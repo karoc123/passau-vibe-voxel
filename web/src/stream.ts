@@ -3,6 +3,10 @@ import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshRequest, MeshReply, RawColumns } from './mesher.worker';
 import { World, type ColumnSource } from './world';
 import { MAT } from './voxelMaterial';
+import { PAL_ROOF, PAL_WALL } from './chamfer';
+
+// the materials of buildings' walls (voxelize.py)
+const WALLS = new Set<number>([MAT.SOLID, MAT.WALL, MAT.GLASS, MAT.FLOODLIT, MAT.CONCRETE, MAT.BRONZE, MAT.RIBBON, MAT.CLASSIC, MAT.WINDOW, MAT.TENEMENT]);
 
 export interface TileNode {
   key: string;
@@ -58,14 +62,15 @@ export class TileStreamer implements ColumnSource {
   private readonly maxWorkers = Math.min(Math.max(2, (navigator.hardwareConcurrency || 4) - 2), 10);
   private readonly pool: Pooled[] = [];
   private quadIdx: THREE.BufferAttribute | null = null;
-  // which palette entries are roof material: their staircases are shaded as roof planes (mesher.worker.ts)
+  // per palette entry: roof material, its staircases shaded as roof planes; a building's wall, its diagonal staircases
+  // chamfered flat (mesher.worker.ts, chamfer.ts)
   private readonly roofPal: Uint8Array;
 
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
-    this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? 1 : 0));
+    this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0));
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -175,8 +180,12 @@ export class TileStreamer implements ColumnSource {
 
   private buildingIds(x0: number, y0: number) {
     if (!this.bldMap) return null;
-    const { data, W } = this.bldMap, N = this.N, out = new Uint16Array(N * N);
-    for (let r = 0; r < N && y0 + r < this.meta.D; r++) out.set(data.subarray((y0 + r) * W + x0, (y0 + r) * W + Math.min(x0 + N, W)), r * N);
+    // with the 1-cell apron (a chamfer's steps run on into it)
+    const { data, W } = this.bldMap, S = this.N + 2, out = new Uint16Array(S * S), xa = Math.max(0, x0 - 1), xb = Math.min(x0 + S - 1, W);
+    for (let r = 0; r < S; r++) {
+      const y = y0 - 1 + r;
+      if (y >= 0 && y < this.meta.D) out.set(data.subarray(y * W + xa, y * W + xb), r * S + xa - (x0 - 1));
+    }
     return out;
   }
 
