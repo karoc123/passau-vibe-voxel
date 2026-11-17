@@ -1,6 +1,6 @@
-"""Fuse the Bavarian surface and terrain models (DOM20 / DGM1), the DOP20 orthophoto and current OSM into a 1 m voxel
-volume of Passau. ("LiDAR" and "DSM" in the comments below mean the surface model: Bavaria's DOM20 is matched from
-aerial images, the DGM1 terrain under it is laser-scanned.)
+"""Fuse the Bavarian surface and terrain models (DOM20 / DGM1), the LoD2 building roofs, the DOP20 orthophoto and current
+OSM into a 1 m voxel volume of Passau. ("LiDAR" and "DSM" in the comments below mean the surface model: Bavaria's DOM20
+is matched from aerial images, the DGM1 terrain under it is laser-scanned.)
 
 Output (web/public/data/): tiles/ (scripts/tiles.py), meta.json (palette, lamps, labels, views), trees.json,
 traffic.json, qa_roadmask.bin.gz; data/ground.npz for flood.py and terrain.py.
@@ -792,6 +792,7 @@ for f in feats:
 bot_rel[~bmask] = 0
 bot_rel[bot_rel < 2.5] = 0
 
+top_dsm = top.copy()  # the surface model's roofs (with OSM's spires and the clipped crowns), before any smoothing
 # de-noise low roofs (LiDAR clutter) in building interiors; keep towers/spires untouched
 interior = ndimage.binary_erosion(bmask, iterations=1)
 top_med = ndimage.median_filter(top, size=3)
@@ -902,14 +903,62 @@ def core_roofs(top):
     note("historic core: pitched roofs fitted:", n_h)
 
 
+def lod2_roofs(top):
+    """The roofs of the LoD2 building models (scripts/lod2.py: planes fitted to the laser scan per building -- ridges,
+    hips, eaves, flat decks) wherever they agree with the surface model. The DOM20 is matched from aerial images: on a
+    pitched roof every 1 m sample is a step of its own, so the old town's roofs were grey terraces and blobs; the
+    planes give each a clean slope up to a straight ridge. Per cell: the LoD2 roof within 3.5 m of the surface model;
+    or off it in a patch of under 30 cells (a chimney, an aerial, a crown over the roof up to 6 m above it; a notch
+    where the samples fell down a wall). A tower or a spire LoD2 lacks (a big patch above it, OSM's heights) and a
+    building LoD2 does not know keep the surface model.
+    Returns the cells of pitched roofs (a slope of 0.3 or more) taken from LoD2."""
+    path = Path("data/lod2.npz")
+    if not path.exists():
+        note("no data/lod2.npz (scripts/lod2.py): roofs from the surface model only")
+        return np.zeros((D, W), bool)
+    z_ = np.load(path)
+    lz, sl = z_["z"] - dtm, z_["slope"]
+    have = np.isfinite(lz)
+    # an OSM outline a cell or two wider than the LoD2 building (along a wall, a misregistered corner): its roof's
+    # nearest cell
+    d_, (ir, ic) = ndimage.distance_transform_edt(~have, return_indices=True)
+    fill = bmask & ~have & (d_ <= 2)
+    lz = np.where(fill, lz[ir, ic], lz)
+    sl = np.where(fill, sl[ir, ic], sl)
+    cand = bmask & np.isfinite(lz) & (lz > 2) & ~(top_dsm > nd_max_b + 1)  # (not where OSM's heights raised it)
+    dlt = top_dsm - lz
+    use = cand & (np.abs(dlt) <= 3.5)
+    # (a small tower or turret over the roof -- 6 m and more, or a part OSM maps taller -- is no chimney)
+    tower = np.nan_to_num(cell_maxh) > lz + 4
+    for off, cap in ((cand & (dlt > 3.5) & (dlt <= 6) & ~tower, 30), (cand & (dlt < -3.5), 30)):
+        lab, n = ndimage.label(off)
+        if n:
+            use |= off & np.r_[False, ndimage.sum(off, lab, range(1, n + 1)) < cap][lab]
+    # a building the two disagree on over half its roof (rebuilt since one of them, a courtyard roofed over): all of it
+    # from the surface model -- patches of planes among the stepped samples read as rubble
+    n_rev = 0
+    for f in render:
+        u_ = use[f["rr"], f["cc"]]
+        if 0 < u_.mean() < 0.5:
+            use[f["rr"], f["cc"]] = False
+            n_rev += 1
+    top[use] = lz[use]
+    pitched = use & (sl >= 0.3)
+    note("LoD2 roofs taken:", int(use.sum()), "of", int(bmask.sum()), "building cells; pitched:", int(pitched.sum()),
+         "; buildings left to the surface model:", n_rev)
+    return pitched
+
+
 CORE_GEOM = landmarks.historic_core()
 core_roofs(top)
+pitched_m = lod2_roofs(top)
 topi = np.where(bmask, np.round(top), 0).astype(np.int32)
 # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
 # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
 _cl = ndimage.grey_closing(topi, size=(3, 3))
 _pit = bmask & (_cl - topi >= 1) & (_cl - topi <= 3) & (ndimage.minimum_filter(bmask.astype(np.uint8), 3) > 0)
 _pit[cells_of(CORE_GEOM)] = False
+_pit &= ~pitched_m  # (a valley between two LoD2 roofs is no pit)
 _pl, _pn = ndimage.label(_pit)
 if _pn:
     _pit &= np.r_[False, ndimage.sum(_pit, _pl, range(1, _pn + 1)) <= 3][_pl]
@@ -959,49 +1008,71 @@ def wall_style(f):
 ROOF_OVERRULED = []
 
 
+# roof palettes: Passau's roofs are red-brown clay tiles and grey sheet metal or slate, a few green copper ones
+ROOF_TILES = ["#87412f", "#934733", "#9e4e37", "#a7563c", "#ae5e40"]  # dark to light (sunlit, they read orange)
+# (neutral to faintly warm: the sky's blue fill turned cool greys lilac)
+ROOF_GREYS = ["#55565a", "#646568", "#747577", "#858584", "#979692", "#aeaca6", "#c2bfb8"]
+ROOF_COPPER = ["#86a99a", "#7d9f91"]
+LUMW = np.array([0.299, 0.587, 0.114])
+
+
+def ortho_roof(f):
+    """What the orthophoto sees on a roof: the share of its cells that are clay-tile red (hue red to orange,
+    saturated), their median colour, and the median colour of all its cells. Not the cells under a crown, deep shadow
+    or glare. A house's median over all cells mixed the tiles' sunlit orange and shaded brown with dormers, skylights,
+    gutters and the street seen past the eaves: tiled roofs came out beige, pink or lilac."""
+    rr, cc = f["rr"], f["cc"]
+    c = cellcol[rr, cc].astype(float)
+    L = c @ LUMW
+    ok = (L > 40) & (L < 235) & ~over[rr, cc] & (exg[rr, cc] < 0.06)
+    if ok.sum() >= 3:
+        c = c[ok]
+    mx, mn = c.max(1), c.min(1)
+    s = (mx - mn) / np.maximum(mx, 1)
+    tile = (c[:, 0] > c[:, 1] + 12) & (c[:, 0] > c[:, 2] + 25) & (s > 0.15)
+    return tile.mean(), (np.median(c[tile], 0) if tile.any() else None), np.median(c, 0)
+
+
+def snap_grey(col, pitched):
+    """the nearest grey by lightness; a pitched roof no lighter than a pale metal (white sheet roofs read as snow)"""
+    greys = ROOF_GREYS[:5] if pitched else ROOF_GREYS
+    L = float(np.dot(col, LUMW)) * (0.92 if pitched else 1)  # (sunlit sheet metal: the ortho's glare)
+    return hex_rgb(min(greys, key=lambda h: abs(float(np.dot(hex_rgb(h), LUMW)) - L)))
+
+
 def roof_style(f):
     col = parse_colour(tag(f, "roof:colour"))
-    if col is None and (f["tags"].get("roof:material") or "").lower() == "glass":
+    mat = (tag(f, "roof:material") or "").lower()
+    if col is None and mat == "glass":
         return pal(soften(hex_rgb("#93adbf"), 0.06), M_GLASS)  # glass atrium roofs (a university hall): blue-grey
-    h = float(np.median(top[f["rr"], f["cc"]]))
-    lum_ = lambda c_: 0.299 * c_[0] + 0.587 * c_[1] + 0.114 * c_[2]
-    # (a near-black tag on a tower too: slabs tagged #170106 tar paper read light grey in the ortho; an
-    # untagged roof up to 80 m as well, 49 m slabs had the dark default grey over light roofs;
-    # higher, the ortho's lean puts facade and street into the roof's cells)
-    if h < 40 or (col is not None and lum_(col) < 110) or (col is None and h < 80):
-        cc = cellcol[f["rr"], f["cc"]]
-        L = lum[f["rr"], f["cc"]]
-        if len(L) >= 3:
-            sel = cc[(L >= np.percentile(L, 25)) & (L <= np.percentile(L, 85))]
-            oc = tuple(np.median(sel, axis=0))
-            # an OSM roof colour far from what the ortho sees (a palace's #003300, near black, over a mid-green copper
-            # roof) gives way to the ortho
-            # (never towards darker: a roof in a tower's shadow reads dark in the ortho)
-            # (only dark OSM colours, the near-black tags; a red or green roof tag is usually right)
-            if col is None or (np.linalg.norm(np.subtract(col, oc)) > 110 and lum_(col) < 110 and lum_(oc) > lum_(col) - 15):
-                if col is not None:
-                    ROOF_OVERRULED.append((f["id"], tag(f, "roof:colour")))
-                col = oc
+    rr, cc = f["rr"], f["cc"]
+    h = float(np.median(top[rr, cc]))
+    pitched = pitched_m[rr, cc].mean() >= 0.4
+    copper_tag = mat == "copper" or (col is not None and col[1] > col[0] + 15 and col[1] >= col[2])
+    pick = lambda shades: hex_rgb(shades[stable_hash(f["id"]) % len(shades)])
+    # (from 80 m up the ortho's lean puts facade and street into the roof's cells: OSM's colour, if any)
+    if len(rr) >= 3 and (h < 80 or col is None):
+        ft, tc, mc = ortho_roof(f)
+        if ft >= 0.3:
+            # clay tiles: one of five red-browns by the tiles' own lightness in the ortho (not the house's median)
+            i = int(np.clip((float(np.dot(tc, LUMW)) - 95) / 20, 0, len(ROOF_TILES) - 1))
+            return pal(soften(hex_rgb(ROOF_TILES[i]), 0.05), M_ROOF, q=12)
+        # copper patina: only where OSM says copper (or a green roof) and the ortho sees it greenish and not white.
+        # The ortho's own green-blue tint fired on blue-grey slate and metal, bluish shadow and crowns over the eaves
+        # (mint roofs all over the town); Passau's copper is its domes and towers and a few palaces
+        if copper_tag and mc[1] > mc[0] + 4 and float(np.dot(mc, LUMW)) < 190:
+            return pal(soften(pick(ROOF_COPPER), 0.05), M_ROOF, q=12)
+        if col is not None and np.linalg.norm(np.subtract(col, mc)) > 110:
+            ROOF_OVERRULED.append((f["id"], tag(f, "roof:colour")))
+        # sheet metal, slate, concrete, gravel: a grey of the ortho's lightness (its hue was mostly sky and shadow)
+        return pal(soften(snap_grey(mc, pitched), 0.05), M_ROOF, q=12)
     if col is None:
-        col = hex_rgb("#7d7f84")
-    col = np.array(col, float) * 1.05  # ortho is slightly dark
-    glassy = pal.entries[f["wall"]][3] == M_GLASS if "wall" in f else False
-    # (an untagged roof the ortho sees clearly orange is tiles too: 422 of them, palaces and friaries off an old town,
-    # had been washed out to beige)
-    tiles = (tag(f, "roof:material") or "") in ("roof_tiles", "tile", "tiles") or CORE.contains(f["geom"].representative_point()) \
-        or (col[0] > col[2] + 35 and col[0] > col[1] + 18)
-    # and carries blue sky reflections -- but not a tiled roof's red, which went pink
-    red = tiles and col[0] > col[2] + 25  # the ortho's sunlit tiles read orange; in photos they are a brick red-brown
-    # copper patina: the ortho sees it pale green-blue (red well under green and blue), the 0.6 desaturation below drew
-    # it near white; photos show a soft grey-green, in two shades
-    if not glassy and col[1] > col[0] + 14 and col[2] > col[0] + 4 and col.mean() > 110:
-        return pal(soften(hex_rgb(["#86a99a", "#7d9f91"][stable_hash(f["id"]) % 2]), 0.05), M_ROOF, q=12)
-    if red:
-        # one of three tile shades: the house's ortho median mixed in dormers and skylights (pink and orange roofs
-        # side by side where the ortho shows one red-brown)
-        return pal(soften(hex_rgb(["#a4533b", "#9a4b35", "#ad5d41"][stable_hash(f["id"]) % 3]), 0.05), M_ROOF, q=12)
-    col = tuple(np.clip(col.mean() + (col - col.mean()) * 0.6, 0, 255))
-    return pal(soften(col, 0.1), M_ROOF, q=12)
+        return pal(soften(hex_rgb("#7d7f84"), 0.05), M_ROOF, q=12)
+    if copper_tag:
+        return pal(soften(pick(ROOF_COPPER), 0.05), M_ROOF, q=12)
+    if col[0] > col[2] + 35 and col[0] > col[1] + 18:
+        return pal(soften(pick(ROOF_TILES[1:4]), 0.05), M_ROOF, q=12)
+    return pal(soften(snap_grey(col, pitched), 0.05), M_ROOF, q=12)
 
 
 for f in render:
@@ -1168,7 +1239,7 @@ if _gn:
 # a small step in a facade (a 1-3 m setback, a stair of a sloping wing, an edge left lower by the LiDAR) is wall, not
 # roof: the building's roof colour (taken from the ortho over its whole top) put cream blobs and checkerboards on glass
 # towers. Patches under 25 cells more than 6 m below the highest top within 3 m.
-_ledge = bmask & (topi < ndimage.maximum_filter(np.where(bmask, topi, 0), 7) - 6)
+_ledge = bmask & ~pitched_m & (topi < ndimage.maximum_filter(np.where(bmask, topi, 0), 7) - 6)  # (not a steep roof's eaves)
 _lab, _n = ndimage.label(_ledge)
 if _n:
     _sz = ndimage.sum(_ledge, _lab, range(1, _n + 1))
@@ -1180,14 +1251,14 @@ vol[zt[rr, cc] - 1, rr, cc] = np.where(green_roof[rr, cc], C["garden"], roofcol[
 # a steep tiled roof steps 2-3 m from cell to cell: under its top voxel each step's side showed the wall's plaster, so
 # from the street the old town's roofs read as more storeys of facade. In the historic core, the side of a step down
 # to a lower cell of the same roof takes the roof's tiles or copper -- a dome's flanks step 3-4 m (a tower's side or a
-# setback of 5 m or more stays wall)
+# setback of 5 m or more stays wall). Outside it too on every pitched roof taken from LoD2
 core_m = np.zeros((D, W), bool)
 core_m[cells_of(CORE)] = True
 mats_of_ids = np.array([e[3] for e in pal.entries] + [0] * 256)
 n_rs = 0
 for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
     nb_t = np.roll(zt, (dr, dc), (0, 1)); nb_b = np.roll(bmask, (dr, dc), (0, 1))
-    step = bmask & nb_b & core_m & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
+    step = bmask & nb_b & (core_m | pitched_m) & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
     for k in (2, 3, 4):
         m = step & (zt - nb_t >= k)
         rr_, cc_ = np.nonzero(m)
@@ -1195,7 +1266,7 @@ for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
         keep = mats_of_ids[vol[z_, rr_, cc_]] != M_ROOF
         vol[z_[keep], rr_[keep], cc_[keep]] = roofcol[rr_[keep], cc_[keep]]
         n_rs += int(keep.sum())
-note("historic core: roof step sides tiled:", n_rs)
+note("roof step sides in roof material (historic core, pitched roofs):", n_rs)
 note("green roof cells:", int(green_roof.sum()))
 # rooftop plant rooms, lift housings and stair heads (1.5-5 m over a building's main roof, under 80 cells) are roof
 # material, not facade: they wore the facade's office windows and read as little houses on every roof
@@ -1979,7 +2050,7 @@ for ln in sorted(tram_lines, key=lambda l: -l.length):
 note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
 meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs="EPSG:25832", trams=trams, jets=jets,
             palette=[list(e) for e in pal.entries], lamps=lamps, labels=labels, views=views,
-            sources=dict(osm=osm.timestamp, elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 (CC BY 4.0)",
+            sources=dict(osm=osm.timestamp, elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
                          ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)"))
 json.dump(meta, open(OUT / "meta.json", "w"))
 import traffic

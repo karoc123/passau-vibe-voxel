@@ -5,8 +5,9 @@ set -e
 cd "$(dirname "$0")/.."
 export PYTHONPATH=scripts
 sh scripts/fetch_osm.sh                  # data/raw/osm.json (Geofabrik Niederbayern, cut to the AOI)
-sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20, DGM1, DOP20)
+sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20, DGM1, DOP20), data/raw/lod2/*.gml
 uv run python scripts/prep.py            # data/prep.npz
+uv run python scripts/lod2.py            # data/lod2.npz (LoD2 roof planes on the grid)
 uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffic.json, qa_roadmask.bin.gz; data/ground.npz
 uv run python scripts/places.py          # places.json (search index)
 uv run python scripts/flood.py           # flood.bin, flood.json (river level slider)
