@@ -6,7 +6,9 @@ where Danube, Inn and Ilz meet, Veste Oberhaus and the Ilzstadt to the north, th
 the Hauptbahnhof and St. Nikola. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`).
 
 The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
-real OSM network.
+real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
+loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
+(`/`) finds streets, squares, buildings and stops.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).
@@ -31,23 +33,35 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 
 | Source | Licence | Used for |
 |---|---|---|
-| **DOM20**, digital surface model, 0.2 m ([Bayerische Vermessungsverwaltung](https://www.geodaten.bayern.de)) | CC BY 4.0 | Building heights and roof shapes, tree crowns, parked vehicles, bridge decks |
+| **DOM20**, digital surface model, 0.2 m ([Bayerische Vermessungsverwaltung](https://www.geodaten.bayern.de)) | CC BY 4.0 | Building heights where LoD2 has no roof, tree crowns, parked vehicles, bridge decks |
 | **DGM1**, digital terrain model, 1 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Ground relief; the rivers where OSM's outlines are cut by the map edge |
-| **DOP20**, orthophoto, 0.2 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof colours, foliage tones, grass OSM doesn't map, vehicle colours, the three rivers' own colours |
+| **DOP20**, orthophoto, 0.2 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof colours, foliage tones, grass and fields OSM doesn't map, vehicle colours, the three rivers' own colours |
+| **LoD2** 3D building models, CityGML (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof planes (pitched roofs, ridges), building footprints the OSM outlines are moved onto, buildings OSM lacks |
 | **[OpenStreetMap](https://www.openstreetmap.org/copyright)**, [Geofabrik](https://download.geofabrik.de/europe/germany/bayern/niederbayern.html) daily extract for Niederbayern | ODbL, © OpenStreetMap contributors | Footprints and 3D parts, facade and roof colours, roads, paths, railways, bridges, trees, street lamps, names, the traffic network |
 | **[Deutscher Wetterdienst](https://opendata.dwd.de/climate_environment/CDC/)**, phenological observations | [DL-DE BY 2.0](https://www.govdata.de/dl-de/by-2-0), source: Deutscher Wetterdienst | When each tree species leafs out, colours and drops its leaves (stations within 100 km of Passau below 500 m) |
 | **[iNaturalist](https://www.inaturalist.org/)** "Leaves" annotations, weekly counts | see iNaturalist's terms | The same, for species the DWD does not record |
 | **[Open-Meteo](https://open-meteo.com/)** historical archive (ERA5) for 48.574° N, 13.466° E | CC BY 4.0 | The typical weather of each day of the year |
 | **[Wikimedia Commons](https://commons.wikimedia.org/)** photos (listed in `scripts/foliage_photos.json`) | per photo | Autumn and summer colour of each species' canopy |
 
-Attribution to show wherever the model is published: *Bayerische Vermessungsverwaltung – www.geodaten.bayern.de
-(CC BY 4.0)* and *© OpenStreetMap contributors (ODbL)*. The viewer's credits line carries both.
+Attribution to show wherever the model or its data is published (the viewer's credits line carries all of it):
+- *Datenquelle: Bayerische Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de)*, licence
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (DOM20, DGM1, DOP20, LoD2; the model is a modified,
+  derived work of them)
+- *© OpenStreetMap contributors*, [ODbL](https://www.openstreetmap.org/copyright). The files in `web/public/data`
+  are a Produced Work built from OSM; the cut `data/raw/osm.json` itself is ODbL.
+- *Weather data by [Open-Meteo.com](https://open-meteo.com/)* (CC BY 4.0), *Quelle: Deutscher Wetterdienst*
+  (phenology, DL-DE BY 2.0)
 
-Inherited from the upstream project, measured on Warsaw and not yet on Passau (both are used as generic Central
-European values):
+`web/public/data/meta.json` records the OSM snapshot's timestamp and the Bavarian sources (written by
+`scripts/voxelize.py`).
+
+Inherited from the upstream project, measured on Warsaw and not yet on Passau (used as generic Central European
+values):
 - `web/public/data/windows.json`: how many windows are lit at night, by building type, hour and weekday. Upstream
   counted them on dated night photos of Warsaw. The file is kept as it is; nothing in this repository rebuilds it.
-- The colour of lawns through the year (`LAWN_LAB` in `scripts/phenology.py`).
+  (`windows.bin`, which building is of which type, is Passau's own, from OSM.)
+- The colour of lawns through the year (`LAWN_LAB` in `scripts/phenology.py`) and the plaster palette for old-town
+  houses without an OSM colour.
 
 ## Build the data
 
@@ -55,23 +69,30 @@ European values):
 sh scripts/build_data.sh
 ```
 
-Needs [uv](https://docs.astral.sh/uv/) and `curl`. The first run downloads about 0.9 GB of Bavarian rasters, the
-Geofabrik extract and the DWD tables into `data/raw` (git-ignored, reused afterwards). `voxelize.py` takes about two
-minutes and ~6 GB of RAM. The steps:
+Needs [uv](https://docs.astral.sh/uv/) and `curl`. The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB
+of LoD2 models, the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
+From cached raw data the build takes about 4 minutes; `voxelize.py` peaks at ~7.5 GB of RAM. Given the same
+`data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-17; the gzip files are
+written with `mtime=0`). The steps:
 
 | Step | Writes |
 |---|---|
-| `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik) |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI |
+| `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles. Files already there are not fetched again |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, orthophoto 0.2 m) |
-| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json`, `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz` |
+| `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
+| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json`, `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`. Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
 | `places.py` | `places.json`: the search index (streets, squares, buildings, stops) |
 | `flood.py` | `flood.bin`, `flood.json`: which cells the rivers reach at each level |
+| `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain.bin`: the bare land shown while the tiles load |
-| `zones.py` | `zones.bin`, `zones.json`: city blocks and buildings, for the render budget |
-| `windows.py` | `windows.bin`: what each building is (residential, office, church …), for its windows at night |
-| `climate.py` | `climate.json` |
-| `phenology.py` | `phenology.json`, `foliage.bin` |
+| `zones.py` | `zones.bin`, `zones.json`: city blocks and buildings, for the render budget (needs `data/footprints.npz`) |
+| `windows.py` | `windows.bin`: what each building is (residential, office, church …), for its windows at night (needs `data/footprints.npz`) |
+| `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
+| `phenology.py` | `phenology.json`, `foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |
+
+Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
+pyproj (MIT), pillow (MIT-CMU); osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.
 
 Checks that run at build time are logged to `data/debug/report.json`; `scripts/floating.py` and
 `scripts/surface_check.py` are whole-map checks to run by hand (`FINALDUMP=1` makes `voxelize.py` save the volume
@@ -79,8 +100,10 @@ for them).
 
 ## How the data is fused (scripts/voxelize.py)
 
-- **Heights** come from the surface model, per building part; OSM's `height` wins only for spires the model
-  under-samples and for buildings that went up after the survey flight.
+- **Buildings.** OSM outlines are moved onto the LoD2 footprints (OSM stands ~3 m off the Bavarian data here);
+  buildings LoD2 has and OSM lacks (sheds, back houses) are added from LoD2. Roofs are LoD2's planes where they agree
+  with the surface model, otherwise the surface model; OSM's `height` wins only for spires the model under-samples and
+  for buildings that went up after the survey flight.
 - **Rivers.** OSM's multipolygons of the Danube and the Ilz are cut by the map edge and do not close, so the rivers are
   taken from the terrain model: flat cells at the water's level. Each river keeps its own colour from the orthophoto
   (the Danube dark green, the Inn milky jade, the Ilz peat-dark), smoothed over ~50 m.
@@ -88,8 +111,9 @@ for them).
   colours where OSM gives none, and pitched tiled roofs fitted to the surface model.
 - **Vegetation.** A cell is a tree if the surface model stands over the terrain and the orthophoto is green (or an OSM
   tree is near), and it is not a building's wall edge. OSM trees without a crown in the model are drawn as young trees.
-- **Set pieces** (`scripts/passau.py`): the cathedral's two tower cupolas and its crossing dome, rebuilt in copper
-  with lanterns and crosses.
+- **Set pieces** (`scripts/passau.py`): the Dom rebuilt (west towers with copper cupolas, front with gable and
+  portal, nave and aisles with arched windows, east end and crossing drum from LoD2); Veste Oberhaus and Niederhaus
+  under clean roofs with OSM's walls as battlements; the Poststeg footbridge over the station's tracks.
 - **Labels and camera presets**: `scripts/landmarks.py` (`LABELS`, `EXTRA_LABELS`, `make_views`), plus named parks
   over 2.5 ha (`scripts/labels.py`).
 - **Per-building curation** goes in `scripts/overrides.json`, keyed by OSM id (wall and roof colour and material,
@@ -122,7 +146,12 @@ No analytics: the page loads nothing beyond its own files and the Google font.
 - Windows are procedural, generated in the shader from floor height and material, not real window positions.
 - The surface model is matched from aerial images: it is noisier than LiDAR on roofs and stands a metre or two over
   open water (cleared in `voxelize.py`).
-- Only the cathedral has hand-made detail; Veste Oberhaus, the Rathaus tower and the bridges are as the data gives them.
+- Only the Dom, the two fortresses and the Poststeg have hand-made detail; the Rathaus tower, the other churches and
+  the river bridges are as the data gives them.
+- Lit windows at night follow Warsaw's statistics (`windows.json`, see above), and the night lighting (street lights,
+  floodlit landmarks) is placed by rule, not from a lighting survey.
+- Boats are simulated: berths and the excursion loop come from OSM, but the season's ship numbers, the timetable and
+  the high-water stop are rules of thumb (`web/src/sim/boats.ts`), not real schedules.
 - Trees come from OSM only (no municipal tree register is merged), so most crowns have no species and follow the
   median calendar.
 - Parked cars are frozen from the survey flight; moving traffic is simulated, not real.

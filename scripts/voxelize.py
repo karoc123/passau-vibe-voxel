@@ -143,6 +143,12 @@ WALL_DEFAULTS = ["#d8cfc0", "#cbbfa8", "#e2d6bf", "#c4bbad", "#d9c7a7", "#cdc6ba
                  "#d3c3b0", "#c9c9c2"]
 
 # ---------------------------------------------------------------- rasters
+for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts/lod2.py")):
+    if not Path(_p).exists() and not (_p == "data/lod2.npz" and os.environ.get("NO_LOD2")):
+        raise SystemExit(f"{_p} missing: run {_by} first" + (" (or set NO_LOD2=1 for roofs, outlines and buildings from "
+                                                             "the surface model and OSM alone)" if "lod2" in _p else ""))
+if not os.environ.get("NO_LOD2") and "cen" not in np.load("data/lod2.npz").files:
+    raise SystemExit("data/lod2.npz has no footprints (`cen`): rerun scripts/lod2.py")
 z = np.load("data/prep.npz")
 dsm, dtm, orto = z["dsm"], z["dtm"], z["orto"]
 d4 = dsm.reshape(D, 2, W, 2)

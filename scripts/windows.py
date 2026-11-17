@@ -12,11 +12,8 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
-import rasterio.features
-from affine import Affine
 from shapely.strtree import STRtree
 
-from aoi import D, W
 from osm import OSM, footprints
 
 OUT = Path(__file__).resolve().parent.parent / "web/public/data/windows.bin"
@@ -62,7 +59,7 @@ def main():
     ptree = STRtree([p for _, p in pts])
     uses = [(t["landuse"], g) for _, _, t, g in osm.areas if t.get("landuse")]
     utree = STRtree([g for _, g in uses])
-    shapes, count = [], Counter()
+    count = Counter()
     vals = {}
     for i, (g, t, oid) in enumerate(blds):
         inside = [pts[j][0] for j in ptree.query(g, predicate="contains")]
@@ -71,12 +68,10 @@ def main():
         k = kind_of(t, inside, lu)
         count[k] += g.area
         habit = (i * 2654435761 >> 7) % 32
-        shapes.append((g, KINDS.index(k) | habit << 3))
         vals[oid] = KINDS.index(k) | habit << 3
-    # the footprints as voxelize.py drew them (moved onto LoD2's), else OSM's own
+    # the footprints as voxelize.py drew them (moved onto LoD2's)
     grid, _ = footprints(vals, lambda k: KINDS.index("other") | ((len(blds) + k) * 2654435761 >> 7) % 32 << 3)
-    grid = rasterio.features.rasterize(shapes, out_shape=(D, W), transform=Affine.identity(), fill=0, dtype=np.uint8) \
-        if grid is None else grid.astype(np.uint8)
+    grid = grid.astype(np.uint8)
     OUT.write_bytes(gzip.compress(grid.tobytes(), mtime=0))
     total = sum(count.values())
     print({k: f"{v / total:.0%}" for k, v in count.most_common()}, OUT.stat().st_size, "bytes")

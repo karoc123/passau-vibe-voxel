@@ -92,12 +92,13 @@ def footprints(ids_values, extra=None):
     """The building footprints voxelize.py drew (OSM outlines moved onto the LoD2 footprints, and buildings from LoD2
     alone under negative ids; data/footprints.npz), as a raster of the given values: ids_values maps an outline's OSM
     id to its value, extra(k) gives the k-th LoD2-only building's (0 without). Returns (raster, number of LoD2-only
-    buildings), or (None, 0) before voxelize.py has run."""
+    buildings). Exits when voxelize.py has not run yet (zones.py and windows.py would otherwise fall back to OSM's
+    own outlines and silently disagree with the tiles)."""
     import numpy as np
     from pathlib import Path
     p = Path("data/footprints.npz")
     if not p.exists():
-        return None, 0
+        raise SystemExit("data/footprints.npz missing: run scripts/voxelize.py first")
     oid = np.load(p)["oid"]
     keys, inv = np.unique(oid, return_inverse=True)
     neg = [int(k) for k in keys if k < 0]
