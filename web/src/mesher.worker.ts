@@ -38,8 +38,10 @@ function decode(buf: ArrayBuffer, N: number) {
   const counts = new Uint16Array(buf, 0, n2), ground = new Uint8Array(buf, n2 * 2, n2);
   let nr = 0;
   for (let i = 0; i < n2; i++) nr += counts[i];
-  const runs = new Uint16Array(buf.slice(n2 * 3, n2 * 3 + nr * 6));
-  return { counts, ground, runs };
+  const end = n2 * 3 + nr * 6, runs = new Uint16Array(buf.slice(n2 * 3, end));
+  // (level 1: the roof plane of each column's top face, scripts/tiles.py)
+  const planes = buf.byteLength >= end + n2 * 2 ? new Uint16Array(buf.slice(end, end + n2 * 2)) : null;
+  return { counts, ground, runs, planes };
 }
 
 const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs });
@@ -48,14 +50,14 @@ const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.
 self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   const m = e.data;
   try {
-    const { counts, ground, runs } = decode(await fetchGzip(m.url), m.N);
+    const { counts, ground, runs, planes } = decode(await fetchGzip(m.url), m.N);
     const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs }) : null;
     if (m.dataOnly) {
       post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0 }, columnBuffers(keep!));
       return;
     }
     const under = typeof m.under === 'string' ? decode(await fetchGzip(m.under), m.N) : m.under ?? null;
-    const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof);
+    const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
     const transfer: Transferable[] = [out.pos.buffer, out.attr.buffer, out.pal.buffer];
     if (out.bld) transfer.push(out.bld.buffer);
     if (keep) transfer.push(...columnBuffers(keep));
@@ -111,7 +113,7 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 
 // bldIds (1 m tiles): the building of each column (scripts/zones.py, 0: none); faces never merge across buildings
 function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
-  roofPal: Uint8Array | null) {
+  roofPal: Uint8Array | null, planes: Uint16Array | null) {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
   const zmax = Math.max(topOf(cols, off, SS), under && uoff ? topOf(under, uoff, SS) : 0);
@@ -127,13 +129,13 @@ function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, b
   fill(cols, off, (v) => v);
   const bidAt = (x: number, y: number) => (bldIds ? bldIds[Math.min(N - 1, Math.max(0, y)) * N + Math.min(N - 1, Math.max(0, x))] : 0);
   const out = new QuadBuffer();
-  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, out);
+  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out);
   const n = out.count;
   return { pos: out.pos.slice(0, n * 3), attr: out.attr.slice(0, n * 4), pal: out.pal.slice(0, n), quads: n / 4, bld: bldIds ? out.bld.slice(0, n) : null };
 }
 
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
-  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, out: QuadBuffer) {
+  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer) {
   const S = N + 2, sx = S, sy = S;
   const dims = [N, N, sz - 2];
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
@@ -142,7 +144,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   const topX = new Uint16Array(S), topY = new Uint16Array(S);
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const t = colTop[x + S * y]; if (t > topX[x]) topX[x] = t; if (t > topY[y]) topY[y] = t; }
   const cell = (X: number, Y: number, z: number) => vol[(X + 1) + sx * ((Y + 1) + sy * (z + 1))];
-  const roofs = roofPal ? roofPlanes(N, vol, colTop, roofPal, bidAt) : null;
+  const roofs = roofPal ? roofPlanes(N, vol, colTop, roofPal, bidAt, planes) : null;
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3, v = (d + 2) % 3, nu = dims[u], nv = dims[v];
     const mask = new Float64Array(nu * nv);
@@ -219,7 +221,10 @@ function wallAngle(N: number, px: number, py: number, cz: number, d: number, dir
 // stripes. Its faces are lit as the plane instead, estimated from the roof's height field: central differences between
 // columns of the same roof (roof material on top, the same building, within a riser's 4 m), smoothed over 3 x 3. A
 // face's plane code: 1 + slope (2.5° steps, 10° to 75°) x 64 + downhill direction (64 steps); 0 where flat or no roof.
-function roofPlanes(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: Uint8Array, bidAt: (x: number, y: number) => number) {
+// Where the tile ships the plane itself (planes: LoD2's, or a fitted roof's, per column; scripts/voxelize.py) it is
+// taken as it is: estimated from steps of whole metres a plane came out a mottle of light and dark voxels.
+function roofPlanes(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: Uint8Array, bidAt: (x: number, y: number) => number,
+  planes: Uint16Array | null) {
   const S = N + 2, SS = S * S;
   const H = new Int16Array(SS).fill(-1000), bid = new Int32Array(SS);
   for (let c = 0; c < SS; c++) {
@@ -254,15 +259,26 @@ function roofPlanes(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: U
     const g = Math.hypot(x, y), k = Math.min(30, Math.round(Math.atan(g) / (Math.PI / 72)));
     return k < 4 ? 0 : 1 + k * 64 + ((Math.round(Math.atan2(-y, -x) / (Math.PI / 32)) + 64) % 64);
   };
+  // a shipped plane falling along (ox, oy): a step down on it faces that way
+  const faces = (p: number, ox: number, oy: number) => {
+    const a = ((p - 1) & 63) * (Math.PI / 32);
+    return p > 0 && Math.cos(a) * ox + Math.sin(a) * oy > 0.05;
+  };
   return {
     // the face of cell (px, py, pz) along axis d (2: up), outwards dir
     code(px: number, py: number, pz: number, d: number, dir: number) {
       const c = (px + 1) + S * (py + 1);
       if (!ok[c]) return 0;
-      if (d === 2) return dir > 0 && pz === H[c] ? encode(gx[c], gy[c]) : 0;
+      if (d === 2) return dir > 0 && pz === H[c] ? (planes && planes[c]) || encode(gx[c], gy[c]) : 0;
       // a riser: the step down to a lower column of the same roof, lit as the plane between the two
       const n = c + (d === 0 ? dir : dir * S);
       if (!ok[n] || !same(c, n) || H[n] >= pz) return 0;
+      if (planes && (planes[c] || planes[n])) {
+        // the plane the step is part of: the upper column's, or the lower one's (the step up from a valley's floor)
+        const ox = d === 0 ? dir : 0, oy = d === 0 ? 0 : dir;
+        if (faces(planes[c], ox, oy)) return planes[c];
+        if (faces(planes[n], ox, oy)) return planes[n];
+      }
       const x = (gx[c] + gx[n]) / 2, y = (gy[c] + gy[n]) / 2;
       // ... facing downhill; or a 1 m notch in it (a pit, a bump) either way
       if (H[c] - H[n] > 1 && -(d === 0 ? x : y) * dir < 0.3 * Math.hypot(x, y)) return 0;

@@ -9,6 +9,8 @@ dormer, chimney and matching error a step. The LoD2 roofs are planes fitted to t
 Output data/lod2.npz (grid D x W, cell (r, c) sampled at its centre):
   z      roof height a.s.l. (m), the highest roof plane over the cell, NaN where there is none
   slope  that plane's rise per metre (0 flat, 1 = 45 degrees)
+  gx, gy that plane's gradient: metres of rise per metre east (column) and south (row) -- the exact plane, for the
+         viewer's roof shading (voxelize.py ships it per column as the plane code mesher.worker.ts lights the roof by)
   bid    the LoD2 building's index (0: none), for per-building statistics
   rtype  the building's roofType code (1000 flat, 2100 shed, 3100 gable, 3200 hip, ...; 0 none)
   cen    the cell's centre lies inside a roof polygon (the building's footprint as the cadastre has it; z, slope and
@@ -62,6 +64,8 @@ def roof_polys(path):
 def main():
     z = np.full((D, W), np.nan, np.float32)
     slope = np.zeros((D, W), np.float32)
+    gx = np.zeros((D, W), np.float32)
+    gy = np.zeros((D, W), np.float32)
     bid = np.zeros((D, W), np.int32)
     rtype = np.zeros((D, W), np.int16)
     cen_m = np.zeros((D, W), bool)
@@ -109,6 +113,8 @@ def main():
             k = np.isnan(cur) | np.where(cen, weak | (zz > cur), weak & (zz > cur))
             z[rr[k], cc[k]] = zz[k]
             slope[rr[k], cc[k]] = s
+            gx[rr[k], cc[k]] = -n[0] / n[2]
+            gy[rr[k], cc[k]] = -n[1] / n[2]
             bid[rr[k], cc[k]] = np.where(cen[k], base + bi, -(base + bi))
             rtype[rr[k], cc[k]] = rt
             cen_m[rr[cen], cc[cen]] = True
@@ -117,7 +123,7 @@ def main():
         print(path, "buildings", nb, file=sys.stderr)
     bid = np.abs(bid)
     print("roof polygons", n_poly, "cells", int(np.isfinite(z).sum()), file=sys.stderr)
-    np.savez_compressed("data/lod2.npz", z=z, slope=slope, bid=bid, rtype=rtype, cen=cen_m)
+    np.savez_compressed("data/lod2.npz", z=z, slope=slope, gx=gx, gy=gy, bid=bid, rtype=rtype, cen=cen_m)
 
 
 if __name__ == "__main__":

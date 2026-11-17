@@ -8,6 +8,8 @@ Node file  tiles/{s}/{nx}_{ny}.bin, gzip of:
   counts  uint16[(N+2)^2]   runs per column (apron included, row-major, row = south)
   ground  uint8 [(N+2)^2]   ground level in metres (z of the first free voxel at level 1), for the facade shader
   runs    uint16[3 * sum]   (z0, len, palette) per run, z in cells of the level, bottom -> top
+  planes  uint16[(N+2)^2]   level 1 only (not in 1f/): the roof plane of the column's top face, 0 for none -- 1 + slope
+                            (2.5 degree steps) x 64 + downhill direction (64 steps), as web/src/mesher.worker.ts lights it
 
 Foliage at level 1 is its own file, loaded after every building (web/src/city.ts): tiles/1f/{nx}_{ny}.bin, the same
 format, holding only trees, trunks and grass (`fol_ids`, `grass_ids`); in tiles/1/ trees and trunks are left out and
@@ -59,6 +61,18 @@ def downsample(vol, s, face_ids=()):
     return out
 
 
+def plane_window(planes, s, r0, c0):
+    """the roof plane codes of a level-1 node and its apron (r0, c0: the window's first row and column), as bytes"""
+    if planes is None or s != 1:
+        return b""
+    D, W = planes.shape
+    pw = np.zeros((N + 2, N + 2), np.uint16)
+    ra, rb, ca, cb = max(r0, 0), min(r0 + N + 2, D), max(c0, 0), min(c0 + N + 2, W)
+    if ra < rb and ca < cb:
+        pw[ra - r0:rb - r0, ca - c0:cb - c0] = planes[ra:rb, ca:cb]
+    return pw.tobytes()
+
+
 def column_runs(vol_win):
     """vol_win (H, R, C) -> counts (R*C,), runs (n, 3) bottom -> top, row-major columns."""
     H = vol_win.shape[0]
@@ -79,8 +93,9 @@ def column_runs(vol_win):
     return counts.astype(np.uint16), np.stack([s_z0, s_z1 - s_z0, val], 1).astype(np.uint16)
 
 
-def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0):
-    """vol (H, D, W) level-1 voxels, g (D, W) ground level -> node files; returns the manifest for meta.json."""
+def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None):
+    """vol (H, D, W) level-1 voxels, g (D, W) ground level, planes (D, W) roof plane codes or None -> node files;
+    returns the manifest for meta.json."""
     D, W = g.shape
     info = dict(N=N, levels=[], bytes=0)
     for s in LEVELS:
@@ -122,7 +137,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0):
                         fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
                     ftot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
                 counts, runs = column_runs(win)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes()
+                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(planes, s, r0, c0)
                 with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:  # mtime 0: rebuilds of unchanged nodes stay byte-identical
                     fh.write(blob)
                 tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
@@ -135,7 +150,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0):
     return info
 
 
-def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0):
+def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None):
     """Rewrite only the nodes (every level) over box = (r0, r1, c0, c1) of the 1 m grid, from the same volume the
     full export would see (for a fast loop on one landmark); each node is built from its own 1 m window, so the result matches
     export()."""
@@ -168,7 +183,7 @@ def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(),
                     with gzip.GzipFile(out / "1f" / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
                         fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
                 counts, runs = column_runs(win)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes()
+                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(planes, s, a, c)
                 with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
                     fh.write(blob)
                 n += 1

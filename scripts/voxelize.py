@@ -1146,6 +1146,23 @@ def flatten_roofs(top):
 flatten_roofs(top)
 
 
+_DIST_GRAD = None
+
+
+def _fit_grad(rr, cc, k, slope_m):
+    """The plane of a roof fitted as eave + k x distance to the open side (core_roofs, dsm_pitched_roofs): rising k per
+    metre away from the nearest wall; flat where it is capped at the ridge (slope_m False)."""
+    global _DIST_GRAD
+    if _DIST_GRAD is None:
+        _d = ndimage.distance_transform_edt(bmask).astype(np.float32)
+        _DIST_GRAD = np.gradient(ndimage.uniform_filter(_d, 3))
+    gy_, gx_ = _DIST_GRAD[0][rr, cc], _DIST_GRAD[1][rr, cc]
+    n_ = np.hypot(gx_, gy_)
+    ok = slope_m & (n_ > 0.3)
+    ROOF_GX[rr, cc] = np.where(ok, k * gx_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
+    ROOF_GY[rr, cc] = np.where(ok, k * gy_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
+
+
 def core_roofs(top):
     """The historic core's tiled roofs as the ortho shows them: clean slopes from the street and the courtyard up to a
     ridge. The 1 m LiDAR made them noisy terraces (every dormer, chimney and sample). Per house in the historic core
@@ -1176,12 +1193,18 @@ def core_roofs(top):
             continue
         ridge = np.percentile(v, 95)
         top[rr, cc] = np.minimum(e + k * d, ridge)
+        _fit_grad(rr, cc, k, e + k * d < ridge)
         n_h += 1
     note("historic core: pitched roofs fitted:", n_h)
 
 
 REVERTED = []  # buildings left to the surface model (data/debug/lod2_reverted.json)
 LOD2_USE = np.zeros((D, W), bool)  # the cells whose roof LoD2 gives
+# the roof plane under each cell where it is known exactly (LoD2's plane, or a fitted pitched roof's slope): its rise per
+# metre east and south. The viewer lit a pitched roof by a plane estimated from the 1 m voxel steps, and a slope rounded
+# to whole metres reads as noise there -- every roof a mottle of light and dark voxels. Shipped per column (plane_codes)
+ROOF_GX = np.full((D, W), np.nan, np.float32)
+ROOF_GY = np.full((D, W), np.nan, np.float32)
 
 
 def lod2_roofs(top):
@@ -1199,6 +1222,9 @@ def lod2_roofs(top):
         return np.zeros((D, W), bool)
     z_ = np.load(path)
     lz, sl = z_["z"] - dtm, z_["slope"]
+    if "gx" not in z_.files:
+        raise SystemExit("data/lod2.npz has no plane gradients (`gx`, `gy`): rerun scripts/lod2.py")
+    lgx, lgy = z_["gx"], z_["gy"]
     have = np.isfinite(lz)
     # an OSM outline a cell or two wider than the LoD2 building (along a wall, a misregistered corner): its roof's
     # nearest cell
@@ -1206,6 +1232,7 @@ def lod2_roofs(top):
     fill = bmask & ~have & (d_ <= 2)
     lz = np.where(fill, lz[ir, ic], lz)
     sl = np.where(fill, sl[ir, ic], sl)
+    lgx, lgy = np.where(fill, lgx[ir, ic], lgx), np.where(fill, lgy[ir, ic], lgy)
     cand = bmask & np.isfinite(lz) & (lz > 2) & ~(top_dsm > nd_max_b + 1)  # (not where OSM's heights raised it)
     dlt = top_dsm - lz
     use = cand & (np.abs(dlt) <= 3.5)
@@ -1227,6 +1254,7 @@ def lod2_roofs(top):
                                  n=len(f["rr"]), lod2=round(float(u_.mean()), 2)))
     top[use] = lz[use]
     LOD2_USE[...] = use
+    ROOF_GX[use], ROOF_GY[use] = lgx[use], lgy[use]
     pitched = use & (sl >= 0.3)
     json.dump(REVERTED, open(DBG / "lod2_reverted.json", "w"), indent=0)
     note("LoD2 roofs taken:", int(use.sum()), "of", int(bmask.sum()), "building cells; pitched:", int(pitched.sum()),
@@ -1278,6 +1306,8 @@ def dsm_pitched_roofs(top):
             big = np.r_[False, ndimage.sum(box, lab, range(1, n + 1)) >= 6]
             up &= big[lab[rr - rr.min(), cc - cc.min()]]
         top[rr, cc] = np.where(up, v, model)
+        _fit_grad(rr, cc, k, (e + k * d < ridge) & ~up)
+        ROOF_GX[rr[up], cc[up]] = ROOF_GY[rr[up], cc[up]] = np.nan
         out[rr, cc] = True
         n_h += 1
     note("pitched roofs fitted to the surface model where LoD2 gives none:", n_h, "buildings,", int(out.sum()), "cells")
@@ -2623,7 +2653,36 @@ debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_o
 if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (scripts/floating.py)
     np.save("data/cache/final_vol.npy", vol)
     np.save("data/cache/final_g.npy", g)
-tile_info = tiles.export(vol, g, OUT / "tiles", note, **EXPORT_IDS)
+
+
+def plane_codes():
+    """Per column, the roof plane its top face lies in (ROOF_GX/GY), coded as mesher.worker.ts lights a roof: 1 + slope
+    (2.5 degree steps, 10 to 75) x 64 + downhill direction (64 steps); 0 where flat, not known, or the column's top is
+    not that roof's voxel any more (a landmark rebuilt over it, a rooftop structure, a canopy). The viewer estimated the
+    plane from the voxel steps, which a slope rounded to whole metres turns into noise."""
+    fol = np.zeros(65536, bool)
+    fol[sorted(EXPORT_IDS["fol_ids"] | EXPORT_IDS["grass_ids"])] = True
+    roofm = np.zeros(65536, bool)
+    roofm[[i for i, e in enumerate(pal.entries) if e[3] == M_ROOF]] = True
+    ztop = np.full((D, W), -1, np.int32)
+    tv = np.zeros((D, W), np.uint16)
+    for z in range(vol.shape[0]):
+        v = vol[z]
+        k = (v != 0) & ~fol[v]
+        ztop[k] = z
+        tv[k] = v[k]
+    ok = bmask & (ztop == zt - 1) & roofm[tv] & np.isfinite(ROOF_GX) & np.isfinite(ROOF_GY)
+    gx_, gy_ = np.nan_to_num(ROOF_GX), np.nan_to_num(ROOF_GY)
+    k = np.minimum(30, np.floor(np.arctan(np.hypot(gx_, gy_)) / (np.pi / 72) + 0.5)).astype(np.int32)
+    az = (np.floor(np.arctan2(-gy_, -gx_) / (np.pi / 32) + 0.5).astype(np.int32) + 64) % 64
+    code = np.where(ok & (k >= 4), 1 + k * 64 + az, 0).astype(np.uint16)
+    note("roof plane codes shipped:", int((code > 0).sum()), "columns of", int(bmask.sum()), "building columns;",
+         "known plane but top changed:", int((bmask & np.isfinite(ROOF_GX) & ~ok).sum()))
+    return code
+
+
+PLANES = plane_codes()
+tile_info = tiles.export(vol, g, OUT / "tiles", note, planes=PLANES, **EXPORT_IDS)
 # tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
 from shapely.ops import linemerge
 tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])
