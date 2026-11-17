@@ -1,6 +1,6 @@
 declare module 'n8ao' {
   import type { Pass } from 'postprocessing';
-  import type { Camera, Scene } from 'three';
+  import type { Camera, Scene, ShaderMaterial } from 'three';
 
   export class N8AOPostPass extends Pass {
     constructor(scene: Scene, camera: Camera, width: number, height: number);
@@ -11,5 +11,7 @@ declare module 'n8ao' {
       halfRes: boolean;
       depthAwareUpsampling: boolean;
     };
+    effectCompositerQuad: { material: ShaderMaterial };
+    configureEffectCompositer(depthBufferType?: number, ortho?: boolean): void;
   }
 }

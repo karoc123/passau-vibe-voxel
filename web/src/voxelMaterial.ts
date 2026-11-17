@@ -176,10 +176,15 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng;
+  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid;
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
+  // how much of a pixel (x +- w/2) falls in [a, b), alone (span) or repeated every p (band): box-filtered, so facade
+  // detail smaller than a pixel fades to its average instead of shimmering
+  float span(float x, float w, float a, float b) { return (clamp(x + 0.5 * w, a, b) - clamp(x - 0.5 * w, a, b)) / w; }
+  float bandInt(float x, float p, float a, float b) { float k = floor(x / p); return k * (b - a) + clamp(x - k * p - a, 0.0, b - a); }
+  float band(float x, float w, float p, float a, float b) { return (bandInt(x + 0.5 * w, p, a, b) - bandInt(x - 0.5 * w, p, a, b)) / w; }
   ${FOLIAGE}
   uniform sampler2D uWinMap; uniform float uWinMed[8]; uniform float uWinShape[72]; uniform float uWinFloors[8]; uniform vec3 uWinCol[8];
   // a building's share of lit windows now: its type's measured median times the building's own habit, a point on the
@@ -213,7 +218,9 @@ const SURFACE = `
   vec3 base = pow(pe.rgb, vec3(2.2));
   int m = int(pe.a * 255.0 + 0.5);
   vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
-  float gz = vGz;
+  // the ground is the same at every corner of a quad, but interpolated it can land a hair either side of the integer:
+  // lvl 2.9999 or 3.0001 flipped whole window rows pixel by pixel into a hatched pattern
+  float gz = floor(vGz + 0.5);
   float lvl = cell.y - gz;
   bool vert = abs(vN.y) < 0.5;
   float u = abs(vN.x) > 0.5 ? cell.z : cell.x;
@@ -228,27 +235,41 @@ const SURFACE = `
     u = floor(dot(vVox.xz, vec2(-wN.z, wN.x)) + 1e-3);
     wpos = floor(dot(vVox.xz, wN.xz) / 3.0);
   }
+  // in metres, not cells: along the wall (its plane on a staircase) and above the street
+  float uc = vWallAng > 0.5 ? dot(vVox.xz, vec2(-wN.z, wN.x)) : (abs(vN.x) > 0.5 ? vVox.z : vVox.x);
+  float lv = vVox.y - gz;
+  float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
   float h = hash13(cell);
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
-  if (m == ${MAT.WALL} || m == ${MAT.CONCRETE}) {
+  if (m == ${MAT.WALL}) {
+    // An old-town facade: window axes 3 m apart (4 m on some), ~1 x 1.8 m windows in a light surround on storeys of
+    // 3.3-3.7 m, plain plaster between; a ground floor of doors and shop windows on the same axes, over a darker plinth
+    // and under a string course. Each building keeps its own rhythm (vBid).
     if (vert) {
-      float fl = mod(lvl, 3.0);
-      bool shop = lvl < 4.0 && lvl >= 1.0;
-      bool win = m == ${MAT.WALL} ? (fl > 0.5 && mod(u, 2.0) < 0.5) : false;
-      if (m == ${MAT.CONCRETE}) win = shop && mod(u, 4.0) > 0.5;
-      if (shop && m == ${MAT.WALL}) win = mod(u, 5.0) > 0.5 && lvl > 0.5;
-      if (win) {
-        col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
-        gRough = 0.12; gMetal = 0.6;
-        vec2 room = vec2(floor(u / 4.0) + wpos * 17.31 + wN.x * 3.1, floor(lvl / 3.0) + wN.z * 5.7);
-        if (shop) {
-          if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
-        } else {
-          gEmissive = windowLight(cell, room, floor(lvl / 3.0)) * uNight;
-        }
+      float P = hash12(vec2(vBid * 0.618, 1.7)) < 0.75 ? 3.0 : 4.0;
+      float x = uc - floor(hash12(vec2(vBid * 0.37, 5.3)) * P);
+      float SH = 3.3 + 0.4 * hash12(vec2(vBid * 0.71, 2.9)), G = 4.2, up = lv - G, st = floor(up / SH);
+      float cu = band(x, fwU, P, 0.0, 1.0), fu = band(x, fwU, P, -0.15, 1.15);
+      float cv = up < 0.0 ? span(lv, fwV, 0.35, 2.9) : band(up, fwV, SH, 0.9, 2.7);
+      float fv = up < 0.0 ? cv : band(up, fwV, SH, 0.75, 2.8);
+      col *= 1.0 - 0.16 * span(lv, fwV, -1.0, 0.6) - 0.12 * span(lv, fwV, G - 0.3, G - 0.05);
+      float win = cu * cv;
+      col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), clamp(fu * fv - win, 0.0, 1.0));
+      col = mix(col, mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h, win);
+      gRough = mix(gRough, 0.12, win); gMetal = 0.6 * win;
+      if (win > 0.0 && uNight > 0.0) {
+        float k = floor(x / P);
+        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight * win; }
+        else gEmissive = windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * win;
       }
+    }
+  } else if (m == ${MAT.CONCRETE}) {
+    if (vert && lvl < 4.0 && lvl >= 1.0 && mod(u, 4.0) > 0.5) {
+      col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
+      gRough = 0.12; gMetal = 0.6;
+      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
     }
   } else if (m == ${MAT.GLASS}) {
     if (vert) {
@@ -309,7 +330,8 @@ const SURFACE = `
     col = base * mix(vec3(1.0), grassTint(), smoothstep(0.02, 0.08, base.g - max(base.r, base.b))) * (0.88 + 0.2 * h); gRough = 1.0;
   } else if (m == ${MAT.WATER}) {
     float r = sin(cell.x * 0.9 + uTime * 1.3) * sin(cell.z * 1.1 - uTime) * 0.5 + 0.5;
-    col = base * mix(0.72, 1.12, r * r) * (0.94 + 0.12 * h); gRough = 0.04; gMetal = 0.3; // each river's own colour (voxelize.py, from the ortho)
+    float rip = 1.0 - 0.75 * smoothstep(0.25, 0.7, fwU); // per-cell ripples under a few pixels a cell beat into a checkerboard
+    col = base * (0.92 + rip * (mix(0.72, 1.12, r * r) - 0.92)) * (0.94 + 0.12 * h * rip); gRough = 0.04; gMetal = 0.3; // each river's own colour (voxelize.py, from the ortho)
     vec3 V = normalize(cameraPosition - vVox);
     float fres = 1.0 - clamp(dot(vN, V), 0.0, 1.0); fres *= fres; fres *= fres;
     col = mix(col, uHorizon * 0.8, clamp(0.08 + 0.55 * fres, 0.0, 0.55));
@@ -437,6 +459,9 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
   return m;
 }
 
+const SHADOW_NORMAL_FALLBACK = 'vec3 shadowWorldNormal = vec3( 0.0 );'; // three's fallback without a normal attribute
+if (!THREE.ShaderChunk.shadowmap_vertex.includes(SHADOW_NORMAL_FALLBACK)) throw new Error('three: shadowmap_vertex changed');
+
 // clay: the 8 m stand-in for the city outside the budget (city.ts)
 export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.0 });
@@ -447,15 +472,18 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <common>', `#include <common>
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        flat varying float vWallAng; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
+        flat varying float vWallAng; flat varying float vBid; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
       // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its plane
       .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01);
         vec3 objectNormal = nAng > 0.5 ? vec3(cos((nAng - 1.0) * 0.261799), 0., sin((nAng - 1.0) * 0.261799)) : normalFromIdx(nAx);`)
-      // and its 1 m steps don't shade each other: shadow lookups step out further along the wall's true direction
-      .replace('#include <shadowmap_vertex>', THREE.ShaderChunk.shadowmap_vertex.replace(
-        'directionalLightShadows[ i ].shadowNormalBias', '(directionalLightShadows[ i ].shadowNormalBias + (nAng > 0.5 ? 1.2 : 0.0))'))
+      // and its 1 m steps don't shade each other: shadow lookups step out of the staircase, 1.4 m along the wall's true
+      // direction. (The tiles carry no normal attribute, so three's own normal bias is always zero here, and stays so
+      // elsewhere: the depth bias alone is what the rest of the city is tuned for.)
+      .replace('#include <shadowmap_vertex>', THREE.ShaderChunk.shadowmap_vertex
+        .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 ? objectNormal : vec3( 0.0 );')
+        .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vLitN = transformedNormal;
+        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vBid = vbld; vLitN = transformedNormal;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)
@@ -468,6 +496,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
       .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance += gEmissive;')
+      // a staircase wall tells the screen-space AO to go easy on it (post.ts)
+      .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+        if (vWallAng > 0.5 && vert && m != ${MAT.LEAF}) gl_FragColor.a = 0.5;`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
         float aoF = mix(0.55, 1.0, vAO);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
