@@ -390,9 +390,122 @@ def dom(vol, g, pal, note):
     # windows, the dome to ~62 m and the lantern over it
     _cupola(vol, g, 747.5, 2004.5 + dx, z0=48, R=6.2, drum=7, rise=7, mats=mats, lantern=4, clear=11.5, fill_from=36, base_R=7.5, roof=roof)
     _stair_turret(vol, g, pal, mats, 758, 765, 2012 + dx, 2018 + dx, 19, 4)
+    n_east = _tidy_east(vol, g, pal, (720, 770, 1997 + dx, 2045 + dx), bid[748, 1960 + dx] if bid is not None else None,
+                        roof, wall)
+    note(f"Dom St. Stephan: east end tidied ({n_east} cells)")
     note(f"Dom St. Stephan: OSM's crossing onion cut ({n_cut} cells), {n_fill} cells of the church filled from LoD2, "
          f"{n_clear} cells of its west end rebuilt (towers, front, nave, aisles), {n_win} windows; two tower cupolas "
          f"and the crossing dome rebuilt (copper, lanterns, crosses), the stair tower by the choir")
+
+
+def _tidy_east(vol, g, pal, box, church, roof, wall):
+    """The Dom's gothic east end (transept, choir, the low roofs in the angle between them) as the surface model left
+    it, tidied: (1) its pale grey roof voxels (the ortho's glare on the tiles) in the church's red; (2) the low roofs in
+    the angle north of the choir, a stair of 1 m steps (32-40 m), levelled: a roof cell 1-3 m off the median of its
+    5 x 5 neighbourhood takes it; (3) the eaves: along the footprint's edge the run of tiles on top starts at the level
+    most of its neighbours along the wall (7 x 7) start at -- tiles hung lower down the wall become wall, wall standing
+    up into the eave becomes tiles. Returns the cells changed."""
+    from scipy import ndimage
+    if church is None:
+        return 0
+    r0, r1, c0, c1 = box
+    B = np.load("data/lod2.npz")["bid"][r0:r1, c0:c1]
+    sub = vol[:, r0:r1, c0:c1]
+    G = g[r0:r1, c0:c1].astype(int)
+    mats = np.array([e[3] for e in pal.entries] + [0] * 64)
+    rgb = np.array([e[:3] for e in pal.entries] + [(0, 0, 0)] * 64, np.int32)
+    m = B == church
+    n = 0
+    # (1) pale grey tiles
+    pale = (mats == ROOF) & (rgb.min(-1) >= 150) & (rgb.max(-1) - rgb.min(-1) < 30)
+    hit = pale[sub] & m[None]
+    n += int(hit.sum())
+    sub[hit] = roof
+    top = sub.shape[0] - 1 - np.argmax(sub[::-1] != 0, axis=0)
+    tid = np.take_along_axis(sub, top[None], 0)[0]
+    # (1b) the church's walls filled up from LoD2 left bare white tops where the roof over them was lower: a stair of
+    # white steps in the angle between the north transept and the choir. The top of such a column is tiles
+    bare = ndimage.binary_dilation(m, iterations=1) & (tid == wall) & (top - G >= 6)
+    for r, c in zip(*np.nonzero(bare)):
+        sub[top[r, c], r, c] = roof
+    n += int(bare.sum())
+    tid = np.take_along_axis(sub, top[None], 0)[0]
+    # (2) low roof steps levelled (only well below the choir's eave: the low roofs, not the main roofs' slopes)
+    low = m & (mats[tid] == ROOF) & (top < 45)
+    H = np.where(low, top, np.nan)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        med = ndimage.generic_filter(H, np.nanmedian, size=5, mode="constant", cval=np.nan)
+    for r, c in zip(*np.nonzero(low & np.isfinite(med))):
+        t, mz = int(top[r, c]), int(round(med[r, c]))
+        if 1 <= abs(t - mz) <= 3:
+            col = sub[:, r, c]
+            if t > mz:
+                col[mz + 1:] = 0
+            else:
+                col[t:mz] = np.where(col[t:mz] == 0, wall, col[t:mz])
+            col[mz] = roof
+            top[r, c] = mz
+            n += 1
+    # (3a) the choir (east of the low roofs, c0 + 17 on): one eave all round its walls and the apse -- the tiles sagged
+    # 5-8 m down the apse's corners onto a stair of bare wall. Its edge ring (the outline's last metre and the surface
+    # model's wall a metre outside it) within 8 m under or 3 m over the eave ends at the eave in one tile
+    e = ndimage.distance_transform_edt(np.pad(m, 1))[1:-1, 1:-1]
+    edge = m & (e < 1.5)
+    choir = np.zeros_like(m)
+    choir[:, 17:] = True
+    ring = choir & (edge | (ndimage.binary_dilation(m) & ~m & (top - G >= 6))) & ((mats[tid] == ROOF) | (tid == wall))
+    ring[758 - r0:766 - r0, :21 + 1] = False  # (the stair turret by the choir, built above)
+    rb_c = []
+    for r, c in zip(*np.nonzero(ring & m & (mats[tid] == ROOF))):
+        col = sub[:, r, c]
+        z = int(top[r, c])
+        while z > G[r, c] and mats[col[z - 1]] == ROOF:
+            z -= 1
+        rb_c.append(z)
+    if len(rb_c) >= 10:
+        vals, cnt = np.unique(rb_c, return_counts=True)
+        E = int(vals[cnt.argmax()])
+        for r, c in zip(*np.nonzero(ring)):
+            t = int(top[r, c])
+            if E - 8 <= t <= E + 3 and t != E:
+                col = sub[:, r, c]
+                seg = col[G[r, c]:E]
+                seg[(seg == 0) | (mats[seg] == ROOF)] = wall
+                col[E] = roof
+                col[E + 1:] = 0
+                top[r, c] = E
+                n += 1
+        tid = np.take_along_axis(sub, top[None], 0)[0]
+    # (3) eaves along the edge
+    tid = np.take_along_axis(sub, top[None], 0)[0]
+    rb = np.full(m.shape, -1)
+    for r, c in zip(*np.nonzero(edge & (mats[tid] == ROOF))):
+        col = sub[:, r, c]
+        z = int(top[r, c])
+        while z > G[r, c] and mats[col[z - 1]] == ROOF:
+            z -= 1
+        rb[r, c] = z
+    for r, c in zip(*np.nonzero(rb >= 0)):
+        w = rb[max(r - 3, 0):r + 4, max(c - 3, 0):c + 4]
+        w = w[w >= 0]
+        if len(w) < 4:
+            continue
+        vals, cnt = np.unique(w, return_counts=True)
+        mode = int(vals[cnt.argmax()])
+        z = int(rb[r, c])
+        if cnt.max() < 3 or z == mode or abs(z - mode) > 4 or mode > top[r, c]:
+            continue
+        col = sub[:, r, c]
+        if z < mode:
+            seg = col[z:mode]
+            seg[mats[seg] == ROOF] = wall
+        else:
+            seg = col[mode:z]
+            seg[np.isin(mats[seg], (1, 20, 22))] = roof
+        n += 1
+    return n
 
 
 def _lod2_abs(box):
@@ -519,6 +632,71 @@ def _tidy_buildings(vol, g, box, pal, wall_rgb, min_h=4):
     return lev, int(bmask.sum())
 
 
+def _wing_roofs(vol, g, box, pal, wall_rgb, min_cells=80):
+    """The surface model's roofs in box (r0, r1, c0, c1) rebuilt per LoD2 building (a wing) as clean hipped roofs:
+    eaves at the wing's LoD2 eave height all round, the ridge at its top, the roof rising evenly from every wall to the
+    footprint's middle (a distance transform), so every eave line is straight and level (the fitted tops zigzagged a
+    metre or two up and down along the walls, wall tops showing between the tiles). The surface model's walls stand up
+    to 2 m outside LoD2's outline: that rim belongs to the nearest wing (its wall tops were a pale seam round the
+    roofs). Each wing keeps its own roof: tiles in its most common red, sheet metal on the sheet range oberhaus() found. Left
+    as they are: small and thin pieces (walls, sheds) and towers (a roof deeper than 2.2 x the footprint's half-width).
+    Returns (wings, cells)."""
+    from scipy import ndimage
+    r0, r1, c0, c1 = box
+    Z, B, dtm = _lod2_abs(box)
+    sub = vol[:, r0:r1, c0:c1]
+    G = g[r0:r1, c0:c1].astype(int)
+    off = float(np.median((G - dtm)[B > 0])) if (B > 0).any() else 0.0
+    Zi = Z + off
+    mats = np.array([e[3] for e in pal.entries] + [0] * 64)
+    top = sub.shape[0] - 1 - np.argmax(sub[::-1] != 0, axis=0)
+    tid = np.take_along_axis(sub, top[None], 0)[0]
+    bld = sub.any(axis=0) & (top - G >= 4)
+    ids, counts = np.unique(B[(B > 0) & bld], return_counts=True)
+    wall = pal(wall_rgb, 1)
+    sheet = pal((138, 150, 142), ROOF)
+    # the sheet range: the green-grey oberhaus() gave the glare-white tops, and pale greys (140+) beside them; darker
+    # grey lumps on the tiles were shadow
+    rgb = np.array([e[:3] for e in pal.entries] + [(0, 0, 0)] * 64, np.int32)
+    grey = (tid == sheet) | ((mats[tid] == ROOF) & (rgb[tid].min(-1) >= 140) & (rgb[tid].max(-1) - rgb[tid].min(-1) < 30))
+    grey = ndimage.median_filter(grey.astype(np.uint8), 5) > 0
+    wings = []
+    for b in ids[counts >= min_cells]:
+        m = B == b
+        e = ndimage.distance_transform_edt(np.pad(m, 1))[1:-1, 1:-1]
+        edge = m & (e < 1.5)
+        eave, ridge = int(round(np.percentile(Zi[edge], 15))), int(round(np.percentile(Zi[m], 97)))
+        if e.max() < 3.5 or ridge - eave > 2.2 * e.max():
+            continue
+        wings.append(b)
+    L = np.where(np.isin(B, wings), B, 0)
+    dL, (ir, ic) = ndimage.distance_transform_edt(L == 0, return_indices=True)
+    L = np.where((L > 0) | ((B == 0) & bld & (dL <= 2)), L[ir, ic], 0)
+    n = 0
+    for b in wings:
+        m = L == b
+        e = ndimage.distance_transform_edt(np.pad(m, 1))[1:-1, 1:-1]
+        lod = B == b
+        el = ndimage.distance_transform_edt(np.pad(lod, 1))[1:-1, 1:-1]
+        eave = int(round(np.percentile(Zi[lod & (el < 1.5)], 15)))
+        ridge = max(int(round(np.percentile(Zi[lod], 97))), eave + 2)
+        reds = tid[m & (mats[tid] == ROOF) & ~grey & (tid != sheet)]
+        red = int(np.bincount(reds).argmax()) if len(reds) else pal(_hex("#a86048"), ROOF)
+        em = e[m].max()
+        rt = eave + np.round((ridge - eave) * (e - 1) / max(em - 1, 1)).astype(int)
+        for r, c in zip(*np.nonzero(m)):
+            col = sub[:, r, c]
+            gz, t = int(G[r, c]), int(rt[r, c])
+            if t <= gz + 2:
+                continue
+            col[max(eave, gz):] = 0
+            seg = col[gz:eave]
+            seg[(seg == 0) | np.isin(mats[seg], (1, 12, 20, 22))] = wall
+            col[max(eave, gz):t + 1] = sheet if grey[r, c] else red
+            n += 1
+    return len(wings), n
+
+
 def oberhaus(vol, g, pal, note):
     """Veste Oberhaus (DOP20, LoD2): its ranges round the courtyards in one pale render under their red roofs. The
     surface model gave them grey and beige patches and lumpy roofs with holes."""
@@ -537,7 +715,9 @@ def oberhaus(vol, g, pal, note):
         col[top[r, c]] = sheet
         if top[r, c] > 0 and col[top[r, c] - 1] in pale:
             col[top[r, c] - 1] = sheet
-    note(f"Veste Oberhaus: {n} building columns in one render, {lev} roof lumps and holes levelled")
+    n_w, n_e = _wing_roofs(vol, g, box, pal, (232, 226, 212))
+    note(f"Veste Oberhaus: {n} building columns in one render, {lev} roof lumps and holes levelled; {n_w} wings under "
+         f"clean hipped roofs with level eaves ({n_e} cells)")
 
 
 def _battlements(vol, g, line, wall, h, step):

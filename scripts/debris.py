@@ -13,7 +13,7 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=256, M=24, box=None):  #
     not reach the block's margin."""
     Hh, Dd, Ww = vol.shape
     n = nv = 0
-    big = []
+    big, grounded = [], []
     st = ndimage.generate_binary_structure(3, 3)  # 26-connected: diagonal cables and wires are chains of corner-touching voxels
     R0, R1, C0, C1 = box or (0, Dd, 0, Ww)  # box: only the blocks over these rows / columns (patch.py)
     for r0 in range(R0 - R0 % B, R1, B):
@@ -43,13 +43,26 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=256, M=24, box=None):  #
                 zi, ri, ci = zi + zs.start, ri + rs.start, ci + cs.start
                 if (zi - gg[ri, ci]).min() < 2:
                     continue  # stands on the ground (bollards, benches, lamps)
+                hmin = int((zi - gg[ri, ci]).min())
+                if max_size <= len(zi) < 600 and zi.max() - zi.min() <= 8 and hmin >= 4:
+                    # a short footbridge's deck high in the canopy (a path over a forest brook at the map's edge: its
+                    # height profile took the crowns over it for the deck): set down as one piece until its lowest
+                    # voxel stands on the highest ground under it (a bank), spanning the dip (the brook) beside it
+                    drop = int(zi.min() - gg[ri, ci].max())
+                    drop = drop if drop >= 1 else hmin  # (its low end already under the high bank: down onto the ground)
+                    v_ = sub[zi, ri, ci].copy()
+                    sub[zi, ri, ci] = 0
+                    sub[zi - drop, ri, ci] = v_
+                    grounded.append((int(ci.mean() + ca), int(ri.mean() + ra), drop, int(len(zi))))
+                    continue
                 if len(zi) >= max_size:  # bigger floating clumps: listed for review (data/debug/floating.json)
                     big.append(dict(x=int(ci.mean() + ca), y=int(ri.mean() + ra), z=int((zi - gg[ri, ci]).min()),
                                     n=int(len(zi)), h=int(zi.max() - zi.min() + 1)))
                     continue
                 sub[zi, ri, ci] = 0
                 n += 1; nv += len(zi)
-    note(f"floating debris removed: {n} clumps, {nv} voxels; {len(big)} bigger floating clumps listed")
+    note(f"floating debris removed: {n} clumps, {nv} voxels; {len(big)} bigger floating clumps listed; flat clumps set "
+         f"down onto the ground (x, y, drop, voxels): {grounded}")
     if box is None:
         Path("data/debug").mkdir(parents=True, exist_ok=True)
         json.dump(sorted(big, key=lambda b: -b["n"]), open("data/debug/floating.json", "w"))

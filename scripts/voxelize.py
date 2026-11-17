@@ -131,7 +131,7 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "fence": pal("#dfe3e6", M_METAL), "crane": pal("#e7b23c", M_METAL), "crane_d": pal("#3d4249", M_METAL),
     "shelter": pal("#a9c3cf", M_GLASS), "deck": pal("#a7a49d", M_CONCRETE), "parking": pal("#6a6d73"),
     "track": pal("#b8875a"), "kerb": pal("#cfc7b8"), "granite_d": pal("#55595c"), "woodfloor": pal("#6b5847"), "jet": pal("#dff1f7", 17),
-    "benchkerb": pal("#dcd9d1", M_CONCRETE),
+    "benchkerb": pal("#dcd9d1", M_CONCRETE), "pline": pal("#eeede6", M_MARK),  # a pitch's white lines
     "shore": pal("#9d9585"),  # a river bank's rip-rap and gravel: grey-brown stones, darker than any paving
 }
 # masonry of retaining walls and quays: rough granite and limestone blocks, a few tones voxel by voxel
@@ -330,7 +330,19 @@ def tunnelish(t):
         or parse_len(t.get("level", "0").split(";")[0] or 0) and parse_len(t.get("level", "0").split(";")[0]) < 0
 
 
+def _pitch_key(shape):
+    """a pitch's or a track's colour as the ortho sees it: red tartan, a blue court, green turf, white (an air hall) or
+    a grey or black hard court"""
+    rr_, cc_ = cells_of(shape)
+    if len(rr_) < 10:
+        return None
+    r_, g_, b_ = np.median(cellcol[rr_, cc_], axis=0)
+    return "tartan" if r_ > g_ + 18 and r_ > b_ + 25 else "court" if b_ > r_ + 25 else \
+        "grass" if (2 * g_ - r_ - b_) / (r_ + g_ + b_ + 1) > 0.03 else "paving" if r_ + g_ + b_ > 560 else "asphalt_l"
+
+
 containers, soft, hard = [], [], []
+pitch_lines = []
 for oid, typ, t, geom in osm.areas:
     if tunnelish(t) or "building" in t or "building:part" in t:
         continue
@@ -346,12 +358,11 @@ for oid, typ, t, geom in osm.areas:
     if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
         # surface tags disagree with it (a green turf pitch tagged tartan, red courts untagged)
         inner = geom.buffer(-1) if geom.area > 60 else geom
-        rr_, cc_ = cells_of(geom if inner.is_empty else inner)
-        if len(rr_) >= 10:
-            r_, g_, b_ = np.median(cellcol[rr_, cc_], axis=0)
-            key = "tartan" if r_ > g_ + 18 and r_ > b_ + 25 else "court" if b_ > r_ + 25 else \
-                "grass" if (2 * g_ - r_ - b_) / (r_ + g_ + b_ + 1) > 0.03 else "paving" if r_ + g_ + b_ > 560 else "asphalt_l"  # (white: an air hall)
+        key = _pitch_key(geom if inner.is_empty else inner)
+        if key:
             soft.append((geom, C[key]))
+            if t.get("leisure") == "pitch" and geom.area >= 150 and key != "paving":
+                pitch_lines.append(geom.difference(geom.buffer(-1)))  # its white outline
             continue
     if t.get("leisure") in LEISURE:
         soft.append((geom, C[SURF.get(t.get("surface"), LEISURE[t["leisure"]])]))
@@ -369,6 +380,14 @@ for oid, typ, t, geom in osm.areas:
             if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150:
                 key = "paving2"
         hard.append((geom, C[key]))
+# a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
+# in the colour the ortho sees along it -- the stadium's black lanes were lost in the oval's lawn
+for oid, t, line in osm.lines:
+    if t.get("leisure") == "track" and not tunnelish(t) and line.length >= 40:
+        band = line.buffer(3, cap_style="flat")
+        key = _pitch_key(band.buffer(-1))
+        if key:
+            soft.append((band, C["asphalt" if key == "asphalt_l" else key]))
 # cells some map feature paints on purpose (a square, a car park, a path, a carriageway, a platform): what is left in
 # the default paving is open land OSM says nothing about (see "natural ground" below)
 explicit = np.zeros((D, W), np.uint8)
@@ -379,6 +398,7 @@ soft.sort(key=lambda s: -s[0].area)
 burn(gcol, containers)
 burn(gcol, soft)
 burn(gcol, hard)
+burn(gcol, [(l_, C["pline"]) for l_ in pitch_lines if not l_.is_empty])
 # a lawn island inside a car park (the stadium's) is drawn over it, not under
 _hard_u = _uu([h_ for h_, _ in hard]) if hard else None
 burn(gcol, [(g_, c_) for g_, c_ in soft if c_ in (C["grass"], C["grass2"]) and _hard_u is not None and g_.area < 20000
@@ -1510,6 +1530,63 @@ gcol[_open] = _maj[_open]
 note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in
                                                    ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble")})
 
+# ---------------------------------------------------------------- cemeteries
+# a cemetery (landuse=cemetery, amenity=grave_yard) OSM gives no surface was the default pale paving: a car park
+# among the trees. As the ortho shows them: lawn, gravel walks every ~25 m along the plot's long axis and across it,
+# and between them rows of graves -- a headstone (one grey or dark voxel) and its planted bed in front, rows 3 m
+# apart. The paths OSM maps and the chapels stay as drawn; the stones are set after the trees (grave_stones)
+CEM_STONES = [pal(c) for c in ("#9a9790", "#a8a59d", "#b8b3a8", "#c4c0b6", "#8d8b86", "#6c6d6f", "#55575a")]  # granite, limestone, a few dark
+grave_stones = []  # (row, col, palette id)
+n_cem = 0
+for oid, typ, t, geom in osm.areas:
+    if not (t.get("landuse") == "cemetery" or t.get("amenity") == "grave_yard") or tunnelish(t):
+        continue
+    rr_, cc_ = cells_of(geom)
+    if not len(rr_):
+        continue
+    k_ = ~bmask[rr_, cc_] & (explicit[rr_, cc_] == 0) & np.isin(gcol[rr_, cc_], [C[k] for k in (
+        "paving", "paving2", "grass", "grass2", "garden", "shore", "dirt", "dirt2", "stubble")])
+    rr_, cc_ = rr_[k_], cc_[k_]
+    gcol[rr_, cc_] = C["grass2"]
+    if geom.area < 400:
+        continue
+    # the plot's axes: its minimum rotated rectangle's long side
+    _mr = list(geom.minimum_rotated_rectangle.exterior.coords)
+    _e = max(((_mr[i], _mr[i + 1]) for i in range(4)), key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
+    th = math.atan2(_e[1][1] - _e[0][1], _e[1][0] - _e[0][0])
+    _q = round(th / (math.pi / 2)) * (math.pi / 2)
+    if abs(th - _q) < math.radians(12):  # nearly square to the grid: rows on the grid (a diagonal of 1 m dots wobbles)
+        th = _q
+    ox, oy = _e[0]
+    x_, y_ = cc_ + 0.5 - ox, rr_ + 0.5 - oy
+    u_ = x_ * math.cos(th) + y_ * math.sin(th)
+    v_ = -x_ * math.sin(th) + y_ * math.cos(th)
+    v_ = np.abs(v_)
+    inner = geom.buffer(-2.5)
+    m_in = np.zeros((D, W), bool)
+    if not inner.is_empty:
+        _ri, _ci = cells_of(inner)
+        m_in[_ri, _ci] = True
+    walk = (np.mod(v_, 26) < 2) | (np.mod(u_ + 12, 30) < 2)  # gravel walks, 2 m wide
+    gcol[rr_[walk], cc_[walk]] = C["gravel"]
+    vm = np.floor(np.mod(v_ - 2, 26)).astype(int)  # 0..23 inside a block of rows
+    um = np.floor(np.mod(u_ + 10, 30)).astype(int)  # 0..27 along it
+    blk = ~walk & m_in[rr_, cc_] & (vm >= 1) & (vm <= 22) & (um >= 1) & (um <= 26)
+    row = vm % 3
+    # wide plain lawns in the ortho (the war graves' fields, a cemetery's meadow) keep rows; crowned cells keep them
+    # too (graves under the trees)
+    stone = blk & (row == 1) & (um % 2 == 0)
+    bed = blk & (row == 2) & (um % 2 == 0)
+    # between the graves gravel where the ortho sees the plot pale (the old town's churchyards: raked gravel between
+    # dense rows), lawn where it is green
+    aisle = blk & ~stone & ~bed & (_lum3[rr_, cc_] > 135) & (_ex3[rr_, cc_] < 0.03)
+    gcol[rr_[aisle], cc_[aisle]] = C["gravel"]
+    gcol[rr_[bed], cc_[bed]] = C["garden"]
+    for r, c in zip(rr_[stone], cc_[stone]):
+        grave_stones.append((int(r), int(c), CEM_STONES[stable_hash(r, c, "grave") % len(CEM_STONES)]))
+    n_cem += 1
+note("cemeteries laid out:", n_cem, "grave stones:", len(grave_stones))
+
 # ground column
 for zz in range(H):
     m = zz < g - 1
@@ -2116,6 +2193,79 @@ for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):
     lamps.append((c, r, int(z0 + hgt - 1)))
 note("street lamps:", len(lamps))
 lamp_xy = np.array([(c, r) for c, r, _ in lamps], float) if lamps else np.zeros((0, 2))
+# park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
+# which stood dark at night. Along their walks a 4 m lamp every ~25 m, a metre and a half beside the way on soft
+# ground or paving (never on the way itself, a carriageway or in a building), none within 12 m of another lamp
+_parks = [g_ for _, _, t_, g_ in osm.areas if t_.get("leisure") == "park" and not tunnelish(t_)]
+_park_u = _uu(_parks).buffer(0) if _parks else None
+_pwalk = np.zeros((D, W), np.uint8)
+burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
+n_pl = 0
+for oid, t, line in osm.lines:
+    if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or tunnelish(t) or on_bridge(t):
+        continue
+    name = (t.get("name") or "").lower()
+    seg = line if ("promenade" in name or name == "ortspitze") else (line.intersection(_park_u) if _park_u is not None else None)
+    for part in getattr(seg, "geoms", [seg]) if seg is not None and not seg.is_empty else []:
+        if part.geom_type != "LineString" or part.length < 20:
+            continue
+        for k, s_ in enumerate(np.arange(10, part.length - 5, 25)):
+            p0, p1 = part.interpolate(max(s_ - 1, 0)), part.interpolate(min(s_ + 1, part.length))
+            L_ = math.hypot(p1.x - p0.x, p1.y - p0.y) or 1
+            side = 1 if k % 2 == 0 else -1
+            for off in (1.8, 2.6):
+                x_ = part.interpolate(s_).x - (p1.y - p0.y) / L_ * off * side
+                y_ = part.interpolate(s_).y + (p1.x - p0.x) / L_ * off * side
+                c, r = int(x_), int(y_)
+                if 0 <= c < W and 0 <= r < D and not bmask[r, c] and not _driven[r, c] and not _pwalk[r, c] \
+                        and gcol[r, c] != C["water"] and vol[g[r, c], r, c] == 0:
+                    break
+            else:
+                continue
+            if len(lamp_xy) and np.min(np.hypot(lamp_xy[:, 0] - c, lamp_xy[:, 1] - r)) < 12:
+                continue
+            z0 = int(g[r, c])
+            vol[z0:z0 + 3, r, c] = C["pole"]
+            vol[z0 + 3, r, c] = C["lamp"]
+            lamps.append((c, r, z0 + 3))
+            lamp_xy = np.vstack([lamp_xy, [c, r]])
+            n_pl += 1
+note("park and promenade lamps:", n_pl)
+
+n_gs = 0
+for r, c, v in grave_stones:  # the headstones (cemeteries above): not where a trunk or a bed already stands
+    if vol[g[r, c], r, c] == 0 and not bmask[r, c]:
+        vol[g[r, c], r, c] = v
+        n_gs += 1
+note("grave stones set:", n_gs)
+# benches (OSM amenity=bench, ~280 in the promenades, parks and squares): a wooden seat two voxels long beside the
+# walk, along the nearest path; on the ground, never on a carriageway or in a building
+BENCH = pal("#7a5a3e")
+_walks = [l_ for _, t_, l_ in osm.lines if t_.get("highway") in ("footway", "path", "pedestrian", "cycleway", "living_street",
+                                                                  "service", "residential", "track")]
+_wtree = STRtree(_walks) if _walks else None
+n_bench = 0
+for oid, t, p in osm.nodes_with("amenity", ("bench",)):
+    c, r = int(p.x), int(p.y)
+    if not (1 <= c < W - 1 and 1 <= r < D - 1) or bmask[r, c] or _driven[r, c]:
+        continue
+    dc, dr = 1, 0
+    if _wtree is not None:
+        l_ = _walks[_wtree.nearest(p)]
+        if l_.distance(p) < 8:
+            s_ = l_.project(p)
+            a_, b_ = l_.interpolate(max(s_ - 1, 0)), l_.interpolate(min(s_ + 1, l_.length))
+            dc, dr = (1, 0) if abs(b_.x - a_.x) >= abs(b_.y - a_.y) else (0, 1)
+    cells = [(r, c), (r + dr, c + dc)]
+    if any(bmask[r_, c_] or _driven[r_, c_] or vol[g[r_, c_], r_, c_] != 0 or abs(int(g[r_, c_]) - int(g[r, c])) > 0
+           for r_, c_ in cells):
+        cells = cells[:1]
+        if vol[g[r, c], r, c] != 0:
+            continue
+    for r_, c_ in cells:
+        vol[g[r_, c_], r_, c_] = BENCH
+    n_bench += 1
+note("benches:", n_bench)
 
 for oid, typ, t, geom in osm.areas_with("amenity", ("shelter",)):
     if t.get("shelter_type") not in (None, "public_transport", "basic_hut") or bmask[cells_of(geom)].any():
