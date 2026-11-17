@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshRequest, MeshReply, RawColumns } from './mesher.worker';
 import { World, type ColumnSource } from './world';
+import { MAT } from './voxelMaterial';
 
 export interface TileNode {
   key: string;
@@ -57,11 +58,14 @@ export class TileStreamer implements ColumnSource {
   private readonly maxWorkers = Math.min(Math.max(2, (navigator.hardwareConcurrency || 4) - 2), 10);
   private readonly pool: Pooled[] = [];
   private quadIdx: THREE.BufferAttribute | null = null;
+  // which palette entries are roof material: their staircases are shaded as roof planes (mesher.worker.ts)
+  private readonly roofPal: Uint8Array;
 
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
+    this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? 1 : 0));
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -161,11 +165,12 @@ export class TileStreamer implements ColumnSource {
       // the base tile's column data is still here: hand over a copy instead of fetching it again
       const b = this.nodes.get(this.key(1, n.tx, n.ty))?.data;
       const under: RawColumns | string = b ? { counts: b.counts.slice(), runs: b.runs.slice() } : file(`1/${n.tx}_${n.ty}`);
-      return { msg: { ...base, url: file(`1f/${n.tx}_${n.ty}`), under, keep: false, dataOnly: false, bld: null },
+      return { msg: { ...base, url: file(`1f/${n.tx}_${n.ty}`), under, keep: false, dataOnly: false, bld: null, roof: null },
         transfer: typeof under === 'string' ? [] : [under.counts.buffer, under.runs.buffer] };
     }
     const bld = !dataOnly && n.s === 1 ? this.buildingIds(x0, y0) : null;
-    return { msg: { ...base, url: file(n.key), keep: n.keep || n.s > 1, dataOnly, bld }, transfer: bld ? [bld.buffer] : [] };
+    return { msg: { ...base, url: file(n.key), keep: n.keep || n.s > 1, dataOnly, bld,
+      roof: !dataOnly && n.s === 1 ? this.roofPal : null }, transfer: bld ? [bld.buffer] : [] };
   }
 
   private buildingIds(x0: number, y0: number) {

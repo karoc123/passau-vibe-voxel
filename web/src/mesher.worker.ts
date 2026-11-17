@@ -16,6 +16,8 @@ export interface MeshRequest {
   keep: boolean;
   dataOnly: boolean;
   bld: Uint16Array | null;
+  // per palette entry, 1 if roof material: its staircases are shaded as the roof plane (1 m tiles only)
+  roof: Uint8Array | null;
 }
 
 export type MeshReply =
@@ -53,7 +55,7 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
       return;
     }
     const under = typeof m.under === 'string' ? decode(await fetchGzip(m.under), m.N) : m.under ?? null;
-    const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under);
+    const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof);
     const transfer: Transferable[] = [out.pos.buffer, out.attr.buffer, out.pal.buffer];
     if (out.bld) transfer.push(out.bld.buffer);
     if (keep) transfer.push(...columnBuffers(keep));
@@ -84,10 +86,10 @@ class QuadBuffer {
     this.pos = grow(this.pos, 3); this.attr = grow(this.attr, 4); this.pal = grow(this.pal, 1); this.bld = grow(this.bld, 1);
   }
 
-  vertex(x: number, y: number, z: number, normal: number, ao: number, ground: number, scale: number, palette: number, building: number) {
+  vertex(x: number, y: number, z: number, normal: number, ao: number, ground: number, roof: number, palette: number, building: number) {
     const v = this.count++;
     this.pos[v * 3] = x; this.pos[v * 3 + 1] = y; this.pos[v * 3 + 2] = z;
-    this.attr[v * 4] = normal; this.attr[v * 4 + 1] = ao; this.attr[v * 4 + 2] = ground; this.attr[v * 4 + 3] = scale;
+    this.attr[v * 4] = normal; this.attr[v * 4 + 1] = ao; this.attr[v * 4 + 2] = ground; this.attr[v * 4 + 3] = roof;
     this.pal[v] = palette; this.bld[v] = building;
   }
 }
@@ -108,7 +110,8 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 }
 
 // bldIds (1 m tiles): the building of each column (scripts/zones.py, 0: none); faces never merge across buildings
-function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null) {
+function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
+  roofPal: Uint8Array | null) {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
   const zmax = Math.max(topOf(cols, off, SS), under && uoff ? topOf(under, uoff, SS) : 0);
@@ -124,13 +127,13 @@ function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, b
   fill(cols, off, (v) => v);
   const bidAt = (x: number, y: number) => (bldIds ? bldIds[Math.min(N - 1, Math.max(0, y)) * N + Math.min(N - 1, Math.max(0, x))] : 0);
   const out = new QuadBuffer();
-  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, out);
+  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, out);
   const n = out.count;
   return { pos: out.pos.slice(0, n * 3), attr: out.attr.slice(0, n * 4), pal: out.pal.slice(0, n), quads: n / 4, bld: bldIds ? out.bld.slice(0, n) : null };
 }
 
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
-  bidAt: (x: number, y: number) => number, out: QuadBuffer) {
+  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, out: QuadBuffer) {
   const S = N + 2, sx = S, sy = S;
   const dims = [N, N, sz - 2];
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
@@ -139,6 +142,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   const topX = new Uint16Array(S), topY = new Uint16Array(S);
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const t = colTop[x + S * y]; if (t > topX[x]) topX[x] = t; if (t > topY[y]) topY[y] = t; }
   const cell = (X: number, Y: number, z: number) => vol[(X + 1) + sx * ((Y + 1) + sy * (z + 1))];
+  const roofs = roofPal ? roofPlanes(N, vol, colTop, roofPal, bidAt) : null;
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3, v = (d + 2) % 3, nu = dims[u], nv = dims[v];
     const mask = new Float64Array(nu * nv);
@@ -163,9 +167,11 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
               if (nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) {
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
-                const ang = d < 2 && nb === 0 ? wallAngle(N, px, py, d === 0 ? j : i, d, dir, cell) : 0;
-                const aob = nb === 0 ? faceAO(vol, ni, su, sv, ang ? d : -1) : 255;
-                // < 2^53: ang < 25, palette < 4096, ids < 16384
+                const pz = d === 2 ? sl : d === 0 ? j : i;
+                const rc = roofs && nb === 0 && roofPal![a] ? roofs.code(px, py, pz, d, dir) : 0;
+                const ang = rc ? 24 + rc : d < 2 && nb === 0 ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
+                const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null) : 255;
+                // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
                 key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
                 any = true;
               }
@@ -209,9 +215,66 @@ function wallAngle(N: number, px: number, py: number, cz: number, d: number, dir
   return gl >= 3 && (gx * ax + gy * ay) / gl > 0.05 ? 1 + (Math.round(Math.atan2(gy, gx) / (Math.PI / 12)) + 24) % 24 : 0;
 }
 
-// per-corner occlusion, 2 bits each; on a staircase wall (stairAxis >= 0) only what is above or below darkens it
-function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis: number) {
-  const o = (k: number) => (vol[k] !== 0 ? 1 : 0);
+// A pitched roof at 1 m is a staircase of tops and risers, each lit by its own axis: grey and red roofs read as dark
+// stripes. Its faces are lit as the plane instead, estimated from the roof's height field: central differences between
+// columns of the same roof (roof material on top, the same building, within a riser's 4 m), smoothed over 3 x 3. A
+// face's plane code: 1 + slope (2.5° steps, 10° to 75°) x 64 + downhill direction (64 steps); 0 where flat or no roof.
+function roofPlanes(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: Uint8Array, bidAt: (x: number, y: number) => number) {
+  const S = N + 2, SS = S * S;
+  const H = new Int16Array(SS).fill(-1000), bid = new Int32Array(SS);
+  for (let c = 0; c < SS; c++) {
+    const v = vol[c + SS * colTop[c]];
+    if (colTop[c] > 0 && v < roofPal.length && roofPal[v]) H[c] = colTop[c] - 1;
+    bid[c] = bidAt((c % S) - 1, Math.floor(c / S) - 1);
+  }
+  const same = (a: number, b: number) => H[b] > -1000 && bid[a] === bid[b] && Math.abs(H[a] - H[b]) <= 4;
+  const rx = new Float32Array(SS), ry = new Float32Array(SS), ok = new Uint8Array(SS);
+  // (the apron too, from what of it is there: a riser out of the tile is lit like its neighbours inside)
+  const diff = (c: number, st: number, lo: boolean, hi: boolean) => {
+    const a = lo && same(c, c - st), b = hi && same(c, c + st);
+    return a && b ? (H[c + st] - H[c - st]) / 2 : a ? H[c] - H[c - st] : b ? H[c + st] - H[c] : 0;
+  };
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const c = x + S * y;
+    if (H[c] === -1000) continue;
+    rx[c] = diff(c, 1, x > 0, x < S - 1); ry[c] = diff(c, S, y > 0, y < S - 1); ok[c] = 1;
+  }
+  const gx = new Float32Array(SS), gy = new Float32Array(SS);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const c = x + S * y;
+    if (!ok[c]) continue;
+    let sx = 0, sy = 0, n = 0;
+    for (let dy = Math.max(-1, -y); dy <= Math.min(1, S - 1 - y); dy++) for (let dx = Math.max(-1, -x); dx <= Math.min(1, S - 1 - x); dx++) {
+      const k = c + dx + S * dy;
+      if (ok[k] && (k === c || same(c, k))) { sx += rx[k]; sy += ry[k]; n++; }
+    }
+    gx[c] = sx / n; gy[c] = sy / n;
+  }
+  const encode = (x: number, y: number) => {
+    const g = Math.hypot(x, y), k = Math.min(30, Math.round(Math.atan(g) / (Math.PI / 72)));
+    return k < 4 ? 0 : 1 + k * 64 + ((Math.round(Math.atan2(-y, -x) / (Math.PI / 32)) + 64) % 64);
+  };
+  return {
+    // the face of cell (px, py, pz) along axis d (2: up), outwards dir
+    code(px: number, py: number, pz: number, d: number, dir: number) {
+      const c = (px + 1) + S * (py + 1);
+      if (!ok[c]) return 0;
+      if (d === 2) return dir > 0 && pz === H[c] ? encode(gx[c], gy[c]) : 0;
+      // a riser: the step down to a lower column of the same roof, lit as the plane between the two
+      const n = c + (d === 0 ? dir : dir * S);
+      if (!ok[n] || !same(c, n) || H[n] >= pz) return 0;
+      const x = (gx[c] + gx[n]) / 2, y = (gy[c] + gy[n]) / 2;
+      // ... facing downhill; or a 1 m notch in it (a pit, a bump) either way
+      if (H[c] - H[n] > 1 && -(d === 0 ? x : y) * dir < 0.3 * Math.hypot(x, y)) return 0;
+      return encode(x, y);
+    },
+  };
+}
+
+// per-corner occlusion, 2 bits each; on a staircase wall (stairAxis >= 0) only what is above or below darkens it, on a
+// roof's staircase (roofPal) only what isn't roof -- a chimney, a dormer's wall
+function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis: number, roofPal: Uint8Array | null) {
+  const o = roofPal ? (k: number) => (vol[k] !== 0 && !(vol[k] < roofPal.length && roofPal[vol[k]]) ? 1 : 0) : (k: number) => (vol[k] !== 0 ? 1 : 0);
   let s10 = o(ni - su), s12 = o(ni + su), s01 = o(ni - sv), s21 = o(ni + sv);
   let c00 = o(ni - su - sv), c20 = o(ni + su - sv), c22 = o(ni + su + sv), c02 = o(ni - su + sv);
   if (stairAxis === 0) { s10 = s12 = 0; c00 = c20 = c22 = c02 = 0; }
@@ -236,6 +299,9 @@ function emitMerged(mask: Float64Array, nu: number, nv: number, d: number, u: nu
       for (let jj = 0; jj < h; jj++) for (let ii = 0; ii < w; ii++) mask[i + ii + (j + jj) * nu] = 0;
       const k0 = key - 1, bid = k0 % 16384, k1 = Math.floor(k0 / 16384);
       const gm = k1 % 256, aoBits = Math.floor(k1 / 256) % 256, palIdx = Math.floor(k1 / 65536) % 4096, ang = Math.floor(k1 / (65536 * 4096));
+      // vattr.x: face axis + 8 x (a wall's direction, or a roof plane's slope in 2.5° steps); vattr.w: 1 + the roof
+      // plane's downhill direction in 64 steps, 0 for anything else
+      const roof = ang > 24 ? ang - 25 : -1, nrm = normalIdx + 8 * (roof >= 0 ? roof >> 6 : ang), rw = roof >= 0 ? 1 + (roof & 63) : 0;
       const aos = aoBits === 255 ? [3, 3, 3, 3] : [aoBits & 3, (aoBits >> 2) & 3, (aoBits >> 4) & 3, (aoBits >> 6) & 3];
       const base = [0, 0, 0];
       base[d] = sl + (dir > 0 ? 1 : 0); base[u] = i; base[v] = j;
@@ -245,7 +311,7 @@ function emitMerged(mask: Float64Array, nu: number, nv: number, d: number, u: nu
       const ord = QUAD_ORDER[(aos[0] + aos[2] < aos[1] + aos[3] ? 2 : 0) + (dir > 0 ? 1 : 0)];
       for (const c of ord) {
         const p = corners[c];
-        out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, normalIdx + 8 * ang, aos[c], gm, s, palIdx, bid);
+        out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);
       }
       i += w;
     }

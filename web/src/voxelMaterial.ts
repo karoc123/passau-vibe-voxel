@@ -176,7 +176,7 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid;
+  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof;
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
@@ -386,7 +386,7 @@ const SURFACE = `
       gRough = 1.0; gMetal = 0.0;
     }
   }
-  if (uSnow > 0.0 && vN.y > 0.5 && m != ${MAT.WATER} && m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) {
+  if (uSnow > 0.0 && (vN.y > 0.5 || vRoof > 0.5) && m != ${MAT.WATER} && m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) {
     float lum = dot(base, vec3(0.3, 0.59, 0.11));
     float street = lvl < 0.5 && m != ${MAT.GRASS} && m != ${MAT.SOIL} && m != ${MAT.LEAF} ? 1.0 : 0.0;
     float cover = smoothstep(0.0, 0.6, uSnow - 0.35 * hash13(cell + 0.5)) * mix(1.0, 0.35 + 0.4 * step(0.5, hash12(floor(cell.xz / 3.0))), street);
@@ -394,7 +394,7 @@ const SURFACE = `
     col = mix(col, snowCol, cover);
     gRough = mix(gRough, 0.8, cover); gMetal *= 1.0 - cover; gEmissive *= 1.0 - cover;
   } else if (uWet > 0.0 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.GLASS}) {
-    float flat_ = vN.y > 0.5 ? 1.0 : 0.0;
+    float flat_ = vN.y > 0.5 && vRoof < 0.5 ? 1.0 : 0.0;
     float pud = flat_ * smoothstep(0.6, 0.7, hash12(floor(cell.xz / 2.0)) * 0.5 + hash12(floor(cell.xz / 7.0)) * 0.5);
     col *= mix(1.0, mix(0.82, mix(0.5, 0.3, pud), flat_), uWet);
     gRough = mix(gRough, mix(0.5, 0.03, pud), uWet * mix(0.5, 1.0, flat_));
@@ -472,18 +472,23 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <common>', `#include <common>
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        flat varying float vWallAng; flat varying float vBid; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
-      // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its plane
-      .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01);
-        vec3 objectNormal = nAng > 0.5 ? vec3(cos((nAng - 1.0) * 0.261799), 0., sin((nAng - 1.0) * 0.261799)) : normalFromIdx(nAx);`)
-      // and its 1 m steps don't shade each other: shadow lookups step out of the staircase, 1.4 m along the wall's true
-      // direction. (The tiles carry no normal attribute, so three's own normal bias is always zero here, and stays so
-      // elsewhere: the depth bias alone is what the rest of the city is tuned for.)
+        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
+      // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its
+      // plane. On a roof's staircase (vattr.w > 0: 1 + its downhill direction in 64 steps) the 8s are the plane's slope
+      // in 2.5° steps, and it is lit as that plane
+      .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01), nRoof = vattr.w;
+        float rSl = nAng * 0.0436332, rAz = (nRoof - 1.0) * 0.0981748;
+        vec3 objectNormal = nRoof > 0.5 ? vec3(sin(rSl) * cos(rAz), cos(rSl), sin(rSl) * sin(rAz))
+          : nAng > 0.5 ? vec3(cos((nAng - 1.0) * 0.261799), 0., sin((nAng - 1.0) * 0.261799)) : normalFromIdx(nAx);
+        if (nRoof > 0.5) nAng = 0.0;`)
+      // and its 1 m steps don't shade each other: shadow lookups step out of the staircase, 1.4 m along the wall's (or
+      // roof's) true direction. (The tiles carry no normal attribute, so three's own normal bias is always zero here,
+      // and stays so elsewhere: the depth bias alone is what the rest of the city is tuned for.)
       .replace('#include <shadowmap_vertex>', THREE.ShaderChunk.shadowmap_vertex
-        .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 ? objectNormal : vec3( 0.0 );')
+        .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 || nRoof > 0.5 ? objectNormal : vec3( 0.0 );')
         .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vBid = vbld; vLitN = transformedNormal;
+        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vBid = vbld; vLitN = transformedNormal;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)
@@ -496,9 +501,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
       .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance += gEmissive;')
-      // a staircase wall tells the screen-space AO to go easy on it (post.ts)
+      // a staircase wall or roof tells the screen-space AO to go easy on it (post.ts)
       .replace('#include <opaque_fragment>', `#include <opaque_fragment>
-        if (vWallAng > 0.5 && vert && m != ${MAT.LEAF}) gl_FragColor.a = 0.5;`)
+        if ((vWallAng > 0.5 && vert && m != ${MAT.LEAF}) || vRoof > 0.5) gl_FragColor.a = 0.5;`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
         float aoF = mix(0.55, 1.0, vAO);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
