@@ -48,7 +48,6 @@ function box(w: number, h: number, l: number, x: number, y: number, z: number, h
   g.deleteAttribute('uv');
   return g;
 }
-const NONE = new THREE.Matrix4().makeScale(0, 0, 0);
 const merge = (gs: THREE.BufferGeometry[]) => mergeGeometries(gs);
 
 const WHITE = 0xf2f1ec, OFF = 0xdcdad3, SKIRT = 0x1b2330, DECK = 0x7f97a3, TURF = 0x4f7d48, GLASS = 0x22303b;
@@ -128,7 +127,8 @@ function tourBoat() {
   return { body: merge(body), accent: merge(accent), win: merge(win) };
 }
 
-interface Kind { body: THREE.InstancedMesh; accent: THREE.InstancedMesh; win: THREE.InstancedMesh; dark: THREE.InstancedMesh; n: number }
+// n: boats placed this frame; lit, dark: of those, how many with their windows lit or dark (each in its own mesh)
+interface Kind { body: THREE.InstancedMesh; accent: THREE.InstancedMesh; win: THREE.InstancedMesh; dark: THREE.InstancedMesh; n: number; lit: number; dark_: number }
 
 // a cruise ship coming in or leaving: along `path` from t0 for dur seconds; `crab` metres at the berth end are the
 // sideways slip to or from the quay, the hull kept parallel to it (hx, hy)
@@ -167,6 +167,7 @@ export class Boats {
   private readonly scl = new THREE.Vector3(1, 1, 1);
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly c = new THREE.Color();
+  private readonly box = new THREE.Box3();
   private readonly a = pt();
   private readonly b = pt();
 
@@ -180,13 +181,15 @@ export class Boats {
       const inst = (geo: THREE.BufferGeometry, m: THREE.Material, colour: boolean, shadow: boolean) => {
         const mesh = new THREE.InstancedMesh(geo, m, n);
         mesh.castShadow = mesh.receiveShadow = shadow;
-        mesh.frustumCulled = false;
+        // culled by the bounds of where the boats are now (update): off screen -- in the town's lanes, up on the
+        // hills -- their ~3000 triangles a ship aren't drawn, nor shadowed
+        mesh.boundingSphere = new THREE.Sphere();
         if (colour) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
         mesh.count = 0;
         this.group.add(mesh);
         return mesh;
       };
-      return { body: inst(g.body, mat, false, true), accent: inst(g.accent, mat, true, true), win: inst(g.win, this.winMat, false, false), dark: inst(g.win, this.darkMat, false, false), n: 0 };
+      return { body: inst(g.body, mat, false, true), accent: inst(g.accent, mat, true, true), win: inst(g.win, this.winMat, false, false), dark: inst(g.win, this.darkMat, false, false), n: 0, lit: 0, dark_: 0 };
     };
     this.cruise = kind(cruiseShip(), MAX_CRUISE);
     this.boat = kind(tourBoat(), MAX_TOUR);
@@ -362,9 +365,22 @@ export class Boats {
     k.body.setMatrixAt(i, this.m);
     k.accent.setMatrixAt(i, this.m);
     k.accent.setColorAt(i, this.c.setHex(accent));
-    // a lit and an unlit copy of the windows: the one not wanted is folded away
-    k.win.setMatrixAt(i, lit ? this.m : NONE);
-    k.dark.setMatrixAt(i, lit ? NONE : this.m);
+    // the windows lit or dark: one mesh each, drawn only for the boats they belong to (a folded-away copy in the other
+    // still cost its vertices)
+    if (lit) k.win.setMatrixAt(k.lit++, this.m);
+    else k.dark.setMatrixAt(k.dark_++, this.m);
+  }
+
+  // the sphere round the boats placed: each one's centre, out by half a cruise ship (three's own InstancedMesh bounds
+  // would go over every vertex of every instance)
+  private bound(mesh: THREE.InstancedMesh) {
+    const s = mesh.boundingSphere!, box = this.box.makeEmpty(), p = this.pos;
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, this.m);
+      box.expandByPoint(p.setFromMatrixPosition(this.m));
+    }
+    box.getBoundingSphere(s);
+    s.radius += CRUISE_L * 0.55;
   }
 
   update(dt: number, hour: number, day: number, night: number, level: number) {
@@ -373,7 +389,7 @@ export class Boats {
     const clock = hour * 3600 + this.t, z = this.waterTop + Math.max(0, level);
     const d = Math.round(day);
     if (d !== this.day) { this.day = d; this.ships = this.cruiseDay(d); }
-    this.cruise.n = this.boat.n = 0;
+    for (const k of [this.cruise, this.boat]) k.n = k.lit = k.dark_ = 0;
 
     // cruise ships: moored, or coming in or leaving
     for (const s of this.ships) {
@@ -412,9 +428,10 @@ export class Boats {
 
     for (const k of [this.cruise, this.boat])
       for (const mesh of [k.body, k.accent, k.win, k.dark]) {
-        mesh.count = k.n;
+        mesh.count = mesh === k.win ? k.lit : mesh === k.dark ? k.dark_ : k.n;
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        if (mesh.count) this.bound(mesh);
       }
     this.winMat.emissiveIntensity = night * 1.3;
   }

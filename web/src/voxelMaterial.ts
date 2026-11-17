@@ -40,6 +40,7 @@ export interface VoxelUniforms {
   uZFBlk: U<THREE.Texture>;
   uLitA: U<THREE.Vector4[]>;
   uLitB: U<THREE.Vector4[]>;
+  uLitMap: U<THREE.Texture>;
 }
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
@@ -197,7 +198,7 @@ const FLOODLIT: Record<string, { a?: [number, number]; b?: [number, number]; r: 
   'St. Paul': { r: 28, k: 0.8 },
   Schaiblingsturm: { r: 10 },
 };
-const LIT_N = 8;
+const LIT_N = 8, LIT_CELL = 8;
 function floodlights(meta: Meta) {
   const A = Array.from({ length: LIT_N }, () => new THREE.Vector4()), B = Array.from({ length: LIT_N }, () => new THREE.Vector4());
   let i = 0;
@@ -208,14 +209,28 @@ function floodlights(meta: Meta) {
     A[i].set(l.x + 0.5 + a[0], l.y + 0.5 + a[1], l.x + 0.5 + b[0], l.y + 0.5 + b[1]);
     B[i++].set(f.r, f.k ?? 1, f.w ?? 0, f.still ? 1 : 0);
   }
-  return { uLitA: { value: A }, uLitB: { value: B } };
+  // which capsule (1 + its index, 0: none) reaches each 8 m cell, the nearest relative to its radius: the shader
+  // weighs that one alone instead of looping over all eight for every pixel of the city at night (and 4 x 8 for every
+  // pixel of the rivers, mirrored)
+  const w = Math.ceil(meta.W / LIT_CELL), h = Math.ceil(meta.D / LIT_CELL), map = new Uint8Array(w * h), best = new Float32Array(w * h).fill(Infinity);
+  for (let k = 0; k < i; k++) {
+    const [ax, ay, bx, by] = A[k].toArray(), r = B[k].x, reach = r + LIT_CELL * 0.75;
+    const bax = bx - ax, bay = by - ay, bb = Math.max(bax * bax + bay * bay, 1e-3);
+    for (let y = Math.max(0, Math.floor((Math.min(ay, by) - reach) / LIT_CELL)); y <= Math.min(h - 1, Math.floor((Math.max(ay, by) + reach) / LIT_CELL)); y++)
+      for (let x = Math.max(0, Math.floor((Math.min(ax, bx) - reach) / LIT_CELL)); x <= Math.min(w - 1, Math.floor((Math.max(ax, bx) + reach) / LIT_CELL)); x++) {
+        const px = (x + 0.5) * LIT_CELL - ax, py = (y + 0.5) * LIT_CELL - ay, t = Math.min(1, Math.max(0, (px * bax + py * bay) / bb));
+        const d = Math.hypot(px - bax * t, py - bay * t);
+        if (d < reach && d / r < best[x + w * y]) { best[x + w * y] = d / r; map[x + w * y] = k + 1; }
+      }
+  }
+  return { uLitA: { value: A }, uLitB: { value: B }, uLitMap: { value: dataTexture(map, w, h, THREE.RedFormat) } };
 }
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
 const FOLIAGE = `
   uniform sampler2D uFolMap; uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
-  vec3 foliageAt(vec3 cell) {
-    vec2 f = texelFetch(uFolMap, ivec2(cell.xz * 0.5), 0).rg;
+  vec2 foliageCell(vec3 cell) { return texelFetch(uFolMap, ivec2(cell.xz * 0.5), 0).rg; }
+  vec3 foliageOf(vec2 f) {
     int cls = int(f.r * 255.0 + 0.5);
     if (cls == 0) cls = 13;
     vec4 d = uFolDate[cls];
@@ -226,16 +241,17 @@ const FOLIAGE = `
     float leaf = t < 200.0 ? smoothstep(d.x, d.x + 14.0, t) : 1.0 - smoothstep(d.z - 8.0, d.z + 8.0, t);
     return vec3(leaf, smoothstep(d.y - 10.0, d.y + 10.0, t), float(cls));
   }
+  vec3 foliageAt(vec3 cell) { return foliageOf(foliageCell(cell)); }
   vec3 grassTint() {
     float m = mod(uDay / 30.42 - 0.5, 12.0);
     int a = int(m);
     return mix(uGrass[a], uGrass[(a + 1) % 12], fract(m));
   }
-  float litter(vec3 cell) {
-    vec2 f = texelFetch(uFolMap, ivec2(cell.xz * 0.5), 0).rg;
+  // (f: the cell's foliageCell, fetched once by the caller)
+  float litter(vec2 f) {
     int cls = int(f.r * 255.0 + 0.5);
     if (cls == 0 || uFolDate[cls].x < 0.0) return 0.0;
-    vec3 fo = foliageAt(cell);
+    vec3 fo = foliageOf(f);
     return (1.0 - fo.x) * fo.y * (1.0 - smoothstep(uFolDate[cls].z + 15.0, uFolDate[cls].z + 50.0, uDay));
   }
   // leaves fall in clumps (2 m blocks mixed with single voxels), not as per-voxel noise; a bare crown keeps a
@@ -290,21 +306,61 @@ const FRAG_PARS = `
   float span(float x, float w, float a, float b) { return (clamp(x + 0.5 * w, a, b) - clamp(x - 0.5 * w, a, b)) / w; }
   float bandInt(float x, float p, float a, float b) { float k = floor(x / p); return k * (b - a) + clamp(x - k * p - a, 0.0, b - a); }
   float band(float x, float w, float p, float a, float b) { return (bandInt(x + 0.5 * w, p, a, b) - bandInt(x - 0.5 * w, p, a, b)) / w; }
+  // An old-town facade at x along the wall (from the building's first window axis) and lv above the street, box-filtered
+  // over w (metres along, up): axes every P m, storeys of SH m over a ground floor of G m. Out: x = the opening, y = its
+  // light surround, z = the window's frame and glazing bars inside it, w = the sill. Close up a window is a frame with a
+  // cross of bars; the bars and the sill are faded in (det) only where they are a few pixels wide, so from afar the
+  // facade is what it was: plain openings in a surround
+  vec4 facadeTap(float x, float lv, vec2 w, float P, float SH, float G, float det) {
+    float up = lv - G;
+    float cu = band(x, w.x, P, 0.0, 1.0), fu = band(x, w.x, P, -0.15, 1.15);
+    bool gf = up < 0.0;
+    float cv = gf ? span(lv, w.y, 0.35, 2.9) : band(up, w.y, SH, 0.9, 2.7);
+    float fv = gf ? cv : band(up, w.y, SH, 0.75, 2.8);
+    float win = cu * cv, bar = 0.0, sill = 0.0;
+    if (det > 0.0) {
+      // the glass inside a 7 cm frame, less a mullion and (upstairs) a transom at two thirds of the height
+      float iu = band(x, w.x, P, 0.07, 0.93);
+      float iv = gf ? span(lv, w.y, 0.42, 2.83) : band(up, w.y, SH, 0.97, 2.63);
+      float mu = band(x, w.x, P, 0.475, 0.525);
+      float tv = gf ? span(lv, w.y, 2.25, 2.3) : band(up, w.y, SH, 2.1, 2.15);
+      float glass = max(iu * iv - mu * iv - iu * tv + mu * tv, 0.0);
+      bar = det * max(win - glass, 0.0);
+      sill = gf ? 0.0 : det * fu * band(up, w.y, SH, 0.78, 0.9);
+    }
+    return vec4(win, clamp(fu * fv - win, 0.0, 1.0), bar, sill);
+  }
+  // ... sampled along the longer side of the pixel's footprint: at a glancing angle a pixel is long along the wall and
+  // short up it, and one box over both (fwidth) smeared each row of windows into a grey band from storey to storey
+  vec4 facade(float x, float lv, vec2 dx, vec2 dy, float P, float SH, float G) {
+    bool xm = dot(dx, dx) > dot(dy, dy);
+    vec2 maj = xm ? dx : dy, mnr = xm ? dy : dx;
+    float n = clamp(ceil(length(maj) / max(length(mnr), 1e-4)), 1.0, 4.0);
+    vec2 w = max(abs(mnr) + abs(maj) / n, vec2(1e-3));
+    float det = 1.0 - smoothstep(0.035, 0.09, max(w.x, w.y));
+    vec4 s = vec4(0.0);
+    for (int i = 0; i < 4; i++) {
+      if (float(i) >= n) break;
+      vec2 o = maj * ((float(i) + 0.5) / n - 0.5);
+      s += facadeTap(x + o.x, lv + o.y, w, P, SH, G, det);
+    }
+    return s / n;
+  }
   ${FOLIAGE}
-  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}];
-  float capsule(vec2 p, vec4 ab) { vec2 pa = p - ab.xy, ba = ab.zw - ab.xy; return length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0)); }
+  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap;
   // how much a floodlit landmark (uLitA/B) lights a point; out: the direction from its axis, and how white its light
   float floodAt(vec2 p, bool mirror, out vec2 out_, out float w_) {
-    float s = 0.0; out_ = vec2(0.0); w_ = 0.0;
-    for (int i = 0; i < ${LIT_N}; i++) {
-      vec4 ab = uLitA[i]; float r = uLitB[i].x;
-      if (r <= 0.0) continue;
-      vec2 pa = p - ab.xy, ba = ab.zw - ab.xy;
-      vec2 d = pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0);
-      float k = (1.0 - smoothstep(r * 0.6, r, length(d))) * uLitB[i].y * (mirror ? 1.0 - uLitB[i].w : 1.0);
-      if (k > s) { s = k; out_ = d / max(length(d), 1.0); w_ = uLitB[i].z; }
-    }
-    return s;
+    out_ = vec2(0.0); w_ = 0.0;
+    ivec2 c = ivec2(floor(p / ${LIT_CELL}.0)), sz = textureSize(uLitMap, 0);
+    if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, sz))) return 0.0;
+    int i = int(texelFetch(uLitMap, c, 0).r * 255.0 + 0.5) - 1;
+    if (i < 0) return 0.0;
+    vec4 ab = uLitA[i], lb = uLitB[i];
+    vec2 pa = p - ab.xy, ba = ab.zw - ab.xy;
+    vec2 d = pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0);
+    float k = (1.0 - smoothstep(lb.x * 0.6, lb.x, length(d))) * lb.y * (mirror ? 1.0 - lb.w : 1.0);
+    if (k > 0.0) { out_ = d / max(length(d), 1.0); w_ = lb.z; }
+    return k;
   }
   uniform sampler2D uWinMap; uniform float uWinMed[8]; uniform float uWinShape[72]; uniform float uWinFloors[8]; uniform vec3 uWinCol[8];
   // a building's share of lit windows now: its type's measured median times the building's own habit, a point on the
@@ -326,6 +382,7 @@ const FRAG_PARS = `
   }
   // a window or a run of windows (room), on floor fl: lit or not, and its light
   vec3 windowLight(vec3 cell, vec2 room, float fl) {
+    if (uNight <= 0.0) return vec3(0.0); // by day every caller scales it to nothing: skip the fetch and the hashes
     vec3 b = building(cell);
     int kind = int(b.y);
     bool floors = hash12(vec2(b.z * 91.7, 3.1)) < uWinFloors[kind];
@@ -359,31 +416,33 @@ const SURFACE = `
   float uc = vWallAng > 0.5 ? dot(vVox.xz, vec2(-wN.z, wN.x)) : (abs(vN.x) > 0.5 ? vVox.z : vVox.x);
   float lv = vVox.y - gz;
   float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
+  vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
   float h = hash13(cell);
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
   float r = 0.5, fres2 = 1.0; // the water's ripple and its glancing reflectance, for its reflections at night
-  if (m == ${MAT.WALL}) {
+  if (m == ${MAT.WALL} || m == ${MAT.TENEMENT}) {
     // An old-town facade: window axes 3 m apart (4 m on some), ~1 x 1.8 m windows in a light surround on storeys of
     // 3.3-3.7 m, plain plaster between; a ground floor of doors and shop windows on the same axes, over a darker plinth
-    // and under a string course. Each building keeps its own rhythm (vBid).
+    // and under a string course. Each building keeps its own rhythm (vBid). The historic core (TENEMENT) is the same
+    // street of houses: it had a grid of 1 m voxel windows of its own, unfiltered, stepping along every staircase wall.
     if (vert) {
       float P = hash12(vec2(vBid * 0.618, 1.7)) < 0.75 ? 3.0 : 4.0;
       float x = uc - floor(hash12(vec2(vBid * 0.37, 5.3)) * P);
       float SH = 3.3 + 0.4 * hash12(vec2(vBid * 0.71, 2.9)), G = 4.2, up = lv - G, st = floor(up / SH);
-      float cu = band(x, fwU, P, 0.0, 1.0), fu = band(x, fwU, P, -0.15, 1.15);
-      float cv = up < 0.0 ? span(lv, fwV, 0.35, 2.9) : band(up, fwV, SH, 0.9, 2.7);
-      float fv = up < 0.0 ? cv : band(up, fwV, SH, 0.75, 2.8);
+      vec4 fc = facade(x, lv, dUVx, dUVy, P, SH, G);
+      float win = fc.x;
       col *= 1.0 - 0.16 * span(lv, fwV, -1.0, 0.6) - 0.12 * span(lv, fwV, G - 0.3, G - 0.05);
-      float win = cu * cv;
-      col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), clamp(fu * fv - win, 0.0, 1.0));
-      col = mix(col, mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h, win);
-      gRough = mix(gRough, 0.12, win); gMetal = 0.6 * win;
-      if (win > 0.0 && uNight > 0.0) {
+      col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), fc.y + fc.w * 0.6);
+      // glass, and white-painted frames and bars (fc.z) in the opening
+      float gw = win - fc.z;
+      col = col * (1.0 - win) + (mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h) * gw + vec3(0.62, 0.6, 0.56) * fc.z;
+      gRough = mix(gRough, 0.12, gw) - 0.3 * fc.z; gMetal = 0.6 * gw;
+      if (gw > 0.0 && uNight > 0.0) {
         float k = floor(x / P);
-        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight * win; }
-        else gEmissive = windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * win;
+        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
+        else gEmissive = windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
       }
     }
   } else if (m == ${MAT.CONCRETE}) {
@@ -403,20 +462,6 @@ const SURFACE = `
         else gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
       }
     } else { gRough = 0.3; gMetal = 0.4; }
-  } else if (m == ${MAT.TENEMENT}) {
-    gRough = 0.85;
-    if (vert) {
-      bool ground = lvl < 4.0, inBay = mod(u, 3.0) < 1.0;
-      float fl = mod(lvl, 4.0);
-      bool win = inBay && (ground ? lvl > 0.5 && lvl < 3.0 : fl > 0.5 && fl < 2.5);
-      if (win) {
-        col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
-        gRough = 0.12; gMetal = 0.6;
-        vec2 room = vec2(floor(u / 6.0) + wpos * 17.31 + wN.x * 3.1, floor(lvl / 4.0) + wN.z * 5.7);
-        if (ground) { if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.7) gEmissive = vec3(1.0, 0.8, 0.55) * 1.4 * uNight; }
-        else gEmissive = windowLight(cell, room, floor(lvl / 4.0)) * uNight;
-      }
-    }
   } else if (m == ${MAT.CLASSIC}) {
     gRough = 0.8;
     if (vert && lvl < 7.5) col *= mod(lvl, 2.0) < 1.0 ? 0.9 : 1.0;
@@ -499,10 +544,35 @@ const SURFACE = `
   } else if (m == ${MAT.MARK}) {
     col = base * (0.95 + 0.05 * h);
   }
+  // The map's edge, below the ground: cut like a diorama's block, not a slab of soil. Dark topsoil and loam follow the
+  // surface; under them beds of gravel, sand and clay lie level, gently wavy; then the gneiss Passau stands on, in
+  // courses; at the bottom a dark plinth under a pale trim line
+  bool cut = vert && lv < 0.0 && m != ${MAT.WATER} && (min(vVox.x, vVox.z) < 0.01 || vVox.x > uSize.x - 0.01 || vVox.z > uSize.y - 0.01);
+  if (cut) {
+    float along = abs(vN.x) > 0.5 ? vVox.z : vVox.x, dep = -lv, y = vVox.y, fy = fwV + 0.02;
+    float wob = 0.9 * sin(along * 0.043) + 0.5 * sin(along * 0.117 + 1.3);
+    float yb = y + wob + 0.8 * sin(y * 0.37 + 0.4), bed = floor(yb / 2.6), hb = hash12(vec2(bed, 7.3));
+    vec3 beds = hb < 0.3 ? vec3(0.33, 0.24, 0.14) : hb < 0.65 ? vec3(0.25, 0.17, 0.11) : vec3(0.29, 0.20, 0.12);
+    beds *= 1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.25 + fy, yb - bed * 2.6)); // each bed's foot a little darker
+    float rockTop = 9.0 + 2.5 * sin(along * 0.021 + 0.7) + wob;
+    // gneiss in rough beds: joints wander, and the cracks across them come every few metres, not as bricks
+    float ry = y + 0.5 * sin(along * 0.07 + y * 0.3), course = floor(ry / 2.3), hc = hash12(vec2(course, 3.1));
+    float cx = along + 7.0 * hc, cp = 4.0 + 5.0 * hc, blk = hash12(vec2(floor(cx / cp), course));
+    float joint = max(band(cx, fwU + 0.02, cp, 0.0, 0.07) * step(0.35, blk), band(ry, fy, 2.3, 0.0, 0.06));
+    vec3 rock = vec3(0.15, 0.15, 0.145) * (0.85 + 0.25 * blk) * (1.0 - 0.45 * joint);
+    vec3 earth = mix(vec3(0.045, 0.028, 0.017), vec3(0.2, 0.13, 0.07), smoothstep(0.35 - fy, 0.35 + fy, dep));
+    earth = mix(earth, beds, smoothstep(2.4 - fy, 2.4 + fy, dep + 0.3 * wob));
+    col = mix(earth, rock, (1.0 - smoothstep(rockTop - fy, rockTop + fy, y)) * smoothstep(2.4 - fy, 2.4 + fy, dep + 0.3 * wob));
+    col = mix(col, vec3(0.42, 0.40, 0.37), span(y, fy, 2.0, 2.2));
+    col = mix(col, vec3(0.025, 0.024, 0.024), span(y, fy, -10.0, 2.0));
+    col *= 0.97 + 0.06 * h;
+    gRough = 1.0; gMetal = 0.0; gEmissive = vec3(0.0);
+  }
   if (uFolOn > 0.5 && vN.y > 0.5 && lvl < 0.5 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.MARK}) {
-    float lit = litter(cell) * (m == ${MAT.GRASS} || m == ${MAT.SOIL} ? 0.9 : 0.35);
+    vec2 ff = foliageCell(cell);
+    float lit = litter(ff) * (m == ${MAT.GRASS} || m == ${MAT.SOIL} ? 0.9 : 0.35);
     if (hash13(cell * 3.1 + 0.7) < lit) {
-      int cls = int(texelFetch(uFolMap, ivec2(cell.xz * 0.5), 0).r * 255.0 + 0.5);
+      int cls = int(ff.r * 255.0 + 0.5);
       col = mix(uFolCol[cls], vec3(0.32, 0.22, 0.12), 0.45 * hash13(cell * 1.3)) * (0.7 + 0.3 * h);
       gRough = 1.0; gMetal = 0.0;
     }
@@ -522,7 +592,7 @@ const SURFACE = `
   }
   if (uNight > 0.0) { // street lamps light what is near the ground; water reflects them instead
     vec3 lm = texture2D(uLampMap, vVox.xz / uSize).rgb;
-    float fall = clamp(1.0 - (vVox.y - gz) / 16.0, 0.0, 1.0);
+    float fall = cut ? 0.0 : clamp(1.0 - (vVox.y - gz) / 16.0, 0.0, 1.0);
     float up = m == ${MAT.LEAF} ? (vN.y < -0.5 ? 2.6 : 1.7) : m == ${MAT.GRASS} ? 0.55 : 1.0;
     if (m == ${MAT.WATER}) {
       // the lights on the banks, mirrored: a light at height y is seen in the water y * (distance / height of the eye)
@@ -581,7 +651,7 @@ const SURFACE = `
   if (!zreal(cell)) discard;
   #endif
   #ifdef CLAY
-  { gEmissive = vec3(0.0); gRough = 0.95; gMetal = 0.0; diffuseColor.rgb = vec3(0.62, 0.61, 0.59) * mix(0.75, 1.0, vAO); }
+  if (!cut) { gEmissive = vec3(0.0); gRough = 0.95; gMetal = 0.0; diffuseColor.rgb = vec3(0.62, 0.61, 0.59) * mix(0.75, 1.0, vAO); }
   #endif`;
 
 // the clay's shadow: none where the city is real (it casts its own)
