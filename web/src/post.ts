@@ -38,6 +38,25 @@ class DepthBlur extends Effect {
   }
 }
 
+// Night as the eye sees it (before tone mapping, in linear light): in the dark, colour fades and what is left turns
+// blue (the Purkinje shift), so red roofs under the moon read as dark slate instead of glowing crimson; what is lit --
+// lamps, windows, floodlit stone -- keeps its warmth. A little lift in the shadows keeps the silhouettes readable.
+const NIGHT = `uniform float night;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 c = inputColor.rgb;
+  float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float s = night * (1.0 - smoothstep(0.01, 0.12, L));
+  c = mix(c, L * vec3(0.72, 0.9, 1.32), 0.85 * s);
+  c += night * vec3(0.0035, 0.0045, 0.008) * (1.0 - smoothstep(0.0, 0.05, L));
+  outputColor = vec4(c, inputColor.a);
+}`;
+
+class NightGrade extends Effect {
+  constructor() { super('NightGrade', NIGHT, { uniforms: new Map([['night', new THREE.Uniform(0)]]) }); }
+  get night() { return this.uniforms.get('night')!.value as number; }
+  set night(v: number) { this.uniforms.get('night')!.value = v; }
+}
+
 // n8ao reads the depth buffer, where a wall at an angle to the grid is a staircase (mesher.worker.ts): it darkened the
 // inner corner of every 1 m step into faint vertical lines from street to eaves. Those walls mark themselves in the
 // scene's alpha (voxelMaterial.ts) and keep only a little of it; the alpha is reset to 1 after.
@@ -68,7 +87,9 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   const tiltPass = new EffectPass(camera, tilt);
   composer.addPass(new EffectPass(camera, bloom));
   composer.addPass(tiltPass);
+  const grade = new NightGrade();
   composer.addPass(new EffectPass(camera,
+    grade,
     tone,
     new HueSaturationEffect({ saturation: 0.12 }),
     new BrightnessContrastEffect({ brightness: 0, contrast: 0.06 }),
@@ -79,5 +100,5 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     tiltPass.enabled = enabled && h > 60;
     tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), renderer.domElement.height);
   };
-  return { composer, n8, bloom, tone, setHeight };
+  return { composer, n8, bloom, tone, grade, setHeight };
 }

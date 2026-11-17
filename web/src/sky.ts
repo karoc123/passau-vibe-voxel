@@ -76,10 +76,10 @@ export class Sky {
   // night: 0 by day .. 1 after sunset; deep: 0 at blue hour .. 1 in full night
   set({ elDeg, sunDir, trueSun, golden, night, deep, cloud }: SkyState) {
     const u = this.u;
-    const nightTop = mixC(C(0x0a2f6a), C(0x050508), deep), nightHor = mixC(C(0x5a6f98), C(0x2b2922), deep);
+    const nightTop = mixC(C(0x0a2f6a), C(0x081226), deep), nightHor = mixC(C(0x5a6f98), C(0x2c3450), deep);
     u.uTop.value.copy(mixC(mixC(C(0x4f8fd8), C(0x6f8fd0), golden * 0.5), nightTop, night));
     u.uHorizon.value.copy(mixC(C(0xdde8f1), nightHor, night));
-    u.uWarm.value.copy(mixC(C(0xffc596), mixC(C(0x7a5a50), C(0x2b2922), deep), night));
+    u.uWarm.value.copy(mixC(C(0xffc596), mixC(C(0x7a5a50), C(0x3a3440), deep), night));
     u.uGolden.value = golden;
     u.uGround.value.copy(mixC(C(0xc9cdd0), C(0x10121c), night));
     u.uSunDir.value.copy(sunDir);
@@ -89,13 +89,13 @@ export class Sky {
     u.uDeep.value = deep;
     const afterglow = Math.max(0, 1 - Math.abs(elDeg + 3) / 11) * (elDeg < 2 ? 1 : 0);
     u.uAfterglow.value.copy(C(0xff9a4a)).multiplyScalar(0.55 * afterglow);
-    u.uCityGlow.value.copy(C(0x5a5244)).multiplyScalar(0.3 * night * deep);
-    u.uCloudLit.value.copy(mixC(C(0xffffff), mixC(C(0x55607a), C(0x1c1b1a), deep), night));
-    u.uCloudDark.value.copy(mixC(C(0xd8dfe8), mixC(C(0x22324f), C(0x0a0a0c), deep), night));
-    const deckLit = mixC(C(0xc4c9cf), C(0x3e3a36), night), deckDark = mixC(C(0x8e959e), C(0x24221f), night);
+    u.uCityGlow.value.copy(C(0x8a6a48)).multiplyScalar(0.3 * night * deep);
+    u.uCloudLit.value.copy(mixC(C(0xffffff), mixC(C(0x55607a), C(0x2c3040), deep), night));
+    u.uCloudDark.value.copy(mixC(C(0xd8dfe8), mixC(C(0x22324f), C(0x111522), deep), night));
+    const deckLit = mixC(C(0xc4c9cf), C(0x5a4e46), night), deckDark = mixC(C(0x8e959e), C(0x3a322d), night);
     u.uCloudLit.value.lerp(deckLit, cloud);
     u.uCloudDark.value.lerp(deckDark, cloud);
-    u.uHorizon.value.lerp(mixC(C(0xb8bdc2), C(0x3a3632), night), cloud);
+    u.uHorizon.value.lerp(mixC(C(0xb8bdc2), C(0x4a423c), night), cloud);
     u.uTop.value.lerp(deckDark, cloud);
     u.uWarm.value.lerp(u.uHorizon.value, cloud);
     u.uGolden.value = golden * (1 - cloud);
