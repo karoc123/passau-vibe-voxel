@@ -86,3 +86,21 @@ class OSM:
 
     def nodes_with(self, key, values=None):
         return [a for a in self.nodes if key in a[1] and (values is None or a[1][key] in values)]
+
+
+def footprints(ids_values, extra=None):
+    """The building footprints voxelize.py drew (OSM outlines moved onto the LoD2 footprints, and buildings from LoD2
+    alone under negative ids; data/footprints.npz), as a raster of the given values: ids_values maps an outline's OSM
+    id to its value, extra(k) gives the k-th LoD2-only building's (0 without). Returns (raster, number of LoD2-only
+    buildings), or (None, 0) before voxelize.py has run."""
+    import numpy as np
+    from pathlib import Path
+    p = Path("data/footprints.npz")
+    if not p.exists():
+        return None, 0
+    oid = np.load(p)["oid"]
+    keys, inv = np.unique(oid, return_inverse=True)
+    neg = [int(k) for k in keys if k < 0]
+    vals = {k: (extra(j) if extra else 0) for j, k in enumerate(neg)}
+    lut = np.array([ids_values.get(int(k), vals.get(int(k), 0)) for k in keys])
+    return lut[inv.reshape(oid.shape)], len(neg)

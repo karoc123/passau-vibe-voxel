@@ -305,7 +305,8 @@ def poststeg(vol, g, note):
                 continue
             vals = vol[gz + nz, r, c].copy()
             vol[gz + nz, r, c] = 0
-            vol[top - len(vals) + 1:top + 1, r, c] = vals[-2:] if len(vals) > 2 else vals
+            vals = vals[-2:]  # (the deck's two voxels, not what stood under it)
+            vol[top - len(vals) + 1:top + 1, r, c] = vals
             moved += 1
             last = (r, c, int(vals[-1]))
     if last is None:
