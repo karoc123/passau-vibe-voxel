@@ -1,0 +1,450 @@
+{
+ "city": {
+  "leaf": 108,
+  "colour": 290,
+  "fall": 308
+ },
+ "sources": [
+  "DWD Climate Data Center: phenological observations, annual reporters, wild plants (historical), stations within 100 km of Passau below 500 m, 1995-2024",
+  "iNaturalist: Leaves annotations, Poland, Germany, Czechia, Slovakia, Lithuania",
+  "autumn colours: Wikimedia Commons photos, scripts/foliage_photos.json",
+  "lawns by month: Wikimedia Commons photos of Central European city lawns (measured by the upstream project, warsaw-vibe-voxel)"
+ ],
+ "classes": {
+  "1": {
+   "species": "Spitz-Ahorn",
+   "genera": [
+    "Acer"
+   ],
+   "leaf": {
+    "day": 109.66666666666667,
+    "sd": 6.385065146791632,
+    "n": 36,
+    "source": "iNaturalist, +0 d to the DWD scale"
+   },
+   "colour": {
+    "day": 278.27974795869136,
+    "sd": 11.536239112301114,
+    "n": 191,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 296.27974795869136,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "colouring + 18 d (the DWD's median gap)"
+   },
+   "autumn": "#eab34f"
+  },
+  "2": {
+   "species": "Sommer-Linde",
+   "genera": [
+    "Tilia"
+   ],
+   "leaf": {
+    "day": 121.8913043478261,
+    "sd": 6.385065146791632,
+    "n": 23,
+    "source": "iNaturalist, +0 d to the DWD scale"
+   },
+   "colour": {
+    "day": 314.4321468298109,
+    "sd": 11.536239112301114,
+    "n": 21,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 332.4321468298109,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "colouring + 18 d (the DWD's median gap)"
+   },
+   "autumn": "#d0a851"
+  },
+  "3": {
+   "species": "Esche",
+   "genera": [
+    "Fraxinus"
+   ],
+   "leaf": {
+    "day": 121.0,
+    "sd": 7.817087985331088,
+    "n": 794,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 290.00357540123946,
+    "sd": 11.536239112301114,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "fall": {
+    "day": 308.00357540123946,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "autumn": "#b8b76b"
+  },
+  "4": {
+   "species": "Robinie",
+   "genera": [
+    "Robinia",
+    "Gleditsia"
+   ],
+   "leaf": {
+    "day": 108.33666666666667,
+    "sd": 6.385065146791632,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "colour": {
+    "day": 290.00357540123946,
+    "sd": 11.536239112301114,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "fall": {
+    "day": 308.00357540123946,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "autumn": "#c7b272"
+  },
+  "5": {
+   "species": "Stiel-Eiche",
+   "genera": [
+    "Quercus"
+   ],
+   "leaf": {
+    "day": 119.0,
+    "sd": 6.243706894393161,
+    "n": 888,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 291.0,
+    "sd": 10.609830655100122,
+    "n": 843,
+    "source": "DWD"
+   },
+   "fall": {
+    "day": 311.0,
+    "sd": 11.546944857317383,
+    "n": 806,
+    "source": "DWD"
+   },
+   "autumn": "#b28d5e"
+  },
+  "6": {
+   "species": "Rosskastanie",
+   "genera": [
+    "Aesculus"
+   ],
+   "leaf": {
+    "day": 105.0,
+    "sd": 6.526423399190103,
+    "n": 925,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 274.0,
+    "sd": 11.42881425992297,
+    "n": 782,
+    "source": "DWD"
+   },
+   "fall": {
+    "day": 291.0,
+    "sd": 10.797293397653865,
+    "n": 787,
+    "source": "DWD"
+   },
+   "autumn": "#bc9156"
+  },
+  "7": {
+   "species": "Rotbuche",
+   "genera": [
+    "Fagus",
+    "Carpinus"
+   ],
+   "leaf": {
+    "day": 112.0,
+    "sd": 5.991326196423422,
+    "n": 836,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 282.0,
+    "sd": 11.536239112301114,
+    "n": 786,
+    "source": "DWD"
+   },
+   "fall": {
+    "day": 301.0,
+    "sd": 10.641046964580944,
+    "n": 760,
+    "source": "DWD"
+   },
+   "autumn": "#cdac59"
+  },
+  "8": {
+   "species": "Haenge-Birke",
+   "genera": [
+    "Betula"
+   ],
+   "leaf": {
+    "day": 104.0,
+    "sd": 5.775184298399165,
+    "n": 924,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 281.0,
+    "sd": 11.559449897278803,
+    "n": 850,
+    "source": "DWD"
+   },
+   "fall": {
+    "day": 299.0,
+    "sd": 11.369260416585545,
+    "n": 836,
+    "source": "DWD"
+   },
+   "autumn": "#d6b372"
+  },
+  "9": {
+   "species": "Eberesche",
+   "genera": [
+    "Sorbus"
+   ],
+   "leaf": {
+    "day": 105.0,
+    "sd": 6.056048760698094,
+    "n": 893,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 261.81145717463846,
+    "sd": 11.536239112301114,
+    "n": 48,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 286.0,
+    "sd": 10.285431604384344,
+    "n": 798,
+    "source": "DWD"
+   },
+   "autumn": "#c28855"
+  },
+  "10": {
+   "species": "Europaeische-Laerche",
+   "genera": [
+    "Larix"
+   ],
+   "leaf": {
+    "day": 100.0,
+    "sd": 8.29661708237977,
+    "n": 857,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 296.0,
+    "sd": 12.300000769683175,
+    "n": 791,
+    "source": "DWD"
+   },
+   "fall": {
+    "day": 313.0,
+    "sd": 11.875518227892883,
+    "n": 788,
+    "source": "DWD"
+   },
+   "autumn": "#e1b670"
+  },
+  "11": {
+   "species": "Sal-Weide",
+   "genera": [
+    "Salix"
+   ],
+   "leaf": {
+    "day": 107.00666666666666,
+    "sd": 6.385065146791632,
+    "n": 75,
+    "source": "iNaturalist, +0 d to the DWD scale"
+   },
+   "colour": {
+    "day": 328.4321468298109,
+    "sd": 11.536239112301114,
+    "n": 58,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 346.4321468298109,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "colouring + 18 d (the DWD's median gap)"
+   },
+   "autumn": "#a49764"
+  },
+  "12": {
+   "species": "Schwarz-Erle",
+   "genera": [
+    "Alnus"
+   ],
+   "leaf": {
+    "day": 106.0,
+    "sd": 9.43732775459954,
+    "n": 771,
+    "source": "DWD"
+   },
+   "colour": {
+    "day": 328.4321468298109,
+    "sd": 11.536239112301114,
+    "n": 20,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 346.4321468298109,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "colouring + 18 d (the DWD's median gap)"
+   },
+   "autumn": "#849363"
+  },
+  "15": {
+   "species": "",
+   "genera": [
+    "Populus"
+   ],
+   "leaf": {
+    "day": 124.83333333333333,
+    "sd": 6.385065146791632,
+    "n": 27,
+    "source": "iNaturalist, +0 d to the DWD scale"
+   },
+   "colour": {
+    "day": 290.00357540123946,
+    "sd": 11.536239112301114,
+    "n": 67,
+    "source": "iNaturalist, +12 d to the DWD scale"
+   },
+   "fall": {
+    "day": 308.00357540123946,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "colouring + 18 d (the DWD's median gap)"
+   },
+   "autumn": "#c7ae5d"
+  },
+  "13": {
+   "species": "median of the classes",
+   "genera": [],
+   "leaf": {
+    "day": 108.33666666666667,
+    "sd": 6.385065146791632,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "colour": {
+    "day": 290.00357540123946,
+    "sd": 11.536239112301114,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "fall": {
+    "day": 308.00357540123946,
+    "sd": 11.083276907119705,
+    "n": 0,
+    "source": "median of the classes"
+   },
+   "autumn": "#c7ac5e"
+  },
+  "14": {
+   "species": "conifers",
+   "genera": [
+    "Abies",
+    "Chamaecyparis",
+    "Cupressocyparis",
+    "Juniperus",
+    "Picea",
+    "Pinus",
+    "Pseudotsuga",
+    "Taxus",
+    "Thuja",
+    "Tsuga"
+   ],
+   "leaf": null,
+   "colour": null,
+   "fall": null
+  }
+ },
+ "grass": [
+  [
+   1.33,
+   0.582,
+   1.291
+  ],
+  [
+   1.607,
+   0.706,
+   1.476
+  ],
+  [
+   1.578,
+   0.792,
+   1.529
+  ],
+  [
+   1.22,
+   0.766,
+   1.046
+  ],
+  [
+   1.137,
+   0.741,
+   0.822
+  ],
+  [
+   1.48,
+   0.906,
+   1.332
+  ],
+  [
+   1.496,
+   0.981,
+   1.586
+  ],
+  [
+   1.319,
+   0.883,
+   1.315
+  ],
+  [
+   1.333,
+   0.839,
+   1.277
+  ],
+  [
+   1.223,
+   0.747,
+   1.238
+  ],
+  [
+   1.072,
+   0.597,
+   1.254
+  ],
+  [
+   1.092,
+   0.52,
+   1.28
+  ]
+ ],
+ "leaf": [
+  1.126,
+  0.749,
+  1.073
+ ]
+}
