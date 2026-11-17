@@ -14,22 +14,36 @@ from scipy import ndimage
 # far (the camera distance in m up to which the label shows; default labels.DEFAULT_FAR), site (its website).
 # anchor "top": highest voxel in the footprint (towers, spires); default: top voxel at the centroid.
 LABELS = {
-    "Dom St. Stephan": dict(en="St Stephen's Cathedral", kind="cathedral", year=1688, anchor="top"),
-    "Veste Niederhaus": dict(kind="castle", year=1250),
+    "Dom St. Stephan": dict(en="St Stephen's Cathedral", kind="cathedral", year=1688, anchor="top", far=9000),
     "Rathausturm": dict(name="Altes Rathaus", en="Old Town Hall", kind="town hall", year=1892, anchor="top"),
-    "Neue Residenz": dict(kind="bishop's palace", year=1730),
-    "Pfarrkirche Sankt Paul": dict(name="St. Paul", kind="church", year=1678, anchor="top"),
     "St. Michael": dict(kind="church", year=1677, anchor="top"),
+    "Pfarrkirche Sankt Paul": dict(name="St. Paul", kind="church", year=1678, anchor="top"),
     "Kloster Niedernburg": dict(kind="abbey"),
-    "Schaiblingsturm": dict(kind="tower", year=1250, anchor="top"),
-    "Sankt Gertraud": dict(kind="church", anchor="top"),
-    "Sankt Severin": dict(kind="church", anchor="top"),
-    "Nikolakloster": dict(en="University of Passau", kind="university"),
+    "Nikolakloster": dict(name="Universität Passau", en="University of Passau", kind="university", year=1978,
+                          alt="Nikolakloster"),
+    "Neue Residenz": dict(kind="bishop's palace", year=1730, far=3000),
+    "Schaiblingsturm": dict(kind="tower", year=1250, anchor="top", far=3000),
+    "Sankt Gertraud": dict(kind="church", anchor="top", far=3000),
+    "Sankt Severin": dict(kind="church", anchor="top", far=3000),
 }
-# places without a single OSM polygon, at EPSG:25832 x, y
+# places without a single OSM polygon (or with one that does not parse as an area: the castles are drawn as lines),
+# at EPSG:25832 x, y -- read off OSM (data/raw/osm.json) and checked on the orthophoto. Within one `far` the order
+# here is the priority on screen; the bridges come last.
 EXTRA_LABELS = {
-    "Dreiflüsseeck": dict(en="Three Rivers Corner", kind="confluence of Danube, Inn and Ilz", at=(830170, 5389742)),
-    "Veste Oberhaus": dict(kind="fortress", year=1219, at=(829736, 5390183)),
+    "Veste Oberhaus": dict(kind="fortress", year=1219, at=(829736, 5390183), far=9000),
+    "Dreiflüsseeck": dict(en="Three Rivers Corner", kind="confluence of Danube, Inn and Ilz", alt="Ortspitze",
+                          at=(830170, 5389742), far=9000),
+    "Veste Niederhaus": dict(kind="castle", year=1250, at=(829966, 5389952)),
+    "Wallfahrtskirche Mariahilf": dict(en="Mariahilf pilgrimage church", kind="church", year=1627, alt="Mariahilf",
+                                       at=(829732, 5389207)),
+    "Passau Hauptbahnhof": dict(en="Main station", kind="station", alt="Hbf Bahnhof", at=(828246, 5389677)),
+    "Innstadt": dict(kind="district", at=(829423, 5389341)),
+    "Ilzstadt": dict(kind="district", at=(830068, 5390056)),
+    "Prinzregent-Luitpold-Brücke": dict(en="Luitpold suspension bridge", kind="bridge", alt="Hängebrücke Luitpoldbrücke",
+                                        at=(829787, 5389933), far=1500),
+    "Schanzlbrücke": dict(kind="bridge", at=(828600, 5389942), far=1500),
+    "Marienbrücke": dict(kind="bridge", at=(829372, 5389555), far=1500),
+    "Innsteg": dict(kind="footbridge", at=(828962, 5389244), far=1500),
 }
 
 
@@ -191,7 +205,7 @@ def small_tree(vol, g, r, c, h, leaves, trunk, height=None):
 def details(vol, g, topi, feats, pal, osm, cells_of, note):
     """The curated set pieces, then the labels and the camera presets."""
     import passau
-    passau.build(vol, g, pal, note)
+    passau.build(vol, g, pal, note, osm)
 
     def top_at(r, c):
         col = np.nonzero(vol[:, r, c])[0]
