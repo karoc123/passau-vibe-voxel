@@ -176,7 +176,7 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
+  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng;
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
@@ -218,6 +218,16 @@ const SURFACE = `
   bool vert = abs(vN.y) < 0.5;
   float u = abs(vN.x) > 0.5 ? cell.z : cell.x;
   float wpos = abs(vN.x) > 0.5 ? cell.x : cell.z;
+  // a wall at an angle to the grid is a staircase of x- and z-facing faces (mesher.worker.ts); each face counting
+  // windows along its own axis aliased them into 1 m light/dark columns from street to eaves. Its windows are laid out
+  // along the plane the staircase stands for instead, in metres from the fragment (wN: that plane's normal)
+  vec3 wN = vN;
+  if (vWallAng > 0.5) {
+    float wa = (vWallAng - 1.0) * 0.261799;
+    wN = vec3(cos(wa), 0.0, sin(wa));
+    u = floor(dot(vVox.xz, vec2(-wN.z, wN.x)) + 1e-3);
+    wpos = floor(dot(vVox.xz, wN.xz) / 3.0);
+  }
   float h = hash13(cell);
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
@@ -232,7 +242,7 @@ const SURFACE = `
       if (win) {
         col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
         gRough = 0.12; gMetal = 0.6;
-        vec2 room = vec2(floor(u / 4.0) + wpos * 17.31 + vN.x * 3.1, floor(lvl / 3.0) + vN.z * 5.7);
+        vec2 room = vec2(floor(u / 4.0) + wpos * 17.31 + wN.x * 3.1, floor(lvl / 3.0) + wN.z * 5.7);
         if (shop) {
           if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
         } else {
@@ -246,7 +256,7 @@ const SURFACE = `
       else {
         col = base * (0.8 + 0.12 * step(0.5, mod(u, 2.0)));
         gRough = 0.08; gMetal = mix(0.35, 0.6, uNight);
-        vec2 zone = vec2(floor(u / 6.0) + wpos * 13.7 + vN.x * 2.3, floor(lvl / 4.0) + vN.z * 4.1);
+        vec2 zone = vec2(floor(u / 6.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
         if (shopLvl && lvl < 4.0) gEmissive = vec3(1.0, 0.86, 0.66) * 1.3 * uNight;
         else gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
       }
@@ -260,7 +270,7 @@ const SURFACE = `
       if (win) {
         col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
         gRough = 0.12; gMetal = 0.6;
-        vec2 room = vec2(floor(u / 6.0) + wpos * 17.31 + vN.x * 3.1, floor(lvl / 4.0) + vN.z * 5.7);
+        vec2 room = vec2(floor(u / 6.0) + wpos * 17.31 + wN.x * 3.1, floor(lvl / 4.0) + wN.z * 5.7);
         if (ground) { if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.7) gEmissive = vec3(1.0, 0.8, 0.55) * 1.4 * uNight; }
         else gEmissive = windowLight(cell, room, floor(lvl / 4.0)) * uNight;
       }
@@ -271,7 +281,7 @@ const SURFACE = `
   } else if (m == ${MAT.RIBBON}) {
     if (vert && mod(lvl, 4.0) > 1.5) {
       col = mix(base * 0.4, vec3(0.12, 0.16, 0.2), 0.6) + 0.02 * h; gRough = 0.08; gMetal = 0.55;
-      vec2 zone = vec2(floor(u / 12.0) + wpos * 13.7 + vN.x * 2.3, floor(lvl / 4.0) + vN.z * 4.1);
+      vec2 zone = vec2(floor(u / 12.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
       gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * uNight;
     } else { gRough = 0.4; gMetal = 0.3; }
   } else if (m == ${MAT.FLOODLIT}) { // floodlit stone: a landmark washed in warm light at night
@@ -437,7 +447,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <common>', `#include <common>
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        ${NORMAL_FROM_IDX}`)
+        flat varying float vWallAng; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
       // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its plane
       .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01);
         vec3 objectNormal = nAng > 0.5 ? vec3(cos((nAng - 1.0) * 0.261799), 0., sin((nAng - 1.0) * 0.261799)) : normalFromIdx(nAx);`)
@@ -445,10 +455,15 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <shadowmap_vertex>', THREE.ShaderChunk.shadowmap_vertex.replace(
         'directionalLightShadows[ i ].shadowNormalBias', '(directionalLightShadows[ i ].shadowNormalBias + (nAng > 0.5 ? 1.2 : 0.0))'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0;
+        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vLitN = transformedNormal;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FRAG_PARS}`)
+      .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)
+      // the tiles carry no normal attribute, so three flat-shades them from screen derivatives (WebGLPrograms:
+      // flatShading) and the staircase's plane normal above went unused -- every 1 m step of a diagonal facade was lit
+      // by its own x- or z-facing side, sunlit and shaded columns from street to eaves. Lit by the vertex normal instead
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+        normal = normalize(vLitN); nonPerturbedNormal = normal;`)
       .replace('#include <color_fragment>', SURFACE)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
