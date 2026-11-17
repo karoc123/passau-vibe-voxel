@@ -127,7 +127,10 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "shelter": pal("#a9c3cf", M_GLASS), "deck": pal("#a7a49d", M_CONCRETE), "parking": pal("#6a6d73"),
     "track": pal("#b8875a"), "kerb": pal("#cfc7b8"), "granite_d": pal("#55595c"), "woodfloor": pal("#6b5847"), "jet": pal("#dff1f7", 17),
     "benchkerb": pal("#dcd9d1", M_CONCRETE),
+    "shore": pal("#9d9585"),  # a river bank's rip-rap and gravel: grey-brown stones, darker than any paving
 }
+# masonry of retaining walls and quays: rough granite and limestone blocks, a few tones voxel by voxel
+STONE = [pal(c) for c in ["#8f897e", "#9b9488", "#857f75", "#a39b8d", "#938a7c"]]
 PERENNIALS = [pal(c, M_LEAF) for c in ["#8e6fae", "#a690c4", "#6f9a4f", "#8aa27a", "#5f8a49", "#7c9c5a", "#c98fb0"]]
 LEAVES = [pal(c, M_LEAF) for c in ["#a3c65c", "#8db552", "#76a24a", "#618f43", "#4f7c3c",
                                     "#93bb6a", "#7da95f", "#689655", "#56834c", "#456f43"]]
@@ -156,8 +159,20 @@ def ground_walls(dtm, dtm_s):
     med = ndimage.median_filter(dtm, 3)
     lo, hi = ndimage.minimum_filter(med, 5), ndimage.maximum_filter(med, 5)
     wall = (ndimage.maximum_filter(dtm, 3) - ndimage.minimum_filter(dtm, 3) >= 3) & (hi - lo >= 3)
+    # a steep natural slope is no wall: the hillsides under Oberhaus and Mariahilf climb 3 m within a few metres too,
+    # and snapped to two levels they stood as cliffs of 4-8 m. A wall takes its whole drop within its 3 x 3 cells, a
+    # slope (even 45 deg) spreads it: in 3 x 3 under 0.65 of the drop over 5 x 5 is a slope
+    near = ndimage.maximum_filter(med, 3) - ndimage.minimum_filter(med, 3)
+    wall &= near >= 0.65 * (hi - lo)
     note("ground: wall cells snapped to their level:", int(wall.sum()))
-    return np.where(wall, np.where(ndimage.gaussian_filter(dtm, 1.5) >= (lo + hi) / 2, hi, lo), dtm_s)
+    # on a slope the 1 m terrain's jitter (crowns' pits, boulders, a filtering seam) rounded to ragged contours: a
+    # stair of 1 m steps that zigzagged up the hillside in pale specks. Where the ground is steep and no wall, smoothed
+    # over ~4 m: even terraces along the contour lines
+    gs = ndimage.gaussian_filter(dtm, 1.5)
+    gy, gx = np.gradient(ndimage.gaussian_filter(dtm, 2.0))
+    steep = ndimage.binary_dilation(np.hypot(gx, gy) > 0.25, iterations=2) & ~ndimage.binary_dilation(wall, iterations=3)
+    note("ground: steep cells smoothed over the hillside:", int(steep.sum()))
+    return np.where(wall, np.where(ndimage.gaussian_filter(dtm, 1.5) >= (lo + hi) / 2, hi, lo), np.where(steep, gs, dtm_s))
 
 
 g = np.round(ground_walls(dtm, dtm_s) - BASE).astype(np.int32)  # ground occupies z in [0, g)
@@ -342,6 +357,11 @@ for oid, typ, t, geom in osm.areas:
             if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150:
                 key = "paving2"
         hard.append((geom, C[key]))
+# cells some map feature paints on purpose (a square, a car park, a path, a carriageway, a platform): what is left in
+# the default paving is open land OSM says nothing about (see "natural ground" below)
+explicit = np.zeros((D, W), np.uint8)
+burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not tunnelish(t_) and "building" not in t_ and (
+    t_.get("place") == "square" or t_.get("highway") == "pedestrian" or "surface" in t_ or t_.get("amenity") == "parking")])
 containers.sort(key=lambda s: -s[0].area)
 soft.sort(key=lambda s: -s[0].area)
 burn(gcol, containers)
@@ -466,10 +486,19 @@ for oid, t, line in osm.lines:
         cycle_shapes.append((poly, C["cycle"]))
     elif hw == "steps":
         foot_shapes.append((poly, C["steps"]))
+    elif hw in ("path", "track", "bridleway") and t.get("surface") is None:
+        # an untagged path or track is no paved walk: through the woods and meadows (under Oberhaus) it was a pale
+        # paving ribbon zigzagging up the hill. Earth where the ortho sees green (crowns over it, a meadow's track)
+        # or brown along it, gravel where it is pale
+        rr_, cc_ = cells_of(poly)
+        green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
+        pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
+        foot_shapes.append((poly, C["dirt" if green_ else "paving" if pale_ else "gravel"]))
     elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
         foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
 note(f"roads taking their square's surface: {n_inherit}")
 burn(gcol, foot_shapes + cycle_shapes)
+burn(explicit, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes + road_shapes])
 road_mask = np.zeros((D, W), np.uint16)
 burn(road_mask, [(s, 1) for s, _ in road_shapes])
 burn(gcol, road_shapes)
@@ -492,6 +521,7 @@ for oid, typ, t, geom in osm.areas_with("area:highway"):
         burn(road_mask, [(geom, 1)])
 area_hw.sort(key=lambda s: -s[0].area)
 burn(gcol, area_hw)
+burn(explicit, [(s_, 1) for s_, _ in area_hw])
 burn(gcol, [(line.buffer(1.0, cap_style="flat"), own) for _, line, own in road_lines])  # no area drawn over a carriageway cuts it
 _cyc = np.zeros((D, W), np.uint16)  # a footway area drawn over a cycleway beside it does not cut it
 burn(_cyc, [(sh, 1) for sh, _ in cycle_shapes])
@@ -542,9 +572,11 @@ for oid, t, line in osm.lines_with("railway"):
         except Exception:
             pass
 burn(gcol, rail_beds)
+burn(explicit, [(s_, 1) for s_, _ in rail_beds])
 _pf = np.zeros((D, W), np.uint16)  # a platform mapped over the carriageway beside it stops at the road
 burn(_pf, [(geom, 1) for oid, typ, t, geom in osm.areas_with("railway", ("platform",)) if not tunnelish(t)])
 gcol[(_pf > 0) & (road_mask == 0)] = C["platform"]
+explicit[_pf > 0] = 1
 burn(gcol, rails, all_touched=True)
 
 # water
@@ -1128,6 +1160,44 @@ H = int(max(topi.max() + g.max(), g.max()) + 12)
 note("volume height", H)
 vol = np.zeros((H, D, W), np.uint16)
 
+# ---------------------------------------------------------------- natural ground
+# open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
+# when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
+# on the slopes and the river banks had come out as pale paving terraces. Streets and squares are drawn explicitly
+# and stay as drawn.
+_gy, _gx = np.gradient(ndimage.gaussian_filter(g.astype(np.float32), 1.5))
+slope = np.hypot(_gx, _gy)
+_water = gcol == C["water"]
+_open = (gcol == C["paving"]) & (explicit == 0) & ~ndimage.binary_dilation(bmask, iterations=1)
+_d_drawn = ndimage.distance_transform_edt(~((explicit > 0) | bmask))
+_ex3, _lum3 = ndimage.median_filter(exg, 3), ndimage.median_filter(lum, 3)
+_red_b = ndimage.median_filter(cellcol[..., 0] - cellcol[..., 2], 3)
+_hill = ndimage.binary_closing(slope > 0.3, iterations=2)
+_bank = (ndimage.distance_transform_edt(~_water) <= 10) & ~_water
+_green = _ex3 > 0.03
+_crown = nd_mean > 2.5
+_brown = (_red_b > 14) & (_lum3 < 150) & ~_green & (_hill | (_d_drawn >= 6))  # (in town brown is a roof's eave or shadow)
+_nat = np.full((D, W), C["paving"], np.uint16)
+_nat[_bank & ~_hill] = C["shore"]  # a flat bank by the water the ortho sees grey: rip-rap and gravel
+_nat[_brown] = C["dirt"]
+_nat[_hill & (_d_drawn >= 2) & (_lum3 < 145)] = C["grass2"]  # a slope away from paths, not pale: meadow
+_nat[_hill & (_crown | (_lum3 < 75))] = C["garden"]  # under the crowns or in their shade: the forest floor
+_nat[_hill & _brown] = C["dirt2"]
+_nat[_green & ~_crown] = C["grass"]
+_nat[_green & _crown] = C["garden"]
+# the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
+# quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
+_edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
+_nat[_edge] = C["shore"]
+_nat[~_open] = C["paving"]
+# a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
+_cls = [C[k] for k in ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden")]
+_votes = np.stack([ndimage.uniform_filter(((_nat == k) & _open).astype(np.float32), 3) for k in _cls])
+_maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
+gcol[_open] = _maj[_open]
+note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in
+                                                   ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden")})
+
 # ground column
 for zz in range(H):
     m = zz < g - 1
@@ -1136,17 +1206,28 @@ for zz in range(H):
     vol[zz][m] = C["soil"]
 rr, cc = np.nonzero(np.ones((D, W), bool))
 vol[g[rr, cc] - 1, rr, cc] = gcol[rr, cc]
-# a paved cell 2 m or more above a neighbour stands on a retaining wall (an underpass, a trench, a ramp's side, a
-# station's cut): its exposed face concrete, not the brown soil of a garden's bank
+# a paved cell 2 m or more above a neighbour stands on a retaining wall (a quay, a terrace on the hillside, a ramp's
+# side): its exposed face masonry, not the brown soil of a garden's bank -- rough stone blocks of a few greys
+# (Passau's quays and terrace walls are granite and limestone; a flat pale concrete made them giant blank slabs).
+# On natural ground too where OSM maps a wall (barrier=retaining_wall/wall/city_wall)
 _nb_lo = ndimage.minimum_filter(g, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
 _mat = np.array([e[3] for e in pal.entries] + [0] * 256)
-_wall = (g - _nb_lo >= 2) & ~np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER])
+_natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin(gcol, [C["dirt"], C["dirt2"]])
+_osm_wall = np.zeros((D, W), np.uint8)
+burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
+                 if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
+_wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
 n_rw = 0
+_rr0, _cc0 = np.mgrid[0:D, 0:W]
 for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
     m = _wall & (zz >= _nb_lo) & (zz < g - 1)
-    vol[zz][m] = C["concrete"]
+    if not m.any():
+        continue
+    # blocks 2 m long, courses offset course by course
+    k = ((_rr0[m] + _cc0[m] + (zz % 2)) // 2 * 2654435761 + zz * 40503) % 1000003 % len(STONE)
+    vol[zz][m] = np.array(STONE, np.uint16)[k]
     n_rw += int(m.sum())
-note("retaining walls (paved ground 2 m+ over a neighbour): concrete voxels", n_rw)
+note("retaining walls (paved ground 2 m+ over a neighbour): masonry voxels", n_rw)
 
 # buildings: base fill with the tallest covering feature's wall, then parts paint their own [minh, maxh)
 basewall = np.zeros((D, W), np.uint16)
