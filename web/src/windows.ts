@@ -12,7 +12,7 @@ const CENTRES = [16.5, 18.5, 20.5, 22.5, 27];
 
 export async function loadWindows(meta: Meta, U: VoxelUniforms) {
   const [stats, buf] = await Promise.all([fetchJson<WinStats>('data/windows.json'), fetchGzip('data/windows.bin')]);
-  const tex = dataTexture(new Uint8Array(buf), meta.W, meta.D, THREE.RedFormat);
+  const cells = new Uint8Array(buf), tex = dataTexture(cells, meta.W, meta.D, THREE.RedFormat);
   tex.magFilter = tex.minFilter = THREE.NearestFilter;
   U.uWinMap.value = tex;
   KIND_MODEL.forEach((m, k) => {
@@ -21,7 +21,7 @@ export async function loadWindows(meta: Meta, U: VoxelUniforms) {
     U.uWinFloors.value[k] = t.floors;
     U.uWinCol.value[k].set(...t.colour);
   });
-  return (hour: number, day: number) => setWindows(U, stats, hour, day);
+  return { set: (hour: number, day: number) => setWindows(U, stats, hour, day), cells }; // cells: non-zero on a building
 }
 
 function setWindows(U: VoxelUniforms, stats: WinStats, hour: number, day: number) {

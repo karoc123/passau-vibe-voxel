@@ -173,10 +173,138 @@ for _ in range(3):
     for _ in range(4):
         pts[2:-6] = (pts[1:-7] + 2 * pts[2:-6] + pts[3:-5]) / 4  # the straight run in to the pier stays straight
 pts = resample(pts, 4)
+
+
+def keep_right(pts, sep=22.0, rounds=6):
+    """where the loop comes back along itself (out and back up the Danube, round the Eck, up the Inn and back) its two
+    runs lay within a few metres: boats meeting there passed through each other. Each run moves to its own starboard
+    side, so they pass port to port ~`sep` apart; where the loop crosses itself it still crosses (the timetable keeps
+    the boats apart there, checked below). The ends at the pier stay put."""
+    pts = pts.copy()
+    for _ in range(rounds):
+        d = np.gradient(pts, axis=0)
+        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        right = np.stack([-d[:, 1], d[:, 0]], axis=1)  # grid y points south: (-dy, dx) is starboard
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
+        push = np.zeros(len(pts))
+        for i in range(30, len(pts) - 30):
+            far = np.abs(cum - cum[i]) > 300
+            gap = np.hypot(*(pts[far] - pts[i]).T)
+            j = np.argmin(gap)
+            if gap[j] < sep and float(np.dot(d[i], d[far][j])) < -0.7:  # running the other way
+                push[i] = (sep - gap[j]) / 2
+        push = ndimage.uniform_filter1d(ndimage.maximum_filter1d(push, 9), 15)
+        moved = pts + right * push[:, None]
+        ok = clear[moved[:, 1].astype(int), moved[:, 0].astype(int)] >= 9
+        pts = np.where(ok[:, None], moved, pts)
+    return pts
+
+
+pts = resample(keep_right(pts), 4)
 bad = [(round(x), round(y)) for x, y in pts if not river[int(y), int(x)]]
 L = float(np.hypot(*np.diff(pts, axis=0).T).sum())
 print(f"tour loop {L:.0f} m, {len(pts)} points, {len(bad)} on land", bad[:8])
 
-json.dump({"berths": berths, "tour": [[round(float(x), 1), round(float(y), 1)] for x, y in pts]},
+# the timetable (boats.ts: departures every 30 or 60 min, 2.8 m/s, ramps of 0.06 m/s²): two boats on the loop at once
+# must not come within a boat's length of each other away from the pier
+V, ACC = 2.8, 0.06
+cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
+ramp = V / ACC
+T = (L - V * ramp) / V + 2 * ramp
+def s_at(t):
+    u = T - t
+    return np.clip(np.where(t < ramp, 0.5 * ACC * t * t, np.where(u < ramp, L - 0.5 * ACC * u * u, 0.5 * ACC * ramp * ramp + V * (t - ramp))), 0, L)
+def pos(s):
+    return np.stack([np.interp(s, cum, pts[:, 0]), np.interp(s, cum, pts[:, 1])], axis=1)
+for gap in (1800, 3600):
+    t = np.arange(0, T - gap, 1.0)
+    if not len(t):
+        continue
+    sa, sb = s_at(t + gap), s_at(t)
+    dist = np.hypot(*(pos(sa) - pos(sb)).T)
+    away = (sb > 150) & (sa < L - 150)
+    print(f"boats {gap // 60} min apart: closest {dist[away].min():.0f} m" if away.any() else f"boats {gap // 60} min apart never meet")
+
+# ---------------------------------------------------------------- the cruise ships' fairway
+# Two lanes along the Danube, from the grid's west edge to its east edge: `up` (westbound, upstream, on the old town's
+# side, clear of the moored ships two abreast and of the excursion boats at their pier) and `down` (eastbound, on the
+# far side). A ship bound downstream from the quay turns in the wide reach above the old town (`turn_w`, up -> down);
+# one arriving from upstream turns in the Dreiflüsseeck's basin below it (`turn_e`, down -> up) to come in bow upstream.
+def channel(x):
+    """the Danube at column x: OSM centre row, north and south bank rows"""
+    col = river[:, int(x)]
+    r = int(np.interp(x, danube[:, 0], danube[:, 1]))
+    a = b = r
+    while a > 0 and col[a - 1]:
+        a -= 1
+    while b < D - 1 and col[b + 1]:
+        b += 1
+    return r, a, b
+
+
+# the obstacles on the south side: moored cruise ships (two abreast) and the excursion pier's raft of three
+south_ob = []
+for b in berths:
+    c, d, n = np.array([b["x"], b["y"]]), np.array([b["dx"], b["dy"]]), np.array([b["nx"], b["ny"]])
+    for k in np.linspace(-SHIP_L / 2, SHIP_L / 2, 28):
+        south_ob.append(c + d * k + n * (SHIP_W * 1.5 + 1.2))  # the outer ship's river side
+for k in np.linspace(-25, 25, 11):
+    south_ob.append(dock + [k, -3 * 9.0 + 4])
+south_ob = np.array(south_ob)
+xs = np.arange(4.0, W - 4.0, 8.0)
+up, down = [], []
+for x in xs:
+    r, a, b = channel(x)
+    mid = (a + b) / 2 if b - a < 200 else r  # the confluence below the Eck: the Danube's own line, not the Inn's mouth
+    half = min(24.0, (b - a) * 0.17)
+    yu, yd = mid + half, mid - half
+    up.append((x, yu))
+    down.append((x, yd))
+up, down = np.array(up), np.array(down)
+north = np.array([channel(x)[1] + SHIP_W / 2 + 10 for x in xs])  # the down lane's own bank
+# a ship on the up lane passes the moored ones along its whole length: the lane stays clear of anything within half a
+# ship's length either side
+cap = np.array([min([y - SHIP_W / 2 - 10 for x0, y in south_ob if abs(x0 - x) < SHIP_L / 2 + 30], default=1e9) for x in xs])
+for k in range(30):
+    up[:, 1] = np.minimum(up[:, 1], cap)
+    down[:, 1] = np.maximum(np.minimum(down[:, 1], up[:, 1] - 34), np.minimum(north, up[:, 1] - 14))
+    if k < 29:
+        up[1:-1, 1] = (up[:-2, 1] + 2 * up[1:-1, 1] + up[2:, 1]) / 4
+        down[1:-1, 1] = (down[:-2, 1] + 2 * down[1:-1, 1] + down[2:, 1]) / 4
+up = up[::-1]  # westbound: from the east edge
+
+
+def u_turn(frm, to, centre, cw):
+    """a half turn about `centre` from the lane point `frm` to `to` (its radius easing from one to the other)"""
+    a0 = math.atan2(frm[1] - centre[1], frm[0] - centre[0])
+    a1 = math.atan2(to[1] - centre[1], to[0] - centre[0])
+    if cw:
+        a1 = a1 if a1 > a0 else a1 + 2 * math.pi
+    else:
+        a1 = a1 if a1 < a0 else a1 - 2 * math.pi
+    rr = np.hypot(*(np.array(frm) - centre)), np.hypot(*(np.array(to) - centre))
+    k = np.linspace(0, 1, 40)
+    rad = rr[0] + (rr[1] - rr[0]) * k
+    ang = a0 + (a1 - a0) * k
+    return np.stack([centre[0] + rad * np.cos(ang), centre[1] + rad * np.sin(ang)], axis=1)
+
+
+def lane_at(lane, x):
+    return int(np.argmin(np.abs(lane[:, 0] - x)))
+
+
+# turn_e: eastbound (north lane) into the basin, round clockwise (grid y south: east -> south -> west), back west on
+# the up lane; turn_w: westbound, round clockwise (west -> north -> east)
+ie_d, ie_u = lane_at(down, 2860), lane_at(up, 2860)
+turn_e = u_turn(down[ie_d], up[ie_u], np.array([2905.0, (down[ie_d][1] + up[ie_u][1]) / 2 + 30]), True)
+iw_u, iw_d = lane_at(up, 900), lane_at(down, 900)
+turn_w = u_turn(up[iw_u], down[iw_d], np.array([860.0, (up[iw_u][1] + down[iw_d][1]) / 2]), True)
+for name, p in (("up", up), ("down", down), ("turn_e", turn_e), ("turn_w", turn_w)):
+    cl = clear[np.clip(p[:, 1].astype(int), 0, D - 1), p[:, 0].astype(int)]
+    print(f"fairway {name}: {len(p)} points, closest to a bank {cl.min():.0f} m, {int((cl == 0).sum())} on land")
+r2 = lambda p: [[round(float(x), 1), round(float(y), 1)] for x, y in p]
+
+json.dump({"berths": berths, "tour": r2(pts),
+           "fairway": {"up": r2(up), "down": r2(down), "turnE": [ie_d, ie_u, r2(turn_e)], "turnW": [iw_u, iw_d, r2(turn_w)]}},
           open(OUT / "boats.json", "w"), separators=(",", ":"))
 print("wrote", OUT / "boats.json")

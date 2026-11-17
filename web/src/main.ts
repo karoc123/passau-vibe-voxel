@@ -20,7 +20,7 @@ import type { Kind, TrafficData } from './sim/types';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
-import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
+import { $, coarsePointer, ease, el, fetchGzip, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
 import type { World } from './world';
 import { lightStreets, makeUniforms, makeVoxelMaterial } from './voxelMaterial';
@@ -253,9 +253,13 @@ async function boot() {
   [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
   views = meta.views;
   uniforms = makeUniforms(meta);
-  loadFoliage(meta, uniforms).then((city) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
+  const foliage = loadFoliage(meta, uniforms), windows = loadWindows(meta, uniforms);
+  foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
     .catch((e) => console.warn('foliage', e));
-  loadWindows(meta, uniforms).then((set) => { setWindows = set; }).catch((e) => console.warn('windows', e));
+  windows.then(({ set }) => { setWindows = set; }).catch((e) => console.warn('windows', e));
+  // where the street lights go: the buildings and the woods
+  const ground = Promise.all([windows, foliage, fetchGzip('data/terrain.bin')])
+    .then(([w, f, terrain]) => ({ buildings: w.cells, trees: f.trees, terrain })).catch(() => null);
   streamer = new TileStreamer(meta, makeVoxelMaterial(uniforms), scene);
   world = nav.world = streamer.world;
   daylight.casters(streamer.group, () => life?.group ?? null);
@@ -284,7 +288,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
-    lightStreets(uniforms!, meta, [...td.roads, ...td.peds]);
+    ground.then((g) => lightStreets(uniforms!, meta, td.roads, td.peds, g));
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;

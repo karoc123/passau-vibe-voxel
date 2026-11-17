@@ -25,5 +25,5 @@ export async function loadFoliage(meta: Meta, U: VoxelUniforms) {
   ph.grass.forEach((t, m) => U.uGrass.value[m].setRGB(...t));
   U.uLeaf.value.setRGB(...ph.leaf);
   U.uFolOn.value = 1;
-  return ph.city;
+  return { city: ph.city, trees: a.subarray(0, w * h) }; // trees: the class per 2 m cell, 0 where none
 }
