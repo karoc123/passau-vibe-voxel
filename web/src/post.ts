@@ -38,12 +38,30 @@ class DepthBlur extends Effect {
   }
 }
 
+// n8ao reads the depth buffer, where a wall at an angle to the grid is a staircase (mesher.worker.ts): it darkened the
+// inner corner of every 1 m step into faint vertical lines from street to eaves. Those walls mark themselves in the
+// scene's alpha (voxelMaterial.ts) and keep only a little of it; the alpha is reset to 1 after.
+const STAIR_AO = 0.3;
+function maskStairs(n8: N8AOPostPass) {
+  const patch = () => {
+    const m = n8.effectCompositerQuad.material, ao = 'float finalAo = pow(texel.r, intensity);';
+    if (!m.fragmentShader.includes(ao)) throw new Error('n8ao: composite shader changed');
+    m.fragmentShader = m.fragmentShader.replace(ao, `float finalAo = mix(1.0, pow(texel.r, intensity), sceneTexel.a < 0.75 ? ${STAIR_AO.toFixed(2)} : 1.0);`)
+      .replaceAll(', sceneTexel.a)', ', 1.0)');
+    m.needsUpdate = true;
+  };
+  const configure = n8.configureEffectCompositer.bind(n8);
+  n8.configureEffectCompositer = (...a) => { configure(...a); patch(); };
+  patch();
+}
+
 export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
   const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
   composer.addPass(new RenderPass(scene, camera));
   const n8 = new N8AOPostPass(scene, camera, innerWidth, innerHeight);
   Object.assign(n8.configuration, { aoRadius: 6, distanceFalloff: 1.5, intensity: 2.2, halfRes: true, depthAwareUpsampling: true });
+  maskStairs(n8);
   composer.addPass(n8);
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });
   const tilt = new DepthBlur();
