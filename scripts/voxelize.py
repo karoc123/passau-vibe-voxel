@@ -330,7 +330,7 @@ for oid, typ, t, geom in osm.areas:
         soft.append((geom, C[SURF.get(t.get("surface"), LEISURE[t["leisure"]])]))
     if t.get("natural") in ("scrub", "heath", "grassland"):
         soft.append((geom, C["scrub" if t["natural"] == "scrub" else "grass"]))
-    if t.get("natural") in ("wood",):
+    if t.get("natural") in ("wood",) or t.get("landuse") == "forest":
         soft.append((geom, C["garden"]))
     if "construction:leisure" in t or "construction:landuse" in t:
         soft.append((geom, C["fresh"]))
@@ -368,6 +368,13 @@ ortho_grass = (gcol == C["paving"]) & (exg > 0.09) & (nd_mean < 0.8)
 ortho_grass = ndimage.binary_opening(ortho_grass, iterations=1)
 gcol[ortho_grass] = C["grass"]
 note("ortho-detected grass cells (OSM silent):", int(ortho_grass.sum()))
+# under a crown the ortho sees only the crown: ground OSM says nothing about (default paving) under green canopy, away
+# from streets, is soil and leaf litter, not pale paving (the wooded slopes under Oberhaus and Mariahilf)
+_canopy = ndimage.median_filter(((exg > 0.02) & (nd_mean > 2.5)).astype(np.uint8), 5) > 0
+_floor = (gcol == C["paving"]) & ndimage.binary_erosion(_canopy, iterations=2)
+_floor = ndimage.binary_opening(_floor, iterations=2)
+gcol[_floor] = C["garden"]
+note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
 
 HW = {"motorway": 20, "trunk": 14, "primary": 12, "secondary": 10, "tertiary": 8, "unclassified": 6,
       "residential": 6, "living_street": 5, "service": 4, "pedestrian": 5, "footway": 2.5, "path": 2,
