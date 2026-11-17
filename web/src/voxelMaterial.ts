@@ -133,7 +133,10 @@ const FOLIAGE = `
     vec3 fo = foliageAt(cell);
     return (1.0 - fo.x) * fo.y * (1.0 - smoothstep(uFolDate[cls].z + 15.0, uFolDate[cls].z + 50.0, uDay));
   }
-  bool leafGone(vec3 cell, vec3 fo) { return hash13(cell * 1.7 + 3.1) > fo.x && hash13(cell * 2.3 + 7.7) > 0.3; }`;
+  // leaves fall in clumps (2 m blocks mixed with single voxels), not as per-voxel noise; a bare crown keeps a
+  // clumped twig mass (~45 %) so it still reads as a tree's silhouette instead of scattered crumbs
+  bool leafOff(vec3 cell, vec3 fo) { return 0.6 * hash13(floor(cell * 0.5) * 1.3 + 5.1) + 0.4 * hash13(cell * 1.7 + 3.1) > fo.x; }
+  bool leafGone(vec3 cell, vec3 fo) { return leafOff(cell, fo) && 0.65 * hash13(floor(cell * 0.5) * 2.1 + 9.3) + 0.35 * hash13(cell * 2.3 + 7.7) > 0.45; }`;
 
 const NORMAL_FROM_IDX = `
   vec3 normalFromIdx(float i) {
@@ -283,11 +286,11 @@ const SURFACE = `
     col = base * uLeaf * (0.8 + 0.35 * h); gRough = 0.95;
     if (uFolOn > 0.5) {
       vec3 fo = foliageAt(cell);
-      if (hash13(cell * 1.7 + 3.1) > fo.x) {
+      if (leafOff(cell, fo)) {
         #ifndef CLAY
         if (leafGone(cell, fo)) discard;
         #endif
-        col = vec3(0.2, 0.17, 0.14) * (0.8 + 0.4 * h);
+        col = mix(vec3(0.16, 0.13, 0.11), vec3(0.25, 0.21, 0.18), hash13(floor(cell * 0.5) + 2.7)) * (0.8 + 0.4 * h);
       } else {
         col = mix(col, uFolCol[int(fo.z)] * (0.75 + 0.45 * h), smoothstep(0.0, 0.3, fo.y - 0.85 * hash13(cell * 0.9 + 1.3)));
       }
@@ -417,7 +420,7 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
         if (uFolOn > 0.5 && int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) == ${MAT.LEAF}) {
           vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
           vec3 fo = foliageAt(cell);
-          if (hash13(cell * 1.7 + 3.1) > fo.x && leafGone(cell, fo)) discard;
+          if (leafGone(cell, fo)) discard;
         }`);
   };
   m.customProgramCacheKey = () => 'voxel-build-depth';
