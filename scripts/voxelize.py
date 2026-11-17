@@ -74,7 +74,11 @@ COLOUR_ALIASES = {"grey": "gray", "lightgrey": "lightgray", "darkgrey": "darkgra
                   "copper": "#5f9c87", "ochre": "#cc9a4a", "salmon": "#e19a85", "pink": "#e6b3b3",
                   "white": "#efede6", "black": "#3a3a3d", "red": "#b5513f", "brown": "#7e5a43",
                   "yellow": "#e3c86a", "green": "#6e9a5e", "blue": "#6c8cad", "orange": "#d98b4e",
-                  "silver": "#c3c6c9", "gray": "#9a9a9a", "darkgray": "#6e6f72", "lightgray": "#cfcfcc"}
+                  "silver": "#c3c6c9", "gray": "#9a9a9a", "darkgray": "#6e6f72", "lightgray": "#cfcfcc",
+                  # a facade tagged by a colour word is a painted plaster, not the CSS colour: purple (#800080)
+                  # came out a magenta block in the station quarter
+                  "purple": "#9a7aa6", "violet": "#ab93c4", "magenta": "#b9789f", "fuchsia": "#b9789f",
+                  "lime": "#a9c46a", "teal": "#5f9a97", "navy": "#4f6488", "maroon": "#8a4a44", "olive": "#8f8d5a"}
 
 
 def parse_colour(s):
@@ -118,6 +122,7 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "grass": pal("#86b45a", M_GRASS), "grass2": pal("#79a852", M_GRASS), "garden": pal("#73a34e", M_GRASS),
     "scrub": pal("#5f8f45", M_LEAF), "flower": pal("#d98fb3", M_GRASS), "flower2": pal("#e8c25e", M_GRASS),
     "dirt": pal("#a58a66"), "dirt2": pal("#8e7455"), "fresh": pal("#93865a", M_GRASS),
+    "stubble": pal("#c4b27e"), "stubble2": pal("#b9a26c"),  # a field mown or harvested: straw, not paving
     "ballast": pal("#8a8178"), "rail": pal("#55575d", M_METAL), "trambed": pal("#a9a59c"),
     "platform": pal("#b7b1a6"), "water": pal("#68654f", M_WATER), "mark": pal("#f1efe8", M_MARK),
     "bare": pal("#a8977c", M_SOIL),  # lawns before their grass arrives (tiles.py: grass is its own file)
@@ -304,7 +309,8 @@ note("open cuts (layer -1, no tunnel) drawn:", len(OPEN_CUT))
 gcol = np.full((D, W), C["paving"], np.uint16)
 is_road = np.zeros((D, W), bool)
 LANDUSE = {"grass": "grass", "meadow": "grass", "village_green": "grass", "flowerbed": "flower", "construction": "dirt",
-           "railway": "ballast", "brownfield": "dirt", "greenfield": "grass"}
+           "railway": "ballast", "brownfield": "dirt", "greenfield": "grass", "orchard": "grass", "vineyard": "grass",
+           "allotments": "garden"}
 LEISURE = {"park": "grass2", "garden": "garden", "pitch": "grass", "playground": "gravel", "dog_park": "gravel"}
 SURF = {"asphalt": "asphalt", "paving_stones": "paving", "sett": "sett", "cobblestone": "sett", "concrete": "concrete",
         "concrete:plates": "concrete", "gravel": "gravel", "fine_gravel": "gravel", "compacted": "gravel",
@@ -380,6 +386,20 @@ _cg = ndimage.median_filter(((exg > 0.04) | (lum < 70)).astype(np.uint8), 9) > 0
 _cp = ndimage.median_filter(((exg <= 0.04) & (lum >= 70) & (cellcol[..., 0] < cellcol[..., 2] + 12)).astype(np.uint8), 9) > 0
 gcol[_cm & _cg] = C["grass"]
 gcol[_cm & ~_cg & _cp] = C["paving2"]  # grey hardstanding, not earth
+# farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
+# harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
+# hay field) wherever the stubble was pale
+_fm = np.zeros((D, W), np.uint8)
+burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not tunnelish(t_)])
+_fm = (_fm > 0) & (gcol == C["paving"])
+if _fm.any():
+    _fex, _flum = ndimage.median_filter(exg, 5), ndimage.median_filter(lum, 5)
+    _frb = ndimage.median_filter(cellcol[..., 0].astype(np.float32) - cellcol[..., 2], 5)
+    _fk = np.where(_fex > 0.03, C["grass"], np.where((_frb > 14) & (_flum < 150), C["dirt"],
+                   np.where(_flum < 165, C["stubble2"], C["stubble"])))
+    gcol[_fm] = _fk[_fm]
+    note("farmland cells by the ortho (crop / ploughed / straw):",
+         [int((_fm & (_fk == C[k])).sum()) for k in ("grass", "dirt")], int((_fm & np.isin(_fk, [C["stubble"], C["stubble2"]])).sum()))
 parking_mask = np.zeros((D, W), np.uint16)
 burn(parking_mask, [(geom, 1) for geom, _ in hard])
 
@@ -1030,17 +1050,21 @@ top = np.where(smooth_roof, top_med, top)
 def flatten_roofs(top):
     """Flat roofs flat: per building part, if most of the roof lies within 1.5 m of its median, snap every cell within
     2.5 m to it, and snap blobs above or below it smaller than 15 cells (LiDAR speckle on the roof, a 1 m slot down a
-    wall where the edge returns came low). Rooftop structures bigger than that, pitched roofs and towers stay."""
+    wall where the edge returns came low). Rooftop structures bigger than that, pitched roofs and towers stay.
+    The levels are absolute (above sea level), not heights over the ground: a flat roof over a sloping street is
+    level, where a constant height over the ground tilted it with the terrain -- every 1 m contour of the street ran
+    across the roof as a step (the shopping centres and blocks on the hillsides)."""
     n_f = n_c = 0
     for f in sorted(render, key=lambda f: -len(f["rr"])):  # parents first, their parts after
         rr, cc = f["rr"], f["cc"]
         if len(rr) < 30 or ((f.get("minh") or 0) >= 2.5 and np.median(bot_rel[rr, cc]) >= 2.5):
             continue  # parts on stilts (canopies, cantilevers): snapping their top under their bottom left fragments
             # (a part on its podium -- a curved wing from 8 m -- stands on something: its roof is snapped too)
-        v = top[rr, cc]
-        med = float(np.median(v))
-        if med < 3:
+        if float(np.median(top[rr, cc])) < 3:
             continue
+        gr = dtm[rr, cc] - BASE  # the ground under each cell: heights below are over BASE, written back over the ground
+        v = top[rr, cc] + gr
+        med = float(np.median(v))
         if np.mean(np.abs(v - med) <= 1.5) < 0.6:
             # several roof levels (one OSM outline over a whole theatre or palace): snap each column to its 5x5
             # neighbourhood's median within 2.5 m, so every terrace is flat and the real setbacks stay
@@ -1054,13 +1078,13 @@ def flatten_roofs(top):
                 # notching the roofline)
                 _, (ir, ic) = ndimage.distance_transform_edt(~inside, return_indices=True)
                 lm = ndimage.median_filter(box[ir, ic], 5)[rr - r0 + 1, cc - c0 + 1]
-                k = (np.abs(v - lm) <= 2.5) & (lm > 3)
+                k = (np.abs(v - lm) <= 2.5) & (lm - gr > 3)
                 n_c += int((k & (v != lm)).sum())
-                top[rr[k], cc[k]] = lm[k]
+                top[rr[k], cc[k]] = lm[k] - gr[k]
                 # then the roof's own levels: peaks of its height histogram (1 m bins, 6 % of the roof or 40 cells);
                 # cells within 1.5 m of a level go to it -- 1 m terraces of LiDAR noise between them (lumpy
                 # podium roofs) were drawn as steps
-                v2 = top[rr, cc]
+                v2 = top[rr, cc] + gr
                 hist = np.bincount(np.clip(np.round(v2).astype(int), 0, 400), minlength=402)
                 lev = [h for h in range(1, 401) if hist[h] >= max(40, 0.06 * len(v2)) and hist[h] >= hist[h - 1] and hist[h] >= hist[h + 1]]
                 if lev:
@@ -1074,7 +1098,7 @@ def flatten_roofs(top):
                     j = np.argmin(np.abs(v2[:, None] - lev[None]), axis=1)
                     k2 = np.abs(v2 - lev[j]) <= 1.5
                     n_c += int((k2 & (v2 != lev[j])).sum())
-                    top[rr[k2], cc[k2]] = lev[j][k2]
+                    top[rr[k2], cc[k2]] = lev[j][k2] - gr[k2]
                 n_f += 1
             continue
         r0, c0 = rr.min(), cc.min()
@@ -1088,7 +1112,7 @@ def flatten_roofs(top):
         else:
             snap = np.ones(len(rr), bool)
         n_c += int((snap & (v != med)).sum())
-        top[rr[snap], cc[snap]] = med
+        top[rr[snap], cc[snap]] = med - gr[snap]
         n_f += 1
     note(f"flat roofs: {n_f} parts, {n_c} cells snapped")
 
@@ -1238,7 +1262,10 @@ CORE_GEOM = landmarks.historic_core()
 core_roofs(top)
 pitched_m = lod2_roofs(top)
 pitched_m |= dsm_pitched_roofs(top)
-topi = np.where(bmask, np.round(top), 0).astype(np.int32)
+# the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
+# and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
+# contour lines of the street below across every flat roof and plane of LoD2
+topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
 # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
 # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
 _cl = ndimage.grey_closing(topi, size=(3, 3))
@@ -1361,9 +1388,25 @@ def roof_style(f):
     return pal(soften(snap_grey(col, pitched), 0.05), M_ROOF, q=12)
 
 
+_GREY_L = sorted((float(np.dot(hex_rgb(h_), LUMW)), h_) for h_ in ROOF_GREYS)
+n_dim = 0
 for f in render:
     f["wall"] = landmarks.wall_override(f, pal) or wall_style(f)
-    f["roof"] = landmarks.roof_override(f, pal) or roof_style(f)
+    _ro = landmarks.roof_override(f, pal)
+    f["roof"] = _ro or roof_style(f)
+    # a pale flat roof (gravel, membrane: the ortho's glare) on a pale facade was the facade's own colour -- whole
+    # blocks of the newer districts read as white boxes with no top. A flat grey roof within 30 of its facade's
+    # lightness takes the palette's grey next under 30 darker than the facade
+    if _ro is None and not tag(f, "roof:colour"):
+        _r, _w = pal.entries[f["roof"]], pal.entries[f["wall"]]
+        _rl, _wl = float(np.dot(_r[:3], LUMW)), float(np.dot(_w[:3], LUMW))
+        _grey = max(_r[:3]) - min(_r[:3]) < 24
+        if _r[3] == M_ROOF and _w[3] != M_GLASS and _grey and abs(_rl - _wl) < 30 and pitched_m[f["rr"], f["cc"]].mean() < 0.4:
+            _cand = [h_ for l_, h_ in _GREY_L if l_ <= _wl - 30] or [_GREY_L[0][1]]
+            f["roof"] = pal(soften(hex_rgb(_cand[-1]), 0.05), M_ROOF, q=12)
+            n_dim += 1
+note("pale flat roofs darkened under their facade:", n_dim)
+for f in render:
     wc, rc = parse_colour(tag(f, "building:colour")), parse_colour(tag(f, "roof:colour"))
     if pal.entries[f["wall"]][3] == M_GLASS and wc is not None and wc == rc:
         f["roof"] = f["wall"]
@@ -1439,18 +1482,27 @@ _nat[_hill & (_crown | (_lum3 < 75))] = C["garden"]  # under the crowns or in th
 _nat[_hill & _brown] = C["dirt2"]
 _nat[_green & ~_crown] = C["grass"]
 _nat[_green & _crown] = C["garden"]
+# a mown or harvested field OSM does not map (its farmland stops at the map's edge, or none is drawn): pale and
+# straw-yellow in the ortho, far from anything drawn, in a patch of 1000 cells or more (a building lot of bare sand or a
+# cemetery is smaller) -- it was a paved square in the middle of the meadows
+_straw = _open & ~_green & ~_crown & (_lum3 >= 140) & (_red_b > 18) & (_d_drawn >= 6)
+_straw = ndimage.binary_opening(_straw, iterations=2)
+_sl, _sn = ndimage.label(_straw)
+if _sn:
+    _straw &= np.r_[False, ndimage.sum(_straw, _sl, range(1, _sn + 1)) >= 1000][_sl]
+_nat[_straw] = C["stubble"]
 # the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
 # quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
 _edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
 _nat[_edge] = C["shore"]
 _nat[~_open] = C["paving"]
 # a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
-_cls = [C[k] for k in ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden")]
+_cls = [C[k] for k in ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble")]
 _votes = np.stack([ndimage.uniform_filter(((_nat == k) & _open).astype(np.float32), 3) for k in _cls])
 _maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
 gcol[_open] = _maj[_open]
 note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in
-                                                   ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden")})
+                                                   ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble")})
 
 # ground column
 for zz in range(H):
@@ -1466,7 +1518,7 @@ vol[g[rr, cc] - 1, rr, cc] = gcol[rr, cc]
 # On natural ground too where OSM maps a wall (barrier=retaining_wall/wall/city_wall)
 _nb_lo = ndimage.minimum_filter(g, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
 _mat = np.array([e[3] for e in pal.entries] + [0] * 256)
-_natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin(gcol, [C["dirt"], C["dirt2"]])
+_natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin(gcol, [C["dirt"], C["dirt2"], C["stubble"], C["stubble2"]])
 _osm_wall = np.zeros((D, W), np.uint8)
 burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
                  if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
