@@ -17,7 +17,7 @@ from affine import Affine
 from shapely.strtree import STRtree
 
 from aoi import D, W
-from osm import OSM
+from osm import OSM, footprints
 
 OUT = Path(__file__).resolve().parent.parent / "web/public/data/windows.bin"
 KINDS = ["none", "residential", "office", "hotel", "retail", "public", "religious", "other"]
@@ -55,7 +55,7 @@ def kind_of(t, inside, landuse):
 
 def main():
     osm = OSM()
-    blds = [(g, t) for _, _, t, g in osm.areas
+    blds = [(g, t, oid) for oid, _, t, g in osm.areas
             if t.get("building") not in (None, "no") and "building:part" not in t and t.get("location") != "underground"]
     blds.sort(key=lambda b: -b[0].area)
     pts = [(t, p) for _, t, p in osm.nodes if any(k in t for k in ("office", "shop", "amenity", "tourism"))]
@@ -63,7 +63,8 @@ def main():
     uses = [(t["landuse"], g) for _, _, t, g in osm.areas if t.get("landuse")]
     utree = STRtree([g for _, g in uses])
     shapes, count = [], Counter()
-    for i, (g, t) in enumerate(blds):
+    vals = {}
+    for i, (g, t, oid) in enumerate(blds):
         inside = [pts[j][0] for j in ptree.query(g, predicate="contains")]
         c = g.representative_point()
         lu = next((uses[j][0] for j in utree.query(c, predicate="within")), None)
@@ -71,7 +72,11 @@ def main():
         count[k] += g.area
         habit = (i * 2654435761 >> 7) % 32
         shapes.append((g, KINDS.index(k) | habit << 3))
-    grid = rasterio.features.rasterize(shapes, out_shape=(D, W), transform=Affine.identity(), fill=0, dtype=np.uint8)
+        vals[oid] = KINDS.index(k) | habit << 3
+    # the footprints as voxelize.py drew them (moved onto LoD2's), else OSM's own
+    grid, _ = footprints(vals, lambda k: KINDS.index("other") | ((len(blds) + k) * 2654435761 >> 7) % 32 << 3)
+    grid = rasterio.features.rasterize(shapes, out_shape=(D, W), transform=Affine.identity(), fill=0, dtype=np.uint8) \
+        if grid is None else grid.astype(np.uint8)
     OUT.write_bytes(gzip.compress(grid.tobytes(), mtime=0))
     total = sum(count.values())
     print({k: f"{v / total:.0%}" for k, v in count.most_common()}, OUT.stat().st_size, "bytes")

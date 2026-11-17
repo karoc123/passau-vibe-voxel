@@ -11,6 +11,8 @@ Output data/lod2.npz (grid D x W, cell (r, c) sampled at its centre):
   slope  that plane's rise per metre (0 flat, 1 = 45 degrees)
   bid    the LoD2 building's index (0: none), for per-building statistics
   rtype  the building's roofType code (1000 flat, 2100 shed, 3100 gable, 3200 hip, ...; 0 none)
+  cen    the cell's centre lies inside a roof polygon (the building's footprint as the cadastre has it; z, slope and
+         bid also cover cells a polygon only touches, a cell wider all round)
 """
 import glob
 import math
@@ -62,6 +64,7 @@ def main():
     slope = np.zeros((D, W), np.float32)
     bid = np.zeros((D, W), np.int32)
     rtype = np.zeros((D, W), np.int16)
+    cen_m = np.zeros((D, W), bool)
     base = 0
     n_poly = 0
     for path in sorted(glob.glob(f"{RAW}/lod2/*.gml")):
@@ -108,12 +111,13 @@ def main():
             slope[rr[k], cc[k]] = s
             bid[rr[k], cc[k]] = np.where(cen[k], base + bi, -(base + bi))
             rtype[rr[k], cc[k]] = rt
+            cen_m[rr[cen], cc[cen]] = True
             n_poly += 1
         base += nb + 1
         print(path, "buildings", nb, file=sys.stderr)
     bid = np.abs(bid)
     print("roof polygons", n_poly, "cells", int(np.isfinite(z).sum()), file=sys.stderr)
-    np.savez_compressed("data/lod2.npz", z=z, slope=slope, bid=bid, rtype=rtype)
+    np.savez_compressed("data/lod2.npz", z=z, slope=slope, bid=bid, rtype=rtype, cen=cen_m)
 
 
 if __name__ == "__main__":

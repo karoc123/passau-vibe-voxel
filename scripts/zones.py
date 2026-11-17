@@ -18,7 +18,7 @@ from affine import Affine
 from scipy import ndimage
 
 from aoi import D, W
-from osm import OSM
+from osm import OSM, footprints
 
 OUT = Path("web/public/data")
 osm = OSM()
@@ -36,10 +36,13 @@ def burn(shapes, dtype=np.uint16, all_touched=False):
 
 
 # buildings (whole buildings, not parts)
-blds = [(g, t) for oid, typ, t, g in osm.areas
+blds = [(g, t, oid) for oid, typ, t, g in osm.areas
         if t.get("building") not in (None, "no") and "building:part" not in t and t.get("location") != "underground"]
 blds.sort(key=lambda b: -b[0].area)  # small ones burnt last stay visible inside big ones
-bld = burn([(g, i + 1) for i, (g, t) in enumerate(blds)])
+# the footprints as voxelize.py drew them (moved onto LoD2's), else OSM's own
+bld, n_extra = footprints({oid: i + 1 for i, (g, t, oid) in enumerate(blds)}, lambda k: len(blds) + 1 + k)
+bld = burn([(g, i + 1) for i, (g, t, oid) in enumerate(blds)]) if bld is None else bld.astype(np.uint16)
+blds += [(None, {"building": "yes"}, None)] * n_extra  # (buildings from LoD2 alone)
 print("buildings", len(blds), "columns", int((bld > 0).sum()))
 
 # separators: streets (not footways/service), railways, water
