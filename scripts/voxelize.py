@@ -1375,60 +1375,129 @@ for k in order:
     taken[r, c] = True
     n_peak += 1
 note("trunks at canopy tops with no known tree under them:", n_peak)
-# crowns, one per trunk: every canopy cell belongs to its nearest trunk; the crown's underside is a dome -- lowest
-# (38 % of the tree's height) over the trunk, rising to the LiDAR top at the crown's rim -- instead of one flat green
-# ceiling over the whole park (the LiDAR gives only the top surface; the dome is the usual lime / maple / chestnut form)
+# crowns, one per trunk: every canopy cell belongs to its nearest trunk (Voronoi). The LiDAR gives only a noisy top
+# surface, so each crown is drawn as one rounded solid standing on its trunk, the way a voxel diorama draws a tree:
+#  - its radial coordinate u runs from 0 at the trunk to 1 at the edge of its own cell -- the canopy's rim or the
+#    line where it meets its neighbour's crown (distance to the trunk / (that + distance to the cell's edge)), so a
+#    crown tapers towards each neighbour too and packed crowns read as separate domes with a notch between them,
+#    not as one Voronoi column each with straight sides and a flat top;
+#  - a broadleaf crown is a squashed superellipsoid over u (its depth from its footprint's radius: no tall narrow
+#    green pillars), a conifer a cone; height, depth and fullness vary a little per tree;
+#  - a metre or so of smooth noise on its top and underside, so the leaf surface is lumpy rather than turned;
+#  - one base leaf tone per tree (its mean ortho colour), lighter clumps on top and darker ones underneath, instead of
+#    each column taking its own ortho pixel (stripes).
 if trunks:
+    nT = len(trunks)
     tidx = np.zeros((D, W), np.int32)
     for i_, (r_, c_, _) in enumerate(trunks, 1):
         tidx[r_, c_] = i_
     _dt, (_tr_, _tc_) = ndimage.distance_transform_edt(tidx == 0, return_indices=True)
     own = np.where(veg, tidx[_tr_, _tc_], 0)
-    idx_ = np.arange(1, len(trunks) + 1)
-    Rt = np.asarray(ndimage.maximum(np.where(veg, _dt, 0), labels=own, index=idx_), np.float32) + 0.7
-    Ht = np.asarray(ndimage.maximum(np.where(veg, crown_top, 0), labels=own, index=idx_), np.float32)
+    idx_ = np.arange(1, nT + 1)
+    # the distance to the edge of the own cell: to the nearest cell with another owner or no canopy
+    _same = own > 0
+    for _ax, _sh in ((0, 1), (0, -1), (1, 1), (1, -1)):
+        _same &= np.roll(own, _sh, axis=_ax) == own
+    _db = ndimage.distance_transform_edt(_same)
     # a crown is one solid per tree, not a column per cell: its height is the crown's robust top (the 5x5 median of the
-    # noisy image-matched surface, then the crown's maximum), measured from the ground at its trunk -- on a slope the
-    # crown sits on its trunk instead of hanging down the hill as a curtain -- shaped as a dome (broadleaf) or a cone
-    # (conifer) over the distance to the trunk
+    # noisy image-matched surface, then the crown's 90th percentile), measured from the ground at its trunk -- on a slope
+    # the crown sits on its trunk instead of hanging down the hill as a curtain
     _sm = ndimage.median_filter(np.where(veg, crown_top, 0), 5)
-    Ht = np.asarray(ndimage.maximum(np.where(veg, np.maximum(_sm, 3), 0), labels=own, index=idx_), np.float32)
-    G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
     vr_, vc_ = np.nonzero(veg)
     k_ = own[vr_, vc_] - 1
     ok_ = k_ >= 0
     kk = np.maximum(k_, 0)
-    con_ = np.array(trunk_conifer, bool)[kk]
-    u = np.clip(_dt[vr_, vc_] / Rt[kk], 0, 1)
-    H_ = Ht[kk]
-    depth = np.clip(0.62 * H_, 2, None)
-    z_c = H_ - depth / 2  # dome: an ellipsoid, flattened a little on top
-    half = depth / 2 * np.sqrt(np.clip(1 - u ** 2, 0.04, 1))
-    top_rel = np.where(con_, H_ - (0.85 * H_ - 1) * u, z_c + half * 1.0)
-    bot_rel = np.where(con_, np.maximum(0.18 * H_, 1.5) + 0.15 * H_ * u, z_c - half)
-    top_rel = np.maximum(top_rel, bot_rel + 1)
-    jit = ((vr_ * 73856093) ^ (vc_ * 19349663)) % 3 == 0  # one voxel of leaf texture at the crown surface
-    top_abs = np.round(G0[kk] + top_rel + jit * 0.6).astype(np.int32)
+    _hv = np.maximum(_sm[vr_, vc_], 3).astype(np.float32)
+    _ord = np.lexsort((_hv, kk))
+    _cnt = np.bincount(kk, minlength=nT)
+    _start = np.concatenate([[0], np.cumsum(_cnt)[:-1]])
+    Ht = np.where(_cnt > 0, _hv[_ord][np.clip(_start + (0.9 * np.maximum(_cnt - 1, 0)).astype(int), 0, len(_hv) - 1)], 3)
+    Ht = Ht.astype(np.float32)
+    Re = np.sqrt(np.maximum(_cnt, 1) / np.pi).astype(np.float32)  # the radius of a disc of the crown's footprint
+    G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
+    con = np.array(trunk_conifer, bool)
+    hsh = np.array([stable_hash(r_, c_, "crown") for r_, c_, _ in trunks], np.int64)
+    v1, v2, v3, v4 = ((hsh >> s) % 1000 / 1000.0 for s in (0, 8, 16, 24))  # per-tree variation in [0, 1)
+    # no tall narrow crowns: a broadleaf tree is at most ~3.4 crown radii + 5 m tall (a conifer 5 radii)
+    Ht = np.minimum(Ht, np.where(con, 5 + 5.0 * Re, 5 + 3.2 * Re)) * (0.93 + 0.1 * v1)
+    # a crown squeezed against a facade (a third of it within 2 m of a building) is the wall's LiDAR as much as a tree:
+    # lower still (2.4 radii + 3 m), no green pillar up the front
+    _atwall = np.bincount(kk, weights=_nearb[vr_, vc_].astype(np.float64), minlength=nT) / np.maximum(_cnt, 1)
+    Ht = np.where(_atwall > 0.33, np.minimum(Ht, 3 + 2.4 * Re), Ht)
+    Ht = np.maximum(Ht, 3)
+    # crown depth (top to underside over the trunk): about the crown's width, never more than 2/3 of the tree
+    dep = np.minimum(0.62 * Ht, (1.5 + 0.5 * v2) * Re + 2)
+    dep = np.where(con, np.minimum(0.82 * Ht, 4.5 * Re + 2), dep)
+    dep = np.maximum(dep, np.minimum(2.0, Ht - 1))
+    pw = 1.7 + 0.9 * v3  # superellipse exponent: a round ball (1.7) to a fuller, flatter-topped lime (2.6)
+    u = np.clip(_dt[vr_, vc_] / (_dt[vr_, vc_] + _db[vr_, vc_] + 0.8), 0, 1)
+    H_, dp_, pw_ = Ht[kk], dep[kk], pw[kk]
+    con_ = con[kk]
+    # smooth noise, ~1 m amplitude, 2-3 m patches
+    _rng = np.random.default_rng(7)
+    _nz = ndimage.gaussian_filter(_rng.standard_normal((D, W)).astype(np.float32), 1.3)
+    _nz /= max(float(_nz.std()), 1e-6)
+    nz_ = _nz[vr_, vc_]
+    _nz2 = ndimage.gaussian_filter(_rng.standard_normal((D, W)).astype(np.float32), 1.0)
+    nz2_ = _nz2[vr_, vc_] / max(float(_nz2.std()), 1e-6)
+    zc = H_ - 0.5 * dp_  # broadleaf: a superellipsoid, its waist a little below the middle (u = 1)
+    s_ = np.clip(1 - u ** pw_, 0, 1) ** (1 / pw_)
+    top_b = zc + 0.5 * dp_ * s_
+    bot_b = zc - 0.5 * dp_ * s_ * 1.1
+    top_c = H_ - (dp_ - 0.5) * u ** 0.9            # conifer: a cone to the top, the skirt flaring out a little
+    bot_c = H_ - dp_ + 0.25 * dp_ * u
+    top_rel = np.where(con_, top_c, top_b) + np.clip(nz_ * 1.0, -1.5, 1.5) * np.minimum(1, dp_ / 4)
+    bot_rel = np.where(con_, bot_c, bot_b) + np.clip(nz2_ * 0.7, -1.0, 1.0) * np.minimum(1, dp_ / 4)
+    top_abs = np.round(G0[kk] + top_rel).astype(np.int32)
     bot_abs = np.round(G0[kk] + bot_rel).astype(np.int32)
     bot_abs = np.maximum(bot_abs, g[vr_, vc_] + 2)  # uphill the crown keeps clear of the ground
-    keep = ok_ & (top_abs > bot_abs)
+    # gaps: the thin rim where two crowns meet (and the outermost fringe) is left out
+    keep = ok_ & (top_abs > bot_abs) & ~((s_ < 0.32) & ~con_ & (dp_ >= 4))
     crown_top[vr_[ok_], vc_[ok_]] = (top_abs - g[vr_, vc_])[ok_]
     crown_bot[vr_[ok_], vc_[ok_]] = (bot_abs - g[vr_, vc_])[ok_]
     veg[vr_[ok_ & ~keep], vc_[ok_ & ~keep]] = False
-    note("crowns as solids at their trunks:", len(trunks), "conifers:", int(np.array(trunk_conifer).sum()))
+    # the trunk always reaches its crown: over the trunk the crown's underside is the crown's own (no noise)
+    for i_, (r_, c_, _) in enumerate(trunks):
+        if veg[r_, c_]:
+            crown_bot[r_, c_] = max(2, int(round(G0[i_] + Ht[i_] - (dep[i_] if con[i_] else 1.05 * dep[i_])) - g[r_, c_]))
+            crown_top[r_, c_] = max(int(crown_top[r_, c_]), int(crown_bot[r_, c_]) + 1)
+    note("crowns as solids at their trunks:", nT, "conifers:", int(con.sum()), "rim cells left out:", int((ok_ & ~keep).sum()))
+    # one leaf tone per tree: its crown's mean ortho brightness and hue
+    _lt = np.asarray(ndimage.mean(lum, labels=own, index=idx_), np.float32)
+    _yt = np.asarray(ndimage.mean(yellowish.astype(np.float32), labels=own, index=idx_), np.float32) + (v3 - 0.5) * 0.5 > 0.5
+    _lb = np.clip(((np.nan_to_num(_lt, nan=90) - 40) / 110 * 5 + (v4 - 0.5) * 1.6).astype(int), 0, 4)
+    tone_t = (4 - _lb) + 5 * (~_yt)  # index into LEAVES
+    tone = np.full((D, W), -1, np.int16)
+    tone[vr_[ok_], vc_[ok_]] = np.where(con_, -2 - (hsh[kk] % 5), tone_t[kk])[ok_]
+    czc = np.zeros((D, W), np.int32)  # the crown's waist (absolute), to tell its upper half from its underside
+    czc[vr_[ok_], vc_[ok_]] = np.round(G0[kk] + np.where(con_, H_ - 0.6 * dp_, zc))[ok_].astype(np.int32)
     # conifers (thuja, pine, spruce, yew...: the city database's species) in dark blue-green needles, not leaf green
-    con = np.array(trunk_conifer, bool)
-    cm_ = ok_.copy()
-    cm_[ok_] = con[k_[ok_]]
-    NEEDLES = np.array([pal(c_, M_LEAF) for c_ in ("#3f5f48", "#456a4f", "#4d7356", "#37553f", "#52785a")], np.uint16)
-    leafidx[vr_[cm_], vc_[cm_]] = NEEDLES[(vr_[cm_] * 7 + vc_[cm_] * 3) % len(NEEDLES)]
-    note("conifer crowns (database species):", int(con.sum()), "cells", int(cm_.sum()))
+    NEEDLES = np.array([pal(c_, M_LEAF) for c_ in ("#37553f", "#3f5f48", "#456a4f", "#4d7356", "#52785a")], np.uint16)  # dark to light
+    note("conifer crowns (database species):", int(con.sum()), "cells", int((ok_ & con_).sum()))
+LEAVES_ = np.array(LEAVES, np.uint16)
 rr, cc = np.nonzero(veg)
+if trunks:
+    tn_ = tone[rr, cc].astype(np.int32)
+    cz_ = czc[rr, cc]
 for zz in range(int(g.min()) + 1, int((g + crown_top).max()) + 1):
     m = (zz >= g[rr, cc] + crown_bot[rr, cc]) & (zz < g[rr, cc] + crown_top[rr, cc])
+    if not m.any():
+        continue
     sel = (rr[m], cc[m])
+    col_ = leafidx[sel]
+    if trunks:
+        t_ = tn_[m]
+        # clumps of 3 x 3 x 3 voxels (fewer colour seams for the mesher than single voxels): a fifth of those in the
+        # upper half one tone lighter, a tenth underneath one darker
+        hz = ((rr[m] // 3) * 73856093 ^ (cc[m] // 3) * 19349663 ^ (zz // 3) * 83492791) % 10
+        up_ = zz >= cz_[m]
+        sh_ = np.where(up_ & (hz < 2), -1, np.where(~up_ & (hz < 1), 1, 0))
+        b_ = t_ % 5  # broadleaf: lightness step within the hue family
+        leaf_ = LEAVES_[np.clip(t_ - b_ + np.clip(b_ + sh_, 0, 4), 0, 9)]
+        n_ = NEEDLES[np.clip((-2 - t_) + sh_, 0, 4)]
+        col_ = np.where(t_ >= 0, leaf_, np.where(t_ <= -2, n_, col_))
     cur = vol[zz][sel]
-    vol[zz][sel] = np.where(cur == 0, leafidx[sel], cur)
+    vol[zz][sel] = np.where(cur == 0, col_, cur)
 note("canopy cells:", int(veg.sum()), "crowns:", len(trunks))
 for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowest point, over the trunk
     hb = int(crown_bot[r_, c_]) + 1
