@@ -1260,6 +1260,16 @@ note("wall-edge cells rejected as vegetation:", int(wall_edge.sum()))
 lab, n = ndimage.label(veg)
 sizes = ndimage.sum(veg, lab, range(1, n + 1))
 veg &= np.isin(lab, np.nonzero(sizes >= 4)[0] + 1)
+# image-matched surface (DOM20) leaves pinholes and frayed rims in crowns: close them, fill holes up to 30 m2
+_vc = ndimage.binary_closing(veg, iterations=1) & ~bmask & (nd_mean > 1.5)
+_holes = ndimage.binary_fill_holes(_vc) & ~_vc
+_hl, _hn = ndimage.label(_holes)
+if _hn:
+    _hs = ndimage.sum(_holes, _hl, range(1, _hn + 1))
+    _vc |= np.isin(_hl, np.nonzero(_hs <= 30)[0] + 1) & ~bmask & ~(gcol == C["water"])
+note("canopy cells added by closing / hole filling:", int((_vc & ~veg).sum()))
+veg = _vc
+nd_mean = np.where(veg & (nd_mean < 2.2), np.maximum(nd_mean, ndimage.median_filter(np.where(veg, nd_mean, 0), 5)), nd_mean)
 hs = ndimage.gaussian_filter(np.where(veg, nd_mean, 0), 2) / np.maximum(ndimage.gaussian_filter(veg.astype(float), 2), 1e-3)
 crown_top = np.round(np.minimum(nd_mean, 40)).astype(np.int32)
 # against a wall the DSM is the wall's (1 m green pillars 20-30 m up the facades): within 2 m
@@ -1370,13 +1380,35 @@ if trunks:
     idx_ = np.arange(1, len(trunks) + 1)
     Rt = np.asarray(ndimage.maximum(np.where(veg, _dt, 0), labels=own, index=idx_), np.float32) + 0.7
     Ht = np.asarray(ndimage.maximum(np.where(veg, crown_top, 0), labels=own, index=idx_), np.float32)
+    # a crown is one solid per tree, not a column per cell: its height is the crown's robust top (the 5x5 median of the
+    # noisy image-matched surface, then the crown's maximum), measured from the ground at its trunk -- on a slope the
+    # crown sits on its trunk instead of hanging down the hill as a curtain -- shaped as a dome (broadleaf) or a cone
+    # (conifer) over the distance to the trunk
+    _sm = ndimage.median_filter(np.where(veg, crown_top, 0), 5)
+    Ht = np.asarray(ndimage.maximum(np.where(veg, np.maximum(_sm, 3), 0), labels=own, index=idx_), np.float32)
+    G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
     vr_, vc_ = np.nonzero(veg)
     k_ = own[vr_, vc_] - 1
     ok_ = k_ >= 0
-    dep = 0.62 * Ht[k_] * np.sqrt(np.clip(1 - (_dt[vr_, vc_] / Rt[k_]) ** 2, 0, 1))
-    bot = np.round(crown_top[vr_, vc_] - np.maximum(dep, 1)).astype(np.int32)
-    bot = np.clip(bot, 2, crown_top[vr_, vc_] - 1)
-    crown_bot[vr_[ok_], vc_[ok_]] = bot[ok_]
+    kk = np.maximum(k_, 0)
+    con_ = np.array(trunk_conifer, bool)[kk]
+    u = np.clip(_dt[vr_, vc_] / Rt[kk], 0, 1)
+    H_ = Ht[kk]
+    depth = np.clip(0.62 * H_, 2, None)
+    z_c = H_ - depth / 2  # dome: an ellipsoid, flattened a little on top
+    half = depth / 2 * np.sqrt(np.clip(1 - u ** 2, 0.04, 1))
+    top_rel = np.where(con_, H_ - (0.85 * H_ - 1) * u, z_c + half * 1.0)
+    bot_rel = np.where(con_, np.maximum(0.18 * H_, 1.5) + 0.15 * H_ * u, z_c - half)
+    top_rel = np.maximum(top_rel, bot_rel + 1)
+    jit = ((vr_ * 73856093) ^ (vc_ * 19349663)) % 3 == 0  # one voxel of leaf texture at the crown surface
+    top_abs = np.round(G0[kk] + top_rel + jit * 0.6).astype(np.int32)
+    bot_abs = np.round(G0[kk] + bot_rel).astype(np.int32)
+    bot_abs = np.maximum(bot_abs, g[vr_, vc_] + 2)  # uphill the crown keeps clear of the ground
+    keep = ok_ & (top_abs > bot_abs)
+    crown_top[vr_[ok_], vc_[ok_]] = (top_abs - g[vr_, vc_])[ok_]
+    crown_bot[vr_[ok_], vc_[ok_]] = (bot_abs - g[vr_, vc_])[ok_]
+    veg[vr_[ok_ & ~keep], vc_[ok_ & ~keep]] = False
+    note("crowns as solids at their trunks:", len(trunks), "conifers:", int(np.array(trunk_conifer).sum()))
     # conifers (thuja, pine, spruce, yew...: the city database's species) in dark blue-green needles, not leaf green
     con = np.array(trunk_conifer, bool)
     cm_ = ok_.copy()
