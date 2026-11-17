@@ -55,6 +55,7 @@ export interface FloodInfo {
   base: number;
   surface0: number;
   fall: number;
+  voxel_top?: number;
 }
 
 export interface Zones {

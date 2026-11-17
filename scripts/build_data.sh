@@ -11,6 +11,7 @@ uv run python scripts/lod2.py            # data/lod2.npz (LoD2 roof planes on th
 uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffic.json, qa_roadmask.bin.gz; data/ground.npz
 uv run python scripts/places.py          # places.json (search index)
 uv run python scripts/flood.py           # flood.bin, flood.json (river level slider)
+uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 uv run python scripts/terrain.py         # terrain.bin (the bare land shown while the tiles load)
 uv run python scripts/zones.py           # zones.bin, zones.json (city blocks and buildings, for the render budget)
 uv run python scripts/windows.py         # windows.bin (what each building is, for its lit windows at night)

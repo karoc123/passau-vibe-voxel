@@ -41,6 +41,9 @@ export class Flood {
     return this.river.some((p) => this.frustum.containsPoint(p) && p.distanceTo(camera.position) < far);
   }
 
+  // metres above (or below) the level on the survey day
+  get level() { return this.uLevel.value; }
+
   // cm above (or below) the level on the survey day; no gauge is calibrated
   setLevel(cm: number) {
     if (!this.info || !this.mesh) return;

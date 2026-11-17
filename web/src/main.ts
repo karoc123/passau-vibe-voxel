@@ -15,6 +15,7 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './sim/life';
+import { Boats, type BoatData } from './sim/boats';
 import type { Kind, TrafficData } from './sim/types';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
@@ -60,7 +61,7 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 const tiltShift = qs.get('tilt') !== '0' && innerWidth >= 600 && !phone;
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
-let life: StreetLife | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
+let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
@@ -285,6 +286,10 @@ async function boot() {
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;
+    fetchJson<BoatData>('data/boats.json').then((bd) => {
+      boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
+      life!.group.add(boats.group); // shown, hidden and shadowed with the rest of the moving things
+    }).catch((e) => console.warn('boats', e));
   });
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
@@ -314,7 +319,11 @@ renderer.setAnimationLoop((now) => {
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
     life.group.visible = !city || city.complete;
-    if (life.group.visible) { life.day = daylight.day; life.update(dt, daylight.hour, daylight.night, focus()); }
+    if (life.group.visible) {
+      life.day = daylight.day;
+      life.update(dt, daylight.hour, daylight.night, focus());
+      boats?.update(dt, daylight.hour, daylight.day, daylight.night, flood?.level ?? 0);
+    }
   }
   daylight.sky.mesh.position.copy(camera.position);
   streamer?.update(camera);
