@@ -638,8 +638,8 @@ def _wing_roofs(vol, g, box, pal, wall_rgb, min_cells=80):
     footprint's middle (a distance transform), so every eave line is straight and level (the fitted tops zigzagged a
     metre or two up and down along the walls, wall tops showing between the tiles). The surface model's walls stand up
     to 2 m outside LoD2's outline: that rim belongs to the nearest wing (its wall tops were a pale seam round the
-    roofs). Each wing keeps its own roof: tiles in its most common red, sheet metal where the roof was grey. Left as
-    they are: small and thin pieces (walls, sheds) and towers (a roof deeper than 2.2 x the footprint's half-width).
+    roofs). Each wing keeps its own roof: tiles in its most common red, sheet metal on the sheet range oberhaus() found. Left
+    as they are: small and thin pieces (walls, sheds) and towers (a roof deeper than 2.2 x the footprint's half-width).
     Returns (wings, cells)."""
     from scipy import ndimage
     r0, r1, c0, c1 = box
@@ -649,14 +649,16 @@ def _wing_roofs(vol, g, box, pal, wall_rgb, min_cells=80):
     off = float(np.median((G - dtm)[B > 0])) if (B > 0).any() else 0.0
     Zi = Z + off
     mats = np.array([e[3] for e in pal.entries] + [0] * 64)
-    rgb = np.array([e[:3] for e in pal.entries] + [(0, 0, 0)] * 64, np.int32)
     top = sub.shape[0] - 1 - np.argmax(sub[::-1] != 0, axis=0)
     tid = np.take_along_axis(sub, top[None], 0)[0]
     bld = sub.any(axis=0) & (top - G >= 4)
     ids, counts = np.unique(B[(B > 0) & bld], return_counts=True)
     wall = pal(wall_rgb, 1)
     sheet = pal((138, 150, 142), ROOF)
-    grey = (mats[tid] == ROOF) & (rgb[tid].max(-1) - rgb[tid].min(-1) < 30)
+    # the sheet range: the green-grey oberhaus() gave the glare-white tops, and pale greys (140+) beside them; darker
+    # grey lumps on the tiles were shadow
+    rgb = np.array([e[:3] for e in pal.entries] + [(0, 0, 0)] * 64, np.int32)
+    grey = (tid == sheet) | ((mats[tid] == ROOF) & (rgb[tid].min(-1) >= 140) & (rgb[tid].max(-1) - rgb[tid].min(-1) < 30))
     grey = ndimage.median_filter(grey.astype(np.uint8), 5) > 0
     wings = []
     for b in ids[counts >= min_cells]:
@@ -678,7 +680,7 @@ def _wing_roofs(vol, g, box, pal, wall_rgb, min_cells=80):
         el = ndimage.distance_transform_edt(np.pad(lod, 1))[1:-1, 1:-1]
         eave = int(round(np.percentile(Zi[lod & (el < 1.5)], 15)))
         ridge = max(int(round(np.percentile(Zi[lod], 97))), eave + 2)
-        reds = tid[m & (mats[tid] == ROOF) & ~grey]
+        reds = tid[m & (mats[tid] == ROOF) & ~grey & (tid != sheet)]
         red = int(np.bincount(reds).argmax()) if len(reds) else pal(_hex("#a86048"), ROOF)
         em = e[m].max()
         rt = eave + np.round((ridge - eave) * (e - 1) / max(em - 1, 1)).astype(int)

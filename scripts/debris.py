@@ -47,11 +47,13 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=256, M=24, box=None):  #
                 if max_size <= len(zi) < 600 and zi.max() - zi.min() <= 8 and hmin >= 4:
                     # a short footbridge's deck high in the canopy (a path over a forest brook at the map's edge: its
                     # height profile took the crowns over it for the deck): set down as one piece until its lowest
-                    # voxel rests on the ground, spanning any dip under it
+                    # voxel stands on the highest ground under it (a bank), spanning the dip (the brook) beside it
+                    drop = int(zi.min() - gg[ri, ci].max())
+                    drop = drop if drop >= 1 else hmin  # (its low end already under the high bank: down onto the ground)
                     v_ = sub[zi, ri, ci].copy()
                     sub[zi, ri, ci] = 0
-                    sub[zi - hmin, ri, ci] = v_
-                    grounded.append((int(ci.mean() + ca), int(ri.mean() + ra), hmin, int(len(zi))))
+                    sub[zi - drop, ri, ci] = v_
+                    grounded.append((int(ci.mean() + ca), int(ri.mean() + ra), drop, int(len(zi))))
                     continue
                 if len(zi) >= max_size:  # bigger floating clumps: listed for review (data/debug/floating.json)
                     big.append(dict(x=int(ci.mean() + ca), y=int(ri.mean() + ra), z=int((zi - gg[ri, ci]).min()),
