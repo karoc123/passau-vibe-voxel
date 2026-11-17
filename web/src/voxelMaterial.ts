@@ -38,6 +38,8 @@ export interface VoxelUniforms {
   uZOn: U<number>;
   uZBlk: U<THREE.Texture>;
   uZFBlk: U<THREE.Texture>;
+  uLitA: U<THREE.Vector4[]>;
+  uLitB: U<THREE.Vector4[]>;
 }
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
@@ -72,6 +74,7 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uZOn: { value: 0 },
     uZBlk: { value: tiny(THREE.RedIntegerFormat, new Uint16Array(1), THREE.UnsignedShortType) },
     uZFBlk: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
+    ...floodlights(meta),
   };
 }
 
@@ -84,26 +87,91 @@ function makePaletteTexture(palette: Meta['palette']) {
 }
 
 // warm pools of street light on the ground (2 m texels), and an even wash over floodlit pitches
+const LAMP_S = 0.5;
+const LAMP_POOL: [number, string][] = [[0, 'rgba(255,206,146,0.65)'], [0.3, 'rgba(255,192,126,0.28)'], [0.65, 'rgba(255,184,114,0.08)'], [1, 'rgba(255,180,108,0)']];
+function pool(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, stops: [number, string][]) {
+  const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
+  for (const [t, c] of stops) gr.addColorStop(t, c);
+  ctx.fillStyle = gr;
+  ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+}
+
 function makeLampTexture(meta: Meta) {
-  const s = 0.5, cv = document.createElement('canvas');
+  const s = LAMP_S, cv = document.createElement('canvas');
   cv.width = meta.W * s; cv.height = meta.D * s;
   const ctx = cv.getContext('2d')!;
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
   ctx.globalCompositeOperation = 'lighter';
-  const pool = (x: number, y: number, r: number, stops: [number, string][]) => {
-    const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
-    for (const [t, c] of stops) gr.addColorStop(t, c);
-    ctx.fillStyle = gr;
-    ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
-  };
-  for (const [x, y] of meta.lamps) pool((x + 0.5) * s, (y + 0.5) * s, 20 * s,
-    [[0, 'rgba(255,226,180,0.65)'], [0.3, 'rgba(255,216,170,0.28)'], [0.65, 'rgba(255,210,160,0.08)'], [1, 'rgba(255,205,150,0)']]);
-  for (const [x, y, r] of meta.floods ?? []) pool(x * s, y * s, r * 1.35 * s,
+  for (const [x, y] of meta.lamps) pool(ctx, (x + 0.5) * s, (y + 0.5) * s, 20 * s, LAMP_POOL);
+  for (const [x, y, r] of meta.floods ?? []) pool(ctx, x * s, y * s, r * 1.35 * s,
     [[0, 'rgba(225,235,255,0.6)'], [0.7, 'rgba(225,235,255,0.52)'], [1, 'rgba(225,235,255,0)']]);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.NoColorSpace;
   tex.flipY = false;
   return tex;
+}
+
+// OSM maps few of Passau's street lamps (123, most on the bridges), so the lanes and alleys stood dark. Every street and
+// footway is lit: a pool every ~26 m along it, unless a lamp (mapped or placed) is already within 16 m -- a road mapped
+// both ways, or a pavement beside it, gets one row. Only the light is drawn; there is no lamp post.
+export function lightStreets(u: VoxelUniforms, meta: Meta, paths: { p: [number, number, number][] }[]) {
+  const tex = u.uLampMap.value as THREE.CanvasTexture, ctx = (tex.image as HTMLCanvasElement).getContext('2d')!;
+  const G = 16, cells = new Map<number, [number, number][]>(), key = (x: number, y: number) => Math.floor(y / G) * 4096 + Math.floor(x / G);
+  const near = (x: number, y: number) => {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+      for (const [px, py] of cells.get(key(x + dx * G, y + dy * G)) ?? []) if (Math.hypot(px - x, py - y) < G) return true;
+    return false;
+  };
+  const add = (x: number, y: number) => {
+    const c = key(x, y);
+    (cells.get(c) ?? cells.set(c, []).get(c)!).push([x, y]);
+  };
+  for (const [x, y] of meta.lamps) add(x + 0.5, y + 0.5);
+  ctx.globalCompositeOperation = 'lighter';
+  let n = 0;
+  for (const { p } of paths) {
+    let next = 6;
+    for (let i = 0, d = 0; i + 1 < p.length; i++) {
+      const [ax, ay] = p[i], [bx, by] = p[i + 1], l = Math.hypot(bx - ax, by - ay);
+      while (next <= d + l) {
+        const t = (next - d) / l, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+        next += 26;
+        if (x < 0 || y < 0 || x >= meta.W || y >= meta.D || near(x, y)) continue;
+        add(x, y); n++;
+        pool(ctx, x * LAMP_S, y * LAMP_S, 18 * LAMP_S, LAMP_POOL);
+      }
+      d += l;
+    }
+  }
+  tex.needsUpdate = true;
+  return n;
+}
+
+// Passau floodlights its cathedral, both fortresses, the town hall's tower and the churches above the rivers. Each is
+// a capsule in plan (from the label, a and b in metres off it, radius r) whose walls catch a warm wash at night,
+// strongest on the faces turned out from it, where the lights stand.
+const FLOODLIT: Record<string, { a?: [number, number]; b?: [number, number]; r: number; k?: number }> = {
+  'Dom St. Stephan': { a: [4, 22], b: [91, 22], r: 30, k: 1.2 },
+  'Veste Oberhaus': { a: [-45, -2], b: [60, 53], r: 48, k: 0.9 },
+  'Veste Niederhaus': { r: 30 },
+  'Altes Rathaus': { r: 24, k: 0.7 },
+  'Wallfahrtskirche Mariahilf': { r: 30 },
+  'St. Michael': { r: 28, k: 0.8 },
+  'St. Paul': { r: 28, k: 0.8 },
+  Schaiblingsturm: { r: 10 },
+};
+const LIT_N = 8;
+function floodlights(meta: Meta) {
+  const A = Array.from({ length: LIT_N }, () => new THREE.Vector4()), B = Array.from({ length: LIT_N }, () => new THREE.Vector4());
+  let i = 0;
+  for (const l of meta.labels) {
+    const f = FLOODLIT[l.name];
+    if (!f || i >= LIT_N) continue;
+    const a = f.a ?? [0, 0], b = f.b ?? a;
+    A[i].set(l.x + 0.5 + a[0], l.y + 0.5 + a[1], l.x + 0.5 + b[0], l.y + 0.5 + b[1]);
+    B[i++].set(f.r, f.k ?? 1, 0, 0);
+  }
+  return { uLitA: { value: A }, uLitB: { value: B } };
 }
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
@@ -186,6 +254,21 @@ const FRAG_PARS = `
   float bandInt(float x, float p, float a, float b) { float k = floor(x / p); return k * (b - a) + clamp(x - k * p - a, 0.0, b - a); }
   float band(float x, float w, float p, float a, float b) { return (bandInt(x + 0.5 * w, p, a, b) - bandInt(x - 0.5 * w, p, a, b)) / w; }
   ${FOLIAGE}
+  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}];
+  float capsule(vec2 p, vec4 ab) { vec2 pa = p - ab.xy, ba = ab.zw - ab.xy; return length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0)); }
+  // how much a floodlit landmark (uLitA/B) lights a point; out: the direction from its axis
+  float floodAt(vec2 p, out vec2 out_) {
+    float s = 0.0; out_ = vec2(0.0);
+    for (int i = 0; i < ${LIT_N}; i++) {
+      vec4 ab = uLitA[i]; float r = uLitB[i].x;
+      if (r <= 0.0) continue;
+      vec2 pa = p - ab.xy, ba = ab.zw - ab.xy;
+      vec2 d = pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0);
+      float k = (1.0 - smoothstep(r * 0.6, r, length(d))) * uLitB[i].y;
+      if (k > s) { s = k; out_ = d / max(length(d), 1.0); }
+    }
+    return s;
+  }
   uniform sampler2D uWinMap; uniform float uWinMed[8]; uniform float uWinShape[72]; uniform float uWinFloors[8]; uniform vec3 uWinCol[8];
   // a building's share of lit windows now: its type's measured median times the building's own habit, a point on the
   // type's measured spread (scripts/window_stats.py)
@@ -243,6 +326,7 @@ const SURFACE = `
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
+  float r = 0.5, fres2 = 1.0; // the water's ripple and its glancing reflectance, for its reflections at night
   if (m == ${MAT.WALL}) {
     // An old-town facade: window axes 3 m apart (4 m on some), ~1 x 1.8 m windows in a light surround on storeys of
     // 3.3-3.7 m, plain plaster between; a ground floor of doors and shop windows on the same axes, over a darker plinth
@@ -329,11 +413,11 @@ const SURFACE = `
   } else if (m == ${MAT.GRASS}) {
     col = base * mix(vec3(1.0), grassTint(), smoothstep(0.02, 0.08, base.g - max(base.r, base.b))) * (0.88 + 0.2 * h); gRough = 1.0;
   } else if (m == ${MAT.WATER}) {
-    float r = sin(cell.x * 0.9 + uTime * 1.3) * sin(cell.z * 1.1 - uTime) * 0.5 + 0.5;
+    r = sin(cell.x * 0.9 + uTime * 1.3) * sin(cell.z * 1.1 - uTime) * 0.5 + 0.5;
     float rip = 1.0 - 0.75 * smoothstep(0.25, 0.7, fwU); // per-cell ripples under a few pixels a cell beat into a checkerboard
     col = base * (0.92 + rip * (mix(0.72, 1.12, r * r) - 0.92)) * (0.94 + 0.12 * h * rip); gRough = 0.04; gMetal = 0.3; // each river's own colour (voxelize.py, from the ortho)
     vec3 V = normalize(cameraPosition - vVox);
-    float fres = 1.0 - clamp(dot(vN, V), 0.0, 1.0); fres *= fres; fres *= fres;
+    float fres = 1.0 - clamp(dot(vN, V), 0.0, 1.0); fres *= fres; fres2 = 0.35 + 0.65 * fres; fres *= fres;
     col = mix(col, uHorizon * 0.8, clamp(0.08 + 0.55 * fres, 0.0, 0.55));
     if (vN.y > 0.5 && hash12(cell.xz * 0.37 + floor(uTime * 1.7 + h * 9.0)) < 0.006) col += vec3(0.35, 0.4, 0.38) * (1.0 - uNight) * (1.0 - uNight);
     if (uDrop > 0.0) { // low water: where the estimated bed is shallower than the drop, a sandbank
@@ -402,9 +486,39 @@ const SURFACE = `
   if (uNight > 0.0) { // street lamps light what is near the ground; water reflects them instead
     vec3 lm = texture2D(uLampMap, vVox.xz / uSize).rgb;
     float fall = clamp(1.0 - (vVox.y - gz) / 16.0, 0.0, 1.0);
-    float up = m == ${MAT.LEAF} ? (vN.y < -0.5 ? 2.6 : 1.7) : 1.0;
-    if (m == ${MAT.WATER}) gEmissive += lm * vec3(1.0, 0.72, 0.42) * fall * uNight * 0.45;
-    else gEmissive += col * lm * fall * uNight * 2.2 * up;
+    float up = m == ${MAT.LEAF} ? (vN.y < -0.5 ? 2.6 : 1.7) : m == ${MAT.GRASS} ? 0.55 : 1.0;
+    if (m == ${MAT.WATER}) {
+      // the lights on the banks, mirrored: a light at height y is seen in the water y * (distance / height of the eye)
+      // beyond the point, away from the eye -- sampled at a few heights, so each light draws a streak towards the viewer
+      vec2 away = vVox.xz - cameraPosition.xz;
+      float dc = length(away), k = dc / max(cameraPosition.y - vVox.y, 2.0);
+      away /= max(dc, 1e-3);
+      // broken by the ripples across the line of sight, into bands that drift
+      vec2 side = vec2(-away.y, away.x);
+      float a = dot(vVox.xz, away), b = dot(vVox.xz, side);
+      float sw = sin(a * 2.1 + 1.7 * sin(b * 0.31 + uTime * 0.5) - uTime * 1.9) * 0.6 + sin(a * 0.93 - b * 0.27 + uTime * 1.1) * 0.4;
+      float shim = (0.45 + 0.9 * smoothstep(-0.2, 0.9, sw)) * (0.8 + 0.4 * hash12(cell.xz + floor(uTime * 3.0)));
+      vec3 refl = vec3(0.0); vec2 o;
+      for (int i = 0; i < 4; i++) {
+        float y = 3.0 + 4.0 * float(i);
+        vec3 l = texture2D(uLampMap, (vVox.xz + away * min(y * k, 400.0)) / uSize).rgb;
+        refl += smoothstep(0.22, 0.6, l) * (1.0 - 0.15 * float(i)); // only a lamp's core: a point of light mirrors as a thin streak
+      }
+      float fl = 0.0;
+      for (int i = 0; i < 4; i++) fl += floodAt(vVox.xz + away * min((14.0 + 14.0 * float(i)) * k, 600.0), o);
+      gEmissive += (refl * 0.45 * vec3(1.0, 0.68, 0.36) + fl * 0.08 * vec3(1.0, 0.76, 0.46)) * shim * fres2 * uNight
+        + lm * vec3(1.0, 0.72, 0.42) * fall * uNight * 0.25;
+    }
+    else gEmissive += col * lm * fall * uNight * 2.2 * up * (1.0 + 0.8 * uWet * (1.0 - gRough)); // a wet street glistens
+    // floodlit landmarks: walls turned out from the axis catch most, roofs a glimmer; the pavement is the lamps'
+    if (m != ${MAT.LEAF} && m != ${MAT.WATER} && m != ${MAT.LAMP} && m != ${MAT.GRASS} && m != ${MAT.SOIL}) {
+      vec2 out_;
+      float fk = floodAt(vVox.xz, out_);
+      if (fk > 0.0) {
+        float face = vert ? clamp(0.4 + 0.7 * dot(wN.xz, out_), 0.08, 1.0) : 0.06;
+        gEmissive += mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), 0.3) * vec3(1.0, 0.76, 0.46) * fk * face * smoothstep(0.5, 6.0, lvl) * (1.0 - 0.35 * smoothstep(10.0, 60.0, lvl)) * uNight * 0.7;
+      }
+    }
   }
   if (m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) col *= mix(1.0, uAlbedo, smoothstep(0.2, 0.6, dot(col, vec3(0.2126, 0.7152, 0.0722))));
   diffuseColor.rgb = col * mix(0.62, 1.0, vAO);

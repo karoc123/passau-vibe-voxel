@@ -23,7 +23,7 @@ import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
 import type { World } from './world';
-import { makeUniforms, makeVoxelMaterial } from './voxelMaterial';
+import { lightStreets, makeUniforms, makeVoxelMaterial } from './voxelMaterial';
 import './style.css';
 
 declare global {
@@ -266,6 +266,7 @@ async function boot() {
   controls.target.set(...(cam ? [cam[3], cam[4], cam[5]] as const : v0.target));
   daylight.uniforms = uniforms;
   daylight.bloom = post.bloom;
+  daylight.grade = post.grade;
   daylight.ao = post.n8.configuration;
   daylight.theta = (meta.theta_deg || 0) * Math.PI / 180;
   const md = qs.get('date')?.split('-').map(Number);
@@ -283,6 +284,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
+    lightStreets(uniforms!, meta, [...td.roads, ...td.peds]);
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;
