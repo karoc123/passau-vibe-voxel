@@ -112,6 +112,7 @@ class Graphics {
     pick('lod', 'Far tiles at 2 m', [['auto', 'auto'], ['off', 'never'], ['far', 'always']]);
     const px = slide('lodpx', { min: 0.6, max: 3, step: 0.1, marks: { default: 1.2 }, show: (v) => `2 m below ${v.toFixed(1)} px` });
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
+    pick('occl', 'Occlusion culling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
     el('div', 'note', 'Depth pre-pass: for testing, slower on some GPUs. Render size (top right) still adapts to the frame rate.', adv);
     this.show();

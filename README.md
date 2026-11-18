@@ -37,6 +37,7 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 | **DGM1**, digital terrain model, 1 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Ground relief; the rivers where OSM's outlines are cut by the map edge |
 | **DOP20**, orthophoto, 0.2 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof colours, foliage tones, grass and fields OSM doesn't map, vehicle colours, the three rivers' own colours |
 | **LoD2** 3D building models, CityGML (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof planes (pitched roofs, ridges), building footprints the OSM outlines are moved onto, buildings OSM lacks |
+| **ALKIS Tatsächliche Nutzung** (actual land use), shapefile of the Stadt Passau (Bayerische Vermessungsverwaltung) | CC BY 4.0 | The class of open land OSM says nothing about: forest, copse, grassland, arable land, park, waste land, car park, cemetery |
 | **[OpenStreetMap](https://www.openstreetmap.org/copyright)**, [Geofabrik](https://download.geofabrik.de/europe/germany/bayern/niederbayern.html) daily extract for Niederbayern | ODbL, © OpenStreetMap contributors | Footprints and 3D parts, facade and roof colours, roads, paths, railways, bridges, trees, street lamps, names, the traffic network |
 | **[Deutscher Wetterdienst](https://opendata.dwd.de/climate_environment/CDC/)**, phenological observations | [DL-DE BY 2.0](https://www.govdata.de/dl-de/by-2-0), source: Deutscher Wetterdienst | When each tree species leafs out, colours and drops its leaves (stations within 100 km of Passau below 500 m) |
 | **[iNaturalist](https://www.inaturalist.org/)** "Leaves" annotations, weekly counts | see iNaturalist's terms | The same, for species the DWD does not record |
@@ -45,7 +46,7 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 
 Attribution to show wherever the model or its data is published (the viewer's credits line carries all of it):
 - *Datenquelle: Bayerische Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de)*, licence
-  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (DOM20, DGM1, DOP20, LoD2; the model is a modified,
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (DOM20, DGM1, DOP20, LoD2, ALKIS Tatsächliche Nutzung; the model is a modified,
   derived work of them)
 - *© OpenStreetMap contributors*, [ODbL](https://www.openstreetmap.org/copyright). The files in `web/public/data`
   are a Produced Work built from OSM; the cut `data/raw/osm.json` itself is ODbL.
@@ -78,7 +79,7 @@ written with `mtime=0`). The steps:
 | Step | Writes |
 |---|---|
 | `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles. Files already there are not fetched again |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB, read by `alkis_tn.py`). Files already there are not fetched again |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, orthophoto 0.2 m) |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
 | `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json`, `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`. Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |

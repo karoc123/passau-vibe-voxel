@@ -294,6 +294,32 @@ const BUILD_VERTEX = `
     }
   }`;
 
+// What is the same at all of a face's corners reaches the fragment shader packed into one interpolated vec4 --
+// (palette + 4096 x hidden, its facing + 8 x its wall's direction + 256 x (1 roof, 2 chamfer), building, ground) --
+// and is unpacked there (faceDecode), each part rounded: interpolating equal values lands a hair off them. (Not what
+// varies over a face: its AO, a gable's wall top, a roof's plane in vattr.x / vattr.w, whose normal is interpolated.)
+// No \`flat\` varyings: through ANGLE's D3D11 a program with any costs extra work per triangle. On an Iris Xe (Windows
+// Chrome, interleaved A/B in one page) the scene pass at 1/16 of the pixels went from 16-22 to ~5 ms, at full size
+// from 25-27 to 12-16 ms; the sun's shadow map, drawn with makeBuildDepthMaterial, ~20 % faster. Integer attributes
+// (gpuType IntType) or dropping the per-vertex uBldOn fetch saved nothing measurable there. (tools/vtxcost.mjs:
+// the tiles' material against a plain one.)
+const FACE_VERTEX = `{
+    float kind = vattr.w > ${SLANT - 0.5} ? 2.0 : vattr.w > 0.5 && vattr.w < ${WALL_TOP - 0.5} ? 1.0 : 0.0;
+    vFace = vec4(floor(vpal + 0.5), (kind == 1.0 ? mod(vattr.x, 8.0) : vattr.x) + 256.0 * kind, vbld, vattr.z);
+  }`;
+const FACE_PARS = `
+  varying vec3 vVox; varying vec4 vFace;
+  vec3 vN; int vPal; float vHide; float vWallAng; float vBid; float vRoof; float vSlant; float vGz;
+  ${NORMAL_FROM_IDX}
+  void faceDecode() {
+    float a = floor(vFace.x + 0.5);
+    int b = int(vFace.y + 0.5), kind = b >> 8;
+    vHide = step(4096.0, a); vPal = int(a) & 4095;
+    vN = normalFromIdx(float(b & 7)); vWallAng = float((b & 255) >> 3);
+    vRoof = kind == 1 ? 1.0 : 0.0; vSlant = kind == 2 ? 1.0 : 0.0;
+    vBid = floor(vFace.z + 0.5); vGz = vFace.w;
+  }`;
+
 // Where the budget leaves the city to the 8 m clay (city.ts, uZOn): a city block is real once uZFBlk says so
 const ZONES_PARS = `
   uniform int uZOn; uniform highp usampler2D uZBlk; uniform sampler2D uZFBlk;
@@ -308,7 +334,11 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying float vWTop;
+  ${FACE_PARS}
+  // (AO and the wall's top do vary over a face)
+  varying vec2 vShade;
+  #define vAO vShade.x
+  #define vWTop vShade.y
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
@@ -733,15 +763,16 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\nattribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
-        varying vec3 vVox; varying vec3 vN; flat varying int vPal; ${NORMAL_FROM_IDX}`)
+        varying vec3 vVox; varying vec4 vFace;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>${BUILD_VERTEX}
-        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(mod(vattr.x, 8.0)); vPal = int(vpal + 0.5);`);
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); ${FACE_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D uPalette; varying vec3 vVox; varying vec3 vN; flat varying int vPal;
+        uniform sampler2D uPalette; ${FACE_PARS}
         float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
         ${FOLIAGE}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        faceDecode();
         if (uFolOn > 0.5 && int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) == ${MAT.LEAF}) {
           vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
           vec3 fo = foliageAt(cell);
@@ -771,8 +802,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
         invariant gl_Position; // as in the depth pre-pass (makeVoxelPrepassMaterial): the same depth to the bit
         #endif
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
-        varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; varying float vWTop; ${NORMAL_FROM_IDX}`)
+        varying vec3 vVox; varying vec4 vFace; varying vec2 vShade; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
       // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its
       // plane. On a roof's staircase (vattr.w > 0: 1 + its downhill direction in 64 steps) the 8s are the plane's slope
       // in 2.5° steps, and it is lit as that plane
@@ -795,10 +825,11 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
         .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 || nRoof > 0.5 ? objectNormal : vec3( 0.0 );')
         .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal; vWTop = nTop;
-        ${BUILD_VERTEX} vHide = hideB;`);
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); ${FACE_VERTEX} vShade = vec2(mod(vattr.y, 4.0) / 3.0, nTop); vLitN = transformedNormal;
+        ${BUILD_VERTEX} vFace.x += 4096.0 * hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nfaceDecode();')
       // the tiles carry no normal attribute, so three flat-shades them from screen derivatives (WebGLPrograms:
       // flatShading) and the staircase's plane normal above went unused -- every 1 m step of a diagonal facade was lit
       // by its own x- or z-facing side, sunlit and shaded columns from street to eaves. Lit by the vertex normal instead
@@ -832,20 +863,17 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
       .replace('#include <common>', `#include <common>
         invariant gl_Position;
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
-        varying vec3 vVox; varying vec3 vN; varying float vGz; flat varying int vPal; flat varying float vWallAng; flat varying float vRoof; flat varying float vSlant; ${NORMAL_FROM_IDX}`)
+        varying vec3 vVox; varying vec4 vFace;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01), nRoof = vattr.w, nSlant = 0.0;
-        if (nRoof > ${SLANT - 0.5}) { nSlant = 1.0; nRoof = 0.0; }
-        if (nRoof > 0.5) nAng = 0.0;
-        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vGz = vattr.z; vPal = int(vpal + 0.5); vWallAng = nAng; vRoof = nRoof; vSlant = nSlant;
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); ${FACE_VERTEX}
         ${BUILD_VERTEX}`);
     shader.fragmentShader = `${ZONES_PARS}\n` + shader.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D uPalette; uniform float uTime;
-        varying vec3 vVox; varying vec3 vN; varying float vGz; flat varying int vPal; flat varying float vWallAng; flat varying float vRoof; flat varying float vSlant;
+        uniform sampler2D uPalette; uniform float uTime; ${FACE_PARS}
         float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
         ${FOLIAGE}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        faceDecode();
         {
           int m = int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5);
           float wa = (vWallAng - 1.0) * 0.261799;

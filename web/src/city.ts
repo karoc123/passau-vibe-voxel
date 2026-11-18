@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import type { Caption } from './caption';
 import type { TileStreamer } from './stream';
-import type { Meta, Zones } from './types';
+import type { ColumnData, Meta, Zones } from './types';
 import { dataTexture, fetchGzip, fetchJson } from './util';
 import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';
-import { makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
+import { MAT, makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
+import { Occlusion } from './occlusion';
 
 const T = 128;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
@@ -17,7 +18,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   3. everything else, nearest to the view first, each building once all its tiles are in; over clay a city block
 //      turns real once every tile under it is in, and back to clay when the budget moves on
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 } }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -28,6 +29,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   budget: () => number;
   prepass?: DepthPrepass | null;
   lod?: { mode: Lod; px: number };
+  occlusion?: boolean;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
   const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
@@ -297,6 +299,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
         S.free(n);
       }
     }
+    occluders();
     let wanted = 0, tilesNow = 0, folNow = 0, pending = 0;
     for (let i = 0; i < total; i++) if (want[i]) { wanted++; tilesNow += inTile[i]; folNow += folTile[i]; }
     for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
@@ -326,6 +329,59 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     S.pump();
   };
 
+  // Occlusion culling (occlusion.ts): a tile's columns block the view once it is in and all its buildings show --
+  // drawn by whichever level (the least of the levels' heights where two are in), never while the clay stands in
+  // for some of the city (its blocks are cut out of the tiles' meshes then)
+  const occ = new Occlusion(W, D, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3);
+  let occOn = occlusion, occAt = 0, occN = -1, lightsAt = -1e9;
+  const occSrc = Array.from({ length: total }, () => [] as ColumnData[]), occStats = { ms: 0, meshes: 0, hidden: 0 };
+  // A hidden mesh moves to layer HIDDEN alone: the camera (layer 0) passes it over before anything else, and the
+  // sun's shadow cameras, which see that layer too, still draw it. Updated on the scene's onBeforeRender (before the
+  // depth pre-pass's, prepass.ts), for the main camera only, again whenever it moved.
+  const HIDDEN = 5, cam0 = camera as THREE.PerspectiveCamera, before = scene.onBeforeRender.bind(scene);
+  const cull = (cam: THREE.Camera) => {
+    if (cam !== camera) return;
+    const now = performance.now(), on = occOn && clay === 'none';
+    if (now - lightsAt > 2000) {
+      lightsAt = now;
+      scene.traverse((o) => { const l = o as THREE.DirectionalLight; if (l.isLight && l.shadow?.camera) l.shadow.camera.layers.enable(HIDDEN); });
+    }
+    const kids = S.group.children;
+    if (!on) {
+      if (occN !== -1) { for (const m of kids) m.layers.mask = 1; occN = -1; occStats.hidden = 0; }
+      return;
+    }
+    // again when the camera moved, the tiles changed, or now and then
+    const t0 = performance.now(), moved = occ.prepare(cam0);
+    if (!moved && kids.length === occN && now - occAt < 250) return;
+    if (!moved) occ.prepare(cam0, true);
+    occAt = now; occN = kids.length;
+    let hidden = 0;
+    for (const o of kids) {
+      const m = o as THREE.Mesh, box = m.geometry?.boundingBox;
+      const h = !!box && o.visible && m.material !== clayMat && occ.hidden(box);
+      m.layers.mask = h ? 1 << HIDDEN : 1;
+      hidden += +h;
+    }
+    occStats.ms = performance.now() - t0; occStats.meshes = kids.length; occStats.hidden = hidden;
+  };
+  scene.onBeforeRender = (...a) => { cull(a[2]); before(...a); };
+  function occluders() {
+    for (let i = 0; i < total; i++) {
+      const tx = i % d.nx, ty = Math.floor(i / d.nx), src: ColumnData[] = [];
+      if (stage >= 2 && inTile[i] && onTile[i].every((b) => shown[b + 1])) for (const s of lods) {
+        const nd = S.nodes.get(S.key(s, Math.floor(tx / s), Math.floor(ty / s)));
+        // (a node meshed again after a lost context is not drawn until then: it hides nothing meanwhile)
+        if (nd?.remesh) { src.length = 0; break; }
+        if (nd?.data) src.push(nd.data);
+      }
+      const was = occSrc[i];
+      if (was.length === src.length && was.every((c, k) => c === src[k])) continue;
+      occSrc[i] = src;
+      occ.setTile(tx, ty, src);
+    }
+  }
+
   const labelled = new Map(meta.labels.map((l) => [`${l.x + 0.5},${l.y + 0.5}`, bldAt(l.x, l.y)]));
   return {
     // a building's label once it shows; the others (parks, the river) with the foliage; over clay, all of them
@@ -344,6 +400,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     // every tile the budget asks for is in
     get settled() { return settled; },
     setLod,
+    setOcclusion(on: boolean) { occOn = on; },
+    // occlusion culling now (tools): on, the last update's cost (ms), tile meshes, of them hidden
+    get occlusion() { return { on: occOn && clay === 'none', ...occStats }; },
+    occluder: occ,
     cityTris,
   };
 }
