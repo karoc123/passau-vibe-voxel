@@ -720,7 +720,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
     const defs = `${ZONES_PARS}\n` + (clay ? '#define CLAY\n' : '');
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
+        #ifdef PREPASSED
         invariant gl_Position; // as in the depth pre-pass (makeVoxelPrepassMaterial): the same depth to the bit
+        #endif
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
         flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
