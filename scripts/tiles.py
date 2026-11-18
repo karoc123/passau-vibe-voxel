@@ -1,29 +1,37 @@
 """Streamable voxel tiles for the viewer (web/src/stream.ts).
 
-Level 1 is the city at 1 m; level 8 (cells of 8 x 8 x 8 m) is the clay standing in where the viewer's budget leaves
-the city out (web/src/city.ts). Every node holds N x N cells (N = 128, so a node spans 128 * s metres) plus a 1-cell
-apron on each side for face culling and AO at the node edge.
+Level 1 is the city at 1 m; level 2 (LOD_LEVELS) is the same city in cells of 2 m, drawn instead of it far from the
+camera, where a metre is a pixel or less (web/src/city.ts; a level 4 cost slim towers and spires their tops for a few
+per cent of triangles at the far edge, so there is none); level 8 (cells of 8 x 8 x 8 m) is the clay
+standing in where the viewer's budget leaves the city out. Every node holds N x N cells (N = 128, so a node spans
+128 * s metres) plus a 1-cell apron on each side for face culling and AO at the node edge.
 
 Node file  tiles/{s}/{nx}_{ny}.bin, gzip of:
   counts  uint16[(N+2)^2]   runs per column (apron included, row-major, row = south)
   ground  uint8 [(N+2)^2]   ground level in metres (z of the first free voxel at level 1), for the facade shader
   runs    uint16[3 * sum]   (z0, len, palette) per run, z in cells of the level, bottom -> top
-  planes  uint16[(N+2)^2]   level 1 only (not in 1f/): the roof plane of the column's top face, 0 for none -- 1 + slope
-                            (2.5 degree steps) x 64 + downhill direction (64 steps), as web/src/mesher.worker.ts lights it
+  planes  uint16[(N+2)^2]   levels 1 and 2 (not in 1f/, not level 8): the roof plane of the column's top face, 0 for
+                            none -- 1 + slope (2.5 degree steps) x 64 + downhill direction (64 steps), as
+                            web/src/mesher.worker.ts lights it; at 2 m the most common plane of the column's 1 m
+                            columns (a slope and its direction don't change with the cell size)
 
 Foliage at level 1 is its own file, loaded after every building (web/src/city.ts): tiles/1f/{nx}_{ny}.bin, the same
 format, holding only trees, trunks and grass (`fol_ids`, `grass_ids`); in tiles/1/ trees and trunks are left out and
 grass is bare earth (`bare_id`), the surface the grass is then drawn on.
 
-Level 8: a cell is solid when at least a quarter of its block is; its colour is the topmost voxel in the block, so
-roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
+Level 2 holds everything, foliage included (one file per node: far away the trees are not worth a second
+mesh, and they come in with the city instead of after it).
+
+Levels 2 and 8: a cell is solid when at least a quarter of its block is; its colour is the topmost voxel in the block,
+so roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
 """
 import gzip
 
 import numpy as np
 
 N = 128
-LEVELS = (1, 8)
+LEVELS = (1, 2, 8)
+LOD_LEVELS = (2,)  # the distance levels: with roof planes, meshed like level 1 (slopes, chamfers)
 
 
 def downsample(vol, s, face_ids=()):
@@ -61,9 +69,27 @@ def downsample(vol, s, face_ids=()):
     return out
 
 
-def plane_window(planes, s, r0, c0):
-    """the roof plane codes of a level-1 node and its apron (r0, c0: the window's first row and column), as bytes"""
-    if planes is None or s != 1:
+def downsample_planes(planes, s):
+    """the roof plane per s x s block of 1 m columns: the most common code among them, where at least half of them have
+    one (0 elsewhere)"""
+    if planes is None or s == 1:
+        return planes
+    D, W = planes.shape
+    p = np.pad(planes, ((0, (-D) % s), (0, (-W) % s)))
+    blk = p.reshape(p.shape[0] // s, s, p.shape[1] // s, s).transpose(0, 2, 1, 3).reshape(p.shape[0] // s, p.shape[1] // s, s * s)
+    nz = (blk != 0).sum(2)
+    best, bestn = np.zeros(blk.shape[:2], np.uint16), np.zeros(blk.shape[:2], np.int32)
+    for k in range(s * s):
+        c = blk[:, :, k]
+        n = (blk == c[:, :, None]).sum(2)
+        better = (c != 0) & (n > bestn)
+        best = np.where(better, c, best); bestn = np.where(better, n, bestn)
+    return np.where(2 * nz >= s * s, best, 0).astype(np.uint16)
+
+
+def plane_window(planes, r0, c0):
+    """the roof plane codes of a node and its apron (r0, c0: the window's first row and column at its level), as bytes"""
+    if planes is None:
         return b""
     D, W = planes.shape
     pw = np.zeros((N + 2, N + 2), np.uint16)
@@ -101,6 +127,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
     for s in LEVELS:
         vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16))
         gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
+        ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
         Hs, Ds, Ws = vs.shape
         nx, ny = -(-Ws // N), -(-Ds // N)
         (out / str(s)).mkdir(parents=True, exist_ok=True)
@@ -137,7 +164,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
                         fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
                     ftot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
                 counts, runs = column_runs(win)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(planes, s, r0, c0)
+                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(ps, r0, c0)
                 with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:  # mtime 0: rebuilds of unchanged nodes stay byte-identical
                     fh.write(blob)
                 tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
@@ -146,7 +173,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
         info["bytes"] += tot
         note(f"tiles level {s}: {nx}x{ny} nodes, {nruns} runs, {tot / 2 ** 20:.1f} MB gz"
              + (f", foliage {ftot / 2 ** 20:.1f} MB gz" if split else ""))
-        del vs
+        del vs, ps
     return info
 
 
@@ -183,7 +210,12 @@ def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(),
                     with gzip.GzipFile(out / "1f" / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
                         fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
                 counts, runs = column_runs(win)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(planes, s, a, c)
+                pw = None
+                if planes is not None and (s == 1 or s in LOD_LEVELS):
+                    p1 = np.zeros((span + 2 * s, span + 2 * s), np.uint16)
+                    p1[ra - a:rb - a, ca - c:cb - c] = planes[ra:rb, ca:cb]
+                    pw = downsample_planes(p1, s)
+                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(pw, 0, 0)
                 with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
                     fh.write(blob)
                 n += 1
