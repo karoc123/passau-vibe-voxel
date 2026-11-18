@@ -151,8 +151,8 @@ No analytics: the page loads nothing beyond its own files and the Google font.
 
 ## FPV Acro prototype
 
-Start the viewer with `cd web && pnpm dev` and open `/?view=dom&fpv=1`. Choose an orbit view near where you want to
-start, then click **Open FPV Acro**. On Windows with a controller connected, use the Windows browser and move a stick
+Start the viewer with `cd web && pnpm dev`. Choose an orbit view near where you want to start, then click
+**FPV Acro** in the top-left toolbar. On Windows with a controller connected, use the Windows browser and move a stick
 or press a controller button so its axes appear under **Controller setup**.
 
 1. Use **Learn axes** and follow the four stick prompts, or select and invert each axis by hand. Standard gamepads start
@@ -173,8 +173,8 @@ Roof and wall collisions follow the source voxels, including where a rendered ro
 
 ## Arcade driving prototype
 
-Open `/?view=dom&drive=1`. Select an existing car or click **Follow nearby car**, then **Take the wheel**. W/S (or the
-up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
+Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
+W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, and **Esc** takes you back to the map.
 

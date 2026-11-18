@@ -10,6 +10,7 @@ export class ArcadeCar {
   brake = false;
   private steer = 0;
   private turnRate = 0;
+  private grip = 7.7;
   private readonly trial: Pose;
 
   constructor(pose: Pose, speed: number, readonly bus: boolean) {
@@ -26,9 +27,11 @@ export class ArcadeCar {
     let sx = Math.sin(p.h), sz = Math.cos(p.h);
     const speed = this.speed, oldLong = this.vx * sx + this.vz * sz;
     const steer = this.steer + (input.steer - this.steer) * (1 - Math.exp(-12 * dt));
-    const grip = input.handbrake ? 1.7 : 7.7;
-    const yaw = steer * Math.sign(oldLong) * Math.min(Math.abs(oldLong) * 0.44, 1.85)
-      * (0.48 + 0.52 / (1 + (speed / 24) ** 2)) * (input.handbrake ? 1.48 : 1) * (this.bus ? 0.7 : 1);
+    const targetGrip = input.handbrake && speed > 3 ? 1.75 : 7.7;
+    const grip = this.grip + (targetGrip - this.grip) * (1 - Math.exp(-(input.handbrake ? 15 : 7) * dt));
+    // Positive steering turns screen-right. With +Z forward, this is a negative heading delta.
+    const yaw = -steer * Math.sign(oldLong) * Math.min(Math.abs(oldLong) * 0.44, 1.85)
+      * (0.48 + 0.52 / (1 + (speed / 24) ** 2)) * (input.handbrake && speed > 3 ? 1.42 : 1) * (this.bus ? 0.7 : 1);
     const turn = this.turnRate + (yaw - this.turnRate) * (1 - Math.exp(-9 * dt));
     const h = p.h + turn * dt;
     sx = Math.sin(h);
@@ -41,7 +44,7 @@ export class ArcadeCar {
     else if (gas > 0 && longitudinal < -0.3) longitudinal = Math.min(0, longitudinal + gas * 13 * dt);
     else if (gas > 0 && brake === 0) longitudinal += (this.bus ? 5.1 : 8.7) * gas * Math.max(0, 1 - (longitudinal / targetSpeed) ** 2) * dt;
     else if (brake > 0) longitudinal = Math.max(-8, longitudinal - 5.5 * brake * dt);
-    const resistance = (gas > 0 || brake > 0 ? 0.055 : 0.38) + (input.handbrake ? 1.25 : 0);
+    const resistance = (gas > 0 || brake > 0 ? 0.055 : 0.38) + (input.handbrake ? 0.85 : 0);
     longitudinal *= Math.exp(-resistance * dt);
     lateral *= Math.exp(-grip * dt);
     if (Math.abs(longitudinal) < 0.06 && !gas && !brake) longitudinal = 0;
@@ -72,6 +75,7 @@ export class ArcadeCar {
       }
     }
     this.steer = steer;
+    this.grip = grip;
     this.turnRate = impact ? 0 : turn;
     this.brake = brake > 0 || input.handbrake || impact;
     if (!surface.blocked) {

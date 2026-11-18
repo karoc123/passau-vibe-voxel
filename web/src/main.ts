@@ -85,6 +85,7 @@ let lampHeads: LampHeads | null = null;
 nav.cancelFly = () => { fly = null; };
 bar.setRiver(RIVER.surveyed);
 bar.showRiver(false);
+const modeTools = el('div', 'mode-tools', '', bar.el);
 const maxShadow = renderer.capabilities.maxTextureSize;
 bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -343,14 +344,11 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  if (qs.get('fpv') === '1') {
-    const { FpvPrototype } = await import('./nav/fpv.prototype');
-    fpv = new FpvPrototype(nav, camera, controls.target, meta);
-  }
-  if (qs.get('drive') === '1') {
-    const { DrivePrototype } = await import('./nav/drive.prototype');
-    drive = new DrivePrototype(nav, controls.target, meta);
-  }
+  const [{ FpvPrototype }, { DrivePrototype }] = await Promise.all([
+    import('./nav/fpv.prototype'), import('./nav/drive.prototype'),
+  ]);
+  fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools);
+  drive = new DrivePrototype(nav, controls.target, meta, modeTools);
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;

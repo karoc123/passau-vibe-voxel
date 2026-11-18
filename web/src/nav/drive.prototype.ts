@@ -24,20 +24,23 @@ export class DrivePrototype {
   private readonly keys = new Set<string>();
   private readonly position = new Vector3();
   private readonly velocity = new Vector3();
-  private readonly panel = el('aside', 'drive-prototype');
-  private readonly action = el('button', '', '', this.panel);
-  private readonly status = el('div', 'drive-status', '', this.panel);
-  private readonly speed = el('div', 'drive-speed', '', this.panel);
-  private readonly help = el('div', 'drive-help', 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit', this.panel);
+  private readonly panel = document.createElement('aside');
+  private readonly action = el('button', 'mode-button', '', this.panel);
+  private readonly details = el('div', 'mode-detail', '', this.panel);
+  private readonly status = el('div', 'drive-status', '', this.details);
+  private readonly speed = el('div', 'drive-speed', '', this.details);
+  private readonly help = el('div', 'drive-help', 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit', this.details);
   private pending: Ride | null = null;
   private driving: Driving | null = null;
   private accumulator = 0;
   private feedbackUntil = 0;
   private waiting = false;
 
-  constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta) {
+  constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta, host: HTMLElement) {
     this.tiles = new VoxelCollision(meta);
+    this.panel.className = 'drive-prototype';
     this.panel.setAttribute('aria-label', 'Drive a car');
+    host.append(this.panel);
     this.status.setAttribute('role', 'status');
     this.action.type = 'button';
     this.action.addEventListener('click', () => { this.activate(); this.action.blur(); });
@@ -75,20 +78,17 @@ export class DrivePrototype {
   private activate() {
     if (this.driving) { this.release(); return; }
     if (this.nav.mode === 'fpv') return;
-    const ride = this.nav.ride;
-    if (ride?.obj.kind === 'car') {
-      this.pending = ride;
-      return;
+    if (this.nav.ride?.obj.kind !== 'car') {
+      const life = this.nav.life;
+      if (!life?.group.visible) return;
+      const choice = life.nearest('car', this.focus, null);
+      if (choice) this.nav.startRide(choice);
+      else {
+        const car = life.roadVehicles().find(c => c.rp);
+        if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
+      }
     }
-    const life = this.nav.life;
-    if (!life?.group.visible) return;
-    // Use the same nearest-vehicle entry point as the viewer's Follow a car action.
-    const choice = life.nearest('car', this.focus, null);
-    if (choice) this.nav.startRide(choice);
-    else {
-      const car = life.roadVehicles().find(c => c.rp);
-      if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
-    }
+    if (this.nav.ride?.obj.kind === 'car') this.pending = this.nav.ride;
   }
 
   private prepare(ride: Ride) {
@@ -188,11 +188,13 @@ export class DrivePrototype {
     const active = this.driving, following = this.nav.ride?.obj.kind === 'car';
     this.panel.hidden = this.nav.mode === 'fpv';
     document.body.classList.toggle('driving', !!active);
-    const label = active ? 'Park car' : following ? 'Take the wheel' : 'Follow nearby car';
+    this.panel.classList.toggle('mode-active', !!(active || this.pending));
+    const label = active ? 'Park car' : 'Take the wheel';
     if (this.action.textContent !== label) this.action.textContent = label;
     const life = this.nav.life;
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
       (!following && !life.roadVehicles().some(c => c.rp))));
+    this.details.hidden = !active && !this.pending;
     this.speed.hidden = this.help.hidden = !active;
     this.status.hidden = !this.pending && !active;
     const message = this.pending || this.waiting ? 'Loading road collision tiles…' :

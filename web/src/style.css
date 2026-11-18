@@ -34,6 +34,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .choices button { white-space: nowrap; padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
 #bar .choices button:hover, #bar .choices button.on { color: #fff; }
 #bar .sky button:disabled { display: none; }
+/* Driving and flight sit alongside the existing map controls. */
+#bar .mode-tools { display: flex; flex-wrap: wrap; gap: 0 14px; padding-top: 5px; }
+#bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
+#bar .mode-tools [hidden] { display: none; }
+#bar .mode-button {
+  padding: 0; min-height: 24px; border: 0; background: none; color: #fff;
+  font: inherit; font-weight: 500; text-shadow: inherit; cursor: pointer;
+}
+#bar .mode-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+#bar .mode-button:disabled { color: var(--t2); cursor: default; text-decoration: none; }
+#bar .mode-button:focus-visible { outline: 1px solid #fff; outline-offset: 3px; border-radius: 2px; }
+#bar .mode-detail {
+  margin-top: 2px; padding: 6px 8px; border-radius: 6px; background: rgba(16,17,20,.62);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); max-height: max(95px, calc(100dvh - 155px));
+  overflow: auto; overscroll-behavior: contain; touch-action: pan-y; line-height: 1.4;
+}
+#bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
+@media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px)); } }
+@media (pointer: coarse) { #bar .mode-button { min-height: 36px; } }
 /* the graphics panel (bar.ts Graphics): folded under a ⚙ row; inside, the presets and an "Advanced" fold */
 #bar .gear { padding-top: 6px; }
 #bar .gear .fold, #bar .adv summary { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; text-shadow: inherit; cursor: pointer; }
@@ -56,7 +75,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
   #bar .choices { column-gap: 7px; }
   #bar:has(.search li) .row { display: none; }
 }
-@media (max-height: 500px) { #bar { left: 8px; top: 8px; width: 330px; } }
+@media (max-height: 500px) { #bar { left: 8px; top: 8px; width: min(330px, calc(100vw - 16px)); } }
 /* credits, bottom right: a small pill (attribution is required, not decoration) */
 #credits { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; position: fixed; right: 12px; bottom: 12px; z-index: 4; padding: 3px 9px; border-radius: 10px; background: rgba(16,17,20,.5); color: rgba(255,255,255,.7);
   font: 10.5px Inter, system-ui, sans-serif; }

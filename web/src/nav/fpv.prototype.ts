@@ -18,13 +18,14 @@ type InputSource = 'controller' | 'keyboard';
 
 function button(label: string, run: () => void) {
   const node = document.createElement('button');
+  node.className = 'mode-button';
   node.type = 'button';
   node.textContent = label;
   node.addEventListener('click', () => { run(); node.blur(); });
   return node;
 }
 
-// Opt-in Acro prototype. The viewer still owns the camera, render loop and all other navigation modes.
+// The viewer owns the camera and render loop; this mode supplies the flight pose.
 export class FpvPrototype {
   private readonly radio = new FpvInput();
   private readonly collision: VoxelCollision;
@@ -36,15 +37,16 @@ export class FpvPrototype {
   private readonly slide = new THREE.Vector3();
   private readonly tilt = new THREE.Quaternion();
   private readonly impactTint = el('div', 'fpv-impact-tint');
-  private readonly panel = el('aside', 'fpv-prototype');
-  private readonly status = el('div', 'fpv-status', '', this.panel);
-  private readonly telemetry = el('div', 'fpv-telemetry', '', this.panel);
-  private readonly actions = el('div', 'fpv-actions', '', this.panel);
-  private readonly enterExit = button('Open FPV Acro', () => this.toggle());
+  private readonly panel = document.createElement('aside');
+  private readonly details = el('div', 'mode-detail', '', this.panel);
+  private readonly status = el('div', 'fpv-status', '', this.details);
+  private readonly telemetry = el('div', 'fpv-telemetry', '', this.details);
+  private readonly actions = el('div', 'fpv-actions', '', this.details);
+  private readonly enterExit = button('FPV Acro', () => this.toggle());
   private readonly armRadio = button('Arm controller', () => this.arm('controller'));
   private readonly armKeys = button('Fly with keyboard', () => this.arm('keyboard'));
   private readonly reset = button('Reset flight', () => this.restart());
-  private readonly options = el('div', 'fpv-options', '', this.panel);
+  private readonly options = el('div', 'fpv-options', '', this.details);
 
   private phase: Phase = 'loading';
   private source: InputSource = 'controller';
@@ -59,24 +61,29 @@ export class FpvPrototype {
   private notice = '';
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
-    private readonly target: THREE.Vector3, meta: Meta) {
+    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement) {
     this.collision = new VoxelCollision(meta);
     this.impactTint.setAttribute('aria-hidden', 'true');
+    this.panel.className = 'fpv-prototype';
     this.panel.setAttribute('aria-label', 'FPV Acro');
+    this.panel.prepend(this.enterExit);
+    host.append(this.panel);
     this.status.setAttribute('role', 'status');
-    this.actions.append(this.enterExit, this.armRadio, this.armKeys, this.reset);
+    this.actions.append(this.armRadio, this.armKeys, this.reset);
     this.options.append(this.radio.element);
-    const angle = el('label', 'fpv-camera-angle', '', this.options);
+    const angle = el('label', 'row fpv-camera-angle', '', this.options);
+    const value = el('span', 'val', '', angle);
+    const track = el('span', 'track', '', angle);
     const range = document.createElement('input');
     range.type = 'range';
     range.min = '0';
     range.max = '45';
     range.value = '20';
-    const value = document.createElement('span');
-    angle.append('Camera tilt ', range, value);
+    range.setAttribute('aria-label', 'Camera tilt');
+    track.append(range);
     const setTilt = () => {
       this.tilt.setFromAxisAngle(CAMERA_PITCH_AXIS, THREE.MathUtils.degToRad(+range.value));
-      value.textContent = range.value + '°';
+      value.textContent = 'Camera tilt ' + range.value + '°';
     };
     range.addEventListener('input', setTilt);
     setTilt();
@@ -285,14 +292,15 @@ export class FpvPrototype {
   private renderPanel() {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
     const canArm = active && (this.phase === 'ready' || this.phase === 'paused');
-    this.panel.classList.toggle('in-flight', flying);
-    this.enterExit.textContent = active ? 'Exit FPV' : 'Open FPV Acro';
+    this.panel.classList.toggle('mode-active', active);
+    this.details.hidden = !active;
+    this.enterExit.textContent = active ? 'Exit FPV' : 'FPV Acro';
     this.enterExit.disabled = !active && this.nav.mode !== 'orbit';
     this.armRadio.hidden = !canArm;
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
     this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
-    this.options.hidden = flying;
+    this.options.hidden = !active || flying;
     this.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;

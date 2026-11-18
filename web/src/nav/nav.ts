@@ -333,7 +333,7 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
-  // Entry point for the opt-in FPV prototype.
+  // Switch from the map camera to FPV.
   startFpv() {
     if (!this.world || this.walkPending || this.mode !== 'orbit') return false;
     this.rememberSky();
