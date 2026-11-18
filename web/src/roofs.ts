@@ -110,7 +110,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   }
   // corner heights per cell (1/64 m), whether each is its region's plane itself, and the normal it is lit by there
   const hq = new Int32Array(SS * 4), pure = new Uint8Array(SS * 4), nq = new Uint16Array(SS * 4);
-  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY;
+  const seam = tileSeams(N, T, planes, bid, roofTop);
+  // a region's plane, bent near the tile's edges to the height both tiles agree on there (tileSeams)
+  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY + seam.bend(r, GX, GY);
   // which corner of cell c grid point (GX, GY) is
   const cornerIdx = (c: number, GX: number, GY: number) => { const dx = GX - (c % S), dy = GY - Math.floor(c / S); return dy ? (dx ? 2 : 3) : dx; };
   const cs = new Int32Array(4), vs = new Int32Array(4), hs = new Int32Array(4), grp = new Int32Array(4);
@@ -238,7 +240,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
 
   function emitTops(out: SlopeSink, x0: number, y0: number, ground: Uint8Array) {
     const done = new Uint8Array(SS);
-    const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3];
+    const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3] && !seam.bent(regions[reg[c]], c);
     for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
       const c = X + S * Y;
       if (reg[c] < 0 || done[c]) continue;
@@ -316,6 +318,87 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   }
 }
 
+// Where a roof runs over the tile's edge, each tile fits its plane to the part of it that it has: the two came out
+// up to a metre apart there (a step along the tile's edge, closed by a skirt, read as a line across the roof). So at
+// the edge both take the height that the columns either side of it give (the edge's own column and the apron's,
+// which both tiles have): the plane of the cells' code through their tops within 8 m along the edge, in exact
+// integers so both tiles get the same; a region's plane bends to it over the last 8 m before the edge.
+const SEAM = 8;
+function tileSeams(N: number, T: Uint16Array, planes: Uint16Array, bid: Int32Array, roofTop: Uint8Array) {
+  const S = N + 2, Lx = [1, N + 1];
+  const target = new Map<number, number>(), touch = new Map<Region, number>();
+  const gq = (code: number) => {
+    if (!code) return [0, 0];
+    const t = Math.tan(((code - 1) >> 6) * (Math.PI / 72)), a = ((code - 1) & 63) * (Math.PI / 32);
+    return [Math.round(-t * Math.cos(a) * Q), Math.round(-t * Math.sin(a) * Q)];
+  };
+  const vals: number[] = [];
+  // the roof's height (1/64 m) at grid point `along` of line L (axis 0: x = L), for the plane `code` of building b
+  const at = (axis: number, L: number, along: number, code: number, b: number) => {
+    const key = ((axis * (S + 1) + L) * (S + 1) + along) * 4096 * 16384 + code * 16384 + (b & 16383);
+    const got = target.get(key);
+    if (got !== undefined) return got;
+    const [gx, gy] = gq(code);
+    vals.length = 0;
+    for (let k = along - SEAM; k < along + SEAM; k++) {
+      if (k < 0 || k >= S) continue;
+      for (const m of [L - 1, L]) {
+        const c = axis === 0 ? m + S * k : k + S * m;
+        if (!roofTop[c] || planes[c] !== code || bid[c] !== b) continue;
+        const cx = c % S, cy = (c - cx) / S, X2 = axis === 0 ? 2 * L : 2 * along, Y2 = axis === 0 ? 2 * along : 2 * L;
+        vals.push(2 * T[c] * Q + gx * (X2 - 2 * cx - 1) + gy * (Y2 - 2 * cy - 1)); // twice the height, an integer
+      }
+    }
+    let h = NaN;
+    if (vals.length >= 4) {
+      vals.sort((p, q) => p - q);
+      const med = vals[vals.length >> 1];
+      let sum = 0, n = 0;
+      for (const v of vals) if (Math.abs(v - med) <= 2 * Q) { sum += v; n++; }
+      h = Math.round(sum / n / 2);
+    }
+    target.set(key, h);
+    return h;
+  };
+  // which of the 4 edge lines (bits: x = 1, x = N + 1, y = 1, y = N + 1) a region reaches
+  const touches = (r: Region) => {
+    let t = touch.get(r);
+    if (t === undefined) {
+      t = 0;
+      for (const c of r.cells) {
+        const x = c % S, y = (c - x) / S;
+        if (x <= 1) t |= 1; if (x >= N) t |= 2; if (y <= 1) t |= 4; if (y >= N) t |= 8;
+      }
+      touch.set(r, t);
+    }
+    return t;
+  };
+  const bend = (r: Region, GX: number, GY: number) => {
+    const t = touches(r);
+    if (!t) return 0;
+    let d = 0;
+    for (let axis = 0; axis < 2; axis++) for (let e = 0; e < 2; e++) {
+      if (!(t & (1 << (axis * 2 + e)))) continue;
+      const L = Lx[e], p = axis === 0 ? GX : GY, along = axis === 0 ? GY : GX, w = 1 - Math.abs(p - L) / SEAM;
+      if (w <= 0) continue;
+      const h = at(axis, L, Math.min(S, Math.max(0, along)), r.code, r.bid);
+      if (Number.isNaN(h)) continue;
+      const own = axis === 0 ? r.e0 + r.gxq * L + r.gyq * GY : r.e0 + r.gxq * GX + r.gyq * L;
+      if (Math.abs(h - own) <= 1.5 * Q) d += Math.min(1, w) * (h - own);
+    }
+    return Math.round(d);
+  };
+  return {
+    bend,
+    // whether any corner of cell c (of region r) is bent
+    bent(r: Region, c: number) {
+      const x = c % S, y = (c - x) / S;
+      return !!touches(r) && (x < SEAM + 1 || y < SEAM + 1 || x > N - SEAM || y > N - SEAM)
+        && (bend(r, x, y) !== 0 || bend(r, x + 1, y) !== 0 || bend(r, x + 1, y + 1) !== 0 || bend(r, x, y + 1) !== 0);
+    },
+  };
+}
+
 // a normal (x east, y up, z south) as a plane code: 1 + slope in 2.5° steps (0 to 30) x 64 + downhill direction
 function normalCode(x: number, y: number, z: number) {
   const k = Math.min(30, Math.round(Math.acos(y / Math.hypot(x, y, z)) / (Math.PI / 72)));
@@ -330,6 +413,8 @@ function fit(r: Region, S: number, T: Uint16Array) {
   for (const c of r.cells) { mx += (c % S) + 0.5; my += Math.floor(c / S) + 0.5; mt += T[c]; }
   mx /= n; my /= n; mt /= n;
   let gx = r.gx, gy = r.gy;
+  // (by the code's slope, not the fitted one: the same in the tiles either side of an edge, tileSeams)
+  r.span = Math.round((0.75 + 0.5 * (Math.abs(gx) + Math.abs(gy))) * Q);
   if (!r.flat && n >= 16) {
     let sxx = 0, sxy = 0, syy = 0, sxt = 0, syt = 0;
     for (const c of r.cells) {
@@ -346,5 +431,4 @@ function fit(r: Region, S: number, T: Uint16Array) {
   // the plane through the tops' mean at their mean position; e0: its height at grid point (0, 0)
   r.e0 = Math.round(mt * Q - r.gxq * mx - r.gyq * my);
   r.gx = r.gxq / Q; r.gy = r.gyq / Q;
-  r.span = Math.round((0.75 + 0.5 * (Math.abs(r.gx) + Math.abs(r.gy))) * Q);
 }

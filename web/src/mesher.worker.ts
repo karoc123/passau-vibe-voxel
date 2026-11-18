@@ -41,13 +41,13 @@ export type MeshReply =
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
   (self as unknown as { postMessage(m: MeshReply, t: Transferable[]): void }).postMessage(msg, transfer);
 
-async function fetchGzip(url: string) {
+export async function fetchGzip(url: string) {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${res.status} ${url}`);
   return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 }
 
-function decode(buf: ArrayBuffer, N: number) {
+export function decode(buf: ArrayBuffer, N: number) {
   const n2 = (N + 2) * (N + 2);
   const counts = new Uint16Array(buf, 0, n2), ground = new Uint8Array(buf, n2 * 2, n2);
   let nr = 0;
@@ -136,7 +136,7 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 
 // bldIds (1 m tiles): the building of each column, apron included (scripts/zones.py, 0: none); faces never merge across
 // buildings
-function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
+export function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
   roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null): MeshOut {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
