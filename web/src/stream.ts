@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
-import type { MeshRequest, MeshReply, RawColumns } from './mesher.worker';
+import type { Columns, MeshOut, MeshRequest, MeshReply } from './mesher.worker';
 import { World, type ColumnSource } from './world';
 import { MAT } from './voxelMaterial';
 import { PAL_ROOF, PAL_WALL } from './chamfer';
@@ -19,6 +19,8 @@ export interface TileNode {
   used: number;
   pinned: number;
   mesh?: THREE.Mesh;
+  // a foliage tile: its base tile's mesh without what the grass covers, put in when this one shows (coverBase)
+  cover?: THREE.BufferGeometry;
   data?: ColumnData;
   empty?: boolean;
   dataJob?: Job;
@@ -38,6 +40,45 @@ interface Job {
 interface Pooled { worker: Worker; busy: number; idle: number }
 
 const releaseArray = function (this: THREE.BufferAttribute) { (this as { array: unknown }).array = null; };
+
+// Facing culling. A tile's quads come grouped by the way they face (mesher.worker.ts byFacing, FACE_ORDER: -y, -z,
+// +x, +y, -x, +z in three.js axes; geometry.userData.faces their starts); each draw of it, in view or in the sun's
+// shadow map, takes only the one run of groups that holds all that can face that camera: what faces away is culled
+// by the GPU anyway, but only after its vertices are shaded.
+// In view: a group can face the camera if the camera is on its outer side of some face plane in the tile's box.
+// In the shadow map (an orthographic sun, the back faces drawn): only the groups facing away from the light.
+const FACE_AXIS = [1, 2, 0, 1, 0, 2], FACE_SIGN = [-1, -1, 1, 1, -1, 1];
+const _c = new THREE.Vector3(), _l = new THREE.Vector3();
+function drawFacing(geo: THREE.BufferGeometry, show: (axis: number, sign: number) => boolean) {
+  const f = geo.userData.faces as Uint32Array | undefined;
+  if (!f) return;
+  let a = -1, b = -1;
+  for (let k = 0; k < 6; k++) if (f[k + 1] > f[k] && show(FACE_AXIS[k], FACE_SIGN[k])) { if (a < 0) a = k; b = k; }
+  if (a < 0) geo.setDrawRange(0, 0);
+  else geo.setDrawRange(f[a] * 6, (f[b + 1] - f[a]) * 6);
+}
+// the index buffer is shared by every tile: disposing a geometry with it would drop it from the GPU for all of them
+const disposeGeometry = (geo: THREE.BufferGeometry) => { geo.setIndex(null); geo.dispose(); };
+const drawAll = (geo: THREE.BufferGeometry) => { const f = geo.userData.faces as Uint32Array | undefined; if (f) geo.setDrawRange(0, f[6] * 6); };
+function facingInView(this: THREE.Mesh, _r: THREE.WebGLRenderer, _s: THREE.Scene, camera: THREE.Camera, geo: THREE.BufferGeometry, material: THREE.Material) {
+  const bb = geo.boundingBox;
+  if (!bb || material.side !== THREE.FrontSide || !(camera as THREE.PerspectiveCamera).isPerspectiveCamera) { drawAll(geo); return; }
+  _c.setFromMatrixPosition(camera.matrixWorld);
+  // outside of the box on a face's outer side, by how much (negative: on its inner side)
+  const out = (axis: number, sign: number) => (sign > 0 ? _c.getComponent(axis) - bb.min.getComponent(axis) : bb.max.getComponent(axis) - _c.getComponent(axis)) + 0.01;
+  // a slanted wall (chamfer) is filed under its nearer side axis but faces up to 45° off it: its group shows wherever
+  // a face turned 45° either way could face the camera
+  const slant = (geo.userData.faces as Uint32Array)[7] === 1;
+  drawFacing(geo, (axis, sign) => out(axis, sign) > 0 || (slant && axis !== 1 && out(axis, sign) + Math.max(out(2 - axis, 1), out(2 - axis, -1)) > 0));
+}
+function facingInShadow(this: THREE.Mesh, _r: THREE.WebGLRenderer, _o: THREE.Object3D, _c0: THREE.Camera, shadowCamera: THREE.Camera, geo: THREE.BufferGeometry, depth: THREE.Material) {
+  if (depth.side === THREE.DoubleSide || !(shadowCamera as THREE.OrthographicCamera).isOrthographicCamera) { drawAll(geo); return; }
+  _l.setFromMatrixColumn(shadowCamera.matrixWorld, 2).normalize(); // towards the light
+  const back = depth.side === THREE.BackSide ? -1 : 1;
+  // roof slopes and slanted walls (faces[7]) face off the axes they are filed under: all of such a tile is drawn
+  if ((geo.userData.faces as Uint32Array)[7] === 1) { drawAll(geo); return; }
+  drawFacing(geo, (axis, sign) => back * sign * _l.getComponent(axis) > -1e-4);
+}
 
 function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
   let resolve = () => {};
@@ -65,18 +106,35 @@ export class TileStreamer implements ColumnSource {
   // per palette entry: roof material, its staircases shaded as roof planes; a building's wall, its diagonal staircases
   // chamfered flat (mesher.worker.ts, chamfer.ts)
   private readonly roofPal: Uint8Array;
+  private readonly leafPal: Uint8Array;
 
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
     this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0));
+    this.leafPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF ? 1 : 0));
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
   }
 
   columns(key: string) { return this.nodes.get(key)?.data; }
+
+  // what the tile meshes hold on the GPU (tools/perfbench.mjs): quads and vertex bytes, of all and of the shown ones
+  stats() {
+    const r = { meshes: 0, quads: 0, bytes: 0, shownMeshes: 0, shownQuads: 0 };
+    for (const n of this.nodes.values()) {
+      const g = n.mesh?.geometry;
+      if (!g) continue;
+      const q = g.userData.faces[6] as number;
+      let b = 0;
+      for (const [k, a] of Object.entries(g.attributes) as [string, THREE.BufferAttribute][]) b += a.count * a.itemSize * (k === 'vattr' ? 1 : 2);
+      r.meshes++; r.quads += q; r.bytes += b;
+      if (n.mesh!.visible) { r.shownMeshes++; r.shownQuads += q; }
+    }
+    return r;
+  }
 
   key(s: number, tx: number, ty: number) { return `${s}/${tx}_${ty}`; }
 
@@ -169,9 +227,12 @@ export class TileStreamer implements ColumnSource {
     if (n.foliage) {
       // the base tile's column data is still here: hand over a copy instead of fetching it again
       const b = this.nodes.get(this.key(1, n.tx, n.ty))?.data;
-      const under: RawColumns | string = b ? { counts: b.counts.slice(), runs: b.runs.slice() } : file(`1/${n.tx}_${n.ty}`);
-      return { msg: { ...base, url: file(`1f/${n.tx}_${n.ty}`), under, keep: false, dataOnly: false, bld: null, roof: null },
-        transfer: typeof under === 'string' ? [] : [under.counts.buffer, under.runs.buffer] };
+      const under: Columns | string = b ? { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null } : file(`1/${n.tx}_${n.ty}`);
+      // ... and the base tile meshed again without what the grass covers (coverBase)
+      const bld = this.buildingIds(x0, y0);
+      return { msg: { ...base, url: file(`1f/${n.tx}_${n.ty}`), under, keep: false, dataOnly: false, bld: null, roof: null,
+        base: { bld, roof: this.roofPal, leaf: this.leafPal } },
+      transfer: [...(typeof under === 'string' ? [] : [under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : [])]), ...(bld ? [bld.buffer] : [])] };
     }
     const bld = !dataOnly && n.s === 1 ? this.buildingIds(x0, y0) : null;
     return { msg: { ...base, url: file(n.key), keep: n.keep || n.s > 1, dataOnly, bld,
@@ -203,7 +264,8 @@ export class TileStreamer implements ColumnSource {
       n.state = 'ready'; n.empty = true;
       n.job.resolve();
     } else if (n && m.type === 'node') {
-      if (m.quads) n.mesh = this.makeMesh(m.pos, m.attr, m.pal, m.bld, m.quads);
+      if (m.quads) n.mesh = this.makeMesh(m);
+      if (m.base?.quads) n.cover = this.makeGeometry(m.base);
       if (m.data) this.setData(n, m.data);
       n.state = 'ready';
       n.job.resolve();
@@ -211,7 +273,7 @@ export class TileStreamer implements ColumnSource {
     this.pump();
   }
 
-  private makeMesh(pos: Int16Array, attr: Uint8Array, pal: Uint16Array, bld: Uint16Array | null, quads: number) {
+  private makeGeometry({ pos, attr, pal, bld, quads, faces }: MeshOut) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('vattr', new THREE.BufferAttribute(attr, 4));
@@ -221,7 +283,14 @@ export class TileStreamer implements ColumnSource {
     geo.setDrawRange(0, quads * 6);
     geo.computeBoundingBox(); geo.computeBoundingSphere();
     for (const a of Object.values(geo.attributes)) (a as THREE.BufferAttribute).onUpload(releaseArray); // culling only needs the bounding sphere
-    const mesh = new THREE.Mesh(geo, this.material);
+    geo.userData.faces = faces;
+    return geo;
+  }
+
+  private makeMesh(out: MeshOut) {
+    const mesh = new THREE.Mesh(this.makeGeometry(out), this.material);
+    mesh.onBeforeRender = facingInView;
+    mesh.onBeforeShadow = facingInShadow;
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.matrixAutoUpdate = false;
@@ -236,22 +305,35 @@ export class TileStreamer implements ColumnSource {
     for (let q = 0, b = 0; q < n; q++, b += 4) a.set([b, b + 1, b + 2, b, b + 2, b + 3], q * 6);
     const old = this.quadIdx;
     this.quadIdx = new THREE.BufferAttribute(a, 1);
-    if (old) for (const v of this.nodes.values()) if (v.mesh?.geometry.index === old) v.mesh.geometry.setIndex(this.quadIdx);
+    if (old) for (const v of this.nodes.values()) for (const g of [v.mesh?.geometry, v.cover]) if (g?.index === old) g.setIndex(this.quadIdx);
     return this.quadIdx;
   }
 
-  private setData(n: TileNode, { counts, ground, runs }: { counts: Uint16Array; ground: Uint8Array; runs: Uint16Array }) {
+  private setData(n: TileNode, { counts, ground, runs, planes }: { counts: Uint16Array; ground: Uint8Array; runs: Uint16Array; planes?: Uint16Array | null }) {
     const S = this.N + 2, off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + counts[i];
     const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
-    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off };
+    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null };
     this.version++;
   }
 
+  // a foliage tile shows: its base tile's mesh loses the faces under its grass (only ever both, or the base alone)
+  coverBase(f: TileNode) {
+    const geo = f.cover, b = this.nodes.get(this.key(1, f.tx, f.ty));
+    f.cover = undefined;
+    if (!geo) return;
+    if (b?.mesh && !b.mesh.geometry.userData.covered) {
+      disposeGeometry(b.mesh.geometry);
+      b.mesh.geometry = geo;
+      geo.userData.covered = true;
+    } else disposeGeometry(geo);
+  }
+
   free(n: TileNode) {
+    if (n.cover) disposeGeometry(n.cover);
     n.dataJob?.resolve();
     n.dataJob = undefined;
-    if (n.mesh) { n.mesh.geometry.dispose(); this.group.remove(n.mesh); }
+    if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); }
     this.nodes.delete(n.key);
     if (n.data) this.version++;
   }

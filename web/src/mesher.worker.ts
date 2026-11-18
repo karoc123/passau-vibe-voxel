@@ -5,12 +5,13 @@ import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs } from './roofs';
 
 export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
-export interface Columns extends RawColumns { ground: Uint8Array }
+// planes: level 1's roof plane per column (decode), kept with the columns so a foliage job can re-mesh its base tile
+export interface Columns extends RawColumns { ground: Uint8Array; planes?: Uint16Array | null }
 
 export interface MeshRequest {
   key: string;
   url: string;
-  under?: RawColumns | string;
+  under?: RawColumns | Columns | string;
   N: number;
   s: number;
   x0: number;
@@ -21,10 +22,18 @@ export interface MeshRequest {
   // per palette entry, flags (chamfer.ts; 1 m tiles only): PAL_ROOF, roof material, its staircases shaded as the roof
   // plane; PAL_WALL, a building's wall, its diagonal staircases chamfered flat
   roof: Uint8Array | null;
+  // a foliage tile only: mesh its base tile (under) again too, without the faces its grass and trunks cover
+  base?: BaseRemesh | null;
 }
 
+// what the base tile is meshed with (as for its own request), and which palette entries are leaves (not cover: they
+// can be discarded, autumn and winter)
+export interface BaseRemesh { bld: Uint16Array | null; roof: Uint8Array | null; leaf: Uint8Array }
+
+export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array }
+
 export type MeshReply =
-  | { type: 'node'; key: string; dataOnly: boolean; data: Columns | null; pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number }
+  | ({ type: 'node'; key: string; dataOnly: boolean; data: Columns | null; base?: MeshOut } & MeshOut)
   | { type: 'error'; key: string; dataOnly: boolean; error: string };
 
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
@@ -47,24 +56,26 @@ function decode(buf: ArrayBuffer, N: number) {
   return { counts, ground, runs, planes };
 }
 
-const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs });
-const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer];
+const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null });
+const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : [])];
 
 self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   const m = e.data;
   try {
     const { counts, ground, runs, planes } = decode(await fetchGzip(m.url), m.N);
-    const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs }) : null;
+    const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
     if (m.dataOnly) {
-      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0 }, columnBuffers(keep!));
+      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(7) }, columnBuffers(keep!));
       return;
     }
     const under = typeof m.under === 'string' ? decode(await fetchGzip(m.under), m.N) : m.under ?? null;
     const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
-    const transfer: Transferable[] = [out.pos.buffer, out.attr.buffer, out.pal.buffer];
-    if (out.bld) transfer.push(out.bld.buffer);
+    const base = m.base && under && 'ground' in under
+      ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
+    const transfer: Transferable[] = [];
+    for (const o of base ? [out, base] : [out]) transfer.push(o.pos.buffer, o.attr.buffer, o.pal.buffer, o.faces.buffer, ...(o.bld ? [o.bld.buffer] : []));
     if (keep) transfer.push(...columnBuffers(keep));
-    post({ type: 'node', key: m.key, dataOnly: false, data: keep, ...out }, transfer);
+    post({ type: 'node', key: m.key, dataOnly: false, data: keep, ...out, base }, transfer);
   } catch (err) {
     post({ type: 'error', key: m.key, dataOnly: m.dataOnly, error: String(err) });
   }
@@ -83,6 +94,7 @@ class QuadBuffer {
   pal = new Uint16Array(this.cap);
   bld = new Uint16Array(this.cap);
   count = 0;
+  slanted = false; // holds faces off the six axes (chamfers, roof slopes): facing culling must be conservative
 
   reserve(n: number) {
     if (this.count + n <= this.cap) return;
@@ -123,7 +135,7 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 // bldIds (1 m tiles): the building of each column, apron included (scripts/zones.py, 0: none); faces never merge across
 // buildings
 function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
-  roofPal: Uint8Array | null, planes: Uint16Array | null) {
+  roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null): MeshOut {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
   const zmax = Math.max(topOf(cols, off, SS), under && uoff ? topOf(under, uoff, SS) : 0);
@@ -139,13 +151,54 @@ function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, b
   fill(cols, off, (v) => v);
   const bidAt = (x: number, y: number) => (bldIds ? bldIds[(y + 1) * S + x + 1] : 0);
   const out = new QuadBuffer();
-  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out);
-  const n = out.count;
-  return { pos: out.pos.slice(0, n * 3), attr: out.attr.slice(0, n * 4), pal: out.pal.slice(0, n), quads: n / 4, bld: bldIds ? out.bld.slice(0, n) : null };
+  if (cover && cover.length < vol.length) { const c = new Uint8Array(vol.length); c.set(cover); cover = c; }
+  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover);
+  return byFacing(out, !!bldIds);
 }
 
+// --- culling helpers (kept apart from the meshing itself) ---
+
+// The quads grouped by the way they face, in the order FACE_ORDER, so that what can face a camera, or the sun, is
+// mostly one run of them (stream.ts draws only that run): from above, of a tile to the north-west (or south-east) of
+// the camera, exactly the run that faces it; the city's shadow map from an afternoon sun (the back faces: down,
+// north and east) the same. faces: where each group starts, in quads, and the end. (Same order in stream.ts FACES.)
+const FACE_ORDER = [4, 2, 1, 5, 0, 3]; // normal index (mesher axis * 2 + positive): down, north, east, up, west, south
+function byFacing(out: QuadBuffer, withBld: boolean): MeshOut {
+  const nq = out.count / 4, cnt = new Uint32Array(6);
+  for (let q = 0; q < nq; q++) cnt[out.attr[q * 16] % 8]++;
+  const faces = new Uint32Array(8), at = new Uint32Array(6);
+  FACE_ORDER.forEach((g, k) => { at[g] = faces[k]; faces[k + 1] = faces[k] + cnt[g]; });
+  const pos = new Int16Array(nq * 12), attr = new Uint8Array(nq * 16), pal = new Uint16Array(nq * 4), bld = withBld ? new Uint16Array(nq * 4) : null;
+  for (let q = 0; q < nq; q++) {
+    const t = at[out.attr[q * 16] % 8]++;
+    pos.set(out.pos.subarray(q * 12, q * 12 + 12), t * 12);
+    attr.set(out.attr.subarray(q * 16, q * 16 + 16), t * 16);
+    pal.set(out.pal.subarray(q * 4, q * 4 + 4), t * 4);
+    if (bld) bld.set(out.bld.subarray(q * 4, q * 4 + 4), t * 4);
+  }
+  faces[7] = out.slanted ? 1 : 0;
+  return { pos, attr, pal, bld, quads: nq, faces };
+}
+
+// What of a base tile its foliage tile covers, per cell of the meshing volume: 1 grass or a trunk (always drawn,
+// opaque), 2 leaves. The foliage tile's grass sits in the base's top cells: the base's own faces there lie under the
+// grass's (drawn over them with a polygon offset) and are left out (meshFaces).
+function coverOf(N: number, fol: RawColumns, leaf: Uint8Array) {
+  const S = N + 2, SS = S * S, off = offsetsOf(fol.counts, SS), sz = topOf(fol, off, SS) + 2, cv = new Uint8Array(SS * sz);
+  for (let i = 0; i < SS; i++) for (let k = off[i], e = off[i] + fol.counts[i]; k < e; k++) {
+    const z0 = fol.runs[k * 3], len = fol.runs[k * 3 + 1], v = fol.runs[k * 3 + 2];
+    for (let z = z0; z < z0 + len; z++) cv[i + SS * (z + 1)] = v < leaf.length && leaf[v] ? 2 : 1;
+  }
+  return cv;
+}
+
+// a face of a base cell (vol index a) towards its empty neighbour (ni) that foliage hides for good: the cell is grass
+// (its own face is there, unless leaves are in front of it, which may go), or the neighbour is grass or a trunk
+const coveredFace = (cover: Uint8Array, a: number, ni: number) => (cover[ni] === 1 || (cover[a] === 1 && cover[ni] !== 2));
+
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
-  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer) {
+  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer,
+  cover: Uint8Array | null = null) {
   const S = N + 2, sx = S, sy = S;
   const dims = [N, N, sz - 2];
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
@@ -181,7 +234,8 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             let key = 0;
             if (a !== 0 && a !== SOLID_BELOW && a !== OCC) {
               const ni = idx + dir * sd, nb = vol[ni];
-              if ((nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))) {
+              if ((nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
+                && !(cover && coveredFace(cover, idx, ni))) {
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
                 const pz = d === 2 ? sl : d === 0 ? j : i;
@@ -201,6 +255,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
     }
   }
   if (ch) for (const p of ch.prisms) emitPrism(p, x0, y0, out, roofPal!, roofs, slopes);
+  if (ch?.prisms.length || slopes) out.slanted = true;
   slopes?.emit(out, x0, y0, ground);
 }
 

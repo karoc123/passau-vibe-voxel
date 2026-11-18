@@ -66,6 +66,7 @@ export interface Zones {
 export type Place = [name: string, kind: string, x: number, y: number, size: number, alt: string];
 
 export interface ColumnData {
+  planes?: Uint16Array | null; // level 1: roof plane per column (mesher.worker.ts decode), for re-meshing
   s: number;
   x0: number;
   y0: number;

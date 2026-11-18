@@ -176,7 +176,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       const i = index(n.tx, n.ty);
       if (!want[i]) {
         if (n.mesh && clay === 'ready') n.mesh.visible = false;
-        if (clay === 'ready' && now - n.used > 4000 && !(n.pinned > now)) {
+        // (the foliage goes with its base: the base's mesh lacks what the grass covers, stream.ts coverBase)
+        if (clay === 'ready' && now - n.used > 4000 && !(n.pinned > now) && !(n.foliage && (S.nodes.get(S.key(1, n.tx, n.ty))?.pinned ?? 0) > now)) {
           if (counted.delete(n.key)) { if (n.foliage) folTile[i] = 0; else inTile[i] = 0; }
           S.free(n);
         }
@@ -185,7 +186,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       n.used = now;
       if (counted.has(n.key)) { if (n.mesh) n.mesh.visible = true; continue; }
       counted.add(n.key);
-      if (n.foliage) { folTile[i] = 1; if (n.mesh) { n.mesh.material = folMat; n.mesh.visible = true; } continue; }
+      if (n.foliage) { folTile[i] = 1; if (n.mesh) { n.mesh.material = folMat; n.mesh.visible = true; } S.coverBase(n); continue; }
       inTile[i] = 1;
       if (n.mesh) { n.mesh.customDepthMaterial = depthMat; n.mesh.visible = true; }
       for (const b of onTile[i]) if (!complete[b] && tilesOf[b].every((k) => inTile[k])) {
