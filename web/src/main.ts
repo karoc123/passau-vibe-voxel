@@ -88,7 +88,8 @@ tamePinch(renderer.domElement);
 boot();
 
 function makeRenderer() {
-  const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+  // (no preserveDrawingBuffer: it costs a full-screen copy every frame; screenshots go through the browser)
+  const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   r.info.autoReset = false;
   r.setPixelRatio(pixelsAt(level));
   r.setSize(innerWidth, innerHeight);
@@ -351,7 +352,7 @@ renderer.setAnimationLoop((now) => {
   labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
 });
 
-window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, city: () => city };
+window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city };
 
 // what the city's shadow map shows: which tiles are drawn, and what folds, hides or thins them in its depth pass
 let stillKey = '';
