@@ -3,11 +3,11 @@
 // headless one only llvmpipe/SwiftShader (HEADLESS=1). Each frame ends in a 1-pixel readback, so its interval is the
 // whole frame's CPU + GPU time, not how far ahead the browser queues. The whole city at 1 m (level 1) by default.
 // usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]
-//   views: comma list of named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
+//   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 
-const [out = 'perfbench.json', viewArg = 'overview,dom,city,low=2127,40,790,2127,22,700', levelArg = '1'] = process.argv.slice(2);
+const [out = 'perfbench.json', viewArg = 'overview;dom;city;low=2127,40,790,2127,22,700', levelArg = '1'] = process.argv.slice(2);
 const URL = process.env.URL || 'http://localhost:5183';
 const N = +(process.env.FRAMES || 30);
 const W = +(process.env.W || 1400), H = +(process.env.H || 900);
@@ -23,7 +23,7 @@ await cdp.send('Performance.enable');
 const met = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
 
 const res = { gpu: null, level: +levelArg, size: [W, H], frames: N, views: {} };
-for (const spec of viewArg.split(',').map((s) => s.trim()).filter(Boolean)) {
+for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
   const [name, cam] = spec.split('=');
   const q = `${cam ? `cam=${cam}` : `view=${name}`}&date=06-21&hour=14&weather=clear`;
   log(spec, 'load');
