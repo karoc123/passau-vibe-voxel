@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Sky } from './sky';
-import { beam, sunAt } from './sun';
+import { beam, moonAt, sunAt } from './sun';
 import { clamp, lerp, smooth } from './util';
 import type { VoxelUniforms } from './voxelMaterial';
 import { visibility, WEATHERS, type Weather } from './weather';
@@ -54,7 +54,7 @@ export class Daylight {
   night = 0;
   readonly sky = new Sky();
   uniforms: VoxelUniforms | null = null;
-  bloom: { intensity: number } | null = null;
+  bloom: { intensity: number; luminanceMaterial: { threshold: number; smoothing: number } } | null = null;
   grade: { night: number } | null = null;
   redraws = 0;
   ao: { intensity: number; aoRadius: number } | null = null;
@@ -193,13 +193,17 @@ export class Daylight {
     const { el, az } = sunAt(this.day, hour), elDeg = el * 180 / Math.PI, w = this.weather, cloud = w.cloud;
     const night = this.night = 1 - smooth(-7, 1, elDeg), day = 1 - night;
     const deep = smooth(-9, -17, elDeg), golden = (1 - smooth(8, 34, elDeg)) * (1 - cloud);
-    const dir = elDeg > -2 ? this.skyDir(az, Math.max(el, 2.5 * Math.PI / 180)) : new THREE.Vector3(0.45, 0.75, 0.5).normalize(); // the moon, high in the SE
+    // by night the light is the moon's where it is up (no lower than 15°: its shadows stay short), fainter at a crescent;
+    // without it, a dim skylight from high in the SE
+    const moon = moonAt(this.day, hour), moonDeg = moon.el * 180 / Math.PI, moonUp = smooth(-1, 6, moonDeg), moonK = moonUp * moon.lit;
+    const nightDir = new THREE.Vector3(0.45, 0.75, 0.5).normalize().lerp(this.skyDir(moon.az, Math.max(moon.el, 15 * Math.PI / 180)), moonUp).normalize();
+    const dir = elDeg > -2 ? this.skyDir(az, Math.max(el, 2.5 * Math.PI / 180)) : nightDir;
     const sun = this.sun, hemi = this.hemi, light = elDeg > -2 ? dir.clone().lerp(new THREE.Vector3(0, 1, 0), 0.8 * cloud).normalize() : dir;
     const T = beam(elDeg), lumT = T[0] * 0.2126 + T[1] * 0.7152 + T[2] * 0.0722, sinEl = Math.max(0, Math.sin(el));
     const sky = Math.max(0.22 * sinEl * (1 - lumT), 0.025 * smooth(-7, 2, elDeg)), sunH = lumT * sinEl;
     const adapt = clamp((0.62 / (sunH + sky)) ** 0.72, 1, 8);
-    sun.color.setRGB(T[0] / T[0], T[1] / T[0], T[2] / T[0]).lerp(new THREE.Color(0xa8b4cc), night).lerp(new THREE.Color(0xd8dde6), cloud * day);
-    sun.intensity = lerp(5.9 * lumT * adapt, 0.85, night) * (elDeg > -2 ? smooth(-2, 1, elDeg) * day + night : night) * lerp(1, 0.4 * sinEl, cloud);
+    sun.color.setRGB(T[0] / T[0], T[1] / T[0], T[2] / T[0]).lerp(new THREE.Color(0xa8b4cc).lerp(new THREE.Color(0x9cb0d8), moonK), night).lerp(new THREE.Color(0xd8dde6), cloud * day);
+    sun.intensity = lerp(5.9 * lumT * adapt, 0.85 * (0.75 + 0.4 * moonK), night) * (elDeg > -2 ? smooth(-2, 1, elDeg) * day + night : night) * lerp(1, 0.4 * sinEl, cloud);
     sun.shadow.radius = lerp(3, 22, cloud);
     sun.shadow.normalBias = clamp(0.3 / Math.max(light.y, 0.05), 0.5, 3);
     const skyRel = sky / 0.075 * adapt;
@@ -211,7 +215,8 @@ export class Daylight {
       hemi.groundColor.lerp(new THREE.Color(0x6e6a66).lerp(new THREE.Color(0x2a2420), night), cloud);
       hemi.intensity = lerp(hemi.intensity, lerp(1.6 * smooth(-4, 6, elDeg) * (0.3 + 0.7 * sinEl) ** 0.4, 3.0 * (1 + 0.35 * w.cover), night), cloud);
     }
-    this.sky.set({ elDeg, sunDir: dir, trueSun: this.skyDir(az, el), golden, night, deep, cloud });
+    this.sky.set({ elDeg, sunDir: dir, trueSun: this.skyDir(az, el), golden, night, deep, cloud,
+      moonDir: this.skyDir(moon.az, moon.el), moon: night * smooth(-0.6, 1, moonDeg) * (1 - cloud), moonLit: moon.lit });
     this.lightDir.copy(light);
     this.shadowKey = '';
     if (this.uniforms) {
@@ -221,7 +226,11 @@ export class Daylight {
       this.uniforms.uSnow.value = w.cover;
       this.uniforms.uDay.value = this.day;
     }
-    if (this.bloom) this.bloom.intensity = lerp(0.15, 0.9, night);
+    // by night a lower threshold: the lit windows, the lamps' heads and the moon glow a little, not only the brightest
+    if (this.bloom) {
+      this.bloom.intensity = lerp(0.15, 0.9, night);
+      Object.assign(this.bloom.luminanceMaterial, { threshold: lerp(0.92, 0.8, night), smoothing: lerp(0.15, 0.25, night) });
+    }
     if (this.grade) this.grade.night = night;
     if (this.ao) Object.assign(this.ao, { intensity: lerp(2.2, 3.4, cloud * day), aoRadius: lerp(6, 9, cloud * day) });
     this.scene.fog = new THREE.Fog(this.sky.horizon.clone(), 2500, 7000);

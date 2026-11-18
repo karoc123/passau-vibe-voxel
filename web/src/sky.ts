@@ -8,6 +8,7 @@ const FRAG = `
 uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uWarm; uniform float uGolden; uniform vec3 uGround;
 uniform vec3 uSunDir; uniform vec3 uTrueSun; uniform vec3 uSunCol; uniform float uNight; uniform float uDeep;
 uniform vec3 uAfterglow; uniform vec3 uCityGlow; uniform vec3 uCloudLit; uniform vec3 uCloudDark; uniform float uCloud;
+uniform vec3 uMoonDir; uniform float uMoon; uniform float uMoonLit;
 varying vec3 vDir;
 float hash(vec3 p) { p = fract(p * 0.3183099 + .1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -26,6 +27,24 @@ void main() {
   col = mix(col, uGround, smoothstep(0.0, -0.25, h));
   float s = max(dot(d, uSunDir), 0.);
   col += uSunCol * (pow(s, 600.) * 6. * (1. - uCloud) + pow(s, 12.) * 0.35 + pow(s, 3.) * 0.12) * (1. - uNight) * (1. - 0.8 * uCloud);
+  // The moon (sun.ts moonAt): a disc ~2.5 x its true size, lit from where the sun is (so its phase is the true one), its
+  // seas a little darker, the dark part faintly earthlit; a halo around it, more of it the fuller it is. Before the
+  // clouds, which pass over it.
+  if (uMoon > 0.0) {
+    float cd = dot(d, uMoonDir);
+    vec3 e1 = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0)), e2 = cross(e1, uMoonDir);
+    vec2 p = vec2(dot(d, e1), dot(d, e2)) / 0.0105;
+    float r2 = dot(p, p);
+    if (cd > 0.0 && r2 < 1.2) {
+      vec3 N = e1 * p.x + e2 * p.y - uMoonDir * sqrt(max(1.0 - r2, 0.0));
+      float lit = smoothstep(-0.04, 0.12, dot(N, uTrueSun));
+      float seas = 0.78 + 0.22 * smoothstep(0.35, 0.65, noise(p * 2.2 + 4.3));
+      vec3 mc = vec3(1.0, 0.96, 0.88) * (lit * seas * 1.7 + 0.025);
+      col = mix(col, mc, (1.0 - smoothstep(1.0 - 2.0 * fwidth(r2), 1.0, r2)) * uMoon);
+    }
+    float a = max(1.0 - cd, 0.0);
+    col += vec3(0.55, 0.65, 0.85) * (exp(-a * 9000.0) * 0.25 + exp(-a * 600.0) * 0.05) * uMoon * uMoonLit;
+  }
   if (h > 0.02) {
     vec2 uv = d.xz / (h + 0.12) * 1.4;
     float f = fbm(uv * 1.3 + vec2(3.7, 1.2));
@@ -51,6 +70,9 @@ export interface SkyState {
   night: number;
   deep: number;
   cloud: number;
+  moonDir: THREE.Vector3;
+  moon: number; // how much of the moon is seen (0 by day, below the horizon or behind the overcast)
+  moonLit: number;
 }
 
 export class Sky {
@@ -63,6 +85,7 @@ export class Sky {
     uWarm: { value: C(0xffc89a) }, uGolden: { value: 0 }, uSunCol: { value: C(0xfff2d8) }, uNight: { value: 0 },
     uDeep: { value: 0 }, uAfterglow: { value: C(0x000000) }, uCityGlow: { value: C(0x000000) },
     uCloudLit: { value: C(0xffffff) }, uCloudDark: { value: C(0xdde3ea) }, uCloud: { value: 0 },
+    uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoon: { value: 0 }, uMoonLit: { value: 0 },
   };
   private env: THREE.Scene | null = null;
 
@@ -74,8 +97,11 @@ export class Sky {
   }
 
   // night: 0 by day .. 1 after sunset; deep: 0 at blue hour .. 1 in full night
-  set({ elDeg, sunDir, trueSun, golden, night, deep, cloud }: SkyState) {
+  set({ elDeg, sunDir, trueSun, golden, night, deep, cloud, moonDir, moon, moonLit }: SkyState) {
     const u = this.u;
+    u.uMoonDir.value.copy(moonDir);
+    u.uMoon.value = moon;
+    u.uMoonLit.value = moonLit;
     const nightTop = mixC(C(0x0a2f6a), C(0x081226), deep), nightHor = mixC(C(0x5a6f98), C(0x2c3450), deep);
     u.uTop.value.copy(mixC(mixC(C(0x4f8fd8), C(0x6f8fd0), golden * 0.5), nightTop, night));
     u.uHorizon.value.copy(mixC(C(0xdde8f1), nightHor, night));

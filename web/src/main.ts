@@ -7,6 +7,7 @@ import { Daylight } from './daylight';
 import { Flood } from './flood';
 import { loadFoliage } from './foliage';
 import { loadWindows } from './windows';
+import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
@@ -75,6 +76,7 @@ const caption = new Caption();
 const perf = new Perf(setLevel);
 perf.show(level);
 let setWindows: ((hour: number, day: number) => void) | null = null;
+let lampHeads: LampHeads | null = null;
 
 nav.cancelFly = () => { fly = null; };
 bar.setRiver(RIVER.surveyed);
@@ -322,7 +324,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
-    ground.then((g) => lightStreets(uniforms!, meta, td.roads, td.peds, g));
+    ground.then((g) => { lampHeads = new LampHeads(scene, lightStreets(uniforms!, meta, td.roads, td.peds, g)); });
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;
@@ -355,6 +357,7 @@ renderer.setAnimationLoop((now) => {
   if (uniforms) uniforms.uTime.value = t;
   setWindows?.(daylight.hour, daylight.day);
   fountains?.update(t, daylight.night);
+  if (lampHeads) lampHeads.night = daylight.night;
   precip.update(t, camera.position, daylight.weather, daylight.night);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
