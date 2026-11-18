@@ -496,7 +496,7 @@ const SURFACE = `
     if (uFolOn > 0.5) {
       vec3 fo = foliageAt(cell);
       if (leafOff(cell, fo)) {
-        #ifndef CLAY
+        #if !defined(CLAY) && !defined(PREPASSED)
         if (leafGone(cell, fo)) discard;
         #endif
         col = mix(vec3(0.16, 0.13, 0.11), vec3(0.25, 0.21, 0.18), hash13(floor(cell * 0.5) + 2.7)) * (0.8 + 0.4 * h);
@@ -548,7 +548,9 @@ const SURFACE = `
     col = base; gRough = 0.3; gMetal = 0.6;
     gEmissive = base * (0.15 + 2.2 * uNight);
   } else if (m == ${MAT.JET}) {
+    #ifndef PREPASSED
     if (${JET_GONE}) discard;
+    #endif
     col = base; gRough = 0.05; gMetal = 0.2;
     gEmissive = vec3(0.7, 0.85, 1.0) * 0.8 * uNight;
   } else if (m == ${MAT.CLOCK}) {
@@ -659,7 +661,7 @@ const SURFACE = `
   if (vHide > 0.5) { diffuseColor.rgb = vec3(0.42, 0.41, 0.39); gEmissive = vec3(0.0); }
   #ifdef CLAY
   if (zreal(cell)) discard;
-  #else
+  #elif !defined(PREPASSED)
   if (!zreal(cell)) discard;
   #endif
   #ifdef CLAY
@@ -765,10 +767,11 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
   return mat;
 }
 
-// The depth pre-pass (prepass.ts): a tile's depth alone, before the real pass draws it with the depth test LessEqual and
-// no depth write. Each vertex lands where makeVoxelMaterial puts it (the same lines, gl_Position invariant in both), and
-// what the real pass discards -- bare twigs' leaves, a jet between spurts, a block left to the clay -- is discarded here
-// too: anything drawn here that the real pass then drops would leave a hole with nothing behind it.
+// The depth pre-pass (prepass.ts): a tile's depth alone, before the real pass draws it with the depth test Equal and
+// no depth write. Each vertex lands where makeVoxelMaterial puts it (the same lines, gl_Position invariant in both),
+// and what the real pass would discard -- bare twigs' leaves, a jet between spurts, a block left to the clay -- is
+// discarded here instead: such a fragment writes no depth, so the real pass fails the test there, and is compiled
+// without its discards (PREPASSED). A shader that never discards keeps the GPU's early depth test.
 export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
   const m = new THREE.MeshBasicMaterial({ colorWrite: false, fog: false });
   m.onBeforeCompile = (shader) => {

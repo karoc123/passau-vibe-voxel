@@ -3,6 +3,8 @@
 // headless one only llvmpipe/SwiftShader (HEADLESS=1). Each frame ends in a 1-pixel readback, so its interval is the
 // whole frame's CPU + GPU time, not how far ahead the browser queues. The whole city at 1 m (level 1) by default.
 // usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]
+//   (EXTRA: more Chrome flags, e.g. --disable-gpu-watchdog where a slow GPU loses its context; GALLIUM_DRIVER=d3d12 on WSL
+//   if the browser reports llvmpipe)
 //   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
@@ -14,7 +16,7 @@ const W = +(process.env.W || 1400), H = +(process.env.H || 900);
 const ABL = (process.env.ABL ?? 'base,shadowEvery,noPost,noAO,noTwin,noLife,pan').split(',');
 const headless = process.env.HEADLESS === '1';
 const browser = await chromium.launch({ channel: 'chrome', headless,
-  args: ['--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit'] });
+  args: ['--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', ...(process.env.EXTRA ? process.env.EXTRA.split(' ') : [])] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.stack?.slice(0, 300)));
 const t0 = Date.now(), log = (...a) => console.log(((Date.now() - t0) / 1000).toFixed(0) + 's', ...a);
@@ -47,7 +49,7 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
       window.__undo = [];
       const set = (o, k, v) => { const was = o[k]; o[k] = v; window.__undo.push(() => { o[k] = was; }); };
       if (abl === 'noAO') set(T.post.n8, 'enabled', false);
-      if (abl === 'noPre' && T.prepass?.()) set(T.prepass(), 'enabled', false);
+      if ((abl === 'noPre' || abl === 'pre') && T.prepass?.()) set(T.prepass(), 'enabled', abl === 'pre');
       if (abl === 'noPost') set(T.post.composer, 'render', () => T.renderer.render(T.scene, T.camera));
       if (abl === 'noTwin') set(D.twin, 'castShadow', false);
       if (abl === 'noLife' && L) { set(L, 'update', () => {}); for (const c of L.group.children) set(c, 'visible', false); }

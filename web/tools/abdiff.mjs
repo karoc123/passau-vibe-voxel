@@ -21,7 +21,7 @@ async function shot(base, view, file) {
     Math.random = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
   });
   const [name, cam] = view.split('@'); // a view by name, or name@x,y,z,tx,ty,tz
-  await page.goto(`${base}/?ui=0&${cam ? `cam=${cam}` : `view=${name}`}&${query}`);
+  await page.goto(`${base}/?ui=0&${cam ? `cam=${cam}` : `view=${name}`}&${query}`, { timeout: 300000 });
   await page.waitForFunction(() => window.__three && window.__ready, null, { timeout: 600000, polling: 250 });
   await page.evaluate(() => window.__three.setLevel?.(1)); // the whole city at 1 m, not what the frame rate allows
   await page.waitForFunction(() => window.__three && window.__ready && !document.body.classList.contains('loading'), null, { timeout: 600000, polling: 250 });
