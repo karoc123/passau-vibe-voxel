@@ -91,6 +91,8 @@ function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
 export class TileStreamer implements ColumnSource {
   readonly N: number;
   readonly levels: number[];
+  // the coarsest level: the clay (city.ts), the others the city at 1 m and its distance levels
+  readonly clay: number;
   readonly dims: Record<number, TileLevel>;
   readonly nodes = new Map<string, TileNode>();
   readonly group = new THREE.Group();
@@ -111,6 +113,7 @@ export class TileStreamer implements ColumnSource {
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
+    this.clay = this.levels[0];
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
     this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0));
     this.leafPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF ? 1 : 0));
@@ -234,18 +237,34 @@ export class TileStreamer implements ColumnSource {
         base: { bld, roof: this.roofPal, leaf: this.leafPal } },
       transfer: [...(typeof under === 'string' ? [] : [under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : [])]), ...(bld ? [bld.buffer] : [])] };
     }
-    const bld = !dataOnly && n.s === 1 ? this.buildingIds(x0, y0) : null;
+    // level 1 and the distance levels are meshed with their buildings and roof palette, the clay without
+    const city = !dataOnly && n.s !== this.clay;
+    const bld = city ? this.buildingIds(x0, y0, n.s) : null;
     return { msg: { ...base, url: file(n.key), keep: n.keep || n.s > 1, dataOnly, bld,
-      roof: !dataOnly && n.s === 1 ? this.roofPal : null }, transfer: bld ? [bld.buffer] : [] };
+      roof: city ? this.roofPal : null }, transfer: bld ? [bld.buffer] : [] };
   }
 
-  private buildingIds(x0: number, y0: number) {
+  private buildingIds(x0: number, y0: number, s = 1) {
     if (!this.bldMap) return null;
+    if (s > 1) return this.buildingIdsCoarse(x0, y0, s);
     // with the 1-cell apron (a chamfer's steps run on into it)
     const { data, W } = this.bldMap, S = this.N + 2, out = new Uint16Array(S * S), xa = Math.max(0, x0 - 1), xb = Math.min(x0 + S - 1, W);
     for (let r = 0; r < S; r++) {
       const y = y0 - 1 + r;
       if (y >= 0 && y < this.meta.D) out.set(data.subarray(y * W + xa, y * W + xb), r * S + xa - (x0 - 1));
+    }
+    return out;
+  }
+
+  // a distance level's cells (s x s m): the building of the cell's middle column, else of any column in it
+  private buildingIdsCoarse(x0: number, y0: number, s: number) {
+    const { data, W } = this.bldMap!, D = this.meta.D, S = this.N + 2, out = new Uint16Array(S * S), h = s >> 1;
+    const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < D ? data[y * W + x] : 0);
+    for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
+      const X = x0 + (c - 1) * s, Y = y0 + (r - 1) * s;
+      let b = at(X + h, Y + h);
+      for (let k = 0; !b && k < s * s; k++) b = at(X + (k % s), Y + Math.floor(k / s));
+      out[r * S + c] = b;
     }
     return out;
   }

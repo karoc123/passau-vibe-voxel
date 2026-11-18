@@ -2,7 +2,7 @@
 // pan that keeps refitting the shadow. Needs a real GPU: on WSL the headed Chrome (WSLg) gets the D3D12 adapter, the
 // headless one only llvmpipe/SwiftShader (HEADLESS=1). Each frame ends in a 1-pixel readback, so its interval is the
 // whole frame's CPU + GPU time, not how far ahead the browser queues. The whole city at 1 m (level 1) by default.
-// usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]
+// usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]   (Q='&lod=0': more of the query)
 //   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
@@ -25,7 +25,7 @@ const met = async () => Object.fromEntries((await cdp.send('Performance.getMetri
 const res = { gpu: null, level: +levelArg, size: [W, H], frames: N, views: {} };
 for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
   const [name, cam] = spec.split('=');
-  const q = `${cam ? `cam=${cam}` : `view=${name}`}&date=06-21&hour=14&weather=clear`;
+  const q = `${cam ? `cam=${cam}` : `view=${name}`}&date=06-21&hour=14&weather=clear${process.env.Q || ''}`;
   log(spec, 'load');
   await page.goto(`${URL}/?${q}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 500 });

@@ -1,6 +1,8 @@
 // Fetches, unzips and greedy-meshes one tile (scripts/tiles.py), with baked ambient occlusion.
 // Data coordinates: x east, y south, z up. Positions go out in three.js axes (x, z, y), metres.
-// A tile is N x N cells of s metres plus a 1-cell apron.
+// A tile is N x N cells of s metres plus a 1-cell apron. The distance level (2 m, scripts/tiles.py LOD_LEVELS)
+// are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres on the way
+// out; the clay (8 m) comes without roof palette and is plain voxels.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs } from './roofs';
 
@@ -19,7 +21,7 @@ export interface MeshRequest {
   keep: boolean;
   dataOnly: boolean;
   bld: Uint16Array | null;
-  // per palette entry, flags (chamfer.ts; 1 m tiles only): PAL_ROOF, roof material, its staircases shaded as the roof
+  // per palette entry, flags (chamfer.ts; not the clay): PAL_ROOF, roof material, its staircases shaded as the roof
   // plane; PAL_WALL, a building's wall, its diagonal staircases chamfered flat
   roof: Uint8Array | null;
   // a foliage tile only: mesh its base tile (under) again too, without the faces its grass and trunks cover
@@ -208,9 +210,9 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const t = colTop[x + S * y]; if (t > topX[x]) topX[x] = t; if (t > topY[y]) topY[y] = t; }
   const cell = (X: number, Y: number, z: number) => vol[(X + 1) + sx * ((Y + 1) + sy * (z + 1))];
   const roofs = roofPal ? roofPlanes(N, vol, colTop, roofPal, bidAt, planes) : null;
-  const ch = roofPal && s === 1 ? chamferWalls(N, vol, sz, ground, colTop, roofPal, bidAt) : null;
+  const ch = roofPal ? chamferWalls(N, vol, sz, ground, colTop, roofPal, bidAt) : null;
   // pitched roofs as slopes (roofs.ts): they hide the voxel faces they stand for
-  const slopes = roofPal && planes && s === 1 ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, ch?.hidden ?? new Uint8Array(S * S * sz)) : null;
+  const slopes = roofPal && planes ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, ch?.hidden ?? new Uint8Array(S * S * sz)) : null;
   slopes?.hide();
   const hidden = ch?.hidden ?? (slopes ? slopes.hidden : undefined);
   for (let d = 0; d < 3; d++) {
@@ -254,15 +256,17 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
       }
     }
   }
-  if (ch) for (const p of ch.prisms) emitPrism(p, x0, y0, out, roofPal!, roofs, slopes);
+  if (ch) for (const p of ch.prisms) emitPrism(p, s, x0, y0, out, roofPal!, roofs, slopes);
   if (ch?.prisms.length || slopes) out.slanted = true;
-  slopes?.emit(out, x0, y0, ground);
+  // (at s > 1 the slopes come out in cells: scaled to metres here, heights in 1/64 of a cell to 1/64 m)
+  slopes?.emit(s === 1 ? out : { reserve: (n) => out.reserve(n), vertexQ: (x, q, z, n, ao, g, w, pal, b) => out.vertexQ(x * s + x0, q * s, z * s + y0, n, ao, g, w, pal, b) },
+    s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground);
 }
 
 // A chamfer (chamfer.ts): its slanted face, lit as the wall's plane (vattr.w = SLANT + its direction) and windowed along
 // its staircase (vattr.x: face axis + 8 x the staircase's direction, as wallAngle's), a lid
 // where nothing stands on it (the eave's top lit as its roof plane) and a floor where it hangs over nothing
-function emitPrism(p: Prism, x0: number, y0: number, out: QuadBuffer, palFlags: Uint8Array, roofs: ReturnType<typeof roofPlanes> | null,
+function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer, palFlags: Uint8Array, roofs: ReturnType<typeof roofPlanes> | null,
   slopes: ReturnType<typeof slopeRoofs>) {
   const P = [p.px, p.py], A = [p.px - p.a * p.sx, p.py], B = [p.px, p.py - p.b * p.sy];
   const nx = -p.b * p.sx, ny = -p.a * p.sy; // outwards
@@ -275,7 +279,7 @@ function emitPrism(p: Prism, x0: number, y0: number, out: QuadBuffer, palFlags: 
     return Number.isFinite(h) ? Math.min(p.z1 * 64, Math.max(p.z0 * 64 + 16, Math.round(h * 64))) : p.z1 * 64;
   };
   const tP = top(P), tL = top(L), tR = top(R);
-  const v = (q: number[], z: number, nrm: number, ao: number, w: number) => out.vertexQ(q[0] + x0, z, q[1] + y0, nrm, ao, p.gm, w, p.pal, p.bid);
+  const v = (q: number[], z: number, nrm: number, ao: number, w: number) => out.vertexQ(q[0] * s + x0, z * s, q[1] * s + y0, nrm, ao, p.gm, w, p.pal, p.bid);
   const wall = (z0: number, zL: number, zR: number, ao: number) => {
     out.reserve(4);
     const n = axis + 8 * p.chain, w = SLANT + p.dir;

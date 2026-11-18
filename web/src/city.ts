@@ -100,8 +100,55 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
   const away = (i: number, f: THREE.Vector3) => Math.hypot((i % d.nx + 0.5) * T - f.x, (Math.floor(i / d.nx) + 0.5) * T - f.z);
   const prio = (i: number, f: THREE.Vector3) => (clay === 'none' ? lmPrio.get(i) : undefined) ?? (seen[i] ? 1e5 : 0) - away(i, f);
+
+  // Distance levels (scripts/tiles.py LOD_LEVELS): far from the camera, where a metre is a pixel or less, the city is
+  // drawn from its 2 m tiles instead of the 1 m ones, trees included (more levels would nest the same way). The levels nest: a node of level s holds
+  // s x s tiles of 128 m. Each update picks the levels as a quadtree from the coarsest down: a node is drawn as it is
+  // while a cell of the next finer level would come out under pxCoarse pixels at its nearest point (back to the finer
+  // one above pxFine, so a camera at the switch doesn't flip it to and fro). What is drawn (shown) only changes once
+  // all of it is in: a coarse node goes once every finer node chosen under it (a 1 m tile with its foliage, after the
+  // first load) is ready, so nothing is ever missing; the nodes shown never overlap. Each tile's own faces close it
+  // at its edges, so a 1 m tile next to a 2 m one leaves no crack. ?lod=0: 1 m only; ?lodpx=: pxCoarse.
+  const lq = new URLSearchParams(location.search);
+  const lods = S.levels.filter((s) => s !== S.clay).sort((a, b) => a - b);
+  const lodOn = lods.length > 1 && lq.get('lod') !== '0';
+  const pxCoarse = +(lq.get('lodpx') ?? 1.2), pxFine = pxCoarse * 1.25, lodMin = +(lq.get('lod') ?? 1); // ?lod=2: never finer than 2 m (to look at it close up)
+  interface LNode { s: number; tx: number; ty: number; key: string; x0: number; y0: number; x1: number; y1: number }
+  const lnode = (s: number, tx: number, ty: number): LNode =>
+    ({ s, tx, ty, key: S.key(s, tx, ty), x0: tx * s, y0: ty * s, x1: Math.min((tx + 1) * s, d.nx), y1: Math.min((ty + 1) * s, d.ny) });
+  const tilesOfNode = (n: LNode) => { const t = []; for (let y = n.y0; y < n.y1; y++) for (let x = n.x0; x < n.x1; x++) t.push(index(x, y)); return t; };
+  const within = (a: LNode, b: LNode) => a.x0 >= b.x0 && a.x1 <= b.x1 && a.y0 >= b.y0 && a.y1 <= b.y1;
+  const overlap = (a: LNode, b: LNode) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const chosen = new Map<string, LNode>(), shownN = new Map<string, LNode>(), level = new Uint8Array(total);
+  let finer = new Set<string>();
+  const eye = new THREE.Vector3();
+  const pick = () => {
+    chosen.clear(); level.fill(0);
+    const add = (n: LNode) => { chosen.set(n.key, n); for (const i of tilesOfNode(n)) level[i] = n.s; };
+    if (!lodOn) { for (let i = 0; i < total; i++) if (want[i]) add(lnode(1, i % d.nx, Math.floor(i / d.nx))); return; }
+    eye.setFromMatrixPosition(camera.matrixWorld);
+    const cam = camera as THREE.PerspectiveCamera;
+    const focal = (innerHeight * Math.min(devicePixelRatio, 2)) / 2 / Math.tan((cam.fov * Math.PI) / 360) * (cam.zoom || 1);
+    const next = new Set<string>();
+    const visit = (k: number, tx: number, ty: number) => {
+      const s = lods[k], n = lnode(s, tx, ty);
+      if (n.x0 >= d.nx || n.y0 >= d.ny || !tilesOfNode(n).some((i) => want[i])) return;
+      if (k === 0 || s <= lodMin) { add(n); return; }
+      const dist = Math.hypot(Math.max(n.x0 * T - eye.x, 0, eye.x - n.x1 * T), Math.max(-eye.y, 0, eye.y - meta.H), Math.max(n.y0 * T - eye.z, 0, eye.z - n.y1 * T));
+      const sf = lods[k - 1], px = (focal * sf) / Math.max(dist, 1);
+      if (px > (finer.has(n.key) ? pxCoarse : pxFine)) {
+        next.add(n.key);
+        const r = s / sf;
+        for (let dy = 0; dy < r; dy++) for (let dx = 0; dx < r; dx++) visit(k - 1, tx * r + dx, ty * r + dy);
+      } else add(n);
+    };
+    const top = lods.length - 1, dt = S.dims[lods[top]];
+    for (let ty = 0; ty < dt.ny; ty++) for (let tx = 0; tx < dt.nx; tx++) visit(top, tx, ty);
+    finer = next;
+  };
+  const nodePrio = (n: LNode, f: THREE.Vector3) => (n.s === 1 ? prio(index(n.tx, n.ty), f) : Math.max(...tilesOfNode(n).map((i) => prio(i, f))));
   const request = (f: THREE.Vector3) => {
-    for (let ty = 0; ty < d.ny; ty++) for (let tx = 0; tx < d.nx; tx++) if (want[index(tx, ty)]) S.request(1, tx, ty, prio(index(tx, ty), f), true);
+    for (const n of chosen.values()) S.request(n.s, n.tx, n.ty, nodePrio(n, f), n.s === 1);
   };
 
   // clay: the whole map at 8 m, fetched the first time the budget leaves some city out; the terrain goes then
@@ -124,7 +171,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U);
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
-  const inTile = new Uint8Array(total), folTile = new Uint8Array(total), complete = new Uint8Array(nb), counted = new Set<string>();
+  const inTile = new Uint8Array(total), cover = new Uint8Array(total), folTile = new Uint8Array(total), complete = new Uint8Array(nb), counted = new Set<string>();
   let lmShown = 0, stage = 1, last = 0, flagKey = '', realTris = 0, settled = false;
   const show = (b: number) => { if (!shown[b + 1]) { shown[b + 1] = 255; if (isLandmark.has(b)) lmShown++; } };
   function toStage2() {
@@ -136,6 +183,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   look();
   choose(focus());
   if (!whole) startClay();
+  pick();
   request(focus());
   S.pump();
 
@@ -168,40 +216,80 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     look();
     choose(f);
     if (!whole && clay === 'none') startClay();
+    pick();
     request(f);
-    S.reprioritize((n) => (n.s === 8 ? 1e9 : prio(index(n.tx, n.ty), f)));
-    let changed = false;
-    for (const n of [...S.nodes.values()]) {
-      if (n.s !== 1 || n.state !== 'ready') continue;
-      const i = index(n.tx, n.ty);
-      if (!want[i]) {
-        if (n.mesh && clay === 'ready') n.mesh.visible = false;
-        // (the foliage goes with its base: the base's mesh lacks what the grass covers, stream.ts coverBase)
-        if (clay === 'ready' && now - n.used > 4000 && !(n.pinned > now) && !(n.foliage && (S.nodes.get(S.key(1, n.tx, n.ty))?.pinned ?? 0) > now)) {
-          if (counted.delete(n.key)) { if (n.foliage) folTile[i] = 0; else inTile[i] = 0; }
-          S.free(n);
-        }
+    S.reprioritize((n) => (n.s === 8 ? 1e9 : n.foliage ? prio(index(n.tx, n.ty), f) : nodePrio(lnode(n.s, n.tx, n.ty), f)));
+    // what is shown: a node chosen and ready replaces what it covers (finer nodes, or nothing yet); one finer than what
+    // shows there waits until everything chosen under that is ready
+    const ready = (n: LNode) => {
+      if (S.nodes.get(n.key)?.state !== 'ready') return false;
+      if (n.s !== 1 || stage < 3) return true;
+      return S.nodes.get(`f/${n.tx}_${n.ty}`)?.state === 'ready';
+    };
+    for (const [k, p] of shownN) {
+      // gone (freed elsewhere), or none of it wanted any more once the clay stands in for it
+      if (S.nodes.get(k)?.state !== 'ready' || (clay === 'ready' && !tilesOfNode(p).some((i) => want[i]))) shownN.delete(k);
+    }
+    for (const n of chosen.values()) {
+      if (shownN.has(n.key) || !ready(n)) continue;
+      const under = [...shownN.values()].filter((p) => overlap(p, n));
+      if (under.every((p) => within(p, n))) {
+        for (const p of under) shownN.delete(p.key);
+        shownN.set(n.key, n);
         continue;
       }
-      n.used = now;
-      if (counted.has(n.key)) { if (n.mesh) n.mesh.visible = true; continue; }
-      counted.add(n.key);
-      if (n.foliage) { folTile[i] = 1; if (n.mesh) { n.mesh.material = folMat; n.mesh.visible = true; } S.coverBase(n); continue; }
-      inTile[i] = 1;
-      if (n.mesh) { n.mesh.customDepthMaterial = depthMat; n.mesh.visible = true; }
-      for (const b of onTile[i]) if (!complete[b] && tilesOf[b].every((k) => inTile[k])) {
+      for (const p of under) {
+        if (!shownN.has(p.key)) continue;
+        const sub = [...chosen.values()].filter((q) => within(q, p));
+        if (sub.every((q) => shownN.has(q.key) || ready(q))) {
+          shownN.delete(p.key);
+          for (const q of sub) shownN.set(q.key, q);
+        }
+      }
+    }
+    for (const p of shownN.values()) for (const i of tilesOfNode(p)) cover[i] = p.s;
+    let changed = false;
+    for (const n of S.nodes.values()) {
+      if (n.s === 8 || n.state !== 'ready') continue;
+      const on = shownN.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key);
+      if (on && !counted.has(n.key)) {
+        counted.add(n.key);
+        if (n.foliage) { if (n.mesh) n.mesh.material = folMat; S.coverBase(n); } else if (n.mesh) n.mesh.customDepthMaterial = depthMat;
+      }
+      if (n.mesh) n.mesh.visible = on;
+    }
+    for (let i = 0; i < total; i++) {
+      const was = inTile[i];
+      inTile[i] = cover[i] ? 1 : 0;
+      folTile[i] = cover[i] > 1 || (cover[i] === 1 && counted.has(`f/${i % d.nx}_${Math.floor(i / d.nx)}`)) ? 1 : 0;
+      cover[i] = 0;
+      if (inTile[i] && !was) for (const b of onTile[i]) if (!complete[b] && tilesOf[b].every((k) => inTile[k])) {
         complete[b] = 1;
         if (isLandmark.has(b) || stage >= 2) { show(b); changed = true; }
       }
     }
-    let wanted = 0, tilesNow = 0, folNow = 0;
+    // what is neither shown nor chosen goes after a while (the foliage with its base: the base's mesh lacks what the
+    // grass covers, stream.ts coverBase); a 1 m tile the budget left out only once the clay is in, as before
+    for (const n of [...S.nodes.values()]) {
+      if (n.s === 8 || n.foliage || n.state !== 'ready') continue;
+      if (shownN.has(n.key) || chosen.has(n.key)) { n.used = now; continue; }
+      const out = n.s === 1 && !want[index(n.tx, n.ty)];
+      if (out && clay !== 'ready') continue;
+      const fol = n.s === 1 ? S.nodes.get(`f/${n.tx}_${n.ty}`) : undefined;
+      if (now - n.used > (out ? 4000 : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
+        if (fol) { counted.delete(fol.key); S.free(fol); }
+        counted.delete(n.key);
+        S.free(n);
+      }
+    }
+    let wanted = 0, tilesNow = 0, folNow = 0, pending = 0;
     for (let i = 0; i < total; i++) if (want[i]) { wanted++; tilesNow += inTile[i]; folNow += folTile[i]; }
-    settled = tilesNow === wanted;
+    for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
+    settled = tilesNow === wanted && pending === 0;
     if (stage === 1 && lmShown === landmarks.length) toStage2();
     if (stage === 2 && tilesNow === wanted) stage = U.uStage.value = 3;
-    if (stage >= 3) for (let ty = 0; ty < d.ny; ty++) for (let tx = 0; tx < d.nx; tx++) {
-      const i = index(tx, ty);
-      if (want[i] && inTile[i] && !folTile[i]) S.requestFoliage(tx, ty, prio(i, f));
+    if (stage >= 3) for (const n of chosen.values()) {
+      if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
     if (terrain && stage >= 2) terrain.dropUnder(inTile);
@@ -216,8 +304,9 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     if (clay === 'ready') {
       const key = flags.join('');
       if (key !== flagKey) { flagKey = key; flagTex.needsUpdate = true; }
-      S.dropQueued((n) => n.s === 8 || want[index(n.tx, n.ty)] > 0 || n.pinned > now);
     }
+    // queued jobs no longer chosen (with the distance levels at any time; else once the clay is in, as before)
+    if (clay === 'ready' || lodOn) S.dropQueued((n) => n.s === 8 || n.pinned > now || (n.foliage ? level[index(n.tx, n.ty)] === 1 : chosen.has(n.key)));
     progress(f, wanted, tilesNow, folNow);
     S.pump();
   };
