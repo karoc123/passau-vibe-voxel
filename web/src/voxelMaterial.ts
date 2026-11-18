@@ -6,6 +6,8 @@ import { SLANT, SLANT_STEPS } from './chamfer';
 import { WALL_TOP } from './roofs';
 
 // material ids, as in scripts/voxelize.py
+// what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
+export const REFL_MAX = 0.4;
 export const MAT = { SOLID: 0, WALL: 1, GLASS: 2, LEAF: 3, WATER: 4, LAMP: 5, METAL: 6, FLOODLIT: 7, GRASS: 8, MARK: 9, SOIL: 10, CAR: 11,
   ROOF: 12, CONCRETE: 13, CLOCK: 14, BRONZE: 15, SIGN: 16, JET: 17, SIGNBAND: 18, RIBBON: 19, CLASSIC: 20, WINDOW: 21, TENEMENT: 22 } as const;
 
@@ -341,7 +343,7 @@ const FRAG_PARS = `
   #define vWTop vShade.y
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
-  vec3 gEmissive; float gRough; float gMetal;
+  vec3 gEmissive; float gRough; float gMetal; float gRefl;
   // Window glass: a dark, faintly blue-grey dielectric (not metal: a metal's reflection is tinted by its colour, and
   // the facade's warm plaster in the panes read as brass), only a hint of the wall's colour in it (the room behind,
   // the frame's shade). Smooth, so the sky (scene.environment) shows in it, by Fresnel: little head-on, more at a glance.
@@ -480,7 +482,7 @@ const SURFACE = `
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
   // (a roof's top by its column alone: on a slope cell.y steps along the contours, and stepped its shade in stripes)
   float h = ${CELL_HASH};
-  gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
+  gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0; gRefl = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
   float r = 0.5, fres2 = 1.0; // the water's ripple and its glancing reflectance, for its reflections at night
@@ -587,11 +589,12 @@ const SURFACE = `
     float fres = 1.0 - clamp(dot(vN, V), 0.0, 1.0); fres *= fres; fres2 = 0.35 + 0.65 * fres; fres *= fres;
     col = mix(col, uHorizon * 0.8, clamp(0.08 + 0.55 * fres, 0.0, 0.55));
     if (vN.y > 0.5 && hash12(cell.xz * 0.37 + floor(uTime * 1.7 + h * 9.0)) < 0.006) col += vec3(0.35, 0.4, 0.38) * (1.0 - uNight) * (1.0 - uNight);
+    if (vN.y > 0.5) gRefl = 1.0; // the open river mirrors (post.ts Reflections)
     if (uDrop > 0.0) { // low water: where the estimated bed is shallower than the drop, a sandbank
       float bed = texelFetch(uFlood, ivec2(cell.x, cell.z), 0).g * 25.5;
       if (bed < uDrop) {
         col = mix(vec3(0.3, 0.24, 0.15), vec3(0.62, 0.52, 0.36), smoothstep(0.05, 0.35, uDrop - bed)) * (0.92 + 0.12 * h);
-        gRough = 0.95; gMetal = 0.0;
+        gRough = 0.95; gMetal = 0.0; gRefl = 0.0;
       }
     }
   } else if (m == ${MAT.LAMP}) {
@@ -676,6 +679,7 @@ const SURFACE = `
     float pud = flat_ * smoothstep(0.6, 0.7, hash12(floor(cell.xz / 2.0)) * 0.5 + hash12(floor(cell.xz / 7.0)) * 0.5);
     col *= mix(1.0, mix(0.82, mix(0.5, 0.3, pud), flat_), uWet);
     gRough = mix(gRough, mix(0.5, 0.03, pud), uWet * mix(0.5, 1.0, flat_));
+    if (m != ${MAT.GRASS}) gRefl = flat_ * uWet * mix(0.1, 0.65, pud); // a puddle mirrors, a wet street a little (post.ts Reflections)
   }
   if (uNight > 0.0) { // street lamps light what is near the ground; water reflects them instead
     vec3 lm = texture2D(uLampMap, vVox.xz / uSize).rgb;
@@ -693,8 +697,10 @@ const SURFACE = `
       float sw = sin(a * 2.1 + 1.7 * sin(b * 0.31 + uTime * 0.5) - uTime * 1.9) * 0.6 + sin(a * 0.93 - b * 0.27 + uTime * 1.1) * 0.4;
       float shim = (0.45 + 0.9 * smoothstep(-0.2, 0.9, sw)) * (0.8 + 0.4 * hash12(cell.xz + floor(uTime * 3.0)));
       vec3 refl = vec3(0.0); vec2 o; float ow;
+      // the heights slide with the ripples' bands: four fixed ones mirrored each light as four separate dashes
+      float jit = fract(0.65 * sw + 0.5);
       for (int i = 0; i < 4; i++) {
-        float y = 3.0 + 4.0 * float(i);
+        float y = 3.0 + 4.0 * (float(i) + jit);
         vec3 l = texture2D(uLampMap, (vVox.xz + away * min(y * k, 400.0)) / uSize).rgb;
         refl += smoothstep(0.22, 0.6, l) * (1.0 - 0.15 * float(i)); // only a lamp's core: a point of light mirrors as a thin streak
       }
@@ -841,7 +847,11 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
       .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance += gEmissive;')
       // a staircase wall or roof tells the screen-space AO to go easy on it (post.ts)
       .replace('#include <opaque_fragment>', `#include <opaque_fragment>
-        if ((vWallAng > 0.5 && vert && m != ${MAT.LEAF}) || vRoof > 0.5) gl_FragColor.a = 0.5;`)
+        if ((vWallAng > 0.5 && vert && m != ${MAT.LEAF}) || vRoof > 0.5) gl_FragColor.a = 0.5;
+        #ifndef CLAY
+        // and what mirrors tells the reflections how much (post.ts Reflections)
+        if (gRefl > 0.004) gl_FragColor.a = ${REFL_MAX.toFixed(2)} * gRefl;
+        #endif`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
         float aoF = mix(0.55, 1.0, vAO);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
