@@ -1,0 +1,3 @@
+#bar .drive-speed { font-variant-numeric: tabular-nums; font-weight: 600; }
+#bar .drive-status:empty { display: none; }
+body.driving :is(#hud, .fpv-prototype) { display: none; }

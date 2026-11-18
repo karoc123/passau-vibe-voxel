@@ -11,6 +11,8 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import type { DrivePrototype } from './nav/drive.prototype';
+import type { FpvPrototype } from './nav/fpv.prototype';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -53,11 +55,16 @@ const gfx = new Settings(phone, innerWidth >= 600);
 const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2) * gfx.now.res;
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
+const movingActors = new THREE.Group();
+scene.add(movingActors);
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000);
 const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
+movingActors.add(nav.actors);
+let fpv: FpvPrototype | null = null;
+let drive: DrivePrototype | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -81,6 +88,16 @@ let lampHeads: LampHeads | null = null;
 nav.cancelFly = () => { fly = null; };
 bar.setRiver(RIVER.surveyed);
 bar.showRiver(false);
+const modeTools = el('div', 'mode-tools', '', bar.el);
+const walkButton = el('button', 'mode-button', 'Walk', modeTools);
+walkButton.type = 'button';
+walkButton.disabled = true;
+walkButton.addEventListener('click', e => {
+  walkButton.blur();
+  drive?.park();
+  const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
+  void nav.togglePedestrian(!touch && !coarsePointer());
+});
 const maxShadow = renderer.capabilities.maxTextureSize;
 bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -156,6 +173,7 @@ function applyGfx(c: Partial<Gfx>) {
 
 function onMode(m: Mode, ride: Ride | null) {
   document.body.classList.toggle('walking', m !== 'orbit');
+  document.body.classList.toggle('fpv', m === 'fpv');
   hud?.set(m, ride);
 }
 
@@ -229,10 +247,11 @@ function flyTo(v: Pick<View, 'pos' | 'target' | 'ms'>) {
 // frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
 function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '') {
   if (!world) return;
+  if (nav.mode === 'fpv') nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
   if (nav.mode !== 'orbit') {
-    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: /^(Most|Kładka|Wiadukt)\b/.test(name) });
+    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: /^(Most|Kładka|Wiadukt)\b/.test(name), thirdPerson: nav.mode === 'pedestrian' });
     return;
   }
   const t = new THREE.Vector3(x + 0.5, g + Math.min(h * 0.5, 60), y + 0.5);
@@ -298,7 +317,7 @@ async function boot() {
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
   world = nav.world = streamer.world;
-  daylight.casters(streamer.group, () => life?.group ?? null);
+  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' ? movingActors : null);
   nav.streamer = streamer;
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
   post.reflections.mapTop = meta.H;
@@ -327,6 +346,7 @@ async function boot() {
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
     ground.then((g) => { lampHeads = new LampHeads(scene, lightStreets(uniforms!, meta, td.roads, td.peds, g)); });
     life = nav.life = new StreetLife(scene, td);
+    movingActors.add(life.group);
     life.world = world;
     window.__life = life;
     fetchJson<BoatData>('data/boats.json').then((bd) => {
@@ -337,6 +357,11 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
+  const [{ FpvPrototype }, { DrivePrototype }] = await Promise.all([
+    import('./nav/fpv.prototype'), import('./nav/drive.prototype'),
+  ]);
+  fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools);
+  drive = new DrivePrototype(nav, controls.target, meta, modeTools);
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
@@ -348,10 +373,15 @@ renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
   adapt(dt, now);
+  drive?.update(dt);
   nav.update(dt);
+  fpv?.update(dt);
+  const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
+  if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
+  walkButton.disabled = !world || nav.enteringWalk || nav.mode === 'fpv';
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, gfx.now.tilt, camera.position.distanceTo(controls.target));
+  post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;

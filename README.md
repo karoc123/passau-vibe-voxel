@@ -149,6 +149,48 @@ flags and several predate the current viewer, so expect to adapt them.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
+## FPV Acro prototype
+
+Start the viewer with `cd web && pnpm dev`. Choose an orbit view near where you want to start, then click
+**FPV Acro** in the top-left toolbar. On Windows with a controller connected, use the Windows browser and move a stick
+or press a controller button so its axes appear under **Controller setup**.
+
+1. Use **Learn axes** and follow the four stick prompts, or select and invert each axis by hand. Standard gamepads start
+   with a Mode 2 layout. The live values should show positive right roll, forward pitch and right yaw.
+2. Use **Calibrate range** to sample both ends of each channel. Leave the attitude sticks centred and lower throttle
+   before finishing. The browser saves the profile for this device on this site.
+3. Lower throttle fully and click **Arm controller**. The drone starts in the air. Around 39% throttle holds altitude
+   when level. Centred attitude sticks hold the current orientation. Set camera tilt before arming.
+
+**T** resets to the launch point, **Enter** arms the last input source again and **Esc** returns to the map. The keyboard
+option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut throttle. It starts at hover throttle.
+
+The flight uses independent 1 m collision data for terrain, structures and trees across the whole 3,200 × 1,408 m model.
+A swept drone volume catches thin voxels even at speed. Hard impacts deflect and spin the drone briefly while it
+stays armed. The drone can settle on the ground and take off again with throttle. The flight waits if a collision tile
+is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
+Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
+
+## Arcade driving prototype
+
+Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
+W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
+loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
+the same car where you stop, and **Esc** takes you back to the map.
+
+The car uses independent road collision tiles from the same 1 m voxel data as FPV, including bridge decks and
+terrain steps. Traffic cars can block the player and recognise the player vehicle in their spatial checks.
+Handling uses an arcade grip model with free steering and reversible impacts. Wheel suspension, deformable bodies,
+and collisions with people, trams or boats are outside this prototype.
+
+## Third-person walking
+
+Click **Walk** in the toolbar to start on foot at the current view or beside the vehicle you're following. Use W/A/S/D
+or the arrow keys to move relative to the camera, Shift to sprint and Space to jump. Move the mouse to look around
+and scroll to zoom. On touch screens, drag to look, pinch to zoom and tap the ground to walk there.
+**Esc** releases the mouse and returns to the map. The chase camera pulls in near walls, and the character uses the viewer's voxel walking
+collision for kerbs, stairs, walls and bridge decks.
+
 ## Known limits
 
 - **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated

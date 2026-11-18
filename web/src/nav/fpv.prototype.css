@@ -1,0 +1,17 @@
+#bar .fpv-actions:has(button:not([hidden])) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+#bar .fpv-telemetry { color: var(--t2); }
+#bar .fpv-options { margin-top: 4px; }
+body.fpv #labels { display: none; }
+
+.fpv-impact-tint {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%);
+}

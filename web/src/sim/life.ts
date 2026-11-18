@@ -46,6 +46,7 @@ export class StreetLife {
   keep: Rideable | null = null;
   readonly peds: PedEdge[];
   readonly cars: Car[] = [];
+  private readonly detachedCars: Car[] = [];
   readonly trams: Tram[] = [];
   readonly trains: Trains;
   people: Person[] = [];
@@ -373,7 +374,7 @@ export class StreetLife {
   private step(dt: number, density: { cars: number; peds: number; trams: number; bikes: number }) {
     this.t += dt;
     if (((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0)) this.breakDeadlocks();
-    const targetCars = Math.min(MAX_CARS, Math.round(this.laneKm * 9 * density.cars));
+    const targetCars = Math.min(MAX_CARS - this.detachedCars.length, Math.round(this.laneKm * 9 * density.cars));
     const targetPeds = Math.min(MAX_PEOPLE, Math.round(this.pedKm * 24 * density.peds));
     for (let k = 0; k < 6 && this.cars.length < targetCars; k++) this.spawnCar(this.cars.length > targetCars * 0.5);
     for (let k = 0; k < 40 && this.people.length < targetPeds; k++) this.spawnPed();
@@ -410,6 +411,12 @@ export class StreetLife {
       c.geo = { px: P.x, py: P.y, cx: C.x, cy: C.y, z: P.z, fx: (F.x - P.x) / l, fy: (F.y - P.y) / l };
       c.block = null;
       pushTo(this.carGrid, cellKey(C.x, C.y, G), c);
+    }
+    for (const c of this.detachedCars) {
+      const p = c.rp!;
+      const fx = Math.sin(c.rh ?? 0), fy = Math.cos(c.rh ?? 0);
+      c.geo = { px: p.x + fx * c.len / 2, py: p.z + fy * c.len / 2, cx: p.x, cy: p.z, z: p.y, fx, fy };
+      pushTo(this.carGrid, cellKey(p.x, p.z, G), c);
     }
     for (const c of this.cars) {
       const g0 = c.geo, gx = (g0.px / G) | 0, gy = (g0.py / G) | 0;
@@ -648,19 +655,23 @@ export class StreetLife {
   private drawCars(back: number, night: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
+    const draw = (c: Car, i: number) => {
+      m.compose(c.rp!, q.setFromAxisAngle(up, c.rh ?? 0), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
+      for (const mesh of [M.body, M.dark, M.head, M.tail]) mesh.setMatrixAt(i, m);
+      M.body.setColorAt(i, c.col);
+      M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
+    };
     this.cars.forEach((c, i) => {
-      // both axles on the blended path: the body follows the curve
+      // Both axles on the blended path: the body follows the curve.
       const s = c.s - c.ds * back, off = c.off - c.dOff * back;
       this.carPoint(c, s, A, off);
       this.carPoint(c, s - (c.len - 1.2), B, off);
       c.rh = Math.atan2(A.x - B.x, A.y - B.y);
       c.rp = (c.rp ?? new THREE.Vector3()).set((A.x + B.x) / 2, Math.max(A.z, B.z), (A.y + B.y) / 2);
-      m.compose(c.rp, q.setFromAxisAngle(up, c.rh), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
-      for (const mesh of [M.body, M.dark, M.head, M.tail]) mesh.setMatrixAt(i, m);
-      M.body.setColorAt(i, c.col);
-      M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
+      draw(c, i);
     });
-    setCount(this.cars.length, M.body, M.dark, M.head, M.tail);
+    this.detachedCars.forEach((c, i) => draw(c, this.cars.length + i));
+    setCount(this.cars.length + this.detachedCars.length, M.body, M.dark, M.head, M.tail);
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 
@@ -756,7 +767,25 @@ export class StreetLife {
 
   // ------------------------------------------------------------------ following
   private tramLabel(tr: Tram) { const ref = this.tramPaths[tr.p].ref; return ref ? `tram ${ref}` : 'tram'; }
-  private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.cars : kind === 'tram' ? this.trams : this.people; }
+  roadVehicles(): Car[] { return this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars; }
+
+  takeWheel(car: Car) {
+    if (this.detachedCars.includes(car)) return true;
+    const i = this.cars.indexOf(car);
+    if (i < 0 || !car.rp) return false;
+    this.removeCar(car);
+    this.cars.splice(i, 1);
+    car.block = null;
+    car.by = null;
+    car.why = 'free';
+    car.wait = 0;
+    this.detachedCars.push(car);
+    // Keep recent player-parked cars around and leave ample room for the traffic fleet.
+    if (this.detachedCars.length > 8) this.detachedCars.shift();
+    return true;
+  }
+
+  private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.roadVehicles() : kind === 'tram' ? this.trams : this.people; }
 
   // the agent nearest to screen point (cx, cy) within px, at least minPx tall on screen, and visible
   pick(camera: THREE.PerspectiveCamera, cx: number, cy: number, px: number, minPx: number, visible: (to: THREE.Vector3) => boolean, skip: Rideable | null): Picked | null {
@@ -781,7 +810,7 @@ export class StreetLife {
       const r = Math.max(px, onScreen * 0.55);
       if (d < r) cand.push({ kind, obj, label, score: d / r + dist / 3000, at: new THREE.Vector3(x, y + size * 0.3, z) });
     };
-    for (const c of this.cars) if (c.rp) test('car', c, c.rp.x, c.rp.y + 0.8, c.rp.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', c.rh, c.len);
+    for (const c of this.roadVehicles()) if (c.rp) test('car', c, c.rp.x, c.rp.y + 0.8, c.rp.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', c.rh, c.len);
     for (const p of this.people) if (p.rp) test('person', p, p.rp.x, p.rp.y + 0.9, p.rp.z, 1.6, 'person');
     for (const [tr, x, z, h, y] of this.tramSections) test('tram', tr, x, y + 1.6, z, 9, this.tramLabel(tr), h, TRAM.sec);
     cand.sort((a, b) => a.score - b.score);
