@@ -210,17 +210,40 @@ class FilmGrade extends Effect {
 // inner corner of every 1 m step into faint vertical lines from street to eaves. Those walls mark themselves in the
 // scene's alpha (voxelMaterial.ts) and keep only a little of it; the alpha is reset to 1 after.
 const STAIR_AO = 0.3;
-function maskStairs(n8: N8AOPostPass) {
+//
+// n8ao also keeps the AO off transparent things (the fountains' jets, the flood's water, rain, the lamps' glow): once
+// the scene holds any, it renders the scene twice more each frame for them, with two full-screen clears and depth
+// copies (~0.9-1 ms on an Iris Xe) -- even when none of them is shown or in view, as by day nearly always. Skipped
+// then, and the composite told so (uTransp: its transparency targets are left as they were, unread).
+const TRANSP = 'if (transparencyAware) {';
+function maskStairs(n8: N8AOPostPass, transpOn: THREE.IUniform<boolean>) {
   const patch = () => {
     const m = n8.effectCompositerQuad.material, ao = 'float finalAo = pow(texel.r, intensity);';
-    if (!m.fragmentShader.includes(ao)) throw new Error('n8ao: composite shader changed');
+    if (!m.fragmentShader.includes(ao) || !m.fragmentShader.includes(TRANSP)) throw new Error('n8ao: composite shader changed');
     m.fragmentShader = m.fragmentShader.replace(ao, `float finalAo = mix(1.0, pow(texel.r, intensity), abs(sceneTexel.a - 0.5) < 0.05 ? ${STAIR_AO.toFixed(2)} : 1.0);`)
-      .replaceAll(', sceneTexel.a)', ', 1.0)');
+      .replaceAll(', sceneTexel.a)', ', 1.0)')
+      .replace(TRANSP, 'if (transparencyAware && uTransp) {').replace('void main()', 'uniform bool uTransp;\nvoid main()');
+    m.uniforms.uTransp = transpOn;
     m.needsUpdate = true;
   };
   const configure = n8.configureEffectCompositer.bind(n8);
   n8.configureEffectCompositer = (...a) => { configure(...a); patch(); };
   patch();
+}
+
+// a transparent thing shown (it and all above it visible; an instanced one with any instances) and in the frustum (or
+// not culled by it)
+function anyTransparentInView(scene: THREE.Object3D, frustum: THREE.Frustum): boolean {
+  for (const o of scene.children) {
+    if (!o.visible || ((o as THREE.InstancedMesh).isInstancedMesh && (o as THREE.InstancedMesh).count === 0)) continue;
+    const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (mat && (Array.isArray(mat) ? mat.some((x) => x.transparent) : mat.transparent)) {
+      const g = (o as THREE.Mesh).geometry;
+      if (!o.frustumCulled || !g || frustum.intersectsObject(o)) return true;
+    }
+    if (o.children.length && anyTransparentInView(o, frustum)) return true;
+  }
+  return false;
 }
 
 export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, sky: Sky) {
@@ -232,7 +255,14 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   composer.addPass(reflPass);
   const n8 = new N8AOPostPass(scene, camera, innerWidth, innerHeight);
   Object.assign(n8.configuration, { aoRadius: 6, distanceFalloff: 1.5, intensity: 2.2, halfRes: true, depthAwareUpsampling: true });
-  maskStairs(n8);
+  const transpOn = new THREE.Uniform(true);
+  maskStairs(n8, transpOn);
+  const render = n8.renderTransparency.bind(n8), frustum = new THREE.Frustum(), m = new THREE.Matrix4();
+  n8.renderTransparency = (r) => {
+    frustum.setFromProjectionMatrix(m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    transpOn.value = anyTransparentInView(scene, frustum);
+    if (transpOn.value) render(r);
+  };
   composer.addPass(n8);
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });
   const tilt = new DepthBlur();

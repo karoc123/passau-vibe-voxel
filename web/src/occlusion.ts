@@ -149,9 +149,11 @@ export class Occlusion {
     }
     this.K = K;
     const cosHalf = Math.cos(delta / 2), cap = this.maxY - ey, hor = this.hor, lvs = this.lv, lws = this.lw, lhs = this.lh;
-    // standing inside the occluders (in a wall, under ground): nothing is hidden; above all of the city: hardly anything
-    // (a building would hide only what is lower still, behind it), not worth the march
-    this.none = ey > this.maxY || this.cellMin(0, ex - 1, ez - 1, ex + 1, ez + 1) > ey - 0.5;
+    // standing inside the occluders (in a wall, under ground): nothing is hidden -- by the eye's own 2 m cell, not by all
+    // of the cells within a metre of it (an eye inside a building sees out through its walls' back faces, and the march
+    // had the building hide the street beyond them); above all of the city: hardly anything (a building would hide only
+    // what is lower still, behind it), not worth the march
+    this.none = ey > this.maxY || this.cellMin(0, ex, ez, ex, ez) > ey - 0.5;
     if (this.none) return;
     for (let b = 0; b < nb; b++) {
       const a = this.aRef + lo + b * delta, c0 = Math.cos(a), s0 = Math.sin(a), c1 = Math.cos(a + delta), s1 = Math.sin(a + delta);
