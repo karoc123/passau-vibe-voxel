@@ -83,7 +83,9 @@ def main():
         levels = tuple(s for s in tiles.LEVELS if s != 1)
     keep = tiles.LEVELS
     tiles.LEVELS = levels
-    info = tiles.export(vol, g, tmp if "--check" in sys.argv else OUT / "tiles", lambda *a: print(*a, flush=True), face_ids=face, planes=planes)
+    walls = [i for i, p in enumerate(meta["palette"]) if p[3] in tiles.WALL_MATS]
+    info = tiles.export(vol, g, tmp if "--check" in sys.argv else OUT / "tiles", lambda *a: print(*a, flush=True), face_ids=face,
+                        planes=planes, wall_ids=walls)
     tiles.LEVELS = keep
     if "--check" in sys.argv:
         same = sum((tmp / "8" / p.name).read_bytes() == p.read_bytes() for p in (OUT / "tiles" / "8").glob("*.bin"))
