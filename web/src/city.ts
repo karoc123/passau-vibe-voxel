@@ -370,8 +370,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (let i = 0; i < total; i++) {
       const tx = i % d.nx, ty = Math.floor(i / d.nx), src: ColumnData[] = [];
       if (stage >= 2 && inTile[i] && onTile[i].every((b) => shown[b + 1])) for (const s of lods) {
-        const c = S.nodes.get(S.key(s, Math.floor(tx / s), Math.floor(ty / s)))?.data;
-        if (c) src.push(c);
+        const nd = S.nodes.get(S.key(s, Math.floor(tx / s), Math.floor(ty / s)));
+        // (a node meshed again after a lost context is not drawn until then: it hides nothing meanwhile)
+        if (nd?.remesh) { src.length = 0; break; }
+        if (nd?.data) src.push(nd.data);
       }
       const was = occSrc[i];
       if (was.length === src.length && was.every((c, k) => c === src[k])) continue;
