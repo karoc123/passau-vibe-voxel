@@ -19,10 +19,19 @@
 // - a flat roof cell of the same building beside a slope (the flat ridge of a fitted roof) is a level region of its
 //   own, so a slope runs up to it instead of stopping a step short
 //
+// - an edge of the roof at an angle to the grid (a diagonal eave, or a gable over a diagonal wall) is a staircase of
+//   cells in plan, and each cell's side under its slope rises from the step's outer corner to its inner one: a row of
+//   teeth along the eave, its shadow on the street a sawtooth. Each inner corner of such a staircase (as chamfer.ts
+//   finds them in the walls: legs of 1 and up to MAX_LEG cells, next to another step) is filled: the roof's surface
+//   goes on over the triangle from the step's inner corner to its two outer ones, a slanted fascia closes it from the
+//   outer corners down to where the cells' sides began, and a floor under it -- the eave runs straight from outer
+//   corner to outer corner, the line the chamfered wall under it takes. The cells' sides inside it are not drawn, and
+//   a chamfer's prism under it (mesher.worker.ts) stops where the fascia begins.
+//
 // On a tile's edge the neighbour's corners are only estimated (its region goes on out of this tile): the face over
 // that edge is always drawn, as a skirt down into the roof, so a slightly different estimate leaves no crack.
 // Heights below a metre ride in vattr.y's top 6 bits (the AO takes the low 2; voxelMaterial.ts adds them back).
-import { PAL_ROOF } from './chamfer';
+import { MAX_LEG, PAL_ROOF } from './chamfer';
 
 export interface SlopeSink {
   reserve(n: number): void;
@@ -42,6 +51,12 @@ const CX = [0, 1, 1, 0], CY = [0, 0, 1, 1];
 const DX = [-1, 1, 0, 0], DY = [0, 0, -1, 1];
 // the 4 edges: [axis, dir, corner a, corner b] (a before b along the edge)
 const EDGES = [[0, -1, 0, 3], [0, 1, 1, 2], [1, -1, 0, 1], [1, 1, 3, 2]] as const;
+
+// the sides an inner corner's cells can be on
+const SIDES = [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const;
+// a filled step of a roof's edge (the header): its inner corner, an empty cell (X, Y) with the roof on its (sx, sy)
+// side, at grid point (px, py); its legs, along x and along y; where its fascia starts (1/64 m)
+interface Fill { X: number; Y: number; sx: number; sy: number; a: number; b: number; px: number; py: number; floor: number }
 
 interface Region {
   code: number; bid: number; flat: boolean; cells: number[];
@@ -194,8 +209,12 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       if (!nq[c * 4 + k] || hs[i] === vs[i]) nq[c * 4 + k] = regions[reg[c]].lit;
     }
   }
+  const { fills, covered, fillFloor } = eaveSteps();
   return {
     hidden,
+    // a filled step's fascia starts at this height (1/64 m) over the inner corner at grid point (X, Y) (tile
+    // coordinates) on the side (sx, sy) of it, as a chamfer's prism (chamfer.ts) has them; undefined: none
+    fillFloor,
     // the surface's height at grid point (X, Y) (tile coordinates) over the slope cells around it (their lowest), in m
     heightAt(X: number, Y: number) {
       let h = Infinity;
@@ -229,8 +248,136 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         const c = X + S * Y;
         if (reg[c] >= 0) for (const e of EDGES) emitEdge(out, c, e, x0, y0, ground);
       }
+      for (const f of fills) emitFill(out, f, x0, y0, ground);
     },
   };
+
+  // The staircases of the roofs' edges in plan (the header): for each inner corner -- an empty cell (X, Y) of no
+  // region with cells of one building's slopes on its side (sx, sy) -- its legs, as chamfer.ts measures them in a
+  // layer of walls; the ones next to another (sharing an outer corner) are filled where what lies under the triangle
+  // stays below the fascia
+  function eaveSteps() {
+    const fills: Fill[] = [], covered = new Uint8Array(SS), floors = new Map<number, number>();
+    const inS = (x: number, y: number) => x >= 0 && y >= 0 && x < S && y < S;
+    const sol = (x: number, y: number, b: number) => inS(x, y) && reg[x + S * y] >= 0 && bid[x + S * y] === b;
+    // from (X, Y) along (ux, uy), the roof on the (ox, oy) side: the cells up to the outer corner
+    const leg = (X: number, Y: number, ux: number, uy: number, ox: number, oy: number, b: number) => {
+      for (let k = 0; k <= MAX_LEG; k++) {
+        const ex = X + ux * k, ey = Y + uy * k;
+        if (!inS(ex, ey) || !inS(ex + ox, ey + oy) || sol(ex, ey, b)) return 0;
+        if (!sol(ex + ox, ey + oy, b)) return k;
+      }
+      return 0;
+    };
+    const cand: Fill[] = [], ends = new Map<number, Fill[]>();
+    const pk = (x: number, y: number) => x * 4096 + y;
+    for (let Y = 0; Y < S; Y++) for (let X = 0; X < S; X++) {
+      for (const [sx, sy] of SIDES) {
+        if (!inS(X + sx, Y + sy)) continue;
+        const C = X + sx + S * (Y + sy);
+        if (reg[C] < 0 || sol(X, Y, bid[C]) || !sol(X + sx, Y, bid[C]) || !sol(X, Y + sy, bid[C])) continue;
+        const a = leg(X, Y, -sx, 0, 0, sy, bid[C]), b = leg(X, Y, 0, -sy, sx, 0, bid[C]);
+        if (!a || !b || Math.min(a, b) !== 1 || Math.max(a, b) > MAX_LEG) continue;
+        const px = X + (sx > 0 ? 1 : 0), py = Y + (sy > 0 ? 1 : 0);
+        const f: Fill = { X, Y, sx, sy, a, b, px, py, floor: 0 };
+        cand.push(f);
+        for (const k of [pk(px - a * sx, py), pk(px, py - b * sy)]) (ends.get(k) ?? ends.set(k, []).get(k)!).push(f);
+      }
+    }
+    const along = (f: Fill, k: number) => ends.get(k)!.some((n) => n !== f && n.sx === f.sx && n.sy === f.sy);
+    for (const f of cand) {
+      const { X, Y, sx, sy, a, b, px, py } = f;
+      if (X < 1 || Y < 1 || X > N || Y > N || !(along(f, pk(px - a * sx, py)) || along(f, pk(px, py - b * sy)))) continue;
+      // the cells' sides it covers: of leg a facing -sy, of leg b facing -sx; the fascia comes down as far as they do
+      let lo = Infinity;
+      for (let k = 0; k < a; k++) lo = Math.min(lo, edgeFloor(X - k * sx + S * (Y + sy), EDGES[sy > 0 ? 2 : 3]));
+      for (let k = 0; k < b; k++) lo = Math.min(lo, edgeFloor(X + sx + S * (Y - k * sy), EDGES[sx > 0 ? 0 : 1]));
+      f.floor = lo * Q;
+      // it stands above its floor, and nothing under the triangle comes up through it: a street, or a lower roof
+      // (what stands above the floor is inside it, behind the fascia)
+      const cs = fillCorners(f);
+      if (Math.min(cs[0][0], cs[1][0], cs[2][0]) <= f.floor) continue;
+      let ok = true;
+      for (let k = 0; k < a && ok; k++) ok = clear(f, cs, X - k * sx, Y);
+      for (let k = 1; k < b && ok; k++) ok = clear(f, cs, X, Y - k * sy);
+      if (!ok) continue;
+      fills.push(f);
+      for (let k = 0; k < a; k++) covered[X - k * sx + S * (Y + sy)] |= 1 << (sy > 0 ? 2 : 3);
+      for (let k = 0; k < b; k++) covered[X + sx + S * (Y - k * sy)] |= 1 << (sx > 0 ? 0 : 1);
+      floors.set(((px - 1) * 4096 + (py - 1)) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0), f.floor);
+    }
+    // whether what is in cell (x, y) (its top; a slope's surface) stays under the fill's triangle where the two
+    // overlap: compared at the corners of the triangle clipped to the cell, both being planes there (a slope's cell
+    // nearly: taken bilinear)
+    function clear(f: Fill, cs: number[][], x: number, y: number) {
+      const P = [f.px, f.py, cs[0][0]], L = [f.px - f.a * f.sx, f.py, cs[1][0]], R = [f.px, f.py - f.b * f.sy, cs[2][0]];
+      let poly = [P, L, R];
+      for (const [ax, lim, keep] of [[0, x, 1], [0, x + 1, -1], [1, y, 1], [1, y + 1, -1]]) {
+        const out: number[][] = [];
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i], q = poly[(i + 1) % poly.length], dp = (p[ax] - lim) * keep, dq = (q[ax] - lim) * keep;
+          if (dp >= 0) out.push(p);
+          if ((dp >= 0) !== (dq >= 0)) { const t = dp / (dp - dq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t]); }
+        }
+        poly = out;
+        if (!poly.length) return true;
+      }
+      const c = x + S * y;
+      for (const [gx, gy, h] of poly) {
+        const u = gx - x, v = gy - y;
+        const top = reg[c] >= 0
+          ? (1 - u) * (1 - v) * hq[c * 4] + u * (1 - v) * hq[c * 4 + 1] + u * v * hq[c * 4 + 2] + (1 - u) * v * hq[c * 4 + 3] : T[c] * Q;
+        if (top > h - Q / 16) return false;
+      }
+      return true;
+    }
+    return {
+      fills, covered,
+      fillFloor: (X: number, Y: number, sx: number, sy: number) => floors.get((X * 4096 + Y) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0)),
+    };
+  }
+
+  // a fill's inner corner P and outer corners L (end of leg a) and R: [height, lit code, cell] each, from the cells
+  // whose sides run along its edges, so the triangle meets them exactly
+  function fillCorners(f: Fill) {
+    const { X, Y, sx, sy, a, b, px, py } = f;
+    const at = (c: number, GX: number, GY: number) => { const k = c * 4 + cornerIdx(c, GX, GY); return [hq[k], nq[k], c]; };
+    const pa = at(X + S * (Y + sy), px, py), pb = at(X + sx + S * Y, px, py);
+    return [pa[0] <= pb[0] ? pa : pb, at(X - (a - 1) * sx + S * (Y + sy), px - a * sx, py), at(X + sx + S * (Y - (b - 1) * sy), px, py - b * sy)];
+  }
+
+  function emitFill(out: SlopeSink, f: Fill, x0: number, y0: number, ground: Uint8Array) {
+    const { sx, sy, a, b, px, py } = f;
+    const [cp, cl, cr] = fillCorners(f);
+    const P = [px, py], A = [px - a * sx, py], B = [px, py - b * sy];
+    const hOf = new Map([[P, cp], [A, cl], [B, cr]]);
+    const c0 = cp[2], r = regions[reg[c0]], top = vol[c0 + SS * T[c0]], gm = ground[c0], bd = bid[c0];
+    const v = (q: number[], h: number, nrm: number, w: number, pal: number) => out.vertexQ(q[0] - 1 + x0, h, q[1] - 1 + y0, nrm, 3, gm, w, pal, bd);
+    // the slope over the triangle (P, A, B counter-clockwise from above: as emitPrism's lid)
+    const up = -a * b * sx * sy > 0, [l1, l2] = up ? [A, B] : [B, A];
+    out.reserve(4);
+    for (const q of [P, l1, l2, l2]) { const [h, lit] = hOf.get(q)!; v(q, h, 5 + 8 * ((lit - 1) >> 6), 1 + ((lit - 1) & 63), top); }
+    // the fascia from A to B: an eave's in the roof's material, lit as the roof (as emitEdge's); else (the slope runs
+    // along it) a gable's, in the wall's material under it, lit as a wall in that direction (a staircase wall's
+    // 15° steps, mesher.worker.ts wallAngle) and ending at its foot (wallTopCode: no window up into it)
+    const nx = -b * sx, ny = -a * sy, nl = Math.hypot(nx, ny);
+    const axis = Math.abs(nx) >= Math.abs(ny) ? (nx > 0 ? 1 : 0) : ny > 0 ? 3 : 2;
+    const az = ((r.code - 1) & 63) * (Math.PI / 32), fall = r.flat ? 0 : (Math.cos(az) * nx + Math.sin(az) * ny) / nl;
+    const below = T[c0] >= 2 ? vol[c0 + SS * (T[c0] - 1)] : 0;
+    const wallBelow = below !== 0 && below < roofPal.length && !(roofPal[below] & PAL_ROOF) && below < 65534;
+    let nrm = axis + 8 * ((r.lit - 1) >> 6), w = 1 + ((r.lit - 1) & 63), pal = top;
+    if (fall <= 0.4 && wallBelow) {
+      pal = below;
+      nrm = axis + 8 * (1 + (Math.round(Math.atan2(ny, nx) / (Math.PI / 12)) + 24) % 24);
+      w = wallTops ? wallTopCode(Math.floor(f.floor / Q) - gm) : 0;
+    }
+    const [L, R] = (B[1] - A[1]) * -nx + (B[0] - A[0]) * ny >= 0 ? [A, B] : [B, A];
+    out.reserve(4);
+    v(L, f.floor, nrm, w, pal); v(R, f.floor, nrm, w, pal); v(R, hOf.get(R)![0], nrm, w, pal); v(L, hOf.get(L)![0], nrm, w, pal);
+    // ... and its floor
+    out.reserve(4);
+    for (const q of [P, l2, l1, l1]) v(q, f.floor, 4, 0, top);
+  }
 
   // the lowest voxel of c whose face along edge e is the slope's to draw
   function edgeFloor(c: number, e: readonly number[]) {
@@ -287,6 +434,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   }
 
   function emitEdge(out: SlopeSink, c: number, e: readonly number[], x0: number, y0: number, ground: Uint8Array) {
+    if (covered[c] & (1 << (e[0] * 2 + (e[1] > 0 ? 1 : 0)))) return; // inside a filled step
     const n = neighbour(c, e), X = c % S, Y = (c - X) / S;
     const a0 = hq[c * 4 + e[2]], a1 = hq[c * 4 + e[3]];
     const lo = edgeFloor(c, e);

@@ -288,8 +288,13 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
   const axis = Math.abs(nx) >= Math.abs(ny) ? (nx > 0 ? 1 : 0) : ny > 0 ? 3 : 2;
   // corners counter-clockwise seen from outside
   const [L, R] = (B[1] - A[1]) * -nx + (B[0] - A[0]) * ny >= 0 ? [A, B] : [B, A];
+  // where the roof's edge over this corner is filled (roofs.ts), its fascia goes on from where the prism stops
+  const fill = slopes?.fillFloor(p.px, p.py, p.sx, p.sy);
+  if (fill !== undefined && p.z0 * 64 >= fill) return;
+  const capTop = p.capTop && fill === undefined;
   // an eave's prism under a sloped roof (roofs.ts) comes up to the slope, not to the top of its voxels (in 1/64 m)
   const top = (q: number[]) => {
+    if (fill !== undefined) return Math.min(p.z1 * 64, fill);
     const h = p.roof && p.capTop && slopes ? slopes.heightAt(q[0], q[1]) : Infinity;
     return Number.isFinite(h) ? Math.min(p.z1 * 64, Math.max(p.z0 * 64 + 16, Math.round(h * 64))) : p.z1 * 64;
   };
@@ -303,7 +308,7 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
   if (p.aoBottom < 3 && p.z1 - p.z0 > 1 && Math.min(tL, tR) > (p.z0 + 1) * 64) { wall(p.z0 * 64, (p.z0 + 1) * 64, (p.z0 + 1) * 64, p.aoBottom); wall((p.z0 + 1) * 64, tL, tR, 3); }
   else wall(p.z0 * 64, tL, tR, p.aoBottom);
   const up = -p.a * p.b * p.sx * p.sy > 0; // P, A, B counter-clockwise from above
-  if (p.capTop) {
+  if (capTop) {
     let nrm = 5, w = 0;
     if (roofs && palFlags[p.pal] & PAL_ROOF) {
       const rc = roofs.code(p.cx, p.cy, p.z1 - 1, 2, 1);
