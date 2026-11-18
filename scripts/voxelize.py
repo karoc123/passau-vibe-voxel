@@ -2647,7 +2647,8 @@ np.savez_compressed("data/footprints.npz", oid=_fp)
 import tiles
 EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
                          fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | {C["trunk"]},
-                         grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"])
+                         grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
+                         wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
 # nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
 debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db)
 if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (scripts/floating.py)

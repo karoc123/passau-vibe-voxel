@@ -32,12 +32,20 @@ import numpy as np
 N = 128
 LEVELS = (1, 2, 8)
 LOD_LEVELS = (2,)  # the distance levels: with roof planes, meshed like level 1 (slopes, chamfers)
+# the materials of buildings' walls (voxelMaterial.ts MAT: SOLID, WALL, GLASS, FLOODLIT, CONCRETE, BRONZE, RIBBON, CLASSIC,
+# WINDOW, TENEMENT; as web/src/stream.ts WALLS): a distance level's wall blocks wear their own colour (side_walls)
+WALL_MATS = (0, 1, 2, 7, 13, 15, 19, 20, 21, 22)
 
 
-def downsample(vol, s, face_ids=()):
+def downsample(vol, s, face_ids=(), wall_ids=None):
+    """wall_ids (a distance level): palette entries of buildings' walls, see side_walls"""
     H, D, W = vol.shape
     Hs, Ds, Ws = -(-H // s), -(-D // s), -(-W // s)
     out = np.zeros((Hs, Ds, Ws), np.uint16)
+    sides = wall_ids is not None and len(wall_ids)
+    if sides:
+        is_wall = np.zeros(65536, bool); is_wall[np.asarray(wall_ids, np.int64)] = True
+        wmode = np.zeros((Hs, Ds, Ws), np.uint16)  # the block's commonest wall voxel where walls are half of it
     need = s ** 3 // 4
     band = max(1, 256 // s)  # block rows per pass: bounded memory on a large volume
     for rb in range(0, Ds, band):
@@ -66,7 +74,49 @@ def downsample(vol, s, face_ids=()):
             fv = blk.max((1, 3, 5), where=np.isin(blk, face_ids), initial=0)
             res = np.where((res != 0) & (fv > 0), fv, res)
         out[:, rb:rb + db, :] = res
+        if sides:
+            wmode[:, rb:rb + db, :] = wall_mode(blk, is_wall)
+    if sides:
+        side_walls(out, wmode)
     return out
+
+
+def wall_mode(blk, is_wall):
+    """per block (blk: (hb, s, db, s, wb, s)), its commonest wall voxel where walls are at least half of what is in it,
+    else 0"""
+    hb, s, db, _, wb, _ = blk.shape
+    f = blk.transpose(0, 2, 4, 1, 3, 5).reshape(hb, db, wb, s ** 3)
+    w = is_wall[f]
+    nw, nz = w.sum(3), (f != 0).sum(3)
+    best, bestn = np.zeros((hb, db, wb), np.uint16), np.zeros((hb, db, wb), np.int32)
+    for k in range(s ** 3):
+        c = f[..., k]
+        n = ((f == c[..., None]) & w).sum(3)
+        better = w[..., k] & (n > bestn)
+        best = np.where(better, c, best); bestn = np.where(better, n, bestn)
+    return np.where((nw > 0) & (2 * nw >= nz), best, 0).astype(np.uint16)
+
+
+def side_walls(out, wmode):
+    """A block takes the colour of its topmost voxel: on a wall under a roof that was the roof's wherever a roof voxel
+    reached into it (a gable's slope, a deep eave), or the roof's thin layer over it was worn down a block, and from
+    afar the town read orange, its walls banded with roof colour. A block of a facade -- open air beside it, and beside
+    the block under it on the same side (a roof's riser has solid under it) -- with walls for half of it wears its
+    commonest wall voxel instead -- the top block of a facade too, under the eave: half wall, its side is mostly wall
+    at 1 m, and as roof it laid a 2 m band of roof colour along every eave (seen from above, the roof's outline gives up
+    those blocks' width; from afar the facades are what is seen). Measured on the overview, the share of roof-orange
+    pixels at 2 m over the same at 1 m: +10 % before, +7 % after; close in on the old town +6 % before, +2 % after."""
+    solid = out != 0
+    face = np.zeros_like(solid)
+    for ax, sh in ((1, 1), (1, -1), (2, 1), (2, -1)):
+        o = ~np.roll(solid, sh, axis=ax)  # open air on that side (the map's edge: none)
+        if ax == 1:
+            o[:, 0 if sh > 0 else -1, :] = False
+        else:
+            o[:, :, 0 if sh > 0 else -1] = False
+        face[1:] |= o[1:] & o[:-1]
+    k = solid & face & (wmode != 0)
+    out[k] = wmode[k]
 
 
 def downsample_planes(planes, s):
@@ -119,13 +169,14 @@ def column_runs(vol_win):
     return counts.astype(np.uint16), np.stack([s_z0, s_z1 - s_z0, val], 1).astype(np.uint16)
 
 
-def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None):
+def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None):
     """vol (H, D, W) level-1 voxels, g (D, W) ground level, planes (D, W) roof plane codes or None -> node files;
-    returns the manifest for meta.json."""
+    wall_ids: the palette entries of buildings' walls (the distance levels' colours, side_walls). Returns the manifest
+    for meta.json."""
     D, W = g.shape
     info = dict(N=N, levels=[], bytes=0)
     for s in LEVELS:
-        vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16))
+        vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16), wall_ids if s in LOD_LEVELS else None)
         gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
         ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
         Hs, Ds, Ws = vs.shape
@@ -177,7 +228,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
     return info
 
 
-def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None):
+def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None):
     """Rewrite only the nodes (every level) over box = (r0, r1, c0, c1) of the 1 m grid, from the same volume the
     full export would see (for a fast loop on one landmark); each node is built from its own 1 m window, so the result matches
     export()."""
@@ -197,7 +248,7 @@ def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(),
                 ra, rb, ca, cb = max(a, 0), min(a + span + 2 * s, D), max(c, 0), min(c + span + 2 * s, W)
                 w1[:, ra - a:rb - a, ca - c:cb - c] = vol[:, ra:rb, ca:cb]
                 g1[ra - a:rb - a, ca - c:cb - c] = g[ra:rb, ca:cb]
-                win = w1 if s == 1 else downsample(w1, s, face)
+                win = w1 if s == 1 else downsample(w1, s, face, wall_ids if s in LOD_LEVELS else None)
                 gw = np.clip(g1[::s, ::s], 0, 255).astype(np.uint8)
                 Hs = win.shape[0]
                 top = int(np.nonzero(win.reshape(Hs, -1).any(1))[0].max()) + 1 if win.any() else 1

@@ -3,6 +3,7 @@ import type { Meta } from './types';
 import { FOLIAGE_CLASSES } from './foliage';
 import { dataTexture } from './util';
 import { SLANT, SLANT_STEPS } from './chamfer';
+import { WALL_TOP } from './roofs';
 
 // material ids, as in scripts/voxelize.py
 export const MAT = { SOLID: 0, WALL: 1, GLASS: 2, LEAF: 3, WATER: 4, LAMP: 5, METAL: 6, FLOODLIT: 7, GRASS: 8, MARK: 9, SOIL: 10, CAR: 11,
@@ -42,6 +43,8 @@ export interface VoxelUniforms {
   uLitA: U<THREE.Vector4[]>;
   uLitB: U<THREE.Vector4[]>;
   uLitMap: U<THREE.Texture>;
+  uNoWin: U<THREE.Vector4>;
+  uNoWinR: U<number>;
 }
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
@@ -224,7 +227,11 @@ function floodlights(meta: Meta) {
         if (d < reach && d / r < best[x + w * y]) { best[x + w * y] = d / r; map[x + w * y] = k + 1; }
       }
   }
-  return { uLitA: { value: A }, uLitB: { value: B }, uLitMap: { value: dataTexture(map, w, h, THREE.RedFormat) } };
+  // the cathedral has its windows in voxels (scripts/passau.py): the shader draws none on its walls
+  const dom = meta.labels.find((l) => l.name === 'Dom St. Stephan'), da = FLOODLIT['Dom St. Stephan'];
+  const noWin = dom ? new THREE.Vector4(dom.x + 0.5 + da.a![0], dom.y + 0.5 + da.a![1], dom.x + 0.5 + da.b![0], dom.y + 0.5 + da.b![1]) : new THREE.Vector4(-1e4, -1e4, -1e4, -1e4);
+  return { uLitA: { value: A }, uLitB: { value: B }, uLitMap: { value: dataTexture(map, w, h, THREE.RedFormat) },
+    uNoWin: { value: noWin }, uNoWinR: { value: da.r } };
 }
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
@@ -301,10 +308,23 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant;
+  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying float vWTop;
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
+  // Window glass: a dark, faintly blue-grey dielectric (not metal: a metal's reflection is tinted by its colour, and
+  // the facade's warm plaster in the panes read as brass), only a hint of the wall's colour in it (the room behind,
+  // the frame's shade). Smooth, so the sky (scene.environment) shows in it, by Fresnel: little head-on, more at a glance.
+  const float GLASS_ROUGH = 0.1;
+  vec3 glassCol(vec3 base, float h) { return mix(vec3(0.026, 0.032, 0.04), base * 0.12, 0.25) * (0.85 + 0.3 * h); }
+  // ... and the sky in it, by day: the environment's reflection off a dielectric is a few per cent and the panes read as
+  // holes; a sheen of the sky's colour (the ground's, darker, looking down into it) by Fresnel, stronger at a glance
+  vec3 glassSky(vec3 n) {
+    vec3 V = normalize(cameraPosition - vVox), R = reflect(-V, n);
+    float f = 0.07 + 0.45 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 3.0);
+    vec3 sky = R.y > 0.0 ? mix(uHorizon, uHorizon * vec3(0.6, 0.75, 1.0), clamp(R.y * 1.5, 0.0, 1.0)) : uHorizon * vec3(0.3, 0.29, 0.27);
+    return sky * f * (1.0 - uNight);
+  }
   // how much of a pixel (x +- w/2) falls in [a, b), alone (span) or repeated every p (band): box-filtered, so facade
   // detail smaller than a pixel fades to its average instead of shimmering
   float span(float x, float w, float a, float b) { return (clamp(x + 0.5 * w, a, b) - clamp(x - 0.5 * w, a, b)) / w; }
@@ -351,7 +371,7 @@ const FRAG_PARS = `
     return s / n;
   }
   ${FOLIAGE}
-  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap;
+  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap; uniform vec4 uNoWin; uniform float uNoWinR;
   // how much a floodlit landmark (uLitA/B) lights a point; out: the direction from its axis, and how white its light
   float floodAt(vec2 p, bool mirror, out vec2 out_, out float w_) {
     out_ = vec2(0.0); w_ = 0.0;
@@ -444,53 +464,76 @@ const SURFACE = `
       float x = uc - floor(hash12(vec2(vBid * 0.37, 5.3)) * P);
       float SH = 3.3 + 0.4 * hash12(vec2(vBid * 0.71, 2.9)), G = 4.2, up = lv - G, st = floor(up / SH);
       vec4 fc = facade(x, lv, dUVx, dUVy, P, SH, G);
+      // no window whose top would run past the wall's end here (an eave, a gable's slope: vWTop, metres over the ground)
+      if (vWTop < 900.0 && (up < 0.0 ? 2.9 : G + st * SH + 2.8) > vWTop - 0.1) fc = vec4(0.0);
       float win = fc.x;
       col *= 1.0 - 0.16 * span(lv, fwV, -1.0, 0.6) - 0.12 * span(lv, fwV, G - 0.3, G - 0.05);
       col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), fc.y + fc.w * 0.6);
       // glass, and white-painted frames and bars (fc.z) in the opening
       float gw = win - fc.z;
-      col = col * (1.0 - win) + (mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h) * gw + vec3(0.62, 0.6, 0.56) * fc.z;
-      gRough = mix(gRough, 0.12, gw) - 0.3 * fc.z; gMetal = 0.6 * gw;
+      col = col * (1.0 - win) + glassCol(base, h) * gw + vec3(0.62, 0.6, 0.56) * fc.z;
+      gRough = mix(gRough, GLASS_ROUGH, gw) - 0.3 * fc.z;
+      gEmissive = glassSky(wN) * gw;
       if (gw > 0.0 && uNight > 0.0) {
         float k = floor(x / P);
-        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
-        else gEmissive = windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
+        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
+        else gEmissive += windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
       }
     }
   } else if (m == ${MAT.CONCRETE}) {
     if (vert && lvl < 4.0 && lvl >= 1.0 && mod(u, 4.0) > 0.5) {
-      col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
-      gRough = 0.12; gMetal = 0.6;
-      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
+      col = glassCol(base, h);
+      gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
+      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
     }
   } else if (m == ${MAT.GLASS}) {
     if (vert) {
       if (mod(lvl, 4.0) < 0.5) { col = base * 0.55 + 0.04; gRough = 0.5; }
       else {
-        col = base * (0.8 + 0.12 * step(0.5, mod(u, 2.0)));
-        gRough = 0.08; gMetal = mix(0.35, 0.6, uNight);
+        col = mix(glassCol(base, h), base * 0.5, 0.35) * (0.9 + 0.12 * step(0.5, mod(u, 2.0)));
+        gRough = 0.08; gMetal = 0.1;
         vec2 zone = vec2(floor(u / 6.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
-        if (shopLvl && lvl < 4.0) gEmissive = vec3(1.0, 0.86, 0.66) * 1.3 * uNight;
-        else gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
+        gEmissive = glassSky(wN);
+        if (shopLvl && lvl < 4.0) gEmissive += vec3(1.0, 0.86, 0.66) * 1.3 * uNight;
+        else gEmissive += windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
       }
     } else { gRough = 0.3; gMetal = 0.4; }
   } else if (m == ${MAT.CLASSIC}) {
     gRough = 0.8;
     if (vert && lvl < 7.5) col *= mod(lvl, 2.0) < 1.0 ? 0.9 : 1.0;
+    // A church (stone or brick, windows.bin's religious kind): tall round-headed windows, ~1.8 m wide every 5-7 m, from
+    // 3.5 m up to 2 m under the eave (vWTop; 11.5 m where that is not known). Its walls were blank: not the town's
+    // storeys of windows, and the voxels had none (but the cathedral's, scripts/passau.py: none drawn over those)
+    if (vert && vWTop > 6.5 && (int(texelFetch(uWinMap, ivec2(cell.xz), 0).r * 255.0 + 0.5) & 7) == 6) {
+      vec2 pa = vVox.xz - uNoWin.xy, ba = uNoWin.zw - uNoWin.xy;
+      if (length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0)) > uNoWinR) {
+        float P = 5.0 + 2.0 * hash12(vec2(vBid * 0.41, 8.3)), x = uc - floor(hash12(vec2(vBid * 0.29, 1.9)) * P);
+        float top = min(vWTop - 2.0, 11.5), wd = 1.8, r = 0.5 * wd;
+        float cu = band(x, fwU, P, 0.0, wd), cv = span(lv, fwV, 3.5, top - r + 0.3); // (into the arch: no seam where the two meet)
+        float dx = mod(x, P) - r, dy = lv - (top - r);
+        float arch = dy > 0.0 ? clamp((r - length(vec2(dx, dy))) / max(fwU, 1e-3) + 0.5, 0.0, 1.0) * step(abs(dx), r) : 0.0;
+        float win = top - 3.5 > 3.0 ? max(cu * cv, arch) : 0.0;
+        if (win > 0.0) {
+          col = mix(col, glassCol(base, h) * vec3(1.0, 1.05, 1.1), win);
+          gRough = mix(gRough, GLASS_ROUGH, win);
+          gEmissive = (glassSky(wN) + vec3(1.0, 0.78, 0.5) * 0.12 * uNight * step(0.4, hash12(vec2(vBid, 2.2)))) * win;
+        }
+      }
+    }
   } else if (m == ${MAT.RIBBON}) {
     if (vert && mod(lvl, 4.0) > 1.5) {
-      col = mix(base * 0.4, vec3(0.12, 0.16, 0.2), 0.6) + 0.02 * h; gRough = 0.08; gMetal = 0.55;
+      col = glassCol(base, h); gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
       vec2 zone = vec2(floor(u / 12.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
-      gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * uNight;
+      gEmissive += windowLight(cell, zone, floor(lvl / 4.0)) * uNight;
     } else { gRough = 0.4; gMetal = 0.3; }
   } else if (m == ${MAT.FLOODLIT}) { // floodlit stone: a landmark washed in warm light at night
     float tower = smoothstep(20.0, 28.0, lvl), wash = 1.0 - 0.3 * smoothstep(28.0, 190.0, lvl);
     vec3 light = mix(vec3(1.0, 0.78, 0.5) * 0.6 * (1.0 - 0.6 * smoothstep(4.0, 18.0, lvl)), vec3(0.95, 0.74, 0.4) * wash * 2.4, tower);
     gEmissive = vert ? col * light * uNight : vec3(0.0);
   } else if (m == ${MAT.WINDOW}) {
-    gRough = 0.15; gMetal = 0.35;
-    col *= 0.6;
-    gEmissive = windowLight(cell, floor(cell.xz / 2.0) + floor(cell.y / 2.0) * 7.3, floor(cell.y / 3.0)) * uNight;
+    gRough = GLASS_ROUGH;
+    col = glassCol(base, h);
+    gEmissive = (vert ? glassSky(wN) : vec3(0.0)) + windowLight(cell, floor(cell.xz / 2.0) + floor(cell.y / 2.0) * 7.3, floor(cell.y / 3.0)) * uNight;
   } else if (m == ${MAT.LEAF}) {
     col = base * uLeaf * (0.8 + 0.35 * h); gRough = 0.95;
     if (uFolOn > 0.5) {
@@ -538,7 +581,7 @@ const SURFACE = `
         col = vec3(0.16, 0.12, 0.065); gRough = 0.55; gMetal = 0.25;
         gEmissive = vec3(1.0, 0.75, 0.4) * 0.35 * uNight;
       } else {
-        col = base * 0.6; gRough = 0.06; gMetal = 0.5;
+        col = mix(glassCol(base, h), base * 0.4, 0.4); gRough = 0.06; gMetal = 0.15;
         if (hash12(vec2(floor(u / 2.0) + cell.x * 0.17, floor(lvl / 4.0))) > 0.6) gEmissive = vec3(1.0, 0.85, 0.6) * 0.5 * uNight;
       }
     }
@@ -725,7 +768,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
         #endif
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
+        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; varying float vWTop; ${NORMAL_FROM_IDX}`)
       // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its
       // plane. On a roof's staircase (vattr.w > 0: 1 + its downhill direction in 64 steps) the 8s are the plane's slope
       // in 2.5° steps, and it is lit as that plane
@@ -734,6 +777,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01), nRoof = vattr.w, nSlant = 0.0;
         float litAng = nAng;
         if (nRoof > ${SLANT - 0.5}) { nSlant = 1.0; litAng = 1.0 + (nRoof - ${SLANT}.0) * ${(24 / SLANT_STEPS).toFixed(6)}; nRoof = 0.0; }
+        // (a wall's face: where the wall ends above it, mesher.worker.ts wallTopCode -- in metres over the ground)
+        float nTop = 999.0;
+        if (nRoof > ${WALL_TOP - 0.5}) { nTop = nRoof > 126.5 ? 999.0 : nRoof - ${WALL_TOP}.0; nRoof = 0.0; }
         float rSl = nAng * 0.0436332, rAz = (nRoof - 1.0) * 0.0981748;
         vec3 objectNormal = nRoof > 0.5 ? vec3(sin(rSl) * cos(rAz), cos(rSl), sin(rSl) * sin(rAz))
           : litAng > 0.5 ? vec3(cos((litAng - 1.0) * 0.261799), 0., sin((litAng - 1.0) * 0.261799)) : normalFromIdx(nAx);
@@ -745,7 +791,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
         .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 || nRoof > 0.5 ? objectNormal : vec3( 0.0 );')
         .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal;
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal; vWTop = nTop;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)

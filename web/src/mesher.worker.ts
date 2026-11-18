@@ -4,7 +4,7 @@
 // are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres on the way
 // out; the clay (8 m) comes without roof palette and is plain voxels.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
-import { slopeRoofs } from './roofs';
+import { slopeRoofs, wallTopCode } from './roofs';
 
 export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
 // planes: level 1's roof plane per column (decode), kept with the columns so a foliage job can re-mesh its base tile
@@ -41,13 +41,13 @@ export type MeshReply =
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
   (self as unknown as { postMessage(m: MeshReply, t: Transferable[]): void }).postMessage(msg, transfer);
 
-async function fetchGzip(url: string) {
+export async function fetchGzip(url: string) {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${res.status} ${url}`);
   return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 }
 
-function decode(buf: ArrayBuffer, N: number) {
+export function decode(buf: ArrayBuffer, N: number) {
   const n2 = (N + 2) * (N + 2);
   const counts = new Uint16Array(buf, 0, n2), ground = new Uint8Array(buf, n2 * 2, n2);
   let nr = 0;
@@ -88,6 +88,11 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
 const QUAD_ORDER = [[1, 2, 3, 0], [1, 0, 3, 2], [0, 1, 2, 3], [0, 3, 2, 1]];
 const SOLID_BELOW = 65535;
 const OCC = 65534; // the base tile under a foliage tile: solid for culling and AO, never meshed
+// Faces out through the tile's border are drawn even where the next tile is solid there (it may not be shown yet: a
+// level's node swaps whole); such a face's top edge lay exactly on the edge of the tops meeting over the border, and
+// where they left a pixel between them it showed through, a hairline along the tile's edge. INNER marks them (in
+// meshFaces' second mask, beside a wall's top) and they are drawn with their top edge sunk 1/64 m
+const INNER = 1;
 
 class QuadBuffer {
   private cap = 1 << 14;
@@ -136,7 +141,7 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 
 // bldIds (1 m tiles): the building of each column, apron included (scripts/zones.py, 0: none); faces never merge across
 // buildings
-function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
+export function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
   roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null): MeshOut {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
@@ -215,9 +220,18 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   const slopes = roofPal && planes ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, ch?.hidden ?? new Uint8Array(S * S * sz)) : null;
   slopes?.hide();
   const hidden = ch?.hidden ?? (slopes ? slopes.hidden : undefined);
+  // (1 m tiles) where each column's wall ends: under the run of roof voxels on top, else its top. Its walls' faces carry
+  // it (WALL_TOP + metres above the ground, in vattr.w) so the facade draws no window that would run up past it: under
+  // an eave, in a gable under its slope, a window row cut through by the roof read as a row of black slivers
+  const wallTop = roofPal && s === 1 ? new Uint16Array(S * S) : null;
+  if (wallTop) for (let c = 0; c < S * S; c++) {
+    let z = colTop[c];
+    while (z > 1) { const w = vol[c + sx * sy * z]; if (!(w < roofPal!.length && roofPal![w] & PAL_ROOF)) break; z--; }
+    wallTop[c] = z; // the top face of the wall's highest voxel (the volume's z is shifted by one)
+  }
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3, v = (d + 2) % 3, nu = dims[u], nv = dims[v];
-    const mask = new Float64Array(nu * nv);
+    const mask = new Float64Array(nu * nv), top = new Uint8Array(nu * nv);
     const sd = ST[d], su = ST[u], sv = ST[v];
     for (const dir of [-1, 1]) {
       const normalIdx = d * 2 + (dir > 0 ? 1 : 0);
@@ -246,13 +260,14 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null) : 255;
                 // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
                 key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
+                top[i + j * nu] = nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
                 any = true;
               }
             }
             mask[i + j * nu] = key;
           }
         }
-        if (any) emitMerged(mask, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out);
+        if (any) emitMerged(mask, top, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out);
       }
     }
   }
@@ -260,7 +275,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   if (ch?.prisms.length || slopes) out.slanted = true;
   // (at s > 1 the slopes come out in cells: scaled to metres here, heights in 1/64 of a cell to 1/64 m)
   slopes?.emit(s === 1 ? out : { reserve: (n) => out.reserve(n), vertexQ: (x, q, z, n, ao, g, w, pal, b) => out.vertexQ(x * s + x0, q * s, z * s + y0, n, ao, g, w, pal, b) },
-    s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground);
+    s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground, s === 1);
 }
 
 // A chamfer (chamfer.ts): its slanted face, lit as the wall's plane (vattr.w = SLANT + its direction) and windowed along
@@ -417,17 +432,17 @@ function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis:
   return ao(s10, s01, c00) | (ao(s12, s01, c20) << 2) | (ao(s12, s21, c22) << 4) | (ao(s10, s21, c02) << 6);
 }
 
-function emitMerged(mask: Float64Array, nu: number, nv: number, d: number, u: number, v: number, dir: number, normalIdx: number,
+function emitMerged(mask: Float64Array, top: Uint8Array, nu: number, nv: number, d: number, u: number, v: number, dir: number, normalIdx: number,
   sl: number, s: number, x0: number, y0: number, out: QuadBuffer) {
   for (let j = 0; j < nv; j++) {
     for (let i = 0; i < nu;) {
-      const key = mask[i + j * nu];
+      const key = mask[i + j * nu], wt = top[i + j * nu];
       if (!key) { i++; continue; }
       let w = 1;
-      while (i + w < nu && mask[i + w + j * nu] === key) w++;
+      while (i + w < nu && mask[i + w + j * nu] === key && top[i + w + j * nu] === wt) w++;
       let h = 1;
       outer: while (j + h < nv) {
-        for (let k = 0; k < w; k++) if (mask[i + k + (j + h) * nu] !== key) break outer;
+        for (let k = 0; k < w; k++) if (mask[i + k + (j + h) * nu] !== key || top[i + k + (j + h) * nu] !== wt) break outer;
         h++;
       }
       for (let jj = 0; jj < h; jj++) for (let ii = 0; ii < w; ii++) mask[i + ii + (j + jj) * nu] = 0;
@@ -435,7 +450,7 @@ function emitMerged(mask: Float64Array, nu: number, nv: number, d: number, u: nu
       const gm = k1 % 256, aoBits = Math.floor(k1 / 256) % 256, palIdx = Math.floor(k1 / 65536) % 4096, ang = Math.floor(k1 / (65536 * 4096));
       // vattr.x: face axis + 8 x (a wall's direction, or a roof plane's slope in 2.5° steps); vattr.w: 1 + the roof
       // plane's downhill direction in 64 steps, 0 for anything else
-      const roof = ang > 24 ? ang - 25 : -1, nrm = normalIdx + 8 * (roof >= 0 ? roof >> 6 : ang), rw = roof >= 0 ? 1 + (roof & 63) : 0;
+      const roof = ang > 24 ? ang - 25 : -1, nrm = normalIdx + 8 * (roof >= 0 ? roof >> 6 : ang), rw = roof >= 0 ? 1 + (roof & 63) : wt === INNER ? 0 : wt;
       const aos = aoBits === 255 ? [3, 3, 3, 3] : [aoBits & 3, (aoBits >> 2) & 3, (aoBits >> 4) & 3, (aoBits >> 6) & 3];
       const base = [0, 0, 0];
       base[d] = sl + (dir > 0 ? 1 : 0); base[u] = i; base[v] = j;
@@ -445,7 +460,9 @@ function emitMerged(mask: Float64Array, nu: number, nv: number, d: number, u: nu
       const ord = QUAD_ORDER[(aos[0] + aos[2] < aos[1] + aos[3] ? 2 : 0) + (dir > 0 ? 1 : 0)];
       for (const c of ord) {
         const p = corners[c];
-        out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);
+        // (a face into the solid of the next tile: its top edge 1/64 m down, under the tops it meets there)
+        if (wt === INNER && d < 2 && p[2] === corners[2][2] && p[2] > corners[0][2]) out.vertex(p[0] * s + x0, p[2] * s - 1, p[1] * s + y0, nrm, aos[c] | (63 << 2), gm, rw, palIdx, bid);
+        else out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);
       }
       i += w;
     }

@@ -31,6 +31,11 @@ export interface SlopeSink {
 }
 
 const Q = 64;
+// A wall's face carries where the wall ends above it, in vattr.w (voxelMaterial.ts: no window past it): WALL_TOP + its
+// height over the ground in metres, up to 61; 127 for 62 and more (no limit). (0 on a wall: not known; 1-64 a roof's
+// plane, SLANT and up a chamfer's)
+export const WALL_TOP = 65;
+export const wallTopCode = (m: number) => (m >= 62 ? 127 : WALL_TOP + Math.max(0, m));
 // corner k of a cell: (0, 0), (1, 0), (1, 1), (0, 1)
 const CX = [0, 1, 1, 0], CY = [0, 0, 1, 1];
 // the 4 neighbours
@@ -48,7 +53,7 @@ interface Region {
 // vol, colTop as in mesher.worker.ts (S x S columns with the apron; vol index (z + 1)); hidden: per voxel, its faces
 // not to draw (bit: normal index); returns null when there are no slopes
 export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: Uint8Array, bidAt: (x: number, y: number) => number,
-  planes: Uint16Array, hidden: Uint8Array) {
+  shipped: Uint16Array, hidden: Uint8Array) {
   const S = N + 2, SS = S * S;
   const T = colTop; // the top face's height (the top voxel is at z = T - 1)
   const bid = new Int32Array(SS), roofTop = new Uint8Array(SS);
@@ -57,9 +62,12 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     bid[c] = bidAt((c % S) - 1, Math.floor(c / S) - 1);
     if (T[c] <= 0 || !bid[c]) continue;
     const v = vol[c + SS * T[c]];
-    if (v < roofPal.length && roofPal[v] & PAL_ROOF) { roofTop[c] = 1; if (planes[c]) any = true; }
+    if (v < roofPal.length && roofPal[v] & PAL_ROOF) { roofTop[c] = 1; if (shipped[c]) any = true; }
   }
   if (!any) return null;
+  const planes = tidyPlanes(S, T, shipped, bid, roofTop);
+  let wallTops = false;
+  if (!planes.some((p, c) => p > 0 && roofTop[c] > 0)) return null;
   const grad = (p: number) => {
     const t = Math.tan(((p - 1) >> 6) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
     return [-t * Math.cos(a), -t * Math.sin(a)]; // rise per metre east (x) and south (y)
@@ -110,7 +118,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   }
   // corner heights per cell (1/64 m), whether each is its region's plane itself, and the normal it is lit by there
   const hq = new Int32Array(SS * 4), pure = new Uint8Array(SS * 4), nq = new Uint16Array(SS * 4);
-  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY;
+  const seam = tileSeams(N, T, planes, bid, roofTop);
+  // a region's plane, bent near the tile's edges to the height both tiles agree on there (tileSeams)
+  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY + seam.bend(r, GX, GY);
   // which corner of cell c grid point (GX, GY) is
   const cornerIdx = (c: number, GX: number, GY: number) => { const dx = GX - (c % S), dy = GY - Math.floor(c / S); return dy ? (dx ? 2 : 3) : dx; };
   const cs = new Int32Array(4), vs = new Int32Array(4), hs = new Int32Array(4), grp = new Int32Array(4);
@@ -211,7 +221,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         }
       }
     },
-    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array) {
+    // tops: mark the walls' faces with where the wall ends (wallTopCode; 1 m tiles)
+    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array, tops = false) {
+      wallTops = tops;
       emitTops(out, x0, y0, ground);
       for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
         const c = X + S * Y;
@@ -238,7 +250,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
 
   function emitTops(out: SlopeSink, x0: number, y0: number, ground: Uint8Array) {
     const done = new Uint8Array(SS);
-    const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3];
+    const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3] && !seam.bent(regions[reg[c]], c);
     for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
       const c = X + S * Y;
       if (reg[c] < 0 || done[c]) continue;
@@ -256,7 +268,16 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       const q = w === 1 && h === 1 ? [hq[c * 4], hq[c * 4 + 1], hq[c * 4 + 2], hq[c * 4 + 3]]
         : [planeQ(r, X, Y), planeQ(r, X + w, Y), planeQ(r, X + w, Y + h), planeQ(r, X, Y + h)];
       const px = [X, X + w, X + w, X], py = [Y, Y, Y + h, Y + h];
-      const ord = Math.abs(q[0] - q[2]) <= Math.abs(q[1] - q[3]) ? [0, 3, 2, 1] : [1, 0, 3, 2];
+      // a cell a ridge, hip or valley runs across is split along the diagonal whose middle comes nearest its own plane
+      // at its centre (its top is that plane's there): split the other way the ridge sagged a notch into every cell
+      // it crossed, a sawtooth along each hip; a plane's own cell splits either way alike
+      let d02 = Math.abs(q[0] - q[2]) <= Math.abs(q[1] - q[3]);
+      if (w === 1 && h === 1 && !(pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3])) {
+        const ctr = (planeQ(r, X, Y) + planeQ(r, X + 1, Y) + planeQ(r, X + 1, Y + 1) + planeQ(r, X, Y + 1)) / 4;
+        const a = Math.abs((q[0] + q[2]) / 2 - ctr), b = Math.abs((q[1] + q[3]) / 2 - ctr);
+        if (Math.abs(a - b) > 1) d02 = a < b;
+      }
+      const ord = d02 ? [0, 3, 2, 1] : [1, 0, 3, 2];
       out.reserve(4);
       for (const k of ord) {
         const lit = w === 1 && h === 1 ? nq[c * 4 + k] : r.lit;
@@ -295,9 +316,23 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     // riser was), else a gable or the side of a step (the wall's)
     const az = ((r.code - 1) & 63) * (Math.PI / 32), ox = e[0] === 0 ? e[1] : 0, oy = e[0] === 1 ? e[1] : 0;
     const fall = r.flat ? 0 : Math.cos(az) * ox + Math.sin(az) * oy;
-    const pal = fall < 0.4 && wallBelow && !skirt ? below : top;
-    const lit = skirt ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
-    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0, a1, pal, lit, ground[c], bid[c], x0, y0);
+    // ... but a side of a cell on an eave that runs at an angle to the grid (a staircase of cells, the roof falling past
+    // the cell's corner: its downhill neighbour is no part of the roof) is a notch in that eave, not a gable: as a
+    // wall's it cut a row of wall-coloured triangles into the roof's edge
+    let eave = false;
+    if (!r.flat && !skirt && reg[n] < 0 && fall > -0.4 && fall < 0.4) {
+      const cx = Math.cos(az), cy = Math.sin(az), dx = Math.abs(cx) > 0.38 ? Math.sign(cx) : 0, dy = Math.abs(cy) > 0.38 ? Math.sign(cy) : 0;
+      const ddx = X + dx, ddy = Y + dy, dn = ddx + S * ddy;
+      eave = ddx >= 0 && ddy >= 0 && ddx < S && ddy < S && (reg[dn] < 0 || bid[dn] !== r.bid || T[dn] < T[c] - 2);
+    }
+    // ... and a step of under a metre to another plane of the same roof is a crease in it (a fragment's edge, a curved
+    // roof's facets), not a wall: in the wall's colour it was a dark or pale triangle in the roof
+    if (!skirt && reg[n] >= 0 && bid[n] === r.bid && Math.max(a0 - cornerOf(n, c, e, 0), a1 - cornerOf(n, c, e, 1)) <= Q) eave = true;
+    const pal = fall < 0.4 && wallBelow && !skirt && !eave ? below : top;
+    const lit = skirt ? r.lit : eave ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
+    // (a skirt's top 1/64 m under the slope's edge: on it, it showed through between the two tiles' slopes as a hairline)
+    const k = skirt ? 1 : 0;
+    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k, a1 - k, pal, lit, ground[c], bid[c], x0, y0);
   }
 
   // a vertical face on cell (X, Y)'s edge e, facing (axis d, dir), from low to high at the edge's two ends
@@ -307,13 +342,177 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     const ax = X + CX[ka] - 1 + x0, ay = Y + CY[ka] - 1 + y0, bx = X + CX[kb] - 1 + x0, by = Y + CY[kb] - 1 + y0;
     const ni = d * 2 + (dir > 0 ? 1 : 0);
     const nrm = lit ? ni + 8 * ((lit - 1) >> 6) : ni, w = lit ? 1 + ((lit - 1) & 63) : 0;
+    // a wall's face (a gable's triangle): its top along it, at each end (vattr.w interpolates between them)
+    const wa = !lit && wallTops ? wallTopCode(Math.floor(h0 / Q) - gm) : w, wb = !lit && wallTops ? wallTopCode(Math.floor(h1 / Q) - gm) : w;
+    const W = d === 0 ? [wa, wb, wb, wa] : [wa, wa, wb, wb];
     // corners in the order mesher.worker.ts's emitMerged gives them for this axis
     const P = d === 0
       ? [[ax, l0, ay], [bx, l1, by], [bx, h1, by], [ax, h0, ay]]
       : [[ax, l0, ay], [ax, h0, ay], [bx, h1, by], [bx, l1, by]];
     out.reserve(4);
-    for (const k of dir > 0 ? [0, 3, 2, 1] : [0, 1, 2, 3]) out.vertexQ(P[k][0], P[k][1], P[k][2], nrm, 3, gm, w, pal, b);
+    for (const k of dir > 0 ? [0, 3, 2, 1] : [0, 1, 2, 3]) out.vertexQ(P[k][0], P[k][1], P[k][2], nrm, 3, gm, W[k], pal, b);
   }
+}
+
+// The shipped planes, tidied before they become slopes (per column: its code, roofTop: roof material on top, bid: the
+// building):
+// - a roof of steep planes on a small footprint -- a tower's helm, a turret, a spire's foot (60° and steeper on the
+//   average, under 64 columns, apart from the rest of the roof by a step or a flat rim) -- stays voxels: a handful of
+//   cells per plane, each slope a sliver, fitted and met at their corners, came out a crumpled cone (the Altes
+//   Rathaus's tower)
+// - a fragment of a plane (up to 3 columns of one code) inside another plane of the same building takes that plane's
+//   code where its tops fit it within a metre, and so does a column with no plane (0) with 3 or 4 sides in one plane:
+//   each was a region of its own, a facet with a crease round it, or a voxel step, in the middle of a smooth roof
+function tidyPlanes(S: number, T: Uint16Array, shipped: Uint16Array, bid: Int32Array, roofTop: Uint8Array) {
+  const SS = S * S, pc = shipped.slice();
+  const slope = (p: number) => (p - 1) >> 6;
+  const grad = (p: number) => {
+    const t = Math.tan(slope(p) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
+    return [-t * Math.cos(a), -t * Math.sin(a)];
+  };
+  const lab = new Int32Array(SS).fill(-1), stack: number[] = [], cells: number[] = [];
+  // the steep small roofs: slope cells of one building, joined where their tops are within 3 m
+  for (let c0 = 0; c0 < SS; c0++) {
+    if (!roofTop[c0] || !pc[c0] || lab[c0] >= 0) continue;
+    cells.length = 0; lab[c0] = c0; stack.push(c0);
+    let k = 0, edge = false;
+    while (stack.length) {
+      const c = stack.pop()!, x = c % S, y = (c - x) / S;
+      cells.push(c); k += slope(pc[c]);
+      if (x === 0 || y === 0 || x === S - 1 || y === S - 1) edge = true;
+      for (let d = 0; d < 4; d++) {
+        const X = x + DX[d], Y = y + DY[d];
+        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+        const n = X + S * Y;
+        if (!roofTop[n] || !pc[n] || lab[n] >= 0 || bid[n] !== bid[c] || Math.abs(T[n] - T[c]) > 3) continue;
+        lab[n] = c0; stack.push(n);
+      }
+    }
+    // (one that reaches the apron may go on in the next tile: left as it is)
+    if (!edge && cells.length < 64 && k >= 24 * cells.length) for (const c of cells) pc[c] = 0;
+  }
+  // fragments: components of one code
+  const size = new Int32Array(SS);
+  lab.fill(-1);
+  for (let c0 = 0; c0 < SS; c0++) {
+    if (!roofTop[c0] || !pc[c0] || lab[c0] >= 0) continue;
+    cells.length = 0; lab[c0] = c0; stack.push(c0);
+    while (stack.length) {
+      const c = stack.pop()!, x = c % S, y = (c - x) / S;
+      cells.push(c);
+      for (let d = 0; d < 4; d++) {
+        const X = x + DX[d], Y = y + DY[d];
+        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+        const n = X + S * Y;
+        if (!roofTop[n] || pc[n] !== pc[c] || lab[n] >= 0 || bid[n] !== bid[c]) continue;
+        lab[n] = c0; stack.push(n);
+      }
+    }
+    for (const c of cells) size[c] = cells.length;
+  }
+  const out = pc.slice(), codes = [0, 0, 0, 0], cnt = [0, 0, 0, 0], fit = [0, 0, 0, 0];
+  for (let c = 0; c < SS; c++) {
+    if (!roofTop[c] || (pc[c] && size[c] > 3)) continue;
+    const x = c % S, y = (c - x) / S;
+    let m = 0;
+    for (let d = 0; d < 4; d++) {
+      const X = x + DX[d], Y = y + DY[d];
+      if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+      const n = X + S * Y, p = pc[n];
+      if (!roofTop[n] || !p || p === pc[c] || bid[n] !== bid[c] || size[n] <= 3) continue;
+      // n's plane carried over to c: how far c's top is off it
+      const [gx, gy] = grad(p), off = Math.abs(T[c] - (T[n] + gx * -DX[d] + gy * -DY[d]));
+      let i = 0;
+      while (i < m && codes[i] !== p) i++;
+      if (i === m) { codes[m] = p; cnt[m] = 0; fit[m] = 0; m++; }
+      cnt[i]++; if (off <= 1) fit[i]++;
+    }
+    let best = -1;
+    for (let i = 0; i < m; i++) if (fit[i] === cnt[i] && (best < 0 || cnt[i] > cnt[best])) best = i;
+    if (best >= 0 && cnt[best] >= (pc[c] ? 2 : 3)) out[c] = codes[best];
+  }
+  return out;
+}
+
+// Where a roof runs over the tile's edge, each tile fits its plane to the part of it that it has: the two came out
+// up to a metre apart there (a step along the tile's edge, closed by a skirt, read as a line across the roof). So at
+// the edge both take the height that the columns either side of it give (the edge's own column and the apron's,
+// which both tiles have): the plane of the cells' code through their tops within 8 m along the edge, in exact
+// integers so both tiles get the same; a region's plane bends to it over the last 8 m before the edge.
+const SEAM = 8;
+function tileSeams(N: number, T: Uint16Array, planes: Uint16Array, bid: Int32Array, roofTop: Uint8Array) {
+  const S = N + 2, Lx = [1, N + 1];
+  const target = new Map<number, number>(), touch = new Map<Region, number>();
+  const gq = (code: number) => {
+    if (!code) return [0, 0];
+    const t = Math.tan(((code - 1) >> 6) * (Math.PI / 72)), a = ((code - 1) & 63) * (Math.PI / 32);
+    return [Math.round(-t * Math.cos(a) * Q), Math.round(-t * Math.sin(a) * Q)];
+  };
+  const vals: number[] = [];
+  // the roof's height (1/64 m) at grid point `along` of line L (axis 0: x = L), for the plane `code` of building b
+  const at = (axis: number, L: number, along: number, code: number, b: number) => {
+    const key = ((axis * (S + 1) + L) * (S + 1) + along) * 4096 * 16384 + code * 16384 + (b & 16383);
+    const got = target.get(key);
+    if (got !== undefined) return got;
+    const [gx, gy] = gq(code);
+    vals.length = 0;
+    for (let k = along - SEAM; k < along + SEAM; k++) {
+      if (k < 0 || k >= S) continue;
+      for (const m of [L - 1, L]) {
+        const c = axis === 0 ? m + S * k : k + S * m;
+        if (!roofTop[c] || planes[c] !== code || bid[c] !== b) continue;
+        const cx = c % S, cy = (c - cx) / S, X2 = axis === 0 ? 2 * L : 2 * along, Y2 = axis === 0 ? 2 * along : 2 * L;
+        vals.push(2 * T[c] * Q + gx * (X2 - 2 * cx - 1) + gy * (Y2 - 2 * cy - 1)); // twice the height, an integer
+      }
+    }
+    let h = NaN;
+    if (vals.length >= 4) {
+      vals.sort((p, q) => p - q);
+      const med = vals[vals.length >> 1];
+      let sum = 0, n = 0;
+      for (const v of vals) if (Math.abs(v - med) <= 2 * Q) { sum += v; n++; }
+      h = Math.round(sum / n / 2);
+    }
+    target.set(key, h);
+    return h;
+  };
+  // which of the 4 edge lines (bits: x = 1, x = N + 1, y = 1, y = N + 1) a region reaches
+  const touches = (r: Region) => {
+    let t = touch.get(r);
+    if (t === undefined) {
+      t = 0;
+      for (const c of r.cells) {
+        const x = c % S, y = (c - x) / S;
+        if (x <= 1) t |= 1; if (x >= N) t |= 2; if (y <= 1) t |= 4; if (y >= N) t |= 8;
+      }
+      touch.set(r, t);
+    }
+    return t;
+  };
+  const bend = (r: Region, GX: number, GY: number) => {
+    const t = touches(r);
+    if (!t) return 0;
+    let d = 0;
+    for (let axis = 0; axis < 2; axis++) for (let e = 0; e < 2; e++) {
+      if (!(t & (1 << (axis * 2 + e)))) continue;
+      const L = Lx[e], p = axis === 0 ? GX : GY, along = axis === 0 ? GY : GX, w = 1 - Math.abs(p - L) / SEAM;
+      if (w <= 0) continue;
+      const h = at(axis, L, Math.min(S, Math.max(0, along)), r.code, r.bid);
+      if (Number.isNaN(h)) continue;
+      const own = axis === 0 ? r.e0 + r.gxq * L + r.gyq * GY : r.e0 + r.gxq * GX + r.gyq * L;
+      if (Math.abs(h - own) <= 1.5 * Q) d += Math.min(1, w) * (h - own);
+    }
+    return Math.round(d);
+  };
+  return {
+    bend,
+    // whether any corner of cell c (of region r) is bent
+    bent(r: Region, c: number) {
+      const x = c % S, y = (c - x) / S;
+      return !!touches(r) && (x < SEAM + 1 || y < SEAM + 1 || x > N - SEAM || y > N - SEAM)
+        && (bend(r, x, y) !== 0 || bend(r, x + 1, y) !== 0 || bend(r, x + 1, y + 1) !== 0 || bend(r, x, y + 1) !== 0);
+    },
+  };
 }
 
 // a normal (x east, y up, z south) as a plane code: 1 + slope in 2.5° steps (0 to 30) x 64 + downhill direction
@@ -330,6 +529,8 @@ function fit(r: Region, S: number, T: Uint16Array) {
   for (const c of r.cells) { mx += (c % S) + 0.5; my += Math.floor(c / S) + 0.5; mt += T[c]; }
   mx /= n; my /= n; mt /= n;
   let gx = r.gx, gy = r.gy;
+  // (by the code's slope, not the fitted one: the same in the tiles either side of an edge, tileSeams)
+  r.span = Math.round((0.75 + 0.5 * (Math.abs(gx) + Math.abs(gy))) * Q);
   if (!r.flat && n >= 16) {
     let sxx = 0, sxy = 0, syy = 0, sxt = 0, syt = 0;
     for (const c of r.cells) {
@@ -346,5 +547,4 @@ function fit(r: Region, S: number, T: Uint16Array) {
   // the plane through the tops' mean at their mean position; e0: its height at grid point (0, 0)
   r.e0 = Math.round(mt * Q - r.gxq * mx - r.gyq * my);
   r.gx = r.gxq / Q; r.gy = r.gyq / Q;
-  r.span = Math.round((0.75 + 0.5 * (Math.abs(r.gx) + Math.abs(r.gy))) * Q);
 }
