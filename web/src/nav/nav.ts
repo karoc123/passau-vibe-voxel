@@ -68,6 +68,8 @@ export class Nav {
   private pedestrian: Pedestrian | null = null;
   private jumpBuffer = 0;
   private groundGrace = 0;
+  private pedestrianStart: object | null = null;
+  private mouseLook: { locked: boolean } | null = null;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     scene: THREE.Scene, private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -92,6 +94,7 @@ export class Nav {
   // ------------------------------------------------------------------ input
   get enteringWalk() { return this.walkPending; }
 
+  private get pedestrianActive() { return this.mode === 'pedestrian'; }
   private get onFoot() { return this.mode === 'walk' || this.mode === 'pedestrian'; }
   private get driving() { return this.ride !== null && this.ride === this.controlledRide; }
 
@@ -101,7 +104,11 @@ export class Nav {
     addEventListener('keydown', (e) => {
       if ((e.target as Element).closest?.('input:not([type=range]), textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       this.shift = e.shiftKey;
-      if (e.code === 'Escape') { if (this.mode !== 'orbit') this.flyUp(); return; }
+      if (e.code === 'Escape') {
+        if (this.pedestrianStart) this.releasePedestrianMouse();
+        if (this.mode !== 'orbit') this.flyUp();
+        return;
+      }
       if (this.mode === 'fpv' || this.driving) return;
       if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.mode === 'pedestrian') {
@@ -128,13 +135,51 @@ export class Nav {
     addEventListener('blur', () => this.keys.clear());
   }
 
+  private requestPedestrianMouse() {
+    if (!this.dom.requestPointerLock || document.pointerLockElement) return;
+    const request = { locked: false };
+    this.mouseLook = request;
+    const reject = () => { if (this.mouseLook === request) this.mouseLook = null; };
+    try {
+      // Browsers expose either a promise or the original event-only API.
+      this.dom.requestPointerLock()?.catch(reject);
+    } catch { reject(); }
+  }
+
+  private releasePedestrianMouse() {
+    this.pedestrianStart = null;
+    this.mouseLook = null;
+    if (document.pointerLockElement === this.dom) document.exitPointerLock();
+  }
+
+  private lookWithMouse(e: MouseEvent) {
+    const scale = 0.0027;
+    this.look(e.movementX * scale, e.movementY * scale * 0.8);
+    this.marker.visible = false;
+  }
+
   private bindPointer() {
     const dom = this.dom, ptrs = new Map<number, { x: number; y: number }>();
     let press: { x: number; y: number; t: number; button: number; moved: boolean } | null = null;
     let pinch0: { d: number; fov: number } | null = null, twist: number | null = null;
     const two = () => [...ptrs.values()];
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === dom) {
+        if (this.mouseLook) this.mouseLook.locked = true;
+        else document.exitPointerLock();
+      } else if (this.mouseLook?.locked) {
+        this.releasePedestrianMouse();
+        if (this.pedestrianActive) this.flyUp();
+      }
+    });
+    document.addEventListener('pointerlockerror', () => {
+      if (this.mouseLook && !this.mouseLook.locked) this.mouseLook = null;
+    });
+    dom.addEventListener('mousemove', e => {
+      if (this.pedestrianActive && document.pointerLockElement === dom) this.lookWithMouse(e);
+    });
     dom.addEventListener('pointerdown', (e) => {
-      if (this.mode === 'fpv') return;
+      if (this.mode === 'fpv' || (this.pedestrianActive && document.pointerLockElement === dom)) return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.mode === 'orbit' && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.pivotAt(e.clientX, e.clientY);
@@ -147,6 +192,13 @@ export class Nav {
     });
     dom.addEventListener('pointermove', (e) => {
       const p = ptrs.get(e.pointerId);
+      if (this.pedestrianActive && e.pointerType === 'mouse') {
+        if (document.pointerLockElement !== dom) {
+          this.lookWithMouse(e);
+          if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) press.moved = true;
+        }
+        return;
+      }
       if (!p) { this.hover(e.clientX, e.clientY, e.pointerType); return; }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
@@ -341,6 +393,7 @@ export class Nav {
   }
 
   setOrbit() {
+    this.releasePedestrianMouse();
     if (this.mode === 'orbit') return;
     if (this.mode === 'pedestrian') { this.keys.clear(); this.shift = false; }
     this.mode = 'orbit';
@@ -371,9 +424,21 @@ export class Nav {
     return true;
   }
 
-  async togglePedestrian() {
+  async togglePedestrian(captureMouse: boolean) {
     if (this.mode === 'pedestrian') { this.flyUp(); return; }
     if (!this.world || this.walkPending || this.mode === 'fpv') return;
+    const entry = {};
+    this.pedestrianStart = entry;
+    if (captureMouse) this.requestPedestrianMouse();
+    try {
+      await this.startPedestrian(this.world);
+    } finally {
+      if (this.pedestrianStart === entry) this.pedestrianStart = null;
+      if (!this.pedestrianActive) this.releasePedestrianMouse();
+    }
+  }
+
+  private async startPedestrian(world: World) {
     this.cancelFly();
     if (this.mode === 'walk') {
       this.landing = this.transition(420);
@@ -387,7 +452,7 @@ export class Nav {
       const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
       const at = new THREE.Vector3(pose.x, pose.y, pose.z);
       const side = new THREE.Vector3(-facing.z, 0, facing.x);
-      const room = this.world;
+      const room = world;
       const exits = ride.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
       const clear = exits.find(p => {
         const y = room.support(p.x, p.z, p.y + 1.02);
@@ -419,12 +484,12 @@ export class Nav {
     if (!w || this.walkPending) return;
     const target = opts.at ?? this.controls.target;
     const t = opts.thirdPerson ? target.clone() : target;
-    const mode = this.mode, ride = this.ride;
+    const mode = this.mode, ride = this.ride, entry = this.pedestrianStart;
     if (this.streamer) {
       this.walkPending = true;
       await this.streamer.ensure(t.x, t.z, 200).finally(() => { this.walkPending = false; });
     }
-    if (opts.thirdPerson && (mode !== this.mode || ride !== this.ride)) return;
+    if (opts.thirdPerson && (mode !== this.mode || ride !== this.ride || (entry && entry !== this.pedestrianStart))) return;
     if (!opts.exact && opts.deckOK) { const deck = w.deckAt(t.x, t.z); if (deck != null) opts = { ...opts, exact: true, at: new THREE.Vector3(t.x, deck, t.z) }; }
     let spot: [number, number] | null;
     this.landmark = null;
@@ -464,7 +529,7 @@ export class Nav {
     if (this.life) this.life.keep = null;
     this.landing = this.transition(opts.ms ?? 900);
     if (opts.thirdPerson) this.enterPedestrian();
-    else { this.mode = 'walk'; this.pedestrian?.hide(); }
+    else { this.mode = 'walk'; this.pedestrian?.hide(); this.releasePedestrianMouse(); }
     this.ride = null;
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
@@ -473,6 +538,7 @@ export class Nav {
 
   startRide(ag: Picked) {
     this.rememberSky();
+    this.releasePedestrianMouse();
     this.pedestrian?.hide();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0 };
     this.landing = this.transition(1100);

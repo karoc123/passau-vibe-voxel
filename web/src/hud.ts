@@ -8,9 +8,9 @@ const KEYS = [['KeyQ', 'Q', TILT(1)], ['KeyW', 'W', ''], ['KeyE', 'E', TILT(-1)]
 const ALIAS: Record<string, string> = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD', ShiftLeft: 'Shift', ShiftRight: 'Shift' };
 
 // an outlined mouse with the part in use filled (l/r button, w wheel), drag arrows either side
-const mouse = (part: 'l' | 'r' | 'w', drag = false) => `<svg viewBox="-13 -2 26 30">
+const mouse = (part: 'l' | 'r' | 'w' | '', drag = false) => `<svg viewBox="-13 -2 26 30">
   ${drag ? '<path d="M-12 13l2.5-2.5M-12 13l2.5 2.5M-12 13h4M12 13l-2.5-2.5M12 13l-2.5 2.5M12 13h-4"/>' : ''}
-  <path class="btn" d="${part === 'l' ? 'M0 1h-1a5 5 0 0 0-5 5v5h6z' : part === 'r' ? 'M0 1h1a5 5 0 0 1 5 5v5h-6z' : 'M-1.4 4h2.8v6h-2.8z'}"/>
+  <path class="btn" d="${part === 'l' ? 'M0 1h-1a5 5 0 0 0-5 5v5h6z' : part === 'r' ? 'M0 1h1a5 5 0 0 1 5 5v5h-6z' : part === 'w' ? 'M-1.4 4h2.8v6h-2.8z' : ''}"/>
   <rect x="-6" y="1" width="12" height="24" rx="6"/><path d="M-6 11h12M0 1v10"/></svg>`;
 const PERSON = '<svg viewBox="-13 -2 26 30"><circle cx="0" cy="4" r="3"/><path d="M0 7v10M0 17l-4 9M0 17l4 9M-5 11l5-2 5 2"/></svg>';
 const ESC = '<span class="cap">Esc</span>', SPACE = '<span class="cap">Space</span>';
@@ -20,8 +20,8 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   walk: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
   fpv: [],
-  pedestrian: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
-    ['Space', SPACE, 'jump'], ['Escape', ESC, 'fly up']],
+  pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
+    ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', tram: 'Following a tram' };
 

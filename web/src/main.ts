@@ -92,10 +92,11 @@ const modeTools = el('div', 'mode-tools', '', bar.el);
 const walkButton = el('button', 'mode-button', 'Walk', modeTools);
 walkButton.type = 'button';
 walkButton.disabled = true;
-walkButton.addEventListener('click', () => {
+walkButton.addEventListener('click', e => {
   walkButton.blur();
   drive?.park();
-  void nav.togglePedestrian();
+  const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
+  void nav.togglePedestrian(!touch && !coarsePointer());
 });
 const maxShadow = renderer.capabilities.maxTextureSize;
 bar.graphics(gfx, applyGfx, maxShadow);

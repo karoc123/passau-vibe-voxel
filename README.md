@@ -186,9 +186,9 @@ and collisions with people, trams or boats are outside this prototype.
 ## Third-person walking
 
 Click **Walk** in the toolbar to start on foot at the current view or beside the vehicle you're following. Use W/A/S/D
-or the arrow keys to move relative to the camera, Shift to sprint and Space to jump. Drag to look around, scroll to
-zoom, or click a place on the ground to walk there. On touch screens, drag, pinch and tap work the same way.
-**Esc** returns to the map. The chase camera pulls in near walls, and the character uses the viewer's voxel walking
+or the arrow keys to move relative to the camera, Shift to sprint and Space to jump. Move the mouse to look around
+and scroll to zoom. On touch screens, drag to look, pinch to zoom and tap the ground to walk there.
+**Esc** releases the mouse and returns to the map. The chase camera pulls in near walls, and the character uses the viewer's voxel walking
 collision for kerbs, stairs, walls and bridge decks.
 
 ## Known limits
