@@ -97,6 +97,13 @@ export class Daylight {
 
   redrawShadow() { this.sun.shadow.needsUpdate = true; }
 
+  // a restored WebGL context comes back with empty render targets: the sky's light and the city's shadow drawn again
+  restore() {
+    this.envKey = '';
+    this.apply(this.hour);
+    this.redrawShadow();
+  }
+
   // the grid is turned (scripts/aoi.py): compass bearings turn by theta in the scene
   set theta(t: number) { this.northTheta = t; this.apply(this.hour); }
 
