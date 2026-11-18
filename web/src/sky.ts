@@ -1,23 +1,24 @@
 import * as THREE from 'three';
 import { clamp } from './util';
-import { CLOUD_GLSL, CLOUD_H, cloudUniforms } from './clouds';
+import { CLOUD_GLSL, CLOUD_H, CLOUD_L, CLOUD_N, CLOUD_SKY_TEX, CLOUD_SKY_Z, cloudUniforms } from './clouds';
+
+// how tall the cumulus stand over their base (cumulus())
+const CLOUD_T = 350;
 
 const VERT = `varying vec3 vDir;
 void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); gl_Position.z = gl_Position.w * 0.99999; }`;
 
-const FRAG = `
+// The sky's light and its cumulus as functions of a direction (and, for the clouds, of where one looks from), shared
+// by the sky itself and by the reflections (post.ts): a ray off the water that leaves the screen mirrors this sky.
+// Uniforms: Sky.uniforms.
+export const SKY_GLSL = `
 ${CLOUD_GLSL}
+uniform sampler2D uCloudSky;
 uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uWarm; uniform float uGolden; uniform vec3 uGround;
 uniform vec3 uSunDir; uniform vec3 uTrueSun; uniform vec3 uSunCol; uniform float uNight; uniform float uDeep;
 uniform vec3 uAfterglow; uniform vec3 uCityGlow; uniform vec3 uCloudLit; uniform vec3 uCloudDark; uniform float uCloud;
-uniform vec3 uMoonDir; uniform float uMoon; uniform float uMoonLit;
-varying vec3 vDir;
-float hash(vec3 p) { p = fract(p * 0.3183099 + .1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
-  return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
-void main() {
-  vec3 d = normalize(vDir);
+// the sky without its clouds, moon and stars
+vec3 skyLight(vec3 d) {
   float h = d.y;
   vec2 sh = normalize(uSunDir.xz + 1e-5), dh = normalize(d.xz + 1e-5);
   float toward = pow(max(dot(sh, dh), 0.), 2.0);
@@ -28,6 +29,69 @@ void main() {
   col = mix(col, uGround, smoothstep(0.0, -0.25, h));
   float s = max(dot(d, uSunDir), 0.);
   col += uSunCol * (pow(s, 600.) * 6. * (1. - uCloud) + pow(s, 12.) * 0.35 + pow(s, 3.) * 0.12) * (1. - uNight) * (1. - 0.8 * uCloud);
+  return col;
+}
+// The cumulus (clouds.ts) seen from o along d (d.y > 0; apx: the angle a pixel spans): rgb, and how much of the sky
+// they hide. Each heap stands on a flat base CLOUD_H up, as tall as its field is dense over the threshold, up to
+// CLOUD_T (the sky's copy of the field, CLOUD_SKY_TEX, holds that share; the plain field shades the ground). The ray
+// meets the bases first: one lookup there, filtered anisotropically over the pixel's footprint alone, so towards the
+// horizon a base keeps its shape, foreshortened, instead of the plain mips' level bands. Where it misses them it may
+// still meet a heap's flank higher up: one more lookup halfway up, from a mip as wide as the ray's way through the
+// layer (CLOUD_T over the elevation's tangent) -- the flanks' share of that way, so looking low the heaps stand tall
+// and the gaps between them close towards the horizon. A base is grey from below, the darker the taller the heap over it,
+// its edge thin and translucent (no bright rim), frayed by a finer copy of the field; a flank is white where the heap
+// falls away towards the sun (one more lookup, 200 m sunwards), grey on its far side. Far ones fade into the haze. The
+// overcast (uCloud) is a deck over all of it. Four lookups (the old flat sheet took two); Iris Xe, whole frame, the
+// old and this one swapped frame block by frame block in one page: +0.05-0.2 ms with the sky in view.
+const float CLOUD_T = ${CLOUD_T.toFixed(1)};
+vec4 cumulus(vec3 o, vec3 d, float apx) {
+  const float IL = ${(1 / CLOUD_L).toExponential(6)};
+  float h = max(d.y, 1e-3), z = uCloudA.z, base = max(${CLOUD_H.toFixed(1)} - o.y, 200.0);
+  vec2 r = d.xz / h;
+  float rl = length(r), dist = base / h;
+  vec2 al = rl > 1e-4 ? r / rl : vec2(1.0, 0.0), ac = vec2(-al.y, al.x);
+  vec4 wk = clamp(1.0 - abs((z - ${CLOUD_SKY_Z[0].toFixed(4)}) * ${(3 / (CLOUD_SKY_Z[3] - CLOUD_SKY_Z[0])).toFixed(4)} - vec4(0.0, 1.0, 2.0, 3.0)), 0.0, 1.0);
+  // the bases: the pixel's footprint, foreshortened along the ray
+  vec2 uv = (o.xz + r * base + uCloudA.xy) * IL, gA = al * (apx * dist / h) * IL, gB = ac * (apx * dist) * IL;
+  #ifdef CUMULUS_CHEAP
+  // (the reflections' sky, post.ts: the bases alone, blurred, as the ripples would)
+  float d0 = dot(textureLod(uCloudSky, uv, 1.5 + log2(max(apx * dist / h * ${CLOUD_N / CLOUD_L}, 1.0))), wk), dm = 0.0, ds = 0.0;
+  #else
+  float d0 = dot(textureGrad(uCloudSky, uv, gA, gB), wk);
+  float fr = textureGrad(uCloudTex, uv * 3.7 + 0.37, gA * 3.7, gB * 3.7).r;
+  d0 *= mix(1.0, 0.35 + 1.3 * fr, 1.0 - smoothstep(0.05, 0.4, d0)); // frayed at the edges only
+  // the flanks: halfway up, along the way through the layer -- a plain mip as wide as that way: they are soft anyway
+  vec2 um = uv + r * (0.5 * CLOUD_T * IL);
+  float lm = log2(max((CLOUD_T * rl + apx * dist / h) * ${CLOUD_N / CLOUD_L}, 1.0)) - 1.0;
+  float dm = dot(textureLod(uCloudSky, um, lm), wk);
+  float ds = dot(textureLod(uCloudSky, um + normalize(uTrueSun.xz + 1e-5) * ${(200 / CLOUD_L).toExponential(6)}, lm), wk);
+  #endif
+  float aB = 1.0 - exp(-7.0 * d0), aF = (1.0 - exp(-0.85 * max(dm - 0.04, 0.0) / h)) * (1.0 - smoothstep(0.3, 0.8, h));
+  float deck = smoothstep(0.6, 0.95, uCloud);
+  float a = aB + (1.0 - aB) * aF;
+  float lit = clamp(0.5 + 3.0 * (dm - ds), 0.0, 1.0);
+  vec3 baseC = mix(uCloudLit * 0.95, uCloudDark * 0.7, smoothstep(0.05, 0.6, d0) * (0.5 + 0.5 * smoothstep(0.1, 0.6, h)));
+  vec3 flankC = mix(uCloudDark * 0.85, uCloudLit, 0.3 + 0.7 * lit);
+  vec3 cl = (baseC * aB + flankC * (a - aB)) / max(a, 1e-4);
+  cl = mix(cl, mix(uCloudDark, uCloudLit, 0.75) * (1.0 - 0.22 * smoothstep(0.1, 0.6, d0)), deck);
+  float s = max(dot(d, uSunDir), 0.), tw = pow(max(dot(normalize(uTrueSun.xz + 1e-5), normalize(d.xz + 1e-5)), 0.), 3.0);
+  cl += uAfterglow * tw * 0.6 + uSunCol * pow(s, 6.0) * 0.4 * (1.0 - 0.6 * smoothstep(0.1, 0.6, d0)) * (1. - uNight) * (1.0 - deck);
+  cl = mix(cl, uHorizon, (1.0 - exp(-dist / 45000.0)) * (1.0 - deck) * 0.85); // the haze over the far ones
+  return vec4(cl, mix(a * 0.97 * smoothstep(0.0, 0.05, h), 1.0, deck));
+}`;
+
+const FRAG = `
+${SKY_GLSL}
+uniform vec3 uMoonDir; uniform float uMoon; uniform float uMoonLit;
+varying vec3 vDir;
+float hash(vec3 p) { p = fract(p * 0.3183099 + .1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
+void main() {
+  vec3 d = normalize(vDir);
+  float h = d.y, apx = length(fwidth(d)) * 0.7;
+  vec3 col = skyLight(d);
   // The moon (sun.ts moonAt): a disc ~2.5 x its true size, lit from where the sun is (so its phase is the true one), its
   // seas a little darker, the dark part faintly earthlit; a halo around it, more of it the fuller it is. Before the
   // clouds, which pass over it.
@@ -46,25 +110,10 @@ void main() {
     float a = max(1.0 - cd, 0.0);
     col += vec3(0.55, 0.65, 0.85) * (exp(-a * 9000.0) * 0.25 + exp(-a * 600.0) * 0.05) * uMoon * uMoonLit;
   }
-  // The cumulus (clouds.ts): where the view meets their sheet, CLOUD_H up, the drifting field there, its edges frayed by
-  // a finer copy of itself; the same field (less the fraying) shades the ground. Far off the texture's mips average it
-  // into a haze over the horizon. The overcast (uCloud) is a deck over all of it, the field its darker and lighter parts.
-  if (h > 0.02) {
-    vec2 q = cameraPosition.xz + d.xz / h * max(${CLOUD_H.toFixed(1)} - cameraPosition.y, 200.0);
-    float f = cloudAt(q), z = uCloudA.z;
-    f += (cloudAt(q * 3.7 + 1234.5) - 0.5) * 0.2 * (1.0 - smoothstep(z, z + 0.3, f)); // frayed at the edges only
-    float cum = smoothstep(z - 0.03, z + 0.06, f);
-    float deck = smoothstep(0.6, 0.95, uCloud);
-    float cov = mix(cum * 0.95, 1.0, deck) * smoothstep(0.02, 0.25, h);
-    float under = 1. - smoothstep(0.02, 0.5, h);
-    // a cumulus seen from below: grey where it is thick, bright at its thin edges and towards the horizon (its sides),
-    // and lit through near the sun
-    float thick = smoothstep(z, min(z + 0.25, 1.0), f) * (1.0 - deck);
-    vec3 cl = mix(uCloudDark * 0.9, uCloudLit, clamp(0.2 + 0.8 * (1.0 - thick) + 0.3 * under, 0., 1.)) + uAfterglow * tw * 0.6;
-    cl += uSunCol * pow(s, 6.0) * 0.4 * (1.0 - 0.6 * thick) * (1. - uNight) * (1.0 - deck);
-    cl *= 1. - deck * 0.22 * smoothstep(0.3, 0.75, f);
-    col = mix(col, cl, cov);
-    if (uDeep > 0.01) col += vec3(step(0.9965, hash(floor(d * 380.)))) * uDeep * 0.2 * smoothstep(0.08, 0.4, h) * (1. - cov);
+  if (h > 0.0) {
+    vec4 cu = cumulus(cameraPosition, d, apx);
+    col = mix(col, cu.rgb, cu.a);
+    if (uDeep > 0.01) col += vec3(step(0.9965, hash(floor(d * 380.)))) * uDeep * 0.2 * smoothstep(0.08, 0.4, h) * (1. - cu.a);
   }
   gl_FragColor = vec4(col, 1.);
   #include <colorspace_fragment>
@@ -90,14 +139,14 @@ export class Sky {
   readonly horizon = C(0xdfe8ee);
   readonly mesh: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
-  private readonly u = {
+  readonly u = {
     uTop: { value: C(0x6fa3d8) }, uHorizon: { value: C(0xdfe8ee) }, uGround: { value: C(0x8a8478) },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uTrueSun: { value: new THREE.Vector3(0, 1, 0) },
     uWarm: { value: C(0xffc89a) }, uGolden: { value: 0 }, uSunCol: { value: C(0xfff2d8) }, uNight: { value: 0 },
     uDeep: { value: 0 }, uAfterglow: { value: C(0x000000) }, uCityGlow: { value: C(0x000000) },
     uCloudLit: { value: C(0xffffff) }, uCloudDark: { value: C(0xdde3ea) }, uCloud: { value: 0 },
     uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoon: { value: 0 }, uMoonLit: { value: 0 },
-    ...cloudUniforms,
+    ...cloudUniforms, uCloudSky: { value: CLOUD_SKY_TEX },
   };
   private env: THREE.Scene | null = null;
 

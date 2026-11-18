@@ -55,8 +55,8 @@ const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000);
 const controls = makeControls();
-const post = makePost(renderer, scene, camera);
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
+const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
@@ -301,6 +301,7 @@ async function boot() {
   daylight.casters(streamer.group, () => life?.group ?? null);
   nav.streamer = streamer;
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
+  post.reflections.mapTop = meta.H;
   const v0 = views[qs.get('view') ?? ''] ?? views.overview, cam = qs.get('cam')?.split(',').map(Number);
   camera.position.set(...(cam ? [cam[0], cam[1], cam[2]] as const : v0.pos));
   controls.target.set(...(cam ? [cam[3], cam[4], cam[5]] as const : v0.target));
