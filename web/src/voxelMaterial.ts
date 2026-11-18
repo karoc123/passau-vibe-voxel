@@ -273,7 +273,10 @@ const NORMAL_FROM_IDX = `
 // While the city loads (city.ts): a building shows once uBldOn says so; until stage 2 the rest is folded under the
 // terrain, after it a hidden building lies flat as a ground-coloured footprint.
 const BUILD_PARS = `uniform float uStage; uniform sampler2D uBldOn; attribute float vbld;`;
+// (a sloped roof's vertex: the height's part below a metre in vattr.y's top 6 bits, the AO in its low 2; roofs.ts)
+const SUB_Y = 'floor(vattr.y / 4.0 + 0.01) / 64.0';
 const BUILD_VERTEX = `
+  transformed.y += ${SUB_Y};
   float hideB = 0.0;
   {
     int bid = int(vbld + 0.5);
@@ -419,7 +422,8 @@ const SURFACE = `
   float lv = vVox.y - gz;
   float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
-  float h = hash13(cell);
+  // (a roof's top by its column alone: on a slope cell.y steps along the contours, and stepped its shade in stripes)
+  float h = hash13(vRoof > 0.5 && !vert ? vec3(cell.x, 0.0, cell.z) : cell);
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
@@ -680,7 +684,7 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
       .replace('#include <common>', `#include <common>\nattribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; flat varying int vPal; ${NORMAL_FROM_IDX}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>${BUILD_VERTEX}
-        vVox = position; vN = normalFromIdx(mod(vattr.x, 8.0)); vPal = int(vpal + 0.5);`);
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(mod(vattr.x, 8.0)); vPal = int(vpal + 0.5);`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D uPalette; varying vec3 vVox; varying vec3 vN; flat varying int vPal;
@@ -730,7 +734,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
         .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 || nRoof > 0.5 ? objectNormal : vec3( 0.0 );')
         .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position; vN = normalFromIdx(nAx); vAO = vattr.y / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal;
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)

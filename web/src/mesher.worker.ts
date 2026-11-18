@@ -2,6 +2,7 @@
 // Data coordinates: x east, y south, z up. Positions go out in three.js axes (x, z, y), metres.
 // A tile is N x N cells of s metres plus a 1-cell apron.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
+import { slopeRoofs } from './roofs';
 
 export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
 export interface Columns extends RawColumns { ground: Uint8Array }
@@ -96,6 +97,12 @@ class QuadBuffer {
     this.attr[v * 4] = normal; this.attr[v * 4 + 1] = ao; this.attr[v * 4 + 2] = ground; this.attr[v * 4 + 3] = roof;
     this.pal[v] = palette; this.bld[v] = building;
   }
+
+  // a vertex at height q / 64 m: the whole metres in the position, the rest in vattr.y's top 6 bits (roofs.ts)
+  vertexQ(x: number, q: number, z: number, normal: number, ao: number, ground: number, roof: number, palette: number, building: number) {
+    const y = Math.floor(q / 64);
+    this.vertex(x, y, z, normal, ao | ((q - y * 64) << 2), ground, roof, palette, building);
+  }
 }
 
 function offsetsOf(counts: Uint16Array, n: number) {
@@ -148,7 +155,11 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const t = colTop[x + S * y]; if (t > topX[x]) topX[x] = t; if (t > topY[y]) topY[y] = t; }
   const cell = (X: number, Y: number, z: number) => vol[(X + 1) + sx * ((Y + 1) + sy * (z + 1))];
   const roofs = roofPal ? roofPlanes(N, vol, colTop, roofPal, bidAt, planes) : null;
-  const ch = roofPal && s === 1 ? chamferWalls(N, vol, sz, ground, colTop, roofPal, bidAt) : null, hidden = ch?.hidden;
+  const ch = roofPal && s === 1 ? chamferWalls(N, vol, sz, ground, colTop, roofPal, bidAt) : null;
+  // pitched roofs as slopes (roofs.ts): they hide the voxel faces they stand for
+  const slopes = roofPal && planes && s === 1 ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, ch?.hidden ?? new Uint8Array(S * S * sz)) : null;
+  slopes?.hide();
+  const hidden = ch?.hidden ?? (slopes ? slopes.hidden : undefined);
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3, v = (d + 2) % 3, nu = dims[u], nv = dims[v];
     const mask = new Float64Array(nu * nv);
@@ -170,7 +181,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             let key = 0;
             if (a !== 0 && a !== SOLID_BELOW && a !== OCC) {
               const ni = idx + dir * sd, nb = vol[ni];
-              if ((nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && d < 2 && hidden[idx] & (1 << normalIdx))) {
+              if ((nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))) {
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
                 const pz = d === 2 ? sl : d === 0 ? j : i;
@@ -189,26 +200,34 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
       }
     }
   }
-  if (ch) for (const p of ch.prisms) emitPrism(p, x0, y0, out, roofPal!, roofs);
+  if (ch) for (const p of ch.prisms) emitPrism(p, x0, y0, out, roofPal!, roofs, slopes);
+  slopes?.emit(out, x0, y0, ground);
 }
 
 // A chamfer (chamfer.ts): its slanted face, lit as the wall's plane (vattr.w = SLANT + its direction) and windowed along
 // its staircase (vattr.x: face axis + 8 x the staircase's direction, as wallAngle's), a lid
 // where nothing stands on it (the eave's top lit as its roof plane) and a floor where it hangs over nothing
-function emitPrism(p: Prism, x0: number, y0: number, out: QuadBuffer, palFlags: Uint8Array, roofs: ReturnType<typeof roofPlanes> | null) {
+function emitPrism(p: Prism, x0: number, y0: number, out: QuadBuffer, palFlags: Uint8Array, roofs: ReturnType<typeof roofPlanes> | null,
+  slopes: ReturnType<typeof slopeRoofs>) {
   const P = [p.px, p.py], A = [p.px - p.a * p.sx, p.py], B = [p.px, p.py - p.b * p.sy];
   const nx = -p.b * p.sx, ny = -p.a * p.sy; // outwards
   const axis = Math.abs(nx) >= Math.abs(ny) ? (nx > 0 ? 1 : 0) : ny > 0 ? 3 : 2;
   // corners counter-clockwise seen from outside
   const [L, R] = (B[1] - A[1]) * -nx + (B[0] - A[0]) * ny >= 0 ? [A, B] : [B, A];
-  const v = (q: number[], z: number, nrm: number, ao: number, w: number) => out.vertex(q[0] + x0, z, q[1] + y0, nrm, ao, p.gm, w, p.pal, p.bid);
-  const wall = (z0: number, z1: number, ao: number) => {
+  // an eave's prism under a sloped roof (roofs.ts) comes up to the slope, not to the top of its voxels (in 1/64 m)
+  const top = (q: number[]) => {
+    const h = p.roof && p.capTop && slopes ? slopes.heightAt(q[0], q[1]) : Infinity;
+    return Number.isFinite(h) ? Math.min(p.z1 * 64, Math.max(p.z0 * 64 + 16, Math.round(h * 64))) : p.z1 * 64;
+  };
+  const tP = top(P), tL = top(L), tR = top(R);
+  const v = (q: number[], z: number, nrm: number, ao: number, w: number) => out.vertexQ(q[0] + x0, z, q[1] + y0, nrm, ao, p.gm, w, p.pal, p.bid);
+  const wall = (z0: number, zL: number, zR: number, ao: number) => {
     out.reserve(4);
     const n = axis + 8 * p.chain, w = SLANT + p.dir;
-    v(L, z0, n, ao, w); v(R, z0, n, ao, w); v(R, z1, n, 3, w); v(L, z1, n, 3, w);
+    v(L, z0, n, ao, w); v(R, z0, n, ao, w); v(R, zR, n, 3, w); v(L, zL, n, 3, w);
   };
-  if (p.aoBottom < 3 && p.z1 - p.z0 > 1) { wall(p.z0, p.z0 + 1, p.aoBottom); wall(p.z0 + 1, p.z1, 3); }
-  else wall(p.z0, p.z1, p.aoBottom);
+  if (p.aoBottom < 3 && p.z1 - p.z0 > 1 && Math.min(tL, tR) > (p.z0 + 1) * 64) { wall(p.z0 * 64, (p.z0 + 1) * 64, (p.z0 + 1) * 64, p.aoBottom); wall((p.z0 + 1) * 64, tL, tR, 3); }
+  else wall(p.z0 * 64, tL, tR, p.aoBottom);
   const up = -p.a * p.b * p.sx * p.sy > 0; // P, A, B counter-clockwise from above
   if (p.capTop) {
     let nrm = 5, w = 0;
@@ -217,13 +236,13 @@ function emitPrism(p: Prism, x0: number, y0: number, out: QuadBuffer, palFlags: 
       if (rc) { nrm = 5 + 8 * ((rc - 1) >> 6); w = 1 + ((rc - 1) & 63); }
     }
     out.reserve(4);
-    const [b, c] = up ? [A, B] : [B, A];
-    v(P, p.z1, nrm, 3, w); v(b, p.z1, nrm, 3, w); v(c, p.z1, nrm, 3, w); v(c, p.z1, nrm, 3, w);
+    const [b, c] = up ? [A, B] : [B, A], tb = b === L ? tL : tR, tc = c === L ? tL : tR;
+    v(P, tP, nrm, 3, w); v(b, tb, nrm, 3, w); v(c, tc, nrm, 3, w); v(c, tc, nrm, 3, w);
   }
   if (p.capBottom) {
     out.reserve(4);
     const [b, c] = up ? [B, A] : [A, B];
-    v(P, p.z0, 4, 3, 0); v(b, p.z0, 4, 3, 0); v(c, p.z0, 4, 3, 0); v(c, p.z0, 4, 3, 0);
+    v(P, p.z0 * 64, 4, 3, 0); v(b, p.z0 * 64, 4, 3, 0); v(c, p.z0 * 64, 4, 3, 0); v(c, p.z0 * 64, 4, 3, 0);
   }
 }
 
