@@ -41,6 +41,12 @@ export class Daylight {
   private env: THREE.WebGLRenderTarget | null = null;
   private envKey = '';
   private shadowKey = '';
+  private lightKey = '';
+  private frame = 0;
+  private fitFrame = -1e9;
+  private readonly fitC = new THREE.Vector3();
+  private fitR = 0;
+  private twinLive = true;
   private northTheta = 0;
 
   constructor(renderer: THREE.WebGLRenderer, private readonly scene: THREE.Scene, shadowSize = 8192) {
@@ -165,10 +171,18 @@ export class Daylight {
     const Rq = Math.min(top, 1.1 ** Math.ceil(Math.log(R) / Math.log(1.1))), g = Rq / 16;
     const c = new THREE.Vector3(Math.round(f.x / g) * g, 0, Math.round(f.z / g) * g), Rf = Rq + 0.75 * g, texel = (2 * Rf) / sun.shadow.mapSize.x;
     const L = this.lightDir;
-    const key = `${c.x},${c.z},${Rq.toFixed(1)},${L.x.toFixed(4)},${L.y.toFixed(4)}`;
+    const lightKey = `${L.x.toFixed(4)},${L.y.toFixed(4)}`, key = `${c.x},${c.z},${Rq.toFixed(1)},${lightKey}`;
+    this.frame++;
     if (key !== this.shadowKey) {
-      this.shadowKey = key;
-      this.fitSun(c, Rf, texel, map);
+      // a refit that only follows the view (the square slid along, or grown or shrunk a step) waits for every 3rd
+      // frame: a pan, a zoom or a flight redrew the whole city's shadow every frame. Not if the view is already two
+      // steps out of the square, or a quarter bigger; a new light, or what apply() changed, goes at once
+      const follow = lightKey === this.lightKey && this.shadowKey !== '';
+      const out = Math.max(Math.abs(c.x - this.fitC.x), Math.abs(c.z - this.fitC.z)) > 2 * g || Rq > 1.25 * this.fitR;
+      if (!follow || out || this.frame - this.fitFrame >= 3) {
+        this.shadowKey = key; this.lightKey = lightKey; this.fitFrame = this.frame; this.fitC.copy(c); this.fitR = Rq;
+        this.fitSun(c, Rf, texel, map);
+      }
     }
     this.fitTwin();
   }
@@ -200,5 +214,10 @@ export class Daylight {
       cb.updateProjectionMatrix();
     }
     Object.assign(b, { bias: a.bias, normalBias: a.normalBias, radius: a.radius, intensity: a.intensity });
+    // the moving things' map is drawn every frame while they are in the scene and shown, and once more (empty) after
+    const moving = this.moving(), live = !!moving && moving.visible && moving.parent !== null;
+    b.autoUpdate = false;
+    if (live || this.twinLive) b.needsUpdate = true;
+    this.twinLive = live;
   }
 }
