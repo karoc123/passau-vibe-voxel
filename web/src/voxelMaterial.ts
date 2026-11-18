@@ -43,6 +43,8 @@ export interface VoxelUniforms {
   uLitA: U<THREE.Vector4[]>;
   uLitB: U<THREE.Vector4[]>;
   uLitMap: U<THREE.Texture>;
+  uNoWin: U<THREE.Vector4>;
+  uNoWinR: U<number>;
 }
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
@@ -225,7 +227,11 @@ function floodlights(meta: Meta) {
         if (d < reach && d / r < best[x + w * y]) { best[x + w * y] = d / r; map[x + w * y] = k + 1; }
       }
   }
-  return { uLitA: { value: A }, uLitB: { value: B }, uLitMap: { value: dataTexture(map, w, h, THREE.RedFormat) } };
+  // the cathedral has its windows in voxels (scripts/passau.py): the shader draws none on its walls
+  const dom = meta.labels.find((l) => l.name === 'Dom St. Stephan'), da = FLOODLIT['Dom St. Stephan'];
+  const noWin = dom ? new THREE.Vector4(dom.x + 0.5 + da.a![0], dom.y + 0.5 + da.a![1], dom.x + 0.5 + da.b![0], dom.y + 0.5 + da.b![1]) : new THREE.Vector4(-1e4, -1e4, -1e4, -1e4);
+  return { uLitA: { value: A }, uLitB: { value: B }, uLitMap: { value: dataTexture(map, w, h, THREE.RedFormat) },
+    uNoWin: { value: noWin }, uNoWinR: { value: da.r } };
 }
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
@@ -365,7 +371,7 @@ const FRAG_PARS = `
     return s / n;
   }
   ${FOLIAGE}
-  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap;
+  uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap; uniform vec4 uNoWin; uniform float uNoWinR;
   // how much a floodlit landmark (uLitA/B) lights a point; out: the direction from its axis, and how white its light
   float floodAt(vec2 p, bool mirror, out vec2 out_, out float w_) {
     out_ = vec2(0.0); w_ = 0.0;
@@ -489,6 +495,25 @@ const SURFACE = `
   } else if (m == ${MAT.CLASSIC}) {
     gRough = 0.8;
     if (vert && lvl < 7.5) col *= mod(lvl, 2.0) < 1.0 ? 0.9 : 1.0;
+    // A church (stone or brick, windows.bin's religious kind): tall round-headed windows, ~1.8 m wide every 5-7 m, from
+    // 3.5 m up to 2 m under the eave (vWTop; 11.5 m where that is not known). Its walls were blank: not the town's
+    // storeys of windows, and the voxels had none (but the cathedral's, scripts/passau.py: none drawn over those)
+    if (vert && vWTop > 6.5 && (int(texelFetch(uWinMap, ivec2(cell.xz), 0).r * 255.0 + 0.5) & 7) == 6) {
+      vec2 pa = vVox.xz - uNoWin.xy, ba = uNoWin.zw - uNoWin.xy;
+      if (length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0)) > uNoWinR) {
+        float P = 5.0 + 2.0 * hash12(vec2(vBid * 0.41, 8.3)), x = uc - floor(hash12(vec2(vBid * 0.29, 1.9)) * P);
+        float top = min(vWTop - 2.0, 11.5), wd = 1.8, r = 0.5 * wd;
+        float cu = band(x, fwU, P, 0.0, wd), cv = span(lv, fwV, 3.5, top - r + 0.3); // (into the arch: no seam where the two meet)
+        float dx = mod(x, P) - r, dy = lv - (top - r);
+        float arch = dy > 0.0 ? clamp((r - length(vec2(dx, dy))) / max(fwU, 1e-3) + 0.5, 0.0, 1.0) * step(abs(dx), r) : 0.0;
+        float win = top - 3.5 > 3.0 ? max(cu * cv, arch) : 0.0;
+        if (win > 0.0) {
+          col = mix(col, glassCol(base, h) * vec3(1.0, 1.05, 1.1), win);
+          gRough = mix(gRough, GLASS_ROUGH, win);
+          gEmissive = (glassSky(wN) + vec3(1.0, 0.78, 0.5) * 0.12 * uNight * step(0.4, hash12(vec2(vBid, 2.2)))) * win;
+        }
+      }
+    }
   } else if (m == ${MAT.RIBBON}) {
     if (vert && mod(lvl, 4.0) > 1.5) {
       col = glassCol(base, h); gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
