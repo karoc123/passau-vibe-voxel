@@ -108,20 +108,22 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const prio = (i: number, f: THREE.Vector3) => (clay === 'none' ? lmPrio.get(i) : undefined) ?? (seen[i] ? 1e5 : 0) - away(i, f);
 
   // Distance levels (scripts/tiles.py LOD_LEVELS): far from the camera, where a metre is a pixel or less, the city is
-  // drawn from its 2 m tiles instead of the 1 m ones, trees included (more levels would nest the same way). The levels nest: a node of level s holds
-  // s x s tiles of 128 m. Each update picks the levels as a quadtree from the coarsest down: a node is drawn as it is
+  // drawn from its 2 m tiles instead of the 1 m ones, trees included, and further out (where a 2 m cell is under
+  // pxCoarse: beyond ~3 km at the default 1.2 px and a 28° view) from its 4 m ones. The levels nest: a node of level s
+  // holds s x s tiles of 128 m. Each update picks the levels as a quadtree from the coarsest down: a node is drawn as it is
   // while a cell of the next finer level would come out under pxCoarse pixels at its nearest point (back to the finer
   // one above pxFine, so a camera at the switch doesn't flip it to and fro). What is drawn (shown) only changes once
   // all of it is in: a coarse node goes once every finer node chosen under it (a 1 m tile with its foliage, after the
   // first load) is ready, so nothing is ever missing; the nodes shown never overlap. Each tile's own faces close it
-  // at its edges, so a 1 m tile next to a 2 m one leaves no crack. lod (settings.ts, ?lod= ?lodpx=): 'off' 1 m only,
-  // 'far' never finer than 2 m (to look at it close up); px: pxCoarse. setLod changes them live: the next update picks
+  // at its edges, so a 1 m tile next to a 2 m one (or a 2 m next to a 4 m) leaves no crack. lod (settings.ts, ?lod=
+  // ?lodpx=): 'off' 1 m only, 'far' never finer than 2 m, 'far4' never finer than 4 m (to look at them close up); px:
+  // pxCoarse. setLod changes them live: the next update picks
   // anew, and what shows changes over as the newly chosen nodes come in, as for a camera move.
   const lods = S.levels.filter((s) => s !== S.clay).sort((a, b) => a - b);
   let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
   const setLod = (l: { mode: Lod; px: number }) => {
     lodOn = lods.length > 1 && l.mode !== 'off';
-    pxCoarse = l.px; pxFine = l.px * 1.25; lodMin = l.mode === 'far' ? 2 : 1;
+    pxCoarse = l.px; pxFine = l.px * 1.25; lodMin = l.mode === 'far' ? 2 : l.mode === 'far4' ? 4 : 1;
     last = 0;
   };
   interface LNode { s: number; tx: number; ty: number; key: string; x0: number; y0: number; x1: number; y1: number }

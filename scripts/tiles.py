@@ -1,44 +1,49 @@
 """Streamable voxel tiles for the viewer (web/src/stream.ts).
 
-Level 1 is the city at 1 m; level 2 (LOD_LEVELS) is the same city in cells of 2 m, drawn instead of it far from the
-camera, where a metre is a pixel or less (web/src/city.ts; a level 4 cost slim towers and spires their tops for a few
-per cent of triangles at the far edge, so there is none); level 8 (cells of 8 x 8 x 8 m) is the clay
-standing in where the viewer's budget leaves the city out. Every node holds N x N cells (N = 128, so a node spans
-128 * s metres) plus a 1-cell apron on each side for face culling and AO at the node edge.
+Level 1 is the city at 1 m; levels 2 and 4 (LOD_LEVELS) are the same city in cells of 2 and 4 m, drawn instead of it
+far from the camera, where a metre is a pixel or less (web/src/city.ts: 4 m where 2 m would be, beyond ~3 km at the
+default switch, the whole map from above or the far end of a view along the valley; there a quarter of 2 m's
+triangles); level 8 (cells of 8 x 8 x 8 m) is the clay standing in where the viewer's budget leaves the city out.
+Every node holds N x N cells (N = 128, so a node spans 128 * s metres) plus a 1-cell apron on each side for face
+culling and AO at the node edge.
 
 Node file  tiles/{s}/{nx}_{ny}.bin, gzip of:
   counts  uint16[(N+2)^2]   runs per column (apron included, row-major, row = south)
   ground  uint8 [(N+2)^2]   ground level in metres (z of the first free voxel at level 1), for the facade shader
   runs    uint16[3 * sum]   (z0, len, palette) per run, z in cells of the level, bottom -> top
-  planes  uint16[(N+2)^2]   levels 1 and 2 (not in 1f/, not level 8): the roof plane of the column's top face, 0 for
+  planes  uint16[(N+2)^2]   levels 1, 2 and 4 (not in 1f/, not level 8): the roof plane of the column's top face, 0 for
                             none -- 1 + slope (2.5 degree steps) x 64 + downhill direction (64 steps), as
                             web/src/mesher.worker.ts lights it; at 2 m the most common plane of the column's 1 m
-                            columns (a slope and its direction don't change with the cell size)
+                            columns (a slope and its direction don't change with the cell size), at 4 m of its 4 x 4
 
 Foliage at level 1 is its own file, loaded after every building (web/src/city.ts): tiles/1f/{nx}_{ny}.bin, the same
 format, holding only trees, trunks and grass (`fol_ids`, `grass_ids`); in tiles/1/ trees and trunks are left out and
 grass is bare earth (`bare_id`), the surface the grass is then drawn on.
 
-Level 2 holds everything, foliage included (one file per node: far away the trees are not worth a second
+Levels 2 and 4 hold everything, foliage included (one file per node: far away the trees are not worth a second
 mesh, and they come in with the city instead of after it).
 
-Levels 2 and 8: a cell is solid when at least a quarter of its block is; its colour is the topmost voxel in the block,
-so roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
+Levels 2, 4 and 8: a cell is solid when at least a quarter of its block is; its colour is the topmost voxel in the
+block, so roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
+Level 4 also keeps a deck over open air that level 2 has (downsample's finer).
 """
 import gzip
 
 import numpy as np
 
 N = 128
-LEVELS = (1, 2, 8)
-LOD_LEVELS = (2,)  # the distance levels: with roof planes, meshed like level 1 (slopes, chamfers)
+LEVELS = (1, 2, 4, 8)
+LOD_LEVELS = (2, 4)  # the distance levels: with roof planes, meshed like level 1 (slopes, chamfers)
+# levels built from the level of half their cell size (downsample's finer): 4 from 2
+CASCADE = (4,)
 # the materials of buildings' walls (voxelMaterial.ts MAT: SOLID, WALL, GLASS, FLOODLIT, CONCRETE, BRONZE, RIBBON, CLASSIC,
 # WINDOW, TENEMENT; as web/src/stream.ts WALLS): a distance level's wall blocks wear their own colour (side_walls)
 WALL_MATS = (0, 1, 2, 7, 13, 15, 19, 20, 21, 22)
 
 
-def downsample(vol, s, face_ids=(), wall_ids=None):
-    """wall_ids (a distance level): palette entries of buildings' walls, see side_walls"""
+def downsample(vol, s, face_ids=(), wall_ids=None, finer=None):
+    """wall_ids (a distance level): palette entries of buildings' walls, see side_walls. finer (level 4, CASCADE): the
+    level of half the cell size, already downsampled: a slab of it over open air stays (see below)"""
     H, D, W = vol.shape
     Hs, Ds, Ws = -(-H // s), -(-D // s), -(-W // s)
     out = np.zeros((Hs, Ds, Ws), np.uint16)
@@ -64,7 +69,19 @@ def downsample(vol, s, face_ids=(), wall_ids=None):
                 for dx in range(s):
                     v = layer[:, :, dy, :, dx]
                     col = np.where((col == 0) & (v != 0), v, col)
-        res = np.where(occ >= need, col, 0)
+        if finer is not None:
+            # A deck over open air (a footbridge, a gangway; a bridge over a road) is a quarter or less of the 4 m
+            # blocks it lies in, but solid at 2 m: it stood there until the switch to 4 m, and there went. The 4 m
+            # level keeps such a slab -- 3 of the 4 cells of either 2 m layer of the block solid -- where nothing
+            # solid is under the block (not for the thin top of the ground or a roof: that would lift them).
+            f = finer[:, rb * 2:(rb + db) * 2, :]
+            f = np.pad(f, ((0, hb * 2 - f.shape[0]), (0, db * 2 - f.shape[1]), (0, wb * 2 - f.shape[2])))
+            lay = (f != 0).reshape(hb, 2, db, 2, wb, 2).sum((3, 5), dtype=np.int32).max(1)  # (hb, db, wb)
+            under = np.zeros_like(occ, bool)
+            under[1:] = occ[:-1] >= need
+            res = np.where((occ >= need) | ((lay >= 3) & ~under), col, 0)
+        else:
+            res = np.where(occ >= need, col, 0)
         # a thin surface (ground or roof in the block's bottom layer) is too sparse to keep its own block, which
         # left the block below showing what lies under it (brown soil along the plazas): that block wears it instead
         up = np.zeros_like(col)
@@ -175,8 +192,15 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
     for meta.json."""
     D, W = g.shape
     info = dict(N=N, levels=[], bytes=0)
+    done = {}
     for s in LEVELS:
-        vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16), wall_ids if s in LOD_LEVELS else None)
+        fin = done.get(s // 2) if s in CASCADE else None
+        if s in CASCADE and fin is None:
+            fin = downsample(vol, s // 2, np.array(sorted(face_ids), np.uint16), wall_ids if s // 2 in LOD_LEVELS else None)
+        vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16), wall_ids if s in LOD_LEVELS else None, fin)
+        del fin
+        if s * 2 in CASCADE:
+            done[s] = vs
         gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
         ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
         Hs, Ds, Ws = vs.shape
@@ -225,6 +249,7 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
         note(f"tiles level {s}: {nx}x{ny} nodes, {nruns} runs, {tot / 2 ** 20:.1f} MB gz"
              + (f", foliage {ftot / 2 ** 20:.1f} MB gz" if split else ""))
         del vs, ps
+        done.pop(s // 2, None)
     return info
 
 
@@ -248,7 +273,8 @@ def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(),
                 ra, rb, ca, cb = max(a, 0), min(a + span + 2 * s, D), max(c, 0), min(c + span + 2 * s, W)
                 w1[:, ra - a:rb - a, ca - c:cb - c] = vol[:, ra:rb, ca:cb]
                 g1[ra - a:rb - a, ca - c:cb - c] = g[ra:rb, ca:cb]
-                win = w1 if s == 1 else downsample(w1, s, face, wall_ids if s in LOD_LEVELS else None)
+                fin = downsample(w1, s // 2, face, wall_ids if s // 2 in LOD_LEVELS else None) if s in CASCADE else None
+                win = w1 if s == 1 else downsample(w1, s, face, wall_ids if s in LOD_LEVELS else None, fin)
                 gw = np.clip(g1[::s, ::s], 0, 255).astype(np.uint8)
                 Hs = win.shape[0]
                 top = int(np.nonzero(win.reshape(Hs, -1).any(1))[0].max()) + 1 if win.any() else 1

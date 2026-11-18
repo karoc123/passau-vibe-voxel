@@ -15,7 +15,7 @@ uv run python scripts/lod2.py            # data/lod2.npz (LoD2 roof planes and f
 uv run python scripts/laser.py           # data/laser.npz (LiDAR vegetation statistics per cell, for the trees)
 uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffic.json, qa_roadmask.bin.gz;
                                          # data/ground.npz, data/footprints.npz (needs data/lod2.npz, or NO_LOD2=1)
-                                         # (scripts/tiles_lod.py: only tiles/2 and tiles/8 again, from tiles/1 and 1f)
+                                         # (scripts/tiles_lod.py: only tiles/2, 4 and 8 again, from tiles/1 and 1f)
 uv run python scripts/places.py          # places.json (search index)
 uv run python scripts/flood.py           # flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
 uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
