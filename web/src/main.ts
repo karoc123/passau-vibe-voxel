@@ -147,6 +147,7 @@ function applyGfx(c: Partial<Gfx>) {
   if ('grade' in c) post.film.strength = g.grade;
   if ('lod' in c || 'lodpx' in c) city?.setLod({ mode: g.lod, px: g.lodpx });
   if ('prepass' in c && prepass) prepass.enabled = g.prepass;
+  if ('occl' in c) city?.setOcclusion(g.occl);
   busy = true;
 }
 
@@ -309,7 +310,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx } });
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl });
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
