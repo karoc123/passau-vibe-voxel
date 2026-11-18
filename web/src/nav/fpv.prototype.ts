@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FpvCollision, type Sweep } from './fpv-collision';
+import { FpvCollision, type ImpactKind } from './fpv-collision';
 import { FpvFlight, HOVER_THROTTLE, type FlightInput } from './fpv-flight';
 import { FpvInput } from './fpv-input';
 import type { Nav } from './nav';
@@ -9,9 +9,10 @@ import './fpv.prototype.css';
 
 const FIXED_STEP = 1 / 120;
 const ARM_THROTTLE = 0.06;
+const MAX_IMPACT_DURATION = 3;
 const CAMERA_PITCH_AXIS = new THREE.Vector3(1, 0, 0);
 const FLIGHT_KEYS = ['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyR', 'KeyF'];
-type Phase = 'loading' | 'ready' | 'flying' | 'crashed' | 'paused';
+type Phase = 'loading' | 'ready' | 'flying' | 'impact' | 'crashed' | 'paused';
 type InputSource = 'controller' | 'keyboard';
 
 function button(label: string, run: () => void) {
@@ -33,6 +34,7 @@ export class FpvPrototype {
   private readonly priorAttitude = new THREE.Quaternion();
   private readonly priorVelocity = new THREE.Vector3();
   private readonly tilt = new THREE.Quaternion();
+  private readonly impactTint = el('div', 'fpv-impact-tint');
   private readonly panel = el('aside', 'fpv-prototype');
   private readonly status = el('div', 'fpv-status', '', this.panel);
   private readonly telemetry = el('div', 'fpv-telemetry', '', this.panel);
@@ -52,11 +54,15 @@ export class FpvPrototype {
   private accumulator = 0;
   private nextStatus = 0;
   private waitingForTile = false;
+  private impactElapsed = 0;
+  private impactStrength = 0;
+  private impactOnGround = false;
   private notice = '';
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
     private readonly target: THREE.Vector3, meta: Meta) {
     this.collision = new FpvCollision(meta);
+    this.impactTint.setAttribute('aria-hidden', 'true');
     this.panel.setAttribute('aria-label', 'FPV Acro');
     this.status.setAttribute('role', 'status');
     this.actions.append(this.enterExit, this.armRadio, this.armKeys, this.reset);
@@ -96,9 +102,11 @@ export class FpvPrototype {
       const p = this.phase === 'loading' ? this.spawn : this.flight.position;
       this.collision.prefetch(p, this.flight.velocity);
       if (this.phase === 'loading') this.prepare();
-      if (this.phase === 'flying') this.updateFlight(dt);
+      if (this.phase === 'flying' || this.phase === 'impact') this.advance(dt);
       this.applyCamera();
     }
+    this.impactTint.style.opacity = active && this.phase === 'impact'
+      ? String(this.impactStrength * Math.exp(-9 * this.impactElapsed)) : '0';
     const now = performance.now();
     if (now >= this.nextStatus) {
       this.nextStatus = now + 100;
@@ -170,45 +178,67 @@ export class FpvPrototype {
     this.renderPanel();
   }
 
-  private updateFlight(dt: number) {
-    if (!document.hasFocus() || document.hidden) {
-      this.pause('Window lost focus. Arm again to resume.');
-      return;
-    }
-    if (this.source === 'controller' && (!this.controller || this.radio.deviceKey !== this.device)) {
-      this.pause('Controller disconnected or unavailable. Arm again to resume.');
-      return;
-    }
-    const input = this.source === 'keyboard' ? this.keyboard() : this.controller!;
+  private advance(dt: number) {
+    const input = this.phase === 'flying' ? this.flightInput() : null;
+    if (this.phase !== 'impact' && !input) return;
     this.accumulator += clamp(dt, 0, 0.1);
-    while (this.accumulator >= FIXED_STEP && this.phase === 'flying') {
+    while (this.accumulator >= FIXED_STEP && (this.phase === 'flying' || this.phase === 'impact')) {
       this.accumulator -= FIXED_STEP;
       this.priorAttitude.copy(this.flight.attitude);
       this.priorVelocity.copy(this.flight.velocity);
-      this.flight.step(input, FIXED_STEP, this.move);
+      const reacting = this.phase === 'impact';
+      if (reacting) this.flight.stepImpact(this.impactElapsed, FIXED_STEP, this.move);
+      else this.flight.step(input!, FIXED_STEP, this.move);
       if (this.waitingForTile) {
         this.flight.attitude.copy(this.priorAttitude);
         this.flight.velocity.copy(this.priorVelocity);
         this.accumulator = 0;
         break;
       }
+      if (reacting) {
+        this.impactElapsed += FIXED_STEP;
+        const settled = this.impactElapsed > 0.7 && this.impactOnGround && this.flight.velocity.lengthSq() < 0.25;
+        if (settled || this.impactElapsed >= MAX_IMPACT_DURATION) {
+          this.phase = 'crashed';
+          this.flight.velocity.set(0, 0, 0);
+          this.renderPanel();
+        }
+      }
     }
+  }
+
+  private flightInput(): FlightInput | null {
+    if (!document.hasFocus() || document.hidden) {
+      this.pause('Window lost focus. Arm again to resume.');
+      return null;
+    }
+    if (this.source === 'controller' && (!this.controller || this.radio.deviceKey !== this.device)) {
+      this.pause('Controller disconnected or unavailable. Arm again to resume.');
+      return null;
+    }
+    return this.source === 'keyboard' ? this.keyboard() : this.controller;
   }
 
   private readonly move = (position: THREE.Vector3, displacement: THREE.Vector3, velocity: THREE.Vector3) => {
     const collision = this.collision.sweep(position, displacement);
     this.waitingForTile = collision === 'loading';
     if (collision === 'loading') return;
+    this.impactOnGround = !!collision.hit && collision.axis === 2;
     const distance = displacement.length();
     const fraction = collision.hit && distance > 0 ? Math.max(0, collision.fraction - 0.002 / distance) : collision.fraction;
     position.addScaledVector(displacement, fraction);
-    if (collision.hit) this.crash(collision.hit, velocity.length());
+    if (collision.hit) {
+      const first = this.phase === 'flying';
+      if (first) this.startImpact(collision.hit, velocity.length());
+      this.flight.bounce(collision.axis, first);
+    }
   };
 
-  private crash(hit: NonNullable<Exclude<Sweep, string>['hit']>, speed: number) {
-    this.phase = 'crashed';
+  private startImpact(hit: ImpactKind, speed: number) {
+    this.phase = 'impact';
+    this.impactElapsed = 0;
+    this.impactStrength = clamp(speed / 26, 0.22, 0.75);
     this.notice = `Impact with ${hit} at ${Math.round(speed * 3.6)} km/h. Reset to fly again.`;
-    this.flight.velocity.set(0, 0, 0);
     this.renderPanel();
   }
 
@@ -243,14 +273,14 @@ export class FpvPrototype {
   private renderPanel() {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
     const canArm = active && (this.phase === 'ready' || this.phase === 'paused');
-    this.panel.classList.toggle('in-flight', flying);
+    this.panel.classList.toggle('in-flight', flying || (active && this.phase === 'impact'));
     this.enterExit.textContent = active ? 'Exit FPV' : 'Open FPV Acro';
     this.enterExit.disabled = !active && this.nav.mode !== 'orbit';
     this.armRadio.hidden = !canArm;
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
     this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
-    this.options.hidden = flying;
+    this.options.hidden = flying || this.phase === 'impact';
     this.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;

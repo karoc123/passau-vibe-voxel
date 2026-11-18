@@ -166,8 +166,8 @@ or press a controller button so its axes appear under **Controller setup**.
 option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut throttle. It starts at hover throttle.
 
 The flight uses independent 1 m collision data for terrain, structures and trees across the whole 3,200 × 1,408 m model.
-A swept drone volume catches thin voxels even at speed. The flight waits if it reaches a tile whose collision data is
-still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
+A swept drone volume catches thin voxels even at speed. Crashes bounce off the hit surface and tumble before stopping.
+The flight waits if it reaches a tile whose collision data is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
 Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
 
 ## Known limits

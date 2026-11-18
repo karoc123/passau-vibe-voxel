@@ -8,7 +8,10 @@ const RADIUS = 0.35;
 const CONCURRENT_LOADS = 4;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs };
-export type Sweep = { fraction: number; hit: 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling' | null } | 'loading';
+export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
+// Normal as a signed one-based axis index (x, y, z).
+type Contact = { fraction: number; axis: number };
+export type Sweep = (Contact & { hit: ImpactKind }) | { fraction: number; hit: null } | 'loading';
 
 function runsOf(columns: Columns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
@@ -18,21 +21,30 @@ function runsOf(columns: Columns): Runs {
 
 // Sweeps a 70 cm box through one column segment, expanded by the drone radius on each axis.
 function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number) {
-  let enter = 0, leave = limit;
+  let enter = 0, leave = limit, axis = 0;
   for (let i = 0; i < 3; i++) {
     const min = (i === 0 ? x : i === 1 ? lo : z) - RADIUS;
     const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + RADIUS;
     const start = p.getComponent(i), move = d.getComponent(i);
     if (Math.abs(move) < 1e-10) {
-      if (start < min || start > max) return Infinity;
+      if (start < min || start > max) return null;
       continue;
     }
     const a = (min - start) / move, b = (max - start) / move;
-    enter = Math.max(enter, Math.min(a, b));
+    const entry = Math.min(a, b);
+    if (entry >= enter) {
+      enter = entry;
+      axis = -Math.sign(move) * (i + 1);
+    }
     leave = Math.min(leave, Math.max(a, b));
-    if (enter > leave) return Infinity;
+    if (enter > leave) return null;
   }
-  return enter;
+  // A craft already inside a voxel (e.g. at a corner) falls back to its opposing motion axis.
+  if (axis === 0) {
+    const i = Math.abs(d.x) >= Math.abs(d.y) && Math.abs(d.x) >= Math.abs(d.z) ? 0 : Math.abs(d.y) >= Math.abs(d.z) ? 1 : 2;
+    axis = d.getComponent(i) > 0 ? -(i + 1) : i + 1;
+  }
+  return { fraction: enter, axis };
 }
 
 // A small collision cache independent of visibility, render budget and the mesh-worker queue.
@@ -96,7 +108,8 @@ export class FpvCollision {
 
   sweep(p: Vector3, d: Vector3): Sweep {
     let fraction = 1;
-    let hit: Exclude<Sweep, string>['hit'] = null;
+    let hit: ImpactKind | null = null, normalAxis = 0;
+    const result = (): Sweep => hit ? { fraction, hit, axis: normalAxis } : { fraction, hit: null };
     // Reserve room for the drone at the edges of the model.
     for (const [axis, extent] of [[0, this.width], [1, this.ceiling], [2, this.depth]]) {
       const start = p.getComponent(axis), move = d.getComponent(axis), end = start + move;
@@ -105,6 +118,7 @@ export class FpvCollision {
       const t = move === 0 ? 0 : Math.max(0, (limit - start) / move);
       if (t <= fraction) {
         fraction = t;
+        normalAxis = (axis + 1) * (end < RADIUS ? 1 : -1);
         hit = axis === 1 ? (end < RADIUS ? 'terrain' : 'ceiling') : 'city edge';
       }
     }
@@ -115,7 +129,7 @@ export class FpvCollision {
     const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + RADIUS));
     const minY = Math.min(p.y, p.y + d.y * fraction) - RADIUS;
     const maxY = Math.max(p.y, p.y + d.y * fraction) + RADIUS;
-    if (minY > this.ceiling - 600) return { fraction, hit };
+    if (minY > this.ceiling - 600) return result();
 
     for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
       const tile = this.tileAt(x, z);
@@ -123,20 +137,26 @@ export class FpvCollision {
       const i = this.column(x, z);
       const ground = tile.ground[i];
       if (minY <= ground) {
-        const t = contact(p, d, x, 0, ground, z, fraction);
-        if (t <= fraction) { fraction = t; hit = 'terrain'; }
+        const groundContact = contact(p, d, x, 0, ground, z, fraction);
+        if (groundContact) {
+          ({ fraction, axis: normalAxis } = groundContact);
+          hit = 'terrain';
+        }
       }
       for (const [kind, runs] of [['structure', tile.base], ['foliage', tile.foliage]] as const) {
         for (let j = runs.offsets[i]; j < runs.offsets[i + 1]; j += 3) {
           const lo = runs.data[j], hi = lo + runs.data[j + 1];
           if (lo > maxY) break;
           if (hi < minY || (kind === 'foliage' && this.material[runs.data[j + 2]] === MAT.GRASS)) continue;
-          const t = contact(p, d, x, lo, hi, z, fraction);
-          if (t < fraction || (t === fraction && !hit)) { fraction = t; hit = kind; }
+          const voxelContact = contact(p, d, x, lo, hi, z, fraction);
+          if (voxelContact && (voxelContact.fraction < fraction || !hit)) {
+            ({ fraction, axis: normalAxis } = voxelContact);
+            hit = kind;
+          }
         }
       }
     }
-    return { fraction, hit };
+    return result();
   }
 
   private column(x: number, z: number) {
