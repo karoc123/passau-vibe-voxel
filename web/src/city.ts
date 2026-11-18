@@ -18,7 +18,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   3. everything else, nearest to the view first, each building once all its tiles are in; over clay a city block
 //      turns real once every tile under it is in, and back to clay when the budget moves on
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -30,6 +30,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   prepass?: DepthPrepass | null;
   lod?: { mode: Lod; px: number };
   occlusion?: boolean;
+  // the drawing buffer's height in pixels (the renderer's own: the render size and the resolution setting scale it)
+  pixelsHigh?: () => number;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
   const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
@@ -117,7 +119,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // first load) is ready, so nothing is ever missing; the nodes shown never overlap. Each tile's own faces close it
   // at its edges, so a 1 m tile next to a 2 m one (or a 2 m next to a 4 m) leaves no crack. lod (settings.ts, ?lod=
   // ?lodpx=): 'off' 1 m only, 'far' never finer than 2 m, 'far4' never finer than 4 m (to look at them close up); px:
-  // pxCoarse. setLod changes them live: the next update picks
+  // pxCoarse, in the drawing buffer's pixels (a lower resolution draws the city coarser; the next update picks again
+  // with it). setLod changes them live: the next update picks
   // anew, and what shows changes over as the newly chosen nodes come in, as for a camera move.
   const lods = S.levels.filter((s) => s !== S.clay).sort((a, b) => a - b);
   let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
@@ -141,7 +144,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     if (!lodOn) { for (let i = 0; i < total; i++) if (want[i]) add(lnode(1, i % d.nx, Math.floor(i / d.nx))); return; }
     eye.setFromMatrixPosition(camera.matrixWorld);
     const cam = camera as THREE.PerspectiveCamera;
-    const focal = (innerHeight * Math.min(devicePixelRatio, 2)) / 2 / Math.tan((cam.fov * Math.PI) / 360) * (cam.zoom || 1);
+    const focal = pixelsHigh() / 2 / Math.tan((cam.fov * Math.PI) / 360) * (cam.zoom || 1);
     const next = new Set<string>();
     const visit = (k: number, tx: number, ty: number) => {
       const s = lods[k], n = lnode(s, tx, ty);
@@ -354,10 +357,13 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     if (!moved && kids.length === occN && now - occAt < 250) return;
     if (!moved) occ.prepare(cam0, true);
     occAt = now; occN = kids.length;
+    // (not by o.visible: n8ao renders the scene again with this camera for its transparent things, every opaque mesh
+    // made invisible for it -- judged then, every tile came out unhidden until the next update, by turns with the
+    // main pass's. Visibility is three's own test anyway; this one is by the box alone)
     let hidden = 0;
     for (const o of kids) {
       const m = o as THREE.Mesh, box = m.geometry?.boundingBox;
-      const h = !!box && o.visible && m.material !== clayMat && occ.hidden(box);
+      const h = !!box && m.material !== clayMat && occ.hidden(box);
       m.layers.mask = h ? 1 << HIDDEN : 1;
       hidden += +h;
     }
