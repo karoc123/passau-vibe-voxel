@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -481,6 +482,7 @@ foot_shapes, road_shapes, bridge_shapes, cycle_shapes, road_lines = [], [], [], 
 bridge_rails = []  # (line, colour) the rails of tracks on bridges, drawn on the deck like those on the ground
 bridge_lines = []  # (line, half width, layer) of every way on a bridge: the deck's height profile is taken along them
 bridge_roads = []  # (line, width) of carriageways on bridges, for the inferred deck lamps
+bridge_road_polys = []  # the carriageways on bridges, where one is drawn on the ground (a ramp's embankment)
 _paved = [(g_, t_["surface"]) for _, _, t_, g_ in osm.areas
           if t_.get("surface") in SURF and ("area:highway" in t_ or (t_.get("highway") and t_.get("area") == "yes"))]
 _ptree = STRtree([g_ for g_, _ in _paved])
@@ -496,16 +498,28 @@ def area_surface(line):
     return None
 
 
+# where a building stands (OSM's outlines): the surface model over it is a roof, never a deck. Not LoD2's footprints
+# (LoD2 models the Poststeg and other footbridges as buildings), nor roofs on posts or a footbridge's own stair tower
+_bld0 = np.zeros((D, W), np.uint8)
+burn(_bld0, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("building") not in (None, "no", "roof", "carport", "canopy",
+                                                                                   "staircase", "bridge")
+             and not tunnelish(t_)])
+_bld0 = _bld0 > 0
+
+
 def snap_footbridge(line):
     """A footbridge is 2-3 m wide, and its OSM way can lie a few metres beside it (the Poststeg over the station's
     tracks: 3-4 m west): the deck test then finds open air under most of the way and no bridge is built. The way moves
     sideways, by the least of up to 6 m, to where the surface model stands 2 m or more over the ground along 85% of
-    it; a way with half of it over a deck already, or one that finds no such place, stays."""
+    it; a way with half of it over a deck already, or one that finds no such place, stays. A building's roof is no deck:
+    the sidewalk of the ramp up to the Schanzlbrücke (its deck an embankment in the terrain model, so open air by this
+    test) was moved 2.5 m onto the Schanzlturm's wall and its deck climbed the facade."""
     def cover(l_):
         P_ = np.array([l_.interpolate(v_).coords[0] for v_ in np.linspace(0, l_.length, max(2, int(l_.length) + 1))])
         r_, c_ = P_[:, 1].astype(int), P_[:, 0].astype(int)
         ok_ = (r_ >= 0) & (r_ < D) & (c_ >= 0) & (c_ < W)
-        return float(((nd_mean[r_[ok_], c_[ok_]] > 2) & (exg[r_[ok_], c_[ok_]] < 0.05)).mean()) if ok_.sum() >= 2 else 1.0
+        r_, c_ = r_[ok_], c_[ok_]
+        return float(((nd_mean[r_, c_] > 2) & (exg[r_, c_] < 0.05) & ~_bld0[r_, c_]).mean()) if ok_.sum() >= 2 else 1.0
     if cover(line) >= 0.5:  # only a way clearly off its deck (and never onto a tree's crown: green in the ortho)
         return line, 0.0
     for off in sorted(np.arange(-6, 6.1, 0.5), key=abs):
@@ -541,6 +555,8 @@ for oid, t, line in osm.lines:
         key = SURF.get(t.get("surface"), "asphalt") if (hw in ROADS or base in ROADS) else ("cycle" if hw == "cycleway" else SURF.get(t.get("surface"), "paving"))
         bridge_shapes.append((poly, C[key], int(parse_len(t.get("layer")) or 1)))
         bridge_lines.append((line, w / 2, int(parse_len(t.get("layer")) or 1), C[key]))
+        if hw in ROADS or base in ROADS:
+            bridge_road_polys.append(poly)
         if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private"):
             bridge_roads.append((line, w))  # (not a footbridge tagged living_street for service vans only)
         continue
@@ -746,7 +762,9 @@ for oid, t, line in osm.lines:
     xy = [tuple(np.round(p, 1)) for p in line.coords]
     for k, p in enumerate(xy):
         _deg[p] = _deg.get(p, 0) + (k > 0) + (k < len(xy) - 1)
-        _hw[p] = max(_hw.get(p, 0), HW[b] / 2)
+        # (the carriageway's own width: an 8-lane approach is 25 m wide, and lane dashes ran on into its junction)
+        _wd = parse_len(t.get("width")) or (parse_len(t.get("lanes")) or 0) * 3.1
+        _hw[p] = max(_hw.get(p, 0), HW[b] / 2, _wd / 2)
 _junc = [Point(p).buffer(_hw[p] + 4) for p, d in _deg.items() if d >= 3]
 _junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not tunnelish(t)]
 lm = np.zeros((D, W), np.uint16)
@@ -2583,8 +2601,14 @@ for line, hw, layer, _ in bridge_lines:
     a_, b_ = a_.ravel(), b_.ravel()
     X_ = P_[:, :1] + T_[:, :1] * a_ - T_[:, 1:] * b_
     Y_ = P_[:, 1:] + T_[:, 1:] * a_ + T_[:, :1] * b_
-    h_ = np.nanpercentile(dsm[np.clip((Y_ * 2).astype(int), 0, 2 * D - 1), np.clip((X_ * 2).astype(int), 0, 2 * W - 1)], 30, axis=1)
+    S_ = dsm[np.clip((Y_ * 2).astype(int), 0, 2 * D - 1), np.clip((X_ * 2).astype(int), 0, 2 * W - 1)]
     pr_, pc_ = np.clip(P_[:, 1].astype(int), 0, D - 1), np.clip(P_[:, 0].astype(int), 0, W - 1)
+    # samples on a building beside the way are its roof, not the deck (a sidewalk along a tower: its deck climbed the
+    # facade); a way over buildings (a viaduct's arches) keeps them
+    Sb_ = bmask[np.clip(Y_.astype(int), 0, D - 1), np.clip(X_.astype(int), 0, W - 1)] & ~bmask[pr_, pc_][:, None]
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        h_ = np.nanpercentile(np.where(Sb_, np.nan, S_), 30, axis=1)
     gd_ = dtm[pr_, pc_]
     ok_ = np.isfinite(h_) & (deck_lay[pr_, pc_] <= layer + 1) & ((h_ > gd_ + 1.5) | (~water_[pr_, pc_] & (h_ > gd_ - 1.5)))
     if ok_.sum() >= 2:
@@ -2670,6 +2694,43 @@ for _z in range(int(zt_[_ru, _cu].min()) if len(_ru) else 0, int(_btop[_ru, _cu]
     _m = _z >= zt_[_ru, _cu]
     vol[_z, _ru[_m], _cu[_m]] = 0
 note("deck cells over buildings under a bridge:", int(_under.sum()), "building cells that keep the deck out:", int(((deck_col > 0) & bmask & ~_under).sum()))
+# a scrap of deck lying on the ground (under 60 cells, no metre of air under any of it: where the ground of a ramp
+# dips a metre under its way) is no bridge: it stood as grey slabs and steps on the carriageway
+_lab, _n = ndimage.label(deck, np.ones((3, 3), bool))
+_scrap = np.zeros((D, W), bool)
+if _n:
+    _sz = ndimage.sum(deck, _lab, np.arange(1, _n + 1))
+    _air = ndimage.maximum(zt_ - 2 - g, _lab, np.arange(1, _n + 1))
+    _scrap = np.isin(_lab, 1 + np.nonzero((_sz < 60) & (_air <= 0))[0]) & ~bmask
+    deck &= ~_scrap
+# a bridge way where no deck is built because the ground comes up to it (the ramp up to the Schanzlbrücke: an
+# embankment the terrain model counts as ground, over the passages under it) is drawn on the ground: its carriageway
+# and sidewalks had been left out of the ground's colours (bridge ways go on the deck), a pale plaza of default paving.
+# Where its level is within 3 m of the ground, on open ground no other way or area is drawn on. (Its level away from
+# any deck: the ways' profiles as on the deck)
+_bwh = deck_abs.copy()
+_rn, _cn = np.nonzero((deck_col > 0) & (deck_abs == 0) & ~bmask)
+if len(_rn) and len(prof):
+    for L_ in np.unique(deck_lay[_rn, _cn]):
+        sel = deck_lay[_rn, _cn] == L_
+        pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
+        d_, k_ = cKDTree(pts[:, :2]).query(np.column_stack([_cn[sel] + 0.5, _rn[sel] + 0.5]), k=min(12, len(pts)))
+        w_ = 1 / np.maximum(d_, 0.5) ** 2
+        _bwh[_rn[sel], _cn[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
+zt_ = np.where(deck_abs > 0, zt_, np.round(_bwh - BASE).astype(np.int32))
+_bw = (deck_col > 0) & ~deck & ~bmask & (_bwh > 0) & (zt_ <= g + 2) & (zt_ >= g - 3) \
+    & (explicit == 0) & (gcol != C["water"])
+_bw |= _scrap & (deck_col > 0)
+_bwr = np.zeros((D, W), np.uint8)
+burn(_bwr, [(p_, 1) for p_ in bridge_road_polys])
+_bwc = deck_col.copy()
+_bwc[_bw & (lm > 0) & (_jm == 0) & (deck_col == C["asphalt"])] = C["mark"]
+gcol[_bw] = _bwc[_bw]
+_rb, _cb = np.nonzero(_bw)
+vol[g[_rb, _cb] - 1, _rb, _cb] = _bwc[_rb, _cb]
+is_road |= _bw & (_bwr > 0)
+note("deck scraps on the ground dropped:", int(_scrap.sum()), "cells; bridge ways drawn on the ground where it reaches "
+     "their level:", int(_bw.sum()), "cells")
 deck_h = np.where(deck, zt_ - g, 0).astype(np.float32)
 # under a deck over the river nothing hangs but the bridge's own structure (landmarks.py): LiDAR columns caught at the
 # deck edge (catenary masts, railings, green from the ortho) were extruded into dangling bits; and no tree crown grows
