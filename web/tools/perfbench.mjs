@@ -31,6 +31,8 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 500 });
   log(spec, 'ready');
   res.gpu ??= await page.evaluate(() => { const gl = window.__three.renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return gl.getParameter(e.UNMASKED_RENDERER_WEBGL); });
+  // a lost WebGL context (the GPU reset: on WSL, e.g. under another GPU load) leaves frames that draw nothing: flagged
+  await page.evaluate(() => { window.__lost = 0; window.__three.renderer.domElement.addEventListener('webglcontextlost', () => { window.__lost++; }); });
   await page.evaluate((l) => window.__three.setLevel(l), +levelArg);
   const settle = async () => {
     await page.waitForFunction(() => { const c = window.__three.city(); return c && c.complete && c.settled && window.__streamer.inflight === 0; }, null, { timeout: 300000, polling: 500 });
@@ -69,7 +71,7 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
       comp.render = orig;
       const d = ts.slice(1).map((t, i) => t - ts[i]).sort((a, b) => a - b), q = (p) => +d[Math.min(d.length - 1, Math.floor(d.length * p))].toFixed(2);
       return { p50: q(0.5), p90: q(0.9), mean: +(d.reduce((a, b) => a + b, 0) / d.length).toFixed(2), renderCpu: +(cpu / N).toFixed(2),
-        calls: Math.round(calls / (N + 1)), tris: Math.round(tris / (N + 1)), shadowRedraws: D.redraws - red0 };
+        calls: Math.round(calls / (N + 1)), tris: Math.round(tris / (N + 1)), shadowRedraws: D.redraws - red0, ...(window.__lost ? { contextLost: window.__lost } : {}) };
     }, N);
     const m1 = await met();
     fr.scriptMsPerFrame = +((m1.ScriptDuration - m0.ScriptDuration) * 1000 / N).toFixed(2);
