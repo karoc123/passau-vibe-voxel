@@ -171,7 +171,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     });
   };
 
-  const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U);
+  const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U), farMat = makeVoxelMaterial(U, { far: true });
+  prepass?.add(farMat, makeVoxelPrepassMaterial(U));
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
   prepass?.add(folMat, makeVoxelPrepassMaterial(U));
   const inTile = new Uint8Array(total), cover = new Uint8Array(total), folTile = new Uint8Array(total), complete = new Uint8Array(nb), counted = new Set<string>();
@@ -257,7 +258,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       const on = shownN.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key);
       if (on && !counted.has(n.key)) {
         counted.add(n.key);
-        if (n.foliage) { if (n.mesh) n.mesh.material = folMat; S.coverBase(n); } else if (n.mesh) n.mesh.customDepthMaterial = depthMat;
+        if (n.foliage) { if (n.mesh) n.mesh.material = folMat; S.coverBase(n); } else if (n.mesh) {
+          n.mesh.customDepthMaterial = depthMat;
+          if (n.s > 1) n.mesh.material = farMat; // a distance level's
+        }
       }
       if (n.mesh) n.mesh.visible = on;
     }
