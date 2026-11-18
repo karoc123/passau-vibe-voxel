@@ -3,7 +3,8 @@ import type { Caption } from './caption';
 import type { TileStreamer } from './stream';
 import type { Meta, Zones } from './types';
 import { dataTexture, fetchGzip, fetchJson } from './util';
-import { makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, type VoxelUniforms } from './voxelMaterial';
+import type { DepthPrepass } from './prepass';
+import { makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
 
 const T = 128;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
@@ -15,7 +16,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   3. everything else, nearest to the view first, each building once all its tiles are in; over clay a city block
 //      turns real once every tile under it is in, and back to clay when the budget moves on
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -24,6 +25,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   camera: THREE.Camera;
   caption: Caption;
   budget: () => number;
+  prepass?: DepthPrepass | null;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
   const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
@@ -124,6 +126,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U);
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
+  prepass?.add(folMat, makeVoxelPrepassMaterial(U));
   const inTile = new Uint8Array(total), folTile = new Uint8Array(total), complete = new Uint8Array(nb), counted = new Set<string>();
   let lmShown = 0, stage = 1, last = 0, flagKey = '', realTris = 0, settled = false;
   const show = (b: number) => { if (!shown[b + 1]) { shown[b + 1] = 255; if (isLandmark.has(b)) lmShown++; } };

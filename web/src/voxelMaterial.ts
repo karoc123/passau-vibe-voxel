@@ -394,13 +394,19 @@ const FRAG_PARS = `
     return lit ? roomLight(hash12(room + 7.1), kind) * (0.55 + 0.35 * hash12(room + 3.3)) : vec3(0.0);
   }`;
 
+// What the depth pre-pass (makeVoxelPrepassMaterial) has to compute just as SURFACE does: a fragment's cell, its hash,
+// and whether a fountain's jet is off there now (with wa, lvl and vert as in SURFACE)
+const CELL = 'vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : floor(vVox - vN * 0.5 + 1e-3)';
+const CELL_HASH = 'hash13(vRoof > 0.5 && !vert ? vec3(cell.x, 0.0, cell.z) : cell)';
+const JET_GONE = 'sin(uTime * 2.4 + h * 6.28) < -0.2 + lvl * 0.6';
+
 const SURFACE = `
   vec4 pe = texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0);
   vec3 base = pow(pe.rgb, vec3(2.2));
   int m = int(pe.a * 255.0 + 0.5);
   float wa = (vWallAng - 1.0) * 0.261799;
   // (a chamfer's face stands up to ~1 m out of the cells it belongs to: they are a metre in from it)
-  vec3 cell = vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : floor(vVox - vN * 0.5 + 1e-3);
+  vec3 cell = ${CELL};
   // the ground is the same at every corner of a quad, but interpolated it can land a hair either side of the integer:
   // lvl 2.9999 or 3.0001 flipped whole window rows pixel by pixel into a hatched pattern
   float gz = floor(vGz + 0.5);
@@ -423,7 +429,7 @@ const SURFACE = `
   float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
   // (a roof's top by its column alone: on a slope cell.y steps along the contours, and stepped its shade in stripes)
-  float h = hash13(vRoof > 0.5 && !vert ? vec3(cell.x, 0.0, cell.z) : cell);
+  float h = ${CELL_HASH};
   gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
@@ -542,7 +548,7 @@ const SURFACE = `
     col = base; gRough = 0.3; gMetal = 0.6;
     gEmissive = base * (0.15 + 2.2 * uNight);
   } else if (m == ${MAT.JET}) {
-    if (sin(uTime * 2.4 + h * 6.28) < -0.2 + lvl * 0.6) discard;
+    if (${JET_GONE}) discard;
     col = base; gRough = 0.05; gMetal = 0.2;
     gEmissive = vec3(0.7, 0.85, 1.0) * 0.8 * uNight;
   } else if (m == ${MAT.CLOCK}) {
@@ -712,6 +718,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
     const defs = `${ZONES_PARS}\n` + (clay ? '#define CLAY\n' : '');
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
+        invariant gl_Position; // as in the depth pre-pass (makeVoxelPrepassMaterial): the same depth to the bit
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
         flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
@@ -756,6 +763,50 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
   };
   mat.customProgramCacheKey = () => `voxel${clay ? '-clay' : ''}`;
   return mat;
+}
+
+// The depth pre-pass (prepass.ts): a tile's depth alone, before the real pass draws it with the depth test LessEqual and
+// no depth write. Each vertex lands where makeVoxelMaterial puts it (the same lines, gl_Position invariant in both), and
+// what the real pass discards -- bare twigs' leaves, a jet between spurts, a block left to the clay -- is discarded here
+// too: anything drawn here that the real pass then drops would leave a hole with nothing behind it.
+export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
+  const m = new THREE.MeshBasicMaterial({ colorWrite: false, fog: false });
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        invariant gl_Position;
+        attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
+        varying vec3 vVox; varying vec3 vN; varying float vGz; flat varying int vPal; flat varying float vWallAng; flat varying float vRoof; flat varying float vSlant; ${NORMAL_FROM_IDX}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01), nRoof = vattr.w, nSlant = 0.0;
+        if (nRoof > ${SLANT - 0.5}) { nSlant = 1.0; nRoof = 0.0; }
+        if (nRoof > 0.5) nAng = 0.0;
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vGz = vattr.z; vPal = int(vpal + 0.5); vWallAng = nAng; vRoof = nRoof; vSlant = nSlant;
+        ${BUILD_VERTEX}`);
+    shader.fragmentShader = `${ZONES_PARS}\n` + shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uPalette; uniform float uTime;
+        varying vec3 vVox; varying vec3 vN; varying float vGz; flat varying int vPal; flat varying float vWallAng; flat varying float vRoof; flat varying float vSlant;
+        float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+        ${FOLIAGE}`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        {
+          int m = int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5);
+          float wa = (vWallAng - 1.0) * 0.261799;
+          vec3 cell = ${CELL};
+          if (m == ${MAT.LEAF} && uFolOn > 0.5 && leafGone(cell, foliageAt(cell))) discard;
+          if (m == ${MAT.JET}) {
+            float lvl = cell.y - floor(vGz + 0.5);
+            bool vert = abs(vN.y) < 0.5;
+            float h = ${CELL_HASH};
+            if (${JET_GONE}) discard;
+          }
+          if (!zreal(cell)) discard;
+        }`);
+  };
+  m.customProgramCacheKey = () => 'voxel-prepass';
+  return m;
 }
 
 export type VoxelMaterial = ReturnType<typeof makeVoxelMaterial>;

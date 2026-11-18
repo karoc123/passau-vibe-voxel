@@ -45,6 +45,7 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
       window.__undo = [];
       const set = (o, k, v) => { const was = o[k]; o[k] = v; window.__undo.push(() => { o[k] = was; }); };
       if (abl === 'noAO') set(T.post.n8, 'enabled', false);
+      if (abl === 'noPre' && T.prepass?.()) set(T.prepass(), 'enabled', false);
       if (abl === 'noPost') set(T.post.composer, 'render', () => T.renderer.render(T.scene, T.camera));
       if (abl === 'noTwin') set(D.twin, 'castShadow', false);
       if (abl === 'noLife' && L) { set(L, 'update', () => {}); for (const c of L.group.children) set(c, 'visible', false); }
