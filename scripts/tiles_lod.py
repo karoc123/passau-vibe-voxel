@@ -4,7 +4,8 @@ finished volume (tiles/1 the city with grass as bare earth, tiles/1f trees, trun
 the ground level, tiles/1's trailing plane codes the roof planes. Level 1 itself is left as it is; meta.json's tile
 manifest is updated.
 
-usage: uv run python scripts/tiles_lod.py [--check]   (--check: only compare the rebuilt level 8 with the one there)
+usage: uv run python scripts/tiles_lod.py [--check]   (levels 2, 4 and 8, ~2 min; --check: only compare the rebuilt
+      level 8 with the one there)
 """
 import gzip
 import json

@@ -7,10 +7,11 @@ import { clamp } from './util';
 //   shadow   0 | 1024 | 2048 | 4096   the sun's shadow map size, 0 none
 //   ao=0, bloom=0, tilt=0|1, refl=0  ambient occlusion, bloom, the tilt-shift blur, the reflections in water (post.ts)
 //   grade    0..2     the film grade's strength (post.ts)
-//   lod      0: 1 m tiles only, 2: never finer than 2 m (else the distance levels choose; city.ts), lodpx their switch
+//   lod      0: 1 m tiles only, 2: never finer than 2 m, 4: never finer than 4 m (to look at them close up; else the
+//            distance levels choose, city.ts), lodpx their switch
 //   prepass=1  the depth pre-pass (prepass.ts)
 //   occl=0     no occlusion culling (city.ts, occlusion.ts)
-export type Lod = 'auto' | 'off' | 'far';
+export type Lod = 'auto' | 'off' | 'far' | 'far4';
 export interface Gfx { res: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean }
 export type Preset = 'low' | 'medium' | 'high';
 
@@ -36,7 +37,7 @@ function fromQuery(q: URLSearchParams): Partial<Gfx> {
     res: num(q.get('res'), 0.5, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
     shadow: shadow === undefined ? undefined : SHADOWS.reduce((a, b) => (Math.abs(b - shadow) < Math.abs(a - shadow) ? b : a)),
     ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')),
-    lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : 'auto',
+    lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : 'auto',
   };
   for (const k of Object.keys(g) as (keyof Gfx)[]) if (g[k] === undefined) delete g[k];
   return g;
@@ -51,7 +52,7 @@ function toQuery(g: Gfx, d: Gfx, q: URLSearchParams) {
   put('tilt', g.tilt !== d.tilt, g.tilt ? '1' : '0');
   put('refl', g.refl !== d.refl, g.refl ? '1' : '0');
   put('grade', g.grade !== d.grade, String(+g.grade.toFixed(2)));
-  put('lod', g.lod !== d.lod, g.lod === 'off' ? '0' : g.lod === 'far' ? '2' : '1');
+  put('lod', g.lod !== d.lod, g.lod === 'off' ? '0' : g.lod === 'far' ? '2' : g.lod === 'far4' ? '4' : '1');
   put('lodpx', g.lodpx !== d.lodpx, String(+g.lodpx.toFixed(2)));
   put('prepass', g.prepass !== d.prepass, g.prepass ? '1' : '0');
   put('occl', g.occl !== d.occl, g.occl ? '1' : '0');
@@ -63,7 +64,7 @@ function stored(): Partial<Gfx> {
     if (!s) return {};
     // checked as a query would be: an old or hand-edited entry cannot set anything out of range
     const o = JSON.parse(s) as Record<string, unknown>, q = new URLSearchParams();
-    for (const [k, v] of Object.entries(o)) q.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : v === 'off' ? '0' : v === 'far' ? '2' : String(v));
+    for (const [k, v] of Object.entries(o)) q.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : v === 'off' ? '0' : v === 'far' ? '2' : v === 'far4' ? '4' : String(v));
     return fromQuery(q);
   } catch { return {}; }
 }
