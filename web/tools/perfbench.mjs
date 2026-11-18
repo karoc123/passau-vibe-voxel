@@ -3,6 +3,8 @@
 // headless one only llvmpipe/SwiftShader (HEADLESS=1). Each frame ends in a 1-pixel readback, so its interval is the
 // whole frame's CPU + GPU time, not how far ahead the browser queues. The whole city at 1 m (level 1) by default.
 // usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]   (Q='&lod=0': more of the query)
+//   (EXTRA: more Chrome flags, e.g. --disable-gpu-watchdog where a slow GPU loses its context; GALLIUM_DRIVER=d3d12 on WSL
+//   if the browser reports llvmpipe)
 //   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
@@ -14,7 +16,7 @@ const W = +(process.env.W || 1400), H = +(process.env.H || 900);
 const ABL = (process.env.ABL ?? 'base,shadowEvery,noPost,noAO,noTwin,noLife,pan').split(',');
 const headless = process.env.HEADLESS === '1';
 const browser = await chromium.launch({ channel: 'chrome', headless,
-  args: ['--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit'] });
+  args: ['--enable-gpu', '--ignore-gpu-blocklist', '--disable-gpu-vsync', '--disable-frame-rate-limit', ...(process.env.EXTRA ? process.env.EXTRA.split(' ') : [])] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.stack?.slice(0, 300)));
 const t0 = Date.now(), log = (...a) => console.log(((Date.now() - t0) / 1000).toFixed(0) + 's', ...a);
@@ -31,6 +33,8 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000, polling: 500 });
   log(spec, 'ready');
   res.gpu ??= await page.evaluate(() => { const gl = window.__three.renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return gl.getParameter(e.UNMASKED_RENDERER_WEBGL); });
+  // a lost WebGL context (the GPU reset: on WSL, e.g. under another GPU load) leaves frames that draw nothing: flagged
+  await page.evaluate(() => { window.__lost = 0; window.__three.renderer.domElement.addEventListener('webglcontextlost', () => { window.__lost++; }); });
   await page.evaluate((l) => window.__three.setLevel(l), +levelArg);
   const settle = async () => {
     await page.waitForFunction(() => { const c = window.__three.city(); return c && c.complete && c.settled && window.__streamer.inflight === 0; }, null, { timeout: 300000, polling: 500 });
@@ -45,6 +49,7 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
       window.__undo = [];
       const set = (o, k, v) => { const was = o[k]; o[k] = v; window.__undo.push(() => { o[k] = was; }); };
       if (abl === 'noAO') set(T.post.n8, 'enabled', false);
+      if ((abl === 'noPre' || abl === 'pre') && T.prepass?.()) set(T.prepass(), 'enabled', abl === 'pre');
       if (abl === 'noPost') set(T.post.composer, 'render', () => T.renderer.render(T.scene, T.camera));
       if (abl === 'noTwin') set(D.twin, 'castShadow', false);
       if (abl === 'noLife' && L) { set(L, 'update', () => {}); for (const c of L.group.children) set(c, 'visible', false); }
@@ -68,7 +73,7 @@ for (const spec of viewArg.split(';').map((s) => s.trim()).filter(Boolean)) {
       comp.render = orig;
       const d = ts.slice(1).map((t, i) => t - ts[i]).sort((a, b) => a - b), q = (p) => +d[Math.min(d.length - 1, Math.floor(d.length * p))].toFixed(2);
       return { p50: q(0.5), p90: q(0.9), mean: +(d.reduce((a, b) => a + b, 0) / d.length).toFixed(2), renderCpu: +(cpu / N).toFixed(2),
-        calls: Math.round(calls / (N + 1)), tris: Math.round(tris / (N + 1)), shadowRedraws: D.redraws - red0 };
+        calls: Math.round(calls / (N + 1)), tris: Math.round(tris / (N + 1)), shadowRedraws: D.redraws - red0, ...(window.__lost ? { contextLost: window.__lost } : {}) };
     }, N);
     const m1 = await met();
     fr.scriptMsPerFrame = +((m1.ScriptDuration - m0.ScriptDuration) * 1000 / N).toFixed(2);

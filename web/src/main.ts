@@ -23,7 +23,8 @@ import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchGzip, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
 import type { World } from './world';
-import { lightStreets, makeUniforms, makeVoxelMaterial } from './voxelMaterial';
+import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
+import { DepthPrepass } from './prepass';
 import './style.css';
 
 declare global {
@@ -65,6 +66,7 @@ let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | n
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
+let prepass: DepthPrepass | null = null;
 let barRect: DOMRect | null = null;
 let climate: Climate | null = null;
 const caption = new Caption();
@@ -262,7 +264,10 @@ async function boot() {
   // where the street lights go: the buildings and the woods
   const ground = Promise.all([windows, foliage, fetchGzip('data/terrain.bin')])
     .then(([w, f, terrain]) => ({ buildings: w.cells, trees: f.trees, terrain })).catch(() => null);
-  streamer = new TileStreamer(meta, makeVoxelMaterial(uniforms), scene);
+  const tileMat = makeVoxelMaterial(uniforms);
+  streamer = new TileStreamer(meta, tileMat, scene);
+  prepass = new DepthPrepass(streamer.group, scene);
+  prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   world = nav.world = streamer.world;
   daylight.casters(streamer.group, () => life?.group ?? null);
   nav.streamer = streamer;
@@ -279,7 +284,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget });
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass });
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
@@ -352,7 +357,7 @@ renderer.setAnimationLoop((now) => {
   labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
 });
 
-window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city };
+window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city, prepass: () => prepass };
 
 // what the city's shadow map shows: which tiles are drawn, and what folds, hides or thins them in its depth pass
 let stillKey = '';
