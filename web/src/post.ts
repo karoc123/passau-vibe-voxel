@@ -57,6 +57,24 @@ class NightGrade extends Effect {
   set night(v: number) { this.uniforms.get('night')!.value = v; }
 }
 
+// A film grade after tone mapping (after HansF/voxelgent, post.ts): cool shadows, warm highlights and a soft S-curve,
+// so the golden hour glows and the shade reads as air rather than grey. Kept light; ?grade=0 turns it off (?grade=0.5
+// for half) to compare.
+const FILM = `uniform float strength;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 x = inputColor.rgb;
+  float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+  float k = strength * smoothstep(0.0, 0.1, l); // not in the near-black: the night is NightGrade's (no blue lift, no crush)
+  x += mix(vec3(-0.010, 0.002, 0.018), vec3(0.026, 0.008, -0.022), smoothstep(0.12, 0.7, l)) * k;
+  vec3 c = clamp(x, 0.0, 1.0);
+  x = mix(x, c * c * (3.0 - 2.0 * c), 0.16 * k);
+  outputColor = vec4(x, inputColor.a);
+}`;
+
+class FilmGrade extends Effect {
+  constructor(strength: number) { super('FilmGrade', FILM, { uniforms: new Map([['strength', new THREE.Uniform(strength)]]) }); }
+}
+
 // n8ao reads the depth buffer, where a wall at an angle to the grid is a staircase (mesher.worker.ts): it darkened the
 // inner corner of every 1 m step into faint vertical lines from street to eaves. Those walls mark themselves in the
 // scene's alpha (voxelMaterial.ts) and keep only a little of it; the alpha is reset to 1 after.
@@ -88,9 +106,11 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   composer.addPass(new EffectPass(camera, bloom));
   composer.addPass(tiltPass);
   const grade = new NightGrade();
+  const filmStrength = clamp(+(new URLSearchParams(location.search).get('grade') ?? 1) || 0, 0, 2);
   composer.addPass(new EffectPass(camera,
     grade,
     tone,
+    ...(filmStrength > 0 ? [new FilmGrade(filmStrength)] : []),
     new HueSaturationEffect({ saturation: 0.12 }),
     new BrightnessContrastEffect({ brightness: 0, contrast: 0.06 }),
     new VignetteEffect({ offset: 0.3, darkness: 0.45 }),
