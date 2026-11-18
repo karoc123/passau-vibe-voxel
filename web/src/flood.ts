@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CLOUD_GLSL, cloudUniforms } from './clouds';
 import type { FloodInfo, Meta } from './types';
 import { MAT, REFL_MAX, type VoxelUniforms } from './voxelMaterial';
 import { dataTexture, fetchGzip, fetchJson } from './util';
@@ -69,12 +70,13 @@ export class Flood {
       blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.ZeroFactor, blendAlpha: 0.92 });
     const uRiver = { value: this.riverColour() };
     mat.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, { uFlood: this.U.uFlood, uLevel: this.uLevel, uTime: this.U.uTime, uHorizon: this.U.uHorizon, uRiver });
+      Object.assign(sh.uniforms, { uFlood: this.U.uFlood, uLevel: this.uLevel, uTime: this.U.uTime, uHorizon: this.U.uHorizon, uRiver, ...cloudUniforms });
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uLevel; varying vec3 vW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.y += uLevel; vW = transformed;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D uFlood; uniform float uTime; uniform vec3 uHorizon; uniform vec3 uRiver; varying vec3 vW;')
+        .replace('#include <common>', `#include <common>\nuniform sampler2D uFlood; uniform float uTime; uniform vec3 uHorizon; uniform vec3 uRiver; varying vec3 vW;\n${CLOUD_GLSL}`)
+        .replace('#include <lights_fragment_begin>', '#include <lights_fragment_begin>\n{ float cs = cloudShade(vW); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }')
         .replace('#include <color_fragment>', `#include <color_fragment>
           float spill = texelFetch(uFlood, ivec2(floor(vW.xz)), 0).r * 255.0;
           if (spill >= vW.y) discard;

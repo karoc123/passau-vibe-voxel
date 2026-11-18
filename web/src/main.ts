@@ -355,6 +355,7 @@ renderer.setAnimationLoop((now) => {
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;
   if (uniforms) uniforms.uTime.value = t;
+  daylight.clouds.tick(t);
   setWindows?.(daylight.hour, daylight.day);
   fountains?.update(t, daylight.night);
   if (lampHeads) lampHeads.night = daylight.night;

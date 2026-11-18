@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Meta } from './types';
 import { FOLIAGE_CLASSES } from './foliage';
 import { dataTexture, hash } from './util';
+import { CLOUD_GLSL, cloudUniforms } from './clouds';
 import { SLANT, SLANT_STEPS } from './chamfer';
 import { WALL_TOP } from './roofs';
 
@@ -88,6 +89,7 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uSpill: { value: new THREE.Vector2(1, 1) },
     uShop: { value: 1 },
     ...floodlights(meta),
+    ...cloudUniforms,
   };
 }
 
@@ -860,7 +862,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
         vVox = position + vec3(0.0, ${SUB_Y}, 0.0); ${FACE_VERTEX} vShade = vec2(mod(vattr.y, 4.0) / 3.0, nTop); vLitN = transformedNormal;
         ${BUILD_VERTEX} vFace.x += 4096.0 * hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)
+      .replace('#include <common>', `#include <common>\n${FRAG_PARS}\n${CLOUD_GLSL}\nvarying vec3 vLitN;`)
       .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nfaceDecode();')
       // the tiles carry no normal attribute, so three flat-shades them from screen derivatives (WebGLPrograms:
       // flatShading) and the staircase's plane normal above went unused -- every 1 m step of a diagonal facade was lit
@@ -877,6 +879,12 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
         #ifndef CLAY
         // and what mirrors tells the reflections how much (post.ts Reflections)
         if (gRefl > 0.004) gl_FragColor.a = ${REFL_MAX.toFixed(2)} * gRefl;
+        #endif`)
+      // the clouds' shadows (clouds.ts) dim the sun's light alone, not the sky's: one bilinear lookup. Iris Xe, 1400 x 900,
+      // with and without (NO_CLOUD_SHADOW) frame by frame in one page: ~0.1-0.2 ms (overview, from Oberhaus, the streets)
+      .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
+        #ifndef NO_CLOUD_SHADOW
+        { float cs = cloudShade(vVox); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }
         #endif`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
         float aoF = mix(0.55, 1.0, vAO);

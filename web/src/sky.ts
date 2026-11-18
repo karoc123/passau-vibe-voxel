@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { clamp } from './util';
+import { CLOUD_GLSL, CLOUD_H, cloudUniforms } from './clouds';
 
 const VERT = `varying vec3 vDir;
 void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); gl_Position.z = gl_Position.w * 0.99999; }`;
 
 const FRAG = `
+${CLOUD_GLSL}
 uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uWarm; uniform float uGolden; uniform vec3 uGround;
 uniform vec3 uSunDir; uniform vec3 uTrueSun; uniform vec3 uSunCol; uniform float uNight; uniform float uDeep;
 uniform vec3 uAfterglow; uniform vec3 uCityGlow; uniform vec3 uCloudLit; uniform vec3 uCloudDark; uniform float uCloud;
@@ -14,7 +16,6 @@ float hash(vec3 p) { p = fract(p * 0.3183099 + .1); p *= 17.0; return fract(p.x 
 float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
-float fbm(vec2 p) { float a = 0.5, s = 0.; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 3.1; a *= 0.5; } return s; }
 void main() {
   vec3 d = normalize(vDir);
   float h = d.y;
@@ -45,14 +46,24 @@ void main() {
     float a = max(1.0 - cd, 0.0);
     col += vec3(0.55, 0.65, 0.85) * (exp(-a * 9000.0) * 0.25 + exp(-a * 600.0) * 0.05) * uMoon * uMoonLit;
   }
+  // The cumulus (clouds.ts): where the view meets their sheet, CLOUD_H up, the drifting field there, its edges frayed by
+  // a finer copy of itself; the same field (less the fraying) shades the ground. Far off the texture's mips average it
+  // into a haze over the horizon. The overcast (uCloud) is a deck over all of it, the field its darker and lighter parts.
   if (h > 0.02) {
-    vec2 uv = d.xz / (h + 0.12) * 1.4;
-    float f = fbm(uv * 1.3 + vec2(3.7, 1.2));
-    float cov = mix(smoothstep(0.52, 0.78, f) * smoothstep(0.02, 0.25, h), 1.0, uCloud);
+    vec2 q = cameraPosition.xz + d.xz / h * max(${CLOUD_H.toFixed(1)} - cameraPosition.y, 200.0);
+    float f = cloudAt(q), z = uCloudA.z;
+    f += (cloudAt(q * 3.7 + 1234.5) - 0.5) * 0.2 * (1.0 - smoothstep(z, z + 0.3, f)); // frayed at the edges only
+    float cum = smoothstep(z - 0.03, z + 0.06, f);
+    float deck = smoothstep(0.6, 0.95, uCloud);
+    float cov = mix(cum * 0.95, 1.0, deck) * smoothstep(0.02, 0.25, h);
     float under = 1. - smoothstep(0.02, 0.5, h);
-    vec3 cl = mix(uCloudDark, uCloudLit, clamp(0.35 + 0.65 * under, 0., 1.)) + uAfterglow * tw * 0.6;
-    cl *= 1. - uCloud * 0.22 * smoothstep(0.35, 0.75, f);
-    col = mix(col, cl, cov * mix(0.85, 1.0, uCloud));
+    // a cumulus seen from below: grey where it is thick, bright at its thin edges and towards the horizon (its sides),
+    // and lit through near the sun
+    float thick = smoothstep(z, min(z + 0.25, 1.0), f) * (1.0 - deck);
+    vec3 cl = mix(uCloudDark * 0.9, uCloudLit, clamp(0.2 + 0.8 * (1.0 - thick) + 0.3 * under, 0., 1.)) + uAfterglow * tw * 0.6;
+    cl += uSunCol * pow(s, 6.0) * 0.4 * (1.0 - 0.6 * thick) * (1. - uNight) * (1.0 - deck);
+    cl *= 1. - deck * 0.22 * smoothstep(0.3, 0.75, f);
+    col = mix(col, cl, cov);
     if (uDeep > 0.01) col += vec3(step(0.9965, hash(floor(d * 380.)))) * uDeep * 0.2 * smoothstep(0.08, 0.4, h) * (1. - cov);
   }
   gl_FragColor = vec4(col, 1.);
@@ -86,6 +97,7 @@ export class Sky {
     uDeep: { value: 0 }, uAfterglow: { value: C(0x000000) }, uCityGlow: { value: C(0x000000) },
     uCloudLit: { value: C(0xffffff) }, uCloudDark: { value: C(0xdde3ea) }, uCloud: { value: 0 },
     uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoon: { value: 0 }, uMoonLit: { value: 0 },
+    ...cloudUniforms,
   };
   private env: THREE.Scene | null = null;
 
@@ -119,10 +131,12 @@ export class Sky {
     u.uCloudLit.value.copy(mixC(C(0xffffff), mixC(C(0x55607a), C(0x2c3040), deep), night));
     u.uCloudDark.value.copy(mixC(C(0xd8dfe8), mixC(C(0x22324f), C(0x111522), deep), night));
     const deckLit = mixC(C(0xc4c9cf), C(0x5a4e46), night), deckDark = mixC(C(0x8e959e), C(0x3a322d), night);
-    u.uCloudLit.value.lerp(deckLit, cloud);
+    // (broken cloud, ~0.6 (clouds.ts), keeps blue between its cumulus, greyer than on a clear day; the overcast closes it)
+    const oc = cloud * cloud;
+    u.uCloudLit.value.lerp(deckLit, oc);
     u.uCloudDark.value.lerp(deckDark, cloud);
     u.uHorizon.value.lerp(mixC(C(0xb8bdc2), C(0x4a423c), night), cloud);
-    u.uTop.value.lerp(deckDark, cloud);
+    u.uTop.value.lerp(deckDark, oc);
     u.uWarm.value.lerp(u.uHorizon.value, cloud);
     u.uGolden.value = golden * (1 - cloud);
     u.uCityGlow.value.multiplyScalar(1 - 0.6 * cloud);

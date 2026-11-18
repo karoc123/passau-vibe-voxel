@@ -9,7 +9,7 @@ export interface Weather {
 
 export const WEATHERS: Record<string, Weather> = {
   clear: { cloud: 0, rain: 0, snow: 0, cover: 0 },
-  cloudy: { cloud: 1, rain: 0, snow: 0, cover: 0 },
+  cloudy: { cloud: 0.6, rain: 0, snow: 0, cover: 0 }, // broken cumulus, sun between (clouds.ts); 1 is the overcast
   rain: { cloud: 1, rain: 1, snow: 0, cover: 0 },
   snow: { cloud: 1, rain: 0, snow: 1, cover: 1 },
 };
