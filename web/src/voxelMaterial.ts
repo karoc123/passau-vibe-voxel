@@ -3,6 +3,7 @@ import type { Meta } from './types';
 import { FOLIAGE_CLASSES } from './foliage';
 import { dataTexture } from './util';
 import { SLANT, SLANT_STEPS } from './chamfer';
+import { WALL_TOP } from './roofs';
 
 // material ids, as in scripts/voxelize.py
 export const MAT = { SOLID: 0, WALL: 1, GLASS: 2, LEAF: 3, WATER: 4, LAMP: 5, METAL: 6, FLOODLIT: 7, GRASS: 8, MARK: 9, SOIL: 10, CAR: 11,
@@ -301,7 +302,7 @@ const FRAG_PARS = `
   uniform sampler2D uPalette; uniform sampler2D uLampMap;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
-  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant;
+  varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide; flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying float vWTop;
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
@@ -451,6 +452,8 @@ const SURFACE = `
       float x = uc - floor(hash12(vec2(vBid * 0.37, 5.3)) * P);
       float SH = 3.3 + 0.4 * hash12(vec2(vBid * 0.71, 2.9)), G = 4.2, up = lv - G, st = floor(up / SH);
       vec4 fc = facade(x, lv, dUVx, dUVy, P, SH, G);
+      // no window whose top would run past the wall's end here (an eave, a gable's slope: vWTop, metres over the ground)
+      if (vWTop < 900.0 && (up < 0.0 ? 2.9 : G + st * SH + 2.8) > vWTop - 0.1) fc = vec4(0.0);
       float win = fc.x;
       col *= 1.0 - 0.16 * span(lv, fwV, -1.0, 0.6) - 0.12 * span(lv, fwV, G - 0.3, G - 0.05);
       col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), fc.y + fc.w * 0.6);
@@ -729,7 +732,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <common>', `#include <common>
         attribute vec4 vattr; attribute float vpal; ${BUILD_PARS}
         varying vec3 vVox; varying vec3 vN; varying float vAO; varying float vGz; flat varying int vPal; varying float vHide;
-        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; ${NORMAL_FROM_IDX}`)
+        flat varying float vWallAng; flat varying float vBid; flat varying float vRoof; flat varying float vSlant; varying vec3 vLitN; varying float vWTop; ${NORMAL_FROM_IDX}`)
       // vattr.x = face axis (0-5) + 8 x the wall's direction in plan (mesher.worker.ts): a staircase wall is lit as its
       // plane. On a roof's staircase (vattr.w > 0: 1 + its downhill direction in 64 steps) the 8s are the plane's slope
       // in 2.5° steps, and it is lit as that plane
@@ -738,6 +741,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
       .replace('#include <beginnormal_vertex>', `float nAx = mod(vattr.x, 8.0), nAng = floor(vattr.x / 8.0 + 0.01), nRoof = vattr.w, nSlant = 0.0;
         float litAng = nAng;
         if (nRoof > ${SLANT - 0.5}) { nSlant = 1.0; litAng = 1.0 + (nRoof - ${SLANT}.0) * ${(24 / SLANT_STEPS).toFixed(6)}; nRoof = 0.0; }
+        // (a wall's face: where the wall ends above it, mesher.worker.ts wallTopCode -- in metres over the ground)
+        float nTop = 999.0;
+        if (nRoof > ${WALL_TOP - 0.5}) { nTop = nRoof > 126.5 ? 999.0 : nRoof - ${WALL_TOP}.0; nRoof = 0.0; }
         float rSl = nAng * 0.0436332, rAz = (nRoof - 1.0) * 0.0981748;
         vec3 objectNormal = nRoof > 0.5 ? vec3(sin(rSl) * cos(rAz), cos(rSl), sin(rSl) * sin(rAz))
           : litAng > 0.5 ? vec3(cos((litAng - 1.0) * 0.261799), 0., sin((litAng - 1.0) * 0.261799)) : normalFromIdx(nAx);
@@ -749,7 +755,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
         .replace(SHADOW_NORMAL_FALLBACK, 'vec3 shadowWorldNormal = nAng > 0.5 || nRoof > 0.5 ? objectNormal : vec3( 0.0 );')
         .replace('directionalLightShadows[ i ].shadowNormalBias', '1.4'))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal;
+        vVox = position + vec3(0.0, ${SUB_Y}, 0.0); vN = normalFromIdx(nAx); vAO = mod(vattr.y, 4.0) / 3.0; vGz = vattr.z; vPal = int(vpal + 0.5); vHide = 0.0; vWallAng = nAng; vRoof = nRoof; vSlant = nSlant; vBid = vbld; vLitN = transformedNormal; vWTop = nTop;
         ${BUILD_VERTEX} vHide = hideB;`);
     shader.fragmentShader = defs + shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}\nvarying vec3 vLitN;`)

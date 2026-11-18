@@ -31,6 +31,11 @@ export interface SlopeSink {
 }
 
 const Q = 64;
+// A wall's face carries where the wall ends above it, in vattr.w (voxelMaterial.ts: no window past it): WALL_TOP + its
+// height over the ground in metres, up to 61; 127 for 62 and more (no limit). (0 on a wall: not known; 1-64 a roof's
+// plane, SLANT and up a chamfer's)
+export const WALL_TOP = 65;
+export const wallTopCode = (m: number) => (m >= 62 ? 127 : WALL_TOP + Math.max(0, m));
 // corner k of a cell: (0, 0), (1, 0), (1, 1), (0, 1)
 const CX = [0, 1, 1, 0], CY = [0, 0, 1, 1];
 // the 4 neighbours
@@ -61,6 +66,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   }
   if (!any) return null;
   const planes = tidyPlanes(S, T, shipped, bid, roofTop);
+  let wallTops = false;
   if (!planes.some((p, c) => p > 0 && roofTop[c] > 0)) return null;
   const grad = (p: number) => {
     const t = Math.tan(((p - 1) >> 6) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
@@ -215,7 +221,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         }
       }
     },
-    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array) {
+    // tops: mark the walls' faces with where the wall ends (wallTopCode; 1 m tiles)
+    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array, tops = false) {
+      wallTops = tops;
       emitTops(out, x0, y0, ground);
       for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
         const c = X + S * Y;
@@ -320,12 +328,15 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     const ax = X + CX[ka] - 1 + x0, ay = Y + CY[ka] - 1 + y0, bx = X + CX[kb] - 1 + x0, by = Y + CY[kb] - 1 + y0;
     const ni = d * 2 + (dir > 0 ? 1 : 0);
     const nrm = lit ? ni + 8 * ((lit - 1) >> 6) : ni, w = lit ? 1 + ((lit - 1) & 63) : 0;
+    // a wall's face (a gable's triangle): its top along it, at each end (vattr.w interpolates between them)
+    const wa = !lit && wallTops ? wallTopCode(Math.floor(h0 / Q) - gm) : w, wb = !lit && wallTops ? wallTopCode(Math.floor(h1 / Q) - gm) : w;
+    const W = d === 0 ? [wa, wb, wb, wa] : [wa, wa, wb, wb];
     // corners in the order mesher.worker.ts's emitMerged gives them for this axis
     const P = d === 0
       ? [[ax, l0, ay], [bx, l1, by], [bx, h1, by], [ax, h0, ay]]
       : [[ax, l0, ay], [ax, h0, ay], [bx, h1, by], [bx, l1, by]];
     out.reserve(4);
-    for (const k of dir > 0 ? [0, 3, 2, 1] : [0, 1, 2, 3]) out.vertexQ(P[k][0], P[k][1], P[k][2], nrm, 3, gm, w, pal, b);
+    for (const k of dir > 0 ? [0, 3, 2, 1] : [0, 1, 2, 3]) out.vertexQ(P[k][0], P[k][1], P[k][2], nrm, 3, gm, W[k], pal, b);
   }
 }
 
