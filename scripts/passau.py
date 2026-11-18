@@ -349,7 +349,7 @@ def dom(vol, g, pal, note):
     from aoi import I0
     dx = I0 - 1980
     mats = (pal(_hex("#ece7da"), CLASSIC), pal((44, 46, 50), WINDOW), pal(_hex("#7fa595"), ROOF, q=12), pal(_hex("#c9a24a"), METAL))
-    wall, roof = pal((248, 248, 236), CLASSIC), pal(_hex("#a86048"), ROOF)
+    wall, roof = pal((248, 248, 236), CLASSIC), pal(_hex("#cb8d6f"), ROOF)  # (its tiles in DOP20, 210,163,141, dehazed as voxelize.ROOF_DEHAZE)
     win = pal((58, 70, 68), WINDOW)
     box = (715, 775, 1920 + dx, 2045 + dx)
     lz, bid = lod2_rel()
@@ -681,7 +681,7 @@ def _wing_roofs(vol, g, box, pal, wall_rgb, min_cells=80):
         eave = int(round(np.percentile(Zi[lod & (el < 1.5)], 15)))
         ridge = max(int(round(np.percentile(Zi[lod], 97))), eave + 2)
         reds = tid[m & (mats[tid] == ROOF) & ~grey & (tid != sheet)]
-        red = int(np.bincount(reds).argmax()) if len(reds) else pal(_hex("#a86048"), ROOF)
+        red = int(np.bincount(reds).argmax()) if len(reds) else pal(_hex("#ae7d64"), ROOF)
         em = e[m].max()
         rt = eave + np.round((ridge - eave) * (e - 1) / max(em - 1, 1)).astype(int)
         for r, c in zip(*np.nonzero(m)):
