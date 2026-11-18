@@ -164,12 +164,17 @@ export class Daylight {
     sun.intensity *= e; hemi.intensity *= e; this.scene.environmentIntensity *= e;
   }
 
-  setFogFrom(dist: number) {
+  // height: the camera above the ground. Low views look along the city, so the haze closes in and softens the far
+  // hills and the map's edge into the sky; the old town across the river stays clear (from Oberhaus the Dom is ~500 m
+  // off, the far side of the old town ~900 m). From the overview up, the whole map stays as clear as before.
+  // (after HansF/voxelgent, daylight.ts). Nothing is culled past fog.far: in clear weather it lies beyond the map from
+  // anywhere in it; only low views in snow would gain (~1/3 of the triangles), and a camera.far there would cut the sky.
+  setFogFrom(dist: number, height = 1000) {
     const fog = this.scene.fog as THREE.Fog | null;
     if (!fog) return;
-    const k = visibility(this.weather);
-    fog.near = Math.max(2500 * k * k, dist * (0.6 + 0.45 * k));
-    fog.far = fog.near + 4500 * k;
+    const k = visibility(this.weather), low = 1 - smooth(60, 450, height);
+    fog.near = Math.max(lerp(2500, 700, low) * k * k, dist * (0.6 + 0.45 * k));
+    fog.far = fog.near + lerp(4500, 2200, low) * k;
   }
 
   fitShadow(focus: THREE.Vector3, camera: THREE.Camera, viewDist: number, map: THREE.Box3) {

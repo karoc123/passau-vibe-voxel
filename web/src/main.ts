@@ -327,7 +327,7 @@ renderer.setAnimationLoop((now) => {
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
   post.setHeight(above, tiltShift, camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
-  daylight.setFogFrom(viewDist);
+  daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;
   if (uniforms) uniforms.uTime.value = t;
   setWindows?.(daylight.hour, daylight.day);
