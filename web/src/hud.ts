@@ -19,6 +19,7 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   orbit: [['l', mouse('l', true), 'move'], ['r', mouse('r', true), 'turn'], ['w', mouse('w'), 'zoom'], ['', PERSON, 'follow']],
   walk: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
+  fpv: [],
 };
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', tram: 'Following a tram' };
 
@@ -48,6 +49,7 @@ export class Hud {
   }
 
   set(mode: Mode, ride: Ride | null) {
+    this.box.hidden = mode === 'fpv';
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? (/^tram \w/.test(ride.label) ? `Following ${ride.label}` : WHO[ride.kind]) : '';
     if (this.touch) return;
     const items = [...MOUSE[mode]];

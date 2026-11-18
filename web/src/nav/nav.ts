@@ -9,12 +9,12 @@ import type { World } from '../world';
 import { rideCamera } from './ride';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 
-// Three modes, one set of keys as in games (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
+// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
 //   ride:  following a pedestrian, car or tram; move keys walk as that person, or get out of a vehicle
-export type Mode = 'orbit' | 'walk' | 'ride';
+export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
@@ -91,6 +91,7 @@ export class Nav {
       if ((e.target as Element).closest?.('input:not([type=range]), textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       this.shift = e.shiftKey;
       if (e.code === 'Escape') { if (this.mode !== 'orbit') this.flyUp(); return; }
+      if (this.mode === 'fpv') return;
       if (e.code === 'Space' && (this.mode === 'walk' || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.mode === 'walk') { if (this.vy === 0) this.vy = 5.2; } else this.jumpAsked = true;
         e.preventDefault(); return;
@@ -118,6 +119,7 @@ export class Nav {
     let pinch0: { d: number; fov: number } | null = null, twist: number | null = null;
     const two = () => [...ptrs.values()];
     dom.addEventListener('pointerdown', (e) => {
+      if (this.mode === 'fpv') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.mode === 'orbit' && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.pivotAt(e.clientX, e.clientY);
@@ -174,6 +176,7 @@ export class Nav {
   }
 
   private wheel(e: WheelEvent) {
+    if (this.mode === 'fpv') return;
     if (this.mode === 'orbit') { this.zoomT = performance.now(); return; }
     e.preventDefault();
     if (e.ctrlKey || this.mode === 'ride') { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
@@ -215,6 +218,7 @@ export class Nav {
 
   // what a click would do here: a hand over people and vehicles, a ring on the street where you would walk
   private hover(cx: number, cy: number, type: string) {
+    if (this.mode === 'fpv') return;
     const now = performance.now();
     if (type === 'touch' || now - this.hoverT < 60 || now - this.quietT < 350) return;
     this.hoverT = now;
@@ -237,6 +241,7 @@ export class Nav {
 
   // a person or vehicle under the click is followed (generous from the air, tight on the street); else walk there
   private tap(cx: number, cy: number) {
+    if (this.mode === 'fpv') return;
     const coarse = coarsePointer(), air = this.mode === 'orbit';
     const ag = this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
     if (ag) { this.startRide(ag); return; }
@@ -325,6 +330,21 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
+  // Entry point for the opt-in FPV prototype.
+  startFpv() {
+    if (!this.world || this.walkPending || this.mode !== 'orbit') return false;
+    this.rememberSky();
+    this.cancelFly();
+    this.keys.clear();
+    this.turned = false;
+    this.mode = 'fpv';
+    this.controls.enabled = false;
+    this.marker.visible = false;
+    this.dom.style.cursor = 'default';
+    this.onMode(this.mode, null);
+    return true;
+  }
+
   // down to street level at (or facing) a spot; waits for the full-detail tiles there
   async setWalk(opts: WalkOpts = {}) {
     const w = this.world;
@@ -406,7 +426,7 @@ export class Nav {
     dt = Math.min(dt, 0.1);
     if (this.mode === 'walk') this.updateWalk(dt);
     else if (this.mode === 'ride') this.updateRide(dt);
-    else this.updateOrbit(dt);
+    else if (this.mode === 'orbit') this.updateOrbit(dt);
   }
 
   // A/D/Q/E turn in place; W/S fly along the view, faster higher up; reaching the street lands you on it

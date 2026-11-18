@@ -11,6 +11,7 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import { FpvPrototype } from './nav/fpv.prototype';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -58,6 +59,7 @@ const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
+const fpv = qs.get('fpv') === '1' ? new FpvPrototype(nav, camera, controls.target, qs) : null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -349,9 +351,10 @@ renderer.setAnimationLoop((now) => {
   lastT = now;
   adapt(dt, now);
   nav.update(dt);
+  fpv?.update(dt);
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, gfx.now.tilt, camera.position.distanceTo(controls.target));
+  post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;

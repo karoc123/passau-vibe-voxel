@@ -140,3 +140,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar, #labels, #hud { transition: opacity .6s; }
 .loading #bar, .loading #labels, .loading #hud { opacity: 0; pointer-events: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
+
+#fpv-prototype { position: fixed; left: 14px; bottom: 72px; z-index: 6; max-width: calc(100vw - 28px);
+  box-sizing: border-box; padding: 10px 12px; color: white; background: #101114e8; border-radius: 8px;
+  font: 12px/1.5 Inter, system-ui, sans-serif; }
+#fpv-prototype button { margin-bottom: 4px; }
+#fpv-prototype pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

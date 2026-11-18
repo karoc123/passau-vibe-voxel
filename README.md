@@ -149,6 +149,24 @@ flags and several predate the current viewer, so expect to adapt them.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
+## FPV prototype
+
+Run `cd web && pnpm dev` and open `/?view=dom&fpv=1`. The panel displays the controller name and live axes after
+a stick movement or button press. Start FPV from an orbit view. W/S moves forward or back, A/D yaws, Q/E banks and
+strafes, R/F changes altitude, and Esc returns to the map.
+
+Default controller assignment is left horizontal/vertical for yaw/lift and right horizontal/vertical for bank/pitch.
+To try a raw device, set `fpvAxes=1,-2,3,-4` in the URL with its four one-based axis numbers in that order. A negative
+number inverts the axis. The prototype assumes centred sticks and applies an 8% dead zone.
+
+The stabilised flight mode uses the existing streaming focus and voxel raycasts. Collision uses the best available
+tile data. Thin obstacles, bridges and foliage need verification at flight speed, including whilst tiles load. The
+browser's Gamepad API must expose the controller before its axis mapping can be calibrated.
+
+Allow roughly 1–2 days for a stabilised mode with a calibrated controller profile and browser checks, or 3–5 days if
+custom calibration and dependable obstacle handling during tile streaming are in scope. Rate/Acro flight would
+also need its own flight model, tuning and playtesting.
+
 ## Known limits
 
 - **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated
