@@ -5,7 +5,7 @@ export interface Rect { x0: number; x1: number; y0: number; y1: number }
 
 const TILT = (d: 1 | -1) => `<svg viewBox="-4 -4 8 8"><path d="M-3 ${d}l3 ${-2 * d} 3 ${2 * d}"/></svg>`;
 const KEYS = [['KeyQ', 'Q', TILT(1)], ['KeyW', 'W', ''], ['KeyE', 'E', TILT(-1)], ['KeyA', 'A', ''], ['KeyS', 'S', ''], ['KeyD', 'D', '']];
-const ALIAS: Record<string, string> = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
+const ALIAS: Record<string, string> = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD', ShiftLeft: 'Shift', ShiftRight: 'Shift' };
 
 // an outlined mouse with the part in use filled (l/r button, w wheel), drag arrows either side
 const mouse = (part: 'l' | 'r' | 'w', drag = false) => `<svg viewBox="-13 -2 26 30">
@@ -20,6 +20,8 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   walk: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
   fpv: [],
+  pedestrian: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
+    ['Space', SPACE, 'jump'], ['Escape', ESC, 'fly up']],
 };
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', tram: 'Following a tram' };
 
@@ -50,6 +52,7 @@ export class Hud {
 
   set(mode: Mode, ride: Ride | null) {
     this.box.hidden = mode === 'fpv';
+    this.box.classList.toggle('pedestrian', mode === 'pedestrian');
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? (/^tram \w/.test(ride.label) ? `Following ${ride.label}` : WHO[ride.kind]) : '';
     if (this.touch) return;
     const items = [...MOUSE[mode]];

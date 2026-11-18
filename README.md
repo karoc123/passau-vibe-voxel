@@ -183,6 +183,14 @@ terrain steps. Traffic cars can block the player and recognise the player vehicl
 Handling uses an arcade grip model with free steering and reversible impacts. Wheel suspension, deformable bodies,
 and collisions with people, trams or boats are outside this prototype.
 
+## Third-person walking
+
+Click **Walk** in the toolbar to start on foot at the current view or beside the vehicle you're following. Use W/A/S/D
+or the arrow keys to move relative to the camera, Shift to sprint and Space to jump. Drag to look around, scroll to
+zoom, or click a place on the ground to walk there. On touch screens, drag, pinch and tap work the same way.
+**Esc** returns to the map. The chase camera pulls in near walls, and the character uses the viewer's voxel walking
+collision for kerbs, stairs, walls and bridge decks.
+
 ## Known limits
 
 - **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated

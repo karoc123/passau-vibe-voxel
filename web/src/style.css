@@ -117,6 +117,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 /* HUD: a legend, not a control panel -- outlines only, semi-transparent, never in the way of the pointer */
 #hud { --o: rgba(255,255,255,.55); position: fixed; left: 14px; bottom: 14px; z-index: 4; pointer-events: none;
   font: 11px Inter, system-ui, sans-serif; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+@media (max-width: 940px) { #hud.pedestrian { bottom: 64px; } }
+@media (max-width: 600px) { #hud.pedestrian { bottom: 94px; } }
 #hud .who { font-weight: 600; color: #fff; margin-bottom: 6px; }
 #hud .who:empty { display: none; }
 #hud .row { display: flex; align-items: flex-end; gap: 16px; }

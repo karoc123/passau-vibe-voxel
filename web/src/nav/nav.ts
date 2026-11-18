@@ -7,6 +7,7 @@ import type { View } from '../types';
 import { clamp, coarsePointer, ease } from '../util';
 import type { World } from '../world';
 import { rideCamera } from './ride';
+import { Pedestrian } from './pedestrian';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
@@ -14,14 +15,14 @@ import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
 //   ride:  following a pedestrian, car or tram; move keys walk as that person, or get out of a vehicle
-export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv';
+export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
   dpitch: number;
   idle: number;
 }
-interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean }
+interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean; thirdPerson?: boolean }
 interface Transition { from: THREE.Vector3; fromQ: THREE.Quaternion; fromFov: number; t0: number; ms: number }
 
 type Action = 'f' | 'b' | 'tl' | 'tr' | 'tu' | 'td';
@@ -35,6 +36,7 @@ export class Nav {
   mode: Mode = 'orbit';
   ride: Ride | null = null;
   controlledRide: Ride | null = null;
+  readonly actors = new THREE.Group();
   world: World | null = null;
   streamer: TileStreamer | null = null;
   cancelFly: () => void = () => {};
@@ -63,6 +65,9 @@ export class Nav {
   private wheelBack = 0;
   private wheelBackT = 0;
   private readonly marker: THREE.Mesh;
+  private pedestrian: Pedestrian | null = null;
+  private jumpBuffer = 0;
+  private groundGrace = 0;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     scene: THREE.Scene, private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -85,6 +90,9 @@ export class Nav {
   get turning() { return this.turned; }
 
   // ------------------------------------------------------------------ input
+  get enteringWalk() { return this.walkPending; }
+
+  private get onFoot() { return this.mode === 'walk' || this.mode === 'pedestrian'; }
   private get driving() { return this.ride !== null && this.ride === this.controlledRide; }
 
   private axis(pos: Action, neg: Action) { return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0); }
@@ -95,8 +103,12 @@ export class Nav {
       this.shift = e.shiftKey;
       if (e.code === 'Escape') { if (this.mode !== 'orbit') this.flyUp(); return; }
       if (this.mode === 'fpv' || this.driving) return;
-      if (e.code === 'Space' && (this.mode === 'walk' || this.ride?.kind === 'person')) { // following someone: become them, then jump
-        if (this.mode === 'walk') { if (this.vy === 0) this.vy = 5.2; } else this.jumpAsked = true;
+      if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
+        if (this.mode === 'pedestrian') {
+          if (!e.repeat) this.jumpBuffer = 0.14;
+        } else if (this.mode === 'walk') {
+          if (this.vy === 0) this.vy = 5.2;
+        } else this.jumpAsked = true;
         e.preventDefault(); return;
       }
       const k = KEYMAP[e.code];
@@ -148,7 +160,14 @@ export class Nav {
         }
         return;
       }
-      if (ptrs.size === 2 && pinch0) { const [a, b] = two(); this.setFov(pinch0.fov * pinch0.d / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y))); return; }
+      if (ptrs.size === 2 && pinch0) {
+        const [a, b] = two(), d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+        if (this.mode === 'pedestrian') {
+          this.pedestrian?.zoom(Math.log(pinch0.d / d));
+          pinch0.d = d;
+        } else this.setFov(pinch0.fov * pinch0.d / d);
+        return;
+      }
       if (press && !press.moved) return;
       const k = (e.pointerType === 'touch' ? 2.4 : 1.2) * (this.camera.fov * Math.PI / 180) / innerHeight;
       this.look(dx * k, dy * k * 0.7);
@@ -182,6 +201,7 @@ export class Nav {
     if (this.mode === 'fpv') return;
     if (this.mode === 'orbit') { this.zoomT = performance.now(); return; }
     e.preventDefault();
+    if (this.mode === 'pedestrian') { this.pedestrian?.zoom(clamp(e.deltaY * 0.003, -0.4, 0.4)); return; }
     if (e.ctrlKey || this.mode === 'ride') { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
     if (e.deltaY > 0) { // keep scrolling back and you rise to the bird's-eye view
       const now = performance.now();
@@ -225,9 +245,9 @@ export class Nav {
     const now = performance.now();
     if (type === 'touch' || now - this.hoverT < 60 || now - this.quietT < 350) return;
     this.hoverT = now;
-    const air = this.mode === 'orbit', ag = this.pickAgent(cx, cy, air ? 14 : 3, air ? 7 : 0);
+    const air = this.mode === 'orbit', ag = this.mode === 'pedestrian' ? null : this.pickAgent(cx, cy, air ? 14 : 3, air ? 7 : 0);
     this.dom.style.cursor = ag ? 'pointer' : air ? 'grab' : 'default';
-    const g = this.mode === 'walk' && !ag ? this.walkTarget(cx, cy) : null;
+    const g = this.onFoot && !ag ? this.walkTarget(cx, cy) : null;
     this.marker.visible = !!g;
     if (g) this.marker.position.set(g.x, g.y + 0.06, g.z);
   }
@@ -246,10 +266,10 @@ export class Nav {
   private tap(cx: number, cy: number) {
     if (this.mode === 'fpv' || this.driving) return;
     const coarse = coarsePointer(), air = this.mode === 'orbit';
-    const ag = this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
+    const ag = this.mode === 'pedestrian' ? null : this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
     if (ag) { this.startRide(ag); return; }
     if (this.mode === 'ride') { this.hopOff(); return; }
-    if (this.mode !== 'walk') return;
+    if (!this.onFoot) return;
     const g = this.walkTarget(cx, cy);
     if (!g) return;
     this.goal = { x: g.x, z: g.z, stuck: 0 };
@@ -291,7 +311,8 @@ export class Nav {
   }
 
   private look(dyaw: number, dpitch: number) {
-    if (this.mode === 'walk') { this.yaw += dyaw; this.pitch = clamp(this.pitch + dpitch, -1.4, 1.45); }
+    if (this.mode === 'pedestrian') this.pedestrian?.look(dyaw, dpitch);
+    else if (this.mode === 'walk') { this.yaw += dyaw; this.pitch = clamp(this.pitch + dpitch, -1.4, 1.45); }
     else if (this.ride) { const R = this.ride; R.dyaw += dyaw; R.dpitch = clamp(R.dpitch + dpitch, -1.2, 1.2); R.idle = performance.now(); }
   }
 
@@ -321,7 +342,9 @@ export class Nav {
 
   setOrbit() {
     if (this.mode === 'orbit') return;
+    if (this.mode === 'pedestrian') { this.keys.clear(); this.shift = false; }
     this.mode = 'orbit';
+    this.pedestrian?.hide();
     this.ride = null;
     this.marker.visible = false;
     if (this.life) this.life.keep = null;
@@ -348,15 +371,60 @@ export class Nav {
     return true;
   }
 
+  async togglePedestrian() {
+    if (this.mode === 'pedestrian') { this.flyUp(); return; }
+    if (!this.world || this.walkPending || this.mode === 'fpv') return;
+    this.cancelFly();
+    if (this.mode === 'walk') {
+      this.landing = this.transition(420);
+      this.enterPedestrian();
+      this.onMode(this.mode, null);
+      return;
+    }
+
+    const ride = this.ride, pose = ride && this.life?.pose(ride.kind, ride.obj);
+    if (pose) {
+      const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
+      const at = new THREE.Vector3(pose.x, pose.y, pose.z);
+      const side = new THREE.Vector3(-facing.z, 0, facing.x);
+      const room = this.world;
+      const exits = ride.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
+      const clear = exits.find(p => {
+        const y = room.support(p.x, p.z, p.y + 1.02);
+        return room.inside(p.x, p.z) && p.y - y < 1.7 && !room.blocked(p.x, p.z, y, y + HEAD);
+      });
+      if (clear) {
+        await this.setWalk({ at: clear, exact: true, facing, ms: 540, thirdPerson: true });
+        return;
+      }
+      await this.setWalk({ at, facing, ms: 650, thirdPerson: true });
+      return;
+    }
+    const facing = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
+    await this.setWalk({ deckOK: true, facing: facing.lengthSq() > 1e-6 ? facing : undefined, thirdPerson: true });
+  }
+
+  private enterPedestrian() {
+    this.pedestrian ??= new Pedestrian(this.actors);
+    this.pedestrian.start(this.yaw);
+    this.keys.clear();
+    this.shift = false;
+    this.jumpBuffer = this.groundGrace = 0;
+    this.mode = 'pedestrian';
+  }
+
   // down to street level at (or facing) a spot; waits for the full-detail tiles there
   async setWalk(opts: WalkOpts = {}) {
     const w = this.world;
     if (!w || this.walkPending) return;
-    const t = opts.at ?? this.controls.target;
+    const target = opts.at ?? this.controls.target;
+    const t = opts.thirdPerson ? target.clone() : target;
+    const mode = this.mode, ride = this.ride;
     if (this.streamer) {
       this.walkPending = true;
       await this.streamer.ensure(t.x, t.z, 200).finally(() => { this.walkPending = false; });
     }
+    if (opts.thirdPerson && (mode !== this.mode || ride !== this.ride)) return;
     if (!opts.exact && opts.deckOK) { const deck = w.deckAt(t.x, t.z); if (deck != null) opts = { ...opts, exact: true, at: new THREE.Vector3(t.x, deck, t.z) }; }
     let spot: [number, number] | null;
     this.landmark = null;
@@ -395,7 +463,8 @@ export class Nav {
     this.marker.visible = false;
     if (this.life) this.life.keep = null;
     this.landing = this.transition(opts.ms ?? 900);
-    this.mode = 'walk';
+    if (opts.thirdPerson) this.enterPedestrian();
+    else { this.mode = 'walk'; this.pedestrian?.hide(); }
     this.ride = null;
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
@@ -404,6 +473,7 @@ export class Nav {
 
   startRide(ag: Picked) {
     this.rememberSky();
+    this.pedestrian?.hide();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0 };
     this.landing = this.transition(1100);
     this.mode = 'ride';
@@ -428,6 +498,7 @@ export class Nav {
   update(dt: number) {
     dt = Math.min(dt, 0.1);
     if (this.mode === 'walk') this.updateWalk(dt);
+    else if (this.mode === 'pedestrian') this.updatePedestrian(dt);
     else if (this.mode === 'ride') this.updateRide(dt);
     else if (this.mode === 'orbit') this.updateOrbit(dt);
   }
@@ -474,6 +545,7 @@ export class Nav {
     for (const s of [m, new THREE.Vector3(m.x, 0, 0), new THREE.Vector3(0, 0, m.z)]) {
       if (!s.lengthSq()) continue;
       const nx = P.x + s.x, nz = P.z + s.z, ax = nx + Math.sign(s.x) * 0.3, az = nz + Math.sign(s.z) * 0.3;
+      if (this.mode === 'pedestrian' && (!w.inside(nx, nz) || !w.inside(ax, az))) continue;
       const sup = w.support(ax, az, feet + STEP);
       if (!w.blocked(ax, az, Math.max(sup, feet + STEP), sup + HEAD) && clear(nx, nz, feet + HEAD)
         && clear(nx + 0.4, nz, feet + HEAD) && clear(nx - 0.4, nz, feet + HEAD) && clear(nx, nz + 0.4, feet + HEAD) && clear(nx, nz - 0.4, feet + HEAD)) {
@@ -507,11 +579,35 @@ export class Nav {
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
   }
 
+  private updatePedestrian(dt: number) {
+    const pedestrian = this.pedestrian!, world = this.world!, p = this.walkPos;
+    const x = p.x, z = p.z, right = this.axis('tr', 'tl'), forward = this.axis('f', 'b');
+    const pitch = this.axis('td', 'tu');
+    if (pitch) pedestrian.look(0, pitch * dt);
+    const grounded = this.vy === 0 && this.feet <= world.support(x, z, this.feet + STEP) + 0.04;
+    this.groundGrace = grounded ? 0.1 : Math.max(0, this.groundGrace - dt);
+    if (this.jumpBuffer > 0 && this.groundGrace > 0) {
+      this.vy = 6.2;
+      this.jumpBuffer = this.groundGrace = 0;
+    } else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    if (right || forward) this.stepBy(pedestrian.move(forward, right, this.shift, dt));
+    else if (this.goal) this.walkToGoal(dt, 2.4);
+
+    if (this.vy > 0) {
+      const rise = this.vy * dt + 0.08;
+      if (world.raycast({ x: p.x, y: this.feet + 1.75, z: p.z }, { x: 0, y: 1, z: 0 }, rise) < rise) this.vy = 0;
+    }
+    this.stand(dt);
+    const view = pedestrian.frame(p.x, this.feet, p.z, p.x - x, p.z - z, this.vy !== 0, dt, world);
+    this.place(view.position, view.rotation, view.fov, false);
+    this.controls.target.copy(view.target);
+  }
+
   // click-to-walk: glide there, faster for far goals, around a post; give up when a wall stops us
-  private walkToGoal(dt: number) {
+  private walkToGoal(dt: number, maxSpeed = 22) {
     const G = this.goal!, P = this.walkPos, d = new THREE.Vector3(G.x - P.x, 0, G.z - P.z), L = d.length();
     if (L < 0.15) { this.goal = null; this.marker.visible = false; return; }
-    const step = d.multiplyScalar(Math.min(L, Math.min(L * 2.2, Math.max(4, Math.min(22, L * 0.9))) * dt) / L), up = new THREE.Vector3(0, 1, 0);
+    const step = d.multiplyScalar(Math.min(L, Math.min(L * 2.2, Math.min(maxSpeed, Math.max(4, L * 0.9))) * dt) / L), up = new THREE.Vector3(0, 1, 0);
     if ([0, 0.6, -0.6, 1.2, -1.2].some((a) => this.stepBy(step.clone().applyAxisAngle(up, a)))) return;
     G.stuck += dt;
     if (G.stuck > 0.4) { this.goal = null; this.marker.visible = false; }

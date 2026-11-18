@@ -56,7 +56,7 @@ export class DrivePrototype {
   }
 
   update(dt: number) {
-    if (this.driving && this.nav.ride !== this.driving.ride) this.release();
+    if (this.driving && this.nav.ride !== this.driving.ride) this.park();
     if (this.pending) this.prepare(this.pending);
     const active = this.driving;
     if (active) {
@@ -76,7 +76,7 @@ export class DrivePrototype {
   }
 
   private activate() {
-    if (this.driving) { this.release(); return; }
+    if (this.driving) { this.park(); return; }
     if (this.nav.mode === 'fpv') return;
     if (this.nav.ride?.obj.kind !== 'car') {
       const life = this.nav.life;
@@ -109,7 +109,7 @@ export class DrivePrototype {
     this.waiting = false;
   }
 
-  private release() {
+  park() {
     if (!this.driving) return;
     this.driving.car.v = 0;
     this.driving.car.brake = 1;
