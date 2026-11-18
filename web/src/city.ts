@@ -317,6 +317,15 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     gate: (x: number, z: number) => { const b = labelled.get(`${x},${z}`) ?? -1; return clay !== 'none' || (b >= 0 ? shown[b + 1] > 0 : stage >= 4); },
     get complete() { return stage >= 4 && clay !== 'loading'; },
     get realTris() { return realTris; },
+    // the distance levels now (tools): nodes shown per level, chosen ones not shown yet, wanted tiles shown by nothing
+    get lod() {
+      const shownBy: Record<number, number> = {};
+      for (const p of shownN.values()) shownBy[p.s] = (shownBy[p.s] ?? 0) + 1;
+      let pending = 0, gaps = 0;
+      for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
+      for (let i = 0; i < total; i++) if (want[i] && !inTile[i]) gaps++;
+      return { on: lodOn, shownBy, pending, gaps };
+    },
     // every tile the budget asks for is in
     get settled() { return settled; },
     cityTris,
