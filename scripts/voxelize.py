@@ -412,10 +412,35 @@ _cg = ndimage.median_filter(((exg > 0.04) | (lum < 70)).astype(np.uint8), 9) > 0
 _cp = ndimage.median_filter(((exg <= 0.04) & (lum >= 70) & (cellcol[..., 0] < cellcol[..., 2] + 12)).astype(np.uint8), 9) > 0
 gcol[_cm & _cg] = C["grass"]
 gcol[_cm & ~_cg & _cp] = C["paving2"]  # grey hardstanding, not earth
+# ALKIS Tatsächliche Nutzung (scripts/alkis_tn.py): the cadastre's land use, parcel by parcel over the whole map. Where
+# OSM says nothing it chooses the class of the open land below ("natural ground"), in place of guessing it from the
+# ortho's colour alone: forest, grassland, arable land, park, copse, waste land, car park, cemetery. It doesn't draw
+# anything: its parcel lines are the cadastre's, not the river bank's or the lawn's edge
+TN = dict(forest=1, copse=2, grassland=3, arable=4, park=5, waste=6, parking=7, cemetery=8)
+TN_KEY = {("Wald", ""): "forest", ("Gehölz", ""): "copse", ("Landwirtschaft", "Grünland"): "grassland",
+          ("Landwirtschaft", "Ackerland"): "arable", ("Landwirtschaft", "Obst- und Nussplantage"): "arable",
+          ("Sport-, Freizeit- und Erholungsfläche", "Park"): "park",
+          ("Sport-, Freizeit- und Erholungsfläche", "Grünanlage"): "park",
+          ("Sport-, Freizeit- und Erholungsfläche", "Garten"): "park",
+          ("Sport-, Freizeit- und Erholungsfläche", "Kleingarten"): "park",
+          ("Sport-, Freizeit- und Erholungsfläche", "Erholungsfläche"): "park",
+          ("Unland/Vegetationslose Fläche", ""): "waste", ("Platz", "Parkplatz"): "parking", ("Friedhof", ""): "cemetery"}
+tn = np.zeros((D, W), np.uint16)
+try:
+    import alkis_tn
+    from shapely.affinity import affine_transform
+    from aoi import EU, EV, I0, J0, world_bounds
+    _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1], J0 - CX * EV[0] - CY * EV[1]]
+    _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in alkis_tn.read(world_bounds(5))
+           if (n_, b_) in TN_KEY]
+    burn(tn, _tn)
+    note("ALKIS land use cells:", {k: int((tn == v).sum()) for k, v in TN.items()})
+except FileNotFoundError:
+    note("no ALKIS land use (data/raw/tn_09262.zip): open land by the ortho alone")
 # farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
 # harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
-# hay field) wherever the stubble was pale
-_fm = np.zeros((D, W), np.uint8)
+# hay field) wherever the stubble was pale. Arable land and orchards in the cadastre that OSM leaves out too
+_fm = (tn == TN["arable"]).astype(np.uint8)
 burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not tunnelish(t_)])
 _fm = (_fm > 0) & (gcol == C["paving"])
 if _fm.any():
@@ -1377,36 +1402,87 @@ def wall_style(f):
 ROOF_OVERRULED = []
 
 
-# roof palettes: Passau's roofs are red-brown clay tiles and grey sheet metal or slate, a few green copper ones
-ROOF_TILES = ["#87412f", "#934733", "#9e4e37", "#a7563c", "#ae5e40"]  # dark to light (sunlit, they read orange)
+# roof colours: each roof its own, the median of what the orthophoto sees on it (in CIELAB, so that a median of hues
+# is a hue), with the ortho's haze taken out. Five hand-picked red-browns for every tiled roof were ~2x too saturated and
+# much darker than the tiles (DOP20, Altstadt clay tiles: median RGB 188,151,133, 10-90 % 138,112,97 .. 222,179,163):
+# the town read as one saturated orange where the ortho shows muted salmon and terracotta, roof by roof.
+# ROOF_DEHAZE is the one knob: the ortho is taken as  seen = roof * t + ROOF_HAZE * (1 - t).  1 keeps its colours as
+# they are (pale, milky); lower deepens and saturates them (0.75: the tiles' median becomes 174,125,100)
+ROOF_DEHAZE = 0.75
+ROOF_HAZE = np.array([230.0, 230.0, 232.0])
+LUMW = np.array([0.299, 0.587, 0.114])
+_XYZ = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+_WP = np.array([0.95047, 1.0, 1.08883])
+
+
+def rgb_lab(c):
+    """sRGB 0..255 (... x 3) -> CIELAB (D65)"""
+    c = np.asarray(c, float) / 255
+    x = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92) @ _XYZ.T / _WP
+    f = np.where(x > 216 / 24389, np.cbrt(x), (24389 / 27 * x + 16) / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def lab_rgb(lab):
+    lab = np.asarray(lab, float)
+    fy = (lab[..., 0] + 16) / 116
+    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+    x = np.where(f ** 3 > 216 / 24389, f ** 3, (116 * f - 16) / (24389 / 27)) * _WP
+    l_ = np.clip(x @ np.linalg.inv(_XYZ).T, 0, 1)
+    return np.clip(255 * np.where(l_ > 0.0031308, 1.055 * l_ ** (1 / 2.4) - 0.055, 12.92 * l_), 0, 255)
+
+
+def lab_median(c):
+    return lab_rgb(np.median(rgb_lab(c), 0))
+
+
+def dehaze(rgb):
+    return tuple(float(v) for v in np.clip((np.asarray(rgb, float) - ROOF_HAZE * (1 - ROOF_DEHAZE)) / ROOF_DEHAZE, 0, 255))
+
+
+# a tiled roof the ortho can't tell (too small, or so tall its lean puts facade and street into the roof's cells) that
+# OSM calls red: the measured tiles' 10th to 90th percentile, dehazed like the rest
+ROOF_TILES = [dehaze(c) for c in ((138, 112, 97), (163, 131, 115), (188, 151, 133), (205, 165, 148), (222, 179, 163))]
 # (neutral to faintly warm: the sky's blue fill turned cool greys lilac)
 ROOF_GREYS = ["#55565a", "#646568", "#747577", "#858584", "#979692", "#aeaca6", "#c2bfb8"]
 ROOF_COPPER = ["#86a99a", "#7d9f91"]
-LUMW = np.array([0.299, 0.587, 0.114])
+ROOF_LOG = {"tiles": 0, "copper": 0, "grey": 0, "copper_untagged": []}
 
 
 def ortho_roof(f):
     """What the orthophoto sees on a roof: the share of its cells that are clay-tile red (hue red to orange,
-    saturated), their median colour, and the median colour of all its cells. Not the cells under a crown, deep shadow
-    or glare. A house's median over all cells mixed the tiles' sunlit orange and shaded brown with dormers, skylights,
-    gutters and the street seen past the eaves: tiled roofs came out beige, pink or lilac."""
+    saturated) and their median colour, the median colour of all its cells, and the share and median colour of its
+    copper-patina cells. Not the cells under a crown (one standing over the roof, or green: exg), deep shadow or glare.
+    A house's median over all cells mixed the tiles' sunlit orange and shaded brown with dormers, skylights, gutters
+    and the street seen past the eaves: tiled roofs came out beige, pink or lilac -- the tiles' own cells it is."""
     rr, cc = f["rr"], f["cc"]
-    c = cellcol[rr, cc].astype(float)
-    L = c @ LUMW
-    ok = (L > 40) & (L < 235) & ~over[rr, cc] & (exg[rr, cc] < 0.06)
-    if ok.sum() >= 3:
-        c = c[ok]
+    c0 = cellcol[rr, cc].astype(float)
+    L = c0 @ LUMW
+    lit = (L > 40) & (L < 235) & ~over[rr, cc]
+    ok = lit & (exg[rr, cc] < 0.06)
+    c = c0[ok] if ok.sum() >= 3 else c0
     mx, mn = c.max(1), c.min(1)
     s = (mx - mn) / np.maximum(mx, 1)
     tile = (c[:, 0] > c[:, 1] + 12) & (c[:, 0] > c[:, 2] + 25) & (s > 0.15)
-    return tile.mean(), (np.median(c[tile], 0) if tile.any() else None), np.median(c, 0)
+    # copper patina by its hue: in this ortho a pale sage, a* -3 .. -9 with b* under 12 (a crown's green is yellow, b*
+    # 20-30; slate, metal and the ortho's bluish shadow sit at a* about 0). Patina is green to exg: the lit cells.
+    # Checked on the ortho roof by roof: the long roof south-east of the Dom (skylights between its copper strips:
+    # 37 % of its cells), the old university, the Ilzstadt's churches
+    cl = c0[lit] if lit.sum() >= 3 else c0
+    lab = rgb_lab(cl)
+    cop = (lab[:, 1] < -3) & (lab[:, 2] < 12) & (lab[:, 2] > -10) & (lab[:, 0] > 35)
+    return (tile.mean(), (lab_median(c[tile]) if tile.any() else None), lab_median(c),
+            cop.mean(), (lab_median(cl[cop]) if cop.any() else None))
 
 
-def snap_grey(col, pitched):
-    """the nearest grey by lightness; a pitched roof no lighter than a pale metal (white sheet roofs read as snow)"""
-    greys = ROOF_GREYS[:5] if pitched else ROOF_GREYS
-    L = float(np.dot(col, LUMW)) * (0.92 if pitched else 1)  # (sunlit sheet metal: the ortho's glare)
-    return hex_rgb(min(greys, key=lambda h: abs(float(np.dot(hex_rgb(h), LUMW)) - L)))
+def grey_roof(col, pitched):
+    """sheet metal, slate, concrete, gravel: the ortho's lightness, dehazed, and a trace of its hue (mostly sky and
+    shadow: a blue-grey turned lilac under the sky's fill); a pitched roof no lighter than a pale metal (white sheet
+    roofs read as snow)"""
+    lab = rgb_lab(dehaze(col))
+    lab[1:] = np.clip(lab[1:] * 0.3, -3, 5)
+    lab[0] = np.clip(lab[0], 36, 66 if pitched else 80)  # (dehazed, a tar roof went black)
+    return tuple(lab_rgb(lab))
 
 
 def roof_style(f):
@@ -1418,30 +1494,32 @@ def roof_style(f):
     h = float(np.median(top[rr, cc]))
     pitched = pitched_m[rr, cc].mean() >= 0.4
     copper_tag = mat == "copper" or (col is not None and col[1] > col[0] + 15 and col[1] >= col[2])
-    pick = lambda shades: hex_rgb(shades[stable_hash(f["id"]) % len(shades)])
+    pick = lambda shades: shades[stable_hash(f["id"]) % len(shades)]
     # (from 80 m up the ortho's lean puts facade and street into the roof's cells: OSM's colour, if any)
     if len(rr) >= 3 and (h < 80 or col is None):
-        ft, tc, mc = ortho_roof(f)
-        if ft >= 0.3:
-            # clay tiles: one of five red-browns by the tiles' own lightness in the ortho (not the house's median)
-            i = int(np.clip((float(np.dot(tc, LUMW)) - 95) / 20, 0, len(ROOF_TILES) - 1))
-            return pal(soften(hex_rgb(ROOF_TILES[i]), 0.05), M_ROOF, q=12)
-        # copper patina: only where OSM says copper (or a green roof) and the ortho sees it greenish and not white.
-        # The ortho's own green-blue tint fired on blue-grey slate and metal, bluish shadow and crowns over the eaves
-        # (mint roofs all over the town); Passau's copper is its domes and towers and a few palaces
-        if copper_tag and mc[1] > mc[0] + 4 and float(np.dot(mc, LUMW)) < 190:
-            return pal(soften(pick(ROOF_COPPER), 0.05), M_ROOF, q=12)
+        ft, tc, mc, fc, cop = ortho_roof(f)
+        if ft >= 0.3:  # clay tiles: their own median colour, dehazed
+            ROOF_LOG["tiles"] += 1
+            return pal(dehaze(tc), M_ROOF, q=12)
+        # copper patina: by its hue on over a third of the roof, or a tenth where OSM says copper (or a green roof),
+        # in the patina cells' own colour. (A fixed mint for the ortho's green-blue tint over all cells had fired on
+        # slate, metal, bluish shadow and crowns over the eaves: mint roofs all over the town)
+        if fc >= 0.35 or (copper_tag and fc >= 0.1):
+            ROOF_LOG["copper"] += 1
+            if not copper_tag:
+                ROOF_LOG["copper_untagged"].append((f["id"], int(rr.mean()), int(cc.mean()), len(rr)))
+            return pal(dehaze(cop), M_ROOF, q=12)
         if col is not None and np.linalg.norm(np.subtract(col, mc)) > 110:
             ROOF_OVERRULED.append((f["id"], tag(f, "roof:colour")))
-        # sheet metal, slate, concrete, gravel: a grey of the ortho's lightness (its hue was mostly sky and shadow)
-        return pal(soften(snap_grey(mc, pitched), 0.05), M_ROOF, q=12)
+        ROOF_LOG["grey"] += 1
+        return pal(grey_roof(mc, pitched), M_ROOF, q=12)
     if col is None:
         return pal(soften(hex_rgb("#7d7f84"), 0.05), M_ROOF, q=12)
     if copper_tag:
-        return pal(soften(pick(ROOF_COPPER), 0.05), M_ROOF, q=12)
+        return pal(soften(hex_rgb(pick(ROOF_COPPER)), 0.05), M_ROOF, q=12)
     if col[0] > col[2] + 35 and col[0] > col[1] + 18:
-        return pal(soften(pick(ROOF_TILES[1:4]), 0.05), M_ROOF, q=12)
-    return pal(soften(snap_grey(col, pitched), 0.05), M_ROOF, q=12)
+        return pal(pick(ROOF_TILES[1:4]), M_ROOF, q=12)
+    return pal(grey_roof(col, pitched), M_ROOF, q=12)
 
 
 _GREY_L = sorted((float(np.dot(hex_rgb(h_), LUMW)), h_) for h_ in ROOF_GREYS)
@@ -1462,6 +1540,9 @@ for f in render:
             f["roof"] = pal(soften(hex_rgb(_cand[-1]), 0.05), M_ROOF, q=12)
             n_dim += 1
 note("pale flat roofs darkened under their facade:", n_dim)
+note("roofs by the ortho (tiles / copper / grey):", ROOF_LOG["tiles"], ROOF_LOG["copper"], ROOF_LOG["grey"],
+     "copper OSM does not tag:", len(ROOF_LOG["copper_untagged"]), ROOF_LOG["copper_untagged"][:12])
+note("roof palette entries:", len({e for e in pal.entries if e[3] == M_ROOF}))
 for f in render:
     wc, rc = parse_colour(tag(f, "building:colour")), parse_colour(tag(f, "roof:colour"))
     if pal.entries[f["wall"]][3] == M_GLASS and wc is not None and wc == rc:
@@ -1542,23 +1623,42 @@ _nat[_green & _crown] = C["garden"]
 # straw-yellow in the ortho, far from anything drawn, in a patch of 1000 cells or more (a building lot of bare sand or a
 # cemetery is smaller) -- it was a paved square in the middle of the meadows
 _straw = _open & ~_green & ~_crown & (_lum3 >= 140) & (_red_b > 18) & (_d_drawn >= 6)
+_straw &= np.isin(tn, [0, TN["grassland"], TN["arable"]])  # (not on a cadastre's building plot, park or car park)
 _straw = ndimage.binary_opening(_straw, iterations=2)
 _sl, _sn = ndimage.label(_straw)
 if _sn:
     _straw &= np.r_[False, ndimage.sum(_straw, _sl, range(1, _sn + 1)) >= 1000][_sl]
 _nat[_straw] = C["stubble"]
+# where the cadastre knows the land's use (ALKIS, above), the class is its, the shade the ortho's: forest and copse are
+# forest floor under their crowns and meadow in the clearings (they were pale paving, dirt or straw wherever the ortho
+# saw the ground between crowns pale or brown); grassland is meadow, pale straw where it is mown; a park lawn, its
+# pale paths gravel; waste land bare earth or a meadow where it is green, the bank's stones by the water; a car park
+# the car park's asphalt where it isn't green
+_wood = np.isin(tn, [TN["forest"], TN["copse"]])
+_nat[_wood] = np.where(_crown | (_lum3 < 75), C["garden"], C["grass2"])[_wood]
+_k = tn == TN["grassland"]
+_nat[_k] = np.where(_green, C["grass"], np.where((_lum3 >= 140) & ~_crown, C["stubble"],
+                                                  np.where(_crown, C["garden"], C["grass2"])))[_k]
+_k = np.isin(tn, [TN["park"], TN["cemetery"]])
+_nat[_k] = np.where(_green, np.where(_crown, C["garden"], C["grass"]), np.where(
+    (_lum3 >= 150) & (_d_drawn >= 1), C["gravel"], np.where(_crown | (_lum3 < 90), C["garden"], C["grass2"])))[_k]
+_k = tn == TN["waste"]
+_nat[_k] = np.where(_green, C["grass2"], np.where(_bank, C["shore"], C["dirt"]))[_k]
+_k = tn == TN["parking"]
+_nat[_k] = np.where(_green, C["grass"], C["parking"])[_k]
 # the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
 # quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
 _edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
 _nat[_edge] = C["shore"]
 _nat[~_open] = C["paving"]
 # a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
-_cls = [C[k] for k in ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble")]
+_NAT = ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble", "gravel", "parking")
+_cls = [C[k] for k in _NAT]
 _votes = np.stack([ndimage.uniform_filter(((_nat == k) & _open).astype(np.float32), 3) for k in _cls])
 _maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
 gcol[_open] = _maj[_open]
-note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in
-                                                   ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble")})
+note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in _NAT})
+note("  of it by the cadastre's use:", {k: int(((tn == v) & _open).sum()) for k, v in TN.items()})
 
 # ---------------------------------------------------------------- cemeteries
 # a cemetery (landuse=cemetery, amenity=grave_yard) OSM gives no surface was the default pale paving: a car park
@@ -2706,7 +2806,8 @@ note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2
 meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs="EPSG:25832", trams=trams, jets=jets,
             palette=[list(e) for e in pal.entries], lamps=lamps, labels=labels, views=views,
             sources=dict(osm=osm.timestamp, elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
-                         ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)"))
+                         ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)",
+                         landuse="Bayerische Vermessungsverwaltung, ALKIS Tatsächliche Nutzung (CC BY 4.0)"))
 json.dump(meta, open(OUT / "meta.json", "w"))
 import traffic
 # QA aid: drivable-surface mask (1 = carriageway/road area, 2 = tram bed) for web/tools/qa.mjs

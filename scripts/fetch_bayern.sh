@@ -1,7 +1,8 @@
 #!/bin/sh
 # Bayerische Vermessungsverwaltung OpenData (CC BY 4.0, www.geodaten.bayern.de): DOM20 surface model (0.2 m),
 # DGM1 terrain (1 m) and DOP20 orthophoto (0.2 m), 1 km tiles in EPSG:25832 covering the AOI (scripts/aoi.py);
-# LoD2 building models (CityGML, roof planes for scripts/lod2.py), 2 km tiles named by their even SW corner in km.
+# LoD2 building models (CityGML, roof planes for scripts/lod2.py), 2 km tiles named by their even SW corner in km;
+# ALKIS Tatsächliche Nutzung (actual land use, shapefile) of the Stadt Passau (09262), for scripts/alkis_tn.py.
 set -e
 cd "$(dirname "$0")/.."
 TILES=$(PYTHONPATH=scripts uv run python -c "
@@ -24,3 +25,4 @@ mkdir -p lod2
 for t in $TILES2; do
   get $O/lod2/citygml/$t.gml lod2/$t.gml
 done
+get $O/tn/lkr/tn_09262.zip tn_09262.zip
