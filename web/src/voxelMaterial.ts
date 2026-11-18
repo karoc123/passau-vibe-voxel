@@ -305,6 +305,19 @@ const FRAG_PARS = `
   float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
   vec3 gEmissive; float gRough; float gMetal;
+  // Window glass: a dark, faintly blue-grey dielectric (not metal: a metal's reflection is tinted by its colour, and
+  // the facade's warm plaster in the panes read as brass), only a hint of the wall's colour in it (the room behind,
+  // the frame's shade). Smooth, so the sky (scene.environment) shows in it, by Fresnel: little head-on, more at a glance.
+  const float GLASS_ROUGH = 0.1;
+  vec3 glassCol(vec3 base, float h) { return mix(vec3(0.026, 0.032, 0.04), base * 0.12, 0.25) * (0.85 + 0.3 * h); }
+  // ... and the sky in it, by day: the environment's reflection off a dielectric is a few per cent and the panes read as
+  // holes; a sheen of the sky's colour (the ground's, darker, looking down into it) by Fresnel, stronger at a glance
+  vec3 glassSky(vec3 n) {
+    vec3 V = normalize(cameraPosition - vVox), R = reflect(-V, n);
+    float f = 0.07 + 0.45 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 3.0);
+    vec3 sky = R.y > 0.0 ? mix(uHorizon, uHorizon * vec3(0.6, 0.75, 1.0), clamp(R.y * 1.5, 0.0, 1.0)) : uHorizon * vec3(0.3, 0.29, 0.27);
+    return sky * f * (1.0 - uNight);
+  }
   // how much of a pixel (x +- w/2) falls in [a, b), alone (span) or repeated every p (band): box-filtered, so facade
   // detail smaller than a pixel fades to its average instead of shimmering
   float span(float x, float w, float a, float b) { return (clamp(x + 0.5 * w, a, b) - clamp(x - 0.5 * w, a, b)) / w; }
@@ -443,29 +456,31 @@ const SURFACE = `
       col = mix(col, min(col * 1.15 + 0.02, vec3(1.0)), fc.y + fc.w * 0.6);
       // glass, and white-painted frames and bars (fc.z) in the opening
       float gw = win - fc.z;
-      col = col * (1.0 - win) + (mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h) * gw + vec3(0.62, 0.6, 0.56) * fc.z;
-      gRough = mix(gRough, 0.12, gw) - 0.3 * fc.z; gMetal = 0.6 * gw;
+      col = col * (1.0 - win) + glassCol(base, h) * gw + vec3(0.62, 0.6, 0.56) * fc.z;
+      gRough = mix(gRough, GLASS_ROUGH, gw) - 0.3 * fc.z;
+      gEmissive = glassSky(wN) * gw;
       if (gw > 0.0 && uNight > 0.0) {
         float k = floor(x / P);
-        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
-        else gEmissive = windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
+        if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
+        else gEmissive += windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
       }
     }
   } else if (m == ${MAT.CONCRETE}) {
     if (vert && lvl < 4.0 && lvl >= 1.0 && mod(u, 4.0) > 0.5) {
-      col = mix(base * 0.42, vec3(0.10, 0.13, 0.17), 0.55) + 0.025 * h;
-      gRough = 0.12; gMetal = 0.6;
-      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive = vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
+      col = glassCol(base, h);
+      gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
+      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
     }
   } else if (m == ${MAT.GLASS}) {
     if (vert) {
       if (mod(lvl, 4.0) < 0.5) { col = base * 0.55 + 0.04; gRough = 0.5; }
       else {
-        col = base * (0.8 + 0.12 * step(0.5, mod(u, 2.0)));
-        gRough = 0.08; gMetal = mix(0.35, 0.6, uNight);
+        col = mix(glassCol(base, h), base * 0.5, 0.35) * (0.9 + 0.12 * step(0.5, mod(u, 2.0)));
+        gRough = 0.08; gMetal = 0.1;
         vec2 zone = vec2(floor(u / 6.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
-        if (shopLvl && lvl < 4.0) gEmissive = vec3(1.0, 0.86, 0.66) * 1.3 * uNight;
-        else gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
+        gEmissive = glassSky(wN);
+        if (shopLvl && lvl < 4.0) gEmissive += vec3(1.0, 0.86, 0.66) * 1.3 * uNight;
+        else gEmissive += windowLight(cell, zone, floor(lvl / 4.0)) * 1.2 * uNight;
       }
     } else { gRough = 0.3; gMetal = 0.4; }
   } else if (m == ${MAT.CLASSIC}) {
@@ -473,18 +488,18 @@ const SURFACE = `
     if (vert && lvl < 7.5) col *= mod(lvl, 2.0) < 1.0 ? 0.9 : 1.0;
   } else if (m == ${MAT.RIBBON}) {
     if (vert && mod(lvl, 4.0) > 1.5) {
-      col = mix(base * 0.4, vec3(0.12, 0.16, 0.2), 0.6) + 0.02 * h; gRough = 0.08; gMetal = 0.55;
+      col = glassCol(base, h); gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
       vec2 zone = vec2(floor(u / 12.0) + wpos * 13.7 + wN.x * 2.3, floor(lvl / 4.0) + wN.z * 4.1);
-      gEmissive = windowLight(cell, zone, floor(lvl / 4.0)) * uNight;
+      gEmissive += windowLight(cell, zone, floor(lvl / 4.0)) * uNight;
     } else { gRough = 0.4; gMetal = 0.3; }
   } else if (m == ${MAT.FLOODLIT}) { // floodlit stone: a landmark washed in warm light at night
     float tower = smoothstep(20.0, 28.0, lvl), wash = 1.0 - 0.3 * smoothstep(28.0, 190.0, lvl);
     vec3 light = mix(vec3(1.0, 0.78, 0.5) * 0.6 * (1.0 - 0.6 * smoothstep(4.0, 18.0, lvl)), vec3(0.95, 0.74, 0.4) * wash * 2.4, tower);
     gEmissive = vert ? col * light * uNight : vec3(0.0);
   } else if (m == ${MAT.WINDOW}) {
-    gRough = 0.15; gMetal = 0.35;
-    col *= 0.6;
-    gEmissive = windowLight(cell, floor(cell.xz / 2.0) + floor(cell.y / 2.0) * 7.3, floor(cell.y / 3.0)) * uNight;
+    gRough = GLASS_ROUGH;
+    col = glassCol(base, h);
+    gEmissive = (vert ? glassSky(wN) : vec3(0.0)) + windowLight(cell, floor(cell.xz / 2.0) + floor(cell.y / 2.0) * 7.3, floor(cell.y / 3.0)) * uNight;
   } else if (m == ${MAT.LEAF}) {
     col = base * uLeaf * (0.8 + 0.35 * h); gRough = 0.95;
     if (uFolOn > 0.5) {
@@ -532,7 +547,7 @@ const SURFACE = `
         col = vec3(0.16, 0.12, 0.065); gRough = 0.55; gMetal = 0.25;
         gEmissive = vec3(1.0, 0.75, 0.4) * 0.35 * uNight;
       } else {
-        col = base * 0.6; gRough = 0.06; gMetal = 0.5;
+        col = mix(glassCol(base, h), base * 0.4, 0.4); gRough = 0.06; gMetal = 0.15;
         if (hash12(vec2(floor(u / 2.0) + cell.x * 0.17, floor(lvl / 4.0))) > 0.6) gEmissive = vec3(1.0, 0.85, 0.6) * 0.5 * uNight;
       }
     }
