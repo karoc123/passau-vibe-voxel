@@ -31,7 +31,6 @@ export interface SlopeSink {
 }
 
 const Q = 64;
-const TIDY_OFF = false;
 // A wall's face carries where the wall ends above it, in vattr.w (voxelMaterial.ts: no window past it): WALL_TOP + its
 // height over the ground in metres, up to 61; 127 for 62 and more (no limit). (0 on a wall: not known; 1-64 a roof's
 // plane, SLANT and up a chamfer's)
@@ -365,7 +364,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
 //   code where its tops fit it within a metre, and so does a column with no plane (0) with 3 or 4 sides in one plane:
 //   each was a region of its own, a facet with a crease round it, or a voxel step, in the middle of a smooth roof
 function tidyPlanes(S: number, T: Uint16Array, shipped: Uint16Array, bid: Int32Array, roofTop: Uint8Array) {
-  const SS = S * S, pc = shipped.slice(); if ((globalThis as { __noTidy?: boolean }).__noTidy !== undefined || TIDY_OFF) return pc;
+  const SS = S * S, pc = shipped.slice();
   const slope = (p: number) => (p - 1) >> 6;
   const grad = (p: number) => {
     const t = Math.tan(slope(p) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
