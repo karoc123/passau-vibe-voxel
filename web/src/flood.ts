@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { FloodInfo, Meta } from './types';
-import { MAT, type VoxelUniforms } from './voxelMaterial';
+import { MAT, REFL_MAX, type VoxelUniforms } from './voxelMaterial';
 import { dataTexture, fetchGzip, fetchJson } from './util';
 
 // The rivers' level (scripts/flood.py). The voxels hold the rivers as on the survey day. Above that, one sheet of water
@@ -63,7 +63,10 @@ export class Flood {
   }
 
   private material() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.04, metalness: 0.3, transparent: true, opacity: 0.92 });
+    // 92 % opaque by a constant, so that what it writes into the alpha is the river's mark for the reflections (post.ts)
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.04, metalness: 0.3, transparent: true,
+      blending: THREE.CustomBlending, blendSrc: THREE.ConstantAlphaFactor, blendDst: THREE.OneMinusConstantAlphaFactor,
+      blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.ZeroFactor, blendAlpha: 0.92 });
     const uRiver = { value: this.riverColour() };
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, { uFlood: this.U.uFlood, uLevel: this.uLevel, uTime: this.U.uTime, uHorizon: this.U.uHorizon, uRiver });
@@ -82,7 +85,9 @@ export class Flood {
           diffuseColor.rgb = mix(uRiver * mix(0.72, 1.12, r * r) * 0.9, vec3(0.16, 0.13, 0.07), land * 0.3);
           vec3 V = normalize(cameraPosition - vW);
           float g = 1.0 - clamp(V.y, 0.0, 1.0); g *= g;
-          diffuseColor.rgb = mix(diffuseColor.rgb, uHorizon * 0.8, clamp(0.08 + 0.55 * g * g, 0.0, 0.55));`);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uHorizon * 0.8, clamp(0.08 + 0.55 * g * g, 0.0, 0.55));`)
+        .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+          gl_FragColor.a = ${REFL_MAX.toFixed(2)} * (1.0 - 0.3 * land);`);
     };
     return mat;
   }

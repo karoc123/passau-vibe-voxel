@@ -144,6 +144,7 @@ function applyGfx(c: Partial<Gfx>) {
   if ('shadow' in c) { daylight.setShadowSize(g.shadow, maxShadow); stillDue = true; }
   if ('ao' in c) post.n8.enabled = g.ao;
   if ('bloom' in c) post.bloomPass.enabled = g.bloom;
+  if ('refl' in c) post.reflPass.enabled = g.refl;
   if ('grade' in c) post.film.strength = g.grade;
   if ('lod' in c || 'lodpx' in c) city?.setLod({ mode: g.lod, px: g.lodpx });
   if ('prepass' in c && prepass) prepass.enabled = g.prepass;
