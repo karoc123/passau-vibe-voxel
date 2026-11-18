@@ -100,6 +100,19 @@ export class Daylight {
 
   redrawShadow() { this.sun.shadow.needsUpdate = true; }
 
+  // the graphics panel (settings.ts): the size of both shadow maps, or none (0). Without shadow-casting lights every
+  // material is compiled again without the shadow lookups (three's light state changes), so off saves their cost too.
+  setShadowSize(n: number, max: number) {
+    const on = n > 0, size = Math.min(n, max);
+    for (const l of [this.sun, this.twin]) {
+      l.castShadow = on;
+      if (on && l.shadow.mapSize.x !== size) { l.shadow.mapSize.set(size, size); l.shadow.map?.dispose(); l.shadow.map = null; }
+    }
+    this.shadowKey = '';
+    this.twinLive = true;
+    this.sun.shadow.needsUpdate = true;
+  }
+
   // a restored WebGL context comes back with empty render targets: the sky's light and the city's shadow drawn again
   restore() {
     this.envKey = '';

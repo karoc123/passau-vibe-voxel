@@ -34,7 +34,23 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .choices button { white-space: nowrap; padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
 #bar .choices button:hover, #bar .choices button.on { color: #fff; }
 #bar .sky button:disabled { display: none; }
+/* the graphics panel (bar.ts Graphics): folded under a ⚙ row; inside, the presets and an "Advanced" fold */
+#bar .gear { padding-top: 6px; }
+#bar .gear .fold, #bar .adv summary { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; text-shadow: inherit; cursor: pointer; }
+#bar .gear .fold:hover, #bar .gear .fold[aria-expanded=true], #bar .adv summary:hover, #bar .adv[open] summary { color: #fff; }
+#bar .gear .icon { display: inline-block; width: 1em; font-size: 12px; transition: transform .2s; }
+#bar .gear .fold[aria-expanded=true] .icon { transform: rotate(60deg); }
+#bar .gear .mark { color: var(--t2); margin-left: 4px; }
+#bar .gfx { display: none; margin-top: 4px; padding: 2px 8px 6px; border-radius: 6px; background: rgba(16,17,20,.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#bar .gfx.open { display: block; }
+#bar .adv summary { padding-top: 6px; list-style: none; }
+#bar .adv summary::-webkit-details-marker { display: none; }
+#bar .adv summary::before { content: '▸'; display: inline-block; width: 1em; }
+#bar .adv[open] summary::before { content: '▾'; }
+#bar .dev .val { color: var(--t2); }
+#bar .gfx .note { padding-top: 6px; color: var(--t2); line-height: 1.35; }
 @media (max-width: 600px) { #bar { left: 8px; right: 8px; top: 8px; width: auto; } }
+@media (max-width: 600px), (max-height: 500px) { #bar .gfx.open { max-height: 55vh; overflow-y: auto; } }
 @media (max-width: 600px), (max-height: 500px) {
   #bar .val { flex-basis: 40%; }
   #bar .choices { column-gap: 7px; }

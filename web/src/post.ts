@@ -59,7 +59,7 @@ class NightGrade extends Effect {
 
 // A film grade after tone mapping (after HansF/voxelgent, post.ts): cool shadows, warm highlights and a soft S-curve,
 // so the golden hour glows and the shade reads as air rather than grey. Kept light; ?grade=0 turns it off (?grade=0.5
-// for half) to compare.
+// for half) to compare, as does the graphics panel (settings.ts): at 0 it leaves every pixel as it was.
 const FILM = `uniform float strength;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 x = inputColor.rgb;
@@ -72,7 +72,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 }`;
 
 class FilmGrade extends Effect {
-  constructor(strength: number) { super('FilmGrade', FILM, { uniforms: new Map([['strength', new THREE.Uniform(strength)]]) }); }
+  constructor() { super('FilmGrade', FILM, { uniforms: new Map([['strength', new THREE.Uniform(1)]]) }); }
+  get strength() { return this.uniforms.get('strength')!.value as number; }
+  set strength(v: number) { this.uniforms.get('strength')!.value = clamp(v, 0, 2); }
 }
 
 // n8ao reads the depth buffer, where a wall at an angle to the grid is a staircase (mesher.worker.ts): it darkened the
@@ -103,14 +105,15 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });
   const tilt = new DepthBlur();
   const tiltPass = new EffectPass(camera, tilt);
-  composer.addPass(new EffectPass(camera, bloom));
+  const bloomPass = new EffectPass(camera, bloom);
+  composer.addPass(bloomPass);
   composer.addPass(tiltPass);
   const grade = new NightGrade();
-  const filmStrength = clamp(+(new URLSearchParams(location.search).get('grade') ?? 1) || 0, 0, 2);
+  const film = new FilmGrade();
   composer.addPass(new EffectPass(camera,
     grade,
     tone,
-    ...(filmStrength > 0 ? [new FilmGrade(filmStrength)] : []),
+    film,
     new HueSaturationEffect({ saturation: 0.12 }),
     new BrightnessContrastEffect({ brightness: 0, contrast: 0.06 }),
     new VignetteEffect({ offset: 0.3, darkness: 0.45 }),
@@ -120,5 +123,5 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     tiltPass.enabled = enabled && h > 60;
     tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), renderer.domElement.height);
   };
-  return { composer, n8, bloom, tone, grade, setHeight };
+  return { composer, n8, bloom, bloomPass, tone, grade, film, setHeight };
 }

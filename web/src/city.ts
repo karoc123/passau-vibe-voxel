@@ -4,6 +4,7 @@ import type { TileStreamer } from './stream';
 import type { Meta, Zones } from './types';
 import { dataTexture, fetchGzip, fetchJson } from './util';
 import type { DepthPrepass } from './prepass';
+import type { Lod } from './settings';
 import { makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
 
 const T = 128;
@@ -16,7 +17,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   3. everything else, nearest to the view first, each building once all its tiles are in; over clay a city block
 //      turns real once every tile under it is in, and back to clay when the budget moves on
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 } }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -26,6 +27,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   caption: Caption;
   budget: () => number;
   prepass?: DepthPrepass | null;
+  lod?: { mode: Lod; px: number };
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
   const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
@@ -110,11 +112,16 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // one above pxFine, so a camera at the switch doesn't flip it to and fro). What is drawn (shown) only changes once
   // all of it is in: a coarse node goes once every finer node chosen under it (a 1 m tile with its foliage, after the
   // first load) is ready, so nothing is ever missing; the nodes shown never overlap. Each tile's own faces close it
-  // at its edges, so a 1 m tile next to a 2 m one leaves no crack. ?lod=0: 1 m only; ?lodpx=: pxCoarse.
-  const lq = new URLSearchParams(location.search);
+  // at its edges, so a 1 m tile next to a 2 m one leaves no crack. lod (settings.ts, ?lod= ?lodpx=): 'off' 1 m only,
+  // 'far' never finer than 2 m (to look at it close up); px: pxCoarse. setLod changes them live: the next update picks
+  // anew, and what shows changes over as the newly chosen nodes come in, as for a camera move.
   const lods = S.levels.filter((s) => s !== S.clay).sort((a, b) => a - b);
-  const lodOn = lods.length > 1 && lq.get('lod') !== '0';
-  const pxCoarse = +(lq.get('lodpx') ?? 1.2), pxFine = pxCoarse * 1.25, lodMin = +(lq.get('lod') ?? 1); // ?lod=2: never finer than 2 m (to look at it close up)
+  let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
+  const setLod = (l: { mode: Lod; px: number }) => {
+    lodOn = lods.length > 1 && l.mode !== 'off';
+    pxCoarse = l.px; pxFine = l.px * 1.25; lodMin = l.mode === 'far' ? 2 : 1;
+    last = 0;
+  };
   interface LNode { s: number; tx: number; ty: number; key: string; x0: number; y0: number; x1: number; y1: number }
   const lnode = (s: number, tx: number, ty: number): LNode =>
     ({ s, tx, ty, key: S.key(s, tx, ty), x0: tx * s, y0: ty * s, x1: Math.min((tx + 1) * s, d.nx), y1: Math.min((ty + 1) * s, d.ny) });
@@ -184,6 +191,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     shownTex.needsUpdate = true;
   }
 
+  setLod(lod);
   look();
   choose(focus());
   if (!whole) startClay();
@@ -335,6 +343,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     },
     // every tile the budget asks for is in
     get settled() { return settled; },
+    setLod,
     cityTris,
   };
 }

@@ -1,5 +1,6 @@
 import { PlaceSearch } from './search';
 import { dateOf } from './sun';
+import { type Gfx, type Preset, SHADOWS, type Settings } from './settings';
 import { $, el } from './util';
 
 const hhmm = (h: number) => { const m = Math.round(h * 60); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
@@ -56,8 +57,77 @@ class Slider {
   get value() { return this.fromPos(+this.input.value); }
 }
 
-const choices = (cls: string, label: string, names: string[], host: HTMLElement) =>
-  el('div', `row ${cls}`, `<span class="val">${label}</span><span class="choices">${names.map((n) => `<button data-v="${n}">${n}</button>`).join('')}</span>`, host);
+// buttons named as their values, or [value, name]
+const choices = (cls: string, label: string, names: (string | [string, string])[], host: HTMLElement) =>
+  el('div', `row ${cls}`, `<span class="val">${label}</span><span class="choices">${names.map((n) => (typeof n === 'string' ? [n, n] : n))
+    .map(([v, n]) => `<button data-v="${v}">${n}</button>`).join('')}</span>`, host);
+
+// The graphics panel, folded under a ⚙ row at the bar's foot: the quality presets, and under "Advanced" each setting
+// on its own (settings.ts). Every control applies at once (onChange) and is kept by the settings.
+class Graphics {
+  private readonly box: HTMLElement;
+  private readonly sync: (() => void)[] = [];
+
+  constructor(host: HTMLElement, private readonly s: Settings, private readonly onChange: (c: Partial<Gfx>) => void, maxShadow: number) {
+    const head = el('div', 'row gear', '<button class="fold" aria-expanded="false"><span class="icon">⚙</span> Graphics <span class="mark"></span></button>', host);
+    this.box = el('div', 'gfx', '', host);
+    const fold = $<HTMLButtonElement>('.fold', head);
+    fold.addEventListener('click', () => {
+      const open = this.box.classList.toggle('open');
+      fold.setAttribute('aria-expanded', String(open));
+      fold.blur(); // Space would click it again instead of jumping (nav.ts)
+    });
+    this.sync.push(() => { $('.mark', head).textContent = PRESET[s.preset ?? ''] ?? 'custom'; });
+
+    const quality = choices('quality', 'Quality', Object.entries(PRESET), this.box);
+    quality.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button');
+      if (b) this.change({ ...s.presets[b.dataset.v as Preset] });
+    });
+    this.sync.push(() => quality.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.preset)));
+
+    const adv = el('details', 'adv', '<summary>Advanced</summary>', this.box);
+    const pick = <K extends keyof Gfx>(key: K, label: string, opts: [Gfx[K], string][], cls = '') => {
+      const row = choices(`pick ${cls}`, label, opts.map(([v, n]) => [String(v), n]), adv);
+      row.addEventListener('click', (e) => {
+        const b = (e.target as HTMLElement).closest('button');
+        const o = b && opts.find(([v]) => String(v) === b.dataset.v);
+        if (o) this.change({ [key]: o[0] } as Partial<Gfx>);
+      });
+      this.sync.push(() => row.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(s.now[key]))));
+      return row;
+    };
+    const slide = (key: 'res' | 'grade' | 'lodpx', spec: Omit<SliderSpec, 'onInput' | 'onChange' | 'near' | 'log' | 'marks'> & { marks?: Record<string, number> }) => {
+      const sl = new Slider(adv, { near: spec.step / 2, log: false, marks: {}, ...spec, onInput: (v) => this.change({ [key]: v }) });
+      this.sync.push(() => { if (document.activeElement !== sl.input) sl.set(s.now[key]); });
+      return sl;
+    };
+    const onOff: [boolean, string][] = [[true, 'on'], [false, 'off']];
+    slide('res', { min: 0.5, max: 1, step: 0.05, show: (v) => `Resolution ${Math.round(v * 100)} %` });
+    pick('shadow', 'Shadows', SHADOWS.filter((n) => n <= maxShadow).map((n) => [n, n ? `${n / 1024}k` : 'off']));
+    pick('ao', 'Ambient occlusion', onOff);
+    pick('bloom', 'Bloom', onOff);
+    pick('tilt', 'Tilt-shift blur', onOff);
+    slide('grade', { min: 0, max: 2, step: 0.1, marks: { default: 1, off: 0 }, show: (v) => `Film grade ${v.toFixed(1)}` });
+    pick('lod', 'Far tiles at 2 m', [['auto', 'auto'], ['off', 'never'], ['far', 'always']]);
+    const px = slide('lodpx', { min: 0.6, max: 3, step: 0.1, marks: { default: 1.2 }, show: (v) => `2 m below ${v.toFixed(1)} px` });
+    this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
+    pick('prepass', 'Depth pre-pass', onOff, 'dev');
+    el('div', 'note', 'Depth pre-pass: for testing, slower on some GPUs. Render size (top right) still adapts to the frame rate.', adv);
+    this.show();
+  }
+
+  private change(c: Partial<Gfx>) {
+    for (const k of Object.keys(c) as (keyof Gfx)[]) if (c[k] === this.s.now[k]) delete c[k];
+    if (!Object.keys(c).length) return;
+    this.s.set(c);
+    this.onChange(c);
+    this.show();
+  }
+
+  show() { for (const f of this.sync) f(); }
+}
+const PRESET: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
 
 export class Bar {
   readonly el = el('div', '');
@@ -97,6 +167,8 @@ export class Bar {
   }
   offer(w: string, possible: boolean) { $<HTMLButtonElement>(`button[data-v="${w}"]`, this.sky).disabled = !possible; }
   setRiver(cm: number) { this.river.set(cm); }
+  // the ⚙ panel at the bar's foot (settings.ts)
+  graphics(s: Settings, onChange: (c: Partial<Gfx>) => void, maxShadow: number) { return new Graphics(this.el, s, onChange, maxShadow); }
   showRiver(on: boolean) { this.river.input.closest('.row')!.classList.toggle('off', !on); }
   get rect() { return this.el.getBoundingClientRect(); }
 }

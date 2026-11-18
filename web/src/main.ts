@@ -25,6 +25,7 @@ import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather
 import type { World } from './world';
 import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { DepthPrepass } from './prepass';
+import { type Gfx, Settings } from './settings';
 import './style.css';
 
 declare global {
@@ -46,13 +47,15 @@ const phone = Math.min(screen.width, screen.height) < 600;
 const ceiling = phone ? 0.75e6 : Infinity;
 let level = 0.75;
 const budget = () => (level >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** level));
-const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2);
+// the graphics settings (settings.ts, the ⚙ panel): the resolution scales the render size's pixels
+const gfx = new Settings(phone, innerWidth >= 600);
+const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2) * gfx.now.res;
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000);
 const controls = makeControls();
 const post = makePost(renderer, scene, camera);
-const daylight = new Daylight(renderer, scene, phone ? 2048 : 4096);
+const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
@@ -60,7 +63,6 @@ const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)
   onWeather: (w) => { setWeather(w); share(); }, onRiver: (cm) => { flood?.setLevel(cm); } });
 const precip = new Precip(scene);
 const map = new THREE.Box3();
-const tiltShift = qs.get('tilt') !== '0' && innerWidth >= 600 && !phone;
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
@@ -77,6 +79,9 @@ let setWindows: ((hour: number, day: number) => void) | null = null;
 nav.cancelFly = () => { fly = null; };
 bar.setRiver(RIVER.surveyed);
 bar.showRiver(false);
+const maxShadow = renderer.capabilities.maxTextureSize;
+bar.graphics(gfx, applyGfx, maxShadow);
+gfx.writeUrl();
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 el('div', '', `<div>Passau in voxels, derived from <a href="https://github.com/stared/warsaw-vibe-voxel" target="_blank" rel="noopener">warsaw-vibe-voxel</a> by <a href="https://p.migdal.pl/" target="_blank" rel="noopener">Piotr Migdał</a> & <a href="https://quesma.com/blog/invisible-cities-one-shot/" target="_blank" rel="noopener">Opus 5.5</a> (MIT)</div>
   <div>data: <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener">Bayerische Vermessungsverwaltung</a> (CC BY 4.0) and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> contributors (ODbL)</div>
@@ -129,6 +134,20 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight);
   post.composer.setSize(innerWidth, innerHeight);
   barRect = null;
+}
+
+// a change of the graphics settings, or all of them at the start; the city's distance levels and the pre-pass once
+// they exist (boot)
+function applyGfx(c: Partial<Gfx>) {
+  const g = gfx.now;
+  if ('res' in c) setLevel(level);
+  if ('shadow' in c) { daylight.setShadowSize(g.shadow, maxShadow); stillDue = true; }
+  if ('ao' in c) post.n8.enabled = g.ao;
+  if ('bloom' in c) post.bloomPass.enabled = g.bloom;
+  if ('grade' in c) post.film.strength = g.grade;
+  if ('lod' in c || 'lodpx' in c) city?.setLod({ mode: g.lod, px: g.lodpx });
+  if ('prepass' in c && prepass) prepass.enabled = g.prepass;
+  busy = true;
 }
 
 function onMode(m: Mode, ride: Ride | null) {
@@ -184,7 +203,7 @@ let shareT = 0;
 function share() {
   clearTimeout(shareT);
   shareT = setTimeout(() => {
-    const d = dateOf(daylight.day);
+    const d = dateOf(daylight.day), qs = new URLSearchParams(location.search); // as it is now: the settings write to it too
     qs.set('date', `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     qs.set('hour', daylight.hour.toFixed(2));
     if (weatherName !== 'typical') qs.set('weather', weatherName); else qs.delete('weather');
@@ -260,6 +279,7 @@ async function boot() {
   let meta: Meta;
   [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
   views = meta.views;
+  applyGfx(gfx.now);
   uniforms = makeUniforms(meta);
   const foliage = loadFoliage(meta, uniforms), windows = loadWindows(meta, uniforms);
   foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
@@ -272,6 +292,7 @@ async function boot() {
   streamer = new TileStreamer(meta, tileMat, scene);
   prepass = new DepthPrepass(streamer.group, scene);
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
+  prepass.enabled = gfx.now.prepass;
   world = nav.world = streamer.world;
   daylight.casters(streamer.group, () => life?.group ?? null);
   nav.streamer = streamer;
@@ -288,7 +309,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass });
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx } });
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
@@ -325,7 +346,7 @@ renderer.setAnimationLoop((now) => {
   nav.update(dt);
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, tiltShift, camera.position.distanceTo(controls.target));
+  post.setHeight(above, gfx.now.tilt, camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;
@@ -361,7 +382,7 @@ renderer.setAnimationLoop((now) => {
   labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
 });
 
-window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city, prepass: () => prepass };
+window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city, prepass: () => prepass, gfx };
 
 // what the city's shadow map shows: which tiles are drawn, and what folds, hides or thins them in its depth pass
 let stillKey = '';
