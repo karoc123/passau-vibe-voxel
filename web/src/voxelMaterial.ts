@@ -93,9 +93,32 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
   };
 }
 
+// The ground's paved surfaces, detailed close up in the fragment shader (groundDetail): their palette entries by the
+// colours scripts/voxelize.py gives them (C: quantised to 4, as its Palette does), plain SOLID. The class rides in the
+// palette texture's alpha over the material id (bits 5-7; material ids stay under 32: `& 31` wherever it is read).
+export const GROUND = { SETT: 1, SLAB: 2, ASPHALT: 3, ROADSETT: 4, GRAVEL: 5, CONCRETE: 6 } as const;
+const GROUND_COLOURS: [string, number][] = [
+  ['#8f8981', GROUND.SETT], // sett, cobblestone: the old town's lanes and squares
+  ['#a49f97', GROUND.ROADSETT], // a carriageway paved in stone
+  ['#c6c2b8', GROUND.SLAB], ['#b5b4af', GROUND.SLAB], ['#b7b1a6', GROUND.SLAB], // paving (also the default), platforms
+  ['#5f636b', GROUND.ASPHALT], ['#6e7178', GROUND.ASPHALT], ['#6a6d73', GROUND.ASPHALT], ['#8a5a52', GROUND.ASPHALT], // roads, car parks, cycle lanes
+  ['#d8ccb5', GROUND.GRAVEL], ['#8a8178', GROUND.GRAVEL], // gravel paths, the railway's ballast
+  ['#bdbab2', GROUND.CONCRETE],
+];
+export function groundClass(p: Meta['palette'][number]) {
+  if (p[3] !== MAT.SOLID) return 0;
+  for (const [hex, c] of GROUND_COLOURS) {
+    // (Python's round: halves to even)
+    const q = [1, 3, 5].map((i) => { const v = parseInt(hex.slice(i, i + 2), 16) / 4, f = Math.floor(v);
+      return Math.min(255, (v - f > 0.5 || (v - f === 0.5 && f % 2) ? f + 1 : f) * 4); });
+    if (q[0] === p[0] && q[1] === p[1] && q[2] === p[2]) return c;
+  }
+  return 0;
+}
+
 function makePaletteTexture(palette: Meta['palette']) {
   const size = 64, data = new Uint8Array(size * size * 4);
-  palette.forEach((p, i) => data.set(p, i * 4));
+  palette.forEach((p, i) => data.set([p[0], p[1], p[2], p[3] | (groundClass(p) << 5)], i * 4));
   const tex = dataTexture(data, size, size, THREE.RGBAFormat);
   tex.magFilter = tex.minFilter = THREE.NearestFilter;
   return tex;
@@ -419,6 +442,82 @@ const FRAG_PARS = `
     }
     return s / n;
   }
+  // The ground close up (GROUND, by its palette entry): cobbles, slabs, asphalt's grain -- what a 1 m voxel cannot hold,
+  // drawn from the fragment's place (p, metres) and box-filtered over its footprint w (metres along x and z): a joint
+  // narrower than a pixel fades to its share of the pixel, and each stone's tone and dome fade out (det) before they
+  // could shimmer. The joints darken against their mean, so from afar the ground keeps its colour. Out: gBump, the
+  // normal's tilt (a cobble's dome); gJoint, how much more of a joint than the mean is here (rain fills them, snow lies
+  // in them first)
+  vec3 gBump; float gJoint;
+  float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  // joints j wide every P, centred on its multiples: how much of a pixel w wide they cover (the box filter of a line
+  // whose edges ramp over the pixel; past j it caps at j / w, the mean over the pixel)
+  float joints(float x, float w, float P, float j) {
+    float d = abs(fract(x / P + 0.5) - 0.5) * P;
+    return clamp((0.5 * (j + w) - d) / w, 0.0, min(1.0, j / w));
+  }
+  // stones of s.x by s.y in rows along x (row: the row's index), each row shifted by a random part of a stone, joints jw
+  // wide; out: tone, a random 0..1 per stone, and f, the place in it (-0.5..0.5)
+  float stones(vec2 q, vec2 w, vec2 s, float jw, float stagger, out float tone, out vec2 f) {
+    float row = floor(q.y / s.y), x = q.x + s.x * (stagger < 0.0 ? 0.5 * mod(row, 2.0) : stagger * fract(row * 0.618034));
+    float jx = joints(x, w.x, s.x, jw), jz = joints(q.y, w.y, s.y, jw);
+    tone = hash12(vec2(floor(x / s.x), row));
+    f = vec2(fract(x / s.x), fract(q.y / s.y)) - 0.5;
+    return jx + jz - jx * jz;
+  }
+  void groundDetail(int cls, vec2 p, vec2 w, inout vec3 col) {
+    float fw = max(w.x, w.y);
+    if (cls == ${GROUND.SETT} || cls == ${GROUND.ROADSETT} || cls == ${GROUND.SLAB}) {
+      bool sett = cls == ${GROUND.SETT}, slab = cls == ${GROUND.SLAB};
+      vec2 s = sett ? vec2(0.14, 0.13) : slab ? vec2(0.5, 0.35) : vec2(0.2, 0.16);
+      if (fw > 2.0 * s.y) return;
+      float jw = slab ? 0.012 : sett ? 0.02 : 0.025;
+      vec2 q = p, wq = w;
+      if (sett) { // laid in segmental arcs, 2 m across, each sagging 0.35 m
+        float xa = (fract(p.x * 0.5) - 0.5) * 2.0;
+        q.y -= 0.35 * xa * xa; wq.y += 0.7 * abs(xa) * w.x;
+      }
+      float tone; vec2 f;
+      float j = stones(q, wq, s, jw, slab ? -1.0 : 1.0, tone, f);
+      float mean = 1.0 - (1.0 - jw / s.x) * (1.0 - jw / s.y);
+      float fwq = max(wq.x, wq.y);
+      float c = 1.0 - smoothstep(0.5 * s.y, 2.0 * s.y, fwq), det = 1.0 - smoothstep(0.15 * s.y, 0.5 * s.y, fwq);
+      float k = slab ? 0.35 : 0.6; // how dark a joint
+      col *= mix(1.0, (1.0 - k * j) / (1.0 - k * mean), c);
+      if (slab) {
+        col *= 1.0 + det * 0.1 * (tone - 0.5);
+        gBump = vec3(tone - 0.5, 0.0, fract(tone * 7.3) - 0.5) * 0.05 * det; // slabs a little out of true
+      } else {
+        // granite setts: grey, some warmer, some bluer, each domed
+        float t2 = fract(tone * 13.7);
+        col *= (1.0 + det * 0.45 * (tone - 0.5)) * mix(vec3(1.0), t2 < 0.3 ? vec3(1.07, 1.0, 0.9) : t2 > 0.8 ? vec3(0.93, 0.97, 1.05) : vec3(1.0), det);
+        gBump = vec3(f.x, 0.0, f.y) * (sett ? 0.9 : 0.6) * det;
+      }
+      gJoint = c * (j - mean);
+    } else if (cls == ${GROUND.CONCRETE}) {
+      if (fw > 1.5) return;
+      float tone; vec2 f;
+      float j = stones(p, w, vec2(3.0), 0.02, 0.0, tone, f), mean = 1.0 - (1.0 - 0.02 / 3.0) * (1.0 - 0.02 / 3.0);
+      float c = 1.0 - smoothstep(0.1, 1.5, fw), det = 1.0 - smoothstep(0.05, 0.2, fw);
+      col *= mix(1.0, (1.0 - 0.4 * j) / (1.0 - 0.4 * mean), c) * (1.0 + c * 0.08 * (tone - 0.5) + det * 0.1 * (vnoise(p * 2.3) - 0.5));
+      gJoint = c * (j - mean);
+    } else if (cls == ${GROUND.ASPHALT} || cls == ${GROUND.GRAVEL}) {
+      // asphalt: worn patches over metres, a mottle over a hand's width, the grit; gravel: the same, coarser and stronger
+      if (fw > 1.2) return;
+      bool grav = cls == ${GROUND.GRAVEL};
+      float g = (vnoise(p * 0.35) - 0.5) * (grav ? 0.08 : 0.12) * (1.0 - smoothstep(0.4, 1.2, fw));
+      if (fw < 0.15) g += (vnoise(p * (grav ? 4.0 : 6.0)) - 0.5) * (grav ? 0.16 : 0.1) * (1.0 - smoothstep(0.05, 0.15, fw));
+      if (fw < 0.03) {
+        float gr = hash12(floor(p * (grav ? 28.0 : 40.0))), fine = 1.0 - smoothstep(0.008, 0.03, fw);
+        g += (gr - 0.5) * (grav ? 0.4 : 0.2) * fine;
+        gBump = vec3(gr - 0.5, 0.0, fract(gr * 9.1) - 0.5) * (grav ? 0.5 : 0.25) * fine;
+      }
+      col *= 1.0 + g;
+    }
+  }
   ${FOLIAGE}
   uniform vec4 uLitA[${LIT_N}]; uniform vec4 uLitB[${LIT_N}]; uniform sampler2D uLitMap; uniform vec4 uNoWin; uniform float uNoWinR;
   // how much a floodlit landmark (uLitA/B) lights a point; out: the direction from its axis, and how white its light
@@ -472,7 +571,7 @@ const JET_GONE = 'sin(uTime * 2.4 + h * 6.28) < -0.2 + lvl * 0.6';
 const SURFACE = `
   vec4 pe = texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0);
   vec3 base = pow(pe.rgb, vec3(2.2));
-  int m = int(pe.a * 255.0 + 0.5);
+  int pa = int(pe.a * 255.0 + 0.5), m = pa & 31; // (bits 5-7: the ground's class, GROUND)
   float wa = (vWallAng - 1.0) * 0.261799;
   // (a chamfer's face stands up to ~1 m out of the cells it belongs to: they are a metre in from it)
   vec3 cell = ${CELL};
@@ -499,7 +598,7 @@ const SURFACE = `
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
   // (a roof's top by its column alone: on a slope cell.y steps along the contours, and stepped its shade in stripes)
   float h = ${CELL_HASH};
-  gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0; gRefl = 0.0;
+  gEmissive = vec3(0.); gRough = 0.88; gMetal = 0.0; gRefl = 0.0; gBump = vec3(0.0); gJoint = 0.0;
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
   float r = 0.5, fres2 = 1.0; // the water's ripple and its glancing reflectance, for its reflections at night
@@ -675,6 +774,12 @@ const SURFACE = `
     col *= 0.97 + 0.06 * h;
     gRough = 1.0; gMetal = 0.0; gEmissive = vec3(0.0);
   }
+  // (not on the far tiles, NO_MOVING_SHADOW, where a metre is a pixel or less: all of it faded there. NO_GROUND_DETAIL:
+  // without it, to time it)
+  #if !defined(CLAY) && !defined(NO_MOVING_SHADOW) && !defined(NO_GROUND_DETAIL)
+  vec2 gw = fwidth(vVox.xz); // (out here, where every fragment takes it)
+  if ((pa >> 5) > 0 && vN.y > 0.5 && vRoof < 0.5) groundDetail(pa >> 5, vVox.xz, gw, col);
+  #endif
   if (uFolOn > 0.5 && vN.y > 0.5 && lvl < 0.5 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.MARK}) {
     vec2 ff = foliageCell(cell);
     float lit = litter(ff) * (m == ${MAT.GRASS} || m == ${MAT.SOIL} ? 0.9 : 0.35);
@@ -689,12 +794,15 @@ const SURFACE = `
     float street = lvl < 0.5 && m != ${MAT.GRASS} && m != ${MAT.SOIL} && m != ${MAT.LEAF} ? 1.0 : 0.0;
     float cover = smoothstep(0.0, 0.6, uSnow - 0.35 * hash13(cell + 0.5)) * mix(1.0, 0.35 + 0.4 * step(0.5, hash12(floor(cell.xz / 3.0))), street);
     vec3 snowCol = mix(vec3(0.86, 0.88, 0.92), vec3(0.42, 0.42, 0.43), street * smoothstep(0.25, 0.05, lum)) * (0.96 + 0.06 * h);
+    cover = clamp(cover + street * 1.5 * gJoint * smoothstep(0.0, 0.5, uSnow), 0.0, 1.0); // (in the joints first)
     col = mix(col, snowCol, cover);
+    gBump *= 1.0 - cover;
     gRough = mix(gRough, 0.8, cover); gMetal *= 1.0 - cover; gEmissive *= 1.0 - cover;
   } else if (uWet > 0.0 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.GLASS}) {
     float flat_ = vN.y > 0.5 && vRoof < 0.5 ? 1.0 : 0.0;
     float pud = flat_ * smoothstep(0.6, 0.7, hash12(floor(cell.xz / 2.0)) * 0.5 + hash12(floor(cell.xz / 7.0)) * 0.5);
-    col *= mix(1.0, mix(0.82, mix(0.5, 0.3, pud), flat_), uWet);
+    col *= mix(1.0, mix(0.82, mix(0.5, 0.3, pud), flat_), uWet) * (1.0 - 0.5 * uWet * max(gJoint, 0.0)); // (the joints full of water)
+    gBump *= 1.0 - pud * uWet; // a puddle's face is level
     gRough = mix(gRough, mix(0.5, 0.03, pud), uWet * mix(0.5, 1.0, flat_));
     if (m != ${MAT.GRASS}) gRefl = flat_ * uWet * mix(0.1, 0.65, pud); // a puddle mirrors, a wet street a little (post.ts Reflections)
   }
@@ -807,7 +915,7 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
         ${FOLIAGE}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         faceDecode();
-        if (uFolOn > 0.5 && int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) == ${MAT.LEAF}) {
+        if (uFolOn > 0.5 && (int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) & 31) == ${MAT.LEAF}) {
           vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
           vec3 fo = foliageAt(cell);
           if (leafGone(cell, fo)) discard;
@@ -867,8 +975,9 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
       // the tiles carry no normal attribute, so three flat-shades them from screen derivatives (WebGLPrograms:
       // flatShading) and the staircase's plane normal above went unused -- every 1 m step of a diagonal facade was lit
       // by its own x- or z-facing side, sunlit and shaded columns from street to eaves. Lit by the vertex normal instead
+      // (tilted by the ground's detail, gBump: a cobble's dome)
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-        normal = normalize(vLitN); nonPerturbedNormal = normal;`)
+        normal = normalize(vLitN + (viewMatrix * vec4(gBump, 0.0)).xyz); nonPerturbedNormal = normal;`)
       .replace('#include <color_fragment>', SURFACE)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = gMetal;')
@@ -919,7 +1028,7 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         faceDecode();
         {
-          int m = int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5);
+          int m = int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) & 31;
           float wa = (vWallAng - 1.0) * 0.261799;
           vec3 cell = ${CELL};
           if (m == ${MAT.LEAF} && uFolOn > 0.5 && leafGone(cell, foliageAt(cell))) discard;

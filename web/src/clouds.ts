@@ -10,7 +10,7 @@ import { hash, smooth } from './util';
 // a threshold t leaves a 1 - t share of the sky covered (the puffs' cores first). A tile pays one bilinear lookup.
 export const CLOUD_H = 1200;
 export const CLOUD_L = 5000;
-const CLOUD_N = 256;
+export const CLOUD_N = 256;
 
 // how much of the sky the cumulus cover, by the weather's cloud (0 clear .. ~0.6 cloudy; past it the overcast deck,
 // sky.ts, closes over them)
@@ -63,8 +63,9 @@ function bake() {
 
 // shared by the sky (sky.ts) and the tiles (voxelMaterial.ts makeUniforms): uCloudA = the wind's drift (x, z, metres),
 // the threshold, the shadow's strength; uCloudSun = the sun's direction over its height (x, z), for the shadow
+const field = bake();
 export const cloudUniforms = {
-  uCloudTex: { value: bake() as THREE.Texture },
+  uCloudTex: { value: field as THREE.Texture },
   uCloudA: { value: new THREE.Vector4(0, 0, 0.86, 0) },
   uCloudSun: { value: new THREE.Vector2(0, 0) },
 };
@@ -80,6 +81,24 @@ export const CLOUD_GLSL = `
     float n = cloudAt(p.xz + uCloudSun * (${CLOUD_H.toFixed(1)} - p.y));
     return 1.0 - uCloudA.w * smoothstep(uCloudA.z - 0.07, uCloudA.z + 0.1, n);
   }`;
+
+// The sky's own copy of the field (sky.ts cumulus): how tall the heaps stand, as a share of their full height, for the
+// thresholds of the four channels (CLOUD_SKY_Z, 1 - coverage from broken cloud to clear, evenly: the weather's own lies
+// between two of them, and the sky interpolates). 0 at a heap's edge, 1 at the densest core. Filtered anisotropically:
+// the sky averages it along a ray's way through the heaps in one lookup. (The tiles keep the plain field: their lookup
+// is the shadow's, and pays nothing for this.)
+export const CLOUD_SKY_Z = [0, 1, 2, 3].map((k) => 1 - coverage(0.6) + k / 3 * (coverage(0.6) - coverage(0)));
+export const CLOUD_SKY_TEX = (() => {
+  const f = field.image.data as Uint8Array, d = new Uint8Array(f.length * 4);
+  for (let i = 0; i < f.length; i++) for (let k = 0; k < 4; k++) {
+    const z = CLOUD_SKY_Z[k];
+    d[i * 4 + k] = Math.round(255 * Math.min(Math.max((f[i] / 255 - z) / (1 - z), 0), 1));
+  }
+  const t = new THREE.DataTexture(d, CLOUD_N, CLOUD_N, THREE.RGBAFormat);
+  Object.assign(t, { wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, magFilter: THREE.LinearFilter,
+    minFilter: THREE.LinearMipmapLinearFilter, generateMipmaps: true, anisotropy: 4, needsUpdate: true });
+  return t as THREE.Texture;
+})();
 
 // The wind at the clouds' height: Passau's prevailing westerlies, from between WSW and NW, a day's own; 8-14 m/s
 export class Clouds {

@@ -3,6 +3,7 @@ import { N8AOPostPass } from 'n8ao';
 import { BloomEffect, BrightnessContrastEffect, Effect, EffectAttribute, EffectComposer, EffectPass, HueSaturationEffect, RenderPass,
   SMAAEffect, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { clamp } from './util';
+import { SKY_GLSL, type Sky } from './sky';
 import { REFL_MAX } from './voxelMaterial';
 
 // The miniature look by depth, not by screen band: each pixel blurs by how far its distance is from the focus (what
@@ -46,10 +47,17 @@ class DepthBlur extends Effect {
 // such pixel is horizontal (an up face), so the mirror is the plane through it: the ray from the eye is mirrored
 // there, tilted by ripples that drift as the water does, and marched over the depth buffer in steps that widen from
 // the water out (more of them near, where the hits are); a crossing is refined by bisection. Where it leaves the
-// screen or the scene, the sky on the screen if the ray ends in it, else nothing: the water keeps the horizon's sheen
-// its own shader gives it. Mixed in by Fresnel -- a mirror at a glance, little of it from above. Along the line of
-// sight the ripples tilt it more than across, so a light on the far bank mirrors as a broken vertical streak.
-const REFL = `uniform mat4 uProj; uniform mat4 uView; uniform mat4 uCamWorld; uniform float uTime;
+// screen or the scene unhit, the sky as the sky draws it in that direction (sky.ts: its light and its cumulus, seen
+// from the water) -- if the ray is sure to meet nothing off the screen: once it is higher than anything on the map
+// (uMapTop) where it leaves, or where the screen shows sky there. Else nothing: the water keeps the horizon's sheen
+// its own shader gives it. (By the pixel where it left alone, from high up the rays that left through the screen's
+// sides met the hills drawn there, those through its top the sky: a straight edge across the river from each top
+// corner, more of one under the clouds' shadows.) Mixed in by Fresnel -- a mirror at a glance, little of it from
+// above. Along the line of sight the ripples tilt it more than across, so a light on the far bank mirrors as a broken
+// vertical streak.
+const REFL = `#define CUMULUS_CHEAP
+${SKY_GLSL}
+uniform mat4 uProj; uniform mat4 uView; uniform mat4 uCamWorld; uniform float uTime; uniform float uMapTop;
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 vec3 viewAt(vec2 uv, float z) { return vec3((uv * 2.0 - 1.0 + vec2(uProj[2][0], uProj[2][1])) * -z / vec2(uProj[0][0], uProj[1][1]), z); }
 float sceneD(vec2 s) { return -getViewZ(readDepth(s)); }
@@ -126,20 +134,30 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     vec2 e = min(sh, 1.0 - sh);
     conf = smoothstep(0.0, 0.08, min(e.x, e.y));
   } else {
-    // the ray left the screen or ran out: the sky, if that is where it ends
+    // the ray left the screen or ran out: where (its view-space point at tEnd, perspective-correct), and the sky
+    vec3 X = (uCamWorld * vec4(P + R * (L * tEnd * k1 / mix(k0, k1, tEnd)), 1.0)).xyz;
     vec2 se = clamp(s0 + dS * tEnd, vec2(0.002), vec2(0.998));
-    refl = texture2D(inputBuffer, se).rgb;
-    conf = step(4000.0, sceneD(se));
+    conf = max(step(4000.0, sceneD(se)), smoothstep(uMapTop, uMapTop * 1.5 + 50.0, X.y));
+    if (w * conf < 0.01) return;
+    vec3 Rw = normalize(mat3(uCamWorld) * R);
+    refl = skyLight(Rw);
+    #ifndef NO_REFL_CLOUDS // (without the clouds, to time them)
+    vec4 cu = cumulus(Wp, Rw, 0.01);
+    refl = mix(refl, cu.rgb, cu.a);
+    #endif
   }
   outputColor.rgb = mix(inputColor.rgb, refl * 0.92, w * conf);
 }`;
 
 class Reflections extends Effect {
-  constructor(private readonly camera: THREE.PerspectiveCamera) {
+  constructor(private readonly camera: THREE.PerspectiveCamera, sky: Sky) {
     super('Reflections', REFL, { attributes: EffectAttribute.DEPTH | EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([['uProj', new THREE.Uniform(new THREE.Matrix4())], ['uView', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())], ['uTime', new THREE.Uniform(0)]]) });
+        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())], ['uTime', new THREE.Uniform(0)], ['uMapTop', new THREE.Uniform(150)],
+        ...Object.entries(sky.u) as [string, THREE.Uniform][]]) });
   }
+  // the map's highest point (metres over the scene's zero)
+  set mapTop(h: number) { this.uniforms.get('uMapTop')!.value = h; }
   update() {
     const u = this.uniforms;
     u.get('uProj')!.value.copy(this.camera.projectionMatrix);
@@ -205,11 +223,12 @@ function maskStairs(n8: N8AOPostPass) {
   patch();
 }
 
-export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, sky: Sky) {
   const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
   composer.addPass(new RenderPass(scene, camera));
-  const reflPass = new EffectPass(camera, new Reflections(camera));
+  const reflections = new Reflections(camera, sky);
+  const reflPass = new EffectPass(camera, reflections);
   composer.addPass(reflPass);
   const n8 = new N8AOPostPass(scene, camera, innerWidth, innerHeight);
   Object.assign(n8.configuration, { aoRadius: 6, distanceFalloff: 1.5, intensity: 2.2, halfRes: true, depthAwareUpsampling: true });
@@ -236,5 +255,5 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     tiltPass.enabled = enabled && h > 60;
     tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), renderer.domElement.height);
   };
-  return { composer, n8, reflPass, bloom, bloomPass, tone, grade, film, setHeight };
+  return { composer, n8, reflPass, reflections, bloom, bloomPass, tone, grade, film, setHeight };
 }
