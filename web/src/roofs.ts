@@ -318,7 +318,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     const fall = r.flat ? 0 : Math.cos(az) * ox + Math.sin(az) * oy;
     const pal = fall < 0.4 && wallBelow && !skirt ? below : top;
     const lit = skirt ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
-    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0, a1, pal, lit, ground[c], bid[c], x0, y0);
+    // (a skirt's top 1/64 m under the slope's edge: on it, it showed through between the two tiles' slopes as a hairline)
+    const k = skirt ? 1 : 0;
+    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k, a1 - k, pal, lit, ground[c], bid[c], x0, y0);
   }
 
   // a vertical face on cell (X, Y)'s edge e, facing (axis d, dir), from low to high at the edge's two ends

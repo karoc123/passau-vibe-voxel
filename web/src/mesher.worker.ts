@@ -88,6 +88,11 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
 const QUAD_ORDER = [[1, 2, 3, 0], [1, 0, 3, 2], [0, 1, 2, 3], [0, 3, 2, 1]];
 const SOLID_BELOW = 65535;
 const OCC = 65534; // the base tile under a foliage tile: solid for culling and AO, never meshed
+// Faces out through the tile's border are drawn even where the next tile is solid there (it may not be shown yet: a
+// level's node swaps whole); such a face's top edge lay exactly on the edge of the tops meeting over the border, and
+// where they left a pixel between them it showed through, a hairline along the tile's edge. INNER marks them (in
+// meshFaces' second mask, beside a wall's top) and they are drawn with their top edge sunk 1/64 m
+const INNER = 1;
 
 class QuadBuffer {
   private cap = 1 << 14;
@@ -255,7 +260,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null) : 255;
                 // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
                 key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
-                top[i + j * nu] = wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
+                top[i + j * nu] = nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
                 any = true;
               }
             }
@@ -445,7 +450,7 @@ function emitMerged(mask: Float64Array, top: Uint8Array, nu: number, nv: number,
       const gm = k1 % 256, aoBits = Math.floor(k1 / 256) % 256, palIdx = Math.floor(k1 / 65536) % 4096, ang = Math.floor(k1 / (65536 * 4096));
       // vattr.x: face axis + 8 x (a wall's direction, or a roof plane's slope in 2.5° steps); vattr.w: 1 + the roof
       // plane's downhill direction in 64 steps, 0 for anything else
-      const roof = ang > 24 ? ang - 25 : -1, nrm = normalIdx + 8 * (roof >= 0 ? roof >> 6 : ang), rw = roof >= 0 ? 1 + (roof & 63) : wt;
+      const roof = ang > 24 ? ang - 25 : -1, nrm = normalIdx + 8 * (roof >= 0 ? roof >> 6 : ang), rw = roof >= 0 ? 1 + (roof & 63) : wt === INNER ? 0 : wt;
       const aos = aoBits === 255 ? [3, 3, 3, 3] : [aoBits & 3, (aoBits >> 2) & 3, (aoBits >> 4) & 3, (aoBits >> 6) & 3];
       const base = [0, 0, 0];
       base[d] = sl + (dir > 0 ? 1 : 0); base[u] = i; base[v] = j;
@@ -455,7 +460,9 @@ function emitMerged(mask: Float64Array, top: Uint8Array, nu: number, nv: number,
       const ord = QUAD_ORDER[(aos[0] + aos[2] < aos[1] + aos[3] ? 2 : 0) + (dir > 0 ? 1 : 0)];
       for (const c of ord) {
         const p = corners[c];
-        out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);
+        // (a face into the solid of the next tile: its top edge 1/64 m down, under the tops it meets there)
+        if (wt === INNER && d < 2 && p[2] === corners[2][2] && p[2] > corners[0][2]) out.vertex(p[0] * s + x0, p[2] * s - 1, p[1] * s + y0, nrm, aos[c] | (63 << 2), gm, rw, palIdx, bid);
+        else out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);
       }
       i += w;
     }
