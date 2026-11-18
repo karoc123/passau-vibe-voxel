@@ -108,10 +108,16 @@ export class Daylight {
     this.watchShadows(scene);
     // a part of the next map is drawn in the frame's own shadow pass, before the sun's and the twin's maps: three's
     // render state (which the depth pass needs) only exists inside a render
+    // Three's depth pass draws what the *view's* camera layers show, not the shadow camera's: a tile the occlusion
+    // culling (city.ts) moved to its own layer would cast no shadow. The view's camera sees all layers for it.
     const sm = renderer.shadowMap, render = sm.render.bind(sm);
     sm.render = (lights, s, camera) => {
-      if (this.partDue && this.job && s === scene) { this.partDue = false; this.drawPart(render, camera); }
-      render(lights, s, camera);
+      const mask = camera.layers.mask;
+      camera.layers.enableAll();
+      try {
+        if (this.partDue && this.job && s === scene) { this.partDue = false; this.drawPart(render, camera); }
+        render(lights, s, camera);
+      } finally { camera.layers.mask = mask; }
     };
     this.pmrem = new THREE.PMREMGenerator(renderer);
   }
