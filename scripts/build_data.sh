@@ -8,9 +8,11 @@ export PYTHONPATH=scripts
 # OSM: data/raw/osm.json is kept once it exists (a new Geofabrik extract changes the whole model);
 # OSM_REFRESH=1 fetches the current extract (Geofabrik Niederbayern, cut to the AOI)
 if [ ! -s data/raw/osm.json ] || [ -n "$OSM_REFRESH" ]; then sh scripts/fetch_osm.sh; fi
-sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20, DGM1, DOP20), data/raw/lod2/*.gml; skips files it has
+sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20, DGM1, DOP20), data/raw/lod2/*.gml,
+                                         # data/raw/laser/*.laz, data/raw/baeume_aoi.csv; skips files it has
 uv run python scripts/prep.py            # data/prep.npz
 uv run python scripts/lod2.py            # data/lod2.npz (LoD2 roof planes and footprints on the grid)
+uv run python scripts/laser.py           # data/laser.npz (LiDAR vegetation statistics per cell, for the trees)
 uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffic.json, qa_roadmask.bin.gz;
                                          # data/ground.npz, data/footprints.npz (needs data/lod2.npz, or NO_LOD2=1)
                                          # (scripts/tiles_lod.py: only tiles/2 and tiles/8 again, from tiles/1 and 1f)

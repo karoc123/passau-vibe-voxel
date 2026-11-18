@@ -23,7 +23,8 @@ crowns keep their brightness relative to the grass under them).
 
 Output: web/public/data/phenology.json (per class: dates, spread, source) and, with the trees' positions
 (web/public/data/trees.json), web/public/data/foliage.bin: per 2 m cell the class of the tree whose crown it is in
-(nearest trunk within 9 m), then a byte of that tree's index (so one tree turns as one), gzip.
+(the crown's owner from data/crowns.npz, written by voxelize.py; elsewhere the nearest trunk within 9 m), then a byte of
+that tree's index (so one tree turns as one), gzip.
 """
 import gzip
 import json
@@ -49,6 +50,7 @@ YEARS = (1995, 2024)
 OUT = Path(__file__).parent.parent / "web/public/data"
 PHASES = ("leaf", "colour", "fall")
 PHOTOS = Path(__file__).parent / "foliage_photos.json"
+CROWNS = Path(__file__).parent.parent / "data/crowns.npz"  # (voxelize.py) which tree each 2 m cell's crown is
 # the sunlit half of city lawns, median CIELAB per month (Jan..Dec). Measured by the upstream project
 # (github.com/stared/warsaw-vibe-voxel, scripts/grass_photos.json) on 119 dated Wikimedia Commons photos of lawns in
 # the parks of Warsaw and a few other lowland cities: Central European lawns, not Passau's own
@@ -240,7 +242,7 @@ def grass_tints():
 
 def classify(t):
     genus = (t.get("sp") or "").split(" ")[0]
-    if genus in CONIFERS:
+    if genus in CONIFERS or (t.get("con") and genus not in ("Larix", "Metasequoia")):  # (con: voxelize.py, laser scan)
         return EVERGREEN
     for k, (_, _, genera) in CLASSES.items():
         if genus in genera:
@@ -258,7 +260,9 @@ def city_median(table, cls, ph):
 
 def main():
     table = phenology()
-    trees = json.load(open(OUT / "trees.json"))["trees"]
+    every = json.load(open(OUT / "trees.json"))["trees"]
+    # the trees drawn (a register point under another tree's crown has none of its own)
+    trees = [t for t in every if t.get("drawn") != "none"]
     cls = np.array([classify(t) for t in trees], np.uint8)
     city = {ph: city_median(table, cls, ph) for ph in PHASES}
     print("city medians:", city)
@@ -276,6 +280,16 @@ def main():
     idx = np.minimum(idx, len(cls) - 1)
     grid = np.where(ok, cls[idx], 0).astype(np.uint8).reshape(gy.shape)
     tree = np.where(ok, (idx * 2654435761 >> 13) & 255, 0).astype(np.uint8).reshape(gy.shape)
+    if CROWNS.exists():
+        # where voxelize.py drew a crown, the tree whose crown it is (data/crowns.npz: index into trees.json), not
+        # the nearest trunk on this 2 m grid
+        own = np.load(CROWNS)["owner"]
+        if own.shape == grid.shape:
+            cls_all = np.array([classify(t) for t in every], np.uint8)
+            m = own >= 0
+            grid[m] = cls_all[own[m]]
+            tree[m] = ((own[m].astype(np.int64) * 2654435761 >> 13) & 255).astype(np.uint8)
+            print("foliage cells from the crowns' owners:", int(m.sum()))
     (OUT / "foliage.bin").write_bytes(gzip.compress(grid.tobytes() + tree.tobytes(), 9, mtime=0))
     print("foliage grid", grid.shape, "cells with a class:", int((grid > 0).sum()))
 

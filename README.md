@@ -37,6 +37,8 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 | **DGM1**, digital terrain model, 1 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Ground relief; the rivers where OSM's outlines are cut by the map edge |
 | **DOP20**, orthophoto, 0.2 m (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof colours, foliage tones, grass and fields OSM doesn't map, vehicle colours, the three rivers' own colours |
 | **LoD2** 3D building models, CityGML (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof planes (pitched roofs, ridges), building footprints the OSM outlines are moved onto, buildings OSM lacks |
+| **Laserdaten**, airborne LiDAR point clouds (LAZ), Feb 2021, ~11 points/m² (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Tree canopy heights, crown bases, conifers (dense in the leaf-off scan) vs. broadleaved trees, trimming the surface model's smeared crown rims |
+| **Einzelbäume 3D**, single trees with height from the 2024 flight, GeoPackage of district 124014, cut to the map (Bayerische Vermessungsverwaltung) | CC BY 4.0 | A trunk under every crown, one crown per tree |
 | **ALKIS Tatsächliche Nutzung** (actual land use), shapefile of the Stadt Passau (Bayerische Vermessungsverwaltung) | CC BY 4.0 | The class of open land OSM says nothing about: forest, copse, grassland, arable land, park, waste land, car park, cemetery |
 | **[OpenStreetMap](https://www.openstreetmap.org/copyright)**, [Geofabrik](https://download.geofabrik.de/europe/germany/bayern/niederbayern.html) daily extract for Niederbayern | ODbL, © OpenStreetMap contributors | Footprints and 3D parts, facade and roof colours, roads, paths, railways, bridges, trees, street lamps, names, the traffic network |
 | **[Deutscher Wetterdienst](https://opendata.dwd.de/climate_environment/CDC/)**, phenological observations | [DL-DE BY 2.0](https://www.govdata.de/dl-de/by-2-0), source: Deutscher Wetterdienst | When each tree species leafs out, colours and drops its leaves (stations within 100 km of Passau below 500 m) |
@@ -46,7 +48,7 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 
 Attribution to show wherever the model or its data is published (the viewer's credits line carries all of it):
 - *Datenquelle: Bayerische Vermessungsverwaltung – [www.geodaten.bayern.de](https://www.geodaten.bayern.de)*, licence
-  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (DOM20, DGM1, DOP20, LoD2, ALKIS Tatsächliche Nutzung; the model is a modified,
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (DOM20, DGM1, DOP20, LoD2, ALKIS Tatsächliche Nutzung, Laserdaten, Einzelbäume 3D; the model is a modified,
   derived work of them)
 - *© OpenStreetMap contributors*, [ODbL](https://www.openstreetmap.org/copyright). The files in `web/public/data`
   are a Produced Work built from OSM; the cut `data/raw/osm.json` itself is ODbL.
@@ -71,7 +73,7 @@ sh scripts/build_data.sh
 ```
 
 Needs [uv](https://docs.astral.sh/uv/) and `curl`. The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB
-of LoD2 models, the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
+of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
 From cached raw data the build takes about 4 minutes; `voxelize.py` peaks at ~7.5 GB of RAM. Given the same
 `data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-17; the gzip files are
 written with `mtime=0`). The steps:
@@ -79,10 +81,11 @@ written with `mtime=0`). The steps:
 | Step | Writes |
 |---|---|
 | `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB, read by `alkis_tn.py`). Files already there are not fetched again |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB, read by `alkis_tn.py`); `data/raw/laser/*.laz`: the LiDAR point clouds (8 sheets, 0.7 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted). Files already there are not fetched again |
+| `laser.py` | `data/laser.npz`: per 1 m cell vegetation statistics from the point clouds (highest return, lowest tenth, pulses caught in the canopy, single-return pulses, ground returns); optional for `voxelize.py` (`NO_LASER=1` ignores it) |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, orthophoto 0.2 m) |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
-| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json`, `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`. Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
+| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json` (the tree register, `scripts/trees.py`: OSM and Einzelbäume), `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`. Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
 | `places.py` | `places.json`: the search index (streets, squares, buildings, stops) |
 | `flood.py` | `flood.bin`, `flood.json`: which cells the rivers reach at each level |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
@@ -93,7 +96,7 @@ written with `mtime=0`). The steps:
 | `phenology.py` | `phenology.json`, `foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |
 
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
-pyproj (MIT), pillow (MIT-CMU); osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.
+pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.
 
 Checks that run at build time are logged to `data/debug/report.json`; `scripts/floating.py` and
 `scripts/surface_check.py` are whole-map checks to run by hand (`FINALDUMP=1` makes `voxelize.py` save the volume
@@ -112,6 +115,12 @@ for them).
   colours where OSM gives none, and pitched tiled roofs fitted to the surface model.
 - **Vegetation.** A cell is a tree if the surface model stands over the terrain and the orthophoto is green (or an OSM
   tree is near), and it is not a building's wall edge. OSM trees without a crown in the model are drawn as young trees.
+  Where the 2021 laser scan saw open ground beside its canopy, the surface model's smeared crown rims are cut back;
+  canopy heights are the laser's (grown by up to 1.5 m to the 2024 surface; the surface model wins where a tree has
+  been cut since). Every crown stands on a trunk: OSM's trees and the Einzelbäume register's (merged within 3 m, OSM
+  keeping the species), one crown per trunk. Crown depth follows the laser's crown base (halfway to the default for
+  broadleaved trees, whose winter scan reads low); crowns that stop the winter pulses (a fifth of them single returns)
+  are conifers: cones in needle green, evergreen in the viewer.
 - **Set pieces** (`scripts/passau.py`): the Dom rebuilt (west towers with copper cupolas, front with gable and
   portal, nave and aisles with arched windows, east end and crossing drum from LoD2); Veste Oberhaus and Niederhaus
   under clean roofs with OSM's walls as battlements; the Poststeg footbridge over the station's tracks.
