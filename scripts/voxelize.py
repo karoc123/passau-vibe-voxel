@@ -2287,6 +2287,29 @@ if trunks:
     # conifers (thuja, pine, spruce, yew...: the city database's species) in dark blue-green needles, not leaf green
     NEEDLES = np.array([pal(c_, M_LEAF) for c_ in ("#37553f", "#3f5f48", "#456a4f", "#4d7356", "#52785a")], np.uint16)  # dark to light
     note("conifer crowns (database species):", int(con.sum()), "cells", int((ok_ & con_).sum()))
+    # which tree each 2 m cell's leaves belong to (data/crowns.npz, for phenology.py's foliage.bin): the tree owning
+    # most of the cell's canopy, the trunk's own cell counting for four (a crown keeps the cell over its trunk). The
+    # viewer turns a leaf by its 2 m cell, so a cell is evergreen or deciduous as a whole: where a broadleaf crown's
+    # edge shares a cell with a conifer, its leaf voxels there stayed in leaf through the winter (thin bright-green
+    # columns beside the conifers among the bare trees), and the conifer's needles in a broadleaf's cell went bare.
+    # Those voxels (the other kind than the cell's owner) are left out: the boundary between the two snaps to 2 m
+    evg = con & ~np.array([((r_ or {}).get("species") or "").split(" ")[0] in ("Larix", "Metasequoia") for r_ in trunk_rec])
+    _wt = np.where(veg, 1, 0).astype(np.int8)
+    _wt[tidx > 0] *= 4
+    _o4 = np.where(veg, own, 0).reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
+    _w4 = _wt.reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
+    own2 = np.zeros((D // 2, W // 2), np.int32)  # (trunk index + 1, 0 where no canopy)
+    _bn = np.zeros((D // 2, W // 2), np.int16)
+    for k_ in range(4):
+        _cand = _o4[..., k_]
+        _n = ((_o4 == _cand[..., None]) * _w4).sum(-1)
+        _up = (_cand > 0) & (_n > _bn)
+        own2[_up], _bn[_up] = _cand[_up], _n[_up]
+    _evg0 = np.concatenate([[False], evg])
+    _odd = veg & (own > 0) & (_evg0[own] != np.repeat(np.repeat(_evg0[own2], 2, 0), 2, 1))
+    note("crown cells of the other kind than their 2 m cell's owner (evergreen / deciduous) left out:", int(_odd.sum()),
+         "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
+    veg &= ~_odd
 LEAVES_ = np.array(LEAVES, np.uint16)
 rr, cc = np.nonzero(veg)
 if trunks:
@@ -2331,23 +2354,16 @@ for t in all_trees:
         if t.get(k_src) is not None:
             rec[k_out] = t[k_src]
     _tr.append(rec)
-# which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): the tree owning most of the cell's
-# canopy here. (phenology.py took the nearest trunk on the 2 m grid, which is not always the crown's own: a broadleaf
-# crown's side beside a conifer took the conifer's evergreen class and stood green through the winter, a pillar)
+# which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as an index into trees.json.
+# (phenology.py took the nearest trunk on the 2 m grid, which is not always the crown's own: a broadleaf crown's side
+# beside a conifer took the conifer's evergreen class and stood green through the winter, a pillar)
 if trunks:
     _ti = {id(t): k for k, t in enumerate(all_trees)}
     _map = np.full(len(trunks) + 1, -1, np.int32)
     for i_, rec_ in enumerate(trunk_rec):
         if rec_ is not None and id(rec_) in _ti:
             _map[i_ + 1] = _ti[id(rec_)]
-    _o4 = np.where(veg, _map[own], -1).reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
-    _best = np.full((D // 2, W // 2), -1, np.int32)
-    _bn = np.zeros((D // 2, W // 2), np.int8)
-    for k_ in range(4):
-        _cand = _o4[..., k_]
-        _n = (_o4 == _cand[..., None]).sum(-1)
-        _up = (_cand >= 0) & (_n > _bn)
-        _best[_up], _bn[_up] = _cand[_up], _n[_up]
+    _best = _map[own2]
     np.savez_compressed("data/crowns.npz", owner=_best)
     note("2 m cells with a crown's owner for phenology:", int((_best >= 0).sum()))
 Path(OUT).mkdir(parents=True, exist_ok=True)

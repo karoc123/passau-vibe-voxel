@@ -272,14 +272,18 @@ def main():
                             "lawns by month: Wikimedia Commons photos of Central European city lawns (measured by the upstream project, warsaw-vibe-voxel)"],
                    classes=table, grass=grass_tints(), leaf=leaf_tint()), open(OUT / "phenology.json", "w"), indent=1, ensure_ascii=False)
 
-    xy = np.array([(t["x"], t["y"]) for t in trees])
     print("trees per class:", {int(k): int((cls == k).sum()) for k in np.unique(cls)})
+    # away from the drawn crowns (hedges, scrub, a procedural tree's crown) the nearest trunk within 9 m; not a LiDAR
+    # crown's conifer, whose needles are all in the crowns' cells below (a hedge beside it is no evergreen)
+    near = np.array([not (c_ == EVERGREEN and t.get("drawn") == "lidar") for t, c_ in zip(trees, cls)])
+    xy, ncls = np.array([(t["x"], t["y"]) for t in trees])[near], cls[near]
+    nid = np.nonzero(near)[0]
     gx, gy = np.meshgrid(np.arange(W // 2) * 2 + 1, np.arange(D // 2) * 2 + 1)
     dist, idx = cKDTree(xy).query(np.c_[gx.ravel(), gy.ravel()], distance_upper_bound=9)
     ok = np.isfinite(dist)
-    idx = np.minimum(idx, len(cls) - 1)
-    grid = np.where(ok, cls[idx], 0).astype(np.uint8).reshape(gy.shape)
-    tree = np.where(ok, (idx * 2654435761 >> 13) & 255, 0).astype(np.uint8).reshape(gy.shape)
+    idx = np.minimum(idx, len(ncls) - 1)
+    grid = np.where(ok, ncls[idx], 0).astype(np.uint8).reshape(gy.shape)
+    tree = np.where(ok, (nid[idx] * 2654435761 >> 13) & 255, 0).astype(np.uint8).reshape(gy.shape)
     if CROWNS.exists():
         # where voxelize.py drew a crown, the tree whose crown it is (data/crowns.npz: index into trees.json), not
         # the nearest trunk on this 2 m grid

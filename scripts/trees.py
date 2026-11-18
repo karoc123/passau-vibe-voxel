@@ -82,7 +82,8 @@ def load(osm_trees, buildings=None):
     return out
 
 
-CONIFER = ("Pinus", "Picea", "Abies", "Taxus", "Thuja", "Larix", "Pseudotsuga", "Juniperus", "Chamaecyparis", "Metasequoia")
+CONIFER = ("Pinus", "Picea", "Abies", "Taxus", "Thuja", "Larix", "Pseudotsuga", "Juniperus", "Chamaecyparis", "Metasequoia",
+           "Tsuga", "Cupressocyparis")  # (phenology.py CONIFERS: these and the larches)
 
 
 def is_conifer(t):
