@@ -9,8 +9,11 @@ import { visibility, WEATHERS, type Weather } from './weather';
 // from a twin of the sun, of no intensity, redrawn every frame. The sun's light is dimmed by both.
 const SHADOW = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
 if (!THREE.ShaderChunk.lights_fragment_begin.includes(SHADOW)) throw new Error('three: lights_fragment_begin changed');
+// (NO_MOVING_SHADOW: the city's far tiles, voxelMaterial.ts, look up the sun's map alone)
 THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin.replace(SHADOW, `
-  #if UNROLLED_LOOP_INDEX == 0 && NUM_DIR_LIGHT_SHADOWS > 1
+  #if UNROLLED_LOOP_INDEX == 0 && NUM_DIR_LIGHT_SHADOWS > 1 && defined(NO_MOVING_SHADOW)
+  ${SHADOW}
+  #elif UNROLLED_LOOP_INDEX == 0 && NUM_DIR_LIGHT_SHADOWS > 1
   ${SHADOW.replace(') : 1.0;', ') * getShadow( directionalShadowMap[ 1 ], directionalLightShadows[ 1 ].shadowMapSize, directionalLightShadows[ 1 ].shadowIntensity, directionalLightShadows[ 1 ].shadowBias, directionalLightShadows[ 1 ].shadowRadius, vDirectionalShadowCoord[ 1 ] ) : 1.0;')}
   #elif UNROLLED_LOOP_INDEX != 1
   ${SHADOW}
@@ -96,6 +99,13 @@ export class Daylight {
   }
 
   redrawShadow() { this.sun.shadow.needsUpdate = true; }
+
+  // a restored WebGL context comes back with empty render targets: the sky's light and the city's shadow drawn again
+  restore() {
+    this.envKey = '';
+    this.apply(this.hour);
+    this.redrawShadow();
+  }
 
   // the grid is turned (scripts/aoi.py): compass bearings turn by theta in the scene
   set theta(t: number) { this.northTheta = t; this.apply(this.hour); }

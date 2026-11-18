@@ -87,6 +87,10 @@ addEventListener('keydown', (e) => {
   if (e.key === '/' && !(e.metaKey || e.ctrlKey || e.altKey) && !(e.target as Element).closest?.('input')) { bar.search.input.focus(); e.preventDefault(); }
 });
 tamePinch(renderer.domElement);
+// A lost WebGL context (a GPU reset; on WSL also under load) is restored by three, but what lived only on the GPU is
+// gone: the tiles are meshed again (stream.ts remeshLost), the sky's light and the shadows drawn again
+renderer.domElement.addEventListener('webglcontextlost', () => { console.warn('WebGL context lost'); streamer?.remeshLost(); });
+renderer.domElement.addEventListener('webglcontextrestored', () => { console.warn('WebGL context restored'); daylight.restore(); });
 boot();
 
 function makeRenderer() {

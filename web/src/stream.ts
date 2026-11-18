@@ -21,6 +21,10 @@ export interface TileNode {
   mesh?: THREE.Mesh;
   // a foliage tile: its base tile's mesh without what the grass covers, put in when this one shows (coverBase)
   cover?: THREE.BufferGeometry;
+  // a foliage tile whose cover is in its base tile's mesh
+  covers?: boolean;
+  // meshed again after a lost WebGL context (remeshLost): shown as it was once the new geometry is in
+  remesh?: { visible: boolean };
   data?: ColumnData;
   empty?: boolean;
   dataJob?: Job;
@@ -185,7 +189,7 @@ export class TileStreamer implements ColumnSource {
 
   dropQueued(keep: (n: TileNode) => boolean) {
     this.queue = this.queue.filter((j) => {
-      if (j.state !== 'queued' || keep(j.node)) return true;
+      if (j.state !== 'queued' || keep(j.node) || j.node.remesh) return true;
       if (j.dataOnly) { j.node.dataJob = undefined; j.resolve(); } else this.nodes.delete(j.node.key);
       return false;
     });
@@ -280,13 +284,24 @@ export class TileStreamer implements ColumnSource {
       job?.resolve();
     } else if (n && m.type === 'error') {
       console.warn(m.error);
+      if (n.remesh && n.mesh) { this.group.remove(n.mesh); n.mesh = undefined; }
+      n.remesh = undefined;
       n.state = 'ready'; n.empty = true;
       n.job.resolve();
     } else if (n && m.type === 'node') {
-      if (m.quads) n.mesh = this.makeMesh(m);
-      if (m.base?.quads) n.cover = this.makeGeometry(m.base);
+      const re = n.remesh;
+      n.remesh = undefined;
+      if (re && n.mesh && m.quads) {
+        // (the old geometry is not disposed: what it had on the GPU went with the lost context, and three would only
+        // complain that its buffers belong to no context)
+        n.mesh.geometry = this.makeGeometry(m);
+        n.mesh.visible = n.s === this.clay && re.visible; // (city.ts shows the others again)
+      } else if (m.quads) n.mesh = this.makeMesh(m);
+      if (n.cover) disposeGeometry(n.cover);
+      n.cover = m.base?.quads ? this.makeGeometry(m.base) : undefined;
       if (m.data) this.setData(n, m.data);
       n.state = 'ready';
+      if (re) this.recover(n);
       n.job.resolve();
     }
     this.pump();
@@ -345,7 +360,41 @@ export class TileStreamer implements ColumnSource {
       disposeGeometry(b.mesh.geometry);
       b.mesh.geometry = geo;
       geo.userData.covered = true;
+      f.covers = true;
     } else disposeGeometry(geo);
+  }
+
+  // A lost WebGL context takes every buffer on the GPU with it, and the tiles' vertex arrays went once they were
+  // uploaded (releaseArray): three could not upload them again ("byteLength of null" every frame, nothing drawn). Each
+  // such tile is meshed again instead, in place -- its mesh keeps its material and is hidden until the new geometry
+  // is in -- nearest first as city.ts prioritizes them; keeping the arrays would hold ~200-300 MB more in memory.
+  remeshLost() {
+    let n = 0;
+    for (const t of this.nodes.values()) {
+      const pos = t.mesh?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+      if (!pos || pos.array || t.remesh) continue;
+      t.remesh = { visible: t.mesh!.visible };
+      t.mesh!.visible = false;
+      if (t.state === 'ready') {
+        t.state = 'queued';
+        t.job = makeJob(t, false, t.job.prio);
+        this.queue.push(t.job);
+      }
+      n++;
+    }
+    this.pump();
+    return n;
+  }
+
+  // a re-meshed tile: a foliage tile's cover goes back into its base tile once that has its own new geometry
+  private recover(n: TileNode) {
+    if (n.foliage) {
+      const b = this.nodes.get(this.key(1, n.tx, n.ty));
+      if (n.covers && b && !b.remesh) { n.covers = false; this.coverBase(n); }
+    } else if (n.s === 1) {
+      const f = this.nodes.get(`f/${n.tx}_${n.ty}`);
+      if (f?.covers && f.cover && !f.remesh) { f.covers = false; this.coverBase(f); }
+    }
   }
 
   free(n: TileNode) {

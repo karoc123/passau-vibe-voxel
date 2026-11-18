@@ -755,12 +755,16 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
 const SHADOW_NORMAL_FALLBACK = 'vec3 shadowWorldNormal = vec3( 0.0 );'; // three's fallback without a normal attribute
 if (!THREE.ShaderChunk.shadowmap_vertex.includes(SHADOW_NORMAL_FALLBACK)) throw new Error('three: shadowmap_vertex changed');
 
-// clay: the 8 m stand-in for the city outside the budget (city.ts)
-export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}) {
+// clay: the 8 m stand-in for the city outside the budget (city.ts). far: the distance levels' tiles (city.ts), where a
+// metre is a pixel or less: without the moving things' shadow map (daylight.ts NO_MOVING_SHADOW) -- a car there is two
+// pixels and its shadow less, and traffic is only simulated within ~900 m of the focus anyway. What it costs is in the
+// program, not in the lookup: on an Iris Xe skipping it beyond 1 km, or taking one tap instead of five, saved nothing,
+// while a program without it drew the scene ~20 % faster at the overview, ~40 % over the whole map (tools/farshade.mjs)
+export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.0 });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
-    const defs = `${ZONES_PARS}\n` + (clay ? '#define CLAY\n' : '');
+    const defs = `${ZONES_PARS}\n` + (clay ? '#define CLAY\n' : '') + (far ? '#define NO_MOVING_SHADOW\n' : '');
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         #ifdef PREPASSED
@@ -811,7 +815,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false } = {}
         float aoF = mix(0.55, 1.0, vAO);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
   };
-  mat.customProgramCacheKey = () => `voxel${clay ? '-clay' : ''}`;
+  mat.customProgramCacheKey = () => `voxel${clay ? '-clay' : ''}${far ? '-far' : ''}`;
   return mat;
 }
 
