@@ -34,6 +34,7 @@ const STEP = 1.05, HEAD = 1.9, GRAV = 16, TILT = Math.PI * 0.48, WALK_FOV = 65;
 export class Nav {
   mode: Mode = 'orbit';
   ride: Ride | null = null;
+  controlledRide: Ride | null = null;
   world: World | null = null;
   streamer: TileStreamer | null = null;
   cancelFly: () => void = () => {};
@@ -84,6 +85,8 @@ export class Nav {
   get turning() { return this.turned; }
 
   // ------------------------------------------------------------------ input
+  private get driving() { return this.ride !== null && this.ride === this.controlledRide; }
+
   private axis(pos: Action, neg: Action) { return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0); }
 
   private bindKeys() {
@@ -91,7 +94,7 @@ export class Nav {
       if ((e.target as Element).closest?.('input:not([type=range]), textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       this.shift = e.shiftKey;
       if (e.code === 'Escape') { if (this.mode !== 'orbit') this.flyUp(); return; }
-      if (this.mode === 'fpv') return;
+      if (this.mode === 'fpv' || this.driving) return;
       if (e.code === 'Space' && (this.mode === 'walk' || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.mode === 'walk') { if (this.vy === 0) this.vy = 5.2; } else this.jumpAsked = true;
         e.preventDefault(); return;
@@ -241,7 +244,7 @@ export class Nav {
 
   // a person or vehicle under the click is followed (generous from the air, tight on the street); else walk there
   private tap(cx: number, cy: number) {
-    if (this.mode === 'fpv') return;
+    if (this.mode === 'fpv' || this.driving) return;
     const coarse = coarsePointer(), air = this.mode === 'orbit';
     const ag = this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
     if (ag) { this.startRide(ag); return; }

@@ -171,6 +171,18 @@ stays armed. The drone can settle on the ground and take off again with throttle
 is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
 Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
 
+## Arcade driving prototype
+
+Open `/?view=dom&drive=1`. Select an existing car or click **Follow nearby car**, then **Take the wheel**. W/S (or the
+up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
+loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
+the same car where you stop, and **Esc** takes you back to the map.
+
+The car uses independent road collision tiles from the same 1 m voxel data as FPV, including bridge decks and
+terrain steps. Traffic cars can block the player and recognise the player vehicle in their spatial checks.
+Handling uses an arcade grip model with free steering and reversible impacts. Wheel suspension, deformable bodies,
+and collisions with people, trams or boats are outside this prototype.
+
 ## Known limits
 
 - **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated

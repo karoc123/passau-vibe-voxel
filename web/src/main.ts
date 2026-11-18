@@ -11,6 +11,7 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import type { DrivePrototype } from './nav/drive.prototype';
 import type { FpvPrototype } from './nav/fpv.prototype';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
@@ -60,6 +61,7 @@ const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
 let fpv: FpvPrototype | null = null;
+let drive: DrivePrototype | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -345,6 +347,10 @@ async function boot() {
     const { FpvPrototype } = await import('./nav/fpv.prototype');
     fpv = new FpvPrototype(nav, camera, controls.target, meta);
   }
+  if (qs.get('drive') === '1') {
+    const { DrivePrototype } = await import('./nav/drive.prototype');
+    drive = new DrivePrototype(nav, controls.target, meta);
+  }
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
@@ -356,6 +362,7 @@ renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
   adapt(dt, now);
+  drive?.update(dt);
   nav.update(dt);
   fpv?.update(dt);
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }

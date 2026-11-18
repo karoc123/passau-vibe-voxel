@@ -48,7 +48,7 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
 }
 
 // A small collision cache independent of visibility, render budget and the mesh-worker queue.
-export class FpvCollision {
+export class VoxelCollision {
   readonly width: number;
   readonly depth: number;
   readonly ceiling: number;
@@ -104,6 +104,35 @@ export class FpvCollision {
       }
     }
     return { ground: tile.ground[i], top };
+  }
+
+  roadSurface(x: number, z: number, from: number, clearance: number) {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    if (ix < 0 || iz < 0 || ix >= this.width || iz >= this.depth) return { height: from, blocked: true };
+    const tile = this.tileAt(ix, iz);
+    if (!tile) return null;
+    const i = this.column(ix, iz);
+    const base = tile.base, ceiling = from + 1.07;
+    let height = tile.ground[i], water = false;
+    if (height > ceiling) return { height, blocked: true };
+    for (let j = base.offsets[i]; j < base.offsets[i + 1]; j += 3) {
+      const top = base.data[j] + base.data[j + 1];
+      if (top >= height && top <= ceiling) {
+        height = top;
+        water = this.material[base.data[j + 2]] === MAT.WATER;
+      }
+    }
+    if (water) return { height, blocked: true };
+    // The car can step over 1 m changes in the source terrain. Keep the body clear over lower wheel samples.
+    const bottom = Math.max(height, from - 0.45);
+    for (const layer of [base, tile.foliage]) {
+      for (let j = layer.offsets[i]; j < layer.offsets[i + 1]; j += 3) {
+        const lo = layer.data[j], hi = lo + layer.data[j + 1];
+        if (lo >= bottom + clearance) break;
+        if (hi > bottom && this.material[layer.data[j + 2]] !== MAT.GRASS) return { height, blocked: true };
+      }
+    }
+    return { height, blocked: false };
   }
 
   sweep(p: Vector3, d: Vector3): Sweep {

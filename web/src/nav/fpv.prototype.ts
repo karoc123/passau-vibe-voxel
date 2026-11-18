@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FpvCollision, type ImpactKind, type Sweep } from './fpv-collision';
+import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
 import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fpv-flight';
 import { FpvInput } from './fpv-input';
 import type { Nav } from './nav';
@@ -27,7 +27,7 @@ function button(label: string, run: () => void) {
 // Opt-in Acro prototype. The viewer still owns the camera, render loop and all other navigation modes.
 export class FpvPrototype {
   private readonly radio = new FpvInput();
-  private readonly collision: FpvCollision;
+  private readonly collision: VoxelCollision;
   private readonly flight = new FpvFlight();
   private readonly keys = new Set<string>();
   private readonly spawn = new THREE.Vector3();
@@ -60,7 +60,7 @@ export class FpvPrototype {
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
     private readonly target: THREE.Vector3, meta: Meta) {
-    this.collision = new FpvCollision(meta);
+    this.collision = new VoxelCollision(meta);
     this.impactTint.setAttribute('aria-hidden', 'true');
     this.panel.setAttribute('aria-label', 'FPV Acro');
     this.status.setAttribute('role', 'status');

@@ -1,0 +1,26 @@
+.drive-prototype {
+  position: fixed;
+  bottom: 64px;
+  right: 14px;
+  z-index: 6;
+  max-width: calc(100vw - 28px);
+  padding: 8px 10px;
+  background: #171925f5;
+  color: #fff;
+  border: 1px solid #ffffff30;
+  border-radius: 8px;
+  font: 12px/1.5 Inter, system-ui, sans-serif;
+}
+.drive-prototype button {
+  padding: 4px 8px;
+  border: 1px solid #ffffff45;
+  border-radius: 5px;
+  color: inherit;
+  background: #292d3b;
+  font: inherit;
+  cursor: pointer;
+}
+.drive-prototype button:disabled { opacity: .55; cursor: default; }
+.drive-prototype .drive-speed { font-size: 18px; font-variant-numeric: tabular-nums; }
+.drive-prototype .drive-status:empty { display: none; }
+body.driving :is(#hud, .fpv-prototype) { display: none; }
