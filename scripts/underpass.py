@@ -16,6 +16,7 @@ from aoi import CRS, RAW, to_grid
 
 WALK = None
 IDS = set()
+SKIP = set()  # ways tunnels.py bores through a hill
 FOOT = ("footway", "path", "pedestrian", "cycleway", "corridor")
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
@@ -43,7 +44,7 @@ def ways(osm):
         t = e.get("tags", {})
         if e["type"] != "way" or t.get("highway") not in FOOT + ("steps",) or not e.get("geometry") or None in e["geometry"]:
             continue
-        if t.get("tunnel") == "building_passage" or t.get("indoor") == "yes" or t.get("location") == "indoor":
+        if e["id"] in SKIP or t.get("tunnel") == "building_passage" or t.get("indoor") == "yes" or t.get("location") == "indoor":
             continue
         lv = _levels(t)
         down = t.get("tunnel") == "yes" or t.get("location") == "underground" or any(v < 0 for v in lv)

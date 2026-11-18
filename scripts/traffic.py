@@ -328,7 +328,16 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
         return float(sum(math.dist(a[:2], b[:2]) for a, b in zip(p, p[1:])))
 
     # ---------------- roads
-    rways = [w for w in ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT)
+    import tunnels
+    bored = tunnels.IDS if tunnels.FLOOR is not None else set()
+
+    def bore_z(p):
+        """a way through a hill (tunnels.py): its points at the bored floor, not on the hill over it"""
+        zs = [int(tunnels.FLOOR[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
+        return [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
+
+    rways = [w for w in ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT
+                                                                   or w["id"] in bored)
              and w["tags"].get("access") not in ("no", "private") and w["tags"].get("area") != "yes"]
     sig_nodes = {n for n, t in ntags.items() if t.get("highway") == "traffic_signals" and n in nodes}
     # controllers: cluster signal nodes
@@ -374,6 +383,8 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
             dirs.append((seg[::-1], int(lb), "backward"))
         for s, nl, dname in dirs:
             p = pts_of(s, bridge)
+            if w["id"] in bored:
+                p = bore_z(p)
             L = length(p)
             if L < 1:
                 continue
@@ -475,7 +486,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     # ---------------- pedestrians
     import underpass
     pways = [w for w in ways if (w["tags"]["highway"] in WALK or w["tags"].get("footway") == "sidewalk")
-             and (not underground(w["tags"]) or w["id"] in underpass.IDS) and w["tags"].get("access") not in ("no", "private")]
+             and (not underground(w["tags"]) or w["id"] in underpass.IDS or w["id"] in bored) and w["tags"].get("access") not in ("no", "private")]
     ped_sig = {n for n, t in ntags.items() if t.get("crossing") == "traffic_signals" or t.get("crossing:signals") == "yes"}
     peds, pidx = [], {}
 
@@ -506,7 +517,9 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
         if L < 0.8:
             continue
         up = max(_num(t.get("level"), 0) or 0, _num(t.get("layer"), 0) or 0) >= 1
-        if w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
+        if w["id"] in bored:
+            p = bore_z(p)
+        elif w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
             zs = [int(underpass.WALK[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
             p = [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
         elif vol is not None and not bridge and up:
@@ -788,5 +801,7 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     tin = pickle.load(open("data/cache/traffic_in.pkl", "rb"))
     import underpass
     OPEN_CUT, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
+    import tunnels
+    tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
     json.dump(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), **tin),
               open("web/public/data/traffic.json", "w"), separators=(",", ":"))

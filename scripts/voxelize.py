@@ -2586,10 +2586,14 @@ for f in feats:  # walls may come down only inside an outline that itself stands
 for f in feats:
     if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
         bkind[f["rr"], f["cc"]] = 2
+import tunnels
+_bores = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
 import underpass
+underpass.SKIP = set(tunnels.IDS)
 underpass.build(vol, g, pal, C, osm, note)
 carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
 labels, views = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)
+tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
 
 import labels as labels_mod
 labels = labels_mod.assemble(labels, osm, lambda r, c: int(g[r, c] + (topi[r, c] if bmask[r, c] else 0)))
@@ -2734,7 +2738,7 @@ _tin = dict(g=g, nd_mean=deck_near, surf=qa, water=(gcol == C["water"]) & (_dd <
 if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py)
     import pickle
     Path("data/cache").mkdir(parents=True, exist_ok=True)
-    pickle.dump(dict(_tin, open_cut=OPEN_CUT, walk=underpass.WALK, ids=underpass.IDS), open("data/cache/traffic_in.pkl", "wb"))
+    pickle.dump(dict(_tin, open_cut=OPEN_CUT, walk=underpass.WALK, ids=underpass.IDS, bore=tunnels.FLOOR, bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
 json.dump(traffic.build(note=note, vol=vol, **_tin), open(OUT / "traffic.json", "w"), separators=(",", ":"))
 json.dump(report, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
 
