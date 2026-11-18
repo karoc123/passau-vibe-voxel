@@ -31,6 +31,7 @@ export interface SlopeSink {
 }
 
 const Q = 64;
+const TIDY_OFF = false;
 // A wall's face carries where the wall ends above it, in vattr.w (voxelMaterial.ts: no window past it): WALL_TOP + its
 // height over the ground in metres, up to 61; 127 for 62 and more (no limit). (0 on a wall: not known; 1-64 a roof's
 // plane, SLANT and up a chamfer's)
@@ -316,8 +317,20 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     // riser was), else a gable or the side of a step (the wall's)
     const az = ((r.code - 1) & 63) * (Math.PI / 32), ox = e[0] === 0 ? e[1] : 0, oy = e[0] === 1 ? e[1] : 0;
     const fall = r.flat ? 0 : Math.cos(az) * ox + Math.sin(az) * oy;
-    const pal = fall < 0.4 && wallBelow && !skirt ? below : top;
-    const lit = skirt ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
+    // ... but a side of a cell on an eave that runs at an angle to the grid (a staircase of cells, the roof falling past
+    // the cell's corner: its downhill neighbour is no part of the roof) is a notch in that eave, not a gable: as a
+    // wall's it cut a row of wall-coloured triangles into the roof's edge
+    let eave = false;
+    if (!r.flat && !skirt && reg[n] < 0 && fall > -0.4 && fall < 0.4) {
+      const cx = Math.cos(az), cy = Math.sin(az), dx = Math.abs(cx) > 0.38 ? Math.sign(cx) : 0, dy = Math.abs(cy) > 0.38 ? Math.sign(cy) : 0;
+      const ddx = X + dx, ddy = Y + dy, dn = ddx + S * ddy;
+      eave = ddx >= 0 && ddy >= 0 && ddx < S && ddy < S && (reg[dn] < 0 || bid[dn] !== r.bid || T[dn] < T[c] - 2);
+    }
+    // ... and a step of under a metre to another plane of the same roof is a crease in it (a fragment's edge, a curved
+    // roof's facets), not a wall: in the wall's colour it was a dark or pale triangle in the roof
+    if (!skirt && reg[n] >= 0 && bid[n] === r.bid && Math.max(a0 - cornerOf(n, c, e, 0), a1 - cornerOf(n, c, e, 1)) <= Q) eave = true;
+    const pal = fall < 0.4 && wallBelow && !skirt && !eave ? below : top;
+    const lit = skirt ? r.lit : eave ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
     // (a skirt's top 1/64 m under the slope's edge: on it, it showed through between the two tiles' slopes as a hairline)
     const k = skirt ? 1 : 0;
     vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k, a1 - k, pal, lit, ground[c], bid[c], x0, y0);
@@ -352,7 +365,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
 //   code where its tops fit it within a metre, and so does a column with no plane (0) with 3 or 4 sides in one plane:
 //   each was a region of its own, a facet with a crease round it, or a voxel step, in the middle of a smooth roof
 function tidyPlanes(S: number, T: Uint16Array, shipped: Uint16Array, bid: Int32Array, roofTop: Uint8Array) {
-  const SS = S * S, pc = shipped.slice();
+  const SS = S * S, pc = shipped.slice(); if ((globalThis as { __noTidy?: boolean }).__noTidy !== undefined || TIDY_OFF) return pc;
   const slope = (p: number) => (p - 1) >> 6;
   const grad = (p: number) => {
     const t = Math.tan(slope(p) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
