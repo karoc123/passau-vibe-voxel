@@ -1,0 +1,94 @@
+.fpv-input {
+  color: #f3f5f6;
+  color-scheme: dark;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpv-input summary {
+  padding-block: 4px;
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fpv-input-content {
+  width: min(21rem, 100%);
+  max-height: min(59vh, 24rem);
+  padding: 8px 2px 4px;
+  overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}
+
+.fpv-input-device {
+  display: grid;
+  gap: 4px;
+}
+
+.fpv-input-grid {
+  display: grid;
+  grid-template-columns: auto minmax(60px, 1fr) auto minmax(4ch, auto);
+  gap: 4px 8px;
+  align-items: center;
+  margin-block: 8px;
+}
+
+.fpv-input-grid label {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.fpv-input-grid output {
+  justify-self: end;
+}
+
+.fpv-input-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fpv-input :is(button, select) {
+  min-height: 28px;
+  min-width: 0;
+  background: #262c33;
+  color: inherit;
+  font: inherit;
+  border: 1px solid #64717b;
+  border-radius: 4px;
+}
+
+.fpv-input select {
+  width: 100%;
+  padding-inline: 5px;
+}
+
+.fpv-input button {
+  padding-inline: 7px;
+}
+
+.fpv-input :is(button, select):disabled {
+  opacity: 0.6;
+}
+
+.fpv-input :is(button, select, input, summary):focus-visible {
+  outline: 2px solid #abd8f2;
+  outline-offset: 1px;
+}
+
+.fpv-input-message {
+  margin: 4px 0;
+}
+
+.fpv-input-raw {
+  color: #c1cdd5;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .fpv-input :is(button, select, summary) { min-height: 36px; }
+  .fpv-input-content { font-size: 14px; }
+}

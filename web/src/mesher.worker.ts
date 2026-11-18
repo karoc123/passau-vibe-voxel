@@ -5,10 +5,7 @@
 // out; the clay (8 m) comes without roof palette and is plain voxels.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs, wallTopCode } from './roofs';
-
-export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
-// planes: level 1's roof plane per column (decode), kept with the columns so a foliage job can re-mesh its base tile
-export interface Columns extends RawColumns { ground: Uint8Array; planes?: Uint16Array | null }
+import { decodeTile, type Columns, type RawColumns } from './tile-data';
 
 export interface MeshRequest {
   key: string;
@@ -47,30 +44,19 @@ export async function fetchGzip(url: string) {
   return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 }
 
-export function decode(buf: ArrayBuffer, N: number) {
-  const n2 = (N + 2) * (N + 2);
-  const counts = new Uint16Array(buf, 0, n2), ground = new Uint8Array(buf, n2 * 2, n2);
-  let nr = 0;
-  for (let i = 0; i < n2; i++) nr += counts[i];
-  const end = n2 * 3 + nr * 6, runs = new Uint16Array(buf.slice(n2 * 3, end));
-  // (level 1: the roof plane of each column's top face, scripts/tiles.py)
-  const planes = buf.byteLength >= end + n2 * 2 ? new Uint16Array(buf.slice(end, end + n2 * 2)) : null;
-  return { counts, ground, runs, planes };
-}
-
 const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null });
 const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : [])];
 
 self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   const m = e.data;
   try {
-    const { counts, ground, runs, planes } = decode(await fetchGzip(m.url), m.N);
+    const { counts, ground, runs, planes } = decodeTile(await fetchGzip(m.url), m.N);
     const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
     if (m.dataOnly) {
       post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(7) }, columnBuffers(keep!));
       return;
     }
-    const under = typeof m.under === 'string' ? decode(await fetchGzip(m.under), m.N) : m.under ?? null;
+    const under = typeof m.under === 'string' ? decodeTile(await fetchGzip(m.under), m.N) : m.under ?? null;
     const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
     const base = m.base && under && 'ground' in under
       ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;

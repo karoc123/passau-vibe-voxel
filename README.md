@@ -149,23 +149,26 @@ flags and several predate the current viewer, so expect to adapt them.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
-## FPV prototype
+## FPV Acro prototype
 
-Run `cd web && pnpm dev` and open `/?view=dom&fpv=1`. The panel displays the controller name and live axes after
-a stick movement or button press. Start FPV from an orbit view. W/S moves forward or back, A/D yaws, Q/E banks and
-strafes, R/F changes altitude, and Esc returns to the map.
+Start the viewer with `cd web && pnpm dev` and open `/?view=dom&fpv=1`. Choose an orbit view near where you want to
+start, then click **Open FPV Acro**. On Windows with a controller connected, use the Windows browser and move a stick
+or press a controller button so its axes appear under **Controller setup**.
 
-Default controller assignment is left horizontal/vertical for yaw/lift and right horizontal/vertical for bank/pitch.
-To try a raw device, set `fpvAxes=1,-2,3,-4` in the URL with its four one-based axis numbers in that order. A negative
-number inverts the axis. The prototype assumes centred sticks and applies an 8% dead zone.
+1. Use **Learn axes** and follow the four stick prompts, or select and invert each axis by hand. Standard gamepads start
+   with a Mode 2 layout. The live values should show positive right roll, forward pitch and right yaw.
+2. Use **Calibrate range** to sample both ends of each channel. Leave the attitude sticks centred and lower throttle
+   before finishing. The browser saves the profile for this device on this site.
+3. Lower throttle fully and click **Arm controller**. The drone starts in the air. Around 39% throttle holds altitude
+   when level. Centred attitude sticks hold the current orientation. Set camera tilt before arming.
 
-The stabilised flight mode uses the existing streaming focus and voxel raycasts. Collision uses the best available
-tile data. Thin obstacles, bridges and foliage need verification at flight speed, including whilst tiles load. The
-browser's Gamepad API must expose the controller before its axis mapping can be calibrated.
+**T** resets to the launch point, **Enter** arms the last input source again and **Esc** returns to the map. The keyboard
+option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut throttle. It starts at hover throttle.
 
-Allow roughly 1–2 days for a stabilised mode with a calibrated controller profile and browser checks, or 3–5 days if
-custom calibration and dependable obstacle handling during tile streaming are in scope. Rate/Acro flight would
-also need its own flight model, tuning and playtesting.
+The flight uses independent 1 m collision data for terrain, structures and trees across the whole 3,200 × 1,408 m model.
+A swept drone volume catches thin voxels even at speed. The flight waits if it reaches a tile whose collision data is
+still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
+Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
 
 ## Known limits
 

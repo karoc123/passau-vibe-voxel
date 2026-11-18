@@ -1,0 +1,34 @@
+.fpv-prototype {
+  position: fixed;
+  z-index: 6;
+  bottom: 70px;
+  left: 14px;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(72vh, 710px);
+  overflow: auto;
+  padding: 10px 12px;
+  color: #fff;
+  background: #171925f5;
+  border: 1px solid #ffffff30;
+  border-radius: 10px;
+  font: 12px/1.5 Inter, system-ui, sans-serif;
+}
+.fpv-prototype [hidden] { display: none; }
+.fpv-prototype.in-flight { bottom: 14px; width: max-content; max-width: calc(100vw - 28px); }
+.fpv-prototype .fpv-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.fpv-prototype .fpv-actions button {
+  padding: 4px 8px;
+  border: 1px solid #ffffff45;
+  border-radius: 5px;
+  color: inherit;
+  background: #292d3b;
+  font: inherit;
+  cursor: pointer;
+}
+.fpv-prototype .fpv-actions button:disabled { opacity: .55; cursor: default; }
+.fpv-prototype .fpv-options { margin-top: 6px; }
+.fpv-prototype .fpv-status, .fpv-prototype .fpv-telemetry { margin-bottom: 4px; }
+.fpv-prototype .fpv-telemetry { font-variant-numeric: tabular-nums; color: #c7dbf5; }
+.fpv-prototype .fpv-camera-angle { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+body.fpv #labels { display: none; }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
-import type { Columns, MeshOut, MeshRequest, MeshReply } from './mesher.worker';
+import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
+import type { Columns } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { MAT } from './voxelMaterial';
 import { PAL_ROOF, PAL_WALL } from './chamfer';

@@ -11,7 +11,7 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
-import { FpvPrototype } from './nav/fpv.prototype';
+import type { FpvPrototype } from './nav/fpv.prototype';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -59,7 +59,7 @@ const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
-const fpv = qs.get('fpv') === '1' ? new FpvPrototype(nav, camera, controls.target, qs) : null;
+let fpv: FpvPrototype | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -158,6 +158,7 @@ function applyGfx(c: Partial<Gfx>) {
 
 function onMode(m: Mode, ride: Ride | null) {
   document.body.classList.toggle('walking', m !== 'orbit');
+  document.body.classList.toggle('fpv', m === 'fpv');
   hud?.set(m, ride);
 }
 
@@ -231,6 +232,7 @@ function flyTo(v: Pick<View, 'pos' | 'target' | 'ms'>) {
 // frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
 function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '') {
   if (!world) return;
+  if (nav.mode === 'fpv') nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
   if (nav.mode !== 'orbit') {
@@ -339,6 +341,10 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
+  if (qs.get('fpv') === '1') {
+    const { FpvPrototype } = await import('./nav/fpv.prototype');
+    fpv = new FpvPrototype(nav, camera, controls.target, meta);
+  }
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
