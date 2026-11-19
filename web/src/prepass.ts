@@ -8,8 +8,10 @@ import * as THREE from 'three';
 // own renders of the scene's transparent things find every tile hidden and draw nothing here. What is not a registered
 // tile material (the clay) is left out of it, and drawn as before.
 export class DepthPrepass {
-  // Off unless asked for (?prepass=1 or the graphics panel, settings.ts; or window.__three.prepass().enabled): on an Iris Xe (WSL, D3D12) it cost more
-  // than it saved -- the depth pass ~3.5-5 ms, the colour pass after it no cheaper (tools/gputime.mjs, close-up view)
+  // Set from the graphics settings (?prepass=1|0, the panel; or window.__three.prepass().enabled): on by default only on
+  // an Intel GPU through Direct3D 11 (settings.ts prepassPays), where it halves the scene pass at Oberhaus. On an Iris Xe
+  // under WSL (D3D12) it cost more than it saved -- the depth pass ~3.5-5 ms, the colour pass after it no cheaper
+  // (tools/gputime.mjs, close-up view)
   enabled = false;
   private readonly pre = new Map<THREE.Material, THREE.Material>();
   private readonly swapped: THREE.Mesh[] = [];

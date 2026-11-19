@@ -28,7 +28,7 @@ import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather
 import type { World } from './world';
 import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { DepthPrepass } from './prepass';
-import { type Gfx, Settings } from './settings';
+import { type Gfx, prepassPays, Settings } from './settings';
 import './style.css';
 
 declare global {
@@ -51,7 +51,7 @@ const ceiling = phone ? 0.75e6 : Infinity;
 let level = 0.75;
 const budget = () => (level >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** level));
 // the graphics settings (settings.ts, the ⚙ panel): the resolution scales the render size's pixels
-const gfx = new Settings(phone, innerWidth >= 600);
+const gfx = new Settings(phone, innerWidth >= 600, prepassPays());
 const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2) * gfx.now.res;
 const renderer = makeRenderer();
 const scene = new THREE.Scene();

@@ -18,9 +18,28 @@ export type Preset = 'low' | 'medium' | 'high';
 export const SHADOWS = [0, 1024, 2048, 4096];
 const KEY = 'passau.gfx';
 
+// The depth pre-pass (prepass.ts) by default where it is known to pay: an Intel GPU through ANGLE's Direct3D 11 (Windows
+// Chrome and Edge). On an Iris Xe, 1400 x 900, 6 fresh page loads each, the scene pass's GPU time without / with it:
+// Oberhaus 10.9 (one load in six at 16.5) / 7.6 ms, the overview 11.9 / 11.5, the city 8.0 / 8.0, a street 5.5 / 4.9.
+// Without it the tiles' shader there runs at one of two speeds, chosen per page load and kept (at Oberhaus 10.8 or
+// 16.5 ms; between a fifth and half of the loads slow): the same program, uniforms, draws and render targets, its
+// pixels ~1.7x slower (scissored to a few pixels both took 2.9 ms), not undone by compiling the program afresh or by
+// recreating the shadow maps, render targets or textures. The same shader compiled without its discards (PREPASSED)
+// and drawn the usual way took 10.3 ms on every load, slow or fast before: the driver handles a pixel shader that may
+// discard and writes depth one of two ways. With the pre-pass the costly shader runs without discards, about once per
+// pixel. (WSL's D3D12 on the same GPU: the depth pass cost more than it saved, off.)
+export function prepassPays() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2'), ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? String(gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return /Intel/i.test(name) && /Direct3D11/i.test(name);
+  } catch { return false; }
+}
+
 // High is what the viewer did before there were settings (phones: 2048 shadows, no tilt-shift)
-export function presets(phone: boolean, wide: boolean): Record<Preset, Gfx> {
-  const high: Gfx = { res: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass: false, occl: true };
+export function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
+  const high: Gfx = { res: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true };
   return {
     low: { ...high, res: 0.6, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2 },
     medium: { ...high, res: 0.8, shadow: 2048, tilt: false, lodpx: 1.6 },
@@ -75,8 +94,8 @@ export class Settings {
   readonly now: Gfx;
   private saveT = 0;
 
-  constructor(phone: boolean, wide: boolean) {
-    this.presets = presets(phone, wide);
+  constructor(phone: boolean, wide: boolean, prepass = false) {
+    this.presets = presets(phone, wide, prepass);
     this.defaults = this.presets.high;
     this.now = { ...this.defaults, ...stored(), ...fromQuery(new URLSearchParams(location.search)) };
   }
