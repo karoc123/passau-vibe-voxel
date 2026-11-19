@@ -4,7 +4,8 @@
 //              node's own mesh: city.ts budget), "1f" (a foliage tile's own mesh) and "1c" (its base tile's mesh once
 //              the foliage shows: without the faces the grass covers, stream.ts coverBase; a 1 m tile with its foliage
 //              draws 1c + 1f), required by the viewer (city.ts budget)
-// Needs zones.bin (the buildings split the mesh's faces): scripts/build_data.sh runs it after zones.py.
+// Needs the tiles' buildings (they split the mesh's faces: scripts/tile_fields.py bldg): scripts/build_data.sh runs
+// it after tile_fields.py.
 // usage (in web/): node tools/tris.mjs [data dir, default public/data]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,8 +22,7 @@ const { module: req } = await runnerImport(path.join(web, 'src/tile-request.ts')
 
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const { W, D } = meta, N = meta.tiles.N, levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => a - b);
-const zbuf = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'zones.bin')));
-const ctx = { N, W, D, ...req.paletteFlags(meta.palette), bldMap: { data: new Uint16Array(zbuf.buffer, zbuf.byteOffset, W * D).slice(), W } };
+const ctx = { N, W, D, ...req.paletteFlags(meta.palette) };
 const load = async (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 
 const tris = {};

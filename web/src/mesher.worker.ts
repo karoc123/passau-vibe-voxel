@@ -5,7 +5,7 @@
 // on the way out.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs, wallTopCode } from './roofs';
-import { decodeTile, type Columns, type RawColumns } from './tile-data';
+import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
 
 export interface MeshRequest {
   key: string;
@@ -17,7 +17,6 @@ export interface MeshRequest {
   y0: number;
   keep: boolean;
   dataOnly: boolean;
-  bld: Uint16Array | null;
   // per palette entry, flags (chamfer.ts): PAL_ROOF, roof material, its staircases shaded as the roof
   // plane; PAL_WALL, a building's wall, its diagonal staircases chamfered flat
   roof: Uint8Array | null;
@@ -27,13 +26,13 @@ export interface MeshRequest {
 
 // what the base tile is meshed with (as for its own request), and which palette entries are leaves (not cover: they
 // can be discarded, autumn and winter)
-export interface BaseRemesh { bld: Uint16Array | null; roof: Uint8Array | null; leaf: Uint8Array }
+export interface BaseRemesh { roof: Uint8Array | null; leaf: Uint8Array }
 
 // box: the vertices' bounds, min x y z then max (the geometry's bounding box, made here rather than on the main thread)
 export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array; normals: Float32Array; cuts: Uint32Array; box: Float32Array }
 
 export type MeshReply =
-  | ({ type: 'node'; key: string; dataOnly: boolean; data: Columns | null; base?: MeshOut } & MeshOut)
+  | ({ type: 'node'; key: string; dataOnly: boolean; data: Columns | null; base?: MeshOut; fields?: Fields | null } & MeshOut)
   | { type: 'error'; key: string; dataOnly: boolean; error: string };
 
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
@@ -45,26 +44,27 @@ export async function fetchGzip(url: string) {
   return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 }
 
-const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null });
-const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : [])];
+const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null });
+const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : [])];
 
 // One request's meshes: the tile's own (out), a foliage tile's base tile meshed again (base), and the column data kept
 // (keep; dataOnly: that alone, no mesh). load: a tile file, unzipped (tools/tris.mjs reads them from disk)
+// (the buildings of the columns, bld, come with the tile: every level's own; a foliage tile has none)
 export async function meshJob(m: MeshRequest, load: (url: string) => Promise<ArrayBuffer>) {
-  const { counts, ground, runs, planes } = decodeTile(await load(m.url), m.N);
-  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
-  if (m.dataOnly) return { keep, out: null, base: undefined };
+  const { counts, ground, runs, planes, bld, fields } = decodeTile(await load(m.url), m.N);
+  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld }) : null;
+  if (m.dataOnly) return { keep, out: null, base: undefined, fields: null };
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
-  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
+  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.roof ? bld : null, under, m.roof, planes);
   const base = m.base && under && 'ground' in under
-    ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
-  return { keep, out, base };
+    ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, (under as Columns).bld ?? null, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
+  return { keep, out, base, fields };
 }
 
 self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   const m = e.data;
   try {
-    const { keep, out, base } = await meshJob(m, fetchGzip);
+    const { keep, out, base, fields } = await meshJob(m, fetchGzip);
     if (!out) {
       post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(GROUPS + 1), normals: new Float32Array(GROUPS * 6), cuts: new Uint32Array(8), box: new Float32Array(6) }, columnBuffers(keep!));
       return;
@@ -72,7 +72,8 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
     const transfer: Transferable[] = [];
     for (const o of base ? [out, base] : [out]) transfer.push(o.pos.buffer, o.attr.buffer, o.pal.buffer, o.faces.buffer, o.normals.buffer, o.cuts.buffer, ...(o.bld ? [o.bld.buffer] : []));
     if (keep) transfer.push(...columnBuffers(keep));
-    post({ type: 'node', key: m.key, dataOnly: false, data: keep, ...out, base }, transfer);
+    if (fields) transfer.push(fields.cell.buffer, fields.spill.buffer);
+    post({ type: 'node', key: m.key, dataOnly: false, data: keep, ...out, base, fields }, transfer);
   } catch (err) {
     post({ type: 'error', key: m.key, dataOnly: m.dataOnly, error: String(err) });
   }

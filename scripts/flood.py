@@ -3,12 +3,13 @@ calibrated to a gauge: no gauge readings or historic flood levels are built in.
 
 Input: data/ground.npz (voxelize.py: ground height and top colour), data/prep.npz (the DTM over the river, its real
 water surface on the LiDAR day).
-Output: web/public/data/flood.bin = gzip of two [D, W] uint8 grids,
+Output: data/flood.bin (tile_fields.py puts each node's part into its file) = gzip of two [D, W] uint8 grids,
   spill: the lowest water level (m above the model base) at which the river reaches the cell -- the highest ground on
          the cell's best path from the river (an embankment keeps the land behind it dry until the water tops it); 255 never
   depth: the river bed under the LiDAR-day surface, in decimetres, estimated (LiDAR doesn't see through water): shallow
          shelves off the natural shores and sandbanks, a steep drop off the embanked left bank (the boulevards)
-and web/public/data/flood.json: the LiDAR-day surface and its fall along the map.
+and web/public/data/flood.json: the LiDAR-day surface and its fall along the map, and the river's points every 24 m
+(x, y pairs; where the bed is: web/src/flood.ts shows the level's slider while some are in view).
 """
 import gzip
 import json
@@ -80,11 +81,13 @@ depth = np.clip(np.where(bed, depth, 0), 0, 25.5)
 dd = np.round(depth * 10).astype(np.uint8)
 print("bed depth percentiles (m)", np.percentile(depth[river], [5, 25, 50, 75, 95]).round(2))
 
-with gzip.GzipFile(OUT / "flood.bin", "wb", compresslevel=9, mtime=0) as fh:
+with gzip.GzipFile(Path("data") / "flood.bin", "wb", compresslevel=9, mtime=0) as fh:
     fh.write(spill.tobytes())
     fh.write(dd.tobytes())
 # no gauge: the viewer's slider is in metres above or below this surveyed surface (a calibration to the Passau gauges
 # would add their zero points here)
 json.dump({"base": base, "surface0": round(float(np.polyval(fall, 0)), 3), "fall": round(float(fall[0]), 7),
-           "voxel_top": int(g[river].max())}, open(OUT / "flood.json", "w"))
-print("flood.bin", (OUT / "flood.bin").stat().st_size // 1024, "KB")
+           "voxel_top": int(g[river].max()),
+           "river": [int(v) for y in range(0, D, 24) for x in range(0, W, 24) if dd[y, x] > 0 for v in (x, y)]},
+          open(OUT / "flood.json", "w"))
+print("data/flood.bin", (Path("data") / "flood.bin").stat().st_size // 1024, "KB")

@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import type { Caption } from './caption';
 import type { TileNode, TileStreamer } from './stream';
 import type { ColumnData, Meta, Zones } from './types';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { dataTexture, fetchJson, pushTo } from './util';
 import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';
 import { MAT, makeBuildDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
 import { Occlusion } from './occlusion';
 import { FarGround } from './farground';
+import { FieldPages } from './fields';
 
 const T = 128;
 // The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
@@ -44,13 +45,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   pixelsHigh?: () => number;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
-  const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
+  // (the buildings' boxes: which tiles each one is on; the columns' buildings come with the tiles)
+  const zonesIn = fetchJson<Zones>('data/zones.json');
   caption.show('Terrain', 0, 2 * total);
   const terrain = loadTerrain(meta, scene, d.nx, d.ny, await terrainBin);
-  const [zbuf, zones] = await zonesIn;
+  const zones = await zonesIn;
   document.querySelector('#loading')?.classList.add('hidden');
-  const bld = new Uint16Array(zbuf, 0, W * D);
-  S.bldMap = { data: bld, W };
   const nb = zones.buildings.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
   const shownTex = dataTexture(shown, 128, shown.length / 128, THREE.RedFormat);
   U.uBldOn.value = shownTex;
@@ -61,9 +61,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       for (let tx = Math.floor(x0 / T); tx <= Math.min(d.nx - 1, Math.floor((x1 - 1) / T)); tx++) t.push(index(tx, ty));
     return t;
   };
+  // (by building: as many as there are, at most 16 k with 14-bit ids; by tile only where there are any)
   const tilesOf = zones.buildings.map((b) => tilesIn(b[3], b[4], b[5], b[6]));
-  const onTile = Array.from({ length: total }, () => [] as number[]);
-  tilesOf.forEach((t, i) => t.forEach((k) => onTile[k].push(i)));
+  const onTile = new Map<number, number[]>(), none: number[] = [], bldsOn = (i: number) => onTile.get(i) ?? none;
+  tilesOf.forEach((t, i) => t.forEach((k) => pushTo(onTile, k, i)));
 
   // the view distance: which tiles are in range of the camera (along the ground), with the hysteresis above. Only the
   // tiles of a window around the camera are looked at (the distance + KEEP_M: none further can be in range), and those
@@ -113,8 +114,9 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
   terrain.each((i) => farAdd(i, 1));
   const dropPiece = (i: number) => { if (terrain.drop(i)) farAdd(i, -1); };
-  const bldAt = (x: number, y: number) => bld[Math.min(D - 1, Math.round(y)) * W + Math.min(W - 1, Math.round(x))] - 1;
-  const landmarks = [...new Set(meta.labels.map((l) => bldAt(l.x, l.y)).filter((b) => b >= 0))], isLandmark = new Set(landmarks);
+  // the building under each label (zones.json labels)
+  const labelBld = meta.labels.map((_, i) => (zones.labels?.[i] ?? 0) - 1);
+  const landmarks = [...new Set(labelBld.filter((b) => b >= 0))], isLandmark = new Set(landmarks);
   const lmPrio = new Map<number, number>();
   landmarks.forEach((b, j) => tilesOf[b].forEach((k) => { if (!lmPrio.has(k)) lmPrio.set(k, 1e6 - j); }));
 
@@ -301,6 +303,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (const n of chosen.values()) S.request(n.s, n.tx, n.ty, nodePrio(n, f), n.s === 1);
   };
 
+  // what the shader reads of the nodes shown (fields.ts): their pages, given and taken back with shownN
+  const pages = new FieldPages(U, d.nx, d.ny);
   const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U), farMat = makeVoxelMaterial(U, { far: true });
   prepass?.add(farMat, makeVoxelPrepassMaterial(U));
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
@@ -382,8 +386,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       if (n.s !== 1 || stage < 3) return true;
       return S.nodes.get(`f/${n.tx}_${n.ty}`)?.state === 'ready';
     };
-    const showN = (n: LNode) => { shownN.set(n.key, n); touched.push(n); };
-    const hideN = (p: LNode) => { if (shownN.delete(p.key)) touched.push(p); };
+    const showN = (n: LNode) => { shownN.set(n.key, n); touched.push(n); pages.show(n.key, n.s, n.tx, n.ty, S.nodes.get(n.key)?.fields); };
+    const hideN = (p: LNode) => { if (shownN.delete(p.key)) { touched.push(p); pages.hide(p.key); } };
     for (const [k, p] of shownN) {
       // gone (freed elsewhere), or none of it in range of the view distance any more
       if (S.nodes.get(k)?.state !== 'ready' || (cut && !nodeIn(p))) hideN(p);
@@ -436,7 +440,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       occDirty.add(i);
       if (!inTile[i]) continue;
       if (stage >= 2) dropPiece(i);
-      for (const b of onTile[i]) if (!complete[b] && tilesOf[b].every((k) => inTile[k])) {
+      for (const b of bldsOn(i)) if (!complete[b] && tilesOf[b].every((k) => inTile[k])) {
         complete[b] = 1;
         if (isLandmark.has(b) || stage >= 2) { show(b); changed = true; }
       }
@@ -471,6 +475,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     if (stage >= 3) terrain.dispose();
     far.on = !!cut;
     far.flush();
+    pages.flush();
     if (changed) shownTex.needsUpdate = true;
     // queued jobs no longer chosen (with the distance levels)
     if (lodOn) S.dropQueued((n) => n.pinned > now || chosen.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key));
@@ -517,7 +522,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   function occluders() {
     for (const i of occDirty) {
       const tx = i % d.nx, ty = Math.floor(i / d.nx), src: ColumnData[] = [];
-      if (stage >= 2 && inTile[i] && onTile[i].every((b) => shown[b + 1])) for (const s of lods) {
+      if (stage >= 2 && inTile[i] && bldsOn(i).every((b) => shown[b + 1])) for (const s of lods) {
         const nd = S.nodes.get(S.key(s, Math.floor(tx / s), Math.floor(ty / s)));
         // (a node meshed again after a lost context is not drawn until then: it hides nothing meanwhile)
         if (nd?.remesh) { src.length = 0; break; }
@@ -531,7 +536,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     occDirty.clear();
   }
 
-  const labelled = new Map(meta.labels.map((l) => [`${l.x + 0.5},${l.y + 0.5}`, bldAt(l.x, l.y)]));
+  const labelled = new Map(meta.labels.map((l, i) => [`${l.x + 0.5},${l.y + 0.5}`, labelBld[i]]));
   return {
     // a building's label once it shows; the others (parks, the river) with the foliage
     gate: (x: number, z: number) => { const b = labelled.get(`${x},${z}`) ?? -1; return b >= 0 ? shown[b + 1] > 0 : stage >= 4; },

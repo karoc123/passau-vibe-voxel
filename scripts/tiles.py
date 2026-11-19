@@ -7,14 +7,15 @@ triangles), and where the viewer's triangle budget is spent (8 m: the whole map 
 Every node holds N x N cells (N = 128, so a node spans 128 * s metres) plus a 1-cell apron on each side for face
 culling and AO at the node edge.
 
-Node file  tiles/{s}/{nx}_{ny}.bin, gzip of:
-  counts  uint16[(N+2)^2]   runs per column (apron included, row-major, row = south)
-  ground  uint8 [(N+2)^2]   ground level in metres (z of the first free voxel at level 1), for the facade shader
+Node file  tiles/{s}/{nx}_{ny}.bin: the container of scripts/tilefile.py (gzip, a small header and tagged sections):
+  cnts    uint16[(N+2)^2]   runs per column (apron included, row-major, row = south)
+  grnd    uint8 [(N+2)^2]   ground level in metres (z of the first free voxel at level 1), for the facade shader
   runs    uint16[3 * sum]   (z0, len, palette) per run, z in cells of the level, bottom -> top
-  planes  uint16[(N+2)^2]   levels 1, 2, 4 and 8 (not in 1f/): the roof plane of the column's top face, 0 for
+  plns    uint16[(N+2)^2]   levels 1, 2, 4 and 8 (not in 1f/): the roof plane of the column's top face, 0 for
                             none -- 1 + slope (2.5 degree steps) x 64 + downhill direction (64 steps), as
                             web/src/mesher.worker.ts lights it; at 2 m the most common plane of the column's 1 m
                             columns (a slope and its direction don't change with the cell size), at 4 m of its 4 x 4
+  (bldg, flod, fols, spil: the buildings, the rivers' levels, foliage and window light per cell, added by tile_fields.py)
 
 Foliage at level 1 is its own file, loaded after every building (web/src/city.ts): tiles/1f/{nx}_{ny}.bin, the same
 format, holding only trees, trunks and grass (`fol_ids`, `grass_ids`); in tiles/1/ trees and trunks are left out and
@@ -27,7 +28,7 @@ Levels 2, 4 and 8: a cell is solid when at least a quarter of its block is; its 
 block, so roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
 Levels 4 and 8 also keep a deck over open air that the level below has (downsample's finer).
 """
-import gzip
+import tilefile
 
 import numpy as np
 
@@ -244,13 +245,13 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
                     fol = np.where(f, win, 0).astype(np.uint16)
                     win = np.where(f, np.where(is_grass[win], bare_id, 0), win).astype(np.uint16)
                     fc, fr = column_runs(fol)
-                    with gzip.GzipFile(out / "1f" / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
-                        fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
+                    tilefile.write(out / "1f" / f"{tx}_{ty}.bin", dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
                     ftot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
                 counts, runs = column_runs(win)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(ps, r0, c0)
-                with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:  # mtime 0: rebuilds of unchanged nodes stay byte-identical
-                    fh.write(blob)
+                sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
+                if ps is not None:
+                    sec["plns"] = plane_window(ps, r0, c0)
+                tilefile.write(out / str(s) / f"{tx}_{ty}.bin", sec)
                 tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
                 nruns += len(runs)
         info["levels"].append(dict(s=s, nx=nx, ny=ny))
@@ -292,16 +293,16 @@ def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(),
                     fv = np.where(f, win, 0).astype(np.uint16)
                     win = np.where(f, np.where(grass[win], bare_id, 0), win).astype(np.uint16)
                     fc, fr = column_runs(fv)
-                    with gzip.GzipFile(out / "1f" / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
-                        fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
+                    tilefile.write(out / "1f" / f"{tx}_{ty}.bin", dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
                 counts, runs = column_runs(win)
                 pw = None
                 if planes is not None and (s == 1 or s in LOD_LEVELS):
                     p1 = np.zeros((span + 2 * s, span + 2 * s), np.uint16)
                     p1[ra - a:rb - a, ca - c:cb - c] = planes[ra:rb, ca:cb]
                     pw = downsample_planes(p1, s)
-                blob = counts.tobytes() + gw.tobytes() + runs.tobytes() + plane_window(pw, 0, 0)
-                with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
-                    fh.write(blob)
+                sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
+                if pw is not None:
+                    sec["plns"] = plane_window(pw, 0, 0)
+                tilefile.write(out / str(s) / f"{tx}_{ty}.bin", sec)
                 n += 1
-    note(f"tiles: {n} nodes rewritten over rows {R0}-{R1}, cols {C0}-{C1}")
+    note(f"tiles: {n} nodes rewritten over rows {R0}-{R1}, cols {C0}-{C1} (without their bldg/flod/fols/spil: run tile_fields.py)")

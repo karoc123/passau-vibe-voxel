@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
-import type { Columns } from './tile-data';
+import type { Columns, Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 
@@ -23,6 +23,8 @@ export interface TileNode {
   // meshed again after a lost WebGL context (remeshLost): hidden until the new geometry is in (city.ts shows it again)
   remesh?: boolean;
   data?: ColumnData;
+  // what the shader reads of it while it shows (fields.ts; not a foliage tile's)
+  fields?: Fields | null;
   empty?: boolean;
   dataJob?: Job;
   ready: Promise<void>;
@@ -147,9 +149,6 @@ export class TileStreamer implements ColumnSource {
   readonly group = new THREE.Group();
   readonly world: World;
   version = 0;
-  // the building of each 1 m column (zones.bin): city.ts sets it once loaded
-  get bldMap() { return this.ctx.bldMap; }
-  set bldMap(m: TileContext['bldMap']) { this.ctx.bldMap = m; }
   update: (camera: THREE.Camera) => void = () => {};
   // the jobs waiting, a binary max-heap by prio (pump takes the first; a new priority moves a job in it, or, for many at
   // once, marks it for one heapify before the next take: stale)
@@ -166,7 +165,7 @@ export class TileStreamer implements ColumnSource {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
-    this.ctx = { N: this.N, W: meta.W, D: meta.D, ...paletteFlags(meta.palette), bldMap: null };
+    this.ctx = { N: this.N, W: meta.W, D: meta.D, ...paletteFlags(meta.palette) };
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -337,14 +336,14 @@ export class TileStreamer implements ColumnSource {
   private requestFor({ node: n, dataOnly }: Job): { msg: MeshRequest; transfer: Transferable[] } {
     const file = (k: string) => new URL(`data/tiles/${k}.bin`, location.href).href;
     const msg = tileRequest(this.ctx, n.s, n.tx, n.ty, n.foliage, file, n.keep, dataOnly);
-    const transfer: Transferable[] = [...[msg.bld, msg.base?.bld].flatMap((b) => (b ? [b.buffer] : []))];
+    const transfer: Transferable[] = [];
     if (n.foliage) {
       // the base tile's column data is still here: hand over a copy instead of fetching it again
       const b = this.nodes.get(this.key(1, n.tx, n.ty))?.data;
       if (b) {
-        const under: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null };
+        const under: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null };
         msg.under = under;
-        transfer.push(under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : []));
+        transfer.push(under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : []), ...(under.bld ? [under.bld.buffer] : []));
       }
     }
     return { msg, transfer };
@@ -377,6 +376,7 @@ export class TileStreamer implements ColumnSource {
       if (n.cover) disposeGeometry(n.cover);
       n.cover = m.base?.quads ? this.makeGeometry(m.base) : undefined;
       if (m.data) this.setData(n, m.data);
+      if (m.fields) n.fields = m.fields;
       n.state = 'ready';
       if (re) this.recover(n);
       n.job.resolve();
@@ -426,11 +426,11 @@ export class TileStreamer implements ColumnSource {
     return this.quadIdx;
   }
 
-  private setData(n: TileNode, { counts, ground, runs, planes }: { counts: Uint16Array; ground: Uint8Array; runs: Uint16Array; planes?: Uint16Array | null }) {
+  private setData(n: TileNode, { counts, ground, runs, planes, bld }: Columns) {
     const S = this.N + 2, off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + counts[i];
     const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
-    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null };
+    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null, bld: bld ?? null };
     this.version++;
   }
 

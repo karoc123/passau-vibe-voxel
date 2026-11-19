@@ -1,11 +1,13 @@
-"""What every building is, for its lit windows at night: a 1 m map of kind (residential, office, hotel, retail, public,
+"""What every building is, for its lit windows at night: its kind (residential, office, hotel, retail, public,
 religious, other) and a per-building number the viewer turns into that building's own habits.
 
 Kind from the OSM building tag, else from what the footprint or the points inside it are (office=*, tourism=hotel, shop,
 amenity), else from the landuse around it.
 
-Output web/public/data/windows.bin: gzip of uint8[D, W], kind in the low 3 bits (0: no building), the building's
-number (0-31) in the high 5.
+Output web/public/data/windows.bin: gzip of uint8[buildings + 1], per building id of zones.py (the same buildings in
+the same order; 0: none), kind in the low 3 bits, the building's number (0-31) in the high 5. The viewer looks it up by
+the building each face carries (voxelMaterial.ts building()); tile_fields.py by each column's building, for the light
+the windows spill on the street.
 """
 import gzip
 from collections import Counter
@@ -69,10 +71,14 @@ def main():
         count[k] += g.area
         habit = (i * 2654435761 >> 7) % 32
         vals[oid] = KINDS.index(k) | habit << 3
-    # the footprints as voxelize.py drew them (moved onto LoD2's)
-    grid, _ = footprints(vals, lambda k: KINDS.index("other") | ((len(blds) + k) * 2654435761 >> 7) % 32 << 3)
-    grid = grid.astype(np.uint8)
-    OUT.write_bytes(gzip.compress(grid.tobytes(), mtime=0))
+    # the buildings as zones.py numbers them: blds in this order, then those from LoD2 alone (footprints.npz)
+    _, n_extra = footprints({})
+    table = np.zeros(len(blds) + n_extra + 1, np.uint8)
+    for i, (g, t, oid) in enumerate(blds):
+        table[i + 1] = vals[oid]
+    for k in range(n_extra):
+        table[len(blds) + 1 + k] = KINDS.index("other") | ((len(blds) + k) * 2654435761 >> 7) % 32 << 3
+    OUT.write_bytes(gzip.compress(table.tobytes(), mtime=0))
     total = sum(count.values())
     print({k: f"{v / total:.0%}" for k, v in count.most_common()}, OUT.stat().st_size, "bytes")
 

@@ -58,17 +58,22 @@ export interface FloodInfo {
   surface0: number;
   fall: number;
   voxel_top?: number;
+  // the river's points every 24 m, x y pairs (scripts/flood.py)
+  river: number[];
 }
 
-// zones.json (scripts/zones.py): per building [cx, cy, columns, x0, y0, x1, y1]
+// zones.json (scripts/zones.py): per building [cx, cy, columns, x0, y0, x1, y1]; per label of meta.json, the building
+// under it (0: none, else id + 1)
 export interface Zones {
   buildings: number[][];
+  labels: number[];
 }
 
 export type Place = [name: string, kind: string, x: number, y: number, size: number, alt: string];
 
 export interface ColumnData {
   planes?: Uint16Array | null; // level 1: roof plane per column (mesher.worker.ts decode), for re-meshing
+  bld?: Uint16Array | null; // the building per column (tile_fields.py bldg), for re-meshing
   s: number;
   x0: number;
   y0: number;

@@ -2,31 +2,35 @@ import * as THREE from 'three';
 import { CLOUD_GLSL, cloudUniforms } from './clouds';
 import type { FloodInfo, Meta } from './types';
 import { MAT, REFL_MAX, type VoxelUniforms } from './voxelMaterial';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { fetchJson } from './util';
+import { FIELDS_GLSL } from './fields';
 
 // The rivers' level (scripts/flood.py). The voxels hold the rivers as on the survey day. Above that, one sheet of water
 // covers every cell the river reaches at that level (an embankment keeps the land behind it dry until topped), sloping
-// with the surveyed surface; below it, the shallows of the schematic bed turn into sandbanks (uDrop).
+// with the surveyed surface; below it, the shallows of the schematic bed turn into sandbanks (uDrop). Where the river
+// reaches at which level, and its bed, come with the tiles (scripts/tile_fields.py flod, fields.ts): the sheet shows
+// over the nodes shown.
+const BUCKET = 512;
 export class Flood {
   info: FloodInfo | null = null;
   private mesh: THREE.Mesh | null = null;
   private readonly uLevel = { value: 0 };
-  private river: THREE.Vector3[] = [];
+  // the river's points (flood.json, every 24 m) by BUCKET m square, row-major
+  private river = new Map<number, THREE.Vector3[]>();
+  private bw = 1;
   private readonly frustum = new THREE.Frustum();
 
   constructor(private readonly scene: THREE.Scene, private readonly U: VoxelUniforms, private readonly meta: Meta) {}
 
   async load() {
-    const [info, buf] = await Promise.all([fetchJson<FloodInfo>('data/flood.json'), fetchGzip('data/flood.bin')]);
-    const { W, D } = this.meta, n = W * D, a = new Uint8Array(buf), rg = new Uint8Array(n * 2);
-    for (let i = 0; i < n; i++) { rg[2 * i] = a[i]; rg[2 * i + 1] = a[n + i]; }
-    const tex = dataTexture(rg, W, D, THREE.RGFormat);
-    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    const info = await fetchJson<FloodInfo>('data/flood.json');
+    const { W, D } = this.meta, r = info.river ?? [];
     this.info = info;
-    for (let y = 0; y < D; y += 24) for (let x = 0; x < W; x += 24) {
-      if (a[n + y * W + x] > 0) this.river.push(new THREE.Vector3(x, info.surface0 + info.fall * y - info.base, y));
+    this.bw = Math.ceil(W / BUCKET);
+    for (let k = 0; k < r.length; k += 2) {
+      const x = r[k], y = r[k + 1], b = Math.floor(y / BUCKET) * this.bw + Math.floor(x / BUCKET);
+      (this.river.get(b) ?? this.river.set(b, []).get(b)!).push(new THREE.Vector3(x, info.surface0 + info.fall * y - info.base, y));
     }
-    this.U.uFlood.value = tex;
     const g = new THREE.PlaneGeometry(W, D, 1, 1).rotateX(-Math.PI / 2).translate(W / 2, 0, D / 2);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) p.setY(i, info.surface0 + info.fall * p.getZ(i) - info.base);
@@ -37,9 +41,14 @@ export class Flood {
     this.scene.add(this.mesh);
   }
 
+  // some of the river within far of the camera and in its view (only the squares within far are looked at)
   inView(camera: THREE.Camera, far: number) {
     this.frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    return this.river.some((p) => this.frustum.containsPoint(p) && p.distanceTo(camera.position) < far);
+    const c = camera.position, bh = Math.ceil(this.meta.D / BUCKET);
+    for (let by = Math.max(0, Math.floor((c.z - far) / BUCKET)); by <= Math.min(bh - 1, Math.floor((c.z + far) / BUCKET)); by++)
+      for (let bx = Math.max(0, Math.floor((c.x - far) / BUCKET)); bx <= Math.min(this.bw - 1, Math.floor((c.x + far) / BUCKET)); bx++)
+        if (this.river.get(by * this.bw + bx)?.some((p) => this.frustum.containsPoint(p) && p.distanceTo(c) < far)) return true;
+    return false;
   }
 
   // metres above (or below) the level on the survey day
@@ -70,15 +79,15 @@ export class Flood {
       blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.ZeroFactor, blendAlpha: 0.92 });
     const uRiver = { value: this.riverColour() };
     mat.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, { uFlood: this.U.uFlood, uLevel: this.uLevel, uTime: this.U.uTime, uHorizon: this.U.uHorizon, uRiver, ...cloudUniforms });
+      Object.assign(sh.uniforms, { uPageIdx: this.U.uPageIdx, uPageF: this.U.uPageF, uPageS: this.U.uPageS, uLevel: this.uLevel, uTime: this.U.uTime, uHorizon: this.U.uHorizon, uRiver, ...cloudUniforms });
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uLevel; varying vec3 vW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.y += uLevel; vW = transformed;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', `#include <common>\nuniform sampler2D uFlood; uniform float uTime; uniform vec3 uHorizon; uniform vec3 uRiver; varying vec3 vW;\n${CLOUD_GLSL}`)
+        .replace('#include <common>', `#include <common>\n${FIELDS_GLSL}\nuniform float uTime; uniform vec3 uHorizon; uniform vec3 uRiver; varying vec3 vW;\n${CLOUD_GLSL}`)
         .replace('#include <lights_fragment_begin>', '#include <lights_fragment_begin>\n{ float cs = cloudShade(vW); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }')
         .replace('#include <color_fragment>', `#include <color_fragment>
-          float spill = texelFetch(uFlood, ivec2(floor(vW.xz)), 0).r * 255.0;
+          float spill = riverAt(floor(vW.xz) + 0.5).x;
           if (spill >= vW.y) discard;
           vec2 cl = floor(vW.xz);
           float r = sin(cl.x * 0.9 + uTime * 1.3) * sin(cl.y * 1.1 - uTime) * 0.5 + 0.5;

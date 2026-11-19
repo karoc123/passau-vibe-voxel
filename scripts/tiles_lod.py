@@ -5,15 +5,15 @@ the ground level, tiles/1's trailing plane codes the roof planes. Level 1 itself
 manifest is updated.
 
 usage: uv run python scripts/tiles_lod.py [--check]   (levels 2, 4 and 8, ~2 min; --check: only compare the rebuilt
-      level 8 with the one there)
+      level 8 with the one there). The rebuilt nodes lack the per-cell sections: run scripts/tile_fields.py after it.
 """
-import gzip
 import json
 import sys
 from pathlib import Path
 
 import numpy as np
 
+import tilefile
 import tiles
 
 OUT = Path("web/public/data")
@@ -21,13 +21,11 @@ CLOCK = 14  # voxelMaterial.ts MAT.CLOCK (voxelize.py M_CLOCK)
 
 
 def read_node(path, N, planes=False):
-    buf = gzip.decompress(path.read_bytes())
-    n2 = (N + 2) ** 2
-    counts = np.frombuffer(buf, np.uint16, n2)
-    ground = np.frombuffer(buf, np.uint8, n2, n2 * 2)
-    nr = int(counts.sum())
-    runs = np.frombuffer(buf, np.uint16, nr * 3, n2 * 3).reshape(-1, 3)
-    pl = np.frombuffer(buf, np.uint16, n2, n2 * 3 + nr * 6) if planes and len(buf) >= n2 * 5 + nr * 6 else None
+    sec = tilefile.read(path, N)
+    counts = np.frombuffer(sec["cnts"], np.uint16)
+    ground = np.frombuffer(sec["grnd"], np.uint8)
+    runs = np.frombuffer(sec["runs"], np.uint16).reshape(-1, 3)
+    pl = np.frombuffer(sec["plns"], np.uint16) if planes and "plns" in sec else None
     return counts, ground, runs, pl
 
 
@@ -89,8 +87,9 @@ def main():
                         planes=planes, wall_ids=walls)
     tiles.LEVELS = keep
     if "--check" in sys.argv:
-        same = sum((tmp / "8" / p.name).read_bytes() == p.read_bytes() for p in (OUT / "tiles" / "8").glob("*.bin"))
-        print(f"level 8 rebuilt: {same} of {len(list((OUT / 'tiles' / '8').glob('*.bin')))} node files byte-identical")
+        voxels = lambda p: {k: v for k, v in tilefile.read(p, N).items() if k in ("cnts", "grnd", "runs", "plns")}
+        same = sum(voxels(tmp / "8" / p.name) == voxels(p) for p in (OUT / "tiles" / "8").glob("*.bin"))
+        print(f"level 8 rebuilt: {same} of {len(list((OUT / 'tiles' / '8').glob('*.bin')))} node files with identical voxels")
         return
     lv = {1: l1}  # level 1 as it is; the others as just built (a level no longer in tiles.LEVELS goes)
     for l in info["levels"]:

@@ -345,15 +345,14 @@ async function boot() {
   views = meta.views;
   applyGfx(gfx.now);
   uniforms = makeUniforms(meta);
-  const foliage = loadFoliage(meta, uniforms), windows = loadWindows(meta, uniforms);
+  const foliage = loadFoliage(uniforms), windows = loadWindows(uniforms);
   foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
     .catch((e) => console.warn('foliage', e));
   windows.then(({ set }) => { setWindows = set; }).catch((e) => console.warn('windows', e));
-  // the terrain (scripts/terrain.py), fetched once: the city's first ground and its far ground (city.ts, farground.ts),
-  // and where the street lights go, with the buildings and the woods
+  // the terrain (scripts/terrain.py), fetched once: the city's first ground and its far ground (city.ts, farground.ts)
   const terrain = fetchGzip('data/terrain.bin');
-  const ground = Promise.all([windows, foliage, terrain])
-    .then(([w, f, terrain]) => ({ buildings: w.cells, trees: f.trees, terrain })).catch(() => null);
+  // the street lamps placed along the streets (streetlamps.ts, web/tools/lamps.mjs)
+  const streetLamps = fetchJson<{ lamps: [number, number, number][] }>('data/streetlamps.json').then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
   streamer = new TileStreamer(meta, tileMat, scene);
   prepass = new DepthPrepass(streamer.group, scene);
@@ -390,7 +389,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
-    ground.then((g) => { lampHeads = new LampHeads(scene, lightStreets(uniforms!, meta, td.roads, td.peds, g)); });
+    streetLamps.then((placed) => { lightStreets(uniforms!, placed); lampHeads = new LampHeads(scene, placed); });
     life = nav.life = new StreetLife(scene, td);
     movingActors.add(life.group);
     life.world = world;
@@ -496,7 +495,8 @@ function stillChanged() {
   }
   if (n !== casting.size) for (const [m, g] of casting) if (!m.visible || m.parent !== streamer.group) { add(g); casting.delete(m); }
   daylight.changed(boxes);
-  const U = uniforms, key = `${U.uStage.value},${U.uBldOn.value.version},${U.uFolOn.value},${U.uDay.value},${U.uFolMap.value.id}`;
+  // (and once the city is complete: its foliage, which the leaves' shadows depend on, came with the last tiles)
+  const U = uniforms, key = `${U.uStage.value},${U.uBldOn.value.version},${U.uFolOn.value},${U.uDay.value},${city?.complete}`;
   if (key === stillKey) return false;
   stillKey = key;
   return true;

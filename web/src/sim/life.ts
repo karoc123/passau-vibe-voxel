@@ -19,7 +19,7 @@ const BOX_IN = 7, BOX_OUT = 9;
 const STEP = 1 / 30;
 const TRAM = { sec: 10.5, gap: 0.6, n: 3, v: 11, a: 1.0, b: 1.6, headway: 300 };
 const TRAM_LEN = TRAM.n * (TRAM.sec + TRAM.gap);
-const ACTIVE_R = 900;
+const ACTIVE_R = 900, ACTIVE_CELL = 300;
 const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'keep-crossing-clear', 'next-edge-car', 'tram-crossing', 'tram'];
@@ -69,9 +69,15 @@ export class StreetLife {
   private active: { x: number; z: number } | null = null;
   private roadOn: boolean[] = [];
   private pedOn: boolean[] = [];
+  // the ways in the circle (their indices) and the weights to pick them by, in the same order
+  private roadAct: number[] = [];
+  private pedAct: number[] = [];
+  private bikeAct: number[] = [];
   private roadW: number[] = [];
   private pedW: number[] = [];
   private bikeW: number[] = [];
+  // the roads and footways by ACTIVE_CELL m cell of their ends and middle, for setActive (built on its first call)
+  private wayGrid: { roads: Map<number, number[]>; peds: Map<number, number[]> } | null = null;
   private bikeKm = 0;
   private sources: number[] = [];
   private laneKm = 0;
@@ -128,16 +134,41 @@ export class StreetLife {
   // ------------------------------------------------------------------ the area around the camera
   // Only a circle around the focus is simulated: roads leaving it are exits, roads entering it are sources, and
   // agents left outside are removed. Trams run everywhere.
+  // (the ways looked at are those with an end or the middle in the cells the circle touches, not all of the map's)
   private setActive(x: number, z: number) {
-    const R = ACTIVE_R, near = (e: { p: number[][] }) => [e.p[0], e.p[e.p.length >> 1], e.p[e.p.length - 1]].some((q) => (q[0] - x) ** 2 + (q[1] - z) ** 2 < R * R);
-    this.roadOn = this.roads.map(near);
-    this.pedOn = this.peds.map(near);
-    this.roadW = this.roads.map((e, i) => (this.roadOn[i] ? e.L * e.lanes * e.c : 0));
-    this.laneKm = this.roads.reduce((a, e, i) => a + (this.roadOn[i] ? e.L * e.lanes : 0), 0) / 1000;
-    this.sources = this.roads.filter((e, i) => this.roadOn[i] && e.L > 15 && !(this.ins.get(e.a) ?? []).some((j) => this.roadOn[j])).map((e) => e.i);
-    this.pedW = this.peds.map((e, i) => (this.pedOn[i] ? e.L * e.w : 0));
-    this.pedKm = this.peds.reduce((a, e, i) => a + (this.pedOn[i] ? e.L : 0), 0) / 1000;
-    this.bikeW = this.peds.map((e, i) => (this.pedOn[i] && e.bk ? e.L * e.bk : 0));
+    const R = ACTIVE_R, probes = (e: { p: number[][] }) => [e.p[0], e.p[e.p.length >> 1], e.p[e.p.length - 1]];
+    const near = (e: { p: number[][] }) => probes(e).some((q) => (q[0] - x) ** 2 + (q[1] - z) ** 2 < R * R);
+    const C = ACTIVE_CELL, key = (cx: number, cy: number) => cy * 65536 + cx;
+    if (!this.wayGrid) {
+      const index = (ways: { p: number[][] }[]) => {
+        const g = new Map<number, number[]>();
+        ways.forEach((e, i) => { for (const k of new Set(probes(e).map((q) => key(Math.floor(q[0] / C), Math.floor(q[1] / C))))) pushTo(g, k, i); });
+        return g;
+      };
+      this.wayGrid = { roads: index(this.roads), peds: index(this.peds) };
+      this.roadOn = new Array(this.roads.length).fill(false);
+      this.pedOn = new Array(this.peds.length).fill(false);
+    }
+    const inCircle = (g: Map<number, number[]>, ways: { p: number[][] }[]) => {
+      const out = new Set<number>();
+      for (let cy = Math.floor((z - R) / C); cy <= Math.floor((z + R) / C); cy++)
+        for (let cx = Math.floor((x - R) / C); cx <= Math.floor((x + R) / C); cx++)
+          for (const i of g.get(key(cx, cy)) ?? []) if (!out.has(i) && near(ways[i])) out.add(i);
+      return [...out].sort((a, b) => a - b);
+    };
+    for (const i of this.roadAct) this.roadOn[i] = false;
+    for (const i of this.pedAct) this.pedOn[i] = false;
+    this.roadAct = inCircle(this.wayGrid.roads, this.roads);
+    this.pedAct = inCircle(this.wayGrid.peds, this.peds);
+    for (const i of this.roadAct) this.roadOn[i] = true;
+    for (const i of this.pedAct) this.pedOn[i] = true;
+    this.roadW = this.roadAct.map((i) => { const e = this.roads[i]; return e.L * e.lanes * e.c; });
+    this.laneKm = this.roadAct.reduce((a, i) => a + this.roads[i].L * this.roads[i].lanes, 0) / 1000;
+    this.sources = this.roadAct.filter((i) => { const e = this.roads[i]; return e.L > 15 && !(this.ins.get(e.a) ?? []).some((j) => this.roadOn[j]); });
+    this.pedW = this.pedAct.map((i) => this.peds[i].L * this.peds[i].w);
+    this.pedKm = this.pedAct.reduce((a, i) => a + this.peds[i].L, 0) / 1000;
+    this.bikeAct = this.pedAct.filter((i) => this.peds[i].bk);
+    this.bikeW = this.bikeAct.map((i) => this.peds[i].L * this.peds[i].bk!);
     this.bikeKm = this.bikeW.reduce((a, w) => a + w, 0) / 1000;
     this.riders = this.riders.filter((p) => this.pedOn[p.e]);
     const out = new Set(this.cars.filter((c) => !this.roadOn[c.e] && c !== this.keep));
@@ -149,7 +180,7 @@ export class StreetLife {
 
   // ------------------------------------------------------------------ spawning
   private spawnCar(fromSource: boolean) {
-    const ei = fromSource && this.sources.length ? anyOf(this.sources) : pickWeighted(this.roadW);
+    const ei = fromSource && this.sources.length ? anyOf(this.sources) : this.roadAct[pickWeighted(this.roadW)];
     const e = this.roads[ei], lane = (Math.random() * e.lanes) | 0;
     const s = fromSource ? 0 : 10 + Math.random() * Math.max(0, e.L - 20 - BOX_IN - 12);
     if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return;
@@ -167,13 +198,13 @@ export class StreetLife {
   }
 
   private spawnPed() {
-    const ei = pickWeighted(this.pedW), e = this.peds[ei];
+    const ei = this.pedAct[pickWeighted(this.pedW)], e = this.peds[ei];
     this.people.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s: Math.random() * e.L, v: 1.05 + Math.random() * 0.55,
       lat: 0.35 + Math.random() * 1.0, ph: Math.random() * 6.28, wait: false, col: new THREE.Color(anyOf(SHIRTS)) });
   }
 
   private spawnRider() {
-    const ei = pickWeighted(this.bikeW), e = this.peds[ei];
+    const ei = this.bikeAct[pickWeighted(this.bikeW)], e = this.peds[ei];
     if (!e || !e.bk) return;
     this.riders.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s: Math.random() * e.L, v: 4 + Math.random() * 1.8,
       lat: 0.45 + Math.random() * 0.3, ph: Math.random() * 6.28, wait: false, bike: true, col: new THREE.Color(anyOf(SHIRTS)) });

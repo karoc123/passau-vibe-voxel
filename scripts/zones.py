@@ -1,8 +1,10 @@
 """Which building every 1 m column belongs to: the viewer (web/src/city.ts) shows each building once all its tiles are
 in, the mesher (web/src/mesher.worker.ts) never merges faces across buildings.
 
-Output (web/public/data/): zones.bin = uint16 building[D, W] (0: none), zones.json = {"buildings": [[cx, cy, columns,
-x0, y0, x1, y1], ...]} (centroid and bounding box in metres, building k + 1 in zones.bin).
+Output: data/zones.bin = gzip of uint16 building[D, W] (0: none; for tile_fields.py, which puts each node's part into
+its file, and web/tools/lamps.mjs), web/public/data/zones.json = {"buildings": [[cx, cy, columns, x0, y0, x1, y1],
+...], "labels": [...]} (centroid and bounding box in metres, building k + 1 in zones.bin; per label of meta.json, in its
+order, the building under it, 0: none).
 """
 import gzip
 import json
@@ -15,6 +17,7 @@ from aoi import D, W
 from osm import OSM, footprints
 
 OUT = Path("web/public/data")
+TMP = Path("data")
 osm = OSM()
 
 # buildings (whole buildings, not parts)
@@ -44,8 +47,11 @@ def stats(lab, n):
                     *( [s[1].start, s[0].start, s[1].stop, s[0].stop] if s else [0, 0, 0, 0])])
     return out
 
-meta = {"buildings": stats(bld.astype(np.int32), len(blds))}
-with gzip.GzipFile(OUT / "zones.bin", "wb", compresslevel=9, mtime=0) as fh:
+# the building under each label (web/src/city.ts: the landmarks, shown first; a label waits for its building)
+labels = json.load(open(OUT / "meta.json"))["labels"]
+under = [int(bld[min(D - 1, int(np.floor(l["y"] + 0.5))), min(W - 1, int(np.floor(l["x"] + 0.5)))]) for l in labels]
+meta = {"buildings": stats(bld.astype(np.int32), len(blds)), "labels": under}
+with gzip.GzipFile(TMP / "zones.bin", "wb", compresslevel=9, mtime=0) as fh:
     fh.write(bld.tobytes())
 json.dump(meta, open(OUT / "zones.json", "w"))
-print("wrote zones.bin", (OUT / "zones.bin").stat().st_size // 1024, "KB")
+print("wrote data/zones.bin, zones.json", (OUT / "zones.json").stat().st_size // 1024, "KB")

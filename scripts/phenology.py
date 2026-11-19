@@ -22,7 +22,7 @@ Summer leaves: the photos' median summer canopy, as one factor on the renderer's
 crowns keep their brightness relative to the grass under them).
 
 Output: web/public/data/phenology.json (per class: dates, spread, source) and, with the trees' positions
-(web/public/data/trees.json), web/public/data/foliage.bin: per 2 m cell the class of the tree whose crown it is in
+(web/public/data/trees.json), data/foliage.bin (tile_fields.py puts it into the node files): per 2 m cell the class of the tree whose crown it is in
 (the crown's owner from data/crowns.npz, written by voxelize.py; elsewhere the nearest trunk within 9 m), then a byte of
 that tree's index (so one tree turns as one), gzip.
 """
@@ -294,7 +294,7 @@ def main():
             grid[m] = cls_all[own[m]]
             tree[m] = ((own[m].astype(np.int64) * 2654435761 >> 13) & 255).astype(np.uint8)
             print("foliage cells from the crowns' owners:", int(m.sum()))
-    (OUT / "foliage.bin").write_bytes(gzip.compress(grid.tobytes() + tree.tobytes(), 9, mtime=0))
+    (OUT.parent.parent.parent / "data" / "foliage.bin").write_bytes(gzip.compress(grid.tobytes() + tree.tobytes(), 9, mtime=0))
     print("foliage grid", grid.shape, "cells with a class:", int((grid > 0).sum()))
 
 

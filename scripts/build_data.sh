@@ -18,13 +18,15 @@ uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffi
                                          # data/ground.npz, data/footprints.npz (needs data/lod2.npz, or NO_LOD2=1)
                                          # (scripts/tiles_lod.py: only tiles/2, 4 and 8 again, from tiles/1 and 1f)
 uv run python scripts/places.py          # places.json (search index)
-uv run python scripts/flood.py           # flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
+uv run python scripts/flood.py           # data/flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
 uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 uv run python scripts/terrain.py         # terrain.bin (the bare land shown while the tiles load)
-uv run python scripts/zones.py           # zones.bin, zones.json (the building of each column; needs footprints.npz)
-(cd web && node tools/tris.mjs)          # meta.json tiles.tris, required by the viewer (the viewer's mesher over
-                                         # every tile; needs web/node_modules and zones.bin)
+uv run python scripts/zones.py           # data/zones.bin, zones.json (the building of each column; needs footprints.npz)
 uv run python scripts/windows.py         # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
-uv run python scripts/phenology.py       # phenology.json, foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
+uv run python scripts/phenology.py       # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
+uv run python scripts/tile_fields.py     # tiles/: each node's buildings, rivers, foliage, window light (from the data/ maps above)
+(cd web && node tools/tris.mjs)          # meta.json tiles.tris, required by the viewer (the viewer's mesher over
+                                         # every tile; needs web/node_modules and the tiles' buildings)
+(cd web && node tools/lamps.mjs)         # streetlamps.json (the lamps along the streets; needs data/zones.bin, data/foliage.bin)
 # web/public/data/windows.json (how many windows are lit, by hour and building type) is not built here: see README.md

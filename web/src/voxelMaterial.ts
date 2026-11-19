@@ -5,6 +5,7 @@ import { dataTexture, hash } from './util';
 import { CLOUD_GLSL, cloudUniforms } from './clouds';
 import { SLANT, SLANT_STEPS } from './chamfer';
 import { WALL_TOP } from './roofs';
+import { FIELDS_GLSL, fieldUniforms } from './fields';
 
 // material ids, as in scripts/voxelize.py
 // what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
@@ -22,17 +23,16 @@ export interface VoxelUniforms {
   uTime: U<number>;
   uHorizon: U<THREE.Color>;
   uDrop: U<number>;
-  uFlood: U<THREE.Texture>;
   uWet: U<number>;
   uSnow: U<number>;
   uDay: U<number>;
   uFolOn: U<number>;
-  uFolMap: U<THREE.Texture>;
   uFolDate: U<THREE.Vector4[]>;
   uFolCol: U<THREE.Color[]>;
   uGrass: U<THREE.Color[]>;
   uLeaf: U<THREE.Color>;
-  uWinMap: U<THREE.Texture>;
+  // per building (zones.py id): what it is, for its windows (windows.ts, scripts/windows.py)
+  uWinB: U<THREE.Texture>;
   uWinMed: U<number[]>;
   uWinShape: U<number[]>;
   uWinFloors: U<number[]>;
@@ -45,8 +45,11 @@ export interface VoxelUniforms {
   uLitMap: U<THREE.Texture>;
   uNoWin: U<THREE.Vector4>;
   uNoWinR: U<number>;
-  uSpillMap: U<THREE.Texture>;
   uSpill: U<THREE.Vector2>;
+  // the shown nodes' pages (fields.ts)
+  uPageIdx: U<THREE.Texture>;
+  uPageF: U<THREE.DataArrayTexture>;
+  uPageS: U<THREE.DataArrayTexture>;
   uShop: U<number>;
 }
 
@@ -61,17 +64,15 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uTime: { value: 0 },
     uHorizon: { value: new THREE.Color(0.7, 0.75, 0.8) },
     uDrop: { value: 0 },
-    uFlood: { value: tiny(THREE.RGFormat, new Uint8Array(2)) },
     uWet: { value: 0 },
     uSnow: { value: 0 },
     uDay: { value: 200 },
     uFolOn: { value: 0 },
-    uFolMap: { value: tiny(THREE.RGFormat, new Uint8Array(2)) },
     uFolDate: { value: Array.from({ length: FOLIAGE_CLASSES }, () => new THREE.Vector4(-1, 0, 0, 0)) },
     uFolCol: { value: Array.from({ length: FOLIAGE_CLASSES }, () => new THREE.Color(0.3, 0.2, 0.05)) },
     uGrass: { value: Array.from({ length: 12 }, () => new THREE.Color(1, 1, 1)) },
     uLeaf: { value: new THREE.Color(1, 1, 1) },
-    uWinMap: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
+    uWinB: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
     uWinMed: { value: new Array(8).fill(0.12) },
     uWinShape: { value: Array.from({ length: 72 }, (_, i) => (i % 9) / 4) },
     uWinFloors: { value: new Array(8).fill(0) },
@@ -79,9 +80,9 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uAlbedo: { value: 0.7 },
     uStage: { value: 0 },
     uBldOn: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
-    uSpillMap: { value: tiny(THREE.RGFormat, new Uint8Array(2)) },
     uSpill: { value: new THREE.Vector2(1, 1) },
     uShop: { value: 1 },
+    ...fieldUniforms(),
     ...floodlights(meta),
     ...cloudUniforms,
   };
@@ -151,75 +152,13 @@ function makeLampTexture(meta: Meta) {
   return tex;
 }
 
-// OSM maps few of Passau's street lamps (123, most on the bridges), so the lanes and alleys stood dark. Every street and
-// footway in the built-up town is lit: a pool every ~26 m along it, unless a lamp (mapped or placed) is already within
-// 16 m -- a road mapped both ways, or a pavement beside it, gets one row. Only the light is drawn; there is no lamp post.
-// Out of town they stay dark: a footpath through the woods or the grass (the Oberhaus slope, the parks), with next to no
-// building beside it and not along a river (the promenades, the Dreiflüsseeck's, stay lit), and a road through the
-// woods or the fields.
-export type Ground = { buildings: Uint8Array; trees: Uint8Array; terrain: ArrayBuffer } | null;
-type Way = { p: [number, number, number][] };
-function townMask(meta: Meta, g: Ground) {
-  if (!g) return () => ({ built: 99, wild: 0, water: 0 });
-  // per 2 m cell: building (windows.bin), and wild ground: under trees (foliage.bin), or grass or bare soil in the
-  // terrain's ground colours (city.ts) -- not paving, not water
-  const tw = Math.ceil(meta.W / 4), th = Math.ceil(meta.D / 4), cw = meta.W >> 1, ch = meta.D >> 1;
-  const rgb = new Uint8Array(g.terrain, tw * th * 2, cw * ch * 3), bld = new Uint8Array(cw * ch), wild = new Uint8Array(cw * ch), water = new Uint8Array(cw * ch);
-  for (let y = 0; y < meta.D; y++) for (let x = 0; x < meta.W; x++) if (g.buildings[y * meta.W + x]) bld[(y >> 1) * cw + (x >> 1)] = 1;
-  for (let i = 0; i < cw * ch; i++) {
-    const r = rgb[3 * i], gr = rgb[3 * i + 1], b = rgb[3 * i + 2];
-    const grass = gr > r + 20 && gr > b + 40, soil = Math.abs(r - 168) + Math.abs(gr - 152) + Math.abs(b - 124) < 12;
-    water[i] = gr > r + 6 && gr < b + 30 ? 1 : 0; // the rivers' greens (grass is far greener than blue)
-    wild[i] = !water[i] && (g.trees[i] || grass || soil) ? 1 : 0;
-  }
-  const sum = (a: Uint8Array, cx: number, cy: number, R: number) => {
-    let s = 0, n = 0;
-    for (let y = Math.max(0, cy - R); y < Math.min(ch, cy + R); y++) for (let x = Math.max(0, cx - R); x < Math.min(cw, cx + R); x++) { s += a[y * cw + x]; n++; }
-    return [s, n];
-  };
-  return (x: number, y: number) => {
-    const cx = Math.floor(x / 2), cy = Math.floor(y / 2), [b] = sum(bld, cx, cy, 5), [w, n] = sum(wild, cx, cy, 6), [r] = sum(water, cx, cy, 7);
-    // m² of building within ~10 m, the share of wild ground within ~12 m, m² of river within ~14 m
-    return { built: b * 4, wild: n ? w / n : 0, water: r * 4 };
-  };
-}
-// returns the lamps it placed: x, y, ground (lamps.ts gives them a glowing head)
-export function lightStreets(u: VoxelUniforms, meta: Meta, roads: Way[], peds: Way[], ground: Ground) {
-  const placed: [number, number, number][] = [];
+// The streets' lamps (streetlamps.ts, placed when the data is built: data/streetlamps.json), their pools of light in
+// the lamp map
+export function lightStreets(u: VoxelUniforms, placed: [number, number, number][]) {
   const tex = u.uLampMap.value as THREE.CanvasTexture, ctx = (tex.image as HTMLCanvasElement).getContext('2d')!;
-  const G = 16, cells = new Map<number, [number, number][]>(), key = (x: number, y: number) => Math.floor(y / G) * 4096 + Math.floor(x / G);
-  const near = (x: number, y: number) => {
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
-      for (const [px, py] of cells.get(key(x + dx * G, y + dy * G)) ?? []) if (Math.hypot(px - x, py - y) < G) return true;
-    return false;
-  };
-  const add = (x: number, y: number) => {
-    const c = key(x, y);
-    (cells.get(c) ?? cells.set(c, []).get(c)!).push([x, y]);
-  };
-  for (const [x, y] of meta.lamps) add(x + 0.5, y + 0.5);
   ctx.globalCompositeOperation = 'lighter';
-  const town = townMask(meta, ground);
-  const lit = (x: number, y: number, ped: boolean) => {
-    const { built, wild, water } = town(x, y);
-    return built >= 20 || water >= 40 || wild < (ped ? 0.5 : 0.75);
-  };
-  for (const { p, ped } of [...roads.map((w) => ({ p: w.p, ped: false })), ...peds.map((w) => ({ p: w.p, ped: true }))]) {
-    let next = 6;
-    for (let i = 0, d = 0; i + 1 < p.length; i++) {
-      const [ax, ay] = p[i], [bx, by] = p[i + 1], l = Math.hypot(bx - ax, by - ay);
-      while (next <= d + l) {
-        const t = (next - d) / l, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = p[i][2] + (p[i + 1][2] - p[i][2]) * t;
-        next += 26;
-        if (x < 0 || y < 0 || x >= meta.W || y >= meta.D || near(x, y) || !lit(x, y, ped)) continue;
-        add(x, y); placed.push([x, y, z]);
-        pool(ctx, x * LAMP_S, y * LAMP_S, 16 * LAMP_S, lampPool(lampColour(x, y)));
-      }
-      d += l;
-    }
-  }
+  for (const [x, y] of placed) pool(ctx, x * LAMP_S, y * LAMP_S, 16 * LAMP_S, lampPool(lampColour(x, y)));
   tex.needsUpdate = true;
-  return placed;
 }
 
 // Passau floodlights its cathedral, both fortresses, the town hall's tower and the churches above the rivers. Each is
@@ -271,9 +210,9 @@ function floodlights(meta: Meta) {
 }
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
-const FOLIAGE = `
-  uniform sampler2D uFolMap; uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
-  vec2 foliageCell(vec3 cell) { return texelFetch(uFolMap, ivec2(cell.xz * 0.5), 0).rg; }
+const FOLIAGE = `${FIELDS_GLSL}
+  uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
+  vec2 foliageCell(vec3 cell) { return foliageAtP(cell.xz + 0.5); }
   vec3 foliageOf(vec2 f) {
     int cls = int(f.r * 255.0 + 0.5);
     if (cls == 0) cls = 13;
@@ -357,9 +296,9 @@ const FACE_PARS = `
   }`;
 
 const FRAG_PARS = `
-  uniform sampler2D uPalette; uniform sampler2D uLampMap; uniform sampler2D uSpillMap; uniform vec2 uSpill; uniform float uShop;
+  uniform sampler2D uPalette; uniform sampler2D uLampMap; uniform vec2 uSpill; uniform float uShop;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
-  uniform float uDrop; uniform sampler2D uFlood; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
+  uniform float uDrop; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
   ${FACE_PARS}
   // (AO and the wall's top do vary over a face)
   varying vec2 vShade;
@@ -518,11 +457,16 @@ const FRAG_PARS = `
     if (k > 0.0) { out_ = d / max(length(d), 1.0); w_ = lb.z; }
     return k;
   }
-  uniform sampler2D uWinMap; uniform float uWinMed[8]; uniform float uWinShape[72]; uniform float uWinFloors[8]; uniform vec3 uWinCol[8];
+  uniform sampler2D uWinB; uniform float uWinMed[8]; uniform float uWinShape[72]; uniform float uWinFloors[8]; uniform vec3 uWinCol[8];
+  // what the face's building is (scripts/windows.py: kind | habit << 3; 0: none)
+  int winOf() {
+    int b = int(vBid + 0.5);
+    return b > 0 ? int(texelFetch(uWinB, ivec2(b & 127, b >> 7), 0).r * 255.0 + 0.5) : 0;
+  }
   // a building's share of lit windows now: its type's measured median times the building's own habit, a point on the
   // type's measured spread (scripts/window_stats.py)
   vec3 building(vec3 cell) {
-    int v = int(texelFetch(uWinMap, ivec2(cell.xz), 0).r * 255.0 + 0.5);
+    int v = winOf();
     int kind = v & 7;
     float habit = (float(v >> 3) + 0.5) / 32.0;
     if (kind == 0) { kind = 1; habit = hash12(floor(cell.xz / 24.0)); }
@@ -636,7 +580,7 @@ const SURFACE = `
     // A church (stone or brick, windows.bin's religious kind): tall round-headed windows, ~1.8 m wide every 5-7 m, from
     // 3.5 m up to 2 m under the eave (vWTop; 11.5 m where that is not known). Its walls were blank: not the town's
     // storeys of windows, and the voxels had none (but the cathedral's, scripts/passau.py: none drawn over those)
-    if (vert && vWTop > 6.5 && (int(texelFetch(uWinMap, ivec2(cell.xz), 0).r * 255.0 + 0.5) & 7) == 6) {
+    if (vert && vWTop > 6.5 && (winOf() & 7) == 6) {
       vec2 pa = vVox.xz - uNoWin.xy, ba = uNoWin.zw - uNoWin.xy;
       if (length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-3), 0.0, 1.0)) > uNoWinR) {
         float P = 5.0 + 2.0 * hash12(vec2(vBid * 0.41, 8.3)), x = uc - floor(hash12(vec2(vBid * 0.29, 1.9)) * P);
@@ -691,7 +635,7 @@ const SURFACE = `
     if (vN.y > 0.5 && hash12(cell.xz * 0.37 + floor(uTime * 1.7 + h * 9.0)) < 0.006) col += vec3(0.35, 0.4, 0.38) * (1.0 - uNight) * (1.0 - uNight);
     if (vN.y > 0.5) gRefl = 1.0; // the open river mirrors (post.ts Reflections)
     if (uDrop > 0.0) { // low water: where the estimated bed is shallower than the drop, a sandbank
-      float bed = texelFetch(uFlood, ivec2(cell.x, cell.z), 0).g * 25.5;
+      float bed = max(riverAt(cell.xz + 0.5).y, 0.0);
       if (bed < uDrop) {
         col = mix(vec3(0.3, 0.24, 0.15), vec3(0.62, 0.52, 0.36), smoothstep(0.05, 0.35, uDrop - bed)) * (0.92 + 0.12 * h);
         gRough = 0.95; gMetal = 0.0; gRefl = 0.0;
@@ -819,8 +763,8 @@ const SURFACE = `
       for (int i = 0; i < 4; i++) {
         vec2 q = vVox.xz + away * min((14.0 + 14.0 * float(i)) * k, 600.0);
         float f = floodAt(q, true, o, ow);
-        ivec2 fs = textureSize(uFlood, 0); // 1 x 1 until the river mask is in: no mirrored floodlight till then
-        if (f > 0.0) f *= fs.x < 2 ? 0.0 : 1.0 - step(0.5, texelFetch(uFlood, clamp(ivec2(q), ivec2(0), fs - 1), 0).g * 255.0);
+        // (none where no node shows: as before the river was known)
+        if (f > 0.0) { float bq = riverAt(floor(q) + 0.5).y; f *= bq < 0.0 ? 0.0 : 1.0 - step(0.05, bq); }
         fl += f;
       }
       gEmissive += (refl * 0.45 * vec3(1.0, 0.8, 0.6) + fl * 0.08 * vec3(1.0, 0.76, 0.46)) * shim * fres2 * uNight
@@ -834,13 +778,13 @@ const SURFACE = `
       }
     }
     else {
-      // and the lit windows light the street before them, and the fronts across it, softly (windows.ts spillMap): a
+      // and the lit windows light the street before them, and the fronts across it, softly (tile_fields.py spill_map): a
       // wall reads the street in front of it, a metre out. (NO_SPILL: without it, to time it: one fetch at night, no
       // measurable cost on an Iris Xe, interleaved A/B in one page)
       #ifdef NO_SPILL
       float spill = 0.0;
       #else
-      vec2 sp = texture2D(uSpillMap, (vVox.xz + (vert ? wN.xz * 1.5 : vec2(0.0))) / uSize).rg;
+      vec2 sp = spillAt(vVox.xz + (vert ? wN.xz * 1.5 : vec2(0.0)));
       float spill = dot(sp, uSpill) * (cut ? 0.0 : clamp(1.0 - lv / 14.0, 0.0, 1.0)) * (vert ? 0.5 : 1.0);
       #endif
       gEmissive += col * (lm * fall * 2.2 * up + vec3(1.0, 0.7, 0.42) * spill * 0.75) * uNight * (1.0 + 0.8 * uWet * (1.0 - gRough)); // a wet street glistens
