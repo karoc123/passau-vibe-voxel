@@ -3,7 +3,7 @@ import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
 import type { Columns } from './tile-data';
 import { World, type ColumnSource } from './world';
-import { clayLevel, paletteFlags, tileRequest, type TileContext } from './tile-request';
+import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 
 export interface TileNode {
   key: string;
@@ -20,8 +20,8 @@ export interface TileNode {
   cover?: THREE.BufferGeometry;
   // a foliage tile whose cover is in its base tile's mesh
   covers?: boolean;
-  // meshed again after a lost WebGL context (remeshLost): shown as it was once the new geometry is in
-  remesh?: { visible: boolean };
+  // meshed again after a lost WebGL context (remeshLost): hidden until the new geometry is in (city.ts shows it again)
+  remesh?: boolean;
   data?: ColumnData;
   empty?: boolean;
   dataJob?: Job;
@@ -140,8 +140,6 @@ function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
 export class TileStreamer implements ColumnSource {
   readonly N: number;
   readonly levels: number[];
-  // the clay's level (city.ts, tile-request.ts CLAY), 0 for none; the others the city at 1 m and its distance levels
-  readonly clay: number;
   readonly dims: Record<number, TileLevel>;
   readonly nodes = new Map<string, TileNode>();
   readonly group = new THREE.Group();
@@ -162,9 +160,8 @@ export class TileStreamer implements ColumnSource {
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
-    this.clay = clayLevel(meta);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
-    this.ctx = { N: this.N, W: meta.W, D: meta.D, clay: this.clay, ...paletteFlags(meta.palette), bldMap: null };
+    this.ctx = { N: this.N, W: meta.W, D: meta.D, ...paletteFlags(meta.palette), bldMap: null };
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -312,7 +309,7 @@ export class TileStreamer implements ColumnSource {
         // (the old geometry is not disposed: what it had on the GPU went with the lost context, and three would only
         // complain that its buffers belong to no context)
         n.mesh.geometry = this.makeGeometry(m);
-        n.mesh.visible = n.s === this.clay && re.visible; // (city.ts shows the others again)
+        n.mesh.visible = false; // (city.ts shows it again)
       } else if (m.quads) n.mesh = this.makeMesh(m);
       if (n.cover) disposeGeometry(n.cover);
       n.cover = m.base?.quads ? this.makeGeometry(m.base) : undefined;
@@ -394,7 +391,7 @@ export class TileStreamer implements ColumnSource {
     for (const t of this.nodes.values()) {
       const pos = t.mesh?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
       if (!pos || pos.array || t.remesh) continue;
-      t.remesh = { visible: t.mesh!.visible };
+      t.remesh = true;
       t.mesh!.visible = false;
       if (t.state === 'ready') {
         t.state = 'queued';

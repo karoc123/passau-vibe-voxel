@@ -2,7 +2,7 @@
 // Data coordinates: x east, y south, z up. Positions go out in three.js axes (x, z, y), metres.
 // A tile is N x N cells of s metres plus a 1-cell apron. The distance levels (2, 4 and 8 m, scripts/tiles.py
 // LOD_LEVELS) are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres
-// on the way out; the clay (8 m, only with tile-request.ts CLAY) comes without roof palette and is plain voxels.
+// on the way out.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs, wallTopCode } from './roofs';
 import { decodeTile, type Columns, type RawColumns } from './tile-data';
@@ -18,7 +18,7 @@ export interface MeshRequest {
   keep: boolean;
   dataOnly: boolean;
   bld: Uint16Array | null;
-  // per palette entry, flags (chamfer.ts; not the clay): PAL_ROOF, roof material, its staircases shaded as the roof
+  // per palette entry, flags (chamfer.ts): PAL_ROOF, roof material, its staircases shaded as the roof
   // plane; PAL_WALL, a building's wall, its diagonal staircases chamfered flat
   roof: Uint8Array | null;
   // a foliage tile only: mesh its base tile (under) again too, without the faces its grass and trunks cover

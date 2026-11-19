@@ -21,8 +21,8 @@ uv run python scripts/places.py          # places.json (search index)
 uv run python scripts/flood.py           # flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
 uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 uv run python scripts/terrain.py         # terrain.bin (the bare land shown while the tiles load)
-uv run python scripts/zones.py           # zones.bin, zones.json (city blocks and buildings; needs footprints.npz)
-(cd web && node tools/tris.mjs)          # meta.json tiles.tris, zones.json blocks' triangles (the viewer's mesher over
+uv run python scripts/zones.py           # zones.bin, zones.json (the building of each column; needs footprints.npz)
+(cd web && node tools/tris.mjs)          # meta.json tiles.tris, required by the viewer (the viewer's mesher over
                                          # every tile; needs web/node_modules and zones.bin)
 uv run python scripts/windows.py         # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)

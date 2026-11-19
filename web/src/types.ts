@@ -42,9 +42,8 @@ export interface Meta {
   base: number;
   theta_deg: number;
   // tris (web/tools/tris.mjs): each node's triangles as meshed, per level, row-major (ty * nx + tx): "1", "2", "4", "8",
-  // "1f" a foliage tile's, "1c" its base tile's once the foliage shows (a 1 m tile with its foliage draws 1c + 1f);
-  // absent where the data was built without it (the viewer then falls back to the clay, tile-request.ts CLAY)
-  tiles: { N: number; levels: TileLevel[]; tris?: Partial<Record<'1' | '1f' | '1c' | '2' | '4' | '8', number[]>> };
+  // "1f" a foliage tile's, "1c" its base tile's once the foliage shows (a 1 m tile with its foliage draws 1c + 1f)
+  tiles: { N: number; levels: TileLevel[]; tris: Record<'1' | '1f' | '1c', number[]> & Partial<Record<'2' | '4' | '8', number[]>> };
   palette: [number, number, number, number][];
   lamps: [number, number, number][];
   floods?: [number, number, number][];
@@ -61,8 +60,8 @@ export interface FloodInfo {
   voxel_top?: number;
 }
 
+// zones.json (scripts/zones.py): per building [cx, cy, columns, x0, y0, x1, y1]
 export interface Zones {
-  blocks: number[][];
   buildings: number[][];
 }
 

@@ -90,8 +90,8 @@ written with `mtime=0`). The steps:
 | `flood.py` | `flood.bin`, `flood.json`: which cells the rivers reach at each level |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain.bin`: the bare land shown while the tiles load |
-| `zones.py` | `zones.bin`, `zones.json`: city blocks and buildings, for the render budget (needs `data/footprints.npz`) |
-| `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node); `zones.json`: each block's triangles at 1 m, for the render budget (needs `zones.bin`) |
+| `zones.py` | `zones.bin`, `zones.json`: the building of each 1 m column, each building's box (a building shows once all its tiles are in; needs `data/footprints.npz`) |
+| `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs `zones.bin`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |
@@ -136,7 +136,7 @@ for them).
 three.js + Vite + TypeScript. The city is streamed in tiles (`web/public/data/tiles/{1,1f,2,4,8}/x_y.bin`): 128 × 128
 cells of 1 m (buildings and ground; foliage in `1f`), 2, 4 or 8 m. `web/src/city.ts` picks each node's level by its
 size on screen and a budget of triangles drawn (the detail setting), the nodes nearest the camera finest; the whole
-map at 8 m is the least it draws.
+map at 8 m is the least it draws, and within ~100 m of a camera near the ground nothing is coarser than 2 m.
 Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~900 m of the camera.
 
 ```sh

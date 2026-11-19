@@ -231,7 +231,7 @@ export class Daylight {
     this.moving = moving;
   }
 
-  // the city changed (what its tiles show: the buildings shown, the season, the clay's blocks): drawn again a part a
+  // the city changed (what its tiles show: the buildings shown, the season): drawn again a part a
   // frame; whole: at once, in this frame
   redrawShadow(whole = false) { if (whole) this.whole = true; else this.dirty = true; }
 

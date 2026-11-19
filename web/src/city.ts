@@ -5,7 +5,7 @@ import type { ColumnData, Meta, Zones } from './types';
 import { dataTexture, fetchGzip, fetchJson } from './util';
 import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';
-import { MAT, makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
+import { MAT, makeBuildDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
 import { Occlusion } from './occlusion';
 import { FarGround } from './farground';
 
@@ -24,9 +24,6 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   2. landmarks: their tiles first, each landmark as soon as all its tiles are in
 //   3. everything else, nearest to the view first, each building once all its tiles are in
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-// With the clay (tile-request.ts CLAY, off) the budget counts 1 m buildings' triangles instead, city blocks nearest to
-// the focus first, and the whole map at 8 m stands in as grey clay for the rest: a city block turns real once every
-// tile under it is in, and back to clay when the budget moves on; landmarks then don't come first.
 export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
@@ -46,20 +43,11 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
   const zonesIn = Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
-  let terrain: Awaited<ReturnType<typeof loadTerrain>> | null = null;
-  // (the clay: S.clay, 0 without)
-  const useClay = S.clay > 0, d8 = S.dims[S.clay] ?? { nx: 0, ny: 0 }, n8 = d8.nx * d8.ny, clayIn: Promise<void>[] = [];
-  let claysIn = 0;
-  if (useClay && Number.isFinite(budget())) {
-    for (let ty = 0; ty < d8.ny; ty++) for (let tx = 0; tx < d8.nx; tx++) clayIn.push(S.request(S.clay, tx, ty, 1e9).then(() => { claysIn++; }));
-    S.pump();
-  } else {
-    caption.show('Terrain', 0, 2 * total);
-    terrain = await loadTerrain(meta, scene, d.nx, d.ny);
-  }
+  caption.show('Terrain', 0, 2 * total);
+  const terrain = await loadTerrain(meta, scene, d.nx, d.ny);
   const [zbuf, zones] = await zonesIn;
   document.querySelector('#loading')?.classList.add('hidden');
-  const bld = new Uint16Array(zbuf, W * D * 2, W * D);
+  const bld = new Uint16Array(zbuf, 0, W * D);
   S.bldMap = { data: bld, W };
   const nb = zones.buildings.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
   const shownTex = dataTexture(shown, 128, shown.length / 128, THREE.RedFormat);
@@ -75,16 +63,6 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const onTile = Array.from({ length: total }, () => [] as number[]);
   tilesOf.forEach((t, i) => t.forEach((k) => onTile[k].push(i)));
 
-  // city blocks [cx, cy, n, x0, y0, x1, y1, triangles] (scripts/zones.py), each real or clay as a whole (with the clay)
-  const blocks = zones.blocks, nk = blocks.length, tris = blockTris(blocks, zones.buildings, new Uint16Array(zbuf, 0, W * D), W, D);
-  const cityTris = tris.reduce((a, b) => a + b, 0);
-  const blockTiles = blocks.map((b) => tilesIn(b[3], b[4], b[5], b[6]));
-  const blkWant = new Uint8Array(nk + 1).fill(1), want = new Uint8Array(total).fill(1);
-  const flags = new Uint8Array(64 * Math.ceil((nk + 1) / 64)), flagTex = dataTexture(flags, 64, flags.length / 64, THREE.RedFormat);
-  U.uZFBlk.value = flagTex;
-  const blkIds = dataTexture(new Uint16Array(zbuf, 0, W * D), W, D, THREE.RedIntegerFormat, THREE.UnsignedShortType);
-  blkIds.internalFormat = 'R16UI';
-  U.uZBlk.value = blkIds;
   // the view distance: which tiles are in range of the camera (along the ground), with the hysteresis above
   let cut = dist;
   const inRange = new Uint8Array(total).fill(1), camAt = new THREE.Vector3();
@@ -106,26 +84,6 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
   const far = new FarGround(meta, d.nx, d.ny), farMask = new Uint8Array(total);
   scene.add(far.group);
-  const bdist = (b: number[], f: THREE.Vector3) => Math.hypot(Math.max(b[3] - f.x, 0, f.x - b[5]), Math.max(b[4] - f.z, 0, f.z - b[6]));
-  const order = blocks.map((_, k) => k);
-  let whole = true;
-  const choose = (f: THREE.Vector3) => {
-    const B = useClay ? budget() : Infinity; // (without the clay, pick spends the budget)
-    whole = B >= cityTris;
-    if (whole) { blkWant.fill(1); want.set(inRange); return; }
-    order.sort((a, b) => bdist(blocks[a], f) - bdist(blocks[b], f));
-    let sum = 0;
-    const next = new Uint8Array(nk + 1);
-    for (const k of order) {
-      sum += tris[k];
-      if (sum > B * (blkWant[k + 1] ? 1.1 : 1)) break;
-      next[k + 1] = 1;
-    }
-    blkWant.set(next);
-    want.fill(0);
-    for (let k = 0; k < nk; k++) if (blkWant[k + 1]) for (const i of blockTiles[k]) want[i] = inRange[i];
-  };
-
   const bldAt = (x: number, y: number) => bld[Math.min(D - 1, Math.round(y)) * W + Math.min(W - 1, Math.round(x))] - 1;
   const landmarks = [...new Set(meta.labels.map((l) => bldAt(l.x, l.y)).filter((b) => b >= 0))], isLandmark = new Set(landmarks);
   const lmPrio = new Map<number, number>();
@@ -141,7 +99,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     }
   };
   const away = (i: number, f: THREE.Vector3) => Math.hypot((i % d.nx + 0.5) * T - f.x, (Math.floor(i / d.nx) + 0.5) * T - f.z);
-  const prio = (i: number, f: THREE.Vector3) => (clay === 'none' ? lmPrio.get(i) : undefined) ?? (seen[i] ? 1e5 : 0) - away(i, f);
+  const prio = (i: number, f: THREE.Vector3) => lmPrio.get(i) ?? (seen[i] ? 1e5 : 0) - away(i, f);
 
   // Distance levels (scripts/tiles.py LOD_LEVELS): far from the camera, where a metre is a pixel or less, the city is
   // drawn from its 2 m tiles instead of the 1 m ones, trees included, and further out (where a 2 m cell is under
@@ -151,18 +109,21 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // pxCoarse pixels at its nearest point (back to the finer one above pxFine, so a camera at the switch doesn't flip it
   // to and fro); an 8 m node always splits, budget permitting. The budget (triangles drawn, budget(): meta.json
   // tiles.tris, a 1 m tile with its foliage) goes to the splits first of 8 m nodes (the whole map at 4 m: 1.1 M), then
-  // in the order of that pixel size, largest first, so the nearest first, a node out of view as if 4 times as far: a
+  // in the order of that pixel size, largest first, so the nearest first, a node out of view as if twice as far: a
   // split that would take the sum over it ends the splitting (one made last time may go 10 % over, again against
   // flipping). What is drawn (shown) only changes once all of it is in: a coarse node goes once every finer
   // node chosen under it (a 1 m tile with its foliage, after the first load) is ready, so nothing is ever missing; the
   // nodes shown never overlap. Each tile's own faces close it at its edges, so a 1 m tile next to a 2 m one (or any
-  // two levels) leaves no crack. lod (settings.ts, ?lod= ?lodpx=): 'off' 1 m only (no budget), 'far' never finer than
+  // two levels) leaves no crack. Around the camera (any node within FLOOR_M of it, the volume's height included: a
+  // street, Oberhaus, not the overview high above) the city is never coarser than 2 m, whatever the budget, so a
+  // camera in the street never stands inside a 4 or 8 m block: those splits come first and are paid first from the
+  // budget. lod (settings.ts, ?lod= ?lodpx=): 'off' 1 m only (no budget), 'far' never finer than
   // 2 m, 'far4' than 4 m, 'far8' than 8 m (to look at them close up); px: pxCoarse, in the drawing buffer's pixels (a
   // lower resolution draws the city coarser; the next update picks again with it). setLod changes them live: the next
   // update picks anew, and what shows changes over as the newly chosen nodes come in, as for a camera move.
-  const lods = S.levels.filter((s) => s !== S.clay).sort((a, b) => a - b);
+  const lods = [...S.levels].sort((a, b) => a - b);
   // (levels coarser than this are chosen only for the budget)
-  const PX_TOP = 4;
+  const PX_TOP = 4, FLOOR_M = 100, FLOOR_S = 2;
   let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
   const setLod = (l: { mode: Lod; px: number }) => {
     lodOn = lods.length > 1 && l.mode !== 'off';
@@ -175,28 +136,27 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const tilesOfNode = (n: LNode) => { const t = []; for (let y = n.y0; y < n.y1; y++) for (let x = n.x0; x < n.x1; x++) t.push(index(x, y)); return t; };
   const within = (a: LNode, b: LNode) => a.x0 >= b.x0 && a.x1 <= b.x1 && a.y0 >= b.y0 && a.y1 <= b.y1;
   const overlap = (a: LNode, b: LNode) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-  // a node's triangles as drawn (a 1 m tile with its foliage); without the counts 0 (and the clay spends the budget)
+  // a node's triangles as drawn (a 1 m tile with its foliage: meta.json tiles.tris)
   const tc = meta.tiles.tris;
   const cost = (n: LNode) => {
-    if (!tc) return 0;
-    if (n.s === 1) { const i = index(n.tx, n.ty); return (tc['1c']?.[i] ?? tc['1']?.[i] ?? 0) + (tc['1f']?.[i] ?? 0); }
+    if (n.s === 1) { const i = index(n.tx, n.ty); return tc['1c'][i] + tc['1f'][i]; }
     return tc[String(n.s) as '2' | '4' | '8']?.[n.ty * S.dims[n.s].nx + n.tx] ?? 0;
   };
-  const sumOf = (k: '1' | '1f' | '1c' | '2' | '4' | '8') => tc?.[k]?.reduce((a, b) => a + b, 0) ?? 0;
+  const sumOf = (k: '1' | '1f' | '1c' | '2' | '4' | '8') => tc[k]?.reduce((a, b) => a + b, 0) ?? 0;
   const chosen = new Map<string, LNode>(), shownN = new Map<string, LNode>(), level = new Uint8Array(total);
   let finer = new Set<string>(), pickTris = 0;
   const eye = new THREE.Vector3();
-  const nodeIn = (n: LNode) => n.x0 < d.nx && n.y0 < d.ny && tilesOfNode(n).some((i) => want[i]);
+  const nodeIn = (n: LNode) => n.x0 < d.nx && n.y0 < d.ny && tilesOfNode(n).some((i) => inRange[i]);
   const pick = () => {
     chosen.clear(); level.fill(0); pickTris = 0;
     const add = (n: LNode) => { chosen.set(n.key, n); for (const i of tilesOfNode(n)) level[i] = n.s; };
-    if (!lodOn) { for (let i = 0; i < total; i++) if (want[i]) add(lnode(1, i % d.nx, Math.floor(i / d.nx))); return; }
+    if (!lodOn) { for (let i = 0; i < total; i++) if (inRange[i]) add(lnode(1, i % d.nx, Math.floor(i / d.nx))); return; }
     eye.setFromMatrixPosition(camera.matrixWorld);
     const cam = camera as THREE.PerspectiveCamera;
     const focal = pixelsHigh() / 2 / Math.tan((cam.fov * Math.PI) / 360) * (cam.zoom || 1);
-    const next = new Set<string>(), B = useClay ? Infinity : budget();
+    const next = new Set<string>(), B = budget();
     // the nodes to split, with the finer level's cell in pixels (w: the order of the splits); sum: the triangles chosen
-    const open: { n: LNode; k: number; w: number }[] = [];
+    const open: { n: LNode; k: number; w: number; floor: boolean }[] = [];
     let sum = 0;
     const visit = (k: number, n: LNode) => {
       if (!nodeIn(n)) return;
@@ -204,8 +164,9 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       if (k === 0 || n.s <= lodMin) { add(n); return; }
       const dist = Math.hypot(Math.max(n.x0 * T - eye.x, 0, eye.x - n.x1 * T), Math.max(-eye.y, 0, eye.y - meta.H), Math.max(n.y0 * T - eye.z, 0, eye.z - n.y1 * T));
       const was = finer.has(n.key), px = (focal * lods[k - 1]) / Math.max(dist, 1);
-      const w = px * (was ? 1.25 : 1) * (tilesOfNode(n).some((i) => seen[i]) ? 1 : 0.25);
-      if (n.s > PX_TOP || px > (was ? pxCoarse : pxFine)) open.push({ n, k, w: n.s > PX_TOP ? 1e9 + w : w });
+      const w = px * (was ? 1.25 : 1) * (tilesOfNode(n).some((i) => seen[i]) ? 1 : 0.5);
+      const floor = n.s > FLOOR_S && dist <= FLOOR_M;
+      if (floor || n.s > PX_TOP || px > (was ? pxCoarse : pxFine)) open.push({ n, k, w: (floor ? 2e9 : n.s > PX_TOP ? 1e9 : 0) + w, floor });
       else add(n);
     };
     const kids = (k: number, n: LNode) => {
@@ -218,12 +179,13 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     while (open.length) {
       let j = 0;
       for (let i = 1; i < open.length; i++) if (open[i].w > open[j].w) j = i;
-      const { n, k } = open[j], sub = kids(k, n).filter(nodeIn);
+      const { n, k, floor } = open[j], sub = kids(k, n).filter(nodeIn);
       open[j] = open[open.length - 1]; open.pop();
       const more = sub.reduce((a, c) => a + cost(c), -cost(n));
       // (the first split over the budget ends them all: a cheaper one further down the order would take the
       // budget from a dear one before it, a meadow at 1 m before the castle)
-      if (sum + more > B * (finer.has(n.key) ? 1.1 : 1)) { add(n); for (const o of open) add(o.n); break; }
+      // (the floor's splits come before any other, and always happen)
+      if (!floor && sum + more > B * (finer.has(n.key) ? 1.1 : 1)) { add(n); for (const o of open) add(o.n); break; }
       next.add(n.key);
       sum -= cost(n);
       for (const c of sub) visit(k - 1, c);
@@ -236,31 +198,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (const n of chosen.values()) S.request(n.s, n.tx, n.ty, nodePrio(n, f), n.s === 1);
   };
 
-  // clay (tile-request.ts CLAY): the whole map at 8 m, fetched the first time the budget leaves some city out; the
-  // terrain goes then
-  let clay: 'none' | 'loading' | 'ready' = 'none';
-  const clayMat = makeVoxelMaterial(U, { clay: true }), clayDepth = makeClayDepthMaterial(U);
-  const startClay = () => {
-    clay = 'loading';
-    if (stage === 1) toStage2();
-    if (!clayIn.length) {
-      for (let ty = 0; ty < d8.ny; ty++) for (let tx = 0; tx < d8.nx; tx++) clayIn.push(S.request(S.clay, tx, ty, 1e9).then(() => { claysIn++; }));
-      S.pump();
-    }
-    Promise.all(clayIn).then(() => {
-      for (const n of S.nodes.values()) if (n.s === S.clay && n.mesh) { n.mesh.material = clayMat; n.mesh.customDepthMaterial = clayDepth; n.mesh.visible = true; }
-      terrain?.dropUnder(new Uint8Array(total).fill(1));
-      U.uZOn.value = 1;
-      clay = 'ready';
-    });
-  };
-
   const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U), farMat = makeVoxelMaterial(U, { far: true });
   prepass?.add(farMat, makeVoxelPrepassMaterial(U));
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
   prepass?.add(folMat, makeVoxelPrepassMaterial(U));
   const inTile = new Uint8Array(total), cover = new Uint8Array(total), folTile = new Uint8Array(total), complete = new Uint8Array(nb), counted = new Set<string>();
-  let lmShown = 0, stage = 1, last = 0, flagKey = '', realTris = 0, settled = false;
+  let lmShown = 0, stage = 1, last = 0, settled = false;
   const show = (b: number) => { if (!shown[b + 1]) { shown[b + 1] = 255; if (isLandmark.has(b)) lmShown++; } };
   function toStage2() {
     stage = U.uStage.value = 2;
@@ -271,30 +214,27 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   setLod(lod);
   range();
   look();
-  choose(focus());
-  if (!whole) startClay();
   pick();
   request(focus());
   S.pump();
 
   // the caption's parts of the long building stage: what you see, then rings around you
   const progress = (f: THREE.Vector3, wanted: number, tilesNow: number, folNow: number) => {
-    const base = clay === 'none' ? 0 : n8, all = base + 2 * wanted;
-    if (stage === 4 && clay !== 'loading') { caption.finish('Foliage', all); return; }
-    if (clay === 'loading' && claysIn < n8) { caption.show('Ground', claysIn, all); return; }
-    if (stage >= 3) { caption.show('Foliage', base + wanted + folNow, all); return; }
+    const all = 2 * wanted;
+    if (stage === 4) { caption.finish('Foliage', all); return; }
+    if (stage >= 3) { caption.show('Foliage', wanted + folNow, all); return; }
     if (stage === 1) { caption.show('Landmarks', tilesNow, all); return; }
     const size = [0, 0, 0, 0];
-    let ends = base;
+    let ends = 0;
     for (let i = 0; i < total; i++) {
-      if (!want[i]) continue;
-      if (clay === 'none' && lmPrio.has(i)) { ends++; continue; }
+      if (!inRange[i]) continue;
+      if (lmPrio.has(i)) { ends++; continue; }
       const r = away(i, f);
       size[seen[i] ? 0 : r < 1000 ? 1 : r < 2000 ? 2 : 3]++;
     }
     let part = 0;
-    for (ends += size[0]; part < 3 && base + tilesNow >= ends; ends += size[++part]);
-    caption.show(RINGS[part][0], base + tilesNow, all);
+    for (ends += size[0]; part < 3 && tilesNow >= ends; ends += size[++part]);
+    caption.show(RINGS[part][0], tilesNow, all);
   };
 
   S.update = () => {
@@ -305,11 +245,9 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     const f = focus();
     range();
     look();
-    choose(f);
-    if (!whole && clay === 'none') startClay();
     pick();
     request(f);
-    S.reprioritize((n) => (n.s === S.clay ? 1e9 : n.foliage ? prio(index(n.tx, n.ty), f) : nodePrio(lnode(n.s, n.tx, n.ty), f)));
+    S.reprioritize((n) => (n.foliage ? prio(index(n.tx, n.ty), f) : nodePrio(lnode(n.s, n.tx, n.ty), f)));
     // what is shown: a node chosen and ready replaces what it covers (finer nodes, or nothing yet); one finer than what
     // shows there waits until everything chosen under that is ready
     const ready = (n: LNode) => {
@@ -318,8 +256,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       return S.nodes.get(`f/${n.tx}_${n.ty}`)?.state === 'ready';
     };
     for (const [k, p] of shownN) {
-      // gone (freed elsewhere), or none of it wanted any more once the clay stands in for it
-      if (S.nodes.get(k)?.state !== 'ready' || ((clay === 'ready' || cut) && !tilesOfNode(p).some((i) => want[i]))) shownN.delete(k);
+      // gone (freed elsewhere), or none of it in range of the view distance any more
+      if (S.nodes.get(k)?.state !== 'ready' || (cut && !tilesOfNode(p).some((i) => inRange[i]))) shownN.delete(k);
     }
     for (const n of chosen.values()) {
       if (shownN.has(n.key) || !ready(n)) continue;
@@ -345,8 +283,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       for (let y = n.ty * n.s; y < Math.min(d.ny, (n.ty + 1) * n.s); y++) for (let x = n.tx * n.s; x < Math.min(d.nx, (n.tx + 1) * n.s); x++) farMask[index(x, y)] = 1;
     };
     for (const n of S.nodes.values()) {
-      if (n.s === S.clay && clay === 'ready' && n.mesh) { n.mesh.visible = drawn(n.mesh); if (n.mesh.visible) masks(n); }
-      if (n.s === S.clay || n.state !== 'ready') continue;
+      if (n.state !== 'ready') continue;
       const on = shownN.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key);
       if (on && !counted.has(n.key)) {
         counted.add(n.key);
@@ -371,16 +308,14 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       }
     }
     // what is neither shown nor chosen goes after a while (the foliage with its base: the base's mesh lacks what the
-    // grass covers, stream.ts coverBase); a 1 m tile the budget left out only once the clay is in, as before
+    // grass covers, stream.ts coverBase)
     for (const n of [...S.nodes.values()]) {
-      if (n.s === S.clay || n.foliage || n.state !== 'ready') continue;
+      if (n.foliage || n.state !== 'ready') continue;
       if (shownN.has(n.key) || chosen.has(n.key)) { n.used = now; continue; }
       // (out of range: none of its tiles in range of the view distance)
       const gone = !!cut && !tilesOfNode(lnode(n.s, n.tx, n.ty)).some((i) => inRange[i]);
-      const out = n.s === 1 && !want[index(n.tx, n.ty)] && !gone;
-      if (out && clay !== 'ready') continue;
       const fol = n.s === 1 ? S.nodes.get(`f/${n.tx}_${n.ty}`) : undefined;
-      if (now - n.used > (gone ? FREE_MS : out ? 4000 : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
+      if (now - n.used > (gone ? FREE_MS : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
         if (fol) { counted.delete(fol.key); S.free(fol); }
         counted.delete(n.key);
         S.free(n);
@@ -388,42 +323,31 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     }
     occluders();
     let wanted = 0, tilesNow = 0, folNow = 0, pending = 0;
-    for (let i = 0; i < total; i++) if (want[i]) { wanted++; tilesNow += inTile[i]; folNow += folTile[i]; }
+    for (let i = 0; i < total; i++) if (inRange[i]) { wanted++; tilesNow += inTile[i]; folNow += folTile[i]; }
     for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
     settled = tilesNow === wanted && pending === 0;
     // (the landmarks wanted: those beyond the view distance never come)
-    if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !want[k])))) toStage2();
+    if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !inRange[k])))) toStage2();
     if (stage === 2 && tilesNow === wanted) stage = U.uStage.value = 3;
     if (stage >= 3) for (const n of chosen.values()) {
       if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
     // (the first moment's terrain: under the tiles in, and beyond the view distance, where the far ground is)
-    if (terrain && stage >= 2) terrain.dropUnder(cut ? inTile.map((v, i) => v | (inRange[i] ^ 1)) : inTile);
-    if (terrain && stage >= 3 && whole) terrain.dispose();
-    terrain?.cover(farMask);
+    if (stage >= 2) terrain.dropUnder(cut ? inTile.map((v, i) => v | (inRange[i] ^ 1)) : inTile);
+    if (stage >= 3) terrain.dispose();
+    terrain.cover(farMask);
     far.on = !!cut;
     if (cut) far.setMask(farMask);
     if (changed) shownTex.needsUpdate = true;
-    realTris = 0;
-    for (let k = 0; k < nk; k++) {
-      const real = blkWant[k + 1] > 0 && blockTiles[k].every((i) => inTile[i]);
-      flags[k + 1] = real ? 255 : 0;
-      if (real) realTris += tris[k];
-    }
-    if (clay === 'ready') {
-      const key = flags.join('');
-      if (key !== flagKey) { flagKey = key; flagTex.needsUpdate = true; }
-    }
-    // queued jobs no longer chosen (with the distance levels at any time; else once the clay is in, as before)
-    if (clay === 'ready' || lodOn) S.dropQueued((n) => n.s === S.clay || n.pinned > now || (n.foliage ? level[index(n.tx, n.ty)] === 1 : chosen.has(n.key)));
+    // queued jobs no longer chosen (with the distance levels)
+    if (lodOn) S.dropQueued((n) => n.pinned > now || (n.foliage ? level[index(n.tx, n.ty)] === 1 : chosen.has(n.key)));
     progress(f, wanted, tilesNow, folNow);
     S.pump();
   };
 
   // Occlusion culling (occlusion.ts): a tile's columns block the view once it is in and all its buildings show --
-  // drawn by whichever level (the least of the levels' heights where two are in), never while the clay (CLAY) stands
-  // in for some of the city (its blocks are cut out of the tiles' meshes then)
+  // drawn by whichever level (the least of the levels' heights where two are in)
   const occ = new Occlusion(W, D, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3);
   let occOn = occlusion, occAt = 0, occN = -1;
   const occSrc = Array.from({ length: total }, () => [] as ColumnData[]), occStats = { ms: 0, meshes: 0, hidden: 0 };
@@ -433,7 +357,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const HIDDEN = 5, cam0 = camera as THREE.PerspectiveCamera, before = scene.onBeforeRender.bind(scene);
   const cull = (cam: THREE.Camera) => {
     if (cam !== camera) return;
-    const now = performance.now(), on = occOn && clay === 'none';
+    const now = performance.now(), on = occOn;
     const kids = S.group.children;
     if (!on) {
       if (occN !== -1) { for (const m of kids) m.layers.mask = 1; occN = -1; occStats.hidden = 0; }
@@ -450,7 +374,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     let hidden = 0;
     for (const o of kids) {
       const m = o as THREE.Mesh, box = m.geometry?.boundingBox;
-      const h = !!box && m.material !== clayMat && occ.hidden(box);
+      const h = !!box && occ.hidden(box);
       m.layers.mask = h ? 1 << HIDDEN : 1;
       hidden += +h;
     }
@@ -475,22 +399,21 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   const labelled = new Map(meta.labels.map((l) => [`${l.x + 0.5},${l.y + 0.5}`, bldAt(l.x, l.y)]));
   return {
-    // a building's label once it shows; the others (parks, the river) with the foliage; over clay, all of them
-    gate: (x: number, z: number) => { const b = labelled.get(`${x},${z}`) ?? -1; return clay !== 'none' || (b >= 0 ? shown[b + 1] > 0 : stage >= 4); },
-    get complete() { return stage >= 4 && clay !== 'loading'; },
-    // with the clay the 1 m buildings' triangles of the blocks shown, else what the last pick chose (tiles.tris)
-    get realTris() { return useClay ? realTris : pickTris; },
+    // a building's label once it shows; the others (parks, the river) with the foliage
+    gate: (x: number, z: number) => { const b = labelled.get(`${x},${z}`) ?? -1; return b >= 0 ? shown[b + 1] > 0 : stage >= 4; },
+    get complete() { return stage >= 4; },
+    // the triangles the last pick chose (tiles.tris)
+    get pickTris() { return pickTris; },
     // main.ts budget, at detail 0 and 1: twice the triangles of the whole map at the coarsest level, and those at 1 m
-    // with its foliage (tiles.tris); with the clay [0.2 M, the 1 m buildings' triangles] (as the blocks count them)
-    trisRange: (useClay ? [0.2e6, cityTris] : [2 * sumOf(String(lods.at(-1)) as '8'), sumOf('1c') + sumOf('1f')]) as [number, number],
-    clay: useClay,
+    // with its foliage (tiles.tris)
+    trisRange: [2 * sumOf(String(lods.at(-1)) as '8'), sumOf('1c') + sumOf('1f')] as [number, number],
     // the distance levels now (tools): nodes shown per level, chosen ones not shown yet, wanted tiles shown by nothing
     get lod() {
       const shownBy: Record<number, number> = {};
       for (const p of shownN.values()) shownBy[p.s] = (shownBy[p.s] ?? 0) + 1;
       let pending = 0, gaps = 0;
       for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
-      for (let i = 0; i < total; i++) if (want[i] && !inTile[i]) gaps++;
+      for (let i = 0; i < total; i++) if (inRange[i] && !inTile[i]) gaps++;
       return { on: lodOn, shownBy, pending, gaps };
     },
     // every tile the budget asks for is in
@@ -500,25 +423,9 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     setDist(m: number) { cut = m; },
     setOcclusion(on: boolean) { occOn = on; },
     // occlusion culling now (tools): on, the last update's cost (ms), tile meshes, of them hidden
-    get occlusion() { return { on: occOn && clay === 'none', ...occStats }; },
+    get occlusion() { return { on: occOn, ...occStats }; },
     occluder: occ,
-    cityTris,
   };
-}
-
-// Each block's triangles at 1 m, as meshed (tools/tris.mjs: level 1's quads by the column under their middle; without
-// the foliage). Data built without that step has none: then the footprints of the buildings whose middle lies in the
-// block, scaled to ~14 M triangles for the whole city, so the detail still spends its budget on the blocks nearest the
-// focus (without it any detail under 1 would leave the whole city as clay).
-function blockTris(blocks: number[][], buildings: number[][], blk: Uint16Array, W: number, D: number) {
-  if (blocks.every((b) => b[7] !== undefined)) return blocks.map((b) => b[7] || 0);
-  const t = new Float64Array(blocks.length);
-  for (const [cx, cy, n] of buildings) {
-    const k = blk[Math.min(D - 1, Math.max(0, Math.round(cy))) * W + Math.min(W - 1, Math.max(0, Math.round(cx)))] - 1;
-    if (k >= 0 && k < t.length) t[k] += n;
-  }
-  const sum = t.reduce((a, b) => a + b, 0) || 1;
-  return [...t].map((x) => (x * 14e6) / sum);
 }
 
 // one terrain piece per 128 m tile (heights every 4 m, ground colours every 2 m), each dropped once its tile is in:

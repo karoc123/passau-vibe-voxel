@@ -40,9 +40,6 @@ export interface VoxelUniforms {
   uAlbedo: U<number>;
   uStage: U<number>;
   uBldOn: U<THREE.Texture>;
-  uZOn: U<number>;
-  uZBlk: U<THREE.Texture>;
-  uZFBlk: U<THREE.Texture>;
   uLitA: U<THREE.Vector4[]>;
   uLitB: U<THREE.Vector4[]>;
   uLitMap: U<THREE.Texture>;
@@ -82,9 +79,6 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uAlbedo: { value: 0.7 },
     uStage: { value: 0 },
     uBldOn: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
-    uZOn: { value: 0 },
-    uZBlk: { value: tiny(THREE.RedIntegerFormat, new Uint16Array(1), THREE.UnsignedShortType) },
-    uZFBlk: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
     uSpillMap: { value: tiny(THREE.RGFormat, new Uint8Array(2)) },
     uSpill: { value: new THREE.Vector2(1, 1) },
     uShop: { value: 1 },
@@ -360,16 +354,6 @@ const FACE_PARS = `
     vN = normalFromIdx(float(b & 7)); vWallAng = float((b & 255) >> 3);
     vRoof = kind == 1 ? 1.0 : 0.0; vSlant = kind == 2 ? 1.0 : 0.0;
     vBid = floor(vFace.z + 0.5); vGz = vFace.w;
-  }`;
-
-// Where the budget leaves the city to the 8 m clay (city.ts, uZOn): a city block is real once uZFBlk says so
-const ZONES_PARS = `
-  uniform int uZOn; uniform highp usampler2D uZBlk; uniform sampler2D uZFBlk;
-  bool zreal(vec3 c) {
-    if (uZOn == 0) return true;
-    uint id = texelFetch(uZBlk, clamp(ivec2(c.x, c.z), ivec2(0), textureSize(uZBlk, 0) - 1), 0).r;
-    int w = textureSize(uZFBlk, 0).x;
-    return texelFetch(uZFBlk, ivec2(int(id) % w, int(id) / w), 0).r > 0.5;
   }`;
 
 const FRAG_PARS = `
@@ -687,7 +671,7 @@ const SURFACE = `
     if (uFolOn > 0.5) {
       vec3 fo = foliageAt(cell);
       if (leafOff(cell, fo)) {
-        #if !defined(CLAY) && !defined(PREPASSED)
+        #ifndef PREPASSED
         if (leafGone(cell, fo)) discard;
         #endif
         col = mix(vec3(0.16, 0.13, 0.11), vec3(0.25, 0.21, 0.18), hash13(floor(cell * 0.5) + 2.7)) * (0.8 + 0.4 * h);
@@ -776,7 +760,7 @@ const SURFACE = `
   }
   // (not on the far tiles, NO_MOVING_SHADOW, where a metre is a pixel or less: all of it faded there. NO_GROUND_DETAIL:
   // without it, to time it)
-  #if !defined(CLAY) && !defined(NO_MOVING_SHADOW) && !defined(NO_GROUND_DETAIL)
+  #if !defined(NO_MOVING_SHADOW) && !defined(NO_GROUND_DETAIL)
   vec2 gw = fwidth(vVox.xz); // (out here, where every fragment takes it)
   if ((pa >> 5) > 0 && vN.y > 0.5 && vRoof < 0.5) groundDetail(pa >> 5, vVox.xz, gw, col);
   #endif
@@ -874,30 +858,7 @@ const SURFACE = `
   if (m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) col *= mix(1.0, uAlbedo, smoothstep(0.2, 0.6, dot(col, vec3(0.2126, 0.7152, 0.0722))));
   diffuseColor.rgb = col * mix(0.62, 1.0, vAO);
   if (vHide > 0.5) { diffuseColor.rgb = vec3(0.42, 0.41, 0.39); gEmissive = vec3(0.0); }
-  #ifdef CLAY
-  if (zreal(cell)) discard;
-  #elif !defined(PREPASSED)
-  if (!zreal(cell)) discard;
-  #endif
-  #ifdef CLAY
-  if (!cut) { gEmissive = vec3(0.0); gRough = 0.95; gMetal = 0.0; diffuseColor.rgb = vec3(0.62, 0.61, 0.59) * mix(0.75, 1.0, vAO); }
-  #endif`;
-
-// the clay's shadow: none where the city is real (it casts its own)
-export function makeClayDepthMaterial(uniforms: VoxelUniforms) {
-  const m = new THREE.MeshDepthMaterial();
-  m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec4 vattr; varying vec3 vVox; varying vec3 vN; ${NORMAL_FROM_IDX}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvVox = position; vN = normalFromIdx(mod(vattr.x, 8.0));`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${ZONES_PARS}\nvarying vec3 vVox; varying vec3 vN;`)
-      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif (zreal(floor(vVox - vN * 0.5 + 1e-3))) discard;`);
-  };
-  m.customProgramCacheKey = () => 'voxel-clay-depth';
-  return m;
-}
+`;
 
 export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
   const m = new THREE.MeshDepthMaterial();
@@ -928,16 +889,16 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
 const SHADOW_NORMAL_FALLBACK = 'vec3 shadowWorldNormal = vec3( 0.0 );'; // three's fallback without a normal attribute
 if (!THREE.ShaderChunk.shadowmap_vertex.includes(SHADOW_NORMAL_FALLBACK)) throw new Error('three: shadowmap_vertex changed');
 
-// clay: the 8 m stand-in for the city outside the budget (city.ts). far: the distance levels' tiles (city.ts), where a
+// far: the distance levels' tiles (city.ts), where a
 // metre is a pixel or less: without the moving things' shadow map (daylight.ts NO_MOVING_SHADOW) -- a car there is two
 // pixels and its shadow less, and traffic is only simulated within ~900 m of the focus anyway. What it costs is in the
 // program, not in the lookup: on an Iris Xe skipping it beyond 1 km, or taking one tap instead of five, saved nothing,
 // while a program without it drew the scene ~20 % faster at the overview, ~40 % over the whole map (tools/farshade.mjs)
-export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far = false } = {}) {
+export function makeVoxelMaterial(uniforms: VoxelUniforms, { far = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.0 });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
-    const defs = `${ZONES_PARS}\n` + (clay ? '#define CLAY\n' : '') + (far ? '#define NO_MOVING_SHADOW\n' : '');
+    const defs = far ? '#define NO_MOVING_SHADOW\n' : '';
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         #ifdef PREPASSED
@@ -985,10 +946,8 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
       // a staircase wall or roof tells the screen-space AO to go easy on it (post.ts)
       .replace('#include <opaque_fragment>', `#include <opaque_fragment>
         if ((vWallAng > 0.5 && vert && m != ${MAT.LEAF}) || vRoof > 0.5) gl_FragColor.a = 0.5;
-        #ifndef CLAY
         // and what mirrors tells the reflections how much (post.ts Reflections)
-        if (gRefl > 0.004) gl_FragColor.a = ${REFL_MAX.toFixed(2)} * gRefl;
-        #endif`)
+        if (gRefl > 0.004) gl_FragColor.a = ${REFL_MAX.toFixed(2)} * gRefl;`)
       // the clouds' shadows (clouds.ts) dim the sun's light alone, not the sky's: one bilinear lookup. Iris Xe, 1400 x 900,
       // with and without (NO_CLOUD_SHADOW) frame by frame in one page: ~0.1-0.2 ms (overview, from Oberhaus, the streets)
       .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
@@ -999,13 +958,13 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { clay = false, far =
         float aoF = mix(0.55, 1.0, vAO);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
   };
-  mat.customProgramCacheKey = () => `voxel${clay ? '-clay' : ''}${far ? '-far' : ''}`;
+  mat.customProgramCacheKey = () => `voxel${far ? '-far' : ''}`;
   return mat;
 }
 
 // The depth pre-pass (prepass.ts): a tile's depth alone, before the real pass draws it with the depth test Equal and
 // no depth write. Each vertex lands where makeVoxelMaterial puts it (the same lines, gl_Position invariant in both),
-// and what the real pass would discard -- bare twigs' leaves, a jet between spurts, a block left to the clay -- is
+// and what the real pass would discard -- bare twigs' leaves, a jet between spurts -- is
 // discarded here instead: such a fragment writes no depth, so the real pass fails the test there, and is compiled
 // without its discards (PREPASSED). A shader that never discards keeps the GPU's early depth test.
 export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
@@ -1020,7 +979,7 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vVox = position + vec3(0.0, ${SUB_Y}, 0.0); ${FACE_VERTEX}
         ${BUILD_VERTEX}`);
-    shader.fragmentShader = `${ZONES_PARS}\n` + shader.fragmentShader
+    shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D uPalette; uniform float uTime; ${FACE_PARS}
         float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -1038,7 +997,6 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
             float h = ${CELL_HASH};
             if (${JET_GONE}) discard;
           }
-          if (!zreal(cell)) discard;
         }`);
   };
   m.customProgramCacheKey = () => 'voxel-prepass';

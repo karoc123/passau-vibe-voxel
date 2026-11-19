@@ -1,19 +1,14 @@
-"""Which building and which city block every 1 m column belongs to: the viewer (web/src/city.ts) shows each building
-once it is whole, and spends its triangle budget on the blocks nearest the focus, the rest as clay.
+"""Which building every 1 m column belongs to: the viewer (web/src/city.ts) shows each building once all its tiles are
+in, the mesher (web/src/mesher.worker.ts) never merges faces across buildings.
 
-Blocks: the ground cut along streets, railways and water; a street's columns go to the nearest block, so two blocks
-meet on its centreline. A building belongs whole to the block holding most of its footprint. Very large blocks
-(railway land, the river banks) are split on a 256 m grid.
-
-Output (web/public/data/): zones.bin = uint16 block[D, W] + uint16 building[D, W] (0: none), zones.json.
+Output (web/public/data/): zones.bin = uint16 building[D, W] (0: none), zones.json = {"buildings": [[cx, cy, columns,
+x0, y0, x1, y1], ...]} (centroid and bounding box in metres, building k + 1 in zones.bin).
 """
 import gzip
 import json
 from pathlib import Path
 
 import numpy as np
-import rasterio.features
-from affine import Affine
 from scipy import ndimage
 
 from aoi import D, W
@@ -21,18 +16,6 @@ from osm import OSM, footprints
 
 OUT = Path("web/public/data")
 osm = OSM()
-
-
-def tunnelish(t):
-    return t.get("tunnel") in ("yes", "building_passage", "culvert") or t.get("layer", "0").lstrip("-").isdigit() and int(t.get("layer", "0")) < 0 \
-        or t.get("covered") == "yes" or t.get("location") == "underground"
-
-
-def burn(shapes, dtype=np.uint16, all_touched=False):
-    shapes = [(s, int(v)) for s, v in shapes if s is not None and not s.is_empty]
-    return rasterio.features.rasterize(shapes, out_shape=(D, W), transform=Affine.identity(), fill=0,
-                                       all_touched=all_touched, dtype=dtype)
-
 
 # buildings (whole buildings, not parts)
 blds = [(g, t, oid) for oid, typ, t, g in osm.areas
@@ -44,49 +27,10 @@ bld = bld.astype(np.uint16)
 blds += [(None, {"building": "yes"}, None)] * n_extra  # (buildings from LoD2 alone)
 print("buildings", len(blds), "columns", int((bld > 0).sum()))
 
-# separators: streets (not footways/service), railways, water
-ROADS = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street",
-         "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "pedestrian"}
-lines = [l.buffer(1.5) for oid, t, l in osm.lines if (t.get("highway") in ROADS or t.get("railway") in ("rail", "tram", "light_rail"))
-         and not tunnelish(t) and t.get("bridge") is None]
-water = [g for oid, typ, t, g in osm.areas if t.get("natural") == "water" or t.get("waterway") == "riverbank"]
-sep = burn([(g, 1) for g in lines + water], np.uint8, all_touched=True) > 0
-sep &= bld == 0  # buildings are never separators (passages under them)
-lab, n = ndimage.label(~sep)
-print("raw blocks", n)
-# streets (and other separator columns) go to the nearest block: blocks meet on the centreline
-_, (ir, ic) = ndimage.distance_transform_edt(lab == 0, return_indices=True)
-blk = lab[ir, ic].astype(np.int64)
-# tiny blocks (traffic islands) join a neighbour; huge ones are split on a 256 m grid
-area = np.bincount(blk.ravel(), minlength=n + 1)
 rr, cc = np.mgrid[0:D, 0:W]
-big = area[blk] > 120_000
-blk = np.where(big, (n + 1) + (rr // 256) * (W // 256 + 1) + (cc // 256) + blk * 10_000, blk)
-_, blk = np.unique(blk, return_inverse=True)
-blk = blk.reshape(D, W) + 1
-area = np.bincount(blk.ravel())
-small = area[blk] < 400
-if small.any():
-    _, (ir, ic) = ndimage.distance_transform_edt(small, return_indices=True)
-    blk = blk[ir, ic]
-# a building lies whole in one block: the one under most of its footprint
-idx = np.flatnonzero(bld.ravel())
-b, k = bld.ravel()[idx], blk.ravel()[idx]
-pairs = np.unique(np.stack([b, k], 1), axis=0, return_counts=True)
-best = {}
-for (bi, ki), cnt in zip(*pairs):
-    if cnt > best.get(bi, (0, 0))[1]:
-        best[bi] = (ki, cnt)
-lut = np.zeros(len(blds) + 1, np.int64)
-for bi, (ki, _) in best.items():
-    lut[bi] = ki
-blk = np.where(bld > 0, lut[bld], blk)
-_, blk = np.unique(blk, return_inverse=True)
-blk = (blk.reshape(D, W) + 1).astype(np.uint16)
-nb = int(blk.max())
-print("blocks", nb)
 
-# per block / building: centroid and bounding box (metres)
+
+# per building: centroid and bounding box (metres)
 def stats(lab, n):
     idx = np.arange(1, n + 1)
     cnt = ndimage.sum_labels(np.ones_like(lab, np.float32), lab, idx)
@@ -100,16 +44,8 @@ def stats(lab, n):
                     *( [s[1].start, s[0].start, s[1].stop, s[0].stop] if s else [0, 0, 0, 0])])
     return out
 
-# (each block's triangles at 1 m, blocks[k][7], come after: web/tools/tris.mjs meshes the tiles, split by these buildings)
-meta = {"blocks": stats(blk, nb), "buildings": stats(bld.astype(np.int32), len(blds))}
+meta = {"buildings": stats(bld.astype(np.int32), len(blds))}
 with gzip.GzipFile(OUT / "zones.bin", "wb", compresslevel=9, mtime=0) as fh:
-    fh.write(blk.tobytes() + bld.astype(np.uint16).tobytes())
+    fh.write(bld.tobytes())
 json.dump(meta, open(OUT / "zones.json", "w"))
-# a picture of the blocks, for checking
-rng = np.random.default_rng(1)
-col = rng.integers(60, 230, (nb + 1, 3), dtype=np.uint8)
-img = col[blk]
-img[bld > 0] = (img[bld > 0] * 0.6).astype(np.uint8)
-from PIL import Image
-Image.fromarray(img).save("data/debug/zones.png")
 print("wrote zones.bin", (OUT / "zones.bin").stat().st_size // 1024, "KB")

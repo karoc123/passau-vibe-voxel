@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // write and no discards (PREPASSED), so that the costly shader runs about once per pixel. Hooked into the scene's
 // onBeforeRender, so every render of the scene gets it (the composer's RenderPass, or a plain renderer.render); n8ao's
 // own renders of the scene's transparent things find every tile hidden and draw nothing here. What is not a registered
-// tile material (the clay) is left out of it, and drawn as before.
+// tile material is left out of it, and drawn as before.
 export class DepthPrepass {
   // Set from the graphics settings (?prepass=1|0, the panel; or window.__three.prepass().enabled): on by default only on
   // an Intel GPU through Direct3D 11 (settings.ts prepassPays), where it halves the scene pass at Oberhaus. On an Iris Xe

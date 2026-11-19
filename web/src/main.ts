@@ -53,9 +53,8 @@ const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
 // evenly on a log scale from twice the whole map at 8 m (0: 0.5 M, the whole map at 8 m and some 4 m around the
 // camera) to all of it at 1 m with its foliage (14.7 M; at 1 no limit at all): 0.45 ~2.3 M (the whole map at 4 m, the
 // nearest at 2 and 1 m), 0.75 ~6.3 M. Phones draw 2 M at most whatever it says (the 1 m tiles of the whole map need ~2
-// GB of GPU). With the clay (tile-request.ts CLAY) it counts 1 m buildings instead, from 0.2 M to all of them, and
-// phones hold 0.75 M.
-const ceiling = () => (!phone ? Infinity : city?.clay ? 0.75e6 : 2e6);
+// GB of GPU).
+const ceiling = () => (!phone ? Infinity : 2e6);
 const budget = () => {
   const l = gfx.now.detail, [lo, hi] = city?.trisRange ?? [0.5e6, 14.7e6];
   return l >= 1 ? ceiling() : Math.min(ceiling(), lo * (Math.max(hi, lo) / lo) ** l);
@@ -484,7 +483,7 @@ function stillChanged() {
   }
   if (n !== casting.size) for (const [m, g] of casting) if (!m.visible || m.parent !== streamer.group) { add(g); casting.delete(m); }
   daylight.changed(boxes);
-  const U = uniforms, key = `${U.uStage.value},${U.uBldOn.value.version},${U.uZOn.value},${U.uZFBlk.value.version},${U.uFolOn.value},${U.uDay.value},${U.uFolMap.value.id}`;
+  const U = uniforms, key = `${U.uStage.value},${U.uBldOn.value.version},${U.uFolOn.value},${U.uDay.value},${U.uFolMap.value.id}`;
   if (key === stillKey) return false;
   stillKey = key;
   return true;

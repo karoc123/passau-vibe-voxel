@@ -25,7 +25,7 @@ const measure = () => page.evaluate(async () => {
   const parts = {
     life: () => { const g = life?.group; if (!g) return () => {}; const v = g.visible; g.visible = false; return () => { g.visible = v; }; },
     foliage: () => { const m = meshes((n) => n.foliage && n.mesh.visible); m.forEach((x) => { x.visible = false; }); return () => m.forEach((x) => { x.visible = true; }); },
-    clay: () => { const m = meshes((n) => n.s === 8 && n.mesh.visible); m.forEach((x) => { x.visible = false; }); return () => m.forEach((x) => { x.visible = true; }); },
+    coarse: () => { const m = meshes((n) => n.s > 1 && !n.foliage && n.mesh.visible); m.forEach((x) => { x.visible = false; }); return () => m.forEach((x) => { x.visible = true; }); },
     buildings: () => { const m = meshes((n) => n.s === 1 && !n.foliage && n.mesh.visible); m.forEach((x) => { x.visible = false; }); return () => m.forEach((x) => { x.visible = true; }); },
     ao: () => { passes[1].enabled = false; return () => { passes[1].enabled = true; }; },
     bloom: () => { passes[2].enabled = false; return () => { passes[2].enabled = true; }; },

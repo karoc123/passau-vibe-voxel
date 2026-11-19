@@ -1,4 +1,4 @@
-// Triangles loaded, by kind (1 m buildings, 1 m foliage, 8 m clay, traffic), at the whole city and at a few details (settings.ts).
+// Triangles shown, by kind (buildings and ground per level 1, 2, 4, 8 m; foliage; traffic), at the whole city and at a few details (settings.ts).
 // usage: node tools/inventory.mjs http://localhost:5188
 import { chromium } from 'playwright-core';
 const [base] = process.argv.slice(2);
@@ -12,16 +12,16 @@ for (const p of [1, 0.75, 0.5, 0.25, 0]) {
   await page.waitForTimeout(5000);
   console.log(JSON.stringify(await page.evaluate(() => {
     const tri = (m) => Math.min(m.geometry.drawRange.count, m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3;
-    const acc = { budgetM: +(window.__three.budget() / 1e6).toFixed(2), realM: +(window.__three.city().realTris / 1e6).toFixed(2) };
+    const acc = { budgetM: +(window.__three.budget() / 1e6).toFixed(2), pickM: +(window.__three.city().pickTris / 1e6).toFixed(2) };
     for (const n of window.__streamer.nodes.values()) {
       if (!n.mesh || !n.mesh.visible) continue;
-      const k = n.s === 8 ? 'clay' : n.foliage ? 'foliage' : 'buildings';
+      const k = n.foliage ? 'foliage' : `level${n.s}`;
       acc[k] = (acc[k] ?? 0) + tri(n.mesh);
       acc[k + 'Tiles'] = (acc[k + 'Tiles'] ?? 0) + 1;
     }
     let life = 0; window.__life?.group.traverse((o) => { if (o.isMesh) life += tri(o) * (o.isInstancedMesh ? o.count : 1); });
     acc.life = life;
-    for (const k of ['clay', 'foliage', 'buildings', 'life']) acc[k] = +((acc[k] ?? 0) / 1e6).toFixed(2);
+    for (const k of ['level1', 'level2', 'level4', 'level8', 'foliage', 'life']) acc[k] = +((acc[k] ?? 0) / 1e6).toFixed(2);
     return acc;
   })));
 }
