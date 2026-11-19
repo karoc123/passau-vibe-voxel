@@ -129,6 +129,16 @@ const credits = el('div', '', `<div>Passau in voxels, derived from <a href="http
   <div>data: <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener">Bayerische Vermessungsverwaltung</a> (CC BY 4.0) and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> contributors (ODbL)</div>
   <div>weather <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0), phenology <a href="https://www.dwd.de/" target="_blank" rel="noopener">Deutscher Wetterdienst</a> (DL-DE BY 2.0)</div>`);
 credits.id = 'credits';
+credits.setAttribute('popover', 'auto');
+const creditsButton = el('button', '', '<span aria-hidden="true">?</span>');
+creditsButton.id = 'credits-button';
+creditsButton.type = 'button';
+creditsButton.setAttribute('aria-label', 'Credits and licenses');
+creditsButton.setAttribute('popovertarget', credits.id);
+document.addEventListener('keydown', (e) => {
+  // Let the browser close the popover before Escape can exit the current navigation mode.
+  if (e.key === 'Escape' && credits.matches(':popover-open')) e.stopPropagation();
+}, { capture: true });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
@@ -396,8 +406,8 @@ async function boot() {
   const [{ FpvPrototype }, { DrivePrototype }] = await Promise.all([
     import('./nav/fpv.prototype'), import('./nav/drive.prototype'),
   ]);
-  fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement, credits);
-  drive = new DrivePrototype(nav, controls.target, meta, modeTools);
+  fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement);
+  drive = new DrivePrototype(nav, controls.target, meta, modeTools, renderer.domElement);
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;

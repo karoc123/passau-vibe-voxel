@@ -1,3 +1,10 @@
 #bar .drive-speed { font-variant-numeric: tabular-nums; font-weight: 600; }
 #bar .drive-status:empty { display: none; }
 body.driving :is(#hud, .fpv-prototype) { display: none; }
+
+#bar .drive-help-touch { display: none; }
+@media (pointer: coarse) {
+  #bar .drive-help-keys { display: none; }
+  #bar .drive-help-touch { display: inline; }
+  #bar .drive-prototype > button { min-height: 44px; }
+}

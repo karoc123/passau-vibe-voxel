@@ -51,7 +51,6 @@ export class FpvPrototype {
   private readonly armTouch = button('Fly with touch', () => this.arm('touch'));
   private readonly reset = button('Reset flight', () => this.restart());
   private readonly options = el('div', 'fpv-options', '', this.details);
-  private readonly attribution = document.createElement('details');
 
   private phase: Phase = 'loading';
   private source: InputSource = 'controller';
@@ -66,8 +65,7 @@ export class FpvPrototype {
   private notice = '';
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
-    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement,
-    private readonly credits: HTMLElement) {
+    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
     this.collision = new VoxelCollision(meta);
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
@@ -76,10 +74,8 @@ export class FpvPrototype {
     this.panel.prepend(this.enterExit);
     host.append(this.panel);
     this.status.setAttribute('role', 'status');
-    this.attribution.className = 'fpv-attribution';
-    this.actions.append(this.armTouch, this.armRadio, this.armKeys, this.reset, this.attribution);
+    this.actions.append(this.armTouch, this.armRadio, this.armKeys, this.reset);
     this.options.append(this.radio.element);
-    el('summary', 'mode-button', 'Attribution', this.attribution);
     const angle = el('label', 'row fpv-camera-angle', '', this.options);
     const value = el('span', 'val', '', angle);
     const track = el('span', 'track', '', angle);
@@ -309,13 +305,6 @@ export class FpvPrototype {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
     const flyingWithTouch = flying && this.source === 'touch';
     document.body.classList.toggle('fpv-flying', flying);
-    this.attribution.hidden = !flying;
-    if (flying && this.credits.parentElement !== this.attribution) {
-      this.attribution.append(this.credits);
-    } else if (!flying && this.credits.parentElement === this.attribution) {
-      this.attribution.open = false;
-      document.body.append(this.credits);
-    }
     const canArm = active && (this.phase === 'ready' || this.phase === 'paused');
     this.panel.classList.toggle('mode-active', active);
     this.details.hidden = !active;

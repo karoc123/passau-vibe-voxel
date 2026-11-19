@@ -5,18 +5,9 @@
 }
 #bar .fpv-telemetry { color: var(--t2); }
 #bar .fpv-options { margin-top: 4px; }
-#bar .fpv-attribution[open] { flex-basis: 100%; }
-#bar .fpv-attribution > summary { width: fit-content; align-content: center; }
-#bar .fpv-attribution #credits {
-  position: static;
-  align-items: flex-start;
-  padding: 0 0 4px;
-  background: none;
-}
 body.fpv #labels { display: none; }
-body.fpv #perf { pointer-events: none; }
 
-body.fpv-flying :is(#perf, #hud, .caption),
+body.fpv-flying :is(#hud, .caption),
 body.fpv-flying #bar > :not(.mode-tools),
 body.fpv-flying #bar .mode-tools > :not(.fpv-prototype) {
   display: none;
@@ -33,7 +24,6 @@ body.fpv-flying #bar .fpv-prototype {
   background: rgba(16,17,20,.62);
 }
 body.fpv-flying #bar .fpv-prototype .mode-detail { display: contents; }
-body.fpv-flying #bar .fpv-attribution[open] { max-width: 320px; }
 body.fpv-flying #bar .fpv-status:not(:empty) { order: 1; flex-basis: 100%; padding-bottom: 6px; }
 body.fpv-flying #bar .fpv-status:empty { position: absolute; }
 

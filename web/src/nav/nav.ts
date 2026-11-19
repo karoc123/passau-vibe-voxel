@@ -180,6 +180,7 @@ export class Nav {
     });
     dom.addEventListener('pointerdown', (e) => {
       if (this.mode === 'fpv' || (this.pedestrianActive && document.pointerLockElement === dom)) return;
+      if (this.driving && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.mode === 'orbit' && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.pivotAt(e.clientX, e.clientY);
@@ -191,6 +192,7 @@ export class Nav {
       this.cancelFly();
     });
     dom.addEventListener('pointermove', (e) => {
+      if (this.driving && e.pointerType === 'touch') return;
       const p = ptrs.get(e.pointerId);
       if (this.pedestrianActive && e.pointerType === 'mouse') {
         if (document.pointerLockElement !== dom) {
@@ -226,7 +228,7 @@ export class Nav {
       this.marker.visible = false;
     });
     const up = (e: PointerEvent) => {
-      ptrs.delete(e.pointerId);
+      if (!ptrs.delete(e.pointerId)) return;
       if (ptrs.size < 2) { pinch0 = null; twist = null; }
       this.quietT = performance.now();
       if (this.mode === 'orbit') dom.style.cursor = 'grab';

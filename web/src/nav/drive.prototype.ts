@@ -5,12 +5,15 @@ import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import { ArcadeCar, carsOverlap, type DriveInput, type RoadContact } from './arcade-car';
 import type { Nav, Ride } from './nav';
+import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
 import './drive.prototype.css';
 
 const STEP = 1 / 90;
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
 const FOOTPRINT = [-1, 0, 1];
+const HANDBRAKE_THRESHOLD = 0.75;
+
 interface Driving {
   ride: Ride;
   life: StreetLife;
@@ -21,6 +24,7 @@ interface Driving {
 
 export class DrivePrototype {
   private readonly tiles: VoxelCollision;
+  private readonly touch: TouchSticks;
   private readonly keys = new Set<string>();
   private readonly position = new Vector3();
   private readonly velocity = new Vector3();
@@ -29,15 +33,19 @@ export class DrivePrototype {
   private readonly details = el('div', 'mode-detail', '', this.panel);
   private readonly status = el('div', 'drive-status', '', this.details);
   private readonly speed = el('div', 'drive-speed', '', this.details);
-  private readonly help = el('div', 'drive-help', 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit', this.details);
+  private readonly help = el('div', 'drive-help', `
+    <span class="drive-help-keys">W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit</span>
+    <span class="drive-help-touch">Drag left thumb up for gas or down to brake/reverse. Drag right thumb sideways to steer or down for the handbrake.</span>
+  `, this.details);
   private pending: Ride | null = null;
   private driving: Driving | null = null;
   private accumulator = 0;
   private feedbackUntil = 0;
   private waiting = false;
 
-  constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta, host: HTMLElement) {
+  constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
     this.tiles = new VoxelCollision(meta);
+    this.touch = new TouchSticks(canvas);
     this.panel.className = 'drive-prototype';
     this.panel.setAttribute('aria-label', 'Drive a car');
     host.append(this.panel);
@@ -51,7 +59,9 @@ export class DrivePrototype {
       e.preventDefault();
     });
     addEventListener('keyup', e => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    const clearInput = () => { this.keys.clear(); this.touch.clear(); };
+    addEventListener('blur', clearInput);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
     this.draw();
   }
 
@@ -103,6 +113,7 @@ export class DrivePrototype {
     if (!life.takeWheel(car)) return;
     this.driving = { ride, life, car, motion: new ArcadeCar(pose, car.v, car.bus), displayHeight: pose.y };
     this.nav.controlledRide = ride;
+    this.touch.setActive(true);
     this.keys.clear();
     this.accumulator = 0;
     this.feedbackUntil = 0;
@@ -116,6 +127,7 @@ export class DrivePrototype {
     this.driving = null;
     this.nav.controlledRide = null;
     this.keys.clear();
+    this.touch.setActive(false);
     this.waiting = false;
   }
 
@@ -176,11 +188,15 @@ export class DrivePrototype {
     catch { /* The keyboard still works when Gamepad API access is blocked. */ }
     const raw = pad?.axes[0] ?? 0;
     const stick = Math.sign(raw) * clamp((Math.abs(raw) - 0.12) / 0.88, 0, 1);
+    const { left, right } = this.touch;
+    const pedal = left ? clamp(stickAxis(left.dy, left.radius), -1, 1) : 0;
+    const steering = right ? clamp(stickAxis(right.dx, right.radius), -1, 1) : 0;
+    const handbrake = !!right && stickAxis(-right.dy, right.radius) >= HANDBRAKE_THRESHOLD;
     return {
-      gas: Math.max(pressed('KeyW', 'ArrowUp'), pad?.buttons[7]?.value ?? 0),
-      brake: Math.max(pressed('KeyS', 'ArrowDown'), pad?.buttons[6]?.value ?? 0),
-      steer: clamp(pressed('KeyD', 'ArrowRight') - pressed('KeyA', 'ArrowLeft') + stick, -1, 1),
-      handbrake: this.keys.has('Space') || !!pad?.buttons[0]?.pressed,
+      gas: Math.max(pressed('KeyW', 'ArrowUp'), pad?.buttons[7]?.value ?? 0, pedal),
+      brake: Math.max(pressed('KeyS', 'ArrowDown'), pad?.buttons[6]?.value ?? 0, -pedal),
+      steer: clamp(pressed('KeyD', 'ArrowRight') - pressed('KeyA', 'ArrowLeft') + stick + steering, -1, 1),
+      handbrake: this.keys.has('Space') || !!pad?.buttons[0]?.pressed || handbrake,
     };
   }
 
