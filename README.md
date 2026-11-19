@@ -133,9 +133,10 @@ for them).
 
 ## Viewer (web/)
 
-three.js + Vite + TypeScript. The city is streamed in tiles (`web/public/data/tiles/{1,1f,8}/x_y.bin`): 128 × 128
-cells of 1 m (buildings and ground; foliage in `1f`) or 8 m. `web/src/city.ts` draws as much of the city at 1 m as a
-triangle budget allows, the blocks nearest the focus first; the 8 m level stands in as clay where the budget ends.
+three.js + Vite + TypeScript. The city is streamed in tiles (`web/public/data/tiles/{1,1f,2,4,8}/x_y.bin`): 128 × 128
+cells of 1 m (buildings and ground; foliage in `1f`), 2, 4 or 8 m. `web/src/city.ts` picks each node's level by its
+size on screen and a budget of triangles drawn (the detail setting), the nodes nearest the camera finest; the whole
+map at 8 m is the least it draws.
 Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~900 m of the camera.
 
 ```sh

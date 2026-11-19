@@ -1,11 +1,11 @@
 // The triangles of every tile as the viewer meshes it: the mesher itself (src/mesher.worker.ts meshJob) run in Node
 // over web/public/data/tiles, each tile with what stream.ts sends with it (src/tile-request.ts). Writes
 //   meta.json  tiles.tris: { level: triangles per tile, row-major (ty * nx + tx) }, levels "1", "2", "4", "8" (the
-//              node's own mesh; 8 as the clay is meshed), "1f" (a foliage tile's own mesh) and "1c" (its base tile's
-//              mesh once the foliage shows: without the faces the grass covers, stream.ts coverBase; a 1 m tile with
-//              its foliage draws 1c + 1f)
-//   zones.json each block's triangles at 1 m (blocks[k][7], city.ts budget): level 1's quads by the column under their
-//              middle
+//              node's own mesh, each level meshed as the city's, never as clay: city.ts budget), "1f" (a foliage
+//              tile's own mesh) and "1c" (its base tile's mesh once the foliage shows: without the faces the grass
+//              covers, stream.ts coverBase; a 1 m tile with its foliage draws 1c + 1f)
+//   zones.json each block's triangles at 1 m (blocks[k][7], city.ts's budget with the clay, tile-request.ts CLAY):
+//              level 1's quads by the column under their middle
 // Needs zones.bin (the buildings split the mesh's faces): scripts/build_data.sh runs it after zones.py.
 // usage (in web/): node tools/tris.mjs [data dir, default public/data]
 import fs from 'node:fs';
@@ -25,7 +25,7 @@ const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const { W, D } = meta, N = meta.tiles.N, levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => a - b);
 const zbuf = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'zones.bin')));
 const zw = new Uint16Array(zbuf.buffer, zbuf.byteOffset, 2 * W * D), blk = zw.subarray(0, W * D);
-const ctx = { N, W, D, clay: levels.at(-1), ...req.paletteFlags(meta.palette), bldMap: { data: zw.slice(W * D), W } };
+const ctx = { N, W, D, clay: 0, ...req.paletteFlags(meta.palette), bldMap: { data: zw.slice(W * D), W } };
 const load = async (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 
 const zonesFile = path.join(dir, 'zones.json'), zones = JSON.parse(fs.readFileSync(zonesFile, 'utf8'));
