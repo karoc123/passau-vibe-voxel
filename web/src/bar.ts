@@ -126,7 +126,7 @@ class Graphics {
     pick('occl', 'Occlusion culling', onOff);
     pick('taa', 'Temporal upscaling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
-    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. View distance: the city further away is neither loaded nor drawn, hidden in haze. Temporal upscaling (experimental): drawn at a lower resolution (67 % unless you set it) and sharpened over several frames instead of SMAA; can blur a little in fast motion. Depth pre-pass: slower on some GPUs.', adv);
+    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. View distance: the city further away is neither loaded nor drawn, hidden in haze. Temporal upscaling: drawn at a lower resolution (67 % unless you set it) and sharpened over several frames instead of SMAA; can blur a little in fast motion. Depth pre-pass: slower on some GPUs.', adv);
     this.show();
   }
 
