@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Meta } from './types';
-import { dataTexture, fetchGzip } from './util';
+import { dataTexture } from './util';
 import { CUT_T } from './daylight';
 
 // The ground beyond the view distance (settings.ts dist): the bare terrain (terrain.bin, scripts/terrain.py) at STEP m,
@@ -20,17 +20,32 @@ export class FarGround {
   readonly group = new THREE.Group();
   private readonly mask: Uint8Array;
   private readonly maskTex: THREE.DataTexture;
+  // per piece (PIECE / T tiles a side, row by row) its tiles not under the city, and its mesh once built
+  private readonly pw: number;
+  private readonly open: Int32Array;
+  private readonly piece: (THREE.Mesh | null)[];
+  // pieces whose count changed since the last flush
+  private readonly touched = new Set<number>();
+  private changed = false;
 
-  constructor(meta: Meta, private readonly nx: number, private readonly ny: number) {
+  // terrain: terrain.bin (fetched once, main.ts)
+  constructor(meta: Meta, private readonly nx: number, ny: number, terrain: Promise<ArrayBuffer>) {
     this.mask = new Uint8Array(nx * ny);
     this.maskTex = dataTexture(this.mask, nx, ny, THREE.RedFormat);
+    const n = PIECE / T;
+    this.pw = Math.ceil(nx / n);
+    this.open = new Int32Array(this.pw * Math.ceil(ny / n));
+    for (let i = 0; i < nx * ny; i++) this.open[this.pieceOf(i)]++;
+    this.piece = new Array(this.open.length).fill(null);
     this.group.visible = false;
     this.group.name = 'farground';
-    void this.build(meta).catch((e) => console.warn('far ground', e));
+    void terrain.then((buf) => this.build(meta, buf)).catch((e) => console.warn('far ground', e));
   }
 
-  private async build(meta: Meta) {
-    const { W, D } = meta, buf = await fetchGzip('data/terrain.bin');
+  private pieceOf(i: number) { const n = PIECE / T; return Math.floor(Math.floor(i / this.nx) / n) * this.pw + Math.floor((i % this.nx) / n); }
+
+  private build(meta: Meta, buf: ArrayBuffer) {
+    const { W, D } = meta;
     const tw = Math.ceil(W / 4), th = Math.ceil(D / 4), hd = new Uint16Array(buf, 0, tw * th);
     // the colours every 2 m, averaged to every 8 m
     const cw = Math.floor(W / 2), ch = Math.floor(D / 2), rgb = new Uint8Array(buf, tw * th * 2, cw * ch * 3);
@@ -85,30 +100,30 @@ export class FarGround {
       // after the city (opaque things sort by renderOrder first): where a tile is drawn the depth test throws its
       // pixels out before the shader (which discards, so it would get no early test of its own)
       m.renderOrder = 1;
-      m.userData.tiles = [px * (PIECE / T), py * (PIECE / T)];
+      const pk = py * this.pw + px;
+      if (pk < this.piece.length) { this.piece[pk] = m; m.visible = this.open[pk] > 0; }
       this.group.add(m);
     }
-    this.cull();
   }
 
-  // where the city stands in (1: some tile drawn over the whole of that 128 m square); a piece under the city
-  // all over is not drawn at all
-  setMask(cover: Uint8Array) {
-    let changed = false;
-    for (let i = 0; i < cover.length; i++) { const v = cover[i] ? 255 : 0; if (v !== this.mask[i]) { this.mask[i] = v; changed = true; } }
-    if (!changed) return;
+  // where the city stands in (some tile drawn over the whole of that 128 m square), tile by tile as it changes; a
+  // piece under the city all over is not drawn at all. Shown at the next flush
+  mark(i: number, covered: boolean) {
+    const v = covered ? 255 : 0;
+    if (v === this.mask[i]) return;
+    this.mask[i] = v;
+    const k = this.pieceOf(i);
+    this.open[k] += covered ? -1 : 1;
+    this.touched.add(k);
+    this.changed = true;
+  }
+
+  flush() {
+    if (!this.changed) return;
+    this.changed = false;
     this.maskTex.needsUpdate = true;
-    this.cull();
-  }
-
-  private cull() {
-    const n = PIECE / T;
-    for (const m of this.group.children) {
-      const [x0, y0] = m.userData.tiles as number[];
-      let open = false;
-      for (let y = y0; y < Math.min(this.ny, y0 + n) && !open; y++) for (let x = x0; x < Math.min(this.nx, x0 + n); x++) if (!this.mask[y * this.nx + x]) { open = true; break; }
-      m.visible = open;
-    }
+    for (const k of this.touched) { const m = this.piece[k]; if (m) m.visible = this.open[k] > 0; }
+    this.touched.clear();
   }
 
   set on(v: boolean) { this.group.visible = v; }

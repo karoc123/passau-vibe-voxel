@@ -20,13 +20,16 @@ interface Pin {
   on: boolean;
   side: 'r' | 'l' | 's';
   since: number;
+  // off (.label.off) since offAt: its fade out over, it is left where it is (no style written each frame)
+  dimmed: boolean;
+  offAt: number;
 }
 export interface Placed extends Facts { x: number; y: number; z: number }
 
 const details = (f: Facts) => [f.en && f.kind, f.height && `${f.height} m`, f.year, f.rebuilt && `rebuilt ${f.rebuilt}`, f.by, f.building && 'under construction'].filter(Boolean);
 const levelAt = (d: number, far: number) => d < Math.max(250, Math.min(far * 0.3, 900)) ? 2 : 0;
 
-const STEM = 20, TOP = 8, MAX = 12, SETTLE = 150;
+const STEM = 20, TOP = 8, MAX = 12, SETTLE = 150, OFF_MS = 700; // (OFF_MS: longer than .label.off's fade, style.css)
 const overlap = (r: Rect, q: Rect) => r.x0 < q.x1 + 6 && r.x1 + 6 > q.x0 && r.y0 < q.y1 + 2 && r.y1 + 2 > q.y0;
 
 // Map pins: a dot on the roof, a hairline stem, the name above. Hidden when something else is in the way (a voxel
@@ -55,7 +58,7 @@ export class Labels {
   private add(cls: string, f: Facts, p: THREE.Vector3, base: THREE.Vector3, R: number): Pin {
     const facts = details(f).map((d) => `<span>${d}</span>`).join('');
     const e = el('div', cls, `<i class="dot"></i><i class="stem"></i><div class="txt"><b>${f.name}</b><span>${f.en ?? f.kind}</span>${facts ? `<p>${facts}</p>` : ''}</div>`, this.host);
-    return { el: e, txt: $('.txt', e), p, base, R, occluded: false, w: 0, h: 0, far: f.far ?? 1300, level: -1, dims: [], shift: 0, on: false, side: 'r', since: -1 };
+    return { el: e, txt: $('.txt', e), p, base, R, occluded: false, w: 0, h: 0, far: f.far ?? 1300, level: -1, dims: [], shift: 0, on: false, side: 'r', since: -1, dimmed: false, offAt: 0 };
   }
 
   // a temporary label on a searched place
@@ -104,7 +107,8 @@ export class Labels {
       const vis = fits && (L.on || now - L.since >= SETTLE);
       if (vis) { L.side = side; L.el.classList.toggle('left', side === 'l'); L.el.classList.toggle('pinned', pinned); L.txt.style.left = side === 's' ? `${L.shift.toFixed(0)}px` : ''; }
       L.on = vis;
-      L.el.classList.toggle('off', !vis);
+      if (L.dimmed === vis) { L.dimmed = !vis; L.el.classList.toggle('off', !vis); L.offAt = now; }
+      if (!vis && now - L.offAt > OFF_MS) continue;
       if (inFront) L.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
     }
   }

@@ -29,7 +29,8 @@ export interface MeshRequest {
 // can be discarded, autumn and winter)
 export interface BaseRemesh { bld: Uint16Array | null; roof: Uint8Array | null; leaf: Uint8Array }
 
-export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array; normals: Float32Array; cuts: Uint32Array }
+// box: the vertices' bounds, min x y z then max (the geometry's bounding box, made here rather than on the main thread)
+export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array; normals: Float32Array; cuts: Uint32Array; box: Float32Array }
 
 export type MeshReply =
   | ({ type: 'node'; key: string; dataOnly: boolean; data: Columns | null; base?: MeshOut } & MeshOut)
@@ -65,7 +66,7 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   try {
     const { keep, out, base } = await meshJob(m, fetchGzip);
     if (!out) {
-      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(GROUPS + 1), normals: new Float32Array(GROUPS * 6), cuts: new Uint32Array(8) }, columnBuffers(keep!));
+      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(GROUPS + 1), normals: new Float32Array(GROUPS * 6), cuts: new Uint32Array(8), box: new Float32Array(6) }, columnBuffers(keep!));
       return;
     }
     const transfer: Transferable[] = [];
@@ -229,7 +230,13 @@ function byFacing(out: QuadBuffer, withBld: boolean, N: number, s: number, x0: n
     pal.set(out.pal.subarray(q * 4, q * 4 + 4), t * 4);
     if (bld) bld.set(out.bld.subarray(q * 4, q * 4 + 4), t * 4);
   }
-  return { pos, attr, pal, bld, quads: kept, faces, normals, cuts };
+  const box = new Float32Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
+  for (let i = 0; i < pos.length; i += 3) for (let c = 0; c < 3; c++) {
+    const v = pos[i + c];
+    if (v < box[c]) box[c] = v;
+    if (v > box[3 + c]) box[3 + c] = v;
+  }
+  return { pos, attr, pal, bld, quads: kept, faces, normals, cuts, box };
 }
 
 // What of a base tile its foliage tile covers, per cell of the meshing volume: 1 grass or a trunk (always drawn,

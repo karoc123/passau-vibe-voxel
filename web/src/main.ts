@@ -65,7 +65,7 @@ const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const movingActors = new THREE.Group();
 scene.add(movingActors);
-const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000);
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000); // (the far plane: fitFar, once the map is known)
 const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
@@ -339,8 +339,10 @@ async function boot() {
   foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
     .catch((e) => console.warn('foliage', e));
   windows.then(({ set }) => { setWindows = set; }).catch((e) => console.warn('windows', e));
-  // where the street lights go: the buildings and the woods
-  const ground = Promise.all([windows, foliage, fetchGzip('data/terrain.bin')])
+  // the terrain (scripts/terrain.py), fetched once: the city's first ground and its far ground (city.ts, farground.ts),
+  // and where the street lights go, with the buildings and the woods
+  const terrain = fetchGzip('data/terrain.bin');
+  const ground = Promise.all([windows, foliage, terrain])
     .then(([w, f, terrain]) => ({ buildings: w.cells, trees: f.trees, terrain })).catch(() => null);
   const tileMat = makeVoxelMaterial(uniforms);
   streamer = new TileStreamer(meta, tileMat, scene);
@@ -365,7 +367,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, terrain, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
     pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
@@ -416,6 +418,7 @@ renderer.setAnimationLoop((now) => {
   post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   viewCut(above);
+  fitFar();
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;
   if (uniforms) uniforms.uTime.value = t;
@@ -500,6 +503,22 @@ function viewCut(above: number) {
   cutNow = c;
   daylight.setCut(c);
   city?.setDist(c);
+}
+
+// The far plane: out to the map's furthest corner from the camera (the far ground stands to the map's edge, faintly
+// through the view distance's fog: farground.ts), within FAR_PER_CUT times the view distance where there is one, and
+// never inside the sky's sphere (sky.ts, 6000 m). In FAR_STEP steps, so that it seldom changes (the depth's scale with
+// it: the TAA's history, the occlusion's horizons).
+const SKY_R = 6000, FAR_PER_CUT = 4, FAR_STEP = 500;
+function fitFar() {
+  if (map.isEmpty()) return;
+  const p = camera.position;
+  const reach = Math.hypot(Math.max(p.x - map.min.x, map.max.x - p.x), Math.max(p.y - map.min.y, map.max.y - p.y), Math.max(p.z - map.min.z, map.max.z - p.z));
+  const want = Math.max(SKY_R + FAR_STEP, cutNow > 0 ? Math.min(reach, cutNow * FAR_PER_CUT) : reach);
+  const far = Math.ceil(want / FAR_STEP) * FAR_STEP;
+  if (far === camera.far) return;
+  camera.far = far;
+  camera.updateProjectionMatrix();
 }
 
 // busy: this frame changed the settings or redrew the shadow map (autores.ts leaves it out)

@@ -34,6 +34,8 @@ interface Job {
   dataOnly: boolean;
   state: 'queued' | 'loading';
   prio: number;
+  // its place in the queue's heap, -1 when not in it
+  at: number;
   done: Promise<void>;
   resolve: () => void;
 }
@@ -132,7 +134,7 @@ function drawRestInShadow(this: THREE.Mesh, r: THREE.WebGLRenderer, _o: THREE.Ob
 function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
   let resolve = () => {};
   const done = new Promise<void>((r) => { resolve = r; });
-  return { node, dataOnly, state: 'queued', prio, done, resolve };
+  return { node, dataOnly, state: 'queued', prio, at: -1, done, resolve };
 }
 
 // Loads voxel tiles (scripts/tiles.py: N x N cells of s metres) and meshes them in a pool of workers. What to load and
@@ -149,7 +151,10 @@ export class TileStreamer implements ColumnSource {
   get bldMap() { return this.ctx.bldMap; }
   set bldMap(m: TileContext['bldMap']) { this.ctx.bldMap = m; }
   update: (camera: THREE.Camera) => void = () => {};
+  // the jobs waiting, a binary max-heap by prio (pump takes the first; a new priority moves a job in it, or, for many at
+  // once, marks it for one heapify before the next take: stale)
   private queue: Job[] = [];
+  private stale = false;
   private inflight = 0;
   private readonly maxWorkers = Math.min(Math.max(2, (navigator.hardwareConcurrency || 4) - 2), 10);
   private readonly pool: Pooled[] = [];
@@ -200,12 +205,12 @@ export class TileStreamer implements ColumnSource {
     let n = this.nodes.get(key);
     if (n && keep && n.state === 'ready' && !n.data && !n.empty) {
       n.keep = true;
-      if (!n.dataJob) { n.dataJob = makeJob(n, true, prio); this.queue.push(n.dataJob); }
-      n.dataJob.prio = prio;
+      if (!n.dataJob) { n.dataJob = makeJob(n, true, prio); this.enqueue(n.dataJob); }
+      this.setPrio(n.dataJob, prio);
       return n.dataJob.done;
     }
     n ??= this.addNode(key, s, tx, ty, false, keep);
-    n.job.prio = prio;
+    this.setPrio(n.job, prio);
     if (prio >= 1e8) n.pinned = performance.now() + 15000;
     return n.ready;
   }
@@ -214,7 +219,7 @@ export class TileStreamer implements ColumnSource {
   requestFoliage(tx: number, ty: number, prio: number): Promise<void> {
     const key = `f/${tx}_${ty}`;
     const n = this.nodes.get(key) ?? this.addNode(key, 1, tx, ty, true, false);
-    n.job.prio = prio;
+    this.setPrio(n.job, prio);
     return n.ready;
   }
 
@@ -223,20 +228,79 @@ export class TileStreamer implements ColumnSource {
     n.job = makeJob(n, false, 0);
     n.ready = n.job.done;
     this.nodes.set(key, n);
-    this.queue.push(n.job);
+    this.enqueue(n.job);
     return n;
   }
 
+  // (the queue: the jobs waiting, the first the dearest)
+  private enqueue(j: Job) {
+    j.at = this.queue.length;
+    this.queue.push(j);
+    if (!this.stale) this.up(j.at);
+  }
+
+  private setPrio(j: Job, prio: number) {
+    if (j.prio === prio) return;
+    const was = j.prio;
+    j.prio = prio;
+    if (j.at < 0 || this.stale) return;
+    if (prio > was) this.up(j.at); else this.down(j.at);
+  }
+
+  private place(j: Job, i: number) { this.queue[i] = j; j.at = i; }
+
+  private up(i: number) {
+    const q = this.queue, j = q[i];
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (q[p].prio >= j.prio) break;
+      this.place(q[p], i);
+      i = p;
+    }
+    this.place(j, i);
+  }
+
+  private down(i: number) {
+    const q = this.queue, j = q[i], n = q.length;
+    for (;;) {
+      let c = 2 * i + 1;
+      if (c >= n) break;
+      if (c + 1 < n && q[c + 1].prio > q[c].prio) c++;
+      if (q[c].prio <= j.prio) break;
+      this.place(q[c], i);
+      i = c;
+    }
+    this.place(j, i);
+  }
+
+  private heapify() {
+    for (let i = 0; i < this.queue.length; i++) this.queue[i].at = i;
+    for (let i = (this.queue.length >> 1) - 1; i >= 0; i--) this.down(i);
+    this.stale = false;
+  }
+
+  private take() {
+    if (this.stale) this.heapify();
+    const q = this.queue, j = q[0], last = q.pop()!;
+    j.at = -1;
+    if (q.length) { this.place(last, 0); this.down(0); }
+    return j;
+  }
+
+  // new priorities for the queued tiles (not the data-only jobs): ordered again once, at the next pump
   reprioritize(prio: (n: TileNode) => number) {
     for (const j of this.queue) if (!j.dataOnly) j.prio = prio(j.node);
+    this.stale = true;
   }
 
   dropQueued(keep: (n: TileNode) => boolean) {
     this.queue = this.queue.filter((j) => {
       if (j.state !== 'queued' || keep(j.node) || j.node.remesh) return true;
+      j.at = -1;
       if (j.dataOnly) { j.node.dataJob = undefined; j.resolve(); } else this.nodes.delete(j.node.key);
       return false;
     });
+    this.stale = true;
   }
 
   private spawn() {
@@ -258,10 +322,9 @@ export class TileStreamer implements ColumnSource {
   }
 
   pump() {
-    this.queue.sort((a, b) => b.prio - a.prio);
     while (this.queue.length > this.pool.length * 2 && this.pool.length < this.maxWorkers) this.spawn();
     while (this.queue.length && this.inflight < this.pool.length * 2) {
-      const job = this.queue.shift()!;
+      const job = this.take();
       if (job.state !== 'queued') continue;
       const p = this.pool.reduce((a, b) => (a.busy <= b.busy ? a : b));
       p.busy++; this.inflight++;
@@ -321,7 +384,7 @@ export class TileStreamer implements ColumnSource {
     this.pump();
   }
 
-  private makeGeometry({ pos, attr, pal, bld, quads, faces, normals, cuts }: MeshOut) {
+  private makeGeometry({ pos, attr, pal, bld, quads, faces, normals, cuts, box }: MeshOut) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('vattr', new THREE.BufferAttribute(attr, 4));
@@ -329,7 +392,9 @@ export class TileStreamer implements ColumnSource {
     if (bld) geo.setAttribute('vbld', new THREE.BufferAttribute(bld, 1));
     geo.setIndex(this.quadIndex(quads));
     geo.setDrawRange(0, quads * 6);
-    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    // (the box from the worker; the sphere around it: a little looser than three's own, for the frustum only)
+    geo.boundingBox = new THREE.Box3().setFromArray(box);
+    geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
     for (const a of Object.values(geo.attributes)) (a as THREE.BufferAttribute).onUpload(releaseArray); // culling only needs the bounding sphere
     geo.userData.faces = faces;
     geo.userData.normals = normals;
@@ -396,7 +461,7 @@ export class TileStreamer implements ColumnSource {
       if (t.state === 'ready') {
         t.state = 'queued';
         t.job = makeJob(t, false, t.job.prio);
-        this.queue.push(t.job);
+        this.enqueue(t.job);
       }
       n++;
     }
