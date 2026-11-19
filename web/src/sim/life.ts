@@ -684,10 +684,11 @@ export class StreetLife {
   }
 
   private drawCars(back: number, night: number) {
-    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world;
     const draw = (c: Car, i: number) => {
-      m.compose(c.rp!, q.setFromAxisAngle(up, c.rh ?? 0), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
+      m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
       for (const mesh of [M.body, M.dark, M.head, M.tail]) mesh.setMatrixAt(i, m);
       M.body.setColorAt(i, c.col);
       M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
@@ -698,6 +699,17 @@ export class StreetLife {
       this.carPoint(c, s, A, off);
       this.carPoint(c, s - (c.len - 1.2), B, off);
       c.rh = Math.atan2(A.x - B.x, A.y - B.y);
+      // on a ramp (world.ts surface: the paths' heights are whole metres) both axles on it, the body pitched between them
+      if (W) {
+        const za = W.surface(A.x, A.y, A.z), zb = W.surface(B.x, B.y, B.z);
+        if (za !== A.z || zb !== B.z) {
+          c.pitch = Math.atan2(za - zb, Math.hypot(A.x - B.x, A.y - B.y) || 1);
+          c.rp = (c.rp ?? new THREE.Vector3()).set((A.x + B.x) / 2, (za + zb) / 2, (A.y + B.y) / 2);
+          draw(c, i);
+          return;
+        }
+      }
+      c.pitch = 0;
       c.rp = (c.rp ?? new THREE.Vector3()).set((A.x + B.x) / 2, Math.max(A.z, B.z), (A.y + B.y) / 2);
       draw(c, i);
     });
@@ -744,8 +756,9 @@ export class StreetLife {
         const l = Math.hypot(B.x - A.x, B.y - A.y) || 1, dx = (B.x - A.x) / l, dy = (B.y - A.y) / l;
         const lat = e.side === undefined ? p.lat : p.lat * e.side * p.dir;
         const x = A.x - dy * lat, y = A.y + dx * lat, h = Math.atan2(dx, dy);
-        if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 6) { p.rp = new THREE.Vector3(x, A.z, y); p.rh = h; }
-        p.rp.lerp(pos.set(x, A.z, y), k);
+        const z = this.world ? this.world.surface(x, y, A.z) : A.z;
+        if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 6) { p.rp = new THREE.Vector3(x, z, y); p.rh = h; }
+        p.rp.lerp(pos.set(x, z, y), k);
         p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
         if (!p.wait) bob = Math.sin(p.ph + ds * 4.2);
       }
@@ -769,8 +782,9 @@ export class StreetLife {
       at(e, p.s + (ds + 1) * p.dir, 0, B);
       const l = Math.hypot(B.x - A.x, B.y - A.y) || 1, dx = (B.x - A.x) / l, dy = (B.y - A.y) / l;
       const x = A.x - dy * p.lat, y = A.y + dx * p.lat, h = Math.atan2(dx, dy);
-      if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 8) { p.rp = new THREE.Vector3(x, A.z, y); p.rh = h; }
-      p.rp.lerp(pos.set(x, A.z, y), k);
+      const z = this.world ? this.world.surface(x, y, A.z) : A.z;
+      if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 8) { p.rp = new THREE.Vector3(x, z, y); p.rh = h; }
+      p.rp.lerp(pos.set(x, z, y), k);
       p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
       q.setFromAxisAngle(up, p.rh!);
       M.bike.setMatrixAt(i, m.compose(p.rp, q, one));

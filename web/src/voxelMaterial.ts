@@ -99,16 +99,23 @@ const GROUND_COLOURS: [string, number][] = [
   ['#d8ccb5', GROUND.GRAVEL], ['#8a8178', GROUND.GRAVEL], // gravel paths, the railway's ballast
   ['#bdbab2', GROUND.CONCRETE],
 ];
+// a palette entry of colour hex (as voxelize.py's Palette quantises it: to 4, Python's round, halves to even)
+const isColour = (p: Meta['palette'][number], hex: string) => [1, 3, 5].every((i, k) => {
+  const v = parseInt(hex.slice(i, i + 2), 16) / 4, f = Math.floor(v);
+  return Math.min(255, (v - f > 0.5 || (v - f === 0.5 && f % 2) ? f + 1 : f) * 4) === p[k];
+});
 export function groundClass(p: Meta['palette'][number]) {
   if (p[3] !== MAT.SOLID) return 0;
-  for (const [hex, c] of GROUND_COLOURS) {
-    // (Python's round: halves to even)
-    const q = [1, 3, 5].map((i) => { const v = parseInt(hex.slice(i, i + 2), 16) / 4, f = Math.floor(v);
-      return Math.min(255, (v - f > 0.5 || (v - f === 0.5 && f % 2) ? f + 1 : f) * 4); });
-    if (q[0] === p[0] && q[1] === p[1] && q[2] === p[2]) return c;
-  }
+  for (const [hex, c] of GROUND_COLOURS) if (isColour(p, hex)) return c;
   return 0;
 }
+
+// The ground drawn as ramps on a slope (ramps.ts): what is walked and driven on -- the paved classes above (not the
+// railway's ballast), kerbs (level with the street in the voxels) and the markings on them. Not steps (#a8a296), the
+// quays' and retaining walls' stone, lawns (their grass is the foliage tile's) or earth.
+const BALLAST = '#8a8178', KERB = '#cfc7b8';
+export const pavedGround = (p: Meta['palette'][number]) =>
+  p[3] === MAT.MARK || (p[3] === MAT.SOLID && (isColour(p, KERB) || (groundClass(p) > 0 && !isColour(p, BALLAST))));
 
 function makePaletteTexture(palette: Meta['palette']) {
   const size = 64, data = new Uint8Array(size * size * 4);
@@ -411,7 +418,10 @@ const FRAG_PARS = `
 
 // What the depth pre-pass (makeVoxelPrepassMaterial) has to compute just as SURFACE does: a fragment's cell, its hash,
 // and whether a fountain's jet is off there now (with wa, lvl and vert as in SURFACE)
-const CELL = 'vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : floor(vVox - vN * 0.5 + 1e-3)';
+// (a ramp's top, ramps.ts, rises and falls up to a metre about the ground's: its cell is the ground's top voxel, so that
+// what is hashed by the cell doesn't change along its contours)
+const CELL = 'vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : vN.y > 0.5 && abs(vVox.y - floor(vGz + 0.5)) < 0.999 '
+  + '? vec3(floor(vVox.x + 1e-3), floor(vGz + 0.5) - 1.0, floor(vVox.z + 1e-3)) : floor(vVox - vN * 0.5 + 1e-3)';
 const CELL_HASH = 'hash13(vRoof > 0.5 && !vert ? vec3(cell.x, 0.0, cell.z) : cell)';
 const JET_GONE = 'sin(uTime * 2.4 + h * 6.28) < -0.2 + lvl * 0.6';
 

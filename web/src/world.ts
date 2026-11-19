@@ -1,6 +1,8 @@
 import type * as THREE from 'three';
+import { PAL_GROUND } from './chamfer';
+import { rampField, rampHeight, type RampField } from './ramps';
 import type { ColumnData, Meta } from './types';
-import { MAT } from './voxelMaterial';
+import { MAT, pavedGround } from './voxelMaterial';
 
 export interface ColumnSource {
   N: number;
@@ -20,11 +22,34 @@ export class World {
   private cache: ColumnData | null = null;
   private cacheVersion = -1;
   private readonly leaf = new Uint8Array(4096);
+  private readonly paved: Uint8Array;
+  // per 1 m tile: its ramps (ramps.ts), as the mesher draws them; null: none
+  private readonly ramps = new WeakMap<ColumnData, RampField | null>();
 
   constructor(private readonly src: ColumnSource, meta: Meta) {
     this.W = meta.W;
     this.D = meta.D;
     meta.palette.forEach((e, i) => { if (e[3] === MAT.LEAF) this.leaf[i] = 1; });
+    this.paved = Uint8Array.from(meta.palette, (p) => (pavedGround(p) ? PAL_GROUND : 0));
+  }
+
+  // the top of paved ground at (x, r) where it is a ramp (column i of node n), else null
+  private ramp(n: ColumnData, i: number, x: number, r: number) {
+    if (n.s !== 1) return null;
+    let f = this.ramps.get(n);
+    if (f === undefined) {
+      f = rampField(this.src.N, n.counts, n.off, n.runs, n.ground, this.paved);
+      if (!f.any) f = null;
+      this.ramps.set(n, f);
+    }
+    return f && f.paved[i] ? rampHeight(f, i, x - Math.floor(x), r - Math.floor(r)) : null;
+  }
+
+  // where something on the ground at level z (a path's point, scripts/traffic.py: whole metres) stands at (x, r): on a
+  // ramp near that level, its height there; else z
+  surface(x: number, r: number, z: number) {
+    const c = this.column(x, r), h = c && this.ramp(c[0], c[1], x, r);
+    return h != null && Math.abs(h - z) <= 1.5 ? h : z;
   }
 
   inside(x: number, r: number) { return x >= 0 && r >= 0 && x < this.W && r < this.D; }
@@ -47,7 +72,7 @@ export class World {
 
   groundAt(x: number, r: number) {
     const c = this.column(x, r);
-    return c ? c[0].ground[c[1]] : 0;
+    return c ? this.ramp(c[0], c[1], x, r) ?? c[0].ground[c[1]] : 0;
   }
 
   solid(x: number, r: number, z: number) {
@@ -67,13 +92,14 @@ export class World {
     const c = this.column(x, r);
     if (!c) return 0;
     const [n, i] = c, k = n.off[i + 1] - 1;
-    return k < n.off[i] ? n.ground[i] : (n.runs[k * 3] + n.runs[k * 3 + 1]) * n.s;
+    return this.ramp(n, i, x, r) ?? (k < n.off[i] ? n.ground[i] : (n.runs[k * 3] + n.runs[k * 3 + 1]) * n.s);
   }
 
   topSolid(x: number, r: number) {
     const c = this.column(x, r);
     if (!c) return 0;
-    const [n, i] = c, R = n.runs;
+    const [n, i] = c, R = n.runs, h = this.ramp(n, i, x, r);
+    if (h != null) return h;
     for (let k = n.off[i + 1] - 1; k >= n.off[i]; k--) if (!this.leaf[R[k * 3 + 2]]) return (R[k * 3] + R[k * 3 + 1]) * n.s;
     return n.ground[i];
   }
@@ -82,7 +108,8 @@ export class World {
   support(x: number, r: number, top: number) {
     const c = this.column(x, r);
     if (!c) return 0;
-    const [n, i] = c, R = n.runs;
+    const [n, i] = c, R = n.runs, h = this.ramp(n, i, x, r);
+    if (h != null && h <= top) return h; // (paved ground: nothing stands on it)
     let s = n.ground[i];
     for (let k = n.off[i], e = n.off[i + 1]; k < e; k++) {
       const t = (R[k * 3] + R[k * 3 + 1]) * n.s;

@@ -4,6 +4,7 @@
 // LOD_LEVELS) are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres
 // on the way out.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
+import { cornerQ, PINNED, rampDiagonal02, ramped, rampField, type RampField } from './ramps';
 import { slopeRoofs, wallTopCode } from './roofs';
 import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
 
@@ -55,7 +56,9 @@ export async function meshJob(m: MeshRequest, load: (url: string) => Promise<Arr
   const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld }) : null;
   if (m.dataOnly) return { keep, out: null, base: undefined, fields: null };
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
-  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.roof ? bld : null, under, m.roof, planes);
+  // (a foliage tile: its trunks reach down to the base's ramps, ramps.ts)
+  const feet = m.base && m.s === 1 && under && 'ground' in under ? rampField(m.N, under.counts, offsetsOf(under.counts, (m.N + 2) ** 2), under.runs, (under as Columns).ground, m.base.roof ?? new Uint8Array()) : null;
+  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.roof ? bld : null, under, m.roof, planes, null, feet?.any ? feet : null);
   const base = m.base && under && 'ground' in under
     ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, (under as Columns).bld ?? null, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
   return { keep, out, base, fields };
@@ -138,7 +141,7 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 // bldIds (1 m tiles): the building of each column, apron included (scripts/zones.py, 0: none); faces never merge across
 // buildings
 export function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
-  roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null): MeshOut {
+  roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null, feet: RampField | null = null): MeshOut {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
   const zmax = Math.max(topOf(cols, off, SS), under && uoff ? topOf(under, uoff, SS) : 0);
@@ -155,7 +158,9 @@ export function meshTile(N: number, s: number, x0: number, y0: number, cols: Col
   const bidAt = (x: number, y: number) => (bldIds ? bldIds[(y + 1) * S + x + 1] : 0);
   const out = new QuadBuffer();
   if (cover && cover.length < vol.length) { const c = new Uint8Array(vol.length); c.set(cover); cover = c; }
-  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover);
+  // (1 m tiles) paved ground on a slope as ramps (ramps.ts)
+  const ramps = roofPal && s === 1 ? rampField(N, cols.counts, off, cols.runs, ground, roofPal) : null;
+  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover, ramps?.any ? ramps : null, feet);
   return byFacing(out, !!bldIds, N, s, x0, y0);
 }
 
@@ -258,8 +263,15 @@ const coveredFace = (cover: Uint8Array, a: number, ni: number) => (cover[ni] ===
 
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
   bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer,
-  cover: Uint8Array | null = null) {
+  cover: Uint8Array | null = null, rp: RampField | null = null, feet: RampField | null = null) {
   const S = N + 2, sx = S, sy = S;
+  // Ramps (ramps.ts): the top of paved ground with a corner off its voxel's top is drawn as its own quad (rampTops:
+  // column, palette, building), and the side of its voxel towards paved ground across an edge with a free point is
+  // left out: where the two tops do not meet there (one end pinned), a fill between them, out through the tile's
+  // border a skirt from the voxel's foot up to the ramp (rampSides: column, neighbour, axis, direction, border, palette,
+  // building). Ramps' AO is that of their ground alone: a step that became a ramp casts none.
+  const rampTops: number[] = [], rampSides: number[] = [], SS = S * S;
+  const rampAO = rp ? (k: number) => { const c = k % SS; return rp.paved[c] === 1 && (k - c) / SS === ground[c]; } : undefined;
   const dims = [N, N, sz - 2];
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
   const ST = [1, sx, sx * sy], colTop = new Uint16Array(S * S);
@@ -308,9 +320,26 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
                 const pz = d === 2 ? sl : d === 0 ? j : i;
+                let aoSkip: ((k: number) => boolean) | undefined;
+                if (rp) {
+                  const c = (px + 1) + S * (py + 1);
+                  if (rp.paved[c] && pz === gm - 1) {
+                    if (d === 2) {
+                      if (ramped(rp, c)) { rampTops.push(c, a, bidAt(px, py)); mask[i + j * nu] = 0; continue; }
+                      aoSkip = rampAO;
+                    } else {
+                      const nc = c + (d === 0 ? dir : dir * S), [p1, p2] = edgePoints(S, c, d, dir);
+                      if (rp.paved[nc] && (rp.h[p1] !== PINNED || rp.h[p2] !== PINNED)) {
+                        rampSides.push(c, nc, d, dir, border ? 1 : 0, a, bidAt(px, py));
+                        mask[i + j * nu] = 0;
+                        continue;
+                      }
+                    }
+                  }
+                }
                 const rc = roofs && nb === 0 && roofPal![a] & PAL_ROOF ? roofs.code(px, py, pz, d, dir) : 0;
                 const ang = rc ? 24 + rc : d < 2 && nb === 0 ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
-                const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null) : 255;
+                const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
                 // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
                 key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
                 top[i + j * nu] = nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
@@ -324,18 +353,124 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
       }
     }
   }
+  if (rp) emitRamps(rp, rampTops, rampSides, vol, x0, y0, out, rampAO!, (c) => bidAt((c % S) - 1, Math.floor(c / S) - 1));
+  if (feet) emitFeet(feet, vol, x0, y0, out);
   out.axisEnd = out.count; // (what follows faces off the axes)
-  if (ch) for (const p of ch.prisms) emitPrism(p, s, x0, y0, out, roofPal!, roofs, slopes);
+  if (ch) for (const p of ch.prisms) emitPrism(p, s, x0, y0, out, roofPal!, roofs, slopes, rp);
   // (at s > 1 the slopes come out in cells: scaled to metres here, heights in 1/64 of a cell to 1/64 m)
   slopes?.emit(s === 1 ? out : { reserve: (n) => out.reserve(n), vertexQ: (x, q, z, n, ao, g, w, pal, b) => out.vertexQ(x * s + x0, q * s, z * s + y0, n, ao, g, w, pal, b) },
     s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground, s === 1);
+}
+
+// the grid points (ramps.ts RampField.h) at the ends of column c's edge facing along axis d (0 x, 1 y), dir
+function edgePoints(S: number, c: number, d: number, dir: number) {
+  const V = S + 1, X = c % S, Y = (c - X) / S;
+  return d === 0 ? [X + (dir > 0 ? 1 : 0) + V * Y, X + (dir > 0 ? 1 : 0) + V * (Y + 1)] : [X + V * (Y + (dir > 0 ? 1 : 0)), X + 1 + V * (Y + (dir > 0 ? 1 : 0))];
+}
+
+// the lowest of a ramp's free points (ramps.ts) over grid points x0..x1, y0..y1 (cells) if within a metre under q
+// (1/64 m), else null: how far something standing there at q has to reach down to meet it
+function rampBelow(rp: RampField, x0: number, y0: number, x1: number, y1: number, q: number) {
+  const V = rp.S + 1;
+  let m = q;
+  for (let y = Math.max(0, y0 + 1); y <= Math.min(rp.S, y1 + 1); y++) for (let x = Math.max(0, x0 + 1); x <= Math.min(rp.S, x1 + 1); x++) {
+    const h = rp.h[x + V * y];
+    if (h !== PINNED && h < m && h >= q - 64) m = h;
+  }
+  return m < q ? m : null;
+}
+
+// A foliage tile over ramps (feet: its base tile's, ramps.ts): what stands on a ramp's column (a trunk) has its sides
+// go down to the ramp where it falls below the voxel's foot
+function emitFeet(feet: RampField, vol: Uint16Array, x0: number, y0: number, out: QuadBuffer) {
+  const { S, ground } = feet, SS = S * S;
+  for (let Y = 1; Y < S - 1; Y++) for (let X = 1; X < S - 1; X++) {
+    const c = X + S * Y, g = ground[c], v = vol[c + SS * (g + 1)];
+    if (v === 0 || v === OCC || v === SOLID_BELOW || !ramped(feet, c)) continue;
+    const q = [0, 1, 2, 3].map((k) => Math.min(cornerQ(feet, c, k), g * 64)), x = X - 1, y = Y - 1, top = g * 64;
+    // sides -x, +x, -y, +y (emitMerged's corners, as emitRamps' fills), its ends' corners (0 .. 3 as cornerQ's)
+    for (const [d, dir, k1, k2] of [[0, -1, 0, 3], [0, 1, 1, 2], [1, -1, 0, 1], [1, 1, 3, 2]]) {
+      if (q[k1] >= top && q[k2] >= top) continue;
+      const xa = d === 0 ? x + (dir > 0 ? 1 : 0) : x, ya = d === 1 ? y + (dir > 0 ? 1 : 0) : y;
+      const P = d === 0 ? [[xa, ya, q[k1]], [xa, ya + 1, q[k2]], [xa, ya + 1, top], [xa, ya, top]] : [[xa, ya, q[k1]], [xa, ya, top], [xa + 1, ya, top], [xa + 1, ya, q[k2]]];
+      out.reserve(4);
+      for (const i of QUAD_ORDER[dir > 0 ? 1 : 0]) out.vertexQ(P[i][0] + x0, P[i][2], P[i][1] + y0, d * 2 + (dir > 0 ? 1 : 0), 3, g, 0, v, 0);
+    }
+  }
+}
+
+// The ramps' faces (meshFaces): each in the axis groups (byFacing) as the voxel face it stands for -- a ramp's top as an
+// up face (lit as flat ground: a street's slope is a few degrees, and in the shadow map it stays a top), a fill or a
+// skirt as the side it replaces. Corners as emitMerged's, so the same winding (QUAD_ORDER).
+function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Array, x0: number, y0: number, out: QuadBuffer, skip: (k: number) => boolean,
+  bidOf: (c: number) => number) {
+  const { S, ground } = rp, SS = S * S, V = S + 1;
+  const put = (P: number[][], d: number, dir: number, ord: number[], aos: number[], gm: number, pal: number, bid: number) => {
+    out.reserve(4);
+    for (const c of ord) out.vertexQ(P[c][0] + x0, P[c][2], P[c][1] + y0, d * 2 + (dir > 0 ? 1 : 0), aos[c], gm, 0, pal, bid);
+  };
+  // a ramp's tops that lie in one plane (a slope as even as its points' 1/8 m allow) and are not darkened merge into one
+  // quad along x (or else along y): the same plane, split either way
+  const nt = tops.length / 3, Q = new Int32Array(nt * 4), AO = new Uint8Array(nt), of = new Int32Array(SS).fill(-1), done = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const c = tops[t * 3];
+    of[c] = t;
+    for (let k = 0; k < 4; k++) Q[t * 4 + k] = cornerQ(rp, c, k);
+    AO[t] = faceAO(vol, c + SS * (ground[c] + 1), 1, S, -1, null, skip);
+  }
+  const like = (t: number, u: number) => u >= 0 && !done[u] && AO[u] === 255 && tops[u * 3 + 1] === tops[t * 3 + 1] && tops[u * 3 + 2] === tops[t * 3 + 2]
+    && ground[tops[u * 3]] === ground[tops[t * 3]];
+  for (let t = 0; t < nt; t++) {
+    if (done[t]) continue;
+    const c = tops[t * 3], X = c % S, Y = (c - X) / S, x = X - 1, y = Y - 1, g = ground[c], q = Q.slice(t * 4, t * 4 + 4), ao = AO[t];
+    const dx = q[1] - q[0], dy = q[3] - q[0];
+    let w = 1, h = 1;
+    if (ao === 255 && q[2] - q[3] === dx) { // (planar)
+      for (let u; X + w < S - 1 && like(t, u = of[c + w]) && Q[u * 4] === q[1] && Q[u * 4 + 3] === q[2] && Q[u * 4 + 1] - Q[u * 4] === dx && Q[u * 4 + 2] - Q[u * 4 + 3] === dx; w++) {
+        done[u] = 1; q[1] += dx; q[2] += dx;
+      }
+      if (w === 1) for (let u; Y + h < S - 1 && like(t, u = of[c + h * S]) && Q[u * 4] === q[3] && Q[u * 4 + 1] === q[2] && Q[u * 4 + 3] - Q[u * 4] === dy && Q[u * 4 + 2] - Q[u * 4 + 1] === dy; h++) {
+        done[u] = 1; q[3] += dy; q[2] += dy;
+      }
+    }
+    done[t] = 1;
+    const P = [[x, y, q[0]], [x + w, y, q[1]], [x + w, y + h, q[2]], [x, y + h, q[3]]];
+    put(P, 2, 1, QUAD_ORDER[(rampDiagonal02(q[0], q[1], q[2], q[3]) ? 2 : 0) + 1], [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3], g, tops[t * 3 + 1], tops[t * 3 + 2]);
+  }
+  const at = (p: number, c: number) => (rp.h[p] === PINNED ? ground[c] * 64 : rp.h[p]);
+  for (let t = 0; t < sides.length; t += 7) {
+    const [c, nc, d, dir, border, pal, bid] = sides.slice(t, t + 7), [p1, p2] = edgePoints(S, c, d, dir);
+    // the top along the edge (p1 to p2: along y for d 0, along x for d 1), and the foot: the neighbour's top, or out
+    // through the border from the voxel's foot (the faces below end there, 1/64 m sunk: INNER), up to the ramp a
+    // 1/64 m down as there
+    const t1 = at(p1, c) - border, t2 = at(p2, c) - border, b1 = border ? ground[c] * 64 - 65 : at(p1, nc), b2 = border ? ground[c] * 64 - 65 : at(p2, nc);
+    if (t1 <= b1 && t2 <= b2) continue;
+    const X = p1 % V - 1, Y = (p1 - (p1 % V)) / V - 1;
+    // emitMerged's corners: d 0 (u y, v z): base, +y, +y +z, +z; d 1 (u z, v x): base, +z, +z +x, +x
+    const P = d === 0 ? [[X, Y, b1], [X, Y + 1, b2], [X, Y + 1, t2], [X, Y, t1]] : [[X, Y, b1], [X, Y, t1], [X + 1, Y, t2], [X + 1, Y, b2]];
+    put(P, d, dir, QUAD_ORDER[dir > 0 ? 1 : 0], [3, 3, 3, 3], ground[c], pal, bid);
+  }
+  // under a wall (a free point beside it: ramps.ts) where the ramp falls below its voxel's top: the wall's face goes on
+  // down to it, in the wall's colour and building, its foot's shade
+  for (let t = 0; t < tops.length; t += 3) {
+    const c = tops[t], g = ground[c] * 64;
+    for (const [d, dir] of [[0, -1], [0, 1], [1, -1], [1, 1]]) {
+      const n = c + (d === 0 ? dir : dir * S);
+      if (rp.paved[n]) continue;
+      const [p1, p2] = edgePoints(S, c, d, dir), b1 = Math.min(g, at(p1, c)), b2 = Math.min(g, at(p2, c));
+      if (b1 >= g && b2 >= g) continue;
+      const X = p1 % V - 1, Y = (p1 - (p1 % V)) / V - 1;
+      const P = d === 0 ? [[X, Y, b1], [X, Y + 1, b2], [X, Y + 1, g], [X, Y, g]] : [[X, Y, b1], [X, Y, g], [X + 1, Y, g], [X + 1, Y, b2]];
+      put(P, d, -dir, QUAD_ORDER[dir < 0 ? 1 : 0], [2, 2, 2, 2], ground[n], vol[n + SS * ground[c]], bidOf(n));
+    }
+  }
 }
 
 // A chamfer (chamfer.ts): its slanted face, lit as the wall's plane (vattr.w = SLANT + its direction) and windowed along
 // its staircase (vattr.x: face axis + 8 x the staircase's direction, as wallAngle's), a lid
 // where nothing stands on it (the eave's top lit as its roof plane) and a floor where it hangs over nothing
 function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer, palFlags: Uint8Array, roofs: ReturnType<typeof roofPlanes> | null,
-  slopes: ReturnType<typeof slopeRoofs>) {
+  slopes: ReturnType<typeof slopeRoofs>, rp: RampField | null) {
   const P = [p.px, p.py], A = [p.px - p.a * p.sx, p.py], B = [p.px, p.py - p.b * p.sy];
   const nx = -p.b * p.sx, ny = -p.a * p.sy; // outwards
   const axis = Math.abs(nx) >= Math.abs(ny) ? (nx > 0 ? 1 : 0) : ny > 0 ? 3 : 2;
@@ -358,6 +493,9 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
     const n = axis + 8 * p.chain, w = SLANT + p.dir;
     v(L, z0, n, ao, w); v(R, z0, n, ao, w); v(R, zR, n, 3, w); v(L, zL, n, 3, w);
   };
+  // standing on a ramp (ramps.ts) that falls below its foot: its face goes on down to it
+  const foot = rp ? rampBelow(rp, Math.min(P[0], A[0], B[0]), Math.min(P[1], A[1], B[1]), Math.max(P[0], A[0], B[0]), Math.max(P[1], A[1], B[1]), p.z0 * 64) : null;
+  if (foot !== null) wall(foot, p.z0 * 64, p.z0 * 64, p.aoBottom);
   if (p.aoBottom < 3 && p.z1 - p.z0 > 1 && Math.min(tL, tR) > (p.z0 + 1) * 64) { wall(p.z0 * 64, (p.z0 + 1) * 64, (p.z0 + 1) * 64, p.aoBottom); wall((p.z0 + 1) * 64, tL, tR, 3); }
   else wall(p.z0 * 64, tL, tR, p.aoBottom);
   const up = -p.a * p.b * p.sx * p.sy > 0; // P, A, B counter-clockwise from above
@@ -480,8 +618,10 @@ function roofPlanes(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: U
 
 // per-corner occlusion, 2 bits each; on a staircase wall (stairAxis >= 0) only what is above or below darkens it, on a
 // roof's staircase (roofPal) only what isn't roof -- a chimney, a dormer's wall
-function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis: number, roofPal: Uint8Array | null) {
-  const o = roofPal ? (k: number) => (vol[k] !== 0 && !(vol[k] < roofPal.length && roofPal[vol[k]] & PAL_ROOF) ? 1 : 0) : (k: number) => (vol[k] !== 0 ? 1 : 0);
+// (skip: what doesn't count, a ramp's ground)
+function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis: number, roofPal: Uint8Array | null, skip?: (k: number) => boolean) {
+  const o = roofPal ? (k: number) => (vol[k] !== 0 && !(vol[k] < roofPal.length && roofPal[vol[k]] & PAL_ROOF) ? 1 : 0)
+    : skip ? (k: number) => (vol[k] !== 0 && !skip(k) ? 1 : 0) : (k: number) => (vol[k] !== 0 ? 1 : 0);
   let s10 = o(ni - su), s12 = o(ni + su), s01 = o(ni - sv), s21 = o(ni + sv);
   let c00 = o(ni - su - sv), c20 = o(ni + su - sv), c22 = o(ni + su + sv), c02 = o(ni - su + sv);
   if (stairAxis === 0) { s10 = s12 = 0; c00 = c20 = c22 = c02 = 0; }
