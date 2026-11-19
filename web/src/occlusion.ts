@@ -8,7 +8,10 @@ import type { ColumnData } from './types';
 // the runs from z = 0 up, unbroken, of opaque voxels -- not leaves, water or fountain jets -- less a metre for roof
 // slopes, eroded by a column all round for chamfered corners). Those heights, the minimum over 2 m cells and then over
 // 4, 8 .. 128 m cells (a min-pyramid), stand for what blocks the view; where a tile is not in, or not all shown yet,
-// its cells are 0 and block nothing.
+// its cells are 0 and block nothing. The pyramid is kept per 128 m tile (5.3 kB each), only for the tiles that block
+// something -- those shown, so within the view distance -- not over the map: its size and the march's reach follow
+// what is shown around the camera, not the map's area. The march finds a tile's pyramid through a grid over the box of
+// the tiles held (made again when they change).
 //
 // Per frame: the view's azimuths in bins of a fraction of a degree. Along each bin the march goes outward in steps;
 // at distance r the chord across the bin (both its edges at r) lies in at most 2 x 2 cells of the first level whose
@@ -19,12 +22,21 @@ import type { ColumnData } from './types';
 // a cell too coarse, a step too long or a bin too wide only ever blocks less. The march in a bin stops once its
 // horizon is above anything that could stand further out (maxY).
 const LEVELS = 7; // cells of 2, 4 .. 128 m
+// per tile: level l's (64 >> l)^2 cells, row by row, from OFF[l]
+const OFF = new Int32Array(LEVELS + 1);
+for (let l = 1; l <= LEVELS; l++) OFF[l] = OFF[l - 1] + (64 >> (l - 1)) ** 2;
+const PYR = OFF[LEVELS];
 const MAX_BINS = 160, MIN_BIN = 0.006, MAX_STEPS = 256, R0 = 1.5;
 
 export class Occlusion {
-  private readonly lv: Uint8Array[] = [];
-  private readonly lw: number[] = [];
-  private readonly lh: number[] = [];
+  // the tiles' pyramids, each at an offset in one pool (by tile index ty * nx + tx; free: offsets given back), and the
+  // grid over their box (gx0, gy0, gw x gh tiles: the offset, -1 none)
+  private readonly tiles = new Map<number, number>();
+  private pool = new Uint8Array(0);
+  private readonly free: number[] = [];
+  private grid = new Int32Array(0);
+  private gx0 = 0; private gy0 = 0; private gw = 0; private gh = 0;
+  private gridDirty = false;
   private readonly colH: Uint8Array;
   // per frame
   private readonly key = new Float64Array(32);
@@ -40,19 +52,39 @@ export class Occlusion {
   private readonly fwd = new THREE.Vector3();
 
   // opaque: per palette entry, 1 where its voxels hide what is behind them
-  constructor(private readonly W: number, private readonly D: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = 128) {
-    let w = Math.ceil(W / 2), h = Math.ceil(D / 2);
-    for (let l = 0; l < LEVELS; l++) { this.lv.push(new Uint8Array(w * h)); this.lw.push(w); this.lh.push(h); w = Math.ceil(w / 2); h = Math.ceil(h / 2); }
+  // nx: the map's tiles in a row (the tiles' index)
+  constructor(private readonly nx: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = 128) {
     this.colH = new Uint8Array((T + 2) * (T + 2));
   }
+
+  // what it holds (tools): tiles, bytes
+  get stats() { return { tiles: this.tiles.size, bytes: this.pool.byteLength + this.grid.byteLength + this.hor.byteLength }; }
 
   // the occluder heights of a T x T m tile from the column data drawn there (each source: 1 m or a coarser level
   // covering it; the least of them where several), or none: it blocks nothing
   setTile(tx: number, ty: number, sources: ColumnData[]) {
-    const T = this.T, x0 = tx * T, y0 = ty * T, S = T + 2, colH = this.colH;
+    const T = this.T, x0 = tx * T, y0 = ty * T, S = T + 2, colH = this.colH, key = ty * this.nx + tx;
+    if (!sources.length) {
+      const o = this.tiles.get(key);
+      if (o !== undefined) { this.tiles.delete(key); this.free.push(o); this.gridDirty = true; }
+      return;
+    }
+    let o0 = this.tiles.get(key);
+    if (o0 === undefined) {
+      if (!this.free.length) {
+        // (a quarter more room at a time)
+        const n = this.pool.length / PYR, more = Math.max(16, n >> 2), pool = new Uint8Array((n + more) * PYR);
+        pool.set(this.pool);
+        this.pool = pool;
+        for (let k = n + more - 1; k >= n; k--) this.free.push(k * PYR);
+      }
+      o0 = this.free.pop()!;
+      this.tiles.set(key, o0);
+      this.gridDirty = true;
+    }
+    const P = this.pool.subarray(o0, o0 + PYR);
     // the tile's columns and one all round (from the sources' aprons)
-    if (!sources.length) colH.fill(0);
-    else for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
+    for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
       const X = x0 + c - 1, Y = y0 + r - 1;
       let h = 255;
       for (const d of sources) {
@@ -63,24 +95,45 @@ export class Occlusion {
       colH[r * S + c] = h === 255 ? 0 : h;
     }
     // 2 m cells: the least of their 2 x 2 columns and the ring around them (eroded by a column)
-    const L0 = this.lv[0], w0 = this.lw[0], h0 = this.lh[0], n = T / 2, c0 = x0 / 2, r0 = y0 / 2;
-    for (let j = 0; j < n && r0 + j < h0; j++) for (let i = 0; i < n && c0 + i < w0; i++) {
+    const n = T / 2;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
       let m = 255;
       for (let dy = 0; dy < 4; dy++) for (let dx = 0; dx < 4; dx++) m = Math.min(m, colH[(2 * j + dy) * S + 2 * i + dx]);
-      L0[(r0 + j) * w0 + c0 + i] = m;
+      P[j * n + i] = m;
     }
+    // (a 128 m tile's cells of 2 << l m nest in it: no cell of a level lies across two tiles)
     for (let l = 1; l < LEVELS; l++) {
-      const a = this.lv[l - 1], aw = this.lw[l - 1], ah = this.lh[l - 1], b = this.lv[l], bw = this.lw[l], bh = this.lh[l];
-      const span = Math.max(1, (T / 2) >> l), bc = Math.floor(c0 / (1 << l)), br = Math.floor(r0 / (1 << l));
-      for (let j = br; j < Math.min(bh, br + span); j++) for (let i = bc; i < Math.min(bw, bc + span); i++) {
-        let m = 255;
-        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-          const y = 2 * j + dy, x = 2 * i + dx;
-          m = Math.min(m, y < ah && x < aw ? a[y * aw + x] : 0);
-        }
-        b[j * bw + i] = m;
+      const a = OFF[l - 1], aw = n >> (l - 1), b = OFF[l], bw = n >> l;
+      for (let j = 0; j < bw; j++) for (let i = 0; i < bw; i++) {
+        const k = a + 2 * j * aw + 2 * i;
+        P[b + j * bw + i] = Math.min(P[k], P[k + 1], P[k + aw], P[k + aw + 1]);
       }
     }
+  }
+
+  // the grid over the tiles held, again if they changed
+  private regrid() {
+    if (!this.gridDirty) return;
+    this.gridDirty = false;
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    for (const k of this.tiles.keys()) {
+      const x = k % this.nx, y = Math.floor(k / this.nx);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    if (x1 < 0) { this.grid = new Int32Array(0); this.gw = this.gh = 0; return; }
+    this.gx0 = x0; this.gy0 = y0; this.gw = x1 - x0 + 1; this.gh = y1 - y0 + 1;
+    this.grid = new Int32Array(this.gw * this.gh).fill(-1);
+    for (const [k, o] of this.tiles) this.grid[(Math.floor(k / this.nx) - y0) * this.gw + (k % this.nx) - x0] = o;
+  }
+
+  // the occluder height of level l's cell (i, j) (cells of 2 << l m from the map's corner; 0 where no tile is held)
+  private at(l: number, i: number, j: number) {
+    const sh = 6 - l, tx = (i >> sh) - this.gx0, ty = (j >> sh) - this.gy0;
+    if (tx < 0 || ty < 0 || tx >= this.gw || ty >= this.gh) return 0;
+    const o = this.grid[ty * this.gw + tx];
+    if (o < 0) return 0;
+    const m = (1 << sh) - 1;
+    return this.pool[o + OFF[l] + ((j & m) << sh) + (i & m)];
   }
 
   // a column's occluder height in metres: opaque runs from the bottom up, unbroken, less one cell
@@ -137,8 +190,10 @@ export class Occlusion {
     const nb = this.nb = Math.max(1, Math.min(MAX_BINS, Math.ceil((hi - lo) / MIN_BIN)));
     const delta = this.delta = (hi - lo) / nb;
     this.aMin = lo;
-    // the steps, the same for every bin: a metre apart, then 4 % of the distance
-    const far = Math.min(camera.far, Math.hypot(Math.max(ex, this.W - ex), Math.max(ez, this.D - ez)));
+    // the steps, the same for every bin: a metre apart, then 4 % of the distance; out to the furthest tile held
+    this.regrid();
+    const T = this.T, gx0 = this.gx0 * T, gx1 = (this.gx0 + this.gw) * T, gz0 = this.gy0 * T, gz1 = (this.gy0 + this.gh) * T;
+    const far = this.gw ? Math.min(camera.far, Math.hypot(Math.max(ex - gx0, gx1 - ex), Math.max(ez - gz0, gz1 - ez)) + 1) : 0;
     let K = 0;
     for (let r = R0; r < far && K < MAX_STEPS; K++) {
       this.rs[K] = r;
@@ -149,7 +204,8 @@ export class Occlusion {
       r += Math.max(1, 0.04 * r);
     }
     this.K = K;
-    const cosHalf = Math.cos(delta / 2), cap = this.maxY - ey, hor = this.hor, lvs = this.lv, lws = this.lw, lhs = this.lh;
+    const cosHalf = Math.cos(delta / 2), cap = this.maxY - ey, hor = this.hor;
+    const pool = this.pool, grid = this.grid, gX = this.gx0, gY = this.gy0, gw = this.gw, gh = this.gh;
     // standing inside the occluders (in a wall, under ground): nothing is hidden -- by the eye's own 2 m cell, not by all
     // of the cells within a metre of it (an eye inside a building sees out through its walls' back faces, and the march
     // had the building hide the street beyond them); above all of the city: hardly anything (a building would hide only
@@ -158,38 +214,52 @@ export class Occlusion {
     if (this.none) return;
     for (let b = 0; b < nb; b++) {
       const a = this.aRef + lo + b * delta, c0 = Math.cos(a), s0 = Math.sin(a), c1 = Math.cos(a + delta), s1 = Math.sin(a + delta);
-      let T = -Infinity, k = 0;
+      let H = -Infinity, k = 0;
       const base = b * MAX_STEPS;
       for (; k < K; k++) {
         const r = this.rs[k], l = this.stepL[k];
         if (l !== 255) {
-          const inv = 1 / (2 << l), L = lvs[l], w = lws[l], hgt = lhs[l];
+          const inv = 1 / (2 << l);
           const ax = ex + r * c0, az = ez + r * s0, bx = ex + r * c1, bz = ez + r * s1;
           const xl = ax < bx ? ax : bx, xh = ax < bx ? bx : ax, zl = az < bz ? az : bz, zh = az < bz ? bz : az;
           const i0 = (xl * inv) | 0, i1 = (xh * inv) | 0, j0 = (zl * inv) | 0, j1 = (zh * inv) | 0;
-          if (xl >= 0 && zl >= 0 && i1 < w && j1 < hgt) {
-            let h = L[j0 * w + i0];
-            if (i1 !== i0 && L[j0 * w + i1] < h) h = L[j0 * w + i1];
-            if (j1 !== j0) { if (L[j1 * w + i0] < h) h = L[j1 * w + i0]; if (i1 !== i0 && L[j1 * w + i1] < h) h = L[j1 * w + i1]; }
+          if (xl >= 0 && zl >= 0) {
+            let h: number;
+            const sh = 6 - l, tx = (i0 >> sh) - gX, ty = (j0 >> sh) - gY;
+            if ((i1 >> sh) - gX === tx && (j1 >> sh) - gY === ty) {
+              // (all in one tile, as mostly: its pyramid looked up once)
+              const o = tx < 0 || ty < 0 || tx >= gw || ty >= gh ? -1 : grid[ty * gw + tx];
+              if (o < 0) h = 0;
+              else {
+                const m = (1 << sh) - 1, b = o + OFF[l];
+                h = pool[b + ((j0 & m) << sh) + (i0 & m)];
+                if (i1 !== i0) h = Math.min(h, pool[b + ((j0 & m) << sh) + (i1 & m)]);
+                if (j1 !== j0) { h = Math.min(h, pool[b + ((j1 & m) << sh) + (i0 & m)]); if (i1 !== i0) h = Math.min(h, pool[b + ((j1 & m) << sh) + (i1 & m)]); }
+              }
+            } else {
+              h = this.at(l, i0, j0);
+              if (h > 0 && i1 !== i0) h = Math.min(h, this.at(l, i1, j0));
+              if (h > 0 && j1 !== j0) { h = Math.min(h, this.at(l, i0, j1)); if (h > 0 && i1 !== i0) h = Math.min(h, this.at(l, i1, j1)); }
+            }
             if (h > 0) {
               const t = h >= ey ? (h - ey) / r : (h - ey) / (r * cosHalf);
-              if (t > T) T = t;
+              if (t > H) H = t;
             }
           }
         }
-        hor[base + k] = T;
+        hor[base + k] = H;
         // above all that could stand further out, or above the view
-        if (T > top || T > (cap > 0 ? cap / r : 0)) break;
+        if (H > top || H > (cap > 0 ? cap / r : 0)) break;
       }
       this.kEnd[b] = Math.min(k, K - 1);
     }
   }
 
   private cellMin(l: number, x0: number, z0: number, x1: number, z1: number) {
-    const cs = 2 << l, w = this.lw[l], h = this.lh[l], L = this.lv[l];
+    const cs = 2 << l;
     let m = 255;
     for (let j = Math.floor(z0 / cs); j <= Math.floor(z1 / cs); j++) for (let i = Math.floor(x0 / cs); i <= Math.floor(x1 / cs); i++)
-      m = Math.min(m, i >= 0 && j >= 0 && i < w && j < h ? L[j * w + i] : 0);
+      m = Math.min(m, i >= 0 && j >= 0 ? this.at(l, i, j) : 0);
     return m;
   }
 

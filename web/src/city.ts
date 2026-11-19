@@ -9,6 +9,8 @@ import { MAT, makeBuildDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMateria
 import { Occlusion } from './occlusion';
 import { FarGround } from './farground';
 import { FieldPages } from './fields';
+import { loadTerrain } from './terrain';
+import type { LampLight } from './lamplight';
 
 const T = 128;
 // The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
@@ -21,11 +23,11 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 
 // The city at 1 m and its distance levels (2, 4, 8 m), as fine as the budget allows (triangles drawn by the tiles,
 // meta.json tiles.tris; on most computers no limit), shown as it arrives, in one order:
-//   1. the ground: the terrain, one small file
+//   1. the ground: the terrain, in chunks of 1 km (terrain.ts), those in range of the view distance
 //   2. landmarks: their tiles first, each landmark as soon as all its tiles are in
 //   3. everything else, nearest to the view first, each building once all its tiles are in
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, terrain: terrainBin, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, lamps, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -34,8 +36,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   camera: THREE.Camera;
   caption: Caption;
   budget: () => number;
-  // terrain.bin, fetched once (main.ts: the street lights' ground too)
-  terrain: Promise<ArrayBuffer>;
+  // the light on the ground at night (lamplight.ts), drawn into the nodes' pages
+  lamps?: LampLight;
   prepass?: DepthPrepass | null;
   lod?: { mode: Lod; px: number };
   occlusion?: boolean;
@@ -44,11 +46,21 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // the drawing buffer's height in pixels (the renderer's own: the resolution setting scales it)
   pixelsHigh?: () => number;
 }) {
-  const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
+  const d = S.dims[1], total = d.nx * d.ny, index = (tx: number, ty: number) => ty * d.nx + tx;
   // (the buildings' boxes: which tiles each one is on; the columns' buildings come with the tiles)
   const zonesIn = fetchJson<Zones>('data/zones.json');
   caption.show('Terrain', 0, 2 * total);
-  const terrain = loadTerrain(meta, scene, d.nx, d.ny, await terrainBin);
+  // (the tiles in range as range() below will find them: the camera's window, or the whole map)
+  const terrainTiles: number[] = [];
+  {
+    camera.updateMatrixWorld();
+    const c = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld), R = dist + LOAD_M;
+    const x0 = dist ? Math.max(0, Math.floor((c.x - R) / T)) : 0, x1 = dist ? Math.min(d.nx - 1, Math.floor((c.x + R) / T)) : d.nx - 1;
+    const y0 = dist ? Math.max(0, Math.floor((c.z - R) / T)) : 0, y1 = dist ? Math.min(d.ny - 1, Math.floor((c.z + R) / T)) : d.ny - 1;
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++)
+      if (!dist || Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T)) <= R) terrainTiles.push(index(tx, ty));
+  }
+  const terrain = await loadTerrain(meta, scene, d.nx, terrainTiles);
   const zones = await zonesIn;
   document.querySelector('#loading')?.classList.add('hidden');
   const nb = zones.buildings.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
@@ -106,7 +118,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
   // The far ground gives way (farground.ts mask) where some tile mesh is drawn or the first moment's terrain stands: per
   // tile how many of those, changed as they come and go
-  const far = new FarGround(meta, d.nx, d.ny, terrainBin), farN = new Uint16Array(total);
+  const far = new FarGround(meta, d.nx, d.ny), farN = new Uint16Array(total);
   scene.add(far.group);
   const farAdd = (i: number, k: number) => { const was = farN[i]; farN[i] += k; if (!was !== !farN[i]) far.mark(i, farN[i] > 0); };
   const farNode = (n: { s: number; tx: number; ty: number }, k: number) => {
@@ -304,7 +316,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
 
   // what the shader reads of the nodes shown (fields.ts): their pages, given and taken back with shownN
-  const pages = new FieldPages(U, d.nx, d.ny);
+  const pages = new FieldPages(U, d.nx, d.ny, lamps);
   const depthMat = makeBuildDepthMaterial(U), folMat = makeVoxelMaterial(U), farMat = makeVoxelMaterial(U, { far: true });
   prepass?.add(farMat, makeVoxelPrepassMaterial(U));
   folMat.polygonOffset = true; folMat.polygonOffsetFactor = -1; folMat.polygonOffsetUnits = -2; // grass wins over the base's bare earth
@@ -472,9 +484,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
-    if (stage >= 3) terrain.dispose();
     far.on = !!cut;
-    far.flush();
+    far.flush(camAt);
     pages.flush();
     if (changed) shownTex.needsUpdate = true;
     // queued jobs no longer chosen (with the distance levels)
@@ -485,7 +496,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   // Occlusion culling (occlusion.ts): a tile's columns block the view once it is in and all its buildings show --
   // drawn by whichever level (the least of the levels' heights where two are in)
-  const occ = new Occlusion(W, D, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3);
+  const occ = new Occlusion(d.nx, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3);
   let occOn = occlusion, occAt = 0, occN = -1;
   const occSrc = new Map<number, ColumnData[]>(), occStats = { ms: 0, meshes: 0, hidden: 0 };
   // A hidden mesh moves to layer HIDDEN alone: the camera (layer 0) passes it over before anything else; the
@@ -564,52 +575,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     // occlusion culling now (tools): on, the last update's cost (ms), tile meshes, of them hidden
     get occlusion() { return { on: occOn, ...occStats }; },
     occluder: occ,
-  };
-}
-
-// one terrain piece per 128 m tile (heights every 4 m, ground colours every 2 m), each dropped once its tile is in:
-// under the real ground it would flicker through
-function loadTerrain(meta: Meta, scene: THREE.Scene, nx: number, ny: number, buf: ArrayBuffer) {
-  const { W, D } = meta;
-  const tw = Math.ceil(W / 4), th = Math.ceil(D / 4), hd = new Uint16Array(buf, 0, tw * th), C = T / 4;
-  const cw = Math.floor(W / 2), ch = Math.floor(D / 2), rgb = new Uint8Array(buf, tw * th * 2, cw * ch * 3), rgba = new Uint8Array(cw * ch * 4);
-  for (let i = 0; i < cw * ch; i++) { rgba.set(rgb.subarray(3 * i, 3 * i + 3), 4 * i); rgba[4 * i + 3] = 255; }
-  const tex = dataTexture(rgba, cw, ch, THREE.RGBAFormat);
-  Object.assign(tex, { colorSpace: THREE.SRGBColorSpace, magFilter: THREE.NearestFilter, minFilter: THREE.LinearMipmapLinearFilter, generateMipmaps: true, anisotropy: 8 });
-  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
-  const pieces = new Map<number, THREE.Mesh>();
-  for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
-    const c0 = tx * C, r0 = ty * C, nc = Math.min(C, tw - 1 - c0) + 1, nr = Math.min(C, th - 1 - r0) + 1;
-    if (nc < 2 || nr < 2) continue;
-    const pos = new Float32Array(nc * nr * 3), uv = new Float32Array(nc * nr * 2), idx = new Uint16Array((nc - 1) * (nr - 1) * 6);
-    for (let r = 0; r < nr; r++) for (let c = 0; c < nc; c++) {
-      const k = r * nc + c;
-      pos.set([(c0 + c) * 4, hd[(r0 + r) * tw + c0 + c] / 10, (r0 + r) * 4], k * 3);
-      uv.set([(c0 + c) * 2 / cw, (r0 + r) * 2 / ch], k * 2);
-    }
-    for (let r = 0, k = 0; r < nr - 1; r++) for (let c = 0; c < nc - 1; c++, k += 6) { const i = r * nc + c; idx.set([i, i + nc, i + 1, i + 1, i + nc, i + nc + 1], k); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    g.setIndex(new THREE.BufferAttribute(idx, 1));
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat);
-    m.receiveShadow = true;
-    m.matrixAutoUpdate = false;
-    scene.add(m);
-    pieces.set(ty * nx + tx, m);
-  }
-  return {
-    // the tile's piece gone (true if there was one)
-    drop(i: number) {
-      const m = pieces.get(i);
-      if (!m) return false;
-      scene.remove(m); m.geometry.dispose(); pieces.delete(i);
-      return true;
-    },
-    // each tile where a piece still stands
-    each(f: (i: number) => void) { for (const i of pieces.keys()) f(i); },
-    // (once every piece is gone)
-    dispose() { if (tex.image.data && !pieces.size) { tex.dispose(); tex.image.data = null as unknown as Uint8Array; } },
+    // what the structures that follow the camera hold now (tools)
+    get held() { return { occlusion: occ.stats, farground: far.stats, pages: pages.stats, terrain: terrain.bytes }; },
   };
 }

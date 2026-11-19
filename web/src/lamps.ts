@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { lampColour } from './voxelMaterial';
+import { lampColour } from './lamplight';
 import { cutFogGlsl, FOG_CUT } from './daylight';
 
-// The heads of the street lamps placed along the streets (voxelMaterial.ts lightStreets: their pools are in the lamp
+// The heads of the street lamps placed along the streets (lamplight.ts: their pools are in the lamp
 // map, and they have no post): a soft point of light 4.5 m over the street, in the lamp's colour, bright enough at night
 // for the bloom to give it a halo. A point sprite ~0.75 m across, never under ~2.5 pixels (its light spread over them
 // instead, so a far street is a string of faint dots, not of sparks). Drawn after the city, tested against its depth

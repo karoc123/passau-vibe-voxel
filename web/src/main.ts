@@ -23,10 +23,11 @@ import type { Kind, TrafficData } from './sim/types';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
-import { $, coarsePointer, ease, el, fetchGzip, fetchJson, lerp } from './util';
+import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
 import type { World } from './world';
-import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
+import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
+import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';
 import { AUTO_KEYS, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
@@ -349,8 +350,8 @@ async function boot() {
   foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
     .catch((e) => console.warn('foliage', e));
   windows.then(({ set }) => { setWindows = set; }).catch((e) => console.warn('windows', e));
-  // the terrain (scripts/terrain.py), fetched once: the city's first ground and its far ground (city.ts, farground.ts)
-  const terrain = fetchGzip('data/terrain.bin');
+  // the light on the ground at night, drawn into the pages of the nodes shown (lamplight.ts, fields.ts)
+  const lamps = new LampLight(meta);
   // the street lamps placed along the streets (streetlamps.ts, web/tools/lamps.mjs)
   const streetLamps = fetchJson<{ lamps: [number, number, number][] }>('data/streetlamps.json').then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
@@ -376,7 +377,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, terrain, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
     pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
@@ -389,7 +390,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
-    streetLamps.then((placed) => { lightStreets(uniforms!, placed); lampHeads = new LampHeads(scene, placed); });
+    streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed); });
     life = nav.life = new StreetLife(scene, td);
     movingActors.add(life.group);
     life.world = world;

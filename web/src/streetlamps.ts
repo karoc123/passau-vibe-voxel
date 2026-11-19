@@ -7,9 +7,9 @@ import type { Meta } from './types';
 // building beside it and not along a river (the promenades, the Dreiflüsseeck's, stay lit), and a road through the
 // woods or the fields.
 // Placed once, when the data is built (web/tools/lamps.mjs: data/streetlamps.json), from maps of the whole: the viewer
-// draws their light (voxelMaterial.ts lightStreets) and heads (lamps.ts) from the list.
+// draws their light (lamplight.ts, into the pages of the nodes shown) and heads (lamps.ts) from the list.
 // buildings: per 1 m column non-zero on a building (zones.py), trees: per 2 m cell the foliage class (phenology.py),
-// terrain: terrain.bin (its ground colours every 2 m)
+// terrain: data/terrain.bin (terrain.py: its ground colours every 2 m)
 export type Ground = { buildings: ArrayLike<number>; trees: ArrayLike<number>; terrain: ArrayBuffer };
 type Way = { p: [number, number, number][] };
 

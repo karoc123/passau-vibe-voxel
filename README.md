@@ -89,14 +89,14 @@ written with `mtime=0`). The steps:
 | `places.py` | `places.json`: the search index (streets, squares, buildings, stops) |
 | `flood.py` | `data/flood.bin` (which cells the rivers reach at each level, the river bed), `flood.json` (the surveyed surface, the river's points) |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
-| `terrain.py` | `terrain.bin`: the bare land shown while the tiles load |
+| `terrain.py` | `terrain/near`, `terrain/far{k}`: the bare land in chunks, shown while the tiles load and beyond the view distance; `data/terrain.bin` (the whole, for the tools) |
 | `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box (a building shows once all its tiles are in), the building under each label (needs `data/footprints.npz`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), per building, for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `data/foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |
 | `tile_fields.py` | into every node file of `tiles/` (`scripts/tilefile.py`: a header of tagged sections): per cell the building, the rivers' level and bed, foliage and the light of lit windows on the street, at the node's own cell size, from the `data/` maps above. Nothing of the map's size is loaded by the viewer whole: each node brings its part. Run again after `voxelize.py` or `tiles_lod.py` |
 | `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`) |
-| `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `terrain.bin`, `traffic.json`) |
+| `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `data/terrain.bin`, `traffic.json`) |
 
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
 pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.

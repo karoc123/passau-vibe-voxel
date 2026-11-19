@@ -1,4 +1,4 @@
-// The terrain-only first moment: tile files are held back, so only terrain.bin shows. usage: node tools/terrainshot.mjs out.jpg [url-suffix]
+// The terrain-only first moment: tile files are held back, so only the terrain's chunks (data/terrain/near) show. usage: node tools/terrainshot.mjs out.jpg [url-suffix]
 import { chromium } from 'playwright-core';
 const [out, q = ''] = process.argv.slice(2);
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });

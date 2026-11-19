@@ -20,7 +20,7 @@ uv run python scripts/voxelize.py        # tiles/, meta.json, trees.json, traffi
 uv run python scripts/places.py          # places.json (search index)
 uv run python scripts/flood.py           # data/flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
 uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
-uv run python scripts/terrain.py         # terrain.bin (the bare land shown while the tiles load)
+uv run python scripts/terrain.py         # terrain/ (the bare land in chunks, while the tiles load and far off); data/terrain.bin
 uv run python scripts/zones.py           # data/zones.bin, zones.json (the building of each column; needs footprints.npz)
 uv run python scripts/windows.py         # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)

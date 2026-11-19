@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Fields } from './tile-data';
 import { dataTexture } from './util';
+import { LAMP_PAGE, type LampLight } from './lamplight';
 
 // What the shader knows per cell besides the voxels -- the rivers' levels and bed, foliage, the light of lit windows
 // on the street (scripts/tile_fields.py) -- comes with each node's file (tile-data.ts Fields), at the node's own cell
@@ -10,17 +11,21 @@ import { dataTexture } from './util';
 //           the river bed (dm), foliage class and tree
 //   uPageS  RG8, per page (N/2 + 2)^2 cells of 2s m with a one-cell apron (bilinear across the node's edge): the
 //           window light (two kinds), a soft light blurred over ~6 m
+//   uPageL  RGBA8, per page (N/2 + 2)^2 cells of 2s m with a one-cell apron, as uPageS: the street lamps'
+//           light on the ground and the floodlit landmark reaching each cell, drawn here from the lamps' lists
+//           (lamplight.ts), not brought by the node's file
 // Four pages to a layer (2 x 2: array layers are few on some GPUs, 256 at least), layers added as more nodes show
 // (a quarter more at a time: the textures hold little more than the pages shown at the most so far).
 // uPageIdx: per 128 m tile of the map (a few hundred bytes; 235 x 235 for 30 km), the page of the node shown over it
 // and its cell size -- the shader's way from a point to its page (FIELDS_GLSL pageAt).
 const N = 128, M = N / 2 + 2, T = 128;
-const F_W = 2 * N, S_W = 2 * M, F_LAYER = F_W * F_W * 4, S_LAYER = S_W * S_W * 2;
+const F_W = 2 * N, S_W = 2 * M, F_LAYER = F_W * F_W * 4, S_LAYER = S_W * S_W * 2, L = LAMP_PAGE, L_W = 2 * L, L_LAYER = L_W * L_W * 4;
 
 export interface FieldUniforms {
   uPageIdx: { value: THREE.Texture };
   uPageF: { value: THREE.DataArrayTexture };
   uPageS: { value: THREE.DataArrayTexture };
+  uPageL: { value: THREE.DataArrayTexture };
 }
 
 function arrayTexture(data: Uint8Array, w: number, layers: number, format: THREE.PixelFormat, filter: THREE.TextureFilter) {
@@ -40,6 +45,7 @@ export function fieldUniforms(): FieldUniforms {
     uPageIdx: { value: dataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat) },
     uPageF: { value: one(F_LAYER, F_W, THREE.RGBAFormat, THREE.NearestFilter) },
     uPageS: { value: one(S_LAYER, S_W, THREE.RGFormat, THREE.LinearFilter) },
+    uPageL: { value: one(L_LAYER, L_W, THREE.RGBAFormat, THREE.LinearFilter) },
   };
 }
 
@@ -49,6 +55,8 @@ export class FieldPages {
   private layers = 0;
   private f = new Uint8Array(0);
   private s = new Uint8Array(0);
+  private l = new Uint8Array(0);
+  private lampsAt = -1;
   private readonly free: number[] = [];
   private readonly slot = new Map<string, { slot: number; s: number; tx: number; ty: number }>();
   private readonly dirty = new Set<number>();
@@ -57,7 +65,8 @@ export class FieldPages {
   // the most layers the GPU takes
   maxLayers = 256;
 
-  constructor(private readonly U: FieldUniforms, private readonly nx: number, private readonly ny: number) {
+  // lamps: the light on the ground at night (lamplight.ts), drawn into each page
+  constructor(private readonly U: FieldUniforms, private readonly nx: number, private readonly ny: number, private readonly lamps?: LampLight) {
     this.idx = new Uint8Array(nx * ny * 4);
     this.idxTex = dataTexture(this.idx, nx, ny, THREE.RGBAFormat);
     this.idxTex.magFilter = this.idxTex.minFilter = THREE.NearestFilter;
@@ -66,11 +75,12 @@ export class FieldPages {
   }
 
   // on the GPU now: layers, pages in use, bytes
-  get stats() { return { layers: this.layers, pages: this.slot.size, bytes: this.f.byteLength + this.s.byteLength + this.idx.byteLength }; }
+  get stats() { return { layers: this.layers, pages: this.slot.size, bytes: this.f.byteLength + this.s.byteLength + this.l.byteLength + this.idx.byteLength }; }
 
   private grow(layers: number) {
-    const f = new Uint8Array(layers * F_LAYER), s = new Uint8Array(layers * S_LAYER);
-    f.set(this.f); s.set(this.s);
+    const f = new Uint8Array(layers * F_LAYER), s = new Uint8Array(layers * S_LAYER), l = new Uint8Array(layers * L_LAYER);
+    f.set(this.f); s.set(this.s); l.set(this.l);
+    this.l = l;
     for (let k = layers * 4 - 1; k >= this.layers * 4; k--) this.free.push(k);
     this.f = f; this.s = s; this.layers = layers;
     this.grown = true;
@@ -87,9 +97,15 @@ export class FieldPages {
     // the page into its quarter of the layer, row by row
     for (let r = 0; r < N; r++) this.f.set(fields.cell.subarray(r * N * 4, (r + 1) * N * 4), layer * F_LAYER + ((qy * N + r) * F_W + qx * N) * 4);
     for (let r = 0; r < M; r++) this.s.set(fields.spill.subarray(r * M * 2, (r + 1) * M * 2), layer * S_LAYER + ((qy * M + r) * S_W + qx * M) * 2);
+    this.paint(k, s, tx, ty);
     this.dirty.add(layer);
     this.slot.set(key, { slot: k, s, tx, ty });
     this.mark(s, tx, ty, k);
+  }
+
+  // the lamps' light into page k's quarter
+  private paint(k: number, s: number, tx: number, ty: number) {
+    this.lamps?.paint(s, tx, ty, this.l, (k >> 2) * L_LAYER + ((((k >> 1) & 1) * L) * L_W + (k & 1) * L) * 4, L_W * 4);
   }
 
   hide(key: string) {
@@ -113,25 +129,31 @@ export class FieldPages {
 
   // the changes to the GPU (before the frame is drawn)
   flush() {
+    // (lamps added: every page shown drawn again)
+    if (this.lamps && this.lamps.version !== this.lampsAt) {
+      if (this.lampsAt >= 0) for (const p of this.slot.values()) { this.paint(p.slot, p.s, p.tx, p.ty); this.dirty.add(p.slot >> 2); }
+      this.lampsAt = this.lamps.version;
+    }
     if (this.idxDirty) { this.idxTex.needsUpdate = true; this.idxDirty = false; }
     if (this.grown) {
       const U = this.U;
-      U.uPageF.value.dispose(); U.uPageS.value.dispose();
+      U.uPageF.value.dispose(); U.uPageS.value.dispose(); U.uPageL.value.dispose();
       U.uPageF.value = arrayTexture(this.f, F_W, this.layers, THREE.RGBAFormat, THREE.NearestFilter);
       U.uPageS.value = arrayTexture(this.s, S_W, this.layers, THREE.RGFormat, THREE.LinearFilter);
+      U.uPageL.value = arrayTexture(this.l, L_W, this.layers, THREE.RGBAFormat, THREE.LinearFilter);
       this.grown = false; this.dirty.clear();
       return;
     }
     if (!this.dirty.size) return;
-    for (const l of this.dirty) { this.U.uPageF.value.addLayerUpdate(l); this.U.uPageS.value.addLayerUpdate(l); }
-    this.U.uPageF.value.needsUpdate = this.U.uPageS.value.needsUpdate = true;
+    for (const l of this.dirty) { this.U.uPageF.value.addLayerUpdate(l); this.U.uPageS.value.addLayerUpdate(l); this.U.uPageL.value.addLayerUpdate(l); }
+    this.U.uPageF.value.needsUpdate = this.U.uPageS.value.needsUpdate = this.U.uPageL.value.needsUpdate = true;
     this.dirty.clear();
   }
 }
 
 // The shader's side: from a point (metres, x and z) to the page of the node shown over it, and what it holds there.
 export const FIELDS_GLSL = `
-  uniform sampler2D uPageIdx; uniform highp sampler2DArray uPageF; uniform highp sampler2DArray uPageS;
+  uniform sampler2D uPageIdx; uniform highp sampler2DArray uPageF; uniform highp sampler2DArray uPageS; uniform highp sampler2DArray uPageL;
   // the page of the node shown over p (x, -1: none) and the node's cell size (y)
   ivec2 pageAt(vec2 p) {
     ivec2 t = ivec2(floor(p * ${(1 / T).toFixed(7)})), sz = textureSize(uPageIdx, 0);
@@ -165,4 +187,20 @@ export const FIELDS_GLSL = `
     float r = float(2 * pg.y);
     vec2 q = p / r - floor(p / (r * ${M - 2}.0)) * ${M - 2}.0 + 1.0, o = vec2(ivec2(pg.x & 1, (pg.x >> 1) & 1) * ${M});
     return texture(uPageS, vec3((o + q) / ${S_W}.0, float(pg.x >> 2))).rg;
+  }
+  // the street lamps' light on the ground at p (lamplight.ts), bilinear; none where no node is shown
+  vec3 lampAt(vec2 p) {
+    ivec2 pg = pageAt(p);
+    if (pg.x < 0) return vec3(0.0);
+    float r = 2.0 * float(pg.y), side = ${T}.0 * float(pg.y);
+    vec2 q = (p - floor(p / side) * side) / r + 1.0, o = vec2(ivec2(pg.x & 1, (pg.x >> 1) & 1) * ${L});
+    return texture(uPageL, vec3((o + q) / ${L_W}.0, float(pg.x >> 2))).rgb;
+  }
+  // the floodlit landmark reaching p's 8 m cell: 1 + its index (voxelMaterial.ts uLitA), 0 none (or no node shown)
+  int litAt(vec2 p) {
+    ivec2 pg = pageAt(p);
+    if (pg.x < 0) return 0;
+    float r = 2.0 * float(pg.y), side = ${T}.0 * float(pg.y);
+    ivec2 c = ivec2(floor((p - floor(p / side) * side) / r)) + 1 + ivec2(pg.x & 1, (pg.x >> 1) & 1) * ${L};
+    return int(texelFetch(uPageL, ivec3(c, pg.x >> 2), 0).a * 255.0 + 0.5);
   }`;
