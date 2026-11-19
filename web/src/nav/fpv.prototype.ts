@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
 import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fpv-flight';
 import { FpvInput } from './fpv-input';
+import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
@@ -14,7 +15,7 @@ const SURFACE_CLEARANCE = 0.002;
 const CAMERA_PITCH_AXIS = new THREE.Vector3(1, 0, 0);
 const FLIGHT_KEYS = ['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyR', 'KeyF'];
 type Phase = 'loading' | 'ready' | 'flying' | 'paused';
-type InputSource = 'controller' | 'keyboard';
+type InputSource = 'controller' | 'keyboard' | 'touch';
 
 function button(label: string, run: () => void) {
   const node = document.createElement('button');
@@ -28,6 +29,8 @@ function button(label: string, run: () => void) {
 // The viewer owns the camera and render loop; this mode supplies the flight pose.
 export class FpvPrototype {
   private readonly radio = new FpvInput();
+  private readonly touch: FpvTouch;
+  private readonly hasTouch = navigator.maxTouchPoints > 0;
   private readonly collision: VoxelCollision;
   private readonly flight = new FpvFlight();
   private readonly keys = new Set<string>();
@@ -45,8 +48,10 @@ export class FpvPrototype {
   private readonly enterExit = button('FPV Acro', () => this.toggle());
   private readonly armRadio = button('Arm controller', () => this.arm('controller'));
   private readonly armKeys = button('Fly with keyboard', () => this.arm('keyboard'));
+  private readonly armTouch = button('Fly with touch', () => this.arm('touch'));
   private readonly reset = button('Reset flight', () => this.restart());
   private readonly options = el('div', 'fpv-options', '', this.details);
+  private readonly attribution = document.createElement('details');
 
   private phase: Phase = 'loading';
   private source: InputSource = 'controller';
@@ -61,16 +66,20 @@ export class FpvPrototype {
   private notice = '';
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
-    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement) {
+    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement,
+    private readonly credits: HTMLElement) {
     this.collision = new VoxelCollision(meta);
+    this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
     this.panel.className = 'fpv-prototype';
     this.panel.setAttribute('aria-label', 'FPV Acro');
     this.panel.prepend(this.enterExit);
     host.append(this.panel);
     this.status.setAttribute('role', 'status');
-    this.actions.append(this.armRadio, this.armKeys, this.reset);
+    this.attribution.className = 'fpv-attribution';
+    this.actions.append(this.armTouch, this.armRadio, this.armKeys, this.reset, this.attribution);
     this.options.append(this.radio.element);
+    el('summary', 'mode-button', 'Attribution', this.attribution);
     const angle = el('label', 'row fpv-camera-angle', '', this.options);
     const value = el('span', 'val', '', angle);
     const track = el('span', 'track', '', angle);
@@ -100,6 +109,7 @@ export class FpvPrototype {
       this.camera.updateProjectionMatrix();
       this.savedNear = null;
       this.keys.clear();
+      this.touch.reset();
       this.phase = 'loading';
       this.notice = '';
     }
@@ -123,6 +133,7 @@ export class FpvPrototype {
 
   private toggle() {
     if (this.nav.mode === 'fpv') {
+      this.touch.setActive(false);
       this.nav.flyUp();
       return;
     }
@@ -140,6 +151,7 @@ export class FpvPrototype {
 
   private restart() {
     this.keys.clear();
+    this.touch.reset();
     this.flight.velocity.set(0, 0, 0);
     this.accumulator = 0;
     this.waitingForTile = false;
@@ -168,6 +180,7 @@ export class FpvPrototype {
     if (this.nav.mode !== 'fpv' || (this.phase !== 'ready' && this.phase !== 'paused')) return;
     if (source === 'controller' && (!this.controller || this.controller.throttle > ARM_THROTTLE)) return;
     this.source = source;
+    this.touch.setActive(source === 'touch');
     this.device = source === 'controller' ? this.radio.deviceKey : null;
     this.phase = 'flying';
     this.notice = '';
@@ -178,6 +191,7 @@ export class FpvPrototype {
 
   private pause(reason: string) {
     this.keys.clear();
+    this.touch.reset();
     if (this.nav.mode !== 'fpv' || this.phase !== 'flying') return;
     this.phase = 'paused';
     this.notice = reason;
@@ -208,6 +222,7 @@ export class FpvPrototype {
       this.pause('Controller disconnected or unavailable. Arm again to resume.');
       return null;
     }
+    if (this.source === 'touch') return this.touch.read();
     return this.source === 'keyboard' ? this.keyboard() : this.controller;
   }
 
@@ -291,6 +306,14 @@ export class FpvPrototype {
 
   private renderPanel() {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
+    const flyingWithTouch = flying && this.source === 'touch';
+    this.attribution.hidden = !flyingWithTouch;
+    if (flyingWithTouch && this.credits.parentElement !== this.attribution) {
+      this.attribution.append(this.credits);
+    } else if (!flyingWithTouch && this.credits.parentElement === this.attribution) {
+      this.attribution.open = false;
+      document.body.append(this.credits);
+    }
     const canArm = active && (this.phase === 'ready' || this.phase === 'paused');
     this.panel.classList.toggle('mode-active', active);
     this.details.hidden = !active;
@@ -299,21 +322,26 @@ export class FpvPrototype {
     this.armRadio.hidden = !canArm;
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
+    this.armTouch.hidden = !canArm || !this.hasTouch;
     this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
     this.options.hidden = !active || flying;
     this.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
+    const controls = this.source === 'touch' ? 'Left: throttle / yaw · Right: pitch / roll' :
+      this.source === 'keyboard' ? 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit' : 'Acro · T reset · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       this.waitingForTile ? 'Waiting for the next collision tile…' :
-      flying ? (this.impact?.message ?? (this.source === 'keyboard' ? 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit' : 'Acro · T reset · Esc exit')) :
-      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm.' : 'Choose a controller or keyboard to fly.');
+      flying ? (this.impact?.message ?? controls) :
+      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' :
+      this.hasTouch ? 'Choose touch, controller, or keyboard to fly.' : 'Choose a controller or keyboard to fly.');
     if (this.status.textContent !== content) this.status.textContent = content;
 
     const p = this.flight.position;
     const terrain = this.collision.surface(p.x, p.z);
     const altitude = terrain ? `${Math.round(p.y - terrain.ground)} m AGL` : `${Math.round(p.y)} m`;
-    this.telemetry.textContent = `${altitude} · ${Math.round(this.flight.velocity.length() * 3.6)} km/h`;
+    const throttle = flyingWithTouch ? ` · ${this.touch.throttlePercent}% throttle` : '';
+    this.telemetry.textContent = `${altitude} · ${Math.round(this.flight.velocity.length() * 3.6)} km/h${throttle}`;
   }
 }

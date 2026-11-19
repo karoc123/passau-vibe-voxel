@@ -5,7 +5,16 @@
 }
 #bar .fpv-telemetry { color: var(--t2); }
 #bar .fpv-options { margin-top: 4px; }
+#bar .fpv-attribution[open] { flex-basis: 100%; }
+#bar .fpv-attribution > summary { width: fit-content; align-content: center; }
+#bar .fpv-attribution #credits {
+  position: static;
+  align-items: flex-start;
+  padding: 0 0 4px;
+  background: none;
+}
 body.fpv #labels { display: none; }
+body.fpv #perf { pointer-events: none; }
 
 .fpv-impact-tint {
   position: fixed;
