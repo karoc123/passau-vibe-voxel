@@ -112,6 +112,7 @@ export class FpvPrototype {
       this.touch.reset();
       this.phase = 'loading';
       this.notice = '';
+      this.renderPanel();
     }
     this.controller = this.radio.update();
     if (active) {
@@ -307,10 +308,11 @@ export class FpvPrototype {
   private renderPanel() {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
     const flyingWithTouch = flying && this.source === 'touch';
-    this.attribution.hidden = !flyingWithTouch;
-    if (flyingWithTouch && this.credits.parentElement !== this.attribution) {
+    document.body.classList.toggle('fpv-flying', flying);
+    this.attribution.hidden = !flying;
+    if (flying && this.credits.parentElement !== this.attribution) {
       this.attribution.append(this.credits);
-    } else if (!flyingWithTouch && this.credits.parentElement === this.attribution) {
+    } else if (!flying && this.credits.parentElement === this.attribution) {
       this.attribution.open = false;
       document.body.append(this.credits);
     }
@@ -329,13 +331,12 @@ export class FpvPrototype {
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
-    const controls = this.source === 'touch' ? 'Left: throttle / yaw · Right: pitch / roll' :
-      this.source === 'keyboard' ? 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit' : 'Acro · T reset · Esc exit';
+    const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll.' :
+      'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       this.waitingForTile ? 'Waiting for the next collision tile…' :
-      flying ? (this.impact?.message ?? controls) :
-      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' :
-      this.hasTouch ? 'Choose touch, controller, or keyboard to fly.' : 'Choose a controller or keyboard to fly.');
+      flying ? (this.impact?.message ?? '') :
+      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : controls);
     if (this.status.textContent !== content) this.status.textContent = content;
 
     const p = this.flight.position;
