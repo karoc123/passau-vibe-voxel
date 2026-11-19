@@ -132,7 +132,8 @@ def build(vol, g, pal, C, stone, note, tunnels):
         return
     lining = C["concrete"]  # (an existing entry: a new one would renumber every later palette colour)
     stone = np.asarray(stone, vol.dtype)
-    masonry = lambda z, r, c: stone[(r * 7 + c * 13 + z * 5) % len(stone)]  # noqa: E731
+    from aoi import C0, R0  # (the project grid's rows and columns: the same stones in every region)
+    masonry = lambda z, r, c: stone[((r + R0) * 7 + (c + C0) * 13 + z * 5) % len(stone)]  # noqa: E731
     g0 = g.copy()
     clear = {}  # (r, c) -> [z0, z1): emptied
     floor = {}  # (r, c) -> (z, palette id): the road's (or the path's) surface voxel

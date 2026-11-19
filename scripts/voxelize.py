@@ -5,6 +5,12 @@ is matched from aerial images, the DGM1 terrain under it is laser-scanned.)
 Output (web/public/data/): tiles/ (scripts/tiles.py), meta.json (palette, lamps, labels, views), trees.json,
 traffic.json, qa_roadmask.bin.gz; data/ground.npz for flood.py and terrain.py.
 Volume axes: vol[z, row, col]; row grows south, col grows east, z up.
+
+Region by region (scripts/region.py): `voxelize.py` (the driver, scripts/regions.py) builds the map as one region or
+as several (--regions NXxNY, --region-size METRES), each in a process of its own running this file with VOXEL_REGION
+(the region: its core and a halo of region.HALO metres) set, and puts the cores together. Below, D, W and every array
+are the region's; a region writes its core: the tiles of its core, its rows and columns of the map-sized rasters and
+what lies in it of the lists (data/cache/regions/, regions.py stitches them).
 """
 import colorsys
 import gzip
@@ -13,6 +19,7 @@ import json
 import math
 import os
 import re
+import sys
 import warnings
 from pathlib import Path
 
@@ -25,20 +32,34 @@ from shapely.geometry import LineString, Point, shape
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import CX, CY, D, THETA, W
+from aoi import BASE, C0, CX, CY, D, R0, THETA, W
 from osm import OSM
 import landmarks
+import region
+from region import boxmean, in_core
+
+if __name__ == "__main__" and not os.environ.get("VOXEL_REGION"):  # the driver: region by region (scripts/regions.py)
+    import regions
+    regions.main(sys.argv[1:])
+    raise SystemExit(0)
 
 OUT = Path("web/public/data")
 DBG = Path("data/debug")
+RDIR = Path(os.environ.get("VOXEL_OUT", "data/cache/regions/whole"))  # this region's own outputs (regions.py)
 OUT.mkdir(parents=True, exist_ok=True)
 DBG.mkdir(parents=True, exist_ok=True)
+RDIR.mkdir(parents=True, exist_ok=True)
 report = {"notes": []}
+RESULT = {}  # what this region hands to regions.py besides its rasters (lists, counts): data/cache/regions/*/out.json
+CORE_SL = region.core_slices()
+
+
+_T0 = __import__("time").time()
 
 
 def note(*a):
     s = " ".join(str(x) for x in a)
-    print(s)
+    print(f"[{__import__('time').time() - _T0:6.0f} s]", s)
     report["notes"].append(s)
 
 
@@ -47,9 +68,15 @@ M_SOLID, M_WALL, M_GLASS, M_LEAF, M_WATER, M_LAMP, M_METAL, M_FLOODLIT, M_GRASS,
 
 
 class Palette:
+    """The palette's ids from a registry (scripts/palette.json): an entry keeps its id from build to build and in every
+    region, whatever order colours are met in. A colour the registry lacks gets the next id for this run and is listed
+    (self.new); regions.py adds the new ones to the registry, sorted, and builds again the regions that met them."""
+    REGISTRY = Path(__file__).with_name("palette.json")
+
     def __init__(self):
-        self.entries = [(0, 0, 0, 0)]
-        self.index = {}
+        self.entries = [tuple(e) for e in json.load(open(self.REGISTRY))["palette"]]
+        self.index = {e: i for i, e in enumerate(self.entries)}
+        self.new = []
 
     def __call__(self, rgb, mat=M_SOLID, q=4):
         if isinstance(rgb, str):
@@ -59,6 +86,7 @@ class Palette:
         if key not in self.index:
             self.index[key] = len(self.entries)
             self.entries.append(key)
+            self.new.append(key)
         return self.index[key]
 
 
@@ -116,6 +144,11 @@ def stable_hash(*a):
     return int(hashlib.md5("/".join(map(str, a)).encode()).hexdigest()[:8], 16)
 
 
+def cell_hash(r, c, *a):
+    """stable_hash of a cell by its project grid row and column (aoi.R0, C0: the same cell in every region)"""
+    return stable_hash(int(r) + R0, int(c) + C0, *a)
+
+
 pal = Palette()
 C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "paving": pal("#c6c2b8"), "paving2": pal("#b5b4af"), "asphalt": pal("#5f636b"), "asphalt_l": pal("#6e7178"),
@@ -150,14 +183,15 @@ for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts
                                                              "the surface model and OSM alone)" if "lod2" in _p else ""))
 if not os.environ.get("NO_LOD2") and "cen" not in np.load("data/lod2.npz").files:
     raise SystemExit("data/lod2.npz has no footprints (`cen`): rerun scripts/lod2.py")
-z = np.load("data/prep.npz")
+z = region.load_npz("data/prep.npz")  # (the region's rows and columns)
 dsm, dtm, orto = z["dsm"], z["dtm"], z["orto"]
+LOD2 = region.load_npz("data/lod2.npz") if Path("data/lod2.npz").exists() else None
 d4 = dsm.reshape(D, 2, W, 2)
 dsm_max = d4.max((1, 3))
 dsm_mean = d4.mean((1, 3))
-dtm_s = ndimage.uniform_filter(dtm, 3)
-SLAB = 3
-BASE = math.floor(dtm.min()) - SLAB
+dtm_s = boxmean(dtm, 3)
+SLAB = 3  # (aoi.BASE: the lowest terrain less SLAB)
+assert dtm.min() >= BASE + SLAB - 1, f"terrain {dtm.min():.1f} m under aoi.BASE + {SLAB}: lower aoi.BASE"
 
 
 def ground_walls(dtm, dtm_s):
@@ -253,6 +287,22 @@ def cells_of(geom, all_touched=False):
     return rr + r0, cc + c0
 
 
+def decided(geom, decide, shape_=None):
+    """[(piece of geom, decide(rows, cols))]: a feature's decision from the cells of its outline (or of shape_), once
+    for the whole of it, or for a feature spanning region.FMAX metres or more block by block (region.feature_parts:
+    each block's piece of it from its cells near the block)"""
+    rr, cc = cells_of(shape_ if shape_ is not None else geom)
+    out = []
+    for blk, (sr, sc) in region.feature_parts(geom, rr, cc):
+        if blk is None:
+            return [(geom, decide(sr, sc))]
+        from shapely.geometry import box as _box
+        piece = geom.intersection(_box(blk[1], blk[0], blk[3], blk[2]))
+        if not piece.is_empty:
+            out.append((piece, decide(sr, sc)))
+    return out
+
+
 def burn(target, shapes, all_touched=False):
     shapes = [(s, int(v)) for s, v in shapes if s is not None and not s.is_empty]
     if not shapes:
@@ -344,6 +394,17 @@ def _pitch_key(shape):
 
 containers, soft, hard = [], [], []
 pitch_lines = []
+
+
+def _lawn(rr_, cc_):  # a lawn the ortho sees paved over (a pavement widened since) is paving
+    return "paving2" if len(rr_) >= 30 and np.median(exg[rr_, cc_]) < 0 and np.median(lum[rr_, cc_]) > 120 else "grass"
+
+
+def _car_park(rr_, cc_):  # an untagged car park the ortho sees pale is paved (a new square's end, mapped as 9000 m2 of
+    # parking, is the new square's paving with a few cars)
+    return "paving2" if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150 else "parking"
+
+
 for oid, typ, t, geom in osm.areas:
     if tunnelish(t) or "building" in t or "building:part" in t:
         continue
@@ -351,11 +412,11 @@ for oid, typ, t, geom in osm.areas:
         containers.append((geom, C[SURF.get(t.get("surface"), "paving")]))
     if t.get("landuse") in LANDUSE:
         key = LANDUSE[t["landuse"]]
-        if key == "grass":  # a lawn the ortho sees paved over (a pavement widened since) is paving
-            rr_, cc_ = cells_of(geom)
-            if len(rr_) >= 30 and np.median(exg[rr_, cc_]) < 0 and np.median(lum[rr_, cc_]) > 120:
-                key = "paving2"
-        soft.append((geom, C[key]))
+        if key == "grass":
+            # (sorted by the whole outline's area below, pieces and all)
+            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(geom, _lawn))
+        else:
+            soft.append((geom, C[key]))
     if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
         # surface tags disagree with it (a green turf pitch tagged tartan, red courts untagged)
         inner = geom.buffer(-1) if geom.area > 60 else geom
@@ -374,13 +435,10 @@ for oid, typ, t, geom in osm.areas:
     if "construction:leisure" in t or "construction:landuse" in t:
         soft.append((geom, C["fresh"]))
     if t.get("amenity") == "parking" and t.get("parking") not in ("underground", "multi-storey", "rooftop"):
-        key = SURF.get(t.get("surface"), "parking")
-        if "surface" not in t:  # an untagged car park the ortho sees pale is paved (a new square's end,
-            # mapped as 9000 m2 of parking, is the new square's paving with a few cars)
-            rr_, cc_ = cells_of(geom)
-            if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150:
-                key = "paving2"
-        hard.append((geom, C[key]))
+        if "surface" not in t:
+            hard.extend((p_, C[k_]) for p_, k_ in decided(geom, _car_park))
+        else:
+            hard.append((geom, C[SURF.get(t.get("surface"), "parking")]))
 # a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
 # in the colour the ortho sees along it -- the stadium's black lanes were lost in the oval's lawn
 for oid, t, line in osm.lines:
@@ -395,7 +453,8 @@ explicit = np.zeros((D, W), np.uint8)
 burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not tunnelish(t_) and "building" not in t_ and (
     t_.get("place") == "square" or t_.get("highway") == "pedestrian" or "surface" in t_ or t_.get("amenity") == "parking")])
 containers.sort(key=lambda s: -s[0].area)
-soft.sort(key=lambda s: -s[0].area)
+soft.sort(key=lambda s: -(s[2] if len(s) > 2 else s[0].area))
+soft = [s[:2] for s in soft]
 burn(gcol, containers)
 burn(gcol, soft)
 burn(gcol, hard)
@@ -431,7 +490,7 @@ try:
     import alkis_tn
     from shapely.affinity import affine_transform
     from aoi import EU, EV, I0, J0, world_bounds
-    _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1], J0 - CX * EV[0] - CY * EV[1]]
+    _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1] - C0, J0 - CX * EV[0] - CY * EV[1] - R0]  # (to the region's cells)
     _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in alkis_tn.read(world_bounds(5))
            if (n_, b_) in TN_KEY]
     burn(tn, _tn)
@@ -546,7 +605,7 @@ for oid, t, line in osm.lines:
     if w <= 0:
         continue
     poly = line.buffer(w / 2, cap_style="flat" if base in ROADS else "round")
-    if on_bridge(t) and not (hw in ROADS or base in ROADS) and line.length >= 15:
+    if on_bridge(t) and not (hw in ROADS or base in ROADS) and line.length >= 15 and not region.spans(line):
         line, _off = snap_footbridge(line)
         if _off:
             poly = line.buffer(w / 2, cap_style="round")
@@ -577,10 +636,11 @@ for oid, t, line in osm.lines:
         # an untagged path or track is no paved walk: through the woods and meadows (under Oberhaus) it was a pale
         # paving ribbon zigzagging up the hill. Earth where the ortho sees green (crowns over it, a meadow's track)
         # or brown along it, gravel where it is pale
-        rr_, cc_ = cells_of(poly)
-        green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
-        pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
-        foot_shapes.append((poly, C["dirt" if green_ else "paving" if pale_ else "gravel"]))
+        def _way(rr_, cc_):
+            green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
+            pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
+            return "dirt" if green_ else "paving" if pale_ else "gravel"
+        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(poly, _way))
     elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
         foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
 note(f"roads taking their square's surface: {n_inherit}")
@@ -617,16 +677,23 @@ is_road = road_mask > 0
 _ped = [C[k] for k in ("paving", "paving2", "kerb", "steps", "platform", "gravel", "grass", "dirt")]  # (a cycle crossing's red is road)
 
 
+SANITY = {}  # per stage, per road: metres of its centreline in the core painted as pavement (regions.py adds them up)
+
+
 def carriageway_sanity(surface, stage):
     """every carriageway's centreline in its own colour: the build stops if a road has 6 m or more of it painted as
-    pavement (a junction square, an area drawn over it, a pit filled over a road ramp)"""
-    bad = []
+    pavement (a junction square, an area drawn over it, a pit filled over a road ramp). Counted in the core: over
+    several regions regions.py adds up each road's metres"""
+    bad, cnt = [], {}
     for oid, line, own in road_lines:
         pts = [line.interpolate(d) for d in np.arange(0, line.length, 1.0)]
-        rc = [(int(p.y), int(p.x)) for p in pts if 0 <= p.y < D and 0 <= p.x < W]
+        rc = [(int(p.y), int(p.x)) for p in pts if 0 <= p.y < D and 0 <= p.x < W and in_core(int(p.y), int(p.x))]
         off = sum(surface(r, c) in _ped and surface(r, c) != own for r, c in rc)
+        if off:
+            cnt[str(oid)] = cnt.get(str(oid), 0) + int(off)
         if off >= 6:
-            bad.append((int(off), oid, rc[0]))
+            bad.append((int(off), oid, (rc[0][0] + R0, rc[0][1] + C0)))
+    SANITY[stage] = cnt
     bad.sort(reverse=True)
     note(f"carriageway sanity ({stage}): {len(bad)} roads with 6+ m of their centreline painted as pavement: {bad[:8]}")
     if bad:
@@ -671,37 +738,47 @@ water = [(geom, C["granite_d"] if t.get("fountain") == "splash_pad" else C["wate
          if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not tunnelish(t)]
 burn(gcol, water)
 # Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
-# terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the level of the water OSM did give
-# (the Inn), in bodies of 2000 cells or more
+# terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
+# the median of the terrain under the water OSM does give, the Inn's), in bodies of 2000 cells or more.
+# Then the rivers (and ponds): one flat surface per water body -- the DTM over water steps in 1 m terraces that show as
+# lines across the river; it drops ~0.3 m across the map, so one level per stretch is truthful: a body's median
+# ground. Both per block of 64 m, from the window of 192 m round it (region.py: the same in every region): a body is
+# its cells within the window, its size and its level are counted there
+from aoi import RIVER_LEVEL
 _w0 = gcol == C["water"]
-if _w0.any():
-    _wl = float(np.median(dtm[_w0]))
-    _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & (np.abs(dtm - _wl) < 0.8)
-    _fl, _fn = ndimage.label(_flat)
-    _big = np.isin(_fl, np.nonzero(np.bincount(_fl.ravel()) >= 2000)[0][1:] if _fl[0, 0] == 0 else np.nonzero(np.bincount(_fl.ravel()) >= 2000)[0])
-    _big &= _flat
-    _big = ndimage.binary_dilation(_big, iterations=3) & (np.abs(dtm - _wl) < 0.8)
-    note(f"rivers from the terrain model: level {_wl:.1f} m, {int((_big & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
-    gcol[_big] = C["water"]
-    # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
-    # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay)
-    _calm = (gcol == C["water"]) & (nd_max < 4)
-    for _a in (nd_max, nd_mean, nd_max_b):
-        _a[_calm] = 0
-    exg[_calm] = -1
-# the rivers (and ponds): one flat surface per water body -- the DTM over water steps in 1 m terraces that show as
-# lines across the river; it drops ~0.3 m across the map, so a single level is truthful
-wlab, wn = ndimage.label(gcol == C["water"])
-wsize = np.bincount(wlab.ravel())
-n_flat = 0
-for i_, sl in enumerate(ndimage.find_objects(wlab), 1):
-    if sl is None or wsize[i_] < 400:
-        continue
-    m_ = wlab[sl] == i_
-    sub = g[sl]
-    sub[m_] = int(np.median(sub[m_]))
-    n_flat += 1
-note("water bodies flattened:", n_flat)
+_near_lv = np.abs(dtm - RIVER_LEVEL) < 0.8
+_flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
+_wat = np.zeros((D, W), bool)
+_wlev = np.full((D, W), -1, np.int32)
+for _b in region.blocks(64):
+    _w = region._grow(_b, 64)
+    _ws = (slice(_w[0], _w[1]), slice(_w[2], _w[3]))
+    _bs = (slice(_b[0] - _w[0], _b[1] - _w[0]), slice(_b[2] - _w[2], _b[3] - _w[2]))
+    _fl, _fn = ndimage.label(_flat[_ws])
+    _big = (np.bincount(_fl.ravel()) >= 2000)[_fl] & (_fl > 0)
+    _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
+    _ww = _w0[_ws] | _big
+    _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
+    _bl, _bn = ndimage.label(_ww)
+    _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
+    _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
+    if len(_ids):
+        _lut = np.full(_bn + 1, -1, np.int32)
+        _gw = g[_ws]
+        for i_ in _ids:
+            _lut[i_] = int(np.median(_gw[_bl == i_]))
+        _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
+note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
+gcol[_wat] = C["water"]
+# the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
+# it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay)
+_calm = (gcol == C["water"]) & (nd_max < 4)
+for _a in (nd_max, nd_mean, nd_max_b):
+    _a[_calm] = 0
+exg[_calm] = -1
+_fw = (_wlev >= 0) & (gcol == C["water"])
+g[_fw] = _wlev[_fw]
+note("water cells flattened to their body's level:", int(_fw.sum()))
 splash_pads = [geom for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not tunnelish(t)]
 
 # zebra crossings + lane markings on asphalt
@@ -806,10 +883,9 @@ def lod2_only_buildings():
     the surface model stands 3 m and more over): a building of LoD2's footprint where OSM has no building on 80 % of it,
     the surface model agrees with its roof (medians within 3 m) and OSM maps no construction site over it (a block
     being pulled down since the flight) and no bridge through it; not a strip under 4 m wide (a wall, a deck)."""
-    path = Path("data/lod2.npz")
-    if not path.exists() or "cen" not in np.load(path).files:
+    if LOD2 is None or "cen" not in LOD2:
         return []
-    z_ = np.load(path)
+    z_ = LOD2
     lb = np.where(z_["cen"], z_["bid"], 0)
     lz_ = z_["z"] - dtm
     have = np.zeros((D, W), bool)
@@ -888,11 +964,10 @@ def align_to_lod2(outlines, parts):
     footprint's cells no building has go to the nearest outline (or its nearest part) within 4 m that covers that
     LoD2 building; an outline's cells outside every LoD2 footprint where the surface model stands under 2.5 m (a
     sliver of street) go, when the outline has LoD2 buildings at all. Outlines LoD2 does not know (built since) stay."""
-    path = Path("data/lod2.npz")
-    if not path.exists():
+    if LOD2 is None:
         return
-    z_ = np.load(path)
-    if "cen" not in z_.files:
+    z_ = LOD2
+    if "cen" not in z_:
         note("data/lod2.npz has no footprints (rerun scripts/lod2.py): OSM outlines left where they are")
         return
     lb = np.where(z_["cen"], z_["bid"], 0)
@@ -996,7 +1071,7 @@ def close_slots():
     # a 1 m gap with two different buildings on its two sides (a 2 m one is as likely an alley the map lacks)
     closed = np.zeros((D, W), bool)
     for ax in (0, 1):
-        a_, b_ = np.roll(own, 1, ax), np.roll(own, -1, ax)
+        a_, b_ = region.shift(own, 1, ax), region.shift(own, -1, ax)
         closed |= (a_ > 0) & (b_ > 0) & (a_ != b_)
     ways = np.zeros((D, W), np.uint8)
     burn(ways, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines if t_.get("highway")])
@@ -1007,8 +1082,8 @@ def close_slots():
     best = np.zeros((D, W), np.int32)
     bh = np.full((D, W), -1.0)
     for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-        o_ = np.roll(own, (dr, dc), (0, 1))
-        h_ = np.roll(hi, (dr, dc), (0, 1))
+        o_ = region.shift2(own, (dr, dc))
+        h_ = region.shift2(hi, (dr, dc))
         k_ = slot & (o_ > 0) & (h_ > bh)
         best[k_], bh[k_] = o_[k_], h_[k_]
     rr_, cc_ = np.nonzero(slot & (best > 0))
@@ -1080,8 +1155,8 @@ for f in sorted(render, key=lambda f: f["maxh"] or 0):
 # a crown that is not green (a copper beech over a low house) is still rough: the DSM's spread over 3 m is ~4 m in a
 # crown, under 1 m on a roof. Only over a small low house standing among crowns (a ring round it, away from other
 # buildings, tall and green or rough) whose raised cells are mostly rough: a mistagged tower is smooth on top
-_m = ndimage.uniform_filter(dsm, 6)
-rough = np.sqrt(np.maximum(ndimage.uniform_filter(dsm * dsm, 6) - _m * _m, 0)).reshape(D, 2, W, 2).max((1, 3))
+_m = boxmean(dsm, 6)
+rough = np.sqrt(np.maximum(boxmean(dsm * dsm, 6) - _m * _m, 0)).reshape(D, 2, W, 2).max((1, 3))
 under_tree = np.zeros((D, W), bool)
 for f in render:
     if f["part"] or f.get("has_parts") or f["maxh"] is None or f["maxh"] > 8 or f["area"] >= 400:
@@ -1198,7 +1273,7 @@ def _fit_grad(rr, cc, k, slope_m):
     global _DIST_GRAD
     if _DIST_GRAD is None:
         _d = ndimage.distance_transform_edt(bmask).astype(np.float32)
-        _DIST_GRAD = np.gradient(ndimage.uniform_filter(_d, 3))
+        _DIST_GRAD = np.gradient(boxmean(_d, 3))
     gy_, gx_ = _DIST_GRAD[0][rr, cc], _DIST_GRAD[1][rr, cc]
     n_ = np.hypot(gx_, gy_)
     ok = slope_m & (n_ > 0.3)
@@ -1259,13 +1334,12 @@ def lod2_roofs(top):
     where the samples fell down a wall). A tower or a spire LoD2 lacks (a big patch above it, OSM's heights) and a
     building LoD2 does not know keep the surface model.
     Returns the cells of pitched roofs (a slope of 0.3 or more) taken from LoD2."""
-    path = Path("data/lod2.npz")
-    if not path.exists():
+    if LOD2 is None:
         note("no data/lod2.npz (scripts/lod2.py): roofs from the surface model only")
         return np.zeros((D, W), bool)
-    z_ = np.load(path)
+    z_ = LOD2
     lz, sl = z_["z"] - dtm, z_["slope"]
-    if "gx" not in z_.files:
+    if "gx" not in z_:
         raise SystemExit("data/lod2.npz has no plane gradients (`gx`, `gy`): rerun scripts/lod2.py")
     lgx, lgy = z_["gx"], z_["gy"]
     have = np.isfinite(lz)
@@ -1299,7 +1373,7 @@ def lod2_roofs(top):
     LOD2_USE[...] = use
     ROOF_GX[use], ROOF_GY[use] = lgx[use], lgy[use]
     pitched = use & (sl >= 0.3)
-    json.dump(REVERTED, open(DBG / "lod2_reverted.json", "w"), indent=0)
+    json.dump(REVERTED, open(RDIR / "lod2_reverted.json", "w"), indent=0)
     note("LoD2 roofs taken:", int(use.sum()), "of", int(bmask.sum()), "building cells; pitched:", int(pitched.sum()),
          "; buildings left to the surface model:", n_rev)
     return pitched
@@ -1575,7 +1649,8 @@ for f in _pl:
     rr_, cc_ = f["rr"], f["cc"]
     m_ = np.zeros((rr_.max() - rr_.min() + 3, cc_.max() - cc_.min() + 3), bool)
     m_[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1] = True
-    _mr = f["geom"].minimum_rotated_rectangle
+    from shapely.affinity import translate as _tr
+    _mr = _tr(f["geom"], C0, R0).minimum_rotated_rectangle  # (in the project grid's coordinates, as above)
     _xy = np.array(_mr.exterior.coords)
     _ang = math.degrees(math.atan2(_xy[1, 1] - _xy[0, 1], _xy[1, 0] - _xy[0, 0])) % 90
     rotated = 12 < _ang < 78  # on the grid a 1 m frame or band draws cleanly (a tower's white frame, its bands)
@@ -1605,10 +1680,12 @@ for f in _thin:
         f["wall"] = best["wall"]
         n_thin += 1
 note("thin parts given their neighbour's wall:", n_thin, "of", len(_thin))
-json.dump(THIN_LOG, open("data/debug/thin_parts.json", "w"))
+json.dump(THIN_LOG, open(RDIR / "thin_parts.json", "w"))
 
 note("OSM roof colours overruled by the ortho:", len(ROOF_OVERRULED), ROOF_OVERRULED[:8])
-H = int(max(topi.max() + g.max(), g.max()) + 12)
+# (room over the tallest of anything in the region -- buildings, the surface model's masts and pylons, crowns up to 40 m,
+# the set pieces' lanterns -- so that nothing is cut off, whatever the region holds; the export trims to what is there)
+H = int(g.max() + max(topi.max(), nd_max.max(), 41) + 24)
 note("volume height", H)
 vol = np.zeros((H, D, W), np.uint16)
 
@@ -1643,9 +1720,7 @@ _nat[_green & _crown] = C["garden"]
 _straw = _open & ~_green & ~_crown & (_lum3 >= 140) & (_red_b > 18) & (_d_drawn >= 6)
 _straw &= np.isin(tn, [0, TN["grassland"], TN["arable"]])  # (not on a cadastre's building plot, park or car park)
 _straw = ndimage.binary_opening(_straw, iterations=2)
-_sl, _sn = ndimage.label(_straw)
-if _sn:
-    _straw &= np.r_[False, ndimage.sum(_straw, _sl, range(1, _sn + 1)) >= 1000][_sl]
+_straw &= region.windowed_sizes(_straw, 64, 64) >= 1000  # (its patch within 192 m of its block: region.py)
 _nat[_straw] = C["stubble"]
 # where the cadastre knows the land's use (ALKIS, above), the class is its, the shade the ortho's: forest and copse are
 # forest floor under their crowns and meadow in the clearings (they were pale paving, dirt or straw wherever the ortho
@@ -1672,7 +1747,7 @@ _nat[~_open] = C["paving"]
 # a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
 _NAT = ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble", "gravel", "parking")
 _cls = [C[k] for k in _NAT]
-_votes = np.stack([ndimage.uniform_filter(((_nat == k) & _open).astype(np.float32), 3) for k in _cls])
+_votes = np.stack([region.boxsum((_nat == k) & _open, 3) for k in _cls])  # (whole votes: a tie goes to the first)
 _maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
 gcol[_open] = _maj[_open]
 note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in _NAT})
@@ -1699,7 +1774,9 @@ for oid, typ, t, geom in osm.areas:
     if geom.area < 400:
         continue
     # the plot's axes: its minimum rotated rectangle's long side
-    _mr = list(geom.minimum_rotated_rectangle.exterior.coords)
+    # (in the project grid's coordinates: the same rectangle, and the same corner first, in every region)
+    from shapely.affinity import translate as _tr
+    _mr = [(x_ - C0, y_ - R0) for x_, y_ in _tr(geom, C0, R0).minimum_rotated_rectangle.exterior.coords]
     _e = max(((_mr[i], _mr[i + 1]) for i in range(4)), key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
     th = math.atan2(_e[1][1] - _e[0][1], _e[1][0] - _e[0][0])
     _q = round(th / (math.pi / 2)) * (math.pi / 2)
@@ -1731,7 +1808,7 @@ for oid, typ, t, geom in osm.areas:
     gcol[rr_[aisle], cc_[aisle]] = C["gravel"]
     gcol[rr_[bed], cc_[bed]] = C["garden"]
     for r, c in zip(rr_[stone], cc_[stone]):
-        grave_stones.append((int(r), int(c), CEM_STONES[stable_hash(r, c, "grave") % len(CEM_STONES)]))
+        grave_stones.append((int(r), int(c), CEM_STONES[cell_hash(r, c, "grave") % len(CEM_STONES)]))
     n_cem += 1
 note("cemeteries laid out:", n_cem, "grave stones:", len(grave_stones))
 
@@ -1755,7 +1832,7 @@ burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
                  if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
 _wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
 n_rw = 0
-_rr0, _cc0 = np.mgrid[0:D, 0:W]
+_rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)
 for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
     m = _wall & (zz >= _nb_lo) & (zz < g - 1)
     if not m.any():
@@ -1916,7 +1993,7 @@ core_m[cells_of(CORE)] = True
 mats_of_ids = np.array([e[3] for e in pal.entries] + [0] * 256)
 n_rs = 0
 for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-    nb_t = np.roll(zt, (dr, dc), (0, 1)); nb_b = np.roll(bmask, (dr, dc), (0, 1))
+    nb_t = region.shift2(zt, (dr, dc)); nb_b = region.shift2(bmask, (dr, dc))
     step = bmask & nb_b & (core_m | pitched_m) & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
     for k in (2, 3, 4):
         m = step & (zt - nb_t >= k)
@@ -1971,7 +2048,7 @@ note("known trees: OSM natural=tree", sum(t["src"] == "osm" for t in all_trees),
 # conifers by their winter density. Optional: without data/laser.npz the trees come from the surface model alone
 LZ = None
 if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
-    LZ = {k: v for k, v in np.load("data/laser.npz").items()}
+    LZ = region.load_npz("data/laser.npz")
 else:
     note("no data/laser.npz (scripts/laser.py): trees from the surface model only")
 # the OSM trees widen the ortho's green test and pardon wall edges (as before); the register's points do not
@@ -2142,7 +2219,7 @@ note("known trees without a crown in the surface model -> procedural:", n_new)
 peak = veg & (nd_mean >= ndimage.maximum_filter(np.where(veg, nd_mean, 0), size=7)) & (nd_mean >= 4)
 _td = ndimage.distance_transform_edt(~trunk_at)
 pr_, pc_ = np.nonzero(peak & (_td >= 5))
-order = np.argsort(-nd_mean[pr_, pc_])
+order = np.argsort(-nd_mean[pr_, pc_], kind="stable")  # (equal heights: row by row, as in every region)
 taken = np.zeros((D, W), bool)
 n_peak = 0
 for k in order:
@@ -2156,8 +2233,8 @@ for k in order:
             if _dbd[r, c] > 3:
                 continue
             r, c = int(_dbr[r, c]), int(_dbc[r, c])
-    put_trunk(r, c, rec=dict(id=f"lidar:{r}_{c}", src="lidar", x=float(c) + 0.5, y=float(r) + 0.5, drawn="lidar",
-                             z=int(g[r, c])))
+    put_trunk(r, c, rec=dict(id=f"lidar:{r + R0}_{c + C0}", src="lidar", x=float(c) + 0.5, y=float(r) + 0.5, drawn="lidar",
+                             z=int(g[r, c]), peak=float(nd_mean[int(pr_[k]), int(pc_[k])])))
     taken[r, c] = True
     n_peak += 1
 note("trunks at canopy tops with no known tree under them:", n_peak)
@@ -2178,12 +2255,15 @@ if trunks:
     for i_, (r_, c_, _) in enumerate(trunks, 1):
         tidx[r_, c_] = i_
     _dt, (_tr_, _tc_) = ndimage.distance_transform_edt(tidx == 0, return_indices=True)
-    own = np.where(veg, tidx[_tr_, _tc_], 0)
+    # (a canopy cell further than region.CROWN_R from every trunk -- low scrub, no peak in it -- is no crown's: drawn
+    # as the canopy's own column below)
+    own = np.where(veg & (_dt <= region.CROWN_R), tidx[_tr_, _tc_], 0)
+    note("canopy cells further than", region.CROWN_R, "m from every trunk (no crown's):", int((veg & (_dt > region.CROWN_R)).sum()))
     idx_ = np.arange(1, nT + 1)
     # the distance to the edge of the own cell: to the nearest cell with another owner or no canopy
     _same = own > 0
     for _ax, _sh in ((0, 1), (0, -1), (1, 1), (1, -1)):
-        _same &= np.roll(own, _sh, axis=_ax) == own
+        _same &= region.shift(own, _sh, _ax) == own
     _db = ndimage.distance_transform_edt(_same)
     # a crown is one solid per tree, not a column per cell: its height is the crown's robust top (the 5x5 median of the
     # noisy image-matched surface, then the crown's 90th percentile), measured from the ground at its trunk -- on a slope
@@ -2194,15 +2274,16 @@ if trunks:
     ok_ = k_ >= 0
     kk = np.maximum(k_, 0)
     _hv = np.maximum(_sm[vr_, vc_], 3).astype(np.float32)
-    _ord = np.lexsort((_hv, kk))
-    _cnt = np.bincount(kk, minlength=nT)
+    _kx = np.where(ok_, k_, nT)  # (a cell no crown owns counts for none: after them all)
+    _ord = np.lexsort((_hv, _kx))
+    _cnt = np.bincount(_kx, minlength=nT + 1)[:nT]
     _start = np.concatenate([[0], np.cumsum(_cnt)[:-1]])
     Ht = np.where(_cnt > 0, _hv[_ord][np.clip(_start + (0.9 * np.maximum(_cnt - 1, 0)).astype(int), 0, len(_hv) - 1)], 3)
     Ht = Ht.astype(np.float32)
     Re = np.sqrt(np.maximum(_cnt, 1) / np.pi).astype(np.float32)  # the radius of a disc of the crown's footprint
     G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
     con = np.array(trunk_conifer, bool)
-    hsh = np.array([stable_hash(r_, c_, "crown") for r_, c_, _ in trunks], np.int64)
+    hsh = np.array([cell_hash(r_, c_, "crown") for r_, c_, _ in trunks], np.int64)
     v1, v2, v3, v4 = ((hsh >> s) % 1000 / 1000.0 for s in (0, 8, 16, 24))  # per-tree variation in [0, 1)
     _sumc = lambda a: np.bincount(kk[ok_], weights=np.asarray(a, np.float64)[vr_[ok_], vc_[ok_]], minlength=nT)
     measured = _sumc(veg_laser) > 0.5 * np.maximum(_cnt, 1)  # the crown's height from the laser
@@ -2237,7 +2318,7 @@ if trunks:
     Ht = np.minimum(Ht, np.where(con, 5 + np.where(measured, 7.0, 5.0) * Re, 5 + np.where(measured, 6.0, 3.2) * Re)) * (0.95 + 0.06 * v1)
     # a crown squeezed against a facade (a third of it within 2 m of a building) is the wall's LiDAR as much as a tree:
     # lower still (2.4 radii + 3 m), no green pillar up the front
-    _atwall = np.bincount(kk, weights=_nearb[vr_, vc_].astype(np.float64), minlength=nT) / np.maximum(_cnt, 1)
+    _atwall = np.bincount(_kx, weights=_nearb[vr_, vc_].astype(np.float64), minlength=nT + 1)[:nT] / np.maximum(_cnt, 1)
     Ht = np.where(_atwall > 0.33, np.minimum(Ht, 3 + 2.4 * Re), Ht)
     Ht = np.maximum(Ht, 3)
     # crown depth (top to underside over the trunk): about the crown's width, never more than 2/3 of the tree
@@ -2262,12 +2343,9 @@ if trunks:
     H_, dp_, pw_ = Ht[kk], dep[kk], pw[kk]
     con_ = con[kk]
     # smooth noise, ~1 m amplitude, 2-3 m patches
-    _rng = np.random.default_rng(7)
-    _nz = ndimage.gaussian_filter(_rng.standard_normal((D, W)).astype(np.float32), 1.3)
-    _nz /= max(float(_nz.std()), 1e-6)
-    nz_ = _nz[vr_, vc_]
-    _nz2 = ndimage.gaussian_filter(_rng.standard_normal((D, W)).astype(np.float32), 1.0)
-    nz2_ = _nz2[vr_, vc_] / max(float(_nz2.std()), 1e-6)
+    # (hashed from the project grid's coordinates, region.noise: the same crowns in every region)
+    nz_ = region.noise(7, 1.3)[vr_, vc_]
+    nz2_ = region.noise(8, 1.0)[vr_, vc_]
     zc = H_ - 0.5 * dp_  # broadleaf: a superellipsoid, its waist a little below the middle (u = 1)
     s_ = np.clip(1 - u ** pw_, 0, 1) ** (1 / pw_)
     top_b = zc + 0.5 * dp_ * s_
@@ -2343,7 +2421,7 @@ for zz in range(int(g.min()) + 1, int((g + crown_top).max()) + 1):
         t_ = tn_[m]
         # clumps of 3 x 3 x 3 voxels (fewer colour seams for the mesher than single voxels): a fifth of those in the
         # upper half one tone lighter, a tenth underneath one darker
-        hz = ((rr[m] // 3) * 73856093 ^ (cc[m] // 3) * 19349663 ^ (zz // 3) * 83492791) % 10
+        hz = (((rr[m] + R0) // 3) * 73856093 ^ ((cc[m] + C0) // 3) * 19349663 ^ (zz // 3) * 83492791) % 10  # (the project grid's)
         up_ = zz >= cz_[m]
         sh_ = np.where(up_ & (hz < 2), -1, np.where(~up_ & (hz < 1), 1, 0))
         b_ = t_ % 5  # broadleaf: lightness step within the hue family
@@ -2359,40 +2437,42 @@ for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowes
         rr_, cc_ = r_ + dr, c_ + dc
         if 0 <= rr_ < D and 0 <= cc_ < W and not bmask[rr_, cc_]:
             vol[g[rr_, cc_]:g[rr_, cc_] + hb, rr_, cc_] = C["trunk"]
-# the tree register for the viewer and for phenology.py
+# the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
+# place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
+# the trunks at canopy tops tallest first, then row by row)
 for t in trunk_rec:  # the trunks placed at canopy tops: no database tree, an id from the cell
     if t is not None and t["src"] == "lidar":
         t["h"] = int(crown_top[int(t["y"]), int(t["x"])])
         all_trees.append(t)
 _tr = []
 for t in all_trees:
-    rec = dict(id=t["id"], x=round(t["x"], 1), y=round(t["y"], 1), src=t["src"], drawn=t.get("drawn"))
+    if not in_core(int(t["y"]), int(t["x"])):
+        continue
+    rec = dict(id=t["id"], x=round(t["x"] + C0, 1), y=round(t["y"] + R0, 1), src=t["src"], drawn=t.get("drawn"))
     for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
                         ("bv_height", "h_bv"), ("con", "con")):
         if t.get(k_src) is not None:
             rec[k_out] = t[k_src]
-    _tr.append(rec)
-# which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as an index into trees.json.
-# (phenology.py took the nearest trunk on the 2 m grid, which is not always the crown's own: a broadleaf crown's side
-# beside a conifer took the conifer's evergreen class and stood green through the winter, a pillar)
+    if t["src"] == "lidar":
+        key = [2, -t["peak"], int(t["y"]) + R0, int(t["x"]) + C0]
+    else:
+        key = [0 if t["src"] == "osm" else 1, t["k"]]
+    _tr.append(dict(key=key, rec=rec))
+RESULT["trees"] = _tr
+# which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as a tree's id here
+# (regions.py: an index into trees.json). (phenology.py took the nearest trunk on the 2 m grid, which is not always the
+# crown's own: a broadleaf crown's side beside a conifer took the conifer's evergreen class and stood green through the
+# winter, a pillar)
+_crown_ids = []
+_best = np.full((D // 2, W // 2), -1, np.int32)
 if trunks:
-    _ti = {id(t): k for k, t in enumerate(all_trees)}
     _map = np.full(len(trunks) + 1, -1, np.int32)
     for i_, rec_ in enumerate(trunk_rec):
-        if rec_ is not None and id(rec_) in _ti:
-            _map[i_ + 1] = _ti[id(rec_)]
+        if rec_ is not None:
+            _map[i_ + 1] = len(_crown_ids)
+            _crown_ids.append(rec_["id"])
     _best = _map[own2]
-    np.savez_compressed("data/crowns.npz", owner=_best)
-    note("2 m cells with a crown's owner for phenology:", int((_best >= 0).sum()))
-Path(OUT).mkdir(parents=True, exist_ok=True)
-json.dump(dict(sources={"osm": "OpenStreetMap natural=tree",
-                        "bv": "Einzelbäume 3D, Bayerische Vermessungsverwaltung (CC BY 4.0), 2024 flight",
-                        "lidar": "a crown in the surface model with no known tree under it (trunk at its top)"},
-               fields=dict(x="grid column", y="grid row", z="ground voxel", h="crown top above ground, m",
-                           sp="species or genus (Latin, as tagged)", cm="trunk circumference, cm", h_inv="tagged height, m",
-                           drawn="lidar | procedural | none", h_bv="height in the Einzelbäume register, m",
-                           con="a conifer (species, or its winter density in the laser scan): evergreen"), trees=_tr),
-          open(Path(OUT) / "trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
+RESULT["crown_ids"] = _crown_ids
 
 # ---------------------------------------------------------------- fountains
 # A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
@@ -2400,8 +2480,8 @@ json.dump(dict(sources={"osm": "OpenStreetMap natural=tree",
 GRAN = [pal("#6a6e71"), pal("#62666a"), pal("#72767a")]
 SHARD, DRAIN, RING = pal("#4a4d50"), pal("#3a3c3f", M_METAL), pal("#b9bdc0", M_METAL)
 n_jets = 0
-jets = []
-for geom in splash_pads:
+jets = []  # (key in the map's order, jet): regions.py keeps a region's in its core
+for i_pad, geom in enumerate(splash_pads):
     rr, cc = cells_of(geom)
     if len(rr) == 0:
         continue
@@ -2409,7 +2489,7 @@ for geom in splash_pads:
     m[rr, cc] = True
     edge = m & ~ndimage.binary_erosion(m)
     # polygon slabs: Voronoi cells around a few random seeds
-    rng = np.random.default_rng(stable_hash(int(rr.mean()), int(cc.mean())))
+    rng = np.random.default_rng(stable_hash(int((rr + R0).mean()), int((cc + C0).mean())))
     seeds = np.stack([rng.uniform(rr.min(), rr.max() + 1, 14), rng.uniform(cc.min(), cc.max() + 1, 14)], 1)
     for r, c in zip(rr, cc):
         z0 = g[r, c] - 1
@@ -2422,10 +2502,10 @@ for geom in splash_pads:
             v = SHARD
         elif r % 2 == 0 and c % 2 == 0:
             v = RING
-            jets.append([c + 0.5, int(z0 + 1), r + 0.5])  # rendered as animated water columns in the viewer
+            jets.append(([i_pad, int(r) + R0, int(c) + C0], [c + C0 + 0.5, int(z0 + 1), r + R0 + 0.5]))  # rendered as animated water columns in the viewer
             n_jets += 1
         else:
-            v = SHARD if stable_hash(r, c, 7) % 23 == 0 else GRAN[k % 3]
+            v = SHARD if cell_hash(r, c, 7) % 23 == 0 else GRAN[k % 3]
         vol[z0, r, c] = v
 note("splash-pad fountain jets:", n_jets)
 
@@ -2450,8 +2530,8 @@ for oid, typ, t, geom in osm.areas:
             continue
         if edge[r, c] and geom.area > 12:
             vol[z0, r, c] = C["benchkerb"]
-        elif stable_hash(oid, r, c) % 5:
-            vol[z0, r, c] = PERENNIALS[stable_hash(r, c, oid) % len(PERENNIALS)]
+        elif stable_hash(oid, r + R0, c + C0) % 5:
+            vol[z0, r, c] = PERENNIALS[cell_hash(r, c, oid) % len(PERENNIALS)]
     n_beds += 1
 note("raised planting beds:", n_beds)
 
@@ -2469,8 +2549,9 @@ def kerb(c, r):
     return (int(_kc[r, c]), int(_kr[r, c])) if _kd[r, c] <= 4 else None
 
 
-lamps = []
-for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):
+lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
+LAMP_KEYS = []
+for i_lamp, (oid, t, p) in enumerate(osm.nodes_with("highway", ("street_lamp",))):
     c, r = kerb(int(p.x), int(p.y)) or (-1, -1)
     if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
         continue
@@ -2479,6 +2560,7 @@ for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):
     vol[z0:z0 + hgt - 1, r, c] = np.where(vol[z0:z0 + hgt - 1, r, c] == 0, C["pole"], vol[z0:z0 + hgt - 1, r, c])
     vol[z0 + hgt - 1, r, c] = C["lamp"]
     lamps.append((c, r, int(z0 + hgt - 1)))
+    LAMP_KEYS.append([0, i_lamp])
 note("street lamps:", len(lamps))
 lamp_xy = np.array([(c, r) for c, r, _ in lamps], float) if lamps else np.zeros((0, 2))
 # park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
@@ -2489,12 +2571,12 @@ _park_u = _uu(_parks).buffer(0) if _parks else None
 _pwalk = np.zeros((D, W), np.uint8)
 burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
 n_pl = 0
-for oid, t, line in osm.lines:
+for i_line, (oid, t, line) in enumerate(osm.lines):
     if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or tunnelish(t) or on_bridge(t):
         continue
     name = (t.get("name") or "").lower()
     seg = line if ("promenade" in name or name == "ortspitze") else (line.intersection(_park_u) if _park_u is not None else None)
-    for part in getattr(seg, "geoms", [seg]) if seg is not None and not seg.is_empty else []:
+    for i_part, part in enumerate(getattr(seg, "geoms", [seg]) if seg is not None and not seg.is_empty else []):
         if part.geom_type != "LineString" or part.length < 20:
             continue
         for k, s_ in enumerate(np.arange(10, part.length - 5, 25)):
@@ -2516,6 +2598,7 @@ for oid, t, line in osm.lines:
             vol[z0:z0 + 3, r, c] = C["pole"]
             vol[z0 + 3, r, c] = C["lamp"]
             lamps.append((c, r, z0 + 3))
+            LAMP_KEYS.append([1, i_line, i_part, k])
             lamp_xy = np.vstack([lamp_xy, [c, r]])
             n_pl += 1
 note("park and promenade lamps:", n_pl)
@@ -2561,7 +2644,7 @@ for oid, typ, t, geom in osm.areas_with("amenity", ("shelter",)):
     rr, cc = cells_of(geom)
     zz = g[rr, cc] + 2
     vol[zz, rr, cc] = C["shelter"]
-    vol[g[rr, cc], rr, cc] = np.where((rr + cc) % 3 == 0, C["pole"], 0)
+    vol[g[rr, cc], rr, cc] = np.where((rr + R0 + cc + C0) % 3 == 0, C["pole"], 0)
 
 for oid, t, p in osm.nodes_with("man_made", ("flagpole",)):
     c, r = int(p.x), int(p.y)
@@ -2620,6 +2703,17 @@ for line, hw, layer, _ in bridge_lines:
         h_ = np.where(h_ > hs_ + 0.6, hs_, h_)
     prof.append(np.column_stack([P_, h_, np.full(n_, layer + 1)]))
 deck_abs = np.zeros((D, W), np.float32)
+
+
+def _knn(pts, q, k):
+    """the k nearest points to each query (distances, indices), ties by the points' order (the same in every region:
+    cKDTree's own order among equal distances follows its tree, which follows the points the region holds), nearest
+    first; distances to a micrometre (their last bits follow the region's origin)"""
+    n = min(k + 6, len(pts))
+    d_, k_ = cKDTree(pts).query(q, k=n)
+    d_, k_ = d_.reshape(len(q), n), k_.reshape(len(q), n)
+    o = np.lexsort((k_, np.round(d_, 6)), axis=-1)[:, :min(k, n)]
+    return np.take_along_axis(d_, o, -1), np.take_along_axis(k_, o, -1)
 if prof:
     # across the deck the ways agree: one surface per layer, each point the low end (10th percentile) of its layer
     # within 10 m. Each way on its own rounded to a different metre from its neighbour (steps along the deck between
@@ -2636,7 +2730,7 @@ if prof:
     for i_, pw_ in enumerate(prof):
         h_ = allp[k0:k0 + len(pw_), 2]
         n_ = len(h_)
-        pw_[:, 2] = ndimage.uniform_filter1d(ndimage.median_filter(h_, min(25, n_), mode="nearest"), min(15, n_), mode="nearest")
+        pw_[:, 2] = region.movmean(ndimage.median_filter(h_, min(25, n_), mode="nearest"), min(15, n_))
         k0 += n_
     # a bridge way often ends (in OSM) metres before the ground climbs back to the deck: the deck carries on along the
     # way's direction, level, until the ground is within 1.5 m of it (up to 15 m) -- no hole for the cars to drop into
@@ -2675,7 +2769,7 @@ if prof:
     for L_ in np.unique(deck_lay[rr, cc]):
         sel = deck_lay[rr, cc] == L_
         pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
-        d_, k_ = cKDTree(pts[:, :2]).query(np.column_stack([cc[sel] + 0.5, rr[sel] + 0.5]), k=min(12, len(pts)))
+        d_, k_ = _knn(pts[:, :2], np.column_stack([cc[sel] + 0.5, rr[sel] + 0.5]), 12)
         w_ = 1 / np.maximum(d_, 0.5) ** 2  # a smooth surface between the ways: any step is a contour across the deck
         deck_abs[rr[sel], cc[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
 zt_ = np.round(deck_abs - BASE).astype(np.int32)
@@ -2714,7 +2808,7 @@ if len(_rn) and len(prof):
     for L_ in np.unique(deck_lay[_rn, _cn]):
         sel = deck_lay[_rn, _cn] == L_
         pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
-        d_, k_ = cKDTree(pts[:, :2]).query(np.column_stack([_cn[sel] + 0.5, _rn[sel] + 0.5]), k=min(12, len(pts)))
+        d_, k_ = _knn(pts[:, :2], np.column_stack([_cn[sel] + 0.5, _rn[sel] + 0.5]), 12)
         w_ = 1 / np.maximum(d_, 0.5) ** 2
         _bwh[_rn[sel], _cn[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
 zt_ = np.where(deck_abs > 0, zt_, np.round(_bwh - BASE).astype(np.int32))
@@ -2798,7 +2892,7 @@ note("bridge pylons from LiDAR:", n_pyl)
 # carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
 _bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])
 n_bl = 0
-for line, w in bridge_roads:
+for i_br, (line, w) in enumerate(bridge_roads):
     for k_, dist in enumerate(np.arange(10, line.length - 6, 32.0)):
         p = line.interpolate(dist)
         q_ = line.interpolate(min(dist + 1, line.length))
@@ -2818,6 +2912,7 @@ for line, w in bridge_roads:
             vol[z0:z0 + 8, r, c] = np.where(vol[z0:z0 + 8, r, c] == 0, C["pole"], vol[z0:z0 + 8, r, c])
             vol[z0 + 8, r, c] = C["lamp"]
             lamps.append((c, r, int(z0 + 8)))
+            LAMP_KEYS.append([2, i_br, k_, side])
             lamp_xy = np.vstack([lamp_xy, [c, r]])
             n_bl += 1
 note("inferred lamps on bridge decks (OSM has almost none):", n_bl)
@@ -2893,16 +2988,12 @@ import underpass
 underpass.SKIP = set(tunnels.IDS)
 underpass.build(vol, g, pal, C, osm, note)
 carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
-labels, views = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)
+RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
 tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
-
-import labels as labels_mod
-labels = labels_mod.assemble(labels, osm, lambda r, c: int(g[r, c] + (topi[r, c] if bmask[r, c] else 0)))
-labels_mod.radii(labels, g, g + np.where(bmask, topi, 0))
 
 # ---------------------------------------------------------------- floating debris
 import debris
-debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]], dtype=vol.dtype), note)
+debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]], dtype=vol.dtype), note, dbg=RDIR)
 
 # ---------------------------------------------------------------- export
 Hm = int(np.nonzero(vol.reshape(H, -1).any(axis=1))[0].max()) + 1
@@ -2910,12 +3001,16 @@ vol = vol[:Hm]
 note("final height", Hm, "palette", len(pal.entries))
 # the three rivers in their own colours, as the orthophoto shows them: the Danube dark green, the Inn milky grey-green
 # from the glaciers, the Ilz peat-black, and the bands running side by side below the Dreiflüsseeck. Per 8 m block the
-# median of the open water's cells (10 m off the banks, ships, bridges and their shadows' worst), smoothed over ~50 m
+# median of the open water's cells (10 m off the banks, ships, bridges and their shadows' worst), a block with none
+# taking the nearest block's within 32 m (else WATER_RGB, a pond far from the rivers), smoothed over ~50 m and drawn
+# between the blocks' centres (blocks of the project grid: the same colours in every region)
+WATER_RGB = (104, 128, 112)
 _ri, _ci = np.arange(D)[:, None], np.arange(W)[None, :]
 _wm = vol[g - 1, _ri, _ci] == C["water"]
 _cov = vol[np.minimum(g, Hm - 1), _ri, _ci] != 0
 _open = ndimage.binary_erosion(_wm, iterations=10) & ~ndimage.binary_dilation(_cov & _wm, iterations=10)
 _B = 8
+assert R0 % _B == 0 and C0 % _B == 0 and D % _B == 0 and W % _B == 0
 _blk = np.where(_open[..., None], cellcol, np.nan).reshape(D // _B, _B, W // _B, _B, 3)
 with np.errstate(all="ignore"):
     import warnings
@@ -2923,11 +3018,23 @@ with np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         _bc = np.nanmedian(_blk, axis=(1, 3))
 _has = np.isfinite(_bc[..., 0])
-if _has.any():
-    _near = ndimage.distance_transform_edt(~_has, return_distances=False, return_indices=True)
-    _bc = _bc[_near[0], _near[1]]
+if _wm.any():
+    _bd, _near = ndimage.distance_transform_edt(~_has, return_indices=True) if _has.any() else \
+        (np.full(_has.shape, np.inf), np.indices(_has.shape))
+    _bc = np.where((_bd <= 4)[..., None], _bc[_near[0], _near[1]], np.array(WATER_RGB, float))
     _bc = np.stack([ndimage.gaussian_filter(ndimage.median_filter(_bc[..., k], 5), 2.5) for k in range(3)], -1)
-    _wc = np.stack([ndimage.zoom(_bc[..., k], _B, order=1) for k in range(3)], -1)
+
+    def _lerp(n, nb):  # cell -> the two blocks round it and the weight of the second
+        t = (np.arange(n) + 0.5) / _B - 0.5
+        i0 = np.floor(t).astype(int)
+        return np.clip(i0, 0, nb - 1), np.clip(i0 + 1, 0, nb - 1), (t - i0)
+    _r0, _r1, _fr = _lerp(D, D // _B)
+    _c0, _c1, _fc = _lerp(W, W // _B)
+    _wc = np.zeros((D, W, 3))
+    for k in range(3):
+        _a = _bc[..., k]
+        _row = _a[_r0] * (1 - _fr[:, None]) + _a[_r1] * _fr[:, None]
+        _wc[..., k] = _row[:, _c0] * (1 - _fc[None]) + _row[:, _c1] * _fc[None]
     # the ortho's water is sunlit and flat: a little darker and richer, as the rivers look from the Oberhaus
     _wc = np.clip((_wc.mean(-1, keepdims=True) + (_wc - _wc.mean(-1, keepdims=True)) * 1.5) * 0.82, 0, 255)
     _wc = _wc * np.array([0.80, 1.0, 0.98])  # and the red taken down: the ortho's glare reads the Inn's jade as concrete grey
@@ -2940,25 +3047,21 @@ if _has.any():
 _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
 _lut = np.array([e[:3] for e in pal.entries], np.uint8)
 _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
-np.savez_compressed("data/ground.npz", g=g.astype(np.int16), rgb=_lut[_ids], water=_wm,
-                    b=np.where(bmask, topi, 0).astype(np.int16))  # building height above ground (photo-pose tools)
+CORE_OUT = dict(g=g.astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
 # the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
 # building cell belongs to, for zones.py and windows.py
 _fp = np.zeros((D, W), np.int64)
 for f in sorted([f for f in feats if not f["part"]], key=lambda f: -f["area"]) + [f for f in render if f["part"] and f.get("parent")]:
     k_ = bmask[f["rr"], f["cc"]]
     _fp[f["rr"][k_], f["cc"][k_]] = (f["parent"] if f["part"] else f)["id"]
-np.savez_compressed("data/footprints.npz", oid=_fp)
+CORE_OUT["oid"] = _fp
 import tiles
 EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
                          fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | {C["trunk"]},
                          grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
                          wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
 # nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
-debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db)
-if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (scripts/floating.py)
-    np.save("data/cache/final_vol.npy", vol)
-    np.save("data/cache/final_g.npy", g)
+debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db, dbg=RDIR)
 
 
 def plane_codes():
@@ -2982,47 +3085,29 @@ def plane_codes():
     k = np.minimum(30, np.floor(np.arctan(np.hypot(gx_, gy_)) / (np.pi / 72) + 0.5)).astype(np.int32)
     az = (np.floor(np.arctan2(-gy_, -gx_) / (np.pi / 32) + 0.5).astype(np.int32) + 64) % 64
     code = np.where(ok & (k >= 4), 1 + k * 64 + az, 0).astype(np.uint16)
-    note("roof plane codes shipped:", int((code > 0).sum()), "columns of", int(bmask.sum()), "building columns;",
-         "known plane but top changed:", int((bmask & np.isfinite(ROOF_GX) & ~ok).sum()))
+    note("roof plane codes shipped:", int((code > 0)[CORE_SL].sum()), "columns of", int(bmask[CORE_SL].sum()),
+         "building columns in the core;", "known plane but top changed:", int((bmask & np.isfinite(ROOF_GX) & ~ok)[CORE_SL].sum()))
     return code
 
 
 PLANES = plane_codes()
-# (--windows NXxNY / --window-size METRES: the nodes window by window, window.py; the same files)
-import sys
+# the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
 import window
-tile_info = tiles.export(vol, g, OUT / "tiles", note, planes=PLANES, windows=window.from_args(sys.argv, D, W), **EXPORT_IDS)
-# tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
-from shapely.ops import linemerge
-tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])
-tram_lines = list(getattr(tram_lines, "geoms", [tram_lines]))
-trams = []
-for ln in sorted(tram_lines, key=lambda l: -l.length):
-    if ln.length < 180:
-        continue
-    pts = [ln.interpolate(d) for d in np.arange(0, ln.length, 2.0)]
-    path = []
-    for p in pts:
-        c, r = min(max(int(p.x), 0), W - 1), min(max(int(p.y), 0), D - 1)
-        path.append([round(p.x, 1), round(p.y, 1), int(g[r, c])])
-    trams.append(path)
-note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
-meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs="EPSG:25832", trams=trams, jets=jets,
-            palette=[list(e) for e in pal.entries], lamps=lamps, labels=labels, views=views,
-            sources=dict(osm=osm.timestamp, elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
-                         ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)",
-                         landuse="Bayerische Vermessungsverwaltung, ALKIS Tatsächliche Nutzung (CC BY 4.0)",
-                         trees="Bayerische Vermessungsverwaltung, Laserdaten (2021) + Einzelbäume 3D (2024) (CC BY 4.0)"))
-json.dump(meta, open(OUT / "meta.json", "w"))
-import traffic
+from aoi import MAP_D, MAP_W
+_kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + R0, CORE_SL[0].stop + R0, CORE_SL[1].start + C0, CORE_SL[1].stop + C0)
+_win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
+_ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
+_es = (slice(_ea - R0, _eb - R0), slice(_ec - C0, _ed - C0))
+RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
+                                                            _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
+                                                            **EXPORT_IDS).items()}
 # QA aid: drivable-surface mask (1 = carriageway/road area, 2 = tram bed) for web/tools/qa.mjs
 qa = np.zeros((D, W), np.uint8)
 qa[is_road] = 1
 qa[np.isin(gcol, [C["trambed"], C["rail"]])] = 2
-with gzip.GzipFile(OUT / "qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
-    fh.write(qa.tobytes())
-# vehicles on a bridge way take the deck under them, or the nearest deck cell within 2 m (a way's centreline can run
-# just off the deck)
+CORE_OUT["qa"] = qa
+# what traffic.py drives on (regions.py runs it over the map): vehicles on a bridge way take the deck under them, or
+# the nearest deck cell within 2 m (a way's centreline can run just off the deck)
 _dd, (_ir, _ic) = ndimage.distance_transform_edt(~deck, return_indices=True)
 deck_near = np.where(_dd <= 2, deck_h[_ir, _ic], 0).astype(np.float32)
 # off the deck mask, on a bridge way (a viaduct whose arches are OSM buildings, a deck end): the top of what the
@@ -3032,28 +3117,43 @@ _skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] 
 _rb, _cb = np.nonzero((deck_col > 0) & (_dd > 2))
 _lim = g[_rb, _cb] + np.clip(np.round(nd_mean[_rb, _cb]), 0, 40).astype(int) + 3
 _top = g[_rb, _cb].copy()
-for _z in range(int(g.min()), int(_lim.max()) + 1):
-    _m = (_z >= g[_rb, _cb]) & (_z < _lim)
-    _v = vol[_z, _rb[_m], _cb[_m]]
+for _z in range(int(g.min()), int(_lim.max()) + 1 if len(_lim) else 0):
+    _m = (_z >= g[_rb, _cb]) & (_z < _lim) & (_z < vol.shape[0])
+    _v = vol[np.minimum(_z, vol.shape[0] - 1), _rb[_m], _cb[_m]]
     _top[np.nonzero(_m)[0][(_v != 0) & ~_skip[_v]]] = _z + 1
 deck_near[_rb, _cb] = _top - g[_rb, _cb]
-_solid = ~_skip
-_solid[0] = False
-traffic.OPEN_CUT = OPEN_CUT
-_tin = dict(g=g, nd_mean=deck_near, surf=qa, water=(gcol == C["water"]) & (_dd <= 2), solid=_solid)
-if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py)
-    import pickle
-    Path("data/cache").mkdir(parents=True, exist_ok=True)
-    pickle.dump(dict(_tin, open_cut=OPEN_CUT, walk=underpass.WALK, ids=underpass.IDS, bore=tunnels.FLOOR, bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
-json.dump(traffic.build(note=note, vol=vol, **_tin), open(OUT / "traffic.json", "w"), separators=(",", ":"))
-json.dump(report, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
+CORE_OUT["deck_near"] = deck_near
+CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
+CORE_OUT["floor"] = tunnels.FLOOR if tunnels.FLOOR is not None else np.full((D, W), -1, np.int16)
+CORE_OUT["walk"] = underpass.WALK
+_lines = {oid: l_ for oid, _, l_ in osm.lines}
 
-# debug: top-down colour of highest voxel
+
+def _owned(oid):
+    """a way is the region's whose middle lies in its core (regions.py: each way's decision from one region)"""
+    p_ = _lines[oid].interpolate(0.5, normalized=True)
+    return in_core(int(p_.y), int(p_.x))
+
+
+RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in tunnels.IDS if _owned(o)),
+              walk_ids=sorted(o for o in underpass.IDS if _owned(o)))
+# debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
 topz = Hm - 1 - np.argmax(vol[::-1] != 0, axis=0)
 topv = np.take_along_axis(vol, topz[None], 0)[0]
 palarr = np.array([e[:3] for e in pal.entries], np.uint8)
-from PIL import Image
-shade = np.clip(0.55 + topz / 120, 0, 1.2)[..., None]
-Image.fromarray(np.clip(palarr[topv] * shade, 0, 255).astype(np.uint8)).save(DBG / "topdown.png")
-Image.fromarray(palarr[gcol]).save(DBG / "ground.png")
+CORE_OUT["topdown"] = np.clip(palarr[topv] * np.clip(0.55 + topz / 120, 0, 1.2)[..., None], 0, 255).astype(np.uint8)
+CORE_OUT["groundcol"] = palarr[gcol]
+# this region's core: the rasters (crowns' owners on the 2 m grid), the volume (for traffic.py and the labels: regions.py),
+# the lists in the map's order (lamps, jets), the palette's new colours
+_k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
+np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
+np.save(RDIR / "vol.npy", np.ascontiguousarray(vol[(slice(None),) + CORE_SL]))
+# (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
+# this region's to add)
+_used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
+RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
+              lamps=[[k_, [c + C0, r + R0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
+              jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], notes=report["notes"],
+              osm_timestamp=osm.timestamp)
+json.dump(RESULT, open(RDIR / "out.json", "w"))
 print("done")

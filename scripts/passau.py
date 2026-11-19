@@ -1,11 +1,52 @@
 """Passau's curated set pieces, on top of what DOM20 + OSM give (called from landmarks.details).
 
-Grid columns below are for the cut of scripts/aoi.py (Dom at I0 = 1980); centres are read off the DOM20 surface model,
-which stands ~3 m south-east of the OSM outlines here.
+Rows and columns below are the project grid's (scripts/aoi.py: column = EPSG:25832 easting - 827371, row = 5390500 -
+northing; the Dom at column 1980, row 733); centres are read off the DOM20 surface model, which stands ~3 m south-east
+of the OSM outlines here. A set piece is built in a region (scripts/region.py) only if the region holds all of its
+box (SET_PIECES); the volume, the ground and LoD2 are handed to it as Project views, indexed in the project grid.
 """
 import math
 
 import numpy as np
+
+# each set piece's reach, rows r0..r1, columns c0..c1 of the project grid (what it reads and writes, with a margin)
+SET_PIECES = dict(dom=(675, 815, 1880, 2085), niederhaus=(495, 605, 2555, 2695), oberhaus=(195, 430, 2260, 2475),
+                  poststeg=(810, 950, 968, 1048))
+
+
+class Project:
+    """an array of the region (aoi.py) indexed by the project grid's rows and columns (its last two axes): integers,
+    slices with both ends, integer arrays. Out of the region is an error, not numpy's wrap-around."""
+
+    def __init__(self, a):
+        from aoi import C0, R0
+        self.a, self.r0, self.c0 = a, R0, C0
+        self.shape, self.dtype, self.ndim = a.shape, a.dtype, a.ndim
+
+    def inside(self, r, c):
+        return 0 <= r - self.r0 < self.a.shape[-2] and 0 <= c - self.c0 < self.a.shape[-1]
+
+    def _ix(self, idx):
+        idx = idx if isinstance(idx, tuple) else (idx,)
+        assert len(idx) == self.ndim, "index all axes"
+        out = list(idx)
+        for ax, o, n in ((self.ndim - 2, self.r0, self.a.shape[-2]), (self.ndim - 1, self.c0, self.a.shape[-1])):
+            v = idx[ax]
+            if isinstance(v, slice):
+                assert v.start is not None and v.stop is not None and v.step is None, "rows and columns by both ends"
+                assert o <= v.start and v.stop - o <= n, "out of the region"
+                out[ax] = slice(v.start - o, v.stop - o)
+            else:
+                v = np.asarray(v) - o
+                assert v.size == 0 or (v.min() >= 0 and v.max() < n), "out of the region"
+                out[ax] = v if v.ndim else int(v)
+        return tuple(out)
+
+    def __getitem__(self, idx):
+        return self.a[self._ix(idx)]
+
+    def __setitem__(self, idx, v):
+        self.a[self._ix(idx)] = v
 
 CLASSIC, WINDOW, ROOF, METAL = 20, 21, 12, 6  # landmarks.MAT_IDS
 
@@ -84,14 +125,17 @@ _LOD2 = {}
 
 
 def lod2_rel():
-    """LoD2 roof heights over the DTM and building ids (scripts/lod2.py), on the grid; None without data/lod2.npz."""
+    """LoD2 roof heights over the DTM and building ids (scripts/lod2.py), the region's, as Project views; None without
+    data/lod2.npz."""
     if "z" not in _LOD2:
         from pathlib import Path
+        import region
         if not Path("data/lod2.npz").exists():
             return None, None
-        z = np.load("data/lod2.npz")
-        dtm = np.load("data/prep.npz", mmap_mode="r")["dtm"]
-        _LOD2["z"], _LOD2["bid"] = np.nan_to_num(z["z"] - dtm, nan=0.0), z["bid"]
+        z = region.load_npz("data/lod2.npz", ("z", "bid"))
+        dtm = region.load_npz("data/prep.npz", ("dtm",))["dtm"]
+        _LOD2["z"], _LOD2["bid"] = Project(np.nan_to_num(z["z"] - dtm, nan=0.0)), Project(z["bid"])
+        _LOD2["zabs"], _LOD2["dtm"] = Project(z["z"]), Project(dtm)
     return _LOD2["z"], _LOD2["bid"]
 
 
@@ -409,7 +453,7 @@ def _tidy_east(vol, g, pal, box, church, roof, wall):
     if church is None:
         return 0
     r0, r1, c0, c1 = box
-    B = np.load("data/lod2.npz")["bid"][r0:r1, c0:c1]
+    B = lod2_rel()[1][r0:r1, c0:c1]
     sub = vol[:, r0:r1, c0:c1]
     G = g[r0:r1, c0:c1].astype(int)
     mats = np.array([e[3] for e in pal.entries] + [0] * 64)
@@ -511,9 +555,8 @@ def _tidy_east(vol, g, pal, box, church, roof, wall):
 def _lod2_abs(box):
     """LoD2 roof heights in voxel z (the grid's own levels, as g has them) and building ids over box."""
     r0, r1, c0, c1 = box
-    z = np.load("data/lod2.npz")
-    dtm = np.load("data/prep.npz", mmap_mode="r")["dtm"][r0:r1, c0:c1]
-    return z["z"][r0:r1, c0:c1], z["bid"][r0:r1, c0:c1], dtm
+    lod2_rel()
+    return _LOD2["zabs"][r0:r1, c0:c1], _LOD2["bid"][r0:r1, c0:c1], _LOD2["dtm"][r0:r1, c0:c1]
 
 
 def _hip_roofs(vol, g, box, wall_rgb, roof, pal, min_cells=30, join=(), keep=()):
@@ -727,7 +770,7 @@ def _battlements(vol, g, line, wall, h, step):
     for k, t in enumerate(np.arange(0, line.length, step)):
         x, y = line.interpolate(t).coords[0]
         r, c = int(y), int(x)
-        if (r, c) in seen or not (0 <= r < vol.shape[1] and 0 <= c < vol.shape[2]):
+        if (r, c) in seen or not vol.inside(r, c):
             continue
         seen.add((r, c))
         gz = int(g[r, c])
@@ -752,7 +795,7 @@ def _parapets(vol, g, line, wall, step=0.5, drop=3):
         prof = []
         for o in np.arange(-3, 3.01, 1.0):
             r, c = int(y + ny * o), int(x + nx * o)
-            if 0 <= r < vol.shape[1] and 0 <= c < vol.shape[2]:
+            if vol.inside(r, c):
                 prof.append((int(g[r, c]), o, r, c))
         if len(prof) < 7:
             continue
@@ -778,13 +821,15 @@ def fortresses(vol, g, pal, note, osm):
     """Veste Oberhaus and Veste Niederhaus read as a town of white houses on the hill: OSM's walls (barrier=wall, the
     curtain wall down the slope between the two) were not built at all, and the bastions' retaining walls stood bare.
     Curtain walls 4 m high and parapets on the bastions, both crenellated, in the fortress's pale render."""
+    from shapely.affinity import translate
     from shapely.geometry import box
-    from aoi import I0
+    from aoi import C0, I0, R0
     dx = I0 - 1980
     area = box(2150 + dx, 130, 2700 + dx, 600)  # the hill from Oberhaus down to the Niederhaus' point
     wall = pal(_hex("#d9d1c0"), CLASSIC)
     n_w = n_p = 0
     for _, t, line in osm.lines:
+        line = translate(line, C0, R0)  # (the region's cells to the project grid's: exact, whole metres)
         if not line.intersects(area):
             continue
         b = t.get("barrier")
@@ -860,9 +905,20 @@ def build(vol, g, pal, note, osm=None):
         np.save("data/cache/passau_g.npy", g)
         pickle.dump(dict(entries=pal.entries, lines=list(osm.lines) if osm is not None else []),
                     open("data/cache/passau_rest.pkl", "wb"))
-    dom(vol, g, pal, note)
-    niederhaus(vol, g, pal, note)
-    oberhaus(vol, g, pal, note)
-    poststeg(vol, g, note)
+    from aoi import C0, D, R0, W
+    vol, g = Project(vol), Project(g)
+
+    def here(k):
+        r0, r1, c0, c1 = SET_PIECES[k]
+        return R0 <= r0 and r1 <= R0 + D and C0 <= c0 and c1 <= C0 + W
+
+    if here("dom"):
+        dom(vol, g, pal, note)
+    if here("niederhaus"):
+        niederhaus(vol, g, pal, note)
+    if here("oberhaus"):
+        oberhaus(vol, g, pal, note)
+    if here("poststeg"):
+        poststeg(vol, g, note)
     if osm is not None:
         fortresses(vol, g, pal, note, osm)

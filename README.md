@@ -103,8 +103,22 @@ written with `mtime=0`). The steps:
 1024 m boundaries (a node of every tile level, a terrain chunk), and the step reads only the region of the core and a
 halo around it (its reach: the tiles 16 m, `tile_fields.py` 32 m, `terrain.py` 8 m, `zones.py` 0), the `data/` files
 row band by row band. `--windows NXxNY` or `--window-size METRES` choose the cover (the whole map in one window by
-default); every cover writes the same bytes (`uv run python scripts/window_check.py STEP` checks it). `voxelize.py`
-itself (the volume), `flood.py` and `boats.py` still work on the whole map (see `scripts/window.py`).
+default); every cover writes the same bytes (`uv run python scripts/window_check.py STEP` checks it).
+
+**Regions.** `voxelize.py` builds the volume region by region (`scripts/region.py`, `scripts/regions.py`): a region
+is a window's core and a halo of 384 m round it, built in a process of its own, which writes its core's tiles and
+leaves its core's rasters, volume and lists in `data/cache/regions/`; the driver puts them together. `--regions NXxNY`
+or `--region-size METRES` choose the cover (the whole map as one region by default, `-j N` builds N at once); every
+cover writes the same bytes (`uv run python scripts/region_check.py` checks it, with the steps after it). What makes
+a region's core independent of what lies beyond its halo: the volume's floor and the rivers' level pinned per project
+(`aoi.BASE`, `aoi.RIVER_LEVEL`), noise and hashes on the project grid's coordinates (fixed to EPSG:25832, `aoi.py`),
+a palette registry (`scripts/palette.json`: ids never depend on the order colours are met; a build adds new colours
+to it, sorted), a feature decided over its whole outline when it spans under 192 m and block by block beyond, sizes
+and levels of connected areas (the rivers' bodies, straw fields) counted within a window of 192 m, nearest-cell fills
+bounded, box filters summed exactly, the floating-debris passes judging pieces up to 64 m across, curated places in
+EPSG:25832 or project grid rows and columns, built only where the region holds them. The labels, the camera presets,
+the tram paths and `traffic.json` are still made on the whole map after the regions, and `flood.py` and `boats.py`
+work on the whole map (see `scripts/window.py`).
 
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
 pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.

@@ -55,18 +55,22 @@ def label(osm_name, facts, x, y, z):
 # material names for overrides.json -> the viewer's material ids (web/src/voxelMaterial.ts MAT)
 MAT_IDS = {"solid": 0, "wall": 1, "glass": 2, "metal": 6, "floodlit": 7, "grass": 8, "roof": 12, "concrete": 13,
            "bronze_grid": 15, "sign": 16, "sign_band": 18, "ribbon": 19, "classic": 20, "window": 21, "tenement": 22}
-# the historic core: the Altstadt peninsula and the Innstadt, in grid cells of the first trial cut (traced on the
-# orthophoto preview; aoi.DX shifts them to the current cut). Their houses are plastered in many colours under tiled
-# roofs, windows a storey apart -- not the newer town's blocks
-HISTORIC_CORE = [[(365, 540), (865, 520), (1130, 575), (1480, 710), (1365, 800), (960, 800), (670, 790), (540, 865), (365, 730)],
-                 [(730, 1035), (1200, 1055), (1200, 1150), (770, 1180), (615, 1135)]]
+# the historic core: the Altstadt peninsula and the Innstadt, at EPSG:25832 x, y (traced on the orthophoto preview).
+# Their houses are plastered in many colours under tiled roofs, windows a storey apart -- not the newer town's blocks
+HISTORIC_CORE = [[(829016, 5389960), (829516, 5389980), (829781, 5389925), (830131, 5389790), (830016, 5389700),
+                  (829611, 5389700), (829321, 5389710), (829191, 5389635), (829016, 5389770)],
+                 [(829381, 5389465), (829851, 5389445), (829851, 5389350), (829421, 5389320), (829266, 5389365)]]
+# camera presets' targets beside the labels' (make_views), EPSG:25832 x, y: Veste Oberhaus (traced on the ortho), the
+# Dreiflüsseeck's point and the ground there
+VIEW_AT = dict(oberhaus=(829736.5, 5390182.5), eck=(830216.0, 5389770.0), eck_ground=(830151.0, 5389765.0))
 
 
 def historic_core():
+    """in the region's cells (aoi.py)"""
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
-    from aoi import DX
-    return unary_union([Polygon([(x + DX, y) for x, y in p]) for p in HISTORIC_CORE])
+    from aoi import to_grid
+    return unary_union([Polygon([tuple(float(v) for v in to_grid(x, y)) for x, y in p]) for p in HISTORIC_CORE])
 
 
 OVERRIDES = json.load(open(Path(__file__).with_name("overrides.json")))["buildings"]
@@ -157,12 +161,16 @@ def apply_zones(vol, g, feats, pal, bmask, note):
 
 
 def override_labels(feats, g, top_at):
+    """[(the building's id, label)] of overrides.json's labels standing in the region's core"""
+    from aoi import C0, R0
+    from region import in_core
     out = []
     for f in feats:
         o = OVERRIDES.get(str(f["id"]))
         if o and "label" in o and not f["part"] and len(f["rr"]):
             r, c = int(np.median(f["rr"])), int(np.median(f["cc"]))
-            out.append(label(o["label"]["name"], o["label"], c, r, top_at(r, c)))
+            if in_core(r, c):
+                out.append((f["id"], label(o["label"]["name"], o["label"], c + C0, r + R0, top_at(r, c))))
     return out
 
 
@@ -203,21 +211,32 @@ def small_tree(vol, g, r, c, h, leaves, trunk, height=None):
 
 
 def details(vol, g, topi, feats, pal, osm, cells_of, note):
-    """The curated set pieces, then the labels and the camera presets."""
+    """The curated set pieces (those in the region), then the curated labels standing in the region's core:
+    [(key in the map's order, label)], the label in the project grid's coordinates (regions.py puts them together,
+    labels.py and make_views finish them on the whole map)"""
     import passau
+    from aoi import C0, MAP_D, MAP_W, R0, to_grid
+    from region import in_core
     passau.build(vol, g, pal, note, osm)
 
     def top_at(r, c):
         col = np.nonzero(vol[:, r, c])[0]
         return int(col[-1]) + 1 if len(col) else int(g[r, c])
 
-    found = {}
+    out, done = [], set()
     for oid, typ, t, geom in osm.areas:
         n = t.get("name")
-        if n not in LABELS or n in found:
+        if n not in LABELS or n in done:
             continue
         facts = LABELS[n]
+        # the first outline of that name on the map (the map's, not the region's: the same one in every region)
+        x0, y0, x1, y1 = geom.bounds
+        if x1 + C0 <= 0 or y1 + R0 <= 0 or x0 + C0 >= MAP_W or y0 + R0 >= MAP_D:
+            continue
         if facts.get("anchor") == "top":
+            if not (x0 >= 0 and y0 >= 0 and x1 <= vol.shape[2] and y1 <= vol.shape[1]):
+                done.add(n)  # (not wholly in the region: its top is not in the core, region.py)
+                continue
             rr, cc = cells_of(geom)
             if len(rr) == 0:
                 continue
@@ -226,20 +245,24 @@ def details(vol, g, topi, feats, pal, osm, cells_of, note):
         else:
             p = geom.representative_point() if not geom.contains(geom.centroid) else geom.centroid
             r, c = int(p.y), int(p.x)
-        if not (0 <= r < vol.shape[1] and 0 <= c < vol.shape[2]):
-            continue
-        found[n] = label(n, facts, c, r, top_at(r, c))
-    labels = [found[n] for n in LABELS if n in found] + override_labels(feats, g, top_at)
-    from aoi import to_grid
-    for n, facts in EXTRA_LABELS.items():
+            if not (0 <= r + R0 < MAP_D and 0 <= c + C0 < MAP_W):
+                continue
+        done.add(n)
+        if in_core(r, c):
+            out.append(([0, list(LABELS).index(n)], label(n, facts, c + C0, r + R0, top_at(r, c))))
+    out += [([1, k], l) for k, l in override_labels(feats, g, top_at)]
+    for k, (n, facts) in enumerate(EXTRA_LABELS.items()):
         c, r = (int(v) for v in to_grid(*facts["at"]))
-        labels.append(label(n, facts, c, r, top_at(r, c)))
-    note("labels:", [l["name"] for l in labels])
-    return labels, make_views(found, g)
+        if in_core(r, c):
+            out.append(([2, k], label(n, facts, c + C0, r + R0, top_at(r, c))))
+    note("labels:", [l["name"] for _, l in out])
+    return out
 
 
 def make_views(found, g):
-    """Camera presets in three.js coords (x = col, y = up, z = row), derived from landmark positions."""
+    """Camera presets in three.js coords (x = col, y = up, z = row), derived from landmark positions (g: the map's)."""
+    from aoi import to_grid
+
     def add(t, off):
         return [t[0] + off[0], t[1] + off[1], t[2] + off[2]]
 
@@ -251,12 +274,14 @@ def make_views(found, g):
     t = [dom[0], gd + 15, dom[2]]
     views["overview"] = dict(label="Overview", target=t, pos=add(t, (-250, 520, 760)))
     views["dom"] = dict(label="Dom", target=[dom[0], gd + 30, dom[2]], pos=add([dom[0], gd + 30, dom[2]], (-170, 110, 200)))
-    from aoi import DX
-    o = [1085.5 + DX, 0, 317.5]  # Veste Oberhaus, grid (traced on the ortho)
-    go = float(g[317, 1085 + DX])
+    oc, orow = (float(v) for v in to_grid(*VIEW_AT["oberhaus"]))  # Veste Oberhaus
+    o = [oc, 0, orow]
+    go = float(g[int(orow), int(oc)])
     views["oberhaus"] = dict(label="Veste Oberhaus", target=[o[0], go + 10, o[2]], pos=add([o[0], go + 10, o[2]], (160, 130, 330)))
     views["fromoberhaus"] = dict(label="View from Oberhaus", target=[dom[0] + 150, gd + 10, dom[2]], pos=[o[0] - 30, go + 60, o[2] + 60])
-    eck = [1565.0 + DX, float(g[735, 1500 + DX]) + 5, 730.0]
+    ec, er = (float(v) for v in to_grid(*VIEW_AT["eck"]))
+    gc, gr = (int(v) for v in to_grid(*VIEW_AT["eck_ground"]))
+    eck = [ec, float(g[gr, gc]) + 5, er]
     views["eck"] = dict(label="Dreiflüsseeck", target=eck, pos=add(eck, (380, 230, 60)))
     mid = [W_ * 0.5, float(np.median(g)) + 10, H_ * 0.5]
     views["city"] = dict(label="Whole map", target=mid, pos=add(mid, (0, 2500, 1300)))

@@ -28,27 +28,28 @@ def _num(v):
 
 
 def register():
-    """the Einzelbäume points on the grid: [(x, y, height, easting, northing)]"""
+    """the Einzelbäume points on the grid (the region's, aoi.py): [(x, y, height, easting, northing, row in the file)]"""
     if not BV_CSV.exists():
         return []
     out = []
     with open(BV_CSV) as f:
-        for row in csv.DictReader(f):
+        for k, row in enumerate(csv.DictReader(f)):
             e, n, h = float(row["x"]), float(row["y"]), float(row["height"])
             x, y = to_grid(e, n)
             if 0 <= x < W and 0 <= y < D:
-                out.append((float(x), float(y), h, e, n))
+                out.append((float(x), float(y), h, e, n, k))
     return out
 
 
 def load(osm_trees, buildings=None):
     """osm_trees: [(oid, tags, Point(col, row))] from voxelize's OSM reader; buildings: (D, W) bool, the footprints.
-    Returns a list of dicts with grid x, y."""
+    Returns a list of dicts with grid x, y and k, the tree's place in its source (osm_trees, the register's file).
+    A region's trees (aoi.py) are those standing in it."""
     out = []
-    for oid, tg, p in osm_trees:
+    for k_osm, (oid, tg, p) in enumerate(osm_trees):
         if not (0 <= p.x < W and 0 <= p.y < D):
             continue
-        out.append(dict(id=f"osm:{oid}", src="osm", x=float(p.x), y=float(p.y), species=tg.get("species") or tg.get("genus"),
+        out.append(dict(id=f"osm:{oid}", src="osm", k=k_osm, x=float(p.x), y=float(p.y), species=tg.get("species") or tg.get("genus"),
                         trunk_cm=_num(tg.get("circumference")) and _num(tg.get("circumference")) * 100,
                         height=_num(tg.get("height")), leaf_type=tg.get("leaf_type"), osm=oid))
     reg = register()
@@ -60,23 +61,24 @@ def load(osm_trees, buildings=None):
     osm_kd = cKDTree([(t["x"], t["y"]) for t in out]) if out else None
     taken = set()
     n_merged = n_bld = 0
-    # nearest register point first, so each OSM tree takes the closest one
+    # nearest register point first, so each OSM tree takes the closest one; the others in the file's order (by their
+    # distance to the nearest OSM tree, as before, they took the order of trees far off, beyond the region)
     cand = []
-    for k, (x, y, h, e, n) in enumerate(reg):
+    for k, (x, y, h, e, n, _) in enumerate(reg):
         if near_b is not None and near_b[int(y), int(x)]:
             n_bld += 1
             continue
         d, i = osm_kd.query((x, y)) if osm_kd is not None else (np.inf, -1)
-        cand.append((d, i, k))
+        cand.append((d, i, k) if d <= MERGE_M else (np.inf, -1, k))
     cand.sort()
     for d, i, k in cand:
-        x, y, h, e, n = reg[k]
+        x, y, h, e, n, row = reg[k]
         if d <= MERGE_M and i not in taken:
             taken.add(i)
             out[i]["bv_height"] = h
             n_merged += 1
             continue
-        out.append(dict(id=f"bv:{round(e * 10)}_{round(n * 10)}", src="bv", x=x, y=y, bv_height=h))
+        out.append(dict(id=f"bv:{round(e * 10)}_{round(n * 10)}", src="bv", k=row, x=x, y=y, bv_height=h))
     print(f"Einzelbäume: {len(reg)} in the AOI, {n_bld} at buildings dropped, {n_merged} matched to OSM trees, "
           f"{sum(t['src'] == 'bv' for t in out)} added")
     return out

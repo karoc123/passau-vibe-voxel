@@ -25,17 +25,13 @@ cell what decides the cell can lie (a filter's radius, a node's apron, a blur). 
 
 Region and core are in map cells; arrays of a region are indexed from the region's corner (`Window.local`).
 
+The volume (voxelize.py) is built region by region: a region is a window's core and a halo of region.HALO (384 m),
+its decisions bounded so that the core comes out the same in any cover (scripts/region.py, regions.py,
+region_check.py); it writes the tiles of its core itself (tiles.export_window).
 Still on the whole map (a window there would change what is built, not only where):
-  voxelize.py   the volume. Its decisions reach across the map: global numbers (BASE: the lowest terrain; the rivers'
-                level, a median over all OSM water; the crowns' noise drawn for the map's shape and scaled by its
-                standard deviation), per-feature statistics over a whole outline (a building's roof levels, LoD2
-                shift, colours; a lawn's or a path's ortho median), connected components judged by their size (water
-                bodies flattened to one level, vegetation, decks, straw, pits), nearest-cell fills without a bound
-                (the rivers' colours from the nearest open water, scipy's zoom sized by the map), running sums
-                (uniform_filter on real numbers: the result depends on where the line starts), the palette numbered in
-                the order colours are first met, hashes of grid coordinates and curated places in grid rows and
-                columns (passau.py, landmarks.py), set pieces and labels that expect their place on the map.
-                tiles.export_window takes its volume window by window already.
+  regions.py    the global context passes after the regions: the labels (the parks', decluttered, their radii), the
+                camera presets, the tram paths, traffic.py over the whole network (the volume put together as a
+                memory map)
   flood.py      the spill height is a connectivity (how high the water must rise to reach a cell from the river),
                 the river bed is made per row of the whole map (its westernmost bank, the thalweg smoothed over rows)
   boats.py      the river: the largest water body
