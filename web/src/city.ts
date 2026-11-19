@@ -27,7 +27,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   2. landmarks: their tiles first, each landmark as soon as all its tiles are in
 //   3. everything else, nearest to the view first, each building once all its tiles are in
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, lamps, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, lamps, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, crop = null, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -45,8 +45,16 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   dist?: number;
   // the drawing buffer's height in pixels (the renderer's own: the resolution setting scales it)
   pixelsHigh?: () => number;
+  // a tiny scene (?crop=, main.ts): only the 128 m tiles meeting this box of the map (metres x0, z0, x1, z1) are ever
+  // in range, whatever the camera does; no far ground. For quick screenshots and checks (web/tools/shoot.mjs)
+  crop?: [number, number, number, number] | null;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, index = (tx: number, ty: number) => ty * d.nx + tx;
+  // the crop in tiles, inclusive
+  const ct = crop && [Math.max(0, Math.floor(crop[0] / T)), Math.max(0, Math.floor(crop[1] / T)),
+    Math.min(d.nx - 1, Math.ceil(crop[2] / T) - 1), Math.min(d.ny - 1, Math.ceil(crop[3] / T) - 1)];
+  const cropList: number[] = [];
+  if (ct) for (let ty = ct[1]; ty <= ct[3]; ty++) for (let tx = ct[0]; tx <= ct[2]; tx++) cropList.push(index(tx, ty));
   // (the buildings' boxes: which tiles each one is on; the columns' buildings come with the tiles)
   const zonesIn = fetchJson<Zones>('data/zones.json');
   caption.show('Terrain', 0, 2 * total);
@@ -60,7 +68,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++)
       if (!dist || Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T)) <= R) terrainTiles.push(index(tx, ty));
   }
-  const terrain = await loadTerrain(meta, scene, d.nx, terrainTiles);
+  const terrain = await loadTerrain(meta, scene, d.nx, ct ? cropList : terrainTiles);
   const zones = await zonesIn;
   document.querySelector('#loading')?.classList.add('hidden');
   const nb = zones.buildings.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
@@ -94,6 +102,11 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const range = () => {
     camera.updateMatrixWorld();
     camAt.setFromMatrixPosition(camera.matrixWorld);
+    if (ct) {
+      if (cutWas !== -2) { for (const i of cropList) enter(i); rangeList = cropList; }
+      cutWas = -2;
+      return;
+    }
     if (!cut) {
       if (cutWas !== 0) { for (let i = 0; i < total; i++) if (!inRange[i]) enter(i); rangeList = Array.from({ length: total }, (_, i) => i); }
       cutWas = 0;
@@ -219,6 +232,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // some tile of it in range (none can be where its nearest point is beyond the distance + KEEP_M)
   const nodeIn = (n: LNode) => {
     if (n.x0 >= d.nx || n.y0 >= d.ny) return false;
+    if (ct) return n.x0 <= ct[2] && n.x1 > ct[0] && n.y0 <= ct[3] && n.y1 > ct[1];
     if (!cut) return true;
     if (flat(n.x0 * T, n.y0 * T, n.x1 * T, n.y1 * T) > cut + KEEP_M) return false;
     for (let y = n.y0; y < n.y1; y++) for (let x = n.x0; x < n.x1; x++) if (inRange[index(x, y)]) return true;
@@ -350,7 +364,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     shownTex.needsUpdate = true;
     // (once: the first moment's terrain goes under the tiles in, and beyond the view distance, where the far ground is;
     // later as tiles come in or leave the range. The occluders count from now on)
-    terrain.each((i) => { if (inTile[i] || (cut && !inRange[i])) dropPiece(i); });
+    terrain.each((i) => { if (inTile[i] || ((cut || ct) && !inRange[i])) dropPiece(i); });
     for (let i = 0; i < total; i++) if (inTile[i]) occDirty.add(i);
   }
 
@@ -404,7 +418,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     const hideN = (p: LNode) => { if (shownN.delete(p.key)) { touched.push(p); pages.hide(p.key); } };
     for (const [k, p] of shownN) {
       // gone (freed elsewhere), or none of it in range of the view distance any more
-      if (S.nodes.get(k)?.state !== 'ready' || (cut && !nodeIn(p))) hideN(p);
+      if (S.nodes.get(k)?.state !== 'ready' || ((cut || ct) && !nodeIn(p))) hideN(p);
     }
     for (const n of chosen.values()) {
       if (shownN.has(n.key) || !ready(n)) continue;
@@ -466,7 +480,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       if (n.foliage || n.state !== 'ready') continue;
       if (shownN.has(n.key) || chosen.has(n.key)) { n.used = now; continue; }
       // (out of range: none of its tiles in range of the view distance)
-      const gone = !!cut && !nodeIn(lnode(n.s, n.tx, n.ty));
+      const gone = (!!cut || !!ct) && !nodeIn(lnode(n.s, n.tx, n.ty));
       const fol = n.s === 1 ? S.nodes.get(`f/${n.tx}_${n.ty}`) : undefined;
       if (now - n.used > (gone ? FREE_MS : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
         if (fol) { if (counted.delete(fol.key)) dirty.add(index(fol.tx, fol.ty)); S.free(fol); }
@@ -486,7 +500,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
-    far.on = !!cut;
+    far.on = !!cut && !ct;
     far.flush(camAt);
     pages.flush();
     if (changed) shownTex.needsUpdate = true;
@@ -576,6 +590,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     setOcclusion(on: boolean) { occOn = on; },
     // occlusion culling now (tools): on, the last update's cost (ms), tile meshes, of them hidden
     get occlusion() { return { on: occOn, ...occStats }; },
+    // the tiny scene's box in metres (?crop=), null: the whole map
+    crop: ct && [ct[0] * T, ct[1] * T, (ct[2] + 1) * T, (ct[3] + 1) * T],
     occluder: occ,
     // what the structures that follow the camera hold now (tools)
     get held() { return { occlusion: occ.stats, farground: far.stats, pages: pages.stats, terrain: terrain.bytes }; },

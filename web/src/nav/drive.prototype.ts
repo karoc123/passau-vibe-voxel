@@ -8,11 +8,10 @@ import { ArcadeCar, carsOverlap, type DriveInput, type RoadContact } from './arc
 import type { Nav, Ride } from './nav';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
+import { airWorld, carGround, STEP } from './car-contact';
 import './drive.prototype.css';
 
-const STEP = 1 / 90;
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
-const FOOTPRINT = [-1, 0, 1];
 const HANDBRAKE_THRESHOLD = 0.75;
 const MAX_TILT = 0.4; // rad: pitch and roll from the wheels' ground
 const SINK_MS = 2000; // in the river this long, then back on the road
@@ -59,14 +58,7 @@ export class DrivePrototype {
 
   constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
     this.tiles = new VoxelCollision(meta);
-    const tiles = this.tiles;
-    this.air = {
-      cast(center, half, move, above) {
-        const s = tiles.sweep(center, move, { half, above, foliage: false, water: false, escape: true });
-        return s === 'loading' ? s : s.hit ? { fraction: s.fraction, axis: s.axis } : null;
-      },
-      ground: (x, z, top) => tiles.support(x, z, top),
-    };
+    this.air = airWorld(this.tiles);
     Object.assign(window, { __drive: this });
     this.touch = new TouchSticks(canvas);
     this.panel.className = 'drive-prototype';
@@ -297,21 +289,7 @@ export class DrivePrototype {
   }
 
   private ground(p: Pose, car: Car): RoadContact {
-    const clearance = car.bus ? 2.55 : 1.48;
-    const center = this.tiles.roadSurface(p.x, p.z, p.y, clearance);
-    // (no wall at a drop: the car drives off it and flies, arcade-car.ts)
-    if (!center || center.blocked || center.water) return center;
-    const from = Math.max(p.y, center.height), sx = Math.sin(p.h), sz = Math.cos(p.h);
-    const half = car.len / 2 - 0.17;
-    for (const f of FOOTPRINT) for (const r of FOOTPRINT) {
-      if (f === 0 && r === 0) continue;
-      const x = p.x + f * sx * half + r * sz * 0.86;
-      const z = p.z + f * sz * half - r * sx * 0.86;
-      const sample = this.tiles.roadSurface(x, z, from, clearance);
-      if (!sample) return null;
-      if (sample.blocked) return { height: center.height, blocked: true };
-    }
-    return center;
+    return carGround(this.tiles, p, car.len, car.bus);
   }
 
   private input(): DriveInput {

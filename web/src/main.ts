@@ -396,7 +396,7 @@ async function boot() {
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
-    pixelsHigh: () => post.height });
+    crop: cropOf(qs.get('crop'), controls.target), pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
@@ -427,6 +427,15 @@ async function boot() {
   fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DrivePrototype(nav, controls.target, meta, modeTools, renderer.domElement);
   if (qs.get('physics') === 'rapier') void import('./physics/rapier/hook').then((m) => m.onKeyP({ scene, camera, controls, meta }, (d) => { rapier = d; }));
+}
+
+// ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
+// ?crop=x0,z0,x1,z1: those meeting that box of the map (metres). For quick screenshots and checks (web/tools/shoot.mjs)
+function cropOf(q: string | null, t: THREE.Vector3): [number, number, number, number] | null {
+  const v = q?.split(',').map(Number);
+  if (!v || v.some((x) => !Number.isFinite(x))) return null;
+  if (v.length === 1 && v[0] > 0) return [t.x - v[0], t.z - v[0], t.x + v[0], t.z + v[0]];
+  return v.length === 4 ? [v[0], v[1], v[2], v[3]] : null;
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;

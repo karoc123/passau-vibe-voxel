@@ -18,7 +18,8 @@ cd web && pnpm install && pnpm dev     # http://localhost:5173  (?view=dom&date=
 ```
 
 Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`, `city`. Other URL parameters:
-`cam=x,y,z,tx,ty,tz`, `date=M-D`, `hour=`, `weather=clear|cloudy|rain|snow`, `tilt=0`, `ui=0`.
+`cam=x,y,z,tx,ty,tz`, `date=M-D`, `hour=`, `weather=clear|cloudy|rain|snow`, `tilt=0`, `ui=0`, `crop=R` (a tiny
+scene: see "Agent tools").
 
 > **Derived from [warsaw-vibe-voxel](https://github.com/stared/warsaw-vibe-voxel) by Piotr Migdał (MIT licence, see
 > `LICENSE`).** The pipeline and the viewer are his; this repository ports them to Passau and Bavarian open data.
@@ -176,6 +177,54 @@ node tools/shot_linux.mjs out.png "view=city&date=7-15&hour=13&weather=clear" 16
 flags and several predate the current viewer, so expect to adapt them.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
+
+## Agent tools (checking a change)
+
+For agents (and people) changing the code. All run from `web/` with no GPU and no extra dependency; in a git
+worktree first `ln -s <main checkout>/web/node_modules web/node_modules` (don't install).
+
+**Physics: `node tools/physics.mjs`** (~3 s). Headless scenarios (`src/physics/scenarios.ts`) drive the real
+`ArcadeCar` with the drive prototype's contact (`src/nav/car-contact.ts`) and `Body` through the real `VoxelCollision`
+over small synthetic worlds (`src/physics/testbed.ts`: a ground height per column, boxes for walls, decks, water,
+written as real node files): accelerate, brake, wall, 1 m and 2 m steps up, a 1 m kerb down, a paved ramp, 3 m and
+20 m cliffs, off a quay into the river, a bridge deck, a box dropped and thrown. Prints PASS/FAIL per scenario with its
+checks and feel numbers (0-100 km/h, stop distance, air time, impact speeds); exit code 1 on a failure.
+`node tools/physics.mjs ramp cliff-3m -v` runs some with every check, `--json` gives the numbers to diff before and
+after a handling change, `--trace cliff-3m --every 9` prints a run step by step as CSV. A new case is a few lines in
+`SCENARIOS`; check any change to `arcade-car.ts`, `body.ts`, `voxel-collision.ts`, `ramps.ts` with it.
+
+**Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres). Only the 128 m tiles within R m of the camera's first
+target are loaded and drawn, no far ground; the rest of the map is empty. With `cam=` it frames any spot; Ctrl+C in the
+viewer copies a `?cam=` link of the spot under the mouse. `crop=192` is a 4 x 4-tile patch: ~16 nodes instead of
+~200-300.
+
+**Screenshots: `node tools/shoot.mjs`**. Builds `dist`, serves it with `vite preview` on port 5194 (`--port`; never
+5173, the dev server's), shoots in headless Chrome with what moves held still (shader clock, clouds, street life
+hidden, shadow drawn whole) and a fixed date/hour/weather (`date=7-15&hour=13&weather=clear` unless the shot sets
+them), so two runs of the same code differ by < 0.02 % of pixels. Typical use:
+
+```sh
+# the reference first, before the change (or from a second worktree on the old commit); outputs into a scratch dir
+node tools/shoot.mjs --set quick --out /tmp/…/ref          # tiny-street, tiny-dom: ~15 s a shot
+# … change the code …
+node tools/shoot.mjs --set quick --out /tmp/…/new --compare /tmp/…/ref   # table + /tmp/…/new/diff/*.png (ref | new | |d| x4)
+node tools/shoot.mjs --shots street,oberhaus-night --crop 256 --out …     # named shots, cropped
+node tools/shoot.mjs --shots 'mine=cam=1600,40,700,1650,20,720&hour=20' --crop 128 --out …   # ad hoc: name=query
+node tools/shoot.mjs --no-shoot --out new --compare ref    # compare two existing sets only
+```
+
+`--list` shows the named shots (`overview`, `oberhaus`, `dom`, `eck`, `street`, night, autumn, winter, snow, `tiny-*`)
+and sets (`quick`, `default`, `seasons`, `all`). `--q "dist=900&shadow=2048"` adds to every shot's query, `--phone`
+shoots at 412 x 860 with touch, `--eval 'window.__three.city().held'` records any page expression per shot
+(`window.__three` exposes camera, scene, renderer, daylight, city(), setGfx …: `main.ts`). `DIR/shots.json` has per shot: ms to `__ready`, to loaded, total,
+one frame's ms, the nodes shown per level and console errors (look there first). The diff fails (exit 1) above
+`--fail` % (default 0.5) of pixels off by more than 24. The renderer is `--gl llvmpipe` (Mesa through ANGLE's
+Vulkan; falls back to `swiftshader`): compare only sets taken with the same `--gl` and `--size` (the two renderers
+differ by up to ~9 % px on glazing).
+
+Measured (WSL, 20 cores shared with other agents, 1280 x 800): a whole-city shot 45-77 s under SwiftShader (frames
+of 2-5 s), 33-50 s under llvmpipe; a `crop=192` shot 14-16 s under llvmpipe (~4 s to `__ready`, ~4 s loading, frames of
+0.2-0.5 s, ~2 s the screenshot itself).
 
 ## FPV Acro prototype
 
