@@ -9,7 +9,6 @@ Output (web/public/data/): zones.bin = uint16 block[D, W] + uint16 building[D, W
 """
 import gzip
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -101,17 +100,8 @@ def stats(lab, n):
                     *( [s[1].start, s[0].start, s[1].stop, s[0].stop] if s else [0, 0, 0, 0])])
     return out
 
+# (each block's triangles at 1 m, blocks[k][7], come after: web/tools/tris.mjs meshes the tiles, split by these buildings)
 meta = {"blocks": stats(blk, nb), "buildings": stats(bld.astype(np.int32), len(blds))}
-# triangles per block at 1 m (prototype estimate): each 128 m tile's triangles (tools/cost1m.mjs) shared by columns
-cost = Path("data/cost1m.json")
-if cost.exists():
-    tt = np.zeros((math.ceil(D / 128), math.ceil(W / 128)))
-    for r in json.load(open(cost))["rows"]:
-        tt[r["ty"], r["tx"]] = r["tris"]
-    per_col = (tt / 16384)[rr // 128, cc // 128]
-    tris = ndimage.sum_labels(per_col, blk, np.arange(1, nb + 1))
-    for b, t in zip(meta["blocks"], tris):
-        b.append(int(t))
 with gzip.GzipFile(OUT / "zones.bin", "wb", compresslevel=9, mtime=0) as fh:
     fh.write(blk.tobytes() + bld.astype(np.uint16).tobytes())
 json.dump(meta, open(OUT / "zones.json", "w"))

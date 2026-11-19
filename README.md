@@ -72,8 +72,8 @@ values):
 sh scripts/build_data.sh
 ```
 
-Needs [uv](https://docs.astral.sh/uv/) and `curl`. The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB
-of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
+Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
+the triangle counts run the viewer's mesher). The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
 From cached raw data the build takes about 4 minutes; `voxelize.py` peaks at ~7.5 GB of RAM. Given the same
 `data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-17; the gzip files are
 written with `mtime=0`). The steps:
@@ -91,6 +91,7 @@ written with `mtime=0`). The steps:
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain.bin`: the bare land shown while the tiles load |
 | `zones.py` | `zones.bin`, `zones.json`: city blocks and buildings, for the render budget (needs `data/footprints.npz`) |
+| `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node); `zones.json`: each block's triangles at 1 m, for the render budget (needs `zones.bin`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |

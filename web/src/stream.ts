@@ -3,11 +3,7 @@ import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
 import type { Columns } from './tile-data';
 import { World, type ColumnSource } from './world';
-import { MAT } from './voxelMaterial';
-import { PAL_ROOF, PAL_WALL } from './chamfer';
-
-// the materials of buildings' walls (voxelize.py)
-const WALLS = new Set<number>([MAT.SOLID, MAT.WALL, MAT.GLASS, MAT.FLOODLIT, MAT.CONCRETE, MAT.BRONZE, MAT.RIBBON, MAT.CLASSIC, MAT.WINDOW, MAT.TENEMENT]);
+import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 
 export interface TileNode {
   key: string;
@@ -151,25 +147,24 @@ export class TileStreamer implements ColumnSource {
   readonly group = new THREE.Group();
   readonly world: World;
   version = 0;
-  bldMap: { data: Uint16Array; W: number } | null = null;
+  // the building of each 1 m column (zones.bin): city.ts sets it once loaded
+  get bldMap() { return this.ctx.bldMap; }
+  set bldMap(m: TileContext['bldMap']) { this.ctx.bldMap = m; }
   update: (camera: THREE.Camera) => void = () => {};
   private queue: Job[] = [];
   private inflight = 0;
   private readonly maxWorkers = Math.min(Math.max(2, (navigator.hardwareConcurrency || 4) - 2), 10);
   private readonly pool: Pooled[] = [];
   private quadIdx: THREE.BufferAttribute | null = null;
-  // per palette entry: roof material, its staircases shaded as roof planes; a building's wall, its diagonal staircases
-  // chamfered flat (mesher.worker.ts, chamfer.ts)
-  private readonly roofPal: Uint8Array;
-  private readonly leafPal: Uint8Array;
+  // what the tiles are meshed with (tile-request.ts)
+  private readonly ctx: TileContext;
 
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.clay = this.levels[0];
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
-    this.roofPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0));
-    this.leafPal = Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF ? 1 : 0));
+    this.ctx = { N: this.N, W: meta.W, D: meta.D, clay: this.clay, ...paletteFlags(meta.palette), bldMap: null };
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -280,49 +275,19 @@ export class TileStreamer implements ColumnSource {
   }
 
   private requestFor({ node: n, dataOnly }: Job): { msg: MeshRequest; transfer: Transferable[] } {
-    const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
     const file = (k: string) => new URL(`data/tiles/${k}.bin`, location.href).href;
-    const base = { key: n.key, N: this.N, s: n.s, x0, y0 };
+    const msg = tileRequest(this.ctx, n.s, n.tx, n.ty, n.foliage, file, n.keep, dataOnly);
+    const transfer: Transferable[] = [...[msg.bld, msg.base?.bld].flatMap((b) => (b ? [b.buffer] : []))];
     if (n.foliage) {
       // the base tile's column data is still here: hand over a copy instead of fetching it again
       const b = this.nodes.get(this.key(1, n.tx, n.ty))?.data;
-      const under: Columns | string = b ? { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null } : file(`1/${n.tx}_${n.ty}`);
-      // ... and the base tile meshed again without what the grass covers (coverBase)
-      const bld = this.buildingIds(x0, y0);
-      return { msg: { ...base, url: file(`1f/${n.tx}_${n.ty}`), under, keep: false, dataOnly: false, bld: null, roof: null,
-        base: { bld, roof: this.roofPal, leaf: this.leafPal } },
-      transfer: [...(typeof under === 'string' ? [] : [under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : [])]), ...(bld ? [bld.buffer] : [])] };
+      if (b) {
+        const under: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null };
+        msg.under = under;
+        transfer.push(under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : []));
+      }
     }
-    // level 1 and the distance levels are meshed with their buildings and roof palette, the clay without
-    const city = !dataOnly && n.s !== this.clay;
-    const bld = city ? this.buildingIds(x0, y0, n.s) : null;
-    return { msg: { ...base, url: file(n.key), keep: n.keep || n.s > 1, dataOnly, bld,
-      roof: city ? this.roofPal : null }, transfer: bld ? [bld.buffer] : [] };
-  }
-
-  private buildingIds(x0: number, y0: number, s = 1) {
-    if (!this.bldMap) return null;
-    if (s > 1) return this.buildingIdsCoarse(x0, y0, s);
-    // with the 1-cell apron (a chamfer's steps run on into it)
-    const { data, W } = this.bldMap, S = this.N + 2, out = new Uint16Array(S * S), xa = Math.max(0, x0 - 1), xb = Math.min(x0 + S - 1, W);
-    for (let r = 0; r < S; r++) {
-      const y = y0 - 1 + r;
-      if (y >= 0 && y < this.meta.D) out.set(data.subarray(y * W + xa, y * W + xb), r * S + xa - (x0 - 1));
-    }
-    return out;
-  }
-
-  // a distance level's cells (s x s m): the building of the cell's middle column, else of any column in it
-  private buildingIdsCoarse(x0: number, y0: number, s: number) {
-    const { data, W } = this.bldMap!, D = this.meta.D, S = this.N + 2, out = new Uint16Array(S * S), h = s >> 1;
-    const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < D ? data[y * W + x] : 0);
-    for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
-      const X = x0 + (c - 1) * s, Y = y0 + (r - 1) * s;
-      let b = at(X + h, Y + h);
-      for (let k = 0; !b && k < s * s; k++) b = at(X + (k % s), Y + Math.floor(k / s));
-      out[r * S + c] = b;
-    }
-    return out;
+    return { msg, transfer };
   }
 
   private onReply(m: MeshReply, p: Pooled) {

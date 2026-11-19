@@ -1,7 +1,8 @@
 #!/bin/sh
 # Full data pipeline for Passau: download (cached in data/raw) -> mosaic -> voxelize -> everything the viewer loads
-# from web/public/data. Needs uv and curl; ~8 GB of RAM for voxelize.py. Every step after the fetches reads only
-# data/raw and the steps before it, so a rerun on the same data/raw rebuilds the same files (see README.md).
+# from web/public/data. Needs uv, curl and node (web/node_modules installed); ~8 GB of RAM for voxelize.py. Every step
+# after the fetches reads only data/raw and the steps before it, so a rerun on the same data/raw rebuilds the same
+# files (see README.md).
 set -e
 cd "$(dirname "$0")/.."
 export PYTHONPATH=scripts
@@ -21,6 +22,8 @@ uv run python scripts/flood.py           # flood.bin, flood.json (river level sl
 uv run python scripts/boats.py           # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 uv run python scripts/terrain.py         # terrain.bin (the bare land shown while the tiles load)
 uv run python scripts/zones.py           # zones.bin, zones.json (city blocks and buildings; needs footprints.npz)
+(cd web && node tools/tris.mjs)          # meta.json tiles.tris, zones.json blocks' triangles (the viewer's mesher over
+                                         # every tile; needs web/node_modules and zones.bin)
 uv run python scripts/windows.py         # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
 uv run python scripts/phenology.py       # phenology.json, foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)

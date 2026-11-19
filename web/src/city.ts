@@ -462,10 +462,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   };
 }
 
-// Each block's triangles at 1 m, as zones.py estimated them (from tools/cost1m.mjs's data/cost1m.json). Built without
-// that file the blocks have none: then the footprints of the buildings whose middle lies in the block, scaled to ~14 M
-// triangles for the whole city, so the detail still spends its budget on the blocks nearest the focus (without it any
-// detail under 1 would leave the whole city as clay).
+// Each block's triangles at 1 m, as meshed (tools/tris.mjs: level 1's quads by the column under their middle; without
+// the foliage). Data built without that step has none: then the footprints of the buildings whose middle lies in the
+// block, scaled to ~14 M triangles for the whole city, so the detail still spends its budget on the blocks nearest the
+// focus (without it any detail under 1 would leave the whole city as clay).
 function blockTris(blocks: number[][], buildings: number[][], blk: Uint16Array, W: number, D: number) {
   if (blocks.every((b) => b[7] !== undefined)) return blocks.map((b) => b[7] || 0);
   const t = new Float64Array(blocks.length);

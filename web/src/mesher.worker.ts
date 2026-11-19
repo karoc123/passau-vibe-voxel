@@ -47,19 +47,27 @@ export async function fetchGzip(url: string) {
 const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null });
 const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : [])];
 
+// One request's meshes: the tile's own (out), a foliage tile's base tile meshed again (base), and the column data kept
+// (keep; dataOnly: that alone, no mesh). load: a tile file, unzipped (tools/tris.mjs reads them from disk)
+export async function meshJob(m: MeshRequest, load: (url: string) => Promise<ArrayBuffer>) {
+  const { counts, ground, runs, planes } = decodeTile(await load(m.url), m.N);
+  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
+  if (m.dataOnly) return { keep, out: null, base: undefined };
+  const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
+  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
+  const base = m.base && under && 'ground' in under
+    ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
+  return { keep, out, base };
+}
+
 self.onmessage = async (e: MessageEvent<MeshRequest>) => {
   const m = e.data;
   try {
-    const { counts, ground, runs, planes } = decodeTile(await fetchGzip(m.url), m.N);
-    const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
-    if (m.dataOnly) {
+    const { keep, out, base } = await meshJob(m, fetchGzip);
+    if (!out) {
       post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(GROUPS + 1), normals: new Float32Array(GROUPS * 6), cuts: new Uint32Array(8) }, columnBuffers(keep!));
       return;
     }
-    const under = typeof m.under === 'string' ? decodeTile(await fetchGzip(m.under), m.N) : m.under ?? null;
-    const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.bld, under, m.roof, planes);
-    const base = m.base && under && 'ground' in under
-      ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
     const transfer: Transferable[] = [];
     for (const o of base ? [out, base] : [out]) transfer.push(o.pos.buffer, o.attr.buffer, o.pal.buffer, o.faces.buffer, o.normals.buffer, o.cuts.buffer, ...(o.bld ? [o.bld.buffer] : []));
     if (keep) transfer.push(...columnBuffers(keep));

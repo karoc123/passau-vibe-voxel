@@ -97,6 +97,7 @@ def main():
         lv[l["s"]] = l
     meta["tiles"]["levels"] = [lv[s] for s in sorted(lv)]
     meta["tiles"]["bytes"] = sum(p.stat().st_size for s in lv for p in (OUT / "tiles" / str(s)).glob("*.bin"))
+    meta["tiles"].pop("tris", None)  # the tiles' triangles, now stale: web/tools/tris.mjs counts them again
     (OUT / "meta.json").write_text(json.dumps(meta))
     print("meta.json tiles:", meta["tiles"])
 
