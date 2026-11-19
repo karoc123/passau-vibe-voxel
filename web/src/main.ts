@@ -422,7 +422,7 @@ renderer.setAnimationLoop((now) => {
   daylight.sky.mesh.position.copy(camera.position);
   streamer?.update(camera);
   daylight.fitShadow(focus(), camera, viewDist, map);
-  const redraws = daylight.redraws;
+  const redraws = daylight.redraws + daylight.patches;
   if (stillChanged()) stillDue = true;
   if (stillDue && now - redrawnAt > 300) { stillDue = false; redrawnAt = now; daylight.redrawShadow(); }
   renderer.info.reset();
@@ -430,7 +430,7 @@ renderer.setAnimationLoop((now) => {
   if (autoRes?.done) autoRes = null;
   autoRes?.begin();
   post.composer.render();
-  if (daylight.redraws !== redraws) busy = true;
+  if (daylight.redraws + daylight.patches !== redraws) busy = true;
   autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
   busy = false;
   perf.frame(now, document.hidden, renderer.info.render.triangles);
@@ -447,13 +447,27 @@ window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, 
   // the detail, as the visitor would set it (tools)
   level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx };
 
-// what the city's shadow map shows: which tiles are drawn, and what folds, hides or thins them in its depth pass
+// what the city's shadow map shows: which tiles are drawn (a tile in or out, or one distance level for another, is
+// drawn again into the map where it casts: daylight.changed), and what folds, hides or thins them in its depth pass
+// (the whole map drawn again)
 let stillKey = '';
+const casting = new Map<THREE.Object3D, THREE.BufferGeometry>();
 function stillChanged() {
   if (!streamer || !uniforms) return false;
-  let n = 0, ids = 0;
-  for (const m of streamer.group.children) if (m.visible) { n++; ids += m.id; }
-  const U = uniforms, key = `${n},${ids},${U.uStage.value},${U.uBldOn.value.version},${U.uZOn.value},${U.uZFBlk.value.version},${U.uFolOn.value},${U.uDay.value},${U.uFolMap.value.id}`;
+  const boxes: THREE.Box3[] = [], add = (g: THREE.BufferGeometry) => { if (g.boundingBox) boxes.push(g.boundingBox); };
+  let n = 0;
+  for (const m of streamer.group.children) {
+    if (!m.visible) continue;
+    n++;
+    const g = (m as THREE.Mesh).geometry, was = casting.get(m);
+    if (was === g) continue;
+    if (was) add(was);
+    add(g);
+    casting.set(m, g);
+  }
+  if (n !== casting.size) for (const [m, g] of casting) if (!m.visible || m.parent !== streamer.group) { add(g); casting.delete(m); }
+  daylight.changed(boxes);
+  const U = uniforms, key = `${U.uStage.value},${U.uBldOn.value.version},${U.uZOn.value},${U.uZFBlk.value.version},${U.uFolOn.value},${U.uDay.value},${U.uFolMap.value.id}`;
   if (key === stillKey) return false;
   stillKey = key;
   return true;
