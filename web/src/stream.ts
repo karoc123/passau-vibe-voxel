@@ -46,44 +46,92 @@ interface Pooled { worker: Worker; busy: number; idle: number }
 
 const releaseArray = function (this: THREE.BufferAttribute) { (this as { array: unknown }).array = null; };
 
-// Facing culling. A tile's quads come grouped by the way they face (mesher.worker.ts byFacing, FACE_ORDER: -y, -z,
-// +x, +y, -x, +z in three.js axes; geometry.userData.faces their starts); each draw of it, in view or in the sun's
-// shadow map, takes only the one run of groups that holds all that can face that camera: what faces away is culled
-// by the GPU anyway, but only after its vertices are shaded.
-// In view: a group can face the camera if the camera is on its outer side of some face plane in the tile's box.
-// In the shadow map (an orthographic sun, the back faces drawn): only the groups facing away from the light.
-const FACE_AXIS = [1, 2, 0, 1, 0, 2], FACE_SIGN = [-1, -1, 1, 1, -1, 1];
+// Facing culling. A tile's quads come grouped by the way they face (mesher.worker.ts byFacing: the six axes, and
+// what faces off them in seventeen groups by its normal; geometry.userData.faces where each starts, .normals the bounds of
+// each one's normals); each draw of it, in view or in the sun's shadow map, takes only the groups that can face that
+// camera: what faces away is culled by the GPU anyway, but only after its vertices are shaded -- on an Iris Xe through
+// D3D11 most of the scene pass's time, and nearly all of the shadow map's.
+// In view: a group can face the camera if, for some normal n in its bounds and point p in the tile's box,
+// (eye - p) . n > 0 (per axis the largest of the products at the bounds' ends: exact for an axis's group).
+// In the shadow map (an orthographic sun, the back faces drawn): if some n in its bounds faces away from the light.
+// The x and z axes' groups come in the order of their faces' planes (cuts): where the camera is between the tile's
+// sides on that axis, of such a group only the faces on its side of the camera are drawn.
+// What is drawn comes out as a few runs of the buffer: the first is the geometry's draw range, as three draws it; the
+// others are drawn straight after it, from onAfterRender / onAfterShadow, with the program and buffers three just
+// bound (drawRest: one multi-draw where there is WEBGL_multi_draw).
 const _c = new THREE.Vector3(), _l = new THREE.Vector3();
-function drawFacing(geo: THREE.BufferGeometry, show: (axis: number, sign: number) => boolean) {
-  const f = geo.userData.faces as Uint32Array | undefined;
-  if (!f) return;
-  let a = -1, b = -1;
-  for (let k = 0; k < 6; k++) if (f[k + 1] > f[k] && show(FACE_AXIS[k], FACE_SIGN[k])) { if (a < 0) a = k; b = k; }
-  if (a < 0) geo.setDrawRange(0, 0);
-  else geo.setDrawRange(f[a] * 6, (f[b + 1] - f[a]) * 6);
+type MultiDraw = { multiDrawElementsWEBGL(m: number, c: Int32Array, co: number, t: number, o: Int32Array, oo: number, n: number): void };
+let _rest: number[] = [], _restOf: THREE.Mesh | null = null, _md: MultiDraw | null | undefined;
+const _starts = new Int32Array(32), _counts = new Int32Array(32);
+// (eye - p) . n at its largest over p in [min, max], n in [lo, hi], along one axis
+const most = (e: number, min: number, max: number, lo: number, hi: number) => Math.max((e - min) * lo, (e - min) * hi, (e - max) * lo, (e - max) * hi);
+// cuts' groups by the order of the groups in the buffer: 0 -x, 1 +x, 2 -z, 3 +z, else -1
+function cutGroups(cuts: Uint32Array, groups: number) {
+  const c = new Int8Array(groups).fill(-1);
+  for (let g = 0; g < 4; g++) c[cuts[4 + g]] = g;
+  return c;
+}
+function runs(mesh: THREE.Mesh, geo: THREE.BufferGeometry, show: (n: Float32Array, k: number) => boolean, eye: THREE.Vector3 | null = null) {
+  const f = geo.userData.faces as Uint32Array | undefined, nb = geo.userData.normals as Float32Array | undefined;
+  _restOf = null;
+  if (!f || !nb) return;
+  const cuts = geo.userData.cuts as Uint32Array, cg: Int8Array = geo.userData.cutGroups ??= cutGroups(cuts, f.length - 1);
+  const out: number[] = [];
+  let open = -1, end = 0;
+  for (let k = 0; k < f.length - 1; k++) {
+    if (f[k + 1] === f[k]) continue; // (an empty group joins the runs either side of it)
+    let a = f[k], b = f[k + 1];
+    if (eye && cg[k] >= 0 && cuts.length > 8) {
+      // only the planes on the camera's side: +x below its x, -x above it (a hundredth of a metre's slack, as above)
+      const g = cg[k], N = cuts[3], o = 8 + g * (N + 2), i = ((g < 2 ? eye.x : eye.z) - cuts[g < 2 ? 0 : 1]) / cuts[2];
+      if (g & 1) b = a + cuts[o + Math.max(0, Math.min(N + 1, Math.ceil(i + 0.01)))];
+      else a += cuts[o + Math.max(0, Math.min(N + 1, Math.floor(i - 0.01) + 1))];
+    }
+    if (a < b && show(nb, k * 6)) {
+      if (open >= 0 && a !== end) { out.push(open, end); open = -1; }
+      if (open < 0) open = a;
+      end = b;
+    } else if (open >= 0) { out.push(open, end); open = -1; }
+  }
+  if (open >= 0) out.push(open, end);
+  if (!out.length) { geo.setDrawRange(0, 0); return; }
+  geo.setDrawRange(out[0] * 6, (out[1] - out[0]) * 6);
+  if (out.length > 2) { _rest = out; _restOf = mesh; }
+}
+function drawRest(this: THREE.Mesh, r: THREE.WebGLRenderer, geo: THREE.BufferGeometry) {
+  if (_restOf !== this) return;
+  _restOf = null;
+  const gl = r.getContext() as WebGL2RenderingContext, idx = geo.index;
+  if (!idx) return;
+  const type = idx.array instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, bytes = type === gl.UNSIGNED_INT ? 4 : 2;
+  const md = _md === undefined ? (_md = r.extensions.has('WEBGL_multi_draw') ? r.extensions.get('WEBGL_multi_draw') as MultiDraw : null) : _md;
+  let n = 0;
+  for (let i = 2; i < _rest.length && n < 32; i += 2, n++) {
+    _starts[n] = _rest[i] * 6 * bytes; _counts[n] = (_rest[i + 1] - _rest[i]) * 6;
+    r.info.update(_counts[n], gl.TRIANGLES, 1);
+  }
+  if (md) md.multiDrawElementsWEBGL(gl.TRIANGLES, _counts, 0, type, _starts, 0, n);
+  else for (let i = 0; i < n; i++) gl.drawElements(gl.TRIANGLES, _counts[i], type, _starts[i]);
 }
 // the index buffer is shared by every tile: disposing a geometry with it would drop it from the GPU for all of them
 const disposeGeometry = (geo: THREE.BufferGeometry) => { geo.setIndex(null); geo.dispose(); };
-const drawAll = (geo: THREE.BufferGeometry) => { const f = geo.userData.faces as Uint32Array | undefined; if (f) geo.setDrawRange(0, f[6] * 6); };
+const drawAll = (geo: THREE.BufferGeometry) => { _restOf = null; const f = geo.userData.faces as Uint32Array | undefined; if (f) geo.setDrawRange(0, f[f.length - 1] * 6); };
 function facingInView(this: THREE.Mesh, _r: THREE.WebGLRenderer, _s: THREE.Scene, camera: THREE.Camera, geo: THREE.BufferGeometry, material: THREE.Material) {
   const bb = geo.boundingBox;
   if (!bb || material.side !== THREE.FrontSide || !(camera as THREE.PerspectiveCamera).isPerspectiveCamera) { drawAll(geo); return; }
   _c.setFromMatrixPosition(camera.matrixWorld);
-  // outside of the box on a face's outer side, by how much (negative: on its inner side)
-  const out = (axis: number, sign: number) => (sign > 0 ? _c.getComponent(axis) - bb.min.getComponent(axis) : bb.max.getComponent(axis) - _c.getComponent(axis)) + 0.01;
-  // a slanted wall (chamfer) is filed under its nearer side axis but faces up to 45° off it: its group shows wherever
-  // a face turned 45° either way could face the camera
-  const slant = (geo.userData.faces as Uint32Array)[7] === 1;
-  drawFacing(geo, (axis, sign) => out(axis, sign) > 0 || (slant && axis !== 1 && out(axis, sign) + Math.max(out(2 - axis, 1), out(2 - axis, -1)) > 0));
+  // (the box's top a metre up: the shader lifts a sloped roof's vertices by up to that, makeVoxelMaterial)
+  runs(this, geo, (n, k) => most(_c.x, bb.min.x, bb.max.x, n[k], n[k + 3]) + most(_c.y, bb.min.y, bb.max.y + 1, n[k + 1], n[k + 4])
+    + most(_c.z, bb.min.z, bb.max.z, n[k + 2], n[k + 5]) > -0.01, _c);
 }
 function facingInShadow(this: THREE.Mesh, _r: THREE.WebGLRenderer, _o: THREE.Object3D, _c0: THREE.Camera, shadowCamera: THREE.Camera, geo: THREE.BufferGeometry, depth: THREE.Material) {
   if (depth.side === THREE.DoubleSide || !(shadowCamera as THREE.OrthographicCamera).isOrthographicCamera) { drawAll(geo); return; }
   _l.setFromMatrixColumn(shadowCamera.matrixWorld, 2).normalize(); // towards the light
-  const back = depth.side === THREE.BackSide ? -1 : 1;
-  // roof slopes and slanted walls (faces[7]) face off the axes they are filed under: all of such a tile is drawn
-  if ((geo.userData.faces as Uint32Array)[7] === 1) { drawAll(geo); return; }
-  drawFacing(geo, (axis, sign) => back * sign * _l.getComponent(axis) > -1e-4);
+  const back = depth.side === THREE.BackSide ? -1 : 1, lx = back * _l.x, ly = back * _l.y, lz = back * _l.z;
+  runs(this, geo, (n, k) => Math.max(lx * n[k], lx * n[k + 3]) + Math.max(ly * n[k + 1], ly * n[k + 4]) + Math.max(lz * n[k + 2], lz * n[k + 5]) > -1e-4);
 }
+function drawRestInView(this: THREE.Mesh, r: THREE.WebGLRenderer, _s: THREE.Scene, _c1: THREE.Camera, geo: THREE.BufferGeometry) { drawRest.call(this, r, geo); }
+function drawRestInShadow(this: THREE.Mesh, r: THREE.WebGLRenderer, _o: THREE.Object3D, _c1: THREE.Camera, _sc: THREE.Camera, geo: THREE.BufferGeometry) { drawRest.call(this, r, geo); }
 
 function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
   let resolve = () => {};
@@ -138,7 +186,7 @@ export class TileStreamer implements ColumnSource {
     for (const n of this.nodes.values()) {
       const g = n.mesh?.geometry;
       if (!g) continue;
-      const q = g.userData.faces[6] as number;
+      const f = g.userData.faces as Uint32Array, q = f[f.length - 1];
       let b = 0;
       for (const [k, a] of Object.entries(g.attributes) as [string, THREE.BufferAttribute][]) b += a.count * a.itemSize * (k === 'vattr' ? 1 : 2);
       r.meshes++; r.quads += q; r.bytes += b;
@@ -311,7 +359,7 @@ export class TileStreamer implements ColumnSource {
     this.pump();
   }
 
-  private makeGeometry({ pos, attr, pal, bld, quads, faces }: MeshOut) {
+  private makeGeometry({ pos, attr, pal, bld, quads, faces, normals, cuts }: MeshOut) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('vattr', new THREE.BufferAttribute(attr, 4));
@@ -322,6 +370,8 @@ export class TileStreamer implements ColumnSource {
     geo.computeBoundingBox(); geo.computeBoundingSphere();
     for (const a of Object.values(geo.attributes)) (a as THREE.BufferAttribute).onUpload(releaseArray); // culling only needs the bounding sphere
     geo.userData.faces = faces;
+    geo.userData.normals = normals;
+    geo.userData.cuts = cuts;
     return geo;
   }
 
@@ -329,6 +379,8 @@ export class TileStreamer implements ColumnSource {
     const mesh = new THREE.Mesh(this.makeGeometry(out), this.material);
     mesh.onBeforeRender = facingInView;
     mesh.onBeforeShadow = facingInShadow;
+    mesh.onAfterRender = drawRestInView;
+    mesh.onAfterShadow = drawRestInShadow;
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.matrixAutoUpdate = false;

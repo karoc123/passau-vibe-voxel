@@ -29,7 +29,7 @@ export interface MeshRequest {
 // can be discarded, autumn and winter)
 export interface BaseRemesh { bld: Uint16Array | null; roof: Uint8Array | null; leaf: Uint8Array }
 
-export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array }
+export interface MeshOut { pos: Int16Array; attr: Uint8Array; pal: Uint16Array; bld: Uint16Array | null; quads: number; faces: Uint32Array; normals: Float32Array; cuts: Uint32Array }
 
 export type MeshReply =
   | ({ type: 'node'; key: string; dataOnly: boolean; data: Columns | null; base?: MeshOut } & MeshOut)
@@ -53,7 +53,7 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
     const { counts, ground, runs, planes } = decodeTile(await fetchGzip(m.url), m.N);
     const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes }) : null;
     if (m.dataOnly) {
-      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(7) }, columnBuffers(keep!));
+      post({ type: 'node', key: m.key, dataOnly: true, data: keep, pos: new Int16Array(), attr: new Uint8Array(), pal: new Uint16Array(), bld: null, quads: 0, faces: new Uint32Array(GROUPS + 1), normals: new Float32Array(GROUPS * 6), cuts: new Uint32Array(8) }, columnBuffers(keep!));
       return;
     }
     const under = typeof m.under === 'string' ? decodeTile(await fetchGzip(m.under), m.N) : m.under ?? null;
@@ -61,7 +61,7 @@ self.onmessage = async (e: MessageEvent<MeshRequest>) => {
     const base = m.base && under && 'ground' in under
       ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, m.base.bld, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
     const transfer: Transferable[] = [];
-    for (const o of base ? [out, base] : [out]) transfer.push(o.pos.buffer, o.attr.buffer, o.pal.buffer, o.faces.buffer, ...(o.bld ? [o.bld.buffer] : []));
+    for (const o of base ? [out, base] : [out]) transfer.push(o.pos.buffer, o.attr.buffer, o.pal.buffer, o.faces.buffer, o.normals.buffer, o.cuts.buffer, ...(o.bld ? [o.bld.buffer] : []));
     if (keep) transfer.push(...columnBuffers(keep));
     post({ type: 'node', key: m.key, dataOnly: false, data: keep, ...out, base }, transfer);
   } catch (err) {
@@ -87,7 +87,7 @@ class QuadBuffer {
   pal = new Uint16Array(this.cap);
   bld = new Uint16Array(this.cap);
   count = 0;
-  slanted = false; // holds faces off the six axes (chamfers, roof slopes): facing culling must be conservative
+  axisEnd = -1; // vertices from here on face off the six axes (chamfers, roof slopes): grouped by their normals
 
   reserve(n: number) {
     if (this.count + n <= this.cap) return;
@@ -146,31 +146,82 @@ export function meshTile(N: number, s: number, x0: number, y0: number, cols: Col
   const out = new QuadBuffer();
   if (cover && cover.length < vol.length) { const c = new Uint8Array(vol.length); c.set(cover); cover = c; }
   meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover);
-  return byFacing(out, !!bldIds);
+  return byFacing(out, !!bldIds, N, s, x0, y0);
 }
 
 // --- culling helpers (kept apart from the meshing itself) ---
 
-// The quads grouped by the way they face, in the order FACE_ORDER, so that what can face a camera, or the sun, is
-// mostly one run of them (stream.ts draws only that run): from above, of a tile to the north-west (or south-east) of
-// the camera, exactly the run that faces it; the city's shadow map from an afternoon sun (the back faces: down,
-// north and east) the same. faces: where each group starts, in quads, and the end. (Same order in stream.ts FACES.)
-const FACE_ORDER = [4, 2, 1, 5, 0, 3]; // normal index (mesher axis * 2 + positive): down, north, east, up, west, south
-function byFacing(out: QuadBuffer, withBld: boolean): MeshOut {
-  const nq = out.count / 4, cnt = new Uint32Array(6);
-  for (let q = 0; q < nq; q++) cnt[out.attr[q * 16] % 8]++;
-  const faces = new Uint32Array(8), at = new Uint32Array(6);
-  FACE_ORDER.forEach((g, k) => { at[g] = faces[k]; faces[k + 1] = faces[k] + cnt[g]; });
-  const pos = new Int16Array(nq * 12), attr = new Uint8Array(nq * 16), pal = new Uint16Array(nq * 4), bld = withBld ? new Uint16Array(nq * 4) : null;
+// The quads grouped by the way they face, so that stream.ts draws only the groups that can face a camera, or (in the
+// sun's shadow map) face away from the sun: the six axes' faces each in a group, and what faces off them (chamfers'
+// walls, lids and floors; roof slopes) in seventeen: down; wall or up, by the direction its normal points to in plan.
+// In the buffer in the order FACE_ORDER, which keeps what a view from above, or the sun, takes mostly in one or two
+// runs. faces: where each group starts, in quads, and the end; normals: each group's normals' bounds (min x y z, max
+// x y z, three.js axes), what stream.ts judges a group by. (A quad of no area -- none of it ever rasterized -- is left out.)
+// The x and z axes' groups are in the order of their faces' planes, west to east (north to south), so that where the
+// camera is over the tile, between its sides, the part of such a group that faces it is one run too. cuts: x0, z0, s,
+// N (the tile's corner and cell in metres, its cells), where in FACE_ORDER the -x, +x, -z, +z groups are, then for the -x, +x, -z, +z groups in turn (N + 2 each) where
+// the quads of plane x0 + i s start in the group, i = 0 .. N + 1 (the last: the group's end).
+const AXIS_N = [[-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1], [0, -1, 0], [0, 1, 0]]; // by normal index (mesher axis * 2 + positive)
+// slanted: 6 down; walls 7-14, ups 15-22 by the direction their normal points to in plan, in 8 steps of 45° (centred
+// on the axes and the diagonals: a chamfer's wall is mostly at 45°, a roof's slope often along an axis)
+const SL_DOWN = 6, SL_WALL = 7, SL_UP = 15;
+const FACE_ORDER = [4, SL_DOWN, 2, 1, ...Array.from({ length: 16 }, (_, i) => SL_WALL + i), 5, 0, 3]; // down, north, east, slanted, up, west, south
+const GROUPS = FACE_ORDER.length;
+function byFacing(out: QuadBuffer, withBld: boolean, N: number, s: number, x0: number, y0: number): MeshOut {
+  const nq = out.count / 4, axisQ = out.axisEnd < 0 ? nq : out.axisEnd / 4;
+  const gid = new Int8Array(nq), nrm = new Float32Array(Math.max(0, nq - axisQ) * 3), P = out.pos, A = out.attr;
+  // the plane of an x (z) axis's face, as i of x0 + i s (y0 + i s)
+  const plane = new Uint16Array(axisQ), cuts = new Uint32Array(8 + 4 * (N + 2));
+  cuts.set([x0, y0, s, N, ...[0, 1, 2, 3].map((g) => FACE_ORDER.indexOf(g))]);
+  for (let q = 0; q < axisQ; q++) {
+    const g = gid[q] = A[q * 16] % 8;
+    if (g < 4) {
+      plane[q] = Math.max(0, Math.min(N, Math.round(g < 2 ? (P[q * 12] - x0) / s : (P[q * 12 + 2] - y0) / s)));
+      cuts[8 + g * (N + 2) + plane[q] + 1]++;
+    }
+  }
+  for (let g = 0; g < 4; g++) for (let i = 1, o = 8 + g * (N + 2); i < N + 2; i++) cuts[o + i] += cuts[o + i - 1];
+  // a slanted quad's normal from its corners (y with its 1/64 m part: vattr.y's top 6 bits), its first triangle's or else its second's
+  const y = (v: number) => P[v * 3 + 1] + (A[v * 4 + 1] >> 2) / 64;
+  const tri = (a: number, b: number, c: number, o: number) => {
+    const ux = P[b * 3] - P[a * 3], uy = y(b) - y(a), uz = P[b * 3 + 2] - P[a * 3 + 2];
+    const wx = P[c * 3] - P[a * 3], wy = y(c) - y(a), wz = P[c * 3 + 2] - P[a * 3 + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, l = Math.hypot(nx, ny, nz);
+    if (l < 1e-6) return false;
+    nrm[o] = nx / l; nrm[o + 1] = ny / l; nrm[o + 2] = nz / l;
+    return true;
+  };
+  for (let q = axisQ; q < nq; q++) {
+    const v = q * 4, o = (q - axisQ) * 3;
+    if (!tri(v, v + 1, v + 2, o) && !tri(v, v + 2, v + 3, o)) { gid[q] = -1; continue; }
+    const ny = nrm[o + 1];
+    gid[q] = ny < -0.3 ? SL_DOWN : (ny > 0.3 ? SL_UP : SL_WALL) + ((Math.round(Math.atan2(nrm[o + 2], nrm[o]) / (Math.PI / 4)) % 8) + 8) % 8;
+  }
+  const cnt = new Uint32Array(GROUPS), lo = new Float32Array(GROUPS * 3).fill(2), hi = new Float32Array(GROUPS * 3).fill(-2);
   for (let q = 0; q < nq; q++) {
-    const t = at[out.attr[q * 16] % 8]++;
+    const g = gid[q];
+    if (g < 0) continue;
+    cnt[g]++;
+    const n = g < 6 ? AXIS_N[g] : nrm.subarray((q - axisQ) * 3, (q - axisQ) * 3 + 3);
+    for (let k = 0; k < 3; k++) { lo[g * 3 + k] = Math.min(lo[g * 3 + k], n[k]); hi[g * 3 + k] = Math.max(hi[g * 3 + k], n[k]); }
+  }
+  const faces = new Uint32Array(GROUPS + 1), normals = new Float32Array(GROUPS * 6), at = new Uint32Array(GROUPS);
+  FACE_ORDER.forEach((g, k) => {
+    at[g] = faces[k]; faces[k + 1] = faces[k] + cnt[g];
+    for (let c = 0; c < 3; c++) { normals[k * 6 + c] = lo[g * 3 + c]; normals[k * 6 + 3 + c] = hi[g * 3 + c]; }
+  });
+  const kept = faces[GROUPS], put = cuts.slice(); // (the cuts within the group; put: where its next quad of each plane goes)
+  const pos = new Int16Array(kept * 12), attr = new Uint8Array(kept * 16), pal = new Uint16Array(kept * 4), bld = withBld ? new Uint16Array(kept * 4) : null;
+  for (let q = 0; q < nq; q++) {
+    const g = gid[q];
+    if (g < 0) continue;
+    const t = g < 4 ? at[g] + put[8 + g * (N + 2) + plane[q]]++ : at[g]++;
     pos.set(out.pos.subarray(q * 12, q * 12 + 12), t * 12);
     attr.set(out.attr.subarray(q * 16, q * 16 + 16), t * 16);
     pal.set(out.pal.subarray(q * 4, q * 4 + 4), t * 4);
     if (bld) bld.set(out.bld.subarray(q * 4, q * 4 + 4), t * 4);
   }
-  faces[7] = out.slanted ? 1 : 0;
-  return { pos, attr, pal, bld, quads: nq, faces };
+  return { pos, attr, pal, bld, quads: kept, faces, normals, cuts };
 }
 
 // What of a base tile its foliage tile covers, per cell of the meshing volume: 1 grass or a trunk (always drawn,
@@ -257,8 +308,8 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
       }
     }
   }
+  out.axisEnd = out.count; // (what follows faces off the axes)
   if (ch) for (const p of ch.prisms) emitPrism(p, s, x0, y0, out, roofPal!, roofs, slopes);
-  if (ch?.prisms.length || slopes) out.slanted = true;
   // (at s > 1 the slopes come out in cells: scaled to metres here, heights in 1/64 of a cell to 1/64 m)
   slopes?.emit(s === 1 ? out : { reserve: (n) => out.reserve(n), vertexQ: (x, q, z, n, ao, g, w, pal, b) => out.vertexQ(x * s + x0, q * s, z * s + y0, n, ao, g, w, pal, b) },
     s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground, s === 1);
