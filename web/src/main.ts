@@ -29,7 +29,7 @@ import type { World } from './world';
 import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';
-import { AUTO_KEYS, type Gfx, gpuName, prepassPays, Settings } from './settings';
+import { AUTO_KEYS, DIST_MAX, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
 import './style.css';
 
@@ -393,7 +393,7 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
     pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
@@ -522,13 +522,14 @@ function stillChanged() {
 // The view distance now: the setting, but no less than VIEW_PER_HEIGHT times the camera's height over the ground (in
 // 100 m steps), so that from high up (the whole map's view, 2.5 km over it) the city below is not all haze. A street,
 // Oberhaus, the overview (~560 m up) keep the setting.
-const VIEW_PER_HEIGHT = 1.2;
+const VIEW_PER_HEIGHT = 1.2, WHOLE_START = 0.75;
 let cutNow = -1;
+// 'Whole map' (dist 0) is DIST_MAX (5 km), so that on a large map it no longer loads all of it; its fog starts late.
 function viewCut(above: number) {
-  const d = gfx.now.dist, c = d ? Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100) : 0;
+  const d = gfx.now.dist || DIST_MAX, c = Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100);
   if (c === cutNow) return;
   cutNow = c;
-  daylight.setCut(c);
+  daylight.setCut(c, gfx.now.dist ? undefined : WHOLE_START);
   city?.setDist(c);
 }
 

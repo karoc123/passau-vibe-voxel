@@ -10,7 +10,7 @@ import { clamp } from './util';
 //            Phones draw 2 M at most whatever it says
 //   dist     metres   the view distance (Sichtweite): the city's tiles further from the camera than this (along the
 //            ground) are neither drawn nor loaded, the fog closes in before it, a coarse ground stands beyond it
-//            (city.ts, daylight.ts, farground.ts); 0: the whole map
+//            (city.ts, daylight.ts, farground.ts); 0: DIST_MAX, with the fog starting later
 //   taa      0|1      temporal upscaling (taa.ts): the scene drawn at the resolution res if the URL or the visitor set
 //            it, else at TAA_RES, put together over the frames at the screen's; replaces SMAA. Off by default, and no
 //            preset changes it (nor does measuring: autores.ts does not run with it on)
@@ -23,7 +23,7 @@ export type Preset = 'low' | 'medium' | 'high';
 export const SHADOWS = [0, 1024, 2048, 4096];
 // the internal resolution with the TAA, unless the resolution is set: two thirds (in pixels 0.45 of the screen's)
 export const TAA_RES = 0.67;
-// the view distance's range (metres; DIST_MAX on the slider stands for the whole map, 0)
+// the view distance's range (metres; DIST_MAX on the slider, stored as 0, is the most: main.ts viewCut)
 export const DIST_MIN = 600, DIST_MAX = 5000;
 const KEY = 'passau.gfx', AUTO_KEY = 'passau.gfx.auto';
 // raised when the measuring changes enough that remembered results should be measured again (2: the detail too)

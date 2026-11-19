@@ -113,7 +113,7 @@ class Graphics {
     slide('detail', { min: 0, max: 1, step: 0.05, show: (v) => `Detail ${v >= 1 ? 'all at 1 m' : `${Math.round(v * 100)} %`}` });
     // the view distance: the slider's end is the whole map (0)
     const dist = new Slider(adv, { min: DIST_MIN, max: DIST_MAX, step: 100, near: 50, log: true, marks: { low: s.presets.low.dist, medium: s.presets.medium.dist },
-      show: (v) => `View distance ${v >= DIST_MAX ? 'whole map' : `${(v / 1000).toFixed(1)} km`}`, onInput: (v) => this.change({ dist: v >= DIST_MAX ? 0 : v }) });
+      show: (v) => `View distance ${v >= DIST_MAX ? 'max (5 km)' : `${(v / 1000).toFixed(1)} km`}`, onInput: (v) => this.change({ dist: v >= DIST_MAX ? 0 : v }) });
     this.sync.push(() => { if (document.activeElement !== dist.input) dist.set(s.now.dist || DIST_MAX); });
     pick('shadow', 'Shadows', SHADOWS.filter((n) => n <= maxShadow).map((n) => [n, n ? `${n / 1024}k` : 'off']));
     pick('ao', 'Ambient occlusion', onOff);

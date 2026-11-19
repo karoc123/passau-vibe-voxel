@@ -165,6 +165,7 @@ export class Daylight {
   private northTheta = 0;
   // the view distance (settings.ts dist; 0: the whole map)
   private cut = 0;
+  private cutStart = CUT_START;
 
   constructor(private readonly renderer: THREE.WebGLRenderer, private readonly scene: THREE.Scene, shadowSize = 8192) {
     const sun = this.sun, size = Math.min(shadowSize, renderer.capabilities.maxTextureSize);
@@ -438,10 +439,13 @@ export class Daylight {
   }
 
   // The view distance: the fog is full there (from CUT_START of it on), and the city's shadow map covers no more
-  setCut(d: number) {
-    if (d === this.cut) return;
+  // start: the fog's start as a share of d (the setting 'whole map', DIST_MAX: late, so that a map the size of Passau's
+  // stays clear to its far corners as it did when that meant no cut at all)
+  setCut(d: number, start = CUT_START) {
+    if (d === this.cut && start === this.cutStart) return;
     this.cut = d;
-    FOG_CUT.x = d * CUT_START; FOG_CUT.y = d;
+    this.cutStart = start;
+    FOG_CUT.x = d * start; FOG_CUT.y = d;
   }
 
   // height: the camera above the ground. Low views look along the city, so the haze closes in and softens the far
