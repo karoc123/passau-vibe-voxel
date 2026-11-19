@@ -184,6 +184,7 @@ function applyGfx(c: Partial<Gfx>) {
   if ('lod' in c || 'lodpx' in c) city?.setLod({ mode: g.lod, px: g.lodpx });
   if ('prepass' in c && prepass) prepass.enabled = g.prepass;
   if ('occl' in c) city?.setOcclusion(g.occl);
+  if ('dist' in c) stillDue = true; // (the view distance: the loop, viewCut)
   busy = true;
 }
 
@@ -349,8 +350,9 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl,
+  city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
     pixelsHigh: () => renderer.domElement.height });
+  cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
@@ -398,6 +400,7 @@ renderer.setAnimationLoop((now) => {
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
   post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
+  viewCut(above);
   daylight.setFogFrom(viewDist, above);
   const t = (performance.now() - t0) / 1000;
   if (uniforms) uniforms.uTime.value = t;
@@ -453,6 +456,19 @@ function stillChanged() {
   if (key === stillKey) return false;
   stillKey = key;
   return true;
+}
+
+// The view distance now: the setting, but no less than VIEW_PER_HEIGHT times the camera's height over the ground (in
+// 100 m steps), so that from high up (the whole map's view, 2.5 km over it) the city below is not all haze. A street,
+// Oberhaus, the overview (~560 m up) keep the setting.
+const VIEW_PER_HEIGHT = 1.2;
+let cutNow = -1;
+function viewCut(above: number) {
+  const d = gfx.now.dist, c = d ? Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100) : 0;
+  if (c === cutNow) return;
+  cutNow = c;
+  daylight.setCut(c);
+  city?.setDist(c);
 }
 
 // busy: this frame changed the settings or redrew the shadow map (autores.ts leaves it out)

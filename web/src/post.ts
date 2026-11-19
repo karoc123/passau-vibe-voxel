@@ -3,6 +3,7 @@ import { N8AOPostPass } from 'n8ao';
 import { BlendFunction, BloomEffect, BrightnessContrastEffect, Effect, EffectAttribute, EffectComposer, EffectPass, HueSaturationEffect, RenderPass,
   SMAAEffect, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { clamp } from './util';
+import { cutFogGlsl, FOG_CUT } from './daylight';
 import { SKY_GLSL, type Sky } from './sky';
 import { REFL_MAX } from './voxelMaterial';
 
@@ -60,6 +61,7 @@ class DepthBlur extends Effect {
 const REFL = `#define CUMULUS_CHEAP
 ${SKY_GLSL}
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uCamWorld; uniform float uTime; uniform float uMapTop;
+${cutFogGlsl('uView')}
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 vec3 viewAt(vec2 uv, float z) { return vec3((uv * 2.0 - 1.0 + vec2(uProj[2][0], uProj[2][1])) * -z / vec2(uProj[0][0], uProj[1][1]), z); }
 float sceneD(vec2 s) { return -getViewZ(textureLod(depthBuffer, s, 0.0).r); }
@@ -89,7 +91,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   g = (along * ga * 0.022 + vec2(-along.y, along.x) * gc * 0.01) * rough;
   vec3 N = normalize(mat3(uView) * normalize(vec3(-g.x, 1.0, -g.y)));
   float c = clamp(dot(-V, N), 0.0, 1.0), f = 1.0 - c;
-  float w = s * (0.12 + 0.78 * f * f * f * f * f);
+  float w = s * (0.12 + 0.78 * f * f * f * f * f) * (1.0 - cutFog(P)); // (none where the view distance's fog hides it)
   if (w < 0.01) return;
   vec3 R = reflect(V, N);
   // never down into the water, never behind the eye
@@ -155,7 +157,7 @@ class Reflections extends Effect {
   constructor(private readonly camera: THREE.PerspectiveCamera, sky: Sky) {
     super('Reflections', REFL, { attributes: EffectAttribute.DEPTH | EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([['uProj', new THREE.Uniform(new THREE.Matrix4())], ['uView', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())], ['uTime', new THREE.Uniform(0)], ['uMapTop', new THREE.Uniform(150)],
+        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())], ['uTime', new THREE.Uniform(0)], ['uMapTop', new THREE.Uniform(150)], ['fogCut', new THREE.Uniform(FOG_CUT)],
         ...Object.entries(sky.u) as [string, THREE.Uniform][]]) });
   }
   // the map's highest point (metres over the scene's zero)
@@ -230,6 +232,7 @@ const TRANSP = 'if (transparencyAware) {';
 //   the pixel lies off that sample's plane (its depth and normal are at hand): a sample across an edge -- another wall,
 //   the ground behind a roof -- counts next to nothing. Side by side the same picture, ~0.45 ms cheaper.
 const DEPTH = 'float depth = texture2D(sceneDepth, vUv).x;';
+const FOG = 'fogFactor = smoothstep( fogNear, fogFar, fogDepth );';
 const UP = /#ifdef HALFRES\s*\n\s*vec4 texel = vec4\(0\.0\);[\s\S]*?#else\s*vec4 texel = texture2D\(tDiffuse, vUv\);\s*#endif/;
 const UPSAMPLE = `vec4 texel = vec4(1.0);
   if (!isBackgroundDepth(depth)) {
@@ -262,12 +265,14 @@ ${REFL.replace('void mainImage(', 'void reflImage(')}
 function patchN8(n8: N8AOPostPass, transpOn: THREE.IUniform<boolean>, reflOn: THREE.IUniform<boolean>, reflUniforms: Map<string, THREE.Uniform>) {
   const patch = () => {
     const m = n8.effectCompositerQuad.material, ao = 'float finalAo = pow(texel.r, intensity);';
-    if (![ao, TRANSP, DEPTH, 'void main()'].every((s) => m.fragmentShader.includes(s)) || !UP.test(m.fragmentShader)) throw new Error('n8ao: composite shader changed');
+    if (![ao, TRANSP, DEPTH, FOG, 'void main()'].every((s) => m.fragmentShader.includes(s)) || !UP.test(m.fragmentShader)) throw new Error('n8ao: composite shader changed');
     m.fragmentShader = m.fragmentShader.replace(ao, `float finalAo = mix(1.0, pow(texel.r, intensity), abs(sceneTexel.a - 0.5) < 0.05 ? ${STAIR_AO.toFixed(2)} : 1.0);`)
       .replaceAll(', sceneTexel.a)', ', 1.0)')
       .replace(TRANSP, 'if (transparencyAware && uTransp) {')
       .replace(DEPTH, `${DEPTH}\n  if (uRefl) { vec4 rc; reflImage(sceneTexel, vUv, depth, rc); sceneTexel = rc; }`)
       .replace(UP, UPSAMPLE)
+      // the AO fades with the view distance's fog too (daylight.ts), not only with the weather's
+      .replace(FOG, 'fogFactor = max(smoothstep( fogNear, fogFar, fogDepth ), cutFog(getWorldPos(depth, vUv)));')
       .replace('void main()', `uniform bool uTransp;\n${REFL_N8}\nvoid main()`);
     Object.assign(m.uniforms, { uTransp: transpOn, uRefl: reflOn }, Object.fromEntries(reflUniforms));
     // the denoised AO, where the accumulation's copy of it was
@@ -367,7 +372,7 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     if (transpOn.value) render(r);
   };
   const n8render = n8.render.bind(n8);
-  n8.render = (...a) => { if (reflOn.value) reflections.update(); n8render(...a); };
+  n8.render = (...a) => { reflections.update(); n8render(...a); }; // (its view matrix: the AO's fog too)
   composer.addPass(n8);
   // the bloom in the last pass (not one of its own, ~0.4 ms): it reads that pass's input, after the depth blur
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });

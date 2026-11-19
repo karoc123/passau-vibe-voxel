@@ -7,13 +7,18 @@ import { clamp } from './util';
 //   res      0.5..1   pixels, a share of the screen's (at most 2 per CSS pixel)
 //   detail   0..1     how much of the city is at 1 m around the focus (main.ts budget, city.ts), the rest 8 m clay;
 //            phones hold 0.75 M triangles at most whatever it says
+//   dist     metres   the view distance (Sichtweite): the city's tiles further from the camera than this (along the
+//            ground) are neither drawn nor loaded, the fog closes in before it, a coarse ground stands beyond it
+//            (city.ts, daylight.ts, farground.ts); 0: the whole map
 // Unless the URL or the visitor set them, res and detail are chosen once at the first visit on a GPU (autores.ts) and
 // remembered with the GPU's name; they never change by themselves after that.
 export type Lod = 'auto' | 'off' | 'far' | 'far4';
-export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean }
+export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean; dist: number }
 export type Preset = 'low' | 'medium' | 'high';
 
 export const SHADOWS = [0, 1024, 2048, 4096];
+// the view distance's range (metres; DIST_MAX on the slider stands for the whole map, 0)
+export const DIST_MIN = 600, DIST_MAX = 5000;
 const KEY = 'passau.gfx', AUTO_KEY = 'passau.gfx.auto';
 // raised when the measuring changes enough that remembered results should be measured again (2: the detail too)
 export const AUTO_VERSION = 2;
@@ -44,12 +49,15 @@ export function gpuName() {
   } catch { return ''; }
 }
 
+// the view distance of Low and Medium (High: the whole map)
+const LOW_DIST = 1500, MEDIUM_DIST = 2500;
+
 // High is what the viewer did before there were settings (phones: 2048 shadows, no tilt-shift)
 export function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
-  const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true };
+  const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true, dist: 0 };
   return {
-    low: { ...high, res: 0.6, detail: 0.5, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2 },
-    medium: { ...high, res: 0.8, detail: 0.75, shadow: 2048, tilt: false, lodpx: 1.6 },
+    low: { ...high, res: 0.6, detail: 0.5, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2, dist: LOW_DIST },
+    medium: { ...high, res: 0.8, detail: 0.75, shadow: 2048, tilt: false, lodpx: 1.6, dist: MEDIUM_DIST },
     high,
   };
 }
@@ -58,12 +66,14 @@ const num = (s: string | null, lo: number, hi: number) => (s === null || s === '
 const bool = (s: string | null) => (s === null ? undefined : s !== '0');
 
 function fromQuery(q: URLSearchParams): Partial<Gfx> {
-  const shadow = num(q.get('shadow'), 0, 4096), lod = q.get('lod');
+  const shadow = num(q.get('shadow'), 0, 4096), lod = q.get('lod'), dist = num(q.get('dist'), 0, 1e6);
   const g: Partial<Gfx> = {
     res: num(q.get('res'), 0.5, 1), detail: num(q.get('detail'), 0, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
     shadow: shadow === undefined ? undefined : SHADOWS.reduce((a, b) => (Math.abs(b - shadow) < Math.abs(a - shadow) ? b : a)),
     ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')),
     lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : 'auto',
+    // (0, or anything past the slider's end: the whole map)
+    dist: dist === undefined ? undefined : dist <= 0 || dist >= DIST_MAX ? 0 : Math.max(DIST_MIN, Math.round(dist)),
   };
   for (const k of Object.keys(g) as (keyof Gfx)[]) if (g[k] === undefined) delete g[k];
   return g;
@@ -83,6 +93,7 @@ function toQuery(g: Gfx, d: Gfx, q: URLSearchParams) {
   put('lodpx', g.lodpx !== d.lodpx, String(+g.lodpx.toFixed(2)));
   put('prepass', g.prepass !== d.prepass, g.prepass ? '1' : '0');
   put('occl', g.occl !== d.occl, g.occl ? '1' : '0');
+  put('dist', g.dist !== d.dist, String(g.dist));
 }
 
 // What the visitor changed ({ v: 2, ...those }). Entries of older versions (no v) hold every setting, as they were

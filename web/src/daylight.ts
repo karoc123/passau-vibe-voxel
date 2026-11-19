@@ -29,6 +29,36 @@ THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begi
   THREE.ShaderChunk.lights_fragment_begin = `${c.slice(0, from)}#if UNROLLED_LOOP_INDEX != 1 || NUM_DIR_LIGHTS != 2\n\t\t${c.slice(from, end)}\n\t\t#endif${c.slice(end)}`;
 }
 
+// The view distance (settings.ts dist): a second fog, by the distance from the camera mostly along the ground, full at
+// the distance itself, where the city's tiles stop (city.ts). Along the ground: from high up the city below stays in
+// view (a vertical metre counts CUT_UP of a horizontal one; never less than the distance along the ground, so where a
+// tile is cut the fog is full). Each fogged material's vertex shader takes the greater of the two fogs as its fog
+// depth, in the weather fog's terms (the same smoothstep in the fragment shader: no new varying). The uniform is one
+// object shared by every material (a plain object: three's uniform cloning keeps it by reference).
+// fogCut: x, y the distance fog's start and end (y 0: none), z, w the weather fog's (scene.fog near, far).
+export const FOG_CUT = { x: 0, y: 0, z: 2500, w: 7000 };
+const CUT_UP = 0.35, CUT_START = 0.45;
+// the distance fog's share along its ramp, in the fog vertex shader (farground.ts takes it further)
+export const CUT_T = 'clamp( ( fogM - fogCut.x ) / ( fogCut.y - fogCut.x ), 0.0, 1.0 )';
+// the distance fog at a view-space position, given the view matrix (lamps.ts: their glow, drawn without fog, fades with
+// the city; post.ts: the AO and the reflections on what the fog hides)
+export const cutFogGlsl = (view: string) => `
+  uniform vec4 fogCut;
+  float cutFog(vec3 mv) {
+    if (fogCut.y <= 0.0) return 0.0;
+    float up = dot(mv, ${view}[1].xyz);
+    return smoothstep(fogCut.x, fogCut.y, sqrt(max(dot(mv, mv) - ${(1 - CUT_UP * CUT_UP).toFixed(4)} * up * up, 0.0)));
+  }`;
+for (const lib of Object.values(THREE.ShaderLib) as { uniforms: Record<string, THREE.IUniform> }[]) if (lib.uniforms.fogColor) lib.uniforms.fogCut = { value: FOG_CUT };
+THREE.ShaderChunk.fog_pars_vertex = THREE.ShaderChunk.fog_pars_vertex.replace('varying float vFogDepth;', `varying float vFogDepth;\nuniform vec4 fogCut;`);
+if (!THREE.ShaderChunk.fog_vertex.includes('vFogDepth = - mvPosition.z;')) throw new Error('three: fog_vertex changed');
+THREE.ShaderChunk.fog_vertex = THREE.ShaderChunk.fog_vertex.replace('vFogDepth = - mvPosition.z;', `vFogDepth = - mvPosition.z;
+  if ( fogCut.y > 0.0 ) {
+    float fogUp = dot( mvPosition.xyz, viewMatrix[ 1 ].xyz );
+    float fogM = sqrt( max( dot( mvPosition.xyz, mvPosition.xyz ) - ${(1 - CUT_UP * CUT_UP).toFixed(4)} * fogUp * fogUp, 0.0 ) );
+    vFogDepth = max( vFogDepth, mix( fogCut.z, fogCut.w, ${CUT_T} ) );
+  }`);
+
 // the city's shadow map is drawn in PARTS x PARTS parts, one a frame. Iris Xe, a time-of-day sweep from Oberhaus, GPU
 // ms/frame p50/p95: still 28.5/30; whole map each frame 56/59; 2 x 2 37/43; 3 x 3 34/37; 4 x 4 32/36 (but 16 frames a map)
 const PARTS = 3;
@@ -89,6 +119,8 @@ export class Daylight {
   private focus = new THREE.Vector3();
   private twinLive = true;
   private northTheta = 0;
+  // the view distance (settings.ts dist; 0: the whole map)
+  private cut = 0;
 
   constructor(private readonly renderer: THREE.WebGLRenderer, private readonly scene: THREE.Scene, shadowSize = 8192) {
     const sun = this.sun, size = Math.min(shadowSize, renderer.capabilities.maxTextureSize);
@@ -253,6 +285,13 @@ export class Daylight {
     sun.intensity *= e; hemi.intensity *= e; this.scene.environmentIntensity *= e;
   }
 
+  // The view distance: the fog is full there (from CUT_START of it on), and the city's shadow map covers no more
+  setCut(d: number) {
+    if (d === this.cut) return;
+    this.cut = d;
+    FOG_CUT.x = d * CUT_START; FOG_CUT.y = d;
+  }
+
   // height: the camera above the ground. Low views look along the city, so the haze closes in and softens the far
   // hills and the map's edge into the sky; the old town across the river stays clear (from Oberhaus the Dom is ~500 m
   // off, the far side of the old town ~900 m). From the overview up, the whole map stays as clear as before.
@@ -266,6 +305,7 @@ export class Daylight {
     const w = this.weather, k = visibility(w), low = 1 - smooth(60, 450, height), least = low * (400 * w.rain + 250 * w.snow);
     fog.near = Math.max(lerp(2500, 700, low) * k ** (2 - low), least, dist * (0.6 + 0.45 * k));
     fog.far = fog.near + lerp(4500, 2200, low) * k;
+    FOG_CUT.z = fog.near; FOG_CUT.w = fog.far;
   }
 
   fitShadow(focus: THREE.Vector3, camera: THREE.Camera, viewDist: number, map: THREE.Box3) {
@@ -273,7 +313,8 @@ export class Daylight {
     const sun = this.sun, f = focus;
     const dist = viewDist + Math.max(0, camera.position.y - (map.min.y + 80));
     // refit in steps (a tenth in size, a sixteenth across), not every frame the view moves: each refit redraws the city
-    const top = Math.max(map.max.x, map.max.z) * 0.75, R = clamp(dist * 1.15, 300, top);
+    // (within the view distance: what lies beyond is neither drawn nor seen through the fog)
+    const top = Math.min(Math.max(map.max.x, map.max.z) * 0.75, this.cut || Infinity), R = clamp(dist * 1.15, Math.min(300, top), top);
     const Rq = Math.min(top, 1.1 ** Math.ceil(Math.log(R) / Math.log(1.1))), g = Rq / 16;
     const c = new THREE.Vector3(Math.round(f.x / g) * g, 0, Math.round(f.z / g) * g), Rf = Rq + 0.75 * g, texel = (2 * Rf) / sun.shadow.mapSize.x;
     const L = this.lightDir, key = `${c.x},${c.z},${Rq.toFixed(1)},${L.x.toFixed(4)},${L.y.toFixed(4)},${L.z.toFixed(4)}`;

@@ -7,8 +7,15 @@ import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';
 import { MAT, makeBuildDepthMaterial, makeClayDepthMaterial, makeVoxelMaterial, makeVoxelPrepassMaterial, type VoxelUniforms } from './voxelMaterial';
 import { Occlusion } from './occlusion';
+import { FarGround } from './farground';
 
 const T = 128;
+// The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
+// within the distance + LOAD_M of the camera along the ground, kept once in until it is further than + KEEP_M (so a
+// camera moving to and fro at the edge doesn't load and free the same tiles over and over), and freed FREE_MS after
+// it left. A mesh is drawn while its box's nearest point is within the distance + DRAW_M: the fog (daylight.ts) is full
+// at the distance, so a tile comes and goes unseen. Beyond, the coarse far ground (farground.ts) stands in.
+const LOAD_M = 150, KEEP_M = 400, DRAW_M = 32, FREE_MS = 8000;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
 
 // The city at 1 m, as much of it as the budget allows (triangles of 1 m buildings, city blocks nearest to the focus
@@ -18,7 +25,7 @@ const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 
 //   3. everything else, nearest to the view first, each building once all its tiles are in; over clay a city block
 //      turns real once every tile under it is in, and back to clay when the budget moves on
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
-export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
+export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
   meta: Meta;
@@ -30,6 +37,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   prepass?: DepthPrepass | null;
   lod?: { mode: Lod; px: number };
   occlusion?: boolean;
+  // the view distance in metres, 0: the whole map
+  dist?: number;
   // the drawing buffer's height in pixels (the renderer's own: the resolution setting scales it)
   pixelsHigh?: () => number;
 }) {
@@ -73,13 +82,34 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const blkIds = dataTexture(new Uint16Array(zbuf, 0, W * D), W, D, THREE.RedIntegerFormat, THREE.UnsignedShortType);
   blkIds.internalFormat = 'R16UI';
   U.uZBlk.value = blkIds;
+  // the view distance: which tiles are in range of the camera (along the ground), with the hysteresis above
+  let cut = dist;
+  const inRange = new Uint8Array(total).fill(1), camAt = new THREE.Vector3();
+  const flat = (x0: number, z0: number, x1: number, z1: number) =>
+    Math.hypot(Math.max(x0 - camAt.x, 0, camAt.x - x1), Math.max(z0 - camAt.z, 0, camAt.z - z1));
+  const range = () => {
+    camera.updateMatrixWorld();
+    camAt.setFromMatrixPosition(camera.matrixWorld);
+    if (!cut) { inRange.fill(1); return; }
+    for (let ty = 0; ty < d.ny; ty++) for (let tx = 0; tx < d.nx; tx++) {
+      const i = index(tx, ty), r = flat(tx * T, ty * T, (tx + 1) * T, (ty + 1) * T);
+      inRange[i] = r <= cut + (inTile[i] ? KEEP_M : LOAD_M) ? 1 : 0;
+    }
+  };
+  // a mesh drawn at this distance
+  const drawn = (m: THREE.Mesh) => {
+    const b = m.geometry.boundingBox;
+    return !cut || !b || flat(b.min.x, b.min.z, b.max.x, b.max.z) <= cut + DRAW_M;
+  };
+  const far = new FarGround(meta, d.nx, d.ny), farMask = new Uint8Array(total);
+  scene.add(far.group);
   const bdist = (b: number[], f: THREE.Vector3) => Math.hypot(Math.max(b[3] - f.x, 0, f.x - b[5]), Math.max(b[4] - f.z, 0, f.z - b[6]));
   const order = blocks.map((_, k) => k);
   let whole = true;
   const choose = (f: THREE.Vector3) => {
     const B = budget();
     whole = B >= cityTris;
-    if (whole) { blkWant.fill(1); want.fill(1); return; }
+    if (whole) { blkWant.fill(1); want.set(inRange); return; }
     order.sort((a, b) => bdist(blocks[a], f) - bdist(blocks[b], f));
     let sum = 0;
     const next = new Uint8Array(nk + 1);
@@ -90,7 +120,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     }
     blkWant.set(next);
     want.fill(0);
-    for (let k = 0; k < nk; k++) if (blkWant[k + 1]) for (const i of blockTiles[k]) want[i] = 1;
+    for (let k = 0; k < nk; k++) if (blkWant[k + 1]) for (const i of blockTiles[k]) want[i] = inRange[i];
   };
 
   const bldAt = (x: number, y: number) => bld[Math.min(D - 1, Math.round(y)) * W + Math.min(W - 1, Math.round(x))] - 1;
@@ -200,6 +230,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   }
 
   setLod(lod);
+  range();
   look();
   choose(focus());
   if (!whole) startClay();
@@ -233,6 +264,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     last = now;
     S.retire();
     const f = focus();
+    range();
     look();
     choose(f);
     if (!whole && clay === 'none') startClay();
@@ -248,7 +280,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     };
     for (const [k, p] of shownN) {
       // gone (freed elsewhere), or none of it wanted any more once the clay stands in for it
-      if (S.nodes.get(k)?.state !== 'ready' || (clay === 'ready' && !tilesOfNode(p).some((i) => want[i]))) shownN.delete(k);
+      if (S.nodes.get(k)?.state !== 'ready' || ((clay === 'ready' || cut) && !tilesOfNode(p).some((i) => want[i]))) shownN.delete(k);
     }
     for (const n of chosen.values()) {
       if (shownN.has(n.key) || !ready(n)) continue;
@@ -269,7 +301,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     }
     for (const p of shownN.values()) for (const i of tilesOfNode(p)) cover[i] = p.s;
     let changed = false;
+    farMask.fill(0);
+    const masks = (n: { s: number; tx: number; ty: number }) => {
+      for (let y = n.ty * n.s; y < Math.min(d.ny, (n.ty + 1) * n.s); y++) for (let x = n.tx * n.s; x < Math.min(d.nx, (n.tx + 1) * n.s); x++) farMask[index(x, y)] = 1;
+    };
     for (const n of S.nodes.values()) {
+      if (n.s === 8 && clay === 'ready' && n.mesh) { n.mesh.visible = drawn(n.mesh); if (n.mesh.visible) masks(n); }
       if (n.s === 8 || n.state !== 'ready') continue;
       const on = shownN.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key);
       if (on && !counted.has(n.key)) {
@@ -279,7 +316,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
           if (n.s > 1) n.mesh.material = farMat; // a distance level's
         }
       }
-      if (n.mesh) n.mesh.visible = on;
+      if (n.mesh) {
+        n.mesh.visible = on && drawn(n.mesh);
+        if (n.mesh.visible && !n.foliage) masks(n);
+      }
     }
     for (let i = 0; i < total; i++) {
       const was = inTile[i];
@@ -296,10 +336,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (const n of [...S.nodes.values()]) {
       if (n.s === 8 || n.foliage || n.state !== 'ready') continue;
       if (shownN.has(n.key) || chosen.has(n.key)) { n.used = now; continue; }
-      const out = n.s === 1 && !want[index(n.tx, n.ty)];
+      // (out of range: none of its tiles in range of the view distance)
+      const gone = !!cut && !tilesOfNode(lnode(n.s, n.tx, n.ty)).some((i) => inRange[i]);
+      const out = n.s === 1 && !want[index(n.tx, n.ty)] && !gone;
       if (out && clay !== 'ready') continue;
       const fol = n.s === 1 ? S.nodes.get(`f/${n.tx}_${n.ty}`) : undefined;
-      if (now - n.used > (out ? 4000 : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
+      if (now - n.used > (gone ? FREE_MS : out ? 4000 : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
         if (fol) { counted.delete(fol.key); S.free(fol); }
         counted.delete(n.key);
         S.free(n);
@@ -310,14 +352,19 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (let i = 0; i < total; i++) if (want[i]) { wanted++; tilesNow += inTile[i]; folNow += folTile[i]; }
     for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
     settled = tilesNow === wanted && pending === 0;
-    if (stage === 1 && lmShown === landmarks.length) toStage2();
+    // (the landmarks wanted: those beyond the view distance never come)
+    if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !want[k])))) toStage2();
     if (stage === 2 && tilesNow === wanted) stage = U.uStage.value = 3;
     if (stage >= 3) for (const n of chosen.values()) {
       if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
-    if (terrain && stage >= 2) terrain.dropUnder(inTile);
+    // (the first moment's terrain: under the tiles in, and beyond the view distance, where the far ground is)
+    if (terrain && stage >= 2) terrain.dropUnder(cut ? inTile.map((v, i) => v | (inRange[i] ^ 1)) : inTile);
     if (terrain && stage >= 3 && whole) terrain.dispose();
+    terrain?.cover(farMask);
+    far.on = !!cut;
+    if (cut) far.setMask(farMask);
     if (changed) shownTex.needsUpdate = true;
     realTris = 0;
     for (let k = 0; k < nk; k++) {
@@ -405,6 +452,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     // every tile the budget asks for is in
     get settled() { return settled; },
     setLod,
+    // the view distance (0: the whole map): the next update loads, shows and frees by it
+    setDist(m: number) { cut = m; },
     setOcclusion(on: boolean) { occOn = on; },
     // occlusion culling now (tools): on, the last update's cost (ms), tile meshes, of them hidden
     get occlusion() { return { on: occOn && clay === 'none', ...occStats }; },
@@ -464,6 +513,9 @@ async function loadTerrain(meta: Meta, scene: THREE.Scene, nx: number, ny: numbe
     dropUnder(inTile: Uint8Array) {
       pieces.forEach((m, i) => { if (m && inTile[i]) { scene.remove(m); m.geometry.dispose(); pieces[i] = null; } });
     },
-    dispose() { if (tex.image.data) { tex.dispose(); tex.image.data = null as unknown as Uint8Array; } },
+    // where a piece still stands (the far ground gives way to it)
+    cover(mask: Uint8Array) { pieces.forEach((m, i) => { if (m) mask[i] = 1; }); },
+    // (once every piece is gone)
+    dispose() { if (tex.image.data && pieces.every((m) => !m)) { tex.dispose(); tex.image.data = null as unknown as Uint8Array; } },
   };
 }

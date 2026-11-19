@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { lampColour } from './voxelMaterial';
+import { cutFogGlsl, FOG_CUT } from './daylight';
 
 // The heads of the street lamps placed along the streets (voxelMaterial.ts lightStreets: their pools are in the lamp
 // map, and they have no post): a soft point of light 4.5 m over the street, in the lamp's colour, bright enough at night
 // for the bloom to give it a halo. A point sprite ~0.75 m across, never under ~2.5 pixels (its light spread over them
 // instead, so a far street is a string of faint dots, not of sparks). Drawn after the city, tested against its depth
 // and writing none; added to the colour only, so the scene's alpha (the reflections' and the AO's marks) is untouched.
-const VERT = `
+// (beyond the view distance, daylight.ts, the lamps fade with the city: they are drawn without fog)
+const VERT = `${cutFogGlsl('viewMatrix')}
 attribute vec3 color;
 uniform float uScale; uniform float uOn;
 varying vec3 vCol;
@@ -15,7 +17,7 @@ void main() {
   gl_Position = projectionMatrix * mv;
   float px = 0.75 * uScale / max(-mv.z, 1.0), s = max(px, 2.5);
   gl_PointSize = min(s, 64.0);
-  vCol = color * uOn * 5.0 * (px / s) * mix(1.0, px / s, 0.5);
+  vCol = color * uOn * 5.0 * (px / s) * mix(1.0, px / s, 0.5) * (1.0 - cutFog(mv.xyz));
 }`;
 const FRAG = `
 varying vec3 vCol;
@@ -40,7 +42,7 @@ export class LampHeads {
     });
     const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(pos, 3)).setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.computeBoundingSphere();
-    this.mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { uScale: { value: 500 }, uOn: { value: 0 } },
+    this.mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { uScale: { value: 500 }, uOn: { value: 0 }, fogCut: { value: FOG_CUT } },
       depthWrite: false, transparent: true, fog: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
       blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
     this.points = new THREE.Points(geo, this.mat);

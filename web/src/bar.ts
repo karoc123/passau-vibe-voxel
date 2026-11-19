@@ -1,6 +1,6 @@
 import { PlaceSearch } from './search';
 import { dateOf } from './sun';
-import { type Gfx, type Preset, SHADOWS, type Settings } from './settings';
+import { DIST_MAX, DIST_MIN, type Gfx, type Preset, SHADOWS, type Settings } from './settings';
 import { $, el } from './util';
 
 const hhmm = (h: number) => { const m = Math.round(h * 60); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
@@ -109,6 +109,10 @@ class Graphics {
     const onOff: [boolean, string][] = [[true, 'on'], [false, 'off']];
     slide('res', { min: 0.5, max: 1, step: 0.05, show: (v) => `Resolution ${Math.round(v * 100)} %` });
     slide('detail', { min: 0, max: 1, step: 0.05, show: (v) => `City at 1 m ${v >= 1 ? 'all' : `${Math.round(v * 100)} %`}` });
+    // the view distance: the slider's end is the whole map (0)
+    const dist = new Slider(adv, { min: DIST_MIN, max: DIST_MAX, step: 100, near: 50, log: true, marks: { low: s.presets.low.dist, medium: s.presets.medium.dist },
+      show: (v) => `View distance ${v >= DIST_MAX ? 'whole map' : `${(v / 1000).toFixed(1)} km`}`, onInput: (v) => this.change({ dist: v >= DIST_MAX ? 0 : v }) });
+    this.sync.push(() => { if (document.activeElement !== dist.input) dist.set(s.now.dist || DIST_MAX); });
     pick('shadow', 'Shadows', SHADOWS.filter((n) => n <= maxShadow).map((n) => [n, n ? `${n / 1024}k` : 'off']));
     pick('ao', 'Ambient occlusion', onOff);
     pick('bloom', 'Bloom', onOff);
@@ -120,7 +124,7 @@ class Graphics {
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
     pick('occl', 'Occlusion culling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
-    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. Depth pre-pass: slower on some GPUs.', adv);
+    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. View distance: the city further away is neither loaded nor drawn, hidden in haze. Depth pre-pass: slower on some GPUs.', adv);
     this.show();
   }
 
