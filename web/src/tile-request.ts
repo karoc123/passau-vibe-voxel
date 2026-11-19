@@ -2,6 +2,7 @@
 // workers, tools/tris.mjs meshes every tile with it in Node to count the triangles (meta.json tiles.tris), so the
 // counts are those of the meshes the viewer draws.
 import type { MeshRequest } from './mesher.worker';
+import type { Meta } from './types';
 import { PAL_ROOF, PAL_WALL } from './chamfer';
 import { MAT } from './voxelMaterial';
 
@@ -12,7 +13,7 @@ export interface TileContext {
   N: number;
   W: number;
   D: number;
-  // the coarsest level: the clay (city.ts), meshed without buildings and roof palette
+  // the clay's level (city.ts CLAY), meshed without buildings and roof palette; 0: none, every level is the city
   clay: number;
   // per palette entry: roof material, its staircases shaded as roof planes; a building's wall, its diagonal staircases
   // chamfered flat (mesher.worker.ts, chamfer.ts)
@@ -22,6 +23,13 @@ export interface TileContext {
   // the building of each 1 m column, W x D (zones.bin; city.ts sets it once loaded)
   bldMap: { data: Uint16Array; W: number } | null;
 }
+
+// The old way to spend the budget (city.ts): the city blocks nearest the focus at 1 m, the rest of the map as grey 8 m
+// clay. Off: the budget picks the tiles' levels (1, 2, 4, 8 m), every one of them in its colours. Also on where the
+// data has no triangle counts (meta.json tiles.tris, tools/tris.mjs). Kept until the clay goes for good.
+export const CLAY = false;
+// the clay's level for this data (TileContext.clay): its coarsest, or 0 without the clay
+export const clayLevel = (meta: Meta) => (CLAY || !meta.tiles.tris ? Math.max(...meta.tiles.levels.map((l) => l.s)) : 0);
 
 export function paletteFlags(palette: [number, number, number, number][]) {
   return {
@@ -44,7 +52,7 @@ export function tileRequest(c: TileContext, s: number, tx: number, ty: number, f
     return { ...base, key: `f/${tx}_${ty}`, url: file(`1f/${tx}_${ty}`), under: file(`1/${tx}_${ty}`), keep: false, dataOnly: false, bld: null, roof: null,
       base: { bld: buildingIds(c, x0, y0), roof: c.roofPal, leaf: c.leafPal } };
   }
-  // level 1 and the distance levels are meshed with their buildings and roof palette, the clay without
+  // level 1 and the distance levels are meshed with their buildings and roof palette, the clay (if any) without
   const key = `${s}/${tx}_${ty}`, city = !dataOnly && s !== c.clay;
   return { ...base, key, url: file(key), keep: keep || s > 1, dataOnly, bld: city ? buildingIds(c, x0, y0, s) : null, roof: city ? c.roofPal : null };
 }

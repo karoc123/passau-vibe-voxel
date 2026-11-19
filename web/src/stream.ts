@@ -3,7 +3,7 @@ import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
 import type { Columns } from './tile-data';
 import { World, type ColumnSource } from './world';
-import { paletteFlags, tileRequest, type TileContext } from './tile-request';
+import { clayLevel, paletteFlags, tileRequest, type TileContext } from './tile-request';
 
 export interface TileNode {
   key: string;
@@ -140,7 +140,7 @@ function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
 export class TileStreamer implements ColumnSource {
   readonly N: number;
   readonly levels: number[];
-  // the coarsest level: the clay (city.ts), the others the city at 1 m and its distance levels
+  // the clay's level (city.ts, tile-request.ts CLAY), 0 for none; the others the city at 1 m and its distance levels
   readonly clay: number;
   readonly dims: Record<number, TileLevel>;
   readonly nodes = new Map<string, TileNode>();
@@ -162,7 +162,7 @@ export class TileStreamer implements ColumnSource {
   constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
-    this.clay = this.levels[0];
+    this.clay = clayLevel(meta);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
     this.ctx = { N: this.N, W: meta.W, D: meta.D, clay: this.clay, ...paletteFlags(meta.palette), bldMap: null };
     scene.add(this.group);

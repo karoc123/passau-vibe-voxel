@@ -109,7 +109,8 @@ class Graphics {
     };
     const onOff: [boolean, string][] = [[true, 'on'], [false, 'off']];
     slide('res', { min: 0.5, max: 1, step: 0.05, show: (v) => `Resolution ${Math.round(v * 100)} %` });
-    slide('detail', { min: 0, max: 1, step: 0.05, show: (v) => `City at 1 m ${v >= 1 ? 'all' : `${Math.round(v * 100)} %`}` });
+    // (the triangles drawn: about the whole map at 8 m at 0, all of it at 1 m at 1; main.ts budget)
+    slide('detail', { min: 0, max: 1, step: 0.05, show: (v) => `Detail ${v >= 1 ? 'all at 1 m' : `${Math.round(v * 100)} %`}` });
     // the view distance: the slider's end is the whole map (0)
     const dist = new Slider(adv, { min: DIST_MIN, max: DIST_MAX, step: 100, near: 50, log: true, marks: { low: s.presets.low.dist, medium: s.presets.medium.dist },
       show: (v) => `View distance ${v >= DIST_MAX ? 'whole map' : `${(v / 1000).toFixed(1)} km`}`, onInput: (v) => this.change({ dist: v >= DIST_MAX ? 0 : v }) });
@@ -120,7 +121,7 @@ class Graphics {
     pick('tilt', 'Tilt-shift blur', onOff);
     pick('refl', 'Reflections', onOff);
     slide('grade', { min: 0, max: 2, step: 0.1, marks: { default: 1, off: 0 }, show: (v) => `Film grade ${v.toFixed(1)}` });
-    pick('lod', 'Far tiles at 2 and 4 m', [['auto', 'auto'], ['off', 'never'], ['far', '2 m'], ['far4', '4 m']]);
+    pick('lod', 'Far tiles at 2, 4 and 8 m', [['auto', 'auto'], ['off', 'never'], ['far', '2 m'], ['far4', '4 m'], ['far8', '8 m']]);
     const px = slide('lodpx', { min: 0.6, max: 3, step: 0.1, marks: { default: 1.2 }, show: (v) => `Coarser below ${v.toFixed(1)} px` });
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
     pick('occl', 'Occlusion culling', onOff);

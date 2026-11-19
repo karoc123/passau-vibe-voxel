@@ -1,8 +1,8 @@
 // Fetches, unzips and greedy-meshes one tile (scripts/tiles.py), with baked ambient occlusion.
 // Data coordinates: x east, y south, z up. Positions go out in three.js axes (x, z, y), metres.
-// A tile is N x N cells of s metres plus a 1-cell apron. The distance level (2 m, scripts/tiles.py LOD_LEVELS)
-// are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres on the way
-// out; the clay (8 m) comes without roof palette and is plain voxels.
+// A tile is N x N cells of s metres plus a 1-cell apron. The distance levels (2, 4 and 8 m, scripts/tiles.py
+// LOD_LEVELS) are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres
+// on the way out; the clay (8 m, only with tile-request.ts CLAY) comes without roof palette and is plain voxels.
 import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { slopeRoofs, wallTopCode } from './roofs';
 import { decodeTile, type Columns, type RawColumns } from './tile-data';

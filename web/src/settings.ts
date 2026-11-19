@@ -5,8 +5,9 @@ import { clamp } from './util';
 // pre-pass's) still reaches them for the rest. On load the URL wins over what is remembered, which wins over the
 // defaults; only what differs from the defaults is written into the URL. All of them apply live.
 //   res      0.5..1   pixels, a share of the screen's (at most 2 per CSS pixel)
-//   detail   0..1     how much of the city is at 1 m around the focus (main.ts budget, city.ts), the rest 8 m clay;
-//            phones hold 0.75 M triangles at most whatever it says
+//   detail   0..1     the triangles the city's tiles may draw (main.ts budget, city.ts): from about the whole map at
+//            8 m (0) to everything at 1 m (1); between, the whole map at 4 m first, then the nearest at 2 and 1 m.
+//            Phones draw 2 M at most whatever it says
 //   dist     metres   the view distance (Sichtweite): the city's tiles further from the camera than this (along the
 //            ground) are neither drawn nor loaded, the fog closes in before it, a coarse ground stands beyond it
 //            (city.ts, daylight.ts, farground.ts); 0: the whole map
@@ -15,7 +16,7 @@ import { clamp } from './util';
 //            preset changes it (nor does measuring: autores.ts does not run with it on)
 // Unless the URL or the visitor set them, res and detail are chosen once at the first visit on a GPU (autores.ts) and
 // remembered with the GPU's name; they never change by themselves after that.
-export type Lod = 'auto' | 'off' | 'far' | 'far4';
+export type Lod = 'auto' | 'off' | 'far' | 'far4' | 'far8';
 export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean; dist: number; taa: boolean }
 export type Preset = 'low' | 'medium' | 'high';
 
@@ -76,7 +77,7 @@ function fromQuery(q: URLSearchParams): Partial<Gfx> {
     res: num(q.get('res'), 0.5, 1), detail: num(q.get('detail'), 0, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
     shadow: shadow === undefined ? undefined : SHADOWS.reduce((a, b) => (Math.abs(b - shadow) < Math.abs(a - shadow) ? b : a)),
     ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')), taa: bool(q.get('taa')),
-    lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : 'auto',
+    lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : lod === '8' ? 'far8' : 'auto',
     // (0, or anything past the slider's end: the whole map)
     dist: dist === undefined ? undefined : dist <= 0 || dist >= DIST_MAX ? 0 : Math.max(DIST_MIN, Math.round(dist)),
   };
@@ -94,7 +95,7 @@ function toQuery(g: Gfx, d: Gfx, q: URLSearchParams) {
   put('tilt', g.tilt !== d.tilt, g.tilt ? '1' : '0');
   put('refl', g.refl !== d.refl, g.refl ? '1' : '0');
   put('grade', g.grade !== d.grade, String(+g.grade.toFixed(2)));
-  put('lod', g.lod !== d.lod, g.lod === 'off' ? '0' : g.lod === 'far' ? '2' : g.lod === 'far4' ? '4' : '1');
+  put('lod', g.lod !== d.lod, g.lod === 'off' ? '0' : g.lod === 'far' ? '2' : g.lod === 'far4' ? '4' : g.lod === 'far8' ? '8' : '1');
   put('lodpx', g.lodpx !== d.lodpx, String(+g.lodpx.toFixed(2)));
   put('prepass', g.prepass !== d.prepass, g.prepass ? '1' : '0');
   put('occl', g.occl !== d.occl, g.occl ? '1' : '0');
@@ -112,7 +113,7 @@ function stored(defaults: Gfx): Partial<Gfx> {
     // checked as a query would be: an old or hand-edited entry cannot set anything out of range
     const o = JSON.parse(s) as Record<string, unknown>, q = new URLSearchParams(), legacy = o.v !== 2;
     delete o.v;
-    for (const [k, v] of Object.entries(o)) q.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : v === 'off' ? '0' : v === 'far' ? '2' : v === 'far4' ? '4' : String(v));
+    for (const [k, v] of Object.entries(o)) q.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : v === 'off' ? '0' : v === 'far' ? '2' : v === 'far4' ? '4' : v === 'far8' ? '8' : String(v));
     const g = fromQuery(q);
     if (legacy) {
       delete g.prepass;
