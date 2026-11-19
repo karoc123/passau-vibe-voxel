@@ -70,6 +70,12 @@ const CELLS = 16, PATCH = 4;
 const SUN_TEXELS = 0.5;
 // the map's square is fitted again once the view rests (REST_MS without wanting another square)
 const REST_MS = 400;
+// The square's half-size: what the view needs (the focus's distance from the camera and its height, daylight.fitShadow),
+// within the view distance, and never more than SHADOW_R (metres) however far the view reaches (a view distance of
+// 'whole map', a map of any size): 1.2 m texels at 4096², 0.6 m at 8192²; further out a voxel's shadow is under a
+// pixel and the haze closes in. (Passau's widest view, 'Whole map' 2.5 km up, asks for it: as before, when the cap
+// was three quarters of the map's size.)
+const SHADOW_R = 2400;
 // What moves (traffic, people, boats) is simulated within 900 m of a centre that trails the focus by up to 120 m
 // (sim/life.ts): its map covers no more than that, at no more than 2048² (at the overview finer than the city's).
 const TWIN_R = 1050, TWIN_MAX = 2048;
@@ -464,7 +470,7 @@ export class Daylight {
     // a g that way), so a flight crosses ~1.25 g a map, not one; once the view needs a larger one (aimed a step larger
     // while it grows, so a zoom out redraws every other step); and a smaller one only once the view rests (REST_MS):
     // a zoom in redraws once, at its end. Or once the light has turned (tipShift) or the city changed.
-    const top = Math.min(Math.max(map.max.x, map.max.z) * 0.75, this.cut || Infinity), R = clamp(dist * 1.15, Math.min(300, top), top);
+    const top = Math.min(SHADOW_R, this.cut || Infinity), R = clamp(dist * 1.15, Math.min(300, top), top);
     const ideal = Math.min(top, 1.1 ** Math.ceil(Math.log(R) / Math.log(1.1))), now = performance.now();
     if (Number.isFinite(this.lastF.x)) this.drift.lerp(new THREE.Vector3(f.x - this.lastF.x, 0, f.z - this.lastF.z), 0.25);
     this.lastF.set(f.x, 0, f.z);

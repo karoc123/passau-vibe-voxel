@@ -135,6 +135,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // in the view's frustum: a tile tested when first asked after look() (seenAt: the look it was tested in), a node by
   // its box first (out of it, so is every tile of it)
   const seenAt = new Uint32Array(total), seenV = new Uint8Array(total), frustum = new THREE.Frustum(), box = new THREE.Box3(), pm = new THREE.Matrix4();
+  // (a tile's box: the ground to the map's top, meta.H, as the occlusion's; not a fixed height)
+  const boxTop = meta.H + 3;
   let lookN = 0;
   const look = () => {
     camera.updateMatrixWorld();
@@ -144,7 +146,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const seen = (i: number) => {
     if (seenAt[i] !== lookN) {
       const tx = i % d.nx, ty = Math.floor(i / d.nx);
-      box.min.set(tx * T, 0, ty * T); box.max.set((tx + 1) * T, 330, (ty + 1) * T);
+      box.min.set(tx * T, 0, ty * T); box.max.set((tx + 1) * T, boxTop, (ty + 1) * T);
       seenV[i] = frustum.intersectsBox(box) ? 1 : 0;
       seenAt[i] = lookN;
     }
@@ -223,7 +225,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     return false;
   };
   const nodeSeen = (n: LNode) => {
-    box.min.set(n.x0 * T, 0, n.y0 * T); box.max.set(n.x1 * T, 330, n.y1 * T);
+    box.min.set(n.x0 * T, 0, n.y0 * T); box.max.set(n.x1 * T, boxTop, n.y1 * T);
     if (!frustum.intersectsBox(box)) return false;
     for (let y = n.y0; y < n.y1; y++) for (let x = n.x0; x < n.x1; x++) if (seen(index(x, y))) return true;
     return false;

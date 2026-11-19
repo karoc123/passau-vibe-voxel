@@ -63,11 +63,16 @@ export class LifeMeshes {
     this.pole = instanced(merge(box(0.18, 3.3, 0.18, 0, 0, 0, 0x3a3e42), box(0.42, 1.25, 0.36, 0, 3.0, 0, 0x202225)), std({ vertexColors: true, roughness: 0.6 }), H);
     this.pole.castShadow = true;
     this.lamp = instanced(new THREE.BoxGeometry(0.3, 0.3, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }), H, { color: true });
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
-    heads.forEach(([x, y, z, rot], i) => this.pole.setMatrixAt(i, m.compose(new THREE.Vector3(x, z, y), q.setFromAxisAngle(up, rot + Math.PI), one)));
-    this.pole.count = heads.length;
+    this.pole.count = 0; // (the signals near the focus: poles())
     this.group.add(this.body, this.dark, this.head, this.tail, this.legs, this.torso, this.bike, this.pole, this.lamp, this.tram, this.tramWin);
     scene.add(this.group);
+  }
+
+  // the signals' poles: those of heads[which] (life.ts: near the focus)
+  poles(heads: [number, number, number, number, ...number[]][], which: number[]) {
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+    which.forEach((h, i) => { const [x, y, z, rot] = heads[h]; this.pole.setMatrixAt(i, m.compose(p.set(x, z, y), q.setFromAxisAngle(up, rot + Math.PI), one)); });
+    setCount(which.length, this.pole);
   }
 }
 

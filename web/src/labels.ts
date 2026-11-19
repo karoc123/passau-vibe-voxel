@@ -3,6 +3,7 @@ import type { Rect } from './hud';
 import type { Facts, Label } from './types';
 import { $, el } from './util';
 import type { World } from './world';
+import { FOG_CUT } from './daylight';
 
 interface Pin {
   el: HTMLElement;
@@ -23,6 +24,8 @@ interface Pin {
   // off (.label.off) since offAt: its fade out over, it is left where it is (no style written each frame)
   dimmed: boolean;
   offAt: number;
+  // its place in the order given (the searched place's: first)
+  order: number;
 }
 export interface Placed extends Facts { x: number; y: number; z: number }
 
@@ -30,6 +33,9 @@ const details = (f: Facts) => [f.en && f.kind, f.height && `${f.height} m`, f.ye
 const levelAt = (d: number, far: number) => d < Math.max(250, Math.min(far * 0.3, 900)) ? 2 : 0;
 
 const STEM = 20, TOP = 8, MAX = 12, SETTLE = 150, OFF_MS = 700; // (OFF_MS: longer than .label.off's fade, style.css)
+// the labels by CELL m square of the map, looked at only within the camera's reach: its far plane, and with a view
+// distance (daylight.ts FOG_CUT) CUT_OUT beyond that (where the buildings, city.gate, are gone into the fog)
+const CELL = 512, CUT_OUT = 500;
 const overlap = (r: Rect, q: Rect) => r.x0 < q.x1 + 6 && r.x1 + 6 > q.x0 && r.y0 < q.y1 + 2 && r.y1 + 2 > q.y0;
 
 // Map pins: a dot on the roof, a hairline stem, the name above. Hidden when something else is in the way (a voxel
@@ -41,6 +47,12 @@ export class Labels {
   private readonly pins: Pin[] = [];
   private picked: Pin | null = null;
   private frame = 0;
+  private readonly grid = new Map<number, Pin[]>();
+  // the pins in the cells within reach (for the square of cells windowKey), and those on or fading out
+  private near: Pin[] = [];
+  private windowKey = '';
+  private readonly live = new Set<Pin>();
+  private list: Pin[] = [];
 
   constructor(labels: Label[], onClick: (l: Label) => void) {
     labels.forEach((l) => {
@@ -50,26 +62,54 @@ export class Labels {
         if (l.site && pin.level === 2) open(l.site, '_blank', 'noopener');
         else onClick(l);
       });
-      this.pins.push(pin);
+      pin.order = this.pins.push(pin) - 1;
+      const k = Math.floor(pin.p.z / CELL) * 65536 + Math.floor(pin.p.x / CELL);
+      (this.grid.get(k) ?? this.grid.set(k, []).get(k)!).push(pin);
     });
     document.fonts?.ready.then(() => { for (const p of this.pins) p.dims = []; });
   }
 
+  // (off until placed: a pin out of reach is never looked at)
   private add(cls: string, f: Facts, p: THREE.Vector3, base: THREE.Vector3, R: number): Pin {
     const facts = details(f).map((d) => `<span>${d}</span>`).join('');
-    const e = el('div', cls, `<i class="dot"></i><i class="stem"></i><div class="txt"><b>${f.name}</b><span>${f.en ?? f.kind}</span>${facts ? `<p>${facts}</p>` : ''}</div>`, this.host);
-    return { el: e, txt: $('.txt', e), p, base, R, occluded: false, w: 0, h: 0, far: f.far ?? 1300, level: -1, dims: [], shift: 0, on: false, side: 'r', since: -1, dimmed: false, offAt: 0 };
+    const e = el('div', `${cls} off`, `<i class="dot"></i><i class="stem"></i><div class="txt"><b>${f.name}</b><span>${f.en ?? f.kind}</span>${facts ? `<p>${facts}</p>` : ''}</div>`, this.host);
+    return { el: e, txt: $('.txt', e), p, base, R, occluded: false, w: 0, h: 0, far: f.far ?? 1300, level: -1, dims: [], shift: 0, on: false, side: 'r', since: -1, dimmed: true, offAt: -Infinity, order: 0 };
   }
 
   // a temporary label on a searched place
   pin(p: Placed | null) {
-    if (this.picked) { this.picked.el.remove(); this.pins.splice(this.pins.indexOf(this.picked), 1); this.picked = null; }
+    if (this.picked) { this.picked.el.remove(); this.live.delete(this.picked); this.picked = null; }
     if (!p) return;
     this.picked = this.add('label pick', { ...p, far: 1e9 }, new THREE.Vector3(p.x + 0.5, p.z + 1, p.y + 0.5), new THREE.Vector3(p.x + 0.5, p.z, p.y + 0.5), 40);
-    this.pins.unshift(this.picked);
+    this.picked.order = -1;
+  }
+
+  // the pins to look at this frame: those within reach of the camera, the searched place's, and those still on or
+  // fading out (in their order)
+  private gather(camera: THREE.Camera) {
+    const far = (camera as THREE.PerspectiveCamera).far ?? Infinity, reach = FOG_CUT.y > 0 ? Math.min(far, FOG_CUT.y + CUT_OUT) : far, p = camera.position;
+    const x0 = Math.floor((p.x - reach) / CELL), x1 = Math.floor((p.x + reach) / CELL), y0 = Math.floor((p.z - reach) / CELL), y1 = Math.floor((p.z + reach) / CELL);
+    const key = `${x0},${x1},${y0},${y1}`;
+    if (key !== this.windowKey) {
+      this.windowKey = key;
+      this.near = [];
+      if (this.grid.size < (x1 - x0 + 1) * (y1 - y0 + 1)) {
+        for (const [k, pins] of this.grid) {
+          const cx = k % 65536, cy = Math.floor(k / 65536);
+          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) this.near.push(...pins);
+        }
+      } else {
+        for (let cy = Math.max(0, y0); cy <= y1; cy++) for (let cx = Math.max(0, x0); cx <= x1; cx++) this.near.push(...(this.grid.get(cy * 65536 + cx) ?? []));
+      }
+    }
+    const set = new Set(this.near);
+    if (this.picked) set.add(this.picked);
+    for (const L of this.live) set.add(L);
+    return [...set];
   }
 
   update(camera: THREE.Camera, world: World | null, bar: DOMRect, obstacles: Rect[]) {
+    this.list = this.gather(camera);
     if (world) this.checkOcclusion(camera, world);
     const placed: Rect[] = bar.width ? [{ x0: bar.left - 8, x1: bar.right, y0: bar.top, y1: bar.bottom + 8 }, ...obstacles] : [...obstacles];
     const free = (r: Rect) => r.x0 >= 4 && r.x1 <= innerWidth - 4 && r.y0 >= 4 && r.y1 <= innerHeight - 4 && !placed.some((q) => overlap(r, q));
@@ -77,7 +117,7 @@ export class Labels {
     const v = new THREE.Vector3(), now = performance.now();
     let shown = 0;
     const rank = (p: Pin) => (p.far >= 9000 ? 0 : 2) + (p.on ? 0 : 1);
-    for (const L of this.pins.map((p, i) => [rank(p), i, p] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2])) {
+    for (const L of this.list.map((p) => [rank(p), p.order, p] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2])) {
       v.copy(L.p).project(camera);
       const inFront = v.z < 1, d = camera.position.distanceTo(L.p);
       let x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
@@ -108,7 +148,8 @@ export class Labels {
       if (vis) { L.side = side; L.el.classList.toggle('left', side === 'l'); L.el.classList.toggle('pinned', pinned); L.txt.style.left = side === 's' ? `${L.shift.toFixed(0)}px` : ''; }
       L.on = vis;
       if (L.dimmed === vis) { L.dimmed = !vis; L.el.classList.toggle('off', !vis); L.offAt = now; }
-      if (!vis && now - L.offAt > OFF_MS) continue;
+      if (!vis && now - L.offAt > OFF_MS) { this.live.delete(L); continue; }
+      this.live.add(L);
       if (inFront) L.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
     }
   }
@@ -123,8 +164,8 @@ export class Labels {
   // a few labels per frame: hidden by something other than the labelled building itself
   private checkOcclusion(camera: THREE.Camera, world: World) {
     const dir = new THREE.Vector3();
-    for (let k = 0; k < 4 && this.pins.length; k++) {
-      const L = this.pins[this.frame++ % this.pins.length];
+    for (let k = 0; k < 4 && this.list.length; k++) {
+      const L = this.list[this.frame++ % this.list.length];
       dir.subVectors(L.p, camera.position);
       const dist = dir.length();
       dir.divideScalar(dist);

@@ -76,7 +76,7 @@ vec4 cumulus(vec3 o, vec3 d, float apx) {
   cl = mix(cl, mix(uCloudDark, uCloudLit, 0.75) * (1.0 - 0.22 * smoothstep(0.1, 0.6, d0)), deck);
   float s = max(dot(d, uSunDir), 0.), tw = pow(max(dot(normalize(uTrueSun.xz + 1e-5), normalize(d.xz + 1e-5)), 0.), 3.0);
   cl += uAfterglow * tw * 0.6 + uSunCol * pow(s, 6.0) * 0.4 * (1.0 - 0.6 * smoothstep(0.1, 0.6, d0)) * (1. - uNight) * (1.0 - deck);
-  cl = mix(cl, uHorizon, (1.0 - exp(-dist / 45000.0)) * (1.0 - deck) * 0.85); // the haze over the far ones
+  cl = mix(cl, uHorizon, (1.0 - exp(-dist / 45000.0)) * (1.0 - deck) * 0.85); // the haze over the far ones (by the way to the cloud base: the air's scale, not the map's)
   return vec4(cl, mix(a * 0.97 * smoothstep(0.0, 0.05, h), 1.0, deck));
 }`;
 

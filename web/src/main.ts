@@ -444,14 +444,14 @@ renderer.setAnimationLoop((now) => {
   post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   viewCut(above);
-  fitFar();
   daylight.setFogFrom(viewDist, above);
+  fitFar(); // (within the fog's far end)
   const t = (performance.now() - t0) / 1000;
   if (uniforms) uniforms.uTime.value = t;
   daylight.clouds.tick(t);
   setWindows?.(daylight.hour, daylight.day);
   fountains?.update(t, daylight.night);
-  if (lampHeads) lampHeads.night = daylight.night;
+  if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
   precip.update(t, camera.position, daylight.weather, daylight.night);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
@@ -534,14 +534,17 @@ function viewCut(above: number) {
 
 // The far plane: out to the map's furthest corner from the camera (the far ground stands to the map's edge, faintly
 // through the view distance's fog: farground.ts), within FAR_PER_CUT times the view distance where there is one, and
-// never inside the sky's sphere (sky.ts, 6000 m). In FAR_STEP steps, so that it seldom changes (the depth's scale with
+// within the weather fog's far end (daylight.setFogFrom: past it all is the fog's colour; in clear weather it lies
+// beyond Passau's map from anywhere in it, so on a larger map the far plane, with 'whole map', no longer grows with
+// the map), and never inside the sky's sphere (sky.ts, 6000 m). In FAR_STEP steps, so that it seldom changes (the depth's scale with
 // it: the TAA's history, the occlusion's horizons).
 const SKY_R = 6000, FAR_PER_CUT = 4, FAR_STEP = 500;
 function fitFar() {
   if (map.isEmpty()) return;
   const p = camera.position;
   const reach = Math.hypot(Math.max(p.x - map.min.x, map.max.x - p.x), Math.max(p.y - map.min.y, map.max.y - p.y), Math.max(p.z - map.min.z, map.max.z - p.z));
-  const want = Math.max(SKY_R + FAR_STEP, cutNow > 0 ? Math.min(reach, cutNow * FAR_PER_CUT) : reach);
+  const fogFar = (scene.fog as THREE.Fog | null)?.far ?? Infinity;
+  const want = Math.max(SKY_R + FAR_STEP, Math.min(reach, cutNow > 0 ? cutNow * FAR_PER_CUT : Infinity, fogFar));
   const far = Math.ceil(want / FAR_STEP) * FAR_STEP;
   if (far === camera.far) return;
   camera.far = far;

@@ -20,6 +20,9 @@ const STEP = 1 / 30;
 const TRAM = { sec: 10.5, gap: 0.6, n: 3, v: 11, a: 1.0, b: 1.6, headway: 300 };
 const TRAM_LEN = TRAM.n * (TRAM.sec + TRAM.gap);
 const ACTIVE_R = 900, ACTIVE_CELL = 300;
+// the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
+// fraction of a pixel wide)
+const HEADS_OUT = 600;
 const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'keep-crossing-clear', 'next-edge-car', 'tram-crossing', 'tram'];
@@ -77,7 +80,9 @@ export class StreetLife {
   private pedW: number[] = [];
   private bikeW: number[] = [];
   // the roads and footways by ACTIVE_CELL m cell of their ends and middle, for setActive (built on its first call)
-  private wayGrid: { roads: Map<number, number[]>; peds: Map<number, number[]> } | null = null;
+  private wayGrid: { roads: Map<number, number[]>; peds: Map<number, number[]>; heads: Map<number, number[]> } | null = null;
+  // the signal heads drawn (their indices)
+  private headAct: number[] = [];
   private bikeKm = 0;
   private sources: number[] = [];
   private laneKm = 0;
@@ -145,7 +150,9 @@ export class StreetLife {
         ways.forEach((e, i) => { for (const k of new Set(probes(e).map((q) => key(Math.floor(q[0] / C), Math.floor(q[1] / C))))) pushTo(g, k, i); });
         return g;
       };
-      this.wayGrid = { roads: index(this.roads), peds: index(this.peds) };
+      const heads = new Map<number, number[]>();
+      this.heads.forEach(([hx, hy], i) => pushTo(heads, key(Math.floor(hx / C), Math.floor(hy / C)), i));
+      this.wayGrid = { roads: index(this.roads), peds: index(this.peds), heads };
       this.roadOn = new Array(this.roads.length).fill(false);
       this.pedOn = new Array(this.peds.length).fill(false);
     }
@@ -175,6 +182,13 @@ export class StreetLife {
     for (const c of out) this.removeCar(c);
     if (out.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !out.has(c)));
     this.people = this.people.filter((p) => this.pedOn[p.e] || p === this.keep || p.ctl);
+    const HR = ACTIVE_R + HEADS_OUT;
+    this.headAct = [];
+    for (let cy = Math.floor((z - HR) / C); cy <= Math.floor((z + HR) / C); cy++)
+      for (let cx = Math.floor((x - HR) / C); cx <= Math.floor((x + HR) / C); cx++)
+        for (const i of this.wayGrid.heads.get(key(cx, cy)) ?? []) if ((this.heads[i][0] - x) ** 2 + (this.heads[i][1] - z) ** 2 < HR * HR) this.headAct.push(i);
+    this.headAct.sort((a, b) => a - b);
+    this.M.poles(this.heads, this.headAct);
     this.active = { x, z };
   }
 
@@ -725,6 +739,7 @@ export class StreetLife {
     let n = 0;
     this.tramSections = [];
     for (const tr of this.trams) {
+      if (!tr.near && tr !== this.keep) continue; // (those far off run along their tracks unseen: MAX_TRAM_SECTIONS is for the near ones)
       const p = this.tramPaths[tr.p];
       for (let k = 0; k < TRAM.n; k++) {
         const s0 = tr.s - tr.ds * back - k * (TRAM.sec + TRAM.gap);
@@ -801,13 +816,14 @@ export class StreetLife {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     const pos = new THREE.Vector3(), col = new THREE.Color();
     const LAMP = { R: [2.2, 0.12, 0.08, 3.95], Y: [2.2, 1.3, 0.1, 3.6], G: [0.1, 2.0, 0.6, 3.25] };
-    this.heads.forEach(([x, row, gz, rot, ctrl, axis], i) => {
+    this.headAct.forEach((h, i) => {
+      const [x, row, gz, rot, ctrl, axis] = this.heads[h];
       const [r, g, b, hy] = LAMP[signal(this.ctrls[ctrl], this.t, axis)], a = rot + Math.PI;
       m.compose(pos.set(x + Math.sin(a) * 0.19, gz + hy, row + Math.cos(a) * 0.19), q.setFromAxisAngle(up, a), one);
       M.lamp.setMatrixAt(i, m);
       M.lamp.setColorAt(i, col.setRGB(r, g, b));
     });
-    setCount(this.heads.length, M.lamp);
+    setCount(this.headAct.length, M.lamp);
   }
 
   // ------------------------------------------------------------------ following

@@ -98,7 +98,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   // never down into the water, never behind the eye
   vec3 up = mat3(uView) * vec3(0.0, 1.0, 0.0);
   R = normalize(R + up * max(0.0, 0.02 - dot(R, up)));
-  float L = 12000.0;
+  float L = cameraFar; // (no further: nothing is drawn beyond the far plane, whatever the map's size)
   if (R.z > 0.0) L = min(L, (-cameraNear * 2.0 - P.z) / R.z);
   vec3 E = P + R * L;
   vec4 c0 = uProj * vec4(P, 1.0), c1 = uProj * vec4(E, 1.0);
@@ -255,12 +255,14 @@ const REFL_N8 = `uniform bool uRefl;
 #define inputBuffer sceneDiffuse
 #define texelSize (1.0 / resolution)
 #define cameraNear near
+#define cameraFar far
 #define depthBuffer sceneDepth
 float getViewZ(float d) { return near * far / ((far - near) * d - far); }
 ${REFL.replace('void mainImage(', 'void reflImage(')}
 #undef inputBuffer
 #undef texelSize
 #undef cameraNear
+#undef cameraFar
 #undef depthBuffer
 `;
 function patchN8(n8: N8AOPostPass, transpOn: THREE.IUniform<boolean>, reflOn: THREE.IUniform<boolean>, reflUniforms: Map<string, THREE.Uniform>) {
