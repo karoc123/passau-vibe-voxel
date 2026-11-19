@@ -97,17 +97,18 @@ class Graphics {
       this.sync.push(() => row.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(s.now[key]))));
       return row;
     };
-    const slide = (key: 'res' | 'grade' | 'lodpx', spec: Omit<SliderSpec, 'onInput' | 'onChange' | 'near' | 'log' | 'marks'> & { marks?: Record<string, number> }) => {
+    const slide = (key: 'res' | 'detail' | 'grade' | 'lodpx', spec: Omit<SliderSpec, 'onInput' | 'onChange' | 'near' | 'log' | 'marks'> & { marks?: Record<string, number> }) => {
       const sl = new Slider(adv, { near: spec.step / 2, log: false, marks: {}, ...spec, onInput: (v) => this.change({ [key]: v }) });
       this.sync.push(() => {
-        // a measured resolution says so (settings.ts, autores.ts)
-        if (key === 'res') sl.setMarks(s.auto ? { [s.auto.measuring ? 'auto, measuring…' : 'auto']: s.now.res } : {});
-        if (document.activeElement !== sl.input) sl.set(s.now[key]);
+        // the resolution and the detail say whether measured or set (settings.ts, autores.ts)
+        if (key === 'res' || key === 'detail') sl.setMarks({ [s.source(key)]: s.now[key] });
+        sl.set(document.activeElement === sl.input ? sl.value : s.now[key]);
       });
       return sl;
     };
     const onOff: [boolean, string][] = [[true, 'on'], [false, 'off']];
     slide('res', { min: 0.5, max: 1, step: 0.05, show: (v) => `Resolution ${Math.round(v * 100)} %` });
+    slide('detail', { min: 0, max: 1, step: 0.05, show: (v) => `City at 1 m ${v >= 1 ? 'all' : `${Math.round(v * 100)} %`}` });
     pick('shadow', 'Shadows', SHADOWS.filter((n) => n <= maxShadow).map((n) => [n, n ? `${n / 1024}k` : 'off']));
     pick('ao', 'Ambient occlusion', onOff);
     pick('bloom', 'Bloom', onOff);
@@ -119,7 +120,7 @@ class Graphics {
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
     pick('occl', 'Occlusion culling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
-    el('div', 'note', 'Resolution “auto”: measured once for this GPU, until you set it. Depth pre-pass: slower on some GPUs. Render size (top right) still adapts to the frame rate.', adv);
+    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. Depth pre-pass: slower on some GPUs.', adv);
     this.show();
   }
 

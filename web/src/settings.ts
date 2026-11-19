@@ -4,16 +4,23 @@ import { clamp } from './util';
 // and remembered in localStorage, only those the visitor changed: a new default (the code's, or a device's like the
 // pre-pass's) still reaches them for the rest. On load the URL wins over what is remembered, which wins over the
 // defaults; only what differs from the defaults is written into the URL. All of them apply live.
-//   res      0.5..1   pixels, a share of what the render size (perf.ts) gives. Unless the URL or the visitor set it,
-//            measured once at the first visit on a GPU (autores.ts) and remembered with the GPU's name
+//   res      0.5..1   pixels, a share of the screen's (at most 2 per CSS pixel)
+//   detail   0..1     how much of the city is at 1 m around the focus (main.ts budget, city.ts), the rest 8 m clay;
+//            phones hold 0.75 M triangles at most whatever it says
+// Unless the URL or the visitor set them, res and detail are chosen once at the first visit on a GPU (autores.ts) and
+// remembered with the GPU's name; they never change by themselves after that.
 export type Lod = 'auto' | 'off' | 'far' | 'far4';
-export interface Gfx { res: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean }
+export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean }
 export type Preset = 'low' | 'medium' | 'high';
 
 export const SHADOWS = [0, 1024, 2048, 4096];
 const KEY = 'passau.gfx', AUTO_KEY = 'passau.gfx.auto';
-// raised when the measuring changes enough that remembered results should be measured again
-export const AUTO_VERSION = 1;
+// raised when the measuring changes enough that remembered results should be measured again (2: the detail too)
+export const AUTO_VERSION = 2;
+// the settings chosen by measuring, while neither the URL nor the visitor set them
+export const AUTO_KEYS = ['res', 'detail'] as const;
+export type AutoKey = typeof AUTO_KEYS[number];
+export type Measured = Record<AutoKey, number>;
 
 // The depth pre-pass (prepass.ts) by default where it is known to pay: an Intel GPU through ANGLE's Direct3D 11 (Windows
 // Chrome and Edge). On an Iris Xe, 1400 x 900, 6 fresh page loads each, the scene pass's GPU time without / with it:
@@ -39,10 +46,10 @@ export function gpuName() {
 
 // High is what the viewer did before there were settings (phones: 2048 shadows, no tilt-shift)
 export function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
-  const high: Gfx = { res: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true };
+  const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true };
   return {
-    low: { ...high, res: 0.6, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2 },
-    medium: { ...high, res: 0.8, shadow: 2048, tilt: false, lodpx: 1.6 },
+    low: { ...high, res: 0.6, detail: 0.5, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2 },
+    medium: { ...high, res: 0.8, detail: 0.75, shadow: 2048, tilt: false, lodpx: 1.6 },
     high,
   };
 }
@@ -53,7 +60,7 @@ const bool = (s: string | null) => (s === null ? undefined : s !== '0');
 function fromQuery(q: URLSearchParams): Partial<Gfx> {
   const shadow = num(q.get('shadow'), 0, 4096), lod = q.get('lod');
   const g: Partial<Gfx> = {
-    res: num(q.get('res'), 0.5, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
+    res: num(q.get('res'), 0.5, 1), detail: num(q.get('detail'), 0, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
     shadow: shadow === undefined ? undefined : SHADOWS.reduce((a, b) => (Math.abs(b - shadow) < Math.abs(a - shadow) ? b : a)),
     ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')),
     lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : 'auto',
@@ -65,6 +72,7 @@ function fromQuery(q: URLSearchParams): Partial<Gfx> {
 function toQuery(g: Gfx, d: Gfx, q: URLSearchParams) {
   const put = (k: string, on: boolean, v: string) => { if (on) q.set(k, v); else q.delete(k); };
   put('res', g.res !== d.res, String(+g.res.toFixed(2)));
+  put('detail', g.detail !== d.detail, String(+g.detail.toFixed(2)));
   put('shadow', g.shadow !== d.shadow, String(g.shadow));
   put('ao', g.ao !== d.ao, g.ao ? '1' : '0');
   put('bloom', g.bloom !== d.bloom, g.bloom ? '1' : '0');
@@ -98,11 +106,12 @@ function stored(defaults: Gfx): Partial<Gfx> {
   } catch { return {}; }
 }
 
-// the resolution measured on an earlier visit, if on the same GPU and by the same measuring
-function storedAuto(gpu: string): number | null {
+// what was measured on an earlier visit, if on the same GPU and by the same measuring
+function storedAuto(gpu: string): Measured | null {
   try {
-    const o = JSON.parse(localStorage.getItem(AUTO_KEY) ?? 'null') as { res?: unknown; gpu?: unknown; v?: unknown } | null;
-    return o && o.gpu === gpu && o.v === AUTO_VERSION && typeof o.res === 'number' ? clamp(o.res, 0.5, 1) : null;
+    const o = JSON.parse(localStorage.getItem(AUTO_KEY) ?? 'null') as { res?: unknown; detail?: unknown; gpu?: unknown; v?: unknown } | null;
+    return o && o.gpu === gpu && o.v === AUTO_VERSION && typeof o.res === 'number' && typeof o.detail === 'number'
+      ? { res: clamp(o.res, 0.5, 1), detail: clamp(o.detail, 0, 1) } : null;
   } catch { return null; }
 }
 
@@ -110,60 +119,65 @@ export class Settings {
   readonly defaults: Gfx;
   readonly presets: Record<Preset, Gfx>;
   readonly now: Gfx;
-  // the resolution chosen by measuring (autores.ts), while the visitor has not set one: being measured, or fixed
-  auto: { res: number; measuring: boolean } | null = null;
+  // what measuring chose (autores.ts): being measured, or fixed. It holds res and detail where isAuto says so.
+  auto: (Measured & { measuring: boolean }) | null = null;
   private readonly chosen: Partial<Gfx>;
-  private readonly resInUrl: boolean;
+  private readonly inUrl: Partial<Gfx>;
   private saveT = 0;
 
   constructor(phone: boolean, wide: boolean, prepass: boolean, private readonly gpu = '') {
     this.presets = presets(phone, wide, prepass);
     this.defaults = this.presets.high;
-    const url = fromQuery(new URLSearchParams(location.search));
+    this.inUrl = fromQuery(new URLSearchParams(location.search));
     this.chosen = stored(this.defaults);
-    this.now = { ...this.defaults, ...this.chosen, ...url };
-    this.resInUrl = 'res' in url;
-    if (!this.resInUrl && !('res' in this.chosen)) {
-      const res = storedAuto(gpu);
-      if (res !== null) { this.auto = { res, measuring: false }; this.now.res = res; }
-    }
+    this.now = { ...this.defaults, ...this.chosen, ...this.inUrl };
+    const m = storedAuto(gpu);
+    if (m) this.setAuto(m, false, false);
   }
 
-  // nothing set the resolution: it is to be measured (autores.ts)
-  get toMeasure() { return this.auto === null && !('res' in this.chosen) && !this.resInUrl; }
+  // res or detail as measured: neither the URL nor the visitor set it, and it was measured (or is being)
+  isAuto(k: AutoKey) { return this.auto !== null && !(k in this.chosen) && !(k in this.inUrl); }
 
-  // the preset the settings match, if any (a measured resolution leaves it as it is)
+  // where res or detail comes from, as the panel says it
+  source(k: AutoKey) {
+    return k in this.chosen ? 'manual' : k in this.inUrl ? 'from link' : !this.isAuto(k) ? 'default' : this.auto!.measuring ? 'auto, measuring…' : 'auto';
+  }
+
+  // nothing set the resolution or the detail: they are to be measured (autores.ts)
+  get toMeasure() { return this.auto === null && AUTO_KEYS.every((k) => !(k in this.chosen) && !(k in this.inUrl)); }
+
+  // the preset the settings match, if any (what was measured leaves it as it is)
   get preset(): Preset | null {
     return (Object.keys(this.presets) as Preset[]).find((p) => (Object.keys(this.now) as (keyof Gfx)[])
-      .every((k) => (k === 'res' && this.auto) || this.presets[p][k] === this.now[k])) ?? null;
+      .every((k) => ((k === 'res' || k === 'detail') && this.isAuto(k)) || this.presets[p][k] === this.now[k])) ?? null;
   }
 
-  // the resolution measured: measuring tells it is not final yet; when final it is remembered for this GPU
-  setAuto(res: number, measuring: boolean) {
-    this.auto = { res, measuring };
-    this.now.res = res;
-    if (!measuring) try { localStorage.setItem(AUTO_KEY, JSON.stringify({ res, gpu: this.gpu, v: AUTO_VERSION })); } catch { /* not remembered */ }
+  // what measuring chose: measuring tells it is not final yet; when final it is remembered for this GPU
+  setAuto(m: Measured, measuring: boolean, save = !measuring) {
+    this.auto = { ...m, measuring };
+    for (const k of AUTO_KEYS) if (this.isAuto(k)) this.now[k] = m[k];
+    if (save) try { localStorage.setItem(AUTO_KEY, JSON.stringify({ ...m, gpu: this.gpu, v: AUTO_VERSION })); } catch { /* not remembered */ }
   }
 
-  // a change by the visitor: kept, and shown in the URL. A resolution they set replaces the measured one for good.
+  // a change by the visitor: kept, and shown in the URL. A resolution or detail they set replaces the measured one for good.
   set(change: Partial<Gfx>) {
     Object.assign(this.now, change);
     Object.assign(this.chosen, change);
-    if ('res' in change) this.auto = null;
     // after a pause: a slider dragged would replace the history entry on every step (browsers throttle that)
     clearTimeout(this.saveT);
     this.saveT = setTimeout(() => {
-      // only what differs from the defaults; the resolution whenever set, so that it is not measured again
-      const keep = Object.fromEntries(Object.entries(this.chosen).filter(([k, v]) => k === 'res' || v !== this.defaults[k as keyof Gfx]));
+      // only what differs from the defaults; res and detail whenever set, so that they are not measured again
+      const keep = Object.fromEntries(Object.entries(this.chosen).filter(([k, v]) => k === 'res' || k === 'detail' || v !== this.defaults[k as keyof Gfx]));
       try { localStorage.setItem(KEY, JSON.stringify({ v: 2, ...keep })); } catch { /* private mode, blocked storage: just not remembered */ }
       this.writeUrl();
     }, 300);
   }
 
   writeUrl() {
-    const q = new URLSearchParams(location.search);
-    // a measured resolution is this GPU's: not put into links
-    toQuery(this.now, this.auto ? { ...this.defaults, res: this.auto.res } : this.defaults, q);
+    const q = new URLSearchParams(location.search), d = { ...this.defaults };
+    // what was measured is this GPU's: not put into links
+    for (const k of AUTO_KEYS) if (this.isAuto(k)) d[k] = this.now[k];
+    toQuery(this.now, d, q);
     const s = `${q}`;
     if (s !== location.search.slice(1)) history.replaceState(history.state, '', s ? `?${s}` : location.pathname);
   }

@@ -30,7 +30,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   prepass?: DepthPrepass | null;
   lod?: { mode: Lod; px: number };
   occlusion?: boolean;
-  // the drawing buffer's height in pixels (the renderer's own: the render size and the resolution setting scale it)
+  // the drawing buffer's height in pixels (the renderer's own: the resolution setting scales it)
   pixelsHigh?: () => number;
 }) {
   const d = S.dims[1], total = d.nx * d.ny, { W, D } = meta, index = (tx: number, ty: number) => ty * d.nx + tx;
@@ -64,7 +64,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   tilesOf.forEach((t, i) => t.forEach((k) => onTile[k].push(i)));
 
   // city blocks [cx, cy, n, x0, y0, x1, y1, triangles] (scripts/zones.py), each real or clay as a whole
-  const blocks = zones.blocks, nk = blocks.length, cityTris = blocks.reduce((a, b) => a + (b[7] || 0), 0);
+  const blocks = zones.blocks, nk = blocks.length, tris = blockTris(blocks, zones.buildings, new Uint16Array(zbuf, 0, W * D), W, D);
+  const cityTris = tris.reduce((a, b) => a + b, 0);
   const blockTiles = blocks.map((b) => tilesIn(b[3], b[4], b[5], b[6]));
   const blkWant = new Uint8Array(nk + 1).fill(1), want = new Uint8Array(total).fill(1);
   const flags = new Uint8Array(64 * Math.ceil((nk + 1) / 64)), flagTex = dataTexture(flags, 64, flags.length / 64, THREE.RedFormat);
@@ -83,7 +84,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     let sum = 0;
     const next = new Uint8Array(nk + 1);
     for (const k of order) {
-      sum += blocks[k][7] || 0;
+      sum += tris[k];
       if (sum > B * (blkWant[k + 1] ? 1.1 : 1)) break;
       next[k + 1] = 1;
     }
@@ -322,7 +323,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     for (let k = 0; k < nk; k++) {
       const real = blkWant[k + 1] > 0 && blockTiles[k].every((i) => inTile[i]);
       flags[k + 1] = real ? 255 : 0;
-      if (real) realTris += blocks[k][7] || 0;
+      if (real) realTris += tris[k];
     }
     if (clay === 'ready') {
       const key = flags.join('');
@@ -410,6 +411,21 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     occluder: occ,
     cityTris,
   };
+}
+
+// Each block's triangles at 1 m, as zones.py estimated them (from tools/cost1m.mjs's data/cost1m.json). Built without
+// that file the blocks have none: then the footprints of the buildings whose middle lies in the block, scaled to ~14 M
+// triangles for the whole city, so the detail still spends its budget on the blocks nearest the focus (without it any
+// detail under 1 would leave the whole city as clay).
+function blockTris(blocks: number[][], buildings: number[][], blk: Uint16Array, W: number, D: number) {
+  if (blocks.every((b) => b[7] !== undefined)) return blocks.map((b) => b[7] || 0);
+  const t = new Float64Array(blocks.length);
+  for (const [cx, cy, n] of buildings) {
+    const k = blk[Math.min(D - 1, Math.max(0, Math.round(cy))) * W + Math.min(W - 1, Math.max(0, Math.round(cx)))] - 1;
+    if (k >= 0 && k < t.length) t[k] += n;
+  }
+  const sum = t.reduce((a, b) => a + b, 0) || 1;
+  return [...t].map((x) => (x * 14e6) / sum);
 }
 
 // one terrain piece per 128 m tile (heights every 4 m, ground colours every 2 m), each dropped once its tile is in:

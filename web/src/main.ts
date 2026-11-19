@@ -28,7 +28,7 @@ import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather
 import type { World } from './world';
 import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { DepthPrepass } from './prepass';
-import { type Gfx, gpuName, prepassPays, Settings } from './settings';
+import { AUTO_KEYS, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
 import './style.css';
 
@@ -44,17 +44,17 @@ const TODAY = dayOfYear(new Date());
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
 
 const qs = new URLSearchParams(location.search);
-// Render size, one level from 0 to 1 (the slider; set by the frames, adapt): how much of the city is 1 m around the focus
-// (city.ts; the rest is 8 m clay), from 0.2 M triangles of buildings to all of them, and in its lower part how many
-// pixels, down to half of the screen's. Phones hold 0.75 M at most, as the 1 m tiles of the whole map need ~2 GB of GPU.
+// the graphics settings (settings.ts, the ⚙ panel), the resolution and the detail among them: set by the visitor, else
+// chosen once (autores.ts), then fixed for the session
 const phone = Math.min(screen.width, screen.height) < 600;
-const ceiling = phone ? 0.75e6 : Infinity;
-let level = 0.75;
-const budget = () => (level >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** level));
-// the graphics settings (settings.ts, the ⚙ panel): the resolution scales the render size's pixels
 const gpu = gpuName();
 const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
-const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2) * gfx.now.res;
+// The detail, 0 to 1: how much of the city is 1 m around the focus (city.ts; the rest is 8 m clay), from 0.2 M triangles
+// of buildings to all of them. Phones hold 0.75 M at most whatever it says, as the 1 m tiles of the whole map need ~2 GB
+// of GPU.
+const ceiling = phone ? 0.75e6 : Infinity;
+const budget = () => { const l = gfx.now.detail; return l >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** l); };
+const pixelRatio = () => Math.min(devicePixelRatio, 2) * gfx.now.res;
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const movingActors = new THREE.Group();
@@ -82,8 +82,7 @@ let prepass: DepthPrepass | null = null;
 let barRect: DOMRect | null = null;
 let climate: Climate | null = null;
 const caption = new Caption();
-const perf = new Perf(setLevel);
-perf.show(level);
+const perf = new Perf();
 let setWindows: ((hour: number, day: number) => void) | null = null;
 let lampHeads: LampHeads | null = null;
 
@@ -103,16 +102,18 @@ walkButton.addEventListener('click', e => {
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
-// the resolution measured once if nothing set it (autores.ts). Not under automation (screenshots, benchmarks keep
-// theirs) unless autores=1; autores=0 never.
+// the resolution and the detail measured once if nothing set them (autores.ts). Not under automation (screenshots,
+// benchmarks keep theirs) unless autores=1; autores=0 never.
 const autoQ = qs.get('autores');
 let autoRes: AutoRes | null = null;
 if (gfx.toMeasure && (autoQ === '1' || (autoQ !== '0' && !navigator.webdriver))) {
-  gfx.setAuto(gfx.now.res, true);
-  autoRes = new AutoRes(renderer, camera, gfx.now.res, (res, final) => {
-    const was = gfx.now.res;
-    gfx.setAuto(res, !final);
-    if (res !== was) applyGfx({ res });
+  const start = { res: gfx.now.res, detail: gfx.now.detail };
+  gfx.setAuto(start, true);
+  autoRes = new AutoRes(renderer, camera, start, (m, final) => {
+    const was = { ...gfx.now };
+    gfx.setAuto(m, !final);
+    const c = Object.fromEntries(AUTO_KEYS.filter((k) => gfx.now[k] !== was[k]).map((k) => [k, gfx.now[k]]));
+    if (Object.keys(c).length) applyGfx(c);
     gfxPanel.show();
   });
   gfxPanel.show();
@@ -137,7 +138,7 @@ function makeRenderer() {
   // (no preserveDrawingBuffer: it costs a full-screen copy every frame; screenshots go through the browser)
   const r = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   r.info.autoReset = false;
-  r.setPixelRatio(pixelsAt(level));
+  r.setPixelRatio(pixelRatio());
   r.setSize(innerWidth, innerHeight);
   r.shadowMap.enabled = true;
   r.shadowMap.type = THREE.PCFShadowMap;
@@ -175,7 +176,8 @@ function onResize() {
 // they exist (boot)
 function applyGfx(c: Partial<Gfx>) {
   const g = gfx.now;
-  if ('res' in c) setLevel(level);
+  if ('res' in c && Math.abs(pixelRatio() - renderer.getPixelRatio()) > 0.001) { renderer.setPixelRatio(pixelRatio()); onResize(); }
+  // the detail: city.ts asks the budget on its next update
   if ('shadow' in c) { daylight.setShadowSize(g.shadow, maxShadow); stillDue = true; }
   if ('ao' in c) post.n8.enabled = g.ao;
   if ('bloom' in c) post.bloomPass.enabled = g.bloom;
@@ -382,14 +384,12 @@ async function boot() {
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
-const frames: number[] = [];
 const t0 = lastT;
 renderer.setAnimationLoop((now) => {
   fly?.(now);
   stepWeather(now);
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
-  adapt(dt, now);
   drive?.update(dt);
   nav.update(dt);
   fpv?.update(dt);
@@ -424,12 +424,13 @@ renderer.setAnimationLoop((now) => {
   if (stillChanged()) stillDue = true;
   if (stillDue && now - redrawnAt > 300) { stillDue = false; redrawnAt = now; daylight.redrawShadow(); }
   renderer.info.reset();
-  if (autoRes && !gfx.auto) autoRes.stop(); // the visitor set the resolution
+  if (autoRes && !(gfx.isAuto('res') && gfx.isAuto('detail'))) autoRes.stop(); // the visitor set one of them
   if (autoRes?.done) autoRes = null;
   autoRes?.begin();
   post.composer.render();
   if (daylight.redraws !== redraws) busy = true;
   autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
+  busy = false;
   perf.frame(now, document.hidden, renderer.info.render.triangles);
   if (flood && now - riverT > 250) {
     riverT = now;
@@ -440,7 +441,9 @@ renderer.setAnimationLoop((now) => {
   labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
 });
 
-window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget, level: () => level, setLevel: (l: number) => { perf.manual = true; setLevel(l); }, city: () => city, prepass: () => prepass, gfx };
+window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,
+  // the detail, as the visitor would set it (tools)
+  level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx };
 
 // what the city's shadow map shows: which tiles are drawn, and what folds, hides or thins them in its depth pass
 let stillKey = '';
@@ -454,41 +457,5 @@ function stillChanged() {
   return true;
 }
 
-// The level from steady frames: frames that redrew the city's shadow or changed the pixels are left out. In windows of
-// 30 frames (or 1 s): slow twice running (median under 27 fps), a step down, bigger the slower, and no growing past it
-// for a minute; smooth twice running (the slowest tenth over 30 fps) with all the city asked for in, a step up, bigger
-// at the screen's own rate.
-let busy = false, stillDue = false, redrawnAt = 0, slow = 0, calm = 0, cap = 1, capAt = 0, windowAt = 0;
-function setLevel(l: number) {
-  level = Math.max(0, Math.min(1, l));
-  const px = pixelsAt(level);
-  if (Math.abs(px - renderer.getPixelRatio()) > 0.01) { renderer.setPixelRatio(px); onResize(); busy = true; }
-  perf.show(level);
-}
-function adapt(dt: number, now: number) {
-  const skip = busy;
-  busy = false;
-  if (!city || document.hidden || dt > 0.5) { frames.length = 0; return; }
-  if (skip) return;
-  if (!frames.length) windowAt = now;
-  frames.push(dt);
-  if (frames.length < 30 && (frames.length < 6 || now - windowAt < 1000)) return;
-  frames.sort((a, b) => a - b);
-  const median = frames[frames.length >> 1], p90 = frames[Math.floor(frames.length * 0.9)];
-  frames.length = 0;
-  if (perf.manual) return;
-  if (now - capAt > 60000) cap = 1;
-  if (median > 1 / 27) {
-    calm = 0;
-    if (++slow < 2) return;
-    slow = 0;
-    setLevel(level - 0.08 * Math.min(3, median * 27));
-    cap = level; capAt = now;
-  } else if (p90 < 1 / 30 && city.settled && level < cap) {
-    slow = 0;
-    if (++calm < 2) return;
-    calm = 0;
-    setLevel(Math.min(cap, level + (p90 < 1 / 50 ? 0.1 : 0.04)));
-  } else { slow = 0; calm = 0; }
-}
-
+// busy: this frame changed the settings or redrew the shadow map (autores.ts leaves it out)
+let busy = false, stillDue = false, redrawnAt = 0;

@@ -1,5 +1,5 @@
 // Where a frame's time goes: GPU time (timer queries) and CPU time of one composer.render, the triangles and draw calls,
-// for the full frame and with one part removed at a time, at a few render sizes and pixel ratios.
+// for the full frame and with one part removed at a time, at a few details (settings.ts) and pixel ratios.
 // usage: node tools/probe.mjs http://localhost:5188 [view] [--swift] [--vp=1440x900]
 import { chromium } from 'playwright-core';
 const args = process.argv.slice(2), flags = args.filter((a) => a.startsWith('--')), [base, view = ''] = args.filter((a) => !a.startsWith('--'));
@@ -13,7 +13,7 @@ await page.addInitScript(() => {
   let s = 1234567; Math.random = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648); });
 await page.goto(`${base}/?date=06-21&hour=16&weather=clear${view ? `&view=${view}` : ''}`);
 await page.waitForFunction(() => window.__three && window.__ready && !document.body.classList.contains('loading'), null, { timeout: 900000, polling: 500 });
-const setBudget = (p) => page.evaluate((p) => { const i = document.querySelector('#perf input'); i.value = String(p); i.dispatchEvent(new Event('input')); }, p);
+const setBudget = (p) => page.evaluate((p) => window.__three.setLevel(p), p);
 const settle = () => page.waitForFunction(() => { const s = window.__streamer, c = window.__three.city(); return s.inflight === 0 && s.queue.length === 0 && c.settled; }, null, { timeout: 900000, polling: 500 }).then(() => page.waitForTimeout(3000));
 
 const measure = () => page.evaluate(async () => {

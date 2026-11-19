@@ -1,14 +1,18 @@
 import * as THREE from 'three';
+import type { Measured } from './settings';
 
-// The resolution chosen once, at the first visit on a GPU, when neither the URL nor the visitor set it (settings.ts):
-// when the city is in and its shadow map drawn, a few seconds of frames are timed, by the GPU (EXT_disjoint_timer_query)
-// where it tells, else between animation frames. Left out: frames that redrew (part of) the shadow map, changed the
-// pixels or the settings, while tiles are meshed or uploaded, and while the camera moves fast. If the median is well
-// over 30 fps' 33 ms, the resolution goes down a step (more for slower: pixels' time goes with res², a guess) and is
-// timed again; at most three steps, to 0.6. Then it stays: never up again, nothing measured again in the session, and
-// it is remembered with the GPU's name. (The render size, perf.ts, still adapts on its own.)
+// The resolution and the city's detail (settings.ts) chosen once, at the first visit on a GPU, when neither the URL nor
+// the visitor set them: when the city is in and its shadow map drawn, a few seconds of frames are timed, by the GPU
+// (EXT_disjoint_timer_query) where it tells, else between animation frames. Left out: frames that redrew (part of) the
+// shadow map, changed the pixels or the settings, while tiles are meshed or uploaded, and while the camera moves fast.
+// If the median is well over 30 fps' 33 ms, the resolution goes down a step (more for slower: pixels' time goes with
+// res², a guess) and is timed again, down to 0.6; still far too slow there, the detail goes down (less of the city at
+// 1 m: fewer triangles, also in the shadow map), once or twice, timed again after each. Then both stay: never up again,
+// nothing measured again in the session, and they are remembered with the GPU's name. Nothing else changes them by
+// itself: no frame rate watched later moves them back and forth.
 const STEPS = [1, 0.85, 0.7, 0.6];
-const TARGET = 1000 / 30, SLOW = 40; // ms: aimed at; over it, a step down
+const DETAILS = [1, 0.75, 0.5];
+const TARGET = 1000 / 30, SLOW = 40, FAR = 50; // ms: aimed at; over it, a step down; at the least resolution, the detail down
 const QUIET = 1000, MEASURE = 2500; // ms: undisturbed before timing; timing at least
 const TURN = THREE.MathUtils.degToRad(25), SPEED = 40; // per s: the camera faster than these is "moving fast"
 
@@ -22,7 +26,6 @@ export class AutoRes {
   private phase: 'wait' | 'time' = 'wait';
   private quietAt = 0;
   private timeAt = 0;
-  private steps = 0;
   private samples: number[] = [];
   private readonly gl: WebGL2RenderingContext;
   private readonly ext: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
@@ -33,8 +36,12 @@ export class AutoRes {
   private readonly pos = new THREE.Vector3();
   private readonly quat = new THREE.Quaternion();
 
-  constructor(renderer: THREE.WebGLRenderer, private readonly camera: THREE.Camera, private res: number,
-    private readonly apply: (res: number, final: boolean) => void) {
+  private res: number;
+  private detail: number;
+
+  constructor(renderer: THREE.WebGLRenderer, private readonly camera: THREE.Camera, start: Measured,
+    private readonly apply: (m: Measured, final: boolean) => void) {
+    ({ res: this.res, detail: this.detail } = start);
     this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.ext = this.gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.pos.copy(camera.position);
@@ -92,13 +99,18 @@ export class AutoRes {
     // enough frames, fewer if clearly slow or slow to come
     if (t < MEASURE || !(n >= 20 || (n >= 5 && this.median > 2 * TARGET) || (n >= 3 && t > 4 * MEASURE))) return;
     const med = this.median, min = STEPS[STEPS.length - 1];
-    console.info(`resolution ${this.res}: ${med.toFixed(1)} ms (median of ${n}, ${this.by})`);
-    if (med <= SLOW || this.res <= min) return this.finish();
-    const want = this.res * Math.sqrt(TARGET / med);
-    const next = STEPS.find((r) => r < this.res - 0.01 && r <= want + 0.01) ?? min;
-    this.res = next;
-    if (++this.steps >= 3 || next <= min) return this.finish();
-    this.apply(next, false);
+    console.info(`resolution ${this.res}, detail ${this.detail}: ${med.toFixed(1)} ms (median of ${n}, ${this.by})`);
+    if (med <= SLOW) return this.finish();
+    if (this.res > min + 0.01) {
+      const want = this.res * Math.sqrt(TARGET / med);
+      this.res = STEPS.find((r) => r < this.res - 0.01 && r <= want + 0.01) ?? min;
+    } else {
+      // at the least resolution: far too slow, the detail a step down; more than twice that, two
+      const lower = DETAILS.filter((d) => d < this.detail - 0.01);
+      if (med <= FAR || !lower.length) return this.finish();
+      this.detail = lower[Math.min(lower.length - 1, med > 2 * FAR ? 1 : 0)];
+    }
+    this.apply({ res: this.res, detail: this.detail }, false);
     this.phase = 'wait';
     this.quietAt = now;
     this.drop();
@@ -109,9 +121,9 @@ export class AutoRes {
   private finish() {
     this.done = true;
     this.drop();
-    this.apply(this.res, true);
+    this.apply({ res: this.res, detail: this.detail }, true);
   }
 
-  // the visitor set the resolution meanwhile
-  stop() { this.done = true; this.drop(); }
+  // the visitor set the resolution or the detail meanwhile: what stands now is kept
+  stop() { this.finish(); }
 }

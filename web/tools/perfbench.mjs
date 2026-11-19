@@ -5,7 +5,7 @@
 // usage: URL=http://localhost:5183 node tools/perfbench.mjs out.json [views] [level]   (Q='&lod=0': more of the query)
 //   (EXTRA: more Chrome flags, e.g. --disable-gpu-watchdog where a slow GPU loses its context; GALLIUM_DRIVER=d3d12 on WSL
 //   if the browser reports llvmpipe)
-//   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: render size 0..1 (default 1)
+//   views: ';'-separated named views (overview, dom, city, ...) or name=x,y,z,tx,ty,tz; level: the detail 0..1 (settings.ts; default 1)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 
