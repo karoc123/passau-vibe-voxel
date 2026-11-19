@@ -179,9 +179,7 @@ function applyGfx(c: Partial<Gfx>) {
   if ('res' in c && Math.abs(pixelRatio() - renderer.getPixelRatio()) > 0.001) { renderer.setPixelRatio(pixelRatio()); onResize(); }
   // the detail: city.ts asks the budget on its next update
   if ('shadow' in c) { daylight.setShadowSize(g.shadow, maxShadow); stillDue = true; }
-  if ('ao' in c) post.n8.enabled = g.ao;
-  if ('bloom' in c) post.bloomPass.enabled = g.bloom;
-  if ('refl' in c) post.reflPass.enabled = g.refl;
+  if ('ao' in c || 'bloom' in c || 'refl' in c) post.enable({ ao: g.ao, bloom: g.bloom, refl: g.refl });
   if ('grade' in c) post.film.strength = g.grade;
   if ('lod' in c || 'lodpx' in c) city?.setLod({ mode: g.lod, px: g.lodpx });
   if ('prepass' in c && prepass) prepass.enabled = g.prepass;

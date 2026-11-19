@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { N8AOPostPass } from 'n8ao';
-import { BloomEffect, BrightnessContrastEffect, Effect, EffectAttribute, EffectComposer, EffectPass, HueSaturationEffect, RenderPass,
+import { BlendFunction, BloomEffect, BrightnessContrastEffect, Effect, EffectAttribute, EffectComposer, EffectPass, HueSaturationEffect, RenderPass,
   SMAAEffect, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { clamp } from './util';
 import { SKY_GLSL, type Sky } from './sky';
@@ -9,6 +9,8 @@ import { REFL_MAX } from './voxelMaterial';
 // The miniature look by depth, not by screen band: each pixel blurs by how far its distance is from the focus (what
 // the camera looks at), in ratio, so the whole plane of the subject stays sharp -- a tower's clock as much as its base.
 // A gather over a disc; a sample counts only if it is itself as blurred as its offset, so sharp edges don't smear out.
+// (textureLod in loops, here and in REFL: with texture2D's implicit mip level ANGLE's D3D compiler unrolls the loop and
+// takes the early exits away, every pixel paying for all of it.)
 const DOF = `uniform float focus; uniform float strength; uniform float maxPx;
 float coc(float depth) {
   float d = -getViewZ(depth);
@@ -22,8 +24,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     float t = float(i) / 24.0, a = float(i) * 2.39996;
     vec2 o = vec2(cos(a), sin(a)) * sqrt(t) * r;
     vec2 q = uv + o * texelSize;
-    float w = smoothstep(length(o) - 1.0, length(o), coc(readDepth(q)));
-    sum += texture2D(inputBuffer, q).rgb * w; n += w;
+    float w = smoothstep(length(o) - 1.0, length(o), coc(textureLod(depthBuffer, q, 0.0).r));
+    sum += textureLod(inputBuffer, q, 0.0).rgb * w; n += w;
   }
   outputColor = vec4(sum / n, inputColor.a);
 }`;
@@ -60,7 +62,7 @@ ${SKY_GLSL}
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uCamWorld; uniform float uTime; uniform float uMapTop;
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 vec3 viewAt(vec2 uv, float z) { return vec3((uv * 2.0 - 1.0 + vec2(uProj[2][0], uProj[2][1])) * -z / vec2(uProj[0][0], uProj[1][1]), z); }
-float sceneD(vec2 s) { return -getViewZ(readDepth(s)); }
+float sceneD(vec2 s) { return -getViewZ(textureLod(depthBuffer, s, 0.0).r); }
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
   outputColor = inputColor;
   float a = inputColor.a;
@@ -129,8 +131,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     // smeared along the ray on the screen (up, mostly) as the ripples would: a light on the far bank, a lit window,
     // mirrors as a streak; more of it at a glance and on a rougher surface
     vec2 sm = normalize(dS * resolution) * texelSize * (1.0 + 7.0 * f * f) * rough;
-    refl = (texture2D(inputBuffer, sh).rgb * 2.0 + texture2D(inputBuffer, sh + sm).rgb + texture2D(inputBuffer, sh - sm).rgb
-      + texture2D(inputBuffer, sh + 2.5 * sm).rgb) / 5.0;
+    refl = (textureLod(inputBuffer, sh, 0.0).rgb * 2.0 + textureLod(inputBuffer, sh + sm, 0.0).rgb + textureLod(inputBuffer, sh - sm, 0.0).rgb
+      + textureLod(inputBuffer, sh + 2.5 * sm, 0.0).rgb) / 5.0;
     vec2 e = min(sh, 1.0 - sh);
     conf = smoothstep(0.0, 0.08, min(e.x, e.y));
   } else {
@@ -216,19 +218,119 @@ const STAIR_AO = 0.3;
 // copies (~0.9-1 ms on an Iris Xe) -- even when none of them is shown or in view, as by day nearly always. Skipped
 // then, and the composite told so (uTransp: its transparency targets are left as they were, unread).
 const TRANSP = 'if (transparencyAware) {';
-function maskStairs(n8: N8AOPostPass, transpOn: THREE.IUniform<boolean>) {
+//
+// On an Iris Xe (D3D11) every full-size pass costs ~0.3 ms at 1400x900 whatever it does, so n8ao's composite (full
+// size: the half-size AO onto the scene) does more than n8ao has it do:
+// - the reflections when uRefl (REFL, the very function of their own pass, which runs only with the AO off; on the
+//   scene as the composite reads it): ~0.25 ms cheaper than a pass of their own.
+// - it draws straight into the composer's buffer: n8ao drew into its own and copied that over (~0.27 ms), and copied
+//   its half-size AO once more for its accumulation over still frames (unused here).
+// - its depth-aware upsampling of the AO (a 3x3 gather around each pixel, which first works out the pixel's normal
+//   from 9 depths: ~0.5 ms) gives way to a bilinear one over the 4 nearest half-size samples, each weighed by how far
+//   the pixel lies off that sample's plane (its depth and normal are at hand): a sample across an edge -- another wall,
+//   the ground behind a roof -- counts next to nothing. Side by side the same picture, ~0.45 ms cheaper.
+const DEPTH = 'float depth = texture2D(sceneDepth, vUv).x;';
+const UP = /#ifdef HALFRES\s*\n\s*vec4 texel = vec4\(0\.0\);[\s\S]*?#else\s*vec4 texel = texture2D\(tDiffuse, vUv\);\s*#endif/;
+const UPSAMPLE = `vec4 texel = vec4(1.0);
+  if (!isBackgroundDepth(depth)) {
+    vec3 P = getWorldPos(depth, vUv); // (in view space)
+    vec2 hr = floor(resolution * 0.5), hp = vUv * hr - 0.5, f = fract(hp);
+    ivec2 i0 = ivec2(floor(hp)), hmax = ivec2(hr) - 1;
+    float ao = 0.0, tw = 0.0, sigma = 0.1 - 0.002 * P.z;
+    for (int k = 0; k < 4; k++) {
+      ivec2 o = ivec2(k & 1, k >> 1), p = clamp(i0 + o, ivec2(0), hmax);
+      vec4 s = texelFetch(tDiffuse, p, 0); // the AO, the normal
+      vec3 Ps = getWorldPos(texelFetch(downsampledDepth, p, 0).x, (vec2(p) + 0.5) / hr);
+      vec2 b = mix(1.0 - f, f, vec2(o));
+      float w = b.x * b.y * exp(-abs(dot(P - Ps, s.gba * 2.0 - 1.0)) / sigma) + 1e-6;
+      ao += s.r * w; tw += w;
+    }
+    texel.r = ao / tw;
+  }`;
+const REFL_N8 = `uniform bool uRefl;
+#define inputBuffer sceneDiffuse
+#define texelSize (1.0 / resolution)
+#define cameraNear near
+#define depthBuffer sceneDepth
+float getViewZ(float d) { return near * far / ((far - near) * d - far); }
+${REFL.replace('void mainImage(', 'void reflImage(')}
+#undef inputBuffer
+#undef texelSize
+#undef cameraNear
+#undef depthBuffer
+`;
+function patchN8(n8: N8AOPostPass, transpOn: THREE.IUniform<boolean>, reflOn: THREE.IUniform<boolean>, reflUniforms: Map<string, THREE.Uniform>) {
   const patch = () => {
     const m = n8.effectCompositerQuad.material, ao = 'float finalAo = pow(texel.r, intensity);';
-    if (!m.fragmentShader.includes(ao) || !m.fragmentShader.includes(TRANSP)) throw new Error('n8ao: composite shader changed');
+    if (![ao, TRANSP, DEPTH, 'void main()'].every((s) => m.fragmentShader.includes(s)) || !UP.test(m.fragmentShader)) throw new Error('n8ao: composite shader changed');
     m.fragmentShader = m.fragmentShader.replace(ao, `float finalAo = mix(1.0, pow(texel.r, intensity), abs(sceneTexel.a - 0.5) < 0.05 ? ${STAIR_AO.toFixed(2)} : 1.0);`)
       .replaceAll(', sceneTexel.a)', ', 1.0)')
-      .replace(TRANSP, 'if (transparencyAware && uTransp) {').replace('void main()', 'uniform bool uTransp;\nvoid main()');
-    m.uniforms.uTransp = transpOn;
+      .replace(TRANSP, 'if (transparencyAware && uTransp) {')
+      .replace(DEPTH, `${DEPTH}\n  if (uRefl) { vec4 rc; reflImage(sceneTexel, vUv, depth, rc); sceneTexel = rc; }`)
+      .replace(UP, UPSAMPLE)
+      .replace('void main()', `uniform bool uTransp;\n${REFL_N8}\nvoid main()`);
+    Object.assign(m.uniforms, { uTransp: transpOn, uRefl: reflOn }, Object.fromEntries(reflUniforms));
+    // the denoised AO, where the accumulation's copy of it was
+    m.uniforms.tDiffuse = { get value() { return n8.writeTargetInternal.texture; }, set value(_: unknown) { /* n8ao's */ } };
     m.needsUpdate = true;
   };
   const configure = n8.configureEffectCompositer.bind(n8);
   n8.configureEffectCompositer = (...a) => { configure(...a); patch(); };
   patch();
+  n8.accumulationQuad.render = () => {};
+  const render = n8.render.bind(n8), copy = n8.copyQuad.render.bind(n8.copyQuad), skip = () => {};
+  n8.copyQuad.render = skip;
+  n8.render = (r, input, output, ...a) => {
+    const own = n8.outputTargetInternal;
+    if (!output) { n8.copyQuad.render = copy; try { render(r, input, output, ...a); } finally { n8.copyQuad.render = skip; } return; }
+    n8.outputTargetInternal = output;
+    try { render(r, input, output, ...a); } finally { n8.outputTargetInternal = own; }
+  };
+}
+
+// The bloom's bright pass at half size: postprocessing masks the whole image by brightness at full size (~0.3 ms) and
+// then takes it down to half with 13 bilinear taps 1 and 2 pixels apart; here each pixel is masked as it is read, 2x2
+// of them averaged into a half-size image, and that taken through the same 13 taps (those 1 pixel apart now land
+// between its pixels: a little wider). As much bloom overall; pixel by pixel off by 2% of it on average in a lit
+// street at night, 15% over the faint bloom of the overview by night (where it barely shows); ~0.3 ms cheaper.
+// (Masking all 36 pixels the 13 taps cover, in one pass, would be exact, but costs more than the passes it replaces.)
+interface MipBlur {
+  downsamplingMipmaps: THREE.WebGLRenderTarget[]; upsamplingMipmaps: THREE.WebGLRenderTarget[]; scene: THREE.Scene; camera: THREE.Camera;
+  fullscreenMaterial: THREE.Material;
+  downsamplingMaterial: THREE.ShaderMaterial & { setSize(w: number, h: number): void; inputBuffer: THREE.Texture };
+  upsamplingMaterial: THREE.ShaderMaterial & { setSize(w: number, h: number): void; inputBuffer: THREE.Texture; supportBuffer: THREE.Texture };
+}
+function brightDown(bloom: BloomEffect, on: () => boolean) {
+  const lum = bloom.luminanceMaterial, mip = bloom.mipmapBlurPass as unknown as MipBlur;
+  const bright = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, type: THREE.HalfFloatType });
+  const mat = new THREE.ShaderMaterial({
+    name: 'BrightDown', depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+    uniforms: { inputBuffer: { value: null }, threshold: { value: 1 }, smoothing: { value: 0 } },
+    vertexShader: 'void main() { gl_Position = vec4(position.xy, 1.0, 1.0); }',
+    fragmentShader: `uniform sampler2D inputBuffer; uniform float threshold; uniform float smoothing;
+vec4 tap(ivec2 p) { vec4 t = texelFetch(inputBuffer, min(p, textureSize(inputBuffer, 0) - 1), 0); return smoothstep(threshold, threshold + smoothing, luminance(t.rgb)) * t; }
+void main() {
+  ivec2 p = 2 * ivec2(gl_FragCoord.xy);
+  gl_FragColor = 0.25 * (tap(p) + tap(p + ivec2(1, 0)) + tap(p + ivec2(0, 1)) + tap(p + ivec2(1, 1)));
+}`,
+  });
+  bloom.update = (renderer: THREE.WebGLRenderer, input: THREE.WebGLRenderTarget) => {
+    if (!on()) return;
+    const { downsamplingMipmaps: down, upsamplingMipmaps: up, downsamplingMaterial: dm, upsamplingMaterial: um } = mip;
+    mat.uniforms.inputBuffer.value = input.texture;
+    mat.uniforms.threshold.value = lum.threshold;
+    mat.uniforms.smoothing.value = lum.smoothing;
+    const step = (m: THREE.Material, target: THREE.WebGLRenderTarget) => { mip.fullscreenMaterial = m; renderer.setRenderTarget(target); renderer.render(mip.scene, mip.camera); };
+    if (bright.width !== down[0].width || bright.height !== down[0].height) bright.setSize(down[0].width, down[0].height);
+    step(mat, bright);
+    dm.setSize(input.width, input.height); dm.inputBuffer = bright.texture; step(dm, down[0]);
+    let prev = down[0];
+    for (let i = 1; i < down.length; i++) { dm.setSize(prev.width, prev.height); dm.inputBuffer = prev.texture; step(dm, down[i]); prev = down[i]; }
+    for (let i = up.length - 1; i >= 0; i--) {
+      um.setSize(prev.width, prev.height); um.inputBuffer = prev.texture; um.supportBuffer = down[i].texture;
+      step(um, up[i]); prev = up[i];
+    }
+  };
 }
 
 // a transparent thing shown (it and all above it visible; an instanced one with any instances) and in the frustum (or
@@ -254,36 +356,65 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   const reflPass = new EffectPass(camera, reflections);
   composer.addPass(reflPass);
   const n8 = new N8AOPostPass(scene, camera, innerWidth, innerHeight);
-  Object.assign(n8.configuration, { aoRadius: 6, distanceFalloff: 1.5, intensity: 2.2, halfRes: true, depthAwareUpsampling: true });
-  const transpOn = new THREE.Uniform(true);
-  maskStairs(n8, transpOn);
+  // 8 samples (n8ao's default 16): after its denoising side by side the same, ~0.25 ms cheaper
+  Object.assign(n8.configuration, { aoRadius: 6, distanceFalloff: 1.5, intensity: 2.2, halfRes: true, depthAwareUpsampling: true, aoSamples: 8 });
+  const transpOn = new THREE.Uniform(true), reflOn = new THREE.Uniform(true);
+  patchN8(n8, transpOn, reflOn, reflections.uniforms);
   const render = n8.renderTransparency.bind(n8), frustum = new THREE.Frustum(), m = new THREE.Matrix4();
   n8.renderTransparency = (r) => {
     frustum.setFromProjectionMatrix(m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     transpOn.value = anyTransparentInView(scene, frustum);
     if (transpOn.value) render(r);
   };
+  const n8render = n8.render.bind(n8);
+  n8.render = (...a) => { if (reflOn.value) reflections.update(); n8render(...a); };
   composer.addPass(n8);
+  // the bloom in the last pass (not one of its own, ~0.4 ms): it reads that pass's input, after the depth blur
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });
+  let bloomOn = true;
+  brightDown(bloom, () => bloomOn);
   const tilt = new DepthBlur();
   const tiltPass = new EffectPass(camera, tilt);
-  const bloomPass = new EffectPass(camera, bloom);
-  composer.addPass(bloomPass);
   composer.addPass(tiltPass);
   const grade = new NightGrade();
   const film = new FilmGrade();
+  // SMAA's edge searches sample in loops: with implicit mip levels (there are no mips) the D3D compiler unrolls them
+  // and drops their early exits, so every pixel ran every step (as in DOF and REFL, which take textureLod for it):
+  // ~0.25-0.4 ms
+  const smaa = new SMAAEffect(), wm = smaa.weightsMaterial;
+  wm.fragmentShader = `#undef texture2D\n#define texture2D(t, c) textureLod(t, c, 0.0)\n${wm.fragmentShader}`;
+  // and its edges are written as none where there are none instead of left out, so their target needs no clearing
+  // first (~0.13 ms for the clear, ~0.05 for the writes)
+  const em = smaa.edgeDetectionMaterial;
+  if (!em.fragmentShader.includes('discard;')) throw new Error('SMAA: edge shader changed');
+  em.fragmentShader = em.fragmentShader.replaceAll('discard;', 'gl_FragColor = vec4(0.0); return;');
+  (smaa as unknown as { clearPass: { render(): void } }).clearPass.render = () => {};
   composer.addPass(new EffectPass(camera,
+    bloom,
     grade,
     tone,
     film,
     new HueSaturationEffect({ saturation: 0.12 }),
     new BrightnessContrastEffect({ brightness: 0, contrast: 0.06 }),
     new VignetteEffect({ offset: 0.3, darkness: 0.45 }),
-    new SMAAEffect()));
+    smaa));
   // focused on what the camera looks at; the blur fades out towards the street, and eases over the whole map
   const setHeight = (h: number, enabled: boolean, focus = 500) => {
     tiltPass.enabled = enabled && h > 60;
     tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), renderer.domElement.height);
   };
-  return { composer, n8, reflPass, reflections, bloom, bloomPass, tone, grade, film, setHeight };
+  // the AO, the reflections (in the AO's composite, else their own pass) and the bloom on or off
+  const on = { ao: true, refl: true };
+  const enable = (c: { ao?: boolean; refl?: boolean; bloom?: boolean }) => {
+    Object.assign(on, { ao: c.ao ?? on.ao, refl: c.refl ?? on.refl });
+    n8.enabled = on.ao;
+    reflOn.value = on.ao && on.refl;
+    reflPass.enabled = !on.ao && on.refl;
+    if (c.bloom !== undefined && c.bloom !== bloomOn) {
+      bloomOn = c.bloom;
+      bloom.blendMode.blendFunction = bloomOn ? BlendFunction.SCREEN : BlendFunction.SKIP;
+    }
+  };
+  enable({});
+  return { composer, n8, reflections, bloom, tone, grade, film, setHeight, enable };
 }
