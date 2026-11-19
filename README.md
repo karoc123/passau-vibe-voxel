@@ -98,6 +98,14 @@ written with `mtime=0`). The steps:
 | `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`) |
 | `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `data/terrain.bin`, `traffic.json`) |
 
+**Windows.** The steps after the volume (`tiles.py`'s export in `voxelize.py`, `tiles_lod.py`, `tile_fields.py`,
+`zones.py`, `terrain.py`) work window by window (`scripts/window.py`): a window's core is a rectangle of the grid on
+1024 m boundaries (a node of every tile level, a terrain chunk), and the step reads only the region of the core and a
+halo around it (its reach: the tiles 16 m, `tile_fields.py` 32 m, `terrain.py` 8 m, `zones.py` 0), the `data/` files
+row band by row band. `--windows NXxNY` or `--window-size METRES` choose the cover (the whole map in one window by
+default); every cover writes the same bytes (`uv run python scripts/window_check.py STEP` checks it). `voxelize.py`
+itself (the volume), `flood.py` and `boats.py` still work on the whole map (see `scripts/window.py`).
+
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
 pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.
 

@@ -2988,7 +2988,10 @@ def plane_codes():
 
 
 PLANES = plane_codes()
-tile_info = tiles.export(vol, g, OUT / "tiles", note, planes=PLANES, **EXPORT_IDS)
+# (--windows NXxNY / --window-size METRES: the nodes window by window, window.py; the same files)
+import sys
+import window
+tile_info = tiles.export(vol, g, OUT / "tiles", note, planes=PLANES, windows=window.from_args(sys.argv, D, W), **EXPORT_IDS)
 # tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
 from shapely.ops import linemerge
 tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])

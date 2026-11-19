@@ -88,20 +88,40 @@ class OSM:
         return [a for a in self.nodes if key in a[1] and (values is None or a[1][key] in values)]
 
 
-def footprints(ids_values, extra=None):
-    """The building footprints voxelize.py drew (OSM outlines moved onto the LoD2 footprints, and buildings from LoD2
-    alone under negative ids; data/footprints.npz), as a raster of the given values: ids_values maps an outline's OSM
-    id to its value, extra(k) gives the k-th LoD2-only building's (0 without). Returns (raster, number of LoD2-only
-    buildings). Exits when voxelize.py has not run yet (zones.py and windows.py would otherwise fall back to OSM's
-    own outlines and silently disagree with the tiles)."""
+FOOTPRINTS = "data/footprints.npz"
+
+
+def lod2_only_ids(band=256):
+    """the ids of the buildings from LoD2 alone in data/footprints.npz (negative), ascending; read row band by row
+    band (window.py), never the whole raster at once"""
     import numpy as np
     from pathlib import Path
-    p = Path("data/footprints.npz")
-    if not p.exists():
+    import window
+    if not Path(FOOTPRINTS).exists():
         raise SystemExit("data/footprints.npz missing: run scripts/voxelize.py first")
-    oid = np.load(p)["oid"]
+    (D, W), _ = window.npz_shape(FOOTPRINTS, "oid")
+    neg = set()
+    for r in range(0, D, band):
+        a = window.npz_rows(FOOTPRINTS, "oid", r, min(r + band, D))
+        neg.update(int(k) for k in np.unique(a[a < 0]))
+    return sorted(neg)
+
+
+def footprints(ids_values, extra=None, region=None, neg=None):
+    """The building footprints voxelize.py drew (OSM outlines moved onto the LoD2 footprints, and buildings from LoD2
+    alone under negative ids; data/footprints.npz), as a raster of the given values: ids_values maps an outline's OSM
+    id to its value, extra(k) gives the k-th LoD2-only building's (0 without). region: (ra, rb, ca, cb), only those
+    rows and columns, read as a stream (window.py); neg: lod2_only_ids(), if known. Returns (raster, number of
+    LoD2-only buildings). Exits when voxelize.py has not run yet (zones.py and windows.py would otherwise fall back to
+    OSM's own outlines and silently disagree with the tiles)."""
+    import numpy as np
+    import window
+    neg = lod2_only_ids() if neg is None else neg
+    if region is None:
+        (D, W), _ = window.npz_shape(FOOTPRINTS, "oid")
+        region = (0, D, 0, W)
+    oid = window.npz_region(FOOTPRINTS, "oid", region)
     keys, inv = np.unique(oid, return_inverse=True)
-    neg = [int(k) for k in keys if k < 0]
     vals = {k: (extra(j) if extra else 0) for j, k in enumerate(neg)}
     lut = np.array([ids_values.get(int(k), vals.get(int(k), 0)) for k in keys])
     return lut[inv.reshape(oid.shape)], len(neg)

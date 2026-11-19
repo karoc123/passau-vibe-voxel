@@ -196,113 +196,116 @@ def column_runs(vol_win):
     return counts.astype(np.uint16), np.stack([s_z0, s_z1 - s_z0, val], 1).astype(np.uint16)
 
 
-def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None):
+HALO = 16  # map cells around a window's core that export_window reads (window.py): a level-8 node's apron (8 m) and
+# side_walls' look at the block beside it (8 m); the coarser levels' blocks, and the cascade within them, are aligned
+
+
+def manifest(D, W, levels=None):
+    """per level its nodes across and down (meta.json tiles.levels)"""
+    return [dict(s=s, nx=-(-(-(-W // s)) // N), ny=-(-(-(-D // s)) // N)) for s in levels or LEVELS]
+
+
+def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None,
+           windows=None, levels=None):
     """vol (H, D, W) level-1 voxels, g (D, W) ground level, planes (D, W) roof plane codes or None -> node files;
-    wall_ids: the palette entries of buildings' walls (the distance levels' colours, side_walls). Returns the manifest
-    for meta.json."""
+    wall_ids: the palette entries of buildings' walls (the distance levels' colours, side_walls). windows: the cover
+    of the map to work in (window.py; default one window, the whole map): each window's nodes come from its region of
+    vol alone, the bytes are the same. Returns the manifest for meta.json."""
+    import window as wmod
     D, W = g.shape
-    info = dict(N=N, levels=[], bytes=0)
-    done = {}
-    for s in LEVELS:
-        fin = done.get(s // 2) if s in CASCADE else None
-        if s in CASCADE and fin is None:
-            fin = downsample(vol, s // 2, np.array(sorted(face_ids), np.uint16), wall_ids if s // 2 in LOD_LEVELS else None)
-        vs = vol if s == 1 else downsample(vol, s, np.array(sorted(face_ids), np.uint16), wall_ids if s in LOD_LEVELS else None, fin)
-        del fin
-        if s * 2 in CASCADE:
-            done[s] = vs
-        gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
-        ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
-        Hs, Ds, Ws = vs.shape
-        nx, ny = -(-Ws // N), -(-Ds // N)
-        (out / str(s)).mkdir(parents=True, exist_ok=True)
-        split = s == 1 and len(fol_ids)
-        if split:
-            (out / "1f").mkdir(parents=True, exist_ok=True)
-            is_fol = np.zeros(65536, bool); is_fol[list(fol_ids)] = True; is_fol[list(grass_ids)] = True
-            is_grass = np.zeros(65536, bool); is_grass[list(grass_ids)] = True
-        tot, nruns, ftot = 0, 0, 0
-        # node files of an earlier, larger map are not in the new manifest: they go, so the folder holds this build only
-        stale = [f for d in ([str(s), "1f"] if split else [str(s)]) for f in (out / d).glob("*.bin")
+    levels = manifest(D, W, levels)
+    remove_stale(out, levels, note, split=bool(len(fol_ids)))
+    stats = {lv["s"]: [0, 0, 0] for lv in levels}
+    for w in windows or wmod.cover(D, W):
+        ra, rb, ca, cb = region = w.region(HALO)
+        st = export_window(vol[:, ra:rb, ca:cb], g[ra:rb, ca:cb], None if planes is None else planes[ra:rb, ca:cb],
+                           region, w, out, face_ids, fol_ids, grass_ids, bare_id, wall_ids, [lv["s"] for lv in levels])
+        for s in st:
+            stats[s] = [a + b for a, b in zip(stats[s], st[s])]
+    for lv in levels:
+        tot, nruns, ftot = stats[lv["s"]]
+        note(f"tiles level {lv['s']}: {lv['nx']}x{lv['ny']} nodes, {nruns} runs, {tot / 2 ** 20:.1f} MB gz"
+             + (f", foliage {ftot / 2 ** 20:.1f} MB gz" if lv["s"] == 1 and len(fol_ids) else ""))
+    return dict(N=N, levels=levels, bytes=sum(st_[0] for st_ in stats.values()))
+
+
+def remove_stale(out, levels, note, split=True):
+    """node files of an earlier, larger map are not in the new manifest: they go, so the folder holds this build only"""
+    for lv in levels:
+        s, nx, ny = lv["s"], lv["nx"], lv["ny"]
+        dirs = [str(s)] + (["1f"] if s == 1 and split else [])
+        for d in dirs:
+            (out / d).mkdir(parents=True, exist_ok=True)
+        stale = [f for d in dirs for f in (out / d).glob("*.bin")
                  if not (lambda tx, ty: tx < nx and ty < ny)(*map(int, f.stem.split("_")))]
         for f in stale:
             f.unlink()
         if stale:
             note(f"tiles level {s}: {len(stale)} stale node files removed")
-        for ty in range(ny):
-            for tx in range(nx):
+
+
+def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, wall_ids=None,
+                  levels=None):
+    """The node files (of the given levels) whose first column and row lie in the window's core (window.Window), from
+    the window's region = (ra, rb, ca, cb), win.region(HALO) or more, of the level-1 volume (vol: (H, rb - ra, cb - ca)),
+    the ground (g) and the roof plane codes (planes, or None). The same bytes as a whole-map export: a node at level s
+    is its own blocks and the 1-cell apron round them, and a block is the voxels in it, the block under it and, for its
+    colour on a facade (side_walls), whether the blocks beside it are solid. Returns per level [bytes, runs, foliage
+    bytes] written."""
+    ra, rb, ca, cb = region
+    assert ra % max(LEVELS) == 0 and ca % max(LEVELS) == 0, "region not aligned to the coarsest level's blocks"
+    D, W = win.D, win.W
+    face = np.array(sorted(face_ids), np.uint16)
+    if len(fol_ids):
+        is_fol = np.zeros(65536, bool); is_fol[list(fol_ids)] = True; is_fol[list(grass_ids)] = True
+        is_grass = np.zeros(65536, bool); is_grass[list(grass_ids)] = True
+    stats, done = {}, {}
+    levels = levels or LEVELS
+    for s in levels:
+        fin = done.get(s // 2) if s in CASCADE else None
+        if s in CASCADE and fin is None:
+            fin = level_of(vol, s // 2, face, wall_ids)
+        vs = vol if s == 1 else downsample(vol, s, face, wall_ids if s in LOD_LEVELS else None, fin)
+        del fin
+        if s * 2 in CASCADE:
+            done[s] = vs
+        gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
+        ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
+        Hs = vs.shape[0]
+        Ds, Ws = -(-D // s), -(-W // s)  # the map at this level
+        oy, ox = ra // s, ca // s  # the region's corner at this level
+        split = s == 1 and len(fol_ids)
+        tot, nruns, ftot = 0, 0, 0
+        for ty in range(win.r0 // (N * s), -(-win.r1 // (N * s))):
+            for tx in range(win.c0 // (N * s), -(-win.c1 // (N * s))):
+                if not win.holds(ty * N * s, tx * N * s):
+                    continue
                 r0, c0 = ty * N - 1, tx * N - 1
-                win = np.zeros((Hs, N + 2, N + 2), np.uint16)
+                nw = np.zeros((Hs, N + 2, N + 2), np.uint16)
                 gw = np.zeros((N + 2, N + 2), np.uint8)
                 rr0, rr1, cc0, cc1 = max(r0, 0), min(r0 + N + 2, Ds), max(c0, 0), min(c0 + N + 2, Ws)
+                assert rr0 >= oy and cc0 >= ox and rr1 - oy <= vs.shape[1] and cc1 - ox <= vs.shape[2], "halo too small"
                 if rr0 < rr1 and cc0 < cc1:
-                    win[:, rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = vs[:, rr0:rr1, cc0:cc1]
-                    gw[rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = np.clip(gs[rr0:rr1, cc0:cc1], 0, 255)
-                top = int(np.nonzero(win.reshape(Hs, -1).any(1))[0].max()) + 1 if win.any() else 1
-                win = win[:top]
+                    nw[:, rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = vs[:, rr0 - oy:rr1 - oy, cc0 - ox:cc1 - ox]
+                    gw[rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = np.clip(gs[rr0 - oy:rr1 - oy, cc0 - ox:cc1 - ox], 0, 255)
+                top = int(np.nonzero(nw.reshape(Hs, -1).any(1))[0].max()) + 1 if nw.any() else 1
+                nw = nw[:top]
                 if split:
-                    f = is_fol[win]
-                    fol = np.where(f, win, 0).astype(np.uint16)
-                    win = np.where(f, np.where(is_grass[win], bare_id, 0), win).astype(np.uint16)
+                    f = is_fol[nw]
+                    fol = np.where(f, nw, 0).astype(np.uint16)
+                    nw = np.where(f, np.where(is_grass[nw], bare_id, 0), nw).astype(np.uint16)
                     fc, fr = column_runs(fol)
                     tilefile.write(out / "1f" / f"{tx}_{ty}.bin", dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
                     ftot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
-                counts, runs = column_runs(win)
+                counts, runs = column_runs(nw)
                 sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
                 if ps is not None:
-                    sec["plns"] = plane_window(ps, r0, c0)
+                    # (beyond the region only beyond the map, where plane_window gives 0 as before)
+                    sec["plns"] = plane_window(ps, r0 - oy, c0 - ox)
                 tilefile.write(out / str(s) / f"{tx}_{ty}.bin", sec)
                 tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
                 nruns += len(runs)
-        info["levels"].append(dict(s=s, nx=nx, ny=ny))
-        info["bytes"] += tot
-        note(f"tiles level {s}: {nx}x{ny} nodes, {nruns} runs, {tot / 2 ** 20:.1f} MB gz"
-             + (f", foliage {ftot / 2 ** 20:.1f} MB gz" if split else ""))
+        stats[s] = [tot, nruns, ftot]
         del vs, ps
         done.pop(s // 2, None)
-    return info
-
-
-def export_region(vol, g, out, box, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None):
-    """Rewrite only the nodes (every level) over box = (r0, r1, c0, c1) of the 1 m grid, from the same volume the
-    full export would see (for a fast loop on one landmark); each node is built from its own 1 m window, so the result matches
-    export()."""
-    H, D, W = vol.shape
-    R0, R1, C0, C1 = box
-    face = np.array(sorted(face_ids), np.uint16)
-    fol = np.zeros(65536, bool); fol[list(fol_ids)] = True; fol[list(grass_ids)] = True
-    grass = np.zeros(65536, bool); grass[list(grass_ids)] = True
-    n = 0
-    for s in LEVELS:
-        span = N * s
-        for ty in range(max(R0 - s, 0) // span, min(R1 + s, D - 1) // span + 1):
-            for tx in range(max(C0 - s, 0) // span, min(C1 + s, W - 1) // span + 1):
-                a, c = ty * span - s, tx * span - s  # 1 m window: the node and its one-cell apron, aligned to s
-                w1 = np.zeros((H, span + 2 * s, span + 2 * s), np.uint16)
-                g1 = np.zeros((span + 2 * s, span + 2 * s), g.dtype)
-                ra, rb, ca, cb = max(a, 0), min(a + span + 2 * s, D), max(c, 0), min(c + span + 2 * s, W)
-                w1[:, ra - a:rb - a, ca - c:cb - c] = vol[:, ra:rb, ca:cb]
-                g1[ra - a:rb - a, ca - c:cb - c] = g[ra:rb, ca:cb]
-                win = level_of(w1, s, face, wall_ids)
-                gw = np.clip(g1[::s, ::s], 0, 255).astype(np.uint8)
-                Hs = win.shape[0]
-                top = int(np.nonzero(win.reshape(Hs, -1).any(1))[0].max()) + 1 if win.any() else 1
-                win = win[:top]
-                if s == 1 and len(fol_ids):
-                    f = fol[win]
-                    fv = np.where(f, win, 0).astype(np.uint16)
-                    win = np.where(f, np.where(grass[win], bare_id, 0), win).astype(np.uint16)
-                    fc, fr = column_runs(fv)
-                    tilefile.write(out / "1f" / f"{tx}_{ty}.bin", dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
-                counts, runs = column_runs(win)
-                pw = None
-                if planes is not None and (s == 1 or s in LOD_LEVELS):
-                    p1 = np.zeros((span + 2 * s, span + 2 * s), np.uint16)
-                    p1[ra - a:rb - a, ca - c:cb - c] = planes[ra:rb, ca:cb]
-                    pw = downsample_planes(p1, s)
-                sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
-                if pw is not None:
-                    sec["plns"] = plane_window(pw, 0, 0)
-                tilefile.write(out / str(s) / f"{tx}_{ty}.bin", sec)
-                n += 1
-    note(f"tiles: {n} nodes rewritten over rows {R0}-{R1}, cols {C0}-{C1} (without their bldg/flod/fols/spil: run tile_fields.py)")
+    return stats

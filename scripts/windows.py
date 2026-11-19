@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 from shapely.strtree import STRtree
 
-from osm import OSM, footprints
+from osm import OSM, lod2_only_ids
 
 OUT = Path(__file__).resolve().parent.parent / "web/public/data/windows.bin"
 KINDS = ["none", "residential", "office", "hotel", "retail", "public", "religious", "other"]
@@ -72,7 +72,7 @@ def main():
         habit = (i * 2654435761 >> 7) % 32
         vals[oid] = KINDS.index(k) | habit << 3
     # the buildings as zones.py numbers them: blds in this order, then those from LoD2 alone (footprints.npz)
-    _, n_extra = footprints({})
+    n_extra = len(lod2_only_ids())  # (their ids only: no raster of the map)
     table = np.zeros(len(blds) + n_extra + 1, np.uint8)
     for i, (g, t, oid) in enumerate(blds):
         table[i + 1] = vals[oid]
