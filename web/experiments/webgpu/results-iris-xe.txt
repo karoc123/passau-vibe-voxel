@@ -1,0 +1,47 @@
+('fromoberhaus', 'gl') meshes 378 quads 5587442 vertexMB 313 meshMs 19875
+('fromoberhaus', 'gpu') meshes 378 quads 5587442 vertexMB 805 meshMs 20366
+('fromoberhaus', 'gpuc') meshes 378 quads 5587442 vertexMB 358 meshMs 20380
+('oberhaus', 'gl') meshes 353 quads 5347146 vertexMB 299 meshMs 16640
+('oberhaus', 'gpu') meshes 353 quads 5347146 vertexMB 770 meshMs 18650
+('oberhaus', 'gpuc') meshes 353 quads 5347146 vertexMB 342 meshMs 18804
+('overview', 'gl') meshes 323 quads 4414984 vertexMB 247 meshMs 13835
+('overview', 'gpu') meshes 323 quads 4414984 vertexMB 636 meshMs 14558
+('overview', 'gpuc') meshes 323 quads 4414984 vertexMB 283 meshMs 16913
+
+view          variant cull  shadow | GPU ms med [load min-max] (in-load IQR) | CPU ms med [min-max] | frame ms med [min-max] | loads
+fromoberhaus  gl      all   every  |  15.25 [14.94-15.94] (0.86) |  2.40 [ 2.30- 2.50] |  15.93 [15.10-20.21] | 4
+fromoberhaus  gpu     all   every  |  29.52 [29.11-34.96] (1.48) |  7.35 [ 6.60-11.25] |  32.16 [30.83-42.86] | 4
+fromoberhaus  gpuc    all   every  |  15.11 [14.85-15.54] (0.88) |  7.90 [ 6.60- 9.30] |  16.51 [15.74-16.87] | 4
+fromoberhaus  gl      all   static |   4.04 [ 4.03- 4.11] (0.17) |  1.00 [ 0.90- 1.10] |   4.68 [ 4.61- 5.72] | 4
+fromoberhaus  gpu     all   static |   7.00 [ 6.73- 7.46] (0.76) |  3.00 [ 2.80- 3.60] |   7.91 [ 7.80- 9.74] | 4
+fromoberhaus  gpuc    all   static |   6.42 [ 5.72- 7.40] (2.78) |  3.15 [ 2.80- 4.25] |   6.80 [ 5.76- 9.15] | 4
+fromoberhaus  gl      cull  every  |   7.78 [ 7.53- 7.99] (0.62) |  4.12 [ 3.80- 4.40] |   8.72 [ 8.62-11.03] | 4
+fromoberhaus  gpu     cull  every  |  13.83 [13.36-14.62] (1.71) |  8.90 [ 8.40-11.65] |  19.42 [19.14-24.82] | 4
+fromoberhaus  gpuc    cull  every  |   9.30 [ 8.24-10.39] (1.12) |  8.52 [ 8.15- 9.90] |  15.05 [14.41-15.37] | 4
+fromoberhaus  gl      cull  static |   2.89 [ 2.85- 2.91] (0.10) |  1.70 [ 1.60- 2.50] |   4.30 [ 3.74- 4.83] | 4
+fromoberhaus  gpu     cull  static |   5.89 [ 4.67- 7.21] (1.40) |  3.57 [ 3.40- 4.30] |   7.47 [ 6.85-10.01] | 4
+fromoberhaus  gpuc    cull  static |   5.62 [ 4.86- 6.25] (1.40) |  3.65 [ 3.55- 4.15] |   7.31 [ 6.33- 8.95] | 4
+oberhaus      gl      all   every  |  13.77 [13.02-14.11] (0.67) |  2.10 [ 1.80- 2.15] |  14.18 [13.57-14.84] | 4
+oberhaus      gpu     all   every  |  26.10 [25.85-26.99] (1.94) |  6.03 [ 5.60- 6.70] |  27.07 [26.87-28.07] | 4
+oberhaus      gpuc    all   every  |  13.55 [13.32-14.83] (0.93) |  6.15 [ 5.70- 6.95] |  15.05 [14.51-16.21] | 4
+oberhaus      gl      all   static |   3.28 [ 3.27- 3.33] (0.09) |  0.75 [ 0.60- 1.00] |   3.78 [ 3.75- 3.81] | 4
+oberhaus      gpu     all   static |   7.31 [ 6.04- 8.27] (4.33) |  1.95 [ 1.60- 2.20] |   7.58 [ 6.37- 8.93] | 4
+oberhaus      gpuc    all   static |   6.38 [ 4.71- 7.64] (4.42) |  2.08 [ 1.80- 2.30] |   6.04 [ 5.80- 7.64] | 4
+oberhaus      gl      cull  every  |   6.94 [ 6.83- 7.16] (0.56) |  3.47 [ 3.30- 3.75] |   8.12 [ 7.80- 8.26] | 4
+oberhaus      gpu     cull  every  |  12.33 [11.88-14.61] (1.80) |  6.90 [ 6.65- 7.40] |  17.48 [17.08-26.89] | 4
+oberhaus      gpuc    cull  every  |   8.57 [ 7.38-11.15] (2.77) |  7.10 [ 6.60- 7.95] |  13.07 [12.24-18.19] | 4
+oberhaus      gl      cull  static |   2.49 [ 2.48- 2.52] (0.08) |  1.12 [ 0.95- 1.40] |   3.35 [ 3.02- 3.50] | 4
+oberhaus      gpu     cull  static |   5.95 [ 4.88- 6.96] (2.57) |  2.18 [ 1.60- 2.40] |   7.54 [ 5.41- 8.14] | 4
+oberhaus      gpuc    cull  static |   6.08 [ 4.42- 7.25] (1.95) |  2.17 [ 1.90- 2.40] |   6.49 [ 4.65- 8.74] | 4
+overview      gl      all   every  |  13.78 [13.37-14.17] (0.63) |  1.25 [ 0.50- 2.00] |  14.34 [13.84-14.97] | 4
+overview      gpu     all   every  |  25.88 [25.07-26.01] (1.22) |  6.47 [ 5.00- 6.60] |  26.79 [25.64-27.98] | 4
+overview      gpuc    all   every  |  14.08 [13.80-15.13] (0.78) |  5.95 [ 5.80- 6.70] |  15.29 [14.95-15.61] | 4
+overview      gl      all   static |   4.96 [ 4.79- 6.53] (0.35) |  0.45 [ 0.20- 1.10] |   5.37 [ 5.04- 6.48] | 4
+overview      gpu     all   static |   8.41 [ 8.16- 8.76] (1.50) |  2.95 [ 2.65- 3.60] |   9.67 [ 9.33-10.94] | 4
+overview      gpuc    all   static |   6.25 [ 6.01- 6.75] (1.37) |  2.93 [ 2.80- 3.15] |   7.36 [ 7.02- 8.37] | 4
+overview      gl      cull  every  |   7.39 [ 7.13- 7.45] (0.46) |  2.47 [ 0.90- 4.15] |   8.32 [ 7.64- 9.31] | 4
+overview      gpu     cull  every  |  13.26 [12.24-13.82] (1.66) |  7.60 [ 4.80- 8.60] |  18.04 [17.25-19.26] | 4
+overview      gpuc    cull  every  |   9.46 [ 9.00-10.15] (1.49) |  7.72 [ 7.10- 8.15] |  13.72 [13.02-14.33] | 4
+overview      gl      cull  static |   3.52 [ 3.45- 3.61] (0.13) |  1.00 [ 0.30- 1.80] |   4.01 [ 3.75- 4.89] | 4
+overview      gpu     cull  static |   8.02 [ 5.60- 8.38] (2.16) |  3.62 [ 3.50- 3.80] |   9.96 [ 7.84-10.88] | 4
+overview      gpuc    cull  static |   8.14 [ 6.03- 8.70] (2.57) |  3.55 [ 3.10- 3.75] |   8.24 [ 6.73- 8.62] | 4
