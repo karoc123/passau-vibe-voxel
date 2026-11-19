@@ -1,17 +1,30 @@
 import type { Vector3 } from 'three';
 import type { Meta } from '../types';
 import { decodeTile, type Columns } from '../tile-data';
+import { PAL_GROUND } from '../chamfer';
+import { rampField, rampHeight, type RampField } from '../ramps';
 import { fetchGzip } from '../util';
-import { MAT } from '../voxelMaterial';
+import { MAT, pavedGround } from '../voxelMaterial';
 
 const RADIUS = 0.35;
 const CONCURRENT_LOADS = 4;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
-type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs };
+// ramps: the smooth paved ground (ramps.ts) as the mesher draws it, built on first use; null: none in the tile
+type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; counts: Uint16Array; ramps?: RampField | null };
 export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
 // Normal as a signed one-based axis index (x, y, z).
 type Contact = { fraction: number; axis: number };
 export type Sweep = (Contact & { hit: ImpactKind }) | { fraction: number; hit: null } | 'loading';
+export interface SweepOptions {
+  half?: Vector3; // the box's half extents (default: the drone's 35 cm cube)
+  above?: number; // ignore voxels (and the ground) whose top is at or below this height: what a body steps over
+  foliage?: boolean; // trees block (default true)
+  water?: boolean; // water blocks (default true)
+  escape?: boolean; // what the box already overlaps doesn't block it (default false: it blocks the move along its axis)
+}
+// a surface to stand on; water: the river's (or a pond's) top
+export interface Support { height: number; water: boolean }
+const CUBE = { x: RADIUS, y: RADIUS, z: RADIUS };
 
 function runsOf(columns: Columns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
@@ -19,12 +32,13 @@ function runsOf(columns: Columns): Runs {
   return { offsets, data: columns.runs };
 }
 
-// Sweeps a 70 cm box through one column segment, expanded by the drone radius on each axis.
-function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number) {
+// Sweeps a box (half extents h; the drone's 70 cm cube by default) through one column segment, expanded by h.
+function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number, h: { x: number; y: number; z: number }, escape = false) {
   let enter = 0, leave = limit, axis = 0;
   for (let i = 0; i < 3; i++) {
-    const min = (i === 0 ? x : i === 1 ? lo : z) - RADIUS;
-    const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + RADIUS;
+    const r = i === 0 ? h.x : i === 1 ? h.y : h.z;
+    const min = (i === 0 ? x : i === 1 ? lo : z) - r;
+    const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + r;
     const start = p.getComponent(i), move = d.getComponent(i);
     if (Math.abs(move) < 1e-10) {
       if (start < min || start > max) return null;
@@ -41,6 +55,7 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
   }
   // A craft already inside a voxel (e.g. at a corner) falls back to its opposing motion axis.
   if (axis === 0) {
+    if (escape) return null;
     const i = Math.abs(d.x) >= Math.abs(d.y) && Math.abs(d.x) >= Math.abs(d.z) ? 0 : Math.abs(d.y) >= Math.abs(d.z) ? 1 : 2;
     axis = d.getComponent(i) > 0 ? -(i + 1) : i + 1;
   }
@@ -57,6 +72,7 @@ export class VoxelCollision {
   private readonly nx: number;
   private readonly nz: number;
   private readonly material: Uint8Array;
+  private readonly paved: Uint8Array;
   private readonly tiles = new Map<number, CollisionTile>();
   private readonly inFlight = new Set<number>();
   private readonly retryAt = new Map<number, number>();
@@ -72,6 +88,7 @@ export class VoxelCollision {
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
     this.material = Uint8Array.from(meta.palette, p => p[3]);
+    this.paved = Uint8Array.from(meta.palette, p => (pavedGround(p) ? PAL_GROUND : 0));
   }
 
   prefetch(p: Vector3, v: Vector3) {
@@ -114,7 +131,7 @@ export class VoxelCollision {
     const i = this.column(ix, iz);
     const base = tile.base, ceiling = from + 1.07;
     let height = tile.ground[i], water = false;
-    if (height > ceiling) return { height, blocked: true };
+    if (height > ceiling) return { height, blocked: true, water };
     for (let j = base.offsets[i]; j < base.offsets[i + 1]; j += 3) {
       const top = base.data[j] + base.data[j + 1];
       if (top >= height && top <= ceiling) {
@@ -122,42 +139,81 @@ export class VoxelCollision {
         water = this.material[base.data[j + 2]] === MAT.WATER;
       }
     }
-    if (water) return { height, blocked: true };
+    // Water is no wall: whoever drives into it sinks (drive.prototype.ts).
+    if (water) return { height, blocked: false, water };
+    // (a ramp's top may lie up to a metre below its voxel's: the voxel is the ramp, nothing over it)
+    const voxel = height;
+    if (height === tile.ground[i]) height = this.ramp(tile, i, x, z) ?? height;
     // The car can step over 1 m changes in the source terrain. Keep the body clear over lower wheel samples.
-    const bottom = Math.max(height, from - 0.45);
+    const bottom = Math.max(voxel, height, from - 0.45);
     for (const layer of [base, tile.foliage]) {
       for (let j = layer.offsets[i]; j < layer.offsets[i + 1]; j += 3) {
         const lo = layer.data[j], hi = lo + layer.data[j + 1];
         if (lo >= bottom + clearance) break;
-        if (hi > bottom && this.material[layer.data[j + 2]] !== MAT.GRASS) return { height, blocked: true };
+        if (hi > bottom && this.material[layer.data[j + 2]] !== MAT.GRASS) return { height, blocked: true, water };
       }
     }
-    return { height, blocked: false };
+    return { height, blocked: false, water };
   }
 
-  sweep(p: Vector3, d: Vector3): Sweep {
+  // The highest surface at or below `top` at (x, z): the ground (smooth where it is a ramp), a roof, a deck, water.
+  // Foliage is not stood on. null: the tile is still loading.
+  support(x: number, z: number, top: number): Support | null {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    if (ix < 0 || iz < 0 || ix >= this.width || iz >= this.depth) return { height: 0, water: false };
+    const tile = this.tileAt(ix, iz);
+    if (!tile) return null;
+    const i = this.column(ix, iz), base = tile.base, ground = tile.ground[i];
+    let height = ground, water = false;
+    for (let j = base.offsets[i]; j < base.offsets[i + 1]; j += 3) {
+      const t = base.data[j] + base.data[j + 1];
+      if (t > top) break;
+      if (t >= height) { height = t; water = this.material[base.data[j + 2]] === MAT.WATER; }
+    }
+    if (height === ground && !water) {
+      const ramp = this.ramp(tile, i, x, z);
+      if (ramp != null && ramp <= top + 1) height = ramp;
+    }
+    return { height, water };
+  }
+
+  private ramp(tile: CollisionTile, i: number, x: number, z: number) {
+    if (tile.ramps === undefined) {
+      const off = new Uint32Array(tile.counts.length + 1);
+      for (let c = 0; c < tile.counts.length; c++) off[c + 1] = off[c] + tile.counts[c];
+      const f = rampField(this.tileSide, tile.counts, off, tile.base.data, tile.ground, this.paved);
+      tile.ramps = f.any ? f : null;
+    }
+    const f = tile.ramps;
+    return f && f.paved[i] ? rampHeight(f, i, x - Math.floor(x), z - Math.floor(z)) : null;
+  }
+
+  sweep(p: Vector3, d: Vector3, options?: SweepOptions): Sweep {
+    const h = options?.half ?? CUBE, above = options?.above ?? -Infinity;
+    const foliage = options?.foliage ?? true, water = options?.water ?? true, escape = !!options?.escape;
     let fraction = 1;
     let hit: ImpactKind | null = null, normalAxis = 0;
     const result = (): Sweep => hit ? { fraction, hit, axis: normalAxis } : { fraction, hit: null };
     // Reserve room for the drone at the edges of the model.
     for (const [axis, extent] of [[0, this.width], [1, this.ceiling], [2, this.depth]]) {
+      const r = axis === 0 ? h.x : axis === 1 ? h.y : h.z;
       const start = p.getComponent(axis), move = d.getComponent(axis), end = start + move;
-      if (end >= RADIUS && end <= extent - RADIUS) continue;
-      const limit = (end < RADIUS ? RADIUS : extent - RADIUS);
+      if (end >= r && end <= extent - r) continue;
+      const limit = (end < r ? r : extent - r);
       const t = move === 0 ? 0 : Math.max(0, (limit - start) / move);
       if (t <= fraction) {
         fraction = t;
-        normalAxis = (axis + 1) * (end < RADIUS ? 1 : -1);
-        hit = axis === 1 ? (end < RADIUS ? 'terrain' : 'ceiling') : 'city edge';
+        normalAxis = (axis + 1) * (end < r ? 1 : -1);
+        hit = axis === 1 ? (end < r ? 'terrain' : 'ceiling') : 'city edge';
       }
     }
 
-    const minX = Math.max(0, Math.floor(Math.min(p.x, p.x + d.x * fraction) - RADIUS));
-    const maxX = Math.min(this.width - 1, Math.floor(Math.max(p.x, p.x + d.x * fraction) + RADIUS));
-    const minZ = Math.max(0, Math.floor(Math.min(p.z, p.z + d.z * fraction) - RADIUS));
-    const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + RADIUS));
-    const minY = Math.min(p.y, p.y + d.y * fraction) - RADIUS;
-    const maxY = Math.max(p.y, p.y + d.y * fraction) + RADIUS;
+    const minX = Math.max(0, Math.floor(Math.min(p.x, p.x + d.x * fraction) - h.x));
+    const maxX = Math.min(this.width - 1, Math.floor(Math.max(p.x, p.x + d.x * fraction) + h.x));
+    const minZ = Math.max(0, Math.floor(Math.min(p.z, p.z + d.z * fraction) - h.z));
+    const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + h.z));
+    const minY = Math.min(p.y, p.y + d.y * fraction) - h.y;
+    const maxY = Math.max(p.y, p.y + d.y * fraction) + h.y;
     if (minY > this.ceiling - 600) return result();
 
     for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
@@ -165,8 +221,8 @@ export class VoxelCollision {
       if (!tile) return 'loading';
       const i = this.column(x, z);
       const ground = tile.ground[i];
-      if (minY <= ground) {
-        const groundContact = contact(p, d, x, 0, ground, z, fraction);
+      if (minY <= ground && ground > above) {
+        const groundContact = contact(p, d, x, 0, ground, z, fraction, h, escape);
         if (groundContact) {
           ({ fraction, axis: normalAxis } = groundContact);
           hit = 'terrain';
@@ -176,8 +232,10 @@ export class VoxelCollision {
         for (let j = runs.offsets[i]; j < runs.offsets[i + 1]; j += 3) {
           const lo = runs.data[j], hi = lo + runs.data[j + 1];
           if (lo > maxY) break;
-          if (hi < minY || (kind === 'foliage' && this.material[runs.data[j + 2]] === MAT.GRASS)) continue;
-          const voxelContact = contact(p, d, x, lo, hi, z, fraction);
+          if (hi < minY || hi <= above) continue;
+          const material = this.material[runs.data[j + 2]];
+          if (kind === 'foliage' ? !foliage || material === MAT.GRASS : !water && material === MAT.WATER) continue;
+          const voxelContact = contact(p, d, x, lo, hi, z, fraction, h, escape);
           if (voxelContact && (voxelContact.fraction < fraction || !hit)) {
             ({ fraction, axis: normalAxis } = voxelContact);
             hit = kind;
@@ -215,7 +273,7 @@ export class VoxelCollision {
       .then(([base, foliage]) => {
         if (!this.wanted.includes(key)) return;
         const terrain = decodeTile(base, this.tileSide);
-        this.tiles.set(key, { ground: terrain.ground, base: runsOf(terrain), foliage: runsOf(decodeTile(foliage, this.tileSide)) });
+        this.tiles.set(key, { ground: terrain.ground, base: runsOf(terrain), foliage: runsOf(decodeTile(foliage, this.tileSide)), counts: terrain.counts });
         this.retryAt.delete(key);
       })
       .catch(() => this.retryAt.set(key, performance.now() + 1500))

@@ -47,6 +47,7 @@ interface Blocked {
 export interface Car extends Blocked {
   kind: 'car';
   pitch?: number; // drawn nose up (radians) on a ramp (life.ts drawCars)
+  roll?: number; // drawn left side up (radians): the driven car on uneven ground (drive.prototype.ts)
   id: number;
   e: number;
   lane: number;

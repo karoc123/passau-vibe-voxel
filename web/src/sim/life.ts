@@ -702,7 +702,7 @@ export class StreetLife {
     const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
     const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world;
     const draw = (c: Car, i: number) => {
-      m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
+      m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
       for (const mesh of [M.body, M.dark, M.head, M.tail]) mesh.setMatrixAt(i, m);
       M.body.setColorAt(i, c.col);
       M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));

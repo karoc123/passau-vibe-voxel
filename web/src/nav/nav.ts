@@ -36,6 +36,9 @@ export class Nav {
   mode: Mode = 'orbit';
   ride: Ride | null = null;
   controlledRide: Ride | null = null;
+  // the driven car's camera: shaken by a crash, dipped by a splash (drive.prototype.ts); its height followed smoothly
+  readonly rideShake = new THREE.Vector3();
+  private rideY: number | null = null;
   readonly actors = new THREE.Group();
   world: World | null = null;
   streamer: TileStreamer | null = null;
@@ -722,7 +725,14 @@ export class Nav {
       if (next) { const view = R.view; this.startRide(next); this.ride!.view = view; } else this.hopOff();
       return;
     }
+    if (this.driving && R.view === 'behind') {
+      // through jumps, drops and landings the chase camera's height follows the car with a short lag
+      const y = this.rideY;
+      this.rideY = y == null || Math.abs(pose.y - y) > 40 ? pose.y : y + (pose.y - y) * (1 - Math.exp(-9 * dt));
+      pose.y = this.rideY;
+    } else this.rideY = null;
     const { pos, look, fov } = rideCamera(R, pose, this.world);
+    if (this.driving) pos.add(this.rideShake);
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, pos.clone().add(look), new THREE.Vector3(0, 1, 0)));
     this.place(pos, q, fov, true);
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
