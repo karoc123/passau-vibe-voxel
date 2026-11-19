@@ -82,7 +82,8 @@ class Graphics {
     const quality = choices('quality', 'Quality', Object.entries(PRESET), this.box);
     quality.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('button');
-      if (b) this.change({ ...s.presets[b.dataset.v as Preset] });
+      // (the TAA as it is: no preset turns it on or off)
+      if (b) { const { taa: _, ...p } = s.presets[b.dataset.v as Preset]; this.change(p); }
     });
     this.sync.push(() => quality.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.preset)));
 
@@ -101,8 +102,8 @@ class Graphics {
       const sl = new Slider(adv, { near: spec.step / 2, log: false, marks: {}, ...spec, onInput: (v) => this.change({ [key]: v }) });
       this.sync.push(() => {
         // the resolution and the detail say whether measured or set (settings.ts, autores.ts)
-        if (key === 'res' || key === 'detail') sl.setMarks({ [s.source(key)]: s.now[key] });
-        sl.set(document.activeElement === sl.input ? sl.value : s.now[key]);
+        if (key === 'res' || key === 'detail') sl.setMarks({ [s.source(key)]: key === 'res' ? s.renderRes : s.now[key] });
+        sl.set(document.activeElement === sl.input ? sl.value : key === 'res' ? s.renderRes : s.now[key]);
       });
       return sl;
     };
@@ -123,8 +124,9 @@ class Graphics {
     const px = slide('lodpx', { min: 0.6, max: 3, step: 0.1, marks: { default: 1.2 }, show: (v) => `Coarser below ${v.toFixed(1)} px` });
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
     pick('occl', 'Occlusion culling', onOff);
+    pick('taa', 'Temporal upscaling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
-    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. View distance: the city further away is neither loaded nor drawn, hidden in haze. Depth pre-pass: slower on some GPUs.', adv);
+    el('div', 'note', 'Resolution and city at 1 m “auto”: chosen once for this GPU (the resolution first, less of the city at 1 m only if still far too slow), then fixed until you set them. View distance: the city further away is neither loaded nor drawn, hidden in haze. Temporal upscaling (experimental): drawn at a lower resolution (67 % unless you set it) and sharpened over several frames instead of SMAA; can blur a little in fast motion. Depth pre-pass: slower on some GPUs.', adv);
     this.show();
   }
 

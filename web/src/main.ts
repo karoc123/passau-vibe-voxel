@@ -54,7 +54,8 @@ const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
 // of GPU.
 const ceiling = phone ? 0.75e6 : Infinity;
 const budget = () => { const l = gfx.now.detail; return l >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** l); };
-const pixelRatio = () => Math.min(devicePixelRatio, 2) * gfx.now.res;
+// (with the TAA the canvas at the screen's resolution, the scene at gfx.renderRes: post.ts)
+const pixelRatio = () => Math.min(devicePixelRatio, 2) * (gfx.now.taa ? 1 : gfx.now.res);
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const movingActors = new THREE.Group();
@@ -106,7 +107,7 @@ gfx.writeUrl();
 // benchmarks keep theirs) unless autores=1; autores=0 never.
 const autoQ = qs.get('autores');
 let autoRes: AutoRes | null = null;
-if (gfx.toMeasure && (autoQ === '1' || (autoQ !== '0' && !navigator.webdriver))) {
+if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !navigator.webdriver))) {
   const start = { res: gfx.now.res, detail: gfx.now.detail };
   gfx.setAuto(start, true);
   autoRes = new AutoRes(renderer, camera, start, (m, final) => {
@@ -177,7 +178,13 @@ function onResize() {
 // they exist (boot)
 function applyGfx(c: Partial<Gfx>) {
   const g = gfx.now;
-  if ('res' in c && Math.abs(pixelRatio() - renderer.getPixelRatio()) > 0.001) { renderer.setPixelRatio(pixelRatio()); onResize(); }
+  // the TAA turned on while measuring: the measuring left off, nothing remembered (it timed frames without it)
+  if (g.taa && autoRes) { gfx.setAuto({ res: g.res, detail: g.detail }, false, false); autoRes = null; gfxPanel.show(); }
+  if ('res' in c || 'taa' in c) {
+    if (Math.abs(pixelRatio() - renderer.getPixelRatio()) > 0.001) renderer.setPixelRatio(pixelRatio());
+    post.setTaa(g.taa, gfx.renderRes);
+    onResize();
+  }
   // the detail: city.ts asks the budget on its next update
   if ('shadow' in c) { daylight.setShadowSize(g.shadow, maxShadow); stillDue = true; }
   if ('ao' in c || 'bloom' in c || 'refl' in c) post.enable({ ao: g.ao, bloom: g.bloom, refl: g.refl });
@@ -190,6 +197,7 @@ function applyGfx(c: Partial<Gfx>) {
 }
 
 function onMode(m: Mode, ride: Ride | null) {
+  post.taa.restart(); // (the camera jumps)
   document.body.classList.toggle('walking', m !== 'orbit');
   document.body.classList.toggle('fpv', m === 'fpv');
   hud?.set(m, ride);
@@ -342,6 +350,7 @@ async function boot() {
   const v0 = views[qs.get('view') ?? ''] ?? views.overview, cam = qs.get('cam')?.split(',').map(Number);
   camera.position.set(...(cam ? [cam[0], cam[1], cam[2]] as const : v0.pos));
   controls.target.set(...(cam ? [cam[3], cam[4], cam[5]] as const : v0.target));
+  post.taa.restart();
   daylight.uniforms = uniforms;
   daylight.bloom = post.bloom;
   daylight.grade = post.grade;
@@ -352,7 +361,7 @@ async function boot() {
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist,
-    pixelsHigh: () => renderer.domElement.height });
+    pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
@@ -445,7 +454,9 @@ renderer.setAnimationLoop((now) => {
 
 window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,
   // the detail, as the visitor would set it (tools)
-  level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx };
+  level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx,
+  // any graphics setting, as the visitor would set it (tools)
+  setGfx: (c: Partial<Gfx>) => { gfx.set(c); applyGfx(c); gfxPanel.show(); } };
 
 // what the city's shadow map shows: which tiles are drawn (a tile in or out, or one distance level for another, is
 // drawn again into the map where it casts: daylight.changed), and what folds, hides or thins them in its depth pass

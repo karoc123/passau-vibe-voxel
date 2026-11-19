@@ -10,13 +10,18 @@ import { clamp } from './util';
 //   dist     metres   the view distance (Sichtweite): the city's tiles further from the camera than this (along the
 //            ground) are neither drawn nor loaded, the fog closes in before it, a coarse ground stands beyond it
 //            (city.ts, daylight.ts, farground.ts); 0: the whole map
+//   taa      0|1      temporal upscaling (taa.ts): the scene drawn at the resolution res if the URL or the visitor set
+//            it, else at TAA_RES, put together over the frames at the screen's; replaces SMAA. Off by default, and no
+//            preset changes it (nor does measuring: autores.ts does not run with it on)
 // Unless the URL or the visitor set them, res and detail are chosen once at the first visit on a GPU (autores.ts) and
 // remembered with the GPU's name; they never change by themselves after that.
 export type Lod = 'auto' | 'off' | 'far' | 'far4';
-export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean; dist: number }
+export interface Gfx { res: number; detail: number; shadow: number; ao: boolean; bloom: boolean; tilt: boolean; refl: boolean; grade: number; lod: Lod; lodpx: number; prepass: boolean; occl: boolean; dist: number; taa: boolean }
 export type Preset = 'low' | 'medium' | 'high';
 
 export const SHADOWS = [0, 1024, 2048, 4096];
+// the internal resolution with the TAA, unless the resolution is set: two thirds (in pixels 0.45 of the screen's)
+export const TAA_RES = 0.67;
 // the view distance's range (metres; DIST_MAX on the slider stands for the whole map, 0)
 export const DIST_MIN = 600, DIST_MAX = 5000;
 const KEY = 'passau.gfx', AUTO_KEY = 'passau.gfx.auto';
@@ -54,7 +59,7 @@ const LOW_DIST = 1500, MEDIUM_DIST = 2500;
 
 // High is what the viewer did before there were settings (phones: 2048 shadows, no tilt-shift)
 export function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
-  const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true, dist: 0 };
+  const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true, dist: 0, taa: false };
   return {
     low: { ...high, res: 0.6, detail: 0.5, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2, dist: LOW_DIST },
     medium: { ...high, res: 0.8, detail: 0.75, shadow: 2048, tilt: false, lodpx: 1.6, dist: MEDIUM_DIST },
@@ -70,7 +75,7 @@ function fromQuery(q: URLSearchParams): Partial<Gfx> {
   const g: Partial<Gfx> = {
     res: num(q.get('res'), 0.5, 1), detail: num(q.get('detail'), 0, 1), grade: num(q.get('grade'), 0, 2), lodpx: num(q.get('lodpx'), 0.5, 4),
     shadow: shadow === undefined ? undefined : SHADOWS.reduce((a, b) => (Math.abs(b - shadow) < Math.abs(a - shadow) ? b : a)),
-    ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')),
+    ao: bool(q.get('ao')), bloom: bool(q.get('bloom')), tilt: bool(q.get('tilt')), refl: bool(q.get('refl')), prepass: bool(q.get('prepass')), occl: bool(q.get('occl')), taa: bool(q.get('taa')),
     lod: lod === null ? undefined : lod === '0' ? 'off' : lod === '2' ? 'far' : lod === '4' ? 'far4' : 'auto',
     // (0, or anything past the slider's end: the whole map)
     dist: dist === undefined ? undefined : dist <= 0 || dist >= DIST_MAX ? 0 : Math.max(DIST_MIN, Math.round(dist)),
@@ -94,6 +99,7 @@ function toQuery(g: Gfx, d: Gfx, q: URLSearchParams) {
   put('prepass', g.prepass !== d.prepass, g.prepass ? '1' : '0');
   put('occl', g.occl !== d.occl, g.occl ? '1' : '0');
   put('dist', g.dist !== d.dist, String(g.dist));
+  put('taa', g.taa !== d.taa, g.taa ? '1' : '0');
 }
 
 // What the visitor changed ({ v: 2, ...those }). Entries of older versions (no v) hold every setting, as they were
@@ -149,8 +155,15 @@ export class Settings {
   // res or detail as measured: neither the URL nor the visitor set it, and it was measured (or is being)
   isAuto(k: AutoKey) { return this.auto !== null && !(k in this.chosen) && !(k in this.inUrl); }
 
+  // set by the URL or the visitor
+  isSet(k: keyof Gfx) { return k in this.chosen || k in this.inUrl; }
+
+  // the resolution the scene is drawn at: with the TAA, TAA_RES unless set
+  get renderRes() { return this.now.taa && !this.isSet('res') ? TAA_RES : this.now.res; }
+
   // where res or detail comes from, as the panel says it
   source(k: AutoKey) {
+    if (k === 'res' && this.now.taa && !this.isSet('res')) return 'TAA default';
     return k in this.chosen ? 'manual' : k in this.inUrl ? 'from link' : !this.isAuto(k) ? 'default' : this.auto!.measuring ? 'auto, measuring…' : 'auto';
   }
 
@@ -160,7 +173,7 @@ export class Settings {
   // the preset the settings match, if any (what was measured leaves it as it is)
   get preset(): Preset | null {
     return (Object.keys(this.presets) as Preset[]).find((p) => (Object.keys(this.now) as (keyof Gfx)[])
-      .every((k) => ((k === 'res' || k === 'detail') && this.isAuto(k)) || this.presets[p][k] === this.now[k])) ?? null;
+      .every((k) => k === 'taa' || ((k === 'res' || k === 'detail') && this.isAuto(k)) || this.presets[p][k] === this.now[k])) ?? null;
   }
 
   // what measuring chose: measuring tells it is not final yet; when final it is remembered for this GPU

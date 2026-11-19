@@ -6,6 +6,7 @@ import { clamp } from './util';
 import { cutFogGlsl, FOG_CUT } from './daylight';
 import { SKY_GLSL, type Sky } from './sky';
 import { REFL_MAX } from './voxelMaterial';
+import { Sharpen, TaaPass } from './taa';
 
 // The miniature look by depth, not by screen band: each pixel blurs by how far its distance is from the focus (what
 // the camera looks at), in ratio, so the whole plane of the subject stays sharp -- a tower's clock as much as its base.
@@ -381,6 +382,10 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   const tilt = new DepthBlur();
   const tiltPass = new EffectPass(camera, tilt);
   composer.addPass(tiltPass);
+  // the temporal upscaling (taa.ts), when on: the passes before it at the lower resolution, it and the last at the screen's
+  const taa = new TaaPass();
+  taa.enabled = false;
+  composer.addPass(taa);
   const grade = new NightGrade();
   const film = new FilmGrade();
   // SMAA's edge searches sample in loops: with implicit mip levels (there are no mips) the D3D compiler unrolls them
@@ -394,7 +399,12 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   if (!em.fragmentShader.includes('discard;')) throw new Error('SMAA: edge shader changed');
   em.fragmentShader = em.fragmentShader.replaceAll('discard;', 'gl_FragColor = vec4(0.0); return;');
   (smaa as unknown as { clearPass: { render(): void } }).clearPass.render = () => {};
-  composer.addPass(new EffectPass(camera,
+  const sharpen = new Sharpen();
+  sharpen.blendMode.blendFunction = BlendFunction.SKIP;
+  const smaaBlend = smaa.blendMode.blendFunction, smaaUpdate = smaa.update.bind(smaa);
+  smaa.update = (...a) => { if (!taa.on) smaaUpdate(...a); };
+  const last = new EffectPass(camera,
+    sharpen,
     bloom,
     grade,
     tone,
@@ -402,11 +412,48 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     new HueSaturationEffect({ saturation: 0.12 }),
     new BrightnessContrastEffect({ brightness: 0, contrast: 0.06 }),
     new VignetteEffect({ offset: 0.3, darkness: 0.45 }),
-    smaa));
+    smaa);
+  composer.addPass(last);
+  // with the TAA the last pass reads its resolved frame (at the screen's size) instead of the composer's buffer
+  const lastRender = last.render.bind(last);
+  last.render = (r, input, ...a) => lastRender(r, taa.on ? taa.output : input, ...a);
+  // the passes before the TAA at the lower size, the TAA's history and the last pass at the screen's
+  const low = new THREE.Vector2(1, 1);
+  const setSize = composer.setSize.bind(composer);
+  const fit = () => {
+    const full = renderer.getDrawingBufferSize(new THREE.Vector2());
+    low.set(Math.max(1, Math.round(full.x * taa.scale)), Math.max(1, Math.round(full.y * taa.scale)));
+    if (!taa.on) low.copy(full);
+    const c = composer as unknown as { inputBuffer: THREE.WebGLRenderTarget; outputBuffer: THREE.WebGLRenderTarget; depthRenderTarget: THREE.WebGLRenderTarget | null };
+    c.inputBuffer.setSize(low.x, low.y);
+    c.outputBuffer.setSize(low.x, low.y);
+    c.depthRenderTarget?.setSize(low.x, low.y);
+    for (const p of composer.passes) {
+      if (p === taa || p === last) p.setSize(full.x, full.y);
+      else p.setSize(low.x, low.y);
+    }
+    taa.setLow(low.x, low.y);
+  };
+  composer.setSize = (...a) => { setSize(...a); fit(); };
+  // the camera jittered for the composer's frame only
+  const compose = composer.render.bind(composer);
+  composer.render = (dt?: number) => {
+    if (!taa.on) return compose(dt);
+    taa.begin(camera);
+    try { compose(dt); } finally { taa.end(camera); }
+  };
+  const setTaa = (on: boolean, scale: number) => {
+    if (on === taa.on && scale === taa.scale) return;
+    taa.on = taa.enabled = on;
+    taa.scale = on ? scale : 1;
+    if (smaa.blendMode.blendFunction !== (on ? BlendFunction.SKIP : smaaBlend)) smaa.blendMode.blendFunction = on ? BlendFunction.SKIP : smaaBlend;
+    sharpen.blendMode.blendFunction = on ? BlendFunction.SRC : BlendFunction.SKIP;
+    composer.setSize(innerWidth, innerHeight);
+  };
   // focused on what the camera looks at; the blur fades out towards the street, and eases over the whole map
   const setHeight = (h: number, enabled: boolean, focus = 500) => {
     tiltPass.enabled = enabled && h > 60;
-    tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), renderer.domElement.height);
+    tilt.set(focus, clamp((h - 60) / 250, 0, 1) * (1 - 0.5 * clamp((h - 1200) / 1500, 0, 1)), low.y);
   };
   // the AO, the reflections (in the AO's composite, else their own pass) and the bloom on or off
   const on = { ao: true, refl: true };
@@ -421,5 +468,8 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
     }
   };
   enable({});
-  return { composer, n8, reflections, bloom, tone, grade, film, setHeight, enable };
+  fit();
+  return { composer, n8, reflections, bloom, tone, grade, film, setHeight, enable, taa, setTaa,
+    // the height the scene is drawn at (pixels)
+    get height() { return low.y; } };
 }

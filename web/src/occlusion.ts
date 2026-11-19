@@ -95,11 +95,12 @@ export class Occlusion {
     return Math.min(254, Math.max(0, (h - 1) * d.s));
   }
 
-  // the horizons for this camera, built again only when it moved (or force); true when built
+  // the horizons for this camera, built again only when it moved (or force); true when built. (Not for the TAA's
+  // sub-pixel jitter, taa.ts: the projection's elements 8 and 9, a far smaller shift than the bins' margins.)
   prepare(camera: THREE.PerspectiveCamera, force = false) {
     const k = this.key, a = camera.matrixWorld.elements, p = camera.projectionMatrix.elements;
     let same = this.built && !force;
-    for (let i = 0; i < 16; i++) { if (k[i] !== a[i] || k[16 + i] !== p[i]) same = false; k[i] = a[i]; k[16 + i] = p[i]; }
+    for (let i = 0; i < 16; i++) { if (k[i] !== a[i] || (i !== 8 && i !== 9 && k[16 + i] !== p[i])) same = false; k[i] = a[i]; k[16 + i] = p[i]; }
     if (same) return false;
     this.build(camera);
     return true;
