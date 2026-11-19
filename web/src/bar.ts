@@ -99,7 +99,11 @@ class Graphics {
     };
     const slide = (key: 'res' | 'grade' | 'lodpx', spec: Omit<SliderSpec, 'onInput' | 'onChange' | 'near' | 'log' | 'marks'> & { marks?: Record<string, number> }) => {
       const sl = new Slider(adv, { near: spec.step / 2, log: false, marks: {}, ...spec, onInput: (v) => this.change({ [key]: v }) });
-      this.sync.push(() => { if (document.activeElement !== sl.input) sl.set(s.now[key]); });
+      this.sync.push(() => {
+        // a measured resolution says so (settings.ts, autores.ts)
+        if (key === 'res') sl.setMarks(s.auto ? { [s.auto.measuring ? 'auto, measuring…' : 'auto']: s.now.res } : {});
+        if (document.activeElement !== sl.input) sl.set(s.now[key]);
+      });
       return sl;
     };
     const onOff: [boolean, string][] = [[true, 'on'], [false, 'off']];
@@ -115,7 +119,7 @@ class Graphics {
     this.sync.push(() => { px.input.disabled = s.now.lod !== 'auto'; });
     pick('occl', 'Occlusion culling', onOff);
     pick('prepass', 'Depth pre-pass', onOff, 'dev');
-    el('div', 'note', 'Depth pre-pass: for testing, slower on some GPUs. Render size (top right) still adapts to the frame rate.', adv);
+    el('div', 'note', 'Resolution “auto”: measured once for this GPU, until you set it. Depth pre-pass: slower on some GPUs. Render size (top right) still adapts to the frame rate.', adv);
     this.show();
   }
 

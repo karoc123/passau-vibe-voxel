@@ -28,7 +28,8 @@ import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather
 import type { World } from './world';
 import { lightStreets, makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { DepthPrepass } from './prepass';
-import { type Gfx, prepassPays, Settings } from './settings';
+import { type Gfx, gpuName, prepassPays, Settings } from './settings';
+import { AutoRes } from './autores';
 import './style.css';
 
 declare global {
@@ -51,7 +52,8 @@ const ceiling = phone ? 0.75e6 : Infinity;
 let level = 0.75;
 const budget = () => (level >= 1 ? ceiling : Math.min(ceiling, 0.2e6 * ((city?.cityTris ?? 14e6) / 0.2e6) ** level));
 // the graphics settings (settings.ts, the ⚙ panel): the resolution scales the render size's pixels
-const gfx = new Settings(phone, innerWidth >= 600, prepassPays());
+const gpu = gpuName();
+const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
 const pixelsAt = (l: number) => Math.max(0.5, Math.min(1, 0.4 + 0.8 * l)) * Math.min(devicePixelRatio, 2) * gfx.now.res;
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
@@ -99,8 +101,22 @@ walkButton.addEventListener('click', e => {
   void nav.togglePedestrian(!touch && !coarsePointer());
 });
 const maxShadow = renderer.capabilities.maxTextureSize;
-bar.graphics(gfx, applyGfx, maxShadow);
+const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
+// the resolution measured once if nothing set it (autores.ts). Not under automation (screenshots, benchmarks keep
+// theirs) unless autores=1; autores=0 never.
+const autoQ = qs.get('autores');
+let autoRes: AutoRes | null = null;
+if (gfx.toMeasure && (autoQ === '1' || (autoQ !== '0' && !navigator.webdriver))) {
+  gfx.setAuto(gfx.now.res, true);
+  autoRes = new AutoRes(renderer, camera, gfx.now.res, (res, final) => {
+    const was = gfx.now.res;
+    gfx.setAuto(res, !final);
+    if (res !== was) applyGfx({ res });
+    gfxPanel.show();
+  });
+  gfxPanel.show();
+}
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 el('div', '', `<div>Passau in voxels, derived from <a href="https://github.com/stared/warsaw-vibe-voxel" target="_blank" rel="noopener">warsaw-vibe-voxel</a> by <a href="https://p.migdal.pl/" target="_blank" rel="noopener">Piotr Migdał</a> & <a href="https://quesma.com/blog/invisible-cities-one-shot/" target="_blank" rel="noopener">Opus 5.5</a> (MIT)</div>
   <div>data: <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener">Bayerische Vermessungsverwaltung</a> (CC BY 4.0) and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> contributors (ODbL)</div>
@@ -408,8 +424,12 @@ renderer.setAnimationLoop((now) => {
   if (stillChanged()) stillDue = true;
   if (stillDue && now - redrawnAt > 300) { stillDue = false; redrawnAt = now; daylight.redrawShadow(); }
   renderer.info.reset();
+  if (autoRes && !gfx.auto) autoRes.stop(); // the visitor set the resolution
+  if (autoRes?.done) autoRes = null;
+  autoRes?.begin();
   post.composer.render();
   if (daylight.redraws !== redraws) busy = true;
+  autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
   perf.frame(now, document.hidden, renderer.info.render.triangles);
   if (flood && now - riverT > 250) {
     riverT = now;
