@@ -74,6 +74,8 @@ const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v
 movingActors.add(nav.actors);
 let fpv: FpvPrototype | null = null;
 let drive: DrivePrototype | null = null;
+// the Rapier physics spike (physics/rapier/demo.ts): only with ?physics=rapier, loaded on the first P
+let rapier: { update(dt: number): void } | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -424,6 +426,7 @@ async function boot() {
   ]);
   fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DrivePrototype(nav, controls.target, meta, modeTools, renderer.domElement);
+  if (qs.get('physics') === 'rapier') void import('./physics/rapier/hook').then((m) => m.onKeyP({ scene, camera, controls, meta }, (d) => { rapier = d; }));
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
@@ -440,6 +443,7 @@ renderer.setAnimationLoop((now) => {
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
   walkButton.disabled = !world || nav.enteringWalk || nav.mode === 'fpv';
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
+  rapier?.update(dt);
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
   post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
