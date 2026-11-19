@@ -144,7 +144,23 @@ if (qs.get('ui') === '0') document.body.classList.add('noui');
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
   if (e.key === '/' && !(e.metaKey || e.ctrlKey || e.altKey) && !(e.target as Element).closest?.('input')) { bar.search.input.focus(); e.preventDefault(); }
+  // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
+  if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !(e.target as Element).closest?.('input, textarea')
+      && !getSelection()?.toString()) {
+    const text = nav.spotText();
+    if (!text) return;
+    e.preventDefault();
+    navigator.clipboard.writeText(text).then(() => toast('Copied: ' + text.split('  ')[0]), () => toast('Copy failed'));
+  }
 });
+function toast(msg: string) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:6px 12px;border-radius:6px;'
+    + 'background:rgba(20,24,30,.85);color:#fff;font:13px system-ui,sans-serif;z-index:1000;pointer-events:none';
+  document.body.append(t);
+  setTimeout(() => t.remove(), 1600);
+}
 tamePinch(renderer.domElement);
 // A lost WebGL context (a GPU reset; on WSL also under load) is restored by three, but what lived only on the GPU is
 // gone: the tiles are meshed again (stream.ts remeshLost), the sky's light and the shadows drawn again

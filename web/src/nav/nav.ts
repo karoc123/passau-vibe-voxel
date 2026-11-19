@@ -61,6 +61,7 @@ export class Nav {
   private zoomT = 0;
   private landT = 0;
   private hoverT = 0;
+  private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
   private quietT = 0;
   private wheelBack = 0;
   private wheelBackT = 0;
@@ -192,6 +193,7 @@ export class Nav {
       this.cancelFly();
     });
     dom.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') this.cursor = { x: e.clientX, y: e.clientY };
       if (this.driving && e.pointerType === 'touch') return;
       const p = ptrs.get(e.pointerId);
       if (this.pedestrianActive && e.pointerType === 'mouse') {
@@ -237,7 +239,7 @@ export class Nav {
     };
     dom.addEventListener('pointerup', up);
     dom.addEventListener('pointercancel', up);
-    dom.addEventListener('pointerleave', () => { this.marker.visible = false; });
+    dom.addEventListener('pointerleave', () => { this.marker.visible = false; this.cursor = null; });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
     dom.addEventListener('dblclick', (e) => this.diveTo(e.clientX, e.clientY));
@@ -276,6 +278,19 @@ export class Nav {
     const pos = hit.p.clone().addScaledVector(hit.dir, -Math.max(25, dist * 0.4));
     pos.y = Math.max(pos.y, this.world.groundAt(pos.x, pos.z) + 2);
     this.flyTo({ pos: pos.toArray(), target: hit.p.toArray() });
+  }
+
+  // Ctrl+C over the map: what is under the mouse (or the middle of the view) as text to paste into a note or a
+  // prompt -- the voxel hit (grid x, height, grid z; three's axes) and a link whose ?cam= looks at it from here
+  spotText() {
+    const cx = this.cursor?.x ?? innerWidth / 2, cy = this.cursor?.y ?? innerHeight / 2;
+    const hit = this.hitAt(cx, cy);
+    if (!hit) return null;
+    const f = (v: number) => +v.toFixed(1), c = this.camera.position, p = hit.p;
+    const u = new URL(location.href);
+    u.searchParams.set('cam', [c.x, c.y, c.z, p.x, p.y, p.z].map(f).join(','));
+    u.searchParams.delete('view');
+    return `voxel ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}  ${u.href}`;
   }
 
   private hitAt(cx: number, cy: number, maxDist = 4000) {
