@@ -1,18 +1,21 @@
 // Rapier spike (approach B), opt-in: ?physics=rapier, then P. Loaded on demand (main.ts); nothing of it is in the boot
 // bundle. P: spawn the car at the focus / get in and out; WASD drive, Space handbrake; B: throw a box from the camera;
 // V: drop a pile of boxes ahead; R: a ragdoll standing ahead (hit it); T: throw a ragdoll from the camera; Esc: get out.
-// Stats in the corner and on window.__rapier.
+// Driving into water ends the drive (P: a new car at the focus); a landing from ~8 m up is a crash (no input for a
+// moment). Stats in the corner and on window.__rapier.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Meta } from '../../types';
-import { RapierCar, type CarInput } from './car';
+import { RapierCar, WORLD_GROUPS, type CarEvent, type CarInput } from './car';
 import { Ragdoll } from './ragdoll';
 import { CHUNK, RapierTerrain } from './terrain';
 
 const STEP = 1 / 60;
 const MAX_STEPS = 4;
 const MAX_BOXES = 80;
+const CRASH_MS = 1100; // after a crash landing: shaken, no input (as variant A's)
+const NO_INPUT: CarInput = { gas: 0, brake: 0, steer: 0, handbrake: true };
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
 
 interface Ctx { scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls; meta: Meta }
@@ -31,8 +34,28 @@ export async function startRapier(ctx: Ctx) {
     return r;
   };
   try { await RAPIER.init(); } finally { (WebAssembly as { instantiate: unknown }).instantiate = inst; }
+  warmUp();
   const initMs = performance.now() - t0;
   return new RapierDemo(ctx, initMs);
+}
+
+// The first step of a world with voxels in it costs ~100 ms (and more in a busy page) once, whatever is in it: taken
+// here, in a throwaway world, with the load, instead of as a hitch on the first frame the car drives.
+function warmUp() {
+  const w = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  const vox: number[] = [];
+  for (let z = 0; z < 8; z++) for (let x = 0; x < 8; x++) vox.push(x, 0, z, x, x === 7 ? 1 : 0, z);
+  w.createCollider(RAPIER.ColliderDesc.voxels(new Int32Array(vox), { x: 1, y: 1, z: 1 }));
+  const b = w.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(3, 1.5, 3));
+  const col = w.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.45, 2), b);
+  const c = w.createVehicleController(b);
+  c.addWheel({ x: 0, y: -0.2, z: 0 }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, 0.35, 0.36);
+  for (let i = 0; i < 3; i++) {
+    c.updateVehicle(1 / 60);
+    w.castShape(b.translation(), b.rotation(), { x: 1, y: 0, z: 0 }, col.shape, 0.02, 2, false, undefined, undefined, col);
+    w.step();
+  }
+  w.free();
 }
 
 export class RapierDemo {
@@ -51,11 +74,13 @@ export class RapierDemo {
   private acc = 0;
   private frozen = false;
   private pendingCar = false;
+  private shakenUntil = 0;
+  private lastEvent: { e: CarEvent; at: number } | null = null;
   private readonly hud = document.createElement('div');
   private readonly boxGeo = new THREE.BoxGeometry(1, 1, 1);
   private readonly boxMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, roughness: 0.6 });
   private readonly camGoal = new THREE.Vector3();
-  readonly stats = { loadMs: 0, initMs: 0, steps: 0, stepMsAvg: 0, stepMsMax: 0, stepMsLast: 0, frameMs: 0, frozenFrames: 0, wasmBytes: 0, bodies: 0, colliders: 0, kmh: 0, wheels: 0, air: 0, maxAir: 0 };
+  readonly stats = { loadMs: 0, initMs: 0, steps: 0, stepMsAvg: 0, stepMsMax: 0, stepMsLast: 0, frameMs: 0, frozenFrames: 0, frameMsMax: 0, wasmBytes: 0, bodies: 0, colliders: 0, kmh: 0, wheels: 0, air: 0, maxAir: 0 };
 
   constructor(private readonly ctx: Ctx, initMs: number) {
     this.stats.initMs = initMs;
@@ -98,6 +123,13 @@ export class RapierDemo {
   };
 
   toggleCar() {
+    // (a car in the water is gone: a new one at the focus)
+    if (this.car?.status === 'water') {
+      const t = this.tracked.find((x) => x.body === this.car!.body);
+      if (t) this.tracked.splice(this.tracked.indexOf(t), 1);
+      this.car.dispose(this.world);
+      this.car = null;
+    }
     if (this.car) { this.driving = !this.driving; return; }
     this.pendingCar = true;
   }
@@ -110,11 +142,11 @@ export class RapierDemo {
 
   private spawnCar() {
     const f = this.ctx.controls.target, p = this.toPhys(f);
-    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true);
+    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true, undefined, WORLD_GROUPS);
     if (!hit) return false;
     const cam = this.ctx.camera.position;
     const heading = Math.atan2(f.x - cam.x, f.z - cam.z);
-    this.car = new RapierCar(RAPIER, this.world, { x: p.x, y: 400 - hit.timeOfImpact + 1.4, z: p.z }, heading);
+    this.car = new RapierCar(RAPIER, this.world, { x: p.x, y: 400 - hit.timeOfImpact + 1.4, z: p.z }, heading, this.terrain);
     this.group.add(this.car.mesh);
     this.track(this.car.body, this.car.mesh);
     this.driving = true;
@@ -131,7 +163,7 @@ export class RapierDemo {
     const f = this.focus(), dir = this.forward();
     const at = f.addScaledVector(dir, 10);
     const p = this.toPhys(at);
-    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true);
+    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true, undefined, WORLD_GROUPS);
     const g = hit ? 400 - hit.timeOfImpact : at.y;
     for (let y = 0; y < 4; y++) for (let x = 0; x < 3 - (y > 1 ? 1 : 0); x++) {
       const side = new THREE.Vector3(dir.z, 0, -dir.x);
@@ -151,7 +183,7 @@ export class RapierDemo {
   private addBox(at: THREE.Vector3, v: THREE.Vector3, size: number) {
     const p = this.toPhys(at);
     const b = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x, p.y, p.z).setLinvel(v.x, v.y, v.z).setCcdEnabled(true));
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(size / 2, size / 2, size / 2).setDensity(80).setFriction(0.7).setRestitution(0.2), b);
+    this.world.createCollider(RAPIER.ColliderDesc.cuboid(size / 2, size / 2, size / 2).setDensity(80).setFriction(0.7).setRestitution(0.2).setCollisionGroups(WORLD_GROUPS), b);
     const m = new THREE.Mesh(this.boxGeo, this.boxMat);
     m.scale.setScalar(size);
     m.castShadow = m.receiveShadow = true;
@@ -165,7 +197,7 @@ export class RapierDemo {
   ragdollAhead() {
     const f = this.focus(), dir = this.forward(), at = f.addScaledVector(dir, this.car ? 25 : 6);
     const p = this.toPhys(at);
-    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true);
+    const hit = this.world.castRay(new RAPIER.Ray({ x: p.x, y: 400, z: p.z }, { x: 0, y: -1, z: 0 }), 500, true, undefined, WORLD_GROUPS);
     if (!hit) return null;
     return this.addRagdoll({ x: p.x, y: 400 - hit.timeOfImpact, z: p.z }, Math.atan2(-dir.x, -dir.z), false);
   }
@@ -181,6 +213,7 @@ export class RapierDemo {
   private addRagdoll(feet: { x: number; y: number; z: number }, heading: number, limp: boolean) {
     const r = new Ragdoll(RAPIER, this.world, feet, heading, this.group, limp);
     r.bodies.forEach((b, i) => this.track(b, r.meshes[i]));
+    for (const h of r.colliders) this.world.getCollider(h)?.setCollisionGroups(WORLD_GROUPS);
     this.ragdolls.push(r);
     if (this.ragdolls.length > 6) {
       const old = this.ragdolls.shift()!;
@@ -213,8 +246,11 @@ export class RapierDemo {
   update(dt: number) {
     const f0 = performance.now();
     // the terrain around every body (asleep too: it may be woken), and around the focus for a car still to be placed
-    const pts: { x: number; z: number }[] = [];
-    for (const t of this.tracked) pts.push(this.toWorld(t.body.translation()));
+    const pts: { x: number; z: number; vx?: number; vz?: number }[] = [];
+    for (const t of this.tracked) {
+      const p = this.toWorld(t.body.translation()), v = t.body.linvel();
+      pts.push({ x: p.x, z: p.z, vx: v.x, vz: v.z });
+    }
     if (this.pendingCar) pts.push(this.ctx.controls.target.clone());
     const ready = this.terrain.update(pts);
     if (this.pendingCar && ready[ready.length - 1] && this.spawnCar()) this.pendingCar = false;
@@ -230,9 +266,14 @@ export class RapierDemo {
         for (const t of this.tracked) { t.prevP.copy(t.curP); t.prevQ.copy(t.curQ); }
         const s0 = performance.now();
         const carV = this.car?.body.linvel();
-        if (this.car) this.car.step(this.driving ? this.input() : { gas: 0, brake: 0, steer: 0, handbrake: true }, STEP);
+        const car = this.car;
+        if (car) car.step(this.driving && car.status === 'ok' && performance.now() >= this.shakenUntil ? this.input() : NO_INPUT, STEP);
         this.world.step(this.events);
         this.handleEvents(carV);
+        const ev = car?.afterStep(STEP);
+        if (ev && ev.kind !== 'step') this.lastEvent = { e: ev, at: performance.now() };
+        if (ev?.crash) this.shakenUntil = performance.now() + CRASH_MS;
+        if (car?.status === 'water' && this.driving) this.driving = false;
         const ms = performance.now() - s0;
         this.stats.steps++;
         this.stats.stepMsLast = ms;
@@ -266,6 +307,7 @@ export class RapierDemo {
     if (this.car && this.driving) this.follow(dt);
     this.ctx.controls.enabled = !(this.car && this.driving);
     this.stats.frameMs = performance.now() - f0;
+    this.stats.frameMsMax = Math.max(this.stats.frameMsMax, this.stats.frameMs);
     this.stats.bodies = this.world.bodies.len();
     this.stats.colliders = this.world.colliders.len();
     this.stats.wasmBytes = wasmMemory?.buffer.byteLength ?? 0;
@@ -311,7 +353,7 @@ export class RapierDemo {
     const from = this.toPhys(p.clone().add(new THREE.Vector3(0, 1.5, 0))), d = this.camGoal.clone().sub(p).sub(new THREE.Vector3(0, 1.5, 0));
     const len = d.length();
     d.divideScalar(len);
-    const hit = this.world.castRay(new RAPIER.Ray(from, d), len, true, undefined, undefined, undefined, car.body);
+    const hit = this.world.castRay(new RAPIER.Ray(from, d), len, true, undefined, WORLD_GROUPS, undefined, car.body);
     if (hit) this.camGoal.copy(p).add(new THREE.Vector3(0, 1.5, 0)).addScaledVector(d, Math.max(3, hit.timeOfImpact - 0.6));
     const k = 1 - Math.exp(-6 * dt);
     cam.position.lerp(this.camGoal, k);
@@ -320,13 +362,20 @@ export class RapierDemo {
     cam.lookAt(ctl.target);
   }
 
+  private eventText() {
+    const l = this.lastEvent;
+    if (!l || performance.now() - l.at > 2500) return '';
+    const e = l.e;
+    return e.kind === 'landing' ? `  ${e.crash ? 'CRASH' : 'landed'} ${e.speed.toFixed(1)} m/s` : `  hit ${e.speed.toFixed(1)} m/s`;
+  }
+
   private drawHud() {
     const s = this.stats, t = this.terrain.stats;
     this.hud.textContent = `rapier ${RAPIER.version()}  load ${s.loadMs.toFixed(0)} ms (init ${s.initMs.toFixed(0)})  wasm ${(s.wasmBytes / 1048576).toFixed(1)} MB\n`
-      + `step ${s.stepMsLast.toFixed(2)} ms (avg ${s.stepMsAvg.toFixed(2)}, max ${s.stepMsMax.toFixed(1)})  update ${s.frameMs.toFixed(2)} ms\n`
-      + `chunks ${t.chunks}  voxels ${t.voxels}  ramp tris ${t.tris}  builds ${t.builds} (avg ${(t.buildMsTotal / Math.max(1, t.builds)).toFixed(2)}, max ${t.buildMsMax.toFixed(1)} ms)  tiles loading ${t.tilesLoading}${this.frozen ? '  FROZEN (loading)' : ''}\n`
+      + `step ${s.stepMsLast.toFixed(2)} ms (avg ${s.stepMsAvg.toFixed(2)}, max ${s.stepMsMax.toFixed(1)})  update ${s.frameMs.toFixed(2)} ms (max ${s.frameMsMax.toFixed(1)})\n`
+      + `chunks ${t.chunks}  voxels ${t.voxels}  ramp tris ${t.tris}  builds ${t.builds} (avg ${(t.buildMsTotal / Math.max(1, t.builds)).toFixed(2)}, max ${t.buildMsMax.toFixed(1)} ms)  tiles loading ${t.tilesLoading} (decode max ${t.decodeMsMax.toFixed(1)} ms)${this.frozen ? '  FROZEN (loading)' : ''}\n`
       + `bodies ${s.bodies}  colliders ${s.colliders}  boxes ${this.boxes.length}  ragdolls ${this.ragdolls.length}\n`
-      + (this.car ? `car ${s.kmh.toFixed(0)} km/h  wheels ${s.wheels}/4${s.air > 0.05 ? `  AIR ${s.air.toFixed(2)} s` : ''}  ${this.driving ? 'driving' : 'parked (P)'}\n` : this.pendingCar ? 'placing car…\n' : '')
+      + (this.car ? `car ${s.kmh.toFixed(0)} km/h  wheels ${s.wheels}/4${s.air > 0.05 ? `  AIR ${s.air.toFixed(2)} s` : ''}  ${this.car.status === 'water' ? 'IN THE WATER (P: new car)' : this.driving ? 'driving' : 'parked (P)'}${this.eventText()}\n` : this.pendingCar ? 'placing car…\n' : '')
       + 'P car  WASD/Space  B box  V pile  R ragdoll  T throw ragdoll  Esc out';
   }
 }
