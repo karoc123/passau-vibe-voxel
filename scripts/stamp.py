@@ -7,8 +7,9 @@ finished, and its command. It runs again when any of them differs now, or an out
 FORCE=NAME,NAME) runs it anyway. Signatures: a file's content hash (cached per size and mtime, region_inputs.file_sha;
 `path#-a.b,c.d` leaves out keys of a JSON file: meta.json's tiles.bytes and tiles.tris, which tile_fields.py and
 web/tools/tris.mjs write after the steps that read meta.json), a folder's names, sizes and mtimes (the tiles: thousands
-of files). A step that changes its own input in place (tile_fields.py the tiles) is recorded after it ran, so it is up to date afterwards.
-The step's own script (the first argument after `python` or `node` ending in .py or .mjs) is an input by itself.
+of files). A step that changes its own input in place (tile_fields.py the tiles) is recorded after it ran, so it is up
+to date afterwards. The step's own script (the first argument after `python` or `node` ending in .py or .mjs) is an
+input by itself.
 """
 import hashlib
 import json

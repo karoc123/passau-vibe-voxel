@@ -51,6 +51,11 @@ DBG.mkdir(parents=True, exist_ok=True)
 RDIR.mkdir(parents=True, exist_ok=True)
 report = {"notes": []}
 RESULT = {}  # what this region hands to regions.py besides its rasters (lists, counts): data/cache/regions/*/out.json
+# the large features (spanning region.FMAX or more), decided whole (features.py): VOXEL_FEATURES, the feature pass, counts
+# what decides them over the region (its core alone) and stops; a build looks up the decisions (VOXEL_FEATURE_TABLE)
+FEATURES_MODE = bool(os.environ.get("VOXEL_FEATURES"))
+FEATURE_TABLE = json.load(open(os.environ["VOXEL_FEATURE_TABLE"])) if os.environ.get("VOXEL_FEATURE_TABLE") else None
+FEATURE_STATS, FEATURE_USED = {}, {}
 CORE_SL = region.core_slices()
 
 
@@ -278,7 +283,7 @@ osm = OSM()
 note("OSM timestamp", osm.timestamp, "areas", len(osm.areas), "lines", len(osm.lines), "nodes", len(osm.nodes))
 
 
-def cells_of(geom, all_touched=False):
+def cells_of(geom, all_touched=False, fallback=True):
     minx, miny, maxx, maxy = geom.bounds
     c0, r0 = max(int(math.floor(minx)), 0), max(int(math.floor(miny)), 0)
     c1, r1 = min(int(math.ceil(maxx)), W), min(int(math.ceil(maxy)), D)
@@ -287,15 +292,27 @@ def cells_of(geom, all_touched=False):
     m = rasterio.features.rasterize([(geom, 1)], out_shape=(r1 - r0, c1 - c0),
                                     transform=Affine.translation(c0, r0), all_touched=all_touched, dtype=np.uint8)
     rr, cc = np.nonzero(m)
-    if len(rr) == 0 and not all_touched:
+    if len(rr) == 0 and not all_touched and fallback:
         return cells_of(geom, True)
     return rr + r0, cc + c0
 
 
-def decided(geom, decide, shape_=None):
+def decided(geom, decide, shape_=None, fid=None):
     """[(piece of geom, decide(rows, cols))]: a feature's decision from the cells of its outline (or of shape_), once
-    for the whole of it, or for a feature spanning region.FMAX metres or more block by block (region.feature_parts:
-    each block's piece of it from its cells near the block)"""
+    for the whole of it. One spanning region.FMAX metres or more: with its id (fid, "<w|r><OSM id>:<kind of
+    features.KINDS>"), from the feature pass's counts over its whole outline (features.py; in the pass itself: its
+    counts over the region, nothing drawn); without, or not in the table, block by block (region.feature_parts: each
+    block's piece of it from its cells near the block)"""
+    if fid is not None and region.spans(geom):
+        if FEATURES_MODE:
+            import features
+            r_, c_ = cells_of(geom, fallback=False)
+            kind = fid.split(":")[1]
+            FEATURE_STATS[fid] = [kind, features.counts(kind, r_, c_, exg, lum, nd_mean)]
+            return []
+        if FEATURE_TABLE is not None and fid in FEATURE_TABLE:
+            FEATURE_USED[fid] = FEATURE_TABLE[fid]
+            return [(geom, FEATURE_TABLE[fid])]
     rr, cc = cells_of(shape_ if shape_ is not None else geom)
     out = []
     for blk, (sr, sc) in region.feature_parts(geom, rr, cc):
@@ -419,7 +436,7 @@ for oid, typ, t, geom in osm.areas:
         key = LANDUSE[t["landuse"]]
         if key == "grass":
             # (sorted by the whole outline's area below, pieces and all)
-            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(geom, _lawn))
+            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(geom, _lawn, fid=f"{typ[0]}{oid}:lawn"))
         else:
             soft.append((geom, C[key]))
     if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
@@ -441,7 +458,7 @@ for oid, typ, t, geom in osm.areas:
         soft.append((geom, C["fresh"]))
     if t.get("amenity") == "parking" and t.get("parking") not in ("underground", "multi-storey", "rooftop"):
         if "surface" not in t:
-            hard.extend((p_, C[k_]) for p_, k_ in decided(geom, _car_park))
+            hard.extend((p_, C[k_]) for p_, k_ in decided(geom, _car_park, fid=f"{typ[0]}{oid}:car_park"))
         else:
             hard.append((geom, C[SURF.get(t.get("surface"), "parking")]))
 # a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
@@ -645,10 +662,15 @@ for oid, t, line in osm.lines:
             green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
             pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
             return "dirt" if green_ else "paving" if pale_ else "gravel"
-        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(poly, _way))
+        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(poly, _way, fid=f"w{oid}:way"))
     elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
         foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
 note(f"roads taking their square's surface: {n_inherit}")
+if FEATURES_MODE:  # the feature pass: the large features' counts over the core, and done (regions.feature_pass)
+    import region_inputs
+    json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process()), open(RDIR / "fstats.json", "w"))
+    print("done")
+    raise SystemExit(0)
 burn(gcol, foot_shapes + cycle_shapes)
 burn(explicit, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes + road_shapes])
 road_mask = np.zeros((D, W), np.uint16)
@@ -3377,7 +3399,9 @@ CORE_OUT["groundcol"] = palarr[gcol]
 # the lists in the map's order (lamps, jets), the palette's new colours
 _k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
 np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
-np.save(RDIR / "vol.npy", np.ascontiguousarray(vol[(slice(None),) + CORE_SL]))
+import mapstore
+mapstore.save_volume(RDIR / "vol.npz", vol[(slice(None),) + CORE_SL])  # (compressed, in 128 m column blocks)
+(RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
 # (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
 # this region's to add)
 _used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
@@ -3388,6 +3412,7 @@ RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new 
               jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], notes=report["notes"],
               osm_timestamp=osm.timestamp)
 import region_inputs
-RESULT["deps"] = region_inputs.deps_of_process()  # (the code this region read: regions.py rebuilds it when that changes)
+RESULT["deps"] = region_inputs.deps_of_process()
+RESULT["features_used"] = FEATURE_USED  # (the large features' decisions it took: regions.py rebuilds it when one changes)  # (the code this region read: regions.py rebuilds it when that changes)
 json.dump(RESULT, open(RDIR / "out.json", "w"))
 print("done")

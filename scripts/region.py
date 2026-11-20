@@ -9,7 +9,9 @@ the build add up to less than HALO. Hence:
   (noise), the palette is a registry (scripts/palette.json, voxelize.Palette)
 - a feature's statistic (a lawn's median green, a path's colour, a building's roof) is over its whole outline when the
   feature spans FMAX metres or less -- it then lies in the region whenever it touches the exact part of it; a larger
-  one decides per BLOCK x BLOCK block of the project grid, from its cells within FMARGIN of the block (feature_parts)
+  one (a lawn, an untagged car park or path) is decided over its whole outline too, from counts every region makes
+  over its core in a feature pass before the regions and the driver adds up (features.py); what has no such decision
+  goes per BLOCK x BLOCK block of the project grid, from its cells within FMARGIN of the block (feature_parts)
 - connected components judged by their size are counted within a window of their block (windowed_sizes): a size
   threshold up to the window's span is decided the same; the rivers' bodies take their level per block the same way
 - nearest-cell fills are bounded (a cell takes the nearest within some metres, or nothing)
@@ -27,7 +29,7 @@ from scipy import ndimage
 import aoi
 
 HALO = 384
-FMAX = 192  # a feature spanning more is decided block by block
+FMAX = 192  # a feature spanning more is decided by the feature pass (features.py), else block by block
 BLOCK, FMARGIN = 128, 64
 CROWN_R = 32  # a canopy cell's crown: the nearest trunk within this many metres
 
@@ -207,7 +209,8 @@ def feature_parts(geom, rr, cc):
 
 
 def spans(geom):
-    """whether a geometry spans more than FMAX metres (its decision then goes block by block, or is left out)"""
+    """whether a geometry spans more than FMAX metres (its decision then comes from the feature pass, goes block by
+    block, or is left out)"""
     x0, y0, x1, y1 = geom.bounds
     return x1 - x0 >= FMAX or y1 - y0 >= FMAX
 

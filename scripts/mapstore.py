@@ -1,12 +1,12 @@
-"""The map's rasters and volume as the regions left them (data/cache/regions/<row>_<col>/: core.npz, vol.npy), read on
+"""The map's rasters and volume as the regions left them (data/cache/regions/<row>_<col>/: core.npz, vol.npz), read on
 demand, so that the steps after the regions (scripts/regions.py: the labels, the camera presets, the trams, traffic.py)
 hold no array of the map's size: what they ask for is read from the regions' cores it lies in, a few cores kept at a
 time, and the map-sized files (data/ground.npz ...) are written row band by row band.
 
 MapRaster(ws, rdir, key)    a 2D (or 2D x k) raster of the map: r[i, j] (ints), r[rows, cols] (integer arrays,
                             broadcast), r[r0:r1, c0:c1] (a box, filled with `fill` beyond the map); .shape, .dtype
-MapVolume(ws, rdir, H)      the volume: v[z, rows, cols] (z an int, an array or ':'), from each region's vol.npy as a
-                            memory map (0 above a region's own height)
+MapVolume(ws, rdir, H)      the volume: v[z, rows, cols] (z an int, an array or ':'), from each region's vol.npz
+                            (save_volume: compressed 128 m column blocks), the blocks looked at read and some kept
 write_npz(path, arrays)     an .npz (np.savez_compressed's format, read by np.load and window.npz_rows) whose arrays
                             are written row band by row band
 """
@@ -152,42 +152,84 @@ class MapRaster:
             yield r0 // s, self.box(r0 // s, r1 // s, 0, self.shape[1])
 
 
+VBLOCK = 128  # the volume's column blocks (a level-1 node's cells)
+
+
+def save_volume(path, vol):
+    """a region's core volume (H, rows, cols) as a compressed .npz of its VBLOCK x VBLOCK column blocks, each cut at
+    its own top ("<row block>_<col block>", from the core's corner): ~1/50 of the raw bytes, and MapVolume reads only
+    the blocks it looks at"""
+    H, R, C = vol.shape
+    out = {}
+    for br in range(0, R, VBLOCK):
+        for bc in range(0, C, VBLOCK):
+            b = vol[:, br:br + VBLOCK, bc:bc + VBLOCK]
+            nz = np.flatnonzero(b.reshape(H, -1).any(axis=1))
+            out[f"{br // VBLOCK}_{bc // VBLOCK}"] = np.ascontiguousarray(b[:nz[-1] + 1] if len(nz) else b[:0])
+    np.savez_compressed(path, **out)
+
+
+def load_volume(path, shape):
+    """save_volume's file as the volume (H, rows, cols) again"""
+    H, R, C = shape
+    v = np.zeros(shape, np.uint16)
+    with np.load(path) as z:
+        for k in z.files:
+            br, bc = (int(x) * VBLOCK for x in k.split("_"))
+            b = z[k]
+            v[:b.shape[0], br:br + b.shape[1], bc:bc + b.shape[2]] = b
+    return v
+
+
 class MapVolume:
-    def __init__(self, ws, rdir, H):
+    """the volume of the map: v[z, rows, cols] (z an int or an array; or ':' at one cell), from the regions' vol.npz,
+    VBLOCK x VBLOCK column blocks read when looked at and `keep_mb` of them kept (0 above a block's own top)"""
+
+    def __init__(self, ws, rdir, H, keep_mb=1024):
         self.cov, self.rdir = _Cover(ws), rdir
         self.shape = (H, self.cov.D, self.cov.W)
         self.dtype = np.dtype(np.uint16)
-        self._mm = {}
+        self.keep = keep_mb << 20
+        self._z, self._blocks, self._bytes = {}, OrderedDict(), 0
 
-    def _vol(self, w):
-        k = (w.r0, w.c0)
-        if k not in self._mm:
-            self._mm[k] = np.load(self.rdir(w) / "vol.npy", mmap_mode="r")
-        return self._mm[k]
+    def _block(self, br, bc):
+        """map block (br, bc) (VBLOCK cells each way)"""
+        k = (br, bc)
+        if k in self._blocks:
+            self._blocks.move_to_end(k)
+            return self._blocks[k]
+        ib, jb = self.cov.index(br * VBLOCK, bc * VBLOCK)
+        w = self.cov.window(int(ib), int(jb))
+        if (w.r0, w.c0) not in self._z:
+            self._z[(w.r0, w.c0)] = np.load(self.rdir(w) / "vol.npz")
+        b = self._z[(w.r0, w.c0)][f"{br - w.r0 // VBLOCK}_{bc - w.c0 // VBLOCK}"]
+        self._blocks[k] = b
+        self._bytes += b.nbytes
+        while self._bytes > self.keep and len(self._blocks) > 1:
+            self._bytes -= self._blocks.popitem(last=False)[1].nbytes
+        return b
 
     def __getitem__(self, idx):
         z, r, c = idx
         H = self.shape[0]
         if np.ndim(r) == 0 and np.ndim(c) == 0:
-            ib, jb = self.cov.index(int(r), int(c))
-            w = self.cov.window(int(ib), int(jb))
-            v = self._vol(w)
+            r, c = int(r), int(c)
+            b = self._block(r // VBLOCK, c // VBLOCK)
             col = np.zeros(H, self.dtype)
-            col[:v.shape[0]] = v[:, int(r) - w.r0, int(c) - w.c0]
+            col[:b.shape[0]] = b[:, r % VBLOCK, c % VBLOCK]
             return col[z]
         assert not isinstance(z, slice), "a column (z = ':') at one cell only"
         z, r, c = np.broadcast_arrays(np.asarray(z), np.asarray(r), np.asarray(c))
         out = np.zeros(r.shape, self.dtype)
-        ib, jb = self.cov.index(r, c)
-        key = ib * len(self.cov.ccuts) + jb
+        nbc = -(-self.shape[2] // VBLOCK)
+        key = (r // VBLOCK) * nbc + c // VBLOCK
         for k in np.unique(key):
             m = key == k
-            w = self.cov.window(int(k) // len(self.cov.ccuts), int(k) % len(self.cov.ccuts))
-            v = self._vol(w)
+            b = self._block(int(k) // nbc, int(k) % nbc)
             zm = z[m]
-            ok = zm < v.shape[0]
+            ok = zm < b.shape[0]
             vals = np.zeros(zm.shape, self.dtype)
-            vals[ok] = v[zm[ok], r[m][ok] - w.r0, c[m][ok] - w.c0]
+            vals[ok] = b[zm[ok], r[m][ok] % VBLOCK, c[m][ok] % VBLOCK]
             out[m] = vals
         return out
 

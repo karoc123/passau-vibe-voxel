@@ -9,12 +9,18 @@ usage: uv run python scripts/voxelize.py [--regions NXxNY | --region-size METRES
 A region is a core of the map on window.ALIGN (1024 m) boundaries (window.py) and a halo of region.HALO metres round
 it. Each region is built by voxelize.py in a process of its own (VOXEL_REGION, VOXEL_CORE, VOXEL_OUT, VOXEL_OSM in its
 environment), which reads its cut of OSM (region_inputs.cut_osm), writes the tiles of its core and leaves in
-data/cache/regions/<row>_<col>/ its core's rasters (core.npz), its core's volume (vol.npy) and what lies in its core
-of the lists (out.json). Incremental: a region is built again only when the hash of what it reads changed (its windows
-of data/prep.npz, lod2.npz, laser.npz, its OSM cut, the raw files it reads, the code it loaded, the map's config:
-region_inputs.region_key, kept in its manifest.json), or the palette registry no longer starts with the colours it was
-built with, or its files are gone. The steps below run again when any region was built or their own inputs changed
-(data/cache/regions.stamp). Then, here:
+data/cache/regions/<row>_<col>/ its core's rasters (core.npz), its core's volume (vol.npz: compressed 128 m column
+blocks, ~2 MB a km2) and what lies in its core of the lists (out.json).
+
+Before the regions, the feature pass (feature_pass, features.py): each region counts over its core alone what
+decides the large features (lawns, untagged car parks and paths spanning region.FMAX or more), the counts are added
+up and each such feature decided once (data/cache/features.json), which the regions look up.
+
+Incremental: a region is built again only when the hash of what it reads changed (its windows of data/prep.npz,
+lod2.npz, laser.npz, its OSM cut, the raw files it reads, the code it loaded, the map's config, the large features'
+decisions it took: region_inputs.region_key, kept in its manifest.json), or the palette registry no longer starts with
+the colours it was built with, or its files are gone; the feature pass the same way. The steps below run again when
+any region was built or their own inputs changed (data/cache/regions.stamp). Then, here:
 - the palette: colours the registry (scripts/palette.json) lacked are added to it, sorted, and the regions that met
   them built again (their ids were provisional)
 - put together, row band by row band (mapstore.py: nothing of the map's size in memory): data/ground.npz,
@@ -65,30 +71,69 @@ def rdir(w):
     return CACHE / f"{w.r0}_{w.c0}"
 
 
-def build(ws, jobs):
-    """voxelize.py over each region in a process of its own, up to `jobs` at once; per region (wall s, peak RSS MB)"""
+FTABLE = Path("data/cache/features.json")  # the large features' decisions (features.py), what the regions look up
+
+
+def build(ws, jobs, fpass=False):
+    """voxelize.py over each region in a process of its own, up to `jobs` at once; per region (wall s, peak RSS MB).
+    fpass: the feature pass instead (VOXEL_FEATURES: over the region's core alone, the counts of its large features
+    into <region>/fpass/fstats.json)"""
     todo, running, stats = list(ws), {}, {}
     while todo or running:
         while todo and len(running) < jobs:
             w = todo.pop(0)
-            ra, rb, ca, cb = w.region(region.HALO)
-            (rdir(w) / "manifest.json").unlink(missing_ok=True)  # (stale until it is written again, after the build)
+            ra, rb, ca, cb = (w.r0, w.r1, w.c0, w.c1) if fpass else w.region(region.HALO)
+            out = rdir(w) / "fpass" if fpass else rdir(w)
+            out.mkdir(parents=True, exist_ok=True)
             env = dict(os.environ, VOXEL_REGION=f"{ra},{rb},{ca},{cb}", VOXEL_CORE=f"{w.r0},{w.r1},{w.c0},{w.c1}",
-                       VOXEL_OUT=str(rdir(w)), VOXEL_OSM=str(rdir(w) / "osm.json"), PYTHONUNBUFFERED="1")
-            rdir(w).mkdir(parents=True, exist_ok=True)
-            log = open(rdir(w) / "log.txt", "w")
+                       VOXEL_OUT=str(out), VOXEL_OSM=str(rdir(w) / "osm.json"), PYTHONUNBUFFERED="1")
+            if fpass:
+                env["VOXEL_FEATURES"] = "1"
+                (out / "fstats.json").unlink(missing_ok=True)
+            else:
+                env["VOXEL_FEATURE_TABLE"] = str(FTABLE)
+                (out / "manifest.json").unlink(missing_ok=True)  # (stale until it is written again, after the build)
+            log = open(out / "log.txt", "w")
             p = subprocess.Popen([sys.executable, str(HERE / "voxelize.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
             running[p.pid] = (w, time.time(), log)
-            print(f"region {w} (with its halo rows {ra}-{rb}, cols {ca}-{cb}): started", flush=True)
+            print(f"region {w} ({'feature pass, its core alone' if fpass else f'with its halo rows {ra}-{rb}, cols {ca}-{cb}'}):"
+                  " started", flush=True)
         pid, status, ru = os.wait4(-1, 0)
         w, t0, log = running.pop(pid)
         log.close()
         if status != 0:
-            print((rdir(w) / "log.txt").read_text()[-3000:])
+            print(Path(log.name).read_text()[-3000:])
             raise SystemExit(f"region {w} failed")
         stats[w] = (round(time.time() - t0, 1), round(ru.ru_maxrss / 1024))
-        print(f"region {w}: {stats[w][0]} s, peak {stats[w][1]} MB", flush=True)
+        print(f"region {w}{' (feature pass)' if fpass else ''}: {stats[w][0]} s, peak {stats[w][1]} MB", flush=True)
     return stats
+
+
+def feature_pass(ws, jobs, osm_hashes, force=()):
+    """the large features' decisions (features.py): each region's counts over its core (again where its inputs
+    changed, as a region's build), added up -> data/cache/features.json (written when it changed); returns them"""
+    import features
+    import region_inputs
+    todo = []
+    for w in ws:
+        f = rdir(w) / "fpass" / "fstats.json"
+        if w in force or not f.exists() or json.load(open(f)).get("key") != \
+                region_inputs.region_key(w, osm_hashes[w], json.load(open(f))["deps"])[0]:
+            todo.append(w)
+    if todo:
+        st = build(todo, jobs, fpass=True)
+        print(f"feature pass: {len(todo)} regions, {round(max(v[0] for v in st.values()))} s the longest", flush=True)
+        for w in todo:
+            f = rdir(w) / "fpass" / "fstats.json"
+            d = json.load(open(f))
+            d["key"] = region_inputs.region_key(w, osm_hashes[w], d["deps"])[0]
+            json.dump(d, open(f, "w"))
+    table = features.merge([json.load(open(rdir(w) / "fpass" / "fstats.json"))["stats"] for w in ws])
+    s = json.dumps(table, indent=0)
+    if not FTABLE.exists() or FTABLE.read_text() != s:
+        FTABLE.parent.mkdir(parents=True, exist_ok=True)
+        FTABLE.write_text(s)
+    return table
 
 
 # ---------------------------------------------------------------- incremental: which regions are up to date
@@ -118,41 +163,48 @@ def fresh(w, key):
     m = json.load(open(f))
     if m.get("key") != key or region_inputs.palette_sig(m["palette_n"]) != m["palette_sig"]:
         return False
-    return all((rdir(w) / n).exists() for n in ("core.npz", "vol.npy", "out.json")) and \
+    return all((rdir(w) / n).exists() for n in ("core.npz", "vol.npz", "out.json")) and \
         all((OUT / "tiles" / t).exists() for t in m["tiles"])
 
 
-def write_manifest(w, osm_hash):
+def key_of(w, osm_hash, table, deps, used):
+    """region w's key (region_inputs.region_key) with the decisions of the large features it looked up"""
     import region_inputs
-    deps = json.load(open(rdir(w) / "out.json"))["deps"]
-    key, parts = region_inputs.region_key(w, osm_hash, deps)
+    return region_inputs.region_key(w, osm_hash, deps, features={f: table.get(f) for f in used})
+
+
+def write_manifest(w, osm_hash, table):
+    import region_inputs
+    out = json.load(open(rdir(w) / "out.json"))
+    deps, used = out["deps"], sorted(out["features_used"])
+    key, parts = key_of(w, osm_hash, table, deps, used)
     n = len(json.load(open(HERE / "palette.json"))["palette"])
-    json.dump(dict(key=key, deps=deps, palette_n=n, palette_sig=region_inputs.palette_sig(n), tiles=core_tiles(w),
-                   parts=parts), open(rdir(w) / "manifest.json", "w"), indent=0)
+    json.dump(dict(key=key, deps=deps, features_used=used, palette_n=n, palette_sig=region_inputs.palette_sig(n),
+                   tiles=core_tiles(w), parts=parts), open(rdir(w) / "manifest.json", "w"), indent=0)
 
 
-def stale_regions(ws, osm_hashes, force=()):
+def stale_regions(ws, osm_hashes, table, force=()):
     """the regions to build: those forced, never built, or whose inputs or code changed since"""
-    import region_inputs
     out = []
     for w in ws:
         f = rdir(w) / "manifest.json"
-        deps = json.load(open(f))["deps"] if f.exists() else None
-        if w in force or deps is None or not fresh(w, region_inputs.region_key(w, osm_hashes[w], deps)[0]):
+        m = json.load(open(f)) if f.exists() else None
+        if w in force or m is None or "features_used" not in m or not fresh(w, key_of(w, osm_hashes[w], table, m["deps"], m["features_used"])[0]):
             out.append(w)
     return out
 
 
-def why_stale(w, osm_hash):
+def why_stale(w, osm_hash, table):
     """what changed for region w since its build (for --status)"""
-    import region_inputs
     f = rdir(w) / "manifest.json"
     if not f.exists():
         return "not built"
     m = json.load(open(f))
-    _, now = region_inputs.region_key(w, osm_hash, m["deps"])
+    if "features_used" not in m:
+        return "built before the feature pass"
+    _, now = key_of(w, osm_hash, table, m["deps"], m["features_used"])
     diff = [k for k in sorted(now) if json.dumps(now[k], sort_keys=True) != json.dumps(m["parts"].get(k), sort_keys=True)]
-    for k in ("rasters", "raw", "code"):
+    for k in ("rasters", "raw", "code", "features"):
         if k in diff:
             diff[diff.index(k)] = k + ":" + ",".join(x for x in now[k] if now[k][x] != m["parts"][k].get(x))
     return "changed: " + " ".join(diff) if diff else ("palette or files" if not fresh(w, m["key"]) else "up to date")
@@ -180,7 +232,7 @@ def driver_stamp(ws):
     raw OSM (labels, trams, traffic), the config"""
     import region_inputs
     keys = [json.load(open(rdir(w) / "manifest.json"))["key"] for w in ws]
-    code = {f: region_inputs.file_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
+    code = {f: region_inputs.code_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
                                                          "tunnels.py", "underpass.py", "osm.py", "aoi.py", "tiles.py",
                                                          "window.py", "region.py", "passau.py", "mapstore.py",
                                                          "overrides.json")}
@@ -212,12 +264,13 @@ def main(argv):
     levels = tiles.manifest(aoi.MAP_D, aoi.MAP_W)
     tiles.remove_stale(OUT / "tiles", levels, note, split=True)
     osm_hashes = region_inputs.cut_osm(ws, rdir)
+    force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
+    table = feature_pass(ws, jobs, osm_hashes, force)
     if "--status" in argv:
         for w in ws:
-            print(f"region {w.r0}_{w.c0} ({w}): {why_stale(w, osm_hashes[w])}")
+            print(f"region {w.r0}_{w.c0} ({w}): {why_stale(w, osm_hashes[w], table)}")
         return
-    force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
-    todo = stale_regions(ws, osm_hashes, force)
+    todo = stale_regions(ws, osm_hashes, table, force)
     print(f"regions: {len(todo)} of {len(ws)} to build", [f"{w.r0}_{w.c0}" for w in todo], flush=True)
     stamp_f = Path("data/cache/regions.stamp")
     if not todo and stamp_f.exists() and stamp_f.read_text() == driver_stamp(ws) and all(p.exists() for p in DRIVER_OUT):
@@ -239,7 +292,7 @@ def main(argv):
         res.update({w: json.load(open(rdir(w) / "out.json")) for w in again})
         assert not any(res[w]["new_palette"] for w in ws), "the palette registry still lacks colours"
     for w in stats:
-        write_manifest(w, osm_hashes[w])
+        write_manifest(w, osm_hashes[w], table)
     palette = [tuple(e) for e in json.load(open(HERE / "palette.json"))["palette"]]
     for w in ws:
         notes.append(f"--- region {w}: " + (f"{stats[w][0]} s, peak {stats[w][1]} MB" if w in stats else "up to date, kept"))
@@ -313,7 +366,7 @@ def main(argv):
     if os.environ.get("FINALDUMP"):  # the finished volume put together, for whole-city checks (scripts/floating.py;
         fv = np.lib.format.open_memmap("data/cache/final_vol.npy", "w+", np.uint16, (Hm, D_, W_))  # a map-sized file)
         for w in ws:
-            v = np.load(rdir(w) / "vol.npy", mmap_mode="r")
+            v = mapstore.load_volume(rdir(w) / "vol.npz", (res[w]["Hm"], w.r1 - w.r0, w.c1 - w.c0))
             fv[:v.shape[0], w.r0:w.r1, w.c0:w.c1] = v
         fv.flush()
         del fv

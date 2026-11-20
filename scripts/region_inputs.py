@@ -9,8 +9,9 @@ code changed (and the OSM cut each region reads instead of the whole of data/raw
   first outline of its name), in the file's order. Its hash is the hash of those elements: a new extract that changes
   nothing near a region leaves it be
 - other raw files a region reads whole (the tree register, ALKIS land use): their hash
-- code: the files of scripts/ the region's process had loaded (recorded in its out.json, `deps`), and the parts of
-  scripts/map.json that decide what is built (grid, anchor, map, base, rivers)
+- code: the files of scripts/ the region's process had loaded (recorded in its out.json, `deps`; a Python file by its
+  syntax tree, so comments and docstrings rebuild nothing), and the parts of scripts/map.json that decide what is built
+  (grid, anchor, map, base, rivers)
 - the palette registry is append-only: a region stays valid while the registry's first n colours are those it was
   built with (palette_ok)
 """
@@ -59,6 +60,26 @@ def file_sha(path, cache={}):
     CACHE.mkdir(parents=True, exist_ok=True)
     json.dump(cache, open(db, "w"))
     return h.hexdigest()
+
+
+def code_sha(path, cache={}):
+    """a code file's hash: a Python file's syntax tree without its docstrings (comments, docstrings and layout do
+    not rebuild anything), another file's content; kept per (size, mtime) as file_sha"""
+    p = Path(path)
+    if p.suffix != ".py" or not p.exists():
+        return file_sha(p)
+    st = p.stat()
+    k = (str(p), st.st_size, st.st_mtime_ns)
+    if k not in cache:
+        import ast
+        tree = ast.parse(p.read_text())
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if isinstance(body, list) and body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+                node.body = body[1:] or [ast.Pass()]
+        cache[k] = "ast:" + sha(ast.dump(tree).encode())
+    return cache[k]
 
 
 def _npz_blocks(path):
@@ -193,13 +214,16 @@ def config_part():
     return {k: c[k] for k in ("crs", "grid", "anchor", "map", "base", "rivers")}
 
 
-def region_key(w, osm_hash, deps):
-    """the hash of everything region w's build reads (deps: the code files it loaded last time, scripts/-relative)"""
+def region_key(w, osm_hash, deps, features=None):
+    """the hash of everything region w's build reads (deps: the code files it loaded last time, scripts/-relative;
+    features: the large features' decisions it looked up, features.py)"""
     import region
     box = w.region(region.HALO)
     d = dict(box=list(box), core=[w.r0, w.r1, w.c0, w.c1], config=config_part(), osm=osm_hash,
              rasters={p: raster_hash(p, box) for p in RASTERS}, raw={p: file_sha(p) for p in RAW_FILES},
-             env={k: os.environ.get(k) for k in ENV}, code={f: file_sha(HERE / f) for f in sorted(deps)})
+             env={k: os.environ.get(k) for k in ENV}, code={f: code_sha(HERE / f) for f in sorted(deps)})
+    if features is not None:
+        d["features"] = features
     return sha(json.dumps(d, sort_keys=True).encode()), d
 
 

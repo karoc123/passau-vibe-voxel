@@ -76,17 +76,18 @@ sh scripts/build_data.sh
 Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
 the triangle counts run the viewer's mesher). The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
 From cached raw data the build takes about 5½ minutes (WSL, 20 cores: prep, lod2, laser 1 min, the volume in 8
-regions of 1024 m, 4 at once, 3 min, the steps after it 1½ min, 45 s of them `tris.mjs`); a region's process peaks at
-~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 1.4 GB. Given the same `data/raw`,
-it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-20; the gzip files are written with
-`mtime=0`).
+regions of 1024 m, 4 at once, 3½ min, the steps after it 1 min, 45 s of them `tris.mjs`); a region's process peaks
+at ~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 0.8 GB; `data/cache` holds
+0.2 GB. Given the same `data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on
+2026-11-20; the gzip files are written with `mtime=0`).
 
 **Incremental.** A rerun does only what changed: each step runs when what it reads or writes changed since it last ran
 (`scripts/stamp.py`, records in `data/cache/stamps/`; `FORCE=1` runs every step, `FORCE=flood,boats` some), and
 `voxelize.py` builds again only the regions whose inputs or code changed (see "Regions"). With nothing changed the
 whole of `build_data.sh` takes 4 s. To iterate on one place: `uv run python scripts/voxelize.py --only x=COL,y=ROW`
 (the region holding that map cell, built again whatever its hash; `--status` lists the regions and what changed for
-each), then `sh scripts/build_data.sh` for the steps after it (the Altstadt's region: 2½ min, then 1 min).
+each), then `sh scripts/build_data.sh` for the steps after it (the Altstadt's region: 2½ min, then 1 min; a small
+region at the map's edge: 20 s).
 
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
 size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
@@ -131,14 +132,18 @@ elements within 64 m of it), writes its core's tiles and leaves its core's raste
 scripts/region_check.py` checks it, with the steps after it, and that an incremental rebuild changes nothing). A region
 is built again only when the hash of what it reads changed (`scripts/region_inputs.py`: its windows of
 `data/prep.npz`, `lod2.npz`, `laser.npz`, hashed per 128 m block once per file; its OSM cut; the raw files it reads;
-the code files its process loaded; the map's config), or the palette registry no longer starts with the colours it was
-built with, or its files are gone. The driver then holds nothing of the map's size (`scripts/mapstore.py`): the
-map-sized files are written row band by row band from the regions' cores, and the passes over the whole map read
-the regions' rasters and volumes where they look. What makes
+the code files its process loaded, by their syntax tree (comments rebuild nothing); the map's config; the large
+features' decisions it took), or the palette registry no longer starts with the colours it was built with, or its files
+are gone. A region keeps its core's volume as compressed 128 m column blocks (`vol.npz`, ~2 MB a km², 1/160 of the
+raw volume). The driver holds nothing of the map's size (`scripts/mapstore.py`): the map-sized files are written row
+band by row band from the regions' cores, and the passes over the whole map read the regions' rasters and volume
+blocks where they look. What makes
 a region's core independent of what lies beyond its halo: the volume's floor and the rivers' level pinned per project
 (`aoi.BASE`, `aoi.RIVER_LEVEL`), noise and hashes on the project grid's coordinates (fixed to EPSG:25832, `aoi.py`),
 a palette registry (`scripts/palette.json`: ids never depend on the order colours are met; a build adds new colours
-to it, sorted), a feature decided over its whole outline when it spans under 192 m and block by block beyond, sizes
+to it, sorted), a feature decided over its whole outline when it spans under 192 m, and beyond that (a long lawn,
+car park or untagged path) over its whole outline too, from counts made by every region over its core in a feature
+pass before the regions and added up by the driver (`scripts/features.py`, `data/cache/features.json`), sizes
 and levels of connected areas (the rivers' bodies, straw fields) counted within a window of 192 m, nearest-cell fills
 bounded, box filters summed exactly, the floating-debris passes judging pieces up to 64 m across, curated places in
 EPSG:25832 or project grid rows and columns, built only where the region holds them. The labels, the camera presets,
