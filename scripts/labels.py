@@ -36,6 +36,8 @@ def roof_height(labels, osm, top_at):
         gm = max(geoms, key=lambda q: q.area)
         c0, r0, c1, r1 = (int(v) for v in gm.bounds)
         c0, r0, c1, r1 = max(c0, 0), max(r0, 0), min(c1, W - 1), min(r1, D - 1)
+        if r1 < r0 or c1 < c0:  # (the name's largest outline lies off the map: a namesake of the label's elsewhere)
+            continue
         m = rasterize([(gm, 1)], out_shape=(r1 - r0 + 1, c1 - c0 + 1), transform=Affine.translation(c0, r0)).astype(bool)
         l["z"] = max(l["z"], max(top_at(r0 + r, c0 + c) for r, c in zip(*np.nonzero(m))))
 
