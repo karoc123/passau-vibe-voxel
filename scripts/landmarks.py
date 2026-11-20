@@ -46,15 +46,16 @@ EXTRA_LABELS = {
     "Hacklberg": dict(kind="district", at=(827464, 5390071)),
     "Hals": dict(kind="district", at=(828979, 5391463)),
     "Ries": dict(kind="district", at=(827587, 5391568)),
-    "Grubweg": dict(kind="district", at=(830342, 5391171)),
+    "Grubweg": dict(kind="district", at=(830561, 5391147)),  # (10 m inside the map's east edge)
     "Heining": dict(kind="district", at=(824166, 5390605)),
-    "Schalding": dict(kind="district", alt="Schalding rechts der Donau", at=(822094, 5391703)),
+    # rechts der Donau: links der Donau lies mostly north of the map
+    "Schalding": dict(kind="district", alt="Schalding rechts der Donau", at=(821808, 5391755)),
     "Prinzregent-Luitpold-Brücke": dict(en="Luitpold suspension bridge", kind="bridge", alt="Hängebrücke Luitpoldbrücke",
                                         at=(829787, 5389933), far=1500),
     "Schanzlbrücke": dict(kind="bridge", at=(828600, 5389942), far=1500),
     "Marienbrücke": dict(kind="bridge", at=(829372, 5389555), far=1500),
     "Innsteg": dict(kind="footbridge", at=(828962, 5389244), far=1500),
-    "Donaubrücke Schalding": dict(kind="bridge", at=(822158, 5391812), far=1500),
+    "Donaubrücke Schalding": dict(kind="bridge", at=(822184, 5391959), far=1500),
 }
 
 
@@ -78,8 +79,8 @@ VIEW_AT = dict(oberhaus=(829736.5, 5390182.5), eck=(830216.0, 5389770.0), eck_gr
 # target in metres: east, up over the ground there, south); a preset outside the map is left out
 VIEWS_MORE = dict(
     kachlet=("Kachlet dam", (824990, 5389985), (330, 260, 420)),
-    schalding=("Schalding", (822160, 5391800), (420, 330, 520)),
-    hacklberg=("Hacklberg", (827650, 5390120), (-260, 220, 380)),
+    schalding=("Schalding", (822000, 5391860), (420, 330, 520)),
+    hacklberg=("Hacklberg", (827820, 5389990), (-260, 220, 380)),
     ilztal=("Ilz valley at Hals", (829000, 5391560), (380, 260, 300)),
     north=("Ries and Grubweg", (829000, 5391500), (-400, 900, 1700)),
 )
