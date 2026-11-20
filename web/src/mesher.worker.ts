@@ -11,7 +11,10 @@ import { fetchGzip } from './fetch';
 
 export interface MeshRequest {
   key: string;
-  url: string;
+  // the node's file (tiles/<key>.bin); or, in its place, its columns already decoded (cols: an edited node,
+  // stream.ts replaceColumns; meshed as the same columns from the file are, no fields)
+  url?: string;
+  cols?: Columns | null;
   under?: RawColumns | Columns | string;
   N: number;
   s: number;
@@ -50,7 +53,7 @@ const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.
 // (keep; dataOnly: that alone, no mesh). load: a tile file, unzipped (tools/tris.mjs reads them from disk)
 // (the buildings of the columns, bld, come with the tile: every level's own; a foliage tile has none)
 export async function meshJob(m: MeshRequest, load: (url: string) => Promise<ArrayBuffer>) {
-  const { counts, ground, runs, planes, bld, fields } = decodeTile(await load(m.url), m.N);
+  const { counts, ground, runs, planes = null, bld = null, fields = null } = m.cols ? { ...m.cols, fields: null } : decodeTile(await load(m.url!), m.N);
   const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld }) : null;
   if (m.dataOnly) return { keep, out: null, base: undefined, fields: null };
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;

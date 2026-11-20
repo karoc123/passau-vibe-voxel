@@ -32,6 +32,10 @@ meshed, collided and written like a pipeline node, and an unedited node re-encod
   stand in one stack with it. Edits lower it where they dig below it and never raise it (`recomputeGround`, capped by
   L0's ground). Water counts as in the files (its top is the ground; `physics/rapier/terrain.ts` lowers the solid
   ground to the water's bottom).
+- **The viewer's edited nodes.** `stream.ts replaceColumns` swaps a loaded 1 m node's columns and re-meshes it (and
+  its foliage tile) in place from them (`mesher.worker.ts` MeshRequest `cols`: the same meshes as from the file,
+  `tools/remesh-bench.mjs`); `core/live-edits.ts` tells the physics, which read node files on their own. Freeing the
+  node drops the edit (L2). `?dig=1` (`dig.ts`) carves spheres by click to try it.
 - **Distance levels (2, 4, 8 m) never show L2.** They show L0; L1 there needs a downsampled L1 from the server
   (not built; `effectiveColumns` refuses persistent edits on them for now).
 - **Core without three.js or the DOM.** `web/src/core/` imports only `tile-data.ts`, so the viewer, the node tools and

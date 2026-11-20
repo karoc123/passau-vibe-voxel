@@ -15,6 +15,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { PAL_GROUND } from '../../chamfer';
 import { rampDiagonal02, rampHeight, ramped, rampField, cornerQ, PINNED, type RampField } from '../../ramps';
 import { decodeTile } from '../../tile-data';
+import { liveEdits, type Region } from '../../core/live-edits';
 import type { Meta } from '../../types';
 import { fetchGzip } from '../../util';
 import { MAT, pavedGround } from '../../voxelMaterial';
@@ -223,6 +224,7 @@ export class RapierTerrain {
   private readonly load: (path: string) => Promise<ArrayBuffer>;
   budgetMs: number;
   couple: boolean;
+  private readonly unlisten: () => void;
   readonly stats: TerrainStats = { chunks: 0, voxels: 0, tris: 0, tilesLoading: 0, builds: 0, buildMsTotal: 0, buildJsMsTotal: 0, buildMsMax: 0, lastFrameBuildMs: 0, frameBuildMsMax: 0, slowest: { ms: 0, js: 0, voxels: 0, rest: 0, n: 0 }, decodeMsMax: 0 };
 
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] },
@@ -234,6 +236,32 @@ export class RapierTerrain {
     this.load = opts.load ?? ((p) => fetchGzip(`data/tiles/${p}`));
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
     this.couple = opts.couple ?? true;
+    // (an edited node, core/live-edits.ts: its tile and the chunks it changed built again)
+    this.unlisten = liveEdits.listen((tx, tz, _n, region) => this.invalidate(tx, tz, region));
+  }
+
+  // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): the tile is decoded again from them (now
+  // where both its base and foliage are given, else from its files with what is given in their place), and the chunks
+  // over region (map metres; null: the whole tile), with the car's surface's reach round it, are removed to be built
+  // again by the next update.
+  invalidate(tx: number, tz: number, region: Region = null) {
+    if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) return;
+    const key = tx + tz * this.nx, t = this.tiles.get(key), live = liveEdits.get(tx, tz);
+    if (t !== 'loading') {
+      if (live?.foliage) this.tiles.set(key, terrainTile(this.N, live.base, live.foliage, this.pal));
+      else this.tiles.delete(key);
+    } // (a load under way takes the live columns when it ends)
+    const [x0, z0, x1, z1] = region ?? [tx * this.N, tz * this.N, (tx + 1) * this.N, (tz + 1) * this.N], m = DRIVE_R_MAX + 4;
+    for (let cz = Math.floor((z0 - m) / CHUNK); cz <= Math.floor((z1 + m) / CHUNK); cz++) {
+      for (let cx = Math.floor((x0 - m) / CHUNK); cx <= Math.floor((x1 + m) / CHUNK); cx++) {
+        const ck = cx + cz * 4096, ch = this.chunks.get(ck);
+        if (!ch) continue;
+        for (const c of ch.colliders) this.world.removeCollider(c, false);
+        this.chunks.delete(ck);
+        this.stats.voxels -= ch.voxels;
+        this.stats.tris -= ch.tris;
+      }
+    }
   }
 
   // a tile given directly (tests: synthetic terrain)
@@ -348,6 +376,7 @@ export class RapierTerrain {
   }
 
   dispose() {
+    this.unlisten();
     for (const ch of this.chunks.values()) for (const c of ch.colliders) this.world.removeCollider(c, false);
     this.chunks.clear();
   }
@@ -453,13 +482,15 @@ export class RapierTerrain {
     const key = tx + tz * this.nx, t = this.tiles.get(key);
     if (t === 'loading' || t === 'failed') return null;
     if (t) return t;
+    const live = liveEdits.get(tx, tz);
+    if (live?.foliage) { const lt = terrainTile(this.N, live.base, live.foliage, this.pal); this.tiles.set(key, lt); return lt; }
     this.tiles.set(key, 'loading');
     const path = `${tx}_${tz}.bin`;
     const load = Promise.all(['1', '1f'].map((s) => this.load(`${s}/${path}`)))
       .then(([base, foliage]) => {
         // (on the main thread: ~3 ms a tile, the first ~30 with the JIT's warm-up)
-        const t0 = performance.now();
-        this.tiles.set(key, terrainTile(this.N, decodeTile(base, this.N), decodeTile(foliage, this.N), this.pal));
+        const t0 = performance.now(), live = liveEdits.get(tx, tz);
+        this.tiles.set(key, terrainTile(this.N, live?.base ?? decodeTile(base, this.N), live?.foliage ?? decodeTile(foliage, this.N), this.pal));
         this.stats.decodeMsMax = Math.max(this.stats.decodeMsMax, performance.now() - t0);
       })
       .catch((e) => { if (e) console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); })

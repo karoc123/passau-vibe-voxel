@@ -4,6 +4,7 @@ import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
 import type { Columns, Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
+import { liveEdits, type Region } from './core/live-edits';
 
 export interface TileNode {
   key: string;
@@ -22,6 +23,13 @@ export interface TileNode {
   covers?: boolean;
   // meshed again after a lost WebGL context (remeshLost): hidden until the new geometry is in (city.ts shows it again)
   remesh?: boolean;
+  // its columns (data) are no longer its file's (replaceColumns): every mesh job of it sends them in its place
+  edited?: boolean;
+  // meshed again in place after an edit (replaceColumns): the mesh shown stays until the new one is in; editKey: the
+  // job's key, its reply's (each job's own); again: changed once more while a worker had it
+  editJob?: Job;
+  editKey?: string;
+  again?: boolean;
   data?: ColumnData;
   // what the shader reads of it while it shows (fields.ts; not a foliage tile's)
   fields?: Fields | null;
@@ -34,6 +42,8 @@ export interface TileNode {
 interface Job {
   node: TileNode;
   dataOnly: boolean;
+  // an edited node meshed again in place (TileNode.editJob)
+  edit: boolean;
   state: 'queued' | 'loading';
   prio: number;
   // its place in the queue's heap, -1 when not in it
@@ -133,10 +143,16 @@ function facingInShadow(this: THREE.Mesh, _r: THREE.WebGLRenderer, _o: THREE.Obj
 function drawRestInView(this: THREE.Mesh, r: THREE.WebGLRenderer, _s: THREE.Scene, _c1: THREE.Camera, geo: THREE.BufferGeometry) { drawRest.call(this, r, geo); }
 function drawRestInShadow(this: THREE.Mesh, r: THREE.WebGLRenderer, _o: THREE.Object3D, _c1: THREE.Camera, _sc: THREE.Camera, geo: THREE.BufferGeometry) { drawRest.call(this, r, geo); }
 
-function makeJob(node: TileNode, dataOnly: boolean, prio: number): Job {
+function makeJob(node: TileNode, dataOnly: boolean, prio: number, edit = false): Job {
   let resolve = () => {};
   const done = new Promise<void>((r) => { resolve = r; });
-  return { node, dataOnly, state: 'queued', prio, at: -1, done, resolve };
+  return { node, dataOnly, edit, state: 'queued', prio, at: -1, done, resolve };
+}
+
+// a copy of a node's columns to send to a worker, and their buffers
+function sendColumns(b: Columns) {
+  const c: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null };
+  return { c, transfer: [c.counts.buffer, c.runs.buffer, c.ground.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : [])] as Transferable[] };
 }
 
 // Loads voxel tiles (scripts/tiles.py: N x N cells of s metres) and meshes them in a pool of workers. What to load and
@@ -149,6 +165,10 @@ export class TileStreamer implements ColumnSource {
   readonly group = new THREE.Group();
   readonly world: World;
   version = 0;
+  // an edit session (?dig=1, dig.ts): the foliage tiles keep their column data too, for edits to carve their trees and
+  // grass (the 1 m tiles keep theirs anyway, city.ts)
+  editing = false;
+  private editSeq = 0;
   update: (camera: THREE.Camera) => void = () => {};
   // the jobs waiting, a binary max-heap by prio (pump takes the first; a new priority moves a job in it, or, for many at
   // once, marks it for one heapify before the next take: stale)
@@ -288,13 +308,13 @@ export class TileStreamer implements ColumnSource {
 
   // new priorities for the queued tiles (not the data-only jobs): ordered again once, at the next pump
   reprioritize(prio: (n: TileNode) => number) {
-    for (const j of this.queue) if (!j.dataOnly) j.prio = prio(j.node);
+    for (const j of this.queue) if (!j.dataOnly && !j.edit) j.prio = prio(j.node);
     this.stale = true;
   }
 
   dropQueued(keep: (n: TileNode) => boolean) {
     this.queue = this.queue.filter((j) => {
-      if (j.state !== 'queued' || keep(j.node) || j.node.remesh) return true;
+      if (j.state !== 'queued' || keep(j.node) || j.node.remesh || j.edit) return true;
       j.at = -1;
       if (j.dataOnly) { j.node.dataJob = undefined; j.resolve(); } else this.nodes.delete(j.node.key);
       return false;
@@ -333,17 +353,25 @@ export class TileStreamer implements ColumnSource {
     }
   }
 
-  private requestFor({ node: n, dataOnly }: Job): { msg: MeshRequest; transfer: Transferable[] } {
+  private requestFor({ node: n, dataOnly, edit }: Job): { msg: MeshRequest; transfer: Transferable[] } {
     const file = (k: string) => new URL(`data/tiles/${k}.bin`, location.href).href;
     const msg = tileRequest(this.ctx, n.s, n.tx, n.ty, n.foliage, file, n.keep, dataOnly);
     const transfer: Transferable[] = [];
+    if (n.foliage && this.editing && !n.data) msg.keep = true;
+    if (edit) msg.key = n.editKey!;
+    if (n.edited && n.data) {
+      // (its columns, not its file; the data stays as it is here)
+      const { c, transfer: t } = sendColumns(n.data);
+      msg.cols = c; msg.url = undefined; msg.keep = false;
+      transfer.push(...t);
+    }
     if (n.foliage) {
       // the base tile's column data is still here: hand over a copy instead of fetching it again
       const b = this.nodes.get(this.key(1, n.tx, n.ty))?.data;
       if (b) {
-        const under: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null };
-        msg.under = under;
-        transfer.push(under.counts.buffer, under.runs.buffer, under.ground.buffer, ...(under.planes ? [under.planes.buffer] : []), ...(under.bld ? [under.bld.buffer] : []));
+        const { c, transfer: t } = sendColumns(b);
+        msg.under = c;
+        transfer.push(...t);
       }
     }
     return { msg, transfer };
@@ -351,8 +379,10 @@ export class TileStreamer implements ColumnSource {
 
   private onReply(m: MeshReply, p: Pooled) {
     p.busy--; this.inflight--; p.idle = performance.now();
-    const n = this.nodes.get(m.key);
-    if (n && m.dataOnly) {
+    const at = m.key.indexOf('!'), n = this.nodes.get(at < 0 ? m.key : m.key.slice(0, at));
+    if (at >= 0) {
+      if (n?.editJob && n.editKey === m.key) this.onEdited(n, m);
+    } else if (n && m.dataOnly) {
       const job = n.dataJob;
       n.dataJob = undefined;
       if (m.type === 'error') console.warn(m.error);
@@ -379,9 +409,70 @@ export class TileStreamer implements ColumnSource {
       if (m.fields) n.fields = m.fields;
       n.state = 'ready';
       if (re) this.recover(n);
+      // (edited while it was being meshed from the columns before: again, in place)
+      if (n.again) { n.again = false; this.remeshEdited(n); }
       n.job.resolve();
     }
     this.pump();
+  }
+
+  // Node `key` (a 1 m tile; not a foliage tile) holds these columns now, foliage its foliage tile's (null: as they
+  // are): its column data is replaced at once (world.ts, occlusion and the like see it: version), and its mesh, and its
+  // foliage tile's with the base's cover (coverBase), are made again from them in place; the meshes shown stay until
+  // the new ones are in. Whatever reads the node files on its own hears of it (core/live-edits.ts: the physics).
+  // region: the box changed (map metres), for them. Transient: when the node is freed, its file again. Returns when
+  // the new meshes are in (null: the node is not here with its data).
+  replaceColumns(key: string, base: Columns, foliage: Columns | null = null, region: Region = null): Promise<void> | null {
+    const n = this.nodes.get(key);
+    if (!n || n.foliage || n.s !== 1 || n.state !== 'ready' || !n.data) return null;
+    n.edited = true;
+    this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld });
+    const wait = [this.remeshEdited(n)];
+    const f = this.nodes.get(`f/${n.tx}_${n.ty}`);
+    if (f) {
+      if (foliage && f.data) { f.edited = true; this.setData(f, foliage); }
+      wait.push(this.remeshEdited(f));
+    }
+    liveEdits.set(n.tx, n.ty, { base: n.data!, foliage: f?.data ?? null }, region);
+    this.pump();
+    return Promise.all(wait).then(() => {});
+  }
+
+  // an edited node's mesh made again (a node still on its way in: once it is in)
+  private remeshEdited(n: TileNode): Promise<void> {
+    if (n.state !== 'ready') {
+      // (queued: its job takes the columns as they are then)
+      if (n.state === 'loading') n.again = true;
+      return n.ready;
+    }
+    if (n.editJob) {
+      if (n.editJob.state === 'loading') n.again = true;
+      return n.editJob.done;
+    }
+    n.editKey = `${n.key}!${++this.editSeq}`;
+    n.editJob = makeJob(n, false, 2e9, true);
+    this.enqueue(n.editJob);
+    return n.editJob.done;
+  }
+
+  private onEdited(n: TileNode, m: MeshReply) {
+    const job = n.editJob!;
+    n.editJob = undefined;
+    if (m.type === 'error') console.warn(m.error);
+    else {
+      if (m.quads && n.mesh) { disposeGeometry(n.mesh.geometry); n.mesh.geometry = this.makeGeometry(m); }
+      else if (m.quads) n.mesh = this.makeMesh(m);
+      else if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); n.mesh = undefined; }
+      if (n.foliage) {
+        if (n.cover) disposeGeometry(n.cover);
+        n.cover = m.base?.quads ? this.makeGeometry(m.base) : undefined;
+      }
+    }
+    if (n.again) { n.again = false; this.remeshEdited(n); }
+    // the base's new mesh lacks what the grass covers once both are in (a base's new mesh has all its faces)
+    const b = this.nodes.get(this.key(1, n.tx, n.ty)), f = this.nodes.get(`f/${n.tx}_${n.ty}`);
+    if (f?.covers && f.cover && b?.mesh && !b.mesh.geometry.userData.covered) this.coverBase(f);
+    job.resolve();
   }
 
   private makeGeometry({ pos, attr, pal, bld, quads, faces, normals, cuts, box }: MeshOut) {
@@ -436,7 +527,10 @@ export class TileStreamer implements ColumnSource {
 
   // a foliage tile shows: its base tile's mesh loses the faces under its grass (only ever both, or the base alone)
   coverBase(f: TileNode) {
-    const geo = f.cover, b = this.nodes.get(this.key(1, f.tx, f.ty));
+    const b = this.nodes.get(this.key(1, f.tx, f.ty));
+    // (either one being meshed again after an edit: once both are in, onEdited)
+    if (f.editJob || b?.editJob) { f.covers = true; return; }
+    const geo = f.cover;
     f.cover = undefined;
     if (!geo) return;
     if (b?.mesh && !b.mesh.geometry.userData.covered) {
@@ -482,6 +576,11 @@ export class TileStreamer implements ColumnSource {
 
   free(n: TileNode) {
     if (n.cover) disposeGeometry(n.cover);
+    // (an edit waiting is not meshed; one in a worker is not taken back: onReply finds no job for it)
+    if (n.editJob) { n.editJob.state = 'loading'; n.editJob.resolve(); n.editJob = undefined; }
+    // (transient edits: the node's file again, when it comes again)
+    if (n.edited && !n.foliage) liveEdits.set(n.tx, n.ty, null);
+    else if (n.foliage && n.data) { const live = liveEdits.get(n.tx, n.ty); if (live?.foliage === n.data) liveEdits.set(n.tx, n.ty, { ...live, foliage: null }); }
     n.dataJob?.resolve();
     n.dataJob = undefined;
     if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); }

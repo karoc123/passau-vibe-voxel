@@ -1,6 +1,7 @@
 import type { Vector3 } from 'three';
 import type { Meta } from '../types';
-import { decodeTile, type Columns } from '../tile-data';
+import { decodeTile, type RawColumns } from '../tile-data';
+import { liveEdits } from '../core/live-edits';
 import { fetchGzip } from '../util';
 import { MAT } from '../voxelMaterial';
 
@@ -13,7 +14,7 @@ export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ce
 type Contact = { fraction: number; axis: number };
 export type Sweep = (Contact & { hit: ImpactKind }) | { fraction: number; hit: null } | 'loading';
 
-function runsOf(columns: Columns): Runs {
+function runsOf(columns: RawColumns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
   for (let i = 0; i < columns.counts.length; i++) offsets[i + 1] = offsets[i] + columns.counts[i] * 3;
   return { offsets, data: columns.runs };
@@ -73,6 +74,16 @@ export class VoxelCollision {
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
     this.material = Uint8Array.from(meta.palette, p => p[3]);
+    // (one per page, fpv.ts: listens as long as the page lives)
+    liveEdits.listen((tx, tz) => this.invalidate(tx, tz));
+  }
+
+  // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): its tile is read again, now where the
+  // live columns hold its foliage too, else from its files (with the live base in place of the file's)
+  invalidate(tx: number, tz: number) {
+    const key = tx + tz * this.nx, live = liveEdits.get(tx, tz);
+    if (!this.tiles.delete(key) && !this.wanted.includes(key)) return;
+    if (live?.foliage) this.tiles.set(key, { ground: live.base.ground, base: runsOf(live.base), foliage: runsOf(live.foliage) });
   }
 
   prefetch(p: Vector3, v: Vector3) {
@@ -189,8 +200,8 @@ export class VoxelCollision {
     Promise.all(['1', '1f'].map(s => fetchGzip(`data/tiles/${s}/${path}`)))
       .then(([base, foliage]) => {
         if (!this.wanted.includes(key)) return;
-        const terrain = decodeTile(base, this.tileSide);
-        this.tiles.set(key, { ground: terrain.ground, base: runsOf(terrain), foliage: runsOf(decodeTile(foliage, this.tileSide)) });
+        const live = liveEdits.get(key % this.nx, Math.floor(key / this.nx)), terrain = live?.base ?? decodeTile(base, this.tileSide);
+        this.tiles.set(key, { ground: terrain.ground, base: runsOf(terrain), foliage: runsOf(live?.foliage ?? decodeTile(foliage, this.tileSide)) });
         this.retryAt.delete(key);
       })
       .catch(() => this.retryAt.set(key, performance.now() + 1500))

@@ -383,6 +383,8 @@ async function boot() {
   const streetLamps = fetchJson<{ lamps: [number, number, number][] }>('data/streetlamps.json').then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
   streamer = new TileStreamer(meta, tileMat, scene);
+  // ?dig=1: a click carves a hole in the city, until the page is loaded again (dig.ts; a developer's switch)
+  if (qs.get('dig') === '1') { const S = streamer; import('./dig').then(({ installDig }) => installDig(S, camera, renderer.domElement)); }
   prepass = new DepthPrepass(streamer.group, scene);
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
