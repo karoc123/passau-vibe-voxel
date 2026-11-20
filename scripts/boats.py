@@ -23,6 +23,7 @@ from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).parent))
 from osm import to_grid  # noqa: E402
+import aoi  # noqa: E402
 
 OUT = Path("web/public/data")
 z = np.load("data/ground.npz")
@@ -295,12 +296,14 @@ def lane_at(lane, x):
 
 # turn_e: eastbound (north lane) into the basin, round clockwise (grid y south: east -> south -> west), back west on
 # the up lane; turn_w: westbound, round clockwise (west -> north -> east)
-ie_d, ie_u = lane_at(down, 2860), lane_at(up, 2860)
-turn_e = u_turn(down[ie_d], up[ie_u], np.array([2905.0, (down[ie_d][1] + up[ie_u][1]) / 2 + 30]), True)
-iw_u, iw_d = lane_at(up, 900), lane_at(down, 900)
-turn_w = u_turn(up[iw_u], down[iw_d], np.array([860.0, (up[iw_u][1] + down[iw_d][1]) / 2]), True)
+# (the turns' places are project grid columns, X(): the map's columns)
+X = lambda c: c - aoi.MAP_C0  # noqa: E731
+ie_d, ie_u = lane_at(down, X(2860)), lane_at(up, X(2860))
+turn_e = u_turn(down[ie_d], up[ie_u], np.array([X(2905.0), (down[ie_d][1] + up[ie_u][1]) / 2 + 30]), True)
+iw_u, iw_d = lane_at(up, X(900)), lane_at(down, X(900))
+turn_w = u_turn(up[iw_u], down[iw_d], np.array([X(860.0), (up[iw_u][1] + down[iw_d][1]) / 2]), True)
 for name, p in (("up", up), ("down", down), ("turn_e", turn_e), ("turn_w", turn_w)):
-    cl = clear[np.clip(p[:, 1].astype(int), 0, D - 1), p[:, 0].astype(int)]
+    cl = clear[np.clip(p[:, 1].astype(int), 0, D - 1), np.clip(p[:, 0].astype(int), 0, W - 1)]
     print(f"fairway {name}: {len(p)} points, closest to a bank {cl.min():.0f} m, {int((cl == 0).sum())} on land")
 r2 = lambda p: [[round(float(x), 1), round(float(y), 1)] for x, y in p]
 

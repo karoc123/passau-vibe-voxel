@@ -27,7 +27,7 @@ Region and core are in map cells; arrays of a region are indexed from the region
 
 The volume (voxelize.py) is built region by region: a region is a window's core and a halo of region.HALO (384 m),
 its decisions bounded so that the core comes out the same in any cover (scripts/region.py, regions.py,
-region_check.py); it writes the tiles of its core itself (tiles.export_window).
+check.py covers); it writes the tiles of its core itself (tiles.export_window).
 Network-wide after the regions (regions.py), over OSM's vectors and what the regions hand over, sampling the regions'
 rasters and volumes where they look (mapstore.py: nothing of the map's size in memory): the labels (the parks',
 decluttered, their radii), the camera presets, the tram paths, traffic.py over the whole network.
@@ -40,7 +40,7 @@ Still on the whole map's rasters (a window there would change what is built, not
 `cover(D, W, size)` cuts the map into windows of `size` x `size` metres (a multiple of ALIGN), `split(D, W, nx, ny)`
 into nx x ny windows (as even as ALIGN allows); one window over the whole map is `cover(D, W, None)`. Steps take
 --windows NXxNY or --window-size METRES (the whole map in one window by default) and write the same bytes either way
-(scripts/window_check.py proves it).
+(`scripts/check.py windows` proves it).
 """
 import gzip
 import zipfile

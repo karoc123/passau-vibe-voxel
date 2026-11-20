@@ -1,0 +1,11 @@
+{
+ "about": "Fixture map for scripts/check.py: 2048 x 1152 m round the Altstadt and the Dom (project rows 0-1152, columns 1024-3072: the peninsula, the Dreiflüsseeck, Veste Oberhaus, the Inn's north bank), a window of the project grid as scripts/map.json describes it, built from the same data/raw. 1152 rows rather than 1024, so that a 2 x 2 cover has four windows meeting at a corner. All but `name`, `map` and `regions` as in scripts/map.json (pinned for the project).",
+ "name": "Passau Altstadt (fixture)",
+ "crs": 25832,
+ "grid": {"x0": 827371, "y0": 5390500},
+ "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
+ "map": {"col0": 1024, "row0": 0, "cols": 2048, "rows": 1152},
+ "base": 287,
+ "rivers": {"level": 290.921, "stretches": []},
+ "regions": {"size": 1024, "jobs": 2}
+}

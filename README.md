@@ -123,14 +123,14 @@ cells, the project grid's less the map's corner. The steps:
 1024 m boundaries (a node of every tile level, a terrain chunk), and the step reads only the region of the core and a
 halo around it (its reach: the tiles 16 m, `tile_fields.py` 32 m, `terrain.py` 8 m, `zones.py` 0), the `data/` files
 row band by row band. `--windows NXxNY` or `--window-size METRES` choose the cover (the whole map in one window by
-default); every cover writes the same bytes (`uv run python scripts/window_check.py STEP` checks it).
+default); every cover writes the same bytes (`uv run python scripts/check.py windows` checks it, see "Checks").
 
 **Regions.** `voxelize.py` builds the volume region by region (`scripts/region.py`, `scripts/regions.py`): a region
 is a window's core and a halo of 384 m round it, built in a process of its own, which reads its own cut of OSM (the
 elements within 64 m of it), writes its core's tiles and leaves its core's rasters, volume and lists in
 `data/cache/regions/<row>_<col>/`. `--regions NXxNY`, `--region-size METRES` or `--whole` choose the cover
 (`scripts/map.json`'s by default: 1024 m, 4 at once; `-j N`); every cover writes the same bytes (`uv run python
-scripts/region_check.py` checks it, with the steps after it, and that an incremental rebuild changes nothing). A region
+scripts/check.py covers` checks it, with the steps after it, and that an incremental rebuild changes nothing). A region
 is built again only when the hash of what it reads changed (`scripts/region_inputs.py`: its windows of
 `data/prep.npz`, `lod2.npz`, `laser.npz`, hashed per 128 m block once per file; its OSM cut; the raw files it reads;
 the code files its process loaded, by their syntax tree (comments rebuild nothing); the map's config; the large
@@ -155,9 +155,25 @@ regions hand over, sampling the rasters (a label's box, a path's cells: never th
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
 pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.
 
-Checks that run at build time are logged to `data/debug/report.json`; `scripts/floating.py` and
-`scripts/surface_check.py` are whole-map checks to run by hand (`FINALDUMP=1` makes `voxelize.py` save the volume
-for them).
+**Checks.** What the build notes on the way is logged to `data/debug/report.json` (a few of its checks stop the
+build: a carriageway painted as pavement). The checks of the pipeline itself run on a fixture map, not on the map
+of `scripts/map.json`, so that they cost the same however large the map grows: `scripts/fixtures/altstadt.json`,
+2048 × 1152 m round the Altstadt (a `MAP_CONFIG` like `map.json`, built with the normal pipeline from the same
+`data/raw`, in workspaces under `data/check/<fixture>/`; the inputs `prep`, `lod2`, `laser.npz` built for it once
+per code and config). `uv run python scripts/check.py COMMAND` (each prints its time and peak RAM, exits 1 on a
+failure; `-j 2` regions at once by default):
+
+| Command | Checks | Time (-j 2) |
+|---|---|---|
+| `verify` | nothing left floating (`data/debug/floating_left.json`, `floating.json` empty), every carriageway in its own colour, LoD2's roofs and the laser's canopy heights taken for most cells, OSM's outlines within 3 m of LoD2's, the cars' lanes and the footpaths of `traffic.json` on the volume's surface (sunk / hovering shares under a threshold) | seconds on a built fixture |
+| `golden --record DIR` / `--compare DIR` | every output of a fresh fixture build (`web/public/data`, the arrays of `data/*.npz` with the inputs, `data/*.bin`) hashed, or compared with the record: a refactor that must not change a byte | ~6 min |
+| `covers [COVER ...]` | `voxelize.py` over the fixture as one region and over each cover (default `2x2`), then the steps after it: the same bytes; an incremental rerun builds nothing, a region built again alone (`--only`) changes nothing | ~14 min |
+| `windows [STEP ...]` | the windowed steps (`zones`, `terrain`, `tile_fields`, `tiles_lod`) over the whole fixture and over 2 × 2 windows (both seams and a corner; `--covers 2x1,1x2` others): the same bytes | ~4 min |
+| `extent` | the fixture against `altstadt_wide.json` (1024 m more to the west): every 128 m block of the volume and every tile node that sees the same map within `region.HALO` holds the same voxels, colour by colour (what growing the map relies on) | ~10 min the first time, then ~1 min |
+| `all` | `verify`, `covers`, `windows`, `extent` | ~30 min |
+
+Not covered: the node steps (`tris.mjs`, `lamps.mjs`) and `climate.py`. `FINALDUMP=1` still makes `voxelize.py`
+save the whole volume (`data/cache/final_vol.npy`, for `traffic.py` run alone).
 
 ## How the data is fused (scripts/voxelize.py)
 

@@ -13,7 +13,7 @@ Every other key is the part's own (PARTS[name]["params"]: type, default, range).
 (`uv run python scripts/parts.py`) and the skill pick it up from there.
 
 Everything is a function of the building's own cells and the voxels already in its columns, in the project grid's
-coordinates, so a part comes out the same in every region that holds the building (scripts/region_check.py).
+coordinates, so a part comes out the same in every region that holds the building (`scripts/check.py covers`).
 """
 import math
 

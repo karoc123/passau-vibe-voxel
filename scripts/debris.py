@@ -102,7 +102,7 @@ LOG = []  # every fill and set of posts the support pass made (data/debug/suppor
 def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None, B=128, K=64, _noleaf=True,
                      dbg=Path("data/debug")):
     """Everything still hanging in the air at the end of the build (6-connected: walking and falling need face contact;
-    pieces spanning K m or less, see above; scripts/floating.py scans the whole city) gets put on the ground or removed:
+    pieces spanning K m or less, see above; `scripts/check.py verify` fails on any left) gets put on the ground or removed:
     - a piece under 12 voxels: removed (a LiDAR return off a wire, a lone sign voxel); a spike (<= 4 cells across,
       not leaves): removed
     - a crown fragment (leaves): under 60 voxels removed (an overhanging twig the LiDAR caught), bigger ones get a

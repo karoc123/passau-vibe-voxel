@@ -1,0 +1,601 @@
+"""The pipeline's checks, run on a fixture map: a MAP_CONFIG of ~2 km² round the Altstadt (scripts/fixtures/), built
+with the normal pipeline from the same data/raw in workspaces of its own (data/check/<fixture>/), so that what a check
+costs does not grow with the map of scripts/map.json.
+
+usage: uv run python scripts/check.py COMMAND [ARGS] [--fixture PATH] [-j JOBS] [--keep]
+
+  verify                        hard checks on the fixture's build (see VERIFY): nothing floating left, carriageways
+                                in their own colour, LoD2 and the laser scan found where they should be, the moving
+                                things on the volume's surface (sunk / hover shares under a threshold)
+  golden --record DIR           every output of a fresh fixture build (web/public/data, data/*.npz arrays, data/*.bin,
+  golden --compare DIR          the inputs prep/lod2/laser.npz) hashed into DIR/golden.json, or compared with it: the
+                                guard of a refactor that must not change a byte. --incremental: build in the kept
+                                workspace instead of from scratch
+  covers [COVER ...]            voxelize.py over the fixture as one region and over each cover (NXxNY or a size in
+                                metres; default 2x2), then the Python steps after it: every output the same bytes. The
+                                first cover is then built again: with nothing changed nothing may be built
+                                (--no-incremental skips it), and with region 0_0 built again alone (--only) the
+                                outputs must still be the same
+  windows [STEP ...]            each windowed step (zones terrain tile_fields tiles_lod by default) over the whole
+          [--covers C,C,..]     fixture and over each cover (default 2x2: both seams and a corner): the same bytes
+  extent [--other PATH]         the fixture and a larger one (default scripts/fixtures/altstadt_wide.json: 1024 m more
+                                to the west): every 128 m block of the volume (the regions' vol.npz) and every node of
+                                the tiles (voxel sections) whose surroundings within region.HALO are the same in both
+                                maps (the same map edge, or no edge that near) must hold the same voxels, colour by
+                                colour -- what growing the map relies on
+  all                           verify, covers, windows, extent
+  build                         only the fixture's workspace (data/check/<name>/base), incrementally
+
+The workspace of a fixture (data/check/<name>/base, kept between runs: built again only where code or inputs changed)
+holds a copy of scripts/ (some steps write beside their script), data/raw linked, the inputs prep, lod2, laser.npz
+built for the fixture (cached in data/check/<name>/inputs/ per code and config), and the outputs where the pipeline
+puts them. covers, windows and golden work in scratch folders beside it (removed after, unless --keep). Not run: the
+node steps (web/tools/tris.mjs, lamps.mjs) and climate.py (it fetches).
+
+Runtime on the Altstadt fixture (WSL, 20 cores, -j 2): build from nothing ~6 min, verify on a built workspace ~1 min,
+covers ~14 min, windows ~2 min, extent ~10 min the first time (the wide fixture's build; then ~1 min), golden ~6 min.
+A region's process peaks at ~4 GB. Every command prints its time and peak RAM and exits 1 if a check fails.
+"""
+import ast
+import hashlib
+import json
+import os
+import re
+import resource
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = ROOT / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+PUB = "web/public/data"
+CHECK = ROOT / "data" / "check"
+FIXTURE = SCRIPTS / "fixtures" / "altstadt.json"
+WIDE = SCRIPTS / "fixtures" / "altstadt_wide.json"
+INPUTS = {"prep": "data/prep.npz", "lod2": "data/lod2.npz", "laser": "data/laser.npz"}  # (built in this order)
+AFTER = ["places", "flood", "boats", "terrain", "zones", "objects", "windows", "phenology", "tile_fields"]
+DROP_ENV = ("MAP_CONFIG", "FORCE", "NO_LOD2", "NO_LASER", "FINALDUMP", "TRAFFICDUMP", "OSM_REFRESH", "PYTHONPATH")
+# per windowed step: what it reads (copied: the step rewrites some in place; or linked) and writes (window.py)
+WSTEPS = {
+    "zones": dict(copy=[f"{PUB}/meta.json"], link=["data/raw", "data/footprints.npz"],
+                  out=["data/zones.bin", f"{PUB}/zones.json"]),
+    "terrain": dict(copy=[f"{PUB}/meta.json"], link=["data/ground.npz"], out=["data/terrain.bin", f"{PUB}/terrain"]),
+    "tile_fields": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles", f"{PUB}/windows.bin"],
+                        link=["data/zones.bin", "data/flood.bin", "data/foliage.bin"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
+    "tiles_lod": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles"], link=[], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
+}
+
+
+class Failed(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- fixtures and workspaces
+
+class Fixture:
+    def __init__(self, path):
+        self.path = Path(path).resolve()
+        self.cfg = json.loads(self.path.read_text())
+        self.name = self.path.stem
+        m = self.cfg["map"]
+        self.row0, self.col0, self.D, self.W = m["row0"], m["col0"], m["rows"], m["cols"]
+        self.home = CHECK / self.name
+
+    def cover(self, size="config"):
+        import window
+        return window.cover(self.D, self.W, self.cfg.get("regions", {}).get("size") if size == "config" else size)
+
+
+def env_for(ws, fx):
+    env = {k: v for k, v in os.environ.items() if k not in DROP_ENV and not k.startswith("VOXEL_")}
+    env.update(PYTHONPATH=str(ws / "scripts"), MAP_CONFIG=str(ws / "fixture.json"))
+    return env
+
+
+def run(ws, fx, script, args=(), log=None, scripts=None):
+    """scripts/<script>.py of the workspace (or of `scripts`) with cwd ws, its output into ws/log_<script>.txt"""
+    log = ws / f"log_{log or script}.txt"
+    with open(log, "w") as fh:
+        p = subprocess.run([sys.executable, str((scripts or ws / "scripts") / f"{script}.py"), *map(str, args)], cwd=ws,
+                           env=env_for(ws, fx), stdout=fh, stderr=subprocess.STDOUT)
+    if p.returncode:
+        tail = log.read_text().splitlines()[-15:]
+        raise Failed(f"{script}.py {' '.join(map(str, args))} failed in {ws} (exit {p.returncode}):\n  " + "\n  ".join(tail))
+    return log
+
+
+def import_closure(names):
+    """the scripts/*.py files that scripts `names` import, transitively"""
+    seen, todo = set(), list(names)
+    while todo:
+        n = todo.pop()
+        f = SCRIPTS / f"{n}.py"
+        if n in seen or not f.exists():
+            continue
+        seen.add(n)
+        for node in ast.walk(ast.parse(f.read_text())):
+            if isinstance(node, ast.Import):
+                todo += [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                todo.append(node.module.split(".")[0])
+    return sorted(seen)
+
+
+def raw_fingerprint():
+    """data/raw's files (names, sizes, mtimes; one level of folders down): what the build reads of it, roughly"""
+    raw = ROOT / "data" / "raw"
+    out = []
+    for f in sorted(raw.iterdir()):
+        for g in sorted(f.iterdir()) if f.is_dir() else [f]:
+            st = g.stat()
+            out.append(f"{g.relative_to(raw)}:{st.st_size}:{st.st_mtime_ns}")
+    return hashlib.sha256("\n".join(out).encode()).hexdigest()[:16]
+
+
+def ensure_inputs(fx):
+    """prep, lod2, laser.npz for the fixture, built once per (their code, the config, data/raw) in
+    data/check/<name>/inputs/<key>/data/"""
+    h = hashlib.sha256(json.dumps(fx.cfg, sort_keys=True).encode() + raw_fingerprint().encode())
+    for n in import_closure(list(INPUTS)):
+        h.update(n.encode() + (SCRIPTS / f"{n}.py").read_bytes())
+    d = fx.home / "inputs" / h.hexdigest()[:16]
+    if not all((d / p).exists() for p in INPUTS.values()):
+        if (fx.home / "inputs").exists():
+            shutil.rmtree(fx.home / "inputs")
+        (d / "data").mkdir(parents=True)
+        (d / "data" / "raw").symlink_to((ROOT / "data" / "raw").resolve())
+        shutil.copy(fx.path, d / "fixture.json")
+        for s in INPUTS:
+            t = time.time()
+            run(d, fx, s, scripts=SCRIPTS)
+            print(f"  inputs: {s}.py {time.time() - t:.0f} s", flush=True)
+    return d
+
+
+def setup(ws, fx, fresh=True, palette=None):
+    """a workspace for fx at ws: a fresh copy of scripts/ (palette: the registry to start from), data/raw linked, the
+    inputs linked; fresh: everything else removed (else the outputs and the regions' cache kept: incremental)"""
+    if fresh and ws.exists():
+        shutil.rmtree(ws)
+    if (ws / "scripts").exists():
+        # (the registry as the last build left it, if it only added colours to scripts/palette.json: else every
+        # region would be built again for a palette that lacks the colours it was built with)
+        reg = json.loads((ws / "scripts" / "palette.json").read_text())["palette"]
+        mine = json.loads((SCRIPTS / "palette.json").read_text())["palette"]
+        if palette is None and reg[:len(mine)] == mine:
+            palette = ws / "palette.kept.json"
+            shutil.copy(ws / "scripts" / "palette.json", palette)
+        shutil.rmtree(ws / "scripts")
+    shutil.copytree(SCRIPTS, ws / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    if palette is not None:
+        shutil.copy(palette, ws / "scripts" / "palette.json")
+    shutil.copy(fx.path, ws / "fixture.json")
+    (ws / PUB).mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / PUB / "windows.json", ws / PUB / "windows.json")  # (not built by the pipeline)
+    inp = ensure_inputs(fx)
+    for p in ["data/raw"] + list(INPUTS.values()):
+        dst = ws / p
+        if dst.is_symlink() or dst.exists():
+            dst.unlink()
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.symlink_to((ROOT / p).resolve() if p == "data/raw" else inp / p)
+    return ws
+
+
+def build(ws, fx, jobs, cover=(), after=True):
+    t = time.time()
+    run(ws, fx, "voxelize", list(cover) + ["-j", jobs])
+    t1 = time.time()
+    if after:
+        for s in AFTER:
+            run(ws, fx, s)
+    print(f"  {ws.relative_to(ROOT)}: voxelize {' '.join(cover) or '(default cover)'} {t1 - t:.0f} s"
+          + (f", the steps after it {time.time() - t1:.0f} s" if after else ""), flush=True)
+
+
+def base(fx, jobs, after=True):
+    """the fixture's kept workspace, built incrementally"""
+    ws = setup(fx.home / "base", fx, fresh=False)
+    build(ws, fx, jobs, after=after)
+    return ws
+
+
+# ---------------------------------------------------------------- digests
+
+def arr_sha(a):
+    return hashlib.sha256(str((a.dtype, a.shape)).encode() + a.tobytes()).hexdigest()
+
+
+def file_sha(f):
+    return hashlib.sha256(Path(f).read_bytes()).hexdigest()
+
+
+def digest(ws, inputs=False):
+    """every output of a workspace: the files of web/public/data, the arrays of data/*.npz (a zip's entries carry the
+    time they were written), data/*.bin; inputs: also the arrays of prep, lod2, laser.npz"""
+    h = {}
+    for f in sorted((ws / PUB).rglob("*")):  # (the registry, scripts/palette.json, is meta.json's palette)
+        if f.is_file():
+            h[str(f.relative_to(ws))] = file_sha(f)
+    for f in sorted((ws / "data").glob("*")):
+        if (f.is_symlink() and not inputs) or not f.is_file():
+            continue
+        if f.suffix == ".npz":
+            with np.load(f) as z:
+                for k in sorted(z.files):
+                    h[f"{f.relative_to(ws)}:{k}"] = arr_sha(z[k])
+        elif f.suffix == ".bin":
+            h[str(f.relative_to(ws))] = file_sha(f)
+    return h
+
+
+def differ(ref, got):
+    return sorted(k for k in set(ref) | set(got) if ref.get(k) != got.get(k))
+
+
+# ---------------------------------------------------------------- verify: hard checks on a build
+
+# thresholds of the hard checks: guards against a regression, set above what the Altstadt fixture gives (2026-11-20,
+# in brackets); a change that crosses one is a bug, or a reason to move it (said in the commit)
+LOD2_SHARE = 0.90     # building cells whose roof is LoD2's (0.965)
+LASER_SHARE = 0.80    # canopy cells whose height is the laser's (0.884)
+SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprints, each way, per region (1.35)
+MATCH_SHARE = 0.40    # OSM outlines matched to a LoD2 footprint (0.493)
+SURFACE = {"road": dict(sunk=0.015, hover=0.005), "tram": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
+           "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
+
+
+def notes_of(ws):
+    return json.load(open(ws / "data/debug/report.json"))["notes"]
+
+
+def sums(notes, pattern):
+    """per match of pattern (two integer groups) in the notes: the totals of both"""
+    ms = [re.search(pattern, n) for n in notes]
+    ms = [m for m in ms if m]
+    if not ms:
+        raise Failed(f"no note matches {pattern!r}: the build's report changed, update scripts/check.py")
+    return sum(int(m.group(1)) for m in ms), sum(int(m.group(2)) for m in ms), ms
+
+
+M_LEAF, M_LAMP, M_CAR = 3, 5, 11
+
+
+def surface(ws, fx):
+    """where the moving things meet the voxels: every car lane, tram track and footpath of traffic.json walked every
+    metre at the height the viewer gives it (linear between path points), against the finished volume (the regions'
+    vol.npz, mapstore.MapVolume: nothing of the map's size)
+      sunk:  a solid voxel (not leaves, lamps, poles, trunks, cars) 0.3-1.5 m above the path -- the vehicle drives
+             into a deck, a wall, a kerb step
+      hover: nothing solid in the 2 m below the path -- it drives over a hole, or above a deck that is drawn lower
+    -> {network: dict(metres, sunk=(metres, share, worst 10 m clusters), hover=...)}"""
+    import mapstore
+    meta = json.load(open(ws / PUB / "meta.json"))
+    tr = json.load(open(ws / PUB / "traffic.json"))
+    pal = meta["palette"]
+    solid = np.array([i != 0 and e[3] not in (M_LEAF, M_LAMP, M_CAR) for i, e in enumerate(pal)] + [True] * 64)
+    rdir = lambda w: ws / "data/cache/regions" / f"{w.r0}_{w.c0}"  # noqa: E731
+    vol = mapstore.MapVolume(fx.cover(), rdir, meta["H"])
+    H, D, W = vol.shape
+
+    def walk(p, offs=(0.0,)):
+        for (x0, y0, z0), (x1, y1, z1) in zip(p, p[1:]):
+            L = np.hypot(x1 - x0, y1 - y0)
+            n = max(1, int(L))
+            tx, ty = (x1 - x0) / max(L, 1e-6), (y1 - y0) / max(L, 1e-6)
+            for k in range(n):
+                f = k / n
+                for o in offs:
+                    yield x0 + (x1 - x0) * f - ty * o, y0 + (y1 - y0) * f + tx * o, z0 + (z1 - z0) * f
+    lanes = lambda r: [r["o0"] + 3.0 * i for i in range(r["lanes"])]  # noqa: E731  (the lane centres: web/src/sim/life.ts)
+    pts = {"road": [q for r in tr["roads"] for q in walk(r["p"], lanes(r))],
+           "tram": [q for t in tr.get("trams", []) for q in walk(t["p"])],
+           "ped": [q for p in tr["peds"] for q in walk(p["p"], (-0.85, 0.85) if "side" not in p else (0.85 * p["side"],))]}
+    out = {}
+    for k, P in pts.items():
+        P = np.array(P, np.float32).reshape(-1, 3)
+        if not len(P):
+            continue
+        c = np.clip(P[:, 0].astype(int), 0, W - 1)
+        r = np.clip(P[:, 1].astype(int), 0, D - 1)
+        zf = np.floor(P[:, 2] + 0.3).astype(int)
+        col = np.stack([solid[vol[np.clip(zf + dz, 0, H - 1), r, c]] for dz in range(-3, 5)], 1)  # floor(z) - 3 .. + 4
+        sunk = col[:, 3] | col[:, 4]
+        hover = ~col[:, 2] & ~col[:, 1] & ~sunk
+        res = dict(metres=len(P))
+        for name, m in (("sunk", sunk), ("hover", hover)):
+            cl = {}
+            for x, y, _ in P[m]:
+                cl.setdefault((int(x) // 10, int(y) // 10), []).append((x, y))
+            worst = sorted(([round(float(np.mean([q[0] for q in v]))), round(float(np.mean([q[1] for q in v]))), len(v)]
+                            for v in cl.values()), key=lambda a: -a[2])[:5]
+            res[name] = (int(m.sum()), float(m.mean()), worst)
+        out[k] = res
+    return out
+
+
+def verify(fx, jobs, ws=None):
+    """the hard checks (VERIFY in the docstring) on the fixture's workspace; returns the failures"""
+    ws = ws or base(fx, jobs, after=False)
+    bad = []
+    dbg = ws / "data/debug"
+    for name, what in (("floating_left", "pieces debris.support_floating could neither ground nor remove"),
+                       ("floating", "floating clumps too big to remove (debris.drop_debris)")):
+        items = json.load(open(dbg / f"{name}.json"))
+        print(f"  {name}.json: {len(items)}")
+        if items:
+            bad.append(f"{len(items)} {what}: {items[:5]} (data/debug/{name}.json)")
+    notes = notes_of(ws)
+    ms =[m for m in (re.search(r"carriageway sanity \((.*?)\): (\d+) roads", x) for x in notes) if m]
+    nbad = sum(int(m.group(2)) for m in ms)
+    print(f"  carriageway sanity: {len(ms)} notes, {nbad} roads painted as pavement")
+    if not ms:
+        bad.append("no carriageway sanity note in the report")
+    elif nbad:
+        bad.append(f"{nbad} carriageways painted as pavement")
+    for label, pat, lim in (("LoD2 roofs taken", r"LoD2 roofs taken: (\d+) of (\d+) building cells", LOD2_SHARE),
+                            ("canopy heights from the laser", r"canopy heights from the laser: (\d+) of (\d+) cells", LASER_SHARE),
+                            ("OSM outlines matched to LoD2", r"OSM outlines moved onto their LoD2 footprints: (\d+) of (\d+)", MATCH_SHARE)):
+        a, b, _ = sums(notes, pat)
+        print(f"  {label}: {a} of {b} ({a / max(b, 1):.3f}, at least {lim})")
+        if a < lim * b:
+            bad.append(f"{label}: {a} of {b}, under {lim}")
+    shifts = [tuple(map(float, m.groups())) for m in
+              (re.search(r"LoD2 footprints: .*mean shift \[([-\d.e]+), ([-\d.e]+)\]", x) for x in notes) if m]
+    worst = max((max(abs(dx), abs(dy)) for dx, dy in shifts), default=None)
+    print(f"  OSM outlines' mean shift onto LoD2: up to {worst} m (at most {SHIFT_MAX})")
+    if worst is None or worst > SHIFT_MAX:
+        bad.append(f"OSM outlines' mean shift onto LoD2 {worst} m (more than {SHIFT_MAX}: the grids disagree?)")
+    for k, res in surface(ws, fx).items():
+        for name in ("sunk", "hover"):
+            m, share, worst = res[name]
+            lim = SURFACE[k][name]
+            print(f"  surface {k}: {res['metres']} m walked, {name} {m} m ({share:.4f}, at most {lim}); worst (x, y, m): {worst[:3]}")
+            if share > lim:
+                bad.append(f"{k} {name}: {share:.4f} of the metres walked (more than {lim}), worst (x, y, m): {worst}")
+    return bad
+
+
+# ---------------------------------------------------------------- covers, windows, golden, extent
+
+def covers(fx, jobs, cvs, incremental=True, keep=False):
+    home = fx.home / "covers"
+    whole = setup(home / "whole", fx)
+    build(whole, fx, 1, ["--whole"])
+    ref = digest(whole)
+    print(f"whole fixture as one region: {len(ref)} outputs", flush=True)
+    bad = []
+    for i, c in enumerate(cvs):
+        args = ["--regions", c] if "x" in c else ["--region-size", c]
+        ws = setup(home / c.replace("/", "_"), fx, palette=whole / "scripts" / "palette.json")
+        build(ws, fx, jobs, args)
+        diff = differ(ref, digest(ws))
+        print(f"{c}: {len(diff)} outputs differ from the whole fixture's", diff[:8], flush=True)
+        bad += [f"cover {c}: {k}" for k in diff]
+        if i == 0 and incremental:
+            log = run(ws, fx, "voxelize", args + ["-j", jobs], log="voxelize_again")
+            noop = "nothing to do" in log.read_text()
+            if not noop:
+                bad.append(f"cover {c}: built again with nothing changed (see {log})")
+            build(ws, fx, jobs, args + ["--only", "0_0"])
+            diff = differ(ref, digest(ws))
+            print(f"{c} again: {'nothing built' if noop else 'BUILT AGAIN with nothing changed'}; region 0_0 built again "
+                  f"alone: {len(diff)} outputs differ from the whole fixture's", diff[:8], flush=True)
+            bad += [f"cover {c}, region 0_0 again: {k}" for k in diff]
+    if not keep:
+        shutil.rmtree(home)
+    return bad
+
+
+def windows(fx, jobs, steps, cvs, keep=False):
+    src = base(fx, jobs)
+    home = fx.home / "windows"
+    bad = []
+
+    def one(step, args, scratch):
+        spec = WSTEPS[step]
+        if scratch.exists():
+            shutil.rmtree(scratch)
+        for p in spec["copy"]:
+            (scratch / p).parent.mkdir(parents=True, exist_ok=True)
+            (shutil.copytree if (src / p).is_dir() else shutil.copy)(src / p, scratch / p)
+        for p in spec["link"]:
+            (scratch / p).parent.mkdir(parents=True, exist_ok=True)
+            (scratch / p).symlink_to((src / p).resolve())
+        (scratch / "data").mkdir(exist_ok=True)
+        shutil.copy(fx.path, scratch / "fixture.json")
+        run(scratch, fx, step, args, scripts=src / "scripts")
+        h = {}
+        for o in spec["out"]:
+            p = scratch / o
+            for f in sorted([p] if p.is_file() else p.rglob("*")):
+                if f.is_file():
+                    h[str(f.relative_to(scratch))] = file_sha(f)
+        return h
+    for step in steps:
+        t = time.time()
+        ref = one(step, [], home / step / "whole")
+        for c in cvs:
+            diff = differ(ref, one(step, ["--windows", c] if "x" in c else ["--window-size", c], home / step / c))
+            print(f"{step}: {c}: {len(diff)} of {len(ref)} files differ from the whole fixture's", diff[:5], flush=True)
+            bad += [f"{step} {c}: {k}" for k in diff]
+        print(f"  {step}: {time.time() - t:.0f} s", flush=True)
+    if not keep:
+        shutil.rmtree(home)
+    return bad
+
+
+def golden(fx, jobs, record=None, compare=None, incremental=False, keep=False):
+    ws = setup(fx.home / "golden", fx, fresh=not incremental)
+    build(ws, fx, jobs)
+    files = digest(ws, inputs=True)
+    if not keep and not incremental:
+        shutil.rmtree(ws)
+    doc = dict(fixture=fx.name, config=fx.cfg, raw=raw_fingerprint(), files=files)
+    if record:
+        Path(record).mkdir(parents=True, exist_ok=True)
+        json.dump(doc, open(Path(record) / "golden.json", "w"), indent=0, sort_keys=True)
+        print(f"golden: {len(files)} outputs recorded in {Path(record) / 'golden.json'}")
+        return []
+    ref = json.load(open(Path(compare) / "golden.json"))
+    if ref["config"] != fx.cfg:
+        print("golden: recorded on another fixture config: differences may be the config's")
+    if ref["raw"] != doc["raw"]:
+        print("golden: data/raw changed since the record: differences may be the data's")
+    diff = differ(ref["files"], files)
+    print(f"golden: {len(files)} outputs, {len(diff)} differ from the record", diff[:12])
+    return [f"golden: {k}" for k in diff]
+
+
+def extent(fx, jobs, other):
+    """compare the fixture's volume and tiles with those of a larger (or shifted) fixture where the two maps look the
+    same from within region.HALO"""
+    import mapstore
+    import region
+    import tilefile
+    import tiles
+    fo = Fixture(other)
+    wa, wb = base(fx, jobs, after=False), base(fo, jobs, after=False)
+    margin = region.HALO
+
+    def same_view(box):
+        """box (project r0, r1, c0, c1): in both maps, and each side either on the same map edge in both or at least
+        `margin` from both maps' edges"""
+        r0, r1, c0, c1 = box
+        ok = True
+        for f in (fx, fo):
+            ok &= f.row0 <= r0 and r1 <= f.row0 + f.D and f.col0 <= c0 and c1 <= f.col0 + f.W
+        if not ok:
+            return False
+        sides = ((r0 - fx.row0, r0 - fo.row0, fx.row0 == fo.row0), (fx.row0 + fx.D - r1, fo.row0 + fo.D - r1, fx.row0 + fx.D == fo.row0 + fo.D),
+                 (c0 - fx.col0, c0 - fo.col0, fx.col0 == fo.col0), (fx.col0 + fx.W - c1, fo.col0 + fo.W - c1, fx.col0 + fx.W == fo.col0 + fo.W))
+        return all(same or min(da, db) >= margin for da, db, same in sides)
+
+    pals = [json.load(open(w / PUB / "meta.json"))["palette"] for w in (wa, wb)]
+    keys = {}
+    luts = [np.array([keys.setdefault(tuple(e), len(keys)) for e in p] + [65535] * 64, np.uint16) for p in pals]
+
+    def blocks(f, ws):
+        """{(project row, col of the block): where it is} of every 128 m block of the regions' cores"""
+        out = {}
+        for w in f.cover():
+            with np.load(ws / "data/cache/regions" / f"{w.r0}_{w.c0}" / "vol.npz") as z:
+                for k in z.files:
+                    br, bc = (int(x) * mapstore.VBLOCK for x in k.split("_"))
+                    out[(f.row0 + w.r0 + br, f.col0 + w.c0 + bc)] = (ws, w, k)
+        return out
+    ba, bb = blocks(fx, wa), blocks(fo, wb)
+
+    def load(ref, lut):  # (the block as colour keys)
+        ws, w, k = ref
+        with np.load(ws / "data/cache/regions" / f"{w.r0}_{w.c0}" / "vol.npz") as z:
+            return lut[z[k]]
+    stats = dict(same=0, differ=0, edge_same=0, edge_differ=0)
+    bad, edge_diff = [], []
+    B = mapstore.VBLOCK
+    for key in sorted(set(ba) & set(bb)):
+        a, b = load(ba[key], luts[0]), load(bb[key], luts[1])
+        h = max(a.shape[0], b.shape[0])
+        pad = lambda v: np.concatenate([v, np.zeros((h - v.shape[0],) + v.shape[1:], v.dtype)])  # noqa: E731
+        eq = a.shape[1:] == b.shape[1:] and np.array_equal(pad(a), pad(b))
+        interior = same_view((key[0], key[0] + B, key[1], key[1] + B))
+        stats[("" if interior else "edge_") + ("same" if eq else "differ")] += 1
+        if not eq:
+            n = int((pad(a) != pad(b)).sum()) if a.shape[1:] == b.shape[1:] else -1
+            (bad if interior else edge_diff).append((key, n))
+    print(f"extent: volume blocks of {B} m in both maps: {stats['same'] + stats['differ']} away from a differing "
+          f"edge ({stats['same']} the same, {stats['differ']} differ), {stats['edge_same'] + stats['edge_differ']} "
+          f"within {margin} m of one ({stats['edge_same']} the same, {stats['edge_differ']} differ)", flush=True)
+    if bad:
+        print("  differing (project row, col; voxels):", bad[:10])
+    if edge_diff:
+        print("  near the edge, differing (project row, col; voxels):", edge_diff[:10])
+    failures = [f"extent: volume block at project {k}: {n} voxels differ" for k, n in bad]
+    # the tiles: every node's voxel sections (runs as colours) where the node and its apron look the same
+    nst = dict(same=0, differ=0)
+    for lv in tiles.manifest(fx.D, fx.W):
+        s = lv["s"]
+        n = tiles.N * s
+        for sub in ([str(s), "1f"] if s == 1 else [str(s)]):
+            for f in sorted((wa / PUB / "tiles" / sub).glob("*.bin")):
+                tx, ty = map(int, f.stem.split("_"))
+                r0, c0 = fx.row0 + ty * n, fx.col0 + tx * n
+                if (r0 - fo.row0) % n or (c0 - fo.col0) % n or not same_view((r0 - 2 * s, r0 + n + 2 * s, c0 - 2 * s, c0 + n + 2 * s)):
+                    continue
+                g = wb / PUB / "tiles" / sub / f"{(c0 - fo.col0) // n}_{(r0 - fo.row0) // n}.bin"
+                ta, tb = tilefile.read(f, tiles.N), tilefile.read(g, tiles.N) if g.exists() else {}
+                diff = []
+                for tag in ("cnts", "grnd", "plns", "runs"):
+                    x, y = ta.get(tag, b""), tb.get(tag, b"")
+                    if tag == "runs":
+                        x, y = (np.frombuffer(v, np.uint16).reshape(-1, 3).copy() for v in (x, y))
+                        x[:, 2], y[:, 2] = luts[0][x[:, 2]], luts[1][y[:, 2]]
+                        x, y = x.tobytes(), y.tobytes()
+                    if x != y:
+                        diff.append(tag)
+                nst["differ" if diff else "same"] += 1
+                if diff:
+                    failures.append(f"extent: tile {sub}/{f.stem} (project row {r0}, col {c0}): {diff} differ")
+    print(f"extent: tile nodes away from a differing edge: {nst['same']} the same, {nst['differ']} differ", flush=True)
+    return failures
+
+
+# ---------------------------------------------------------------- main
+
+def main(argv):
+    def opt(name, default=None):
+        return argv[argv.index(name) + 1] if name in argv else default
+    flags = ("--fixture", "-j", "--record", "--compare", "--covers", "--other")
+    pos = [a for i, a in enumerate(argv) if not a.startswith("-") and (i == 0 or argv[i - 1] not in flags)]
+    if not pos:
+        print(__doc__)
+        return 2
+    cmd, rest = pos[0], pos[1:]
+    fx = Fixture(opt("--fixture", FIXTURE))
+    jobs = int(opt("-j", fx.cfg.get("regions", {}).get("jobs", 2)))
+    keep = "--keep" in argv
+    t0 = time.time()
+    bad = []
+    try:
+        if cmd == "build":
+            base(fx, jobs)
+        elif cmd == "verify":
+            bad = verify(fx, jobs)
+        elif cmd == "golden":
+            if not (opt("--record") or opt("--compare")):
+                raise Failed("golden needs --record DIR or --compare DIR")
+            bad = golden(fx, jobs, opt("--record"), opt("--compare"), "--incremental" in argv, keep)
+        elif cmd == "covers":
+            bad = covers(fx, jobs, rest or ["2x2"], "--no-incremental" not in argv, keep)
+        elif cmd == "windows":
+            bad = windows(fx, jobs, rest or list(WSTEPS), opt("--covers", "2x2").split(","), keep)
+        elif cmd == "extent":
+            bad = extent(fx, jobs, opt("--other", WIDE))
+        elif cmd == "all":
+            for name, fn in (("verify", lambda: verify(fx, jobs)), ("covers", lambda: covers(fx, jobs, ["2x2"], True, keep)),
+                             ("windows", lambda: windows(fx, jobs, list(WSTEPS), ["2x2"], keep)),
+                             ("extent", lambda: extent(fx, jobs, WIDE))):
+                t = time.time()
+                print(f"== {name}", flush=True)
+                bad += fn()
+                print(f"== {name}: {time.time() - t:.0f} s", flush=True)
+        else:
+            print(__doc__)
+            return 2
+    except Failed as e:
+        bad.append(str(e))
+    peak = max(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    print(f"check {cmd} on {fx.name}: {time.time() - t0:.0f} s, peak RAM of a process {peak / 1024:.0f} MB")
+    for b in bad:
+        print("FAILED:", b)
+    print("ok" if not bad else f"{len(bad)} failed")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
