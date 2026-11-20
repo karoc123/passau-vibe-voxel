@@ -283,7 +283,11 @@ on level ground (overshoot, settle time, frequency), `steer_step` holds half the
 `yawGain`, `latG`, `rollDeg`). `--set stiffness=34,gravity=1.25,...` runs anything with other numbers for the ride
 (`car.ts` RIDE) or the car's surface (`terrain.ts` DRIVE: `tol`, `sigma`). `--real X,Z,HEADING,KMH,SECS` drives
 straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
-ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). `node
+ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). The `drive_*` scenarios
+(`src/physics/rapier/drive-scenarios.ts`) run the drive mode's glue (`src/nav/drive-session.ts`) in Rapier's drive
+world with a stand-in street life: a traffic car knocked out of the traffic (`drive_knock`), a person knocked down
+(`drive_person`), into the river and back on the bank ~12 m before its edge (`drive_river_respawn`), parked in the
+river (`drive_park_in_river`), a crash landing that holds the input (`drive_crash_landing`). `node
 tools/rapier-car-bench.mjs`: collider build and step costs along a route.
 
 **Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres). Only the 128 m tiles within R m of the camera's first

@@ -1,4 +1,5 @@
-// Rapier car scenarios (src/physics/rapier/scenarios.ts), headless in node.
+// Rapier car scenarios (src/physics/rapier/scenarios.ts) and the drive mode's (drive-scenarios.ts: a traffic car
+// knocked out, a person hit, the river and back, a crash landing, through nav/drive-session.ts), headless in node.
 // usage: node tools/rapier-car.mjs [--spike] [--json] [scenario ...]
 //          synthetic voxel terrain; exit code 1 if a scenario fails
 //        node tools/rapier-car.mjs [--spike] --real X,Z,HEADING_DEG,KMH,SECONDS[,STEER[,V0]]
@@ -18,6 +19,7 @@ const args = process.argv.slice(2);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const load = (p) => runnerImport(`${root}src/${p}`, { root, logLevel: 'error' }).then((m) => m.module);
 const sc = await load('physics/rapier/scenarios.ts');
+const ds = await load('physics/rapier/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
 // --set key=value,...: the ride's numbers (car.ts RIDE) and the car's surface (terrain.ts DRIVE) changed for this run
@@ -112,7 +114,7 @@ if (real >= 0) {
 }
 
 const ids = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--set');
-const out = await sc.runScenarios(ids.length ? ids : undefined);
+const out = [...await sc.runScenarios(ids.length ? ids : undefined), ...await ds.runDriveScenarios(ids.length ? ids : undefined)];
 if (args.includes('--json')) console.log(JSON.stringify(out, null, 1));
 else for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(22)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);
 process.exit(out.every((o) => o.pass) ? 0 : 1);
