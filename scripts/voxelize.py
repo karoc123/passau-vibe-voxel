@@ -2628,16 +2628,19 @@ for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowes
 # half the crown's reach in their direction and up, each forking into 1-3 branches (by the crown's width) that end a
 # metre or two inside the leaf surface near its rim; in wide crowns more off the leader and the limbs' middles. One
 # voxel thick, the branches paler (twig), never on the leaf surface (no brown specks in summer). Voxels only within
-# the tree's own crown cells, into its leaves or the air under its top; none in a conifer. (A packed forest's narrow
-# crowns get few branches: each wood voxel costs ~6 triangles, drawn all year.)
-n_wood = n_wtree = 0
+# the tree's own crown cells, into its leaves or the air under its top; none in an evergreen conifer. A larch (bare in
+# winter as well, phenology.py) gets a conifer's skeleton instead: its trunk on up as a straight leader, inside the
+# needles, to near the top, whorls of 4-5 thin branches round it every 1.2-1.7 m, near level, the lower ones longer
+# (out to most of the crown's reach, drooping a little), the upper ones short and rising: a bare cone. (A packed
+# forest's narrow crowns get few branches: each wood voxel costs ~6 triangles, drawn all year.)
+n_wood = n_wtree = n_ltree = 0
 if trunks:
     _isleaf = np.zeros(len(pal.entries) + 64, bool)
     _isleaf[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF]] = True
     _AZ = np.linspace(0, 2 * np.pi, 16, endpoint=False)
     _ST = np.arange(1, 2 * region.CROWN_R + 1) * 0.5
     for i_, (r0_, c0_, thick_) in enumerate(trunks):
-        if con[i_] or not veg[r0_, c0_]:
+        if evg[i_] or not veg[r0_, c0_]:
             continue
         zb_ = int(g[r0_, c0_] + crown_bot[r0_, c0_])
         zt_ = int(g[r0_, c0_] + crown_top[r0_, c0_])
@@ -2653,7 +2656,7 @@ if trunks:
         _in &= veg[_ri, _ci] & (own[_ri, _ci] == own_id)
         _fo = np.argmin(_in, 1)
         reach_ = np.where(_in.all(1), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
-        if reach_.max() < 2:
+        if reach_.max() < (1 if con[i_] else 2):  # (a larch's narrow cone: its leader and what branches fit)
             continue
         rng_ = np.random.default_rng(cell_hash(r0_, c0_, "limbs"))
 
@@ -2668,18 +2671,22 @@ if trunks:
                 return int(g[r, c] + crown_bot[r, c]), int(g[r, c] + crown_top[r, c])
             return None
 
+        def hidden(z, r, c):
+            """under the leaf surface: inside a crown on all four sides and above (from the crowns' rasters, not the
+            volume: the same whatever order the trees are drawn in)"""
+            for rn, cn, zn in ((r - 1, c, z), (r + 1, c, z), (r, c - 1, z), (r, c + 1, z), (r, c, z + 1)):
+                if not (0 <= rn < D and 0 <= cn < W and veg[rn, cn]
+                        and g[rn, cn] + crown_bot[rn, cn] <= zn < g[rn, cn] + crown_top[rn, cn]):
+                    return False
+            return True
+
         def put(z, r, c, col):
             global n_wood
             if not (0 <= r < D and 0 <= c < W and 0 <= z < H) or own[r, c] != own_id or z <= g[r, c]:
                 return
             v = vol[z, r, c]
-            if col == C["twig"]:
-                # a branch stays under the leaf surface: inside a crown on all four sides and above (from the crowns'
-                # rasters, not the volume: the same whatever order the trees are drawn in)
-                for rn, cn, zn in ((r - 1, c, z), (r + 1, c, z), (r, c - 1, z), (r, c + 1, z), (r, c, z + 1)):
-                    if not (0 <= rn < D and 0 <= cn < W and veg[rn, cn]
-                            and g[rn, cn] + crown_bot[rn, cn] <= zn < g[rn, cn] + crown_top[rn, cn]):
-                        return
+            if col == C["twig"] and not hidden(z, r, c):  # a branch stays under the leaf surface
+                return
             if (v == 0 and z < g[r, c] + crown_top[r, c]) or _isleaf[v]:
                 vol[z, r, c] = col
                 n_wood += 1
@@ -2704,6 +2711,35 @@ if trunks:
                     return np.array([x, y, max(z, base)])
             return None
 
+        if con[i_]:  # a larch (a conifer, not evergreen)
+            n_ltree += 1
+            cx, cy, dz = c0_ + 0.5, r0_ + 0.5, zt_ - zb_
+            # the leader: bark, under the needles' surface (a cone's top metres are the trunk's column alone: there
+            # it stops, or it would stand out of the crown in summer), its upper third in twig
+            for z in range(zb_ + 1, zt_):
+                if not hidden(z, r0_, c0_):
+                    if z > zb_ + dz // 2:
+                        break
+                    continue
+                col = C["trunk"] if z < zb_ + 2 * dz // 3 else C["twig"]
+                for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ and z < zb_ + dz // 2 else ((0, 0),):
+                    if hidden(z, r0_ + dr, c0_ + dc):
+                        put(z, r0_ + dr, c0_ + dc, col)
+            z = zb_ + 1 + rng_.random() * 1.5
+            while z < zt_ - 2:
+                f = (zt_ - z) / dz  # 1 at the crown's foot .. 0 at its top
+                nb = 4 + int(rng_.random() < 0.4)
+                a0 = rng_.random() * 2 * np.pi
+                for k in range(nb):
+                    a = a0 + k * 2 * np.pi / nb + rng_.uniform(-0.4, 0.4)
+                    # out to the cone's rim at this height (put() stops it a voxel under the needles' surface)
+                    L = reach_at(a) * (0.4 + 0.6 * f) * rng_.uniform(0.9, 1.0) + 0.5
+                    if L < 1:
+                        continue
+                    seg(np.array([cx, cy, z]), np.array([cx + L * np.cos(a), cy + L * np.sin(a), z + L * (0.35 - 0.5 * f)]),
+                        C["twig"])
+                z += 1.2 + 0.5 * rng_.random()
+            continue
         n_wtree += 1
         dz = zt_ - zb_
         zf = zb_ + max(1, int(round((0.25 + 0.15 * rng_.random()) * dz)))
@@ -2744,7 +2780,7 @@ if trunks:
                 t2 = tip(a + rng_.uniform(-0.5, 0.5), 0.8, 0.1, 0.4, m2[2] - 2)
                 if t2 is not None:
                     seg(m2, t2, C["twig"])
-note("broadleaf crowns given branches:", n_wtree, "wood voxels:", n_wood)
+note("broadleaf crowns given branches:", n_wtree, "larches:", n_ltree, "wood voxels:", n_wood)
 # the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
 # place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
 # the trunks at canopy tops tallest first, then row by row)
