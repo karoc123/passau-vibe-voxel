@@ -1,7 +1,7 @@
-// The player's car on Rapier (car.ts) in the drive mode (nav/drive.prototype.ts): one world for the page, its voxel
-// colliders built near the car (terrain.ts), the traffic near it as kinematic bodies the car runs into. Loaded in the
-// background once the city is shown (loadRapierDrive: Rapier's wasm, its first step and the collision decoding's
-// first tile taken then, not on the first drive).
+// The player's car on Rapier (car.ts) in the drive mode (nav/drive.prototype.ts, one drive: nav/drive-session.ts):
+// one world for the page, its voxel colliders built near the car (terrain.ts), the traffic near it as kinematic bodies
+// the car runs into. Loaded in the background once the city is shown (loadRapierDrive: Rapier's wasm, its first step
+// and the collision decoding's first tile taken then, not on the first drive).
 //
 // The drive mode keeps its car (a traffic Car of sim/life.ts, drawn by the street life) and moves it from here: the
 // body's pose is put on the Car (its ground point rp, heading rh, pitch and roll; any orientation: a car on its roof is
@@ -15,7 +15,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
-import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes } from './terrain';
+import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 
 export const STEP = 1 / 60;
 const MAX_STEPS = 4;
@@ -97,12 +97,13 @@ export class RapierDrive {
   private readonly wrecked = new Map<object, Wreck>();
   readonly stats = { stepMs: 0, stepMsMax: 0, frameMs: 0, frameMsMax: 0 };
 
-  constructor(private readonly meta: Meta, focus: { x: number; z: number }) {
+  // (terrain: its options; tests give the tiles directly, terrain.setTile)
+  constructor(private readonly meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] }, focus: { x: number; z: number }, terrain: TerrainOptions = {}) {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
     this.origin = { x: Math.floor(focus.x / CHUNK) * CHUNK, z: Math.floor(focus.z / CHUNK) * CHUNK };
-    this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin);
-    (window as unknown as { __rapierDrive: RapierDrive }).__rapierDrive = this;
+    this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, terrain);
+    (globalThis as unknown as { __rapierDrive: RapierDrive }).__rapierDrive = this;
   }
 
   // The tile under `focus` decoded (the decoding's first run, ~30-50 ms with the JIT's warm-up, out of the way) and
