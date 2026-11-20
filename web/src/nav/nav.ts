@@ -10,6 +10,7 @@ import { rideCamera } from './ride';
 import { Pedestrian } from './pedestrian';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 import { stickAxis, TouchSticks } from './touch-sticks';
+import { HEAD, STEP, walkStep } from './walk';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike) and one gesture language for mouse, trackpad and touch:
@@ -36,7 +37,7 @@ const KEYMAP: Record<string, Action> = {
   KeyW: 'f', KeyS: 'b', KeyA: 'tl', KeyD: 'tr', KeyQ: 'tu', KeyE: 'td',
   ArrowUp: 'f', ArrowDown: 'b', ArrowLeft: 'tl', ArrowRight: 'tr',
 };
-const STEP = 1.05, HEAD = 1.9, GRAV = 16, TILT = Math.PI * 0.48, WALK_FOV = 65;
+const GRAV = 16, TILT = Math.PI * 0.48, WALK_FOV = 65;
 // On foot the camera stands a step from walls: the walk's side probes keep 0.4 m, the third-person boom 0.32 m (0.22
 // at the least, pedestrian.ts), less in a doorway or a narrow aisle. The map camera's near plane (0.5 m, main.ts) cut
 // into them there; on foot it comes in to WALK_NEAR -- its frustum's corners ~0.33 m out at the walk's field of view --
@@ -693,20 +694,7 @@ export class Nav {
 
   // one collision-checked horizontal step, sliding along walls; true if it moved
   private stepBy(m: THREE.Vector3) {
-    const w = this.world!, P = this.walkPos, feet = this.feet;
-    const clear = (x: number, z: number, from: number) => !w.blocked(x, z, Math.max(w.support(x, z, feet + STEP), feet + STEP), from);
-    for (const s of [m, new THREE.Vector3(m.x, 0, 0), new THREE.Vector3(0, 0, m.z)]) {
-      if (!s.lengthSq()) continue;
-      const nx = P.x + s.x, nz = P.z + s.z, ax = nx + Math.sign(s.x) * 0.3, az = nz + Math.sign(s.z) * 0.3;
-      if (this.mode === 'pedestrian' && (!w.inside(nx, nz) || !w.inside(ax, az))) continue;
-      const sup = w.support(ax, az, feet + STEP);
-      if (!w.blocked(ax, az, Math.max(sup, feet + STEP), sup + HEAD) && clear(nx, nz, feet + HEAD)
-        && clear(nx + 0.4, nz, feet + HEAD) && clear(nx - 0.4, nz, feet + HEAD) && clear(nx, nz + 0.4, feet + HEAD) && clear(nx, nz - 0.4, feet + HEAD)) {
-        P.x = nx; P.z = nz;
-        return true;
-      }
-    }
-    return false;
+    return walkStep(this.world!, this.walkPos, this.feet, m, this.mode === 'pedestrian');
   }
 
   // on whatever is underfoot: up kerbs and stairs, off ledges, jumps

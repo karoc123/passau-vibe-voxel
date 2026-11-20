@@ -1,14 +1,19 @@
 import { Vector3 } from 'three';
-import type { Meta } from '../types';
+import type { ColumnData, Meta } from '../types';
 import { VoxelCollision } from './voxel-collision';
 import { MAT } from '../voxelMaterial';
-import { TILE_MAGIC as MAGIC, TILE_N as N } from '../tile-data';
+import { decodeTile, roomOffsets, TILE_MAGIC as MAGIC, TILE_N as N } from '../tile-data';
+import { World } from '../world';
+import { STEP, walkStep } from './walk';
 
 // Headless checks of the FPV drone's collision (voxel-collision.ts; web/tools/collision.mjs): a synthetic voxel world
 // (a ground height per column and boxes on it: walls, decks, water) written as real 1 m node files (VXT2, as
 // scripts/tilefile.py) and served to the real VoxelCollision through a stubbed fetch, so it reads exactly what it reads
 // in the viewer. Columns as the data has them: soil from 0 to the ground's top voxel, that voxel in the surface's
-// colour, the boxes' runs above. Then a few sweeps of the drone's cube and surface lookups (CHECKS).
+// colour, the boxes' runs above. Then a few sweeps of the drone's cube and surface lookups (CHECKS); and in a hollow
+// building with a door and a room recorded in it (scripts/interiors.py; the node files' room section), the drone and a
+// walker (walk.ts, as nav.ts steps on foot, on the World the viewer builds from the same files) going in and staying
+// inside (runRoomChecks).
 
 // Palette entries quantised as voxelize.py does (to 4), so voxelMaterial.ts recognises the paved ones
 export const PAL = {
@@ -31,6 +36,9 @@ export interface WorldSpec {
   ground: (x: number, z: number) => number; // the ground's top at column (x, z), whole metres >= 1
   surface?: (x: number, z: number) => Surface; // the ground's top voxel (default road)
   boxes?: Box[];
+  // rooms (scripts/interiors.py): the voids recorded in the node files' room section, mat the fill (what stood there);
+  // their voxels must hold no box
+  rooms?: Box[];
 }
 
 function encode(sections: [string, ArrayBufferView][]) {
@@ -56,7 +64,7 @@ async function gzip(b: Uint8Array) {
 
 // a 1 m tile (base, or its empty foliage tile) with its 1-column apron
 function tile(spec: WorldSpec, tx: number, ty: number, foliage: boolean) {
-  const S = N + 2, [W, D] = spec.size, counts = new Uint16Array(S * S), ground = new Uint8Array(S * S), runs: number[] = [];
+  const S = N + 2, [W, D] = spec.size, counts = new Uint16Array(S * S), ground = new Uint8Array(S * S), runs: number[] = [], rooms: number[] = [];
   for (let az = 0; az < S; az++) for (let ax = 0; ax < S; ax++) {
     const c = ax + S * az;
     const x = Math.min(W - 1, Math.max(0, tx * N + ax - 1)), z = Math.min(D - 1, Math.max(0, ty * N + az - 1));
@@ -67,8 +75,10 @@ function tile(spec: WorldSpec, tx: number, ty: number, foliage: boolean) {
     for (const b of spec.boxes ?? []) if (x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1) col.push([b.y0, b.y1 - b.y0, IDS[b.mat]]);
     col.sort((a, b) => a[0] - b[0]);
     for (const r of col) if (r[1] > 0) { runs.push(...r); counts[c]++; }
+    const sp = (spec.rooms ?? []).filter((b) => x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1).sort((a, b) => a.y0 - b.y0);
+    for (const b of sp) rooms.push(c, b.y0, b.y1 - b.y0, IDS[b.mat]);
   }
-  return encode([['cnts', counts], ['grnd', ground], ['runs', new Uint16Array(runs)]]);
+  return encode([['cnts', counts], ['grnd', ground], ['runs', new Uint16Array(runs)], ...(rooms.length ? [['room', new Uint16Array(rooms)] as [string, Uint16Array]] : [])]);
 }
 
 export interface TestWorld { meta: Meta; collision: VoxelCollision; files: Map<string, Uint8Array> }
@@ -169,4 +179,94 @@ export async function sweepPath(meta: Meta, files: Map<string, Uint8Array>, path
     if (s.hit) return { at: k, hit: s.hit, fraction: r3(s.fraction), x: path[k][0], z: path[k][1], y: path[k][2] + lift };
   }
   return null;
+}
+
+// The walker's World (world.ts) over a test world's level-1 files, as the viewer's tile streamer holds them (stream.ts
+// setData: the columns' offsets, the rooms')
+export async function worldOf(w: TestWorld) {
+  const S = N + 2, nodes = new Map<string, ColumnData>();
+  for (const [path, gz] of w.files) {
+    const m = /tiles\/1\/(\d+)_(\d+)\.bin$/.exec(path);
+    if (!m) continue;
+    const buf = await new Response(new Blob([gz as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    const t = decodeTile(buf, N), off = new Uint32Array(S * S + 1);
+    for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + t.counts[i];
+    nodes.set(`1/${m[1]}_${m[2]}`, { s: 1, x0: +m[1] * N, y0: +m[2] * N, S, counts: t.counts, ground: t.ground, runs: t.runs, off,
+      rooms: t.rooms, roomOff: t.rooms ? roomOffsets(t.rooms, S * S) : null });
+  }
+  return new World({ N, levels: [1], version: 0, columns: (k) => nodes.get(k) }, w.meta);
+}
+
+// A hall on a road at 10 m, across the tiles' seam at x = 128: walls 2 m thick from 10 to 20 m (x 100..130, z 100..140),
+// its room inside them (x 102..128, z 102..138, 10..18 m: the roof's underside), a door through the west wall (z 118..122,
+// 3 m high; recorded with the room, as interiors.py records a door), a gallery in the north-west corner (x 114..128, z
+// 102..110, its top at 14 m, 3 m of headroom under it) and stairs up to it along x (1 m a step)
+export const HALL: Pick<WorldSpec, 'boxes' | 'rooms'> = {
+  boxes: [
+    { x0: 100, x1: 102, z0: 100, z1: 118, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 100, x1: 102, z0: 122, z1: 140, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 100, x1: 102, z0: 118, z1: 122, y0: 13, y1: 20, mat: 'wall' }, // over the door
+    { x0: 128, x1: 130, z0: 100, z1: 140, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 102, x1: 128, z0: 100, z1: 102, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 102, x1: 128, z0: 138, z1: 140, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 102, x1: 128, z0: 102, z1: 138, y0: 18, y1: 20, mat: 'wall' }, // the roof
+    { x0: 114, x1: 128, z0: 102, z1: 110, y0: 13, y1: 14, mat: 'deck' }, // the gallery
+    { x0: 108, x1: 110, z0: 102, z1: 106, y0: 10, y1: 11, mat: 'deck' }, // its stairs
+    { x0: 110, x1: 112, z0: 102, z1: 106, y0: 10, y1: 12, mat: 'deck' },
+    { x0: 112, x1: 114, z0: 102, z1: 106, y0: 10, y1: 13, mat: 'deck' },
+  ],
+  rooms: [
+    // (the room's spans: around the gallery and the stairs, which stand in it)
+    { x0: 102, x1: 108, z0: 102, z1: 106, y0: 10, y1: 18, mat: 'wall' },
+    { x0: 108, x1: 110, z0: 102, z1: 106, y0: 11, y1: 18, mat: 'wall' },
+    { x0: 110, x1: 112, z0: 102, z1: 106, y0: 12, y1: 18, mat: 'wall' },
+    { x0: 112, x1: 114, z0: 102, z1: 106, y0: 13, y1: 18, mat: 'wall' },
+    { x0: 102, x1: 114, z0: 106, z1: 110, y0: 10, y1: 18, mat: 'wall' },
+    { x0: 114, x1: 128, z0: 102, z1: 110, y0: 10, y1: 13, mat: 'wall' },
+    { x0: 114, x1: 128, z0: 102, z1: 110, y0: 14, y1: 18, mat: 'wall' },
+    { x0: 102, x1: 128, z0: 110, z1: 138, y0: 10, y1: 18, mat: 'wall' },
+    { x0: 100, x1: 102, z0: 118, z1: 122, y0: 10, y1: 13, mat: 'wall' }, // the door
+  ],
+};
+
+// In and around HALL: the drone flies in through the door and is stopped inside by the far wall, the roof and a side
+// wall, and outside by the wall over the door; a walker (walk.ts) goes in through the door and stays in, is kept out by
+// the wall beside it, and climbs the stairs onto the gallery; World.inRoom knows the room, the door and the outside
+export async function runRoomChecks(): Promise<CheckOutcome[]> {
+  const w = await makeWorld({ size: [256, 256], ground: () => 10, ...HALL });
+  await loaded(w);
+  const out: CheckOutcome[] = [];
+  const sweep = (name: string, from: [number, number, number], d: [number, number, number], axis: number, at: number, along: 0 | 1 | 2) => {
+    const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
+    const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
+    const got = s === 'loading' ? null : s.hit ? s.axis : null;
+    const ok = s !== 'loading' && s.hit === 'structure' && got === axis && near(end, at);
+    out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
+  };
+  // (three.js axes: x east, y up, z = the row)
+  sweep('room_drone_door', [90, 11.5, 120], [40, 0, 0], -1, 127.65, 0); // in through the door to the far wall
+  sweep('room_drone_roof', [115, 12, 125], [0, 10, 0], -2, 17.65, 1); // up to the roof's underside
+  sweep('room_drone_side', [115, 12, 120], [0, 0, 30], -3, 137.65, 2); // across to the north wall
+  sweep('room_drone_lintel', [90, 15, 120], [20, 0, 0], -1, 99.65, 0); // over the door: the wall
+  const world = await worldOf(w);
+  // a walker at 6 m/s in 1/60 s strides, standing on what is under it after each (nav.ts stand, at once)
+  const walk = (x: number, z: number, dx: number, dz: number, metres: number) => {
+    const P = { x, z };
+    let feet = world.support(x, z, 10 + STEP);
+    const L = Math.hypot(dx, dz), m = { x: dx / L * 0.1, z: dz / L * 0.1 };
+    for (let i = 0; i < metres * 10; i++) { walkStep(world, P, feet, m); feet = world.support(P.x, P.z, feet + STEP); }
+    return { x: r3(P.x), z: r3(P.z), feet };
+  };
+  const a = walk(90.5, 120, 1, 0, 50);
+  out.push({ name: 'room_walk_in', pass: a.x > 120 && a.x < 128 && a.feet === 10, detail: { ...a, want: 'x 120..128 (in, at the far wall)' } });
+  const b = walk(115, 120, 0, -1, 30); // (under the gallery: 3 m of headroom)
+  out.push({ name: 'room_walk_stays', pass: b.z > 102 && b.z < 103 && b.feet === 10, detail: { ...b, want: 'z 102..103 (in, at the south wall)' } });
+  const c = walk(90.5, 112, 1, 0, 30);
+  out.push({ name: 'room_walk_wall', pass: c.x < 100, detail: { ...c, want: 'x < 100 (outside)' } });
+  const d = walk(105, 104, 1, 0, 30);
+  out.push({ name: 'room_walk_gallery', pass: d.feet === 14 && d.x > 116, detail: { ...d, want: 'on the gallery (14 m), x > 116' } });
+  const inR = { hall: world.inRoom(115, 120, 12), door: world.inRoom(101, 120, 11), lintel: world.inRoom(101, 120, 14),
+    street: world.inRoom(90, 120, 12), roof: world.inRoom(115, 120, 19), gallery: world.inRoom(120, 105, 13.5), seam: world.inRoom(127.5, 130, 17.9) };
+  out.push({ name: 'room_inroom', pass: inR.hall && inR.door && !inR.lintel && !inR.street && !inR.roof && !inR.gallery && inR.seam, detail: inR });
+  return out;
 }

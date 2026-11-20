@@ -1,5 +1,6 @@
 // The FPV drone's collision (src/nav/voxel-collision.ts) headless: src/nav/collision-checks.ts (a synthetic world
-// served as real node files; sweeps of the drone's cube, surfaces). Then, on the real data (public/data) if it is
+// served as real node files; sweeps of the drone's cube, surfaces; a hall with a door and its room recorded: the drone
+// and a walker go in and stay in, World.inRoom). Then, on the real data (public/data) if it is
 // there: the drone flown through a tunnel under a hill (scripts/tunnels.py) 2 m over the road along the traffic road
 // with the most points 5 m or more under the voxels over them; skipped without such a road or where the tiles' ground
 // still stands over the bore (data from before the bores' floors became the ground).
@@ -12,7 +13,7 @@ import zlib from 'node:zlib';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { module: m } = await runnerImport(`${root}src/nav/collision-checks.ts`, { root, logLevel: 'error' });
 const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
-const out = await m.runCollisionChecks();
+const out = [...await m.runCollisionChecks(), ...await m.runRoomChecks()];
 
 async function tunnelFlight() {
   const D = `${root}public/data/`;
