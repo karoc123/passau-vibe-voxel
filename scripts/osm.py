@@ -8,7 +8,7 @@ from pyproj import Transformer
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
-from aoi import CRS, RAW, to_grid as _aoi_grid
+from aoi import CRS, OSM_PATH, to_grid as _aoi_grid
 
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
@@ -28,7 +28,8 @@ AREA_KEYS = ("building", "building:part", "landuse", "leisure", "natural", "amen
 
 
 class OSM:
-    def __init__(self, path=f"{RAW}/osm.json"):
+    def __init__(self, path=None):
+        path = path or OSM_PATH  # (data/raw/osm.json, or the region's cut of it: regions.py)
         data = json.load(open(path))
         self.timestamp = data["osm3s"]["timestamp_osm_base"]
         self.nodes = []  # (id, tags, Point)

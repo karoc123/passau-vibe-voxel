@@ -3,7 +3,7 @@
 A 3200 × 1408 m diorama of Passau, the city of three rivers, at 1 m voxels, in the style of MagicaVoxel renders:
 the Altstadt peninsula between Danube and Inn with the cathedral (Dom St. Stephan) at its centre, the Dreiflüsseeck
 where Danube, Inn and Ilz meet, Veste Oberhaus and the Ilzstadt to the north, the Innstadt to the south, and west to
-the Hauptbahnhof and St. Nikola. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`).
+the Hauptbahnhof and St. Nikola. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the extent is set in `scripts/map.json`).
 
 The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
@@ -75,9 +75,26 @@ sh scripts/build_data.sh
 
 Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
 the triangle counts run the viewer's mesher). The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
-From cached raw data the build takes about 4 minutes; `voxelize.py` peaks at ~7.5 GB of RAM. Given the same
-`data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-17; the gzip files are
-written with `mtime=0`). The steps:
+From cached raw data the build takes about 5½ minutes (WSL, 20 cores: prep, lod2, laser 1 min, the volume in 8
+regions of 1024 m, 4 at once, 3 min, the steps after it 1½ min, 45 s of them `tris.mjs`); a region's process peaks at
+~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 1.4 GB. Given the same `data/raw`,
+it reproduces the committed `web/public/data` byte for byte (checked on 2026-11-20; the gzip files are written with
+`mtime=0`).
+
+**Incremental.** A rerun does only what changed: each step runs when what it reads or writes changed since it last ran
+(`scripts/stamp.py`, records in `data/cache/stamps/`; `FORCE=1` runs every step, `FORCE=flood,boats` some), and
+`voxelize.py` builds again only the regions whose inputs or code changed (see "Regions"). With nothing changed the
+whole of `build_data.sh` takes 4 s. To iterate on one place: `uv run python scripts/voxelize.py --only x=COL,y=ROW`
+(the region holding that map cell, built again whatever its hash; `--status` lists the regions and what changed for
+each), then `sh scripts/build_data.sh` for the steps after it (the Altstadt's region: 2½ min, then 1 min).
+
+**The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
+size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
+`uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model), the
+anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
+(column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
+larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
+cells, the project grid's less the map's corner. The steps:
 
 | Step | Writes |
 |---|---|
@@ -86,7 +103,7 @@ written with `mtime=0`). The steps:
 | `laser.py` | `data/laser.npz`: per 1 m cell vegetation statistics from the point clouds (highest return, lowest tenth, pulses caught in the canopy, single-return pulses, ground returns); optional for `voxelize.py` (`NO_LASER=1` ignores it) |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, orthophoto 0.2 m) |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
-| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json` (the tree register, `scripts/trees.py`: OSM and Einzelbäume), `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`. Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
+| `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `trees.json` (the tree register, `scripts/trees.py`: OSM and Einzelbäume), `traffic.json`, `qa_roadmask.bin.gz`; `data/ground.npz`, `data/footprints.npz`, `data/crowns.npz`; region by region, only the regions that changed (`data/cache/regions/`). Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
 | `places.py` | `places.json`: the search index (streets, squares, buildings, stops) |
 | `flood.py` | `data/flood.bin` (which cells the rivers reach at each level, the river bed), `flood.json` (the surveyed surface, the river's points) |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
@@ -107,10 +124,17 @@ row band by row band. `--windows NXxNY` or `--window-size METRES` choose the cov
 default); every cover writes the same bytes (`uv run python scripts/window_check.py STEP` checks it).
 
 **Regions.** `voxelize.py` builds the volume region by region (`scripts/region.py`, `scripts/regions.py`): a region
-is a window's core and a halo of 384 m round it, built in a process of its own, which writes its core's tiles and
-leaves its core's rasters, volume and lists in `data/cache/regions/`; the driver puts them together. `--regions NXxNY`
-or `--region-size METRES` choose the cover (the whole map as one region by default, `-j N` builds N at once); every
-cover writes the same bytes (`uv run python scripts/region_check.py` checks it, with the steps after it). What makes
+is a window's core and a halo of 384 m round it, built in a process of its own, which reads its own cut of OSM (the
+elements within 64 m of it), writes its core's tiles and leaves its core's rasters, volume and lists in
+`data/cache/regions/<row>_<col>/`. `--regions NXxNY`, `--region-size METRES` or `--whole` choose the cover
+(`scripts/map.json`'s by default: 1024 m, 4 at once; `-j N`); every cover writes the same bytes (`uv run python
+scripts/region_check.py` checks it, with the steps after it, and that an incremental rebuild changes nothing). A region
+is built again only when the hash of what it reads changed (`scripts/region_inputs.py`: its windows of
+`data/prep.npz`, `lod2.npz`, `laser.npz`, hashed per 128 m block once per file; its OSM cut; the raw files it reads;
+the code files its process loaded; the map's config), or the palette registry no longer starts with the colours it was
+built with, or its files are gone. The driver then holds nothing of the map's size (`scripts/mapstore.py`): the
+map-sized files are written row band by row band from the regions' cores, and the passes over the whole map read
+the regions' rasters and volumes where they look. What makes
 a region's core independent of what lies beyond its halo: the volume's floor and the rivers' level pinned per project
 (`aoi.BASE`, `aoi.RIVER_LEVEL`), noise and hashes on the project grid's coordinates (fixed to EPSG:25832, `aoi.py`),
 a palette registry (`scripts/palette.json`: ids never depend on the order colours are met; a build adds new colours
@@ -118,8 +142,9 @@ to it, sorted), a feature decided over its whole outline when it spans under 192
 and levels of connected areas (the rivers' bodies, straw fields) counted within a window of 192 m, nearest-cell fills
 bounded, box filters summed exactly, the floating-debris passes judging pieces up to 64 m across, curated places in
 EPSG:25832 or project grid rows and columns, built only where the region holds them. The labels, the camera presets,
-the tram paths and `traffic.json` are still made on the whole map after the regions, and `flood.py` and `boats.py`
-work on the whole map (see `scripts/window.py`).
+the tram paths and `traffic.json` are made after the regions, network-wide over OSM's vectors and the lists the
+regions hand over, sampling the rasters (a label's box, a path's cells: never the map's size); `flood.py` and
+`boats.py` still work on the whole map's rasters (see `scripts/window.py`).
 
 Python dependencies (`pyproject.toml`, `uv.lock`): numpy, scipy, rasterio, affine, shapely, webcolors (BSD-3-Clause),
 pyproj (MIT), pillow (MIT-CMU), laspy (BSD-2-Clause) with lazrs (MIT / Apache-2.0) for the LAZ files; osmium (BSD-2-Clause) only for `fetch_osm.sh`, added there by `uv run --with`.

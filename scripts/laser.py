@@ -29,7 +29,7 @@ import glob
 import laspy
 import numpy as np
 
-from aoi import CX, CY, D, I0, J0, RAW, W
+from aoi import CX, CY, D, I0, J0, MAP_C0, MAP_R0, RAW, W
 
 KEYS = ("n_pulse", "n_canopy", "n_single", "n_ground", "int_canopy", "veg_n", "veg_top", "veg_p10", "veg_p50", "n_ret")
 
@@ -59,8 +59,8 @@ def main():
         rn = np.asarray(las.return_number)
         nr = np.asarray(las.number_of_returns)
         it = np.asarray(las.intensity, np.float64)
-        c = np.floor(I0 + (x - CX)).astype(np.int64)
-        r = np.floor(J0 - (y - CY)).astype(np.int64)
+        c = np.floor(I0 - MAP_C0 + (x - CX)).astype(np.int64)
+        r = np.floor(J0 - MAP_R0 - (y - CY)).astype(np.int64)
         ok = (c >= 0) & (c < W) & (r >= 0) & (r < D) & (cls != 7)
         c, r, z, cls, rn, nr, it = c[ok], r[ok], z[ok], cls[ok], rn[ok], nr[ok], it[ok]
         del x, y, las

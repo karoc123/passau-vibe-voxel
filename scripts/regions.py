@@ -1,21 +1,30 @@
-"""voxelize.py's driver: the map built region by region and put together.
+"""voxelize.py's driver: the map built region by region and put together, rebuilding only what changed.
 
-usage: uv run python scripts/voxelize.py [--regions NXxNY | --region-size METRES] [-j JOBS]
-  (the whole map as one region by default; every cover writes the same bytes, scripts/region_check.py)
+usage: uv run python scripts/voxelize.py [--regions NXxNY | --region-size METRES | --whole] [-j JOBS]
+                                         [--status | --only ROW_COL[+ROW_COL..] | --only x=COL,y=ROW | --force]
+  the cover: scripts/map.json's `regions` (size, jobs) unless given; every cover writes the same bytes
+  (scripts/region_check.py). --status: which regions are up to date and what changed for the others; --only: build
+  these regions again (and whatever else changed), e.g. to iterate on one place; --force: all of them
 
 A region is a core of the map on window.ALIGN (1024 m) boundaries (window.py) and a halo of region.HALO metres round
-it. Each region is built by voxelize.py in a process of its own (VOXEL_REGION, VOXEL_CORE, VOXEL_OUT in its
-environment), which writes the tiles of its core and leaves in data/cache/regions/<row>_<col>/ its core's rasters
-(core.npz), its core's volume (vol.npy) and what lies in its core of the lists (out.json). Then, here:
+it. Each region is built by voxelize.py in a process of its own (VOXEL_REGION, VOXEL_CORE, VOXEL_OUT, VOXEL_OSM in its
+environment), which reads its cut of OSM (region_inputs.cut_osm), writes the tiles of its core and leaves in
+data/cache/regions/<row>_<col>/ its core's rasters (core.npz), its core's volume (vol.npy) and what lies in its core
+of the lists (out.json). Incremental: a region is built again only when the hash of what it reads changed (its windows
+of data/prep.npz, lod2.npz, laser.npz, its OSM cut, the raw files it reads, the code it loaded, the map's config:
+region_inputs.region_key, kept in its manifest.json), or the palette registry no longer starts with the colours it was
+built with, or its files are gone. The steps below run again when any region was built or their own inputs changed
+(data/cache/regions.stamp). Then, here:
 - the palette: colours the registry (scripts/palette.json) lacked are added to it, sorted, and the regions that met
   them built again (their ids were provisional)
-- stitched: data/ground.npz, data/footprints.npz, data/crowns.npz, qa_roadmask.bin.gz, trees.json (in the map's
-  order, the crowns' owners as indices into it), meta.json's lamps and jets, the debug images and lists
-- the global context passes, on the whole map for now (WP6b-2 must make them region by region or network-wide
-  passes over what the regions hand over): the labels (labels.py: the parks', each curated label's top over its whole
-  outline, the decluttering, their radii), the camera presets (landmarks.make_views), the tram paths and traffic.json
-  (traffic.py: the network over data/cache/vol.npy, the regions' volumes put together, read as a memory map), the
-  carriageway check summed over the regions. flood.py and boats.py stay whole-map steps of their own.
+- put together, row band by row band (mapstore.py: nothing of the map's size in memory): data/ground.npz,
+  data/footprints.npz, data/crowns.npz, qa_roadmask.bin.gz, trees.json (in the map's order, the crowns' owners as
+  indices into it), meta.json's lamps and jets, the debug images (whole up to 64 Mpx, else per region) and lists
+- the passes over the whole map, network-wide over OSM's vectors and the regions' lists, reading the regions' rasters
+  and volumes where they look (mapstore.MapRaster, MapVolume: point lookups, a box round a label): the labels
+  (labels.py: the parks', each curated label's top over its whole outline, the decluttering, their radii), the camera
+  presets (landmarks.make_views; the ground's median from the regions' histograms), the tram paths and traffic.json
+  (traffic.py), the carriageway check summed over the regions. flood.py and boats.py stay whole-map steps of their own.
 """
 import gzip
 import json
@@ -29,6 +38,7 @@ from pathlib import Path
 import numpy as np
 
 import aoi
+import mapstore
 import region
 import window
 
@@ -39,13 +49,16 @@ HERE = Path(__file__).resolve().parent
 
 
 def cover(argv):
+    """the regions asked for: --regions NXxNY, --region-size METRES, --whole (one region), else scripts/map.json's"""
+    if "--whole" in argv:
+        return window.cover(aoi.MAP_D, aoi.MAP_W, None)
     for i, a in enumerate(argv):
         if a == "--regions":
             nx, ny = map(int, argv[i + 1].lower().split("x"))
             return window.split(aoi.MAP_D, aoi.MAP_W, nx, ny)
         if a == "--region-size":
             return window.cover(aoi.MAP_D, aoi.MAP_W, int(argv[i + 1]))
-    return window.cover(aoi.MAP_D, aoi.MAP_W, None)
+    return window.cover(aoi.MAP_D, aoi.MAP_W, aoi.CONFIG.get("regions", {}).get("size"))
 
 
 def rdir(w):
@@ -59,8 +72,9 @@ def build(ws, jobs):
         while todo and len(running) < jobs:
             w = todo.pop(0)
             ra, rb, ca, cb = w.region(region.HALO)
+            (rdir(w) / "manifest.json").unlink(missing_ok=True)  # (stale until it is written again, after the build)
             env = dict(os.environ, VOXEL_REGION=f"{ra},{rb},{ca},{cb}", VOXEL_CORE=f"{w.r0},{w.r1},{w.c0},{w.c1}",
-                       VOXEL_OUT=str(rdir(w)), PYTHONUNBUFFERED="1")
+                       VOXEL_OUT=str(rdir(w)), VOXEL_OSM=str(rdir(w) / "osm.json"), PYTHONUNBUFFERED="1")
             rdir(w).mkdir(parents=True, exist_ok=True)
             log = open(rdir(w) / "log.txt", "w")
             p = subprocess.Popen([sys.executable, str(HERE / "voxelize.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -77,19 +91,114 @@ def build(ws, jobs):
     return stats
 
 
-def stitch(ws, key, dtype, tail=(), scale=1):
-    """a map-sized raster from the regions' cores (core.npz[key])"""
-    out = np.zeros((aoi.MAP_D // scale, aoi.MAP_W // scale) + tuple(tail), dtype)
-    for w in ws:
-        a = np.load(rdir(w) / "core.npz")[key]
-        out[w.r0 // scale:w.r1 // scale, w.c0 // scale:w.c1 // scale] = a
+# ---------------------------------------------------------------- incremental: which regions are up to date
+
+def core_tiles(w):
+    """the node files of the region's core (tiles.py: a node is its core's whose first cell lies in it)"""
+    import tiles
+    out = []
+    for lv in tiles.manifest(aoi.MAP_D, aoi.MAP_W):
+        s = lv["s"]
+        n = tiles.N * s
+        for d in [str(s)] + (["1f"] if s == 1 else []):
+            for ty in range(-(-w.r0 // n), -(-w.r1 // n)):
+                for tx in range(-(-w.c0 // n), -(-w.c1 // n)):
+                    if (OUT / "tiles" / d / f"{tx}_{ty}.bin").exists():
+                        out.append(f"{d}/{tx}_{ty}.bin")
     return out
 
 
+def fresh(w, key):
+    """whether region w's outputs are those of a build with this key: its manifest says so, the palette registry
+    still starts with the colours it was built with, and its files are there"""
+    import region_inputs
+    f = rdir(w) / "manifest.json"
+    if not f.exists():
+        return False
+    m = json.load(open(f))
+    if m.get("key") != key or region_inputs.palette_sig(m["palette_n"]) != m["palette_sig"]:
+        return False
+    return all((rdir(w) / n).exists() for n in ("core.npz", "vol.npy", "out.json")) and \
+        all((OUT / "tiles" / t).exists() for t in m["tiles"])
+
+
+def write_manifest(w, osm_hash):
+    import region_inputs
+    deps = json.load(open(rdir(w) / "out.json"))["deps"]
+    key, parts = region_inputs.region_key(w, osm_hash, deps)
+    n = len(json.load(open(HERE / "palette.json"))["palette"])
+    json.dump(dict(key=key, deps=deps, palette_n=n, palette_sig=region_inputs.palette_sig(n), tiles=core_tiles(w),
+                   parts=parts), open(rdir(w) / "manifest.json", "w"), indent=0)
+
+
+def stale_regions(ws, osm_hashes, force=()):
+    """the regions to build: those forced, never built, or whose inputs or code changed since"""
+    import region_inputs
+    out = []
+    for w in ws:
+        f = rdir(w) / "manifest.json"
+        deps = json.load(open(f))["deps"] if f.exists() else None
+        if w in force or deps is None or not fresh(w, region_inputs.region_key(w, osm_hashes[w], deps)[0]):
+            out.append(w)
+    return out
+
+
+def why_stale(w, osm_hash):
+    """what changed for region w since its build (for --status)"""
+    import region_inputs
+    f = rdir(w) / "manifest.json"
+    if not f.exists():
+        return "not built"
+    m = json.load(open(f))
+    _, now = region_inputs.region_key(w, osm_hash, m["deps"])
+    diff = [k for k in sorted(now) if json.dumps(now[k], sort_keys=True) != json.dumps(m["parts"].get(k), sort_keys=True)]
+    for k in ("rasters", "raw", "code"):
+        if k in diff:
+            diff[diff.index(k)] = k + ":" + ",".join(x for x in now[k] if now[k][x] != m["parts"][k].get(x))
+    return "changed: " + " ".join(diff) if diff else ("palette or files" if not fresh(w, m["key"]) else "up to date")
+
+
+def pick(ws, spec):
+    """the regions named by --only, '+'-separated: ROW_COL (a region's first map row and column, its cache folder's
+    name) or x=COL,y=ROW (the region whose core holds that map cell)"""
+    out = []
+    for item in spec.split("+"):
+        if item.startswith("x="):
+            c, r = (int(v.split("=")[1]) for v in item.split(","))
+            hit = [w for w in ws if w.holds(r, c)]
+        else:
+            r0, c0 = map(int, item.split("_"))
+            hit = [w for w in ws if (w.r0, w.c0) == (r0, c0)]
+        if not hit:
+            raise SystemExit(f"--only {item}: no such region in the cover {[f'{w.r0}_{w.c0}' for w in ws]}")
+        out += hit
+    return out
+
+
+def driver_stamp(ws):
+    """the hash of what the steps after the regions read: the regions' keys, their own code, the registry, the
+    raw OSM (labels, trams, traffic), the config"""
+    import region_inputs
+    keys = [json.load(open(rdir(w) / "manifest.json"))["key"] for w in ws]
+    code = {f: region_inputs.file_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
+                                                         "tunnels.py", "underpass.py", "osm.py", "aoi.py", "tiles.py",
+                                                         "window.py", "region.py", "passau.py", "mapstore.py",
+                                                         "overrides.json")}
+    d = dict(keys=keys, code=code, palette=region_inputs.file_sha(HERE / "palette.json"),
+             osm=region_inputs.file_sha(f"{aoi.RAW}/osm.json"), config=region_inputs.config_part(),
+             env={k: os.environ.get(k) for k in ("FINALDUMP", "TRAFFICDUMP")})
+    return region_inputs.sha(json.dumps(d, sort_keys=True).encode())
+
+
+DRIVER_OUT = [OUT / "meta.json", OUT / "trees.json", OUT / "traffic.json", OUT / "qa_roadmask.bin.gz",
+              Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz")]
+
+
 def main(argv):
+    import region_inputs
     import tiles
     t_start = time.time()
-    jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else 1
+    jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else aoi.CONFIG.get("regions", {}).get("jobs", 1)
     ws = cover(argv)
     notes = []
 
@@ -102,7 +211,20 @@ def main(argv):
     DBG.mkdir(parents=True, exist_ok=True)
     levels = tiles.manifest(aoi.MAP_D, aoi.MAP_W)
     tiles.remove_stale(OUT / "tiles", levels, note, split=True)
-    stats = build(ws, jobs)
+    osm_hashes = region_inputs.cut_osm(ws, rdir)
+    if "--status" in argv:
+        for w in ws:
+            print(f"region {w.r0}_{w.c0} ({w}): {why_stale(w, osm_hashes[w])}")
+        return
+    force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
+    todo = stale_regions(ws, osm_hashes, force)
+    print(f"regions: {len(todo)} of {len(ws)} to build", [f"{w.r0}_{w.c0}" for w in todo], flush=True)
+    stamp_f = Path("data/cache/regions.stamp")
+    if not todo and stamp_f.exists() and stamp_f.read_text() == driver_stamp(ws) and all(p.exists() for p in DRIVER_OUT):
+        print(f"nothing to do: every region and the steps after them are up to date ({round(time.time() - t_start, 1)} s)")
+        return
+    stamp_f.unlink(missing_ok=True)
+    stats = build(todo, jobs)
     res = {w: json.load(open(rdir(w) / "out.json")) for w in ws}
     # the palette: colours met that the registry lacks go into it (sorted), and the regions that met them again
     new = sorted({tuple(e) for r in res.values() for e in r["new_palette"]})
@@ -116,9 +238,11 @@ def main(argv):
         stats.update(build(again, jobs))
         res.update({w: json.load(open(rdir(w) / "out.json")) for w in again})
         assert not any(res[w]["new_palette"] for w in ws), "the palette registry still lacks colours"
+    for w in stats:
+        write_manifest(w, osm_hashes[w])
     palette = [tuple(e) for e in json.load(open(HERE / "palette.json"))["palette"]]
     for w in ws:
-        notes.append(f"--- region {w}: {stats[w][0]} s, peak {stats[w][1]} MB")
+        notes.append(f"--- region {w}: " + (f"{stats[w][0]} s, peak {stats[w][1]} MB" if w in stats else "up to date, kept"))
         notes.extend(res[w]["notes"])
     # the carriageways' centrelines, summed over the regions (voxelize.carriageway_sanity)
     for stage in res[ws[0]]["sanity"]:
@@ -131,26 +255,49 @@ def main(argv):
             raise SystemExit(f"carriageways painted as pavement ({stage}): {bad[:8]}")
 
     # ---------------------------------------------------------------- rasters
-    g = stitch(ws, "g", np.int16)
-    b = stitch(ws, "b", np.int16)
-    np.savez_compressed("data/ground.npz", g=g, rgb=stitch(ws, "rgb", np.uint8, (3,)), water=stitch(ws, "water", bool), b=b)
-    np.savez_compressed("data/footprints.npz", oid=stitch(ws, "oid", np.int64))
-    qa = stitch(ws, "qa", np.uint8)
+    # (nothing of the map's size in memory: the regions' cores read on demand, the map-sized files written row band by
+    # row band, mapstore.py)
+    D_, W_ = aoi.MAP_D, aoi.MAP_W
+    R = lambda key, dtype=None, **kw: mapstore.MapRaster(ws, rdir, key, dtype, **kw)  # noqa: E731
+    g = R("g", np.int32)  # (the ground as int32, as the passes below took it)
+
+    def npz_entry(key, dtype, tail=(), scale=1):
+        r = R(key, dtype, scale=scale)
+        return (D_ // scale, W_ // scale) + tuple(tail), dtype, (b_ for _, b_ in r.bands())
+
+    mapstore.write_npz("data/ground.npz", dict(g=npz_entry("g", np.int16), rgb=npz_entry("rgb", np.uint8, (3,)),
+                                               water=npz_entry("water", bool), b=npz_entry("b", np.int16)))
+    mapstore.write_npz("data/footprints.npz", dict(oid=npz_entry("oid", np.int64)))
+    qa = R("qa", np.uint8)
     with gzip.GzipFile(OUT / "qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
-        fh.write(qa.tobytes())
+        for _, band in qa.bands():
+            fh.write(band.tobytes())
     from PIL import Image
-    Image.fromarray(stitch(ws, "topdown", np.uint8, (3,))).save(DBG / "topdown.png")
-    Image.fromarray(stitch(ws, "groundcol", np.uint8, (3,))).save(DBG / "ground.png")
+    for key, name in (("topdown", "topdown"), ("groundcol", "ground")):  # (debug images: the whole map up to 64 Mpx,
+        if D_ * W_ <= 64e6:                                              # else one per region in data/debug/<name>/)
+            Image.fromarray(R(key).box(0, D_, 0, W_)).save(DBG / f"{name}.png")
+        else:
+            (DBG / name).mkdir(exist_ok=True)
+            for w in ws:
+                Image.fromarray(np.load(rdir(w) / "core.npz")[key]).save(DBG / name / f"{w.r0}_{w.c0}.png")
     # the trees in the map's order; the crowns' owners as indices into it
     trees = sorted((t for w in ws for t in res[w]["trees"]), key=lambda t: t["key"])
     index = {t["rec"]["id"]: k for k, t in enumerate(trees)}
-    owner = np.full((aoi.MAP_D // 2, aoi.MAP_W // 2), -1, np.int32)
-    for w in ws:
-        lut = np.array([index.get(i, -1) for i in res[w]["crown_ids"]] + [-1], np.int32)
-        a = np.load(rdir(w) / "core.npz")["crowns"]
-        owner[w.r0 // 2:w.r1 // 2, w.c0 // 2:w.c1 // 2] = lut[a]
-    np.savez_compressed("data/crowns.npz", owner=owner)
-    note("2 m cells with a crown's owner for phenology:", int((owner >= 0).sum()))
+    luts = {(w.r0, w.c0): np.array([index.get(i, -1) for i in res[w]["crown_ids"]] + [-1], np.int32) for w in ws}
+    cov = mapstore._Cover(ws)
+    n_owned = [0]
+
+    def owner_bands():  # (each core's crowns as indices into trees.json, band by band)
+        for k, r0 in enumerate(cov.rcuts):
+            r1 = cov.rcuts[k + 1] if k + 1 < len(cov.rcuts) else D_
+            band = np.full(((r1 - r0) // 2, W_ // 2), -1, np.int32)
+            for c0 in cov.ccuts:
+                w = cov.at[(r0, c0)]
+                band[:, w.c0 // 2:w.c1 // 2] = luts[(w.r0, w.c0)][np.load(rdir(w) / "core.npz")["crowns"]]
+            n_owned[0] += int((band >= 0).sum())
+            yield band
+    mapstore.write_npz("data/crowns.npz", dict(owner=((D_ // 2, W_ // 2), np.int32, owner_bands())))
+    note("2 m cells with a crown's owner for phenology:", n_owned[0])
     json.dump(dict(sources={"osm": "OpenStreetMap natural=tree",
                             "bv": "Einzelbäume 3D, Bayerische Vermessungsverwaltung (CC BY 4.0), 2024 flight",
                             "lidar": "a crown in the surface model with no known tree under it (trunk at its top)"},
@@ -160,33 +307,34 @@ def main(argv):
                                con="a conifer (species, or its winter density in the laser scan): evergreen"),
                    trees=[t["rec"] for t in trees]),
               open(OUT / "trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
-    # the volume put together (for traffic.py; FINALDUMP: for scripts/floating.py), a memory map
+    # the volume: the regions' own (for traffic.py), read where asked for (mapstore.MapVolume)
     Hm = max(r["Hm"] for r in res.values())
-    vol = np.lib.format.open_memmap("data/cache/vol.npy", "w+", np.uint16, (Hm, aoi.MAP_D, aoi.MAP_W))
-    for w in ws:
-        v = np.load(rdir(w) / "vol.npy", mmap_mode="r")
-        vol[:v.shape[0], w.r0:w.r1, w.c0:w.c1] = v
-    vol.flush()
-    vol = np.load("data/cache/vol.npy", mmap_mode="r")
-    if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (scripts/floating.py)
-        np.save("data/cache/final_vol.npy", vol)
-        np.save("data/cache/final_g.npy", g.astype(np.int32))
+    vol = mapstore.MapVolume(ws, rdir, Hm)
+    if os.environ.get("FINALDUMP"):  # the finished volume put together, for whole-city checks (scripts/floating.py;
+        fv = np.lib.format.open_memmap("data/cache/final_vol.npy", "w+", np.uint16, (Hm, D_, W_))  # a map-sized file)
+        for w in ws:
+            v = np.load(rdir(w) / "vol.npy", mmap_mode="r")
+            fv[:v.shape[0], w.r0:w.r1, w.c0:w.c1] = v
+        fv.flush()
+        del fv
+        np.save("data/cache/final_g.npy", g.box(0, D_, 0, W_))
 
-    # ---------------------------------------------------------------- global context passes (whole map, WP6b-2)
+    # ---------------------------------------------------------------- the passes over the whole map: labels, presets,
+    # trams and traffic.json, network-wide over OSM's vectors and what the regions handed over, sampling the rasters
+    # above where they need them (point lookups and boxes round a label: never the map's size)
     from osm import OSM
     import labels as labels_mod
     import landmarks
     import traffic
     import tunnels
     import underpass
-    osm = OSM()
-    gi = g.astype(np.int32)
-    top = gi + b
+    osm = OSM(f"{aoi.RAW}/osm.json")
+    top = R(("g", "b"), np.int32, fn=lambda g_, b_: g_.astype(np.int32) + b_)
     cur = sorted((tuple(k), l) for w in ws for k, l in res[w]["labels"])
     found = {list(landmarks.LABELS)[k[1]]: l for k, l in cur if k[0] == 0}
-    views = landmarks.make_views(found, gi)
+    views = landmarks.make_views(found, g, median=hist_median([res[w]["g_hist"] for w in ws]))
     labels = labels_mod.assemble([l for _, l in cur], osm, lambda r, c: int(top[r, c]))
-    labels_mod.radii(labels, gi, top)
+    labels_mod.radii(labels, g, top)
     # tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
     from shapely.ops import linemerge
     tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])
@@ -199,7 +347,7 @@ def main(argv):
         for d in np.arange(0, ln.length, 2.0):
             p = ln.interpolate(d)
             c, r = min(max(int(p.x), 0), aoi.MAP_W - 1), min(max(int(p.y), 0), aoi.MAP_D - 1)
-            path.append([round(p.x, 1), round(p.y, 1), int(gi[r, c])])
+            path.append([round(p.x, 1), round(p.y, 1), int(g[r, c])])
         trams.append(path)
     note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
     tile_bytes = {}
@@ -217,7 +365,7 @@ def main(argv):
     meta = dict(W=aoi.MAP_W, D=aoi.MAP_D, H=Hm, base=aoi.BASE, tiles=tile_info, center=[aoi.CX, aoi.CY],
                 theta_deg=math.degrees(aoi.THETA), crs="EPSG:25832", trams=trams, jets=jets,
                 palette=[list(e) for e in palette], lamps=lamps, labels=labels, views=views,
-                sources=dict(osm=res[ws[0]]["osm_timestamp"],
+                sources=dict(osm=osm.timestamp,
                              elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
                              ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)",
                              landuse="Bayerische Vermessungsverwaltung, ALKIS Tatsächliche Nutzung (CC BY 4.0)",
@@ -225,18 +373,19 @@ def main(argv):
     json.dump(meta, open(OUT / "meta.json", "w"))
     # traffic.py over the whole network, on what the regions handed over
     traffic.OPEN_CUT = {o for r in res.values() for o in r["open_cut"]}
-    underpass.WALK, underpass.IDS = stitch(ws, "walk", np.int16), {o for r in res.values() for o in r["walk_ids"]}
-    tunnels.FLOOR, tunnels.IDS = stitch(ws, "floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
+    underpass.WALK, underpass.IDS = R("walk", np.int16), {o for r in res.values() for o in r["walk_ids"]}
+    tunnels.FLOOR, tunnels.IDS = R("floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
     skip = np.zeros(len(palette) + 64, bool)
     ids = res[ws[0]]["ids"]
     skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11, 23)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car, wood)
     solid = ~skip
     solid[0] = False
-    tin = dict(g=gi, nd_mean=stitch(ws, "deck_near", np.float32), surf=qa, water=stitch(ws, "twater", bool), solid=solid)
-    if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py)
-        import pickle
-        pickle.dump(dict(tin, open_cut=traffic.OPEN_CUT, walk=underpass.WALK, ids=underpass.IDS, bore=tunnels.FLOOR,
-                         bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
+    tin = dict(g=g, nd_mean=R("deck_near", np.float32), surf=qa, water=R("twater", bool), solid=solid)
+    if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py;
+        import pickle                  # the rasters put together: map-sized)
+        whole = lambda a: a.box(0, D_, 0, W_) if isinstance(a, mapstore.MapRaster) else a  # noqa: E731
+        pickle.dump(dict({k: whole(v) for k, v in tin.items()}, open_cut=traffic.OPEN_CUT, walk=whole(underpass.WALK),
+                         ids=underpass.IDS, bore=whole(tunnels.FLOOR), bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
     json.dump(traffic.build(note=note, vol=vol, **tin), open(OUT / "traffic.json", "w"), separators=(",", ":"))
     # debug lists of the regions, one after the other
     for name in ("lod2_reverted", "thin_parts", "floating", "floating_left", "supports"):
@@ -246,10 +395,33 @@ def main(argv):
             if f.exists():
                 items += json.load(open(f))
         json.dump(items, open(DBG / f"{name}.json", "w"))
-    note(f"regions: {len(ws)}, {round(time.time() - t_start)} s in all; per region (s, peak MB):",
-         {str(w): stats[w] for w in ws})
+    import resource
+    note(f"regions: {len(ws)} ({len(stats)} built), {round(time.time() - t_start)} s in all; per region built (s, peak MB):",
+         {str(w): stats[w] for w in stats}, "; the steps after them: peak",
+         round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024), "MB")
     json.dump({"notes": notes}, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
+    stamp_f.write_text(driver_stamp(ws))
     print("done")
+
+
+def hist_median(hists):
+    """np.median of the map's ground (int), from the regions' histograms of their cores [(lowest value, counts)]"""
+    tot = {}
+    for lo, counts in hists:
+        for k, n in enumerate(counts):
+            if n:
+                tot[lo + k] = tot.get(lo + k, 0) + n
+    vals = sorted(tot)
+    n = sum(tot.values())
+    cum, lo_v, hi_v = 0, None, None
+    for v in vals:
+        cum += tot[v]
+        if lo_v is None and cum >= (n + 1) // 2:  # the (n-1)//2-th value (0-based)
+            lo_v = v
+        if cum >= n // 2 + 1:  # the n//2-th
+            hi_v = v
+            break
+    return (lo_v + hi_v) / 2
 
 
 def tunnelish(t):

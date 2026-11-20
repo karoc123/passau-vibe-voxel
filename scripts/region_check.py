@@ -2,10 +2,12 @@
 whole map and once per cover given, each in a scratch copy of its inputs and outputs, then the steps after it, and
 compares every output: the files of web/public/data, the arrays of data/*.npz, data/*.bin.
 
-usage: uv run python scripts/region_check.py [COVER ...] [--steps voxelize|all] [-j JOBS] [--keep]
+usage: uv run python scripts/region_check.py [COVER ...] [--steps voxelize|all] [-j JOBS] [--keep] [--no-incremental]
   COVER  NXxNY (--regions) or a size in metres (--region-size); default 3x2 1024
   --steps all (default): voxelize.py and the Python steps after it (places flood boats terrain zones windows phenology
          tile_fields; not climate.py, which fetches); voxelize: voxelize.py alone
+The first cover is then built again incrementally in its scratch (regions.py): with nothing changed nothing may be
+built, and with one region (0_0) built again alone (--only) the outputs must still be the whole map's.
 Exits 1 if any output differs. Scratch copies in data/region_check/ (removed after, unless --keep). Needs the inputs of
 voxelize.py in data/ (prep.npz, lod2.npz, laser.npz, raw/) and ~8 GB of RAM (the whole map in one region).
 """
@@ -41,9 +43,13 @@ def digest(root):
     return h
 
 
-def run(args, scratch, steps, jobs, palette=None):
+def run(args, scratch, steps, jobs, palette=None, again=False):
     """the steps in scratch, with a copy of scripts/ (some steps write beside their script: places.py, windows.py,
-    phenology.py); palette: the registry to start from (the whole map's run's, so that both have the same ids)"""
+    phenology.py); palette: the registry to start from (the whole map's run's, so that both have the same ids);
+    again: in the scratch as the last run left it (its regions' cache: an incremental build)"""
+    env = {"PYTHONPATH": str(scratch / "scripts"), "PATH": "/usr/bin:/bin"}
+    if again:
+        return steps_in(args, scratch, steps, jobs, env)
     if scratch.exists():
         shutil.rmtree(scratch)
     shutil.copytree(ROOT / "scripts", scratch / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
@@ -55,7 +61,10 @@ def run(args, scratch, steps, jobs, palette=None):
         if (ROOT / p).exists():
             (scratch / p).parent.mkdir(parents=True, exist_ok=True)
             (scratch / p).symlink_to((ROOT / p).resolve())
-    env = {"PYTHONPATH": str(scratch / "scripts"), "PATH": "/usr/bin:/bin"}
+    return steps_in(args, scratch, steps, jobs, env)
+
+
+def steps_in(args, scratch, steps, jobs, env):
     for s in ["voxelize"] + (AFTER if steps == "all" else []):
         a = args + ["-j", str(jobs)] if s == "voxelize" else []
         subprocess.run([sys.executable, str(scratch / "scripts" / f"{s}.py"), *a], cwd=scratch, check=True, env=env,
@@ -69,7 +78,7 @@ def main():
     jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else 1
     covers = [a for i, a in enumerate(argv) if not a.startswith("-") and (i == 0 or argv[i - 1] not in ("--steps", "-j"))]
     base = ROOT / "data" / "region_check"
-    ref = run([], base / "whole", steps, 1)
+    ref = run(["--whole"], base / "whole", steps, 1)
     print(f"whole map: {len(ref)} outputs")
     bad = 0
     for c in covers or ["3x2", "1024"]:
@@ -77,7 +86,17 @@ def main():
                   palette=base / "whole" / "scripts" / "palette.json")
         diff = sorted(k for k in set(ref) | set(got) if ref.get(k) != got.get(k))
         bad += len(diff)
-        print(f"{c}: {len(got)} outputs, {len(diff)} differ from the whole map's", diff[:8])
+        print(f"{c}: {len(got)} outputs, {len(diff)} differ from the whole map's", diff[:8], flush=True)
+        if c == (covers or ["3x2"])[0] and "--no-incremental" not in argv:
+            # incremental: nothing changed, so nothing is built; then one region built again on its own
+            args = ["--regions", c] if "x" in c else ["--region-size", c]
+            run(args, base / c, "voxelize", jobs, again=True)
+            noop = "nothing to do" in (base / c / "log_voxelize.txt").read_text()
+            got = run(args + ["--only", "0_0"], base / c, steps, jobs, again=True)
+            diff = sorted(k for k in set(ref) | set(got) if ref.get(k) != got.get(k))
+            bad += len(diff) + (not noop)
+            print(f"{c} again: {'nothing built' if noop else 'BUILT AGAIN with nothing changed'}; region 0_0 built again "
+                  f"alone: {len(diff)} outputs differ from the whole map's", diff[:8], flush=True)
     if "--keep" not in argv:
         shutil.rmtree(base)
     sys.exit(1 if bad else 0)

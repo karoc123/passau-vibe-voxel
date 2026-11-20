@@ -28,10 +28,10 @@ Region and core are in map cells; arrays of a region are indexed from the region
 The volume (voxelize.py) is built region by region: a region is a window's core and a halo of region.HALO (384 m),
 its decisions bounded so that the core comes out the same in any cover (scripts/region.py, regions.py,
 region_check.py); it writes the tiles of its core itself (tiles.export_window).
-Still on the whole map (a window there would change what is built, not only where):
-  regions.py    the global context passes after the regions: the labels (the parks', decluttered, their radii), the
-                camera presets, the tram paths, traffic.py over the whole network (the volume put together as a
-                memory map)
+Network-wide after the regions (regions.py), over OSM's vectors and what the regions hand over, sampling the regions'
+rasters and volumes where they look (mapstore.py: nothing of the map's size in memory): the labels (the parks',
+decluttered, their radii), the camera presets, the tram paths, traffic.py over the whole network.
+Still on the whole map's rasters (a window there would change what is built, not only where):
   flood.py      the spill height is a connectivity (how high the water must rise to reach a cell from the river),
                 the river bed is made per row of the whole map (its westernmost bank, the thalweg smoothed over rows)
   boats.py      the river: the largest water body

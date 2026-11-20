@@ -229,6 +229,34 @@ def trim_portal(p, reach=8.0):
         return q[k:]
     return head(head(p)[::-1])[::-1]
 
+
+def tram_clearance(surf):
+    """the carriageway mask with ~1 m round the tram bed counted as tram bed (so bodies never touch): reach 1 cell,
+    so made region by region on a raster of the regions (mapstore.MapRaster) and the same as over the whole map"""
+    from scipy import ndimage as _nd
+
+    def f(s):
+        tramzone = _nd.binary_dilation(s == 2, iterations=1)
+        return np.where(tramzone & (s != 2), 2, s).astype(np.uint8)
+    return surf.map_chunks(f, 1) if hasattr(surf, "map_chunks") else f(surf)
+
+
+def off_surface(surf, r, c, reach):
+    """the nearest cell off the surface (surf == 0) to (r, c), if within `reach` metres and (r, c) is on it, as
+    distance_transform_edt over the whole map finds it: from a box of 2 * reach round the cell (every cell nearer than
+    the box's edge is in it)"""
+    from scipy import ndimage as _nd
+    m = 2 * reach
+    r0, c0 = max(r - m, 0), max(c - m, 0)
+    box = np.asarray(surf[r0:min(r + m + 1, surf.shape[0]), c0:min(c + m + 1, surf.shape[1])])
+    if box[r - r0, c - c0] == 0 or (box > 0).all():
+        return None
+    kd, (kr, kc) = _nd.distance_transform_edt(box > 0, return_indices=True)
+    if 0 < kd[r - r0, c - c0] <= reach:
+        return int(kr[r - r0, c - c0]) + r0, int(kc[r - r0, c - c0]) + c0
+    return None
+
+
 def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     """surf: (D, W) uint8, 1 = carriageway, 2 = tram bed; used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
@@ -410,9 +438,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     # the tram bed (OSM lanes= often counts space the tracks take, or a wider road than the mapped centreline allows)
     n_drop = 0
     if surf is not None:
-        from scipy import ndimage as _nd
-        tramzone = _nd.binary_dilation(surf == 2, iterations=1)  # ~1 m clearance so bodies never touch
-        surf = np.where(tramzone & (surf != 2), 2, surf).astype(np.uint8)
+        surf = tram_clearance(surf)
         for e in roads:
             p = np.array(e["p"], float)
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(p[:, :2], axis=0).T))])
@@ -576,9 +602,8 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
 
     # signal heads: one per signalled approach, at the stop line on the right-hand kerb
     heads = []
-    if surf is not None:  # a signal stands off the carriageway and the tracks: the nearest such cell (95 of 708 stood
-        from scipy import ndimage as _nd  # in a lane of a wider road, a turn lane or the road across)
-        _kd, (_kr, _kc) = _nd.distance_transform_edt(surf > 0, return_indices=True)
+    # (a signal stands off the carriageway and the tracks: the nearest such cell within 8 m, off_surface; 95 of 708
+    # stood in a lane of a wider road, a turn lane or the road across)
     for e in roads:
         sg = e.get("sig")
         if not sg:
@@ -592,8 +617,9 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
         off = (e["lanes"] + (0 if e["two"] else -e["lanes"] / 2)) * 3.1 + 1.2
         hx, hy = x - dy * off, y + dx * off
         c_, r_ = min(max(int(hx), 0), W - 1), min(max(int(hy), 0), D - 1)
-        if surf is not None and 0 < _kd[r_, c_] <= 8:
-            c_, r_ = int(_kc[r_, c_]), int(_kr[r_, c_])
+        off_ = off_surface(surf, r_, c_, 8) if surf is not None else None
+        if off_ is not None:
+            r_, c_ = off_
             hx, hy = c_ + 0.5, r_ + 0.5
         heads.append([round(hx, 1), round(hy, 1), z_at(hx, hy, True), round(math.atan2(dx, dy), 2), sg["ctrl"], sg["axis"]])
 

@@ -53,7 +53,7 @@ def load_npz(path, keys=None):
         (rows, cols, *_), _ = window.npz_shape(path, k)
         s = rows // aoi.MAP_D
         assert rows == s * aoi.MAP_D and cols == s * aoi.MAP_W, (path, k)
-        box = (aoi.R0 * s, (aoi.R0 + aoi.D) * s, aoi.C0 * s, (aoi.C0 + aoi.W) * s)
+        box = (aoi.MR0 * s, (aoi.MR0 + aoi.D) * s, aoi.MC0 * s, (aoi.MC0 + aoi.W) * s)
         out[k] = window.npz_region(path, k, box)
     return out
 

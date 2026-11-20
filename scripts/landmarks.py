@@ -162,7 +162,7 @@ def apply_zones(vol, g, feats, pal, bmask, note):
 
 def override_labels(feats, g, top_at):
     """[(the building's id, label)] of overrides.json's labels standing in the region's core"""
-    from aoi import C0, R0
+    from aoi import MC0, MR0
     from region import in_core
     out = []
     for f in feats:
@@ -170,7 +170,7 @@ def override_labels(feats, g, top_at):
         if o and "label" in o and not f["part"] and len(f["rr"]):
             r, c = int(np.median(f["rr"])), int(np.median(f["cc"]))
             if in_core(r, c):
-                out.append((f["id"], label(o["label"]["name"], o["label"], c + C0, r + R0, top_at(r, c))))
+                out.append((f["id"], label(o["label"]["name"], o["label"], c + MC0, r + MR0, top_at(r, c))))
     return out
 
 
@@ -212,10 +212,10 @@ def small_tree(vol, g, r, c, h, leaves, trunk, height=None):
 
 def details(vol, g, topi, feats, pal, osm, cells_of, note):
     """The curated set pieces (those in the region), then the curated labels standing in the region's core:
-    [(key in the map's order, label)], the label in the project grid's coordinates (regions.py puts them together,
+    [(key in the map's order, label)], the label in the map's cells (regions.py puts them together,
     labels.py and make_views finish them on the whole map)"""
     import passau
-    from aoi import C0, MAP_D, MAP_W, R0, to_grid
+    from aoi import MAP_D, MAP_W, MC0, MR0, to_grid
     from region import in_core
     passau.build(vol, g, pal, note, osm)
 
@@ -231,7 +231,7 @@ def details(vol, g, topi, feats, pal, osm, cells_of, note):
         facts = LABELS[n]
         # the first outline of that name on the map (the map's, not the region's: the same one in every region)
         x0, y0, x1, y1 = geom.bounds
-        if x1 + C0 <= 0 or y1 + R0 <= 0 or x0 + C0 >= MAP_W or y0 + R0 >= MAP_D:
+        if x1 + MC0 <= 0 or y1 + MR0 <= 0 or x0 + MC0 >= MAP_W or y0 + MR0 >= MAP_D:
             continue
         if facts.get("anchor") == "top":
             if not (x0 >= 0 and y0 >= 0 and x1 <= vol.shape[2] and y1 <= vol.shape[1]):
@@ -245,22 +245,23 @@ def details(vol, g, topi, feats, pal, osm, cells_of, note):
         else:
             p = geom.representative_point() if not geom.contains(geom.centroid) else geom.centroid
             r, c = int(p.y), int(p.x)
-            if not (0 <= r + R0 < MAP_D and 0 <= c + C0 < MAP_W):
+            if not (0 <= r + MR0 < MAP_D and 0 <= c + MC0 < MAP_W):
                 continue
         done.add(n)
         if in_core(r, c):
-            out.append(([0, list(LABELS).index(n)], label(n, facts, c + C0, r + R0, top_at(r, c))))
+            out.append(([0, list(LABELS).index(n)], label(n, facts, c + MC0, r + MR0, top_at(r, c))))
     out += [([1, k], l) for k, l in override_labels(feats, g, top_at)]
     for k, (n, facts) in enumerate(EXTRA_LABELS.items()):
         c, r = (int(v) for v in to_grid(*facts["at"]))
         if in_core(r, c):
-            out.append(([2, k], label(n, facts, c + C0, r + R0, top_at(r, c))))
+            out.append(([2, k], label(n, facts, c + MC0, r + MR0, top_at(r, c))))
     note("labels:", [l["name"] for _, l in out])
     return out
 
 
-def make_views(found, g):
-    """Camera presets in three.js coords (x = col, y = up, z = row), derived from landmark positions (g: the map's)."""
+def make_views(found, g, median=None):
+    """Camera presets in three.js coords (x = col, y = up, z = row), derived from landmark positions (g: the map's
+    ground, read at a few cells; median: its median, else np.median(g))"""
     from aoi import to_grid
 
     def add(t, off):
@@ -283,7 +284,7 @@ def make_views(found, g):
     gc, gr = (int(v) for v in to_grid(*VIEW_AT["eck_ground"]))
     eck = [ec, float(g[gr, gc]) + 5, er]
     views["eck"] = dict(label="Dreiflüsseeck", target=eck, pos=add(eck, (380, 230, 60)))
-    mid = [W_ * 0.5, float(np.median(g)) + 10, H_ * 0.5]
+    mid = [W_ * 0.5, float(np.median(g) if median is None else median) + 10, H_ * 0.5]
     views["city"] = dict(label="Whole map", target=mid, pos=add(mid, (0, 2500, 1300)))
     return views
 

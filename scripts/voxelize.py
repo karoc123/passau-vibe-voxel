@@ -32,7 +32,7 @@ from shapely.geometry import LineString, Point, shape
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import BASE, C0, CX, CY, D, R0, THETA, W
+from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, THETA, W
 from osm import OSM
 import landmarks
 import region
@@ -622,7 +622,7 @@ for oid, t, line in osm.lines:
         if hw in ROADS or base in ROADS:
             bridge_road_polys.append(poly)
         if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private"):
-            bridge_roads.append((line, w))  # (not a footbridge tagged living_street for service vans only)
+            bridge_roads.append((line, w, oid))  # (not a footbridge tagged living_street for service vans only)
         continue
     if hw in ROADS or base in ROADS:
         _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
@@ -749,9 +749,13 @@ burn(gcol, water)
 # lines across the river; it drops ~0.3 m across the map, so one level per stretch is truthful: a body's median
 # ground. Both per block of 64 m, from the window of 192 m round it (region.py: the same in every region): a body is
 # its cells within the window, its size and its level are counted there
-from aoi import RIVER_LEVEL
+from aoi import RIVER_LEVEL, RIVER_STRETCHES, river_level
+# (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
+# everywhere subtracts exactly as the scalar did)
+RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
+RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
 _w0 = gcol == C["water"]
-_near_lv = np.abs(dtm - RIVER_LEVEL) < 0.8
+_near_lv = np.abs(dtm - RIVER_LV) < 0.8
 _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
 _wat = np.zeros((D, W), bool)
 _wlev = np.full((D, W), -1, np.int32)
@@ -773,7 +777,7 @@ for _b in region.blocks(64):
         for i_ in _ids:
             _lut[i_] = int(np.median(_gw[_bl == i_]))
         _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
-note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
+note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
 gcol[_wat] = C["water"]
 # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
 # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay)
@@ -784,7 +788,7 @@ exg[_calm] = -1
 _fw = (_wlev >= 0) & (gcol == C["water"])
 g[_fw] = _wlev[_fw]
 note("water cells flattened to their body's level:", int(_fw.sum()))
-splash_pads = [geom for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not tunnelish(t)]
+splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not tunnelish(t)]
 
 # zebra crossings + lane markings on asphalt
 asph = np.isin(gcol, [C["asphalt"], C["asphalt_l"], C["parking"], C["road_paving"]])
@@ -2577,7 +2581,7 @@ _tr = []
 for t in all_trees:
     if not in_core(int(t["y"]), int(t["x"])):
         continue
-    rec = dict(id=t["id"], x=round(t["x"] + C0, 1), y=round(t["y"] + R0, 1), src=t["src"], drawn=t.get("drawn"))
+    rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
     for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
                         ("bv_height", "h_bv"), ("con", "con")):
         if t.get(k_src) is not None:
@@ -2585,7 +2589,7 @@ for t in all_trees:
     if t["src"] == "lidar":
         key = [2, -t["peak"], int(t["y"]) + R0, int(t["x"]) + C0]
     else:
-        key = [0 if t["src"] == "osm" else 1, t["k"]]
+        key = [0, t["osm"]] if t["src"] == "osm" else [1, t["k"]]  # (OSM's: its id, the file's order in any cut of it)
     _tr.append(dict(key=key, rec=rec))
 RESULT["trees"] = _tr
 # which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as a tree's id here
@@ -2610,7 +2614,7 @@ GRAN = [pal("#6a6e71"), pal("#62666a"), pal("#72767a")]
 SHARD, DRAIN, RING = pal("#4a4d50"), pal("#3a3c3f", M_METAL), pal("#b9bdc0", M_METAL)
 n_jets = 0
 jets = []  # (key in the map's order, jet): regions.py keeps a region's in its core
-for i_pad, geom in enumerate(splash_pads):
+for rel_pad, oid_pad, geom in splash_pads:  # (keyed by OSM type and id: the file's order, in any region's cut of it)
     rr, cc = cells_of(geom)
     if len(rr) == 0:
         continue
@@ -2631,7 +2635,7 @@ for i_pad, geom in enumerate(splash_pads):
             v = SHARD
         elif r % 2 == 0 and c % 2 == 0:
             v = RING
-            jets.append(([i_pad, int(r) + R0, int(c) + C0], [c + C0 + 0.5, int(z0 + 1), r + R0 + 0.5]))  # rendered as animated water columns in the viewer
+            jets.append(([rel_pad, oid_pad, int(r) + R0, int(c) + C0], [c + MC0 + 0.5, int(z0 + 1), r + MR0 + 0.5]))  # rendered as animated water columns in the viewer
             n_jets += 1
         else:
             v = SHARD if cell_hash(r, c, 7) % 23 == 0 else GRAN[k % 3]
@@ -2680,7 +2684,7 @@ def kerb(c, r):
 
 lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
 LAMP_KEYS = []
-for i_lamp, (oid, t, p) in enumerate(osm.nodes_with("highway", ("street_lamp",))):
+for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids, the file's order in any cut of it)
     c, r = kerb(int(p.x), int(p.y)) or (-1, -1)
     if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
         continue
@@ -2689,7 +2693,7 @@ for i_lamp, (oid, t, p) in enumerate(osm.nodes_with("highway", ("street_lamp",))
     vol[z0:z0 + hgt - 1, r, c] = np.where(vol[z0:z0 + hgt - 1, r, c] == 0, C["pole"], vol[z0:z0 + hgt - 1, r, c])
     vol[z0 + hgt - 1, r, c] = C["lamp"]
     lamps.append((c, r, int(z0 + hgt - 1)))
-    LAMP_KEYS.append([0, i_lamp])
+    LAMP_KEYS.append([0, oid])
 note("street lamps:", len(lamps))
 lamp_xy = np.array([(c, r) for c, r, _ in lamps], float) if lamps else np.zeros((0, 2))
 # park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
@@ -2700,7 +2704,7 @@ _park_u = _uu(_parks).buffer(0) if _parks else None
 _pwalk = np.zeros((D, W), np.uint8)
 burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
 n_pl = 0
-for i_line, (oid, t, line) in enumerate(osm.lines):
+for oid, t, line in osm.lines:
     if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or tunnelish(t) or on_bridge(t):
         continue
     name = (t.get("name") or "").lower()
@@ -2727,7 +2731,7 @@ for i_line, (oid, t, line) in enumerate(osm.lines):
             vol[z0:z0 + 3, r, c] = C["pole"]
             vol[z0 + 3, r, c] = C["lamp"]
             lamps.append((c, r, z0 + 3))
-            LAMP_KEYS.append([1, i_line, i_part, k])
+            LAMP_KEYS.append([1, oid, i_part, k])
             lamp_xy = np.vstack([lamp_xy, [c, r]])
             n_pl += 1
 note("park and promenade lamps:", n_pl)
@@ -2989,7 +2993,7 @@ def bridgehead_fill(deck, zt_):
     burn(seed, [(Point(p_).buffer(20), 1) for p_ in sorted(open_ends)])
     # nor the banks: over the water the surface model is a smooth sheet metres up (the Ilz under its bridges), and
     # ground within 2 m of the rivers' level is their bank or bed
-    near_water = ndimage.binary_dilation(gcol == C["water"], iterations=4) | (g <= RIVER_LEVEL - BASE + 2)
+    near_water = ndimage.binary_dilation(gcol == C["water"], iterations=4) | (g <= RIVER_LV - BASE + 2)
     cand = ~deck & ~bmask & ~near_water & ~veg & flat & (dmin - g >= 2) & (under == 0)
     NEG = np.float32(-1e4)
     src = deck & (seed > 0)
@@ -3118,7 +3122,7 @@ note("bridge pylons from LiDAR:", n_pyl)
 # carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
 _bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])
 n_bl = 0
-for i_br, (line, w) in enumerate(bridge_roads):
+for line, w, i_br in bridge_roads:
     for k_, dist in enumerate(np.arange(10, line.length - 6, 32.0)):
         p = line.interpolate(dist)
         q_ = line.interpolate(min(dist + 1, line.length))
@@ -3320,10 +3324,10 @@ PLANES = plane_codes()
 # the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
 import window
 from aoi import MAP_D, MAP_W
-_kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + R0, CORE_SL[0].stop + R0, CORE_SL[1].start + C0, CORE_SL[1].stop + C0)
+_kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + MR0, CORE_SL[0].stop + MR0, CORE_SL[1].start + MC0, CORE_SL[1].stop + MC0)  # (map cells)
 _win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
 _ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
-_es = (slice(_ea - R0, _eb - R0), slice(_ec - C0, _ed - C0))
+_es = (slice(_ea - MR0, _eb - MR0), slice(_ec - MC0, _ed - MC0))
 RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
                                                             _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
                                                             **EXPORT_IDS).items()}
@@ -3377,9 +3381,13 @@ np.save(RDIR / "vol.npy", np.ascontiguousarray(vol[(slice(None),) + CORE_SL]))
 # (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
 # this region's to add)
 _used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
+_gc = CORE_OUT["g"][CORE_SL].astype(np.int64)  # (a histogram of the core's ground: the map's median, regions.py)
+RESULT["g_hist"] = [int(_gc.min()), np.bincount((_gc - _gc.min()).ravel()).tolist()]
 RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
-              lamps=[[k_, [c + C0, r + R0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
+              lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
               jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], notes=report["notes"],
               osm_timestamp=osm.timestamp)
+import region_inputs
+RESULT["deps"] = region_inputs.deps_of_process()  # (the code this region read: regions.py rebuilds it when that changes)
 json.dump(RESULT, open(RDIR / "out.json", "w"))
 print("done")
