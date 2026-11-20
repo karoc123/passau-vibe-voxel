@@ -26,6 +26,9 @@ interface StickEvents {
 // a pinch with it, not a second stick: the two thumbs of the sticks are far apart (on a phone, portrait ~200 px,
 // landscape ~600 px), a pinch's fingers close; and a stick in use has moved
 const PINCH_NEAR = 0.35, PINCH_STILL = 20;
+// the first finger of a pinch is a stick until the second lands: for its first moments (still, the only one) it is
+// not read yet (the getters, onMove), so a pinch never steers, walks or turns on the way in
+const PINCH_WINDOW = 120; // ms
 
 export function stickAxis(offset: number, radius: number) {
   return Math.sign(offset) * Math.max(0, Math.abs(offset) - DEAD_ZONE) / (radius - DEAD_ZONE);
@@ -55,7 +58,7 @@ export class TouchSticks {
   private readonly rings: Record<Side, Rings> = { left: new Rings(), right: new Rings() };
   private pinch: { pts: Map<number, { x: number; y: number }>; d: number } | null = null;
 
-  constructor(private readonly canvas: HTMLElement, events: StickEvents = {}) {
+  constructor(private readonly canvas: HTMLElement, private readonly events: StickEvents = {}) {
     canvas.addEventListener('pointerdown', e => {
       if (!this.active || e.pointerType !== 'touch') return;
       const bounds = canvas.getBoundingClientRect();
@@ -99,7 +102,7 @@ export class TouchSticks {
       stick.dx = e.clientX - stick.startX;
       stick.dy = stick.startY - e.clientY;
       this.rings[side].show(stick);
-      events.onMove?.(side, stick);
+      if (!this.undecided(stick)) events.onMove?.(side, stick);
     });
     canvas.addEventListener('pointerup', e => {
       if (this.pinch?.pts.has(e.pointerId)) { this.endPinch(); return; } // (the other finger then does nothing until lifted)
@@ -111,7 +114,7 @@ export class TouchSticks {
       events.onEnd?.(side, stick);
     });
     const interrupt = () => {
-      if (!this.left && !this.right) return;
+      if (!this.sticks.left && !this.sticks.right) { this.endPinch(); return; }
       this.clear();
       events.onInterrupted?.();
     };
@@ -124,8 +127,16 @@ export class TouchSticks {
     addEventListener('resize', interrupt);
   }
 
-  get left(): Readonly<Stick> | null { return this.sticks.left; }
-  get right(): Readonly<Stick> | null { return this.sticks.right; }
+  get left(): Readonly<Stick> | null { return this.decided(this.sticks.left); }
+  get right(): Readonly<Stick> | null { return this.decided(this.sticks.right); }
+
+  private decided(s: Stick | null) { return s && !this.undecided(s) ? s : null; }
+
+  // a lone stick just put down that has hardly moved: maybe the first finger of a pinch (see PINCH_WINDOW)
+  private undecided(s: Readonly<Stick>) {
+    return !!this.events.onPinch && !(this.sticks.left && this.sticks.right) &&
+      performance.now() - s.t < PINCH_WINDOW && Math.hypot(s.dx, s.dy) < PINCH_STILL;
+  }
 
   setActive(active: boolean) {
     this.active = active;
@@ -149,6 +160,6 @@ export class TouchSticks {
   }
 
   private sideOf(id: number): Side | null {
-    return this.left?.id === id ? 'left' : this.right?.id === id ? 'right' : null;
+    return this.sticks.left?.id === id ? 'left' : this.sticks.right?.id === id ? 'right' : null;
   }
 }

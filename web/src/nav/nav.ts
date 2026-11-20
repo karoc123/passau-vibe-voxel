@@ -25,6 +25,8 @@ export interface Ride extends Picked {
   dyaw: number;
   dpitch: number;
   idle: number;
+  /** how far out the camera is (wheel, pinch): behind, a factor on the chase distance; at the eyes, on the field of view */
+  zoom: number;
 }
 interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean; thirdPerson?: boolean }
 interface Transition { from: THREE.Vector3; fromQ: THREE.Quaternion; fromFov: number; t0: number; ms: number }
@@ -263,8 +265,8 @@ export class Nav {
       }
       if (ptrs.size === 2 && pinch0) {
         const [a, b] = two(), d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
-        if (this.mode === 'pedestrian') {
-          this.pedestrian?.zoom(Math.log(pinch0.d / d));
+        if (this.mode === 'pedestrian' || this.mode === 'ride') {
+          if (this.mode === 'ride') this.zoomRide(pinch0.d / d); else this.pedestrian?.zoom(Math.log(pinch0.d / d));
           pinch0.d = d;
         } else this.setFov(pinch0.fov * pinch0.d / d);
         return;
@@ -303,7 +305,8 @@ export class Nav {
     if (this.mode === 'orbit') { this.zoomT = performance.now(); return; }
     e.preventDefault();
     if (this.mode === 'pedestrian') { this.pedestrian?.zoom(clamp(e.deltaY * 0.003, -0.4, 0.4)); return; }
-    if (e.ctrlKey || this.mode === 'ride') { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
+    if (this.mode === 'ride') { this.zoomRide(Math.exp(e.deltaY * 0.004)); return; }
+    if (e.ctrlKey) { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
     if (e.deltaY > 0) { // keep scrolling back and you rise to the bird's-eye view
       const now = performance.now();
       this.wheelBack = (now - this.wheelBackT < 600 ? this.wheelBack : 0) + e.deltaY;
@@ -396,6 +399,11 @@ export class Nav {
   private dir() { return new THREE.Vector3().subVectors(this.controls.target, this.camera.position); }
 
   private setFov(f: number) { this.camera.fov = clamp(f, 20, 80); this.camera.updateProjectionMatrix(); }
+
+  /** riding or driving: the camera out (ratio > 1) or in, as the wheel and a pinch (drive.ts) do (ride.ts rideCamera) */
+  zoomRide(ratio: number) {
+    if (this.ride) this.ride.zoom = clamp(this.ride.zoom * ratio, 0.5, 2.2);
+  }
 
   // the nose moves, the camera stays (A/D, Q/E). Above level too: OrbitControls' tilt limit follows the keys, so it
   // never swings the camera to get the focus back below it; clamp() restores it once you look down again.
@@ -603,7 +611,7 @@ export class Nav {
     this.rememberSky();
     this.releasePedestrianMouse();
     this.pedestrian?.hide();
-    this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0 };
+    this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
     this.landing = this.transition(1100);
     this.mode = 'ride';
     if (this.life) this.life.keep = ag.obj;
@@ -774,7 +782,7 @@ export class Nav {
     const pose = life?.pose(R.kind, R.obj);
     if (!pose) { // it left the map: the nearest one of the same kind, else on foot
       const next = life?.nearest(R.kind, { x: this.camera.position.x, z: this.camera.position.z }, R.obj);
-      if (next) { const view = R.view; this.startRide(next); this.ride!.view = view; } else this.hopOff();
+      if (next) { const { view, zoom } = R; this.startRide(next); Object.assign(this.ride!, { view, zoom }); } else this.hopOff();
       return;
     }
     if (this.driving && R.view === 'behind') {
@@ -799,7 +807,7 @@ export class Nav {
       if (!p) return;
       this.possessed = o;
       o.ctl = { x: p.x, y: p.y, z: p.z, h: p.h, moving: false };
-      Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0 });
+      Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
       this.landing = this.transition(1100);
       this.onMode(this.mode, R);
       this.walkPos.set(p.x, p.y + EYE, p.z);

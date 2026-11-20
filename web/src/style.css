@@ -193,6 +193,13 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   touch-action: none; -webkit-user-select: none; user-select: none; }
 #jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
 @media (pointer: coarse) { body.on-foot:not(.noui) #jump-button { display: grid; place-items: center; } }
+/* landscape: the right thumb rests ~100-150 px in from the bottom right corner, so the button sits on the edge beside
+   it, just above the "?" (#credits-button: 8 px in, 44 px), out of the stick's ring (radius <= 72 px around the thumb)
+   and far from the bar (top left); the safe area keeps it off a notch or the home indicator */
+@media (pointer: coarse) and (orientation: landscape) {
+  #jump-button { width: 56px; height: 56px; right: max(10px, calc(env(safe-area-inset-right, 0px) + 6px));
+    bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 44px + 12px); }
+}
 #hud .hint { max-width: min(300px, calc(100vw - 100px)); line-height: 1.4; }
 #hud .hint:empty { display: none; }
 /* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */

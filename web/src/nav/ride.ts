@@ -19,11 +19,13 @@ export function rideCamera(R: Ride, pose: Pose, world: World | null) {
   if (R.view === 'eyes') {
     const bus = R.obj.kind === 'car' && R.obj.bus ? R.obj : null;
     const ahead = bus ? bus.len / 2 + 0.25 : rig.eye[1], up = bus ? 2.3 : rig.eye[0];
-    return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: rig.fov };
+    return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: THREE.MathUtils.clamp(rig.fov * R.zoom, 25, 80) };
   }
-  const pos = base.clone().addScaledVector(new THREE.Vector3(look.x, 0, look.z).normalize(), -rig.back);
-  pos.y = base.y + rig.up;
-  return { pos: world ? clearOf(world, base, pos, rig.up, R.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };
+  // (zoomed: further back and higher up alike, the same angle down)
+  const back = rig.back * R.zoom, high = rig.up * R.zoom;
+  const pos = base.clone().addScaledVector(new THREE.Vector3(look.x, 0, look.z).normalize(), -back);
+  pos.y = base.y + high;
+  return { pos: world ? clearOf(world, base, pos, high, R.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };
 }
 
 // keep the chase camera clear: under a deck or a tree drop lower first, only then pull in towards the agent

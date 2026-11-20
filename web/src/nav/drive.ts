@@ -26,7 +26,7 @@ export class DriveMode {
   private readonly speed = el('div', 'drive-speed', '', this.details);
   private readonly help = el('div', 'drive-help', `
     <span class="drive-help-keys">W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit</span>
-    <span class="drive-help-touch">Drag left thumb up for gas or down to brake/reverse. Drag right thumb sideways to steer or down for the handbrake.</span>
+    <span class="drive-help-touch">Drag left thumb up for gas or down to brake/reverse. Drag right thumb sideways to steer or down for the handbrake. Pinch to zoom.</span>
   `, this.details);
   private pending: Ride | null = null;
   private driving: { ride: Ride; session: DriveSession } | null = null;
@@ -42,7 +42,8 @@ export class DriveMode {
       const idle = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
       if (idle) idle(() => this.loadRapier(), { timeout: 3000 }); else this.loadRapier();
     }, RAPIER_AFTER_MS);
-    this.touch = new TouchSticks(canvas);
+    // two fingers close together pinch the chase camera in and out (at the eyes, the field of view; nav.ts zoomRide)
+    this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio) });
     this.panel.className = 'drive-mode';
     this.panel.setAttribute('aria-label', 'Drive a car');
     host.append(this.panel);
