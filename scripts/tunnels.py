@@ -21,6 +21,7 @@ import numpy as np
 
 FLOOR = None
 IDS = set()
+LOWERED = {}  # (r, c) -> the hill's surface over a bored column whose ground build() lowered to the bore's floor
 CARRIAGE = ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service",
             "living_street")
 FOOT = ("footway", "path", "cycleway", "pedestrian", "bridleway")
@@ -121,9 +122,19 @@ def plan(osm, g):
     return out
 
 
+def surface(g):
+    """g with the hill's surface again over the bores (the ground rasters the map's other passes read: far terrain,
+    objects, labels), not the bores' floors the tiles take"""
+    g = g.copy()
+    for (r, c), z in LOWERED.items():
+        g[r, c] = max(int(g[r, c]), z)
+    return g
+
+
 def build(vol, g, pal, C, stone, note, tunnels):
     """bore the tunnels of plan() into vol; g drops to the road where the approach is cut open"""
     global FLOOR
+    LOWERED.clear()
     D, W = g.shape
     H = vol.shape[0]
     FLOOR = np.full((D, W), -1, np.int16)
@@ -194,7 +205,12 @@ def build(vol, g, pal, C, stone, note, tunnels):
         vol[z0:min(z1, H), r, c] = 0
         if not bore[(r, c)] and (r, c) not in wall and z1 >= g0[r, c]:
             g[r, c] = z0  # cut open: the ground is the road now
-        elif (r, c) in wall and z1 > z0:
+        elif z1 > z0 and ((r, c) in wall or bore[(r, c)]):
+            # the bore's floor is the column's ground: the tiles' ground is solid from 0 up to it for the viewer's
+            # collision (nav/voxel-collision.ts, physics/rapier/terrain.ts) and the car's surface, and the rock over
+            # the bore stays as the voxels above it (base runs); surface() gives back the hill's for the rasters
+            if z0 < g[r, c] and (r, c) not in wall:
+                LOWERED[(r, c)] = int(g[r, c])
             g[r, c] = min(int(g[r, c]), z0)
     # line what the bore and the cut bare -- the ground's voxels, not what stands on it: masonry in the cut, a pale
     # lining in the tunnel, instead of the soil inside the hill

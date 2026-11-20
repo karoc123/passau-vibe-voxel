@@ -40,6 +40,10 @@ export const SHOTS = {
   // the Schanzlbrücke's deck (ramped as a street, ramps.ts): along it from its south end, and from the side
   'schanzl-deck': 'cam=1210,23,505,1232,19,575',
   'schanzl-side': 'cam=1190,26,548,1226,18,562',
+  // the B 12's tube under the Georgsberg (scripts/tunnels.py): its south-east portal, inside, the north-west portal
+  'tunnel-portal-se': 'cam=2552,14,460,2540,11,486',
+  'tunnel-inside': 'cam=2539,12.5,487,2522,12,502',
+  'tunnel-portal-nw': 'cam=2496,14,512,2516,11,504',
   'street-night': `${STREET}&hour=22`,
   'oberhaus-night': 'view=oberhaus&hour=22',
   'oberhaus-autumn': 'view=oberhaus&date=10-20',

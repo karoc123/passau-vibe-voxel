@@ -154,3 +154,20 @@ export async function runCollisionChecks(): Promise<CheckOutcome[]> {
   out.push({ name: 'collision_surface', pass: s?.top === 15 && s.ground === 10 && g?.top === 10, detail: { deckTop: s?.top ?? null, deckGround: s?.ground ?? null, roadTop: g?.top ?? null } });
   return out;
 }
+
+// The drone flown along a path on the real data (tools/collision.mjs: through a tunnel under a hill, scripts/tunnels.py)
+// at `lift` m over each point's level; path: [x, z, level]; files: the gzipped node files at data/tiles/{1,1f}/x_y.bin.
+// Returns the first hit (the segment, what it hit) or null for a clear flight.
+export async function sweepPath(meta: Meta, files: Map<string, Uint8Array>, path: [number, number, number][], lift: number) {
+  serve(files);
+  const c = new VoxelCollision(meta);
+  for (let k = 0; k < path.length - 1; k++) {
+    const p = new Vector3(path[k][0], path[k][2] + lift, path[k][1]);
+    const d = new Vector3(path[k + 1][0] - path[k][0], path[k + 1][2] - path[k][2], path[k + 1][1] - path[k][1]);
+    let s = c.sweep(p, d);
+    for (let i = 0; s === 'loading' && i < 2000; i++) { c.prefetch(p, d); await new Promise((r) => setTimeout(r, 5)); s = c.sweep(p, d); }
+    if (s === 'loading') throw new Error('collision tiles never loaded');
+    if (s.hit) return { at: k, hit: s.hit, fraction: r3(s.fraction), x: path[k][0], z: path[k][1], y: path[k][2] + lift };
+  }
+  return null;
+}

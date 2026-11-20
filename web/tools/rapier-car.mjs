@@ -145,9 +145,63 @@ async function schanzlBridge() {
   return { name: 'schanzl_bridge', pass: end.z > 690 && detail.minUp > 0.9 && acc < 25 && pr < 0.6 && detail.liftPct < 2, detail };
 }
 
+// Through a tunnel under a hill (scripts/tunnels.py: the B 12 under the Georgsberg by Veste Oberhaus) on the real
+// data: the traffic road (traffic.json, its points at the bore's floor) with the most points 5 m or more under the
+// voxels over them, driven at 30 km/h. Skipped (null) without data, without such a road, or where the tiles' ground
+// still stands over the bore (data from before the bores' floors became the ground: solid for the car).
+async function tunnelRoad() {
+  if (!fs.existsSync(`${root}public/data/traffic.json`)) return null;
+  const TD = await load('tile-data.ts');
+  const meta = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8')), N = meta.tiles.N, S = N + 2;
+  const cache = new Map();
+  const col = (x, z) => {
+    const k = `${Math.floor(x / N)}_${Math.floor(z / N)}`;
+    if (!cache.has(k)) { const f = `${root}public/data/tiles/1/${k}.bin`; cache.set(k, fs.existsSync(f) ? TD.decodeTile(zlib.gunzipSync(fs.readFileSync(f)).buffer, N) : null); }
+    const t = cache.get(k);
+    if (!t) return null;
+    const c = (Math.floor(x) % N) + 1 + S * ((Math.floor(z) % N) + 1);
+    let k0 = 0;
+    for (let i = 0; i < c; i++) k0 += t.counts[i];
+    const top = t.counts[c] ? t.runs[(k0 + t.counts[c] - 1) * 3] + t.runs[(k0 + t.counts[c] - 1) * 3 + 1] : 0;
+    return { ground: t.ground[c], top };
+  };
+  const traffic = JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8'));
+  let best = null;
+  for (const r of traffic.roads) {
+    let n = 0;
+    for (const q of r.p) { const c = col(q[0], q[1]); if (c && c.top - q[2] >= 5) n++; }
+    if (n >= 4 && (!best || n > best.n)) best = { r, n };
+  }
+  if (!best) return null;
+  const inside = best.r.p.filter((q) => { const c = col(q[0], q[1]); return c && c.top - q[2] >= 5; });
+  const blocked = inside.filter((q) => col(q[0], q[1]).ground > q[2] + 1).length;
+  if (blocked > inside.length / 2) { console.log(`skip  tunnel_road            (the tiles' ground still over the bore: ${blocked}/${inside.length} points; data needs regenerating)`); return null; }
+  const pts = [];
+  const P = best.r.p;
+  for (let k = 0; k < P.length - 1; k++) {
+    const n = Math.max(1, Math.ceil(Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1])));
+    for (let i = 0; i < n; i++) pts.push([P[k][0] + (P[k + 1][0] - P[k][0]) * i / n, P[k][1] + (P[k + 1][1] - P[k][1]) * i / n]);
+  }
+  pts.push([P[P.length - 1][0], P[P.length - 1][1]]);
+  let L = 0;
+  for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+  const map = await realMap(pts, 48);
+  const h = Math.atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+  const s = new sc.Sim(map, { x: pts[0][0], y: P[0][2] + 1.5, z: pts[0][1] }, h, 30 / 3.6);
+  s.run(L / (30 / 3.6) * 1.6 + 2, sc.follow(pts, 30));
+  const end = pts[pts.length - 1], last = s.log[s.log.length - 1];
+  const zMax = Math.max(...P.map((q) => q[2]));
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const detail = { x0: r2(pts[0][0]), z0: r2(pts[0][1]), length: r2(L), inside: inside.length, left: r2(Math.hypot(last.x - end[0], last.z - end[1])),
+    maxY: r2(Math.max(...s.log.map((l) => l.y))), roadLevel: zMax, minUp: r2(Math.min(...s.log.map((l) => l.up))), status: s.car.status };
+  s.dispose();
+  return { name: 'tunnel_road', pass: detail.left < 10 && detail.maxY < zMax + 4 && detail.minUp > 0.9, detail };
+}
+
 const ids = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--set');
 const out = [...await sc.runScenarios(ids.length ? ids : undefined), ...await ds.runDriveScenarios(ids.length ? ids : undefined)];
 if (!ids.length || ids.includes('schanzl_bridge')) { const o = await schanzlBridge(); if (o) out.push(o); }
+if (!ids.length || ids.includes('tunnel_road')) { const o = await tunnelRoad(); if (o) out.push(o); }
 if (args.includes('--json')) console.log(JSON.stringify(out, null, 1));
 else for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(22)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);
 process.exit(out.every((o) => o.pass) ? 0 : 1);
