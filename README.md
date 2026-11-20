@@ -252,11 +252,11 @@ window light on the street: `scripts/tile_fields.py`); the nodes shown hold page
 cd web
 pnpm check                                   # tsc
 pnpm build                                   # static site in web/dist
-node tools/shot_linux.mjs out.png "view=city&date=7-15&hour=13&weather=clear" 1600 1000   # headless screenshot (Linux/WSL)
+node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screenshot (see "Agent tools")
 ```
 
-`web/tools/` holds the upstream project's measurement and QA scripts (Playwright); most launch Chrome with macOS
-flags and several predate the current viewer, so expect to adapt them.
+`web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`) and the agent checks below (`shoot.mjs`,
+`physics.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 

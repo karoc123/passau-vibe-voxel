@@ -173,7 +173,7 @@ export class TileStreamer implements ColumnSource {
 
   columns(key: string) { return this.nodes.get(key)?.data; }
 
-  // what the tile meshes hold on the GPU (tools/perfbench.mjs): quads and vertex bytes, of all and of the shown ones
+  // what the tile meshes hold on the GPU (window.__streamer.stats() in the console): quads and vertex bytes, of all and of the shown ones
   // nothing being meshed or waiting to be
   get idle() { return this.inflight === 0 && this.queue.length === 0; }
 

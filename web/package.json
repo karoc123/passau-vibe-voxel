@@ -6,7 +6,6 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "shot": "node tools/shot.mjs",
     "check": "tsc --noEmit"
   },
   "dependencies": {
