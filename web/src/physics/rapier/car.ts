@@ -1,8 +1,12 @@
 // Rapier car: a drivable car on Rapier's DynamicRayCastVehicleController (raycast wheels on a chassis), with what the
 // voxel city needs on top of it (each switchable in CarTuning, for the scenarios in scenarios.ts):
-// - steps: a riser of up to STEP_MAX (a 1 m terrace or kerb) ahead of the moving car gets a short invisible wedge in
-//   front of it (a convex prism only the car collides with and its wheels ride on), so it drives up as on a steep
-//   ramp instead of hitting the riser; higher is a wall.
+// - ground: the car drives on its own surface where the ground goes up or down in steps of a metre (terrain.ts
+//   DRIVE_TOL: the ground's 1 m terraces as ramps, paved or not, and smoother than the ramps as drawn); its wheels'
+//   rays see that, not the voxels' tops there.
+// - steps: a riser of up to STEP_MAX that is not the ground's (a platform, a low wall) ahead of the moving car, up or
+//   down, gets an invisible wedge on its low side, laid before the front wheels reach its foot (prisms on a smoothstep
+//   profile, as wide as the car's crossing needs, that only the car collides with and its wheels ride on), so it
+//   drives up or down as on a ramp instead of hitting the riser or dropping off it; higher is a wall (or a drop).
 // - walls: the chassis has no friction or bounce against the world, so it glances along a wall instead of sticking to
 //   it; touching a wall turns the car towards the wall's direction (the way it slides).
 // - air: no wheel touching, the roll and pitch are damped and gently righted (the heading left alone).
@@ -11,7 +15,7 @@
 //   the driver is shaken, as variant A's).
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import type { RapierTerrain } from './terrain';
+import { CAR_GROUPS, CAR_ONLY_GROUPS, type RapierTerrain } from './terrain';
 
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
 export type CarStatus = 'ok' | 'water';
@@ -41,16 +45,15 @@ const MAX_STEER = 0.55;
 const TOP_SPEED = 22; // m/s (~80 km/h)
 export const CRASH_SPEED = Math.sqrt(2 * 9.81 * 8); // m/s into the ground: a fall of ~8 m
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
-const WEDGE_LEN = 2.8; // m: the wedge's run (a 1 m riser: ~20°)
-const WEDGE_W = 3.2; // m: its width along the riser
-// interaction groups (membership << 16 | filter): the car's chassis is in G_CAR, the wedges in G_WEDGE and meet only
-// G_CAR; other bodies (and queries that should not see the wedges) use WORLD_GROUPS, in neither
-const G_CAR = 1 << 0, G_WEDGE = 1 << 1;
-const CAR_GROUPS = (G_CAR << 16) | 0xffff;
-const WEDGE_GROUPS = (G_WEDGE << 16) | G_CAR;
-export const WORLD_GROUPS = ((0xffff & ~(G_CAR | G_WEDGE)) << 16) | 0xffff;
+// m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
+// ones launch the car off their top and drop its front at their foot: tools/rapier-car.mjs terrace_*)
+const WEDGE_LEN = 5, WEDGE_SEG = 3;
+const WEDGE_W_MAX = 6; // m: at most this far either side of the car's crossing along the riser
+// (the wedges are CAR_ONLY_GROUPS: only the car meets them; other bodies and queries use WORLD_GROUPS: terrain.ts)
 
-interface Wedge { collider: RAPIER.Collider; x: number; z: number; key: string; bornAt: number }
+// a wedge: its collider, its centre (physics coordinates), the riser it is on (grid plane, axis, low side, cells lo..hi
+// along it) and its half diagonal
+interface Wedge { colliders: RAPIER.Collider[]; x: number; z: number; ax: boolean; plane: number; sgn: number; lo: number; hi: number; reach: number; bornAt: number }
 
 export class RapierCar {
   readonly body: RAPIER.RigidBody;
@@ -90,8 +93,8 @@ export class RapierCar {
       c.addWheel({ x: w.x, y: -0.2, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, REST, WHEEL_R);
       const i = c.numWheels() - 1;
       c.setWheelSuspensionStiffness(i, 28);
-      c.setWheelSuspensionCompression(i, 2.6);
-      c.setWheelSuspensionRelaxation(i, 3.2);
+      c.setWheelSuspensionCompression(i, 3.5);
+      c.setWheelSuspensionRelaxation(i, 4.5);
       c.setWheelMaxSuspensionTravel(i, 0.35);
       c.setWheelMaxSuspensionForce(i, 60000);
       c.setWheelFrictionSlip(i, w.front ? 1.6 : 1.5);
@@ -143,7 +146,7 @@ export class RapierCar {
     // (the velocity before the springs' impulses: a landing's speed into the ground)
     const lv = this.body.linvel();
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
-    c.updateVehicle(dt);
+    c.updateVehicle(dt, undefined, CAR_GROUPS);
     if (this.tuning.steps) this.stepAssist(input, dt);
     if (this.tuning.air && this.wheelsInContact() === 0) this.airAssist(dt);
   }
@@ -170,7 +173,7 @@ export class RapierCar {
       // (sitting on the water's top its centre is ~0.9 m over it)
       if (w >= 0 && p.y < w + 1.2) this.status = 'water';
       // pushed into the ground (the colliders are a shell of voxels: a hard push can go through it): back on top
-      const top = this.terrain.solidTop(p.x + o.x, p.y, p.z + o.z);
+      const top = this.terrain.solidTop(p.x + o.x, p.y, p.z + o.z, true);
       if (top >= 0) {
         b.setTranslation({ x: p.x, y: top + 1, z: p.z }, true);
         b.setLinvel({ x: v.x, y: Math.max(0, v.y), z: v.z }, true);
@@ -179,13 +182,16 @@ export class RapierCar {
     // wedges the car has left
     for (let i = this.wedges.length - 1; i >= 0; i--) {
       const w = this.wedges[i], p = b.translation();
-      if (Math.hypot(p.x - w.x, p.z - w.z) > 7 || this.time - w.bornAt > 4) {
-        this.world.removeCollider(w.collider, false);
+      // (a slow climb may take a while: a wedge goes when the car is well clear of it)
+      if ((Math.hypot(p.x - w.x, p.z - w.z) > w.reach + HALF.z + 2 && this.time - w.bornAt > 0.5) || this.time - w.bornAt > 30) {
+        for (const c of w.colliders) this.world.removeCollider(c, false);
         this.wedges.splice(i, 1);
       }
     }
     return this.event;
   }
+
+  private isWedge(c: RAPIER.Collider) { return this.wedges.some((w) => w.colliders.includes(c)); }
 
   // is the chassis touching anything (the world or the wedges)?
   private touchingWorld() {
@@ -197,7 +203,8 @@ export class RapierCar {
     return any;
   }
 
-  // A riser ahead (from the chassis' cast along its horizontal velocity): a wedge in front of it if it is a step.
+  // A step ahead, up (a riser the chassis' cast along its horizontal velocity meets) or down (an edge the ground
+  // drops off by a step along the wheels' tracks): a wedge on its low side.
   private stepAssist(input: CarInput, dt: number) {
     // (on its wheels, or hung on an edge by its belly: a staircase of terraces narrower than the wheelbase)
     if (!this.terrain || (this.wheelsInContact() < 2 && !this.touchingWorld())) return;
@@ -208,52 +215,120 @@ export class RapierCar {
       const dir = input.gas > 0 ? 1 : input.brake > 0 ? -1 : 0;
       if (!dir) return;
       const f = new THREE.Vector3(0, 0, dir).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
-      dx = f.x; dz = f.z; hs = 1;
+      dx = f.x; dz = f.z; hs = 0;
     }
-    dx /= hs; dz /= hs;
-    const reach = (hs === 1 ? 1 : 0.4) + Math.min(hs, 25) * dt * 6;
+    const d = Math.hypot(dx, dz);
+    dx /= d; dz /= d;
+    // (moving: far enough that the wedge is there before the front wheels reach its foot)
+    const reach = hs ? WEDGE_LEN - (HALF.z - WHEELS[0].z) + 0.3 + Math.min(hs, 25) * dt * 3 : 1;
+    // the ground under the car: its lowest wheel contact
+    let low = Infinity;
+    for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) low = Math.min(low, this.controller.wheelContactPoint(i)!.y);
+    if (low === Infinity) low = p.y - 1.3; // (no wheel down: the chassis' belly is on something about here)
+    if (!this.stepUp(p, r, dx, dz, reach, low) && hs) this.stepDown(p, dx, dz, reach, low);
+  }
+
+  private stepUp(p: RAPIER.Vector, r: RAPIER.Rotation, dx: number, dz: number, reach: number, low: number) {
+    const terrain = this.terrain!;
     // (from a little higher: not the ground the belly may rest on, only what stands in the way)
     const hit = this.world.castShape({ x: p.x, y: p.y + 0.1, z: p.z }, r, { x: dx, y: 0, z: dz }, this.shape, 0.02, reach, false,
-      undefined, undefined, this.chassis, b, (col) => !this.wedges.some((w) => w.collider === col));
-    if (!hit) return;
+      undefined, CAR_GROUPS, this.chassis, this.body, (col) => !this.isWedge(col));
+    if (!hit) return false;
     // the riser's face: axis-aligned (voxels); its column and the one in front of it. A face hit square on gives it;
     // an edge (the riser's top edge against the chassis' bottom: the normal mostly up) the way the car goes
     const n = hit.normal1, face = Math.abs(n.y) < 0.5;
     const ax = face ? Math.abs(n.x) > Math.abs(n.z) : Math.abs(dx) > Math.abs(dz);
     const nx = ax ? (face ? Math.sign(n.x) : -Math.sign(dx)) : 0, nz = ax ? 0 : (face ? Math.sign(n.z) : -Math.sign(dz));
-    if (nx * dx + nz * dz > -0.2) return; // grazing it, not into it
-    const o = this.terrain.origin, w = hit.witness1;
+    if (nx * dx + nz * dz > -0.2) return false; // grazing it, not into it
+    const o = terrain.origin, w = hit.witness1;
     const wx = w.x + o.x, wz = w.z + o.z;
-    // the ground under the car: its lowest wheel contact
-    let low = p.y - 1.3; // (no wheel down: the chassis' belly is on something about here)
-    for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) low = Math.min(low, this.controller.wheelContactPoint(i)!.y);
-    const below = this.terrain.groundAt(wx + nx * 0.5, wz + nz * 0.5, low + STEP_MAX + 0.05);
-    const top = below === null ? null : this.terrain.groundAt(wx - nx * 0.5, wz - nz * 0.5, below + STEP_MAX + 0.05);
-    if (below === null || top === null) return;
-    const rise = top - below;
+    // (just either side of the riser's plane on the grid: a smooth ramp (ramps.ts) has no rise there, a riser all of it)
+    const plane = ax ? Math.round(wx) : Math.round(wz);
+    const gx = ax ? plane : wx, gz = ax ? wz : plane;
+    const below = terrain.groundAt(gx + nx * 0.05, gz + nz * 0.05, low + STEP_MAX + 0.05, true);
+    const top = below === null ? null : terrain.groundAt(gx - nx * 0.05, gz - nz * 0.05, below + STEP_MAX + 0.05, true);
+    if (below === null || top === null) return false;
     // (the riser's foot: the ground the lowest wheel is on, or a step above it under the belly)
-    if (rise < STEP_MIN || rise > STEP_MAX || below < low - 0.35 || below > low + STEP_MAX) return;
-    // room on top: nothing solid over the step for the car's height
-    if (!this.terrain.clear(wx - nx * 0.5, wz - nz * 0.5, top, 2)) return;
-    // the riser's plane (on the voxel grid) and a key for it (one wedge per riser cell and direction)
-    const fx = ax ? Math.round(wx) : wx, fz = ax ? wz : Math.round(wz);
-    const along = ax ? Math.round(wz) : Math.round(wx);
-    const key = `${ax ? 'x' : 'z'}${ax ? fx : fz}:${along}:${nx || nz}`;
-    if (this.wedges.some((q) => q.key === key)) return;
-    // the prism: the riser's foot (fx, fz) at `below`, its top edge at `top`, the slope running out WEDGE_LEN along n
-    const tx = -nz, tz = nx; // along the riser
-    const pts: number[] = [];
-    for (const s of [-WEDGE_W / 2, WEDGE_W / 2]) {
-      const ex = fx + tx * s, ez = fz + tz * s;
-      pts.push(ex, top, ez, ex, below - 0.02, ez, ex + nx * WEDGE_LEN, below - 0.02, ez + nz * WEDGE_LEN);
+    if (below < low - 0.35 || below > low + STEP_MAX) return false;
+    return this.wedge(ax, plane, nx || nz, below, top, p, dx, dz);
+  }
+
+  private stepDown(p: RAPIER.Vector, dx: number, dz: number, reach: number, low: number) {
+    const terrain = this.terrain!, o = terrain.origin;
+    const len = HALF.z + reach, sx = -dz, sz = dx;
+    for (const side of [0, -WHEELS[0].x, WHEELS[0].x]) {
+      let x = p.x + o.x + sx * side, z = p.z + o.z + sz * side;
+      let g = terrain.groundAt(x, z, low + 0.4, true);
+      if (g === null || Math.abs(g - low) > 0.4) continue;
+      for (let s = 0; s < len; s += 0.2) {
+        const x1 = x + dx * 0.2, z1 = z + dz * 0.2;
+        const cxd = Math.floor(x1) !== Math.floor(x), czd = Math.floor(z1) !== Math.floor(z);
+        const g1 = terrain.groundAt(x1, z1, g + 0.4, true);
+        if (g1 === null) break;
+        if ((cxd || czd) && g - g1 >= STEP_MIN) {
+          if (g - g1 > STEP_MAX) break; // a drop: no wedge
+          // (the edge crossed: the grid line between the two columns; the low side the way the car goes)
+          const ax = cxd && (!czd || Math.abs(dx) > Math.abs(dz));
+          const plane = ax ? Math.max(Math.floor(x), Math.floor(x1)) : Math.max(Math.floor(z), Math.floor(z1));
+          const sgn = ax ? Math.sign(dx) : Math.sign(dz);
+          const below = terrain.groundAt(ax ? plane + sgn * 0.05 : x1, ax ? z1 : plane + sgn * 0.05, g + 0.05, true);
+          if (below === null) break;
+          return this.wedge(ax, plane, sgn, below, g, p, dx, dz);
+        }
+        if (g1 - g > 0.4) break; // up: the cast's
+        x = x1; z = z1; g = g1;
+      }
     }
-    for (let i = 0; i < pts.length; i += 3) { pts[i] -= o.x; pts[i + 2] -= o.z; }
-    const desc = this.R.ColliderDesc.convexHull(new Float32Array(pts));
-    if (!desc) return;
-    const collider = this.world.createCollider(desc.setCollisionGroups(WEDGE_GROUPS).setFriction(0.9));
-    const cx = fx + nx * WEDGE_LEN / 2 - o.x, cz = fz + nz * WEDGE_LEN / 2 - o.z;
-    this.wedges.push({ collider, x: cx, z: cz, key, bornAt: this.time });
+    return false;
+  }
+
+  // A wedge on the low side of the riser in grid plane `plane` (x = plane if ax, else z = plane), the low side towards
+  // `sgn` along that axis, from `below` up to `top`: as wide as the car's crossing needs, over the riser's cells that
+  // are the same step (the same foot and top, room on top), its slope running out WEDGE_LEN.
+  private wedge(ax: boolean, plane: number, sgn: number, below: number, top: number, p: RAPIER.Vector, dx: number, dz: number) {
+    const terrain = this.terrain!, o = terrain.origin;
+    const rise = top - below;
+    if (rise < STEP_MIN || rise > STEP_MAX) return false;
+    const nx = ax ? sgn : 0, nz = ax ? 0 : sgn;
+    // where the car's path crosses the plane, along the riser
+    const px = p.x + o.x, pz = p.z + o.z;
+    const dn = ax ? dx : dz, t = Math.abs(dn) > 0.05 ? ((plane - (ax ? px : pz)) / dn) : 0;
+    const along0 = ax ? pz + dz * t : px + dx * t;
+    const cos = Math.max(0.2, Math.abs(dn)), sin = Math.sqrt(1 - Math.min(1, cos * cos));
+    const halfW = Math.min(WEDGE_W_MAX, (HALF.x + 0.4) / cos + HALF.z * sin);
+    const same = (k: number) => {
+      const lx = ax ? plane + nx * 0.05 : k + 0.5, lz = ax ? k + 0.5 : plane + nz * 0.05;
+      const ux = ax ? plane - nx * 0.05 : k + 0.5, uz = ax ? k + 0.5 : plane - nz * 0.05;
+      const b = terrain.groundAt(lx, lz, below + 0.3, true), u = terrain.groundAt(ux, uz, top + 0.05, true);
+      return b !== null && u !== null && Math.abs(b - below) < 0.15 && Math.abs(u - top) < 0.15
+        && terrain.clear(ax ? plane - nx * 0.5 : k + 0.5, ax ? k + 0.5 : plane - nz * 0.5, top, 2);
+    };
+    const k0 = Math.floor(along0);
+    if (!same(k0)) return false;
+    let lo = k0, hi = k0;
+    while (lo > along0 - halfW && same(lo - 1)) lo--;
+    while (hi + 1 < along0 + halfW && same(hi + 1)) hi++;
+    // (one wedge per stretch of riser and side)
+    if (this.wedges.some((w) => w.ax === ax && w.plane === plane && w.sgn === sgn && w.lo <= hi && w.hi >= lo)) return false;
+    // the prism: the riser's foot at `below`, its top edge at `top`, the slope running out WEDGE_LEN along n
+    const colliders: RAPIER.Collider[] = [], K = WEDGE_SEG;
+    const h = (t: number) => { const u = 1 - t / WEDGE_LEN; return below + rise * (K > 1 ? u * u * (3 - 2 * u) : u); };
+    for (let i = 0; i < K; i++) {
+      const t0 = WEDGE_LEN * i / K, t1 = WEDGE_LEN * (i + 1) / K;
+      const pts: number[] = [];
+      for (const k of [lo, hi + 1]) {
+        const ex = ax ? plane : k, ez = ax ? k : plane;
+        for (const [t, y] of [[t0, h(t0)], [t0, below - 0.02], [t1, below - 0.02], [t1, h(t1)]]) pts.push(ex + nx * t - o.x, y, ez + nz * t - o.z);
+      }
+      const desc = this.R.ColliderDesc.convexHull(new Float32Array(pts));
+      if (desc) colliders.push(this.world.createCollider(desc.setCollisionGroups(CAR_ONLY_GROUPS).setFriction(0.9)));
+    }
+    if (!colliders.length) return false;
+    const mid = (lo + hi + 1) / 2;
+    const cx = (ax ? plane + nx * WEDGE_LEN / 2 : mid) - o.x, cz = (ax ? mid : plane + nz * WEDGE_LEN / 2) - o.z;
+    this.wedges.push({ colliders, x: cx, z: cz, ax, plane, sgn, lo, hi, reach: Math.hypot(WEDGE_LEN, hi + 1 - lo) / 2, bornAt: this.time });
     this.event = { kind: 'step', speed: rise };
+    return true;
   }
 
   // In the air: roll and pitch damped and gently righted (a car that flips on landing ends no drive, but it shouldn't
@@ -272,7 +347,7 @@ export class RapierCar {
     const b = this.body;
     let nx = 0, nz = 0;
     this.world.contactPairsWith(this.chassis, (other) => {
-      if (this.wedges.some((w) => w.collider === other)) return;
+      if (this.isWedge(other)) return;
       this.world.contactPair(this.chassis, other, (m, flipped) => {
         if (m.numContacts() === 0) return;
         const n = m.normal();
@@ -316,7 +391,7 @@ export class RapierCar {
   }
 
   dispose(world: RAPIER.World) {
-    for (const w of this.wedges) world.removeCollider(w.collider, false);
+    for (const w of this.wedges) for (const c of w.colliders) world.removeCollider(c, false);
     this.wedges.length = 0;
     world.removeVehicleController(this.controller);
     world.removeRigidBody(this.body);

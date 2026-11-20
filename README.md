@@ -234,6 +234,15 @@ checks and feel numbers (0-100 km/h, stop distance, air time, impact speeds); ex
 after a handling change, `--trace cliff-3m --every 9` prints a run step by step as CSV. A new case is a few lines in
 `SCENARIOS`; check any change to `arcade-car.ts`, `body.ts`, `voxel-collision.ts`, `ramps.ts` with it.
 
+**Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel
+terrain (`src/physics/rapier/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
+ramps along, across and diagonal, a bridge. Ground and slope cases print how much the car wobbles (`pitchJit`,
+`rollJit`: RMS of the pitch and roll rate less their 0.5 s mean, rad/s; `liftPct`: share of samples with a wheel
+off the ground; `lifts`: how often one left it). `--real X,Z,HEADING,KMH,SECS` drives straight in the real city,
+`--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest ten roads both ways and
+prints the mean wobble (the benchmark for the car's feel on real ramps). `node tools/rapier-car-bench.mjs`: collider
+build and step costs along a route.
+
 **Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres). Only the 128 m tiles within R m of the camera's first
 target are loaded and drawn, no far ground; the rest of the map is empty. With `cam=` it frames any spot; Ctrl+C in the
 viewer copies a `?cam=` link of the spot under the mouse. `crop=192` is a 4 x 4-tile patch: ~16 nodes instead of

@@ -7,9 +7,9 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Meta } from '../../types';
-import { RapierCar, WORLD_GROUPS, type CarEvent, type CarInput } from './car';
+import { RapierCar, type CarEvent, type CarInput } from './car';
 import { Ragdoll } from './ragdoll';
-import { CHUNK, RapierTerrain } from './terrain';
+import { CHUNK, RapierTerrain, WORLD_GROUPS } from './terrain';
 
 const STEP = 1 / 60;
 const MAX_STEPS = 4;

@@ -7,19 +7,27 @@
 //
 // The world is cut in CHUNK x CHUNK m chunks. A chunk within REACH of a dynamic body gets one Voxels collider (only the
 // voxels with a face to the air: the shell) and, where the street is a ramp (ramps.ts), a trimesh of the ramp's
-// triangles in place of the top voxel. Neighbouring chunks' voxel colliders are coupled (combineVoxelStates), so a body
+// triangles in place of the top voxel; the car gets a surface of its own over the ground's steps (DRIVE_TOL). Neighbouring chunks' voxel colliders are coupled (combineVoxelStates), so a body
 // sliding across a chunk border meets no inner edge there. Chunks are built nearest first within a time budget per
 // frame, those ahead of a moving body (along its velocity) before those behind. Chunks no body has needed for a while
 // are removed. Physics coordinates are the world's minus `origin` (f32 precision near the action).
 import RAPIER from '@dimforge/rapier3d-compat';
 import { PAL_GROUND } from '../../chamfer';
-import { rampDiagonal02, rampHeight, ramped, rampField, cornerQ, type RampField } from '../../ramps';
+import { rampDiagonal02, rampHeight, ramped, rampField, cornerQ, PINNED, type RampField } from '../../ramps';
 import { decodeTile } from '../../tile-data';
 import type { Meta } from '../../types';
 import { fetchGzip } from '../../util';
 import { MAT, pavedGround } from '../../voxelMaterial';
 
 export const CHUNK = 16;
+// collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
+// meets (its surface on the ramps, the steps' wedges: car.ts) G_CAR_ONLY; the ramps as drawn meet everything but the
+// car; other bodies, and queries that should see the city as drawn, use WORLD_GROUPS.
+export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1;
+export const CAR_GROUPS = (G_CAR << 16) | 0xffff;
+export const CAR_ONLY_GROUPS = (G_CAR_ONLY << 16) | G_CAR;
+export const NOT_CAR_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | (0xffff & ~G_CAR);
+export const WORLD_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | 0xffff;
 const REACH = 40; // chunks within this of a body are built
 const LEAD_S = 1.2; // ... and within REACH of where it will be in this many seconds
 const KEEP_MS = 3000; // a chunk not needed for this long is removed
@@ -38,17 +46,21 @@ export interface TerrainTile {
   ramps: RampField | null;
   // per column: 1 where its top is a ramp (ramps.ts ramped)
   ramped: Uint8Array | null;
+  // the same over all ground, paved or not (the car's: see DRIVE_TOL)
+  car: RampField | null;
+  carRamped: Uint8Array | null;
 }
 
 // the columns of a tile as decodeTile gives them (base: with the ground)
 export interface TileColumns { counts: Uint16Array; runs: Uint16Array; ground?: Uint8Array }
 
-// palette flags: solid (not grass, not water), water, paved ground (PAL_GROUND)
+// palette flags: solid (not grass, not water), water, paved ground (PAL_GROUND), any ground but water (PAL_GROUND)
 export function terrainPalette(palette: Meta['palette']) {
   return {
     solid: Uint8Array.from(palette, (p) => (p[3] === MAT.GRASS || p[3] === MAT.WATER ? 0 : 1)),
     water: Uint8Array.from(palette, (p) => (p[3] === MAT.WATER ? 1 : 0)),
     paved: Uint8Array.from(palette, (p) => (pavedGround(p) ? PAL_GROUND : 0)),
+    ground: Uint8Array.from(palette, (p) => (p[3] === MAT.WATER ? 0 : PAL_GROUND)),
   };
 }
 export type TerrainPalette = ReturnType<typeof terrainPalette>;
@@ -89,51 +101,88 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
     }
     off[c + 1] = n;
   }
-  const f = rampField(N, base.counts, bo, base.runs, base.ground, pal.paved);
-  let rmp: Uint8Array | null = null;
-  if (f.any) {
-    rmp = new Uint8Array(C);
-    for (let c = 0; c < C; c++) rmp[c] = ramped(f, c) ? 1 : 0;
-  }
-  return { S, ground: base.ground, iv: out.slice(0, n), off, water, ramps: f.any ? f : null, ramped: rmp };
+  const field = (flags: Uint8Array) => {
+    const f = rampField(N, base.counts, bo, base.runs, base.ground, flags);
+    if (!f.any) return { f: null, r: null };
+    const r = new Uint8Array(C);
+    for (let c = 0; c < C; c++) r[c] = ramped(f, c) ? 1 : 0;
+    return { f, r };
+  };
+  const drawn = field(pal.paved), car = field(pal.ground);
+  return { S, ground: base.ground, iv: out.slice(0, n), off, water, ramps: drawn.f, ramped: drawn.r, car: car.f, carRamped: car.r };
 }
 
-// The colliders' data of chunk (cx, cz) in `tile` (N m a side): the shell voxels (chunk-local grid coordinates) and the
-// ramps' triangles (chunk-local metres).
-export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number) {
-  const { S, iv, off, ground, ramped: rmp } = tile;
+// The car's surface: the ground smoothed over its 1 m steps, paved or not, and smoother than the ramps as drawn.
+// - Over all ground: ramps.ts smooths paved ground only, but many of the city's lanes, tracks, verges and yards are
+//   not paved in the data, and their ground goes up a slope in 1 m terraces every metre or two: a staircase the car
+//   bucked up and down on. The car gets its own ramp field (ramps.ts rampField) over any ground (the top voxel the
+//   ground's, not water): where it is a ramp the top voxel is not there for the car (it is for everything else: a
+//   voxel collider of their own), the one under it is kept as a floor.
+// - Smoother: ramps.ts takes each free grid point's height as a mean within 3 m, so a street going up in 1 m terraces
+//   every few metres comes out as steeper and flatter stretches by turns (1 m per 4 m: slopes of 0.375 and 0.125
+//   every 2 m), a wash-board the car's springs rock on. Here each free point takes a Gaussian mean (sigma DRIVE_SIGMA
+//   m) of the field's heights of the free points around it, held within DRIVE_TOL of the field's height and never
+//   under the top of a voxel the wheels could see (a column's top, a ramp's floor voxel): a uniform slope comes out
+//   uniform, ripples of 4-5 m are gone, gentler slopes' bends are softened. A point's height depends only on the
+//   field within DRIVE_R of it, so chunks and tiles agree on the points they share. Pinned points (edges, steps over
+//   a metre) stay as they are.
+// So the car's wheels may float or sink by up to ~0.5 m against the voxels drawn on unpaved terraces (~0.2 m on the
+// paved ramps).
+export const DRIVE_TOL = 0.2; // m
+const DRIVE_SIGMA = 2, DRIVE_R = 5;
+const KERNEL = Array.from({ length: 2 * DRIVE_R + 1 }, (_, i) => Math.exp(-((i - DRIVE_R) ** 2) / (2 * DRIVE_SIGMA ** 2)));
+
+// The colliders' data of chunk (cx, cz) in `tile` (N m a side): the shell voxels (chunk-local grid coordinates), the
+// top voxels only the car does not see (top), the ramps' triangles (chunk-local metres) as drawn (for everything but
+// the car) and the car's surface (see DRIVE_TOL).
+// drive: the car's surface at the chunk's (CHUNK + 1)^2 grid points (1/64 m, PINNED: each column's own top), null: none
+export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number, drive: Int32Array | null = null) {
+  const { S, iv, off, ground, ramped: rmp, carRamped: crm } = tile;
+  // (a column whose top voxel is not in the shell: a ramp, drawn or the car's)
+  const open = (c: number) => (!!rmp && rmp[c] === 1) || (!!crm && crm[c] === 1);
+  const P = CHUNK + 1;
+  const dq = (i: number, j: number, c: number) => { const q = drive![i + P * j]; return (q === PINNED ? ground[c] * 64 : q) / 64; };
   const lx0 = (cx * CHUNK) % N, lz0 = (cz * CHUNK) % N;
-  const vox: number[] = [], verts: number[] = [], idx: number[] = [];
+  const vox: number[] = [], top: number[] = [], verts: number[] = [], idx: number[] = [], dverts: number[] = [], didx: number[] = [];
+  const quad = (vs: number[], is: number[], i: number, j: number, q0: number, q1: number, q2: number, q3: number) => {
+    const b = vs.length / 3;
+    vs.push(i, q0, j, i + 1, q1, j, i + 1, q2, j + 1, i, q3, j + 1);
+    // (counter-clockwise seen from above: normals up)
+    if (rampDiagonal02(q0, q1, q2, q3)) is.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    else is.push(b, b + 3, b + 1, b + 1, b + 3, b + 2);
+  };
   for (let j = 0; j < CHUNK; j++) for (let i = 0; i < CHUNK; i++) {
     const c = lx0 + i + 1 + S * (lz0 + j + 1);
     const n0 = c - 1, n1 = c + 1, n2 = c - S, n3 = c + S;
     // (a ramp's top voxel is not there: its neighbours' faces against it are open)
-    const k0 = rmp && rmp[n0] ? ground[n0] - 1 : -1, k1 = rmp && rmp[n1] ? ground[n1] - 1 : -1;
-    const k2 = rmp && rmp[n2] ? ground[n2] - 1 : -1, k3 = rmp && rmp[n3] ? ground[n3] - 1 : -1;
-    const ramp = !!rmp && rmp[c] === 1;
+    const k0 = open(n0) ? ground[n0] - 1 : -1, k1 = open(n1) ? ground[n1] - 1 : -1;
+    const k2 = open(n2) ? ground[n2] - 1 : -1, k3 = open(n3) ? ground[n3] - 1 : -1;
+    const ramp = !!rmp && rmp[c] === 1, op = open(c);
     const g = ground[c];
     // below the lowest neighbouring ground all four sides are solid: nothing to see there but an interval's ends
-    const deep = Math.min(ground[n0], ground[n1], ground[n2], ground[n3], ramp ? g : 1e9) - 2;
+    const deep = Math.min(ground[n0], ground[n1], ground[n2], ground[n3], op ? g : 1e9) - 2;
     for (let k = off[c]; k < off[c + 1]; k += 2) {
       const lo = iv[k], hi = iv[k + 1];
       for (let y = lo; y < hi; y++) {
         if (y > lo && y < deep && y < hi - 1) y = Math.min(deep, hi - 1);
-        // the ramp's column: its top voxel replaced by the ramp's triangles, the one below kept (a floor under them)
-        if (ramp && y === g - 1) continue;
-        if (y === hi - 1 || (y === lo && lo > 0) || (ramp && y === g - 2) || k0 === y || k1 === y || k2 === y || k3 === y
+        // the ramp's column: its top voxel replaced by the ramp's triangles, the one below kept (a floor under them);
+        // the car's ramp only: the top voxel there for the others
+        if (op && y === g - 1) { if (!ramp) top.push(i, y, j); continue; }
+        if (y === hi - 1 || (y === lo && lo > 0) || (op && y === g - 2) || k0 === y || k1 === y || k2 === y || k3 === y
           || !inside(tile, n0, y) || !inside(tile, n1, y) || !inside(tile, n2, y) || !inside(tile, n3, y)) vox.push(i, y, j);
       }
     }
     if (ramp) {
-      const f = tile.ramps!, q0 = cornerQ(f, c, 0) / 64, q1 = cornerQ(f, c, 1) / 64, q2 = cornerQ(f, c, 2) / 64, q3 = cornerQ(f, c, 3) / 64;
-      const b = verts.length / 3;
-      verts.push(i, q0, j, i + 1, q1, j, i + 1, q2, j + 1, i, q3, j + 1);
-      // (counter-clockwise seen from above: normals up)
-      if (rampDiagonal02(q0, q1, q2, q3)) idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
-      else idx.push(b, b + 3, b + 1, b + 1, b + 3, b + 2);
+      const f = tile.ramps!;
+      quad(verts, idx, i, j, cornerQ(f, c, 0) / 64, cornerQ(f, c, 1) / 64, cornerQ(f, c, 2) / 64, cornerQ(f, c, 3) / 64);
+    }
+    // the car's surface: on the ramps, and on any ground with a corner off its top
+    if (drive && tile.car!.paved[c]) {
+      const q0 = dq(i, j, c), q1 = dq(i + 1, j, c), q2 = dq(i + 1, j + 1, c), q3 = dq(i, j + 1, c);
+      if (op || q0 !== g || q1 !== g || q2 !== g || q3 !== g) quad(dverts, didx, i, j, q0, q1, q2, q3);
     }
   }
-  return { vox: new Int32Array(vox), verts: new Float32Array(verts), idx: new Uint32Array(idx) };
+  return { vox: new Int32Array(vox), top: new Int32Array(top), verts: new Float32Array(verts), idx: new Uint32Array(idx), dverts: new Float32Array(dverts), didx: new Uint32Array(didx) };
 }
 
 interface Chunk { colliders: RAPIER.Collider[]; vox: RAPIER.Collider | null; usedAt: number; voxels: number; tris: number }
@@ -209,7 +258,7 @@ export class RapierTerrain {
       if (spent > this.budgetMs) break;
       const cx = key % 4096, cz = Math.floor(key / 4096);
       const tile = this.tile(Math.floor((cx * CHUNK) / this.N), Math.floor((cz * CHUNK) / this.N));
-      if (!tile) continue;
+      if (!tile || (tile.car && !this.around(cx, cz))) continue;
       const t0 = performance.now();
       this.chunks.set(key, this.build(tile, cx, cz, now));
       const ms = performance.now() - t0;
@@ -250,24 +299,31 @@ export class RapierTerrain {
     return t && t.tile.water[t.c] ? t.tile.water[t.c] : -1;
   }
 
-  // The surface a car stands on at world (x, z), at or below `top`: the ramp's where the street is one, else the top
-  // of the highest solid interval. null: not loaded.
-  groundAt(x: number, z: number, top: number) {
+  // The surface a body stands on at world (x, z), at or below `top`: the ramp's where the street is one (car: the car's
+  // ramps, as its field has them, not smoothed), else the top of the highest solid interval. null: not loaded.
+  groundAt(x: number, z: number, top: number, car = false) {
     const t = this.column(x, z);
     if (!t) return null;
     const { iv, off } = t.tile;
     let h = 0;
     for (let k = off[t.c]; k < off[t.c + 1]; k += 2) if (iv[k + 1] <= top + 1e-3) h = iv[k + 1];
-    if (h === t.tile.ground[t.c] && t.tile.ramps && t.tile.ramps.paved[t.c]) h = rampHeight(t.tile.ramps, t.c, x - Math.floor(x), z - Math.floor(z));
+    const f = car ? t.tile.car : t.tile.ramps;
+    if (h === t.tile.ground[t.c] && f && f.paved[t.c]) h = rampHeight(f, t.c, x - Math.floor(x), z - Math.floor(z));
     return h;
   }
 
-  // The top of the solid interval world point (x, y, z) is in, or -1: in the open (or not loaded).
-  solidTop(x: number, y: number, z: number) {
+  // The top of the solid interval world point (x, y, z) is in, or -1: in the open (or not loaded). car: a top voxel only
+  // the others see (the car's ramps) is open.
+  solidTop(x: number, y: number, z: number, car = false) {
     const t = this.column(x, z);
     if (!t) return -1;
-    const { iv, off } = t.tile;
-    for (let k = off[t.c]; k < off[t.c + 1]; k += 2) if (y >= iv[k] && y < iv[k + 1]) return iv[k + 1];
+    const { iv, off, ground, carRamped } = t.tile;
+    const g = ground[t.c], open = car && !!carRamped && carRamped[t.c] === 1;
+    for (let k = off[t.c]; k < off[t.c + 1]; k += 2) {
+      if (y < iv[k] || y >= iv[k + 1]) continue;
+      if (open && iv[k + 1] === g) return y >= g - 1 ? -1 : g - 1;
+      return iv[k + 1];
+    }
     return -1;
   }
 
@@ -293,6 +349,61 @@ export class RapierTerrain {
     return { tile, c: (ix % this.N) + 1 + tile.S * ((iz % this.N) + 1) };
   }
 
+  // are the tiles the car's surface of chunk (cx, cz) reads loaded (or off the map)? (asks for them if not)
+  private around(cx: number, cz: number) {
+    const x0 = Math.floor((cx * CHUNK - DRIVE_R - 1) / this.N), x1 = Math.floor(((cx + 1) * CHUNK + DRIVE_R + 1) / this.N);
+    const z0 = Math.floor((cz * CHUNK - DRIVE_R - 1) / this.N), z1 = Math.floor(((cz + 1) * CHUNK + DRIVE_R + 1) / this.N);
+    let ok = true;
+    for (let tz = z0; tz <= z1; tz++) for (let tx = x0; tx <= x1; tx++) {
+      if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) continue;
+      const t = this.tiles.get(tx + tz * this.nx);
+      if (t === 'failed') continue;
+      if (!t || t === 'loading') { this.tile(tx, tz); ok = false; }
+    }
+    return ok;
+  }
+
+  // the drawn ramp height (1/64 m) at world grid point (x, z) (the corner before column (x, z)), PINNED: none
+  private pointQ(x: number, z: number) {
+    if (x < 0 || z < 0 || x >= this.nx * this.N || z >= this.nz * this.N) return PINNED;
+    const tile = this.tiles.get(Math.floor(x / this.N) + this.nx * Math.floor(z / this.N));
+    if (!tile || typeof tile === 'string' || !tile.car) return PINNED;
+    return tile.car.h[(x % this.N) + 1 + (tile.S + 1) * ((z % this.N) + 1)];
+  }
+
+  // the car's surface at chunk (cx, cz)'s grid points (see DRIVE_TOL)
+  private drive(cx: number, cz: number) {
+    const P = CHUNK + 1, W = P + 2 * DRIVE_R, x0 = cx * CHUNK - DRIVE_R, z0 = cz * CHUNK - DRIVE_R;
+    const v = new Int32Array(W * W);
+    for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) v[i + W * j] = this.pointQ(x0 + i, z0 + j);
+    // (the Gaussian is separable, the free points' weights too: the rows' sums first, of q w and of w)
+    const R2 = 2 * DRIVE_R, hs = new Float64Array(P * W), hw = new Float64Array(P * W);
+    for (let j = 0; j < W; j++) for (let i = 0; i < P; i++) {
+      let sum = 0, wsum = 0;
+      for (let a = 0, k = i + W * j; a <= R2; a++, k++) {
+        const q = v[k];
+        if (q !== PINNED) { sum += q * KERNEL[a]; wsum += KERNEL[a]; }
+      }
+      hs[i + P * j] = sum; hw[i + P * j] = wsum;
+    }
+    const out = new Int32Array(P * P), tol = DRIVE_TOL * 64;
+    for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
+      const h = v[i + DRIVE_R + W * (j + DRIVE_R)];
+      if (h === PINNED) { out[i + P * j] = PINNED; continue; }
+      let sum = 0, wsum = 0;
+      for (let b = 0, k = i + P * j; b <= R2; b++, k += P) { sum += hs[k] * KERNEL[b]; wsum += hw[k] * KERNEL[b]; }
+      // (not under the top of a paved column around it: its voxel's, or a ramp's floor voxel's)
+      let lo = h - tol;
+      const x = cx * CHUNK + i, z = cz * CHUNK + j;
+      for (const [ox, oz] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+        const t = this.column(x + ox + 0.5, z + oz + 0.5);
+        if (t && t.tile.car?.paved[t.c]) lo = Math.max(lo, (t.tile.ground[t.c] - t.tile.carRamped![t.c]) * 64);
+      }
+      out[i + P * j] = Math.round(Math.min(h + tol, Math.max(lo, sum / wsum)));
+    }
+    return out;
+  }
+
   private onMap(cx: number, cz: number) { return cx >= 0 && cz >= 0 && cx * CHUNK < this.nx * this.N && cz * CHUNK < this.nz * this.N; }
 
   private chunkDist(cx: number, cz: number, x: number, z: number) {
@@ -313,13 +424,13 @@ export class RapierTerrain {
         this.tiles.set(key, terrainTile(this.N, decodeTile(base, this.N), decodeTile(foliage, this.N), this.pal));
         this.stats.decodeMsMax = Math.max(this.stats.decodeMsMax, performance.now() - t0);
       })
-      .catch((e) => { console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); });
+      .catch((e) => { if (e) console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); });
     return null;
   }
 
   private build(tile: TerrainTile, cx: number, cz: number, now: number): Chunk {
     const { R } = this, t0 = performance.now();
-    const { vox, verts, idx } = chunkShapes(tile, this.N, cx, cz);
+    const { vox, top, verts, idx, dverts, didx } = chunkShapes(tile, this.N, cx, cz, tile.car ? this.drive(cx, cz) : null);
     const t1 = performance.now();
     this.stats.buildJsMsTotal += t1 - t0;
     let t2 = t1;
@@ -337,15 +448,21 @@ export class RapierTerrain {
         }
       }
     }
+    if (top.length) colliders.push(this.world.createCollider(R.ColliderDesc.voxels(top, { x: 1, y: 1, z: 1 }).setTranslation(tx, 0, tz).setFriction(0.9).setCollisionGroups(NOT_CAR_GROUPS)));
     if (idx.length) {
       colliders.push(this.world.createCollider(R.ColliderDesc.trimesh(verts, idx, R.TriMeshFlags.FIX_INTERNAL_EDGES)
-        .setTranslation(tx, 0, tz).setFriction(0.9)));
+        .setTranslation(tx, 0, tz).setFriction(0.9).setCollisionGroups(NOT_CAR_GROUPS)));
+    }
+    if (didx.length) {
+      // (only the wheels' rays meet it, as a rule: no internal edges to fix, which would cost ~1 ms a chunk)
+      colliders.push(this.world.createCollider(R.ColliderDesc.trimesh(dverts, didx)
+        .setTranslation(tx, 0, tz).setFriction(0.9).setCollisionGroups(CAR_ONLY_GROUPS)));
     }
     const t3 = performance.now();
     if (t3 - t0 > this.stats.slowest.ms) this.stats.slowest = { ms: t3 - t0, js: t1 - t0, voxels: t2 - t1, rest: t3 - t2, n: vox.length / 3 };
     this.stats.voxels += vox.length / 3;
-    this.stats.tris += idx.length / 3;
-    return { colliders, vox: vc, usedAt: now, voxels: vox.length / 3, tris: idx.length / 3 };
+    this.stats.tris += (idx.length + didx.length) / 3;
+    return { colliders, vox: vc, usedAt: now, voxels: vox.length / 3, tris: (idx.length + didx.length) / 3 };
   }
 }
 
