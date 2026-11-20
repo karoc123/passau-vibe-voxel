@@ -87,7 +87,7 @@ function args(argv) {
     url: null, port: 5194, build: true, wait: 1500, timeout: 600000, gl: 'llvmpipe', list: false, shoot: true, eval: null, focus: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = () => argv[++i];
-    if (a === '--shots') o.shots = v().split(',');
+    if (a === '--shots') o.shots = v().split(/,(?=[a-z][\w-]*(?:=|,|$))/); // (a comma before a name: ad-hoc shots' cam=x,y,z,... stay whole)
     else if (a === '--set') o.set = v();
     else if (a === '--out') o.out = v();
     else if (a === '--compare') o.compare = v();

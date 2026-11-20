@@ -322,10 +322,11 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             if (a !== 0 && a !== SOLID_BELOW && a !== OCC) {
               const ni = idx + dir * sd, nb = vol[ni];
               const thru = see !== null && nb !== 0 && nb < see.length && see[nb] === 1 && a < see.length && see[a] === 2;
-              // (a distance level: the side of a bank beside the river's top block, whose faces end at the river's
-              // surface under the block's top, emitMerged: open, or a slot stood between the bank and the water)
+              // (a distance level: the river's top block, whose faces end at the river's surface under the block's
+              // top, emitMerged, is open to the side of a bank beside it -- else a slot stood between the bank and the
+              // water -- and to the side of water whose surface stands higher -- else a crack at the step)
               const wet = wetPal !== null && d < 2 && nb !== 0 && nb < wetPal.length && (wetPal[nb] & PAL_WATER) !== 0
-                && a < wetPal.length && !(wetPal[a] & PAL_WATER) && vol[ni + sx * sy] === 0;
+                && vol[ni + sx * sy] === 0 && a < wetPal.length && (!(wetPal[a] & PAL_WATER) || ground[(idx % SS) + (d === 0 ? dir : dir * S)] < ground[idx % SS]);
               const free = nb === 0 || wet;
               if ((free || thru || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
                 && !(cover && coveredFace(cover, idx, ni))) {
