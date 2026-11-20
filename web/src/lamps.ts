@@ -40,7 +40,7 @@ export class LampHeads {
   private readonly cells = new Map<number, THREE.Points>();
   private windowKey = '';
 
-  constructor(scene: THREE.Scene, lamps: [number, number, number][]) {
+  constructor(scene: THREE.Scene, lamps: [number, number, number][], origin: readonly [number, number] = [0, 0]) {
     this.mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: { uScale: { value: 500 }, uOn: { value: 0 }, fogCut: { value: FOG_CUT } },
       depthWrite: false, transparent: true, fog: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
       blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
@@ -58,7 +58,7 @@ export class LampHeads {
       const pos = new Float32Array(list.length * 3), col = new Float32Array(list.length * 3);
       list.forEach(([x, y, z], i) => {
         pos.set([x, z + 4.5, y], 3 * i);
-        const [r, g, b] = lampColour(x, y);
+        const [r, g, b] = lampColour(x, y, origin);
         c.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
         col.set([c.r, c.g, c.b], 3 * i);
       });

@@ -45,6 +45,8 @@ export class Nav {
   readonly actors = new THREE.Group();
   world: World | null = null;
   streamer: TileStreamer | null = null;
+  // the map's corner in the project grid (meta.origin): ?cam= links are in the project grid's coordinates
+  origin: [number, number] = [0, 0];
   cancelFly: () => void = () => {};
   private lifeRef: StreetLife | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
@@ -323,11 +325,12 @@ export class Nav {
     const cx = this.cursor?.x ?? innerWidth / 2, cy = this.cursor?.y ?? innerHeight / 2;
     const hit = this.hitAt(cx, cy);
     if (!hit) return null;
-    const f = (v: number) => +v.toFixed(1), c = this.camera.position, p = hit.p;
+    // (in the project grid's coordinates, as ?cam= is read: map cells + meta.origin)
+    const [ox, oz] = this.origin, f = (v: number) => +v.toFixed(1), c = this.camera.position, p = hit.p;
     const u = new URL(location.href);
-    u.searchParams.set('cam', [c.x, c.y, c.z, p.x, p.y, p.z].map(f).join(','));
+    u.searchParams.set('cam', [c.x + ox, c.y, c.z + oz, p.x + ox, p.y, p.z + oz].map(f).join(','));
     u.searchParams.delete('view');
-    return `voxel ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}  ${u.href}`;
+    return `voxel ${Math.floor(p.x + ox)},${Math.floor(p.y)},${Math.floor(p.z + oz)}  ${u.href}`;
   }
 
   private hitAt(cx: number, cy: number, maxDist = 4000) {

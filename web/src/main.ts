@@ -387,9 +387,12 @@ async function boot() {
   world = nav.world = streamer.world;
   daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' ? movingActors : null);
   nav.streamer = streamer;
+  nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
   post.reflections.mapTop = meta.H;
-  const v0 = views[qs.get('view') ?? ''] ?? views.overview, cam = qs.get('cam')?.split(',').map(Number);
+  // (?cam= in the project grid's coordinates: meta.origin)
+  const [ox, oz] = meta.origin ?? [0, 0];
+  const v0 = views[qs.get('view') ?? ''] ?? views.overview, cam = qs.get('cam')?.split(',').map(Number).map((v, i) => v - (i % 3 === 0 ? ox : i % 3 === 2 ? oz : 0));
   // ?focus=bld:<id> | street:<id>: one object framed (focus.ts)
   const fo = qs.get('focus') ? await focusView(qs.get('focus')!, qs, camera.fov, camera.aspect) : null;
   camera.position.set(...(fo ? fo.pos : cam ? [cam[0], cam[1], cam[2]] as const : v0.pos));
@@ -405,7 +408,7 @@ async function boot() {
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
-    crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target), pixelsHigh: () => post.height });
+    crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target, meta.origin), pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
@@ -417,7 +420,7 @@ async function boot() {
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
   fetchJson<TrafficData>('data/traffic.json').then((td) => {
-    streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed); });
+    streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     life = nav.life = new StreetLife(scene, td);
     movingActors.add(life.group);
     life.world = world;
@@ -438,13 +441,14 @@ async function boot() {
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
-// ?crop=x0,z0,x1,z1: those meeting that box of the map (metres); with ?focus=, crop=fit: the object and 128 m round it.
-// For quick screenshots and checks (web/tools/shoot.mjs)
-function cropOf(q: string | null, t: THREE.Vector3): [number, number, number, number] | null {
+// ?crop=x0,z0,x1,z1: those meeting that box (metres, the project grid's x and z as ?cam=); with ?focus=, crop=fit: the
+// object and 128 m round it. For quick screenshots and checks (web/tools/shoot.mjs)
+function cropOf(q: string | null, t: THREE.Vector3, origin: [number, number] = [0, 0]): [number, number, number, number] | null {
   const v = q?.split(',').map(Number);
   if (!v || v.some((x) => !Number.isFinite(x))) return null;
   if (v.length === 1 && v[0] > 0) return [t.x - v[0], t.z - v[0], t.x + v[0], t.z + v[0]];
-  return v.length === 4 ? [v[0], v[1], v[2], v[3]] : null;
+  const [ox, oz] = origin;
+  return v.length === 4 ? [v[0] - ox, v[1] - oz, v[2] - ox, v[3] - oz] : null;
 }
 
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;

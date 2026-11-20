@@ -416,7 +416,7 @@ def main(argv):
     tile_info = dict(N=tiles.N, levels=levels, bytes=sum(v[0] for v in tile_bytes.values()))
     jets = [j for _, j in sorted((tuple(k), j) for w in ws for k, j in res[w]["jets"])]
     lamps = [l for _, l in sorted((tuple(k), l) for w in ws for k, l in res[w]["lamps"])]
-    meta = dict(W=aoi.MAP_W, D=aoi.MAP_D, H=Hm, base=aoi.BASE, tiles=tile_info, center=[aoi.CX, aoi.CY],
+    meta = dict(W=aoi.MAP_W, D=aoi.MAP_D, H=Hm, base=aoi.BASE, origin=[aoi.MAP_C0, aoi.MAP_R0], tiles=tile_info, center=[aoi.CX, aoi.CY],
                 theta_deg=math.degrees(aoi.THETA), crs="EPSG:25832", trams=trams, jets=jets,
                 palette=[list(e) for e in palette], lamps=lamps, labels=labels, views=views,
                 sources=dict(osm=osm.timestamp,

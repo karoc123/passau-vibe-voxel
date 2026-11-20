@@ -38,11 +38,23 @@ EXTRA_LABELS = {
     "Passau Hauptbahnhof": dict(en="Main station", kind="station", alt="Hbf Bahnhof", at=(828246, 5389677)),
     "Innstadt": dict(kind="district", at=(829423, 5389341)),
     "Ilzstadt": dict(kind="district", at=(830068, 5390056)),
+    # up the Danube and north of it (OSM: the power plant's outline, place nodes; checked on the orthophoto)
+    "Kraftwerk Kachlet": dict(en="Kachlet dam", kind="Danube dam, locks and power plant", year=1927,
+                              alt="Staustufe Kachlet Schleuse", at=(824978, 5389979), far=9000),
+    "Brauerei Hacklberg": dict(en="Hacklberg brewery", kind="brewery", year=1618, at=(827702, 5390063)),
+    "Burgruine Hals": dict(en="Hals castle ruin", kind="castle ruin", at=(828999, 5391622)),
+    "Hacklberg": dict(kind="district", at=(827464, 5390071)),
+    "Hals": dict(kind="district", at=(828979, 5391463)),
+    "Ries": dict(kind="district", at=(827587, 5391568)),
+    "Grubweg": dict(kind="district", at=(830342, 5391171)),
+    "Heining": dict(kind="district", at=(824166, 5390605)),
+    "Schalding": dict(kind="district", alt="Schalding rechts der Donau", at=(822094, 5391703)),
     "Prinzregent-Luitpold-Brücke": dict(en="Luitpold suspension bridge", kind="bridge", alt="Hängebrücke Luitpoldbrücke",
                                         at=(829787, 5389933), far=1500),
     "Schanzlbrücke": dict(kind="bridge", at=(828600, 5389942), far=1500),
     "Marienbrücke": dict(kind="bridge", at=(829372, 5389555), far=1500),
     "Innsteg": dict(kind="footbridge", at=(828962, 5389244), far=1500),
+    "Donaubrücke Schalding": dict(kind="bridge", at=(822158, 5391812), far=1500),
 }
 
 
@@ -62,6 +74,15 @@ HISTORIC_CORE = [[(829016, 5389960), (829516, 5389980), (829781, 5389925), (8301
 # camera presets' targets beside the labels' (make_views), EPSG:25832 x, y: Veste Oberhaus (traced on the ortho), the
 # Dreiflüsseeck's point and the ground there
 VIEW_AT = dict(oberhaus=(829736.5, 5390182.5), eck=(830216.0, 5389770.0), eck_ground=(830151.0, 5389765.0))
+# the presets up the Danube and north of it, each (label, its target at EPSG:25832 x, y, the camera's offset from the
+# target in metres: east, up over the ground there, south); a preset outside the map is left out
+VIEWS_MORE = dict(
+    kachlet=("Kachlet dam", (824990, 5389985), (330, 260, 420)),
+    schalding=("Schalding", (822160, 5391800), (420, 330, 520)),
+    hacklberg=("Hacklberg", (827650, 5390120), (-260, 220, 380)),
+    ilztal=("Ilz valley at Hals", (829000, 5391560), (380, 260, 300)),
+    north=("Ries and Grubweg", (829000, 5391500), (-400, 900, 1700)),
+)
 
 
 def historic_core():
@@ -273,8 +294,16 @@ def make_views(found, g, median=None):
     gc, gr = (int(v) for v in to_grid(*VIEW_AT["eck_ground"]))
     eck = [ec, float(g[gr, gc]) + 5, er]
     views["eck"] = dict(label="Dreiflüsseeck", target=eck, pos=add(eck, (380, 230, 60)))
+    for k, (label_, (x, y), off) in VIEWS_MORE.items():
+        c, r = (float(v) for v in to_grid(x, y))
+        if not (0 <= c < W_ and 0 <= r < H_):
+            continue
+        t = [c, float(g[int(r), int(c)]) + 5, r]
+        views[k] = dict(label=label_, target=t, pos=add(t, off))
     mid = [W_ * 0.5, float(np.median(g) if median is None else median) + 10, H_ * 0.5]
-    views["city"] = dict(label="Whole map", target=mid, pos=add(mid, (0, 2500, 1300)))
+    # (from far enough to hold the map's width: 2500 m up and 1300 m south for 3.2 km)
+    k = max(1.0, W_ / 3200)
+    views["city"] = dict(label="Whole map", target=mid, pos=add(mid, (0, 2500 * k, 1300 * k)))
     return views
 
 

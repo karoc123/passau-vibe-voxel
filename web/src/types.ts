@@ -41,6 +41,10 @@ export interface Meta {
   H: number;
   base: number;
   theta_deg: number;
+  // the map's corner in the project grid (scripts/map.json map.col0, row0): the viewer works in map cells (x = column,
+  // z = row from the corner); ?cam= and ?crop= boxes are in the project grid's (map cells + origin), so a link keeps
+  // pointing at the same place when the map grows
+  origin?: [number, number];
   // tris (web/tools/tris.mjs): each node's triangles as meshed, per level, row-major (ty * nx + tx): "1", "2", "4", "8",
   // "1f" a foliage tile's, "1c" its base tile's once the foliage shows (a 1 m tile with its foliage draws 1c + 1f)
   tiles: { N: number; levels: TileLevel[]; tris: Record<'1' | '1f' | '1c', number[]> & Partial<Record<'2' | '4' | '8', number[]>> };

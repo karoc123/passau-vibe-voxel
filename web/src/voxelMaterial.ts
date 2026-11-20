@@ -19,6 +19,10 @@ export interface VoxelUniforms {
   [name: string]: THREE.IUniform;
   uPalette: U<THREE.Texture>;
   uSize: U<THREE.Vector2>;
+  // the map's corner in the project grid (meta.origin, as x, 0, z): what is hashed or patterned by its place (a cell's
+  // tone, the leaves' turn, window rhythms, the ground's stones) is so in the project grid's coordinates, so a place
+  // looks the same whatever the map's extent (scripts/aoi.py)
+  uOrg: U<THREE.Vector3>;
   uNight: U<number>;
   uTime: U<number>;
   uHorizon: U<THREE.Color>;
@@ -61,6 +65,7 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
   const U: VoxelUniforms = {
     uPalette: { value: makePaletteTexture(meta.palette) },
     uSize: { value: new THREE.Vector2(meta.W, meta.D) },
+    uOrg: { value: new THREE.Vector3(meta.origin?.[0] ?? 0, 0, meta.origin?.[1] ?? 0) },
     uNight: { value: 0 },
     uTime: { value: 0 },
     uHorizon: { value: new THREE.Color(0.7, 0.75, 0.8) },
@@ -159,10 +164,12 @@ function floodlights(meta: Meta) {
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
 const FOLIAGE = `${FIELDS_GLSL}
   uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
-  vec2 foliageCell(vec3 cell) { return foliageAtP(cell.xz + 0.5); }
+  // (cell: in the project grid's coordinates, the map's + uOrg: CELL)
+  uniform vec3 uOrg;
+  vec2 foliageCell(vec3 cell) { return foliageAtP(cell.xz - uOrg.xz + 0.5); }
   // fine: the node shown here is a 1 m one -- its leaves are a foliage tile's, with the crown's branches under them
   // (scripts/voxelize.py, mesher.worker.ts); else they are 2, 4 or 8 m blocks, with no branches in them
-  bool leafFine(vec3 cell) { return pageAt(cell.xz + 0.5).y == 1; }
+  bool leafFine(vec3 cell) { return pageAt(cell.xz - uOrg.xz + 0.5).y == 1; }
   vec3 foliageOf(vec2 f) {
     int cls = int(f.r * 255.0 + 0.5);
     if (cls == 0) cls = 13;
@@ -457,8 +464,9 @@ const FRAG_PARS = `
 // and whether a fountain's jet is off there now (with wa, lvl and vert as in SURFACE)
 // (a ramp's top, ramps.ts, rises and falls up to a metre about the ground's: its cell is the ground's top voxel, so that
 // what is hashed by the cell doesn't change along its contours)
-const CELL = 'vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : vN.y > 0.5 && abs(vVox.y - floor(vGz + 0.5)) < 0.999 '
-  + '? vec3(floor(vVox.x + 1e-3), floor(vGz + 0.5) - 1.0, floor(vVox.z + 1e-3)) : floor(vVox - vN * 0.5 + 1e-3)';
+// (in the project grid's coordinates: the map's cell + uOrg)
+const CELL = '(vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : vN.y > 0.5 && abs(vVox.y - floor(vGz + 0.5)) < 0.999 '
+  + '? vec3(floor(vVox.x + 1e-3), floor(vGz + 0.5) - 1.0, floor(vVox.z + 1e-3)) : floor(vVox - vN * 0.5 + 1e-3)) + uOrg';
 const CELL_HASH = 'hash13(vRoof > 0.5 && !vert ? vec3(cell.x, 0.0, cell.z) : cell)';
 const JET_GONE = 'sin(uTime * 2.4 + h * 6.28) < -0.2 + lvl * 0.6';
 
@@ -467,8 +475,10 @@ const SURFACE = `
   vec3 base = pow(pe.rgb, vec3(2.2));
   int pa = int(pe.a * 255.0 + 0.5), m = pa & 31; // (bits 5-7: the ground's class, GROUND)
   float wa = (vWallAng - 1.0) * 0.261799;
-  // (a chamfer's face stands up to ~1 m out of the cells it belongs to: they are a metre in from it)
+  // (a chamfer's face stands up to ~1 m out of the cells it belongs to: they are a metre in from it; the project grid's
+  // cell: vP its place, vVox's)
   vec3 cell = ${CELL};
+  vec3 vP = vVox + uOrg;
   // the ground is the same at every corner of a quad, but interpolated it can land a hair either side of the integer:
   // lvl 2.9999 or 3.0001 flipped whole window rows pixel by pixel into a hatched pattern
   float gz = floor(vGz + 0.5);
@@ -482,11 +492,11 @@ const SURFACE = `
   vec3 wN = vN;
   if (vWallAng > 0.5) {
     wN = vec3(cos(wa), 0.0, sin(wa));
-    u = floor(dot(vVox.xz, vec2(-wN.z, wN.x)) + 1e-3);
-    wpos = floor(dot(vVox.xz, wN.xz) / 3.0);
+    u = floor(dot(vP.xz, vec2(-wN.z, wN.x)) + 1e-3);
+    wpos = floor(dot(vP.xz, wN.xz) / 3.0);
   }
   // in metres, not cells: along the wall (its plane on a staircase) and above the street
-  float uc = vWallAng > 0.5 ? dot(vVox.xz, vec2(-wN.z, wN.x)) : (abs(vN.x) > 0.5 ? vVox.z : vVox.x);
+  float uc = vWallAng > 0.5 ? dot(vP.xz, vec2(-wN.z, wN.x)) : (abs(vN.x) > 0.5 ? vP.z : vP.x);
   float lv = vVox.y - gz;
   float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
@@ -606,7 +616,7 @@ const SURFACE = `
     if (vN.y > 0.5 && hash12(cell.xz * 0.37 + floor(uTime * 1.7 + h * 9.0)) < 0.006) col += vec3(0.35, 0.4, 0.38) * (1.0 - uNight) * (1.0 - uNight);
     if (vN.y > 0.5) gRefl = 1.0; // the open river mirrors (post.ts Reflections)
     if (uDrop > 0.0) { // low water: where the estimated bed is shallower than the drop, a sandbank
-      float bed = max(riverAt(cell.xz + 0.5).y, 0.0);
+      float bed = max(riverAt(cell.xz - uOrg.xz + 0.5).y, 0.0);
       if (bed < uDrop) {
         col = mix(vec3(0.3, 0.24, 0.15), vec3(0.62, 0.52, 0.36), smoothstep(0.05, 0.35, uDrop - bed)) * (0.92 + 0.12 * h);
         gRough = 0.95; gMetal = 0.0; gRefl = 0.0;
@@ -677,7 +687,7 @@ const SURFACE = `
   // without it, to time it)
   #if !defined(NO_MOVING_SHADOW) && !defined(NO_GROUND_DETAIL)
   vec2 gw = fwidth(vVox.xz); // (out here, where every fragment takes it)
-  if ((pa >> 5) > 0 && vN.y > 0.5 && vRoof < 0.5) groundDetail(pa >> 5, vVox.xz, gw, col);
+  if ((pa >> 5) > 0 && vN.y > 0.5 && vRoof < 0.5) groundDetail(pa >> 5, vP.xz, gw, col);
   #endif
   if (uFolOn > 0.5 && vN.y > 0.5 && lvl < 0.5 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.MARK}) {
     vec2 ff = foliageCell(cell);
@@ -717,7 +727,7 @@ const SURFACE = `
       away /= max(dc, 1e-3);
       // broken by the ripples across the line of sight, into bands that drift
       vec2 side = vec2(-away.y, away.x);
-      float a = dot(vVox.xz, away), b = dot(vVox.xz, side);
+      float a = dot(vP.xz, away), b = dot(vP.xz, side);
       float sw = sin(a * 2.1 + 1.7 * sin(b * 0.31 + uTime * 0.5) - uTime * 1.9) * 0.6 + sin(a * 0.93 - b * 0.27 + uTime * 1.1) * 0.4;
       float shim = (0.45 + 0.9 * smoothstep(-0.2, 0.9, sw)) * (0.8 + 0.4 * hash12(cell.xz + floor(uTime * 3.0)));
       vec3 refl = vec3(0.0); vec2 o; float ow;
@@ -792,7 +802,7 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         faceDecode();
         if (uFolOn > 0.5 && (int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) & 31) == ${MAT.LEAF}) {
-          vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
+          vec3 cell = floor(vVox - vN * 0.5 + 1e-3) + uOrg;
           vec3 fo = foliageAt(cell);
           if (leafGone(cell, fo, leafFine(cell))) discard;
         }`);

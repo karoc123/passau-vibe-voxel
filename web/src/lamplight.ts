@@ -12,8 +12,9 @@ import { hash } from './util';
 // Lamps: mapped ones (meta.json lamps), floodlit pitches (floods) and those placed along the streets (streetlamps.ts,
 // data/streetlamps.json, added when they arrive: every page shown is drawn again).
 export const LAMP_COLOURS: [number, number, number][] = [[255, 196, 132], [255, 156, 70], [212, 226, 255]];
-export const lampColour = (x: number, y: number) => {
-  const h = hash(Math.floor(x) * 0.1271 + Math.floor(y) * 0.3117);
+// (by its place in the project grid: map cells + origin, meta.origin, so a lamp keeps its colour whatever the map's extent)
+export const lampColour = (x: number, y: number, origin: readonly [number, number] = [0, 0]) => {
+  const h = hash(Math.floor(x + origin[0]) * 0.1271 + Math.floor(y + origin[1]) * 0.3117);
   return LAMP_COLOURS[h < 0.6 ? 0 : h < 0.82 ? 1 : 2];
 };
 // a pool's alpha by its distance over its radius: a lamp's, a pitch's floodlight
@@ -66,7 +67,7 @@ export class LampLight {
   private acc = new Float32Array(0);
 
   constructor(private readonly meta: Meta) {
-    for (const [x, y] of meta.lamps) this.add(x + 0.5, y + 0.5, 18, lampColour(x, y), LAMP_STOPS);
+    for (const [x, y] of meta.lamps) this.add(x + 0.5, y + 0.5, 18, lampColour(x, y, meta.origin), LAMP_STOPS);
     for (const [x, y, r] of meta.floods ?? []) this.add(x, y, r * 1.35, FLOOD_RGB, FLOOD_STOPS);
     this.caps = floodCapsules(meta);
   }
@@ -79,7 +80,7 @@ export class LampLight {
 
   // the streets' lamps (streetlamps.ts, placed when the data is built)
   addStreets(placed: [number, number, number][]) {
-    for (const [x, y] of placed) this.add(x, y, 16, lampColour(x, y), LAMP_STOPS);
+    for (const [x, y] of placed) this.add(x, y, 16, lampColour(x, y, this.meta.origin), LAMP_STOPS);
     this.version++;
   }
 

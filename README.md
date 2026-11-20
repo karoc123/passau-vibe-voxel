@@ -1,9 +1,11 @@
 # Passau in voxels
 
-A 3200 × 1408 m diorama of Passau, the city of three rivers, at 1 m voxels, in the style of MagicaVoxel renders:
-the Altstadt peninsula between Danube and Inn with the cathedral (Dom St. Stephan) at its centre, the Dreiflüsseeck
-where Danube, Inn and Ilz meet, Veste Oberhaus and the Ilzstadt to the north, the Innstadt to the south, and west to
-the Hauptbahnhof and St. Nikola. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the extent is set in `scripts/map.json`).
+A 9344 × 3456 m diorama of Passau, the city of three rivers, at 1 m voxels, in the style of MagicaVoxel renders:
+the Altstadt peninsula between Danube and Inn with the cathedral (Dom St. Stephan), the Dreiflüsseeck where Danube,
+Inn and Ilz meet, Veste Oberhaus and the Ilzstadt, the Innstadt to the south, the Hauptbahnhof and St. Nikola; west up
+the Danube past Hacklberg, Heining and the Kachlet dam to Schalding, both banks; north over Haidenhof, Ries, Grubweg
+and the Ilz valley up to Hals and its loops. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the
+extent is set in `scripts/map.json`).
 
 The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
@@ -17,8 +19,10 @@ Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on
 cd web && pnpm install && pnpm dev     # http://localhost:5173  (?view=dom&date=7-15&hour=13&weather=clear)
 ```
 
-Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`, `city`. Other URL parameters:
-`cam=x,y,z,tx,ty,tz`, `date=M-D`, `hour=`, `weather=clear|cloudy|rain|snow`, `tilt=0`, `ui=0`, `crop=R` (a tiny
+Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`, `kachlet`, `schalding`,
+`hacklberg`, `ilztal`, `north`, `city`. Other URL parameters: `cam=x,y,z,tx,ty,tz` (x and z in the project grid's
+metres: column = easting − 827371, row = 5390500 − northing, y over the volume's floor; so a link keeps its place
+when the map grows; the viewer works in map cells, the project grid's less `meta.json` `origin`), `date=M-D`, `hour=`, `weather=clear|cloudy|rain|snow`, `tilt=0`, `ui=0`, `crop=R` (a tiny
 scene: see "Agent tools").
 
 > **Derived from [warsaw-vibe-voxel](https://github.com/stared/warsaw-vibe-voxel) by Piotr Migdał (MIT licence, see
@@ -40,7 +44,7 @@ scene: see "Agent tools").
 | **LoD2** 3D building models, CityGML (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Roof planes (pitched roofs, ridges), building footprints the OSM outlines are moved onto, buildings OSM lacks |
 | **Laserdaten**, airborne LiDAR point clouds (LAZ), Feb 2021, ~11 points/m² (Bayerische Vermessungsverwaltung) | CC BY 4.0 | Tree canopy heights, crown bases, conifers (dense in the leaf-off scan) vs. broadleaved trees, trimming the surface model's smeared crown rims |
 | **Einzelbäume 3D**, single trees with height from the 2024 flight, GeoPackage of district 124014, cut to the map (Bayerische Vermessungsverwaltung) | CC BY 4.0 | A trunk under every crown, one crown per tree |
-| **ALKIS Tatsächliche Nutzung** (actual land use), shapefile of the Stadt Passau (Bayerische Vermessungsverwaltung) | CC BY 4.0 | The class of open land OSM says nothing about: forest, copse, grassland, arable land, park, waste land, car park, cemetery |
+| **ALKIS Tatsächliche Nutzung** (actual land use), shapefiles of the Stadt Passau and the Landkreis Passau (Bayerische Vermessungsverwaltung) | CC BY 4.0 | The class of open land OSM says nothing about: forest, copse, grassland, arable land, park, waste land, car park, cemetery |
 | **[OpenStreetMap](https://www.openstreetmap.org/copyright)**, [Geofabrik](https://download.geofabrik.de/europe/germany/bayern/niederbayern.html) daily extract for Niederbayern | ODbL, © OpenStreetMap contributors | Footprints and 3D parts, facade and roof colours, roads, paths, railways, bridges, trees, street lamps, names, the traffic network |
 | **[Deutscher Wetterdienst](https://opendata.dwd.de/climate_environment/CDC/)**, phenological observations | [DL-DE BY 2.0](https://www.govdata.de/dl-de/by-2-0), source: Deutscher Wetterdienst | When each tree species leafs out, colours and drops its leaves (stations within 100 km of Passau below 500 m) |
 | **[iNaturalist](https://www.inaturalist.org/)** "Leaves" annotations, weekly counts | see iNaturalist's terms | The same, for species the DWD does not record |
@@ -91,16 +95,19 @@ region at the map's edge: 20 s).
 
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
 size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
-`uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model), the
-anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
+`uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
+box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir,
+the Danube below it, the Ilz above and below the Hals weir; elsewhere 290.921 m), the anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
-cells, the project grid's less the map's corner. The steps:
+cells, the project grid's less the map's corner (`meta.json` `origin`). The viewer's shaders hash and pattern by the
+project grid's coordinates too (`voxelMaterial.ts` `uOrg`: a voxel's tone, window rhythms, the leaves' turn, the
+ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 
 | Step | Writes |
 |---|---|
 | `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB, read by `alkis_tn.py`); `data/raw/laser/*.laz`: the LiDAR point clouds (8 sheets, 0.7 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted). Files already there are not fetched again |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`, `tn_09275.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB) and the Landkreis Passau (38 MB; the map's west and north edges reach into it), read by `alkis_tn.py`; `data/raw/laser/*.laz`: the LiDAR point clouds (40 sheets, 3.5 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted). Files already there are not fetched again |
 | `laser.py` | `data/laser.npz`: per 1 m cell vegetation statistics from the point clouds (highest return, lowest tenth, pulses caught in the canopy, single-return pulses, ground returns); optional for `voxelize.py` (`NO_LASER=1` ignores it) |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, orthophoto 0.2 m) |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
@@ -362,7 +369,7 @@ or press a controller button so its axes appear under **Controller setup**.
 **T** resets to the launch point, **Enter** arms the last input source again and **Esc** returns to the map. The keyboard
 option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut throttle. It starts at hover throttle.
 
-The flight uses independent 1 m collision data for terrain, structures and trees across the whole 3,200 × 1,408 m model.
+The flight uses independent 1 m collision data for terrain, structures and trees across the whole 9,344 × 3,456 m model.
 A swept drone volume catches thin voxels even at speed. Hard impacts deflect and spin the drone briefly while it
 stays armed. The drone can settle on the ground and take off again with throttle. The flight waits if a collision tile
 is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
@@ -401,7 +408,10 @@ collision for kerbs, stairs, walls and bridge decks.
 ## Known limits
 
 - **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated
-  to the Passau gauges and shows no historic flood levels; below the surveyed level the river bed is schematic.
+  to the Passau gauges and shows no historic flood levels; below the surveyed level the river bed is schematic. Above
+  the Kachlet dam and the Ilz's weir at Hals the rivers stand at their own levels (`scripts/map.json`
+  `rivers.stretches`); the slider raises every stretch by the same metres over its own surveyed level (a real flood
+  drains the impounded reach as the weir opens: not modelled), and a cell floods from the river of its own stretch.
 - Windows are procedural, generated in the shader from floor height and material, not real window positions.
 - The surface model is matched from aerial images: it is noisier than LiDAR on roofs and stands a metre or two over
   open water (cleared in `voxelize.py`).

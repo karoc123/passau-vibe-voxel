@@ -12,7 +12,8 @@
 // exit code 1 if any shot's px>24 exceeds --fail (default 0.5 %). --no-shoot compares DIR's existing PNGs only.
 // Compare only sets shot with the same --gl and --size (a renderer change alone moves some pixels).
 //
-// Shots: a name from SHOTS below, or `name=query` for an ad-hoc one (e.g. `x=cam=1600,40,700,1650,20,720`).
+// Shots: a name from SHOTS below, or `name=query` for an ad-hoc one (e.g. `x=cam=1600,40,700,1650,20,720`; ?cam= is in
+// the project grid's coordinates, so a shot keeps its place when the map's extent changes).
 // Every shot gets `ui=0&autores=0&weather=clear&date=7-15&hour=13` unless its query sets them; --q adds to all.
 // Tiny scene: `--crop 256` (or a shot query with crop=...) loads only the tiles within that many metres of the
 // camera's target (see ?crop= in README "Agent tools"), which is what makes a shot take seconds instead of minutes.
@@ -53,11 +54,19 @@ export const SHOTS = {
   // tiny scenes (crop=192: the 128 m tiles within 192 m of the camera's target, 3-4 a side), ~15 s a shot
   'tiny-street': `${STREET}&crop=192`,
   'tiny-dom': 'cam=1610,95,560,1700,20,700&crop=192',
+  // up the Danube and north (the presets of scripts/landmarks.py VIEWS_MORE)
+  kachlet: 'view=kachlet',
+  schalding: 'view=schalding',
+  hacklberg: 'view=hacklberg',
+  ilztal: 'view=ilztal',
+  north: 'view=north',
+  city: 'view=city',
 };
 const SETS = {
   quick: ['tiny-street', 'tiny-dom'],
   default: ['overview', 'oberhaus', 'street', 'street-night'],
   seasons: ['oberhaus', 'oberhaus-autumn', 'oberhaus-winter', 'street-winter'],
+  west: ['kachlet', 'schalding', 'hacklberg', 'ilztal', 'north'],
   all: Object.keys(SHOTS),
 };
 const BASE = { ui: '0', autores: '0', weather: 'clear', date: '7-15', hour: '13' };
