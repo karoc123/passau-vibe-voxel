@@ -78,7 +78,7 @@ sh scripts/build_data.sh
 ```
 
 Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
-the triangle counts run the viewer's mesher). The first run downloads about 0.8 GB of Bavarian rasters, 0.26 GB of LoD2 models, 0.7 GB of LiDAR point clouds and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
+the triangle counts run the viewer's mesher). The first run downloads about 4.3 GB of Bavarian rasters (40 sheets of 1 km), 0.5 GB of LoD2 models, 3.5 GB of LiDAR point clouds, 41 MB of ALKIS land use and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
 From cached raw data the build takes about 5½ minutes (WSL, 20 cores: prep, lod2, laser 1 min, the volume in 8
 regions of 1024 m, 4 at once, 3½ min, the steps after it 1 min, 45 s of them `tris.mjs`); a region's process peaks
 at ~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 0.8 GB; `data/cache` holds
