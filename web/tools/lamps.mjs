@@ -16,7 +16,8 @@ const { module: lamps } = await runnerImport(path.join(web, 'src/streetlamps.ts'
 
 const json = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
 const gz = (f) => { const b = zlib.gunzipSync(fs.readFileSync(f)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
-const meta = json('meta.json'), traffic = json('traffic.json');
+const { module: TP } = await runnerImport(path.join(web, 'src/sim/traffic-pack.ts'), { root: web, logLevel: 'error' });
+const meta = json('meta.json'), traffic = TP.unpackTraffic(json('traffic.json'));
 const buildings = new Uint16Array(gz(path.join(tmp, 'zones.bin')), 0, meta.W * meta.D);
 const trees = new Uint8Array(gz(path.join(tmp, 'foliage.bin')), 0, (meta.W >> 1) * (meta.D >> 1));
 const terrain = gz(path.join(tmp, 'terrain.bin'));

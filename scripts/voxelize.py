@@ -2,8 +2,8 @@
 OSM into a 1 m voxel volume of Passau. ("LiDAR" and "DSM" in the comments below mean the surface model: Bavaria's DOM20
 is matched from aerial images, the DGM1 terrain under it is laser-scanned.)
 
-Output (web/public/data/): tiles/ (scripts/tiles.py), meta.json (palette, lamps, labels, views), trees.json,
-traffic.json, qa_roadmask.bin.gz; data/ground.npz for flood.py and terrain.py.
+Output (web/public/data/): tiles/ (scripts/tiles.py), meta.json (palette, lamps, labels, views),
+traffic.json; data/trees.json, data/qa_roadmask.bin.gz (not served: the viewer reads neither), data/ground.npz for flood.py and terrain.py.
 Volume axes: vol[z, row, col]; row grows south, col grows east, z up.
 
 Region by region (scripts/region.py): `voxelize.py` (the driver, scripts/regions.py) builds the map as one region or

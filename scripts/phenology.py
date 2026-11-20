@@ -36,7 +36,7 @@ Summer leaves: the photos' median summer canopy, as one factor on the renderer's
 crowns keep their brightness relative to the grass under them).
 
 Output: web/public/data/phenology.json (per class: dates, spread, source) and, with the trees' positions
-(web/public/data/trees.json), data/foliage.bin (tile_fields.py puts it into the node files): per 2 m cell the class of the tree whose crown it is in
+(data/trees.json), data/foliage.bin (tile_fields.py puts it into the node files): per 2 m cell the class of the tree whose crown it is in
 (the crown's owner from data/crowns.npz, written by voxelize.py; elsewhere the nearest trunk within 9 m), then a byte of
 that tree's index (so one tree turns as one), gzip.
 """
@@ -387,7 +387,7 @@ def city_median(table, cls, ph):
 
 def main():
     table = phenology()
-    every = json.load(open(OUT / "trees.json"))["trees"]
+    every = json.load(open(Path(__file__).parent.parent / "data/trees.json"))["trees"]
     # the trees drawn (a register point under another tree's crown has none of its own)
     drawn, site = site_classes(every)
     cls_all = np.array([classify(t, d) for t, d in zip(every, drawn)], np.uint8)

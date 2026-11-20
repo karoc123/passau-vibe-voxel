@@ -24,7 +24,7 @@ any region was built or their own inputs changed (data/cache/regions.stamp). The
 - the palette: colours the registry (scripts/palette.json) lacked are added to it, sorted, and the regions that met
   them built again (their ids were provisional)
 - put together, row band by row band (mapstore.py: nothing of the map's size in memory): data/ground.npz,
-  data/footprints.npz, data/crowns.npz, qa_roadmask.bin.gz, trees.json (in the map's order, the crowns' owners as
+  data/footprints.npz, data/crowns.npz, data/qa_roadmask.bin.gz, data/trees.json (in the map's order, the crowns' owners as
   indices into it), meta.json's lamps and jets, the debug images (whole up to 64 Mpx, else per region) and lists
 - the passes over the whole map, network-wide over OSM's vectors and the regions' lists, reading the regions' rasters
   and volumes where they look (mapstore.MapRaster, MapVolume: point lookups, a box round a label): the labels
@@ -245,7 +245,7 @@ def driver_stamp(ws):
     return region_inputs.sha(json.dumps(d, sort_keys=True).encode())
 
 
-DRIVER_OUT = [OUT / "meta.json", OUT / "trees.json", OUT / "traffic.json", OUT / "qa_roadmask.bin.gz",
+DRIVER_OUT = [OUT / "meta.json", Path("data/trees.json"), OUT / "traffic.json", Path("data/qa_roadmask.bin.gz"),
               Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz")]
 
 
@@ -325,7 +325,7 @@ def main(argv):
                                                water=npz_entry("water", bool), b=npz_entry("b", np.int16)))
     mapstore.write_npz("data/footprints.npz", dict(oid=npz_entry("oid", np.int64)))
     qa = R("qa", np.uint8)
-    with gzip.GzipFile(OUT / "qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
+    with gzip.GzipFile("data/qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
         for _, band in qa.bands():
             fh.write(band.tobytes())
     from PIL import Image
@@ -362,7 +362,7 @@ def main(argv):
                                drawn="lidar | procedural | none", h_bv="height in the Einzelbäume register, m",
                                con="a conifer (species, or its winter density in the laser scan): evergreen"),
                    trees=[t["rec"] for t in trees]),
-              open(OUT / "trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
+              open("data/trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
     # the volume: the regions' own (for traffic.py), read where asked for (mapstore.MapVolume)
     Hm = max(r["Hm"] for r in res.values())
     vol = mapstore.MapVolume(ws, rdir, Hm)
@@ -382,6 +382,7 @@ def main(argv):
     import labels as labels_mod
     import landmarks
     import traffic
+    import trafficpack
     import tunnels
     import underpass
     osm = OSM(f"{aoi.RAW}/osm.json")
@@ -427,7 +428,7 @@ def main(argv):
         whole = lambda a: a.box(0, D_, 0, W_) if isinstance(a, mapstore.MapRaster) else a  # noqa: E731
         pickle.dump(dict({k: whole(v) for k, v in tin.items()}, open_cut=traffic.OPEN_CUT, walk=whole(underpass.WALK),
                          ids=underpass.IDS, bore=whole(tunnels.FLOOR), bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
-    json.dump(traffic.build(note=note, vol=vol, **tin), open(OUT / "traffic.json", "w"), separators=(",", ":"))
+    json.dump(trafficpack.pack(traffic.build(note=note, vol=vol, **tin)), open(OUT / "traffic.json", "w"), separators=(",", ":"))
     # debug lists of the regions, one after the other
     for name in ("lod2_reverted", "thin_parts", "floating", "floating_left", "supports"):
         items = []

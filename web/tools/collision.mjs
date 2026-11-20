@@ -42,7 +42,8 @@ async function tunnelFlight() {
     return { ground: t.ground[c], top };
   };
   const under = (q) => { const c = col(q[0], q[1]); return c && c.top - q[2] >= 5; };
-  const traffic = JSON.parse(fs.readFileSync(`${D}traffic.json`, 'utf8'));
+  const { module: TP } = await runnerImport(`${root}src/sim/traffic-pack.ts`, { root, logLevel: 'error' });
+  const traffic = TP.unpackTraffic(JSON.parse(fs.readFileSync(`${D}traffic.json`, 'utf8')));
   let best = null;
   for (const r of traffic.roads) {
     const n = r.p.filter(under).length;

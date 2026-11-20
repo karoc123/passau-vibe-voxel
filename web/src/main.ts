@@ -20,6 +20,7 @@ import type { SearchItem } from './search';
 import { StreetLife } from './sim/life';
 import { Boats, type BoatData } from './sim/boats';
 import type { Kind, TrafficData } from './sim/types';
+import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
@@ -419,7 +420,7 @@ async function boot() {
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
-  fetchJson<TrafficData>('data/traffic.json').then((td) => {
+  fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     life = nav.life = new StreetLife(scene, td);
     movingActors.add(life.group);

@@ -56,7 +56,7 @@ const fmt = (o) => Object.entries(o).map(([k, v]) => `${k}=${v}`).join(' ');
 const roadArgs = args.flatMap((a, i) => (a === '--road' ? [args[i + 1]] : []));
 const roadsAt = args.indexOf('--roads');
 if (roadArgs.length || roadsAt >= 0) {
-  const traffic = JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8'));
+  const traffic = (await load('sim/traffic-pack.ts')).unpackTraffic(JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8')));
   // the benchmark: the steepest roads of Passau (each with ~40 m at 15-25 %), both ways
   const bench = [435, 451, 533, 54, 139, 293, 358, 1, 421, 355];
   const kmhAll = roadsAt >= 0 && args[roadsAt + 1] && !args[roadsAt + 1].startsWith('--') ? +args[roadsAt + 1] : 30;
@@ -168,7 +168,7 @@ async function tunnelRoad() {
     const top = t.counts[c] ? t.runs[(k0 + t.counts[c] - 1) * 3] + t.runs[(k0 + t.counts[c] - 1) * 3 + 1] : 0;
     return { ground: t.ground[c], top };
   };
-  const traffic = JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8'));
+  const traffic = (await load('sim/traffic-pack.ts')).unpackTraffic(JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8')));
   let best = null;
   // (the B 12 under the Georgsberg, OSM way 27662492, by default: on the larger map the deepest road is another tunnel;
   // TUNNEL_WAY=<id> tries another, TUNNEL_WAY=0 the deepest)

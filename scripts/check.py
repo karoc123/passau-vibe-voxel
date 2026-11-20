@@ -230,7 +230,7 @@ def file_sha(f):
 
 def digest(ws, inputs=False):
     """every output of a workspace: the files of web/public/data, the arrays of data/*.npz (a zip's entries carry the
-    time they were written), data/*.bin; inputs: also the arrays of prep, lod2, laser.npz"""
+    time they were written), data/*.bin, data/trees.json, data/qa_roadmask.bin.gz; inputs: also the arrays of prep, lod2, laser.npz"""
     h = {}
     for f in sorted((ws / PUB).rglob("*")):  # (the registry, scripts/palette.json, is meta.json's palette)
         if f.is_file():
@@ -242,7 +242,7 @@ def digest(ws, inputs=False):
             with np.load(f) as z:
                 for k in sorted(z.files):
                     h[f"{f.relative_to(ws)}:{k}"] = arr_sha(z[k])
-        elif f.suffix == ".bin":
+        elif f.suffix == ".bin" or f.name in ("trees.json", "qa_roadmask.bin.gz"):  # (the two not served: regions.py)
             h[str(f.relative_to(ws))] = file_sha(f)
     return h
 
@@ -289,7 +289,8 @@ def surface(ws, fx):
     -> {network: dict(metres, sunk=(metres, share, worst 10 m clusters), hover=...)}"""
     import mapstore
     meta = json.load(open(ws / PUB / "meta.json"))
-    tr = json.load(open(ws / PUB / "traffic.json"))
+    import trafficpack
+    tr = trafficpack.unpack(json.load(open(ws / PUB / "traffic.json")))
     pal = meta["palette"]
     solid = np.array([i != 0 and e[3] not in (M_LEAF, M_LAMP, M_CAR) for i, e in enumerate(pal)] + [True] * 64)
     rdir = lambda w: ws / "data/cache/regions" / f"{w.r0}_{w.c0}"  # noqa: E731

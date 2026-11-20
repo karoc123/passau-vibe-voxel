@@ -1,6 +1,6 @@
 """Road + pedestrian graphs with real signal positions for the live simulation (web/src/sim/life.ts).
 
-Output traffic.json, coordinates in grid metres (x = col, y = row) with z = walking/driving surface voxel level.
+Output traffic.json (its polylines packed: trafficpack.py), coordinates in grid metres (x = col, y = row) with z = walking/driving surface voxel level.
 - roads: directed edges between junctions (OSM ways split at shared nodes), lanes per direction, speed,
   optional stop line {s, ctrl, axis} for traffic signals (OSM highway=traffic_signals + traffic_signals:direction)
 - ctrls: signal controllers = signal nodes clustered per junction (<= 45 m); each runs a two-axis cycle
@@ -820,5 +820,6 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     OPEN_CUT, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
     import tunnels
     tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
-    json.dump(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), **tin),
+    import trafficpack
+    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), **tin)),
               open("web/public/data/traffic.json", "w"), separators=(",", ":"))
