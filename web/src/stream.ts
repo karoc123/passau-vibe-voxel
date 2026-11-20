@@ -332,8 +332,11 @@ export class TileStreamer implements ColumnSource {
     this.pool.push(p);
   }
 
-  // workers past the first one leave after 4 s idle (each holds ~35 MB)
+  // workers past the first one leave after 4 s idle (each holds ~35 MB) -- only while the page is hidden (city.ts, on
+  // visibilitychange): in view, the next turn of the camera wants them again, and a new one costs its modules fetched
+  // and compiled anew
   retire() {
+    if (!document.hidden) return;
     const now = performance.now();
     for (const p of [...this.pool]) {
       if (this.pool.length > 1 && p.busy === 0 && now - p.idle > 4000) {

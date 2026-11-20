@@ -81,9 +81,12 @@ VIEW_AT = dict(oberhaus=(829736.5, 5390182.5), eck=(830216.0, 5389770.0), eck_gr
 VIEWS_MORE = dict(
     kachlet=("Kachlet dam", (824990, 5389985), (330, 260, 420)),
     schalding=("Schalding", (822000, 5391860), (420, 330, 520)),
-    hacklberg=("Hacklberg", (827820, 5389990), (-260, 220, 380)),
+    # (hacklberg, north: aimed so the districts' labels are in frame -- Hacklberg and the brewery at 1280 x 720 and on a
+    # phone held upright, 390 x 844; Ries and Grubweg at 1280 x 720, from high and steep: lower, the hills and trees in
+    # front hid the labels (labels.ts casts a ray to each), and their 3 km never fit a phone's width)
+    hacklberg=("Hacklberg", (827592, 5390075), (-405, 352, -109)),
     ilztal=("Ilz valley at Hals", (829000, 5391560), (380, 260, 300)),
-    north=("Ries and Grubweg", (829000, 5391500), (-400, 900, 1700)),
+    north=("Ries and Grubweg", (829077, 5391384), (-199, 3943, 2268)),
 )
 
 

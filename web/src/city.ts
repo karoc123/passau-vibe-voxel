@@ -15,10 +15,17 @@ import { TILE_N as T } from './tile-data';
 
 // The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
 // within the distance + LOAD_M of the camera along the ground, kept once in until it is further than + KEEP_M (so a
-// camera moving to and fro at the edge doesn't load and free the same tiles over and over), and freed FREE_MS after
-// it left. A mesh is drawn while its box's nearest point is within the distance + DRAW_M: the fog (daylight.ts) is full
+// camera moving to and fro at the edge doesn't load and free the same tiles over and over); once out, it is idle (below).
+// A mesh is drawn while its box's nearest point is within the distance + DRAW_M: the fog (daylight.ts) is full
 // at the distance, so a tile comes and goes unseen. Beyond, the coarse far ground (farground.ts) stands in.
-const LOAD_M = 150, KEEP_M = 400, DRAW_M = 32, FREE_MS = 8000;
+const LOAD_M = 150, KEEP_M = 400, DRAW_M = 32;
+// A node neither shown nor chosen (idle: behind the camera in an orbit, finer than wanted now, out of range) stays in
+// for a turn back to it: once all the idle ones hold over IDLE_BYTES (vertices as stream.ts stats() counts them, and
+// column data) they go, those out of range first, then the furthest from the camera -- but none used within RECENT_MS
+// (a camera turning round, an orbit, wants them again within seconds; least recently used first would free just those
+// an orbit comes to next); any of them IDLE_MS after its last use. (An orbit of the overview leaves ~170 idle nodes,
+// ~400 MB)
+const IDLE_BYTES = 384e6, IDLE_MS = 180000, RECENT_MS = 20000;
 // The first moment's ground (terrain.ts): the 128 m tiles within the view distance + LOAD_M, but no further than
 // FIRST_M + LOAD_M (a mesh of 33 x 33 heights each until its tile is in: on a large map at a 5 km distance ~2000 of
 // them, 1.4 M vertices, seconds of the start). Beyond, the far ground stands in until the tiles come. (All of the old
@@ -437,11 +444,26 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   // the tile meshes drawn last time (not foliage): the far ground gives way under them
   let masking = new Map<string, TileNode>();
+  // the idle nodes kept (S.update's release): how many, their bytes (vertices as stream.ts stats() counts them, the
+  // base's foliage cover, the column data); freed: the nodes released so far, by why
+  let idleN = 0, idleBytes = 0;
+  const freed = { gone: 0, old: 0, lru: 0 };
+  const geoBytes = (g?: THREE.BufferGeometry) => {
+    let b = 0;
+    if (g) for (const [k, a] of Object.entries(g.attributes) as [string, THREE.BufferAttribute][]) b += a.count * a.itemSize * (k === 'vattr' ? 1 : 2);
+    return b;
+  };
+  const nodeBytes = (n?: TileNode) => {
+    if (!n) return 0;
+    const c = n.data;
+    return geoBytes(n.mesh?.geometry) + geoBytes(n.cover) + (c ? c.counts.byteLength + c.runs.byteLength + c.ground.byteLength + c.off.byteLength : 0);
+  };
+  // the workers past the first one leave once the page has been hidden a while (stream.ts retire)
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setTimeout(() => S.retire(), 5000); });
   S.update = () => {
     const now = performance.now();
     if (now - last < 100) return;
     last = now;
-    S.retire();
     const f = focus();
     range();
     look();
@@ -515,19 +537,38 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       }
     }
     dirty.clear();
-    // what is neither shown nor chosen goes after a while (the foliage with its base: the base's mesh lacks what the
-    // grass covers, stream.ts coverBase)
+    // What is neither shown nor chosen (idle) stays in, for the camera turning back to it (an orbit picks the nodes
+    // behind it coarser, then finer again), as IDLE_BYTES, RECENT_MS, IDLE_MS say. (The foliage with its base: the
+    // base's mesh lacks what the grass covers, stream.ts coverBase)
+    const release = (n: TileNode, fol: TileNode | undefined) => {
+      if (fol) { if (counted.delete(fol.key)) dirty.add(index(fol.tx, fol.ty)); S.free(fol); }
+      counted.delete(n.key);
+      if (occSig.delete(n.key)) occNode(n);
+      S.free(n);
+    };
+    const idle: { n: TileNode; fol: TileNode | undefined; b: number; gone: boolean; d: number }[] = [];
+    idleBytes = 0;
     for (const n of [...S.nodes.values()]) {
       if (n.foliage || n.state !== 'ready') continue;
       if (shownN.has(n.key) || chosen.has(n.key)) { n.used = now; continue; }
       // (out of range: none of its tiles in range of the view distance)
       const gone = (!!cut || !!ct) && !nodeIn(lnode(n.s, n.tx, n.ty));
       const fol = n.s === 1 ? S.nodes.get(`f/${n.tx}_${n.ty}`) : undefined;
-      if (now - n.used > (gone ? FREE_MS : 15000) && !(n.pinned > now) && !((fol?.pinned ?? 0) > now)) {
-        if (fol) { if (counted.delete(fol.key)) dirty.add(index(fol.tx, fol.ty)); S.free(fol); }
-        counted.delete(n.key);
-        if (occSig.delete(n.key)) occNode(n);
-        S.free(n);
+      if (n.pinned > now || (fol?.pinned ?? 0) > now) continue;
+      if (now - n.used > IDLE_MS) { release(n, fol); freed.old++; continue; }
+      const b = nodeBytes(n) + nodeBytes(fol);
+      idle.push({ n, fol, b, gone, d: flat(n.tx * n.s * T, n.ty * n.s * T, (n.tx + 1) * n.s * T, (n.ty + 1) * n.s * T) });
+      idleBytes += b;
+    }
+    idleN = idle.length;
+    if (idleBytes > IDLE_BYTES) {
+      idle.sort((a, b) => +b.gone - +a.gone || b.d - a.d);
+      for (const { n, fol, b, gone } of idle) {
+        if (idleBytes <= IDLE_BYTES) break;
+        if (now - n.used < RECENT_MS) continue;
+        release(n, fol);
+        freed[gone ? 'gone' : 'lru']++;
+        idleBytes -= b; idleN--;
       }
     }
     occluders();
@@ -636,6 +677,6 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     crop: ct && [ct[0] * T, ct[1] * T, (ct[2] + 1) * T, (ct[3] + 1) * T],
     occluder: occ,
     // what the structures that follow the camera hold now (tools)
-    get held() { return { occlusion: occ.stats, farground: far.stats, pages: pages.stats, terrain: terrain.bytes }; },
+    get held() { return { occlusion: occ.stats, farground: far.stats, pages: pages.stats, terrain: terrain.bytes, idle: { nodes: idleN, bytes: idleBytes, freed } }; },
   };
 }
