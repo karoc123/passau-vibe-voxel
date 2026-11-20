@@ -2098,6 +2098,13 @@ if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
     LZ = region.load_npz("data/laser.npz")
 else:
     note("no data/laser.npz (scripts/laser.py): trees from the surface model only")
+# the forests' dominant species from remote sensing (scripts/species_map.py: DLR Tree Species Germany 2022, 2016 where
+# 2022 has lost the canopy; 10 m). Optional: without data/raw/treespecies_*.tif (or with NO_SPECIES_MAP) the trees'
+# kinds come from OSM and the laser alone
+import species_map
+SPM = None if os.environ.get("NO_SPECIES_MAP") else species_map.grid()
+if SPM is None:
+    note("no tree species map (data/raw/treespecies_*.tif): conifers by OSM and the laser only")
 # the OSM trees widen the ortho's green test and pardon wall edges (as before); the register's points do not
 tree_rc = np.array([(int(t["y"]), int(t["x"])) for t in all_trees if t["src"] == "osm"])
 near_tree = np.zeros((D, W), bool)
@@ -2335,16 +2342,48 @@ if trunks:
     _sumc = lambda a: np.bincount(kk[ok_], weights=np.asarray(a, np.float64)[vr_[ok_], vc_[ok_]], minlength=nT)
     measured = _sumc(veg_laser) > 0.5 * np.maximum(_cnt, 1)  # the crown's height from the laser
     have_base = np.zeros(nT, bool)
+    # a crown whose species OSM or the register knows keeps it; the others take the species map's class where half
+    # of the crown's cells or more have it (species_map.per_crown), else the laser's
+    _unk = ~con & ~np.array(trunk_broad, bool)
+    cls_rs, share_rs = np.full(nT, species_map.NONE, np.uint8), np.zeros(nT)
+    if SPM is not None:
+        cls_rs, share_rs = species_map.per_crown(SPM[vr_[ok_], vc_[ok_]], kk[ok_], nT)
+    _mapped = share_rs >= 0.5
+    cls_rs = np.where(_mapped, cls_rs, species_map.NONE)
+    everg_rs = np.isin(cls_rs, species_map.EVERGREEN)
+    larch_rs = cls_rs == species_map.LARCH
+    broad_rs = np.isin(cls_rs, species_map.BROADLEAF)
+    lcon = np.zeros(nT, bool)
     if LZ is not None:
         # conifers by the winter scan: a spruce, fir, pine, yew or thuja keeps its needles and stops the pulse in the
         # crown (one return, nothing behind it); a bare broadleaf crown lets it on through its twigs to the ground
-        # (more returns). A fifth of the crown's canopy pulses single makes it a conifer (~6 % of the trees, in
-        # groups in the forests on the slopes; a broadleaf crown is under 2 % single), unless OSM knows it broadleaved
+        # (more returns), and the needles reflect brighter: the canopy first returns' mean intensity is ~960 over
+        # evergreen conifers, ~560 over bare broadleaf crowns (~690 over leafless larch). A quarter of the crown's
+        # canopy pulses single or a mean intensity of 780 and up makes it a conifer (against the DLR map's forest
+        # blocks: recall 0.82 at precision 0.72; single >= 0.2 alone found half the conifers)
         _can, _sgl = _sumc(LZ["n_canopy"]), _sumc(LZ["n_single"])
+        _int = _sumc(LZ["int_canopy"]) * 16 / np.maximum(_can, 1)
         # (a crown of 10 m2 or more: a narrow dense column is an ivy-clad trunk or a pole as often, a green pillar)
-        lcon = (_sgl >= 0.2 * _can) & (_can >= 15) & (_cnt >= 10) & ~np.array(trunk_broad, bool)
-        note("conifers by the laser's winter density:", int((lcon & ~con).sum()), "(by species:", int(con.sum()), ")")
-        con |= lcon
+        lcon = ((_sgl >= 0.25 * _can) | (_int >= 780)) & (_can >= 15) & (_cnt >= 10)
+        # needles in February, single and bright: no larch (the map's larch is then a spruce or Douglas fir beside it),
+        # and in a broadleaf pixel a conifer among the broadleaves
+        _dense = (_sgl >= 0.25 * _can) & (_int >= 800) & (_can >= 15)
+        larch_rs &= ~_dense
+        lcon = (everg_rs | (cls_rs == species_map.LARCH) & _dense | broad_rs & _dense
+                | (cls_rs == species_map.NONE) & lcon)
+    lcon = _unk & (lcon | everg_rs | larch_rs)
+    note("crowns of unknown species on the species map:", int((_unk & _mapped).sum()), "of", int(_unk.sum()),
+         "(evergreen conifer", int((_unk & everg_rs).sum()), "larch", int((_unk & larch_rs).sum()), "broadleaved",
+         int((_unk & broad_rs).sum()), ")")
+    note("conifers by the species map and the laser:", int(lcon.sum()), "(by species:", int(con.sum()), ")")
+    con |= lcon
+    # the map's genus where the crown is drawn as the map says (trees.json "sp_rs", for phenology.py; "species"/"sp"
+    # stay the register's and OSM's): not where the laser overruled it (needles in a broadleaf or larch pixel)
+    _say = _unk & ((everg_rs | larch_rs) & con | broad_rs & ~con)
+    for i_ in np.nonzero(_say)[0]:
+        if trunk_rec[i_] is not None:
+            trunk_rec[i_]["sp_rs"] = species_map.GENUS[int(cls_rs[i_])] or species_map.OTHER_BROADLEAF
+    if LZ is not None:
         # the crown's underside from the laser: the median over its cells (8+ vegetation returns) of their lowest
         # tenth -- the lowest branches, and on a tree in the open, its skirt
         _cb = (LZ["veg_n"] >= 8) & veg
@@ -2436,7 +2475,9 @@ if trunks:
     # edge shares a cell with a conifer, its leaf voxels there stayed in leaf through the winter (thin bright-green
     # columns beside the conifers among the bare trees), and the conifer's needles in a broadleaf's cell went bare.
     # Those voxels (the other kind than the cell's owner) are left out: the boundary between the two snaps to 2 m
-    evg = con & ~np.array([((r_ or {}).get("species") or "").split(" ")[0] in ("Larix", "Metasequoia") for r_ in trunk_rec])
+    # (a larch, by its species or the species map, is a cone but bare in winter)
+    evg = con & ~np.array([((r_ or {}).get("species") or (r_ or {}).get("sp_rs") or "").split(" ")[0] in ("Larix", "Metasequoia")
+                           for r_ in trunk_rec])
     _wt = np.where(veg, 1, 0).astype(np.int8)
     _wt[tidx > 0] *= 4
     _o4 = np.where(veg, own, 0).reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
@@ -2621,7 +2662,7 @@ for t in all_trees:
         continue
     rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
     for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
-                        ("bv_height", "h_bv"), ("con", "con")):
+                        ("bv_height", "h_bv"), ("con", "con"), ("sp_rs", "sp_rs")):
         if t.get(k_src) is not None:
             rec[k_out] = t[k_src]
     if t["src"] == "lidar":

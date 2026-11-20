@@ -7,6 +7,9 @@
 # Laserdaten (airborne LiDAR point clouds, LAZ, Feb 2021 leaf-off, ~11 points/m2), 1 km tiles, for scripts/laser.py;
 # Einzelbäume 3D (single trees with height, from the 2024 flight) of the Landkreis/Stadt GeoPackage 124014, cut to the
 # AOI once (scripts/clip_baeume.py) into baeume_aoi.csv; the 370 MB GeoPackage is deleted after the cut.
+# Not the Vermessungsverwaltung's: Tree Species Germany 2022 and 2016 (DLR Earth Observation Center, Wegler et al.,
+# CC BY 4.0), the dominant tree species of the forests at 10 m, EPSG:3035 cloud-optimised GeoTIFFs; only the map's
+# window is read (HTTP ranges, ~1 MB each) by scripts/clip_species.py into treespecies_2022.tif, treespecies_2016.tif.
 set -e
 cd "$(dirname "$0")/.."
 TILES=$(PYTHONPATH=scripts uv run python -c "
@@ -47,3 +50,9 @@ if [ ! -s baeume_aoi.csv ]; then
   rm -f baeume_dl/124014_baeume.gpkg
 fi
 ls -la baeume_aoi.csv
+for y in 2022 2016; do
+  [ -s treespecies_$y.tif ] || uv run --project "$ROOT" python -I "$ROOT/scripts/clip_species.py" \
+    https://download.geoservice.dlr.de/TREE_SPECIES_DE/files/treespecies_de_$y.tif treespecies_$y.tif.part $BOUNDS \
+    && mv treespecies_$y.tif.part treespecies_$y.tif
+  ls -la treespecies_$y.tif
+done

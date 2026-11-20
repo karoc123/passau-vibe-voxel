@@ -15,14 +15,16 @@ export PYTHONPATH=scripts
 # OSM_REFRESH=1 fetches the current extract (Geofabrik Niederbayern, cut to the AOI)
 if [ ! -s data/raw/osm.json ] || [ -n "$OSM_REFRESH" ]; then sh scripts/fetch_osm.sh; fi
 sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20, DGM1, DOP20), data/raw/lod2/*.gml,
-                                         # data/raw/laser/*.laz, data/raw/baeume_aoi.csv; skips files it has
+                                         # data/raw/laser/*.laz, data/raw/baeume_aoi.csv, data/raw/treespecies_{2022,2016}.tif
+                                         # (DLR Tree Species Germany, the map's window); skips files it has
 S="uv run python scripts/stamp.py"
 A="scripts/aoi.py scripts/map.json"      # (what every step reads of the map)
 $S prep -i $A data/raw/dsm_*.tif data/raw/dtm_*.tif data/raw/orto_*.tif -o data/prep.npz \
   -- python scripts/prep.py              # data/prep.npz
 $S lod2 -i $A data/raw/lod2 -o data/lod2.npz -- python scripts/lod2.py   # data/lod2.npz (LoD2 roof planes and footprints on the grid)
 $S laser -i $A data/raw/laser data/prep.npz -o data/laser.npz -- python scripts/laser.py  # data/laser.npz (LiDAR vegetation statistics per cell)
-uv run python scripts/voxelize.py        # (region by region: --regions NXxNY, -j N; only the regions that changed, --status
+uv run python scripts/voxelize.py        # (reads data/raw/treespecies_*.tif too: scripts/region_inputs.py RAW_FILES)
+                                         # (region by region: --regions NXxNY, -j N; only the regions that changed, --status
                                          # tells which; --only ROW_COL builds one again) tiles/, meta.json, data/trees.json,
                                          # traffic.json, data/qa_roadmask.bin.gz; data/ground.npz, data/footprints.npz,
                                          # data/crowns.npz (needs data/lod2.npz, or NO_LOD2=1)
@@ -44,7 +46,7 @@ $S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/wind
   -- python scripts/windows.py           # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
 $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/alkis_tn.py data/raw/dwd data/raw/tn_09262.zip data/raw/tn_09275.zip \
-  data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
+  data/raw/treespecies_2022.tif data/raw/treespecies_2016.tif data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
 $S tile_fields -i $A scripts/window.py scripts/tilefile.py data/zones.bin data/flood.bin data/foliage.bin $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light (from the data/ maps above)

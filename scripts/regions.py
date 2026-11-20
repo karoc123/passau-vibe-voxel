@@ -360,7 +360,10 @@ def main(argv):
                    fields=dict(x="grid column", y="grid row", z="ground voxel", h="crown top above ground, m",
                                sp="species or genus (Latin, as tagged)", cm="trunk circumference, cm", h_inv="tagged height, m",
                                drawn="lidar | procedural | none", h_bv="height in the Einzelbäume register, m",
-                               con="a conifer (species, or its winter density in the laser scan): evergreen"),
+                               con="a conifer, drawn as a cone (species, the species map, or its winter density and "
+                                   "brightness in the laser scan): evergreen unless sp or sp_rs is a larch",
+                               sp_rs="genus from the forests' species map (DLR Tree Species Germany 2022/2016, "
+                                     "CC BY 4.0) where sp is unknown, or 'other broadleaved'"),
                    trees=[t["rec"] for t in trees]),
               open("data/trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
     # the volume: the regions' own (for traffic.py), read where asked for (mapstore.MapVolume)
@@ -411,7 +414,9 @@ def main(argv):
                              elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
                              ortho="Bayerische Vermessungsverwaltung, DOP20 (CC BY 4.0)",
                              landuse="Bayerische Vermessungsverwaltung, ALKIS Tatsächliche Nutzung (CC BY 4.0)",
-                             trees="Bayerische Vermessungsverwaltung, Laserdaten (2021) + Einzelbäume 3D (2024) (CC BY 4.0)"))
+                             trees="Bayerische Vermessungsverwaltung, Laserdaten (2021) + Einzelbäume 3D (2024) (CC BY 4.0)",
+                             **({"tree_species": "Tree Species Germany 2022/2016, DLR Earth Observation Center (Wegler et al.) "
+                                 "(CC BY 4.0)"} if list(Path(aoi.RAW).glob("treespecies_*.tif")) else {})))
     json.dump(meta, open(OUT / "meta.json", "w"))
     # traffic.py over the whole network, on what the regions handed over
     traffic.OPEN_CUT = {o for r in res.values() for o in r["open_cut"]}

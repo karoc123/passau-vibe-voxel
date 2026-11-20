@@ -62,7 +62,7 @@ FIXTURE = SCRIPTS / "fixtures" / "altstadt.json"
 WIDE = SCRIPTS / "fixtures" / "altstadt_wide.json"
 INPUTS = {"prep": "data/prep.npz", "lod2": "data/lod2.npz", "laser": "data/laser.npz"}  # (built in this order)
 AFTER = ["places", "flood", "boats", "terrain", "zones", "objects", "windows", "phenology", "tile_fields"]
-DROP_ENV = ("MAP_CONFIG", "FORCE", "NO_LOD2", "NO_LASER", "FINALDUMP", "TRAFFICDUMP", "OSM_REFRESH", "PYTHONPATH")
+DROP_ENV = ("MAP_CONFIG", "FORCE", "NO_LOD2", "NO_LASER", "NO_SPECIES_MAP", "FINALDUMP", "TRAFFICDUMP", "OSM_REFRESH", "PYTHONPATH")
 # per windowed step: what it reads (copied: the step rewrites some in place; or linked) and writes (window.py)
 WSTEPS = {
     "zones": dict(copy=[f"{PUB}/meta.json"], link=["data/raw", "data/footprints.npz"],

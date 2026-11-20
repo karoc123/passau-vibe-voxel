@@ -10,7 +10,7 @@ code changed (and the OSM cut each region reads instead of the whole of data/raw
   nothing near a region leaves it be
 - the per-object overrides (scripts/overrides, overrides.py) of the ways and relations within OVERRIDE_REACH of its
   core: their files' hashes go with the cut's, so editing one rebuilds only the regions near that object
-- other raw files a region reads whole (the tree register, ALKIS land use): their hash
+- other raw files a region reads whole (the tree register, ALKIS land use, the tree species maps): their hash
 - code: the files of scripts/ the region's process had loaded (recorded in its out.json, `deps`; a Python file by its
   syntax tree, so comments and docstrings rebuild nothing), and the parts of scripts/map.json that decide what is built
   (grid, anchor, map, base, rivers)
@@ -34,8 +34,9 @@ OVERRIDE_REACH = 128  # m: an override (scripts/overrides) of an object this nea
 CACHE = Path("data/cache/inputs")
 HERE = Path(__file__).resolve().parent
 RASTERS = ["data/prep.npz", "data/lod2.npz", "data/laser.npz"]
-RAW_FILES = ["data/raw/baeume_aoi.csv", "data/raw/tn_09262.zip", "data/raw/tn_09275.zip"]
-ENV = ["NO_LOD2", "NO_LASER"]
+RAW_FILES = ["data/raw/baeume_aoi.csv", "data/raw/tn_09262.zip", "data/raw/tn_09275.zip", "data/raw/treespecies_2022.tif",
+             "data/raw/treespecies_2016.tif"]
+ENV = ["NO_LOD2", "NO_LASER", "NO_SPECIES_MAP"]
 
 
 def sha(b):

@@ -12,8 +12,12 @@
 A phase neither source gives takes the median over the classes.
 
 Species groups where the tree's species is unknown (all but a few hundred OSM trees: the Einzelbäume register has no
-species, only ground and tree height; the conifers are told by the laser's winter scan, voxelize.py "con"). Such a
-broadleaved tree takes a class drawn by its site, from open data (site_classes below):
+species, only ground and tree height). In the forests the species map gives the genus (voxelize.py "sp_rs", from DLR
+Tree Species Germany 2022/2016, scripts/species_map.py): pine, spruce, Douglas fir, fir (evergreen), larch (class 10),
+beech, oak, birch, alder; elsewhere the conifers are told by the laser's winter scan (voxelize.py "con"). A broadleaved
+tree with no genus takes a class drawn by its site, from open data (site_classes below):
+- the species map's "other broadleaved" (neither beech, oak, birch nor alder): the forest's other genera without
+  birch and alder, in equal shares;
 - riparian: within 30 m of open water (data/ground.npz water, bodies of 1000 m2 and up) and at most 3 m above it --
   the floodplain forest's genera (willow, alder, poplar, ash), in equal shares (no inventory gives their mix here);
 - forest: ALKIS Wald or Gehölz (alkis_tn.py) -- beech (with hornbeam) 17 and oak 12 parts (their shares of the forest
@@ -263,11 +267,12 @@ def genus_class(genus):
 
 
 def classify(t, drawn=None):
-    """the tree's class; drawn: for a tree of unknown species, the class its site's draw gave (site_classes)"""
-    genus = (t.get("sp") or "").split(" ")[0]
+    """the tree's class; drawn: for a tree of unknown species, the class its site's draw gave (site_classes). The
+    species is OSM's or the register's ("sp"), else the forests' species map's genus (voxelize.py "sp_rs")"""
+    genus = (t.get("sp") or t.get("sp_rs") or "").split(" ")[0]
     if genus in CONIFERS or (t.get("con") and genus not in ("Larix", "Metasequoia")):  # (con: voxelize.py, laser scan)
         return EVERGREEN
-    if not genus and drawn is not None:
+    if (not genus or t.get("sp_rs") == OTHER_BROADLEAF and not t.get("sp")) and drawn is not None:
         return drawn
     return genus_class(genus)
 
@@ -276,6 +281,9 @@ def classify(t, drawn=None):
 RIPARIAN = [("Salix", 1), ("Alnus", 1), ("Populus", 1), ("Fraxinus", 1)]
 FOREST_OTHER = ["Acer", "Fraxinus", "Tilia", "Betula", "Alnus", "Salix", "Populus", "Sorbus", "Prunus"]
 FOREST = [("Fagus", 17), ("Quercus", 12)] + [(g_, 18 / len(FOREST_OTHER)) for g_ in FOREST_OTHER]
+# the species map's "other broadleaved" (neither beech, oak, birch nor alder): the forest's other genera but those
+MAPPED_OTHER = [(g_, 1) for g_ in FOREST_OTHER if g_ not in ("Betula", "Alnus")]
+OTHER_BROADLEAF = "other broadleaved"  # (species_map.OTHER_BROADLEAF: trees.json "sp_rs")
 URBAN_GENERA = sorted({g_ for _, _, gs in CLASSES.values() for g_ in gs if g_ != "Larix"} |
                       {"Prunus", "Ulmus", "Juglans", "Malus", "Platanus"})
 INAT_COUNT = ("https://api.inaturalist.org/v1/observations?taxon_name={g}&swlat={s}&swlng={w}&nelat={n}&nelng={e}"
@@ -339,7 +347,7 @@ def _u(*key):
 
 def site_classes(trees):
     """per tree (trees.json's, map cells): the class drawn for it by its site (see the docstring), and the site
-    (0 elsewhere, 1 forest, 2 riparian)"""
+    (0 elsewhere, 1 forest, 2 riparian, 3 the species map's "other broadleaved")"""
     import aoi
     forest, riparian = site_masks()
     urban = urban_shares()
@@ -348,6 +356,9 @@ def site_classes(trees):
     c = np.clip(xy[:, 0].astype(int), 0, forest.shape[1] - 1)
     r = np.clip(xy[:, 1].astype(int), 0, forest.shape[0] - 1)
     site = np.where(riparian[r, c], 2, np.where(forest[r, c], 1, 0))
+    # a tree the species map calls "other broadleaved" draws from the genera the map leaves (sp_rs Fagus, Quercus,
+    # Betula, Alnus need no draw: classify takes them)
+    site = np.where([t.get("sp_rs") == OTHER_BROADLEAF for t in trees], 3, site)
     # stands: the nearest of jittered seeds, one per STAND_M square of the project grid
     pc, pr = xy[:, 0] + aoi.MAP_C0, xy[:, 1] + aoi.MAP_R0
     i0, j0 = np.floor(pc / STAND_M).astype(int), np.floor(pr / STAND_M).astype(int)
@@ -365,7 +376,7 @@ def site_classes(trees):
             best[m] = d[m]
             stand[m] = np.c_[si, sj][m]
     tables = {}
-    for k, shares in ((0, urban), (1, FOREST), (2, RIPARIAN)):
+    for k, shares in ((0, urban), (1, FOREST), (2, RIPARIAN), (3, MAPPED_OTHER)):
         w = np.array([p_ for _, p_ in shares], float)
         tables[k] = ([genus_class(g_) for g_, _ in shares], np.cumsum(w) / w.sum())
     out = np.zeros(len(trees), np.uint8)
@@ -394,7 +405,7 @@ def main():
     keep = np.array([t.get("drawn") != "none" for t in every], bool)
     trees = [t for t in every if t.get("drawn") != "none"]
     cls = cls_all[keep]
-    print("trees per site (elsewhere, forest, riparian):", np.bincount(site[keep], minlength=3).tolist(),
+    print("trees per site (elsewhere, forest, riparian, map's other broadleaved):", np.bincount(site[keep], minlength=4).tolist(),
           "conifers among the forest's:", int(((cls == EVERGREEN) & (site[keep] == 1)).sum()))
     city = {ph: city_median(table, cls, ph) for ph in PHASES}
     print("city medians:", city)
