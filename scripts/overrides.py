@@ -40,7 +40,9 @@ A water file (a lock chamber, a basin: water whose level is its own, not the riv
                   (walkway_colour, default #b8bcc0 metal), the leaves colour/material (default #54585c metal); `sill`
                   (m a.s.l., under top): concrete from the lower water up to it (a lock head's sill in an empty
                   chamber). `osm.gates` holds each gate way's geometry hash (rebase writes it), so `check` sees one
-                  redrawn
+                  redrawn. The river water by a gate's outer side (the lock's approaches) stands at the level of its
+                  stretch (scripts/map.json rivers.stretches), not at its body's median ground: the DGM over an
+                  approach is interpolated from the walls round it (voxelize.py)
 
 CLI:  uv run python scripts/overrides.py check              validate every file, report stale or vanished objects
       uv run python scripts/overrides.py info KIND ID       the object's tags, place and size, and a ?focus= link
@@ -691,6 +693,12 @@ def water_levels(areas, cells_of, base):
         out.append((oid, rr, cc, int(math.floor(d["level"] - base + 0.5)),
                     (w.get("colour", WALL_STYLE[0]), w.get("material", WALL_STYLE[1])), geom))
     return out
+
+
+def gate_lines(lines):
+    """the water overrides' gate lines among lines (voxelize's osm.lines, the region's grid): [(gate, line)]"""
+    byid = {oid: line for oid, t, line in lines}
+    return [(gt, byid[gt["way"]]) for o in waters().values() for gt in o["data"].get("gates", []) if gt["way"] in byid]
 
 
 def lock_gates(vol, g, water, lines, pal, mats, cells_of, base, note):

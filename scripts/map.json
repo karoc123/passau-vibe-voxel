@@ -19,6 +19,7 @@
   {"name": "Danube above the Kachlet dam, along the weir", "box": [825040, 5390059, 825060, 5392600], "level": 299.75},
   {"name": "Danube above the Kachlet dam, along the weir", "box": [825060, 5390085, 825080, 5392600], "level": 299.75},
   {"name": "Danube above the Kachlet dam, along the weir", "box": [825080, 5390112, 825100, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam: the locks' upper approach, up to the north chamber's upper gate", "box": [825100, 5390138, 825120, 5392600], "level": 299.75},
   {"name": "Danube below the Kachlet dam", "box": [825000, 5389300, 826200, 5390300], "level": 291.5},
   {"name": "Danube from Heining to Hacklberg", "box": [826200, 5389300, 827371, 5390100], "level": 291.35},
   {"name": "Ilz: the loop below the Hals weir", "box": [828580, 5392000, 828800, 5392600], "level": 296.0},

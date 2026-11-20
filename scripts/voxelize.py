@@ -777,6 +777,26 @@ from aoi import RIVER_LEVEL, RIVER_STRETCHES, river_level
 # (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
 # everywhere subtracts exactly as the scalar did)
 RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
+# the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
+# one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
+# took a median between the two reaches: 64 m blocks of water at 295 and 299 m standing over the tailwater (292 m).
+# Stretches of one river's fall (under WEIR_STEP apart) stay one body, as before. The boxes step along a weir 20 m at
+# a time, across it: within POOL_EDGE of where two pools meet a cell takes the pool whose level (the nearest cell's
+# of that pool) its terrain is nearest -- the DGM over the water is the surface on either side and ramps across the
+# weir, so the cut runs along the weir's middle, not the boxes' staircase
+WEIR_STEP, POOL_EDGE = 2.0, 32  # m
+_lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
+_pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[
+    np.searchsorted(_lvs, np.broadcast_to(RIVER_LV, (D, W)))]
+if _pool.min() < _pool.max():
+    _best, _bestd = _pool.copy(), np.full((D, W), np.inf, np.float32)
+    for p_ in np.unique(_pool):
+        _d, (_i, _j) = ndimage.distance_transform_edt(_pool != p_, return_indices=True)
+        _dl = np.abs(dtm - np.broadcast_to(RIVER_LV, (D, W))[_i, _j]).astype(np.float32)
+        _take = (_d <= POOL_EDGE) & (_dl < _bestd)
+        _best[_take], _bestd[_take] = p_, _dl[_take]
+    _pool = _best
+    del _best, _bestd, _d, _i, _j, _dl, _take
 RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
 _w0 = gcol == C["water"]
 _near_lv = np.abs(dtm - RIVER_LV) < 0.8
@@ -791,6 +811,30 @@ _locklev = np.zeros((D, W), np.int32)
 for _, _lr, _lc, _lg, _, _ in _locks:
     _lockm[_lr, _lc] = True
     _locklev[_lr, _lc] = _lg
+# and the river water by a lock gate's outer side (the approaches) stands at its stretch's level: the DGM over an
+# approach is interpolated from the walls round it (no ground returns in the water), and the upper approach's median
+# came out a metre over the reach in front of the Kachlet's north chamber. A body that reaches within 3.5 m of a gate
+# takes the stretch level there (the top water voxel as the overrides' levels: floor(level - base + 0.5) - 1)
+_gatelv = np.full((D, W), -1, np.int32)
+for _, _gl in overrides.gate_lines(osm.lines):
+    _gr, _gc = cells_of(_gl.buffer(3.5), all_touched=True)
+    _gatelv[_gr, _gc] = np.floor(np.broadcast_to(RIVER_LV, (D, W))[_gr, _gc] - BASE + 0.5).astype(np.int32)
+_gatelv[_lockm] = -1
+
+
+def _bodies(ww, pool):
+    """the water bodies of a window (ndimage.label), cut where the pools meet"""
+    ps = np.unique(pool[ww])
+    if len(ps) <= 1:
+        return ndimage.label(ww)
+    bl, bn = np.zeros(ww.shape, np.int32), 0
+    for p_ in ps:
+        l_, n_ = ndimage.label(ww & (pool == p_))
+        bl[l_ > 0] = l_[l_ > 0] + bn
+        bn += n_
+    return bl, bn
+
+
 for _b in region.blocks(64):
     _w = region._grow(_b, 64)
     _ws = (slice(_w[0], _w[1]), slice(_w[2], _w[3]))
@@ -800,14 +844,16 @@ for _b in region.blocks(64):
     _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
     _ww = (_w0[_ws] | _big) & ~_lockm[_ws]
     _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
-    _bl, _bn = ndimage.label(_ww)
+    _bl, _bn = _bodies(_ww, _pool[_ws])
     _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
     _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
     if len(_ids):
         _lut = np.full(_bn + 1, -1, np.int32)
-        _gw = g[_ws]
+        _gw, _glw = g[_ws], _gatelv[_ws]
         for i_ in _ids:
-            _lut[i_] = int(np.median(_gw[_bl == i_]))
+            _m = _bl == i_
+            _gt = _glw[_m & (_glw >= 0)]
+            _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
         _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
 note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
 gcol[_wat | _lockm] = C["water"]

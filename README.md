@@ -99,8 +99,10 @@ region at the map's edge: 20 s).
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
 size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
-box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir,
-the Danube below it, the Ilz above and below the Hals weir; elsewhere 290.921 m), the anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
+box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
+and on to the lock's upper gates, the Danube below it, the Ilz above and below the Hals weir; elsewhere 290.921 m;
+stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where they meet, so no level is a median
+across a weir), the anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
 cells, the project grid's less the map's corner (`meta.json` `origin`). The viewer's shaders hash and pattern by the
@@ -250,7 +252,8 @@ lists them and their parameters).
 - **Water** (`scripts/overrides/water/<way id>.json`, a `natural=water` area): a `level` of its own (m a.s.l.; the
   polygon then leaves the river bodies whose median level the rest of the water takes), `walls` (the face colour of
   its banks, default concrete; its outline counts as a mapped wall) and `gates` (`waterway=lock_gate` lines drawn from
-  the lower water to a `top`, a walkway on top, concrete under an optional `sill`). The Kachlet lock's two chambers
+  the lower water to a `top`, a walkway on top, concrete under an optional `sill`; the river water by a gate's outer
+  side takes its stretch's level, not the DGM's interpolated median over the approach). The Kachlet lock's two chambers
   (one full, one empty, as on the survey day) are the example; their gate ways' geometry is in the file's `osm` basis.
 - **Validation and staleness**: every build (`region_inputs.cut_osm`) validates all files (unknown keys, bad colours
   or materials, a file name that is not an id of the right kind: the build stops with the list) and warns when an
