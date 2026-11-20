@@ -24,6 +24,7 @@
 // The mean's window shrinks towards the tile's border, to the four columns at a point on it: the 1-cell apron is all a
 // tile sees of its neighbour, so both tiles must find the same height at the points they share.
 import { PAL_GROUND } from './chamfer';
+import type { Box } from './sections';
 
 export const RAMP_R = 3;
 // heights in 1/64 m (as roofs.ts and vattr.y's top 6 bits); PINNED: the point is pinned
@@ -45,12 +46,16 @@ export interface RampField {
 // floor rises in 1 m steps, which were risers the car crashed into (the B 85's ramp tunnel at Hacklberg); the drawn
 // ramps and the mesher keep the column's top
 export const COVER_CLEAR = 3;
-export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs: Uint16Array, under: Uint8Array, pal: Uint8Array, deck = pal, covered = false): RampField {
+// box (apron coordinates): only its columns and the points between them (meshing a part of a node, sections.ts; the
+// points within RAMP_R + 1 of its edge come out as if nothing were beyond it)
+export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs: Uint16Array, under: Uint8Array, pal: Uint8Array, deck = pal, covered = false,
+  box: Box | null = null): RampField {
   const S = N + 2, V = S + 1, paved = new Uint8Array(S * S), h = new Int32Array(V * V).fill(PINNED);
   let ground = under;
   // (solid: how far each column is solid from the bottom up, in cells)
   const solid = new Int32Array(S * S);
-  for (let c = 0; c < S * S; c++) {
+  const bx0 = box ? box.x0 : 0, bx1 = box ? box.x1 : S, by0 = box ? box.y0 : 0, by1 = box ? box.y1 : S;
+  for (let Y0 = by0; Y0 < by1; Y0++) for (let c = bx0 + S * Y0, ce = bx1 + S * Y0; c < ce; c++) {
     if (!counts[c]) continue;
     let t = 0;
     for (let k = off[c] * 3, e = (off[c] + counts[c]) * 3; k < e && runs[k] <= t; k += 3) t = Math.max(t, runs[k] + runs[k + 1]);
@@ -75,7 +80,7 @@ export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs
   }
   let any = false;
   const four = [0, 1, S, S + 1];
-  for (let Y = 1; Y < S; Y++) for (let X = 1; X < S; X++) {
+  for (let Y = Math.max(1, by0 + 1); Y < by1; Y++) for (let X = Math.max(1, bx0 + 1); X < bx1; X++) {
     const a = X - 1 + S * (Y - 1);
     let lo = 1e9, hi = -1, sum = 0, n = 0;
     for (const o of four) if (paved[a + o]) { const g = ground[a + o]; lo = Math.min(lo, g); hi = Math.max(hi, g); sum += g; n++; }

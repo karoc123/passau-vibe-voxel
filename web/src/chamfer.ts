@@ -12,12 +12,22 @@
 // the step does, and into the eave (where the roof overhangs the street, or stands on a filled step), so
 // the eave runs straight as well; the roof above it is left as it is.
 
+import { grow, type Box } from './sections';
+
 export const MAX_LEG = 6;
 // palette flags (stream.ts): roof material, the walls that are chamfered, paved ground (ramps.ts), and water (a distance
 // level's water sunk to its surface, mesher.worker.ts emitMerged)
 export const PAL_ROOF = 1, PAL_WALL = 2, PAL_GROUND = 4, PAL_WATER = 8;
 // vattr.w of a slanted face: SLANT + its outward direction in plan in SLANT_STEPS steps (atan2(y, x), data axes)
 export const SLANT = 128, SLANT_STEPS = 128;
+
+// Meshing a part of a node (sections.ts, mesher.worker.ts meshSections): the steps are looked for in box only (apron
+// coordinates; the volume holds what they read, 8 columns round it). A staircase's steps depend on each other (a step
+// counts next to another, a prism's light and windows come from its staircase), so the staircases that matter --
+// those with a step within 19 columns of hot (an edit's columns: what it can have changed) or within 7 of rel (the
+// sections meshed: their prisms and hidden faces) -- are returned with the box of their steps (comps)
+export interface ChamferWindow { box: Box; hot: Box | null; rel: Box[] }
+export interface Staircase { box: Box; hot: boolean }
 
 export interface Prism {
   px: number; py: number; // the inner corner, a grid point
@@ -32,15 +42,29 @@ export interface Prism {
   cx: number; cy: number; // the cell its material is taken from
 }
 
-interface Tri { ca: number; cb: number; key: number; X: number; Y: number; cx: number; cy: number; sx: number; sy: number; a: number; b: number; pal: number; bid: number; gm: number; roof: boolean; nx: number; ny: number }
+// The steps found at each height (steps[z]), kept with a node meshed in sections (mesher.worker.ts): a step depends on
+// the columns within 7 of its inner corner only, so after an edit only those in redo (apron coordinates: the columns
+// changed and 8 round them) are looked for again, the others taken as they were. Then changed: the inner corners of
+// the steps whose prisms can have changed -- found, lost, or another light (their staircase's), and those within 10 of
+// the edit (hot: what a prism reads round it)
+export interface ChamferMemo { steps: Tri[][]; redo: Box }
+export interface Tri { ca: number; cb: number; key: number; X: number; Y: number; cx: number; cy: number; sx: number; sy: number; a: number; b: number; pal: number; bid: number; gm: number; roof: boolean; nx: number; ny: number }
 
 const SIDES = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
 
 // vol: the tile's voxels as in mesher.worker.ts (1-cell apron, z = -1 below); returns the prisms and, per voxel, the
 // faces that are inside one (bit d * 2 + (dir > 0) per horizontal face)
 export function chamferWalls(N: number, vol: Uint16Array, sz: number, ground: Uint8Array, colTop: Uint16Array, pal: Uint8Array,
-  bidAt: (x: number, y: number) => number) {
+  bidAt: (x: number, y: number) => number, win: ChamferWindow | null = null, memo: ChamferMemo | null = null) {
   const S = N + 2, SS = S * S;
+  // (the steps' cells looked at: all, or the window's box; node cells)
+  const look = memo ? memo.redo : win ? win.box : null;
+  const X0 = look ? Math.max(0, look.x0 - 1) : 0, X1 = look ? Math.min(N, look.x1 - 1) : N;
+  const Y0 = look ? Math.max(0, look.y0 - 1) : 0, Y1 = look ? Math.min(N, look.y1 - 1) : N;
+  const steps: Tri[][] = [];
+  const hotB = win?.hot ? grow(win.hot, 19, S) : null, relB = win ? win.rel.map((b) => grow(b, 7, S)) : [];
+  const comps: Staircase[] = [], changed: { X: number; Y: number }[] = [];
+  const hot10 = memo && win?.hot ? grow(win.hot, 10, S) : null;
   const hidden = new Uint8Array(SS * sz);
   const at = (X: number, Y: number, z: number) => (X + 1) + S * (Y + 1) + SS * (z + 1);
   const inb = (X: number, Y: number) => X >= -1 && X <= N && Y >= -1 && Y <= N;
@@ -67,6 +91,7 @@ export function chamferWalls(N: number, vol: Uint16Array, sz: number, ground: Ui
 
   let zTop = 0;
   for (let c = 0; c < SS; c++) zTop = Math.max(zTop, colTop[c]);
+  if (memo) zTop = Math.max(zTop, memo.steps.length);
   // grid points, as numbers
   const pk = (x: number, y: number) => (y + 8) * 4096 + x + 8;
   // the rows with anything at a height, and the ones beside them
@@ -74,15 +99,18 @@ export function chamferWalls(N: number, vol: Uint16Array, sz: number, ground: Ui
   for (let c = 0; c < SS; c++) { const r = Math.floor(c / S); rowTop[r] = Math.max(rowTop[r], colTop[c]); }
   // the columns beside a building: the only ones a step can be in
   const near = new Uint8Array(SS);
-  for (let Y = 0; Y < N; Y++) for (let X = 0; X < N; X++)
+  for (let Y = Y0; Y < Y1; Y++) for (let X = X0; X < X1; X++)
     near[(X + 1) + S * (Y + 1)] = bidAt(X - 1, Y) || bidAt(X + 1, Y) || bidAt(X, Y - 1) || bidAt(X, Y + 1) ? 1 : 0;
   const prisms: Prism[] = [];
   let open = new Map<number, Prism>();
   for (let z = 0; z < zTop; z++) {
     const tris: Tri[] = [];
-    for (let Y = 0; Y < N; Y++) {
+    // (the steps kept: in the order they are found in, by key)
+    if (memo) for (const t of memo.steps[z] ?? []) if (t.X < X0 || t.X >= X1 || t.Y < Y0 || t.Y >= Y1) tris.push(t);
+    const kept = tris.length;
+    for (let Y = Y0; Y < Y1; Y++) {
       if (Math.max(rowTop[Y], rowTop[Y + 1], rowTop[Y + 2]) <= z) continue;
-      for (let X = 0; X < N; X++) {
+      for (let X = X0; X < X1; X++) {
         if (!near[(X + 1) + S * (Y + 1)]) continue;
         const e = at(X, Y, z);
         if (vol[e] !== 0) continue;
@@ -112,10 +140,23 @@ export function chamferWalls(N: number, vol: Uint16Array, sz: number, ground: Ui
         }
       }
     }
+    if (memo && kept && kept < tris.length) tris.sort((a, b) => a.key - b.key);
+    steps[z] = tris;
     // steps of the same staircase share their outer corners
     const ends = new Map<number, Tri[]>();
     for (const t of tris) for (const c of [t.ca, t.cb]) (ends.get(c) ?? ends.set(c, []).get(c)!).push(t);
     const along = (t: Tri, c: number) => ends.get(c)!.find((n) => n !== t && n.sx === t.sx && n.sy === t.sy);
+    if (win && !memo) staircases(tris, ends, hotB, relB, comps);
+    if (memo) {
+      const old = memo.steps[z] ?? [], near = (t: Tri) => hot10 !== null && t.X + 1 >= hot10.x0 && t.X + 1 < hot10.x1 && t.Y + 1 >= hot10.y0 && t.Y + 1 < hot10.y1;
+      // (the same steps as before at this height: none changed but those near the edit)
+      if (old.length === tris.length && old.every((o, i) => o === tris[i] || sameStep(o, tris[i]))) { for (const t of tris) if (near(t)) changed.push(t); }
+      else {
+        const was = stepLight(old), now = stepLight(tris);
+        for (const [k, v] of now) if (was.get(k)?.sig !== v.sig || near(v.t)) changed.push(v.t);
+        for (const [k, v] of was) if (!now.has(k)) changed.push(v.t);
+      }
+    }
     // a lone inner corner is a facade's jog, not a staircase
     const acc = tris.filter((t) => along(t, t.ca) || along(t, t.cb));
     // lit as the wall: a new prism's direction is its staircase's over two steps either side (SLANT_STEPS)
@@ -192,5 +233,68 @@ export function chamferWalls(N: number, vol: Uint16Array, sz: number, ground: Ui
     }
     if (all) p.capTop = false;
   }
-  return { prisms, hidden };
+  return { prisms, hidden, comps, steps, changed };
+}
+
+const sameStep = (a: Tri, b: Tri) => a.key === b.key && a.pal === b.pal && a.bid === b.bid && a.gm === b.gm && a.roof === b.roof && a.cx === b.cx && a.cy === b.cy;
+
+// Per step (by key) what its prism is made of: whether it is one (a step next to it), its light over two steps either
+// side, its staircase's direction, and its own -- as chamferWalls has them (sig)
+function stepLight(tris: Tri[]) {
+  const ends = new Map<number, Tri[]>();
+  for (const t of tris) for (const c of [t.ca, t.cb]) (ends.get(c) ?? ends.set(c, []).get(c)!).push(t);
+  const along = (t: Tri, c: number) => ends.get(c)!.find((n) => n !== t && n.sx === t.sx && n.sy === t.sy);
+  const sum = new Map<Tri, number[]>(), out = new Map<number, { t: Tri; sig: string }>();
+  for (const t of tris) {
+    if (!sum.has(t)) {
+      const seen: Tri[] = [t], todo = [t], v = [0, 0];
+      sum.set(t, v);
+      while (todo.length) {
+        const f = todo.pop()!;
+        v[0] += f.nx; v[1] += f.ny;
+        for (const c of [f.ca, f.cb]) for (const n of ends.get(c)!) {
+          if (n.sx !== f.sx || n.sy !== f.sy || sum.has(n)) continue;
+          sum.set(n, v); seen.push(n); todo.push(n);
+        }
+      }
+    }
+    let nx = 2 * t.nx, ny = 2 * t.ny;
+    for (const c0 of [t.ca, t.cb]) {
+      let cur = t, c = c0;
+      for (let k = 0; k < 2; k++) {
+        const n = along(cur, c);
+        if (!n) break;
+        nx += n.nx; ny += n.ny;
+        c = n.ca === c ? n.cb : n.ca; cur = n;
+      }
+    }
+    const v = sum.get(t)!, acc = !!(along(t, t.ca) || along(t, t.cb));
+    const dir = ((Math.round(Math.atan2(ny, nx) / (2 * Math.PI / SLANT_STEPS)) % SLANT_STEPS) + SLANT_STEPS) % SLANT_STEPS;
+    const chain = 1 + (Math.round(Math.atan2(v[1], v[0]) / (Math.PI / 12)) + 24) % 24;
+    out.set(t.key, { t, sig: `${acc} ${dir} ${chain} ${t.pal} ${t.bid} ${t.gm} ${t.roof} ${t.cx} ${t.cy}` });
+  }
+  return out;
+}
+
+// the staircases (steps of one side sharing outer corners) with a step in hot or in one of rel, and their boxes
+function staircases(tris: Tri[], ends: Map<number, Tri[]>, hot: Box | null, rel: Box[], out: Staircase[]) {
+  const seen = new Set<Tri>(), todo: Tri[] = [];
+  const at = (b: Box, t: Tri) => t.X + 1 >= b.x0 && t.X + 1 < b.x1 && t.Y + 1 >= b.y0 && t.Y + 1 < b.y1;
+  for (const t0 of tris) {
+    if (seen.has(t0)) continue;
+    seen.add(t0); todo.push(t0);
+    const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    let h = false, r = false;
+    while (todo.length) {
+      const f = todo.pop()!;
+      box.x0 = Math.min(box.x0, f.X + 1); box.y0 = Math.min(box.y0, f.Y + 1); box.x1 = Math.max(box.x1, f.X + 2); box.y1 = Math.max(box.y1, f.Y + 2);
+      if (hot && !h && at(hot, f)) h = true;
+      if (!r) for (const b of rel) if (at(b, f)) { r = true; break; }
+      for (const c of [f.ca, f.cb]) for (const n of ends.get(c)!) {
+        if (n.sx !== f.sx || n.sy !== f.sy || seen.has(n)) continue;
+        seen.add(n); todo.push(n);
+      }
+    }
+    if (h || r) out.push({ box, hot: h });
+  }
 }

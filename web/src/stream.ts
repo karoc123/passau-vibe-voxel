@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
-import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
+import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.worker';
 import { roomOffsets, type Columns, type Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type Region } from './core/live-edits';
+import { hotBox, perSide, roofsChanged, union, type Box } from './sections';
 
 export interface TileNode {
   key: string;
@@ -33,6 +34,17 @@ export interface TileNode {
   // a 1 m tile edited while its foliage's cover is its mesh: not meshed again plain (replaceColumns), its mesh shown
   // stays until the foliage tile's new cover takes its place (onEdited)
   stale?: boolean;
+  // Meshed in sections (sections.ts; an edited 1 m node, its foliage tile): sec, each section's mesh (a child of mesh,
+  // whose own geometry then draws nothing: sectionParent), null where it has none; secId: the job they are of (the
+  // worker's memo of the node, mesher.worker.ts meshSections); secHot, secBids: what the next job is to mesh again
+  // (null: every section; undefined: no sectioned job); secCovered: a base's sections are its foliage's cover;
+  // worker: the worker its sectioned jobs go to (it keeps the memo)
+  sec?: (THREE.Mesh | null)[];
+  secId?: string;
+  secHot?: Box | null;
+  secBids?: number[];
+  secCovered?: boolean;
+  worker?: Pooled;
   data?: ColumnData;
   // what the shader reads of it while it shows (fields.ts; not a foliage tile's)
   fields?: Fields | null;
@@ -202,8 +214,8 @@ export class TileStreamer implements ColumnSource {
 
   stats() {
     const r = { meshes: 0, quads: 0, bytes: 0, shownMeshes: 0, shownQuads: 0 };
-    for (const n of this.nodes.values()) {
-      const g = n.mesh?.geometry;
+    for (const n of this.nodes.values()) for (const m of n.sec ?? [n.mesh]) {
+      const g = m?.geometry;
       if (!g) continue;
       const f = g.userData.faces as Uint32Array, q = f[f.length - 1];
       let b = 0;
@@ -351,7 +363,10 @@ export class TileStreamer implements ColumnSource {
     while (this.queue.length && this.inflight < this.pool.length * 2) {
       const job = this.take();
       if (job.state !== 'queued') continue;
-      const p = this.pool.reduce((a, b) => (a.busy <= b.busy ? a : b));
+      // (a node's edits to one worker: it keeps the node's memo for its sectioned jobs)
+      const pin = job.edit && job.node.worker && this.pool.includes(job.node.worker) ? job.node.worker : null;
+      const p = pin ?? this.pool.reduce((a, b) => (a.busy <= b.busy ? a : b));
+      if (job.edit) job.node.worker = p;
       p.busy++; this.inflight++;
       job.state = 'loading';
       const { msg, transfer } = this.requestFor(job);
@@ -365,6 +380,11 @@ export class TileStreamer implements ColumnSource {
     const transfer: Transferable[] = [];
     if (n.foliage && this.editing && !n.data) msg.keep = true;
     if (edit) msg.key = n.editKey!;
+    // (in sections: those the edits since its last job can have changed)
+    if (edit && n.secHot !== undefined) {
+      msg.sections = { hot: n.secHot, bids: n.secBids ?? [], id: n.editKey, from: n.secId ?? null };
+      n.secHot = n.secBids = undefined;
+    }
     if (n.edited && n.data) {
       // (its columns, not its file; the data stays as it is here)
       const { c, transfer: t } = sendColumns(n.data);
@@ -403,6 +423,7 @@ export class TileStreamer implements ColumnSource {
     } else if (n && m.type === 'node') {
       const re = n.remesh;
       n.remesh = undefined;
+      if (re) this.unsection(n, false);
       if (re && n.mesh && m.quads) {
         // (the old geometry is not disposed: what it had on the GPU went with the lost context, and three would only
         // complain that its buffers belong to no context)
@@ -432,12 +453,21 @@ export class TileStreamer implements ColumnSource {
     const n = this.nodes.get(key);
     if (!n || n.foliage || n.s !== 1 || n.state !== 'ready' || !n.data) return null;
     n.edited = true;
+    // (the columns it changed, and the buildings whose roofs: what the sectioned jobs mesh again)
+    const hot = region ? hotBox(this.N, n.tx, n.ty, region) : null, bids = hot ? roofsChanged(this.N, n.data, base, n.data.bld, hot) : [];
     this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld });
     const f = this.nodes.get(`f/${n.tx}_${n.ty}`), wait: Promise<void>[] = [];
     // (its foliage's cover in its mesh: the foliage tile's job meshes the base again with the cover anyway, and the
-    // plain mesh would be replaced by it at once -- not made, a whole node's meshing saved per edit; ADR 0003)
-    if (f && f.covers && f.state === 'ready' && n.mesh && !n.editJob) n.stale = true;
-    else wait.push(this.remeshEdited(n));
+    // plain mesh would be replaced by it at once -- not made, a whole node's meshing saved per edit; ADR 0003). An
+    // edited node is meshed in sections (ADR 0003): with its foliage tile's cover in its mesh, the foliage's job (its
+    // sections and the cover's); without a foliage tile, its own; else as a whole
+    if (f && f.covers && f.state === 'ready' && n.mesh && !n.editJob) {
+      n.stale = true;
+      this.pend(f, hot, bids, !!(f.sec && n.sec && n.secCovered));
+    } else {
+      if (!f) this.pend(n, hot, bids, !!(n.sec && !n.secCovered));
+      wait.push(this.remeshEdited(n));
+    }
     if (f) {
       if (foliage && f.data) { f.edited = true; this.setData(f, foliage); }
       wait.push(this.remeshEdited(f));
@@ -467,8 +497,15 @@ export class TileStreamer implements ColumnSource {
   private onEdited(n: TileNode, m: MeshReply) {
     const job = n.editJob!;
     n.editJob = undefined;
-    if (m.type === 'error') console.warn(m.error);
-    else {
+    if (m.type === 'error') {
+      console.warn(m.error);
+      // (its sections lack this job's: all of them the next time)
+      if (n.sec) { n.secId = undefined; n.secHot = null; }
+    } else if (m.sec) {
+      this.applySections(n, m.sec, false);
+      n.secId = n.editKey;
+    } else {
+      this.unsection(n);
       if (m.quads && n.mesh) { disposeGeometry(n.mesh.geometry); n.mesh.geometry = this.makeGeometry(m); }
       else if (m.quads) n.mesh = this.makeMesh(m);
       else if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); n.mesh = undefined; }
@@ -483,15 +520,23 @@ export class TileStreamer implements ColumnSource {
       // the base not meshed again (replaceColumns): the new cover takes its mesh's place (it stays stale while
       // another job of the foliage is coming); none came (an error): the base meshed again plain after all
       if (m.type === 'error') { b.stale = false; this.remeshEdited(b); }
-      else {
+      else if (m.baseSec) {
+        // (in sections: the cover's in the base's place)
+        if (!n.editJob) b.stale = false;
+        this.applySections(b, m.baseSec, true);
+        n.covers = true;
+      } else {
         if (!n.editJob) b.stale = false;
         const geo = n.cover;
         n.cover = undefined;
+        this.unsection(b);
         if (b.mesh) disposeGeometry(b.mesh.geometry);
         if (geo && b.mesh) { b.mesh.geometry = geo; geo.userData.covered = true; } else if (b.mesh) { this.group.remove(b.mesh); b.mesh = undefined; }
         n.covers = true;
       }
     }
+    // (a cover in sections the base did not take: the foliage's memo is ahead of what the base shows, all again next time)
+    else if (n.foliage && m.type === 'node' && m.baseSec) { n.secId = undefined; n.secHot = null; }
     // the base's new mesh lacks what the grass covers once both are in (a base's new mesh has all its faces)
     else if (f?.covers && f.cover && b?.mesh && !b.mesh.geometry.userData.covered) this.coverBase(f);
     job.resolve();
@@ -515,17 +560,68 @@ export class TileStreamer implements ColumnSource {
     return geo;
   }
 
-  private makeMesh(out: MeshOut) {
-    const mesh = new THREE.Mesh(this.makeGeometry(out), this.material);
+  private makeMesh(out: MeshOut | THREE.BufferGeometry, parent: THREE.Mesh | null = null) {
+    const mesh = new THREE.Mesh(out instanceof THREE.BufferGeometry ? out : this.makeGeometry(out), this.material);
     mesh.onBeforeRender = facingInView;
     mesh.onBeforeShadow = facingInShadow;
     mesh.onAfterRender = drawRestInView;
     mesh.onAfterShadow = drawRestInShadow;
     mesh.castShadow = mesh.receiveShadow = true;
-    mesh.visible = false;
     mesh.matrixAutoUpdate = false;
-    this.group.add(mesh);
+    if (parent) {
+      // a section's: drawn as its node's mesh is (city.ts sets that one's material, depth material, visibility and
+      // occlusion layer)
+      for (const k of ['material', 'customDepthMaterial', 'layers'] as const) Object.defineProperty(mesh, k, { get: () => parent[k], set: () => {}, configurable: true });
+      parent.add(mesh);
+    } else {
+      mesh.visible = false;
+      this.group.add(mesh);
+    }
     return mesh;
+  }
+
+  // Sections' meshes (sm, mesher.worker.ts meshSections) into node n's mesh, in place of the sections' before (all of
+  // them the first time: then in place of its mesh's geometry). Its mesh's own geometry then draws nothing (its sphere
+  // lies out of every view and the sun's), and carries the sections' box (city.ts, main.ts: a new one for each change)
+  // and whether they are its foliage's cover (covered: coverBase)
+  private applySections(n: TileNode, sm: SectionMeshes, covered: boolean) {
+    if (!n.sec) {
+      if (sm.ids.length < perSide(this.N) ** 2) { console.warn(`${n.key}: sections without the node's other sections`); return; }
+      n.sec = sm.ids.map(() => null);
+      if (n.mesh) disposeGeometry(n.mesh.geometry);
+      else n.mesh = this.makeMesh(new THREE.BufferGeometry());
+    }
+    const parent = n.mesh!;
+    sm.ids.forEach((k, i) => {
+      const old = n.sec![k];
+      if (old) { disposeGeometry(old.geometry); parent.remove(old); }
+      n.sec![k] = sm.meshes[i].quads ? this.makeMesh(sm.meshes[i], parent) : null;
+    });
+    const g = new THREE.BufferGeometry(), box = new THREE.Box3();
+    for (const m of n.sec) if (m) box.union(m.geometry.boundingBox!);
+    if (box.isEmpty()) { const [x0, y0, x1, y1] = this.bounds(n.s, n.tx, n.ty); box.set(new THREE.Vector3(x0, 0, y0), new THREE.Vector3(x1, 1, y1)); }
+    g.boundingBox = box;
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -1e9, 0), 0);
+    g.setDrawRange(0, 0);
+    g.userData.covered = covered;
+    parent.geometry.dispose();
+    parent.geometry = g;
+    n.secCovered = covered;
+  }
+
+  // n's sections gone (its mesh's geometry is set again by the caller); dispose: their geometries too (not after a lost
+  // context)
+  private unsection(n: TileNode, dispose = true) {
+    if (!n.sec) return;
+    for (const m of n.sec) if (m) { if (dispose) disposeGeometry(m.geometry); n.mesh?.remove(m); }
+    n.sec = n.secId = n.secHot = n.secBids = n.secCovered = undefined;
+  }
+
+  // an edit's columns (hot) and changed roofs (bids) for n's next sectioned job; cont: n's sections are there to be
+  // meshed again in part (else all of them)
+  private pend(n: TileNode, hot: Box | null, bids: number[], cont: boolean) {
+    n.secHot = !cont || hot === null || n.secHot === null ? null : union(n.secHot ?? null, hot);
+    n.secBids = [...new Set([...(n.secBids ?? []), ...bids])];
   }
 
   // one index buffer for every tile: 0 1 2, 0 2 3 quad after quad (the mesher orders each quad's corners to fit it)
@@ -535,7 +631,7 @@ export class TileStreamer implements ColumnSource {
     for (let q = 0, b = 0; q < n; q++, b += 4) a.set([b, b + 1, b + 2, b, b + 2, b + 3], q * 6);
     const old = this.quadIdx;
     this.quadIdx = new THREE.BufferAttribute(a, 1);
-    if (old) for (const v of this.nodes.values()) for (const g of [v.mesh?.geometry, v.cover]) if (g?.index === old) g.setIndex(this.quadIdx);
+    if (old) for (const v of this.nodes.values()) for (const g of [v.mesh?.geometry, v.cover, ...(v.sec ?? []).map((m) => m?.geometry)]) if (g?.index === old) g.setIndex(this.quadIdx);
     return this.quadIdx;
   }
 
@@ -557,6 +653,7 @@ export class TileStreamer implements ColumnSource {
     f.cover = undefined;
     if (!geo) return;
     if (b?.mesh && !b.mesh.geometry.userData.covered) {
+      this.unsection(b);
       disposeGeometry(b.mesh.geometry);
       b.mesh.geometry = geo;
       geo.userData.covered = true;
@@ -571,7 +668,8 @@ export class TileStreamer implements ColumnSource {
   remeshLost() {
     let n = 0;
     for (const t of this.nodes.values()) {
-      const pos = t.mesh?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+      const g = t.sec ? t.sec.find((m) => m)?.geometry : t.mesh?.geometry;
+      const pos = g?.getAttribute('position') as THREE.BufferAttribute | undefined;
       if (!pos || pos.array || t.remesh) continue;
       t.remesh = true;
       t.mesh!.visible = false;
@@ -609,6 +707,7 @@ export class TileStreamer implements ColumnSource {
     else if (n.foliage && n.data) { const live = liveEdits.get(n.tx, n.ty); if (live?.foliage === n.data) liveEdits.set(n.tx, n.ty, { ...live, foliage: null }); }
     n.dataJob?.resolve();
     n.dataJob = undefined;
+    this.unsection(n);
     if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); }
     this.nodes.delete(n.key);
     if (n.data) this.version++;

@@ -32,12 +32,17 @@
 // that edge is always drawn, as a skirt down into the roof, so a slightly different estimate leaves no crack.
 // Heights below a metre ride in vattr.y's top 6 bits (the AO takes the low 2; voxelMaterial.ts adds them back).
 import { MAX_LEG, PAL_ROOF } from './chamfer';
+import type { Box } from './sections';
 
 export interface SlopeSink {
   reserve(n: number): void;
   // q: height in 1/64 m
   vertexQ(x: number, q: number, z: number, normal: number, ao: number, ground: number, roof: number, palette: number, building: number): void;
 }
+
+// Meshing a part of a node (sections.ts): the sink of column (X, Y) (apron coordinates), null for one not meshed; last(V):
+// the last column of V's section along either axis (a merged top stops there)
+export interface SlopeParts { at(X: number, Y: number): SlopeSink | null; last(V: number): number }
 
 const Q = 64;
 // A wall's face carries where the wall ends above it, in vattr.w (voxelMaterial.ts: no window past it): WALL_TOP + its
@@ -66,155 +71,28 @@ interface Region {
 }
 
 // vol, colTop as in mesher.worker.ts (S x S columns with the apron; vol index (z + 1)); hidden: per voxel, its faces
-// not to draw (bit: normal index); returns null when there are no slopes
+// not to draw (bit: normal index); returns null when there are no slopes. box: only its columns (apron coordinates;
+// meshing a part of a node, sections.ts). base: the roofs' regions and their corners (slopeBase) as they are, from the
+// whole node (else from box's columns)
 export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roofPal: Uint8Array, bidAt: (x: number, y: number) => number,
-  shipped: Uint16Array, hidden: Uint8Array) {
+  shipped: Uint16Array, hidden: Uint8Array, box: Box | null = null, base: SlopeBase | null = null) {
   const S = N + 2, SS = S * S;
   const T = colTop; // the top face's height (the top voxel is at z = T - 1)
-  const bid = new Int32Array(SS), roofTop = new Uint8Array(SS);
-  let any = false;
-  for (let c = 0; c < SS; c++) {
-    bid[c] = bidAt((c % S) - 1, Math.floor(c / S) - 1);
-    if (T[c] <= 0 || !bid[c]) continue;
-    const v = vol[c + SS * T[c]];
-    if (v < roofPal.length && roofPal[v] & PAL_ROOF) { roofTop[c] = 1; if (shipped[c]) any = true; }
-  }
-  if (!any) return null;
-  const planes = tidyPlanes(S, T, shipped, bid, roofTop);
+  const bx0 = box ? box.x0 : 0, bx1 = box ? box.x1 : S, by0 = box ? box.y0 : 0, by1 = box ? box.y1 : S;
+  const B = base ?? slopeBase(N, colTop, (c) => vol[c + SS * colTop[c]], roofPal, bidAt, shipped, box);
+  if (!B) return null;
+  const { bid, reg, regions, hq, pure, nq, seam, planeQ, cornerIdx } = B;
   let wallTops = false;
-  if (!planes.some((p, c) => p > 0 && roofTop[c] > 0)) return null;
-  const grad = (p: number) => {
-    const t = Math.tan(((p - 1) >> 6) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
-    return [-t * Math.cos(a), -t * Math.sin(a)]; // rise per metre east (x) and south (y)
-  };
-  // regions
-  const reg = new Int32Array(SS).fill(-1), regions: Region[] = [];
-  const stack: number[] = [];
-  for (let c0 = 0; c0 < SS; c0++) {
-    if (!roofTop[c0] || reg[c0] >= 0) continue;
-    const code = planes[c0], flat = code === 0;
-    const [gx, gy] = flat ? [0, 0] : grad(code);
-    const th = flat ? 0 : ((code - 1) >> 6) * (Math.PI / 72), az = flat ? 0 : ((code - 1) & 63) * (Math.PI / 32);
-    const r: Region = { code, bid: bid[c0], gx, gy, e0: 0, gxq: 0, gyq: 0, flat, cells: [],
-      span: 0, lit: flat ? 1 : code, nx: Math.sin(th) * Math.cos(az), ny: Math.cos(th), nz: Math.sin(th) * Math.sin(az) };
-    const id = regions.length;
-    regions.push(r);
-    reg[c0] = id; stack.push(c0);
-    while (stack.length) {
-      const c = stack.pop()!;
-      r.cells.push(c);
-      const x = c % S, y = (c - x) / S;
-      for (let k = 0; k < 4; k++) {
-        const dx = DX[k], dy = DY[k], X = x + dx, Y = y + dy;
-        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
-        const n = X + S * Y;
-        if (!roofTop[n] || reg[n] >= 0 || planes[n] !== code || bid[n] !== r.bid) continue;
-        if (Math.abs(T[n] - T[c] - gx * dx - gy * dy) > (flat ? 0.5 : 1.5)) continue;
-        reg[n] = id; stack.push(n);
-      }
-    }
-  }
-  // a level region counts only beside a slope of its building: a flat roof elsewhere stays voxels
-  const slopeNext = (r: Region) => {
-    let k = 0;
-    for (const c of r.cells) {
-      const x = c % S, y = (c - x) / S;
-      for (let d = 0; d < 4; d++) {
-        const X = x + DX[d], Y = y + DY[d], n = X + S * Y;
-        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
-        if (reg[n] >= 0 && !regions[reg[n]].flat && bid[n] === r.bid) { k++; break; }
-      }
-    }
-    return k;
-  };
-  for (const r of regions) {
-    if (r.flat && (r.cells.length > 400 || slopeNext(r) * 4 < r.cells.length)) { for (const c of r.cells) reg[c] = -1; r.cells = []; continue; }
-    fit(r, S, T);
-  }
-  // corner heights per cell (1/64 m), whether each is its region's plane itself, and the normal it is lit by there
-  const hq = new Int32Array(SS * 4), pure = new Uint8Array(SS * 4), nq = new Uint16Array(SS * 4);
-  const seam = tileSeams(N, T, planes, bid, roofTop);
-  // a region's plane, bent near the tile's edges to the height both tiles agree on there (tileSeams)
-  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY + seam.bend(r, GX, GY);
-  // which corner of cell c grid point (GX, GY) is
-  const cornerIdx = (c: number, GX: number, GY: number) => { const dx = GX - (c % S), dy = GY - Math.floor(c / S); return dy ? (dx ? 2 : 3) : dx; };
-  const cs = new Int32Array(4), vs = new Int32Array(4), hs = new Int32Array(4), grp = new Int32Array(4);
-  const nv = [0, 0, 0];
-  // (a corner is its column's centre height, rounded to its top, give or take half a metre's rise)
-  const span = (i: number) => regions[reg[cs[i]]].span;
-  const fits = (i: number, h: number) => Math.abs(h - T[cs[i]] * Q) <= span(i);
-  // one height for each group: the planes' lowest at a ridge or a hip (each rises towards the other), the highest
-  // in a valley, else their mean; a cell it would take more than its span off its own top keeps its own
-  const meet = (mem: number[]) => {
-    let ridge = false, valley = false, lo = Infinity, hi = -Infinity, sum = 0;
-    for (const i of mem) {
-      lo = Math.min(lo, vs[i]); hi = Math.max(hi, vs[i]); sum += vs[i];
-      for (const j of mem) {
-        const ri = regions[reg[cs[i]]], rj = regions[reg[cs[j]]];
-        if (j <= i || ri === rj) continue;
-        const ux = (cs[j] % S) - (cs[i] % S), uy = Math.floor(cs[j] / S) - Math.floor(cs[i] / S);
-        const sl = (ri.gx - rj.gx) * ux + (ri.gy - rj.gy) * uy;
-        if (sl > 0.1) ridge = true; else if (sl < -0.1) valley = true;
-      }
-    }
-    return ridge && !valley ? lo : valley && !ridge ? hi : Math.round(sum / mem.length);
-  };
-  // lit there by the plane (or planes) the height is taken from: the one that is the roof at this point, so the light
-  // turns over the ridge where it runs, not along its cells' staircase
-  const light = (mem: number[], h: number) => {
-    nv[0] = nv[1] = nv[2] = 0;
-    for (const i of mem) {
-      if (Math.abs(vs[i] - h) > Q / 8 && mem.some((j) => Math.abs(vs[j] - h) <= Q / 8)) continue;
-      const r = regions[reg[cs[i]]];
-      nv[0] += r.nx; nv[1] += r.ny; nv[2] += r.nz;
-    }
-    return normalCode(nv[0], nv[1], nv[2]);
-  };
-  for (let GY = 0; GY <= S; GY++) for (let GX = 0; GX <= S; GX++) {
-    let n = 0, one = true;
-    for (let k = 0; k < 4; k++) {
-      const X = GX - 1 + (k & 1), Y = GY - 1 + (k >> 1);
-      if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
-      const c = X + S * Y;
-      if (reg[c] < 0) continue;
-      cs[n] = c; vs[n] = planeQ(regions[reg[c]], GX, GY);
-      if (reg[c] !== reg[cs[0]]) one = false;
-      n++;
-    }
-    if (!n) continue;
-    // the cells that meet here: of one building, or of two whose roofs come within a metre (a step that small drawn
-    // as a wall zigzags along the cells)
-    for (let i = 0; i < n; i++) grp[i] = one ? 0 : i;
-    if (!one) for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      const d = Math.abs(vs[i] - vs[j]);
-      if (d <= Q || (bid[cs[i]] === bid[cs[j]] && d <= 2 * Q)) { const gi = grp[i], gj = grp[j]; for (let k = 0; k < n; k++) if (grp[k] === gj) grp[k] = gi; }
-    }
-    for (let i = 0; i < n; i++) hs[i] = Math.min(T[cs[i]] * Q + span(i), Math.max(T[cs[i]] * Q - span(i), vs[i]));
-    if (!one) for (let g = 0; g < n; g++) {
-      let mem: number[] = [];
-      for (let i = 0; i < n; i++) if (grp[i] === g) mem.push(i);
-      if (mem.length < 2) continue;
-      let h = meet(mem);
-      const ok = mem.filter((i) => fits(i, h));
-      if (ok.length < mem.length) { mem = ok; if (mem.length < 2) continue; h = meet(mem); if (!mem.every((i) => fits(i, h))) continue; }
-      for (const i of mem) hs[i] = h;
-      if (mem.some((i) => h !== vs[i])) {
-        const code = light(mem, h);
-        for (const i of mem) nq[cs[i] * 4 + cornerIdx(cs[i], GX, GY)] = code;
-      }
-    }
-    for (let i = 0; i < n; i++) {
-      const c = cs[i], k = cornerIdx(c, GX, GY);
-      hq[c * 4 + k] = hs[i]; pure[c * 4 + k] = hs[i] === vs[i] ? 1 : 0;
-      if (!nq[c * 4 + k] || hs[i] === vs[i]) nq[c * 4 + k] = regions[reg[c]].lit;
-    }
-  }
-  const { fills, covered, fillFloor } = eaveSteps();
+  const { fills, covered, fillFloor, cand } = eaveSteps();
   return {
-    hidden,
+    base: B,
+hidden,
     // a filled step's fascia starts at this height (1/64 m) over the inner corner at grid point (X, Y) (tile
     // coordinates) on the side (sx, sy) of it, as a chamfer's prism (chamfer.ts) has them; undefined: none
     fillFloor,
+    // the steps of the eaves that could be filled, as found (each depends on the others next to it, and on what lies
+    // under its triangle: mesher.worker.ts meshSections)
+    steps: cand,
     // the surface's height at grid point (X, Y) (tile coordinates) over the slope cells around it (their lowest), in m
     heightAt(X: number, Y: number) {
       let h = Infinity;
@@ -229,7 +107,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       return h;
     },
     hide() {
-      for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
+      for (let Y = Math.max(1, by0); Y <= Math.min(N, by1 - 1); Y++) for (let X = Math.max(1, bx0); X <= Math.min(N, bx1 - 1); X++) {
         const c = X + S * Y;
         if (reg[c] < 0) continue;
         hidden[c + SS * T[c]] |= 1 << 5;
@@ -240,15 +118,20 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         }
       }
     },
-    // tops: mark the walls' faces with where the wall ends (wallTopCode; 1 m tiles)
-    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array, tops = false) {
+    // tops: mark the walls' faces with where the wall ends (wallTopCode; 1 m tiles); parts: a part of the node only
+    emit(out: SlopeSink, x0: number, y0: number, ground: Uint8Array, tops = false, parts: SlopeParts | null = null) {
       wallTops = tops;
-      emitTops(out, x0, y0, ground);
+      emitTops(out, x0, y0, ground, parts);
       for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
         const c = X + S * Y;
-        if (reg[c] >= 0) for (const e of EDGES) emitEdge(out, c, e, x0, y0, ground);
+        if (reg[c] < 0) continue;
+        const o = parts ? parts.at(X, Y) : out;
+        if (o) for (const e of EDGES) emitEdge(o, c, e, x0, y0, ground);
       }
-      for (const f of fills) emitFill(out, f, x0, y0, ground);
+      for (const f of fills) {
+        const o = parts ? parts.at(f.X, f.Y) : out;
+        if (o) emitFill(o, f, x0, y0, ground);
+      }
     },
   };
 
@@ -271,7 +154,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     };
     const cand: Fill[] = [], ends = new Map<number, Fill[]>();
     const pk = (x: number, y: number) => x * 4096 + y;
-    for (let Y = 0; Y < S; Y++) for (let X = 0; X < S; X++) {
+    for (let Y = by0; Y < by1; Y++) for (let X = bx0; X < bx1; X++) {
       for (const [sx, sy] of SIDES) {
         if (!inS(X + sx, Y + sy)) continue;
         const C = X + sx + S * (Y + sy);
@@ -332,7 +215,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       return true;
     }
     return {
-      fills, covered,
+      fills, covered, cand,
       fillFloor: (X: number, Y: number, sx: number, sy: number) => floors.get((X * 4096 + Y) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0)),
     };
   }
@@ -395,18 +278,22 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     return hq[n * 4 + (ky ? (kx ? 2 : 3) : kx)];
   }
 
-  function emitTops(out: SlopeSink, x0: number, y0: number, ground: Uint8Array) {
+  function emitTops(sink: SlopeSink, x0: number, y0: number, ground: Uint8Array, parts: SlopeParts | null) {
     const done = new Uint8Array(SS);
     const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3] && !seam.bent(regions[reg[c]], c);
     for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
       const c = X + S * Y;
       if (reg[c] < 0 || done[c]) continue;
+      const out = parts ? parts.at(X, Y) : sink;
+      if (!out) continue;
       const r = regions[reg[c]], pal = vol[c + SS * T[c]];
       let w = 1, h = 1;
       if (ok(c)) {
         const same = (k: number) => !done[k] && reg[k] === reg[c] && ok(k) && vol[k + SS * T[k]] === pal;
-        while (X + w <= N && same(c + w)) w++;
-        outer: while (Y + h <= N) {
+        // (a part's tops merge within its section)
+        const lx = parts ? parts.last(X) : N, ly = parts ? parts.last(Y) : N;
+        while (X + w <= lx && same(c + w)) w++;
+        outer: while (Y + h <= ly) {
           for (let i = 0; i < w; i++) if (!same(c + i + S * h)) break outer;
           h++;
         }
@@ -500,6 +387,153 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     out.reserve(4);
     for (const k of dir > 0 ? [0, 3, 2, 1] : [0, 1, 2, 3]) out.vertexQ(P[k][0], P[k][1], P[k][2], nrm, 3, gm, W[k], pal, b);
   }
+}
+
+// The roofs' regions, their planes and each cell's corners (slopeRoofs; null: none). T: each column's top (as colTop),
+// top(c): the palette entry of column c's top voxel. box: only its columns (apron coordinates)
+export type SlopeBase = NonNullable<ReturnType<typeof slopeBase>>;
+export function slopeBase(N: number, T: Uint16Array, top: (c: number) => number, roofPal: Uint8Array, bidAt: (x: number, y: number) => number,
+  shipped: Uint16Array, box: Box | null = null) {
+  const S = N + 2, SS = S * S;
+  const bid = new Int32Array(SS), roofTop = new Uint8Array(SS);
+  const bx0 = box ? box.x0 : 0, bx1 = box ? box.x1 : S, by0 = box ? box.y0 : 0, by1 = box ? box.y1 : S;
+  let any = false;
+  for (let Y0 = by0; Y0 < by1; Y0++) for (let c = bx0 + S * Y0, ce = bx1 + S * Y0; c < ce; c++) {
+    bid[c] = bidAt((c % S) - 1, Math.floor(c / S) - 1);
+    if (T[c] <= 0 || !bid[c]) continue;
+    const v = top(c);
+    if (v < roofPal.length && roofPal[v] & PAL_ROOF) { roofTop[c] = 1; if (shipped[c]) any = true; }
+  }
+  if (!any) return null;
+  const planes = tidyPlanes(S, T, shipped, bid, roofTop);
+  if (!planes.some((p, c) => p > 0 && roofTop[c] > 0)) return null;
+  const grad = (p: number) => {
+    const t = Math.tan(((p - 1) >> 6) * (Math.PI / 72)), a = ((p - 1) & 63) * (Math.PI / 32);
+    return [-t * Math.cos(a), -t * Math.sin(a)]; // rise per metre east (x) and south (y)
+  };
+  // regions
+  const reg = new Int32Array(SS).fill(-1), regions: Region[] = [];
+  const stack: number[] = [];
+  for (let c0 = 0; c0 < SS; c0++) {
+    if (!roofTop[c0] || reg[c0] >= 0) continue;
+    const code = planes[c0], flat = code === 0;
+    const [gx, gy] = flat ? [0, 0] : grad(code);
+    const th = flat ? 0 : ((code - 1) >> 6) * (Math.PI / 72), az = flat ? 0 : ((code - 1) & 63) * (Math.PI / 32);
+    const r: Region = { code, bid: bid[c0], gx, gy, e0: 0, gxq: 0, gyq: 0, flat, cells: [],
+      span: 0, lit: flat ? 1 : code, nx: Math.sin(th) * Math.cos(az), ny: Math.cos(th), nz: Math.sin(th) * Math.sin(az) };
+    const id = regions.length;
+    regions.push(r);
+    reg[c0] = id; stack.push(c0);
+    while (stack.length) {
+      const c = stack.pop()!;
+      r.cells.push(c);
+      const x = c % S, y = (c - x) / S;
+      for (let k = 0; k < 4; k++) {
+        const dx = DX[k], dy = DY[k], X = x + dx, Y = y + dy;
+        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+        const n = X + S * Y;
+        if (!roofTop[n] || reg[n] >= 0 || planes[n] !== code || bid[n] !== r.bid) continue;
+        if (Math.abs(T[n] - T[c] - gx * dx - gy * dy) > (flat ? 0.5 : 1.5)) continue;
+        reg[n] = id; stack.push(n);
+      }
+    }
+  }
+  // a level region counts only beside a slope of its building: a flat roof elsewhere stays voxels
+  const slopeNext = (r: Region) => {
+    let k = 0;
+    for (const c of r.cells) {
+      const x = c % S, y = (c - x) / S;
+      for (let d = 0; d < 4; d++) {
+        const X = x + DX[d], Y = y + DY[d], n = X + S * Y;
+        if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+        if (reg[n] >= 0 && !regions[reg[n]].flat && bid[n] === r.bid) { k++; break; }
+      }
+    }
+    return k;
+  };
+  for (const r of regions) {
+    if (r.flat && (r.cells.length > 400 || slopeNext(r) * 4 < r.cells.length)) { for (const c of r.cells) reg[c] = -1; r.cells = []; continue; }
+    fit(r, S, T);
+  }
+  // corner heights per cell (1/64 m), whether each is its region's plane itself, and the normal it is lit by there
+  const hq = new Int32Array(SS * 4), pure = new Uint8Array(SS * 4), nq = new Uint16Array(SS * 4);
+  const seam = tileSeams(N, T, planes, bid, roofTop);
+  // a region's plane, bent near the tile's edges to the height both tiles agree on there (tileSeams)
+  const planeQ = (r: Region, GX: number, GY: number) => r.e0 + r.gxq * GX + r.gyq * GY + seam.bend(r, GX, GY);
+  // which corner of cell c grid point (GX, GY) is
+  const cornerIdx = (c: number, GX: number, GY: number) => { const dx = GX - (c % S), dy = GY - Math.floor(c / S); return dy ? (dx ? 2 : 3) : dx; };
+  const cs = new Int32Array(4), vs = new Int32Array(4), hs = new Int32Array(4), grp = new Int32Array(4);
+  const nv = [0, 0, 0];
+  // (a corner is its column's centre height, rounded to its top, give or take half a metre's rise)
+  const span = (i: number) => regions[reg[cs[i]]].span;
+  const fits = (i: number, h: number) => Math.abs(h - T[cs[i]] * Q) <= span(i);
+  // one height for each group: the planes' lowest at a ridge or a hip (each rises towards the other), the highest
+  // in a valley, else their mean; a cell it would take more than its span off its own top keeps its own
+  const meet = (mem: number[]) => {
+    let ridge = false, valley = false, lo = Infinity, hi = -Infinity, sum = 0;
+    for (const i of mem) {
+      lo = Math.min(lo, vs[i]); hi = Math.max(hi, vs[i]); sum += vs[i];
+      for (const j of mem) {
+        const ri = regions[reg[cs[i]]], rj = regions[reg[cs[j]]];
+        if (j <= i || ri === rj) continue;
+        const ux = (cs[j] % S) - (cs[i] % S), uy = Math.floor(cs[j] / S) - Math.floor(cs[i] / S);
+        const sl = (ri.gx - rj.gx) * ux + (ri.gy - rj.gy) * uy;
+        if (sl > 0.1) ridge = true; else if (sl < -0.1) valley = true;
+      }
+    }
+    return ridge && !valley ? lo : valley && !ridge ? hi : Math.round(sum / mem.length);
+  };
+  // lit there by the plane (or planes) the height is taken from: the one that is the roof at this point, so the light
+  // turns over the ridge where it runs, not along its cells' staircase
+  const light = (mem: number[], h: number) => {
+    nv[0] = nv[1] = nv[2] = 0;
+    for (const i of mem) {
+      if (Math.abs(vs[i] - h) > Q / 8 && mem.some((j) => Math.abs(vs[j] - h) <= Q / 8)) continue;
+      const r = regions[reg[cs[i]]];
+      nv[0] += r.nx; nv[1] += r.ny; nv[2] += r.nz;
+    }
+    return normalCode(nv[0], nv[1], nv[2]);
+  };
+  for (let GY = by0; GY <= by1; GY++) for (let GX = bx0; GX <= bx1; GX++) {
+    let n = 0, one = true;
+    for (let k = 0; k < 4; k++) {
+      const X = GX - 1 + (k & 1), Y = GY - 1 + (k >> 1);
+      if (X < 0 || Y < 0 || X >= S || Y >= S) continue;
+      const c = X + S * Y;
+      if (reg[c] < 0) continue;
+      cs[n] = c; vs[n] = planeQ(regions[reg[c]], GX, GY);
+      if (reg[c] !== reg[cs[0]]) one = false;
+      n++;
+    }
+    if (!n) continue;
+    // the cells that meet here: of one building, or of two whose roofs come within a metre (a step that small drawn
+    // as a wall zigzags along the cells)
+    for (let i = 0; i < n; i++) grp[i] = one ? 0 : i;
+    if (!one) for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const d = Math.abs(vs[i] - vs[j]);
+      if (d <= Q || (bid[cs[i]] === bid[cs[j]] && d <= 2 * Q)) { const gi = grp[i], gj = grp[j]; for (let k = 0; k < n; k++) if (grp[k] === gj) grp[k] = gi; }
+    }
+    for (let i = 0; i < n; i++) hs[i] = Math.min(T[cs[i]] * Q + span(i), Math.max(T[cs[i]] * Q - span(i), vs[i]));
+    if (!one) for (let g = 0; g < n; g++) {
+      let mem: number[] = [];
+      for (let i = 0; i < n; i++) if (grp[i] === g) mem.push(i);
+      if (mem.length < 2) continue;
+      let h = meet(mem);
+      const ok = mem.filter((i) => fits(i, h));
+      if (ok.length < mem.length) { mem = ok; if (mem.length < 2) continue; h = meet(mem); if (!mem.every((i) => fits(i, h))) continue; }
+      for (const i of mem) hs[i] = h;
+      if (mem.some((i) => h !== vs[i])) {
+        const code = light(mem, h);
+        for (const i of mem) nq[cs[i] * 4 + cornerIdx(cs[i], GX, GY)] = code;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const c = cs[i], k = cornerIdx(c, GX, GY);
+      hq[c * 4 + k] = hs[i]; pure[c * 4 + k] = hs[i] === vs[i] ? 1 : 0;
+      if (!nq[c * 4 + k] || hs[i] === vs[i]) nq[c * 4 + k] = regions[reg[c]].lit;
+    }
+  }
+  return { bid, reg, regions, hq, pure, nq, seam, planeQ, cornerIdx };
 }
 
 // The shipped planes, tidied before they become slopes (per column: its code, roofTop: roof material on top, bid: the

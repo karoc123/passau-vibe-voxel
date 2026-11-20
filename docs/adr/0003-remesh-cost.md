@@ -1,6 +1,6 @@
 # 0003 Re-mesh cost of an edit
 
-Status: proposed. Measured with `web/tools/mesh-profile.mjs` (20 Altstadt nodes round 63_21, node 22, warm JIT; the
+Status: accepted -- steps 1, 3 and 2 (sections) done, see the end. Measured with `web/tools/mesh-profile.mjs` (20 Altstadt nodes round 63_21, node 22, warm JIT; the
 phase split with timers in a throw-away copy of `mesher.worker.ts`, the mesher itself unchanged).
 
 ## Context
@@ -86,7 +86,7 @@ Measured as above (`mesh-profile.mjs`; the machine shared, so means within ~10 %
    byte-identical (`tools/mesh-golden.mjs`, 106 meshes at levels 1, 1f + cover, 2, 4, 8). meshFaces' own time fell
    ~4x; what is left is mostly roofs and chamfers (`slopeRoofs`, `chamferWalls`, `emitEdge`, ~10 ms) and `wallAngle`.
 
-## Proposal: dirty 32 x 32 sections (not implemented)
+## Proposal: dirty 32 x 32 sections (as proposed; done otherwise, below)
 
 An edited Altstadt node still costs ~32 ms mean, 65-80 ms max, over the ~30 ms aimed at (a crater over a node corner:
 4 of them). The rest scales with the area meshed (sub-node 32 x 32 now 1.5 / 3.6 ms, 48 x 48 3.1 / 7.4 ms), so:
@@ -103,3 +103,37 @@ An edited Altstadt node still costs ~32 ms mean, 65-80 ms max, over the ~30 ms a
 - Expected: ~3-8 ms per touched section, a crater r 4 m touching 1-4 sections: ~5-15 ms per node instead of ~32.
   Costs: up to 16 draws per edited node (only edited ones), quads split at section borders (same surface), and the
   mesher's emit window.
+
+## Done (2): an edited node in sections
+
+`web/src/sections.ts`, `mesher.worker.ts meshSections`, `stream.ts` (applySections, pend), checked by
+`web/tools/section-check.mjs`, timed by `web/tools/remesh-bench.mjs` (its last line).
+
+- An unedited node keeps its one mesh, byte for byte (mesh-golden). An edited 1 m node -- its own mesh where it has no
+  foliage tile, else its foliage tile's and the base's cover (the foliage job) -- is meshed as 8 x 8 sections of
+  **16 x 16** columns (32 x 32 meshed ~2x the area per crater: a crater and its reach of 6 columns, 19 wide, meets
+  2 x 2 sections of 16 but often 2 x 2 of 32 too), each its own geometry, a child of the node's mesh (whose own
+  geometry then draws nothing and carries the box: city.ts, main.ts unchanged). The first edit meshes all of them (a
+  whole node's cost), each later one those it can have changed.
+- Every analysis runs in the node's own coordinates over a box round the sections meshed, emitting only their columns'
+  faces, ramps, prisms and slopes, greedy merges cut at section edges; so the sections are the whole node's mesh.
+  section-check splits merged quads into unit cells and compares the multisets: 20 Altstadt nodes, all sections before,
+  then 4 carves one after the other (middle, a section corner, a roof, the node's edge; foliage and cover too) -- equal.
+  Two things differ only by the cut: a node-border face's sunk top edge, and a merged roof top's ground (vattr.z, the
+  cell it starts at).
+- What reaches far: a staircase's chamfers (chamfer.ts: a step's prism depends on the whole staircase) and a roof's
+  slopes (roofs.ts: planes fitted per region, eave steps next to each other). Slopes: the regions and corners are made
+  from the whole node's column tops (`slopeBase`, cheap, no volume). Staircases: the worker keeps a memo per edited
+  node (its columns, all its steps, the regions; stream.ts sends a node's edits to one worker, `from`/`id` name the
+  state): an edit looks for steps again only within 8 of what changed, and meshes again only the sections whose
+  prisms changed (found, lost, another light) or lie within 10 of it; a changed roof only round the cells whose slope
+  changed. Without the memo (another worker, an error) it still comes out right: boxes grown until each staircase
+  that matters lies inside, more sections where the edit can reach (slower: ~30 ms).
+- Measured (remesh-bench, a 3 m sphere at the middle on the ground, 20 Altstadt nodes with foliage, machine loaded:
+  load ~7, the whole node's mesh 38 ms there against ~23 idle): the foliage job **~19 ms mean** (10-11 sections), down
+  from the whole node's ~55; section-check over all its carves (roofs included): foliage job 13-21 ms, whole 44-62.
+  Not the ~8 ms aimed at, on this machine as loaded; scaled to an idle one ~10-12 ms. Left: the fixed cost per job
+  (the volume allocated for the node's height, two meshings per foliage job), the middle of a node being 4 sections'
+  corner, chamfers' whole-node assembly (`stepLight` only where steps changed).
+- Costs: up to 64 draws per edited node (only edited ones; empty sections have no mesh), ~1 MB of memo per edited node
+  in its worker (8 kept).
