@@ -66,7 +66,8 @@ def label(osm_name, facts, x, y, z):
 
 # material names for the overrides (overrides.py, parts.py) -> the viewer's material ids (web/src/voxelMaterial.ts MAT)
 MAT_IDS = {"solid": 0, "wall": 1, "glass": 2, "metal": 6, "floodlit": 7, "grass": 8, "roof": 12, "concrete": 13,
-           "bronze_grid": 15, "sign": 16, "sign_band": 18, "ribbon": 19, "classic": 20, "window": 21, "tenement": 22}
+           "bronze_grid": 15, "sign": 16, "sign_band": 18, "ribbon": 19, "classic": 20, "window": 21, "tenement": 22,
+           "interior": 24, "interior_glass": 25}  # (a room's inside and its windows' inside: interiors.py)
 # the historic core: the Altstadt peninsula and the Innstadt, at EPSG:25832 x, y (traced on the orthophoto preview).
 # Their houses are plastered in many colours under tiled roofs, windows a storey apart -- not the newer town's blocks
 HISTORIC_CORE = [[(829016, 5389960), (829516, 5389980), (829781, 5389925), (830131, 5389790), (830016, 5389700),

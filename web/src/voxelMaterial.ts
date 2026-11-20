@@ -12,7 +12,9 @@ import { FLOODLIT, floodCapsules, LIT_N } from './lamplight';
 // what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
 export const REFL_MAX = 0.4;
 export const MAT = { SOLID: 0, WALL: 1, GLASS: 2, LEAF: 3, WATER: 4, LAMP: 5, METAL: 6, FLOODLIT: 7, GRASS: 8, MARK: 9, SOIL: 10, CAR: 11,
-  ROOF: 12, CONCRETE: 13, CLOCK: 14, BRONZE: 15, SIGN: 16, JET: 17, SIGNBAND: 18, RIBBON: 19, CLASSIC: 20, WINDOW: 21, TENEMENT: 22, WOOD: 23 } as const;
+  ROOF: 12, CONCRETE: 13, CLOCK: 14, BRONZE: 15, SIGN: 16, JET: 17, SIGNBAND: 18, RIBBON: 19, CLASSIC: 20, WINDOW: 21, TENEMENT: 22, WOOD: 23,
+  // a room's inside and the inside of its windows (scripts/interiors.py M_INTERIOR, M_INTERIOR_GLASS): indoors, see SURFACE
+  INTERIOR: 24, INTERIOR_GLASS: 25 } as const;
 
 type U<T> = { value: T };
 export interface VoxelUniforms {
@@ -57,6 +59,8 @@ export interface VoxelUniforms {
   uPageS: U<THREE.DataArrayTexture>;
   uPageL: U<THREE.DataArrayTexture>;
   uShop: U<number>;
+  // indoors (MAT.INTERIOR, INTERIOR_GLASS): the share of the sky's light (the hemisphere, the environment) that reaches in
+  uIndoorAmb: U<number>;
 }
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
@@ -88,6 +92,7 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uBldOn: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
     uSpill: { value: new THREE.Vector2(1, 1) },
     uShop: { value: 1 },
+    uIndoorAmb: { value: 0.35 },
     ...fieldUniforms(),
     ...floodlights(meta),
     ...cloudUniforms,
@@ -268,7 +273,7 @@ const FACE_PARS = `
   }`;
 
 const FRAG_PARS = `
-  uniform sampler2D uPalette; uniform vec2 uSpill; uniform float uShop;
+  uniform sampler2D uPalette; uniform vec2 uSpill; uniform float uShop; uniform float uIndoorAmb;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
   uniform float uDrop; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
   ${FACE_PARS}
@@ -498,6 +503,11 @@ const SURFACE = `
   // in metres, not cells: along the wall (its plane on a staircase) and above the street
   float uc = vWallAng > 0.5 ? dot(vP.xz, vec2(-wN.z, wN.x)) : (abs(vN.x) > 0.5 ? vP.z : vP.x);
   float lv = vVox.y - gz;
+  // Indoors: a room's faces (scripts/interiors.py), told by their material alone (no attribute, no varying): no facade
+  // windows on them (their own branch below), no weather (snow, puddles, leaf litter), no street lamps, window spill or
+  // floodlight -- all of those are the street's, found by place in plan, and would reach through the roof -- and the
+  // sky's light damped (uIndoorAmb, after the lights). The sun still comes in by the shadow map, where it can.
+  bool indoor = m == ${MAT.INTERIOR} || m == ${MAT.INTERIOR_GLASS};
   float fwU = max(fwidth(uc), 1e-3), fwV = max(fwidth(lv), 1e-3);
   vec2 dUVx = vec2(dFdx(uc), dFdx(lv)), dUVy = vec2(dFdy(uc), dFdy(lv));
   // (a roof's top by its column alone: on a slope cell.y steps along the contours, and stepped its shade in stripes)
@@ -658,6 +668,11 @@ const SURFACE = `
     gRough = 0.3; gEmissive = vec3(1.0, 0.95, 0.8) * 1.4 * uNight;
   } else if (m == ${MAT.MARK}) {
     col = base * (0.95 + 0.05 * h);
+  } else if (m == ${MAT.INTERIOR}) { // plaster, stone, wood: as its colour says
+    gRough = 0.9;
+  } else if (m == ${MAT.INTERIOR_GLASS}) { // a window seen from inside: the day outside shines through it, at night dark
+    col = glassCol(base, h); gRough = GLASS_ROUGH;
+    gEmissive = uHorizon * 0.6 * (1.0 - uNight);
   }
   // The map's edge, below the ground: cut like a diorama's block, not a slab of soil. Dark topsoil and loam follow the
   // surface; under them beds of gravel, sand and clay lie level, gently wavy; then the gneiss Passau stands on, in
@@ -689,7 +704,7 @@ const SURFACE = `
   vec2 gw = fwidth(vVox.xz); // (out here, where every fragment takes it)
   if ((pa >> 5) > 0 && vN.y > 0.5 && vRoof < 0.5) groundDetail(pa >> 5, vP.xz, gw, col);
   #endif
-  if (uFolOn > 0.5 && vN.y > 0.5 && lvl < 0.5 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.MARK}) {
+  if (uFolOn > 0.5 && !indoor && vN.y > 0.5 && lvl < 0.5 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.MARK}) {
     vec2 ff = foliageCell(cell);
     float lit = litter(ff) * (m == ${MAT.GRASS} || m == ${MAT.SOIL} ? 0.9 : 0.35);
     if (hash13(cell * 3.1 + 0.7) < lit) {
@@ -698,7 +713,7 @@ const SURFACE = `
       gRough = 1.0; gMetal = 0.0;
     }
   }
-  if (uSnow > 0.0 && (vN.y > 0.5 || vRoof > 0.5) && m != ${MAT.WATER} && m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) {
+  if (uSnow > 0.0 && !indoor && (vN.y > 0.5 || vRoof > 0.5) && m != ${MAT.WATER} && m != ${MAT.LAMP} && m != ${MAT.JET} && m != ${MAT.SIGN}) {
     float lum = dot(base, vec3(0.3, 0.59, 0.11));
     float street = lvl < 0.5 && m != ${MAT.GRASS} && m != ${MAT.SOIL} && m != ${MAT.LEAF} ? 1.0 : 0.0;
     float cover = smoothstep(0.0, 0.6, uSnow - 0.35 * hash13(cell + 0.5)) * mix(1.0, 0.35 + 0.4 * step(0.5, hash12(floor(cell.xz / 3.0))), street);
@@ -707,7 +722,7 @@ const SURFACE = `
     col = mix(col, snowCol, cover);
     gBump *= 1.0 - cover;
     gRough = mix(gRough, 0.8, cover); gMetal *= 1.0 - cover; gEmissive *= 1.0 - cover;
-  } else if (uWet > 0.0 && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.GLASS}) {
+  } else if (uWet > 0.0 && !indoor && m != ${MAT.WATER} && m != ${MAT.LEAF} && m != ${MAT.GLASS}) {
     float flat_ = vN.y > 0.5 && vRoof < 0.5 ? 1.0 : 0.0;
     float pud = flat_ * smoothstep(0.6, 0.7, hash12(floor(cell.xz / 2.0)) * 0.5 + hash12(floor(cell.xz / 7.0)) * 0.5);
     col *= mix(1.0, mix(0.82, mix(0.5, 0.3, pud), flat_), uWet) * (1.0 - 0.5 * uWet * max(gJoint, 0.0)); // (the joints full of water)
@@ -715,7 +730,7 @@ const SURFACE = `
     gRough = mix(gRough, mix(0.5, 0.03, pud), uWet * mix(0.5, 1.0, flat_));
     if (m != ${MAT.GRASS}) gRefl = flat_ * uWet * mix(0.1, 0.65, pud); // a puddle mirrors, a wet street a little (post.ts Reflections)
   }
-  if (uNight > 0.0) { // street lamps light what is near the ground; water reflects them instead
+  if (uNight > 0.0 && !indoor) { // street lamps light what is near the ground; water reflects them instead
     vec3 lm = lampAt(vVox.xz);
     float fall = cut ? 0.0 : clamp(1.0 - (vVox.y - gz) / 16.0, 0.0, 1.0);
     float up = m == ${MAT.LEAF} ? (vN.y < -0.5 ? 2.6 : 1.7) : m == ${MAT.GRASS} ? 0.55 : 1.0;
@@ -880,7 +895,7 @@ export function makeVoxelMaterial(uniforms: VoxelUniforms, { far = false } = {})
         { float cs = cloudShade(vVox); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }
         #endif`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
-        float aoF = mix(0.55, 1.0, vAO);
+        float aoF = mix(0.55, 1.0, vAO) * (indoor ? uIndoorAmb : 1.0);
         reflectedLight.indirectDiffuse *= aoF; reflectedLight.indirectSpecular *= aoF;`);
   };
   mat.customProgramCacheKey = () => `voxel${far ? '-far' : ''}`;
