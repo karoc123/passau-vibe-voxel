@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash } from '../util';
+import { setCount } from './meshes';
 import { at, prepPath, pt, type Path, type PathData } from './path';
 
 // Trains on the open-air railway (scripts/traffic.py: the OSM route=train relations, one path per track, each route
@@ -10,7 +11,7 @@ import { at, prepPath, pt, type Path, type PathData } from './path';
 export interface TrainService { ref: string; op: string; stops: number[] }
 export interface TrainPathData extends PathData { svc: TrainService[] }
 interface TrainPath extends TrainPathData, Path { next: number[] }
-interface Train { p: number; svc: TrainService; s: number; ds: number; v: number; n: number; wait: number; done: Set<number>; liv: number }
+interface Train { p: number; svc: TrainService; s: number; ds: number; v: number; n: number; wait: number; done: Set<number>; liv: number; ahead?: Train | null }
 
 const CAR = 20, GAP = 1, V = 16, A = 0.7, B = 0.9, DWELL = 25, HEADWAY = 1800, SPACING = 70;
 const MAX_CARS = 240;
@@ -32,11 +33,15 @@ export class Trains {
   private readonly band: THREE.InstancedMesh;
   private readonly stripe: THREE.InstancedMesh;
   private readonly win: THREE.InstancedMesh;
+  private readonly meshes: THREE.InstancedMesh[];
   private readonly winMat = new THREE.MeshStandardMaterial({ color: 0x26323d, roughness: 0.15, metalness: 0.4, emissive: new THREE.Color(1.0, 0.85, 0.6), emissiveIntensity: 0 });
   private t = 0;
+  // per track, its trains front first (update)
+  private readonly byPath: Train[][];
 
   constructor(data: TrainPathData[]) {
     this.paths = data.map((d, i) => Object.assign(prepPath(d), { next: d.svc.map((_, k) => hash(i * 31 + k + 5) * HEADWAY) }));
+    this.byPath = this.paths.map(() => []);
     const std = (o: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.15, ...o });
     const inst = (g: THREE.BufferGeometry, m: THREE.Material, colour: boolean) => {
       const mesh = new THREE.InstancedMesh(g, m, MAX_CARS);
@@ -53,6 +58,7 @@ export class Trains {
     this.stripe = inst(box(2.94, 0.25, L - 0.6, 3.2), std({ color: 0xffffff }), true);
     this.win = inst(box(2.96, 0.95, L - 2.4, 2.05), this.winMat, false);
     this.win.castShadow = false;
+    this.meshes = [this.body, this.band, this.stripe, this.win];
     for (const p of this.paths)
       for (let s = 200 + hash(p.cum.length + 11) * 900; s < p.L - 50; s += 900 + hash(s) * 900) this.spawn(p, hash(s + 3) * p.svc.length | 0, s);
   }
@@ -60,7 +66,9 @@ export class Trains {
   private spawn(p: TrainPath, k: number, s: number) {
     const svc = p.svc[k], liv = livery(svc.op, svc.ref), n = look(liv)[3];
     const done = new Set(svc.stops.filter((x) => x < s));
-    this.list.push({ p: this.paths.indexOf(p), svc, s, ds: 0, v: V * 0.8, n, wait: 0, done, liv });
+    const tr: Train = { p: this.paths.indexOf(p), svc, s, ds: 0, v: V * 0.8, n, wait: 0, done, liv };
+    this.list.push(tr);
+    return tr;
   }
 
   private len(tr: Train) { return tr.n * (CAR + GAP) - GAP; }
@@ -68,23 +76,38 @@ export class Trains {
   update(dt: number, hour: number) {
     const run = !(hour > 0.25 && hour < 4.5);
     this.t += dt;
+    // each track's trains, front first (by where they are at the start of the frame; on a track no train passes another)
+    const byPath = this.byPath;
+    for (const g of byPath) g.length = 0;
+    for (const tr of this.list) byPath[tr.p].push(tr);
+    for (const g of byPath) {
+      if (g.length > 1) g.sort((x, y) => y.s - x.s);
+      for (let i = 0; i < g.length; i++) { // the nearest train strictly ahead
+        let j = i - 1;
+        while (j >= 0 && g[j].s <= g[i].s) j--;
+        g[i].ahead = j >= 0 ? g[j] : null;
+      }
+    }
     if (run)
-      for (const p of this.paths)
-        p.next.forEach((tNext, k) => {
-          if (this.t < tNext) return;
-          const last = this.list.filter((tr) => this.paths[tr.p] === p).reduce((m, tr) => Math.min(m, tr.s - this.len(tr)), Infinity);
-          if (last < SPACING + 40) { p.next[k] = this.t + 20; return; } // the track is occupied: try again in a while
-          this.spawn(p, k, 0);
-          p.next[k] = this.t + HEADWAY * (0.85 + 0.3 * hash(this.t + k));
-        });
+      this.paths.forEach((p, i) => p.next.forEach((tNext, k) => {
+        if (this.t < tNext) return;
+        const last = byPath[i].reduce((m, tr) => Math.min(m, tr.s - this.len(tr)), Infinity);
+        if (last < SPACING + 40) { p.next[k] = this.t + 20; return; } // the track is occupied: try again in a while
+        const g = byPath[i], tr = this.spawn(p, k, 0); // (behind the rest: their tails are past SPACING + 40)
+        tr.ahead = g.length ? g[g.length - 1] : null;
+        g.push(tr);
+        p.next[k] = this.t + HEADWAY * (0.85 + 0.3 * hash(this.t + k));
+      }));
     for (const tr of this.list) {
       const p = this.paths[tr.p], L = this.len(tr);
       if (tr.wait > 0) { tr.wait -= dt; tr.ds = 0; continue; }
       // the nearest place to stop: its next station (the train centred on it, front past the stop node), or the
-      // tail of the train ahead on this track less a gap
+      // tail of the train ahead on this track less a gap (the nearest one ahead: trains keep SPACING behind the tail
+      // of the one in front, so its tail is the nearest of all those ahead)
       let stop = Infinity, station = -1;
       for (const x of tr.svc.stops) if (!tr.done.has(x)) { const f = Math.min(x + L / 2, p.L); if (f >= tr.s - 1 && f < stop) { stop = f; station = x; } }
-      for (const o of this.list) if (o !== tr && o.p === tr.p && o.s > tr.s) stop = Math.min(stop, o.s - this.len(o) - SPACING);
+      const o = tr.ahead;
+      if (o) stop = Math.min(stop, o.s - this.len(o) - SPACING);
       const d = stop - tr.s;
       const vSafe = d === Infinity ? V : Math.sqrt(Math.max(0, 2 * B * Math.max(0, d)));
       const target = Math.min(V, vSafe);
@@ -112,18 +135,14 @@ export class Trains {
         at(p, s0, 0, a); at(p, s0 - CAR, 0, b);
         pos.set((a.x + b.x) / 2, Math.max(a.z, b.z) + 0.05, (a.y + b.y) / 2);
         m.compose(pos, q.setFromAxisAngle(up, Math.atan2(a.x - b.x, a.y - b.y)), one);
-        for (const mesh of [this.body, this.band, this.stripe, this.win]) mesh.setMatrixAt(n, m);
+        for (const mesh of this.meshes) mesh.setMatrixAt(n, m);
         this.body.setColorAt(n, c.setHex(body));
         this.band.setColorAt(n, c.setHex(band));
         this.stripe.setColorAt(n, c.setHex(stripe));
         n++;
       }
     }
-    for (const mesh of [this.body, this.band, this.stripe, this.win]) {
-      mesh.count = n;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
+    setCount(n, ...this.meshes);
     this.winMat.emissiveIntensity = night * 1.6;
   }
 }

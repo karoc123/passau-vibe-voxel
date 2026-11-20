@@ -20,6 +20,7 @@ const STEP = 1 / 30;
 const TRAM = { sec: 10.5, gap: 0.6, n: 3, v: 11, a: 1.0, b: 1.6, headway: 300 };
 const TRAM_LEN = TRAM.n * (TRAM.sec + TRAM.gap);
 const ACTIVE_R = 900, ACTIVE_CELL = 300;
+const BODY_CELL = 80; // (the tram bodies' grid, stepTrams: a tram looks 70 m ahead)
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
@@ -90,8 +91,16 @@ export class StreetLife {
   private tramGrid = new Map<number, [number, number, Tram][]>();
   private carGrid = new Map<number, Car[]>();
   private tramSections: [Tram, number, number, number, number][] = [];
+  // each tram path's trams, in this.trams' order (snapshot: for the cars' level crossings)
+  private tramsOn: Tram[][] = [];
+  // the tram bodies near the focus by BODY_CELL m cell, as indices into the tick's bodies (stepTrams)
+  private readonly bodyGrid = new Map<number, number[]>();
   private idSeq = 1;
   private readonly tmp = pt();
+  // scratch points (carPoint uses tmp itself)
+  private readonly sP = pt();
+  private readonly sF = pt();
+  private readonly sC = pt();
 
   constructor(scene: THREE.Scene, data: TrafficData) {
     this.roads = data.roads.map((r, i) => Object.assign(prepPath(r), { i, lists: Array.from({ length: r.lanes }, () => []) }));
@@ -109,6 +118,7 @@ export class StreetLife {
     ({ roadX: this.roadX, diamonds: this.diamonds } = findCrossings(this.roads, this.tramPaths));
     for (const p of this.tramPaths)
       for (let s = hash(p.i + 3) * 500 + 60; s < p.L - 40; s += 450 + hash(s) * 300) if (this.tramClear(p, s)) this.trams.push(this.newTram(p, s));
+    this.tramsOn = this.tramPaths.map(() => []);
     this.M = new LifeMeshes(scene, this.heads, TRAM.sec);
     this.trains = new Trains(data.trains ?? []);
     this.M.group.add(this.trains.group);
@@ -369,7 +379,7 @@ export class StreetLife {
     for (const x of xs ?? []) {
       const d = x.sR - car.s;
       if (d < 2.5 || d > 40) continue;
-      const busy = this.trams.find((tr) => tr.p === x.path && tr.s - TRAM_LEN < x.sT + 3 && (tr.s > x.sT - 2 || (tr.v > 1 && tr.s > x.sT - tr.v * 4)));
+      const busy = this.tramsOn[x.path].find((tr) => tr.s - TRAM_LEN < x.sT + 3 && (tr.s > x.sT - 2 || (tr.v > 1 && tr.s > x.sT - tr.v * 4)));
       if (busy && busy !== ig) stop(d - 3.5, 'tram-crossing', busy);
       if (d > 0.5) { // not across the tracks without room for the whole car beyond them
         let room = Infinity, rb: Car | null = null;
@@ -378,7 +388,7 @@ export class StreetLife {
       }
     }
     if (!onCrossing && this.tramGrid.size) { // any tram body in the next 25 m of my path
-      const P = this.carPoint(car, car.s, pt()), F = this.carPoint(car, car.s + 1, pt());
+      const P = this.carPoint(car, car.s, this.sP), F = this.carPoint(car, car.s + 1, this.sF);
       const fx = F.x - P.x, fy = F.y - P.y, gx = (P.x / 32) | 0, gy = (P.y / 32) | 0;
       for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [x, y, tro] of this.tramGrid.get((gx + i) * 100003 + (gy + j)) ?? []) {
         const rx = x - P.x, ry = y - P.y;
@@ -442,7 +452,11 @@ export class StreetLife {
   // where everything is at the start of the tick: tram bodies and cars in grids, and who physically blocks whom
   private snapshot() {
     const A = this.active, q = pt();
-    for (const tr of this.trams) { at(this.tramPaths[tr.p], tr.s, 0, q); tr.near = !A || (q.x - A.x) ** 2 + (q.y - A.z) ** 2 < (ACTIVE_R + 200) ** 2; }
+    for (const l of this.tramsOn) l.length = 0;
+    for (const tr of this.trams) {
+      at(this.tramPaths[tr.p], tr.s, 0, q); tr.near = !A || (q.x - A.x) ** 2 + (q.y - A.z) ** 2 < (ACTIVE_R + 200) ** 2;
+      this.tramsOn[tr.p].push(tr);
+    }
     this.tramGrid = new Map();
     for (const tr of this.trams) {
       if (!tr.near) continue;
@@ -451,16 +465,16 @@ export class StreetLife {
     const G = 8;
     this.carGrid = new Map();
     for (const c of this.cars) {
-      const P = this.carPoint(c, c.s, pt()), F = this.carPoint(c, c.s + 1, pt()), C = this.carPoint(c, c.s - c.len / 2, pt());
-      const l = Math.hypot(F.x - P.x, F.y - P.y) || 1;
-      c.geo = { px: P.x, py: P.y, cx: C.x, cy: C.y, z: P.z, fx: (F.x - P.x) / l, fy: (F.y - P.y) / l };
+      const P = this.carPoint(c, c.s, this.sP), F = this.carPoint(c, c.s + 1, this.sF), C = this.carPoint(c, c.s - c.len / 2, this.sC);
+      const l = Math.hypot(F.x - P.x, F.y - P.y) || 1, g = c.geo;
+      g.px = P.x; g.py = P.y; g.cx = C.x; g.cy = C.y; g.z = P.z; g.fx = (F.x - P.x) / l; g.fy = (F.y - P.y) / l;
       c.block = null;
       pushTo(this.carGrid, cellKey(C.x, C.y, G), c);
     }
     for (const c of this.detachedCars) {
       const p = c.rp!;
-      const fx = Math.sin(c.rh ?? 0), fy = Math.cos(c.rh ?? 0);
-      c.geo = { px: p.x + fx * c.len / 2, py: p.z + fy * c.len / 2, cx: p.x, cy: p.z, z: p.y, fx, fy };
+      const fx = Math.sin(c.rh ?? 0), fy = Math.cos(c.rh ?? 0), g = c.geo;
+      g.px = p.x + fx * c.len / 2; g.py = p.z + fy * c.len / 2; g.cx = p.x; g.cy = p.z; g.z = p.y; g.fx = fx; g.fy = fy;
       pushTo(this.carGrid, cellKey(p.x, p.z, G), c);
     }
     for (const c of this.cars) {
@@ -563,9 +577,15 @@ export class StreetLife {
       if (this.tramClear(p, TRAM_LEN + 1)) { this.trams.push(this.newTram(p, TRAM_LEN + 1)); p.nextSpawn = TRAM.headway * (0.7 + 0.6 * Math.random()); }
       else p.nextSpawn = 5;
     }
-    const q = pt(), q2 = pt(), bodies: [number, number, number][] = [];
+    const q = pt(), q2 = pt(), bodies: [number, number, number][] = [], grid = this.bodyGrid, near: number[] = [];
+    for (const l of grid.values()) l.length = 0;
     this.trams.forEach((tr, ti) => {
-      if (tr.near) for (let k = 0; k <= TRAM.n; k++) { at(this.tramPaths[tr.p], tr.s - k * (TRAM.sec + TRAM.gap), 0, q); bodies.push([ti, q.x, q.y]); }
+      if (tr.near) for (let k = 0; k <= TRAM.n; k++) {
+        at(this.tramPaths[tr.p], tr.s - k * (TRAM.sec + TRAM.gap), 0, q);
+        const key = Math.floor(q.x / BODY_CELL) * 100003 + Math.floor(q.y / BODY_CELL), l = grid.get(key);
+        if (l) l.push(bodies.length); else grid.set(key, [bodies.length]);
+        bodies.push([ti, q.x, q.y]);
+      }
     });
     this.trams.forEach((tr, ti) => {
       if (!tr.near) { // far away: just runs along its track
@@ -580,7 +600,17 @@ export class StreetLife {
       tr.why = 'free'; tr.by = null;
       const ignored = (o: Agent) => tr.ignore === o && (tr.ignoreT ?? 0) > this.t;
       const stop = (g: number, why: string, by: Agent | null) => { if (g < gap) { gap = g; tr.why = why; tr.by = by; } };
-      for (const [oj, x, y] of bodies) { // any tram ahead on the track, also converging from a branch
+      // the bodies that may be in reach, in their order: along < 70 and lat < 7 with |(fdx, fdy)| <= 1 (less on a bend)
+      const reach = 71 / Math.max(Math.hypot(fdx, fdy), 1e-3), r = Math.ceil(reach / BODY_CELL);
+      near.length = 0;
+      if (r > 3) for (let i = 0; i < bodies.length; i++) near.push(i);
+      else {
+        const gx = Math.floor(q.x / BODY_CELL), gy = Math.floor(q.y / BODY_CELL);
+        for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) for (const b of grid.get((gx + i) * 100003 + (gy + j)) ?? []) near.push(b);
+        near.sort((a, b) => a - b);
+      }
+      for (const b of near) { // any tram ahead on the track, also converging from a branch
+        const [oj, x, y] = bodies[b];
         if (oj === ti) continue;
         const rx = x - q.x, ry = y - q.y, along = rx * fdx + ry * fdy, lat = Math.abs(rx * fdy - ry * fdx);
         if (along > -0.5 && along < 70 && lat < 2.2 + Math.min(along, 40) * 0.12) {
@@ -700,10 +730,10 @@ export class StreetLife {
   private drawCars(back: number, night: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
-    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world;
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world, meshes = [M.body, M.dark, M.head, M.tail];
     const draw = (c: Car, i: number) => {
       m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
-      for (const mesh of [M.body, M.dark, M.head, M.tail]) mesh.setMatrixAt(i, m);
+      for (const mesh of meshes) mesh.setMatrixAt(i, m);
       M.body.setColorAt(i, c.col);
       M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };

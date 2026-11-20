@@ -76,10 +76,18 @@ export class LifeMeshes {
   }
 }
 
+// the instances drawn; only those are uploaded (not the whole MAX_* buffer), and nothing when there are none
 export function setCount(n: number, ...meshes: THREE.InstancedMesh[]) {
   for (const m of meshes) {
     m.count = n;
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    if (n === 0) continue; // (a range of 0 would upload the whole array: WebGL's bufferSubData takes length 0 as "to the end")
+    upload(m.instanceMatrix, n);
+    if (m.instanceColor) upload(m.instanceColor, n);
   }
+}
+
+function upload(a: THREE.BufferAttribute, n: number) {
+  a.clearUpdateRanges(); // (still pending if the mesh was not drawn since: this one covers all that is drawn)
+  a.addUpdateRange(0, n * a.itemSize);
+  a.needsUpdate = true;
 }
