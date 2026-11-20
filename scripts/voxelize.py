@@ -562,6 +562,9 @@ bridge_lines = []  # (line, half width, layer) of every way on a bridge: the dec
 bridge_roads = []  # (line, width) of carriageways on bridges, for the inferred deck lamps
 bridge_road_polys = []  # the carriageways on bridges, where one is drawn on the ground (a ramp's embankment)
 lit_ground_ways = []  # the ways on the ground but those lit=no: a street lamp by one may stand under a bridge
+# ways unlit unless tagged lit=yes: a field track under the Alte Poststraße's bridge over the A 3 (no lit tag) ran
+# 4 m from one of its lamps, nearer than the bridge way, and the lamp stood on the ground under the deck
+UNLIT = ("track",)
 bridge_ways = []  # (OSM id, tags, line, half width) of every way on a bridge: where its piers stand (bridge_piers)
 _paved = [(g_, t_["surface"]) for _, _, t_, g_ in osm.areas
           if t_.get("surface") in SURF and ("area:highway" in t_ or (t_.get("highway") and t_.get("area") == "yes"))]
@@ -637,7 +640,7 @@ for oid, t, line in osm.lines:
         if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private"):
             bridge_roads.append((line, w, oid))  # (not a footbridge tagged living_street for service vans only)
         continue
-    if t.get("lit") != "no":
+    if t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT):
         lit_ground_ways.append(poly)
     if hw in ROADS or base in ROADS:
         _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
@@ -2853,7 +2856,8 @@ def stand_lamp(c, r, z0, hgt, key):
 # carriageway from edge to edge) beside the deck, poles from the Inn up to its edge, and the Alte Poststraße's over the
 # A 3 stood on the motorway, up to under the deck. d_br, d_gr: the node's distance from the nearest bridge way and
 # from the nearest way on the ground that may be lit (one under the bridge, the street the bridge lands on; not the
-# unlit A 3 under the Alte Poststraße). A node's layer tag decides: 0 or less on the ground, 1 or more on the deck
+# unlit A 3 under the Alte Poststraße, nor a field track: UNLIT). A node's layer tag decides: 0 or less on the
+# ground, 1 or more on the deck
 _bridge_ways = STRtree([p_ for p_, _, _ in bridge_shapes])
 _ground_ways = STRtree(lit_ground_ways)
 
