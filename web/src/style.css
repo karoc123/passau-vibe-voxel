@@ -177,13 +177,16 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 #bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px); }
 #bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
 #bar.folded .bar-fold { position: static; flex: none; }
-#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
+#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; align-items: flex-start; } /* (not stretched to the drive's speed below Park car) */
 #bar.folded .mode-tools .drive-help { display: none; }
 #bar.folded .mode-tools .mode-active { flex-basis: auto; }
 @media (pointer: coarse) {
   #bar .bar-fold { width: 36px; height: 36px; }
   #bar .search { margin-left: 44px; }
   #bar .search input { height: 36px; }
+  /* folded: Walk, Park car (drive.css: 44 px), Fly on one line of text, the fold button centred on it */
+  #bar.folded .mode-tools .mode-button { min-height: 44px; }
+  #bar.folded .bar-fold { margin-top: 4px; }
 }
 
 /* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
