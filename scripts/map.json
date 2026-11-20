@@ -6,6 +6,25 @@
  "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
  "map": {"col0": -6144, "row0": -2048, "cols": 9344, "rows": 3456},
  "base": 287,
- "rivers": {"level": 290.921, "stretches": []},
+ "rivers": {"level": 290.921, "stretches": [
+  {"name": "Danube above the Kachlet dam (and the Gaißa)", "box": [821000, 5388900, 824880, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824880, 5389847, 824900, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824900, 5389873, 824920, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824920, 5389900, 824940, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824940, 5389926, 824960, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824960, 5389953, 824980, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [824980, 5389979, 825000, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [825000, 5390006, 825020, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [825020, 5390032, 825040, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [825040, 5390059, 825060, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [825060, 5390085, 825080, 5392600], "level": 299.75},
+  {"name": "Danube above the Kachlet dam, along the weir", "box": [825080, 5390112, 825100, 5392600], "level": 299.75},
+  {"name": "Danube below the Kachlet dam", "box": [825000, 5389300, 826200, 5390300], "level": 291.5},
+  {"name": "Danube from Heining to Hacklberg", "box": [826200, 5389300, 827371, 5390100], "level": 291.35},
+  {"name": "Ilz: the loop below the Hals weir", "box": [828580, 5392000, 828800, 5392600], "level": 296.0},
+  {"name": "Ilz above the Hals weir", "box": [827900, 5391380, 828960, 5392600], "level": 301.4},
+  {"name": "Ilz below Hals", "box": [828960, 5391150, 829250, 5392600], "level": 293.9},
+  {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9}
+ ]},
  "regions": {"size": 1024, "jobs": 4}
 }
