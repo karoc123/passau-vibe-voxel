@@ -17,6 +17,8 @@ and web/public/data/flood.json: the LiDAR-day surface where no stretch is (surfa
 stretch's box (map cells x0, y0, x1, y1: the first that holds a cell is its stretch, as aoi.river_level) and level,
 spill0, and the river's points every 24 m (x, y pairs; where the bed is: web/src/flood.ts shows the level's slider
 while some are in view).
+On a partial map (a check fixture) with no river outside the stretches the surface there is rivers.level, flat; with no
+river at all nothing floods.
 """
 import gzip
 import json
@@ -58,8 +60,14 @@ dtm = np.load("data/prep.npz", mmap_mode="r")["dtm"]
 low = river & (stretch < 0)
 rows = np.nonzero(low)[0]
 v = dtm[low]
-ok = np.isfinite(v) & (v < np.nanpercentile(v, 90))  # not the bank cells caught in the river outline
-fall = np.polyfit(rows[ok], v[ok], 1)  # m per grid row (row 0 = north edge)
+ok = np.isfinite(v)
+if ok.any():
+    ok &= v < np.nanpercentile(v, 90)  # not the bank cells caught in the river outline
+if len(np.unique(rows[ok])) >= 2:
+    fall = np.polyfit(rows[ok], v[ok], 1)  # m per grid row (row 0 = north edge)
+else:  # a partial map (a check fixture) with no river outside the stretches: the configured level, flat
+    print("note: no river outside the stretches on this map: the surface where no stretch is is rivers.level, flat")
+    fall = np.array([0.0, aoi.RIVER_LEVEL])
 print(f"LiDAR-day surface {np.polyval(fall, 0):.2f} (row 0) .. {np.polyval(fall, D):.2f} (row {D}) m a.s.l.")
 del dtm, v, rows, ok
 # the ground over the water of its own stretch (m)
@@ -73,7 +81,9 @@ del over
 spill = np.full((D, W), 255, np.uint8)
 spill[river] = first[river]
 wet = river.copy()
-for k in range(int(first[river].min()), int(SPILL_MAX * 10) + 1):
+if not river.any():
+    print("note: no river on this map (no water body of", RIVER_MIN, "cells): nothing floods")
+for k in range(int(first[river].min()) if river.any() else 255, int(SPILL_MAX * 10) + 1):
     reach = (first <= k) | wet
     ys, xs = np.nonzero(reach.any(1))[0], np.nonzero(reach.any(0))[0]
     sl = (slice(ys[0], ys[-1] + 1), slice(xs[0], xs[-1] + 1))
@@ -108,6 +118,9 @@ for r in range(D):
         cen[r] = cs[np.argmax(d_any[r, cs])]
         half[r] = d_any[r, cs].max()
 ok_r = np.isfinite(cen)
+if not ok_r.any():  # no river row (a partial map): no thalweg
+    ok_r[:] = True
+    cen[:], half[:] = -1e6, 0.0
 cen = np.interp(np.arange(D), np.nonzero(ok_r)[0], cen[ok_r])
 half = np.interp(np.arange(D), np.nonzero(ok_r)[0], half[ok_r])
 cen = ndimage.gaussian_filter1d(cen, 40) + 0.35 * ndimage.gaussian_filter1d(half, 40) * np.sin(np.arange(D) * 2 * np.pi / 520)
@@ -117,7 +130,8 @@ depth = np.where(bed & ~river, np.maximum(0.45 + 0.03 * ndimage.distance_transfo
 depth = np.maximum(depth, channel)
 depth = np.clip(np.where(bed, depth, 0), 0, 25.5)
 dd = np.round(depth * 10).astype(np.uint8)
-print("bed depth percentiles (m)", np.percentile(depth[river], [5, 25, 50, 75, 95]).round(2))
+if river.any():
+    print("bed depth percentiles (m)", np.percentile(depth[river], [5, 25, 50, 75, 95]).round(2))
 
 with gzip.GzipFile(Path("data") / "flood.bin", "wb", compresslevel=9, mtime=0) as fh:
     fh.write(spill.tobytes())
@@ -125,7 +139,7 @@ with gzip.GzipFile(Path("data") / "flood.bin", "wb", compresslevel=9, mtime=0) a
 # no gauge: the viewer's slider is in metres above or below this surveyed surface (a calibration to the Passau gauges
 # would add their zero points here)
 json.dump({"base": base, "surface0": round(float(np.polyval(fall, 0)), 3), "fall": round(float(fall[0]), 7),
-           "voxel_top": int(g[low].max()), "spill0": SPILL0, "stretches": boxes,
+           "voxel_top": int(g[low].max()) if low.any() else int(g[river].max()) if river.any() else int(round(fall[1] - base)), "spill0": SPILL0, "stretches": boxes,
            "river": [int(v) for y in range(0, D, 24) for x in range(0, W, 24) if dd[y, x] > 0 for v in (x, y)]},
           open(OUT / "flood.json", "w"))
 print("data/flood.bin", (Path("data") / "flood.bin").stat().st_size // 1024, "KB")
