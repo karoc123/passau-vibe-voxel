@@ -43,7 +43,8 @@ $S objects -i $A data/raw/osm.json data/ground.npz -o $P/objects \
 $S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/windows.bin \
   -- python scripts/windows.py           # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
-$S phenology -i $A scripts/foliage_photos.json data/raw/dwd $P/trees.json data/crowns.npz -o $P/phenology.json data/foliage.bin \
+$S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/alkis_tn.py data/raw/dwd data/raw/tn_09262.zip data/raw/tn_09275.zip \
+  $P/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
 $S tile_fields -i $A scripts/window.py scripts/tilefile.py data/zones.bin data/flood.bin data/foliage.bin $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light (from the data/ maps above)

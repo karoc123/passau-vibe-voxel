@@ -1,0 +1,31 @@
+{
+ "box": [
+  13.3552,
+  48.5725,
+  13.4842,
+  48.5986
+ ],
+ "fetched": "2026-11-20",
+ "observations": {
+  "Acer": 10,
+  "Aesculus": 7,
+  "Alnus": 4,
+  "Betula": 5,
+  "Carpinus": 2,
+  "Fagus": 0,
+  "Fraxinus": 9,
+  "Gleditsia": 0,
+  "Juglans": 2,
+  "Malus": 2,
+  "Platanus": 0,
+  "Populus": 9,
+  "Prunus": 11,
+  "Quercus": 6,
+  "Robinia": 8,
+  "Salix": 9,
+  "Sorbus": 1,
+  "Tilia": 22,
+  "Ulmus": 10
+ },
+ "source": "iNaturalist API v1, observations (verifiable) per genus within the map's box (lon/lat)"
+}

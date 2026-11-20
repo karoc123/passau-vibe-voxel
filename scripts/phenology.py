@@ -11,6 +11,20 @@
   the DWD dates for the species both sources have. Leaf fall: colouring plus the DWD's median gap between the two.
 A phase neither source gives takes the median over the classes.
 
+Species groups where the tree's species is unknown (all but a few hundred OSM trees: the Einzelbäume register has no
+species, only ground and tree height; the conifers are told by the laser's winter scan, voxelize.py "con"). Such a
+broadleaved tree takes a class drawn by its site, from open data (site_classes below):
+- riparian: within 30 m of open water (data/ground.npz water, bodies of 1000 m2 and up) and at most 3 m above it --
+  the floodplain forest's genera (willow, alder, poplar, ash), in equal shares (no inventory gives their mix here);
+- forest: ALKIS Wald or Gehölz (alkis_tn.py) -- beech (with hornbeam) 17 and oak 12 parts (their shares of the forest
+  floor in the Bundeswaldinventur 2022, Germany: Thünen-Institut, BWI 2022 brochure), the other broadleaved genera
+  18 parts in equal shares (about the rest of the inventory's broadleaved share, not split further here);
+- elsewhere (streets, gardens, parks): the genera's iNaturalist observation counts (verifiable) within the map's box,
+  kept in scripts/tree_genera.json (fetched again when the map's box changes) -- the trees people noted in Passau
+  (cherries, elms, walnuts are class 13, the deciduous trees without series of their own).
+The draw is stable: a tree takes its stand's number (stands: the cells round jittered seeds every 32 m of the project
+grid) with probability 0.6, else its own (a hash of its id), so neighbours tend to share a genus as in a real stand.
+
 Autumn colours: measured on Wikimedia Commons photos of each taxon's canopy, autumn and summer (scripts/foliage_photos.json:
 the method, the photos, both medians). The sunlit half of the leaf pixels; the renderer keeps its own summer greens, so
 all autumn colours are scaled by how much brighter those greens are than the photos' summer canopies (one factor, so
@@ -33,6 +47,7 @@ import re
 import sys
 import time
 import urllib.request
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -240,14 +255,126 @@ def grass_tints():
     return [[round(float(v), 3) for v in lin[m] * k / linear(GRASS)] for m in range(12)]
 
 
-def classify(t):
-    genus = (t.get("sp") or "").split(" ")[0]
-    if genus in CONIFERS or (t.get("con") and genus not in ("Larix", "Metasequoia")):  # (con: voxelize.py, laser scan)
-        return EVERGREEN
+def genus_class(genus):
     for k, (_, _, genera) in CLASSES.items():
         if genus in genera:
             return k
     return OTHER
+
+
+def classify(t, drawn=None):
+    """the tree's class; drawn: for a tree of unknown species, the class its site's draw gave (site_classes)"""
+    genus = (t.get("sp") or "").split(" ")[0]
+    if genus in CONIFERS or (t.get("con") and genus not in ("Larix", "Metasequoia")):  # (con: voxelize.py, laser scan)
+        return EVERGREEN
+    if not genus and drawn is not None:
+        return drawn
+    return genus_class(genus)
+
+
+# the genera drawn from per site (see the docstring): (genus, parts)
+RIPARIAN = [("Salix", 1), ("Alnus", 1), ("Populus", 1), ("Fraxinus", 1)]
+FOREST_OTHER = ["Acer", "Fraxinus", "Tilia", "Betula", "Alnus", "Salix", "Populus", "Sorbus", "Prunus"]
+FOREST = [("Fagus", 17), ("Quercus", 12)] + [(g_, 18 / len(FOREST_OTHER)) for g_ in FOREST_OTHER]
+URBAN_GENERA = sorted({g_ for _, _, gs in CLASSES.values() for g_ in gs if g_ != "Larix"} |
+                      {"Prunus", "Ulmus", "Juglans", "Malus", "Platanus"})
+INAT_COUNT = ("https://api.inaturalist.org/v1/observations?taxon_name={g}&swlat={s}&swlng={w}&nelat={n}&nelng={e}"
+              "&verifiable=true&per_page=0")
+STAND_M, STAND_P = 32, 0.6
+GENERA = Path(__file__).parent / "tree_genera.json"
+
+
+def urban_shares():
+    """[(genus, iNaturalist observations within the map's box)]"""
+    import pyproj
+    from aoi import CRS, world_bounds
+    x0, y0, x1, y1 = world_bounds(0)
+    tr = pyproj.Transformer.from_crs(CRS, 4326, always_xy=True)
+    (w, s_), (e, n) = tr.transform(x0, y0), tr.transform(x1, y1)
+    box = [round(v, 4) for v in (w, s_, e, n)]
+    known = json.loads(GENERA.read_text()) if GENERA.exists() else {}
+    if known.get("box") != box or sorted(known.get("observations", {})) != URBAN_GENERA:
+        out = {}
+        for g_ in URBAN_GENERA:
+            url = INAT_COUNT.format(g=g_, w=box[0], s=box[1], e=box[2], n=box[3])
+            out[g_] = json.load(urllib.request.urlopen(urllib.request.Request(url, headers=UA)))["total_results"]
+            time.sleep(1.1)
+        known = dict(source="iNaturalist API v1, observations (verifiable) per genus within the map's box (lon/lat)",
+                     fetched=time.strftime("%Y-%m-%d"), box=box, observations=out)
+        GENERA.write_text(json.dumps(known, indent=1, sort_keys=True) + "\n")
+    return [(g_, c) for g_, c in sorted(known["observations"].items()) if c > 0]
+
+
+def site_masks():
+    """(forest, riparian): [D, W] bool on the map's cells"""
+    import rasterio.features
+    from affine import Affine
+    from scipy import ndimage
+    from shapely.affinity import affine_transform
+    import aoi
+    z = np.load(Path(__file__).parent.parent / "data/ground.npz")
+    g, water = z["g"].astype(np.float32), z["water"]
+    lab, _ = ndimage.label(water)
+    big = np.bincount(lab.ravel()) >= 1000
+    big[0] = False
+    water = big[lab]
+    dist, (wr, wc) = ndimage.distance_transform_edt(~water, return_indices=True)
+    riparian = (dist <= 30) & (g - g[wr, wc] <= 3)
+    forest = np.zeros(g.shape, np.uint8)
+    try:
+        import alkis_tn
+        tm = [aoi.EU[0], aoi.EU[1], aoi.EV[0], aoi.EV[1], aoi.I0 - aoi.CX * aoi.EU[0] - aoi.CY * aoi.EU[1] - aoi.C0,
+              aoi.J0 - aoi.CX * aoi.EV[0] - aoi.CY * aoi.EV[1] - aoi.R0]
+        shapes = [(affine_transform(p_, tm), 1) for n_, _, p_ in alkis_tn.read(aoi.world_bounds(5)) if n_ in ("Wald", "Gehölz")]
+        if shapes:
+            forest = rasterio.features.rasterize(shapes, out_shape=g.shape, transform=Affine.identity(), fill=0, dtype="uint8")
+    except FileNotFoundError:
+        print("no ALKIS land use: no forest sites")
+    return forest > 0, riparian
+
+
+def _u(*key):
+    return (zlib.crc32(repr(key).encode()) & 0xFFFFFF) / float(1 << 24)
+
+
+def site_classes(trees):
+    """per tree (trees.json's, map cells): the class drawn for it by its site (see the docstring), and the site
+    (0 elsewhere, 1 forest, 2 riparian)"""
+    import aoi
+    forest, riparian = site_masks()
+    urban = urban_shares()
+    print("urban genera (iNaturalist, map box):", dict(urban))
+    xy = np.array([(t["x"], t["y"]) for t in trees])
+    c = np.clip(xy[:, 0].astype(int), 0, forest.shape[1] - 1)
+    r = np.clip(xy[:, 1].astype(int), 0, forest.shape[0] - 1)
+    site = np.where(riparian[r, c], 2, np.where(forest[r, c], 1, 0))
+    # stands: the nearest of jittered seeds, one per STAND_M square of the project grid
+    pc, pr = xy[:, 0] + aoi.MAP_C0, xy[:, 1] + aoi.MAP_R0
+    i0, j0 = np.floor(pc / STAND_M).astype(int), np.floor(pr / STAND_M).astype(int)
+    best = np.full(len(trees), np.inf)
+    stand = np.zeros((len(trees), 2), int)
+    seed = {}
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            si, sj = i0 + di, j0 + dj
+            for k in set(zip(si.tolist(), sj.tolist())) - seed.keys():
+                seed[k] = ((k[0] + _u("sx", *k)) * STAND_M, (k[1] + _u("sy", *k)) * STAND_M)
+            sxy = np.array([seed[k] for k in zip(si.tolist(), sj.tolist())])
+            d = (sxy[:, 0] - pc) ** 2 + (sxy[:, 1] - pr) ** 2
+            m = d < best
+            best[m] = d[m]
+            stand[m] = np.c_[si, sj][m]
+    tables = {}
+    for k, shares in ((0, urban), (1, FOREST), (2, RIPARIAN)):
+        w = np.array([p_ for _, p_ in shares], float)
+        tables[k] = ([genus_class(g_) for g_, _ in shares], np.cumsum(w) / w.sum())
+    out = np.zeros(len(trees), np.uint8)
+    for n_, t in enumerate(trees):
+        st = int(site[n_])
+        u = _u("stand", int(stand[n_, 0]), int(stand[n_, 1]), st) if _u("pick", t["id"]) < STAND_P else _u("tree", t["id"])
+        cl, cum = tables[st]
+        out[n_] = cl[min(int(np.searchsorted(cum, u, side="right")), len(cl) - 1)]
+    return out, site
 
 
 def city_median(table, cls, ph):
@@ -262,8 +389,13 @@ def main():
     table = phenology()
     every = json.load(open(OUT / "trees.json"))["trees"]
     # the trees drawn (a register point under another tree's crown has none of its own)
+    drawn, site = site_classes(every)
+    cls_all = np.array([classify(t, d) for t, d in zip(every, drawn)], np.uint8)
+    keep = np.array([t.get("drawn") != "none" for t in every], bool)
     trees = [t for t in every if t.get("drawn") != "none"]
-    cls = np.array([classify(t) for t in trees], np.uint8)
+    cls = cls_all[keep]
+    print("trees per site (elsewhere, forest, riparian):", np.bincount(site[keep], minlength=3).tolist(),
+          "conifers among the forest's:", int(((cls == EVERGREEN) & (site[keep] == 1)).sum()))
     city = {ph: city_median(table, cls, ph) for ph in PHASES}
     print("city medians:", city)
     json.dump(dict(city=city, sources=["DWD Climate Data Center: phenological observations, annual reporters, wild plants (historical), stations within 100 km of Passau below 500 m, 1995-2024",
@@ -289,7 +421,6 @@ def main():
         # the nearest trunk on this 2 m grid
         own = np.load(CROWNS)["owner"]
         if own.shape == grid.shape:
-            cls_all = np.array([classify(t) for t in every], np.uint8)
             m = own >= 0
             grid[m] = cls_all[own[m]]
             tree[m] = ((own[m].astype(np.int64) * 2654435761 >> 13) & 255).astype(np.uint8)
