@@ -57,17 +57,18 @@ export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs
     solid[c] = t;
     const k = (off[c] + counts[c] - 1) * 3, v = runs[k + 2], top = runs[k] + runs[k + 1];
     if (top === ground[c]) { if (v < pal.length && pal[v] & PAL_GROUND) paved[c] = 1; continue; }
-    if (covered && top > ground[c]) {
-      // (the run ending at the ground, and the next one's bottom at least COVER_CLEAR over it)
+    // (a deck: a paved top run over the ground's top)
+    if (top < ground[c] || top > 255 || v >= deck.length || !(deck[v] & PAL_GROUND)) {
+      if (!covered || top < ground[c]) continue;
+      // (covered ground, no deck over it: the run ending at the ground, the next one's bottom COVER_CLEAR over it)
       let gk = -1;
       for (let k2 = off[c] * 3, e = (off[c] + counts[c]) * 3; k2 < e; k2 += 3) {
         if (runs[k2] + runs[k2 + 1] === ground[c]) gk = k2;
         else if (gk >= 0) { if (runs[k2] < ground[c] + COVER_CLEAR) gk = -1; break; }
       }
-      if (gk >= 0 && runs[gk + 2] < pal.length && pal[runs[gk + 2]] & PAL_GROUND) { paved[c] = 1; continue; }
+      if (gk >= 0 && runs[gk + 2] < pal.length && pal[runs[gk + 2]] & PAL_GROUND) paved[c] = 1;
+      continue;
     }
-    // (a deck: a paved top run over the ground's top)
-    if (top < ground[c] || top > 255 || v >= deck.length || !(deck[v] & PAL_GROUND)) continue;
     if (ground === under) ground = Uint8Array.from(under);
     ground[c] = top;
     paved[c] = 1;
