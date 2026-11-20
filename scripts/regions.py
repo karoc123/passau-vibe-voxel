@@ -29,7 +29,7 @@ any region was built or their own inputs changed (data/cache/regions.stamp). The
 - the passes over the whole map, network-wide over OSM's vectors and the regions' lists, reading the regions' rasters
   and volumes where they look (mapstore.MapRaster, MapVolume: point lookups, a box round a label): the labels
   (labels.py: the parks', each curated label's top over its whole outline, the decluttering, their radii), the camera
-  presets (landmarks.make_views; the ground's median from the regions' histograms), the tram paths and traffic.json
+  presets (landmarks.make_views; the ground's median from the regions' histograms), traffic.json
   (traffic.py), the carriageway check summed over the regions. flood.py and boats.py stay whole-map steps of their own.
 """
 import gzip
@@ -229,7 +229,7 @@ def pick(ws, spec):
 
 def driver_stamp(ws):
     """the hash of what the steps after the regions read: the regions' keys, their own code, the registry, the
-    raw OSM (labels, trams, traffic), the config"""
+    raw OSM (labels, traffic), the config"""
     import region_inputs
     keys = [json.load(open(rdir(w) / "manifest.json"))["key"] for w in ws]
     code = {f: region_inputs.code_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
@@ -374,7 +374,7 @@ def main(argv):
         np.save("data/cache/final_g.npy", g.box(0, D_, 0, W_))
 
     # ---------------------------------------------------------------- the passes over the whole map: labels, presets,
-    # trams and traffic.json, network-wide over OSM's vectors and what the regions handed over, sampling the rasters
+    # traffic.json, network-wide over OSM's vectors and what the regions handed over, sampling the rasters
     # above where they need them (point lookups and boxes round a label: never the map's size)
     from osm import OSM
     import labels as labels_mod
@@ -389,21 +389,6 @@ def main(argv):
     views = landmarks.make_views(found, g, median=hist_median([res[w]["g_hist"] for w in ws]))
     labels = labels_mod.assemble([l for _, l in cur], osm, lambda r, c: int(top[r, c]))
     labels_mod.radii(labels, g, top)
-    # tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
-    from shapely.ops import linemerge
-    tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])
-    tram_lines = list(getattr(tram_lines, "geoms", [tram_lines]))
-    trams = []
-    for ln in sorted(tram_lines, key=lambda l: -l.length):
-        if ln.length < 180:
-            continue
-        path = []
-        for d in np.arange(0, ln.length, 2.0):
-            p = ln.interpolate(d)
-            c, r = min(max(int(p.x), 0), aoi.MAP_W - 1), min(max(int(p.y), 0), aoi.MAP_D - 1)
-            path.append([round(p.x, 1), round(p.y, 1), int(g[r, c])])
-        trams.append(path)
-    note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
     tile_bytes = {}
     for w in ws:
         for s, (tot, nruns, ftot) in res[w]["tiles"].items():
@@ -417,7 +402,7 @@ def main(argv):
     jets = [j for _, j in sorted((tuple(k), j) for w in ws for k, j in res[w]["jets"])]
     lamps = [l for _, l in sorted((tuple(k), l) for w in ws for k, l in res[w]["lamps"])]
     meta = dict(W=aoi.MAP_W, D=aoi.MAP_D, H=Hm, base=aoi.BASE, origin=[aoi.MAP_C0, aoi.MAP_R0], tiles=tile_info, center=[aoi.CX, aoi.CY],
-                theta_deg=math.degrees(aoi.THETA), crs="EPSG:25832", trams=trams, jets=jets,
+                theta_deg=math.degrees(aoi.THETA), crs="EPSG:25832", jets=jets,
                 palette=[list(e) for e in palette], lamps=lamps, labels=labels, views=views,
                 sources=dict(osm=osm.timestamp,
                              elevation="Bayerische Vermessungsverwaltung, DOM20 + DGM1 + LoD2 (CC BY 4.0)",
