@@ -1,4 +1,4 @@
-// The player's car on Rapier (car.ts) in the drive mode (nav/drive.prototype.ts, one drive: nav/drive-session.ts):
+// The player's car on Rapier (car.ts) in the drive mode (nav/drive.ts, one drive: nav/drive-session.ts):
 // one world for the page, its voxel colliders built near the car (terrain.ts), the traffic near it as kinematic bodies
 // the car runs into. Loaded in the background once the city is shown (loadRapierDrive: Rapier's wasm, its first step
 // and the collision decoding's first tile taken then, not on the first drive).

@@ -2,13 +2,13 @@ import { Vector3 } from 'three';
 import type { StreetLife } from '../sim/life';
 import type { Car, Person, Pose } from '../sim/types';
 import type { CarBuild, CarInput } from '../physics/rapier/car';
-import type { DrawnPose, Obstacle, RapierDrive, Walker } from '../physics/rapier/drive';
+import type { DrawnPose, Obstacle, RapierDrive, Walker } from '../physics/rapier/drive-world';
 
-// One drive of a traffic car on Rapier (physics/rapier/drive.ts), between the car's world and the street life: what
-// the car meets (the traffic and the people near it), what that does to them (a car knocked out of the traffic, a
-// person knocked down), the river (a splash, then back on the road a little way back), a crash landing (no control for a
-// moment), and the Car drawn where the body is. No DOM: the drive mode (drive.prototype.ts) gives it the input and
-// the clock and shows its notes; tools/rapier-car.mjs runs it headless (drive-scenarios.ts).
+// One drive of a traffic car on Rapier (physics/rapier/drive-world.ts), between the car's world and the street life:
+// what the car meets (the traffic and the people near it), what that does to them (a car knocked out of the traffic, a
+// person knocked down), the river (a splash, then back on the road a little way back), a crash landing (no control
+// for a moment), and the Car drawn where the body is. No DOM: the drive mode (drive.ts) gives it the input and the
+// clock and shows its notes; tools/rapier-car.mjs runs it headless (physics/rapier/drive-scenarios.ts).
 
 export const SINK_MS = 2000; // in the river this long, then back on the road
 export const CRASH_MS = 1100; // after a crash landing: shaken, no input

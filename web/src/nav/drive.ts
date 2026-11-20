@@ -2,20 +2,21 @@ import type { Vector3 } from 'three';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import type { CarInput } from '../physics/rapier/car';
-import type { RapierDrive } from '../physics/rapier/drive';
+import type { RapierDrive } from '../physics/rapier/drive-world';
 import type { Nav, Ride } from './nav';
 import { CRASH_MS, DriveSession, SINK_MS } from './drive-session';
 import { stickAxis, TouchSticks } from './touch-sticks';
-import './drive.prototype.css';
+import './drive.css';
 
-// The drive mode: the player takes the wheel of a traffic car, driven on Rapier (physics/rapier/drive.ts, loaded in
-// the background once the city is shown; drive-session.ts: one drive). Here: the panel, the input, the camera's shake.
+// The drive mode: the player takes the wheel of a traffic car, driven on Rapier (physics/rapier/drive-world.ts,
+// loaded in the background once the city is shown; drive-session.ts: one drive). Here: the panel, the input, the
+// camera's shake.
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
 const HANDBRAKE_THRESHOLD = 0.75;
 
-export class DrivePrototype {
+export class DriveMode {
   private readonly touch: TouchSticks;
   private readonly keys = new Set<string>();
   private readonly panel = document.createElement('aside');
@@ -33,7 +34,7 @@ export class DrivePrototype {
   private feedback = 'Contact';
   private rapier: RapierDrive | null = null;
   private rapierLoad: Promise<void> | null = null;
-  private rapierMod: typeof import('../physics/rapier/drive') | null = null;
+  private rapierMod: typeof import('../physics/rapier/drive-world') | null = null;
 
   constructor(private readonly nav: Nav, private readonly focus: Vector3, private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
     Object.assign(window, { __drive: this });
@@ -42,7 +43,7 @@ export class DrivePrototype {
       if (idle) idle(() => this.loadRapier(), { timeout: 3000 }); else this.loadRapier();
     }, RAPIER_AFTER_MS);
     this.touch = new TouchSticks(canvas);
-    this.panel.className = 'drive-prototype';
+    this.panel.className = 'drive-mode';
     this.panel.setAttribute('aria-label', 'Drive a car');
     host.append(this.panel);
     this.status.setAttribute('role', 'status');
@@ -135,7 +136,7 @@ export class DrivePrototype {
   private loadRapier() {
     if (this.rapierLoad) return;
     const t0 = performance.now();
-    this.rapierLoad = import('../physics/rapier/drive').then(async (m) => {
+    this.rapierLoad = import('../physics/rapier/drive-world').then(async (m) => {
       this.rapierMod = m;
       const f = this.focus;
       this.rapier = await m.loadRapierDrive(this.meta, { x: f.x, z: f.z });

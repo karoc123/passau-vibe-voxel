@@ -47,7 +47,7 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
   return { fraction: enter, axis };
 }
 
-// The FPV drone's collision (fpv.prototype.ts): a small cache of the 1 m tiles near it, independent of visibility,
+// The FPV drone's collision (fpv.ts): a small cache of the 1 m tiles near it, independent of visibility,
 // render budget and the mesh-worker queue.
 export class VoxelCollision {
   readonly width: number;

@@ -9,12 +9,12 @@ body.fpv #labels { display: none; }
 
 body.fpv-flying :is(#hud, .caption),
 body.fpv-flying #bar > :not(.mode-tools),
-body.fpv-flying #bar .mode-tools > :not(.fpv-prototype) {
+body.fpv-flying #bar .mode-tools > :not(.fpv-mode) {
   display: none;
 }
 body.fpv-flying #bar { right: auto; width: max-content; max-width: calc(100% - 28px); }
 body.fpv-flying #bar .mode-tools { padding-top: 0; }
-body.fpv-flying #bar .fpv-prototype {
+body.fpv-flying #bar .fpv-mode {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -23,7 +23,7 @@ body.fpv-flying #bar .fpv-prototype {
   border-radius: 6px;
   background: rgba(16,17,20,.62);
 }
-body.fpv-flying #bar .fpv-prototype .mode-detail { display: contents; }
+body.fpv-flying #bar .fpv-mode .mode-detail { display: contents; }
 body.fpv-flying #bar .fpv-status:not(:empty) { order: 1; flex-basis: 100%; padding-bottom: 6px; }
 body.fpv-flying #bar .fpv-status:empty { position: absolute; }
 

@@ -11,8 +11,8 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
-import type { DrivePrototype } from './nav/drive.prototype';
-import type { FpvPrototype } from './nav/fpv.prototype';
+import type { DriveMode } from './nav/drive';
+import type { FpvMode } from './nav/fpv';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -73,8 +73,8 @@ const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
 movingActors.add(nav.actors);
-let fpv: FpvPrototype | null = null;
-let drive: DrivePrototype | null = null;
+let fpv: FpvMode | null = null;
+let drive: DriveMode | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -422,11 +422,11 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  const [{ FpvPrototype }, { DrivePrototype }] = await Promise.all([
-    import('./nav/fpv.prototype'), import('./nav/drive.prototype'),
+  const [{ FpvMode }, { DriveMode }] = await Promise.all([
+    import('./nav/fpv'), import('./nav/drive'),
   ]);
-  fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement);
-  drive = new DrivePrototype(nav, controls.target, meta, modeTools, renderer.domElement);
+  fpv = new FpvMode(nav, camera, controls.target, meta, modeTools, renderer.domElement);
+  drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;

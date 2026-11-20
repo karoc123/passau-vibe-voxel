@@ -6,7 +6,7 @@ import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
-import './fpv.prototype.css';
+import './fpv.css';
 
 const FIXED_STEP = 1 / 120;
 const ARM_THROTTLE = 0.06;
@@ -27,7 +27,7 @@ function button(label: string, run: () => void) {
 }
 
 // The viewer owns the camera and render loop; this mode supplies the flight pose.
-export class FpvPrototype {
+export class FpvMode {
   private readonly radio = new FpvInput();
   private readonly touch: FpvTouch;
   private readonly hasTouch = navigator.maxTouchPoints > 0;
@@ -69,7 +69,7 @@ export class FpvPrototype {
     this.collision = new VoxelCollision(meta);
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
-    this.panel.className = 'fpv-prototype';
+    this.panel.className = 'fpv-mode';
     this.panel.setAttribute('aria-label', 'FPV Acro');
     this.panel.prepend(this.enterExit);
     host.append(this.panel);

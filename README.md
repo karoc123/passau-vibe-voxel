@@ -348,14 +348,14 @@ stays armed. The drone can settle on the ground and take off again with throttle
 is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
 Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
 
-## Arcade driving prototype
+## Driving
 
 Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, and **Esc** takes you back to the map.
 
-The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive.ts`,
+The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive-world.ts`,
 `car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks; the
 ground's 1 m steps are smoothed into a surface of the car's own, steps up to ~1 m that are not ground (platforms, low
 walls) get an invisible ramp. Traffic cars and buses near it are solid; hit one at more than ~15 km/h (between the
@@ -365,7 +365,10 @@ no physics: `sim/life.ts` `knockDown`), and lie there until the car is ~35 m awa
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
-~1.5 s after the city is shown; taking the wheel before that waits for it.
+~1.5 s after the city is shown; taking the wheel before that waits for it. Rapier is the only car physics. The mode's
+panel and input are `web/src/nav/drive.ts`; one drive (the traffic and people near the car, knock-outs, the river and
+back, crash landings, where to come back to: the last poses on its wheels on the terrain's ground with no water under
+it) is `nav/drive-session.ts`, with no DOM, checked headless by `tools/rapier-car.mjs` (`drive_*`).
 
 ## Third-person walking
 
