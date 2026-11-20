@@ -561,6 +561,7 @@ bridge_rails = []  # (line, colour) the rails of tracks on bridges, drawn on the
 bridge_lines = []  # (line, half width, layer) of every way on a bridge: the deck's height profile is taken along them
 bridge_roads = []  # (line, width) of carriageways on bridges, for the inferred deck lamps
 bridge_road_polys = []  # the carriageways on bridges, where one is drawn on the ground (a ramp's embankment)
+lit_ground_ways = []  # the ways on the ground but those lit=no: a street lamp by one may stand under a bridge
 _paved = [(g_, t_["surface"]) for _, _, t_, g_ in osm.areas
           if t_.get("surface") in SURF and ("area:highway" in t_ or (t_.get("highway") and t_.get("area") == "yes"))]
 _ptree = STRtree([g_ for g_, _ in _paved])
@@ -634,6 +635,8 @@ for oid, t, line in osm.lines:
         if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private"):
             bridge_roads.append((line, w, oid))  # (not a footbridge tagged living_street for service vans only)
         continue
+    if t.get("lit") != "no":
+        lit_ground_ways.append(poly)
     if hw in ROADS or base in ROADS:
         _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
         n_inherit += _s is not None and "surface" not in t
@@ -2761,20 +2764,47 @@ def kerb(c, r):
     return (int(_kc[r, c]), int(_kr[r, c])) if _kd[r, c] <= 4 else None
 
 
-lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
-LAMP_KEYS = []
-for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids, the file's order in any cut of it)
-    c, r = kerb(int(p.x), int(p.y)) or (-1, -1)
-    if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
-        continue
-    hgt = int(parse_len(t.get("height")) or (10 if is_road[max(r - 6, 0):r + 7, max(c - 6, 0):c + 7].any() else 6))
-    z0 = g[r, c]
+def lamp_height(t, c, r):
+    return int(parse_len(t.get("height")) or (10 if is_road[max(r - 6, 0):r + 7, max(c - 6, 0):c + 7].any() else 6))
+
+
+def stand_lamp(c, r, z0, hgt, key):
     vol[z0:z0 + hgt - 1, r, c] = np.where(vol[z0:z0 + hgt - 1, r, c] == 0, C["pole"], vol[z0:z0 + hgt - 1, r, c])
     vol[z0 + hgt - 1, r, c] = C["lamp"]
     lamps.append((c, r, int(z0 + hgt - 1)))
-    LAMP_KEYS.append([0, oid])
-note("street lamps:", len(lamps))
-lamp_xy = np.array([(c, r) for c, r, _ in lamps], float) if lamps else np.zeros((0, 2))
+    LAMP_KEYS.append(key)
+
+
+# a lamp node by a bridge way (within 3 m: OSM's lamp nodes sit on the kerb line) waits for the deck (below): it
+# stands on the deck's top, not on the ground or the river under it -- kerb() put the Marienbrücke's lamps (a deck of
+# carriageway from edge to edge) beside the deck, poles from the Inn up to its edge, and the Alte Poststraße's over the
+# A 3 stood on the motorway, up to under the deck. d_br, d_gr: the node's distance from the nearest bridge way and
+# from the nearest way on the ground that may be lit (one under the bridge, the street the bridge lands on; not the
+# unlit A 3 under the Alte Poststraße). A node's layer tag decides: 0 or less on the ground, 1 or more on the deck
+_bridge_ways = STRtree([p_ for p_, _, _ in bridge_shapes])
+_ground_ways = STRtree(lit_ground_ways)
+
+
+def _way_dist(tree, p):
+    _, d_ = tree.query_nearest(p, max_distance=8, return_distance=True)
+    return float(d_.min()) if len(d_) else math.inf
+
+
+lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
+LAMP_KEYS = []
+bridge_lamps = []  # (oid, tags, node, d_br, d_gr): placed with the deck
+for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids, the file's order in any cut of it)
+    d_br, layer = _way_dist(_bridge_ways, p), parse_len(t.get("layer"))
+    if d_br <= 3 and (layer is None or layer >= 1) and 0 <= p.x < W and 0 <= p.y < D:
+        bridge_lamps.append((oid, t, p, d_br, math.inf if layer else _way_dist(_ground_ways, p)))
+        continue
+    c, r = kerb(int(p.x), int(p.y)) or (-1, -1)
+    if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
+        continue
+    stand_lamp(c, r, int(g[r, c]), lamp_height(t, c, r), [0, oid])
+note("street lamps:", len(lamps), "(and", len(bridge_lamps), "by bridge ways, placed with the decks)")
+# (the bridges' lamps where their nodes are: the park and the inferred deck lamps keep 12 m from them)
+lamp_xy = np.array([(c, r) for c, r, _ in lamps] + [(int(p.x), int(p.y)) for _, _, p, _, _ in bridge_lamps], float).reshape(-1, 2)
 # park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
 # which stood dark at night. Along their walks a 4 m lamp every ~25 m, a metre and a half beside the way on soft
 # ground or paving (never on the way itself, a carriageway or in a building), none within 12 m of another lamp
@@ -3200,6 +3230,27 @@ note("bridge pylons from LiDAR:", n_pyl)
 # deck that carries no way of its own, with no carriageway or track within 4 m beyond it: the inner side of a
 # carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
 _bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])
+# OSM's lamps by the bridge ways (street furniture above) stand on the deck's top: on the nearest deck cell off the
+# carriageway and the tracks within 4 m of the node, else on the deck cell nearest the kerb (the edge of a deck that
+# is carriageway from edge to edge). One as near a way on the ground as the bridge way (by a street under the bridge)
+# stands on the ground, where no deck over it or right beside it is lower than its head; and one with no deck within
+# 4 m too
+_od, (_oi, _oj) = ndimage.distance_transform_edt(~deck, return_indices=True)
+_of, (_fi, _fj) = ndimage.distance_transform_edt(~(deck & ~_bed), return_indices=True)
+n_ol = 0
+for oid, t, p, d_br, d_gr in bridge_lamps:
+    c0, r0 = int(p.x), int(p.y)
+    kc, kr = kerb(c0, r0) or (c0, r0)
+    hgt = lamp_height(t, kc, kr)
+    room = _od[kr, kc] > 1.5 or deck_h[_oi[kr, kc], _oj[kr, kc]] >= hgt + 1  # (no deck over or beside the post under its head)
+    if _od[r0, c0] <= 4 and not (room and d_gr <= d_br + 1.5):
+        r, c = (int(_fi[r0, c0]), int(_fj[r0, c0])) if _of[r0, c0] <= 4 else (int(_oi[kr, kc]), int(_oj[kr, kc]))
+        if not bmask[r, c]:
+            stand_lamp(c, r, int(g[r, c] + round(float(deck_h[r, c]))), hgt, [0, oid])
+            n_ol += 1
+    elif kerb(c0, r0) and not bmask[kr, kc]:
+        stand_lamp(kc, kr, int(g[kr, kc]), hgt, [0, oid])
+note("OSM's lamps by the bridge ways:", n_ol, "on the decks,", len(bridge_lamps) - n_ol, "on the ground or none")
 n_bl = 0
 for line, w, i_br in bridge_roads:
     for k_, dist in enumerate(np.arange(10, line.length - 6, 32.0)):
