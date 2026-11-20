@@ -95,11 +95,13 @@ def build(ws, jobs, fpass=False):
                 (out / "manifest.json").unlink(missing_ok=True)  # (stale until it is written again, after the build)
             log = open(out / "log.txt", "w")
             p = subprocess.Popen([sys.executable, str(HERE / "voxelize.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
-            running[p.pid] = (w, time.time(), log)
+            # (the Popen kept too: one garbage-collected while running is reaped by subprocess's own cleanup on the next
+            # Popen, and os.wait4 then found no child)
+            running[p.pid] = (w, time.time(), log, p)
             print(f"region {w} ({'feature pass, its core alone' if fpass else f'with its halo rows {ra}-{rb}, cols {ca}-{cb}'}):"
                   " started", flush=True)
         pid, status, ru = os.wait4(-1, 0)
-        w, t0, log = running.pop(pid)
+        w, t0, log, _ = running.pop(pid)
         log.close()
         if status != 0:
             print(Path(log.name).read_text()[-3000:])
