@@ -9,7 +9,13 @@ import type { Nav, Ride } from './nav';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
 import { airWorld, carGround, STEP } from './car-contact';
+import type { Obstacle, RapierDrive } from '../physics/rapier/drive';
 import './drive.prototype.css';
+
+// The car's physics: Rapier's (physics/rapier/drive.ts, loaded in the background once the city is shown) unless
+// ?physics=a: variant A (arcade-car.ts with physics/body.ts in the air)
+const PHYSICS: 'rapier' | 'a' = new URLSearchParams(location.search).get('physics') === 'a' ? 'a' : 'rapier';
+const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
 const HANDBRAKE_THRESHOLD = 0.75;
@@ -22,7 +28,8 @@ interface Driving {
   ride: Ride;
   life: StreetLife;
   car: Car;
-  motion: ArcadeCar;
+  motion: ArcadeCar; // variant A's (not stepped on Rapier)
+  rapier: RapierDrive | null; // Rapier's world, the car in it
   displayHeight: number;
   pitch: number;
   roll: number;
@@ -55,11 +62,19 @@ export class DrivePrototype {
   private feedback = 'Contact';
   private waiting = false;
   private readonly air: PhysicsWorld;
+  private rapier: RapierDrive | null = null;
+  private rapierLoad: Promise<void> | null = null;
+  private rapierMod: typeof import('../physics/rapier/drive') | null = null;
+  private lastInput: DriveInput = NO_INPUT;
 
-  constructor(private readonly nav: Nav, private readonly focus: Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
+  constructor(private readonly nav: Nav, private readonly focus: Vector3, private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
     this.tiles = new VoxelCollision(meta);
     this.air = airWorld(this.tiles);
     Object.assign(window, { __drive: this });
+    if (PHYSICS === 'rapier') setTimeout(() => {
+      const idle = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+      if (idle) idle(() => this.loadRapier(meta), { timeout: 3000 }); else this.loadRapier(meta);
+    }, RAPIER_AFTER_MS);
     this.touch = new TouchSticks(canvas);
     this.panel.className = 'drive-prototype';
     this.panel.setAttribute('aria-label', 'Drive a car');
@@ -84,7 +99,10 @@ export class DrivePrototype {
     if (this.driving && this.nav.ride !== this.driving.ride) this.park();
     if (this.pending) this.prepare(this.pending);
     const active = this.driving;
-    if (active) {
+    if (active?.rapier) {
+      if (document.hasFocus() && !document.hidden) this.advanceRapier(active, active.rapier, dt);
+      this.presentRapier(active, active.rapier);
+    } else if (active) {
       const { motion } = active;
       const { pose } = motion;
       this.position.set(pose.x, pose.y, pose.z);
@@ -126,6 +144,11 @@ export class DrivePrototype {
     car.roll = active.roll;
     car.v = motion.vx * Math.sin(pose.h) + motion.vz * Math.cos(pose.h);
     car.brake = +motion.brake;
+    this.shake(active, now);
+  }
+
+  // the camera shaken by a crash and dipped by a splash
+  private shake(active: Driving, now: number) {
     const shake = this.nav.rideShake.set(0, 0, 0);
     const crash = (active.crashUntil - now) / CRASH_MS;
     if (crash > 0) {
@@ -171,6 +194,7 @@ export class DrivePrototype {
     if (!life || ride !== this.nav.ride || car.kind !== 'car') { this.pending = null; return; }
     const pose = life.pose('car', car);
     if (!pose) { this.pending = null; return; }
+    if (PHYSICS === 'rapier') { this.prepareRapier(ride, life, car, pose); return; }
     this.position.set(pose.x, pose.y, pose.z);
     this.tiles.prefetch(this.position, this.velocity.set(0, 0, 0));
     if (!this.tiles.roadSurface(pose.x, pose.z, pose.y, 1.45)) return;
@@ -178,8 +202,12 @@ export class DrivePrototype {
     if (!life.takeWheel(car)) return;
     this.driving = {
       ride, life, car, motion: new ArcadeCar(pose, car.v, car.bus, car.len, car.bus ? 2.55 : 1.48), displayHeight: pose.y,
-      pitch: car.pitch ?? 0, roll: 0, squash: 0, squashV: 0, safe: [], sinkUntil: 0, crashUntil: 0,
+      pitch: car.pitch ?? 0, roll: 0, squash: 0, squashV: 0, safe: [], sinkUntil: 0, crashUntil: 0, rapier: null,
     };
+    this.started(ride);
+  }
+
+  private started(ride: Ride) {
     this.nav.controlledRide = ride;
     this.touch.setActive(true);
     this.keys.clear();
@@ -190,8 +218,14 @@ export class DrivePrototype {
 
   park() {
     if (!this.driving) return;
-    // (parked in the air or the river: back on the road)
-    if (this.driving.motion.mode !== 'ground' || this.driving.sinkUntil) {
+    const rap = this.driving.rapier;
+    if (rap) {
+      // (parked in the river: back on the road first; anywhere else it stays as it is, on its roof too)
+      if (this.driving.sinkUntil || rap.car?.status === 'water') this.respawnRapier(this.driving, rap);
+      else { rap.settle(); this.presentRapier(this.driving, rap); } // (parked in the air: where it comes to rest)
+      rap.end();
+    } else if (this.driving.motion.mode !== 'ground' || this.driving.sinkUntil) {
+      // (parked in the air or the river: back on the road)
       this.respawn(this.driving);
       this.present(this.driving, 0);
     }
@@ -256,6 +290,94 @@ export class DrivePrototype {
         if (active.safe.length > 16) active.safe.shift();
       }
     }
+  }
+
+  // ---- Rapier
+
+  private loadRapier(meta: Meta) {
+    if (this.rapierLoad) return;
+    const t0 = performance.now();
+    this.rapierLoad = import('../physics/rapier/drive').then(async (m) => {
+      this.rapierMod = m;
+      const f = this.focus;
+      this.rapier = await m.loadRapierDrive(meta, { x: f.x, z: f.z });
+      (window as unknown as { __rapierLoadMs: number }).__rapierLoadMs = performance.now() - t0;
+    }).catch((e) => { console.warn('rapier', e); });
+  }
+
+  private prepareRapier(ride: Ride, life: StreetLife, car: Car, pose: Pose) {
+    const rap = this.rapier, m = this.rapierMod;
+    if (!rap || !m) { this.loadRapier(this.meta); return; }
+    this.pending = null;
+    if (!life.takeWheel(car)) return;
+    // (a car parked on its side or roof is taken as it lies)
+    const at = car.rp ?? new Vector3(pose.x, pose.y, pose.z);
+    rap.begin({ x: at.x, y: at.y, z: at.z, h: car.rh ?? pose.h, pitch: car.pitch ?? 0, roll: car.roll ?? 0 }, car.v, m.buildFor(car.bus, car.len));
+    this.driving = {
+      ride, life, car, motion: new ArcadeCar(pose, car.v, car.bus, car.len, car.bus ? 2.55 : 1.48), displayHeight: pose.y,
+      pitch: 0, roll: 0, squash: 0, squashV: 0, safe: [], sinkUntil: 0, crashUntil: 0, rapier: rap,
+    };
+    this.started(ride);
+  }
+
+  private advanceRapier(active: Driving, rap: RapierDrive, dt: number) {
+    const { life, car } = active, now = performance.now();
+    if (active.sinkUntil && now >= active.sinkUntil) { this.respawnRapier(active, rap); return; }
+    const input = this.lastInput = now < active.sinkUntil || now < active.crashUntil ? NO_INPUT : this.input();
+    const p = car.rp;
+    const obstacles: Obstacle[] = [];
+    for (const other of life.roadVehicles()) {
+      const q = other.rp;
+      if (other === car || !q || (p && (Math.abs(q.x - p.x) > 40 || Math.abs(q.z - p.z) > 40))) continue;
+      obstacles.push({ key: other, x: q.x, y: q.y, z: q.z, h: other.rh ?? 0, len: other.len, bus: other.bus });
+    }
+    const events = rap.update(dt, input, obstacles);
+    this.waiting = events === 'loading';
+    if (events === 'loading') return;
+    for (const e of events) {
+      if (e.kind === 'impact' && e.speed > 2) this.say('Contact', 350);
+      else if (e.kind === 'landing') {
+        if (e.crash) { active.crashUntil = now + CRASH_MS; this.say('Crash!', CRASH_MS); }
+        else if (e.speed > 6) this.say('Hard landing', 700);
+      }
+    }
+    if (rap.car?.status === 'water' && !active.sinkUntil) {
+      active.sinkUntil = now + SINK_MS;
+      this.say('Splash! Back on the road in a moment…', SINK_MS);
+    }
+    // where it was last on its wheels, to come back to from the river
+    const d = rap.drawn();
+    if (d && rap.onWheels && rap.car?.status === 'ok' && (!active.safe.length || now - active.safe[active.safe.length - 1].t > 400)) {
+      active.safe.push({ pose: { x: d.x, y: d.y, z: d.z, h: d.h }, t: now });
+      if (active.safe.length > 16) active.safe.shift();
+    }
+  }
+
+  private presentRapier(active: Driving, rap: RapierDrive) {
+    const d = rap.drawn(), { car } = active;
+    if (d) {
+      car.rp!.set(d.x, d.y, d.z);
+      car.rh = d.h;
+      car.pitch = d.pitch;
+      car.roll = d.roll;
+      car.v = (rap.car?.kmh ?? 0) / 3.6;
+    }
+    car.brake = this.lastInput.brake > 0 || this.lastInput.handbrake ? 1 : 0;
+    this.shake(active, performance.now());
+  }
+
+  // back where the car last was on its wheels, some 12 m before where it left the road, standing still
+  private respawnRapier(active: Driving, rap: RapierDrive) {
+    const safe = active.safe, edge = safe.at(-1)?.pose;
+    const i = edge ? safe.findLastIndex(s => Math.hypot(s.pose.x - edge.x, s.pose.z - edge.z) > 12) : -1;
+    const pose = safe[Math.max(0, i)]?.pose ?? edge;
+    active.safe = safe.slice(0, Math.max(1, i + 1));
+    active.sinkUntil = 0;
+    active.crashUntil = 0;
+    if (!pose || !this.rapierMod) return;
+    rap.begin({ ...pose, pitch: 0, roll: 0 }, 0, this.rapierMod.buildFor(active.car.bus, active.car.len));
+    active.car.rp!.set(pose.x, pose.y, pose.z);
+    Object.assign(active.car, { rh: pose.h, pitch: 0, roll: 0 });
   }
 
   private say(message: string, ms: number) {
@@ -324,11 +446,13 @@ export class DrivePrototype {
     this.details.hidden = !active && !this.pending;
     this.speed.hidden = this.help.hidden = !active;
     this.status.hidden = !this.pending && !active;
-    const message = this.pending || this.waiting ? 'Loading road collision tiles…' :
+    const message = this.pending && PHYSICS === 'rapier' && !this.rapier ? 'Loading physics…' :
+      this.pending || this.waiting ? 'Loading road collision tiles…' :
       performance.now() < this.feedbackUntil ? this.feedback : '';
     if (this.status.textContent !== message) this.status.textContent = message;
     if (active) {
-      const speed = Math.round(active.motion.speed * 3.6) + ' km/h';
+      const kmh = active.rapier ? Math.abs(active.rapier.car?.kmh ?? 0) : active.motion.speed * 3.6;
+      const speed = Math.round(kmh) + ' km/h';
       if (this.speed.textContent !== speed) this.speed.textContent = speed;
     }
   }

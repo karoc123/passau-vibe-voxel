@@ -74,7 +74,7 @@ const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v
 movingActors.add(nav.actors);
 let fpv: FpvPrototype | null = null;
 let drive: DrivePrototype | null = null;
-// the Rapier physics spike (physics/rapier/demo.ts): only with ?physics=rapier, loaded on the first P
+// the Rapier physics spike (physics/rapier/demo.ts): only with ?physics=demo, loaded on the first P
 let rapier: { update(dt: number): void } | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
@@ -426,7 +426,7 @@ async function boot() {
   ]);
   fpv = new FpvPrototype(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DrivePrototype(nav, controls.target, meta, modeTools, renderer.domElement);
-  if (qs.get('physics') === 'rapier') void import('./physics/rapier/hook').then((m) => m.onKeyP({ scene, camera, controls, meta }, (d) => { rapier = d; }));
+  if (qs.get('physics') === 'demo') void import('./physics/rapier/hook').then((m) => m.onKeyP({ scene, camera, controls, meta }, (d) => { rapier = d; }));
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;

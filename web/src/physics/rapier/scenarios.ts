@@ -3,7 +3,7 @@
 // input at a fixed 1/60 s step and judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { MAT } from '../../voxelMaterial';
-import { RapierCar, TUNED, type CarInput, type CarEvent, type CarTuning } from './car';
+import { bus, CAR, RapierCar, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
 import { RapierTerrain, terrainTile, terrainPalette } from './terrain';
 
 const N = 64;
@@ -52,7 +52,7 @@ export class Sim {
   t = 0;
 
   // at.y: the ground to start on is at or below it (default: the highest)
-  constructor(map: ScenarioMap, at: { x: number; y?: number; z: number }, heading: number, speed = 0) {
+  constructor(map: ScenarioMap, at: { x: number; y?: number; z: number }, heading: number, speed = 0, build: CarBuild = CAR) {
     const R = RAPIER;
     this.world = new R.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
@@ -61,7 +61,7 @@ export class Sim {
     for (const t of map.tiles) this.terrain.setTile(t.tx, t.tz, t.tile);
     this.terrain.update([{ x: at.x, z: at.z }]);
     const g = this.terrain.groundAt(at.x, at.z, at.y ?? 1e4) ?? 0;
-    this.car = new RapierCar(R, this.world, { x: at.x, y: g + 1.0, z: at.z }, heading, this.terrain, scenarioTuning.tuning);
+    this.car = new RapierCar(R, this.world, { x: at.x, y: g + build.ride + 0.15, z: at.z }, heading, this.terrain, scenarioTuning.tuning, build);
     this.car.body.setLinvel({ x: Math.sin(heading) * speed, y: 0, z: Math.cos(heading) * speed }, true);
     // settle on its wheels
     for (let i = 0; i < 30; i++) this.step({ gas: 0, brake: 0, steer: 0, handbrake: false }, false);
@@ -286,6 +286,28 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), steps: s.events.filter((e) => e.kind === 'step').length, ...wobble(L), ...summary(s) };
     s.dispose();
     return { name: 'terrace_stairs', pass: end.y > 14.5 && end.z > 70 && d.minUp > 0.8, detail: d };
+  },
+  // a bus (12 m) up the ramp street at 40 km/h and onto a 1 m terrace at 25
+  bus_ramp() {
+    const map = synthMap(2, (x, z) => {
+      const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
+      return x >= 56 && x < 72 ? { g, mat: STREET } : { g: g + 3 };
+    });
+    const s = new Sim(map, { x: 64, z: 12 }, 0, 40 / 3.6, bus(12));
+    s.run(6, cruise(40));
+    const L = s.log, end = L[L.length - 1];
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...wobble(L.filter((l) => l.z < 74)), ...summary(s) };
+    s.dispose();
+    return { name: 'bus_ramp', pass: end.z > 75 && d.minUp > 0.9, detail: d };
+  },
+  bus_terrace() {
+    const map = synthMap(2, (_x, z) => ({ g: z >= 50 ? 11 : 10 }));
+    const s = new Sim(map, { x: 64, z: 25 }, 0, 25 / 3.6, bus(12));
+    s.run(6, cruise(25));
+    const L = s.log, end = L[L.length - 1];
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...wobble(L), ...summary(s) };
+    s.dispose();
+    return { name: 'bus_terrace', pass: end.z > 65 && end.y > 11.5 && d.minUp > 0.9, detail: d };
   },
   flat_chunk_borders() {
     // flat ground at 80 km/h over 6 chunk borders: no bumps

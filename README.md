@@ -305,10 +305,17 @@ W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, and **Esc** takes you back to the map.
 
-The car uses independent road collision tiles from the same 1 m voxel data as FPV, including bridge decks and
-terrain steps. Traffic cars can block the player and recognise the player vehicle in their spatial checks.
-Handling uses an arcade grip model with free steering and reversible impacts. Wheel suspension, deformable bodies,
-and collisions with people, trams or boats are outside this prototype.
+The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive.ts`,
+`car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks; the
+ground's 1 m steps are smoothed into a surface of the car's own, steps up to ~1 m that are not ground (platforms, low
+walls) get an invisible ramp. Traffic cars and buses near it are solid (it bounces off them); they recognise the
+player vehicle in their spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
+another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
+(no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
+~1.5 s after the city is shown; taking the wheel before that waits for it.
+
+`?physics=a` drives the older arcade model instead (variant A: `arcade-car.ts`, `physics/body.ts` in the air, its
+headless checks `tools/physics.mjs`); `?physics=demo` the Rapier spike's sandbox (P car, B box, V pile, R/T ragdoll).
 
 ## Third-person walking
 

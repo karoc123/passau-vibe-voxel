@@ -411,20 +411,34 @@ export class RapierTerrain {
     return Math.hypot(dx, dz);
   }
 
+  // The tile at world (x, z), loaded and decoded (null: off the map or failed)
+  async prefetch(x: number, z: number): Promise<TerrainTile | null> {
+    const tx = Math.floor(x / this.N), tz = Math.floor(z / this.N);
+    if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) return null;
+    this.tile(tx, tz);
+    await this.loads.get(tx + tz * this.nx);
+    const t = this.tiles.get(tx + tz * this.nx);
+    return t && typeof t !== 'string' ? t : null;
+  }
+
+  private readonly loads = new Map<number, Promise<void>>();
+
   private tile(tx: number, tz: number): TerrainTile | null {
     const key = tx + tz * this.nx, t = this.tiles.get(key);
     if (t === 'loading' || t === 'failed') return null;
     if (t) return t;
     this.tiles.set(key, 'loading');
     const path = `${tx}_${tz}.bin`;
-    Promise.all(['1', '1f'].map((s) => this.load(`${s}/${path}`)))
+    const load = Promise.all(['1', '1f'].map((s) => this.load(`${s}/${path}`)))
       .then(([base, foliage]) => {
         // (on the main thread: ~3 ms a tile, the first ~30 with the JIT's warm-up)
         const t0 = performance.now();
         this.tiles.set(key, terrainTile(this.N, decodeTile(base, this.N), decodeTile(foliage, this.N), this.pal));
         this.stats.decodeMsMax = Math.max(this.stats.decodeMsMax, performance.now() - t0);
       })
-      .catch((e) => { if (e) console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); });
+      .catch((e) => { if (e) console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); })
+      .finally(() => this.loads.delete(key));
+    this.loads.set(key, load);
     return null;
   }
 

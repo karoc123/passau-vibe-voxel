@@ -31,18 +31,24 @@ export interface CarTuning {
 export const TUNED: CarTuning = { steps: true, walls: true, air: true };
 export const SPIKE: CarTuning = { steps: false, walls: false, air: false };
 
-const HALF = { x: 0.9, y: 0.45, z: 2.1 };
-const MASS = 1200;
+// what is driven: the chassis' half extents (m), its mass (kg), the wheels (chassis space), the engine's force per
+// driven (rear) wheel (N), the brakes, the top speed (m/s); ride: the ground's height under the body's origin at rest
+export interface CarBuild {
+  half: { x: number; y: number; z: number }; mass: number; wheels: { x: number; z: number; front: boolean }[];
+  engine: number; brake: number; top: number; ride: number;
+}
+const wheels4 = (x: number, zf: number, zr: number) => [
+  { x, z: zf, front: true }, { x: -x, z: zf, front: true }, { x, z: zr, front: false }, { x: -x, z: zr, front: false },
+];
+export const CAR: CarBuild = { half: { x: 0.9, y: 0.45, z: 2.1 }, mass: 1200, wheels: wheels4(0.82, 1.35, -1.3), engine: 2600, brake: 45, top: 22, ride: 0.84 };
+// a bus of `len` m (the traffic's: 12): its chassis as high as its body (the traffic's 2.55 m less the wheels)
+export const bus = (len: number): CarBuild => ({
+  half: { x: 1.25, y: 0.95, z: len / 2 - 0.1 }, mass: 11000, wheels: wheels4(1.1, len / 2 - 2.4, -(len / 2 - 3)),
+  engine: 14000, brake: 400, top: 17, ride: 0.84,
+});
 const WHEEL_R = 0.36;
 const REST = 0.35;
-const WHEELS = [
-  { x: 0.82, z: 1.35, front: true }, { x: -0.82, z: 1.35, front: true },
-  { x: 0.82, z: -1.3, front: false }, { x: -0.82, z: -1.3, front: false },
-];
-const ENGINE = 2600; // N per driven wheel (rear)
-const BRAKE = 45;
 const MAX_STEER = 0.55;
-const TOP_SPEED = 22; // m/s (~80 km/h)
 export const CRASH_SPEED = Math.sqrt(2 * 9.81 * 8); // m/s into the ground: a fall of ~8 m
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
 // m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
@@ -69,18 +75,22 @@ export class RapierCar {
   private prevV = { x: 0, y: 0, z: 0 };
   private time = 0;
   private event: CarEvent | null = null;
+  private readonly half: CarBuild['half'];
 
-  constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number,
-    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED) {
-    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading);
+  // heading: radians about y (0: +z), or a whole rotation
+  constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
+    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR) {
+    const q = typeof heading === 'number' ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading) : heading;
     this.body = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q)
       .setCanSleep(false).setCcdEnabled(true).setAngularDamping(0.4));
+    const HALF = this.half = build.half, MASS = build.mass;
     const inertia = { x: MASS * (HALF.y ** 2 + HALF.z ** 2) / 3, y: MASS * (HALF.x ** 2 + HALF.z ** 2) / 3, z: MASS * (HALF.x ** 2 + HALF.y ** 2) / 3 };
     const walls = tuning.walls;
-    // (a plain box: a rounded one (roundCuboid) glances no better and costs 3x the contact time against voxels)
-    const desc = R.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z);
+    // (a plain box: a rounded one (roundCuboid) glances no better and costs 3x the contact time against voxels; its
+    // bottom 0.25 m over the wheels' axles)
+    const desc = R.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setTranslation(0, HALF.y - 0.45, 0);
     // (the centre of mass low, under the floor: it rolls less)
-    desc.setMassProperties(MASS, { x: 0, y: -0.45, z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
+    desc.setMassProperties(MASS, { x: 0, y: -0.45 - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
       .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS).setCollisionGroups(CAR_GROUPS);
     if (walls) desc.setFriction(0).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min);
     else desc.setFriction(0.3);
@@ -89,7 +99,7 @@ export class RapierCar {
     const c = world.createVehicleController(this.body);
     c.indexUpAxis = 1;
     c.setIndexForwardAxis = 2;
-    for (const w of WHEELS) {
+    for (const w of build.wheels) {
       c.addWheel({ x: w.x, y: -0.2, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, REST, WHEEL_R);
       const i = c.numWheels() - 1;
       c.setWheelSuspensionStiffness(i, 28);
@@ -106,12 +116,13 @@ export class RapierCar {
     const glass = new THREE.MeshStandardMaterial({ color: 0x223040, roughness: 0.2 });
     const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
     const box = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 2, HALF.y * 2, HALF.z * 2), paint);
+    box.position.y = HALF.y - 0.45;
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 1.7, 0.55, HALF.z * 1.0), glass);
     cabin.position.set(0, HALF.y + 0.27, -0.2);
     this.mesh.add(box, cabin);
     for (const m of [box, cabin]) { m.castShadow = true; m.receiveShadow = true; }
     const wg = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.28, 16).rotateZ(Math.PI / 2);
-    for (let i = 0; i < WHEELS.length; i++) {
+    for (let i = 0; i < build.wheels.length; i++) {
       const wm = new THREE.Mesh(wg, tyre);
       wm.castShadow = true;
       this.wheels.push(wm);
@@ -130,15 +141,16 @@ export class RapierCar {
     const target = -input.steer * MAX_STEER / (1 + Math.abs(v) / 14);
     this.steer += (target - this.steer) * Math.min(1, dt * 8);
     let engine = 0, brake = 0;
-    if (input.gas > 0) engine = v > -0.5 ? input.gas * ENGINE * (v < TOP_SPEED ? 1 : 0) : 0;
+    const B = this.build, BRAKE = B.brake;
+    if (input.gas > 0) engine = v > -0.5 ? input.gas * B.engine * (v < B.top ? 1 : 0) : 0;
     if (input.brake > 0) {
       if (v > 0.8) brake = input.brake * BRAKE;
-      else engine = -input.brake * ENGINE * 0.6 * (v > -8 ? 1 : 0); // reverse
+      else engine = -input.brake * B.engine * 0.6 * (v > -8 ? 1 : 0); // reverse
     }
     if (input.gas > 0 && v < -0.5) brake = input.gas * BRAKE;
-    if (!input.gas && !input.brake) brake = 1.2; // rolling resistance
+    if (!input.gas && !input.brake) brake = BRAKE * 0.027; // rolling resistance
     for (let i = 0; i < 4; i++) {
-      const front = WHEELS[i].front;
+      const front = B.wheels[i].front;
       c.setWheelSteering(i, front ? this.steer : 0);
       c.setWheelEngineForce(i, front ? 0 : engine);
       c.setWheelBrake(i, input.handbrake && !front ? BRAKE * 2 : brake);
@@ -183,7 +195,7 @@ export class RapierCar {
     for (let i = this.wedges.length - 1; i >= 0; i--) {
       const w = this.wedges[i], p = b.translation();
       // (a slow climb may take a while: a wedge goes when the car is well clear of it)
-      if ((Math.hypot(p.x - w.x, p.z - w.z) > w.reach + HALF.z + 2 && this.time - w.bornAt > 0.5) || this.time - w.bornAt > 30) {
+      if ((Math.hypot(p.x - w.x, p.z - w.z) > w.reach + this.half.z + 2 && this.time - w.bornAt > 0.5) || this.time - w.bornAt > 30) {
         for (const c of w.colliders) this.world.removeCollider(c, false);
         this.wedges.splice(i, 1);
       }
@@ -220,7 +232,7 @@ export class RapierCar {
     const d = Math.hypot(dx, dz);
     dx /= d; dz /= d;
     // (moving: far enough that the wedge is there before the front wheels reach its foot)
-    const reach = hs ? WEDGE_LEN - (HALF.z - WHEELS[0].z) + 0.3 + Math.min(hs, 25) * dt * 3 : 1;
+    const reach = hs ? WEDGE_LEN - (this.half.z - this.build.wheels[0].z) + 0.3 + Math.min(hs, 25) * dt * 3 : 1;
     // the ground under the car: its lowest wheel contact
     let low = Infinity;
     for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) low = Math.min(low, this.controller.wheelContactPoint(i)!.y);
@@ -255,8 +267,8 @@ export class RapierCar {
 
   private stepDown(p: RAPIER.Vector, dx: number, dz: number, reach: number, low: number) {
     const terrain = this.terrain!, o = terrain.origin;
-    const len = HALF.z + reach, sx = -dz, sz = dx;
-    for (const side of [0, -WHEELS[0].x, WHEELS[0].x]) {
+    const len = this.half.z + reach, sx = -dz, sz = dx, wx = this.build.wheels[0].x;
+    for (const side of [0, -wx, wx]) {
       let x = p.x + o.x + sx * side, z = p.z + o.z + sz * side;
       let g = terrain.groundAt(x, z, low + 0.4, true);
       if (g === null || Math.abs(g - low) > 0.4) continue;
@@ -295,7 +307,7 @@ export class RapierCar {
     const dn = ax ? dx : dz, t = Math.abs(dn) > 0.05 ? ((plane - (ax ? px : pz)) / dn) : 0;
     const along0 = ax ? pz + dz * t : px + dx * t;
     const cos = Math.max(0.2, Math.abs(dn)), sin = Math.sqrt(1 - Math.min(1, cos * cos));
-    const halfW = Math.min(WEDGE_W_MAX, (HALF.x + 0.4) / cos + HALF.z * sin);
+    const halfW = Math.min(WEDGE_W_MAX, (this.half.x + 0.4) / cos + this.half.z * sin);
     const same = (k: number) => {
       const lx = ax ? plane + nx * 0.05 : k + 0.5, lz = ax ? k + 0.5 : plane + nz * 0.05;
       const ux = ax ? plane - nx * 0.05 : k + 0.5, uz = ax ? k + 0.5 : plane - nz * 0.05;
@@ -378,7 +390,7 @@ export class RapierCar {
     const c = this.controller;
     for (let i = 0; i < 4; i++) {
       const w = this.wheels[i], len = c.wheelSuspensionLength(i) ?? REST;
-      const p = WHEELS[i];
+      const p = this.build.wheels[i];
       w.position.set(p.x, -0.2 - len, p.z);
       w.rotation.set(c.wheelRotation(i) ?? 0, c.wheelSteering(i) ?? 0, 0, 'YXZ');
     }

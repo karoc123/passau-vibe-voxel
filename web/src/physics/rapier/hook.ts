@@ -1,5 +1,5 @@
 // Rapier spike: the P key that loads it (demo.ts and Rapier itself, ~1.7 MB gzip) only when pressed. main.ts imports
-// this small module only with ?physics=rapier.
+// this small module only with ?physics=demo (the drive mode has its own: drive.ts).
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type * as THREE from 'three';
 import type { Meta } from '../../types';

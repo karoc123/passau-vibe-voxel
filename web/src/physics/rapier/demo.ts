@@ -1,4 +1,4 @@
-// Rapier spike (approach B), opt-in: ?physics=rapier, then P. Loaded on demand (main.ts); nothing of it is in the boot
+// Rapier spike (approach B), opt-in: ?physics=demo, then P. Loaded on demand (main.ts); nothing of it is in the boot
 // bundle. P: spawn the car at the focus / get in and out; WASD drive, Space handbrake; B: throw a box from the camera;
 // V: drop a pile of boxes ahead; R: a ragdoll standing ahead (hit it); T: throw a ragdoll from the camera; Esc: get out.
 // Driving into water ends the drive (P: a new car at the focus); a landing from ~8 m up is a crash (no input for a
