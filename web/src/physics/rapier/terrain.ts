@@ -14,11 +14,11 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { PAL_GROUND } from '../../chamfer';
 import { rampDiagonal02, rampHeight, ramped, rampField, cornerQ, PINNED, type RampField } from '../../ramps';
-import { decodeTile } from '../../tile-data';
 import { liveEdits, type Region } from '../../core/live-edits';
+import { TileCache } from '../../core/tile-cache';
 import type { Meta } from '../../types';
-import { fetchGzip } from '../../util';
-import { MAT, pavedGround } from '../../voxelMaterial';
+import { fetchGzip } from '../../fetch';
+import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 
 export const CHUNK = 16;
 // collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
@@ -61,11 +61,12 @@ export interface TileColumns { counts: Uint16Array; runs: Uint16Array; ground?: 
 
 // palette flags: solid (not grass, not water), water, paved ground (PAL_GROUND), any ground but water (PAL_GROUND)
 export function terrainPalette(palette: Meta['palette']) {
+  const t = semanticTable(palette);
   return {
-    solid: Uint8Array.from(palette, (p) => (p[3] === MAT.GRASS || p[3] === MAT.WATER ? 0 : 1)),
-    water: Uint8Array.from(palette, (p) => (p[3] === MAT.WATER ? 1 : 0)),
-    paved: Uint8Array.from(palette, (p) => (pavedGround(p) ? PAL_GROUND : 0)),
-    ground: Uint8Array.from(palette, (p) => (p[3] === MAT.WATER ? 0 : PAL_GROUND)),
+    solid: paletteMask(t, RULES.solidForCar),
+    water: paletteMask(t, RULES.water),
+    paved: paletteMask(t, RULES.paved, PAL_GROUND),
+    ground: paletteMask(t, RULES.groundForCar, PAL_GROUND),
   };
 }
 export type TerrainPalette = ReturnType<typeof terrainPalette>;
@@ -208,6 +209,8 @@ export interface TerrainStats {
 }
 
 export interface TerrainOptions {
+  // the nodes' files (core/tile-cache.ts; e.g. the viewer's shared one); default: its own, with `load`
+  cache?: TileCache;
   // a tile's bytes (ungzipped) by its path under data/tiles/ ('1/3_4.bin'); default: fetched
   load?: (path: string) => Promise<ArrayBuffer>;
   budgetMs?: number;
@@ -221,7 +224,7 @@ export class RapierTerrain {
   private readonly pal: TerrainPalette;
   private readonly tiles = new Map<number, TerrainTile | 'loading' | 'failed'>();
   private readonly chunks = new Map<number, Chunk>();
-  private readonly load: (path: string) => Promise<ArrayBuffer>;
+  private readonly cache: TileCache;
   budgetMs: number;
   couple: boolean;
   private readonly unlisten: () => void;
@@ -233,7 +236,7 @@ export class RapierTerrain {
     this.nx = Math.ceil(meta.W / this.N);
     this.nz = Math.ceil(meta.D / this.N);
     this.pal = terrainPalette(meta.palette);
-    this.load = opts.load ?? ((p) => fetchGzip(`data/tiles/${p}`));
+    this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load ?? ((p) => fetchGzip(`data/tiles/${p}`)), edits: liveEdits });
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
     this.couple = opts.couple ?? true;
     // (an edited node, core/live-edits.ts: its tile and the chunks it changed built again)
@@ -241,14 +244,14 @@ export class RapierTerrain {
   }
 
   // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): the tile is decoded again from them (now
-  // where both its base and foliage are given, else from its files with what is given in their place), and the chunks
+  // where the cache has the node: its files in, or both its base and foliage given; else loaded again), and the chunks
   // over region (map metres; null: the whole tile), with the car's surface's reach round it, are removed to be built
   // again by the next update.
   invalidate(tx: number, tz: number, region: Region = null) {
     if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) return;
-    const key = tx + tz * this.nx, t = this.tiles.get(key), live = liveEdits.get(tx, tz);
+    const key = tx + tz * this.nx, t = this.tiles.get(key), v = this.cache.view(tx, tz);
     if (t !== 'loading') {
-      if (live?.foliage) this.tiles.set(key, terrainTile(this.N, live.base, live.foliage, this.pal));
+      if (v) this.tiles.set(key, terrainTile(this.N, v.base, v.foliage, this.pal));
       else this.tiles.delete(key);
     } // (a load under way takes the live columns when it ends)
     const [x0, z0, x1, z1] = region ?? [tx * this.N, tz * this.N, (tx + 1) * this.N, (tz + 1) * this.N], m = DRIVE_R_MAX + 4;
@@ -482,15 +485,16 @@ export class RapierTerrain {
     const key = tx + tz * this.nx, t = this.tiles.get(key);
     if (t === 'loading' || t === 'failed') return null;
     if (t) return t;
-    const live = liveEdits.get(tx, tz);
-    if (live?.foliage) { const lt = terrainTile(this.N, live.base, live.foliage, this.pal); this.tiles.set(key, lt); return lt; }
+    const now = this.cache.view(tx, tz);
+    if (now) { const lt = terrainTile(this.N, now.base, now.foliage, this.pal); this.tiles.set(key, lt); return lt; }
     this.tiles.set(key, 'loading');
     const path = `${tx}_${tz}.bin`;
-    const load = Promise.all(['1', '1f'].map((s) => this.load(`${s}/${path}`)))
-      .then(([base, foliage]) => {
+    // (held only while decoded into the collision form: the cache keeps it for others, or drops it)
+    const load = this.cache.acquire(tx, tz)
+      .then((v) => {
         // (on the main thread: ~3 ms a tile, the first ~30 with the JIT's warm-up)
-        const t0 = performance.now(), live = liveEdits.get(tx, tz);
-        this.tiles.set(key, terrainTile(this.N, live?.base ?? decodeTile(base, this.N), live?.foliage ?? decodeTile(foliage, this.N), this.pal));
+        const t0 = performance.now();
+        try { this.tiles.set(key, terrainTile(this.N, v.base, v.foliage, this.pal)); } finally { this.cache.release(tx, tz); }
         this.stats.decodeMsMax = Math.max(this.stats.decodeMsMax, performance.now() - t0);
       })
       .catch((e) => { if (e) console.warn('rapier terrain tile', path, e); this.tiles.set(key, 'failed'); })

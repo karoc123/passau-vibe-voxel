@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
 import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
+import { viewerTileCache } from '../../viewer-tiles';
 
 export const STEP = 1 / 60;
 const MAX_STEPS = 4;
@@ -102,7 +103,8 @@ export class RapierDrive {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
     this.origin = { x: Math.floor(focus.x / CHUNK) * CHUNK, z: Math.floor(focus.z / CHUNK) * CHUNK };
-    this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, terrain);
+    // (the viewer's shared node files, unless told where to load them from)
+    this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, terrain.cache || terrain.load ? terrain : { ...terrain, cache: viewerTileCache(meta.tiles.N) });
     (globalThis as unknown as { __rapierDrive: RapierDrive }).__rapierDrive = this;
   }
 

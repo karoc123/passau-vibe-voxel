@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
+import { viewerTileCache } from '../viewer-tiles';
 import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fpv-flight';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
@@ -66,7 +67,7 @@ export class FpvMode {
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
     private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
-    this.collision = new VoxelCollision(meta);
+    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
     // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
       this.camera.fov = clamp(this.camera.fov * ratio, 45, 100);

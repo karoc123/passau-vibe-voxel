@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import { PAL_GROUND } from './chamfer';
 import { rampField, rampHeight, type RampField } from './ramps';
 import type { ColumnData, Meta } from './types';
-import { MAT, pavedGround } from './voxelMaterial';
+import { paletteMask, RULES, semanticTable } from './core/semantics';
 
 export interface ColumnSource {
   N: number;
@@ -21,7 +21,8 @@ export class World {
   hitAxis = 0;
   private cache: ColumnData | null = null;
   private cacheVersion = -1;
-  private readonly leaf = new Uint8Array(4096);
+  // per palette id: 1 where topSolid does not stand on it (leaves; ids past the palette: 0)
+  private readonly leaf: Uint8Array;
   private readonly paved: Uint8Array;
   // per 1 m tile: its ramps (ramps.ts), as the mesher draws them; null: none
   private readonly ramps = new WeakMap<ColumnData, RampField | null>();
@@ -29,8 +30,9 @@ export class World {
   constructor(private readonly src: ColumnSource, meta: Meta) {
     this.W = meta.W;
     this.D = meta.D;
-    meta.palette.forEach((e, i) => { if (e[3] === MAT.LEAF) this.leaf[i] = 1; });
-    this.paved = Uint8Array.from(meta.palette, (p) => (pavedGround(p) ? PAL_GROUND : 0));
+    const t = semanticTable(meta.palette);
+    this.leaf = paletteMask(t, (f) => !RULES.standOnForWalker(f), 1, 4096);
+    this.paved = paletteMask(t, RULES.paved, PAL_GROUND);
   }
 
   // the top of paved ground at (x, r) where it is a ramp (column i of node n), else null
@@ -76,6 +78,7 @@ export class World {
     return c ? this.ramp(c[0], c[1], x, r, false) ?? c[0].ground[c[1]] : 0;
   }
 
+  // any voxel (core/semantics.ts RULES.solidForRay), or under the floor
   solid(x: number, r: number, z: number) {
     const c = this.column(x, r);
     if (!c) return z < 0;

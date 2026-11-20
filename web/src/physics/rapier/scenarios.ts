@@ -2,7 +2,7 @@
 // page (window.__rapierScenarios). Each builds a small map (2 x 2 tiles of 64 m), drops the car, drives it with scripted
 // input at a fixed 1/60 s step and judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { MAT } from '../../voxelMaterial';
+import { MAT } from '../../core/materials';
 import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
 import { DRIVE, RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
 

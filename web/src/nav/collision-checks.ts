@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import type { ColumnData, Meta } from '../types';
 import { VoxelCollision } from './voxel-collision';
-import { MAT } from '../voxelMaterial';
+import { MAT } from '../core/materials';
 import { decodeTile, roomOffsets, TILE_MAGIC as MAGIC, TILE_N as N } from '../tile-data';
 import { World } from '../world';
 import { STEP, walkStep } from './walk';

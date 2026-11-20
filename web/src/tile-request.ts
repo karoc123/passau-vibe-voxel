@@ -3,10 +3,7 @@
 // counts are those of the meshes the viewer draws.
 import type { MeshRequest } from './mesher.worker';
 import { PAL_GROUND, PAL_ROOF, PAL_WALL, PAL_WATER } from './chamfer';
-import { MAT, pavedGround } from './voxelMaterial';
-
-// the materials of buildings' walls (voxelize.py)
-const WALLS = new Set<number>([MAT.SOLID, MAT.WALL, MAT.GLASS, MAT.FLOODLIT, MAT.CONCRETE, MAT.BRONZE, MAT.RIBBON, MAT.CLASSIC, MAT.WINDOW, MAT.TENEMENT]);
+import { RULES, semanticTable } from './core/semantics';
 
 export interface TileContext {
   N: number;
@@ -23,10 +20,11 @@ export interface TileContext {
 }
 
 export function paletteFlags(palette: [number, number, number, number][]) {
+  const t = Array.from(semanticTable(palette));
   return {
-    roofPal: Uint8Array.from(palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0) | (pavedGround(p) ? PAL_GROUND : 0) | (p[3] === MAT.WATER ? PAL_WATER : 0)),
-    leafPal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : 0)),
-    seePal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : p[3] === MAT.WOOD ? 2 : 0)),
+    roofPal: Uint8Array.from(t, (f) => (RULES.roof(f) ? PAL_ROOF : RULES.wall(f) ? PAL_WALL : 0) | (RULES.paved(f) ? PAL_GROUND : 0) | (RULES.water(f) ? PAL_WATER : 0)),
+    leafPal: Uint8Array.from(t, (f) => (RULES.leaf(f) ? 1 : 0)),
+    seePal: Uint8Array.from(t, (f) => (RULES.leaf(f) ? 1 : RULES.wood(f) ? 2 : 0)),
   };
 }
 

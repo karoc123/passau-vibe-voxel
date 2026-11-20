@@ -1,9 +1,10 @@
 import type { Vector3 } from 'three';
 import type { Meta } from '../types';
-import { decodeTile, type RawColumns } from '../tile-data';
+import type { RawColumns } from '../tile-data';
 import { liveEdits } from '../core/live-edits';
-import { fetchGzip } from '../util';
-import { MAT } from '../voxelMaterial';
+import { paletteMask, RULES, semanticTable } from '../core/semantics';
+import { TileCache } from '../core/tile-cache';
+import { fetchGzip } from '../fetch';
 
 const RADIUS = 0.35;
 const CONCURRENT_LOADS = 4;
@@ -49,7 +50,8 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
 }
 
 // The FPV drone's collision (fpv.ts): a small cache of the 1 m tiles near it, independent of visibility,
-// render budget and the mesh-worker queue.
+// render budget and the mesh-worker queue. The nodes' files come through a TileCache (core/tile-cache.ts: given, e.g.
+// the viewer's shared one, or its own fetching data/tiles/), held while near.
 export class VoxelCollision {
   readonly width: number;
   readonly depth: number;
@@ -58,14 +60,19 @@ export class VoxelCollision {
   private readonly row: number;
   private readonly nx: number;
   private readonly nz: number;
-  private readonly material: Uint8Array;
+  // per palette id: 1 where the drone passes it in the foliage tile and does not settle on it (not core/semantics.ts
+  // solidForDrone: grass; ids past the palette: solid)
+  private readonly passable: Uint8Array;
+  private readonly cache: TileCache;
+  // the nodes this holds one reference to in the cache
+  private readonly held = new Set<number>();
   private readonly tiles = new Map<number, CollisionTile>();
   private readonly inFlight = new Set<number>();
   private readonly retryAt = new Map<number, number>();
   private wanted: number[] = [];
   private nextPrefetch = 0;
 
-  constructor(meta: Meta) {
+  constructor(meta: Meta, cache?: TileCache) {
     this.width = meta.W;
     this.depth = meta.D;
     this.ceiling = meta.H + 600;
@@ -73,17 +80,19 @@ export class VoxelCollision {
     this.row = this.tileSide + 2;
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
-    this.material = Uint8Array.from(meta.palette, p => p[3]);
+    this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
+    this.cache = cache ?? new TileCache({ N: this.tileSide, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits });
     // (one per page, fpv.ts: listens as long as the page lives)
     liveEdits.listen((tx, tz) => this.invalidate(tx, tz));
   }
 
   // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): its tile is read again, now where the
-  // live columns hold its foliage too, else from its files (with the live base in place of the file's)
+  // cache has it (its files in, or live columns with its foliage too), else loaded again
   invalidate(tx: number, tz: number) {
-    const key = tx + tz * this.nx, live = liveEdits.get(tx, tz);
+    const key = tx + tz * this.nx;
     if (!this.tiles.delete(key) && !this.wanted.includes(key)) return;
-    if (live?.foliage) this.tiles.set(key, { ground: live.base.ground, base: runsOf(live.base), foliage: runsOf(live.foliage) });
+    const v = this.cache.view(tx, tz);
+    if (v) this.tiles.set(key, { ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage) });
   }
 
   prefetch(p: Vector3, v: Vector3) {
@@ -95,6 +104,7 @@ export class VoxelCollision {
       this.wanted = [...new Set([...current, ...ahead])];
       // Keep only the current and predictive neighbourhoods, including during quick resets.
       for (const key of this.tiles.keys()) if (!this.wanted.includes(key)) this.tiles.delete(key);
+      for (const key of this.held) if (!this.wanted.includes(key)) { this.held.delete(key); this.cache.release(key % this.nx, Math.floor(key / this.nx)); }
       for (const key of this.retryAt.keys()) if (!this.wanted.includes(key)) this.retryAt.delete(key);
     }
     for (const key of this.wanted) {
@@ -112,7 +122,7 @@ export class VoxelCollision {
     let top = tile.ground[i];
     for (const { offsets, data } of [tile.base, tile.foliage]) {
       for (let j = offsets[i]; j < offsets[i + 1]; j += 3) {
-        if (this.material[data[j + 2]] !== MAT.GRASS) top = Math.max(top, data[j] + data[j + 1]);
+        if (!this.passable[data[j + 2]]) top = Math.max(top, data[j] + data[j + 1]);
       }
     }
     return { ground: tile.ground[i], top };
@@ -162,7 +172,7 @@ export class VoxelCollision {
           const lo = runs.data[j], hi = lo + runs.data[j + 1];
           if (lo > maxY) break;
           if (hi < minY) continue;
-          if (kind === 'foliage' && this.material[runs.data[j + 2]] === MAT.GRASS) continue;
+          if (kind === 'foliage' && this.passable[runs.data[j + 2]]) continue;
           const voxelContact = contact(p, d, x, lo, hi, z, fraction);
           if (voxelContact && (voxelContact.fraction < fraction || !hit)) {
             ({ fraction, axis: normalAxis } = voxelContact);
@@ -195,13 +205,15 @@ export class VoxelCollision {
   }
 
   private load(key: number) {
-    const path = `${key % this.nx}_${Math.floor(key / this.nx)}.bin`;
+    const tx = key % this.nx, tz = Math.floor(key / this.nx);
     this.inFlight.add(key);
-    Promise.all(['1', '1f'].map(s => fetchGzip(`data/tiles/${s}/${path}`)))
-      .then(([base, foliage]) => {
-        if (!this.wanted.includes(key)) return;
-        const live = liveEdits.get(key % this.nx, Math.floor(key / this.nx)), terrain = live?.base ?? decodeTile(base, this.tileSide);
-        this.tiles.set(key, { ground: terrain.ground, base: runsOf(terrain), foliage: runsOf(live?.foliage ?? decodeTile(foliage, this.tileSide)) });
+    this.cache.acquire(tx, tz)
+      .then((v) => {
+        // (one reference held per wanted node)
+        const wanted = this.wanted.includes(key);
+        if (!wanted || this.held.has(key)) this.cache.release(tx, tz); else this.held.add(key);
+        if (!wanted) return;
+        this.tiles.set(key, { ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage) });
         this.retryAt.delete(key);
       })
       .catch(() => this.retryAt.set(key, performance.now() + 1500))

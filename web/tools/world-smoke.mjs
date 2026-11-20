@@ -1,6 +1,7 @@
 // The regression gate of the client-independent stack (docs/adr/0001-world-layers.md, 0002-addressing.md) on the real
 // data (public/data), headless, no viewer:
-//   1. a 3 x 3 area of level-1 nodes round the Dom (meta.json labels) loaded through src/core + tile-data.ts only;
+//   1. a 3 x 3 area of level-1 nodes round the Dom (meta.json labels) loaded through src/core (core/tile-cache.ts, the
+//      files read from disk) + tile-data.ts only;
 //   2. an L1 build (a 6 x 6 x 4 m wall-coloured box on a flat, empty lot) and an L2 crater (a sphere of r 4 m carved at a
 //      flat road's surface) as WorldOps (project grid, absolute height), routed (routeOps) and composed per node
 //      (layers.ts effectiveColumns), foliage cleared in their shapes as dig.ts does;
@@ -23,7 +24,7 @@ const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data'), verbose = process.argv.includes('-v');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
 const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
-const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts'), LA = await imp('src/core/layers.ts');
+const TC = await imp('src/core/tile-cache.ts'), CO = await imp('src/core/columns.ts'), LA = await imp('src/core/layers.ts');
 
 const bad = [];
 const check = (ok, what) => { if (!ok) { bad.push(what); console.log(`  FAIL ${what}`); } return ok; };
@@ -33,16 +34,17 @@ const log = (...a) => { if (verbose) console.log(...a); };
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const f = LA.frameOf(meta), N = f.N, S = N + 2, { nx, ny } = meta.tiles.levels[0], BUILD = 'disk';
 const raw = (k) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${k}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
-const has = (k) => fs.existsSync(path.join(dir, 'tiles', `${k}.bin`));
+// the nodes' files through the cache (no live edits: the edits below are composed here)
+const cache = new TC.TileCache({ N, load: async (p) => raw(p.replace(/\.bin$/, '')) });
 const dom = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const TX = Math.floor(dom.x / N), TY = Math.floor(dom.y / N);
 const area = new Map(); // "tx_ty" -> { tx, ty, base: BaseNode (+ planes, bld), fol }
 for (let ty = TY - 1; ty <= TY + 1; ty++) for (let tx = TX - 1; tx <= TX + 1; tx++) {
   const k = `${tx}_${ty}`;
-  if (!has(`1/${k}`)) { check(false, `node 1/${k} missing`); continue; }
-  const d = TD.decodeTile(raw(`1/${k}`), N);
-  const fol = has(`1f/${k}`) ? TD.decodeTile(raw(`1f/${k}`), N) : null;
-  area.set(k, { tx, ty, base: { ...d, buildId: BUILD, node: { s: 1, tx, ty } }, fol: fol && { ...fol, buildId: BUILD, node: { s: 1, tx, ty } } });
+  const v = await cache.acquire(tx, ty).catch(() => null);
+  if (!v) { check(false, `node 1/${k} or 1f/${k} missing`); continue; }
+  const d = v.base, fol = v.foliage;
+  area.set(k, { tx, ty, file: d, base: { ...d, buildId: BUILD, node: { s: 1, tx, ty } }, fol: fol && { ...fol, buildId: BUILD, node: { s: 1, tx, ty } } });
 }
 if (area.size !== 9) { console.log(`FAIL world-smoke: ${area.size}/9 nodes round ${TX}_${TY} on disk`); process.exit(1); }
 
@@ -116,6 +118,22 @@ const colAt = (w, x, y) => { const a = at(x, y), e = w.get(`${a.n.tx}_${a.n.ty}`
   check(lc0.runs.slice(-3).join() === `${lot.g},4,${wallId}` && lc0.ground === lot.g, `L1 box: lot column ${lc0.runs.slice(-3)} ground ${lc0.ground}, want ${lot.g},4,${wallId} ground ${lot.g}`);
   check(topOf(rc0.runs) === road.g - 4 && rc0.ground === road.g - 4, `L2 crater: road column top ${topOf(rc0.runs)} ground ${rc0.ground}, want ${road.g - 4}`);
   for (const [k, w] of world) check(w.edited === touched.has(k), `node ${k}: edited ${w.edited}, routed ${touched.has(k)}`);
+}
+// the cache: each node read once while held; seen through live edits (core/live-edits.ts) as the physics see it
+{
+  const k = [...touched][0], n = area.get(k), again = await cache.acquire(n.tx, n.ty);
+  check(cache.loads === 9 && again.base === n.file, `cache: ${cache.loads} loads for 9 nodes, a second acquire shares the first`);
+  cache.release(n.tx, n.ty); cache.release(n.tx, n.ty);
+  check(cache.view(n.tx, n.ty) === null && cache.size === 8, `cache: a node let go is dropped (size ${cache.size})`);
+  const LE = await imp('src/core/live-edits.ts'), edits = new LE.LiveEdits();
+  const lc = new TC.TileCache({ N, load: async (p) => raw(p.replace(/\.bin$/, '')), edits }), w = world.get(k);
+  const v0 = await lc.acquire(n.tx, n.ty);
+  edits.set(n.tx, n.ty, { base: w.base, foliage: null });
+  const v1 = lc.view(n.tx, n.ty);
+  edits.set(n.tx, n.ty, null);
+  const v2 = lc.view(n.tx, n.ty);
+  check(!v0.edited && v1.edited && v1.base === w.base && v1.foliage === v0.foliage && !v2.edited && v2.base === v0.base,
+    'cache: an edited node seen with its live base and its file\'s foliage, the file again when the edit is dropped');
 }
 
 // --- 3. re-meshed from the columns ---
