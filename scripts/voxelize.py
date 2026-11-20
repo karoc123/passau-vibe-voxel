@@ -3346,7 +3346,8 @@ note("bridge deck cells:", int(deck.sum()))
 # The decks stood on nothing between their abutments: the A 3's kilometre over the Danube at Schalding, the rail and
 # road bridges, the footbridges over the Ilz floated over the water and the valleys. A pier is a wall across the deck
 # (as wide as the deck less PIER_INSET at each edge, PIER_T metres thick along the way) from the deck's underside down
-# to the ground, or through the river to its bed. Where OSM maps them (bridge:support=pier nodes: the Marienbrücke)
+# to the ground, or through the river to its bed. Where OSM maps them (bridge:support=pier nodes: the Marienbrücke),
+# or a street override lists the way's spans (overrides.py `piers`, as such nodes: the A 3's Donaubrücke Schalding),
 # they stand there (in the river too), and the ways near them get no others. Elsewhere every span metres along each bridge way (by
 # bridge:structure -- of the way, or of the man_made=bridge outline it lies in -- and the way's kind; a suspension or
 # cable-stayed bridge none, a way shorter than 1.5 spans none: one span), evenly over its length. A pier is left out

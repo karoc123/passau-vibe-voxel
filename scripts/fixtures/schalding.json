@@ -1,0 +1,40 @@
+{
+ "about": "Fixture map for scripts/check.py: 1280 x 1280 m round the A 3's Donaubrücke Schalding (project rows -2048 to -768, columns -6144 to -4864; EPSG:25832 x 821227-822507, y 5391268-5392548): the 1 km bridge over the Danube above the Kachlet dam, the railway and the B 8 under it on the right bank, the St 2125 on the left; its piers come from a street override (scripts/overrides/street/8017122.json). The map's top edge. All but `name`, `map` and `regions` as in scripts/map.json (the rivers' stretches: the Kachlet pool's).",
+ "name": "Passau Schalding (fixture)",
+ "crs": 25832,
+ "grid": {
+  "x0": 827371,
+  "y0": 5390500
+ },
+ "anchor": {
+  "name": "Dom St. Stephan",
+  "x": 829351,
+  "y": 5389767
+ },
+ "map": {
+  "col0": -6144,
+  "row0": -2048,
+  "cols": 1280,
+  "rows": 1280
+ },
+ "base": 287,
+ "rivers": {
+  "level": 290.921,
+  "stretches": [
+   {
+    "name": "Danube above the Kachlet dam (and the Gaißa)",
+    "box": [
+     821000,
+     5388900,
+     824880,
+     5392600
+    ],
+    "level": 299.75
+   }
+  ]
+ },
+ "regions": {
+  "size": 1024,
+  "jobs": 2
+ }
+}

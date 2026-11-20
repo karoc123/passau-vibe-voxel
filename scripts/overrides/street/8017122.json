@@ -1,0 +1,19 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 8017122,
+    "geom": "e5d9256dabe3",
+    "tags": "9959d365004d",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "Donaubrücke Schalding (A 3, southbound carriageway way 8017122, its twin 26703838; the bridge outline man_made=bridge way 734273682, bridge:structure=beam, wikidata Q1240859). OSM maps no piers, and the derived ones (a motorway's 45 m) gave about 18 walls 44.6 m apart on the banks and none over the 267 m between 490 and 758 m from the south end, the Danube (~260 m wide there: more than twice PIER_WATER from its banks). The real bridge: a steel box-girder continuous beam (one superstructure for both carriageways, 30.8 m wide), 1020 m in eight spans of 86.5 - 110 - 130 - 171 - 171 - 140 - 110 - 101.5 m (de.wikipedia, Donaubrücke Schalding), so seven piers. The list runs in the A 3's stationing, north to south (Passau-Nord to Passau-Mitte), i.e. from this way's last node: so the piers stand 101.5, 211.5, 351.5, 522.5, 693.5, 823.5 and 933.5 m from the south end, two of them in the Danube (about 35 m off the right bank and 50 m off the left), the 171 m span between them over the fairway. That orientation fits the DOP20: the fairway buoys beside the bridge lie between those two piers (the other order would put one 30 m from the river's axis, between the buoys). The piers' own shape is not in the sources: they get the default mapped-pier wall across the deck.",
+  "sources": [
+    "osm",
+    "de.wikipedia: Donaubrücke Schalding",
+    "dop20"
+  ],
+  "piers": {
+    "spans": [86.5, 110.0, 130.0, 171.0, 171.0, 140.0, 110.0, 101.5],
+    "from": "end"
+  }
+}

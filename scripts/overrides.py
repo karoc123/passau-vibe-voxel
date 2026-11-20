@@ -28,6 +28,11 @@ A street file:
   sidewalk        {left, right (m), surface, kerb: bool}: paved strips beside the carriageway, a kerb line between
   trees           {side: both|left|right, spacing, offset, start, end, species, height}: young trees along it
   lamps           {side, spacing, offset, start, end, height}: street lamps along it
+  piers           {spans: [m, ...], from: start|end}: a bridge way's spans as its source lists them, from the way's
+                  first node (start, the default) or its last; the piers stand between them, the stations scaled to
+                  the way's length (an abutment's few metres more or less), as bridge:support=pier nodes on the way
+                  (voxelize.py bridge_piers: across the whole deck, its twin carriageway's too, in the river as well;
+                  the way and the ways beside it get no derived piers). For a bridge OSM maps no piers on
   (left/right as the way is drawn in OSM; offset: metres from the way's centre line, default half the width + 1.5)
 A water file (a lock chamber, a basin: water whose level is its own, not the river's around it):
   level           m a.s.l. of the water surface over the whole polygon (the top water voxel: round(level - base) - 1);
@@ -60,6 +65,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE / "overrides"
 KINDS = ("building", "street", "water")
 SYNTH_BASE = 10 ** 15  # ids of the nodes a street override adds (trees, lamps): way id * 1000 + k over this
+PIER_K0, PIER_MAX = 900, 99  # (a street override's piers: k from 900 on; trees and lamps stop short of it)
 # the surfaces a street override may name (the OSM values voxelize.SURF draws)
 SURFACES = ("asphalt", "paving_stones", "sett", "cobblestone", "concrete", "concrete:plates", "gravel", "fine_gravel",
             "compacted", "grass", "ground", "dirt", "unhewn_cobblestone", "paved", "wood")
@@ -212,7 +218,7 @@ def _along(d, where, extra=()):
 
 
 def _street(d, where):
-    _keys(d, ("osm", "note", "sources", "width", "lanes", "surface", "sidewalk", "trees", "lamps"), where,
+    _keys(d, ("osm", "note", "sources", "width", "lanes", "surface", "sidewalk", "trees", "lamps", "piers"), where,
           required=("osm",))
     if "width" in d:
         _num(d["width"], f"{where}.width", 1, 40)
@@ -240,6 +246,15 @@ def _street(d, where):
         _along(d["lamps"], f"{where}.lamps", ("height",))
         if "height" in d["lamps"]:
             _num(d["lamps"]["height"], f"{where}.lamps.height", 3, 15, integer=True)
+    if "piers" in d:
+        pi = d["piers"]
+        _keys(pi, ("spans", "from"), f"{where}.piers", required=("spans",))
+        if not isinstance(pi["spans"], list) or not 2 <= len(pi["spans"]) <= PIER_MAX + 1:
+            raise Invalid(f"{where}.piers.spans: a list of 2 to {PIER_MAX + 1} span lengths (m)")
+        for k, v in enumerate(pi["spans"]):
+            _num(v, f"{where}.piers.spans[{k}]", 3, 500)
+        if pi.get("from", "start") not in ("start", "end"):
+            raise Invalid(f"{where}.piers.from: start or end")
     if "sources" in d and not (isinstance(d["sources"], list) and all(isinstance(s, str) for s in d["sources"])):
         raise Invalid(f"{where}.sources: a list of strings")
 
@@ -486,10 +501,35 @@ def street_width(tags):
     return ways.way_width(tags)
 
 
+def pier_stations(length, spec):
+    """metres from the way's first node to each pier of a `piers` spec, its spans scaled to the way's length"""
+    spans = spec["spans"] if spec.get("from", "start") == "start" else spec["spans"][::-1]
+    f, acc, out = length / sum(spans), 0.0, []
+    for v in spans[:-1]:
+        acc += v
+        out.append(acc * f)
+    return out
+
+
+def _piers(e, spec, back):
+    """the bridge:support=pier nodes of a street override's `piers` on way e"""
+    line = _way_line(e)
+    if line is None:
+        return []
+    out = []
+    for k, dist in enumerate(pier_stations(line.length, spec)):
+        p = line.interpolate(dist)
+        lon, lat = back.transform(p.x, p.y)
+        out.append(dict(type="node", id=SYNTH_BASE + e["id"] * 1000 + PIER_K0 + k, lat=round(lat, 8),
+                        lon=round(lon, 8), tags={"bridge:support": "pier", "source": "override"}))
+    return out
+
+
 def patch_elements(elements):
     """OSM's elements as the overrides change them, in place: a street's tags (width, lanes, surface), and the trees and
-    lamps it adds as nodes (natural=tree, highway=street_lamp; ids SYNTH_BASE + way id x 1000 + k, after the
-    elements, by way id). Returns the elements. Only ways present are patched (a region's cut patches its own)."""
+    lamps and bridge piers it adds as nodes (natural=tree, highway=street_lamp, bridge:support=pier; ids SYNTH_BASE +
+    way id x 1000 + k, after the elements, by way id). Returns the elements. Only ways present are patched (a
+    region's cut patches its own: it holds the whole way, so the piers' stations are the same in every cut)."""
     objs = streets()
     if not objs:
         return elements
@@ -505,6 +545,8 @@ def patch_elements(elements):
         for k in ("width", "lanes", "surface"):
             if k in d:
                 t[k] = str(d[k])
+        if "piers" in d:
+            add.extend(_piers(e, d["piers"], back))
         if "trees" in d or "lamps" in d:
             line = _way_line(e)
             if line is None:
@@ -516,7 +558,7 @@ def patch_elements(elements):
                 spec = d[what]
                 sides = ("left", "right") if spec.get("side", "both") == "both" else (spec["side"],)
                 for side, k, x, y in _along_points(line, spec, w, sides):
-                    if k0 + k >= 1000:
+                    if k0 + k >= PIER_K0:
                         break
                     lon, lat = back.transform(x, y)
                     tags = dict(tags0, source="override")
