@@ -599,7 +599,8 @@ function tileSeams(N: number, T: Uint16Array, planes: Uint16Array, bid: Int32Arr
   const vals: number[] = [];
   // the roof's height (1/64 m) at grid point `along` of line L (axis 0: x = L), for the plane `code` of building b
   const at = (axis: number, L: number, along: number, code: number, b: number) => {
-    const key = ((axis * (S + 1) + L) * (S + 1) + along) * 4096 * 16384 + code * 16384 + (b & 16383);
+    // < 2^44: the line and point < 2^16, code < 4096, b a 16-bit id (< 65536)
+    const key = ((axis * (S + 1) + L) * (S + 1) + along) * 4096 * 65536 + code * 65536 + b;
     const got = target.get(key);
     if (got !== undefined) return got;
     const [gx, gy] = gq(code);

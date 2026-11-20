@@ -71,6 +71,8 @@ def main():
     ids = {oid: i + 1 for i, (g, t, oid) in enumerate(blds)}
     neg = lod2_only_ids()
     n = len(blds) + len(neg)  # (then the buildings from LoD2 alone)
+    if n > 65535:  # ids 1 .. n are 16-bit everywhere (zones.bin, the tiles' bldg, the mesher): would wrap silently
+        sys.exit(f"zones.py: {n} buildings, but building ids are 16-bit (at most 65535); see the 16-bit id notes in the plan (tile bldg / zones.bin as uint32)")
     labels = json.load(open(OUT / "meta.json"))["labels"]
     at = [(min(D - 1, int(np.floor(l["y"] + 0.5))), min(W - 1, int(np.floor(l["x"] + 0.5)))) for l in labels]
     under = [0] * len(labels)

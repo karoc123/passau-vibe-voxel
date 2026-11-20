@@ -279,7 +279,7 @@ node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screen
 ```
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`) and the agent checks below (`shoot.mjs`,
-`collision.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
+`collision.mjs`, `bld-ids.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
@@ -293,6 +293,11 @@ over a small synthetic world (`src/nav/collision-checks.ts`: a ground height per
 written as real node files and served through a stubbed fetch): a sweep before the tiles are in waits, the drone's
 cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
 code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
+
+**Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
+slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
+across ids, one id still merges into one top. Ids are 16-bit end to end (`scripts/zones.py` fails past 65535). Exit
+code 1 on a failure; check any change to the mesher's greedy merge with it.
 
 **Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel
 terrain (`src/physics/rapier/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved

@@ -301,7 +301,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   }
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3, v = (d + 2) % 3, nu = dims[u], nv = dims[v];
-    const mask = new Float64Array(nu * nv), top = new Uint8Array(nu * nv);
+    const mask = new Float64Array(nu * nv), top = new Uint8Array(nu * nv), bidm = new Uint16Array(nu * nv);
     const sd = ST[d], su = ST[u], sv = ST[v];
     for (const dir of [-1, 1]) {
       const normalIdx = d * 2 + (dir > 0 ? 1 : 0);
@@ -347,8 +347,10 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 const rc = roofs && nb === 0 && roofPal![a] & PAL_ROOF ? roofs.code(px, py, pz, d, dir) : 0;
                 const ang = rc ? 24 + rc : d < 2 && nb === 0 ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
                 const aob = thru ? faceAO(vol, ni, su, sv, -1, null, seeLeaf) : nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
-                // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
-                key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
+                // < 2^39: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096; the building
+                // (16-bit ids, < 65536) beside it in bidm (where the key is 0 it is stale and never compared)
+                key = ((ang * 4096 + a) * 256 + aob) * 256 + gm + 1;
+                bidm[i + j * nu] = bidAt(px, py);
                 top[i + j * nu] = thru ? THRU : nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
                 any = true;
               }
@@ -356,7 +358,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             mask[i + j * nu] = key;
           }
         }
-        if (any) emitMerged(mask, top, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out);
+        if (any) emitMerged(mask, top, bidm, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out);
       }
     }
   }
@@ -638,21 +640,24 @@ function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis:
   return ao(s10, s01, c00) | (ao(s12, s01, c20) << 2) | (ao(s12, s21, c22) << 4) | (ao(s10, s21, c02) << 6);
 }
 
-function emitMerged(mask: Float64Array, top: Uint8Array, nu: number, nv: number, d: number, u: number, v: number, dir: number, normalIdx: number,
+function emitMerged(mask: Float64Array, top: Uint8Array, bidm: Uint16Array, nu: number, nv: number, d: number, u: number, v: number, dir: number, normalIdx: number,
   sl: number, s: number, x0: number, y0: number, out: QuadBuffer) {
   for (let j = 0; j < nv; j++) {
     for (let i = 0; i < nu;) {
-      const key = mask[i + j * nu], wt = top[i + j * nu];
+      const key = mask[i + j * nu], wt = top[i + j * nu], bid = bidm[i + j * nu];
       if (!key) { i++; continue; }
       let w = 1;
-      while (i + w < nu && mask[i + w + j * nu] === key && top[i + w + j * nu] === wt) w++;
+      while (i + w < nu && mask[i + w + j * nu] === key && top[i + w + j * nu] === wt && bidm[i + w + j * nu] === bid) w++;
       let h = 1;
       outer: while (j + h < nv) {
-        for (let k = 0; k < w; k++) if (mask[i + k + (j + h) * nu] !== key || top[i + k + (j + h) * nu] !== wt) break outer;
+        for (let k = 0; k < w; k++) {
+          const c = i + k + (j + h) * nu;
+          if (mask[c] !== key || top[c] !== wt || bidm[c] !== bid) break outer;
+        }
         h++;
       }
       for (let jj = 0; jj < h; jj++) for (let ii = 0; ii < w; ii++) mask[i + ii + (j + jj) * nu] = 0;
-      const k0 = key - 1, bid = k0 % 16384, k1 = Math.floor(k0 / 16384);
+      const k1 = key - 1;
       const gm = k1 % 256, aoBits = Math.floor(k1 / 256) % 256, palIdx = Math.floor(k1 / 65536) % 4096, ang = Math.floor(k1 / (65536 * 4096));
       // vattr.x: face axis + 8 x (a wall's direction, or a roof plane's slope in 2.5° steps); vattr.w: 1 + the roof
       // plane's downhill direction in 64 steps, 0 for anything else
