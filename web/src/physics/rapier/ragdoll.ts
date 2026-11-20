@@ -1,4 +1,5 @@
-// Rapier spike: a simple ragdoll (11 capsules and spherical/revolute joints). It stands posed (kinematic, as an
+// Rapier spike: a simple ragdoll (11 capsules and spherical/revolute joints), for the ?physics=demo sandbox (demo.ts;
+// the drive mode lays people it hits down without physics: sim/life.ts knockDown). It stands posed (kinematic, as an
 // animated NPC would) until something hits it; then all of it turns dynamic and takes the hitter's momentum.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';

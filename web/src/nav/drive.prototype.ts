@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import type { StreetLife } from '../sim/life';
-import type { Car, Pose } from '../sim/types';
+import type { Car, Person, Pose } from '../sim/types';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import type { PhysicsWorld } from '../physics/body';
@@ -22,6 +22,7 @@ const HANDBRAKE_THRESHOLD = 0.75;
 const MAX_TILT = 0.4; // rad: pitch and roll from the wheels' ground
 const SINK_MS = 2000; // in the river this long, then back on the road
 const CRASH_MS = 1100; // after a crash landing: shaken, no input
+const FALLEN_R = 35; // m: people knocked down lie there until the car is this far away (life.ts knockDown)
 const NO_INPUT: DriveInput = { gas: 0, brake: 0, steer: 0, handbrake: false };
 
 interface Driving {
@@ -333,11 +334,11 @@ export class DrivePrototype {
     }
     // the people near it, walking or cycling (not one being walked by the player)
     const walkers: Walker[] = [];
-    for (const q of life.people) {
+    for (const list of [life.people, life.riders]) for (const q of list) {
       if (!q.rp || q.ctl || (p && (Math.abs(q.rp.x - p.x) > 15 || Math.abs(q.rp.z - p.z) > 15))) continue;
-      walkers.push({ key: q, x: q.rp.x, y: q.rp.y, z: q.rp.z, h: q.rh ?? 0, col: q.col });
+      walkers.push({ key: q, x: q.rp.x, y: q.rp.y, z: q.rp.z });
     }
-    rap.group = life.group;
+    if (p) life.clearFallen(p.x, p.z, FALLEN_R);
     const events = rap.update(dt, input, obstacles, walkers);
     this.waiting = events === 'loading';
     if (events === 'loading') return;
@@ -347,8 +348,8 @@ export class DrivePrototype {
         life.takeWheel(e.key as Car);
         this.say('Crash!', 600);
       } else if (e.kind === 'person') {
-        life.people = life.people.filter((q) => q !== e.key);
-        this.say('Ouch!', 600);
+        // (shoved away along the hit and laid down flat: no physics)
+        if (life.knockDown(e.key as Person, e.vx, e.vz)) this.say('Ouch!', 600);
       } else if (e.kind === 'impact' && e.speed > 2) this.say('Contact', 350);
       else if (e.kind === 'landing') {
         if (e.crash) { active.crashUntil = now + CRASH_MS; this.say('Crash!', CRASH_MS); }

@@ -28,6 +28,12 @@ const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'keep-crossing-clear', 'next-edge-car', 'tram-crossing', 'tram'];
 const TRAM_HARD = ['road-occupied', 'car-on-track', 'tram'];
+// people knocked down by the driven car (knockDown): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
+// per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s
+const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
+
+// a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
+interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null }
 
 function phase(ctrl: Controller, t: number, axis: number) {
   const u = ((t + ctrl.off) % CYCLE + CYCLE) % CYCLE;
@@ -55,6 +61,7 @@ export class StreetLife {
   readonly trains: Trains;
   people: Person[] = [];
   riders: Person[] = [];
+  private fallen: Fallen[] = [];
   day = 180;
   private t = 0;
   private acc = 0;
@@ -723,7 +730,7 @@ export class StreetLife {
     this.drawTrams(back, night);
     this.trains.render(0, night);
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
-    setCount(n, this.M.legs, this.M.torso);
+    setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
   }
 
@@ -840,6 +847,62 @@ export class StreetLife {
     });
     setCount(this.riders.length, M.bike);
     return this.riders.length;
+  }
+
+  // A person walking or cycling hit by the driven car at (vx, vz) m/s: out of the crowd, shoved away along the hit and
+  // falling over (drawFallen), no physics. Returns whether they were there.
+  knockDown(p: Person, vx: number, vz: number) {
+    const list = p.bike ? this.riders : this.people, i = list.indexOf(p);
+    if (i < 0 || !p.rp || p === this.keep) return false;
+    list.splice(i, 1);
+    const v = Math.hypot(vx, vz) || 1;
+    if (this.fallen.length >= MAX_FALLEN) this.fallen.shift();
+    this.fallen.push({
+      col: p.col, bike: !!p.bike, at: p.rp.clone(), h: p.rh ?? 0, dx: vx / v, dz: vz / v, v: Math.min(FALL_V, v * 0.6), t: 0,
+      bikeAt: p.bike ? p.rp.clone() : null,
+    });
+    return true;
+  }
+
+  // the people knocked down further than r m from (x, z) gone (left behind)
+  clearFallen(x: number, z: number, r: number) {
+    this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r);
+  }
+
+  // the people knocked down, drawn from instance i0 on: sliding along the shove, tipping over towards it (about the
+  // horizontal axis across it, at their feet) until flat on the ground, a little hop as they go; a bike on its side
+  // where it was hit, sliding half as far
+  private drawFallen(dt: number, i0: number) {
+    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
+    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3();
+    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S);
+    const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
+    let bikes = 0;
+    for (let i = 0; i < n; i++) {
+      const f = this.fallen[i];
+      f.t += dt;
+      const step = f.v * dt;
+      f.at.x += f.dx * step; f.at.z += f.dz * step;
+      if (f.bikeAt) { f.bikeAt.x += f.dx * step * 0.5; f.bikeAt.z += f.dz * step * 0.5; }
+      f.v *= Math.exp(-FALL_DRAG * dt);
+      if (this.world) f.at.y = this.world.surface(f.at.x, f.at.z, f.at.y);
+      const k = Math.min(1, f.t / FALL_S), a = k * k * Math.PI / 2;
+      // (up turned towards the shove: about up x shove)
+      tip.setFromAxisAngle(axis.set(f.dz, 0, -f.dx), a);
+      q.setFromAxisAngle(up, f.h).premultiply(tip);
+      pos.copy(f.at);
+      pos.y += Math.sin(Math.PI * k) * 0.3 + 0.12 * Math.sin(a);
+      m.compose(pos, q, one);
+      M.legs.setMatrixAt(i0 + i, m); M.torso.setMatrixAt(i0 + i, m);
+      M.torso.setColorAt(i0 + i, f.col);
+      if (f.bikeAt && this.riders.length + bikes < MAX_BIKES) {
+        // (on its side: about its own length)
+        q.setFromAxisAngle(up, f.h).multiply(tip.setFromAxisAngle(axis.set(0, 0, 1), a));
+        M.bike.setMatrixAt(this.riders.length + bikes++, m.compose(f.bikeAt, q, one));
+      }
+    }
+    if (bikes) setCount(this.riders.length + bikes, M.bike);
+    return n;
   }
 
   private drawSignals() {

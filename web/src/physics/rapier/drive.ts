@@ -9,13 +9,12 @@
 //
 // What the car runs into, kept cheap and near it: a traffic car hit hard (KNOCK m/s between them) turns from a
 // kinematic box into a dynamic one (a wreck: knocked away, it comes to rest and stays where it lies, then a kinematic
-// box again); a person walking or cycling (the street life's) hit by the car falls as a ragdoll (ragdoll.ts) where
-// they were, with the car's momentum, and lies there until the car is MAX_RAGDOLL_R away (MAX_RAGDOLLS at once).
+// box again); a person walking or cycling (the street life's) the car's box runs into is reported (a 'person' event
+// with the car's velocity: the street life shoves them away and lays them down, life.ts knockDown; no bodies here).
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
-import { Ragdoll } from './ragdoll';
 import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes } from './terrain';
 
 export const STEP = 1 / 60;
@@ -23,14 +22,15 @@ const MAX_STEPS = 4;
 const OBSTACLE_R = 40; // m: traffic within this of the car is in the world
 const KNOCK = 4; // m/s between the car and a traffic car that knocks it away
 const MAX_WRECKS = 4, WRECK_REST_S = 0.8, WRECK_MAX_S = 20;
-const MAX_RAGDOLLS = 6, MAX_RAGDOLL_R = 35, HIT_SPEED = 2.5;
+const HIT_SPEED = 2.5; // m/s: slower, the car nudges people aside unreported (they walk on)
 
 // something on the road the car meets (a traffic car or bus): its ground point and heading, length, kind
 export interface Obstacle { key: object; x: number; y: number; z: number; h: number; len: number; bus: boolean }
-// a person near the car (walking or cycling): their ground point, heading, clothes
-export interface Walker { key: object; x: number; y: number; z: number; h: number; col?: THREE.Color }
-// what the car did to them: knocked a traffic car away (now a wreck: drawn from wrecks()), ran a person over (a ragdoll)
-export type DriveEvent = CarEvent | { kind: 'knock' | 'person'; key: object; speed: number };
+// a person near the car (walking or cycling): their ground point
+export interface Walker { key: object; x: number; y: number; z: number }
+// what the car did to them: knocked a traffic car away (now a wreck: drawn from wrecks()), hit a person (vx, vz: the
+// car's velocity then, m/s)
+export type DriveEvent = CarEvent | { kind: 'knock'; key: object; speed: number } | { kind: 'person'; key: object; speed: number; vx: number; vz: number };
 interface Kin { body: RAPIER.RigidBody; collider: RAPIER.Collider; from: THREE.Vector3; fromH: number; to: THREE.Vector3; toH: number; seen: boolean; lift: number; v: THREE.Vector3 }
 interface Wreck { body: RAPIER.RigidBody; lift: number; age: number; still: number }
 
@@ -95,9 +95,6 @@ export class RapierDrive {
   private readonly curQ = new THREE.Quaternion();
   private readonly kin = new Map<object, Kin>();
   private readonly wrecked = new Map<object, Wreck>();
-  private readonly ragdolls: Ragdoll[] = [];
-  // where ragdolls are drawn (the street life's group)
-  group: THREE.Object3D | null = null;
   readonly stats = { stepMs: 0, stepMsMax: 0, frameMs: 0, frameMsMax: 0 };
 
   constructor(private readonly meta: Meta, focus: { x: number; z: number }) {
@@ -127,11 +124,9 @@ export class RapierDrive {
     this.pending = null;
     for (const k of this.kin.values()) this.world.removeRigidBody(k.body);
     this.kin.clear();
-    // (the wrecks stay as they lie; the ragdolls go)
+    // (the wrecks stay as they lie)
     for (const w of this.wrecked.values()) this.world.removeRigidBody(w.body);
     this.wrecked.clear();
-    for (const r of this.ragdolls) r.dispose();
-    this.ragdolls.length = 0;
   }
 
   get waiting() { return !!this.pending; }
@@ -178,7 +173,6 @@ export class RapierDrive {
       this.curQ.set(r.x, r.y, r.z, r.w);
     }
     for (const k of this.kin.values()) { k.from.copy(k.to); k.fromH = k.toH; }
-    this.drawRagdolls(at);
     this.stats.frameMs = performance.now() - f0;
     this.stats.frameMsMax = Math.max(this.stats.frameMsMax, this.stats.frameMs);
     return events;
@@ -319,10 +313,10 @@ export class RapierDrive {
     this.wrecked.delete(key);
   }
 
-  // People the car's box (grown by its travel over the frame) runs into at HIT_SPEED or more: ragdolls
+  // People the car's box (grown by its travel over the frame) runs into at HIT_SPEED or more: 'person' events
   private walkers(list: Walker[], span: number, events: DriveEvent[]) {
     const car = this.car!, b = car.body, v = b.linvel(), speed = Math.hypot(v.x, v.y, v.z);
-    if (speed < HIT_SPEED || !this.group) return;
+    if (speed < HIT_SPEED) return;
     const r = b.rotation(), inv = new THREE.Quaternion(r.x, r.y, r.z, r.w).invert(), c = this.toWorld(b.translation());
     const half = car.build.half, reach = speed * span + 0.3, fwd = new THREE.Vector3(v.x, v.y, v.z).applyQuaternion(inv).z >= 0 ? 1 : -1;
     for (const w of list) {
@@ -331,28 +325,9 @@ export class RapierDrive {
       // (the chassis' box sits from -0.45 to 2 half.y - 0.45 over the body's origin: car.ts)
       const zlo = fwd > 0 ? -half.z - 0.3 : -half.z - reach, zhi = fwd > 0 ? half.z + reach : half.z + 0.3;
       if (Math.abs(l.x) > half.x + 0.35 || l.z < zlo || l.z > zhi || l.y < -1.6 || l.y > 2 * half.y + 0.5) continue;
-      if (this.ragdolls.length >= MAX_RAGDOLLS) this.ragdolls.shift()!.dispose();
-      const feet = { x: w.x - this.origin.x, y: w.y + 0.05, z: w.z - this.origin.z };
-      const rd = new Ragdoll(RAPIER, this.world, feet, w.h, this.group, true, w.col);
-      const kick = new THREE.Vector3(v.x, v.y, v.z).multiplyScalar(0.85).add(new THREE.Vector3(0, 1.5 + speed * 0.15, 0));
-      for (const p of rd.bodies) p.setLinvel({ x: kick.x + (Math.random() - 0.5), y: kick.y, z: kick.z + (Math.random() - 0.5) }, true);
-      this.ragdolls.push(rd);
       // (the car loses a little: a person's ~70 kg against its mass)
       b.setLinvel({ x: v.x * 0.95, y: v.y, z: v.z * 0.95 }, true);
-      events.push({ kind: 'person', key: w.key, speed });
-    }
-  }
-
-  // ragdolls drawn where their bodies are; those left behind go
-  private drawRagdolls(at: THREE.Vector3) {
-    for (let i = this.ragdolls.length - 1; i >= 0; i--) {
-      const rd = this.ragdolls[i], p0 = rd.bodies[0].translation();
-      if (Math.hypot(p0.x + this.origin.x - at.x, p0.z + this.origin.z - at.z) > MAX_RAGDOLL_R || p0.y < -50) { rd.dispose(); this.ragdolls.splice(i, 1); continue; }
-      rd.bodies.forEach((b, k) => {
-        const t = b.translation(), r = b.rotation();
-        rd.meshes[k].position.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
-        rd.meshes[k].quaternion.set(r.x, r.y, r.z, r.w);
-      });
+      events.push({ kind: 'person', key: w.key, speed, vx: v.x, vz: v.z });
     }
   }
 }
