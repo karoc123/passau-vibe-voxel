@@ -4,9 +4,14 @@ usage: uv run python scripts/tile_roundtrip.py OUT_DIR [SEED]
   OUT_DIR/tile.bin       a level-1 node file, every section, written as tiles.py and tile_fields.py write them
                          (tiles.column_runs over a volume, tiles.room_section, tilefile.write)
   OUT_DIR/tile_noroom.bin  the same node without its room section (a node without rooms: every node before them)
+  OUT_DIR/tile_extra.bin   the node with sections the registry does not decode: two unknown tags (one of odd length,
+                         one empty), handed in out of order, and the reserved brik -- kept by tilefile.write (after
+                         the registry's, sorted), read back and written again byte for byte; decodeTile's extra
   OUT_DIR/expected.json  N; per column (apron included, row-major) its ground and runs [z0, len, palette] -- the runs
                          the volume was painted from, not column_runs' -- planes, buildings, the fields as
-                         tile-data.ts Fields interleaves them, and the room spans [column, z0, len, fill] in order
+                         tile-data.ts Fields interleaves them, the room spans [column, z0, len, fill] in order, the
+                         extra sections (tag, bytes) and the registry's tags (tilefile.SECTIONS, for
+                         web/src/core/tile-sections.ts)
 Synthetic data only: seeded random columns, plus edge cases -- empty columns, runs from z 0 and up to the top, touching
 runs, palette 65535, ground 255, the apron's rows and columns all different; rooms in the gaps of some columns, the
 apron's corners included, several to a column, fill 65535.
@@ -94,11 +99,27 @@ def main():
                bldg=bld.tobytes(), flod=flod.tobytes(), fols=fols.tobytes(), spil=spil.tobytes())
     tilefile.write(out / "tile_noroom.bin", sec)
     tilefile.write(out / "tile.bin", dict(sec, room=room))
+    # unknown tags kept, after the registry's, sorted (handed in before the known ones, out of order)
+    extra = {"zz~9": bytes(rng.integers(0, 256, 7, dtype=np.uint8)), "abcd": b"",
+             "brik": bytes(rng.integers(0, 256, 12, dtype=np.uint8))}
+    tilefile.write(out / "tile_extra.bin", {"zz~9": extra["zz~9"], **sec, "abcd": extra["abcd"], "room": room,
+                                            "brik": extra["brik"]})
+    back = tilefile.read(out / "tile_extra.bin", N)
+    want_tags = tilefile.ORDER + ["abcd", "zz~9"]
+    assert list(back) == want_tags, f"tile_extra.bin: tags {list(back)}, not {want_tags}"
+    assert all(back[t] == v for t, v in {**sec, "room": room, **extra}.items()), "tile_extra.bin: a section changed"
+    raw = (out / "tile_extra.bin").read_bytes()
+    (out / "again").mkdir(exist_ok=True)  # (the same name: gzip's header holds it)
+    tilefile.write(out / "again" / "tile_extra.bin", back)
+    assert (out / "again" / "tile_extra.bin").read_bytes() == raw, "tile_extra.bin: read -> write not byte for byte"
+    # the registry's tags alone: the order as before the registry (ORDER of today's sections)
+    assert tilefile.ORDER[:9] == ["cnts", "grnd", "runs", "plns", "bldg", "flod", "fols", "spil", "room"]
     # (the fields interleaved as decodeTile does: cell RGBA = river level, bed, foliage class, tree; spill RG)
     cell = np.stack([flod[:a], flod[a:], fols[:a], fols[a:]], 1).ravel()
     spill = np.stack([spil[:m], spil[m:]], 1).ravel()
     exp = dict(N=N, ground=ground.tolist(), columns=[[list(r) for r in rs] for rs in cols], planes=planes.tolist(),
-               bld=bld.tolist(), cell=cell.tolist(), spill=spill.tolist(), rooms=np.frombuffer(room, np.uint16).tolist())
+               bld=bld.tolist(), cell=cell.tolist(), spill=spill.tolist(), rooms=np.frombuffer(room, np.uint16).tolist(),
+               extra={t: list(v) for t, v in extra.items()}, registry=[[x.tag, x.reserved] for x in tilefile.SECTIONS])
     (out / "expected.json").write_text(json.dumps(exp, separators=(",", ":")))
     print(f"{out / 'tile.bin'}: {S * S} columns, {len(runs)} runs, {sum(not c for c in cols)} empty, {len(rooms)} room spans")
 

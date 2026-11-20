@@ -1,3 +1,5 @@
+import { DECODED_TAGS } from './core/tile-sections';
+
 export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
 // planes: the roof plane per column, bld: the building per column (both apron included), kept with the columns so a
 // foliage job can re-mesh its base tile; rooms: a level-1 node's room spans (decodeTile), null where it has none
@@ -22,8 +24,9 @@ export function roomOffsets(rooms: Uint16Array, n2: number) {
   return off;
 }
 
-// A node file (scripts/tilefile.py): a header of tagged sections -- cnts, grnd, runs, and (levels, not foliage) plns,
-// bldg, flod, fols, spil (scripts/tile_fields.py), room (level 1, where it has rooms; roomOffsets)
+// A node file (scripts/tilefile.py): a header of tagged sections (core/tile-sections.ts TILE_SECTIONS) -- cnts, grnd,
+// runs, and (levels, not foliage) plns, bldg, flod, fols, spil (scripts/tile_fields.py), room (level 1, where it has
+// rooms; roomOffsets). extra: every other section, raw (a tag this reader does not know, or a reserved one: brik)
 export function decodeTile(buf: ArrayBuffer, N: number) {
   const dv = new DataView(buf);
   if (buf.byteLength < 8 || dv.getUint32(0, true) !== TILE_MAGIC) throw new Error('tile: not a VXT2 node file (scripts/tile_fields.py)');
@@ -47,5 +50,7 @@ export function decodeTile(buf: ArrayBuffer, N: number) {
     for (let i = 0; i < m; i++) { spill[2 * i] = sp[i]; spill[2 * i + 1] = sp[m + i]; }
     fields = { cell, spill };
   }
-  return { counts, ground, runs, planes, bld, rooms, fields };
+  const extra = new Map<string, Uint8Array>();
+  for (const [t, [at, len]] of sec) if (!DECODED_TAGS.has(t)) extra.set(t, new Uint8Array(buf, at, len));
+  return { counts, ground, runs, planes, bld, rooms, fields, extra };
 }
