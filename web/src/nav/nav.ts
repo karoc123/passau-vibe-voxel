@@ -36,7 +36,7 @@ export class Nav {
   mode: Mode = 'orbit';
   ride: Ride | null = null;
   controlledRide: Ride | null = null;
-  // the driven car's camera: shaken by a crash, dipped by a splash (drive.prototype.ts); its height followed smoothly
+  // the driven car's camera: shaken by a crash, dipped by a splash (nav/drive.ts); its height followed smoothly
   readonly rideShake = new THREE.Vector3();
   private rideY: number | null = null;
   readonly actors = new THREE.Group();

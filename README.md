@@ -256,7 +256,7 @@ node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screen
 ```
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`) and the agent checks below (`shoot.mjs`,
-`physics.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
+`collision.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
