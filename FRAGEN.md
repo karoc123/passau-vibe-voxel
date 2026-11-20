@@ -12,8 +12,8 @@ Erledigte Fragen werden gestrichen bzw. entfernt.
 
 ## Vision (Server-Welt, GTA-artig)
 
-5. **Server-Technik:** Gibt es eine Vorliebe für die Sprache des Servers (TypeScript/Node, damit Code mit dem Client geteilt wird, oder Rust/Go für Leistung)?
-6. **Feinere Blöcke:** Wie fein soll die Nahansicht werden: 50 cm, 25 cm oder noch feiner? Überall oder nur dort, wo gebaut bzw. detailliert wird?
+5. **Server-Technik:** Gibt es eine Vorliebe für die Sprache des Servers (TypeScript/Node, damit Code mit dem Client geteilt wird, oder Rust/Go für Leistung)? *Empfehlung aus dem Fundament-Plan: TypeScript. Physik (Rapier), Mesher und Kollision laufen schon ohne Browser in Node; Rust würde den Kern doppelt pflegen.*
+6. **Feinere Blöcke:** Wie fein soll die Nahansicht werden: 50 cm, 25 cm oder noch feiner? Überall oder nur dort, wo gebaut bzw. detailliert wird? *Empfehlung: Die 1-m-Welt bleibt. Einzelne 1-m-Zellen lassen sich bei Bedarf fein unterteilen, etwa in 4×4×4 oder 8×8×8 kleinere Blöcke. So bleiben Fernansicht und Datenmenge unverändert.*
 7. **Spielerbauten:** Darf ein Spieler überall bauen, oder nur auf eigenen Grundstücken? Dürfen Spieler bestehende (importierte) Gebäude umbauen oder abreißen, dauerhaft?
 8. **Zerstörung:** Wann setzt sich Zerstörung zurück: erst beim Neuladen des Chunks, nach einer festen Zeit oder wenn kein Spieler in der Nähe ist? Sehen alle Spieler dieselben Trümmer?
 9. **Spielerzahl:** Wie viele Spieler sollen gleichzeitig auf einer Welt sein (10, 100, 1000)? Davon hängt die Server-Architektur stark ab.
