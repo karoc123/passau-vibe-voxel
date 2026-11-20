@@ -37,6 +37,12 @@ const KEYMAP: Record<string, Action> = {
   ArrowUp: 'f', ArrowDown: 'b', ArrowLeft: 'tl', ArrowRight: 'tr',
 };
 const STEP = 1.05, HEAD = 1.9, GRAV = 16, TILT = Math.PI * 0.48, WALK_FOV = 65;
+// On foot the camera stands a step from walls: the walk's side probes keep 0.4 m, the third-person boom 0.32 m (0.22
+// at the least, pedestrian.ts), less in a doorway or a narrow aisle. The map camera's near plane (0.5 m, main.ts) cut
+// into them there; on foot it comes in to WALK_NEAR -- its frustum's corners ~0.33 m out at the walk's field of view --
+// and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
+// (near x 2^24), is then 2.5 x coarser than the map camera's, as the drone's has always been.)
+const WALK_NEAR = 0.2;
 
 export class Nav {
   mode: Mode = 'orbit';
@@ -82,6 +88,7 @@ export class Nav {
   private groundGrace = 0;
   private pedestrianStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
+  private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
   // touch on foot: left thumb walks, right thumb looks (the drag since the last move)
   private readonly footSticks: TouchSticks;
   private lookFrom = { dx: 0, dy: 0 };
@@ -635,10 +642,18 @@ export class Nav {
   update(dt: number) {
     dt = Math.min(dt, 0.1);
     this.footSticks.setActive(this.onFoot);
+    this.fitNear();
     if (this.mode === 'walk') this.updateWalk(dt);
     else if (this.mode === 'pedestrian') this.updatePedestrian(dt);
     else if (this.mode === 'ride') this.updateRide(dt);
     else if (this.mode === 'orbit') this.updateOrbit(dt);
+  }
+
+  // the near plane on foot (WALK_NEAR) and back
+  private fitNear() {
+    const cam = this.camera;
+    if (this.onFoot && this.mapNear === null) { this.mapNear = cam.near; cam.near = Math.min(cam.near, WALK_NEAR); cam.updateProjectionMatrix(); }
+    else if (!this.onFoot && this.mapNear !== null) { cam.near = this.mapNear; this.mapNear = null; cam.updateProjectionMatrix(); }
   }
 
   // A/D/Q/E turn in place; W/S fly along the view, faster higher up; reaching the street lands you on it
