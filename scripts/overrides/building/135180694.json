@@ -1,0 +1,43 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 135180694,
+    "geom": "2b033881ce11",
+    "tags": "c9a983420e5b",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "Spitalhofstraße 15: 6-storey residential apartment building (WoGeNo Passau). Footprint 28.1 x 20.0 m with ground at 319.7 m asl. LoD2 and DOM20 surface model measure eaves at 15.7 m and ridge at 18.4 m with a hipped roof oriented along the building's long axis (bearing 70.0°). Facade colour is warm pale ochre/yellow (#ded5b8) matching OSM building:colour=yellow and DOP20 orthophoto; roof is reddish-brown tile (#aa8472) measured from DOP20 median RGB [170, 132, 114]. Six rows of window openings (width 2 m, bay spacing 3.5 m) spaced over the 6 storeys up to eaves height.",
+  "sources": [
+    "osm",
+    "dop20",
+    "dom20",
+    "lod2"
+  ],
+  "wall": {
+    "colour": "#ded5b8",
+    "material": "wall"
+  },
+  "roof": {
+    "shape": "hipped",
+    "eaves": 15.7,
+    "ridge": 18.4,
+    "ridge_dir": "long",
+    "colour": "#aa8472",
+    "material": "roof"
+  },
+  "windows": {
+    "bay": 3.5,
+    "width": 2,
+    "depth": 1,
+    "margin": 2.5,
+    "colour": "#3a4644",
+    "rows": [
+      [1, 1],
+      [3, 1],
+      [6, 1],
+      [8, 1],
+      [11, 1],
+      [13, 1]
+    ]
+  }
+}
