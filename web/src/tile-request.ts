@@ -2,7 +2,7 @@
 // workers, tools/tris.mjs meshes every tile with it in Node to count the triangles (meta.json tiles.tris), so the
 // counts are those of the meshes the viewer draws.
 import type { MeshRequest } from './mesher.worker';
-import { PAL_GROUND, PAL_ROOF, PAL_WALL } from './chamfer';
+import { PAL_GROUND, PAL_ROOF, PAL_WALL, PAL_WATER } from './chamfer';
 import { MAT, pavedGround } from './voxelMaterial';
 
 // the materials of buildings' walls (voxelize.py)
@@ -13,7 +13,8 @@ export interface TileContext {
   W: number;
   D: number;
   // per palette entry: roof material, its staircases shaded as roof planes; a building's wall, its diagonal staircases
-  // chamfered flat (mesher.worker.ts, chamfer.ts); paved ground, ramps on a slope (ramps.ts)
+  // chamfered flat (mesher.worker.ts, chamfer.ts); paved ground, ramps on a slope (ramps.ts); water (mesher.worker.ts
+  // emitMerged)
   roofPal: Uint8Array;
   // per palette entry: leaves (a foliage tile's cover, mesher.worker.ts coverOf)
   leafPal: Uint8Array;
@@ -23,7 +24,7 @@ export interface TileContext {
 
 export function paletteFlags(palette: [number, number, number, number][]) {
   return {
-    roofPal: Uint8Array.from(palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0) | (pavedGround(p) ? PAL_GROUND : 0)),
+    roofPal: Uint8Array.from(palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0) | (pavedGround(p) ? PAL_GROUND : 0) | (p[3] === MAT.WATER ? PAL_WATER : 0)),
     leafPal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : 0)),
     seePal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : p[3] === MAT.WOOD ? 2 : 0)),
   };

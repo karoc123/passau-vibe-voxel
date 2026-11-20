@@ -3,7 +3,7 @@
 // A tile is N x N cells of s metres plus a 1-cell apron. The distance levels (2, 4 and 8 m, scripts/tiles.py
 // LOD_LEVELS) are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres
 // on the way out.
-import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
+import { chamferWalls, PAL_ROOF, PAL_WATER, SLANT, type Prism } from './chamfer';
 import { cornerQ, PINNED, rampDiagonal02, ramped, rampField, type RampField } from './ramps';
 import { slopeRoofs, wallTopCode } from './roofs';
 import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
@@ -278,6 +278,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   const rampTops: number[] = [], rampSides: number[] = [], SS = S * S;
   const rampAO = rp ? (k: number) => { const c = k % SS; return rp.paved[c] === 1 && (k - c) / SS === rp.ground[c]; } : undefined;
   const dims = [N, N, sz - 2];
+  const wetPal = s > 1 ? roofPal : null; // (a distance level's water, emitMerged)
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
   const ST = [1, sx, sx * sy], colTop = new Uint16Array(S * S);
   for (let c = 0; c < S * S; c++) { let z = sz - 1; while (z > 0 && vol[c + sx * sy * z] === 0) z--; colTop[c] = z; }
@@ -321,7 +322,12 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             if (a !== 0 && a !== SOLID_BELOW && a !== OCC) {
               const ni = idx + dir * sd, nb = vol[ni];
               const thru = see !== null && nb !== 0 && nb < see.length && see[nb] === 1 && a < see.length && see[a] === 2;
-              if ((nb === 0 || thru || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
+              // (a distance level: the side of a bank beside the river's top block, whose faces end at the river's
+              // surface under the block's top, emitMerged: open, or a slot stood between the bank and the water)
+              const wet = wetPal !== null && d < 2 && nb !== 0 && nb < wetPal.length && (wetPal[nb] & PAL_WATER) !== 0
+                && a < wetPal.length && !(wetPal[a] & PAL_WATER) && vol[ni + sx * sy] === 0;
+              const free = nb === 0 || wet;
+              if ((free || thru || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
                 && !(cover && coveredFace(cover, idx, ni))) {
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
@@ -344,21 +350,21 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                     }
                   }
                 }
-                const rc = roofs && nb === 0 && roofPal![a] & PAL_ROOF ? roofs.code(px, py, pz, d, dir) : 0;
-                const ang = rc ? 24 + rc : d < 2 && nb === 0 ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
-                const aob = thru ? faceAO(vol, ni, su, sv, -1, null, seeLeaf) : nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
+                const rc = roofs && free && roofPal![a] & PAL_ROOF ? roofs.code(px, py, pz, d, dir) : 0;
+                const ang = rc ? 24 + rc : d < 2 && free ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
+                const aob = thru ? faceAO(vol, ni, su, sv, -1, null, seeLeaf) : free ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
                 // < 2^39: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096; the building
                 // (16-bit ids, < 65536) beside it in bidm (where the key is 0 it is stale and never compared)
                 key = ((ang * 4096 + a) * 256 + aob) * 256 + gm + 1;
                 bidm[i + j * nu] = bidAt(px, py);
-                top[i + j * nu] = thru ? THRU : nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
+                top[i + j * nu] = thru ? THRU : !free ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
                 any = true;
               }
             }
             mask[i + j * nu] = key;
           }
         }
-        if (any) emitMerged(mask, top, bidm, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out);
+        if (any) emitMerged(mask, top, bidm, nu, nv, d, u, v, dir, normalIdx, sl, s, x0, y0, out, roofPal);
       }
     }
   }
@@ -641,7 +647,7 @@ function faceAO(vol: Uint16Array, ni: number, su: number, sv: number, stairAxis:
 }
 
 function emitMerged(mask: Float64Array, top: Uint8Array, bidm: Uint16Array, nu: number, nv: number, d: number, u: number, v: number, dir: number, normalIdx: number,
-  sl: number, s: number, x0: number, y0: number, out: QuadBuffer) {
+  sl: number, s: number, x0: number, y0: number, out: QuadBuffer, pal: Uint8Array | null = null) {
   for (let j = 0; j < nv; j++) {
     for (let i = 0; i < nu;) {
       const key = mask[i + j * nu], wt = top[i + j * nu], bid = bidm[i + j * nu];
@@ -669,8 +675,15 @@ function emitMerged(mask: Float64Array, top: Uint8Array, bidm: Uint16Array, nu: 
       corners[1][u] += w; corners[2][u] += w; corners[2][v] += h; corners[3][v] += h;
       out.reserve(4);
       const ord = QUAD_ORDER[(aos[0] + aos[2] < aos[1] + aos[3] ? 2 : 0) + (dir > 0 ? 1 : 0)];
+      // A distance level's water: its top block is solid when a quarter of it is (scripts/tiles.py), so the surface
+      // stood at the block's top, up to s - 1 m over the river's (at 299.75 m above the Kachlet, 12.75 m over the base:
+      // 13 m at 1 m, 14 at 2, 16 at 4 and 8), and where nodes of two levels met, a step ran across the river. The
+      // column's ground (gm) over water is the river's surface at 1 m (the first free voxel): the water's faces end
+      // there, its top and the top of its sides, where they stand less than a block over it
+      const sink = s > 1 && pal !== null && palIdx < pal.length && (pal[palIdx] & PAL_WATER) !== 0;
       for (const c of ord) {
         const p = corners[c];
+        if (sink && p[2] * s > gm && p[2] * s < gm + s) { out.vertex(p[0] * s + x0, gm, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid); continue; }
         // (a face into the solid of the next tile: its top edge 1/64 m down, under the tops it meets there)
         if (wt === INNER && d < 2 && p[2] === corners[2][2] && p[2] > corners[0][2]) out.vertex(p[0] * s + x0, p[2] * s - 1, p[1] * s + y0, nrm, aos[c] | (63 << 2), gm, rw, palIdx, bid);
         else out.vertex(p[0] * s + x0, p[2] * s, p[1] * s + y0, nrm, aos[c], gm, rw, palIdx, bid);

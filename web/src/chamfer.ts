@@ -13,8 +13,9 @@
 // the eave runs straight as well; the roof above it is left as it is.
 
 export const MAX_LEG = 6;
-// palette flags (stream.ts): roof material, the walls that are chamfered, and paved ground (ramps.ts)
-export const PAL_ROOF = 1, PAL_WALL = 2, PAL_GROUND = 4;
+// palette flags (stream.ts): roof material, the walls that are chamfered, paved ground (ramps.ts), and water (a distance
+// level's water sunk to its surface, mesher.worker.ts emitMerged)
+export const PAL_ROOF = 1, PAL_WALL = 2, PAL_GROUND = 4, PAL_WATER = 8;
 // vattr.w of a slanted face: SLANT + its outward direction in plan in SLANT_STEPS steps (atan2(y, x), data axes)
 export const SLANT = 128, SLANT_STEPS = 128;
 
