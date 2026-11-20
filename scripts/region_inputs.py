@@ -34,7 +34,7 @@ OVERRIDE_REACH = 128  # m: an override (scripts/overrides) of an object this nea
 CACHE = Path("data/cache/inputs")
 HERE = Path(__file__).resolve().parent
 RASTERS = ["data/prep.npz", "data/lod2.npz", "data/laser.npz"]
-RAW_FILES = ["data/raw/baeume_aoi.csv", "data/raw/tn_09262.zip"]
+RAW_FILES = ["data/raw/baeume_aoi.csv", "data/raw/tn_09262.zip", "data/raw/tn_09275.zip"]
 ENV = ["NO_LOD2", "NO_LASER"]
 
 

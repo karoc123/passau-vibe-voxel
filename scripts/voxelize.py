@@ -519,7 +519,7 @@ try:
     burn(tn, _tn)
     note("ALKIS land use cells:", {k: int((tn == v).sum()) for k, v in TN.items()})
 except FileNotFoundError:
-    note("no ALKIS land use (data/raw/tn_09262.zip): open land by the ortho alone")
+    note("no ALKIS land use (data/raw/tn_09262.zip, tn_09275.zip): open land by the ortho alone")
 # farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
 # harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
 # hay field) wherever the stubble was pale. Arable land and orchards in the cadastre that OSM leaves out too

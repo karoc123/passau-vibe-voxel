@@ -1,6 +1,7 @@
 """ALKIS Tatsächliche Nutzung (actual land use) of the Bavarian surveying administration, CC BY 4.0
-(data/raw/tn_09262.zip, Stadt Passau, from scripts/fetch_bayern.sh): one polygon per parcel of use, covering the whole
-town -- forest, grassland, arable land, park, Gehölz, Unland, car parks, cemeteries, streets, water.
+(data/raw/tn_09262.zip, Stadt Passau, and tn_09275.zip, Landkreis Passau, from scripts/fetch_bayern.sh): one polygon
+per parcel of use, covering the whole district -- forest, grassland, arable land, park, Gehölz, Unland, car parks,
+cemeteries, streets, water. The two districts do not overlap; the map's west and north edges reach into the Landkreis.
 
 Read with a small shapefile reader of its own (polygons and a dBASE table, straight from the zip), no GDAL/OGR
 binding needed. The archive is downloaded data: only its .shp, .shx and .dbf members are read, as bytes.
@@ -15,25 +16,26 @@ from shapely.geometry.polygon import orient
 
 from aoi import RAW
 
-TN_ZIP = Path(RAW) / "tn_09262.zip"
+TN_ZIPS = [Path(RAW) / "tn_09262.zip", Path(RAW) / "tn_09275.zip"]  # Stadt Passau, Landkreis Passau
 
 
 def _dbf(buf):
+    """record i of a dBASE table, as a function (the Landkreis has some 10^5 records: only those asked for are read)"""
     n, hlen, rlen = struct.unpack("<IHH", buf[4:12])
     fields, p = [], 32
     while buf[p] != 0x0D:
         name = buf[p:p + 11].split(b"\0")[0].decode("ascii", "replace")
         fields.append((name, buf[p + 16]))
         p += 32
-    out = []
-    for i in range(n):
+
+    def rec(i):
         r = buf[hlen + i * rlen: hlen + (i + 1) * rlen]
-        rec, q = {}, 1  # (byte 0: the deletion flag)
+        out, q = {}, 1  # (byte 0: the deletion flag)
         for name, ln in fields:
-            rec[name] = r[q:q + ln].decode("utf-8", "replace").strip()
+            out[name] = r[q:q + ln].decode("utf-8", "replace").strip()
             q += ln
-        out.append(rec)
-    return out
+        return out
+    return rec
 
 
 def _polygon(rec):
@@ -61,11 +63,19 @@ def _polygon(rec):
 
 
 def read(bounds):
-    """[(nutzart, bez, polygon in EPSG:25832)] of the parcels whose bounding box meets bounds (minx, miny, maxx, maxy)"""
-    with zipfile.ZipFile(TN_ZIP) as z:
+    """[(nutzart, bez, polygon in EPSG:25832)] of the parcels whose bounding box meets bounds (minx, miny, maxx, maxy),
+    of every district's file there is (FileNotFoundError if none)"""
+    zips = [p for p in TN_ZIPS if p.exists()]
+    if not zips:
+        raise FileNotFoundError(TN_ZIPS[0])
+    return [r for p in zips for r in _read(p, bounds)]
+
+
+def _read(path, bounds):
+    with zipfile.ZipFile(path) as z:
         names = {Path(n).suffix.lower(): n for n in z.namelist()}
         shp, shx, dbf = (z.read(names[k]) for k in (".shp", ".shx", ".dbf"))
-    recs = _dbf(dbf)
+    rec = _dbf(dbf)
     offs = np.frombuffer(shx, ">i4", count=(len(shx) - 100) // 4, offset=100).reshape(-1, 2)
     x0, y0, x1, y1 = bounds
     out = []
@@ -77,7 +87,8 @@ def read(bounds):
             continue
         g = _polygon(body)
         if g is not None and not g.is_empty:
-            out.append((recs[i].get("nutzart", ""), recs[i].get("bez", ""), g))
+            r = rec(i)
+            out.append((r.get("nutzart", ""), r.get("bez", ""), g))
     return out
 
 
