@@ -141,10 +141,17 @@ document.addEventListener('keydown', (e) => {
   // Let the browser close the popover before Escape can exit the current navigation mode.
   if (e.key === 'Escape' && credits.matches(':popover-open')) e.stopPropagation();
 }, { capture: true });
+// on foot on a touch screen: Jump (Space), over the right thumb's look area (the sticks: nav.ts footSticks)
+const jumpButton = el('button', '', '<span aria-hidden="true">⤒</span>');
+jumpButton.id = 'jump-button';
+jumpButton.type = 'button';
+jumpButton.setAttribute('aria-label', 'Jump');
+jumpButton.addEventListener('pointerdown', (e) => { e.preventDefault(); nav.jump(); });
+jumpButton.addEventListener('click', (e) => { if (e.detail === 0) nav.jump(); }); // (the keyboard)
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
-  if (e.key === '/' && !(e.metaKey || e.ctrlKey || e.altKey) && !(e.target as Element).closest?.('input')) { bar.search.input.focus(); e.preventDefault(); }
+  if (e.key === '/' && !(e.metaKey || e.ctrlKey || e.altKey) && !(e.target as Element).closest?.('input')) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
   if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !(e.target as Element).closest?.('input, textarea')
       && !getSelection()?.toString()) {
@@ -233,6 +240,7 @@ function onMode(m: Mode, ride: Ride | null) {
   post.taa.restart(); // (the camera jumps)
   document.body.classList.toggle('walking', m !== 'orbit');
   document.body.classList.toggle('fpv', m === 'fpv');
+  document.body.classList.toggle('on-foot', m === 'walk' || m === 'pedestrian');
   hud?.set(m, ride);
 }
 

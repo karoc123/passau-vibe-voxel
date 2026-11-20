@@ -34,7 +34,7 @@ export class Hud {
   constructor(dom: HTMLElement, mode: Mode) {
     const box = this.box;
     box.id = 'hud';
-    box.innerHTML = `<div class="who"></div>${this.touch ? ''
+    box.innerHTML = `<div class="who"></div>${this.touch ? '<div class="hint"></div>'
       : `<div class="row"><div class="keys">${KEYS.map(([c, k, g]) => `<span class="cap" data-k="${c}">${k}${g && `<i>${g}</i>`}</span>`).join('')}</div><div class="mouse"></div></div>`}`;
     const lit = (k: string, on: boolean) => box.querySelectorAll(`[data-k="${k}"]`).forEach((n) => n.classList.toggle('on', on));
     addEventListener('keydown', (e) => { if (!(e.target as Element).closest?.('input:not([type=range])')) lit(ALIAS[e.code] ?? e.code, true); });
@@ -54,7 +54,11 @@ export class Hud {
     this.box.hidden = mode === 'fpv';
     this.box.classList.toggle('pedestrian', mode === 'pedestrian');
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? WHO[ride.kind] : '';
-    if (this.touch) return;
+    if (this.touch) {
+      $('.hint', this.box).textContent = mode === 'walk' || mode === 'pedestrian'
+        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there' : '';
+      return;
+    }
     const items = [...MOUSE[mode]];
     if (mode === 'walk' || ride?.kind === 'person') items.splice(items.length - 1, 0, ['Space', SPACE, 'jump']);
     $('.mouse', this.box).innerHTML = items.map(([k, icon, word]) => `<figure data-k="${k}">${icon}<figcaption>${word}</figcaption></figure>`).join('');

@@ -165,3 +165,32 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar, #labels, #hud { transition: opacity .6s; }
 .loading #bar, .loading #labels, .loading #hud { opacity: 0; pointer-events: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
+
+/* the bar's fold (bar.ts): a round button as the "?" one; folded, only it and the mode buttons (walk, drive, fly) */
+#bar .bar-fold { position: absolute; left: 0; top: 0; z-index: 1; width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: rgba(16,17,20,.75); color: #fff; cursor: pointer; }
+#bar .bar-fold span { display: block; width: 12px; height: 2px; background: currentColor; box-shadow: 0 -4px currentColor, 0 4px currentColor; transition: transform .2s; }
+#bar:not(.folded) .bar-fold span { width: 10px; height: 10px; background: none; box-shadow: none; border: solid currentColor; border-width: 0 0 2px 2px; transform: translateY(2px) rotate(135deg); }
+#bar .bar-fold:is(:hover, :focus-visible) { background: #2d3036; }
+#bar .bar-fold:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
+#bar .search { margin-left: 34px; }
+#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px); }
+#bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
+#bar.folded .bar-fold { position: static; flex: none; }
+#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
+#bar.folded .mode-tools .drive-help { display: none; }
+#bar.folded .mode-tools .mode-active { flex-basis: auto; }
+@media (pointer: coarse) {
+  #bar .bar-fold { width: 36px; height: 36px; }
+  #bar .search { margin-left: 44px; }
+  #bar .search input { height: 36px; }
+}
+
+/* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
+#jump-button { display: none; position: fixed; right: 18px; bottom: 120px; z-index: 4; width: 60px; height: 60px; padding: 0;
+  border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
+  touch-action: none; -webkit-user-select: none; user-select: none; }
+#jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
+@media (pointer: coarse) { body.on-foot:not(.noui) #jump-button { display: grid; place-items: center; } }
+#hud .hint { max-width: min(300px, calc(100vw - 100px)); line-height: 1.4; }
+#hud .hint:empty { display: none; }

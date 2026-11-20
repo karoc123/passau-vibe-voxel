@@ -1,7 +1,7 @@
 import { clamp } from '../util';
 
 export const DEAD_ZONE = 5; // CSS pixels
-type Side = 'left' | 'right';
+export type Side = 'left' | 'right';
 
 interface Stick {
   id: number;
@@ -10,11 +10,13 @@ interface Stick {
   radius: number;
   dx: number;
   dy: number;
+  t: number; // performance.now() at the touch
 }
 
 interface StickEvents {
   onStart?: (side: Side) => void;
   onMove?: (side: Side, stick: Readonly<Stick>) => void;
+  onEnd?: (side: Side, stick: Readonly<Stick>) => void;
   onInterrupted?: () => void;
 }
 
@@ -26,7 +28,7 @@ export class TouchSticks {
   private active = false;
   private readonly sticks: Record<Side, Stick | null> = { left: null, right: null };
 
-  constructor(private readonly canvas: HTMLCanvasElement, events: StickEvents = {}) {
+  constructor(private readonly canvas: HTMLElement, events: StickEvents = {}) {
     canvas.addEventListener('pointerdown', e => {
       if (!this.active || e.pointerType !== 'touch') return;
       const bounds = canvas.getBoundingClientRect();
@@ -36,7 +38,7 @@ export class TouchSticks {
       this.sticks[side] = {
         id: e.pointerId, startX: e.clientX, startY: e.clientY,
         radius: clamp(Math.min(bounds.width, bounds.height) * 0.16, 42, 72),
-        dx: 0, dy: 0,
+        dx: 0, dy: 0, t: performance.now(),
       };
       events.onStart?.(side);
     });
@@ -50,7 +52,10 @@ export class TouchSticks {
     });
     canvas.addEventListener('pointerup', e => {
       const side = this.sideOf(e.pointerId);
-      if (side) this.sticks[side] = null;
+      if (!side) return;
+      const stick = this.sticks[side]!;
+      this.sticks[side] = null;
+      events.onEnd?.(side, stick);
     });
     const interrupt = () => {
       if (!this.left && !this.right) return;

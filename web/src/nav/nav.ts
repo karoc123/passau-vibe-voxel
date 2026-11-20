@@ -9,11 +9,14 @@ import type { World } from '../world';
 import { rideCamera } from './ride';
 import { Pedestrian } from './pedestrian';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
+import { stickAxis, TouchSticks } from './touch-sticks';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
+//   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
+//          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's)
 //   ride:  following a pedestrian, car or tram; move keys walk as that person, or get out of a vehicle
 export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian';
 export interface Ride extends Picked {
@@ -74,6 +77,9 @@ export class Nav {
   private groundGrace = 0;
   private pedestrianStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
+  // touch on foot: left thumb walks, right thumb looks (the drag since the last move)
+  private readonly footSticks: TouchSticks;
+  private lookFrom = { dx: 0, dy: 0 };
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     scene: THREE.Scene, private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -88,7 +94,35 @@ export class Nav {
     scene.add(this.marker);
     this.bindKeys();
     this.bindPointer();
+    this.footSticks = new TouchSticks(dom, {
+      onStart: () => { this.lookFrom = { dx: 0, dy: 0 }; this.goal = null; this.marker.visible = false; this.cancelFly(); },
+      onMove: (side, s) => {
+        if (side !== 'right') return;
+        const k = 2.4 * (this.camera.fov * Math.PI / 180) / innerHeight;
+        this.look((s.dx - this.lookFrom.dx) * k, -(s.dy - this.lookFrom.dy) * k * 0.7);
+        this.lookFrom = { dx: s.dx, dy: s.dy };
+      },
+      // a short touch that hardly moved: a tap (walk there, as with one finger elsewhere)
+      onEnd: (_side, s) => {
+        if (Math.hypot(s.dx, s.dy) < 8 && performance.now() - s.t < 600) this.tap(s.startX + s.dx, s.startY - s.dy);
+      },
+    });
   }
+
+  /** the left touch stick while on foot: [forward, right] in -1..1, or null */
+  private footStick(): [number, number] | null {
+    const s = this.footSticks.left;
+    if (!s) return null;
+    const f = clamp(stickAxis(s.dy, s.radius), -1, 1), r = clamp(stickAxis(s.dx, s.radius), -1, 1);
+    return f || r ? [f, r] : null;
+  }
+
+  /** Space on foot (the touch Jump button) */
+  jump() {
+    if (this.mode === 'pedestrian') this.jumpBuffer = 0.14;
+    else if (this.mode === 'walk' && this.vy === 0) this.vy = 5.2;
+  }
+
 
   get life() { return this.lifeRef; }
   set life(l: StreetLife | null) { this.lifeRef = l; this.net = null; }
@@ -184,7 +218,7 @@ export class Nav {
     });
     dom.addEventListener('pointerdown', (e) => {
       if (this.mode === 'fpv' || (this.pedestrianActive && document.pointerLockElement === dom)) return;
-      if (this.driving && e.pointerType === 'touch') return;
+      if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.mode === 'orbit' && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.pivotAt(e.clientX, e.clientY);
@@ -197,7 +231,7 @@ export class Nav {
     });
     dom.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') this.cursor = { x: e.clientX, y: e.clientY };
-      if (this.driving && e.pointerType === 'touch') return;
+      if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       const p = ptrs.get(e.pointerId);
       if (this.pedestrianActive && e.pointerType === 'mouse') {
         if (document.pointerLockElement !== dom) {
@@ -583,6 +617,7 @@ export class Nav {
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
     dt = Math.min(dt, 0.1);
+    this.footSticks.setActive(this.onFoot);
     if (this.mode === 'walk') this.updateWalk(dt);
     else if (this.mode === 'pedestrian') this.updatePedestrian(dt);
     else if (this.mode === 'ride') this.updateRide(dt);
@@ -656,8 +691,12 @@ export class Nav {
   private updateWalk(dt: number) {
     const tr = this.axis('tr', 'tl'), tp = this.axis('tu', 'td'), go = this.axis('f', 'b');
     if (tr || tp) this.look(-tr * (this.shift ? 2.6 : 1.8) * dt, tp * dt);
+    const stick = this.footStick();
     if (go) this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (this.shift ? 20 : 6) * dt));
-    else if (this.goal) this.walkToGoal(dt);
+    else if (stick) {
+      const [f, r] = stick, sx = Math.sin(this.yaw), sz = Math.cos(this.yaw);
+      this.stepBy(new THREE.Vector3(sx * f - sz * r, 0, sz * f + sx * r).multiplyScalar(6 * dt));
+    } else if (this.goal) this.walkToGoal(dt);
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
     this.place(this.walkPos, q, WALK_FOV, false);
@@ -676,8 +715,12 @@ export class Nav {
       this.vy = 6.2;
       this.jumpBuffer = this.groundGrace = 0;
     } else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    const stick = this.footStick();
     if (right || forward) this.stepBy(pedestrian.move(forward, right, this.shift, dt));
-    else if (this.goal) this.walkToGoal(dt, 2.4);
+    else if (stick) { // analog: up to a walk, pushed to the rim a run
+      const push = Math.min(1, Math.hypot(...stick));
+      this.stepBy(pedestrian.move(stick[0], stick[1], push > 0.92, dt).multiplyScalar(push > 0.92 ? 1 : Math.max(0.35, push)));
+    } else if (this.goal) this.walkToGoal(dt, 2.4);
 
     if (this.vy > 0) {
       const rise = this.vy * dt + 0.08;

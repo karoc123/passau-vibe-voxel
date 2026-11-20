@@ -1,7 +1,7 @@
 import { PlaceSearch } from './search';
 import { dateOf } from './sun';
 import { DIST_MAX, DIST_MIN, type Gfx, type Preset, SHADOWS, type Settings } from './settings';
-import { $, el } from './util';
+import { $, coarsePointer, el } from './util';
 
 const hhmm = (h: number) => { const m = Math.round(h * 60); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
 const dayMonth = (d: number) => dateOf(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -150,6 +150,9 @@ export class Bar {
   private readonly time: Slider;
   private readonly date: Slider;
   private readonly sky: HTMLElement;
+  // folds the panel to this one round button (and the mode buttons beside it): as the "?" button's credits, out of
+  // the way of the thumbs. Folded at first on touch screens and narrow ones, open on the desktop.
+  private readonly foldButton = el('button', 'bar-fold', '<span aria-hidden="true"></span>', this.el);
 
   constructor({ days, weathers, river, onDay, onDayEnd, onHour, onWeather, onRiver }: {
     days: Record<string, number>;
@@ -162,6 +165,9 @@ export class Bar {
     onRiver: (cm: number) => void;
   }) {
     this.el.id = 'bar';
+    this.foldButton.type = 'button';
+    this.foldButton.addEventListener('click', () => { this.fold(!this.folded); this.foldButton.blur(); });
+    this.fold(coarsePointer() || matchMedia('(max-width: 600px)').matches);
     this.search = new PlaceSearch(this.el, 'Search Passau…');
     this.date = new Slider(this.el, { min: 1, max: 365, step: 1, marks: days, near: 3, log: false, show: dayMonth, onInput: onDay, onChange: onDayEnd });
     this.time = new Slider(this.el, { min: 4, max: 23.5, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });
@@ -184,5 +190,12 @@ export class Bar {
   // the ⚙ panel at the bar's foot (settings.ts)
   graphics(s: Settings, onChange: (c: Partial<Gfx>) => void, maxShadow: number) { return new Graphics(this.el, s, onChange, maxShadow); }
   showRiver(on: boolean) { this.river.input.closest('.row')!.classList.toggle('off', !on); }
+  get folded() { return this.el.classList.contains('folded'); }
+  fold(on: boolean) {
+    this.el.classList.toggle('folded', on);
+    this.foldButton.setAttribute('aria-expanded', String(!on));
+    this.foldButton.setAttribute('aria-label', on ? 'Show the map controls' : 'Hide the map controls');
+    this.foldButton.title = on ? 'Show controls' : 'Hide controls';
+  }
   get rect() { return this.el.getBoundingClientRect(); }
 }
