@@ -200,7 +200,7 @@ for them).
 ## Per-object overrides (scripts/overrides/)
 
 One JSON file per object, so that many agents can each refine one building or street (the `/verfeinern` skill,
-`.claude/skills/verfeinern/SKILL.md`) and their branches merge without conflicts:
+`.agents/skills/verfeinern/SKILL.md`, linked from `.claude/skills/` for Claude Code) and their branches merge without conflicts:
 `scripts/overrides/building/<way id>.json` (`r<id>.json` for a relation; an outline or a `building:part`) and
 `scripts/overrides/street/<way id>.json` (a highway way). A file says *what* to build as parameters, never voxels, so
 it is rebuilt from the data on every build, in any region cover and on a larger map. The format, its keys and its
