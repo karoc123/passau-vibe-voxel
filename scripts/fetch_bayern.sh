@@ -51,8 +51,10 @@ if [ ! -s baeume_aoi.csv ]; then
 fi
 ls -la baeume_aoi.csv
 for y in 2022 2016; do
-  [ -s treespecies_$y.tif ] || uv run --project "$ROOT" python -I "$ROOT/scripts/clip_species.py" \
-    https://download.geoservice.dlr.de/TREE_SPECIES_DE/files/treespecies_de_$y.tif treespecies_$y.tif.part $BOUNDS \
-    && mv treespecies_$y.tif.part treespecies_$y.tif
+  if [ ! -s treespecies_$y.tif ]; then
+    uv run --project "$ROOT" python -I "$ROOT/scripts/clip_species.py" \
+      https://download.geoservice.dlr.de/TREE_SPECIES_DE/files/treespecies_de_$y.tif treespecies_$y.tif.part $BOUNDS
+    mv treespecies_$y.tif.part treespecies_$y.tif
+  fi
   ls -la treespecies_$y.tif
 done
