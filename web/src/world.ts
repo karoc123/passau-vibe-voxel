@@ -89,6 +89,16 @@ export class World {
     return false;
   }
 
+  // whether the voxel at (x, r, z) is in a room (scripts/interiors.py: a void carved out of a building on purpose), by
+  // the 1 m tile there (a coarser level has no rooms: they are solid in it)
+  inRoom(x: number, r: number, z: number) {
+    const c = this.column(x, r);
+    if (!c || !c[0].roomOff) return false;
+    const [n, i] = c, M = n.rooms!, off = n.roomOff!, zc = Math.floor(z / n.s);
+    for (let k = off[i]; k < off[i + 1]; k++) if (zc >= M[k * 4 + 1] && zc < M[k * 4 + 1] + M[k * 4 + 2]) return true;
+    return false;
+  }
+
   top(x: number, r: number) {
     const c = this.column(x, r);
     if (!c) return 0;

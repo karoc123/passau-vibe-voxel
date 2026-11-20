@@ -9,7 +9,11 @@ import { TILE_N } from './tile-data';
 // the runs from z = 0 up, unbroken, of opaque voxels -- not leaves, water or fountain jets -- less a metre for roof
 // slopes, eroded by a column all round for chamfered corners). Those heights, the minimum over 2 m cells and then over
 // 4, 8 .. 128 m cells (a min-pyramid), stand for what blocks the view; where a tile is not in, or not all shown yet,
-// its cells are 0 and block nothing. The pyramid is kept per 128 m tile (5.3 kB each), only for the tiles that block
+// its cells are 0 and block nothing. A room (scripts/interiors.py: a void carved out of a building on purpose, enclosed
+// but for its doors) counts as the solid building it was, so that a building with rooms hides as much as before: its
+// spans fill the gaps in the runs. Not near the camera, which may stand in a room or look into one through its door: a
+// tile with rooms keeps a second pyramid without them (as the voxels are), drawn on while the camera is in that tile or
+// one of the eight round it. The pyramid is kept per 128 m tile (5.3 kB each), only for the tiles that block
 // something -- those shown, so within the view distance -- not over the map: its size and the march's reach follow
 // what is shown around the camera, not the map's area. The march finds a tile's pyramid through a grid over the box of
 // the tiles held (made again when they change).
@@ -31,8 +35,11 @@ const MAX_BINS = 160, MIN_BIN = 0.006, MAX_STEPS = 256, R0 = 1.5;
 
 export class Occlusion {
   // the tiles' pyramids, each at an offset in one pool (by tile index ty * nx + tx; free: offsets given back), and the
-  // grid over their box (gx0, gy0, gw x gh tiles: the offset, -1 none)
+  // grid over their box (gx0, gy0, gw x gh tiles: the offset, -1 none); hollow: those of the tiles with rooms, the
+  // rooms left open, which the grid takes within a tile of the camera's (cx, cy)
   private readonly tiles = new Map<number, number>();
+  private readonly hollow = new Map<number, number>();
+  private cx = -1e9; private cy = -1e9;
   private pool = new Uint8Array(0);
   private readonly free: number[] = [];
   private grid = new Int32Array(0);
@@ -59,19 +66,22 @@ export class Occlusion {
   }
 
   // what it holds (tools): tiles, bytes
-  get stats() { return { tiles: this.tiles.size, bytes: this.pool.byteLength + this.grid.byteLength + this.hor.byteLength }; }
+  get stats() { return { tiles: this.tiles.size, hollow: this.hollow.size, bytes: this.pool.byteLength + this.grid.byteLength + this.hor.byteLength }; }
 
   // the occluder heights of a T x T m tile from the column data drawn there (each source: 1 m or a coarser level
   // covering it; the least of them where several), or none: it blocks nothing
   setTile(tx: number, ty: number, sources: ColumnData[]) {
-    const T = this.T, x0 = tx * T, y0 = ty * T, S = T + 2, colH = this.colH, key = ty * this.nx + tx;
-    if (!sources.length) {
-      const o = this.tiles.get(key);
-      if (o !== undefined) { this.tiles.delete(key); this.free.push(o); this.gridDirty = true; }
-      return;
-    }
-    let o0 = this.tiles.get(key);
-    if (o0 === undefined) {
+    const key = ty * this.nx + tx;
+    if (!sources.length) { this.drop(this.tiles, key); this.drop(this.hollow, key); return; }
+    this.pyramid(this.slot(this.tiles, key), tx, ty, sources, true);
+    if (sources.some((d) => d.rooms)) this.pyramid(this.slot(this.hollow, key), tx, ty, sources, false);
+    else this.drop(this.hollow, key);
+  }
+
+  // the pool's offset of the tile's pyramid in map, a new one if it has none
+  private slot(map: Map<number, number>, key: number) {
+    let o = map.get(key);
+    if (o === undefined) {
       if (!this.free.length) {
         // (a quarter more room at a time)
         const n = this.pool.length / PYR, more = Math.max(16, n >> 2), pool = new Uint8Array((n + more) * PYR);
@@ -79,10 +89,21 @@ export class Occlusion {
         this.pool = pool;
         for (let k = n + more - 1; k >= n; k--) this.free.push(k * PYR);
       }
-      o0 = this.free.pop()!;
-      this.tiles.set(key, o0);
+      o = this.free.pop()!;
+      map.set(key, o);
       this.gridDirty = true;
     }
+    return o;
+  }
+
+  private drop(map: Map<number, number>, key: number) {
+    const o = map.get(key);
+    if (o !== undefined) { map.delete(key); this.free.push(o); this.gridDirty = true; }
+  }
+
+  // the tile's pyramid at offset o0 of the pool (rooms: filled, else open)
+  private pyramid(o0: number, tx: number, ty: number, sources: ColumnData[], rooms: boolean) {
+    const T = this.T, x0 = tx * T, y0 = ty * T, S = T + 2, colH = this.colH;
     const P = this.pool.subarray(o0, o0 + PYR);
     // the tile's columns and one all round (from the sources' aprons)
     for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
@@ -91,7 +112,7 @@ export class Occlusion {
       for (const d of sources) {
         const cx = Math.floor((X - d.x0) / d.s) + 1, cy = Math.floor((Y - d.y0) / d.s) + 1;
         if (cx < 0 || cy < 0 || cx >= d.S || cy >= d.S) { h = 0; break; }
-        h = Math.min(h, this.column(d, cx + d.S * cy));
+        h = Math.min(h, this.column(d, cx + d.S * cy, rooms));
       }
       colH[r * S + c] = h === 255 ? 0 : h;
     }
@@ -124,7 +145,10 @@ export class Occlusion {
     if (x1 < 0) { this.grid = new Int32Array(0); this.gw = this.gh = 0; return; }
     this.gx0 = x0; this.gy0 = y0; this.gw = x1 - x0 + 1; this.gh = y1 - y0 + 1;
     this.grid = new Int32Array(this.gw * this.gh).fill(-1);
-    for (const [k, o] of this.tiles) this.grid[(Math.floor(k / this.nx) - y0) * this.gw + (k % this.nx) - x0] = o;
+    for (const [k, o] of this.tiles) {
+      const x = k % this.nx, y = Math.floor(k / this.nx), h = this.hollow.get(k);
+      this.grid[(y - y0) * this.gw + x - x0] = h !== undefined && Math.abs(x - this.cx) <= 1 && Math.abs(y - this.cy) <= 1 ? h : o;
+    }
   }
 
   // the occluder height of level l's cell (i, j) (cells of 2 << l m from the map's corner; 0 where no tile is held)
@@ -137,14 +161,19 @@ export class Occlusion {
     return this.pool[o + OFF[l] + ((j & m) << sh) + (i & m)];
   }
 
-  // a column's occluder height in metres: opaque runs from the bottom up, unbroken, less one cell
-  private column(d: ColumnData, i: number) {
-    const R = d.runs;
-    let h = 0;
-    for (let k = d.off[i], e = d.off[i + 1]; k < e; k++) {
-      const z0 = R[k * 3];
+  // a column's occluder height in metres: opaque runs from the bottom up, unbroken, less one cell; with its rooms
+  // (rooms: as the solid they were), a run within them not breaking it either
+  private column(d: ColumnData, i: number, rooms: boolean) {
+    const R = d.runs, M = rooms && d.roomOff ? d.rooms! : null;
+    let h = 0, q = M ? d.roomOff![i] : 0;
+    const qe = M ? d.roomOff![i + 1] : 0;
+    for (let k = d.off[i], e = d.off[i + 1]; ;) {
+      if (q < qe && M![q * 4 + 1] <= h) { h = Math.max(h, M![q * 4 + 1] + M![q * 4 + 2]); q++; continue; }
+      if (k >= e) break;
+      const z0 = R[k * 3], z1 = z0 + R[k * 3 + 1];
+      if (z1 <= h) { k++; continue; }
       if (z0 > h || !this.opaque[R[k * 3 + 2]]) break;
-      h = Math.max(h, z0 + R[k * 3 + 1]);
+      h = z1; k++;
     }
     return Math.min(254, Math.max(0, (h - 1) * d.s));
   }
@@ -191,9 +220,12 @@ export class Occlusion {
     const nb = this.nb = Math.max(1, Math.min(MAX_BINS, Math.ceil((hi - lo) / MIN_BIN)));
     const delta = this.delta = (hi - lo) / nb;
     this.aMin = lo;
-    // the steps, the same for every bin: a metre apart, then 4 % of the distance; out to the furthest tile held
+    // the steps, the same for every bin: a metre apart, then 4 % of the distance; out to the furthest tile held (the
+    // grid again when the camera moved to another tile and some tile has rooms: their pyramids near it are open)
+    const T = this.T, ctx = Math.floor(ex / T), cty = Math.floor(ez / T);
+    if (ctx !== this.cx || cty !== this.cy) { this.cx = ctx; this.cy = cty; if (this.hollow.size) this.gridDirty = true; }
     this.regrid();
-    const T = this.T, gx0 = this.gx0 * T, gx1 = (this.gx0 + this.gw) * T, gz0 = this.gy0 * T, gz1 = (this.gy0 + this.gh) * T;
+    const gx0 = this.gx0 * T, gx1 = (this.gx0 + this.gw) * T, gz0 = this.gy0 * T, gz1 = (this.gy0 + this.gh) * T;
     const far = this.gw ? Math.min(camera.far, Math.hypot(Math.max(ex - gx0, gx1 - ex), Math.max(ez - gz0, gz1 - ez)) + 1) : 0;
     let K = 0;
     for (let r = R0; r < far && K < MAX_STEPS; K++) {

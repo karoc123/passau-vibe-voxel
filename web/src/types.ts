@@ -84,6 +84,9 @@ export type Place = [name: string, kind: string, x: number, y: number, size: num
 export interface ColumnData {
   planes?: Uint16Array | null; // level 1: roof plane per column (mesher.worker.ts decode), for re-meshing
   bld?: Uint16Array | null; // the building per column (tile_fields.py bldg), for re-meshing
+  // level 1: the node's room spans (tile-data.ts decodeTile; null: none) and per column where its spans start (roomOffsets)
+  rooms?: Uint16Array | null;
+  roomOff?: Uint32Array | null;
   s: number;
   x0: number;
   y0: number;

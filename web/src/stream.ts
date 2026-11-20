@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './types';
 import type { MeshOut, MeshRequest, MeshReply } from './mesher.worker';
-import type { Columns, Fields } from './tile-data';
+import { roomOffsets, type Columns, type Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type Region } from './core/live-edits';
@@ -517,11 +517,12 @@ export class TileStreamer implements ColumnSource {
     return this.quadIdx;
   }
 
-  private setData(n: TileNode, { counts, ground, runs, planes, bld }: Columns) {
+  private setData(n: TileNode, { counts, ground, runs, planes, bld, rooms }: Columns) {
     const S = this.N + 2, off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + counts[i];
     const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
-    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null, bld: bld ?? null };
+    n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null, bld: bld ?? null,
+      rooms: rooms ?? null, roomOff: rooms ? roomOffsets(rooms, S * S) : null };
     this.version++;
   }
 

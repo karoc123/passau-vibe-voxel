@@ -481,7 +481,8 @@ renderer.setAnimationLoop((now) => {
   setWindows?.(daylight.hour, daylight.day);
   fountains?.update(t, daylight.night);
   if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
-  precip.update(t, camera.position, daylight.weather, daylight.night);
+  const cp = camera.position;
+  precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
     life.group.visible = !city || city.complete;

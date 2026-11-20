@@ -81,12 +81,14 @@ export class Precip {
     for (const o of [this.rain, this.snow]) { o.frustumCulled = false; o.visible = false; scene.add(o); }
   }
 
-  update(t: number, cam: THREE.Vector3, w: Weather, night: number) {
+  // indoors: the camera is in a room (world.ts inRoom): neither falls -- the drops are drawn all round the camera, in
+  // the room's air too (seen out through its door the street is dry then, a lesser fault)
+  update(t: number, cam: THREE.Vector3, w: Weather, night: number, indoors = false) {
     this.uniforms.uTime.value = t;
     this.uniforms.uCam.value.copy(cam);
     this.uniforms.uCol.value.setRGB(1, 1, 1).multiplyScalar(1 - 0.75 * night);
-    this.rain.visible = w.rain > 0.01;
-    this.snow.visible = w.snow > 0.01;
+    this.rain.visible = !indoors && w.rain > 0.01;
+    this.snow.visible = !indoors && w.snow > 0.01;
     this.rain.geometry.setDrawRange(0, Math.round(w.rain * DROPS) * 2);
     this.snow.geometry.setDrawRange(0, Math.round(w.snow * DROPS));
   }
