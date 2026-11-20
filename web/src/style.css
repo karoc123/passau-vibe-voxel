@@ -194,3 +194,8 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 @media (pointer: coarse) { body.on-foot:not(.noui) #jump-button { display: grid; place-items: center; } }
 #hud .hint { max-width: min(300px, calc(100vw - 100px)); line-height: 1.4; }
 #hud .hint:empty { display: none; }
+/* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */
+.stick-ring { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; box-sizing: border-box; border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
+.stick-ring.knob { width: 46px; height: 46px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); }
+.noui .stick-ring { display: none; }

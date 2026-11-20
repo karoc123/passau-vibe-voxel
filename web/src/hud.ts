@@ -56,7 +56,7 @@ export class Hud {
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? WHO[ride.kind] : '';
     if (this.touch) {
       $('.hint', this.box).textContent = mode === 'walk' || mode === 'pedestrian'
-        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there' : '';
+        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there · Pinch: zoom' : '';
       return;
     }
     const items = [...MOUSE[mode]];

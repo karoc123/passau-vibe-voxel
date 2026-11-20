@@ -16,7 +16,8 @@ import { stickAxis, TouchSticks } from './touch-sticks';
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
-//          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's)
+//          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's); two fingers
+//          close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
 export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian';
 export interface Ride extends Picked {
@@ -107,6 +108,11 @@ export class Nav {
       // a short touch that hardly moved: a tap (walk there, as with one finger elsewhere)
       onEnd: (_side, s) => {
         if (Math.hypot(s.dx, s.dy) < 8 && performance.now() - s.t < 600) this.tap(s.startX + s.dx, s.startY - s.dy);
+      },
+      // two fingers close together: the third-person camera's distance (the wheel's), in first person the field of view
+      onPinch: (ratio) => {
+        if (this.mode === 'pedestrian') this.pedestrian?.zoom(Math.log(ratio));
+        else this.setFov(this.camera.fov * ratio);
       },
     });
   }
