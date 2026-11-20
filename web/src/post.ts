@@ -53,7 +53,8 @@ class DepthBlur extends Effect {
 // the water out (more of them near, where the hits are); a crossing is refined by bisection. Where it leaves the
 // screen or the scene unhit, the sky as the sky draws it in that direction (sky.ts: its light and its cumulus, seen
 // from the water) -- if the ray is sure to meet nothing off the screen: once it is higher than anything on the map
-// (uMapTop) where it leaves, or where the screen shows sky there. Else nothing: the water keeps the horizon's sheen
+// (uMapTop) where it leaves, or where the screen shows sky there (around there, across the ray: else the skyline
+// where it met the screen's edge drew a hard line down the water). Else nothing: the water keeps the horizon's sheen
 // its own shader gives it. (By the pixel where it left alone, from high up the rays that left through the screen's
 // sides met the hills drawn there, those through its top the sky: a straight edge across the river from each top
 // corner, more of one under the clouds' shadows.) Mixed in by Fresnel -- a mirror at a glance, little of it from
@@ -142,7 +143,13 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     // the ray left the screen or ran out: where (its view-space point at tEnd, perspective-correct), and the sky
     vec3 X = (uCamWorld * vec4(P + R * (L * tEnd * k1 / mix(k0, k1, tEnd)), 1.0)).xyz;
     vec2 se = clamp(s0 + dS * tEnd, vec2(0.002), vec2(0.998));
-    conf = max(step(4000.0, sceneD(se)), smoothstep(uMapTop, uMapTop * 1.5 + 50.0, X.y));
+    // whether the screen shows sky there: over a span across the ray (~4 % of the height, as the ripples would spread
+    // it), not at its one pixel -- where the skyline met the screen's edge, the pixels whose rays left on either side
+    // of it took the sky or nothing, a hard edge down the river (and a thin line under each tree or tower on it)
+    vec2 pr = dS * resolution, sp = normalize(vec2(-pr.y, pr.x) + 1e-6) * texelSize * (0.04 * resolution.y);
+    float sky = 0.0;
+    for (int i = 0; i < 8; i++) sky += step(4000.0, sceneD(clamp(se + sp * ((float(i) + j) * 0.25 - 1.0), vec2(0.002), vec2(0.998))));
+    conf = max(sky * 0.125, smoothstep(uMapTop, uMapTop * 1.5 + 50.0, X.y));
     if (w * conf < 0.01) return;
     vec3 Rw = normalize(mat3(uCamWorld) * R);
     refl = skyLight(Rw);
