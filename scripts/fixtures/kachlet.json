@@ -172,14 +172,84 @@
     "level": 291.35
    },
    {
-    "name": "Ilz: the loop below the Hals weir",
+    "name": "Ilz: the loop below the Hals weir (the power station's residual flow), its north bend",
     "box": [
      828580,
      5392000,
-     828800,
+     828960,
      5392600
     ],
-    "level": 296.0
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, its middle",
+    "box": [
+     828660,
+     5391800,
+     828960,
+     5392000
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, down to the weir (OSM way 440171244)",
+    "box": [
+     828750,
+     5391520,
+     828960,
+     5391800
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828900,
+     5391511,
+     828910,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828910,
+     5391503,
+     828920,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828920,
+     5391495,
+     828930,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828930,
+     5391488,
+     828940,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828940,
+     5391480,
+     828960,
+     5391520
+    ],
+    "level": 295.85
    },
    {
     "name": "Ilz above the Hals weir",

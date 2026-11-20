@@ -780,30 +780,37 @@ from aoi import RIVER_LEVEL, RIVER_STRETCHES, river_level
 # (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
 # everywhere subtracts exactly as the scalar did)
 RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
-# the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
-# one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
-# took a median between the two reaches: 64 m blocks of water at 295 and 299 m standing over the tailwater (292 m).
-# Stretches of one river's fall (under WEIR_STEP apart) stay one body, as before. The boxes step along a weir 20 m at
-# a time, across it: within POOL_EDGE of where two pools meet a cell takes the pool whose level (the nearest cell's
-# of that pool) its terrain is nearest -- the DGM over the water is the surface on either side and ramps across the
-# weir, so the cut runs along the weir's middle, not the boxes' staircase
-WEIR_STEP, POOL_EDGE = 2.0, 32  # m
-_lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
-_pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[
-    np.searchsorted(_lvs, np.broadcast_to(RIVER_LV, (D, W)))]
-if _pool.min() < _pool.max():
-    _best, _bestd = _pool.copy(), np.full((D, W), np.inf, np.float32)
-    for p_ in np.unique(_pool):
-        _d, (_i, _j) = ndimage.distance_transform_edt(_pool != p_, return_indices=True)
-        _dl = np.abs(dtm - np.broadcast_to(RIVER_LV, (D, W))[_i, _j]).astype(np.float32)
-        _take = (_d <= POOL_EDGE) & (_dl < _bestd)
-        _best[_take], _bestd[_take] = p_, _dl[_take]
-    _pool = _best
-    del _best, _bestd, _d, _i, _j, _dl, _take
+_lv64 = np.broadcast_to(RIVER_LV, (D, W))
 RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
 _w0 = gcol == C["water"]
 _near_lv = np.abs(dtm - RIVER_LV) < 0.8
 _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
+# the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
+# one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
+# took a median between the two reaches: 64 m blocks of water at 295 and 299 m standing over the tailwater (292 m).
+# Stretches of one river's fall (under WEIR_STEP apart) stay one body, as before. The boxes step along a weir 20 m at
+# a time, across it: within POOL_EDGE of a pool's water (OSM's, or flat terrain at its stretch's level) a cell of
+# another pool takes that pool if its terrain is nearer that pool's level (the nearest such water cell's) than its
+# own stretch's -- the DGM over the water is the surface on either side and ramps across the weir, so the cut runs
+# along the weir's middle, not the boxes' staircase. Only the pool's water counts, not its box: a box's edge along a
+# bank (no water of that pool beyond it) cuts nothing, and the bank's cells, nearer the upper level by their DGM,
+# stay their river's (the loop below the Hals weir: terraces at 298-301 m up the bank over the 296 m river)
+WEIR_STEP, POOL_EDGE = 2.0, 32  # m
+_lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
+_pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[np.searchsorted(_lvs, _lv64)]
+if _pool.min() < _pool.max():
+    _best, _bestd = _pool.copy(), np.abs(dtm - _lv64).astype(np.float32)
+    _pw = _w0 | _flat
+    for p_ in np.unique(_pool):
+        _pm = (_pool == p_) & _pw
+        if not _pm.any():
+            continue
+        _d, (_i, _j) = ndimage.distance_transform_edt(~_pm, return_indices=True)
+        _dl = np.abs(dtm - _lv64[_i, _j]).astype(np.float32)
+        _take = (_d <= POOL_EDGE) & (_dl < _bestd)
+        _best[_take], _bestd[_take] = p_, _dl[_take]
+    _pool = _best
+    del _best, _bestd, _pw, _pm, _d, _i, _j, _dl, _take
 _wat = np.zeros((D, W), bool)
 _wlev = np.full((D, W), -1, np.int32)
 # water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
@@ -825,8 +832,18 @@ for _, _gl in overrides.gate_lines(osm.lines):
 _gatelv[_lockm] = -1
 
 
-def _bodies(ww, pool):
-    """the water bodies of a window (ndimage.label), cut where the pools meet"""
+def _bodies(ww, pool, pool0):
+    """the water bodies of a window (ndimage.label), cut where the pools meet. Water that took another pool than its
+    stretch's (pool vs pool0) keeps it only where it joins that pool's own water in the window: else it would stand
+    apart, a body too small to be flattened, and is back in its stretch's pool"""
+    ps = np.unique(pool[ww])
+    if len(ps) <= 1:
+        return ndimage.label(ww)
+    pool = pool.copy()
+    for p_ in ps:
+        l_, _ = ndimage.label(ww & (pool == p_))
+        stray = (l_ > 0) & ~np.isin(l_, l_[(pool0 == p_) & (l_ > 0)])
+        pool[stray] = pool0[stray]
     ps = np.unique(pool[ww])
     if len(ps) <= 1:
         return ndimage.label(ww)
@@ -847,7 +864,7 @@ for _b in region.blocks(64):
     _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
     _ww = (_w0[_ws] | _big) & ~_lockm[_ws]
     _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
-    _bl, _bn = _bodies(_ww, _pool[_ws])
+    _bl, _bn = _bodies(_ww, _pool[_ws], _pool0[_ws])
     _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
     _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
     if len(_ids):

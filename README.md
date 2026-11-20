@@ -100,8 +100,8 @@ region at the map's edge: 20 s).
 size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
 box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
-and on to the lock's upper gates, the Danube below it, the Ilz above and below the Hals weir; elsewhere 290.921 m;
-stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where they meet, so no level is a median
+and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; elsewhere 290.921 m;
+stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
 across a weir), the anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
