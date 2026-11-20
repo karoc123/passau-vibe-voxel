@@ -7,6 +7,7 @@ import { chamferWalls, PAL_ROOF, SLANT, type Prism } from './chamfer';
 import { cornerQ, PINNED, rampDiagonal02, ramped, rampField, type RampField } from './ramps';
 import { slopeRoofs, wallTopCode } from './roofs';
 import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
+import { fetchGzip } from './fetch';
 
 export interface MeshRequest {
   key: string;
@@ -41,12 +42,6 @@ export type MeshReply =
 
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
   (self as unknown as { postMessage(m: MeshReply, t: Transferable[]): void }).postMessage(msg, transfer);
-
-export async function fetchGzip(url: string) {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`${res.status} ${url}`);
-  return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-}
 
 const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null });
 const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : [])];

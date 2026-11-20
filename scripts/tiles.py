@@ -38,7 +38,7 @@ LOD_LEVELS = (2, 4, 8)  # the distance levels: with roof planes, meshed like lev
 # levels built from the level of half their cell size (downsample's finer): 4 from 2, 8 from 4
 CASCADE = (4, 8)
 # the materials of buildings' walls (voxelMaterial.ts MAT: SOLID, WALL, GLASS, FLOODLIT, CONCRETE, BRONZE, RIBBON, CLASSIC,
-# WINDOW, TENEMENT; as web/src/stream.ts WALLS): a distance level's wall blocks wear their own colour (side_walls)
+# WINDOW, TENEMENT; as web/src/tile-request.ts WALLS): a distance level's wall blocks wear their own colour (side_walls)
 WALL_MATS = (0, 1, 2, 7, 13, 15, 19, 20, 21, 22)
 
 

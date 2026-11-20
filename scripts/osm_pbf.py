@@ -1,9 +1,9 @@
-"""Fallback for fetch_osm.sh when Overpass is overloaded: cut the AOI bbox out of a Geofabrik .osm.pbf and write
-the same JSON as Overpass `nwr(bbox); out body geom(bbox);` (what osm.py and traffic.py read):
+"""fetch_osm.sh's default: cut the AOI bbox out of the Geofabrik .osm.pbf and write the same JSON as Overpass
+`nwr(bbox); out body geom(bbox);` (what osm.py and traffic.py read; OVERPASS=1 in fetch_osm.sh asks Overpass instead):
 - tagged nodes inside the bbox
 - ways with a node inside the bbox; `geometry` keeps the coordinates of nodes inside or next to one, else null
 - relations with a member way/node kept above; way members carry the same clipped `geometry`
-usage: uv run --with osmium python scripts/osm_pbf.py data/raw/geofabrik/mazowieckie-latest.osm.pbf S,W,N,E out.json
+usage: uv run --with osmium python scripts/osm_pbf.py data/raw/geofabrik/niederbayern-latest.osm.pbf S,W,N,E out.json
 """
 import json
 import os

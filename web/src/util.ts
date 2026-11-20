@@ -14,18 +14,7 @@ export function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {
   else map.set(key, [value]);
 }
 
-export async function gunzip(data: ArrayBuffer | ReadableStream<Uint8Array<ArrayBuffer>>): Promise<ArrayBuffer> {
-  const stream = data instanceof ArrayBuffer ? new Blob([data]).stream() : data;
-  return new Response(stream.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-}
-
-export async function fetchGzip(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`${res.status} ${url}`);
-  return gunzip(res.body);
-}
-
-export const fetchJson = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as Promise<T>);
+export { fetchGzip, fetchJson } from './fetch';
 
 export function dataTexture(data: Uint8Array | Uint16Array, w: number, h: number, format: THREE.PixelFormat,
   type: THREE.TextureDataType = THREE.UnsignedByteType) {
