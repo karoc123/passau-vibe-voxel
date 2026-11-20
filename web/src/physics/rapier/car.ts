@@ -61,7 +61,7 @@ const REST = 0.35;
 // - com: the centre of mass' drop under the body's origin (m)
 // tools/rapier-car.mjs --set key=value,... runs the scenarios with others.
 export const RIDE = {
-  stiffness: 28, compression: 3.5, relaxation: 4.5, gravity: 1, downforce: 0, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
+  stiffness: 34, compression: 4, relaxation: 5.5, gravity: 1.25, downforce: 0.4, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
 };
 // m/s into the ground: a fall of ~8 m (under the car's gravity)
 export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
