@@ -30,7 +30,7 @@ import type { World } from './world';
 import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';
-import { AUTO_KEYS, DIST_MAX, type Gfx, gpuName, prepassPays, Settings } from './settings';
+import { AUTO_KEYS, DIST_MAX, DIST_MIN, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
 import { focusView } from './focus';
 import './style.css';
@@ -53,10 +53,10 @@ const phone = Math.min(screen.width, screen.height) < 600;
 const gpu = gpuName();
 const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
 // The detail, 0 to 1: the triangles the city's tiles may draw (city.ts picks their levels by it, the nearest finest),
-// evenly on a log scale from twice the whole map at 8 m (0: 0.5 M, the whole map at 8 m and some 4 m around the
-// camera) to all of it at 1 m with its foliage (14.7 M; at 1 no limit at all): 0.45 ~2.3 M (the whole map at 4 m, the
-// nearest at 2 and 1 m), 0.75 ~6.3 M. Phones draw 2 M at most whatever it says (the 1 m tiles of the whole map need ~2
-// GB of GPU).
+// evenly on a log scale from twice the whole map at 8 m (0: 3.4 M on today's map, the whole map at 8 m and the nearest
+// finer) to all of it at 1 m with its foliage (132 M; at 1 no limit at all): 0.45 ~18 M, 0.75 ~53 M. Phones draw 2 M at
+// most whatever it says (the 1 m tiles of the whole map need several GB of GPU), the whole map at 8 m alone ~1.7 M of
+// it: their view distance stays within what half of it affords (viewCut).
 const ceiling = () => (!phone ? Infinity : 2e6);
 const budget = () => {
   const l = gfx.now.detail, [lo, hi] = city?.trisRange ?? [0.5e6, 14.7e6];
@@ -553,13 +553,21 @@ function stillChanged() {
 // 100 m steps), so that from high up (the whole map's view, 2.5 km over it) the city below is not all haze. A street,
 // Oberhaus, the overview (~560 m up) keep the setting.
 const VIEW_PER_HEIGHT = 1.2, WHOLE_START = 0.75;
-let cutNow = -1;
+let cutNow = -1, affordNow = Infinity;
 // 'Whole map' (dist 0) is DIST_MAX (5 km), so that on a large map it no longer loads all of it; its fog starts late.
+// Within what the budget affords (city.ts affordable): the coarsest level's nodes in range at most half the budget (as
+// detail 0 is twice the whole map's), the rest for the splits nearest and in view. Only a phone's ceiling ever makes it
+// bite (on a desktop the budget is at least twice the whole map at 8 m); the camera's height still widens it (the
+// overview: the whole map at 8 m). It shrinks at once and grows again only by AFFORD_STEP, not to and fro as the
+// camera moves; never under DIST_MIN.
+const AFFORD_STEP = 300;
 function viewCut(above: number) {
-  const d = gfx.now.dist || DIST_MAX, c = Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100);
+  const a = Math.max(DIST_MIN, city?.affordable(budget() / 2) ?? Infinity);
+  if (a < affordNow || a >= affordNow + AFFORD_STEP) affordNow = a;
+  const want = gfx.now.dist || DIST_MAX, d = Math.min(want, affordNow), c = Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100);
   if (c === cutNow) return;
   cutNow = c;
-  daylight.setCut(c, gfx.now.dist ? undefined : WHOLE_START);
+  daylight.setCut(c, gfx.now.dist || d < want ? undefined : WHOLE_START);
   city?.setDist(c);
 }
 

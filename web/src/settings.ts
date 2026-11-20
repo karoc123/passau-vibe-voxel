@@ -6,8 +6,9 @@ import { clamp } from './util';
 // defaults; only what differs from the defaults is written into the URL. All of them apply live.
 //   res      0.5..1   pixels, a share of the screen's (at most 2 per CSS pixel)
 //   detail   0..1     the triangles the city's tiles may draw (main.ts budget, city.ts): from about the whole map at
-//            8 m (0) to everything at 1 m (1); between, the whole map at 4 m first, then the nearest at 2 and 1 m.
-//            Phones draw 2 M at most whatever it says
+//            8 m (0) to everything at 1 m (1); between, the nearest and in view finest first.
+//            Phones draw 2 M at most whatever it says, and their view distance stays within what that affords
+//            (main.ts viewCut)
 //   dist     metres   the view distance (Sichtweite): the city's tiles further from the camera than this (along the
 //            ground) are neither drawn nor loaded, the fog closes in before it, a coarse ground stands beyond it
 //            (city.ts, daylight.ts, farground.ts); 0: DIST_MAX, with the fog starting later

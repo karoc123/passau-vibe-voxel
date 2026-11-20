@@ -214,9 +214,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // quadtree from the coarsest down: a node is drawn as it is while a cell of the next finer level would come out under
   // pxCoarse pixels at its nearest point (back to the finer one above pxFine, so a camera at the switch doesn't flip it
   // to and fro); an 8 m node always splits, budget permitting. The budget (triangles drawn, budget(): meta.json
-  // tiles.tris, a 1 m tile with its foliage) goes to the splits first of 8 m nodes (the whole map at 4 m: 1.1 M), then
-  // in the order of that pixel size, largest first, so the nearest first, a node out of view as if twice as far: a
-  // split that would take the sum over it ends the splitting (one made last time may go 10 % over, again against
+  // tiles.tris, a 1 m tile with its foliage) goes to the splits in the order of that pixel size, largest first, so the
+  // nearest first, 8 m nodes among the others (not all of them first: the whole map at 4 m is 7.8 M, past a phone's
+  // 2 M, which then went to 4 m nodes kilometres off and out of view, the hill 450 m below the camera left at 4-8 m), a
+  // node out of view as if twice as far: a split that would take the sum over it ends the splitting (one made last time may go 10 % over, again against
   // flipping). What is drawn (shown) only changes once all of it is in: a coarse node goes once every finer
   // node chosen under it (a 1 m tile with its foliage, after the first load) is ready, so nothing is ever missing; the
   // nodes shown never overlap. Each tile's own faces close it at its edges, so a 1 m tile next to a 2 m one (or any
@@ -330,7 +331,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       const w = px * (was ? 1.25 : 1) * (inView ? 1 : 0.5);
       const floor = n.s > FLOOR_S && dist <= FLOOR_M;
       const pxSplit = !was && !inView && dist > OUT_M ? px / OUT_FAR : px;
-      if (floor || n.s > PX_TOP || pxSplit > (was ? pxCoarse : pxFine)) heapUp(open, { n, k, w: (floor ? 2e9 : n.s > PX_TOP ? 1e9 : 0) + w, floor });
+      if (floor || n.s > PX_TOP || pxSplit > (was ? pxCoarse : pxFine)) heapUp(open, { n, k, w: (floor ? 2e9 : 0) + w, floor });
       else add(n);
     };
     const kids = (k: number, n: LNode) => {
@@ -664,6 +665,23 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
       for (const i of rangeList) if (!inTile[i]) gaps++;
       return { on: lodOn, shownBy, pending, gaps };
+    },
+    // The view distance (metres, in 100 m steps) at which the coarsest level's nodes in range cost at most tris (pick()
+    // pays for every one in range before any split): Infinity where the whole map's do. main.ts viewCut keeps the view
+    // distance within it for half the budget, so that a small budget (a phone's 2 M on a map whose 8 m level alone is
+    // ~1.7 M) is not spent on the whole map at 8 m around and behind the camera, with nothing left for what is in view
+    affordable(tris: number) {
+      if (!lodOn || ct || !Number.isFinite(tris)) return Infinity;
+      const p = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+      const st = lods.at(-1)!, dt = S.dims[st], L = st * T, near: [number, number][] = [];
+      for (let ty = 0; ty < dt.ny; ty++) for (let tx = 0; tx < dt.nx; tx++) {
+        const x0 = tx * L, z0 = ty * L, x1 = Math.min((tx + 1) * L, d.nx * T), z1 = Math.min((ty + 1) * L, d.ny * T);
+        near.push([Math.hypot(Math.max(x0 - p.x, 0, p.x - x1), Math.max(z0 - p.z, 0, p.z - z1)), cost(lnode(st, tx, ty))]);
+      }
+      near.sort((a, b) => a[0] - b[0]);
+      let sum = 0;
+      for (const [dn, c] of near) if ((sum += c) > tris) return Math.max(0, Math.floor((dn - KEEP_M) / 100) * 100);
+      return Infinity;
     },
     // every tile the budget asks for is in
     get settled() { return settled; },
