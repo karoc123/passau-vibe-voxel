@@ -102,6 +102,8 @@ def build(vol, g, pal, C, osm, note):
         else:
             hi, lo = b, a
         rr, cc = _cells(ln.buffer(3.0), D, W)
+        if not len(rr):  # (a stairwell beyond the region's volume: its passage's end is in it)
+            continue
         ring = g[rr, cc]
         street = int(np.percentile(ring, 80))
         zf = level[bot]
