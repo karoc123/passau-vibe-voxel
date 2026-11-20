@@ -121,14 +121,21 @@ def build(vol, R0, C0, note, rooms=None):
 
 def check(vol, room, R0=0, C0=0):
     """what is wrong with a carved room (vol: the region's volume, R0, C0 its corner in the project grid), [] if
-    nothing: see the module's doc"""
+    nothing: see the module's doc. (It looks at the room's box and a voxel round it only.)"""
     H, D, W = vol.shape
+    parts = (room, *room.doors)
+    za, zb = max(min(p.z0 for p in parts) - 1, 0), min(max(p.z1 for p in parts) + 1, H)
+    ra, rb = max(min(p.box[0] for p in parts) - R0 - 1, 0), min(max(p.box[1] for p in parts) - R0 + 1, D)
+    ca, cb = max(min(p.box[2] for p in parts) - C0 - 1, 0), min(max(p.box[3] for p in parts) - C0 + 1, W)
+    sub = vol[za:zb, ra:rb, ca:cb]
+    at = lambda z, r, c: f"z {z + za}, row {r + ra + R0}, col {c + ca + C0}"
     bad = []
 
     def mask(part):
-        m = np.zeros((H, D, W), bool)
-        rr, cc = _cells(part.box, R0, C0, D, W)
-        m[max(part.z0, 0):min(part.z1, H), rr, cc] = True
+        m = np.zeros(sub.shape, bool)
+        r0, r1, c0, c1 = part.box
+        m[max(part.z0 - za, 0):max(part.z1 - za, 0), max(r0 - R0 - ra, 0):max(r1 - R0 - ra, 0),
+          max(c0 - C0 - ca, 0):max(c1 - C0 - ca, 0)] = True
         return m
 
     room_m = mask(room)
@@ -139,9 +146,8 @@ def check(vol, room, R0=0, C0=0):
     hollow = room_m | door_m
     if not room_m.any():
         return [f"{room.name}: no voxels"]
-    if (vol[hollow] != 0).any():
-        z, r, c = np.argwhere(hollow & (vol != 0))[0]
-        bad.append(f"not empty at z {z}, row {r + R0}, col {c + C0}")
+    if (sub[hollow] != 0).any():
+        bad.append("not empty at " + at(*np.argwhere(hollow & (sub != 0))[0]))
     # every neighbour of a room voxel: solid, the room, or a door
     for ax in range(3):
         for sh in (1, -1):
@@ -150,19 +156,16 @@ def check(vol, room, R0=0, C0=0):
             dst = [slice(None)] * 3
             src[ax], dst[ax] = (slice(0, -1), slice(1, None)) if sh > 0 else (slice(1, None), slice(0, -1))
             nb[tuple(dst)] = room_m[tuple(src)]  # the voxels next to a room voxel on that side
-            leak = nb & ~hollow & (vol == 0)
+            leak = nb & ~hollow & (sub == 0)
             if leak.any():
-                z, r, c = np.argwhere(leak)[0]
-                bad.append(f"open to the outside at z {z}, row {r + R0}, col {c + C0} (not a door)")
-                break
+                bad.append("open to the outside at " + at(*np.argwhere(leak)[0]) + " (not a door)")
     # a floor under every column
     zs = np.argmax(room_m, axis=0)
-    has = room_m.any(0)
-    rr, cc = np.nonzero(has)
+    rr, cc = np.nonzero(room_m.any(0))
     under = zs[rr, cc] - 1
-    if (under < 0).any() or (vol[np.maximum(under, 0), rr, cc] == 0).any():
+    if (under < 0).any() or (sub[np.maximum(under, 0), rr, cc] == 0).any():
         bad.append("a column without a floor")
-    # each door: next to the room, and to open air outside it
+    # each door: next to the room, and to open air outside it (the crop's margin: np.roll wraps only into it)
     for d in room.doors:
         dm = mask(d) & ~room_m
         grown = np.zeros_like(dm)
@@ -170,7 +173,7 @@ def check(vol, room, R0=0, C0=0):
             grown |= np.roll(dm, 1, ax) | np.roll(dm, -1, ax)
         if not (grown & room_m).any():
             bad.append(f"door {d.box} does not reach the room")
-        if not (grown & ~hollow & (vol == 0)).any():
+        if not (grown & ~hollow & (sub == 0)).any():
             bad.append(f"door {d.box} does not reach the outside")
     return bad
 
@@ -253,6 +256,13 @@ def _test():
     sp = runs(0, D, 0, W)
     if not (sp[:, 4] == WALL).all() or int(sp[:, 3].sum()) != n_room:
         bad.append("runs: not the wall that stood there")
+    # in the project grid: the same room in a region whose corner is project row 1000, column 2000
+    moved = lambda p, **k: type(p)(**{**p.__dict__, "box": (p.box[0] + 1000, p.box[1] + 1000, p.box[2] + 2000, p.box[3] + 2000), **k})
+    v6 = city()
+    build(v6, 1000, 2000, note, [moved(hall, doors=tuple(moved(d) for d in hall.doors))])
+    if not np.array_equal(v6, vol) or not np.array_equal(runs(0, D, 0, W), sp):
+        bad.append("build: not the same room in a region at another corner of the project grid")
+    build(city(), 0, 0, note, [hall])  # (the record as it was)
     # check(): passes; a hole in the wall, a door that leads nowhere, a missing floor fail
     if check(vol, hall):
         bad.append(f"check: a sound room fails: {check(vol, hall)}")
