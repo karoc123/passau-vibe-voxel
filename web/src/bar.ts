@@ -142,6 +142,7 @@ class Graphics {
   show() { for (const f of this.sync) f(); }
 }
 const PRESET: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
+const FOLD_KEY = 'passau.barFolded';
 
 export class Bar {
   readonly el = el('div', '');
@@ -151,7 +152,8 @@ export class Bar {
   private readonly date: Slider;
   private readonly sky: HTMLElement;
   // folds the panel to this one round button (and the mode buttons beside it): as the "?" button's credits, out of
-  // the way of the thumbs. Folded at first on touch screens and narrow ones, open on the desktop.
+  // the way of the thumbs. Folded at first on touch screens and narrow ones, open on the desktop; then as last left
+  // (localStorage, FOLD_KEY).
   private readonly foldButton = el('button', 'bar-fold', '<span aria-hidden="true"></span>', this.el);
 
   constructor({ days, weathers, river, onDay, onDayEnd, onHour, onWeather, onRiver }: {
@@ -166,8 +168,14 @@ export class Bar {
   }) {
     this.el.id = 'bar';
     this.foldButton.type = 'button';
-    this.foldButton.addEventListener('click', () => { this.fold(!this.folded); this.foldButton.blur(); });
-    this.fold(coarsePointer() || matchMedia('(max-width: 600px)').matches);
+    this.foldButton.addEventListener('click', () => {
+      this.fold(!this.folded);
+      this.foldButton.blur();
+      try { localStorage.setItem(FOLD_KEY, this.folded ? '1' : '0'); } catch { /* storage blocked: folded as by default next time */ }
+    });
+    let kept: string | null = null;
+    try { kept = localStorage.getItem(FOLD_KEY); } catch { /* storage blocked */ }
+    this.fold(kept === '1' || (kept !== '0' && (coarsePointer() || matchMedia('(max-width: 600px)').matches)));
     this.search = new PlaceSearch(this.el, 'Search Passau…');
     this.date = new Slider(this.el, { min: 1, max: 365, step: 1, marks: days, near: 3, log: false, show: dayMonth, onInput: onDay, onChange: onDayEnd });
     this.time = new Slider(this.el, { min: 4, max: 23.5, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });
