@@ -9,7 +9,7 @@ import type { Nav, Ride } from './nav';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
 import { airWorld, carGround, STEP } from './car-contact';
-import type { Obstacle, RapierDrive } from '../physics/rapier/drive';
+import type { Obstacle, RapierDrive, Walker } from '../physics/rapier/drive';
 import './drive.prototype.css';
 
 // The car's physics: Rapier's (physics/rapier/drive.ts, loaded in the background once the city is shown) unless
@@ -331,11 +331,25 @@ export class DrivePrototype {
       if (other === car || !q || (p && (Math.abs(q.x - p.x) > 40 || Math.abs(q.z - p.z) > 40))) continue;
       obstacles.push({ key: other, x: q.x, y: q.y, z: q.z, h: other.rh ?? 0, len: other.len, bus: other.bus });
     }
-    const events = rap.update(dt, input, obstacles);
+    // the people near it, walking or cycling (not one being walked by the player)
+    const walkers: Walker[] = [];
+    for (const q of life.people) {
+      if (!q.rp || q.ctl || (p && (Math.abs(q.rp.x - p.x) > 15 || Math.abs(q.rp.z - p.z) > 15))) continue;
+      walkers.push({ key: q, x: q.rp.x, y: q.rp.y, z: q.rp.z, h: q.rh ?? 0, col: q.col });
+    }
+    rap.group = life.group;
+    const events = rap.update(dt, input, obstacles, walkers);
     this.waiting = events === 'loading';
     if (events === 'loading') return;
     for (const e of events) {
-      if (e.kind === 'impact' && e.speed > 2) this.say('Contact', 350);
+      if (e.kind === 'knock') {
+        // (out of the traffic: it lies where it is knocked to)
+        life.takeWheel(e.key as Car);
+        this.say('Crash!', 600);
+      } else if (e.kind === 'person') {
+        life.people = life.people.filter((q) => q !== e.key);
+        this.say('Ouch!', 600);
+      } else if (e.kind === 'impact' && e.speed > 2) this.say('Contact', 350);
       else if (e.kind === 'landing') {
         if (e.crash) { active.crashUntil = now + CRASH_MS; this.say('Crash!', CRASH_MS); }
         else if (e.speed > 6) this.say('Hard landing', 700);
@@ -355,6 +369,11 @@ export class DrivePrototype {
 
   private presentRapier(active: Driving, rap: RapierDrive) {
     const d = rap.drawn(), { car } = active;
+    for (const [key, w] of rap.wrecks()) {
+      const c = key as Car;
+      (c.rp ??= new Vector3()).set(w.x, w.y, w.z);
+      Object.assign(c, { rh: w.h, pitch: w.pitch, roll: w.roll, v: 0, brake: 1 });
+    }
     if (d) {
       car.rp!.set(d.x, d.y, d.z);
       car.rh = d.h;

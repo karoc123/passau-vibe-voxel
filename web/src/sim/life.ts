@@ -872,7 +872,8 @@ export class StreetLife {
     car.wait = 0;
     this.detachedCars.push(car);
     // Keep recent player-parked cars around and leave ample room for the traffic fleet.
-    if (this.detachedCars.length > 8) this.detachedCars.shift();
+    // (never the one driven or followed)
+    if (this.detachedCars.length > 8) this.detachedCars.splice(Math.max(0, this.detachedCars.findIndex((c) => c !== this.keep)), 1);
     return true;
   }
 

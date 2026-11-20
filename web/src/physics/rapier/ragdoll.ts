@@ -2,6 +2,7 @@
 // animated NPC would) until something hits it; then all of it turns dynamic and takes the hitter's momentum.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { G_CAR_ONLY, G_RAGDOLL } from './terrain';
 
 // (drawn as cylinders: CapsuleGeometry would pull more of three into the boot bundle, which three lives in)
 // part: centre (standing, relative to the feet), capsule half height and radius, axis 'y' or 'x'
@@ -32,8 +33,8 @@ const JOINTS: [Part, Part, [number, number, number], 'ball' | 'hinge'][] = [
   ['legUL', 'legLL', [0.11, 0.48, 0], 'hinge'],
   ['legUR', 'legLR', [-0.11, 0.48, 0], 'hinge'],
 ];
-// ragdoll parts don't collide with each other (group 2 in, group 2 filtered out)
-const GROUPS = (0x0002 << 16) | 0xfffd;
+// ragdoll parts don't collide with each other, nor with what only the car meets
+const GROUPS = (G_RAGDOLL << 16) | (0xffff & ~G_RAGDOLL & ~G_CAR_ONLY);
 
 export class Ragdoll {
   readonly bodies: RAPIER.RigidBody[] = [];
@@ -41,12 +42,16 @@ export class Ragdoll {
   readonly colliders = new Set<number>();
   limp = false;
 
-  constructor(R: typeof RAPIER, private readonly world: RAPIER.World, feet: { x: number; y: number; z: number }, heading: number, group: THREE.Group, limp = false) {
+  private readonly mats: THREE.Material[];
+
+  // cloth: its clothes' colour (default blue)
+  constructor(R: typeof RAPIER, private readonly world: RAPIER.World, feet: { x: number; y: number; z: number }, heading: number, group: THREE.Object3D, limp = false, cloth?: THREE.Color) {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading);
     const rot = (v: readonly number[]) => new THREE.Vector3(v[0], v[1], v[2]).applyQuaternion(q);
     const byName = new Map<Part, RAPIER.RigidBody>();
     const skin = new THREE.MeshStandardMaterial({ color: 0xe0b090, roughness: 0.7 });
-    const cloth = new THREE.MeshStandardMaterial({ color: 0x3060c0, roughness: 0.8 });
+    const clothes = new THREE.MeshStandardMaterial({ color: cloth ?? 0x3060c0, roughness: 0.8 });
+    this.mats = [skin, clothes];
     for (const [name, p] of Object.entries(PARTS) as [Part, (typeof PARTS)[Part]][]) {
       const c = rot(p.at);
       const partQ = q.clone();
@@ -59,7 +64,7 @@ export class Ragdoll {
       this.colliders.add(col.handle);
       this.bodies.push(b);
       byName.set(name, b);
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r, p.hh * 2 + p.r * 1.6, 8), name === 'head' || name.startsWith('armL') ? skin : cloth);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r, p.hh * 2 + p.r * 1.6, 8), name === 'head' || name.startsWith('armL') ? skin : clothes);
       m.castShadow = true;
       group.add(m);
       this.meshes.push(m);
@@ -86,7 +91,8 @@ export class Ragdoll {
 
   dispose() {
     for (const b of this.bodies) this.world.removeRigidBody(b);
-    for (const m of this.meshes) m.removeFromParent();
+    for (const m of this.meshes) { m.removeFromParent(); m.geometry.dispose(); }
+    for (const m of this.mats) m.dispose();
   }
 }
 

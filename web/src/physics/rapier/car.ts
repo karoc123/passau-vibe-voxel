@@ -15,7 +15,7 @@
 //   the driver is shaken, as variant A's).
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { CAR_GROUPS, CAR_ONLY_GROUPS, type RapierTerrain } from './terrain';
+import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
 
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
 export type CarStatus = 'ok' | 'water';
@@ -158,7 +158,7 @@ export class RapierCar {
     // (the velocity before the springs' impulses: a landing's speed into the ground)
     const lv = this.body.linvel();
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
-    c.updateVehicle(dt, undefined, CAR_GROUPS);
+    c.updateVehicle(dt, undefined, WHEEL_GROUPS);
     if (this.tuning.steps) this.stepAssist(input, dt);
     if (this.tuning.air && this.wheelsInContact() === 0) this.airAssist(dt);
   }
@@ -359,7 +359,8 @@ export class RapierCar {
     const b = this.body;
     let nx = 0, nz = 0;
     this.world.contactPairsWith(this.chassis, (other) => {
-      if (this.isWedge(other)) return;
+      // (walls: not the wedges, not what moves by itself -- a ragdoll, a wreck)
+      if (this.isWedge(other) || other.parent()?.isDynamic()) return;
       this.world.contactPair(this.chassis, other, (m, flipped) => {
         if (m.numContacts() === 0) return;
         const n = m.normal();

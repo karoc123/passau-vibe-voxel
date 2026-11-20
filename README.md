@@ -308,8 +308,10 @@ the same car where you stop, and **Esc** takes you back to the map.
 The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive.ts`,
 `car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks; the
 ground's 1 m steps are smoothed into a surface of the car's own, steps up to ~1 m that are not ground (platforms, low
-walls) get an invisible ramp. Traffic cars and buses near it are solid (it bounces off them); they recognise the
-player vehicle in their spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
+walls) get an invisible ramp. Traffic cars and buses near it are solid; hit one at more than ~15 km/h (between the
+two) and it is knocked out of the traffic, tumbles and stays where it comes to rest. People walking or cycling that
+the car runs into fall as ragdolls (gone once the car is ~35 m away). The traffic recognises the player vehicle in its
+spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
 ~1.5 s after the city is shown; taking the wheel before that waits for it.

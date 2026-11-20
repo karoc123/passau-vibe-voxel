@@ -23,8 +23,10 @@ export const CHUNK = 16;
 // collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
 // meets (its surface on the ramps, the steps' wedges: car.ts) G_CAR_ONLY; the ramps as drawn meet everything but the
 // car; other bodies, and queries that should see the city as drawn, use WORLD_GROUPS.
-export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1;
+export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1, G_RAGDOLL = 1 << 2;
 export const CAR_GROUPS = (G_CAR << 16) | 0xffff;
+// the wheels' rays: as the car, but not on a ragdoll (the car's wheels rolling over one would kick it about)
+export const WHEEL_GROUPS = (G_CAR << 16) | (0xffff & ~G_RAGDOLL);
 export const CAR_ONLY_GROUPS = (G_CAR_ONLY << 16) | G_CAR;
 export const NOT_CAR_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | (0xffff & ~G_CAR);
 export const WORLD_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | 0xffff;
