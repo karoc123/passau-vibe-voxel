@@ -248,8 +248,8 @@ const BUILD_VERTEX = `
 // No \`flat\` varyings: through ANGLE's D3D11 a program with any costs extra work per triangle. On an Iris Xe (Windows
 // Chrome, interleaved A/B in one page) the scene pass at 1/16 of the pixels went from 16-22 to ~5 ms, at full size
 // from 25-27 to 12-16 ms; the sun's shadow map, drawn with makeBuildDepthMaterial, ~20 % faster. Integer attributes
-// (gpuType IntType) or dropping the per-vertex uBldOn fetch saved nothing measurable there. (tools/vtxcost.mjs:
-// the tiles' material against a plain one.)
+// (gpuType IntType) or dropping the per-vertex uBldOn fetch saved nothing measurable there (measured
+// with the tiles' material against a plain one).
 const FACE_VERTEX = `{
     float kind = vattr.w > ${SLANT - 0.5} ? 2.0 : vattr.w > 0.5 && vattr.w < ${WALL_TOP - 0.5} ? 1.0 : 0.0;
     vFace = vec4(floor(vpal + 0.5), (kind == 1.0 ? mod(vattr.x, 8.0) : vattr.x) + 256.0 * kind, vbld, vattr.z);
@@ -818,7 +818,7 @@ if (!THREE.ShaderChunk.shadowmap_vertex.includes(SHADOW_NORMAL_FALLBACK)) throw 
 // metre is a pixel or less: without the moving things' shadow map (daylight.ts NO_MOVING_SHADOW) -- a car there is two
 // pixels and its shadow less, and traffic is only simulated within ~900 m of the focus anyway. What it costs is in the
 // program, not in the lookup: on an Iris Xe skipping it beyond 1 km, or taking one tap instead of five, saved nothing,
-// while a program without it drew the scene ~20 % faster at the overview, ~40 % over the whole map (tools/farshade.mjs)
+// while a program without it drew the scene ~20 % faster at the overview, ~40 % over the whole map
 export function makeVoxelMaterial(uniforms: VoxelUniforms, { far = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.0 });
   mat.onBeforeCompile = (shader) => {

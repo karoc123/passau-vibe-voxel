@@ -7,7 +7,6 @@ import type { Ride } from './nav';
 const RIG = {
   person: { eye: [1.62, 0.2], back: 4.5, up: 2.2, fov: 65 },
   car: { eye: [1.3, 2.45], back: 9, up: 3.6, fov: 62 }, // dashcam just past the bonnet
-  tram: { eye: [2.1, 5.4], back: 26, up: 9, fov: 60 }, // at the cab window
 };
 
 export function rideCamera(R: Ride, pose: Pose, world: World | null) {

@@ -88,6 +88,5 @@ export interface Person {
 
 export type Agent = Car;
 export type Rideable = Car | Person;
-// ('tram' is no longer simulated; it stays in Kind only while nav/nav.ts and nav/ride.ts still name it)
-export type Kind = 'car' | 'tram' | 'person';
+export type Kind = 'car' | 'person';
 export interface Pose { x: number; y: number; z: number; h: number }

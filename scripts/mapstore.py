@@ -1,5 +1,5 @@
 """The map's rasters and volume as the regions left them (data/cache/regions/<row>_<col>/: core.npz, vol.npz), read on
-demand, so that the steps after the regions (scripts/regions.py: the labels, the camera presets, the trams, traffic.py)
+demand, so that the steps after the regions (scripts/regions.py: the labels, the camera presets, traffic.py)
 hold no array of the map's size: what they ask for is read from the regions' cores it lies in, a few cores kept at a
 time, and the map-sized files (data/ground.npz ...) are written row band by row band.
 

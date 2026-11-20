@@ -30,7 +30,7 @@ its decisions bounded so that the core comes out the same in any cover (scripts/
 check.py covers); it writes the tiles of its core itself (tiles.export_window).
 Network-wide after the regions (regions.py), over OSM's vectors and what the regions hand over, sampling the regions'
 rasters and volumes where they look (mapstore.py: nothing of the map's size in memory): the labels (the parks',
-decluttered, their radii), the camera presets, the tram paths, traffic.py over the whole network.
+decluttered, their radii), the camera presets, traffic.py over the whole network.
 Still on the whole map's rasters (a window there would change what is built, not only where):
   flood.py      the spill height is a connectivity (how high the water must rise to reach a cell from the river),
                 the river bed is made per row of the whole map (its westernmost bank, the thalweg smoothed over rows)

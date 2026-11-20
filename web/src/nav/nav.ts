@@ -17,7 +17,7 @@ import { stickAxis, TouchSticks } from './touch-sticks';
 //   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
 //          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's)
-//   ride:  following a pedestrian, car or tram; move keys walk as that person, or get out of a vehicle
+//   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
 export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
@@ -613,7 +613,7 @@ export class Nav {
     const R = this.ride, pose = R && this.life?.pose(R.kind, R.obj);
     const f = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
     const p = pose ? new THREE.Vector3(pose.x, pose.y, pose.z) : this.camera.position.clone();
-    if (R && pose && R.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), R.kind === 'tram' ? 2.6 : 2.0);
+    if (R && pose && R.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), 2.0);
     this.setWalk({ at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.kind === 'person' });
   }
 

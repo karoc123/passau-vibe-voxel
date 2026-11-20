@@ -3353,7 +3353,7 @@ _es = (slice(_ea - MR0, _eb - MR0), slice(_ec - MC0, _ed - MC0))
 RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
                                                             _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
                                                             **EXPORT_IDS).items()}
-# QA aid: drivable-surface mask (1 = carriageway/road area, 2 = tram bed) for web/tools/qa.mjs
+# drivable-surface mask (1 = carriageway/road area, 2 = rails / track bed): regions.py writes it as qa_roadmask.bin.gz
 qa = np.zeros((D, W), np.uint8)
 qa[is_road] = 1
 qa[np.isin(gcol, [C["trambed"], C["rail"]])] = 2

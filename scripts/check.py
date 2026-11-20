@@ -259,7 +259,7 @@ LOD2_SHARE = 0.90     # building cells whose roof is LoD2's (0.965)
 LASER_SHARE = 0.80    # canopy cells whose height is the laser's (0.884)
 SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprints, each way, per region (1.35)
 MATCH_SHARE = 0.40    # OSM outlines matched to a LoD2 footprint (0.493)
-SURFACE = {"road": dict(sunk=0.015, hover=0.005), "tram": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
+SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
 
 
@@ -280,7 +280,7 @@ M_LEAF, M_LAMP, M_CAR = 3, 5, 11
 
 
 def surface(ws, fx):
-    """where the moving things meet the voxels: every car lane, tram track and footpath of traffic.json walked every
+    """where the moving things meet the voxels: every car lane and footpath of traffic.json walked every
     metre at the height the viewer gives it (linear between path points), against the finished volume (the regions'
     vol.npz, mapstore.MapVolume: nothing of the map's size)
       sunk:  a solid voxel (not leaves, lamps, poles, trunks, cars) 0.3-1.5 m above the path -- the vehicle drives
@@ -307,7 +307,6 @@ def surface(ws, fx):
                     yield x0 + (x1 - x0) * f - ty * o, y0 + (y1 - y0) * f + tx * o, z0 + (z1 - z0) * f
     lanes = lambda r: [r["o0"] + 3.0 * i for i in range(r["lanes"])]  # noqa: E731  (the lane centres: web/src/sim/life.ts)
     pts = {"road": [q for r in tr["roads"] for q in walk(r["p"], lanes(r))],
-           "tram": [q for t in tr.get("trams", []) for q in walk(t["p"])],
            "ped": [q for p in tr["peds"] for q in walk(p["p"], (-0.85, 0.85) if "side" not in p else (0.85 * p["side"],))]}
     out = {}
     for k, P in pts.items():
