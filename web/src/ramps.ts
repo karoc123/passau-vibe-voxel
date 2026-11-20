@@ -40,7 +40,12 @@ export interface RampField {
 
 // The field of a 1 m tile's columns (apron included); pal: palette flags (PAL_GROUND); deck: those of a deck's top
 // (default: pal)
-export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs: Uint16Array, under: Uint8Array, pal: Uint8Array, deck = pal): RampField {
+// covered: the ground under something (a tunnel's floor under its rock, a road under a bridge) counts too where the
+// column stands open COVER_CLEAR m over it -- for the car's surface (physics/rapier/terrain.ts) only: a bored tunnel's
+// floor rises in 1 m steps, which were risers the car crashed into (the B 85's ramp tunnel at Hacklberg); the drawn
+// ramps and the mesher keep the column's top
+export const COVER_CLEAR = 3;
+export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs: Uint16Array, under: Uint8Array, pal: Uint8Array, deck = pal, covered = false): RampField {
   const S = N + 2, V = S + 1, paved = new Uint8Array(S * S), h = new Int32Array(V * V).fill(PINNED);
   let ground = under;
   // (solid: how far each column is solid from the bottom up, in cells)
@@ -52,6 +57,15 @@ export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs
     solid[c] = t;
     const k = (off[c] + counts[c] - 1) * 3, v = runs[k + 2], top = runs[k] + runs[k + 1];
     if (top === ground[c]) { if (v < pal.length && pal[v] & PAL_GROUND) paved[c] = 1; continue; }
+    if (covered && top > ground[c]) {
+      // (the run ending at the ground, and the next one's bottom at least COVER_CLEAR over it)
+      let gk = -1;
+      for (let k2 = off[c] * 3, e = (off[c] + counts[c]) * 3; k2 < e; k2 += 3) {
+        if (runs[k2] + runs[k2 + 1] === ground[c]) gk = k2;
+        else if (gk >= 0) { if (runs[k2] < ground[c] + COVER_CLEAR) gk = -1; break; }
+      }
+      if (gk >= 0 && runs[gk + 2] < pal.length && pal[runs[gk + 2]] & PAL_GROUND) { paved[c] = 1; continue; }
+    }
     // (a deck: a paved top run over the ground's top)
     if (top < ground[c] || top > 255 || v >= deck.length || !(deck[v] & PAL_GROUND)) continue;
     if (ground === under) ground = Uint8Array.from(under);

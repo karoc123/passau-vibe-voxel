@@ -1494,6 +1494,21 @@ CORE_WALLS = ["#d9a441", "#b55a3f", "#d98f6e", "#efe3c4", "#c98a5a", "#e6d3a3", 
               "#9daa87", "#c2866e", "#e9d6b4"]
 
 
+# buildings that are structures, not houses: the shader's facade of storeys of windows over a ground floor of shop
+# windows (M_WALL) on them read as housing -- the Kachlet power station (power=plant, building=industrial, its outline
+# across the Danube) was a 350 m palace of windows. They get plain walls (M_SOLID)
+PLAIN_BUILDINGS = {"industrial", "warehouse", "hangar", "silo", "storage_tank", "transformer_tower", "service",
+                   "digester", "bunker", "water_tower", "barn", "farm_auxiliary", "cowshed", "stable", "sty", "garage",
+                   "garages", "shed", "carport", "tank", "pumping_station", "bridge", "dam", "weir"}
+PLAIN_MAN_MADE = {"works", "water_works", "wastewater_plant", "silo", "storage_tank", "tank", "water_tower",
+                  "pumping_station", "reservoir_covered", "kiln", "gasometer", "dam", "weir", "lock_gate"}
+
+
+def plain_walls(f, btype):
+    return (btype in PLAIN_BUILDINGS or tag(f, "power") is not None or tag(f, "man_made") in PLAIN_MAN_MADE
+            or tag(f, "waterway") in ("dam", "weir", "lock_gate"))
+
+
 def wall_style(f):
     t = f["tags"]
     mat_tag = (tag(f, "building:material") or "").lower()
@@ -1515,6 +1530,8 @@ def wall_style(f):
         col = hex_rgb(walls[stable_hash(f["id"]) % len(walls)])
     if btype in SACRED or tag(f, "amenity") == "place_of_worship":
         return pal(soften(col), M_CLASSIC)  # stone or brick, tall windows: not the shader's office grid of storeys
+    if plain_walls(f, btype):
+        return pal(soften(col), M_SOLID)  # a plant, a works, a shed: no storeys of house windows (the shader's M_WALL)
     if core:
         return pal(soften(col), M_TENEMENT)
     return pal(soften(col), M_WALL)

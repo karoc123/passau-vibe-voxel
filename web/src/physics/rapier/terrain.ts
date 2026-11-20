@@ -108,7 +108,7 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
   // (decks: the car's top voxel of every deck column open, ramped or not, so its surface may dip under a flat deck's
   // top beside a step: DRIVE.deckTol)
   const field = (flags: Uint8Array, decks: boolean) => {
-    const f = rampField(N, base.counts, bo, base.runs, base.ground, flags, pal.paved);
+    const f = rampField(N, base.counts, bo, base.runs, base.ground, flags, pal.paved, decks);
     if (!f.any) return { f: null, r: null };
     const r = new Uint8Array(C);
     for (let c = 0; c < C; c++) r[c] = ramped(f, c) || (decks && f.paved[c] && f.ground[c] !== base.ground[c]) ? 1 : 0;

@@ -1,0 +1,15 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 157572363,
+    "geom": "dc4b543314c9",
+    "tags": "eebd92047782",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "Kraftwerk Kachlet: OSM draws the whole plant as one building outline across the Danube, the weir's ~190 m (south-west) and the powerhouse (north-east, ~160 m). The surface model filled it as one solid block, a palace across the river. The weir's six bays opened: the pier noses OSM maps on both sides of the outline are 29.8 m apart along a bearing of 36.5 deg (piers at 45.5, 76, 105.4, 135.5, 164.9 m from the south-west end; the series centred on the middle pier, EPSG:25832 824945, 5389933), the piers ~7 m thick at the waterline. DOM20 across the weir: the service bridge ~12 m wide on top at 320-321 m a.s.l., the gates' tops at 300-301 m (the upstream water 299.75 m): the bays open from 301 m up to 316 m (the bridge ~4-5 m deep, a guess: no measurement of its underside). Piers, gates and bridge in the ortho's concrete grey (DOP20 median over the weir, ~#a9a69c, lightened as the ortho's haze is taken out).",
+  "sources": ["osm", "dop20", "dom20", "lod2"],
+  "parts": [
+    {"part": "weir", "at": [824945.0, 5389933.0], "count": 6, "span": 29.85, "pier": 7, "bearing": 36.5,
+     "sill": 301, "soffit": 316, "colour": "#aeaba3", "material": "solid"}
+  ]
+}

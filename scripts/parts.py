@@ -298,7 +298,42 @@ def arcade(ctx, y, x, p):
     return k
 
 
+def weir(ctx, y, x, p):
+    """A weir's bays: `count` openings `span` m apart (centre to centre) along `bearing`, centred on the point, each
+    `span - pier` wide, cut through the whole footprint from the gates' top `sill` up to the service bridge's
+    underside `soffit` (m a.s.l.); what is left between `pier`s and over the bays (piers, gates, bridge) takes `colour`
+    when given. For a weir or dam OSM draws as one building outline across the river (a power station's whole plant)"""
+    from aoi import BASE
+    b = math.radians(p["bearing"])
+    ax = (math.sin(b), -math.cos(b))  # (east, south)
+    span, cnt = p["span"], p["count"]
+    L = span * cnt
+    half = (span - p["pier"]) / 2
+    z0, z1 = int(round(p["sill"] - BASE)), int(round(p["soffit"] - BASE))
+    col = ctx.pal(p["colour"], ctx.mats[p["material"]]) if p["colour"] else None
+    k = 0
+    for r, c in zip(ctx.rr, ctx.cc):
+        t = (c + 0.5 - x) * ax[0] + (r + 0.5 - y) * ax[1]
+        if abs(t) > L / 2 + p["pier"] / 2:
+            continue
+        tt = (t + L / 2) % span - span / 2  # from the bay's centre
+        if col is not None:
+            nz = np.flatnonzero(ctx.vol[:, r, c])
+            nz = nz[nz >= ctx.g[r, c]]
+            ctx.vol[nz, r, c] = col
+        if abs(t) < L / 2 and abs(tt) < half:
+            seg = ctx.vol[z0:z1, r, c]
+            k += int(np.count_nonzero(seg))
+            seg[:] = 0
+    return k
+
+
 PARTS = {
+    "weir": dict(fn=weir, params=dict(
+        count=_p("int", 6, 1, 30), span=_p("num", 30, 4, 80, "m, centre to centre"), pier=_p("num", 6, 1, 20, "m"),
+        bearing=_p("num", 0, 0, 360, "degrees: the weir's axis, along which the bays follow each other"),
+        sill=_p("num", 300, 250, 400, "m a.s.l.: the gates' top"), soffit=_p("num", 310, 250, 400, "m a.s.l."),
+        colour=_p("colour", None, doc="default: leave the voxels' colour"), material=_p("material", "solid"))),
     "helm": dict(fn=helm, params=dict(
         shape=_p("enum:pyramid,cone,needle,dome,onion", "pyramid"), radius=_p("num", 3, 0.5, 15, "m"),
         height=_p("num", 6, 1, 60, "m"), plan=_p("enum:square,octagon,round", None),
