@@ -70,10 +70,12 @@ export interface FloodInfo {
   river: number[];
 }
 
-// zones.json (scripts/zones.py): per building [cx, cy, columns, x0, y0, x1, y1]; per label of meta.json, the building
-// under it (0: none, else id + 1)
+// zones.json (scripts/zones.py): per building its box, four numbers x0, y0, w, h in one flat list (boxes; from before,
+// buildings: per building [cx, cy, columns, x0, y0, x1, y1]); per label of meta.json, the building under it (0: none,
+// else id + 1)
 export interface Zones {
-  buildings: number[][];
+  boxes?: number[];
+  buildings?: number[][];
   labels: number[];
 }
 

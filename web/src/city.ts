@@ -19,11 +19,16 @@ const T = 128;
 // it left. A mesh is drawn while its box's nearest point is within the distance + DRAW_M: the fog (daylight.ts) is full
 // at the distance, so a tile comes and goes unseen. Beyond, the coarse far ground (farground.ts) stands in.
 const LOAD_M = 150, KEEP_M = 400, DRAW_M = 32, FREE_MS = 8000;
+// The first moment's ground (terrain.ts): the 128 m tiles within the view distance + LOAD_M, but no further than
+// FIRST_M + LOAD_M (a mesh of 33 x 33 heights each until its tile is in: on a large map at a 5 km distance ~2000 of
+// them, 1.4 M vertices, seconds of the start). Beyond, the far ground stands in until the tiles come. (All of the old
+// 3.2 x 1.4 km map lay within it from the overview.)
+const FIRST_M = 2500;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
 
 // The city at 1 m and its distance levels (2, 4, 8 m), as fine as the budget allows (triangles drawn by the tiles,
 // meta.json tiles.tris; on most computers no limit), shown as it arrives, in one order:
-//   1. the ground: the terrain, in chunks of 1 km (terrain.ts), those in range of the view distance
+//   1. the ground: the terrain, in chunks of 1 km (terrain.ts), those in range of the view distance (to FIRST_M)
 //   2. landmarks: their tiles first, each landmark as soon as all its tiles are in
 //   3. everything else, nearest to the view first, each building once all its tiles are in
 //   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
@@ -62,16 +67,20 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const terrainTiles: number[] = [];
   {
     camera.updateMatrixWorld();
-    const c = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld), R = dist + LOAD_M;
-    const x0 = dist ? Math.max(0, Math.floor((c.x - R) / T)) : 0, x1 = dist ? Math.min(d.nx - 1, Math.floor((c.x + R) / T)) : d.nx - 1;
-    const y0 = dist ? Math.max(0, Math.floor((c.z - R) / T)) : 0, y1 = dist ? Math.min(d.ny - 1, Math.floor((c.z + R) / T)) : d.ny - 1;
+    const c = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld), R = Math.min(dist || FIRST_M, FIRST_M) + LOAD_M;
+    const x0 = Math.max(0, Math.floor((c.x - R) / T)), x1 = Math.min(d.nx - 1, Math.floor((c.x + R) / T));
+    const y0 = Math.max(0, Math.floor((c.z - R) / T)), y1 = Math.min(d.ny - 1, Math.floor((c.z + R) / T));
     for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++)
-      if (!dist || Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T)) <= R) terrainTiles.push(index(tx, ty));
+      if (Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T)) <= R) terrainTiles.push(index(tx, ty));
   }
   const terrain = await loadTerrain(meta, scene, d.nx, ct ? cropList : terrainTiles);
   const zones = await zonesIn;
   document.querySelector('#loading')?.classList.add('hidden');
-  const nb = zones.buildings.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
+  // (each building's box x0, y0, x1, y1)
+  const boxes: [number, number, number, number][] = zones.boxes
+    ? Array.from({ length: zones.boxes.length / 4 }, (_, i) => { const b = zones.boxes!; return [b[4 * i], b[4 * i + 1], b[4 * i] + b[4 * i + 2], b[4 * i + 1] + b[4 * i + 3]]; })
+    : zones.buildings!.map((b) => [b[3], b[4], b[5], b[6]]);
+  const nb = boxes.length, shown = new Uint8Array(128 * Math.ceil((nb + 1) / 128));
   const shownTex = dataTexture(shown, 128, shown.length / 128, THREE.RedFormat);
   U.uBldOn.value = shownTex;
   U.uStage.value = 1;
@@ -82,7 +91,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     return t;
   };
   // (by building: as many as there are, at most 16 k with 14-bit ids; by tile only where there are any)
-  const tilesOf = zones.buildings.map((b) => tilesIn(b[3], b[4], b[5], b[6]));
+  const tilesOf = boxes.map((b) => tilesIn(b[0], b[1], b[2], b[3]));
   const onTile = new Map<number, number[]>(), none: number[] = [], bldsOn = (i: number) => onTile.get(i) ?? none;
   tilesOf.forEach((t, i) => t.forEach((k) => pushTo(onTile, k, i)));
 

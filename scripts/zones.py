@@ -2,9 +2,9 @@
 in, the mesher (web/src/mesher.worker.ts) never merges faces across buildings.
 
 Output: data/zones.bin = gzip of uint16 building[D, W] (0: none; for tile_fields.py, which puts each node's part into
-its file, and web/tools/lamps.mjs), web/public/data/zones.json = {"buildings": [[cx, cy, columns, x0, y0, x1, y1],
-...], "labels": [...]} (centroid and bounding box in metres, building k + 1 in zones.bin; per label of meta.json, in its
-order, the building under it, 0: none).
+its file, and web/tools/lamps.mjs), web/public/data/zones.json = {"boxes": [x0, y0, w, h, ...], "labels": [...]}
+(per building, building k + 1 in zones.bin, its bounding box in metres as one flat list, four numbers a building: the
+viewer loads it at startup and needs no more; per label of meta.json, in its order, the building under it, 0: none).
 
 Window by window (window.py, halo 0: a column's building is its own): each window's columns from its rows of
 data/footprints.npz, and per building the sums of its columns' count, rows and columns and its box in the window,
@@ -89,7 +89,8 @@ def main():
                     under[k] = int(bld[r - win.r0, c - win.c0])
             rows.put(win.r0, win.c0, bld)
     print("buildings", n, "columns", cols)
-    json.dump({"buildings": stats.rows(), "labels": under}, open(OUT / "zones.json", "w"))
+    boxes = [v for _, _, _, x0, y0, x1, y1 in stats.rows() for v in (x0, y0, x1 - x0, y1 - y0)]
+    json.dump({"boxes": boxes, "labels": under}, open(OUT / "zones.json", "w"), separators=(",", ":"))
     print("wrote data/zones.bin, zones.json", (OUT / "zones.json").stat().st_size // 1024, "KB")
 
 

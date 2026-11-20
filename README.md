@@ -116,7 +116,7 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | `flood.py` | `data/flood.bin` (which cells the rivers reach at each level, the river bed), `flood.json` (the surveyed surface, the river's points) |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain/near`, `terrain/far{k}`: the bare land in chunks, shown while the tiles load and beyond the view distance; `data/terrain.bin` (the whole, for the tools) |
-| `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box (a building shows once all its tiles are in), the building under each label (needs `data/footprints.npz`) |
+| `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box, four numbers each in one flat list (a building shows once all its tiles are in), the building under each label (needs `data/footprints.npz`) |
 | `objects.py` | `objects/<k>.json`: every building's and street's box by OSM id, in 64 files by id, for the viewer's `?focus=` (needs `data/ground.npz`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), per building, for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
