@@ -484,6 +484,9 @@ const SURFACE = `
   vec3 col = base * (0.97 + 0.06 * h);
   bool shopLvl = lvl > 0.5 && lvl < 3.5;
   float r = 0.5, fres2 = 1.0; // the water's ripple and its glancing reflectance, for its reflections at night
+  // (CONCRETE is plain: on this map it is the civil works' -- bridge decks and piers, the lock's walls, the benches'
+  // kerbs, no building's -- and the ground floor of shop windows it had put glass bands 1-4 m up the bridge piers,
+  // lit as shopfronts at night)
   if (m == ${MAT.WALL} || m == ${MAT.TENEMENT}) {
     // An old-town facade: window axes 3 m apart (4 m on some), ~1 x 1.8 m windows in a light surround on storeys of
     // 3.3-3.7 m, plain plaster between; a ground floor of doors and shop windows on the same axes, over a darker plinth
@@ -509,12 +512,6 @@ const SURFACE = `
         if (up < 0.0) { if (hash12(vec2(k, wpos * 3.7)) < 0.75 * uShop) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight * gw; }
         else gEmissive += windowLight(cell, vec2(k + wpos * 17.31 + wN.x * 3.1, st + wN.z * 5.7), st) * uNight * gw;
       }
-    }
-  } else if (m == ${MAT.CONCRETE}) {
-    if (vert && lvl < 4.0 && lvl >= 1.0 && mod(u, 4.0) > 0.5) {
-      col = glassCol(base, h);
-      gRough = GLASS_ROUGH; gEmissive = glassSky(wN);
-      if (hash12(vec2(floor(u / 6.0), wpos * 3.7)) < 0.8 * uShop) gEmissive += vec3(1.0, 0.8, 0.55) * 1.5 * uNight;
     }
   } else if (m == ${MAT.GLASS}) {
     if (vert) {
