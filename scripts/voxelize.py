@@ -780,6 +780,14 @@ _near_lv = np.abs(dtm - RIVER_LV) < 0.8
 _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
 _wat = np.zeros((D, W), bool)
 _wlev = np.full((D, W), -1, np.int32)
+# water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
+# the bodies' medians are taken without it, and its own level after
+_locks = overrides.water_levels(osm.areas, cells_of, BASE)
+_lockm = np.zeros((D, W), bool)
+_locklev = np.zeros((D, W), np.int32)
+for _, _lr, _lc, _lg, _, _ in _locks:
+    _lockm[_lr, _lc] = True
+    _locklev[_lr, _lc] = _lg
 for _b in region.blocks(64):
     _w = region._grow(_b, 64)
     _ws = (slice(_w[0], _w[1]), slice(_w[2], _w[3]))
@@ -787,7 +795,7 @@ for _b in region.blocks(64):
     _fl, _fn = ndimage.label(_flat[_ws])
     _big = (np.bincount(_fl.ravel()) >= 2000)[_fl] & (_fl > 0)
     _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
-    _ww = _w0[_ws] | _big
+    _ww = (_w0[_ws] | _big) & ~_lockm[_ws]
     _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
     _bl, _bn = ndimage.label(_ww)
     _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
@@ -799,7 +807,7 @@ for _b in region.blocks(64):
             _lut[i_] = int(np.median(_gw[_bl == i_]))
         _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
 note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
-gcol[_wat] = C["water"]
+gcol[_wat | _lockm] = C["water"]
 # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
 # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay)
 _calm = (gcol == C["water"]) & (nd_max < 4)
@@ -809,6 +817,10 @@ exg[_calm] = -1
 _fw = (_wlev >= 0) & (gcol == C["water"])
 g[_fw] = _wlev[_fw]
 note("water cells flattened to their body's level:", int(_fw.sum()))
+if _locks:
+    g[_lockm] = _locklev[_lockm]
+    note("water overrides (own level): (way, cells, water top m a.s.l.)",
+         [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in _locks])
 splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not tunnelish(t)]
 
 # zebra crossings + lane markings on asphalt
@@ -1880,8 +1892,13 @@ _natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin
 _osm_wall = np.zeros((D, W), np.uint8)
 burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
                  if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
+# a water override's outline is a wall too (a lock chamber's), faced in its own colour (default concrete) within 2 m
+_lockwall = np.zeros((D, W), np.uint16)
+if _locks:
+    burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in _locks])
+    burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in _locks])
 _wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
-n_rw = 0
+n_rw = n_lw = 0
 _rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)
 for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
     m = _wall & (zz >= _nb_lo) & (zz < g - 1)
@@ -1891,7 +1908,14 @@ for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
     k = ((_rr0[m] + _cc0[m] + (zz % 2)) // 2 * 2654435761 + zz * 40503) % 1000003 % len(STONE)
     vol[zz][m] = np.array(STONE, np.uint16)[k]
     n_rw += int(m.sum())
+    if _locks:
+        _lw = _lockwall[m]
+        vol[zz][m] = np.where(_lw > 0, _lw, vol[zz][m])
+        n_lw += int((_lw > 0).sum())
 note("retaining walls (paved ground 2 m+ over a neighbour): masonry voxels", n_rw)
+if _locks:
+    note("water overrides: wall face voxels", n_lw)
+    overrides.lock_gates(vol, g, gcol == C["water"], osm.lines, pal, landmarks.MAT_IDS, cells_of, BASE, note)
 
 # buildings: base fill with the tallest covering feature's wall, then parts paint their own [minh, maxh)
 basewall = np.zeros((D, W), np.uint16)

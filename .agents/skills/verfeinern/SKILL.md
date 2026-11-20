@@ -14,6 +14,8 @@ You run unattended: decide from the data, never ask. Your whole result is FILE, 
 no other tracked file: many agents refine other objects in parallel and their branches must merge cleanly. The
 override format is documented in the docstring of `scripts/overrides.py`, the parts in `scripts/parts.py` (`uv run
 python scripts/parts.py` prints them with their parameters); README.md "Per-object overrides" is the overview.
+(A third kind, `water/<way id>.json`, gives a water area its own level, wall faces and lock gates; it is written by
+hand from the LiDAR, not by this skill: see the docstring.)
 
 Sources: open data only (OSM tags, LoD2, the DOP20 orthophoto, the DOM20 surface model, all via `scripts/look.py`).
 Facade colours and details nobody measured stay as the model has them; the data you can point to is the bar for

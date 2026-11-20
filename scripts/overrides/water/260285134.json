@@ -1,0 +1,38 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 260285134,
+    "geom": "28b8727a8c9e",
+    "tags": "7acb862e1cd8",
+    "osm_timestamp": "2026-11-16T21:22:36Z",
+    "gates": {
+      "1302826585": "e7ead9214b73",
+      "1302826582": "e3cf35440015"
+    }
+  },
+  "note": "South chamber of the Kachlet double lock (Schleuse Kachlet, 1922-27; 230 x 24 m, iron mitre gates with 12.8 m leaves). Drawn FULL at 299.75 m, as on the LiDAR day (Feb 2021: 299.3-299.7 m in the chamber, barges in it; the upper reach 299.70-299.80): the level is a state, not a structure (both chambers full is the other fair choice: change `level`). Before this file the chamber was part of a river body and took its median (DGM1 there is interpolated from the crests at 301.2 m): water flush with the walls and a 9 m water cliff at a 64 m block line. Walls: concrete crests at 301.10-301.25 m (LiDAR ground returns), light grey in the DOP20. Gates from the waterway=lock_gate lines: walkway tops ~302.2 m (LiDAR), the upper head's sill at 295.2 m (seen in the empty north chamber; hidden here under the full chamber).",
+  "sources": [
+    "osm",
+    "laser",
+    "dgm1",
+    "dop20",
+    "vde",
+    "wikipedia"
+  ],
+  "level": 299.75,
+  "walls": {
+    "colour": "#a7a49d",
+    "material": "concrete"
+  },
+  "gates": [
+    {
+      "way": 1302826585,
+      "top": 302.2,
+      "sill": 295.2
+    },
+    {
+      "way": 1302826582,
+      "top": 302.2
+    }
+  ]
+}

@@ -280,20 +280,24 @@ def make_views(found, g, median=None):
 
     views = {}
     H_, W_ = g.shape
+
+    def g_at(r, c):  # (clamped: a map that holds neither Oberhaus nor the Eck, e.g. the Kachlet fixture)
+        return float(g[min(max(int(r), 0), H_ - 1), min(max(int(c), 0), W_ - 1)])
+
     dom = found.get("Dom St. Stephan")
     dom = [dom["x"] + 0.5, 0.0, dom["y"] + 0.5] if dom else [W_ / 2, 0, H_ / 2]
-    gd = float(g[int(dom[2]), int(dom[0])])
+    gd = g_at(dom[2], dom[0])
     t = [dom[0], gd + 15, dom[2]]
     views["overview"] = dict(label="Overview", target=t, pos=add(t, (-250, 520, 760)))
     views["dom"] = dict(label="Dom", target=[dom[0], gd + 30, dom[2]], pos=add([dom[0], gd + 30, dom[2]], (-170, 110, 200)))
     oc, orow = (float(v) for v in to_grid(*VIEW_AT["oberhaus"]))  # Veste Oberhaus
     o = [oc, 0, orow]
-    go = float(g[int(orow), int(oc)])
+    go = g_at(orow, oc)
     views["oberhaus"] = dict(label="Veste Oberhaus", target=[o[0], go + 10, o[2]], pos=add([o[0], go + 10, o[2]], (160, 130, 330)))
     views["fromoberhaus"] = dict(label="View from Oberhaus", target=[dom[0] + 150, gd + 10, dom[2]], pos=[o[0] - 30, go + 60, o[2] + 60])
     ec, er = (float(v) for v in to_grid(*VIEW_AT["eck"]))
     gc, gr = (int(v) for v in to_grid(*VIEW_AT["eck_ground"]))
-    eck = [ec, float(g[gr, gc]) + 5, er]
+    eck = [ec, g_at(gr, gc) + 5, er]
     views["eck"] = dict(label="Dreiflüsseeck", target=eck, pos=add(eck, (380, 230, 60)))
     for k, (label_, (x, y), off) in VIEWS_MORE.items():
         c, r = (float(v) for v in to_grid(x, y))

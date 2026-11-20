@@ -246,6 +246,11 @@ lists them and their parameters).
   and the lamps all see them), `sidewalk` (paved strips left and right of the carriageway, with a kerb line),
   `trees` and `lamps` every so many metres along a side (added as OSM nodes, ids from 10^15: young trees where the
   surface model has no crown, lamps with their poles and light).
+- **Water** (`scripts/overrides/water/<way id>.json`, a `natural=water` area): a `level` of its own (m a.s.l.; the
+  polygon then leaves the river bodies whose median level the rest of the water takes), `walls` (the face colour of
+  its banks, default concrete; its outline counts as a mapped wall) and `gates` (`waterway=lock_gate` lines drawn from
+  the lower water to a `top`, a walkway on top, concrete under an optional `sill`). The Kachlet lock's two chambers
+  (one full, one empty, as on the survey day) are the example; their gate ways' geometry is in the file's `osm` basis.
 - **Validation and staleness**: every build (`region_inputs.cut_osm`) validates all files (unknown keys, bad colours
   or materials, a file name that is not an id of the right kind: the build stops with the list) and warns when an
   object's OSM geometry changed since the override was written (its `osm` block holds hashes of geometry and tags,

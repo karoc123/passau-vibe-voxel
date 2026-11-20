@@ -4,6 +4,7 @@ objects never touch the same file, and the result is rebuilt from the data every
 
     scripts/overrides/building/<id>.json    a building outline or building:part: <id> is the OSM way id, r<id> a relation
     scripts/overrides/street/<id>.json      a highway way, by its OSM way id
+    scripts/overrides/water/<id>.json       a water area (natural=water, water=*): <id> as for a building
 
 Every file carries `osm`: what it was written against (the element's type and id, a hash of its geometry and of its
 tags, the extract's timestamp). The build warns when the element's geometry changed or the element vanished
@@ -28,11 +29,24 @@ A street file:
   trees           {side: both|left|right, spacing, offset, start, end, species, height}: young trees along it
   lamps           {side, spacing, offset, start, end, height}: street lamps along it
   (left/right as the way is drawn in OSM; offset: metres from the way's centre line, default half the width + 1.5)
+A water file (a lock chamber, a basin: water whose level is its own, not the river's around it):
+  level           m a.s.l. of the water surface over the whole polygon (the top water voxel: round(level - base) - 1);
+                  the polygon is then no part of any river body (voxelize.py: the bodies' medians are taken without it).
+                  A lock chamber's level is a state (full or empty), not a structure: say which in `note`
+  walls           {colour, material}: the faces of the banks 2 m or more over the water within 2 m of the polygon
+                  (default concrete #a7a49d); the outline counts as a mapped wall, so grassy crests get faces too
+  gates           [{way, top, sill, colour, material, walkway_colour}]: waterway=lock_gate lines drawn as walls across
+                  the water, from the lower water's surface to `top` (m a.s.l.), its top voxel a walkway
+                  (walkway_colour, default #b8bcc0 metal), the leaves colour/material (default #54585c metal); `sill`
+                  (m a.s.l., under top): concrete from the lower water up to it (a lock head's sill in an empty
+                  chamber). `osm.gates` holds each gate way's geometry hash (rebase writes it), so `check` sees one
+                  redrawn
 
 CLI:  uv run python scripts/overrides.py check              validate every file, report stale or vanished objects
-      uv run python scripts/overrides.py info building ID   the object's tags, place and size, and a ?focus= link
-      uv run python scripts/overrides.py new building ID    write a skeleton file with its `osm` basis
-      uv run python scripts/overrides.py rebase building ID refresh the basis after checking the override still fits
+      uv run python scripts/overrides.py info KIND ID       the object's tags, place and size, and a ?focus= link
+      uv run python scripts/overrides.py new KIND ID        write a skeleton file with its `osm` basis
+      uv run python scripts/overrides.py rebase KIND ID     refresh the basis after checking the override still fits
+                                                            (KIND: building, street or water)
 """
 import hashlib
 import json
@@ -42,7 +56,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE / "overrides"
-KINDS = ("building", "street")
+KINDS = ("building", "street", "water")
 SYNTH_BASE = 10 ** 15  # ids of the nodes a street override adds (trees, lamps): way id * 1000 + k over this
 # the surfaces a street override may name (the OSM values voxelize.SURF draws)
 SURFACES = ("asphalt", "paving_stones", "sett", "cobblestone", "concrete", "concrete:plates", "gravel", "fine_gravel",
@@ -98,11 +112,17 @@ def _style(d, where, extra=()):
 
 
 def _basis(d, where, kind, otype, oid):
-    _keys(d, ("type", "id", "geom", "tags", "osm_timestamp"), where, required=("type", "id", "geom"))
+    _keys(d, ("type", "id", "geom", "tags", "osm_timestamp") + (("gates",) if kind == "water" else ()), where,
+          required=("type", "id", "geom"))
     if d["type"] != otype or d["id"] != oid:
         raise Invalid(f"{where}: says {d['type']} {d['id']}, the file name says {otype} {oid}")
-    for k in ("geom", "tags"):
-        if k in d and not (isinstance(d[k], str) and re.match(r"^[0-9a-f]{12}$", d[k])):
+    hexes = [(k, d[k]) for k in ("geom", "tags") if k in d]
+    if "gates" in d:
+        if not isinstance(d["gates"], dict):
+            raise Invalid(f"{where}.gates: {{way id: geometry hash}} (overrides.py rebase writes it)")
+        hexes += [(f"gates.{k}", v) for k, v in d["gates"].items()]
+    for k, v in hexes:
+        if not (isinstance(v, str) and re.match(r"^[0-9a-f]{12}$", v)):
             raise Invalid(f"{where}.{k}: expected 12 hex digits (overrides.py new/rebase write it)")
 
 
@@ -222,12 +242,42 @@ def _street(d, where):
         raise Invalid(f"{where}.sources: a list of strings")
 
 
+def _water(d, where):
+    _keys(d, ("osm", "note", "sources", "level", "walls", "gates"), where, required=("osm", "level"))
+    _num(d["level"], f"{where}.level", 250, 400)
+    if "walls" in d:
+        _style(d["walls"], f"{where}.walls")
+    if not isinstance(d.get("gates", []), list):
+        raise Invalid(f"{where}.gates: a list")
+    seen = set()
+    for k, gt in enumerate(d.get("gates", [])):
+        w = f"{where}.gates[{k}]"
+        _keys(gt, ("way", "top", "sill", "colour", "material", "walkway_colour"), w, required=("way", "top"))
+        _num(gt["way"], f"{w}.way", 1, None, integer=True)
+        if gt["way"] in seen:
+            raise Invalid(f"{w}.way: way {gt['way']} twice")
+        seen.add(gt["way"])
+        _num(gt["top"], f"{w}.top", 250, 400)
+        if "sill" in gt:
+            _num(gt["sill"], f"{w}.sill", 250, gt["top"] - 1)
+        for c in ("colour", "walkway_colour"):
+            if c in gt:
+                _colour(gt[c], f"{w}.{c}")
+        if "material" in gt:
+            _material(gt["material"], f"{w}.material")
+    gb = d["osm"].get("gates")
+    if gb is not None and set(gb) != {str(gt["way"]) for gt in d.get("gates", [])}:
+        raise Invalid(f"{where}.osm.gates: not the gates' ways (`overrides.py rebase water <id>` writes it)")
+    if "sources" in d and not (isinstance(d["sources"], list) and all(isinstance(s, str) for s in d["sources"])):
+        raise Invalid(f"{where}.sources: a list of strings")
+
+
 def parse_name(kind, stem):
     """(osm type, id) of a file name: building 123 / r123, street 123"""
     m = re.match(r"^(r?)([1-9][0-9]*)$", stem)
     if not m or (kind == "street" and m.group(1)):
         raise Invalid(f"{kind}/{stem}.json: the name must be the OSM way id" + (" (or r<id> for a relation)"
-                                                                               if kind == "building" else ""))
+                                                                               if kind != "street" else ""))
     return ("relation" if m.group(1) else "way"), int(m.group(2))
 
 
@@ -237,7 +287,7 @@ def validate(kind, path, d):
     if not isinstance(d, dict) or "osm" not in d:
         raise Invalid(f"{where}: no `osm` basis (write the file with `overrides.py new {kind} {Path(path).stem}`)")
     _basis(d["osm"], f"{where}.osm", kind, otype, oid)
-    (_building if kind == "building" else _street)(d, where)
+    dict(building=_building, street=_street, water=_water)[kind](d, where)
     return otype, oid
 
 
@@ -278,6 +328,10 @@ def buildings():
 
 def streets():
     return load()["street"]
+
+
+def waters():
+    return load()["water"]
 
 
 def building_for(typ, oid):
@@ -322,6 +376,10 @@ def check(elements, timestamp=None, quiet=False):
                 warn.append(f"{name}: OSM {key[0]} {key[1]} is no building (tags {sorted(t)[:6]})")
             if kind == "street" and "highway" not in t:
                 warn.append(f"{name}: OSM way {key[1]} is no highway (tags {sorted(t)[:6]})")
+            if kind == "water":
+                if not _is_water(t):
+                    warn.append(f"{name}: OSM {key[0]} {key[1]} is no water area (tags {sorted(t)[:6]})")
+                warn += _check_gates(name, o, idx)
             now, was = basis(e), o["data"]["osm"]
             if now["geom"] != was["geom"]:
                 warn.append(f"{name}: STALE, the geometry changed since the override was written (check it still fits, "
@@ -333,6 +391,34 @@ def check(elements, timestamp=None, quiet=False):
     return warn
 
 
+def _is_water(t):
+    return t.get("natural") == "water" or "water" in t
+
+
+def _gate_basis(d, idx):
+    """{way id (str): geometry hash} of the water file's gates present in idx"""
+    return {str(gt["way"]): _short(_geom_of(idx[("way", gt["way"])])) for gt in d.get("gates", [])
+            if ("way", gt["way"]) in idx}
+
+
+def _check_gates(name, o, idx):
+    """a water file's gate ways: present, waterway=lock_gate, drawn as when the file was written (osm.gates)"""
+    out, was = [], o["data"]["osm"].get("gates", {})
+    for gt in o["data"].get("gates", []):
+        e = idx.get(("way", gt["way"]))
+        if e is None:
+            out.append(f"{name}: gate way {gt['way']} is gone from the extract: the gate is not drawn")
+            continue
+        if e.get("tags", {}).get("waterway") != "lock_gate":
+            out.append(f"{name}: gate way {gt['way']} is no waterway=lock_gate (tags {sorted(e.get('tags', {}))[:6]})")
+        if str(gt["way"]) not in was:
+            out.append(f"{name}: gate way {gt['way']} has no basis (`overrides.py rebase water {o['path'].stem}`)")
+        elif _short(_geom_of(e)) != was[str(gt["way"])]:
+            out.append(f"{name}: STALE, gate way {gt['way']}'s geometry changed since the override was written (check "
+                       f"it still fits, then `overrides.py rebase water {o['path'].stem}`)")
+    return out
+
+
 def objects():
     """the (osm type, id) of every override"""
     return {k for objs in load().values() for k in objs}
@@ -340,7 +426,9 @@ def objects():
 
 def keys_in(elements):
     """the override files (path relative to ROOT, its content hash) of the ways and relations among elements: what a
-    region's build reads of scripts/overrides (region_inputs.cut_osm: of the objects near the region)"""
+    region's build reads of scripts/overrides (region_inputs.cut_osm: of the objects near the region). (A water
+    file's gate ways lie on its polygon's ends, so they are in the cut whose hash goes with this one: redrawing a gate
+    in OSM rebuilds the regions that draw it)"""
     have = {(e["type"], e["id"]) for e in elements if e["type"] in ("way", "relation")}
     out = []
     for kind, objs in load().items():
@@ -579,6 +667,76 @@ def apply_details(vol, g, feats, pal, note):
         note(f"override details: {f['typ']} {f['id']}: windows {n_w}, part voxels {n_p}")
 
 
+# ---------------------------------------------------------------- water: applied by voxelize.py
+
+WALL_STYLE = ("#a7a49d", "concrete")  # a water override's wall faces (voxelize.C["deck"]: the lock's crests in the ortho)
+GATE_STYLE = ("#54585c", "metal")
+WALKWAY = "#b8bcc0"
+
+
+def water_levels(areas, cells_of, base):
+    """[(oid, rows, cols, g, walls style, polygon)] of the water overrides among areas (voxelize's osm.areas, the
+    region's grid): the cells whose centres lie in the polygon and the ground index g of its level (the top water voxel
+    is g - 1, as voxelize.py's river levels)"""
+    import math
+    objs = waters()
+    out = []
+    for oid, typ, t, geom in areas:
+        o = objs.get((typ, oid))
+        if not o:
+            continue
+        d = o["data"]
+        rr, cc = cells_of(geom, fallback=False)
+        w = d.get("walls", {})
+        out.append((oid, rr, cc, int(math.floor(d["level"] - base + 0.5)),
+                    (w.get("colour", WALL_STYLE[0]), w.get("material", WALL_STYLE[1])), geom))
+    return out
+
+
+def lock_gates(vol, g, water, lines, pal, mats, cells_of, base, note):
+    """the water overrides' gates (waterway=lock_gate lines, voxelize's osm.lines) into vol: on each water cell of the
+    line's band (all cells touched within 0.5 m: closed, so the chamber stays apart from the water beside it) a wall
+    from the lower water's surface voxel (the lowest water within 3.5 m) to `top`, its top voxel the walkway, concrete
+    under `sill`; on a dry cell (the walls' crests at its ends) the leaves and walkway over the ground only"""
+    import numpy as np
+    byid = {oid: line for oid, t, line in lines}
+    H = vol.shape[0]
+    n_g = n_v = 0
+    for o in waters().values():
+        d = o["data"]
+        wall = pal(*_style_of(d.get("walls", {}), WALL_STYLE, mats))
+        for gt in d.get("gates", []):
+            line = byid.get(gt["way"])
+            if line is None:
+                continue
+            rr, cc = cells_of(line.buffer(0.5), all_touched=True)
+            if len(rr) == 0:
+                continue
+            nr, nc = cells_of(line.buffer(3.5), all_touched=True)
+            wet = water[nr, nc]
+            if not wet.any():
+                continue
+            z_lo = int(g[nr, nc][wet].min()) - 1
+            z_top = min(int(round(gt["top"] - base)), H)
+            z_sill = max(int(round(gt["sill"] - base)), z_lo) if "sill" in gt else z_lo
+            leaf = pal(*_style_of(gt, GATE_STYLE, mats))
+            walk = pal(gt.get("walkway_colour", WALKWAY), mats["metal"])
+            for r, c in zip(rr, cc):
+                z0 = z_lo if water[r, c] else int(g[r, c])
+                for zz in range(max(z0, 0), z_top):
+                    vol[zz, r, c] = walk if zz == z_top - 1 else (wall if zz < z_sill else leaf)
+                    n_v += 1
+            n_g += 1
+            note(f"lock gate: way {gt['way']}: {len(rr)} cells, from {z_lo + base} m (sill {z_sill + base} m) to "
+                 f"{z_top + base} m")
+    if n_g:
+        note("lock gates (water overrides):", n_g, "gates,", n_v, "voxels")
+
+
+def _style_of(d, default, mats):
+    return d.get("colour", default[0]), mats[d.get("material", default[1])]
+
+
 # ---------------------------------------------------------------- CLI
 
 def _osm():
@@ -615,7 +773,7 @@ def info(kind, ident):
                        centre=[round((x0 + x1) / 2, 1), round((y0 + y1) / 2, 1)]),
         map_cells=dict(col=[float(c0), float(c1)], row=[float(r0), float(r1)]),
         size_m=[round(x1 - x0, 1), round(y1 - y0, 1)],
-        focus=f"?focus={'bld' if kind == 'building' else 'street'}:{path.stem}",
+        focus=f"?focus={'bld' if kind == 'building' else 'street'}:{path.stem}" if kind != "water" else None,
         override=str(path.relative_to(HERE.parent)) if path.exists() else None,
         extract=data.get("osm3s", {}).get("timestamp_osm_base")), indent=1, ensure_ascii=False))
 
@@ -631,6 +789,8 @@ def new(kind, ident):
         raise SystemExit(f"OSM {otype} {oid} is no building: {t}")
     if kind == "street" and "highway" not in t:
         raise SystemExit(f"OSM way {oid} is no highway: {t}")
+    if kind == "water" and not _is_water(t):
+        raise SystemExit(f"OSM {otype} {oid} is no water area: {t}")
     if path.exists():
         raise SystemExit(f"{path} exists (edit it; `rebase` refreshes its basis)")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -647,6 +807,11 @@ def rebase(kind, ident):
         raise SystemExit(f"OSM {otype} {oid} is not in data/raw/osm.json: delete {path} or move it to the new id")
     d = json.load(open(path))
     d["osm"] = basis(e, data.get("osm3s", {}).get("timestamp_osm_base"))
+    if kind == "water" and d.get("gates"):
+        miss = [gt["way"] for gt in d["gates"] if ("way", gt["way"]) not in idx]
+        if miss:
+            raise SystemExit(f"gate way(s) {miss} not in data/raw/osm.json: fix `gates` in {path} first")
+        d["osm"]["gates"] = _gate_basis(d, idx)
     path.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     print(path)
 

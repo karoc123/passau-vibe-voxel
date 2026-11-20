@@ -1,0 +1,38 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 260285135,
+    "geom": "7a67b4a214d3",
+    "tags": "7acb862e1cd8",
+    "osm_timestamp": "2026-11-16T21:22:36Z",
+    "gates": {
+      "1302826584": "35e55f847f25",
+      "1302826583": "46bc8c54dc0f"
+    }
+  },
+  "note": "North chamber of the Kachlet double lock. Drawn EMPTY at 291.5 m, as on the LiDAR day (Feb 2021: 291.5-291.6 m, the lower reach's level 291.45-291.60): the level is a state, not a structure (299.75 for a full chamber). The ~9.5 m lift shows as concrete chamber walls from the water up to the crests at 301.10-301.25 m (LiDAR ground returns; light grey in the DOP20). Gates from the waterway=lock_gate lines: walkway tops ~302.2 m (LiDAR; the lower gate's machinery reaches 303.6-303.9 m, not modelled), and under the upper gate the head's sill at 295.2 m (LiDAR in the empty chamber) in concrete.",
+  "sources": [
+    "osm",
+    "laser",
+    "dgm1",
+    "dop20",
+    "vde",
+    "wikipedia"
+  ],
+  "level": 291.5,
+  "walls": {
+    "colour": "#a7a49d",
+    "material": "concrete"
+  },
+  "gates": [
+    {
+      "way": 1302826584,
+      "top": 302.2,
+      "sill": 295.2
+    },
+    {
+      "way": 1302826583,
+      "top": 302.2
+    }
+  ]
+}
