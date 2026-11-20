@@ -365,9 +365,11 @@ hidden,
     if (!skirt && reg[n] >= 0 && bid[n] === r.bid && Math.max(a0 - cornerOf(n, c, e, 0), a1 - cornerOf(n, c, e, 1)) <= Q) eave = true;
     const pal = fall < 0.4 && wallBelow && !skirt && !eave ? below : top;
     const lit = skirt ? r.lit : eave ? r.lit : pal === top && fall > 0.05 ? r.code : 0;
-    // (a skirt's top 1/64 m under the slope's edge: on it, it showed through between the two tiles' slopes as a hairline)
-    const k = skirt ? 1 : 0;
-    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k, a1 - k, pal, lit, ground[c], bid[c], x0, y0);
+    // (a skirt's top 1/64 m under the slope's edge where the next tile's roof comes up to it: on it, it showed through
+    // between the two tiles' slopes as a hairline. Where that roof is lower the skirt is the step down to it, seen, and
+    // meets the edge: sunk, it left a slit under the edge, a dashed line of what lies behind)
+    const k0 = skirt && cornerOf(n, c, e, 0) >= a0 ? 1 : 0, k1 = skirt && cornerOf(n, c, e, 1) >= a1 ? 1 : 0;
+    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k0, a1 - k1, pal, lit, ground[c], bid[c], x0, y0);
   }
 
   // a vertical face on cell (X, Y)'s edge e, facing (axis d, dir), from low to high at the edge's two ends
