@@ -35,7 +35,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .choices button:hover, #bar .choices button.on { color: #fff; }
 #bar .sky button:disabled { display: none; }
 /* Driving and flight sit alongside the existing map controls. */
-#bar .mode-tools { display: flex; flex-wrap: wrap; gap: 0 14px; padding-top: 5px; }
+#bar .mode-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; padding-top: 5px; }
 #bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
 #bar .mode-tools [hidden] { display: none; }
 #bar .mode-button {
@@ -52,7 +52,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 }
 #bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
 @media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px)); } }
-@media (pointer: coarse) { #bar .mode-button { min-height: 36px; } }
+@media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
 /* the graphics panel (bar.ts Graphics): folded under a ⚙ row; inside, the presets and an "Advanced" fold */
 #bar .gear { padding-top: 6px; }
 #bar .gear .fold, #bar .adv summary { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; text-shadow: inherit; cursor: pointer; }
@@ -177,16 +177,14 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 #bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px); }
 #bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
 #bar.folded .bar-fold { position: static; flex: none; }
-#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; align-items: flex-start; } /* (not stretched to the drive's speed below Park car) */
+#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
 #bar.folded .mode-tools .drive-help { display: none; }
 #bar.folded .mode-tools .mode-active { flex-basis: auto; }
 @media (pointer: coarse) {
   #bar .bar-fold { width: 36px; height: 36px; }
   #bar .search { margin-left: 44px; }
   #bar .search input { height: 36px; }
-  /* folded: Walk, Park car (drive.css: 44 px), Fly on one line of text, the fold button centred on it */
-  #bar.folded .mode-tools .mode-button { min-height: 44px; }
-  #bar.folded .bar-fold { margin-top: 4px; }
+  #bar.folded .bar-fold { margin-top: 4px; } /* centred on the mode buttons' line (44 px) */
 }
 
 /* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
