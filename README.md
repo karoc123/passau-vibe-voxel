@@ -119,12 +119,13 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | `flood.py` | `data/flood.bin` (which cells the rivers reach at each level, the river bed), `flood.json` (the surveyed surface, the river's points) |
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain/near`, `terrain/far{k}`: the bare land in chunks, shown while the tiles load and beyond the view distance; `data/terrain.bin` (the whole, for the tools) |
-| `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box, four numbers each in one flat list (a building shows once all its tiles are in), the building under each label (needs `data/footprints.npz`) |
+| `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box, four numbers each in one flat list (a building shows once all its tiles are in), the building under each label, each building's stable key (`w<osm id>`, `r<osm id>`, `lod2:<gml:id>`: `scripts/lod2_ids.py`; building ids are build-local, docs/adr/0002-addressing.md) (needs `data/footprints.npz`) |
 | `objects.py` | `objects/<k>.json`: every building's and street's box by OSM id, in 64 files by id, for the viewer's `?focus=` (needs `data/ground.npz`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), per building, for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `data/foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `data/trees.json`) |
 | `tile_fields.py` | into every node file of `tiles/` (`scripts/tilefile.py`: a header of tagged sections): per cell the building, the rivers' level and bed, foliage and the light of lit windows on the street, at the node's own cell size, from the `data/` maps above. Nothing of the map's size is loaded by the viewer whole: each node brings its part. Run again after `voxelize.py` or `tiles_lod.py` |
+| `world_id.py` | `meta.json` `world`: the build id (a hash over the contents of `tiles/1` and `1f`), the palette's length and hash, origin, base, the project grid (docs/adr/0001-world-layers.md); every build, written only when it changed. `scripts/palette_check.py [REV]` checks the palette registry is append-only against a git revision |
 | `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`) |
 | `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `data/terrain.bin`, `traffic.json`) |
 
@@ -304,7 +305,7 @@ code 1 on a failure; check any change to `voxel-collision.ts` or the tile format
 
 **Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
 slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
-across ids, one id still merges into one top. Ids are 16-bit end to end (`scripts/zones.py` fails past 65535). Exit
+across ids, one id still merges into one top. Ids are 16-bit end to end; the map's stay below 60000 (`scripts/zones.py` fails there), 60000..65535 are reserved for players' builds. Exit
 code 1 on a failure; check any change to the mesher's greedy merge with it.
 
 **Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel

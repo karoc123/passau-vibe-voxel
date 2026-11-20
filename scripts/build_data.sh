@@ -30,7 +30,8 @@ uv run python scripts/voxelize.py        # (reads data/raw/treespecies_*.tif too
                                          # data/crowns.npz (needs data/lod2.npz, or NO_LOD2=1)
                                          # (scripts/tiles_lod.py: only tiles/2, 4 and 8 again, from tiles/1 and 1f)
 P=web/public/data
-M="$P/meta.json#-tiles.tris,tiles.bytes" # (meta.json as voxelize.py wrote it: tile_fields.py and tris.mjs add these)
+M="$P/meta.json#-tiles.tris,tiles.bytes,world" # (meta.json as voxelize.py wrote it: tile_fields.py, tris.mjs and
+                                               # world_id.py add these)
 $S places -i $A scripts/osm.py data/raw/osm.json -o $P/places.json -- python scripts/places.py   # places.json (search index)
 $S flood -i $A data/ground.npz data/prep.npz $M -o data/flood.bin $P/flood.json \
   -- python scripts/flood.py             # data/flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
@@ -38,8 +39,9 @@ $S boats -i $A scripts/osm.py data/ground.npz data/raw/osm.json -o $P/boats.json
   -- python scripts/boats.py             # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 $S terrain -i $A scripts/window.py data/ground.npz $M -o $P/terrain data/terrain.bin \
   -- python scripts/terrain.py           # terrain/ (the bare land in chunks, while the tiles load and far off); data/terrain.bin
-$S zones -i $A scripts/window.py scripts/osm.py data/footprints.npz data/raw/osm.json $M -o data/zones.bin $P/zones.json \
-  -- python scripts/zones.py             # data/zones.bin, zones.json (the building of each column; needs footprints.npz)
+$S zones -i $A scripts/window.py scripts/osm.py scripts/lod2_ids.py data/footprints.npz data/raw/osm.json data/raw/lod2 $M \
+  -o data/zones.bin $P/zones.json -- python scripts/zones.py  # data/zones.bin, zones.json (the building of each column
+                                         # and each building's stable key; needs footprints.npz)
 $S objects -i $A data/raw/osm.json data/ground.npz -o $P/objects \
   -- python scripts/objects.py           # objects/ (each building's and street's box, for the viewer's ?focus=; needs ground.npz)
 $S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/windows.bin \
@@ -50,6 +52,9 @@ $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
 $S tile_fields -i $A scripts/window.py scripts/tilefile.py data/zones.bin data/flood.bin data/foliage.bin $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light (from the data/ maps above)
+uv run python scripts/world_id.py       # meta.json world (build id over tiles/1 and 1f, palette, grid): every
+                                         # build, cheap; written only when it changed. Before tris, which records
+                                         # meta.json whole as its output
 $S tris -i web/tools/tris.mjs web/src $P/tiles $M -o $P/meta.json \
   -- sh -c "cd web && node tools/tris.mjs"       # meta.json tiles.tris, required by the viewer (the viewer's mesher over
                                                  # every tile; needs web/node_modules and the tiles' buildings)

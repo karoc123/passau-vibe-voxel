@@ -14,7 +14,11 @@ one-cell margin round each 128 m node) are rebuilt from the sources now and then
 Three layers, composed per level-1 node when it is loaded:
 
 - **L0, the base build.** The node files of one pipeline build, named by a build id. Immutable: a build is never edited
-  in place; a new pipeline run is a new build id. Edits live outside it.
+  in place; a new pipeline run is a new build id. Edits live outside it. The id is `meta.json` `world.buildId`
+  (`scripts/world_id.py`, run every build after the tiles are final): a hash over the contents of `tiles/1` and `tiles/1f`,
+  so the same tiles give the same id anywhere and any changed tile a new one. `world` also carries `formatVersion` (node
+  files and addresses), `paletteLen`/`paletteHash`, `origin`, `base`, the project grid's `grid` x0/y0 and `voxel` (1 m):
+  what a server and a client compare before replaying ops.
 - **L1, persistent edits.** Players' building and lasting changes, stored by the server as ordered ops and replayed over
   L0 on every load.
 - **L2, transient edits.** Destruction. Applied over L0 + L1 while the node is loaded; when the node is loaded again

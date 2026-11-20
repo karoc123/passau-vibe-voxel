@@ -6,7 +6,8 @@ The step's record (data/cache/stamps/NAME.json) holds the signatures of its inpu
 finished, and its command. It runs again when any of them differs now, or an output is missing; FORCE=1 (or
 FORCE=NAME,NAME) runs it anyway. Signatures: a file's content hash (cached per size and mtime, region_inputs.file_sha;
 `path#-a.b,c.d` leaves out keys of a JSON file: meta.json's tiles.bytes and tiles.tris, which tile_fields.py and
-web/tools/tris.mjs write after the steps that read meta.json), a folder's names, sizes and mtimes (the tiles: thousands
+web/tools/tris.mjs write after the steps that read meta.json, and world, world_id.py's; a record is compared by path, so
+a key added to the list that the file does not have yet reruns nothing),a folder's names, sizes and mtimes (the tiles: thousands
 of files). A step that changes its own input in place (tile_fields.py the tiles) is recorded after it ran, so it is up
 to date afterwards. The step's own script (the first argument after `python` or `node` ending in .py or .mjs) is an
 input by itself.
@@ -60,6 +61,14 @@ def sig(spec):
     return region_inputs.file_sha(p)
 
 
+def _by_path(rec):
+    """a record with its inputs and outputs keyed by path alone: a key added to a `#-` list that the file does not have
+    yet (meta.json `world`) leaves the signature as it was, and reruns nothing"""
+    if rec is None:
+        return None
+    return dict(cmd=rec["cmd"], **{k: {p.partition("#-")[0]: v for p, v in rec[k].items()} for k in ("ins", "outs")})
+
+
 def main(argv):
     name = argv[0]
     cut = argv.index("--")
@@ -75,7 +84,7 @@ def main(argv):
     force = os.environ.get("FORCE", "")
     rec = json.load(open(f)) if f.exists() else None
     now = dict(cmd=cmd, ins={p: sig(p) for p in ins}, outs={p: sig(p) for p in outs})
-    if rec == now and all(v is not None for v in now["outs"].values()) and not (force == "1" or name in force.split(",")):
+    if _by_path(rec) == _by_path(now) and all(v is not None for v in now["outs"].values()) and not (force == "1" or name in force.split(",")):
         print(f"[{name}] up to date")
         return 0
     t0 = time.time()

@@ -55,6 +55,21 @@ export interface Meta {
   labels: Label[];
   views: Record<string, View>;
   sources: { osm: string };
+  // the world's identity (scripts/world_id.py; docs/adr/0001-world-layers.md): what edits are checked against
+  world?: WorldId;
+}
+
+// meta.json world: buildId hashes the contents of tiles/1 and 1f (the L0 base build); edits are addressed in the project
+// grid (grid: its corner, EPSG:25832, column = easting - x0, row = y0 - northing) and absolute height (0002-addressing)
+export interface WorldId {
+  formatVersion: number;
+  buildId: string;
+  paletteLen: number;
+  paletteHash: string;
+  origin: [number, number];
+  base: number;
+  grid: { x0: number; y0: number };
+  voxel: number;
 }
 
 export interface FloodInfo {
@@ -72,11 +87,13 @@ export interface FloodInfo {
 
 // zones.json (scripts/zones.py): per building its box, four numbers x0, y0, w, h in one flat list (boxes; from before,
 // buildings: per building [cx, cy, columns, x0, y0, x1, y1]); per label of meta.json, the building under it (0: none,
-// else id + 1)
+// else id + 1); keys: per building its stable key ("w<osm id>", "r<osm id>", "lod2:<gml:id>"), what outlives the build
+// (building ids are build-local; 60000..65535 are reserved for players' builds)
 export interface Zones {
   boxes?: number[];
   buildings?: number[][];
   labels: number[];
+  keys?: string[];
 }
 
 export type Place = [name: string, kind: string, x: number, y: number, size: number, alt: string];
