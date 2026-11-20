@@ -263,6 +263,8 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
     vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit)."""
     data = json.load(open(f"{RAW}/osm.json"))
+    import overrides
+    overrides.patch_elements(data["elements"])  # (the street overrides: osm.OSM reads them so too)
     # nodes of any bridge way (road, path, tram, rail): drawn on the deck, so agents there move at deck height
     # (ways that carry traffic only: a bridge's outline, man_made=bridge, shares nodes with the street passing under
     # it -- cars there jumped up onto the viaduct and back down)

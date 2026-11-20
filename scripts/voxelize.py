@@ -35,6 +35,7 @@ from shapely.strtree import STRtree
 from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, THETA, W
 from osm import OSM
 import landmarks
+import overrides
 import region
 from region import boxmean, in_core
 
@@ -549,11 +550,7 @@ _floor = ndimage.binary_opening(_floor, iterations=2)
 gcol[_floor] = C["garden"]
 note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
 
-HW = {"motorway": 20, "trunk": 14, "primary": 12, "secondary": 10, "tertiary": 8, "unclassified": 6,
-      "residential": 6, "living_street": 5, "service": 4, "pedestrian": 5, "footway": 2.5, "path": 2,
-      "cycleway": 2, "steps": 2.5, "platform": 3, "bridleway": 2, "track": 3, "corridor": 0}
-ROADS = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service",
-         "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "living_street"}
+from ways import HW, ROADS, way_width  # noqa: E402  (the widths ways are drawn at: shared with overrides.py)
 
 def on_bridge(t):
     return t.get("bridge") not in (None, "no") or t.get("man_made") == "bridge"
@@ -619,11 +616,7 @@ for oid, t, line in osm.lines:
     if not hw or tunnelish(t) or hw in ("corridor", "elevator", "proposed"):
         continue
     base = hw.replace("_link", "")
-    w = parse_len(t.get("width")) or (parse_len(t.get("lanes")) * 3.1 if t.get("lanes") and base in HW and base in ROADS else None) or HW.get(base, 0)
-    if t.get("footway") == "sidewalk":
-        w = max(w, 3)
-    if base == "service" and t.get("service") in ("parking_aisle", "driveway", "alley"):
-        w = 3.5
+    w = way_width(t)
     if w <= 0:
         continue
     poly = line.buffer(w / 2, cap_style="flat" if base in ROADS else "round")
@@ -676,6 +669,9 @@ burn(explicit, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes + road_shapes])
 road_mask = np.zeros((D, W), np.uint16)
 burn(road_mask, [(s, 1) for s, _ in road_shapes])
 burn(gcol, road_shapes)
+_sw = [(s_, C["kerb"] if k_ == "kerb" else C[SURF.get(k_, "paving")]) for s_, k_ in overrides.sidewalks(osm.lines, note)]
+burn(gcol, _sw)  # (the street overrides' sidewalks and kerbs, scripts/overrides/street)
+burn(explicit, [(s_, 1) for s_, _ in _sw])
 
 AH = {"footway": "paving", "pedestrian": "paving", "cycleway": "cycle", "traffic_island": "kerb", "steps": "steps",
       "emergency": "asphalt_l", "yes": "paving", "platform": "platform", "busway": "asphalt", "parking": "parking",
@@ -1466,6 +1462,7 @@ CORE_GEOM = landmarks.historic_core()
 core_roofs(top)
 pitched_m = lod2_roofs(top)
 pitched_m |= dsm_pitched_roofs(top)
+overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note)  # (scripts/overrides/building)
 # the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
 # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
 # contour lines of the street below across every flat roof and plane of LoD2
@@ -3224,6 +3221,7 @@ note("church windows:", n_cw)
 
 # ---------------------------------------------------------------- curated landmark details
 landmarks.apply_zones(vol, g, feats, pal, bmask, note)
+overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
 # where a hanging building piece may carry its walls down (1: inside a building outline) or needs posts (2: roof-only)
 bkind = np.zeros((D, W), np.uint8)
 ROOFY = {"roof", "carport", "canopy", "shelter"}

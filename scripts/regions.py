@@ -235,8 +235,9 @@ def driver_stamp(ws):
     code = {f: region_inputs.code_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
                                                          "tunnels.py", "underpass.py", "osm.py", "aoi.py", "tiles.py",
                                                          "window.py", "region.py", "passau.py", "mapstore.py",
-                                                         "overrides.json")}
-    d = dict(keys=keys, code=code, palette=region_inputs.file_sha(HERE / "palette.json"),
+                                                         "overrides.py", "ways.py")}
+    import overrides
+    d = dict(keys=keys, code=code, overrides=overrides.tree_sha(), palette=region_inputs.file_sha(HERE / "palette.json"),
              osm=region_inputs.file_sha(f"{aoi.RAW}/osm.json"), config=region_inputs.config_part(),
              env={k: os.environ.get(k) for k in ("FINALDUMP", "TRAFFICDUMP")})
     return region_inputs.sha(json.dumps(d, sort_keys=True).encode())

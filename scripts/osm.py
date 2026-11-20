@@ -8,6 +8,7 @@ from pyproj import Transformer
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
+import overrides
 from aoi import CRS, OSM_PATH, to_grid as _aoi_grid
 
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
@@ -31,6 +32,7 @@ class OSM:
     def __init__(self, path=None):
         path = path or OSM_PATH  # (data/raw/osm.json, or the region's cut of it: regions.py)
         data = json.load(open(path))
+        overrides.patch_elements(data["elements"])  # (the street overrides' tags, trees and lamps)
         self.timestamp = data["osm3s"]["timestamp_osm_base"]
         self.nodes = []  # (id, tags, Point)
         self.lines = []  # (id, tags, LineString)

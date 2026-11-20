@@ -1,6 +1,6 @@
 """Every label on the map and how far away it shows.
 
-The curated landmarks (landmarks.LABELS, EXTRA_LABELS, overrides.json labels) plus the named parks, gardens, marinas
+The curated landmarks (landmarks.LABELS, EXTRA_LABELS, the building overrides' labels) plus the named parks, gardens, marinas
 and harbours of 2.5 ha or more that none of them names. `far` is the camera distance (m) up to which a label shows;
 the viewer adds its English name or kind closer in, then its facts and website.
 """

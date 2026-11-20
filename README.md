@@ -193,9 +193,49 @@ for them).
   under clean roofs with OSM's walls as battlements; the Poststeg footbridge over the station's tracks.
 - **Labels and camera presets**: `scripts/landmarks.py` (`LABELS`, `EXTRA_LABELS`, `make_views`), plus named parks
   over 2.5 ha (`scripts/labels.py`).
-- **Per-building curation** goes in `scripts/overrides.json`, keyed by OSM id (wall and roof colour and material,
-  facade zones, a crown band, a label). It is empty so far. Prefer fixing `building:colour`, `height` and
-  `building:part` in OSM itself.
+- **Per-object overrides** (see below). Prefer fixing `building:colour`, `height`, `building:part`, `width` and
+  `surface` in OSM itself where OSM is wrong; an override is for what OSM does not model.
+
+## Per-object overrides (scripts/overrides/)
+
+One JSON file per object, so that many agents can each refine one building or street (the `/verfeinern` skill,
+`.claude/skills/verfeinern/SKILL.md`) and their branches merge without conflicts:
+`scripts/overrides/building/<way id>.json` (`r<id>.json` for a relation; an outline or a `building:part`) and
+`scripts/overrides/street/<way id>.json` (a highway way). A file says *what* to build as parameters, never voxels, so
+it is rebuilt from the data on every build, in any region cover and on a larger map. The format, its keys and its
+CLI are documented in `scripts/overrides.py`; the parts in `scripts/parts.py` (`uv run python scripts/parts.py`
+lists them and their parameters).
+
+- **Buildings**: wall and roof colour and material; `roof.shape` (`flat`, `gabled`, `hipped`, `pyramidal`, with
+  `eaves`, `ridge` in metres over the footprint's median ground and `ridge_dir`), which rebuilds the roof surface
+  (and the viewer's roof plane shading) from parameters; facade `zones` and a `crown` band; `windows` (real window
+  openings on every straight edge: bay, rows); `parts`; a `label`. Applied in `voxelize.py`: the roof shape before
+  the roof is rounded to voxels, zones, windows and parts on the finished building.
+- **Parts** (`scripts/parts.py`): `helm` (a tower's pyramid, cone, needle, dome or onion with cross or ball),
+  `dormer`, `chimney`, `bay_window` (oriel), `arcade` (arches cut into the ground floor). Placed `at` the centre,
+  the highest column, an EPSG:25832 point or a fraction along and across the footprint, `repeat`ed by a step. A new
+  part is a function and an entry in `PARTS`.
+- **Streets**: `width`, `lanes`, `surface` (set as the way's OSM tags when OSM is read, so the volume, the traffic
+  and the lamps all see them), `sidewalk` (paved strips left and right of the carriageway, with a kerb line),
+  `trees` and `lamps` every so many metres along a side (added as OSM nodes, ids from 10^15: young trees where the
+  surface model has no crown, lamps with their poles and light).
+- **Validation and staleness**: every build (`region_inputs.cut_osm`) validates all files (unknown keys, bad colours
+  or materials, a file name that is not an id of the right kind: the build stops with the list) and warns when an
+  object's OSM geometry changed since the override was written (its `osm` block holds hashes of geometry and tags,
+  written by `overrides.py new`, refreshed by `overrides.py rebase`) or the object vanished. `uv run python
+  scripts/overrides.py check` does the same by hand.
+- **Rebuilds**: an override is in the key of the regions whose core lies within 128 m of its object
+  (`region_inputs.OVERRIDE_REACH`), so editing one file rebuilds those regions only (one to four:
+  `voxelize.py --status`), then the steps after them.
+- Not covered (yet): changing a building's footprint or height outright (OSM's job: `height`, `building:part`),
+  per-facade colours by compass side (zones run along the long axis), street furniture other than trees and lamps,
+  a street's own height (kerbs are drawn flush: the ground is a height field).
+
+**Looking at an object: `uv run python scripts/look.py building|street ID [--out DIR]`** draws the orthophoto, the
+surface model and the LoD2 roofs round it with the OSM outline (`look.png`, 5 px per metre, a 10 m grid) and prints
+what the parameters come from: its OSM tags, the heights over the ground (DOM20 percentiles, LoD2 eaves and ridge,
+the ridge's bearing, the roof type), towers in the surface model with their width at every 2 m of height, the
+roof's colour in the orthophoto. `overrides.py info` gives the object's place.
 
 ## Viewer (web/)
 

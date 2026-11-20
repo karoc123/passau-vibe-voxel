@@ -8,6 +8,8 @@ code changed (and the OSM cut each region reads instead of the whole of data/raw
   OSM_MARGIN of the region's box (and, everywhere, those named in landmarks.LABELS: a curated label takes the map's
   first outline of its name), in the file's order. Its hash is the hash of those elements: a new extract that changes
   nothing near a region leaves it be
+- the per-object overrides (scripts/overrides, overrides.py) of the ways and relations within OVERRIDE_REACH of its
+  core: their files' hashes go with the cut's, so editing one rebuilds only the regions near that object
 - other raw files a region reads whole (the tree register, ALKIS land use): their hash
 - code: the files of scripts/ the region's process had loaded (recorded in its out.json, `deps`; a Python file by its
   syntax tree, so comments and docstrings rebuild nothing), and the parts of scripts/map.json that decide what is built
@@ -28,6 +30,7 @@ import window
 
 BLOCK = 128  # map cells; region boxes lie on multiples of it (cores on 1024, halo 384) or on the map's edge
 OSM_MARGIN = 64  # m: an element this near a region's box is in its cut
+OVERRIDE_REACH = 128  # m: an override (scripts/overrides) of an object this near a region's core is in its key
 CACHE = Path("data/cache/inputs")
 HERE = Path(__file__).resolve().parent
 RASTERS = ["data/prep.npz", "data/lod2.npz", "data/laser.npz"]
@@ -176,13 +179,18 @@ def cut_osm(ws, rdir, src=None):
     """each region's cut of data/raw/osm.json into rdir(w)/osm.json (written only when it changed); returns {w: hash
     of its elements}"""
     import landmarks
+    import overrides
     src = Path(src or f"{aoi.RAW}/osm.json")
     data = json.load(open(src))
     els = data.pop("elements")
+    overrides.load()  # (every override file valid, or stop here)
+    overrides.check(els)  # (warns of overrides whose object changed or vanished)
     boxes = _osm_boxes(els)
     named = {f.get("name", n) for n, f in landmarks.LABELS.items()} | set(landmarks.LABELS)
     always = np.array([b is None or e.get("tags", {}).get("name") in named for e, b in zip(els, boxes)])
     bb = np.array([b if b is not None else (0, 0, 0, 0) for b in boxes], float).reshape(-1, 4)
+    have = overrides.objects()
+    ovm = np.array([(e["type"], e["id"]) in have for e in els], bool)
     out = {}
     for w in ws:
         ra, rb, ca, cb = w.region(_halo())
@@ -198,7 +206,13 @@ def cut_osm(ws, rdir, src=None):
             head = json.dumps(data, separators=(",", ":"), ensure_ascii=False)[:-1]
             (d / "osm.json").write_text(head + (',' if data else '') + '"elements":' + body + "}")
             stamp.write_text(h)
-        out[w] = h
+        # the overrides of the objects within OVERRIDE_REACH of the region's core: what an override changes stays
+        # within a few metres of its object, and what that changes in turn within the halo's checks (64 m debris, 32 m
+        # crowns). (Not every cut's: a curated label's outline is in all of them)
+        ka, kb, kc, kd = w.r0 - OVERRIDE_REACH, w.r1 + OVERRIDE_REACH, w.c0 - OVERRIDE_REACH, w.c1 + OVERRIDE_REACH
+        close = ovm & (bb[:, 2] >= kc) & (bb[:, 0] <= kd) & (bb[:, 3] >= ka) & (bb[:, 1] <= kb)
+        ov = overrides.keys_in([els[i] for i in np.flatnonzero(close)])
+        out[w] = sha((h + json.dumps(ov)).encode()) if ov else h
     return out
 
 
@@ -236,11 +250,11 @@ def palette_sig(n):
 
 
 def deps_of_process():
-    """the files of scripts/ this process has loaded (for its out.json), and the data files of scripts/ it reads"""
+    """the files of scripts/ this process has loaded (for its out.json)"""
     import sys
     fs = set()
     for m in list(sys.modules.values()):
         f = getattr(m, "__file__", None)
         if f and Path(f).resolve().parent == HERE:
             fs.add(Path(f).name)
-    return sorted(fs | {"overrides.json"})
+    return sorted(fs)

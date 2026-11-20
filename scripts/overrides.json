@@ -1,4 +1,0 @@
-{
-  "_doc": "Per-building curation applied on top of the surface model + OSM (landmarks.py). Keyed by OSM element id (way/relation) or by name; empty for Passau so far. Fields: wall/roof {colour, material}; zones: facade split along the footprint's long axis (from/to are fractions 0..1, measured from end 'origin': west|east|north|south); crown: facade band at the top {height, colour, material, sign_colour, tip: only the first fraction of the long axis from the origin end}; min_part_height: apply only to parts taller than this; label {name, en, kind, height, year, rebuilt, by, building} as in landmarks.LABELS. Materials: landmarks.MAT_IDS.",
-  "buildings": {}
-}

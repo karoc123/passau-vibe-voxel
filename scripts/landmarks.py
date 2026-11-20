@@ -1,8 +1,7 @@
-"""Curated details layered on top of the data-driven voxels: the labels and camera presets, per-building overrides
-(overrides.json) and Passau's set pieces (passau.py)."""
-import json
+"""Curated details layered on top of the data-driven voxels: the labels and camera presets, the per-building overrides'
+colours, facade zones and labels (scripts/overrides/building/*.json, read by overrides.py) and Passau's set pieces
+(passau.py)."""
 import math
-from pathlib import Path
 
 import numpy as np
 from shapely.geometry import Point
@@ -52,7 +51,7 @@ def label(osm_name, facts, x, y, z):
     return dict(name=facts.get("name", osm_name), **keep, x=x, y=y, z=z)
 
 
-# material names for overrides.json -> the viewer's material ids (web/src/voxelMaterial.ts MAT)
+# material names for the overrides (overrides.py, parts.py) -> the viewer's material ids (web/src/voxelMaterial.ts MAT)
 MAT_IDS = {"solid": 0, "wall": 1, "glass": 2, "metal": 6, "floodlit": 7, "grass": 8, "roof": 12, "concrete": 13,
            "bronze_grid": 15, "sign": 16, "sign_band": 18, "ribbon": 19, "classic": 20, "window": 21, "tenement": 22}
 # the historic core: the Altstadt peninsula and the Innstadt, at EPSG:25832 x, y (traced on the orthophoto preview).
@@ -73,22 +72,16 @@ def historic_core():
     return unary_union([Polygon([tuple(float(v) for v in to_grid(x, y)) for x, y in p]) for p in HISTORIC_CORE])
 
 
-OVERRIDES = json.load(open(Path(__file__).with_name("overrides.json")))["buildings"]
-
-
 def _hex(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
 def override_for(f):
-    """overrides.json entry for a feature: by its own id, its parent outline's id, or its (parent's) name."""
-    keys = [str(f["id"])]
-    if f.get("parent"):
-        keys.append(str(f["parent"]["id"]))
-    keys.append(_name(f) or "")
-    for k in keys:
-        o = OVERRIDES.get(k)
+    """the building override of a feature (overrides.py): its own, else its parent outline's"""
+    import overrides
+    for x in (f, f.get("parent")):
+        o = x and overrides.building_for(x["typ"], x["id"])
         if o and (f["maxh"] or 0) >= o.get("min_part_height", -1):
             return o
     return None
@@ -105,7 +98,7 @@ def wall_override(f, pal):
 
 
 def apply_zones(vol, g, feats, pal, bmask, note):
-    """Facade zones and crown bands from overrides.json, painted onto the voxels of the building's footprint."""
+    """Facade zones and crown bands from the building overrides, painted onto the voxels of the building's footprint."""
     by_outline = {}
     for f in feats:
         o = override_for(f)
@@ -161,22 +154,18 @@ def apply_zones(vol, g, feats, pal, bmask, note):
 
 
 def override_labels(feats, g, top_at):
-    """[(the building's id, label)] of overrides.json's labels standing in the region's core"""
+    """[(the building's id, label)] of the building overrides' labels standing in the region's core"""
     from aoi import MC0, MR0
     from region import in_core
     out = []
     for f in feats:
-        o = OVERRIDES.get(str(f["id"]))
+        import overrides
+        o = overrides.building_for(f["typ"], f["id"])
         if o and "label" in o and not f["part"] and len(f["rr"]):
             r, c = int(np.median(f["rr"])), int(np.median(f["cc"]))
             if in_core(r, c):
                 out.append((f["id"], label(o["label"]["name"], o["label"], c + MC0, r + MR0, top_at(r, c))))
     return out
-
-
-def _name(f):
-    return f["tags"].get("name") or (f.get("parent") or {}).get("tags", {}).get("name")
-
 
 
 def roof_override(f, pal):
