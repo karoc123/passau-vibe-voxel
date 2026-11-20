@@ -266,6 +266,10 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     s.dispose();
     return { name: 'wall_head_on_50', pass: end.z < 60 && end.up > 0.8, detail: d };
   },
+  // a garage (a room, scripts/interiors.py): driven in through its 4 m door at 20 km/h, gas held to its back wall --
+  // it stays in, on its floor, under its roof; and into the wall beside the door, where it stays out
+  garage_in() { return garage('garage_in', 64); },
+  garage_wall() { return garage('garage_wall', 56); },
   cliff_10m() { return cliff('cliff_10m', 10, 60, true); },
   cliff_4m() { return cliff('cliff_4m', 4, 50, false); },
   // the river as the data has it: its water the ground's top voxel (at 4), a bank 3 m over it, driven off at 40 km/h
@@ -520,6 +524,26 @@ function cliff(name: string, drop: number, kmh: number, crash: boolean): Outcome
   const d = { landingSpeed: land ? r2(land.speed) : 0, crashed: !!land?.crash, upright: end.up > 0.8, zEnd: r2(end.z), ...summary(s) };
   s.dispose();
   return { name, pass: d.crashed === crash && (crash || d.upright), detail: d };
+}
+
+// A hall on level earth at 10 m (not paved: no ramps), x 50..78, z 60..110: walls 2 m thick up to 17 m, its floor the
+// ground, its roof 15..17 m (5 m of headroom), a door 4 m wide and 4 m high in the south wall (x 62..66). The car
+// from z 30 heading +z at x, held at 20 km/h for 16 s (through the door the back wall is 78 m off)
+function garage(name: string, x: number): Outcome {
+  const map = synthMap(2, (cx, cz) => {
+    if (cx < 50 || cx >= 78 || cz < 60 || cz >= 110) return { g: 10 };
+    const wall = cx < 52 || cx >= 76 || cz < 62 || cz >= 108, door = cz < 62 && cx >= 62 && cx < 66;
+    return { g: 10, runs: [[door ? 14 : wall ? 10 : 15, 17, WALL]] };
+  });
+  const s = new Sim(map, { x, z: 30 }, 0, 20 / 3.6);
+  s.run(16, cruise(20));
+  const L = s.log, end = L[L.length - 1];
+  const zMax = Math.max(...L.map((l) => l.z)), yMax = Math.max(...L.map((l) => l.y));
+  const inside = end.z > 62 && end.z < 108 && end.x > 52 && end.x < 76;
+  const d = { xEnd: r2(end.x), zEnd: r2(end.z), zMax: r2(zMax), yMax: r2(yMax), inside, impacts: s.events.filter((e) => e.kind === 'impact').length, ...summary(s) };
+  s.dispose();
+  const ok = name === 'garage_in' ? inside && zMax < 108 && yMax < 12.5 : end.z < 60 && zMax < 60;
+  return { name, pass: ok && d.minUp > 0.8, detail: d };
 }
 
 export async function runScenarios(ids?: string[]) {
