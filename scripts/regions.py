@@ -364,7 +364,7 @@ def main(argv):
     # the volume: the regions' own (for traffic.py), read where asked for (mapstore.MapVolume)
     Hm = max(r["Hm"] for r in res.values())
     vol = mapstore.MapVolume(ws, rdir, Hm)
-    if os.environ.get("FINALDUMP"):  # the finished volume put together, for whole-city checks (scripts/floating.py;
+    if os.environ.get("FINALDUMP"):  # the finished volume put together, for whole-city checks (traffic.py run alone;
         fv = np.lib.format.open_memmap("data/cache/final_vol.npy", "w+", np.uint16, (Hm, D_, W_))  # a map-sized file)
         for w in ws:
             v = mapstore.load_volume(rdir(w) / "vol.npz", (res[w]["Hm"], w.r1 - w.r0, w.c1 - w.c0))
