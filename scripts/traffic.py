@@ -211,9 +211,9 @@ def join_bike_ways(peds, pn, note, nodes_xy=None, fit_ok=None):
 
 
 def trim_portal(p, reach=8.0):
-    """a route piece cut at a tunnel starts on its portal node, in the retaining wall's top cell: the fitted path
-    ramped down the wall (a tram diving 11 m at the W-Z tunnel). Points standing 2 m or more over the lowest point
-    within `reach` m on from them are dropped, at both ends"""
+    """a path cut at a tunnel starts on its portal node, in the retaining wall's top cell: the fitted path ramped
+    down the wall. Points standing 2 m or more over the lowest point within `reach` m on from them are dropped, at
+    both ends"""
     def head(q):
         k = 0
         while k < len(q) - 2:
@@ -230,14 +230,15 @@ def trim_portal(p, reach=8.0):
     return head(head(p)[::-1])[::-1]
 
 
-def tram_clearance(surf):
-    """the carriageway mask with ~1 m round the tram bed counted as tram bed (so bodies never touch): reach 1 cell,
-    so made region by region on a raster of the regions (mapstore.MapRaster) and the same as over the whole map"""
+def track_clearance(surf):
+    """the carriageway mask with ~1 m round the track bed counted as track bed (so cars keep off the rails): reach
+    1 cell, so made region by region on a raster of the regions (mapstore.MapRaster) and the same as over the whole
+    map"""
     from scipy import ndimage as _nd
 
     def f(s):
-        tramzone = _nd.binary_dilation(s == 2, iterations=1)
-        return np.where(tramzone & (s != 2), 2, s).astype(np.uint8)
+        zone = _nd.binary_dilation(s == 2, iterations=1)
+        return np.where(zone & (s != 2), 2, s).astype(np.uint8)
     return surf.map_chunks(f, 1) if hasattr(surf, "map_chunks") else f(surf)
 
 
@@ -258,14 +259,14 @@ def off_surface(surf, r, c, reach):
 
 
 def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
-    """surf: (D, W) uint8, 1 = carriageway, 2 = tram bed; used to validate OSM lane counts against the paving.
+    """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
     vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit)."""
     data = json.load(open(f"{RAW}/osm.json"))
     import overrides
     overrides.patch_elements(data["elements"])  # (the street overrides: osm.OSM reads them so too)
-    # nodes of any bridge way (road, path, tram, rail): drawn on the deck, so agents there move at deck height
+    # nodes of any bridge way (road, path, rail): drawn on the deck, so agents there move at deck height
     # (ways that carry traffic only: a bridge's outline, man_made=bridge, shares nodes with the street passing under
     # it -- cars there jumped up onto the viaduct and back down)
     bridge_nodes = {n for e in data["elements"] if e["type"] == "way" and e.get("tags", {}).get("bridge") not in (None, "no")
@@ -437,10 +438,10 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                 e["sig"] = dict(s=round(best[0], 1), ctrl=best[1], axis=0 if abs(dx) >= abs(dy) else 1)
             roads.append(e)
     # validate lanes against the actual paved surface: a lane centre must run mostly on carriageway and not on
-    # the tram bed (OSM lanes= often counts space the tracks take, or a wider road than the mapped centreline allows)
+    # the track bed (OSM lanes= can count space rails take, or a wider road than the mapped centreline allows)
     n_drop = 0
     if surf is not None:
-        surf = tram_clearance(surf)
+        surf = track_clearance(surf)
         for e in roads:
             p = np.array(e["p"], float)
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(p[:, :2], axis=0).T))])
@@ -479,7 +480,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     else:
         for e in roads:
             e["o0"] = 1.5 if e["two"] else round((0.5 - e["lanes"] / 2) * 3.0, 2)
-    note(f"traffic: {n_drop} OSM lanes dropped where the lane centre is not on carriageway or runs on the tram bed")
+    note(f"traffic: {n_drop} OSM lanes dropped where the lane centre is not on carriageway or runs on the track bed")
 
     # approaches into a signalled junction without their own signal node (side streets) obey the same controller
     n_inf = 0
@@ -625,7 +626,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
             hx, hy = c_ + 0.5, r_ + 0.5
         heads.append([round(hx, 1), round(hy, 1), z_at(hx, hy, True), round(math.atan2(dx, dy), 2), sg["ctrl"], sg["axis"]])
 
-    # ---------------- trams: real route relations (PTv2, one relation per direction), chained and clipped
+    # ---------------- rail routes: real route relations (PTv2, one relation per direction), chained and clipped
     way_by_id = {e["id"]: e for e in data["elements"] if e["type"] == "way"}
     def chain(ws):
         """a route's member ways (node lists) as one node chain, None at its gaps: from the first way on, each time
@@ -660,7 +661,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
 
     def runs(seq, stop=()):
         """the pieces of a chain inside the map and off the `stop` nodes; one that leaves the map ends on its edge (it
-        ended on its last node inside, up to 60 m short: trams appeared in the middle of a street)"""
+        ended on its last node inside, up to 60 m short: vehicles appeared out of nowhere)"""
         def edge(i, o):
             (xi, yi), (xo, yo) = nodes[i], nodes[o]
             f = min([(b - a) / (c - a) for a, c, b in ((xi, xo, 3), (xi, xo, W - 3.01), (yi, yo, 3), (yi, yo, D - 3.01))
@@ -686,7 +687,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
 
     def members(rel):
         """the ways a route runs on (its members without a stop or platform role), whatever state the way is tagged
-        in: a few metres of route 13 at Wolska are railway=disused while the track is relaid"""
+        in (a few metres of a route can be railway=disused while the track is relaid)"""
         ws = []
         for m in rel.get("members", []):
             w = way_by_id.get(m["ref"]) if m["type"] == "way" and m.get("role") in ("", "forward", "backward") else None
@@ -695,7 +696,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                 ws.append(ns)
         return ws
 
-    # under the ground a piece ends: a tram or a train goes into a tunnel at its portal
+    # under the ground a piece ends: a train goes into a tunnel at its portal
     tunnel_nodes = set()
     for e in data["elements"]:
         tg = e.get("tags", {})
@@ -707,18 +708,6 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                     nodes[nid] = (float(i), float(j))
             if tg.get("tunnel") not in (None, "no") or tg.get("covered") == "yes" or _num(tg.get("layer"), 0) < 0:
                 tunnel_nodes.update(e["nodes"][1:-1])
-    trams = []
-    for rel in data["elements"]:
-        t = rel.get("tags", {})
-        if rel["type"] != "relation" or t.get("route") != "tram":
-            continue
-        for piece in runs(chain(members(rel)), tunnel_nodes):
-            pp = pts_of(piece, False)
-            if length(pp) >= 120:
-                trams.append(dict(ref=t.get("ref", "?"), p=pp, L=round(length(pp), 1)))
-    # identical paths from different refs share track: keep all (each ref runs its own service)
-    note(f"traffic: {len(trams)} tram route pieces inside the AOI, lines {sorted({tr['ref'] for tr in trams}, key=lambda r: (len(r), r))}")
-
     # ---------------- trains: the route=train relations (one per direction), on the open-air track only -- a piece
     # ends where the line goes into a tunnel or leaves the map. Routes on the
     # same track share one path; each keeps the stations it stops at (its stop members on the path)
@@ -778,11 +767,6 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                 p_ = trim_portal(e["p"])
                 if len(p_) >= 2 and length(p_) > 3:
                     e["p"], e["L"] = p_, round(length(p_), 1)
-        for tr in trams:
-            tr["p"], lift, _ = fit(tr["p"], (-0.9, 0.0, 0.9), vol, solid, W, D, decks=True)
-            n_lift += lift
-            tr["p"] = trim_portal(tr["p"])
-            tr["L"] = round(length(tr["p"]), 1)
         for tr in trains:
             p_, lift, _ = fit(tr["p"], (-1.2, 0.0, 1.2), vol, solid, W, D, decks=True)
             if len(p_) != len(tr["p"]):  # the stops are arc lengths: they hold as long as the path's corners do
@@ -821,7 +805,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     note(f"traffic: {len(roads)} directed road edges ({round(sum(e['L'] * e['lanes'] for e in roads) / 1000, 1)} lane-km), "
          f"{len(ctrls)} signal controllers, {nsig} signalled approaches; {len(peds)} footpath edges "
          f"({round(sum(e['L'] for e in peds) / 1000, 1)} km), {ncross} signalled crossings")
-    return dict(roads=roads, rnodes=rnodes, ctrls=ctrls, heads=heads, peds=peds, pnodes=pn, trams=trams, trains=trains, restr=restr)
+    return dict(roads=roads, rnodes=rnodes, ctrls=ctrls, heads=heads, peds=peds, pnodes=pn, trains=trains, restr=restr)
 
 
 if __name__ == "__main__":  # traffic.json alone, from the last full build's volume (TRAFFICDUMP=1 FINALDUMP=1 voxelize.py)

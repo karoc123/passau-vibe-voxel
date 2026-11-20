@@ -18,17 +18,11 @@ export interface Road extends RoadData, Path { i: number; lists: Car[][] }
 export interface PedData extends PathData { a: number; b: number; w: number; x?: SignalRef; side?: number; bk?: number }
 export interface PedEdge extends PedData, Path { i: number }
 
-export interface TramStop extends SignalRef { s: number }
-export type TramCrossing = { kind: 'road'; e: number; sR: number; sT: number } | { kind: 'diamond'; id: number; sT: number };
-export interface TramPathData extends PathData { ref?: string }
-export interface TramPath extends TramPathData, Path { i: number; stops: TramStop[]; nextSpawn: number; xs: TramCrossing[] }
-
 export interface TrafficData {
   roads: RoadData[];
   peds: PedData[];
   ctrls: { x: number; y: number }[];
   heads?: [number, number, number, number, number, number][];
-  trams?: TramPathData[];
   trains?: TrainPathData[];
   restr?: [number, number, number, string][];
 }
@@ -76,15 +70,6 @@ export interface Car extends Blocked {
   block: { o: Car; gap: number } | null;
 }
 
-export interface Tram extends Blocked {
-  kind: 'tram';
-  p: number;
-  s: number;
-  ds: number;
-  near: boolean;
-  yieldTo: number;
-}
-
 export interface Person {
   kind: 'person';
   e: number;
@@ -101,7 +86,8 @@ export interface Person {
   ctl?: { x: number; y: number; z: number; h: number; moving: boolean };
 }
 
-export type Agent = Car | Tram;
-export type Rideable = Car | Tram | Person;
+export type Agent = Car;
+export type Rideable = Car | Person;
+// ('tram' is no longer simulated; it stays in Kind only while nav/nav.ts and nav/ride.ts still name it)
 export type Kind = 'car' | 'tram' | 'person';
 export interface Pose { x: number; y: number; z: number; h: number }
