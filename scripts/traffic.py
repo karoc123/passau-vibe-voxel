@@ -421,6 +421,11 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                 continue
             e = dict(a=node_idx(s[0]), b=node_idx(s[-1]), w=w["id"], p=p, L=round(L, 1), lanes=max(1, min(nl, 4)),
                      v=round(v, 1), c=CLASS.get(hw.replace("_link", ""), 1), two=not (ow or rev))
+            # no street lamps along it (web/src/streetlamps.ts): lit=no, a motorway or a road out of town (OSM's
+            # zone:traffic=DE:rural) unless lit=yes -- the A 3's Danube bridge and the B 8 up the Danube had a lamp
+            # every 26 m beside the river
+            if t.get("lit") == "no" or t.get("lit") != "yes" and (hw.startswith("motorway") or t.get("zone:traffic") == "DE:rural"):
+                e["dark"] = 1
             # signal for this direction: a signal node on this edge (not its start) within 45 m of its end
             cum = np.concatenate([[0], np.cumsum([math.dist(a[:2], b[:2]) for a, b in zip(p, p[1:])])])
             best = None

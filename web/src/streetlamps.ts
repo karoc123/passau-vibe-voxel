@@ -11,7 +11,7 @@ import type { Meta } from './types';
 // buildings: per 1 m column non-zero on a building (zones.py), trees: per 2 m cell the foliage class (phenology.py),
 // terrain: data/terrain.bin (terrain.py: its ground colours every 2 m)
 export type Ground = { buildings: ArrayLike<number>; trees: ArrayLike<number>; terrain: ArrayBuffer };
-type Way = { p: [number, number, number][] };
+type Way = { p: [number, number, number][]; dark?: number };
 
 function townMask(meta: Meta, g: Ground) {
   // per 2 m cell: building, and wild ground: under trees, or grass or bare soil in the terrain's ground colours (city.ts)
@@ -56,7 +56,7 @@ export function placeStreetLamps(meta: Meta, roads: Way[], peds: Way[], ground: 
     const { built, wild, water } = town(x, y);
     return built >= 20 || water >= 40 || wild < (ped ? 0.5 : 0.75);
   };
-  for (const { p, ped } of [...roads.map((w) => ({ p: w.p, ped: false })), ...peds.map((w) => ({ p: w.p, ped: true }))]) {
+  for (const { p, ped } of [...roads.filter((w) => !w.dark).map((w) => ({ p: w.p, ped: false })), ...peds.map((w) => ({ p: w.p, ped: true }))]) {
     let next = 6;
     for (let i = 0, d = 0; i + 1 < p.length; i++) {
       const [ax, ay] = p[i], [bx, by] = p[i + 1], l = Math.hypot(bx - ax, by - ay);
