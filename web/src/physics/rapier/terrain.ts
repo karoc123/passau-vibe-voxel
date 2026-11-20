@@ -3,7 +3,7 @@
 // The same per-tile data the collision code reads (nav/voxel-collision.ts: data/tiles/1 and 1f, 128 m tiles with a
 // 1-column apron): per column the ground (solid from 0 up to it) and runs of voxels (base and foliage). Grass is not
 // solid, as there. Water is not solid either (the river's top voxel is the ground's: the ground ends under it); its
-// top per column is kept for waterAt (the car sinks, as variant A's).
+// top per column is kept for waterAt (the car sinks).
 //
 // The world is cut in CHUNK x CHUNK m chunks. A chunk within REACH of a dynamic body gets one Voxels collider (only the
 // voxels with a face to the air: the shell) and, where the street is a ramp (ramps.ts), a trimesh of the ramp's
@@ -23,10 +23,10 @@ export const CHUNK = 16;
 // collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
 // meets (its surface on the ramps, the steps' wedges: car.ts) G_CAR_ONLY; the ramps as drawn meet everything but the
 // car; other bodies, and queries that should see the city as drawn, use WORLD_GROUPS.
-export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1, G_RAGDOLL = 1 << 2;
+export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1;
 export const CAR_GROUPS = (G_CAR << 16) | 0xffff;
-// the wheels' rays: as the car, but not on a ragdoll (the car's wheels rolling over one would kick it about)
-export const WHEEL_GROUPS = (G_CAR << 16) | (0xffff & ~G_RAGDOLL);
+// the wheels' rays: as the car
+export const WHEEL_GROUPS = CAR_GROUPS;
 export const CAR_ONLY_GROUPS = (G_CAR_ONLY << 16) | G_CAR;
 export const NOT_CAR_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | (0xffff & ~G_CAR);
 export const WORLD_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | 0xffff;

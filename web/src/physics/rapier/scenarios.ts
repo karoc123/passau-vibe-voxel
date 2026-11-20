@@ -176,7 +176,7 @@ export function wobble(L: Sample[]) {
 
 // How floaty the car is, over the samples: how its body's height follows the road under it.
 // - vyErr (m/s): RMS of the body's vertical speed less the road's under it (along the car's way): 0 for a car glued
-//   to its road (variant A, physics/body.ts, is near that), large when the body lifts off crests and wallows in dips.
+//   to its road, large when the body lifts off crests and wallows in dips.
 // - heave (cm): RMS of the body's height over the road less its 1 s moving mean (how far it bobs on its springs).
 // - lightPct: share of samples with the wheels carrying under half the car's weight (light: little grip, no steering);
 //   airPct: no wheel touching.

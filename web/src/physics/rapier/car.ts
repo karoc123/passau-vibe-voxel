@@ -12,7 +12,7 @@
 // - air: no wheel touching, the roll and pitch are damped and gently righted (the heading left alone).
 // - water: the chassis' centre down at the water's top at its column ends the drive (status 'water').
 // - landing: touching down from the air faster than crashSpeed() into the ground (a fall of ~8 m) is a crash (an event:
-//   the driver is shaken, as variant A's).
+//   the driver is shaken).
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
@@ -54,7 +54,7 @@ const REST = 0.35;
 // as far as the car sags on it (g * gravity / (4 stiffness): a stiffer spring loses the ground sooner over a crest).
 // - stiffness, compression, relaxation: per wheel (heave ~sqrt(stiffness) / pi Hz, damping ratio ~damping /
 //   sqrt(stiffness))
-// - gravity: the car's own gravity (a multiple of g: variant A has 12 m/s^2): how fast it comes back down over a crest
+// - gravity: the car's own gravity (a multiple of g): how fast it comes back down over a crest
 // - downforce: pressed onto its wheels' ground (along its own down) by this many g at 50 km/h, with the speed squared
 //   (at most twice that), while a wheel touches: more grip and a body that stays on the road over crests at speed
 // - gripFront, gripRear: the tyres' frictionSlip (the most force per load); side: their lateral stiffness
@@ -380,7 +380,7 @@ export class RapierCar {
     const b = this.body;
     let nx = 0, nz = 0;
     this.world.contactPairsWith(this.chassis, (other) => {
-      // (walls: not the wedges, not what moves by itself -- a ragdoll, a wreck)
+      // (walls: not the wedges, not what moves by itself -- a wreck)
       if (this.isWedge(other) || other.parent()?.isDynamic()) return;
       this.world.contactPair(this.chassis, other, (m, flipped) => {
         if (m.numContacts() === 0) return;

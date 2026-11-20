@@ -1,12 +1,13 @@
+import { Vector3 } from 'three';
 import type { Meta } from '../types';
-import { VoxelCollision } from '../nav/voxel-collision';
+import { VoxelCollision } from './voxel-collision';
 import { MAT } from '../voxelMaterial';
 
-// A synthetic voxel world for headless physics checks (physics/scenarios.ts, web/tools/physics.mjs): a ground height
-// per column and boxes on it (walls, decks, water), written as real 1 m node files (VXT2, as scripts/tilefile.py) and
-// served to the real VoxelCollision through a stubbed fetch, so the car and bodies meet exactly what the viewer's
-// collision gives them. Columns as the data has them: soil from 0 to the ground's top voxel, that voxel in the
-// surface's colour (paved: a ramp on a gentle slope, ramps.ts), the boxes' runs above.
+// Headless checks of the FPV drone's collision (voxel-collision.ts; web/tools/collision.mjs): a synthetic voxel world
+// (a ground height per column and boxes on it: walls, decks, water) written as real 1 m node files (VXT2, as
+// scripts/tilefile.py) and served to the real VoxelCollision through a stubbed fetch, so it reads exactly what it reads
+// in the viewer. Columns as the data has them: soil from 0 to the ground's top voxel, that voxel in the surface's
+// colour, the boxes' runs above. Then a few sweeps of the drone's cube and surface lookups (CHECKS).
 
 // Palette entries quantised as voxelize.py does (to 4), so voxelMaterial.ts recognises the paved ones
 export const PAL = {
@@ -100,4 +101,56 @@ function serve(files: Map<string, Uint8Array>) {
     if (url.includes('data/tiles/')) return new Response(null, { status: 404 });
     return realFetch!(input, init);
   }) as typeof fetch;
+}
+
+// waits until all of the world's tiles (at most 2 x 2, all within the 3 x 3 around its centre) are in
+async function loaded(w: TestWorld) {
+  const nx = Math.ceil(w.meta.W / N), nz = Math.ceil(w.meta.D / N), c = new Vector3(w.meta.W / 2, 0, w.meta.D / 2);
+  for (let i = 0; i < 2000; i++) {
+    w.collision.prefetch(c, new Vector3());
+    let all = true;
+    for (let tz = 0; tz < nz; tz++) for (let tx = 0; tx < nx; tx++) if (!w.collision.surface(tx * N + 64, tz * N + 64)) all = false;
+    if (all) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error('collision tiles never loaded');
+}
+
+export interface CheckOutcome { name: string; pass: boolean; detail: Record<string, number | string | boolean | null> }
+
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+// The drone's cube (0.35 m half) swept against a flat road at 10 m with a wall (x 100..103, 10 m high) and a deck
+// (14..15 m over x 150..170, z 100..120) on it: where the cube ends (touching), the hit's kind and its normal (axis:
+// signed one-based x/y/z)
+export async function runCollisionChecks(): Promise<CheckOutcome[]> {
+  const w = await makeWorld({ size: [256, 256], ground: () => 10, boxes: [
+    { x0: 100, x1: 103, z0: 0, z1: 256, y0: 10, y1: 20, mat: 'wall' },
+    { x0: 150, x1: 170, z0: 100, z1: 120, y0: 14, y1: 15, mat: 'deck' },
+  ] });
+  const out: CheckOutcome[] = [];
+  // (before its tiles are in, a sweep waits)
+  const fresh = new VoxelCollision(w.meta).sweep(new Vector3(64, 15, 64), new Vector3(0, -10, 0));
+  out.push({ name: 'collision_loading', pass: fresh === 'loading', detail: { sweep: typeof fresh === 'string' ? fresh : fresh.hit } });
+  await loaded(w);
+  const sweep = (name: string, from: [number, number, number], d: [number, number, number], hit: string, axis: number, at: number, along: 0 | 1 | 2) => {
+    const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
+    const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
+    const got = s === 'loading' ? null : s.hit ? s.axis : null;
+    const ok = s !== 'loading' && s.hit === hit && got === axis && near(end, at);
+    out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
+  };
+  // falling onto the road: on it, the cube's half over its top, the normal up
+  sweep('collision_fall', [64, 15, 64], [0, -10, 0], 'terrain', 2, 10.35, 1);
+  // flying into the wall along +x: stopped short of it, the normal -x
+  sweep('collision_wall', [90, 12, 64], [20, 0, 0], 'structure', -1, 99.65, 0);
+  // falling onto the deck (a run over the ground, not the ground)
+  sweep('collision_deck', [160, 20, 110], [0, -10, 0], 'structure', 2, 15.35, 1);
+  // out of the map along -x: the city's edge
+  sweep('collision_edge', [5, 12, 64], [-10, 0, 0], 'city edge', 1, 0.35, 0);
+  // what the drone settles on, and its ground: the deck's top over the road's
+  const s = w.collision.surface(160, 110), g = w.collision.surface(64, 64);
+  out.push({ name: 'collision_surface', pass: s?.top === 15 && s.ground === 10 && g?.top === 10, detail: { deckTop: s?.top ?? null, deckGround: s?.ground ?? null, roadTop: g?.top ?? null } });
+  return out;
 }

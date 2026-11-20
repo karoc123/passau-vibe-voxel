@@ -265,15 +265,11 @@ No analytics: the page loads nothing beyond its own files and the Google font.
 For agents (and people) changing the code. All run from `web/` with no GPU and no extra dependency; in a git
 worktree first `ln -s <main checkout>/web/node_modules web/node_modules` (don't install).
 
-**Physics: `node tools/physics.mjs`** (~3 s). Headless scenarios (`src/physics/scenarios.ts`) drive the real
-`ArcadeCar` with the drive prototype's contact (`src/nav/car-contact.ts`) and `Body` through the real `VoxelCollision`
-over small synthetic worlds (`src/physics/testbed.ts`: a ground height per column, boxes for walls, decks, water,
-written as real node files): accelerate, brake, wall, 1 m and 2 m steps up, a 1 m kerb down, a paved ramp, 3 m and
-20 m cliffs, off a quay into the river, a bridge deck, a box dropped and thrown. Prints PASS/FAIL per scenario with its
-checks and feel numbers (0-100 km/h, stop distance, air time, impact speeds); exit code 1 on a failure.
-`node tools/physics.mjs ramp cliff-3m -v` runs some with every check, `--json` gives the numbers to diff before and
-after a handling change, `--trace cliff-3m --every 9` prints a run step by step as CSV. A new case is a few lines in
-`SCENARIOS`; check any change to `arcade-car.ts`, `body.ts`, `voxel-collision.ts`, `ramps.ts` with it.
+**FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/nav/voxel-collision.ts`)
+over a small synthetic world (`src/nav/collision-checks.ts`: a ground height per column, boxes for walls and decks,
+written as real node files and served through a stubbed fetch): a sweep before the tiles are in waits, the drone's
+cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
+code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
 
 **Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel
 terrain (`src/physics/rapier/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
@@ -370,9 +366,6 @@ spatial checks. It can jump, flip and land on its roof, where it stays (park it,
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
 ~1.5 s after the city is shown; taking the wheel before that waits for it.
-
-`?physics=a` drives the older arcade model instead (variant A: `arcade-car.ts`, `physics/body.ts` in the air, its
-headless checks `tools/physics.mjs`); `?physics=demo` the Rapier spike's sandbox (P car, B box, V pile, R/T ragdoll).
 
 ## Third-person walking
 
