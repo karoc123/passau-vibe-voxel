@@ -117,32 +117,35 @@ if (real >= 0) {
 // roads 186, 570, 149, 660, 111), off the street onto the deck over the Danube and back onto the street. The deck is a
 // slab over the river in whole metres (18 -> 19 -> 18 -> 17 m along it): a voxel staircase the car bumped over, unless
 // its top is ramped as a street's (ramps.ts). Judged by the body's vertical acceleration (max |dvy/dt|), the pitch
-// rate's peak and the share of samples with a wheel off the deck. Skipped when the data are not there.
+// rate's peak and the share of samples with a wheel off the deck. Skipped when the data are not there. The points are in
+// the project grid (map cells + meta.origin), so the scenario holds whatever the map's extent.
 const SCHANZL = [[1202, 459], [1205, 471], [1211, 489], [1215, 503], [1218, 515], [1223, 535], [1226, 549], [1229, 561], [1232, 576],
   [1235, 590], [1238, 602], [1242, 620], [1246, 634], [1247, 642], [1249, 651], [1252, 666], [1254, 678], [1257, 692], [1259, 702]];
 async function schanzlBridge() {
   if (!fs.existsSync(`${root}public/data/meta.json`)) return null;
+  const [ox, oz] = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8')).origin ?? [0, 0];
+  const way = SCHANZL.map(([x, z]) => [x - ox, z - oz]);
   const pts = [];
-  for (let k = 0; k < SCHANZL.length - 1; k++) {
-    const [a, b] = [SCHANZL[k], SCHANZL[k + 1]], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
+  for (let k = 0; k < way.length - 1; k++) {
+    const [a, b] = [way[k], way[k + 1]], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
     for (let i = 0; i < n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
   }
-  pts.push(SCHANZL[SCHANZL.length - 1]);
+  pts.push(way[way.length - 1]);
   const map = await realMap(pts, 48);
   const h = Math.atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
   const s = new sc.Sim(map, { x: pts[0][0], y: 20, z: pts[0][1] }, h, 50 / 3.6);
   s.run(17, sc.follow(pts, 50));
   // (on the bridge and its approaches: from 10 m past the start to 15 m before the end)
-  const L = s.log.filter((l) => l.z > 470 && l.z < 690);
+  const L = s.log.filter((l) => l.z + oz > 470 && l.z + oz < 690);
   let acc = 0, pr = 0, lift = 0;
   for (let i = 1; i < L.length; i++) acc = Math.max(acc, Math.abs(L[i].vy - L[i - 1].vy) * 60);
   for (const l of L) { pr = Math.max(pr, Math.abs(l.pr)); if (l.wheels < 4) lift++; }
   if (process.env.SCHANZL_DEBUG) for (const l of L) if (Math.abs(l.pr) > 0.4 || l.wheels < 4) console.log(l.x.toFixed(1), l.z.toFixed(1), l.y.toFixed(2), l.road.toFixed(2), 'pr', l.pr.toFixed(2), 'w', l.wheels);
   const end = s.log[s.log.length - 1], r2 = (x) => Math.round(x * 100) / 100;
-  const detail = { zEnd: r2(end.z), minKmh: r2(Math.min(...L.map((l) => l.kmh))), maxVertAccel: r2(acc), pitchRateMax: r2(pr), liftPct: r2(100 * lift / Math.max(1, L.length)),
+  const detail = { zEnd: r2(end.z + oz), minKmh: r2(Math.min(...L.map((l) => l.kmh))), maxVertAccel: r2(acc), pitchRateMax: r2(pr), liftPct: r2(100 * lift / Math.max(1, L.length)),
     minUp: r2(Math.min(...L.map((l) => l.up))), status: s.car.status };
   s.dispose();
-  return { name: 'schanzl_bridge', pass: end.z > 690 && detail.minUp > 0.9 && acc < 25 && pr < 0.6 && detail.liftPct < 2, detail };
+  return { name: 'schanzl_bridge', pass: end.z + oz > 690 && detail.minUp > 0.9 && acc < 25 && pr < 0.6 && detail.liftPct < 2, detail };
 }
 
 // Through a tunnel under a hill (scripts/tunnels.py: the B 12 under the Georgsberg by Veste Oberhaus) on the real
@@ -167,7 +170,11 @@ async function tunnelRoad() {
   };
   const traffic = JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8'));
   let best = null;
+  // (the B 12 under the Georgsberg, OSM way 27662492, by default: on the larger map the deepest road is another tunnel;
+  // TUNNEL_WAY=<id> tries another, TUNNEL_WAY=0 the deepest)
+  const onlyWay = Number(process.env.TUNNEL_WAY ?? 27662492);
   for (const r of traffic.roads) {
+    if (onlyWay && r.w !== onlyWay) continue;
     let n = 0;
     for (const q of r.p) { const c = col(q[0], q[1]); if (c && c.top - q[2] >= 5) n++; }
     if (n >= 4 && (!best || n > best.n)) best = { r, n };
@@ -190,6 +197,7 @@ async function tunnelRoad() {
   const s = new sc.Sim(map, { x: pts[0][0], y: P[0][2] + 1.5, z: pts[0][1] }, h, 30 / 3.6);
   s.run(L / (30 / 3.6) * 1.6 + 2, sc.follow(pts, 30));
   const end = pts[pts.length - 1], last = s.log[s.log.length - 1];
+  if (process.env.TUNNEL_DEBUG) { console.log('road', JSON.stringify(Object.fromEntries(Object.entries(best.r).filter(([k]) => k !== 'p'))), 'P', JSON.stringify(P.map((q) => q.map((v) => Math.round(v * 10) / 10)))); for (let i = 0; i < s.log.length; i += 20) { const l = s.log[i]; const c = col(l.x, l.z); console.log(l.t.toFixed(1), l.x.toFixed(1), l.z.toFixed(1), l.y.toFixed(2), l.kmh.toFixed(0), 'w', l.wheels, 'g', c && c.ground, 'top', c && c.top); } console.log('events', JSON.stringify(s.events.slice(0, 8))); }
   const zMax = Math.max(...P.map((q) => q[2]));
   const r2 = (x) => Math.round(x * 100) / 100;
   const detail = { x0: r2(pts[0][0]), z0: r2(pts[0][1]), length: r2(L), inside: inside.length, left: r2(Math.hypot(last.x - end[0], last.z - end[1])),
