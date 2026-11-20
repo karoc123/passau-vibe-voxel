@@ -279,10 +279,16 @@ after a handling change, `--trace cliff-3m --every 9` prints a run step by step 
 terrain (`src/physics/rapier/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
 ramps along, across and diagonal, a bridge. Ground and slope cases print how much the car wobbles (`pitchJit`,
 `rollJit`: RMS of the pitch and roll rate less their 0.5 s mean, rad/s; `liftPct`: share of samples with a wheel
-off the ground; `lifts`: how often one left it). `--real X,Z,HEADING,KMH,SECS` drives straight in the real city,
-`--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest ten roads both ways and
-prints the mean wobble (the benchmark for the car's feel on real ramps). `node tools/rapier-car-bench.mjs`: collider
-build and step costs along a route.
+off the ground; `lifts`: how often one left it) and how floaty it is (`vyErr`: RMS of the body's vertical speed less
+the road's under its axles, m/s, 0 for a car glued to the road; `heave`: how far the body bobs over the road, cm;
+`lightPct`: share of the time the wheels carry under half its weight; `airPct`: no wheel down). `crest_50`/`crest_30`
+drive over the top of a 25 % street (`airS`, `hopCm`, `landLoad`, `settleS`), `settle_heave`/`settle_pitch` kick the body
+on level ground (overshoot, settle time, frequency), `steer_step` holds half the steering at 50 km/h (`yawRise`,
+`yawGain`, `latG`, `rollDeg`). `--set stiffness=34,gravity=1.25,...` runs anything with other numbers for the ride
+(`car.ts` RIDE) or the car's surface (`terrain.ts` DRIVE: `tol`, `sigma`). `--real X,Z,HEADING,KMH,SECS` drives
+straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
+ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). `node
+tools/rapier-car-bench.mjs`: collider build and step costs along a route.
 
 **Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres). Only the 128 m tiles within R m of the camera's first
 target are loaded and drawn, no far ground; the rest of the map is empty. With `cam=` it frames any spot; Ctrl+C in the

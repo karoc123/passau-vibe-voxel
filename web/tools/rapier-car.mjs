@@ -20,6 +20,16 @@ const load = (p) => runnerImport(`${root}src/${p}`, { root, logLevel: 'error' })
 const sc = await load('physics/rapier/scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
+// --set key=value,...: the ride's numbers (car.ts RIDE) and the car's surface (terrain.ts DRIVE) changed for this run
+const setAt = args.indexOf('--set');
+if (setAt >= 0) {
+  for (const kv of args[setAt + 1].split(',')) {
+    const [k, v] = kv.split('=');
+    const o = k in sc.RIDE ? sc.RIDE : k in sc.DRIVE ? sc.DRIVE : null;
+    if (!o) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)}) or DRIVE (${Object.keys(sc.DRIVE)})`);
+    o[k] = +v;
+  }
+}
 
 // the real city's tiles within `reach` m of the points (x, z)
 async function realMap(points, reach) {
@@ -49,7 +59,9 @@ if (roadArgs.length || roadsAt >= 0) {
   const bench = [435, 451, 533, 54, 139, 293, 358, 1, 421, 355];
   const kmhAll = roadsAt >= 0 && args[roadsAt + 1] && !args[roadsAt + 1].startsWith('--') ? +args[roadsAt + 1] : 30;
   const runs = roadArgs.length ? roadArgs.map((r) => r.split(',').map(Number)) : bench.flatMap((i) => [[i, kmhAll, 0], [i, kmhAll, 1]]);
-  const tot = { pitchJit: 0, rollJit: 0, liftPct: 0, lifts: 0, n: 0 };
+  const KEYS = ['pitchJit', 'rollJit', 'liftPct', 'lifts', 'vyErr', 'heave', 'lightPct', 'airPct'];
+  const tot = { n: 0 };
+  for (const k of KEYS) tot[k] = 0;
   for (const [i, kmh = 30, rev = 0] of runs) {
     const pts = traffic.roads[i].p.map((q) => [q[0], q[1]]);
     if (rev) pts.reverse();
@@ -63,17 +75,19 @@ if (roadArgs.length || roadsAt >= 0) {
     const end = pts[pts.length - 1];
     // (until near the road's end, or stuck)
     s.run(L / (kmh / 3.6) * 1.6 + 2, (sim) => f(sim));
-    const log = s.log.filter((l) => Math.hypot(l.x - end[0], l.z - end[1]) > 8);
-    const w = sc.wobble(log), last = s.log[s.log.length - 1];
+    // (up to where it leaves the map, if it does: off the map edge it falls for ever)
+    const off = s.log.findIndex((l) => l.x < 0 || l.z < 0 || l.x > map.meta.W || l.z > map.meta.D);
+    const log = s.log.slice(0, off < 0 ? s.log.length : off).filter((l) => Math.hypot(l.x - end[0], l.z - end[1]) > 8);
+    const w = sc.feel(log), last = s.log[s.log.length - 1];
     const ev = s.events.filter((e) => e.kind !== 'impact' || e.speed > 2).map((e) => `${e.kind}${e.crash ? '!' : ''}`);
     const left = Math.hypot(last.x - end[0], last.z - end[1]);
-    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...s.log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
-    for (const k of ['pitchJit', 'rollJit', 'liftPct', 'lifts']) tot[k] += w[k];
+    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
+    for (const k of KEYS) tot[k] += w[k];
     tot.n++;
     if (args.includes('-v')) for (let k = 0; k < s.log.length; k += 15) { const l = s.log[k]; console.log(`  t ${l.t.toFixed(2)} ${l.x.toFixed(1)},${l.y.toFixed(2)},${l.z.toFixed(1)} ${l.kmh.toFixed(0)} km/h up ${l.up.toFixed(2)} wheels ${l.wheels} pr ${l.pr.toFixed(2)} rr ${l.rr.toFixed(2)}`); }
     s.dispose();
   }
-  if (tot.n > 1) console.log(`mean over ${tot.n}: pitchJit=${(tot.pitchJit / tot.n).toFixed(3)} rollJit=${(tot.rollJit / tot.n).toFixed(3)} liftPct=${(tot.liftPct / tot.n).toFixed(2)} lifts=${(tot.lifts / tot.n).toFixed(1)}`);
+  if (tot.n > 1) console.log(`mean over ${tot.n}: ${KEYS.map((k) => `${k}=${(tot[k] / tot.n).toFixed(k.endsWith('Jit') || k === 'vyErr' ? 3 : 2)}`).join(' ')}`);
   process.exit(0);
 }
 
@@ -92,12 +106,12 @@ if (real >= 0) {
   }
   const ev = s.events.filter((e) => e.kind !== 'impact' || e.speed > 2);
   console.log('events', JSON.stringify(ev.map((e) => `${e.kind} ${e.speed.toFixed(1)}${e.crash ? ' CRASH' : ''}`)));
-  console.log('wobble', fmt(sc.wobble(s.log)));
+  console.log('feel', fmt(sc.feel(s.log)));
   console.log('status', s.car.status, 'steps (ms) avg', (s.log.reduce((q, l) => q + l.stepMs, 0) / s.log.length).toFixed(3), 'max', Math.max(...s.log.map((l) => l.stepMs)).toFixed(2));
   process.exit(0);
 }
 
-const ids = args.filter((a) => !a.startsWith('--'));
+const ids = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--set');
 const out = await sc.runScenarios(ids.length ? ids : undefined);
 if (args.includes('--json')) console.log(JSON.stringify(out, null, 1));
 else for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(22)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);

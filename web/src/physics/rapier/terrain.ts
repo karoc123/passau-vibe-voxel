@@ -7,7 +7,7 @@
 //
 // The world is cut in CHUNK x CHUNK m chunks. A chunk within REACH of a dynamic body gets one Voxels collider (only the
 // voxels with a face to the air: the shell) and, where the street is a ramp (ramps.ts), a trimesh of the ramp's
-// triangles in place of the top voxel; the car gets a surface of its own over the ground's steps (DRIVE_TOL). Neighbouring chunks' voxel colliders are coupled (combineVoxelStates), so a body
+// triangles in place of the top voxel; the car gets a surface of its own over the ground's steps (DRIVE). Neighbouring chunks' voxel colliders are coupled (combineVoxelStates), so a body
 // sliding across a chunk border meets no inner edge there. Chunks are built nearest first within a time budget per
 // frame, those ahead of a moving body (along its velocity) before those behind. Chunks no body has needed for a while
 // are removed. Physics coordinates are the world's minus `origin` (f32 precision near the action).
@@ -48,7 +48,7 @@ export interface TerrainTile {
   ramps: RampField | null;
   // per column: 1 where its top is a ramp (ramps.ts ramped)
   ramped: Uint8Array | null;
-  // the same over all ground, paved or not (the car's: see DRIVE_TOL)
+  // the same over all ground, paved or not (the car's: see DRIVE)
   car: RampField | null;
   carRamped: Uint8Array | null;
 }
@@ -122,21 +122,22 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
 //   voxel collider of their own), the one under it is kept as a floor.
 // - Smoother: ramps.ts takes each free grid point's height as a mean within 3 m, so a street going up in 1 m terraces
 //   every few metres comes out as steeper and flatter stretches by turns (1 m per 4 m: slopes of 0.375 and 0.125
-//   every 2 m), a wash-board the car's springs rock on. Here each free point takes a Gaussian mean (sigma DRIVE_SIGMA
-//   m) of the field's heights of the free points around it, held within DRIVE_TOL of the field's height and never
+//   every 2 m), a wash-board the car's springs rock on. Here each free point takes a Gaussian mean (sigma DRIVE.sigma
+//   m) of the field's heights of the free points around it, held within DRIVE.tol of the field's height and never
 //   under the top of a voxel the wheels could see (a column's top, a ramp's floor voxel): a uniform slope comes out
 //   uniform, ripples of 4-5 m are gone, gentler slopes' bends are softened. A point's height depends only on the
 //   field within DRIVE_R of it, so chunks and tiles agree on the points they share. Pinned points (edges, steps over
 //   a metre) stay as they are.
 // So the car's wheels may float or sink by up to ~0.5 m against the voxels drawn on unpaved terraces (~0.2 m on the
 // paved ramps).
-export const DRIVE_TOL = 0.2; // m
-const DRIVE_SIGMA = 2, DRIVE_R = 5;
-const KERNEL = Array.from({ length: 2 * DRIVE_R + 1 }, (_, i) => Math.exp(-((i - DRIVE_R) ** 2) / (2 * DRIVE_SIGMA ** 2)));
+// (tools/rapier-car.mjs --set tol=..,sigma=.. tries others)
+export const DRIVE = { tol: 0.2, sigma: 2 }; // m
+const DRIVE_R = 5;
+const kernel = (sigma: number) => Array.from({ length: 2 * DRIVE_R + 1 }, (_, i) => Math.exp(-((i - DRIVE_R) ** 2) / (2 * sigma ** 2)));
 
 // The colliders' data of chunk (cx, cz) in `tile` (N m a side): the shell voxels (chunk-local grid coordinates), the
 // top voxels only the car does not see (top), the ramps' triangles (chunk-local metres) as drawn (for everything but
-// the car) and the car's surface (see DRIVE_TOL).
+// the car) and the car's surface (see DRIVE).
 // drive: the car's surface at the chunk's (CHUNK + 1)^2 grid points (1/64 m, PINNED: each column's own top), null: none
 export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number, drive: Int32Array | null = null) {
   const { S, iv, off, ground, ramped: rmp, carRamped: crm } = tile;
@@ -373,13 +374,13 @@ export class RapierTerrain {
     return tile.car.h[(x % this.N) + 1 + (tile.S + 1) * ((z % this.N) + 1)];
   }
 
-  // the car's surface at chunk (cx, cz)'s grid points (see DRIVE_TOL)
+  // the car's surface at chunk (cx, cz)'s grid points (see DRIVE)
   private drive(cx: number, cz: number) {
     const P = CHUNK + 1, W = P + 2 * DRIVE_R, x0 = cx * CHUNK - DRIVE_R, z0 = cz * CHUNK - DRIVE_R;
     const v = new Int32Array(W * W);
     for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) v[i + W * j] = this.pointQ(x0 + i, z0 + j);
     // (the Gaussian is separable, the free points' weights too: the rows' sums first, of q w and of w)
-    const R2 = 2 * DRIVE_R, hs = new Float64Array(P * W), hw = new Float64Array(P * W);
+    const R2 = 2 * DRIVE_R, hs = new Float64Array(P * W), hw = new Float64Array(P * W), KERNEL = kernel(DRIVE.sigma);
     for (let j = 0; j < W; j++) for (let i = 0; i < P; i++) {
       let sum = 0, wsum = 0;
       for (let a = 0, k = i + W * j; a <= R2; a++, k++) {
@@ -388,7 +389,7 @@ export class RapierTerrain {
       }
       hs[i + P * j] = sum; hw[i + P * j] = wsum;
     }
-    const out = new Int32Array(P * P), tol = DRIVE_TOL * 64;
+    const out = new Int32Array(P * P), tol = DRIVE.tol * 64;
     for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
       const h = v[i + DRIVE_R + W * (j + DRIVE_R)];
       if (h === PINNED) { out[i + P * j] = PINNED; continue; }

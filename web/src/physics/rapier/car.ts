@@ -1,7 +1,7 @@
 // Rapier car: a drivable car on Rapier's DynamicRayCastVehicleController (raycast wheels on a chassis), with what the
 // voxel city needs on top of it (each switchable in CarTuning, for the scenarios in scenarios.ts):
 // - ground: the car drives on its own surface where the ground goes up or down in steps of a metre (terrain.ts
-//   DRIVE_TOL: the ground's 1 m terraces as ramps, paved or not, and smoother than the ramps as drawn); its wheels'
+//   DRIVE: the ground's 1 m terraces as ramps, paved or not, and smoother than the ramps as drawn); its wheels'
 //   rays see that, not the voxels' tops there.
 // - steps: a riser of up to STEP_MAX that is not the ground's (a platform, a low wall) ahead of the moving car, up or
 //   down, gets an invisible wedge on its low side, laid before the front wheels reach its foot (prisms on a smoothstep
@@ -11,7 +11,7 @@
 //   it; touching a wall turns the car towards the wall's direction (the way it slides).
 // - air: no wheel touching, the roll and pitch are damped and gently righted (the heading left alone).
 // - water: the chassis' centre down at the water's top at its column ends the drive (status 'water').
-// - landing: touching down from the air faster than CRASH_SPEED into the ground (a fall of ~8 m) is a crash (an event:
+// - landing: touching down from the air faster than crashSpeed() into the ground (a fall of ~8 m) is a crash (an event:
 //   the driver is shaken, as variant A's).
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
@@ -48,8 +48,24 @@ export const bus = (len: number): CarBuild => ({
 });
 const WHEEL_R = 0.36;
 const REST = 0.35;
+// The ride. Rapier's raycast wheels have no mass of their own: each pushes the chassis with
+// mass * (stiffness * compression - damping * its speed) (damping: `compression` while it is pushed in, `relaxation`
+// while it extends), never pulls, and leaves the ground once its spring is back at its rest length, so it hangs only
+// as far as the car sags on it (g * gravity / (4 stiffness): a stiffer spring loses the ground sooner over a crest).
+// - stiffness, compression, relaxation: per wheel (heave ~sqrt(stiffness) / pi Hz, damping ratio ~damping /
+//   sqrt(stiffness))
+// - gravity: the car's own gravity (a multiple of g: variant A has 12 m/s^2): how fast it comes back down over a crest
+// - downforce: pressed onto its wheels' ground (along its own down) by this many g at 50 km/h, with the speed squared
+//   (at most twice that), while a wheel touches: more grip and a body that stays on the road over crests at speed
+// - gripFront, gripRear: the tyres' frictionSlip (the most force per load); side: their lateral stiffness
+// - com: the centre of mass' drop under the body's origin (m)
+// tools/rapier-car.mjs --set key=value,... runs the scenarios with others.
+export const RIDE = {
+  stiffness: 28, compression: 3.5, relaxation: 4.5, gravity: 1, downforce: 0, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
+};
+// m/s into the ground: a fall of ~8 m (under the car's gravity)
+export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
 const MAX_STEER = 0.55;
-export const CRASH_SPEED = Math.sqrt(2 * 9.81 * 8); // m/s into the ground: a fall of ~8 m
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
 // m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
 // ones launch the car off their top and drop its front at their foot: tools/rapier-car.mjs terrace_*)
@@ -82,7 +98,7 @@ export class RapierCar {
     private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR) {
     const q = typeof heading === 'number' ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading) : heading;
     this.body = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q)
-      .setCanSleep(false).setCcdEnabled(true).setAngularDamping(0.4));
+      .setCanSleep(false).setCcdEnabled(true).setAngularDamping(0.4).setGravityScale(RIDE.gravity));
     const HALF = this.half = build.half, MASS = build.mass;
     const inertia = { x: MASS * (HALF.y ** 2 + HALF.z ** 2) / 3, y: MASS * (HALF.x ** 2 + HALF.z ** 2) / 3, z: MASS * (HALF.x ** 2 + HALF.y ** 2) / 3 };
     const walls = tuning.walls;
@@ -90,7 +106,7 @@ export class RapierCar {
     // bottom 0.25 m over the wheels' axles)
     const desc = R.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setTranslation(0, HALF.y - 0.45, 0);
     // (the centre of mass low, under the floor: it rolls less)
-    desc.setMassProperties(MASS, { x: 0, y: -0.45 - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
+    desc.setMassProperties(MASS, { x: 0, y: -RIDE.com - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
       .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS).setCollisionGroups(CAR_GROUPS);
     if (walls) desc.setFriction(0).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min);
     else desc.setFriction(0.3);
@@ -102,13 +118,13 @@ export class RapierCar {
     for (const w of build.wheels) {
       c.addWheel({ x: w.x, y: -0.2, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, REST, WHEEL_R);
       const i = c.numWheels() - 1;
-      c.setWheelSuspensionStiffness(i, 28);
-      c.setWheelSuspensionCompression(i, 3.5);
-      c.setWheelSuspensionRelaxation(i, 4.5);
+      c.setWheelSuspensionStiffness(i, RIDE.stiffness);
+      c.setWheelSuspensionCompression(i, RIDE.compression);
+      c.setWheelSuspensionRelaxation(i, RIDE.relaxation);
       c.setWheelMaxSuspensionTravel(i, 0.35);
       c.setWheelMaxSuspensionForce(i, 60000);
-      c.setWheelFrictionSlip(i, w.front ? 1.6 : 1.5);
-      c.setWheelSideFrictionStiffness(i, 1.0);
+      c.setWheelFrictionSlip(i, w.front ? RIDE.gripFront : RIDE.gripRear);
+      c.setWheelSideFrictionStiffness(i, RIDE.side);
     }
     this.controller = c;
 
@@ -159,6 +175,11 @@ export class RapierCar {
     const lv = this.body.linvel();
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
     c.updateVehicle(dt, undefined, WHEEL_GROUPS);
+    if (RIDE.downforce && this.wheelsInContact()) {
+      const r = this.body.rotation(), up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+      const f = -RIDE.downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
+      this.body.applyImpulse({ x: up.x * f, y: up.y * f, z: up.z * f }, true);
+    }
     if (this.tuning.steps) this.stepAssist(input, dt);
     if (this.tuning.air && this.wheelsInContact() === 0) this.airAssist(dt);
   }
@@ -172,7 +193,7 @@ export class RapierCar {
     if (!touching) this.airTime += dt;
     else {
       // (the speed just before the first touch: the springs take the rest over a few steps)
-      if (this.airTime > 0.25 && pv.y < -2) this.event = { kind: 'landing', speed: -pv.y, crash: -pv.y >= CRASH_SPEED };
+      if (this.airTime > 0.25 && pv.y < -2) this.event = { kind: 'landing', speed: -pv.y, crash: -pv.y >= crashSpeed() };
       this.airTime = 0;
     }
     // a wall: horizontal speed lost in one step (more than the brakes could)

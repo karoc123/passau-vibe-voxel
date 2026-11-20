@@ -3,8 +3,11 @@
 // input at a fixed 1/60 s step and judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { MAT } from '../../voxelMaterial';
-import { bus, CAR, RapierCar, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
-import { RapierTerrain, terrainTile, terrainPalette } from './terrain';
+import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
+import { DRIVE, RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
+
+// (the ride's and the car surface's numbers, for tools/rapier-car.mjs --set: the same module instances as the scenarios')
+export { DRIVE, RIDE };
 
 const N = 64;
 // the tuning the scenarios' cars get (tools/rapier-car.mjs --spike: the spike's car)
@@ -40,8 +43,15 @@ export function synthMap(tiles: number, col: (x: number, z: number) => Col): Sce
   return { meta, tiles: out };
 }
 
-// pr, rr: the chassis' pitch and roll rate (rad/s, about its own side and forward axes)
-export interface Sample { t: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; kmh: number; up: number; heading: number; wheels: number; pr: number; rr: number; stepMs: number }
+// pr, rr: the chassis' pitch and roll rate (rad/s, about its own side and forward axes); yr: its yaw rate (rad/s, about
+// the world's up); road: the height of what the wheels drive on under the front and rear axles, their mean (NaN: none
+// within 3 m under the body);
+// load: the wheels' suspension forces over the car's weight (1: resting on level ground); steer: the front wheels'
+// angle (rad); pitch (nose up), roll: the chassis' forward and side axes' angles over the horizontal (rad)
+export interface Sample {
+  t: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; kmh: number; up: number; heading: number;
+  pitch: number; roll: number; wheels: number; pr: number; rr: number; yr: number; road: number; load: number; steer: number; stepMs: number;
+}
 
 export class Sim {
   readonly world: RAPIER.World;
@@ -90,7 +100,23 @@ export class Sim {
     const w = b.angvel(), qx = -q.x, qy = -q.y, qz = -q.z, qw = q.w;
     const ix = qw * w.x + qy * w.z - qz * w.y, iy = qw * w.y + qz * w.x - qx * w.z, iz = qw * w.z + qx * w.y - qy * w.x, iw = -qx * w.x - qy * w.y - qz * w.z;
     const lx = ix * qw + iw * -qx + iy * -qz - iz * -qy, lz = iz * qw + iw * -qz + ix * -qy - iy * -qx;
-    this.log.push({ t: this.t, x: pp.x, y: pp.y, z: pp.z, vx: vv.x, vy: vv.y, vz: vv.z, kmh: this.car.kmh, up, heading: Math.atan2(fx, fz), wheels: this.car.wheelsInContact(), pr: lx, rr: lz, stepMs: ms });
+    // (the road under the front and rear axles, straight down from over the body's origin: a car glued to its road
+    // would be at their mean)
+    const B = this.car.build, sh = Math.hypot(fx, fz) || 1;
+    const road = (dz: number) => {
+      const x = pp.x + fx / sh * dz, z = pp.z + fz / sh * dz;
+      const hit = this.world.castRay(new RAPIER.Ray({ x, y: pp.y + 1, z }, { x: 0, y: -1, z: 0 }), 4, true, undefined, WHEEL_GROUPS, undefined, b);
+      return hit ? pp.y + 1 - hit.timeOfImpact : NaN;
+    };
+    const c = this.car.controller;
+    let load = 0;
+    for (let i = 0; i < c.numWheels(); i++) load += c.wheelSuspensionForce(i) ?? 0;
+    this.log.push({
+      t: this.t, x: pp.x, y: pp.y, z: pp.z, vx: vv.x, vy: vv.y, vz: vv.z, kmh: this.car.kmh, up, heading: Math.atan2(fx, fz),
+      pitch: Math.asin(Math.max(-1, Math.min(1, 2 * (q.y * q.z - q.w * q.x)))), roll: Math.asin(Math.max(-1, Math.min(1, 2 * (q.x * q.y + q.w * q.z)))),
+      wheels: this.car.wheelsInContact(), pr: lx, rr: lz, yr: w.y, road: (road(B.wheels[0].z) + road(B.wheels[2].z)) / 2,
+      load: load / (b.mass() * 9.81 * RIDE.gravity), steer: c.wheelSteering(0) ?? 0, stepMs: ms,
+    });
   }
 
   run(seconds: number, input: CarInput | ((s: Sim) => CarInput)) {
@@ -146,6 +172,56 @@ export function wobble(L: Sample[]) {
   }
   n = Math.max(1, n);
   return { pitchJit: r3(Math.sqrt(pj / n)), rollJit: r3(Math.sqrt(rj / n)), pitchMax: r2(pm), rollMax: r2(rm), liftPct: r2(100 * lift / n), lifts };
+}
+
+// How floaty the car is, over the samples: how its body's height follows the road under it.
+// - vyErr (m/s): RMS of the body's vertical speed less the road's under it (along the car's way): 0 for a car glued
+//   to its road (variant A, physics/body.ts, is near that), large when the body lifts off crests and wallows in dips.
+// - heave (cm): RMS of the body's height over the road less its 1 s moving mean (how far it bobs on its springs).
+// - lightPct: share of samples with the wheels carrying under half the car's weight (light: little grip, no steering);
+//   airPct: no wheel touching.
+export function floaty(L: Sample[]) {
+  let e2 = 0, ne = 0, light = 0, air = 0;
+  for (let i = 1; i < L.length; i++) {
+    const a = L[i - 1], b = L[i];
+    if (b.load < 0.5) light++;
+    if (b.wheels === 0) air++;
+    // (not across a jump in what is under it: an edge, a deck)
+    if (!Number.isFinite(a.road) || !Number.isFinite(b.road) || Math.abs(b.road - a.road) > 0.3) continue;
+    e2 += (b.vy - (b.road - a.road) / STEP) ** 2;
+    ne++;
+  }
+  const W = 30, h = L.map((l) => l.y - l.road);
+  let h2 = 0, nh = 0;
+  for (let i = W; i < L.length - W; i++) {
+    let m = 0, ok = Number.isFinite(h[i]);
+    for (let k = i - W; k <= i + W && ok; k++) { ok = Number.isFinite(h[k]); m += h[k]; }
+    if (!ok) continue;
+    h2 += (h[i] - m / (2 * W + 1)) ** 2;
+    nh++;
+  }
+  const n = Math.max(1, L.length - 1);
+  return { vyErr: r3(Math.sqrt(e2 / Math.max(1, ne))), heave: r2(100 * Math.sqrt(h2 / Math.max(1, nh))), lightPct: r2(100 * light / n), airPct: r2(100 * air / n) };
+}
+
+// wobble and floatiness together
+export const feel = (L: Sample[]) => ({ ...wobble(L), ...floaty(L) });
+
+// A disturbance's settling: how a signal (from its value at rest) swings after a kick at sample 0: its first peak, the
+// overshoot past rest the other way (% of the peak), the time until it stays within `band` of rest (s), the swing's
+// frequency (Hz, from the first two crossings of rest; 0: none)
+function settling(v: number[], rest: number, band: number) {
+  const d = v.map((x) => x - rest);
+  let peak = 0, k = 0;
+  while (k < d.length && Math.abs(d[k]) >= Math.abs(peak)) peak = d[k++];
+  let over = 0, last = 0;
+  const cross: number[] = [];
+  for (let i = 1; i < d.length; i++) {
+    if (Math.sign(d[i]) !== Math.sign(d[i - 1]) && d[i] !== 0) cross.push(i);
+    if (cross.length && cross.length < 2) over = Math.max(over, -Math.sign(peak) * d[i]);
+    if (Math.abs(d[i]) > band) last = i;
+  }
+  return { peak: r3(peak), overPct: r2(peak ? 100 * Math.max(0, over) / Math.abs(peak) : 0), settleS: r2((last + 1) * STEP), hz: cross.length >= 2 ? r2(1 / (2 * (cross[1] - cross[0]) * STEP)) : 0 };
 }
 
 export interface Outcome { name: string; pass: boolean; detail: Record<string, number | string | boolean> }
@@ -222,7 +298,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const ang = s.car.body.angvel();
     pitchRate = Math.abs(ang.x);
     const end = L[L.length - 1];
-    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), maxVertAccel: r2(jerk), pitchRateEnd: r2(pitchRate), minWheels: Math.min(...L.map((l) => l.wheels)), ...wobble(L.filter((l) => l.z < 74)), ...summary(s) };
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), maxVertAccel: r2(jerk), pitchRateEnd: r2(pitchRate), minWheels: Math.min(...L.map((l) => l.wheels)), ...feel(L.filter((l) => l.z < 74)), ...summary(s) };
     s.dispose();
     return { name: 'ramp_street', pass: end.z > 75 && jerk < 60, detail: d };
   },
@@ -273,7 +349,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const s = new Sim(map, { x: 64, z: 30 }, 0.5, 30 / 3.6);
     s.run(3, cruise(30));
     const L = s.log, end = L[L.length - 1];
-    const d = { yEnd: r2(end.y), zEnd: r2(end.z), ...wobble(L), ...summary(s) };
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), ...feel(L), ...summary(s) };
     s.dispose();
     return { name: 'kerb_paved_diag', pass: end.y > 11.5 && d.minUp > 0.8, detail: d };
   },
@@ -283,7 +359,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const s = new Sim(map, { x: 64, z: 25 }, 0, 25 / 3.6);
     s.run(9, cruise(25));
     const L = s.log, end = L[L.length - 1];
-    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), steps: s.events.filter((e) => e.kind === 'step').length, ...wobble(L), ...summary(s) };
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), steps: s.events.filter((e) => e.kind === 'step').length, ...feel(L), ...summary(s) };
     s.dispose();
     return { name: 'terrace_stairs', pass: end.y > 14.5 && end.z > 70 && d.minUp > 0.8, detail: d };
   },
@@ -296,7 +372,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const s = new Sim(map, { x: 64, z: 12 }, 0, 40 / 3.6, bus(12));
     s.run(6, cruise(40));
     const L = s.log, end = L[L.length - 1];
-    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...wobble(L.filter((l) => l.z < 74)), ...summary(s) };
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...feel(L.filter((l) => l.z < 74)), ...summary(s) };
     s.dispose();
     return { name: 'bus_ramp', pass: end.z > 75 && d.minUp > 0.9, detail: d };
   },
@@ -305,9 +381,38 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const s = new Sim(map, { x: 64, z: 25 }, 0, 25 / 3.6, bus(12));
     s.run(6, cruise(25));
     const L = s.log, end = L[L.length - 1];
-    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...wobble(L), ...summary(s) };
+    const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...feel(L), ...summary(s) };
     s.dispose();
     return { name: 'bus_terrace', pass: end.z > 65 && end.y > 11.5 && d.minUp > 0.9, detail: d };
+  },
+  // floatiness: the body kicked at 30 km/h on level ground (as by a bump): down at 0.6 m/s (heave), nose up at 0.8
+  // rad/s (pitch); how it swings back (settling(): overshoot, settle time to within 1 cm / 0.005 rad, frequency)
+  settle_heave() { return kick('settle_heave', { x: 0, y: -0.6, z: 0 }, null); },
+  settle_pitch() { return kick('settle_pitch', null, 0.8); },
+  // floatiness over a crest: the ramp street's top (1 m per 5 m, ~25 %, onto level ground) at 50 and 30 km/h: how long
+  // no wheel touches (airS), how high the body rises over its ride height (hopCm), the hardest landing (landLoad: the
+  // wheels' force over the car's weight) and the time from the top until the body is back within 2 cm (settleS)
+  crest_50() { return crest('crest_50', 50); },
+  crest_30() { return crest('crest_30', 30); },
+  // steering: at 50 km/h on level ground, half the steering held from 0.5 s: how fast the yaw rate builds up (yawRise:
+  // to 90 % of its steady value), how much of the wheels' angle it turns (yawGain: 1 = as the front wheels point, less:
+  // the tyres slide), the sideways g and body roll (deg)
+  steer_step() {
+    const map = synthMap(2, () => ({ g: 10, mat: STREET }));
+    const s = new Sim(map, { x: 64, z: 30 }, 0, 50 / 3.6);
+    s.run(4, (sim) => ({ ...cruise(50)(sim), steer: sim.t >= 0.5 ? 0.5 : 0 }));
+    const L = s.log, at = (t: number) => L.findIndex((l) => l.t >= t);
+    const tail = L.slice(at(3), at(3.9));
+    const yr = tail.reduce((a, l) => a + Math.abs(l.yr), 0) / tail.length;
+    const rise = L.findIndex((l) => l.t >= 0.5 && Math.abs(l.yr) >= 0.9 * yr);
+    const v = Math.hypot(tail[0].vx, tail[0].vz), steer = Math.abs(tail[0].steer);
+    const base = CAR.wheels[0].z - CAR.wheels[2].z;
+    const d = {
+      yawRise: r2(L[rise].t - 0.5), yawGain: r2(yr / (v * Math.tan(steer) / base)), latG: r2(v * yr / 9.81),
+      rollDeg: r2(Math.abs(tail.reduce((a, l) => a + l.roll, 0) / tail.length) * 180 / Math.PI), kmhEnd: r2(L[L.length - 1].kmh), ...summary(s),
+    };
+    s.dispose();
+    return { name: 'steer_step', pass: d.yawGain > 0.5 && d.minUp > 0.9, detail: d };
   },
   flat_chunk_borders() {
     // flat ground at 80 km/h over 6 chunk borders: no bumps
@@ -327,9 +432,46 @@ function slope(name: string, g: (x: number, z: number) => number, kmh: number, h
   const s = new Sim(map, { x: 64, z: 15 }, 0, kmh / 3.6);
   s.run(70 / (kmh / 3.6), cruise(kmh));
   const L = s.log, end = L[L.length - 1];
-  const d = { zEnd: r2(end.z), xEnd: r2(end.x), kmhEnd: r2(end.kmh), steps: s.events.filter((e) => e.kind === 'step').length, ...wobble(L.filter((l) => l.z < 80)), ...summary(s) };
+  const d = { zEnd: r2(end.z), xEnd: r2(end.x), kmhEnd: r2(end.kmh), steps: s.events.filter((e) => e.kind === 'step').length, ...feel(L.filter((l) => l.z < 80)), ...summary(s) };
   s.dispose();
   return { name, pass: end.z > 80 && d.minUp > 0.8, detail: d };
+}
+
+function crest(name: string, kmh: number): Outcome {
+  const map = synthMap(2, (x, z) => {
+    const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
+    return x >= 56 && x < 72 ? { g, mat: STREET } : { g: g + 3 };
+  });
+  const s = new Sim(map, { x: 64, z: 15 }, 0, kmh / 3.6);
+  s.run(110 / (kmh / 3.6), cruise(kmh));
+  const rest = s.log[0].y - s.log[0].road;
+  // (from the last stretch of the climb on)
+  const L = s.log.filter((l) => l.z > 62 && l.z < 110), top = L.findIndex((l) => l.z > 72);
+  const h = L.map((l) => l.y - l.road - rest);
+  const d = {
+    airS: r2(L.filter((l) => l.wheels === 0).length * STEP), hopCm: r2(100 * Math.max(...h)), landLoad: r2(Math.max(...L.slice(top).map((l) => l.load))),
+    settleS: r2((L.length - top - [...h].reverse().findIndex((x) => Math.abs(x) > 0.02)) * STEP), ...floaty(L), ...summary(s),
+  };
+  s.dispose();
+  return { name, pass: d.minUp > 0.9, detail: d };
+}
+
+// on level ground at 30 km/h: the body's velocity (heave) or pitch rate (rad/s, nose up) kicked at 1 s
+function kick(name: string, dv: { x: number; y: number; z: number } | null, pitchRate: number | null): Outcome {
+  const map = synthMap(2, () => ({ g: 10, mat: STREET }));
+  const s = new Sim(map, { x: 64, z: 10 }, 0, 30 / 3.6);
+  s.run(1, cruise(30));
+  const rest = s.log[s.log.length - 1], b = s.car.body;
+  if (dv) { const v = b.linvel(); b.setLinvel({ x: v.x + dv.x, y: v.y + dv.y, z: v.z + dv.z }, true); }
+  // (heading 0: the car's side axis is x; nose up is about -x)
+  if (pitchRate) { const w = b.angvel(); b.setAngvel({ x: w.x - pitchRate, y: w.y, z: w.z }, true); }
+  const from = s.log.length;
+  s.run(2.5, cruise(30));
+  const L = s.log.slice(from);
+  const st = dv ? settling(L.map((l) => l.y - l.road), rest.y - rest.road, 0.01) : settling(L.map((l) => l.pitch), rest.pitch, 0.005);
+  const d = { ...st, minLoad: r2(Math.min(...L.map((l) => l.load))), airPct: floaty(L).airPct, ...summary(s) };
+  s.dispose();
+  return { name, pass: st.settleS < 1.5 && d.minUp > 0.9, detail: d };
 }
 
 function wallGlance(name: string, deg: number): Outcome {
@@ -364,7 +506,7 @@ function terrace(name: string, kmh: number, angle: number, rise: number, target 
   const climbed = end.z > 58 && up;
   let jerk = 0;
   for (let i = 1; i < L.length; i++) jerk = Math.max(jerk, Math.abs(L[i].vy - L[i - 1].vy) / STEP);
-  const d = { climbed, zEnd: r2(end.z), yEnd: r2(end.y), kmhEnd: r2(end.kmh), maxVertAccel: r2(jerk), steps: s.events.filter((e) => e.kind === 'step').length, ...wobble(L), ...summary(s) };
+  const d = { climbed, zEnd: r2(end.z), yEnd: r2(end.y), kmhEnd: r2(end.kmh), maxVertAccel: r2(jerk), steps: s.events.filter((e) => e.kind === 'step').length, ...feel(L), ...summary(s) };
   s.dispose();
   return { name, pass: climbed && d.minUp > 0.8, detail: d };
 }
