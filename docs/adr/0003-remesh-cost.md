@@ -66,3 +66,40 @@ ms) but the node's mesh is one buffer; the quads above and below the band would 
 cut where greedy quads (walls) cross the band's ends, and `colTop`, `wallTop`, roof planes and chamfers need the full
 column. It only pays inside 3-D sections (32³ bricks), which multiply draws further. Order: 1 now, 2 with the next
 mesher change, 3 when streaming cost matters.
+
+## Done (1 and 3), and what is left
+
+Measured as above (`mesh-profile.mjs`; the machine shared, so means within ~10 %):
+
+| | before | after |
+|---|---:|---:|
+| whole node (base job) | 46 / 121 | 22-24 / 49-65 |
+| foliage job (foliage tile + the base's cover) | 79 / 225 | 32 / 66-82 |
+| **an edited node with foliage** | **125 / 311** (base + foliage job) | **32 / 66-82** (foliage job only) |
+
+1. `stream.ts replaceColumns`: where the foliage's cover is the base's mesh, the plain base job is skipped (`stale`);
+   the old mesh shows until the new cover replaces it, the base is meshed plain only if the foliage job fails or the
+   foliage tile is freed first. −37 % per edited node alone.
+3. The mesher's scan visits only cells that can carry a face: per column from just over its neighbour's solid bottom
+   (`colBot`) to its own top (`colTop`), both from the runs (`columnSpans`); z faces bucketed by slice. The mask is two
+   Uint32 keys, written only at faces; `emitMerged` walks each row's span and allocates nothing per quad. The output is
+   byte-identical (`tools/mesh-golden.mjs`, 106 meshes at levels 1, 1f + cover, 2, 4, 8). meshFaces' own time fell
+   ~4x; what is left is mostly roofs and chamfers (`slopeRoofs`, `chamferWalls`, `emitEdge`, ~10 ms) and `wallAngle`.
+
+## Proposal: dirty 32 x 32 sections (not implemented)
+
+An edited Altstadt node still costs ~32 ms mean, 65-80 ms max, over the ~30 ms aimed at (a crater over a node corner:
+4 of them). The rest scales with the area meshed (sub-node 32 x 32 now 1.5 / 3.6 ms, 48 x 48 3.1 / 7.4 ms), so:
+
+- An edited node (only once edited; streaming keeps one mesh per node) is meshed as 4 x 4 sections of 32 x 32 columns,
+  each its own geometry (face groups, cuts, box) under the node; an edit re-meshes the sections its box (plus the
+  context below) touches, the base's cover and the foliage likewise per section.
+- Each section is meshed from a read window of section + 8 cells (`meshTile` with an emit window: faces, ramps,
+  prisms and slopes emitted only for columns inside it). 8 cells cover what reads beyond a column: `wallAngle` ±2,
+  `faceAO` ±1, ramps' smoothing, chamfer legs (≤ 4?), roof planes 3 x 3; but `slopeRoofs` fits planes per building,
+  so a building crossing the window must be read whole (window grown to the buildings' boxes, or roof planes taken
+  from the whole-node pass and kept per node). That is the part to verify first, with mesh-golden extended to compare
+  the union of 16 sections against the whole node (same quads up to the greedy merges cut at section borders).
+- Expected: ~3-8 ms per touched section, a crater r 4 m touching 1-4 sections: ~5-15 ms per node instead of ~32.
+  Costs: up to 16 draws per edited node (only edited ones), quads split at section borders (same surface), and the
+  mesher's emit window.
