@@ -1,0 +1,41 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 135267426,
+    "geom": "9a28b05181f3",
+    "tags": "e0778d682bf3",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "Spitalhofstraße 34 (incorporating 34, 34a-e): 102 m long, 4-storey residential apartment block with ground at 312.1 m asl. LoD2 has a data gap (height 2.7 m instead of 19.2 m) at the western end [827473.5, 5389319.5]. The surface model DOM20 and LoD2 measure eaves at 15.6 m and ridge at 21.4 m with a hipped roof along the long axis (bearing 82.0°). Roof colour is reddish-brown tile (#bb8870) from DOP20 median RGB [187, 136, 112]. Facade is warm light ochre/yellow (#ded5b8) matching OSM building:colour=yellow and DOP20 orthophoto. Four rows of 2 m wide window openings with 3.5 m bay spacing across the 4 storeys up to eaves height.",
+  "sources": [
+    "osm",
+    "dop20",
+    "dom20",
+    "lod2"
+  ],
+  "wall": {
+    "colour": "#ded5b8",
+    "material": "wall"
+  },
+  "roof": {
+    "shape": "hipped",
+    "eaves": 15.6,
+    "ridge": 21.4,
+    "ridge_dir": "long",
+    "colour": "#bb8870",
+    "material": "roof"
+  },
+  "windows": {
+    "bay": 3.5,
+    "width": 2,
+    "depth": 1,
+    "margin": 2.5,
+    "colour": "#3a4644",
+    "rows": [
+      [1, 2],
+      [5, 2],
+      [9, 2],
+      [13, 2]
+    ]
+  }
+}
