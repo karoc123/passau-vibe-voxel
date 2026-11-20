@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": { "noUnusedParameters": false },
-  "include": [".", "../../src/n8ao.d.ts"]
-}
