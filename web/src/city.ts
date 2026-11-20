@@ -24,14 +24,19 @@ const LOAD_M = 150, KEEP_M = 400, DRAW_M = 32, FREE_MS = 8000;
 // them, 1.4 M vertices, seconds of the start). Beyond, the far ground stands in until the tiles come. (All of the old
 // 3.2 x 1.4 km map lay within it from the overview.)
 const FIRST_M = 2500;
+// landmarks go first only in view or within this (ground distance from the camera): Kachlet 4 km behind the overview
+// would otherwise go before every tile in view
+const LM_M = 2000;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
 
 // The city at 1 m and its distance levels (2, 4, 8 m), as fine as the budget allows (triangles drawn by the tiles,
 // meta.json tiles.tris; on most computers no limit), shown as it arrives, in one order:
-//   1. the ground: the terrain, in chunks of 1 km (terrain.ts), those in range of the view distance (to FIRST_M)
-//   2. landmarks: their tiles first, each landmark as soon as all its tiles are in
-//   3. everything else, nearest to the view first, each building once all its tiles are in
-//   4. foliage: trees and grass, their own tiles (tiles/1f), then traffic
+//   1. the ground: the terrain, in chunks of 1 km (terrain.ts), those in range of the view distance (to FIRST_M), the
+//      chunks in view first; the tiles are asked for meanwhile (once zones.json is in)
+//   2. landmarks in view or within LM_M: their tiles first, each landmark as soon as all its tiles are in
+//   3. everything else, nearest to the view first, each building once all its tiles are in; each 1 m tile's foliage
+//      (trees and grass, tiles/1f) as soon as its base is in: in view the bases, then their foliage, then out of view
+//      the same; traffic once all is in
 export async function installCity({ streamer: S, uniforms: U, meta, scene, focus, camera, caption, budget, lamps, prepass, lod = { mode: 'auto', px: 1.2 }, occlusion = true, dist = 0, crop = null, pixelsHigh = () => innerHeight * Math.min(devicePixelRatio, 2) }: {
   streamer: TileStreamer;
   uniforms: VoxelUniforms;
@@ -65,18 +70,28 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const zonesIn = fetchJson<Zones>('data/zones.json');
   caption.show('Terrain', 0, 2 * total);
   // (the tiles in range as range() below will find them: the camera's window, or the whole map)
+  // (in view first, then the nearest: loadTerrain fetches and builds its chunks in the order of their first tile)
   const terrainTiles: number[] = [];
   {
     camera.updateMatrixWorld();
     const c = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld), R = Math.min(dist || FIRST_M, FIRST_M) + LOAD_M;
+    const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    const b = new THREE.Box3(), order = new Map<number, number>();
     const x0 = Math.max(0, Math.floor((c.x - R) / T)), x1 = Math.min(d.nx - 1, Math.floor((c.x + R) / T));
     const y0 = Math.max(0, Math.floor((c.z - R) / T)), y1 = Math.min(d.ny - 1, Math.floor((c.z + R) / T));
-    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++)
-      if (Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T)) <= R) terrainTiles.push(index(tx, ty));
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+      const r = Math.hypot(Math.max(tx * T - c.x, 0, c.x - (tx + 1) * T), Math.max(ty * T - c.z, 0, c.z - (ty + 1) * T));
+      if (r > R) continue;
+      b.min.set(tx * T, 0, ty * T); b.max.set((tx + 1) * T, meta.H + 3, (ty + 1) * T);
+      terrainTiles.push(index(tx, ty));
+      order.set(index(tx, ty), r - (fr.intersectsBox(b) ? 1e5 : 0));
+    }
+    terrainTiles.sort((a, b) => order.get(a)! - order.get(b)!);
   }
-  const terrain = await loadTerrain(meta, scene, d.nx, ct ? cropList : terrainTiles);
+  // (not waited for before the tiles are asked for: below, once they are)
+  const terrainIn = loadTerrain(meta, scene, d.nx, ct ? cropList : terrainTiles);
+  let terrain!: Awaited<typeof terrainIn>;
   const zones = await zonesIn;
-  document.querySelector('#loading')?.classList.add('hidden');
   // (each building's box x0, y0, x1, y1)
   const boxes: [number, number, number, number][] = zones.boxes
     ? Array.from({ length: zones.boxes.length / 4 }, (_, i) => { const b = zones.boxes!; return [b[4 * i], b[4 * i + 1], b[4 * i] + b[4 * i + 2], b[4 * i + 1] + b[4 * i + 3]]; })
@@ -147,7 +162,6 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const farNode = (n: { s: number; tx: number; ty: number }, k: number) => {
     for (let y = n.ty * n.s; y < Math.min(d.ny, (n.ty + 1) * n.s); y++) for (let x = n.tx * n.s; x < Math.min(d.nx, (n.tx + 1) * n.s); x++) farAdd(index(x, y), k);
   };
-  terrain.each((i) => farAdd(i, 1));
   const dropPiece = (i: number) => { if (terrain.drop(i)) farAdd(i, -1); };
   // the building under each label (zones.json labels)
   const labelBld = meta.labels.map((_, i) => (zones.labels?.[i] ?? 0) - 1);
@@ -176,7 +190,15 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     return seenV[i];
   };
   const away = (i: number, f: THREE.Vector3) => Math.hypot((i % d.nx + 0.5) * T - f.x, (Math.floor(i / d.nx) + 0.5) * T - f.z);
-  const prio = (i: number, f: THREE.Vector3) => lmPrio.get(i) ?? (seen(i) ? 1e5 : 0) - away(i, f);
+  // (a landmark's tile goes first only in view or within LM_M of the camera)
+  const lmNear = (i: number) => seen(i) || flat((i % d.nx) * T, Math.floor(i / d.nx) * T, (i % d.nx + 1) * T, (Math.floor(i / d.nx) + 1) * T) <= LM_M;
+  const lmAt = (i: number) => { const p = lmPrio.get(i); return p !== undefined && lmNear(i) ? p : undefined; };
+  // The queue's order (stream.ts, the dearest first): landmarks near (1e6), tiles in view (1e5 less the distance), their
+  // foliage (5e4 less it), tiles out of view (less the distance), their foliage (-1e4 less it). A tile in range lies within
+  // the view distance (at most DIST_MAX, 5 km) + KEEP_M of the camera, and the focus within 1.5 km of that (main.ts):
+  // under 1e4 from the focus, so the bands never overlap
+  const prio = (i: number, f: THREE.Vector3) => lmAt(i) ?? (seen(i) ? 1e5 : 0) - away(i, f);
+  const folPrio = (i: number, f: THREE.Vector3) => (seen(i) ? 5e4 : -1e4) - away(i, f);
 
   // Distance levels (scripts/tiles.py LOD_LEVELS): far from the camera, where a metre is a pixel or less, the city is
   // drawn from its 2 m tiles instead of the 1 m ones, trees included, and further out (where a 2 m cell is under
@@ -201,6 +223,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const lods = [...S.levels].sort((a, b) => a - b);
   // (levels coarser than this are chosen only for the budget)
   const PX_TOP = 4, FLOOR_M = 100, FLOOR_S = 2;
+  // A node out of the view's frustum and further than OUT_M (shadows cast into the view at a low sun, a quick turn)
+  // splits as if OUT_FAR times as far -- not one split last time (finer): turned away from, a node stays as fine as it
+  // is, its tiles not freed only to be loaded again on turning back
+  const OUT_M = 400, OUT_FAR = 2;
   let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
   const setLod = (l: { mode: Lod; px: number }) => {
     lodOn = lods.length > 1 && l.mode !== 'off';
@@ -293,10 +319,11 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       sum += cost(n);
       if (k === 0 || n.s <= lodMin) { add(n); return; }
       const dist = Math.hypot(Math.max(n.x0 * T - eye.x, 0, eye.x - n.x1 * T), Math.max(-eye.y, 0, eye.y - meta.H), Math.max(n.y0 * T - eye.z, 0, eye.z - n.y1 * T));
-      const was = finer.has(n.key), px = (focal * lods[k - 1]) / Math.max(dist, 1);
-      const w = px * (was ? 1.25 : 1) * (nodeSeen(n) ? 1 : 0.5);
+      const was = finer.has(n.key), px = (focal * lods[k - 1]) / Math.max(dist, 1), inView = nodeSeen(n);
+      const w = px * (was ? 1.25 : 1) * (inView ? 1 : 0.5);
       const floor = n.s > FLOOR_S && dist <= FLOOR_M;
-      if (floor || n.s > PX_TOP || px > (was ? pxCoarse : pxFine)) heapUp(open, { n, k, w: (floor ? 2e9 : n.s > PX_TOP ? 1e9 : 0) + w, floor });
+      const pxSplit = !was && !inView && dist > OUT_M ? px / OUT_FAR : px;
+      if (floor || n.s > PX_TOP || pxSplit > (was ? pxCoarse : pxFine)) heapUp(open, { n, k, w: (floor ? 2e9 : n.s > PX_TOP ? 1e9 : 0) + w, floor });
       else add(n);
     };
     const kids = (k: number, n: LNode) => {
@@ -333,7 +360,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       lmNode.set(n.key, m);
     }
     const lm = lmNode.get(n.key);
-    if (lm !== undefined) return lm;
+    if (lm !== undefined && (nodeSeen(n) || flat(n.x0 * T, n.y0 * T, n.x1 * T, n.y1 * T) <= LM_M)) return lm;
     const cx = Math.min(Math.max(f.x / T - 0.5, n.x0), n.x1 - 1), cy = Math.min(Math.max(f.z / T - 0.5, n.y0), n.y1 - 1);
     return (nodeSeen(n) ? 1e5 : 0) - Math.hypot((Math.round(cx) + 0.5) * T - f.x, (Math.round(cy) + 0.5) * T - f.z);
   };
@@ -384,6 +411,10 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   pick();
   request(focus());
   S.pump();
+  // (the replies wait, ready, for the first update: it is set below, once the first moment's ground stands)
+  terrain = await terrainIn;
+  terrain.each((i) => farAdd(i, 1));
+  document.querySelector('#loading')?.classList.add('hidden');
 
   // the caption's parts of the long building stage: what you see, then rings around you
   const progress = (f: THREE.Vector3) => {
@@ -395,7 +426,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     const size = [0, 0, 0, 0];
     let ends = 0;
     for (const i of rangeList) {
-      if (lmPrio.has(i)) { ends++; continue; }
+      if (lmAt(i) !== undefined) { ends++; continue; }
       const r = away(i, f);
       size[seen(i) ? 0 : r < 1000 ? 1 : r < 2000 ? 2 : 3]++;
     }
@@ -416,7 +447,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     look();
     pick();
     request(f);
-    S.reprioritize((n) => (n.foliage ? prio(index(n.tx, n.ty), f) : nodePrio(lnode(n.s, n.tx, n.ty), f)));
+    S.reprioritize((n) => (n.foliage ? folPrio(index(n.tx, n.ty), f) : nodePrio(lnode(n.s, n.tx, n.ty), f)));
     // what is shown: a node chosen and ready replaces what it covers (finer nodes, or nothing yet); one finer than what
     // shows there waits until everything chosen under that is ready
     const ready = (n: LNode) => {
@@ -503,11 +534,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     let pending = 0;
     for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
     settled = tilesNow === wanted && pending === 0;
-    // (the landmarks wanted: those beyond the view distance never come)
-    if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !inRange[k])))) toStage2();
+    // (the landmarks wanted: those beyond the view distance never come, those neither in view nor near come in turn)
+    if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !inRange[k]) || !tilesOf[b].some(lmNear)))) toStage2();
     if (stage === 2 && tilesNow === wanted) stage = U.uStage.value = 3;
-    if (stage >= 3) for (const n of chosen.values()) {
-      if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, prio(index(n.tx, n.ty), f));
+    // (each 1 m tile's foliage once its base is in, not after the whole range: what is in view completes first)
+    if (stage >= 2) for (const n of chosen.values()) {
+      if (n.s === 1 && S.nodes.get(n.key)?.state === 'ready') S.requestFoliage(n.tx, n.ty, folPrio(index(n.tx, n.ty), f));
     }
     if (stage === 3 && folNow === wanted) stage = 4;
     far.on = !!cut && !ct;
