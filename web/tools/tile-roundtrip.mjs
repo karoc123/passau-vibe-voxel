@@ -1,6 +1,7 @@
 // The node file's format end to end: scripts/tile_roundtrip.py writes a synthetic node (tiles.column_runs,
 // tilefile.write) and what it holds, src/tile-data.ts decodeTile reads it back; every column's ground and runs, the
-// planes, buildings and fields compared, and the two sides' N (tilefile.N, TILE_N). Files in a temp dir, removed
+// planes, buildings, fields and room spans compared (roomOffsets: each column's), and the two sides' N (tilefile.N,
+// TILE_N); the same node without its room section decodes to the same, rooms null. Files in a temp dir, removed
 // unless a check fails.
 // usage: node tools/tile-roundtrip.mjs [SEED]; exit code 1 on a mismatch
 import { runnerImport } from 'vite';
@@ -17,35 +18,49 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tile-roundtrip-'));
 execFileSync('uv', ['run', '--quiet', 'python', 'scripts/tile_roundtrip.py', dir, process.argv[2] ?? '1'], { cwd: repo, stdio: 'inherit' });
 
 const exp = JSON.parse(fs.readFileSync(path.join(dir, 'expected.json'), 'utf8'));
-const buf = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tile.bin')));
-const t = TD.decodeTile(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), exp.N);
+const decode = (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, f))); return TD.decodeTile(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), exp.N); };
 const bad = [];
 const fail = (what) => { if (bad.length < 20) console.log(`  FAIL ${what}`); bad.push(what); };
 if (exp.N !== TD.TILE_N) fail(`N: tilefile.py ${exp.N}, tile-data.ts ${TD.TILE_N}`);
 const S = exp.N + 2;
-if (t.counts.length !== S * S) fail(`counts: ${t.counts.length} columns, not ${S * S}`);
-let at = 0;
-for (let c = 0; c < S * S; c++) {
-  const want = exp.columns[c], got = [];
-  for (let k = 0; k < t.counts[c]; k++, at += 3) got.push([t.runs[at], t.runs[at + 1], t.runs[at + 2]]);
-  if (JSON.stringify(got) !== JSON.stringify(want)) fail(`column ${c} (row ${Math.floor(c / S)}, col ${c % S}): ${JSON.stringify(got)} != ${JSON.stringify(want)}`);
-}
-if (at !== t.runs.length) fail(`runs: ${t.runs.length / 3}, the counts say ${at / 3}`);
 const same = (name, got, want) => {
   if (!got) return fail(`${name}: missing`);
   if (got.length !== want.length) return fail(`${name}: ${got.length} values, not ${want.length}`);
   const i = want.findIndex((v, k) => got[k] !== v);
   if (i >= 0) fail(`${name}[${i}]: ${got[i]} != ${want[i]}`);
 };
-same('ground', t.ground, exp.ground);
-same('planes', t.planes, exp.planes);
-same('bld', t.bld, exp.bld);
-same('fields.cell', t.fields?.cell, exp.cell);
-same('fields.spill', t.fields?.spill, exp.spill);
+let nruns = 0;
+for (const [file, withRooms] of [['tile.bin', true], ['tile_noroom.bin', false]]) {
+  const t = decode(file), F = (what) => `${file} ${what}`;
+  if (t.counts.length !== S * S) fail(F(`counts: ${t.counts.length} columns, not ${S * S}`));
+  let at = 0;
+  for (let c = 0; c < S * S; c++) {
+    const want = exp.columns[c], got = [];
+    for (let k = 0; k < t.counts[c]; k++, at += 3) got.push([t.runs[at], t.runs[at + 1], t.runs[at + 2]]);
+    if (JSON.stringify(got) !== JSON.stringify(want)) fail(F(`column ${c} (row ${Math.floor(c / S)}, col ${c % S}): ${JSON.stringify(got)} != ${JSON.stringify(want)}`));
+  }
+  if (at !== t.runs.length) fail(F(`runs: ${t.runs.length / 3}, the counts say ${at / 3}`));
+  nruns = t.runs.length / 3;
+  same(F('ground'), t.ground, exp.ground);
+  same(F('planes'), t.planes, exp.planes);
+  same(F('bld'), t.bld, exp.bld);
+  same(F('fields.cell'), t.fields?.cell, exp.cell);
+  same(F('fields.spill'), t.fields?.spill, exp.spill);
+  if (!withRooms) { if (t.rooms !== null) fail(F(`rooms: ${t.rooms.length / 4} spans, not none`)); continue; }
+  same(F('rooms'), t.rooms, exp.rooms);
+  if (!exp.rooms.length) fail(F('no room spans to test'));
+  // each column's spans through roomOffsets: the expected ones of that column, in order
+  if (t.rooms) {
+    const off = TD.roomOffsets(t.rooms, S * S);
+    let n = 0;
+    for (let c = 0; c < S * S; c++) for (let k = off[c]; k < off[c + 1]; k++, n++) if (t.rooms[4 * k] !== c) { fail(F(`roomOffsets: span ${k} not column ${c}'s`)); break; }
+    if (n !== t.rooms.length / 4 || off[S * S] !== n) fail(F(`roomOffsets: ${n} spans, not ${t.rooms.length / 4}`));
+  }
+}
 
 if (bad.length) {
   console.log(`tile round trip: ${bad.length} mismatches (files kept in ${dir})`);
   process.exit(1);
 }
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`tile round trip: ok (${S * S} columns, ${t.runs.length / 3} runs)`);
+console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; and without the room section)`);

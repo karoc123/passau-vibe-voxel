@@ -16,6 +16,10 @@ little-endian throughout. Sections (S = N + 2, the node and its one-cell apron; 
   fols  uint8 [2][N^2]    per cell (no apron), one plane each: foliage class and tree (phenology.py)
   spil  uint8 [2][(N/2+2)^2]  per cell of twice the node's size, apron included, one plane each: the light of lit
                            windows on the street before them, two kinds (tile_fields.py spill_map)
+  room  uint16[4 * spans]  level 1 only, and only in a node with rooms (scripts/interiors.py): (column, z0, len, fill)
+                           per span of voxels carved out of a building as a room -- empty in runs -- column as cnts
+                           counts them (apron included), sorted by column, then z0; fill: the palette entry that stood
+                           there, what the distance levels (tiles.py) and the occlusion culling count the room as
 A file without the magic is the format before it (cnts grnd runs [plns], told apart by length).
 """
 import gzip
@@ -57,7 +61,7 @@ def unpack(buf, N):
     return out
 
 
-ORDER = ["cnts", "grnd", "runs", "plns", "bldg", "flod", "fols", "spil"]
+ORDER = ["cnts", "grnd", "runs", "plns", "bldg", "flod", "fols", "spil", "room"]
 
 
 def write(path, sections):

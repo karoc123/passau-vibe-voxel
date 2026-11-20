@@ -1,7 +1,8 @@
 """Rebuild the coarser tile levels (tiles.py LEVELS other than 1) from the level-1 tiles already in web/public/data,
 without running voxelize.py again (which needs ~8 GB and the raw data): tiles/1 and tiles/1f together are the whole
 finished volume (tiles/1 the city with grass as bare earth, tiles/1f trees, trunks and grass), their ground bytes
-the ground level, tiles/1's trailing plane codes the roof planes. Level 1 itself is left as it is; meta.json's tile
+the ground level, tiles/1's trailing plane codes the roof planes, their room sections the rooms (interiors.py: filled
+again for the coarser levels, as voxelize.py's export does). Level 1 itself is left as it is; meta.json's tile
 manifest is updated.
 
 Window by window (window.py): each window's nodes from the level-1 nodes over its region (the core and
@@ -26,12 +27,24 @@ CLOCK = 14  # voxelMaterial.ts MAT.CLOCK (voxelize.py M_CLOCK)
 
 
 def read_node(path, N, planes=False):
+    """counts, ground, runs, roof planes (or None) and room spans ((n, 4): column, z0, len, fill; empty without) of a
+    node"""
     sec = tilefile.read(path, N)
     counts = np.frombuffer(sec["cnts"], np.uint16)
     ground = np.frombuffer(sec["grnd"], np.uint8)
     runs = np.frombuffer(sec["runs"], np.uint16).reshape(-1, 3)
     pl = np.frombuffer(sec["plns"], np.uint16) if planes and "plns" in sec else None
-    return counts, ground, runs, pl
+    rooms = np.frombuffer(sec.get("room", b""), np.uint16).reshape(-1, 4)
+    return counts, ground, runs, pl, rooms
+
+
+def own_rooms(rooms, N, r0, c0):
+    """a node's room spans (read_node) in its own N x N columns (not the apron), as interiors.runs() gives them: (row,
+    col, z0, len, fill) with the node's first own row and column at r0, c0"""
+    col = rooms[:, 0].astype(np.int64)
+    rr, cc = col // (N + 2) - 1, col % (N + 2) - 1
+    k = (rr >= 0) & (rr < N) & (cc >= 0) & (cc < N)
+    return np.stack([rr[k] + r0, cc[k] + c0, *(rooms[k, j].astype(np.int64) for j in (1, 2, 3))], 1)
 
 
 def paint(vol, counts, runs, N, r0, c0, keep_existing):
@@ -63,8 +76,8 @@ def paste(dst, node, N, r0, c0):
 
 
 def region_volume(src, N, region):
-    """the finished level-1 volume, ground and roof planes over region (ra, rb, ca, cb) from the level-1 nodes
-    (src: the tiles folder)"""
+    """the finished level-1 volume, ground, roof planes and rooms (interiors.runs()' spans, in the region's rows and
+    columns) over region (ra, rb, ca, cb) from the level-1 nodes (src: the tiles folder)"""
     ra, rb, ca, cb = region
     nodes = [(tx, ty) for ty in range(ra // N, -(-rb // N)) for tx in range(ca // N, -(-cb // N))]
     data, H = {}, 1
@@ -78,13 +91,17 @@ def region_volume(src, N, region):
     vol = np.zeros((H, rb - ra, cb - ca), np.uint16)
     g = np.zeros((rb - ra, cb - ca), np.int16)
     planes = np.zeros((rb - ra, cb - ca), np.uint16)
+    rooms = []
     for (tx, ty), (b, f) in data.items():
         r0, c0 = ty * N - ra, tx * N - ca
         paint(vol, b[0], b[2], N, r0, c0, False)
         paint(vol, f[0], f[2], N, r0, c0, True)  # grass over the bare earth it stands for, trees and trunks
         paste(g, b[1], N, r0, c0)
         paste(planes, b[3], N, r0, c0)
-    return vol, g, planes
+        rooms.append(own_rooms(b[4], N, r0, c0))
+    rooms = np.concatenate(rooms) if rooms else np.zeros((0, 5), np.int64)
+    rooms = rooms[(rooms[:, 0] >= 0) & (rooms[:, 0] < rb - ra) & (rooms[:, 1] >= 0) & (rooms[:, 1] < cb - ca)]
+    return vol, g, planes, rooms[np.lexsort((rooms[:, 2], rooms[:, 1], rooms[:, 0]))]
 
 
 def main():
@@ -103,11 +120,11 @@ def main():
     windows = window.from_args(sys.argv, D, W)
     for w in windows:
         region = w.region(tiles.HALO)
-        vol, g, planes = region_volume(OUT / "tiles", N, region)
-        st = tiles.export_window(vol, g, planes, region, w, dst, face_ids=face, wall_ids=walls, levels=levels)
+        vol, g, planes, rooms = region_volume(OUT / "tiles", N, region)
+        st = tiles.export_window(vol, g, planes, region, w, dst, face_ids=face, wall_ids=walls, levels=levels, rooms=rooms)
         print(f"window {w}: volume {vol.shape}, nodes written:",
               {s: f"{v[0] / 2 ** 20:.1f} MB" for s, v in st.items()}, flush=True)
-        del vol, g, planes
+        del vol, g, planes, rooms
     if check:
         voxels = lambda p: {k: v for k, v in tilefile.read(p, N).items() if k in ("cnts", "grnd", "runs", "plns")}
         same = sum(voxels(tmp / "8" / p.name) == voxels(p) for p in (OUT / "tiles" / "8").glob("*.bin"))

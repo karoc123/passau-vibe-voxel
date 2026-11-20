@@ -543,11 +543,12 @@ def extent(fx, jobs, other):
                 g = wb / PUB / "tiles" / sub / f"{(c0 - fo.col0) // n}_{(r0 - fo.row0) // n}.bin"
                 ta, tb = tilefile.read(f, tiles.N), tilefile.read(g, tiles.N) if g.exists() else {}
                 diff = []
-                for tag in ("cnts", "grnd", "plns", "runs"):
+                for tag in ("cnts", "grnd", "plns", "runs", "room"):
                     x, y = ta.get(tag, b""), tb.get(tag, b"")
-                    if tag == "runs":
-                        x, y = (np.frombuffer(v, np.uint16).reshape(-1, 3).copy() for v in (x, y))
-                        x[:, 2], y[:, 2] = luts[0][x[:, 2]], luts[1][y[:, 2]]
+                    if tag in ("runs", "room"):  # (their palette entries as colours: the last of the 3 or 4 values)
+                        k = 3 if tag == "runs" else 4
+                        x, y = (np.frombuffer(v, np.uint16).reshape(-1, k).copy() for v in (x, y))
+                        x[:, k - 1], y[:, k - 1] = luts[0][x[:, k - 1]], luts[1][y[:, k - 1]]
                         x, y = x.tobytes(), y.tobytes()
                     if x != y:
                         diff.append(tag)
