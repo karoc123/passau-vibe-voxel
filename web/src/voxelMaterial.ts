@@ -37,6 +37,8 @@ export interface VoxelUniforms {
   uFolCol: U<THREE.Color[]>;
   uGrass: U<THREE.Color[]>;
   uLeaf: U<THREE.Color>;
+  // the larch's foliage class (phenology.json: the class of Larix; -1 none): its needles summer-green, not spruce's
+  uFolLarch: U<number>;
   // per building (zones.py id): what it is, for its windows (windows.ts, scripts/windows.py)
   uWinB: U<THREE.Texture>;
   uWinMed: U<number[]>;
@@ -80,6 +82,7 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uFolCol: { value: Array.from({ length: FOLIAGE_CLASSES }, () => new THREE.Color(0.3, 0.2, 0.05)) },
     uGrass: { value: Array.from({ length: 12 }, () => new THREE.Color(1, 1, 1)) },
     uLeaf: { value: new THREE.Color(1, 1, 1) },
+    uFolLarch: { value: -1 },
     uWinB: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
     uWinMed: { value: new Array(8).fill(0.12) },
     uWinShape: { value: Array.from({ length: 72 }, (_, i) => (i % 9) / 4) },
@@ -136,7 +139,7 @@ function floodlights(meta: Meta) {
 
 // A leaf voxel through the year (foliage.ts): x = in leaf (0 bare .. 1), y = turned (0 green .. 1 autumn colour), z = class.
 const FOLIAGE = `${FIELDS_GLSL}
-  uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
+  uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf; uniform float uFolLarch;
   // (cell: in the project grid's coordinates, the map's + uOrg: CELL)
   uniform vec3 uOrg;
   vec2 foliageCell(vec3 cell) { return foliageAtP(cell.xz - uOrg.xz + 0.5); }
@@ -568,6 +571,11 @@ const SURFACE = `
     if (uFolOn > 0.5) {
       vec3 fo = foliageAt(cell);
       bool fine = leafFine(cell);
+      // a larch's needles (voxelize.py NEEDLES, blue-green: more blue than red, unlike any leaf green): the soft,
+      // light yellow-green of a larch in leaf instead of a spruce's dark one, the needle tones' steps kept (0.145:
+      // the middle tone #456a4f's green, linear). Its autumn gold and winter skeleton are its class's (phenology.json)
+      // and its branches' (voxelize.py) as for the broadleaves
+      if (fo.z == uFolLarch && base.b > base.r) col = vec3(0.16, 0.37, 0.085) * mix(1.0, base.g / 0.145, 0.6) * uLeaf * (0.8 + 0.35 * h);
       if (leafOff(cell, fo)) {
         #ifndef PREPASSED
         if (leafGone(cell, fo, fine)) discard;

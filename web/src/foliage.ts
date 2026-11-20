@@ -2,7 +2,7 @@ import { fetchJson } from './util';
 import type { VoxelUniforms } from './voxelMaterial';
 
 interface Phase { day: number; sd: number; n: number }
-interface Class { species: string; leaf: Phase | null; colour: Phase | null; fall: Phase | null; autumn?: string }
+interface Class { species: string; genera?: string[]; leaf: Phase | null; colour: Phase | null; fall: Phase | null; autumn?: string }
 interface Phenology { classes: Record<string, Class>; city: { leaf: number; colour: number; fall: number }; grass: [number, number, number][]; leaf: [number, number, number] }
 
 export const FOLIAGE_CLASSES = 16;
@@ -16,6 +16,8 @@ export async function loadFoliage(U: VoxelUniforms) {
     if (c.leaf && c.colour && c.fall) U.uFolDate.value[i].set(c.leaf.day, c.colour.day, c.fall.day, (c.leaf.sd + c.colour.sd + c.fall.sd) / 3);
     else U.uFolDate.value[i].set(-1, 0, 0, 0);
     if (c.autumn) U.uFolCol.value[i].set(c.autumn).convertSRGBToLinear();
+    // the larch's class: its needles are light green in summer (voxelMaterial.ts), not the evergreens' dark ones
+    if (c.genera?.includes('Larix')) U.uFolLarch.value = i;
   }
   ph.grass.forEach((t, m) => U.uGrass.value[m].setRGB(...t));
   U.uLeaf.value.setRGB(...ph.leaf);
