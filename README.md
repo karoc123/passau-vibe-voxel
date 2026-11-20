@@ -165,11 +165,11 @@ failure; `-j 2` regions at once by default):
 
 | Command | Checks | Time (-j 2) |
 |---|---|---|
-| `verify` | nothing left floating (`data/debug/floating_left.json`, `floating.json` empty), every carriageway in its own colour, LoD2's roofs and the laser's canopy heights taken for most cells, OSM's outlines within 3 m of LoD2's, the cars' lanes and the footpaths of `traffic.json` on the volume's surface (sunk / hovering shares under a threshold) | seconds on a built fixture |
-| `golden --record DIR` / `--compare DIR` | every output of a fresh fixture build (`web/public/data`, the arrays of `data/*.npz` with the inputs, `data/*.bin`) hashed, or compared with the record: a refactor that must not change a byte | ~6 min |
-| `covers [COVER ...]` | `voxelize.py` over the fixture as one region and over each cover (default `2x2`), then the steps after it: the same bytes; an incremental rerun builds nothing, a region built again alone (`--only`) changes nothing | ~14 min |
-| `windows [STEP ...]` | the windowed steps (`zones`, `terrain`, `tile_fields`, `tiles_lod`) over the whole fixture and over 2 × 2 windows (both seams and a corner; `--covers 2x1,1x2` others): the same bytes | ~4 min |
-| `extent` | the fixture against `altstadt_wide.json` (1024 m more to the west): every 128 m block of the volume and every tile node that sees the same map within `region.HALO` holds the same voxels, colour by colour (what growing the map relies on) | ~10 min the first time, then ~1 min |
+| `verify` | nothing left floating (`data/debug/floating_left.json`, `floating.json` empty), every carriageway in its own colour, LoD2's roofs and the laser's canopy heights taken for most cells, OSM's outlines within 3 m of LoD2's, the cars' lanes and the footpaths of `traffic.json` on the volume's surface (sunk / hovering shares under a threshold) | 4 s on a built fixture |
+| `golden --record DIR` / `--compare DIR` | every output of a fresh fixture build (`web/public/data`, the arrays of `data/*.npz` with the inputs, `data/*.bin`) hashed, or compared with the record: a refactor that must not change a byte | ~5 min |
+| `covers [COVER ...]` | `voxelize.py` over the fixture as one region and over each cover (default `2x2`), then the steps after it: the same bytes; an incremental rerun builds nothing, a region built again alone (`--only`) changes nothing | ~12-16 min, 4.2 GB |
+| `windows [STEP ...]` | the windowed steps (`zones`, `terrain`, `tile_fields`, `tiles_lod`) over the whole fixture and over 2 × 2 windows (both seams and a corner; `--covers 2x1,1x2` others): the same bytes | ~9 min (`tiles_lod.py`) |
+| `extent` | the fixture against `altstadt_wide.json` (1024 m more to the west): every 128 m block of the volume and every tile node that sees the same map within `region.HALO` holds the same voxels, colour by colour (what growing the map relies on) | ~6.5 min the first time, then seconds |
 | `all` | `verify`, `covers`, `windows`, `extent` | ~30 min |
 
 Not covered: the node steps (`tris.mjs`, `lamps.mjs`) and `climate.py`. `FINALDUMP=1` still makes `voxelize.py`

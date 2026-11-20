@@ -32,9 +32,12 @@ built for the fixture (cached in data/check/<name>/inputs/ per code and config),
 puts them. covers, windows and golden work in scratch folders beside it (removed after, unless --keep). Not run: the
 node steps (web/tools/tris.mjs, lamps.mjs) and climate.py (it fetches).
 
-Runtime on the Altstadt fixture (WSL, 20 cores, -j 2): build from nothing ~6 min, verify on a built workspace ~1 min,
-covers ~14 min, windows ~2 min, extent ~10 min the first time (the wide fixture's build; then ~1 min), golden ~6 min.
-A region's process peaks at ~4 GB. Every command prints its time and peak RAM and exits 1 if a check fails.
+Runtime on the Altstadt fixture (WSL, 20 cores, -j 2, measured 2026-11-20 with other builds running): the inputs ~1 min
+(once per code and config), a build from nothing ~5 min (two 1024 m regions ~3.5 min each, two thin ones ~30 s, the
+steps after it 20 s), verify on a built workspace 4 s, covers ~12-16 min (the fixture as one region ~4 min at 4.2 GB),
+windows ~9 min (tiles_lod.py ~4 min a run, the other steps seconds), extent ~6.5 min the first time (the wide
+fixture's 6 regions) then seconds, golden ~5 min. Every command prints its time and peak RAM of a process and exits
+1 if a check fails.
 """
 import ast
 import hashlib
@@ -157,19 +160,27 @@ def ensure_inputs(fx):
     return d
 
 
+def extends(path):
+    """whether the registry at path is scripts/palette.json with colours added"""
+    if not Path(path).exists():
+        return False
+    mine = json.loads((SCRIPTS / "palette.json").read_text())["palette"]
+    return json.loads(Path(path).read_text())["palette"][:len(mine)] == mine
+
+
 def setup(ws, fx, fresh=True, palette=None):
     """a workspace for fx at ws: a fresh copy of scripts/ (palette: the registry to start from), data/raw linked, the
     inputs linked; fresh: everything else removed (else the outputs and the regions' cache kept: incremental)"""
     if fresh and ws.exists():
         shutil.rmtree(ws)
+    # the registry to start from: the one the last build of the fixture left (fx.home/palette.json), if it only added
+    # colours to scripts/palette.json (a fixture meets a few the map does not): else a fresh build meets them, adds
+    # them and builds its regions a second time, and a kept one builds every region again
+    if palette is None and extends((fx.home / "palette.json")):
+        palette = ws.parent / f".{ws.name}.palette.json"
+        palette.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(fx.home / "palette.json", palette)
     if (ws / "scripts").exists():
-        # (the registry as the last build left it, if it only added colours to scripts/palette.json: else every
-        # region would be built again for a palette that lacks the colours it was built with)
-        reg = json.loads((ws / "scripts" / "palette.json").read_text())["palette"]
-        mine = json.loads((SCRIPTS / "palette.json").read_text())["palette"]
-        if palette is None and reg[:len(mine)] == mine:
-            palette = ws / "palette.kept.json"
-            shutil.copy(ws / "scripts" / "palette.json", palette)
         shutil.rmtree(ws / "scripts")
     shutil.copytree(SCRIPTS, ws / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     if palette is not None:
@@ -190,6 +201,8 @@ def setup(ws, fx, fresh=True, palette=None):
 def build(ws, fx, jobs, cover=(), after=True):
     t = time.time()
     run(ws, fx, "voxelize", list(cover) + ["-j", jobs])
+    if extends(ws / "scripts" / "palette.json"):
+        shutil.copy(ws / "scripts" / "palette.json", fx.home / "palette.json")
     t1 = time.time()
     if after:
         for s in AFTER:
