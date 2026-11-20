@@ -295,6 +295,12 @@ def _test():
             for f in sorted((a / str(s)).glob("*.bin")):
                 if f.read_bytes() != (b / str(s) / f.name).read_bytes():
                     bad.append(f"level {s} node {f.name}: not the solid building's bytes")
+        # (in 2 x 2 windows, each from its region alone: the same bytes)
+        e = Path(tmp) / "windows"
+        tiles.export(vol, g, e, note, planes=pl, windows=window.split(D, W, 2, 2), rooms=sp)
+        for f in sorted(b.glob("*/*.bin")):
+            if f.read_bytes() != (e / f.parent.name / f.name).read_bytes():
+                bad.append(f"tiles.export in windows: {f.parent.name}/{f.name} not export_window's bytes")
         nodes = sorted((b / "1").glob("*.bin"))
         secs = {f.name: tilefile.read(f, N) for f in nodes}
         if sum("room" in s for s in secs.values()) != 4:  # (the room lies across both seams)
@@ -314,7 +320,7 @@ def _test():
             if not (np.diff(sp4[:, 0] * 65536 + sp4[:, 1]) > 0).all():
                 bad.append(f"{f}: spans not sorted by column and z")
             for (rr_, c_, z0, ln, fl) in zip(r, cc, sp4[:, 1], sp4[:, 2], sp4[:, 3]):
-                if any(SPANS[rr_, c_].get(z) != fl for z in range(z0, z0 + ln)):
+                if any(SPANS.get((rr_, c_), {}).get(z) != fl for z in range(z0, z0 + ln)):
                     bad.append(f"{f}: span at {rr_}, {c_} not as recorded"); break
             own = (sp4[:, 0] // (N + 2) >= 1) & (sp4[:, 0] // (N + 2) <= N) & (sp4[:, 0] % (N + 2) >= 1) & (sp4[:, 0] % (N + 2) <= N)
             got += int(sp4[own, 2].sum())

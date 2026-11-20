@@ -210,11 +210,12 @@ def manifest(D, W, levels=None):
 
 
 def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, planes=None, wall_ids=None,
-           windows=None, levels=None):
+           windows=None, levels=None, rooms=None):
     """vol (H, D, W) level-1 voxels, g (D, W) ground level, planes (D, W) roof plane codes or None -> node files;
     wall_ids: the palette entries of buildings' walls (the distance levels' colours, side_walls). windows: the cover
     of the map to work in (window.py; default one window, the whole map): each window's nodes come from its region of
-    vol alone, the bytes are the same. Returns the manifest for meta.json."""
+    vol alone, the bytes are the same. rooms: interiors.runs()' spans over the map, or None (export_window). Returns the
+    manifest for meta.json."""
     import window as wmod
     D, W = g.shape
     levels = manifest(D, W, levels)
@@ -223,7 +224,8 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
     for w in windows or wmod.cover(D, W):
         ra, rb, ca, cb = region = w.region(HALO)
         st = export_window(vol[:, ra:rb, ca:cb], g[ra:rb, ca:cb], None if planes is None else planes[ra:rb, ca:cb],
-                           region, w, out, face_ids, fol_ids, grass_ids, bare_id, wall_ids, [lv["s"] for lv in levels])
+                           region, w, out, face_ids, fol_ids, grass_ids, bare_id, wall_ids, [lv["s"] for lv in levels],
+                           None if rooms is None else rooms - np.array([ra, ca, 0, 0, 0]))
         for s in st:
             stats[s] = [a + b for a, b in zip(stats[s], st[s])]
     for lv in levels:
