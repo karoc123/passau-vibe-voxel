@@ -2825,6 +2825,103 @@ vol[g[_rb, _cb] - 1, _rb, _cb] = _bwc[_rb, _cb]
 is_road |= _bw & (_bwr > 0)
 note("deck scraps on the ground dropped:", int(_scrap.sum()), "cells; bridge ways drawn on the ground where it reaches "
      "their level:", int(_bw.sum()), "cells")
+
+
+def bridgehead_fill(deck, zt_):
+    """The ground at a bridgehead lifted to the surface the terrain model dropped with the bridge. The DGM1 leaves out
+    bridges, and with them often the last metres of the approach, an abutment, or the plaza over a road that dives under
+    the bridgehead (the Schanzlbrücke's north end over the B 12's covered stretch): the ground there lay 7 m under the
+    deck, and the junction beside it was a crater -- the carriageway falling into a pit between the deck and the
+    approach. Such a cell is open ground (no building, water, deck or tree crown) next to the deck, whose terrain stands
+    2 m or more under the surface model, and the surface model there is level and at the deck's height or on a ramp
+    down from it (12 % at most, within BH_REACH metres of the deck): it is lifted to the surface model's level
+    (an embankment, its exposed sides masonry). A road or path that really passes under the bridge is open to the
+    sky beside the deck: the surface model sees it down at the ground, and it stays. Grown out from the deck cell by
+    cell through such cells only (a max-plus dilation: no ties, the same in every region). Returns the new ground."""
+    dmin = ndimage.median_filter(d4.min((1, 3)), 5) - BASE  # the surface model's low end per cell, over 5 m (no cars)
+    flat = ndimage.maximum_filter(dmin, 3) - ndimage.minimum_filter(dmin, 3) <= 1.5  # a road's surface, not a crown
+    # a way at the ground that does not come off a bridge (no node shared with a bridge way's end) passes under the
+    # bridge or the structure beside it -- the tracks under a building site's deck by the station -- and stays open
+    _k = lambda p_: (round(p_[0], 3), round(p_[1], 3))
+    ends = {_k(p_) for _, t_, l_ in osm.lines if on_bridge(t_) and (t_.get("highway") or t_.get("railway"))
+            for p_ in (l_.coords[0], l_.coords[-1])}
+    ground = [(t_, l_) for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in (
+        "rail", "tram", "light_rail", "subway", "narrow_gauge")) and not on_bridge(t_) and not tunnelish(t_)]
+    under = np.zeros((D, W), np.uint8)
+    burn(under, [(l_.buffer((parse_len(t_.get("width")) or HW.get((t_.get("highway") or "").replace("_link", ""), 0)
+                             or (3.8 if t_.get("railway") else 2)) / 2 + 1), 1) for t_, l_ in ground
+                 if not ends & {_k(p_) for p_ in l_.coords}])
+    # and the railway's land (its tracks and platforms under a footbridge)
+    burn(under, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "railway" or t_.get("railway") == "platform"])
+    # grown from the deck at a bridge's end only: within 20 m of a bridge way's end that a way on the ground goes on
+    # from (not along a footbridge's span over a station's tracks and the building site beside it)
+    open_ends = ends & {_k(p_) for _, l_ in ground for p_ in l_.coords}
+    seed = np.zeros((D, W), np.uint8)
+    burn(seed, [(Point(p_).buffer(20), 1) for p_ in sorted(open_ends)])
+    # nor the banks: over the water the surface model is a smooth sheet metres up (the Ilz under its bridges), and
+    # ground within 2 m of the rivers' level is their bank or bed
+    near_water = ndimage.binary_dilation(gcol == C["water"], iterations=4) | (g <= RIVER_LEVEL - BASE + 2)
+    cand = ~deck & ~bmask & ~near_water & ~veg & flat & (dmin - g >= 2) & (under == 0)
+    NEG = np.float32(-1e4)
+    src = deck & (seed > 0)
+    cone = np.where(src, zt_, NEG).astype(np.float32)  # the highest a cell may stand: the deck less 12 % per metre
+    top = cone.copy()  # the deck level it comes from
+    st = -BH_GRADE * np.array([[2 ** 0.5, 1, 2 ** 0.5], [1, 0, 1], [2 ** 0.5, 1, 2 ** 0.5]], np.float32)
+    acc = np.zeros((D, W), bool)
+    for _ in range(BH_REACH):
+        c2 = ndimage.grey_dilation(cone, structure=st, mode="constant", cval=NEG)
+        t2 = ndimage.grey_dilation(top, size=(3, 3), mode="constant", cval=NEG)
+        ok = cand & (c2 > NEG / 2) & (dmin >= c2 - 1.5) & (dmin <= t2 + 1.0)
+        new = ok & ~acc
+        if not new.any():
+            break
+        acc |= ok
+        cone = np.where(src, cone, np.where(ok, c2, NEG)).astype(np.float32)
+        top = np.where(src, top, np.where(ok, t2, NEG)).astype(np.float32)
+    # not a sliver along a deck's edge (the surface model's deck smeared a cell or two over the bank beside it, or
+    # over the road under a viaduct): a soil curtain hung from the deck's edge to the ground; nor a wedge by an
+    # abutment over the bank falling away beside it. A piece 3 m wide and of 30 cells or more: an approach, a plaza
+    # (the cells the opening shaved off a piece's rim come back: no notches of pit at its edge)
+    acc0, acc = acc, ndimage.binary_opening(acc, np.ones((3, 3), bool))
+    lab, n = ndimage.label(acc, np.ones((3, 3), bool))
+    if n:
+        acc &= np.isin(lab, np.nonzero(ndimage.sum(acc, lab, np.arange(1, n + 1)) >= 30)[0] + 1)
+    acc |= acc0 & ndimage.binary_dilation(acc, np.ones((3, 3), bool), iterations=2)
+    gn = np.where(acc, np.maximum(g, np.round(np.minimum(dmin, top))), g).astype(np.int32)
+    return gn, acc
+
+
+BH_GRADE, BH_REACH = 0.12, 40
+_gn, _bh = bridgehead_fill(deck, zt_)
+_rh, _ch = np.nonzero(_gn > g)
+if len(_rh):
+    # what stood on the old ground (a kerb, a post, a car) rises with it; under it soil, the top keeps its colour, and
+    # a side 2 m or more over its neighbour is masonry, as the retaining walls above
+    _g0, _g1 = g[_rh, _ch], _gn[_rh, _ch]
+    _lift = _g1 - _g0
+    # open land no way or area is drawn on had been read as the slope of a pit (a meadow on the hillside): paved, as
+    # the bridgehead round it, unless the ortho sees it green
+    _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03)
+    gcol[_rh[_pv], _ch[_pv]] = C["paving"]
+    vol[_g0[_pv] - 1, _rh[_pv], _ch[_pv]] = C["paving"]
+    _old = np.stack([vol[np.minimum(_g0 - 1 + k, H - 1), _rh, _ch] for k in range(7)])
+    for k in range(6, -1, -1):
+        _z = _g1 - 1 + k
+        _ok = (_z < H) & ((_old[k] != 0) | (_z <= _g0 + 5))  # (air written only where it moved from: not into a crown)
+        vol[_z[_ok], _rh[_ok], _ch[_ok]] = _old[k][_ok]
+    for k in range(int(_lift.max())):
+        _m = k < _lift
+        vol[_g0[_m] - 1 + k, _rh[_m], _ch[_m]] = C["soil"]
+    _nb = ndimage.minimum_filter(_gn, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))[_rh, _ch]
+    _rp, _cp = _rh + R0, _ch + C0
+    for k in range(int((_g1 - _nb).max())):
+        _z = _nb + k
+        _m = (_z < _g1 - 1) & (_g1 - _nb >= 2)
+        _s = ((_rp[_m] + _cp[_m] + (_z[_m] % 2)) // 2 * 2654435761 + _z[_m] * 40503) % 1000003 % len(STONE)
+        vol[_z[_m], _rh[_m], _ch[_m]] = np.array(STONE, np.uint16)[_s]
+    g = _gn
+note("bridgeheads: ground lifted to the dropped surface:", len(_rh), "cells, by", int(_lift.sum()) if len(_rh) else 0,
+     "m in all, up to", int(_lift.max()) if len(_rh) else 0, "m")
 deck_h = np.where(deck, zt_ - g, 0).astype(np.float32)
 # under a deck over the river nothing hangs but the bridge's own structure (landmarks.py): LiDAR columns caught at the
 # deck edge (catenary masts, railings, green from the ortho) were extruded into dangling bits; and no tree crown grows

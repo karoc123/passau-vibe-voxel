@@ -147,6 +147,12 @@ for them).
   keeping the species), one crown per trunk. Crown depth follows the laser's crown base (halfway to the default for
   broadleaved trees, whose winter scan reads low); crowns that stop the winter pulses (a fifth of them single returns)
   are conifers: cones in needle green, evergreen in the viewer.
+- **Bridgeheads.** The terrain model leaves out bridges, and often with them the last metres of an approach or the
+  plaza over a road diving under the bridgehead. Ground next to a deck at a bridge's end (within 20 m of a bridge way's
+  end that a way on the ground goes on from) is lifted to the surface model's level where that stands 2 m or more over
+  the terrain, level, at the deck's height or on a ramp down from it (12 % at most, up to 40 m out); never under a way
+  that does not come off the bridge, on railway land, by the water or under a crown (`bridgehead_fill` in
+  `voxelize.py`).
 - **Set pieces** (`scripts/passau.py`): the Dom rebuilt (west towers with copper cupolas, front with gable and
   portal, nave and aisles with arched windows, east end and crossing drum from LoD2); Veste Oberhaus and Niederhaus
   under clean roofs with OSM's walls as battlements; the Poststeg footbridge over the station's tracks.
