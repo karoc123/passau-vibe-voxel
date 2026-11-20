@@ -276,7 +276,7 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   // border a skirt from the voxel's foot up to the ramp (rampSides: column, neighbour, axis, direction, border, palette,
   // building). Ramps' AO is that of their ground alone: a step that became a ramp casts none.
   const rampTops: number[] = [], rampSides: number[] = [], SS = S * S;
-  const rampAO = rp ? (k: number) => { const c = k % SS; return rp.paved[c] === 1 && (k - c) / SS === ground[c]; } : undefined;
+  const rampAO = rp ? (k: number) => { const c = k % SS; return rp.paved[c] === 1 && (k - c) / SS === rp.ground[c]; } : undefined;
   const dims = [N, N, sz - 2];
   // the tallest column in each row and each column of the slab: slices are scanned only up to it
   const ST = [1, sx, sx * sy], colTop = new Uint16Array(S * S);
@@ -329,7 +329,8 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 let aoSkip: ((k: number) => boolean) | undefined;
                 if (rp) {
                   const c = (px + 1) + S * (py + 1);
-                  if (rp.paved[c] && pz === gm - 1) {
+                  // (rp.ground: a bridge deck's top where it is one, ramps.ts)
+                  if (rp.paved[c] && pz === rp.ground[c] - 1) {
                     if (d === 2) {
                       if (ramped(rp, c)) { rampTops.push(c, a, bidAt(px, py)); mask[i + j * nu] = 0; continue; }
                       aoSkip = rampAO;
@@ -410,7 +411,8 @@ function emitFeet(feet: RampField, vol: Uint16Array, x0: number, y0: number, out
 // skirt as the side it replaces. Corners as emitMerged's, so the same winding (QUAD_ORDER).
 function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Array, x0: number, y0: number, out: QuadBuffer, skip: (k: number) => boolean,
   bidOf: (c: number) => number) {
-  const { S, ground } = rp, SS = S * S, V = S + 1;
+  // (ground: the ramps' surface, a deck's top where it is one; under: the tile's ground, the faces' gm as the voxels')
+  const { S, ground, under } = rp, SS = S * S, V = S + 1;
   const put = (P: number[][], d: number, dir: number, ord: number[], aos: number[], gm: number, pal: number, bid: number) => {
     out.reserve(4);
     for (const c of ord) out.vertexQ(P[c][0] + x0, P[c][2], P[c][1] + y0, d * 2 + (dir > 0 ? 1 : 0), aos[c], gm, 0, pal, bid);
@@ -425,10 +427,10 @@ function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Ar
     AO[t] = faceAO(vol, c + SS * (ground[c] + 1), 1, S, -1, null, skip);
   }
   const like = (t: number, u: number) => u >= 0 && !done[u] && AO[u] === 255 && tops[u * 3 + 1] === tops[t * 3 + 1] && tops[u * 3 + 2] === tops[t * 3 + 2]
-    && ground[tops[u * 3]] === ground[tops[t * 3]];
+    && ground[tops[u * 3]] === ground[tops[t * 3]] && under[tops[u * 3]] === under[tops[t * 3]];
   for (let t = 0; t < nt; t++) {
     if (done[t]) continue;
-    const c = tops[t * 3], X = c % S, Y = (c - X) / S, x = X - 1, y = Y - 1, g = ground[c], q = Q.slice(t * 4, t * 4 + 4), ao = AO[t];
+    const c = tops[t * 3], X = c % S, Y = (c - X) / S, x = X - 1, y = Y - 1, q = Q.slice(t * 4, t * 4 + 4), ao = AO[t];
     const dx = q[1] - q[0], dy = q[3] - q[0];
     let w = 1, h = 1;
     if (ao === 255 && q[2] - q[3] === dx) { // (planar)
@@ -441,7 +443,7 @@ function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Ar
     }
     done[t] = 1;
     const P = [[x, y, q[0]], [x + w, y, q[1]], [x + w, y + h, q[2]], [x, y + h, q[3]]];
-    put(P, 2, 1, QUAD_ORDER[(rampDiagonal02(q[0], q[1], q[2], q[3]) ? 2 : 0) + 1], [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3], g, tops[t * 3 + 1], tops[t * 3 + 2]);
+    put(P, 2, 1, QUAD_ORDER[(rampDiagonal02(q[0], q[1], q[2], q[3]) ? 2 : 0) + 1], [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3], under[c], tops[t * 3 + 1], tops[t * 3 + 2]);
   }
   const at = (p: number, c: number) => (rp.h[p] === PINNED ? ground[c] * 64 : rp.h[p]);
   for (let t = 0; t < sides.length; t += 7) {
@@ -454,7 +456,7 @@ function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Ar
     const X = p1 % V - 1, Y = (p1 - (p1 % V)) / V - 1;
     // emitMerged's corners: d 0 (u y, v z): base, +y, +y +z, +z; d 1 (u z, v x): base, +z, +z +x, +x
     const P = d === 0 ? [[X, Y, b1], [X, Y + 1, b2], [X, Y + 1, t2], [X, Y, t1]] : [[X, Y, b1], [X, Y, t1], [X + 1, Y, t2], [X + 1, Y, b2]];
-    put(P, d, dir, QUAD_ORDER[dir > 0 ? 1 : 0], [3, 3, 3, 3], ground[c], pal, bid);
+    put(P, d, dir, QUAD_ORDER[dir > 0 ? 1 : 0], [3, 3, 3, 3], under[c], pal, bid);
   }
   // under a wall (a free point beside it: ramps.ts) where the ramp falls below its voxel's top: the wall's face goes on
   // down to it, in the wall's colour and building, its foot's shade
@@ -467,7 +469,7 @@ function emitRamps(rp: RampField, tops: number[], sides: number[], vol: Uint16Ar
       if (b1 >= g && b2 >= g) continue;
       const X = p1 % V - 1, Y = (p1 - (p1 % V)) / V - 1;
       const P = d === 0 ? [[X, Y, b1], [X, Y + 1, b2], [X, Y + 1, g], [X, Y, g]] : [[X, Y, b1], [X, Y, g], [X + 1, Y, g], [X + 1, Y, b2]];
-      put(P, d, -dir, QUAD_ORDER[dir < 0 ? 1 : 0], [2, 2, 2, 2], ground[n], vol[n + SS * ground[c]], bidOf(n));
+      put(P, d, -dir, QUAD_ORDER[dir < 0 ? 1 : 0], [2, 2, 2, 2], under[n], vol[n + SS * ground[c]], bidOf(n));
     }
   }
 }

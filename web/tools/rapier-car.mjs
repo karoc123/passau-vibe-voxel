@@ -113,8 +113,41 @@ if (real >= 0) {
   process.exit(0);
 }
 
+// The real city (public/data on disk): across the Schanzlbrücke at 50 km/h, south to north along its carriageway (traffic
+// roads 186, 570, 149, 660, 111), off the street onto the deck over the Danube and back onto the street. The deck is a
+// slab over the river in whole metres (18 -> 19 -> 18 -> 17 m along it): a voxel staircase the car bumped over, unless
+// its top is ramped as a street's (ramps.ts). Judged by the body's vertical acceleration (max |dvy/dt|), the pitch
+// rate's peak and the share of samples with a wheel off the deck. Skipped when the data are not there.
+const SCHANZL = [[1202, 459], [1205, 471], [1211, 489], [1215, 503], [1218, 515], [1223, 535], [1226, 549], [1229, 561], [1232, 576],
+  [1235, 590], [1238, 602], [1242, 620], [1246, 634], [1247, 642], [1249, 651], [1252, 666], [1254, 678], [1257, 692], [1259, 702]];
+async function schanzlBridge() {
+  if (!fs.existsSync(`${root}public/data/meta.json`)) return null;
+  const pts = [];
+  for (let k = 0; k < SCHANZL.length - 1; k++) {
+    const [a, b] = [SCHANZL[k], SCHANZL[k + 1]], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
+    for (let i = 0; i < n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+  }
+  pts.push(SCHANZL[SCHANZL.length - 1]);
+  const map = await realMap(pts, 48);
+  const h = Math.atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+  const s = new sc.Sim(map, { x: pts[0][0], y: 20, z: pts[0][1] }, h, 50 / 3.6);
+  s.run(17, sc.follow(pts, 50));
+  // (on the bridge and its approaches: from 10 m past the start to 15 m before the end)
+  const L = s.log.filter((l) => l.z > 470 && l.z < 690);
+  let acc = 0, pr = 0, lift = 0;
+  for (let i = 1; i < L.length; i++) acc = Math.max(acc, Math.abs(L[i].vy - L[i - 1].vy) * 60);
+  for (const l of L) { pr = Math.max(pr, Math.abs(l.pr)); if (l.wheels < 4) lift++; }
+  if (process.env.SCHANZL_DEBUG) for (const l of L) if (Math.abs(l.pr) > 0.4 || l.wheels < 4) console.log(l.x.toFixed(1), l.z.toFixed(1), l.y.toFixed(2), l.road.toFixed(2), 'pr', l.pr.toFixed(2), 'w', l.wheels);
+  const end = s.log[s.log.length - 1], r2 = (x) => Math.round(x * 100) / 100;
+  const detail = { zEnd: r2(end.z), minKmh: r2(Math.min(...L.map((l) => l.kmh))), maxVertAccel: r2(acc), pitchRateMax: r2(pr), liftPct: r2(100 * lift / Math.max(1, L.length)),
+    minUp: r2(Math.min(...L.map((l) => l.up))), status: s.car.status };
+  s.dispose();
+  return { name: 'schanzl_bridge', pass: end.z > 690 && detail.minUp > 0.9 && acc < 25 && pr < 0.6 && detail.liftPct < 2, detail };
+}
+
 const ids = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--set');
 const out = [...await sc.runScenarios(ids.length ? ids : undefined), ...await ds.runDriveScenarios(ids.length ? ids : undefined)];
+if (!ids.length || ids.includes('schanzl_bridge')) { const o = await schanzlBridge(); if (o) out.push(o); }
 if (args.includes('--json')) console.log(JSON.stringify(out, null, 1));
 else for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(22)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);
 process.exit(out.every((o) => o.pass) ? 0 : 1);

@@ -34,7 +34,8 @@ export class World {
   }
 
   // the top of paved ground at (x, r) where it is a ramp (column i of node n), else null
-  private ramp(n: ColumnData, i: number, x: number, r: number) {
+  // (deck: a bridge deck's top too, ramps.ts; else the ground's only)
+  private ramp(n: ColumnData, i: number, x: number, r: number, deck = true) {
     if (n.s !== 1) return null;
     let f = this.ramps.get(n);
     if (f === undefined) {
@@ -42,7 +43,7 @@ export class World {
       if (!f.any) f = null;
       this.ramps.set(n, f);
     }
-    return f && f.paved[i] ? rampHeight(f, i, x - Math.floor(x), r - Math.floor(r)) : null;
+    return f && f.paved[i] && (deck || f.ground[i] === f.under[i]) ? rampHeight(f, i, x - Math.floor(x), r - Math.floor(r)) : null;
   }
 
   // where something on the ground at level z (a path's point, scripts/traffic.py: whole metres) stands at (x, r): on a
@@ -72,7 +73,7 @@ export class World {
 
   groundAt(x: number, r: number) {
     const c = this.column(x, r);
-    return c ? this.ramp(c[0], c[1], x, r) ?? c[0].ground[c[1]] : 0;
+    return c ? this.ramp(c[0], c[1], x, r, false) ?? c[0].ground[c[1]] : 0;
   }
 
   solid(x: number, r: number, z: number) {

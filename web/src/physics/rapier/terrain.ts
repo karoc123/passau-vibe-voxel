@@ -39,6 +39,8 @@ const BUILD_BUDGET_MS = 2;
 export interface TerrainTile {
   S: number;
   ground: Uint8Array;
+  // per column: the top of the surface the ramps take (ramps.ts: the ground, or a bridge deck's top)
+  top: Uint8Array;
   // per column c (S x S, apron included): its merged solid intervals [lo, hi), sorted, as pairs in
   // iv[off[c] .. off[c + 1])
   iv: Uint16Array;
@@ -103,15 +105,17 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
     }
     off[c + 1] = n;
   }
-  const field = (flags: Uint8Array) => {
-    const f = rampField(N, base.counts, bo, base.runs, base.ground, flags);
+  // (decks: the car's top voxel of every deck column open, ramped or not, so its surface may dip under a flat deck's
+  // top beside a step: DRIVE.deckTol)
+  const field = (flags: Uint8Array, decks: boolean) => {
+    const f = rampField(N, base.counts, bo, base.runs, base.ground, flags, pal.paved);
     if (!f.any) return { f: null, r: null };
     const r = new Uint8Array(C);
-    for (let c = 0; c < C; c++) r[c] = ramped(f, c) ? 1 : 0;
+    for (let c = 0; c < C; c++) r[c] = ramped(f, c) || (decks && f.paved[c] && f.ground[c] !== base.ground[c]) ? 1 : 0;
     return { f, r };
   };
-  const drawn = field(pal.paved), car = field(pal.ground);
-  return { S, ground: base.ground, iv: out.slice(0, n), off, water, ramps: drawn.f, ramped: drawn.r, car: car.f, carRamped: car.r };
+  const drawn = field(pal.paved, false), car = field(pal.ground, true);
+  return { S, ground: base.ground, top: car.f?.ground ?? drawn.f?.ground ?? base.ground, iv: out.slice(0, n), off, water, ramps: drawn.f, ramped: drawn.r, car: car.f, carRamped: car.r };
 }
 
 // The car's surface: the ground smoothed over its 1 m steps, paved or not, and smoother than the ramps as drawn.
@@ -131,16 +135,20 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
 // So the car's wheels may float or sink by up to ~0.5 m against the voxels drawn on unpaved terraces (~0.2 m on the
 // paved ramps).
 // (tools/rapier-car.mjs --set tol=..,sigma=.. tries others)
-export const DRIVE = { tol: 0.2, sigma: 2 }; // m
-const DRIVE_R = 5;
-const kernel = (sigma: number) => Array.from({ length: 2 * DRIVE_R + 1 }, (_, i) => Math.exp(-((i - DRIVE_R) ** 2) / (2 * sigma ** 2)));
+// On a bridge's deck (ramps.ts: a slab in whole metres over a road that is smooth in truth: a step there is the
+// rounding of a gentle slope) the surface may stray further from the ramps, deckTol: a 1 m step's ramp spreads over
+// the Gaussian's width instead of ~6 m, which the car took at speed as a crest (two wheels, then none, down).
+export const DRIVE = { tol: 0.2, sigma: 2, deckTol: 0.5, deckSigma: 5 }; // m
+const DRIVE_R = 5, DRIVE_R_MAX = 12; // m: the Gaussian's reach (on a deck: the wider one's)
+const kernel = (sigma: number, r: number) => Array.from({ length: 2 * r + 1 }, (_, i) => Math.exp(-((i - r) ** 2) / (2 * sigma ** 2)));
 
 // The colliders' data of chunk (cx, cz) in `tile` (N m a side): the shell voxels (chunk-local grid coordinates), the
 // top voxels only the car does not see (top), the ramps' triangles (chunk-local metres) as drawn (for everything but
 // the car) and the car's surface (see DRIVE).
 // drive: the car's surface at the chunk's (CHUNK + 1)^2 grid points (1/64 m, PINNED: each column's own top), null: none
 export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number, drive: Int32Array | null = null) {
-  const { S, iv, off, ground, ramped: rmp, carRamped: crm } = tile;
+  // (ground: the surface the ramps take, a bridge deck's top where it is one)
+  const { S, iv, off, top: ground, ground: under, ramped: rmp, carRamped: crm } = tile;
   // (a column whose top voxel is not in the shell: a ramp, drawn or the car's)
   const open = (c: number) => (!!rmp && rmp[c] === 1) || (!!crm && crm[c] === 1);
   const P = CHUNK + 1;
@@ -163,7 +171,7 @@ export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number
     const ramp = !!rmp && rmp[c] === 1, op = open(c);
     const g = ground[c];
     // below the lowest neighbouring ground all four sides are solid: nothing to see there but an interval's ends
-    const deep = Math.min(ground[n0], ground[n1], ground[n2], ground[n3], op ? g : 1e9) - 2;
+    const deep = Math.min(under[n0], under[n1], under[n2], under[n3], op ? under[c] : 1e9) - 2;
     for (let k = off[c]; k < off[c + 1]; k += 2) {
       const lo = iv[k], hi = iv[k + 1];
       for (let y = lo; y < hi; y++) {
@@ -311,7 +319,7 @@ export class RapierTerrain {
     let h = 0;
     for (let k = off[t.c]; k < off[t.c + 1]; k += 2) if (iv[k + 1] <= top + 1e-3) h = iv[k + 1];
     const f = car ? t.tile.car : t.tile.ramps;
-    if (h === t.tile.ground[t.c] && f && f.paved[t.c]) h = rampHeight(f, t.c, x - Math.floor(x), z - Math.floor(z));
+    if (h === t.tile.top[t.c] && f && f.paved[t.c]) h = rampHeight(f, t.c, x - Math.floor(x), z - Math.floor(z));
     return h;
   }
 
@@ -320,7 +328,7 @@ export class RapierTerrain {
   solidTop(x: number, y: number, z: number, car = false) {
     const t = this.column(x, z);
     if (!t) return -1;
-    const { iv, off, ground, carRamped } = t.tile;
+    const { iv, off, top: ground, carRamped } = t.tile;
     const g = ground[t.c], open = car && !!carRamped && carRamped[t.c] === 1;
     for (let k = off[t.c]; k < off[t.c + 1]; k += 2) {
       if (y < iv[k] || y >= iv[k + 1]) continue;
@@ -354,8 +362,8 @@ export class RapierTerrain {
 
   // are the tiles the car's surface of chunk (cx, cz) reads loaded (or off the map)? (asks for them if not)
   private around(cx: number, cz: number) {
-    const x0 = Math.floor((cx * CHUNK - DRIVE_R - 1) / this.N), x1 = Math.floor(((cx + 1) * CHUNK + DRIVE_R + 1) / this.N);
-    const z0 = Math.floor((cz * CHUNK - DRIVE_R - 1) / this.N), z1 = Math.floor(((cz + 1) * CHUNK + DRIVE_R + 1) / this.N);
+    const x0 = Math.floor((cx * CHUNK - DRIVE_R_MAX - 1) / this.N), x1 = Math.floor(((cx + 1) * CHUNK + DRIVE_R_MAX + 1) / this.N);
+    const z0 = Math.floor((cz * CHUNK - DRIVE_R_MAX - 1) / this.N), z1 = Math.floor(((cz + 1) * CHUNK + DRIVE_R_MAX + 1) / this.N);
     let ok = true;
     for (let tz = z0; tz <= z1; tz++) for (let tx = x0; tx <= x1; tx++) {
       if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) continue;
@@ -376,33 +384,48 @@ export class RapierTerrain {
 
   // the car's surface at chunk (cx, cz)'s grid points (see DRIVE)
   private drive(cx: number, cz: number) {
-    const P = CHUNK + 1, W = P + 2 * DRIVE_R, x0 = cx * CHUNK - DRIVE_R, z0 = cz * CHUNK - DRIVE_R;
+    const P = CHUNK + 1, R = DRIVE_R_MAX, W = P + 2 * R, x0 = cx * CHUNK - R, z0 = cz * CHUNK - R;
     const v = new Int32Array(W * W);
     for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) v[i + W * j] = this.pointQ(x0 + i, z0 + j);
-    // (the Gaussian is separable, the free points' weights too: the rows' sums first, of q w and of w)
-    const R2 = 2 * DRIVE_R, hs = new Float64Array(P * W), hw = new Float64Array(P * W), KERNEL = kernel(DRIVE.sigma);
-    for (let j = 0; j < W; j++) for (let i = 0; i < P; i++) {
-      let sum = 0, wsum = 0;
-      for (let a = 0, k = i + W * j; a <= R2; a++, k++) {
-        const q = v[k];
-        if (q !== PINNED) { sum += q * KERNEL[a]; wsum += KERNEL[a]; }
-      }
-      hs[i + P * j] = sum; hw[i + P * j] = wsum;
-    }
-    const out = new Int32Array(P * P), tol = DRIVE.tol * 64;
+    // (per point: on a deck (a column around it a deck's, ramps.ts), its tolerance; its floor, not under the top of
+    // a paved column around it: its voxel's, or a ramp's floor voxel's)
+    const deck = new Uint8Array(P * P), floor = new Float64Array(P * P).fill(-1e9);
+    let decks = false;
     for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
-      const h = v[i + DRIVE_R + W * (j + DRIVE_R)];
-      if (h === PINNED) { out[i + P * j] = PINNED; continue; }
-      let sum = 0, wsum = 0;
-      for (let b = 0, k = i + P * j; b <= R2; b++, k += P) { sum += hs[k] * KERNEL[b]; wsum += hw[k] * KERNEL[b]; }
-      // (not under the top of a paved column around it: its voxel's, or a ramp's floor voxel's)
-      let lo = h - tol;
       const x = cx * CHUNK + i, z = cz * CHUNK + j;
       for (const [ox, oz] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
         const t = this.column(x + ox + 0.5, z + oz + 0.5);
-        if (t && t.tile.car?.paved[t.c]) lo = Math.max(lo, (t.tile.ground[t.c] - t.tile.carRamped![t.c]) * 64);
+        if (!t) continue;
+        if (t.tile.top[t.c] !== t.tile.ground[t.c]) { deck[i + P * j] = 1; decks = true; }
+        if (t.tile.car?.paved[t.c]) floor[i + P * j] = Math.max(floor[i + P * j], (t.tile.top[t.c] - t.tile.carRamped![t.c]) * 64);
       }
-      out[i + P * j] = Math.round(Math.min(h + tol, Math.max(lo, sum / wsum)));
+    }
+    // (the Gaussian is separable, the free points' weights too: the rows' sums first, of q w and of w; within r of a
+    // point)
+    const gauss = (sigma: number, r: number) => {
+      const K = kernel(sigma, r), hs = new Float64Array(P * W), hw = new Float64Array(P * W), out = new Float64Array(P * P);
+      for (let j = 0; j < W; j++) for (let i = 0; i < P; i++) {
+        let sum = 0, wsum = 0;
+        for (let a = 0, k = i + R - r + W * j; a <= 2 * r; a++, k++) {
+          const q = v[k];
+          if (q !== PINNED) { sum += q * K[a]; wsum += K[a]; }
+        }
+        hs[i + P * j] = sum; hw[i + P * j] = wsum;
+      }
+      for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
+        let sum = 0, wsum = 0;
+        for (let b = 0, k = i + P * (j + R - r); b <= 2 * r; b++, k += P) { sum += hs[k] * K[b]; wsum += hw[k] * K[b]; }
+        out[i + P * j] = sum / wsum;
+      }
+      return out;
+    };
+    const near = gauss(DRIVE.sigma, DRIVE_R), wide = decks ? gauss(DRIVE.deckSigma, DRIVE_R_MAX) : near;
+    const out = new Int32Array(P * P);
+    for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
+      const k = i + P * j, h = v[i + R + W * (j + R)];
+      if (h === PINNED) { out[k] = PINNED; continue; }
+      const tol = (deck[k] ? DRIVE.deckTol : DRIVE.tol) * 64, m = deck[k] ? wide[k] : near[k];
+      out[k] = Math.round(Math.min(h + tol, Math.max(h - tol, floor[k], m)));
     }
     return out;
   }

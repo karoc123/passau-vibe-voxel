@@ -37,6 +37,9 @@ export const SHOTS = {
   dom: 'view=dom',
   eck: 'view=eck',
   street: STREET,
+  // the Schanzlbrücke's deck (ramped as a street, ramps.ts): along it from its south end, and from the side
+  'schanzl-deck': 'cam=1210,23,505,1232,19,575',
+  'schanzl-side': 'cam=1190,26,548,1226,18,562',
   'street-night': `${STREET}&hour=22`,
   'oberhaus-night': 'view=oberhaus&hour=22',
   'oberhaus-autumn': 'view=oberhaus&date=10-20',
