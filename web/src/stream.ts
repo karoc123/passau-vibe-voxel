@@ -30,6 +30,9 @@ export interface TileNode {
   editJob?: Job;
   editKey?: string;
   again?: boolean;
+  // a 1 m tile edited while its foliage's cover is its mesh: not meshed again plain (replaceColumns), its mesh shown
+  // stays until the foliage tile's new cover takes its place (onEdited)
+  stale?: boolean;
   data?: ColumnData;
   // what the shader reads of it while it shows (fields.ts; not a foliage tile's)
   fields?: Fields | null;
@@ -427,8 +430,11 @@ export class TileStreamer implements ColumnSource {
     if (!n || n.foliage || n.s !== 1 || n.state !== 'ready' || !n.data) return null;
     n.edited = true;
     this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld });
-    const wait = [this.remeshEdited(n)];
-    const f = this.nodes.get(`f/${n.tx}_${n.ty}`);
+    const f = this.nodes.get(`f/${n.tx}_${n.ty}`), wait: Promise<void>[] = [];
+    // (its foliage's cover in its mesh: the foliage tile's job meshes the base again with the cover anyway, and the
+    // plain mesh would be replaced by it at once -- not made, a whole node's meshing saved per edit; ADR 0003)
+    if (f && f.covers && f.state === 'ready' && n.mesh && !n.editJob) n.stale = true;
+    else wait.push(this.remeshEdited(n));
     if (f) {
       if (foliage && f.data) { f.edited = true; this.setData(f, foliage); }
       wait.push(this.remeshEdited(f));
@@ -469,9 +475,22 @@ export class TileStreamer implements ColumnSource {
       }
     }
     if (n.again) { n.again = false; this.remeshEdited(n); }
-    // the base's new mesh lacks what the grass covers once both are in (a base's new mesh has all its faces)
     const b = this.nodes.get(this.key(1, n.tx, n.ty)), f = this.nodes.get(`f/${n.tx}_${n.ty}`);
-    if (f?.covers && f.cover && b?.mesh && !b.mesh.geometry.userData.covered) this.coverBase(f);
+    if (n.foliage && b?.stale) {
+      // the base not meshed again (replaceColumns): the new cover takes its mesh's place (it stays stale while
+      // another job of the foliage is coming); none came (an error): the base meshed again plain after all
+      if (m.type === 'error') { b.stale = false; this.remeshEdited(b); }
+      else {
+        if (!n.editJob) b.stale = false;
+        const geo = n.cover;
+        n.cover = undefined;
+        if (b.mesh) disposeGeometry(b.mesh.geometry);
+        if (geo && b.mesh) { b.mesh.geometry = geo; geo.userData.covered = true; } else if (b.mesh) { this.group.remove(b.mesh); b.mesh = undefined; }
+        n.covers = true;
+      }
+    }
+    // the base's new mesh lacks what the grass covers once both are in (a base's new mesh has all its faces)
+    else if (f?.covers && f.cover && b?.mesh && !b.mesh.geometry.userData.covered) this.coverBase(f);
     job.resolve();
   }
 
@@ -577,6 +596,9 @@ export class TileStreamer implements ColumnSource {
 
   free(n: TileNode) {
     if (n.cover) disposeGeometry(n.cover);
+    // (a foliage tile freed before its base: the base, waiting for its cover after an edit, meshed again plain)
+    const b = n.foliage ? this.nodes.get(this.key(1, n.tx, n.ty)) : undefined;
+    if (b?.stale) { b.stale = false; this.remeshEdited(b); }
     // (an edit waiting is not meshed; one in a worker is not taken back: onReply finds no job for it)
     if (n.editJob) { n.editJob.state = 'loading'; n.editJob.resolve(); n.editJob = undefined; }
     // (transient edits: the node's file again, when it comes again)

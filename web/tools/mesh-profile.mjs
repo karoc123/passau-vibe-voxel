@@ -42,7 +42,8 @@ const zmaxOf = (d) => { let z = 0; for (let c = 0, k = 0; c < d.counts.length; k
 const zs = nodes.map((n) => zmaxOf(n.d));
 console.log(`${nodes.length} nodes round ${mx}_${my}: zmax mean ${(zs.reduce((a, b) => a + b) / zs.length).toFixed(0)} max ${Math.max(...zs)} -> dense volume ${(S * S * (Math.max(...zs) + 2) * 2 / 1e6).toFixed(1)} MB at most`);
 for (let w = 0; w < 2; w++) await timeAll(job, 1);
-console.log(`meshJob (cols) whole node  ms mean / max  ${stat(await timeAll(job))}`);
+const whole = await timeAll(job);
+console.log(`meshJob (cols) whole node  ms mean / max  ${stat(whole)}`);
 // an edit re-meshes the node's foliage tile too, and with it the base again without what the grass covers (dig.ts)
 const fols = nodes.filter((n) => has(`1f/${n.tx}_${n.ty}`));
 for (const n of fols) n.f = TD.decodeTile(raw(`1f/${n.tx}_${n.ty}`), N);
@@ -50,7 +51,13 @@ const fjob = (n) => mesher.meshJob({ ...req.tileRequest(ctx, 1, n.tx, n.ty, true
 if (fols.length) {
   const save = nodes.splice(0, nodes.length, ...fols);
   for (let w = 0; w < 2; w++) await timeAll(fjob, 1);
-  console.log(`  + its foliage tile and the base's cover (${fols.length} nodes)  ms mean / max  ${stat(await timeAll(fjob))}`);
+  const ft = await timeAll(fjob);
+  console.log(`  + its foliage tile and the base's cover (${fols.length} nodes)  ms mean / max  ${stat(ft)}`);
+  // an edited node with foliage (stream.ts replaceColumns): the foliage job alone (its cover is the base's mesh); were
+  // the base meshed plain too, that node's whole-node time on top (per pass, the same nodes)
+  const wt = new Map(nodes.map((n, i) => [n, whole.filter((_, k) => k % nodes.length === i)]));
+  const plus = ft.map((t, k) => t + wt.get(fols[k % fols.length])[Math.floor(k / fols.length)]);
+  console.log(`  an edited node with foliage: foliage job (cover) ${stat(ft)}; with the base meshed plain too ${stat(plus)}`);
   const fonly = (n) => mesher.meshJob({ ...req.tileRequest(ctx, 1, n.tx, n.ty, true, (k) => k), url: undefined, cols: { ...n.f, ground: n.d.ground }, under: cols(n.d), base: null }, null);
   for (let w = 0; w < 2; w++) await timeAll(fonly, 1);
   console.log(`    of which the foliage tile alone  ms mean / max  ${stat(await timeAll(fonly))}`);
