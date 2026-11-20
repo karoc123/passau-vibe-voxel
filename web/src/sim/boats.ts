@@ -17,6 +17,8 @@ import { at, prepPath, pt, type Path } from './path';
 //   the pier casts off the next slides in.
 // Everything is a function of the clock (the hour slider), and floats on the river level (the slider: flood.ts);
 // windows light up at night.
+// On a partial map (the check fixtures) any part may be missing: no berths (no cruise ships), an empty tour (no
+// excursion boats) or no fairway (the cruise ships stay moored all day).
 
 export interface Berth { x: number; y: number; dx: number; dy: number; nx: number; ny: number }
 type XY = [number, number];
@@ -150,13 +152,13 @@ const arcLen = (p: XY[]) => p.reduce((l, q, k) => (k ? l + Math.hypot(q[0] - p[k
 
 export class Boats {
   readonly group = new THREE.Group();
-  private readonly tour: Path;
+  private readonly tour: Path | null; // null: no tour on this map, no excursion boats
   private readonly cruise: Kind;
   private readonly boat: Kind;
   private readonly winMat = new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.12, metalness: 0.5, emissive: new THREE.Color(1.0, 0.8, 0.52), emissiveIntensity: 0 });
   private readonly darkMat = new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.12, metalness: 0.5 });
-  private readonly T: number; // a round trip, s
-  private readonly raft: XY; // from the pier out into the river
+  private readonly T: number = 0; // a round trip, s
+  private readonly raft: XY = [0, 0]; // from the pier out into the river
   private t = 0;
   private lastHour = -1;
   private day = -1;
@@ -171,11 +173,24 @@ export class Boats {
   private readonly a = pt();
   private readonly b = pt();
 
-  constructor(private readonly data: BoatData, private readonly waterTop = 4) {
-    this.tour = prepPath({ p: xyz(data.tour) });
-    const ramp = V / ACC; // s to reach cruising speed
-    this.T = (this.tour.L - V * ramp) / V + 2 * ramp;
-    this.raft = [-this.tour.startD[1], this.tour.startD[0]]; // the boat at the pier lies bow west, the river to starboard
+  private readonly berths: Berth[];
+  private readonly fairway?: Fairway;
+
+  constructor(data: BoatData, private readonly waterTop = 4) {
+    const fin = (...v: number[]) => v.every(Number.isFinite);
+    const pts = (p: unknown): p is XY[] => Array.isArray(p) && p.every((q) => Array.isArray(q) && fin(q[0], q[1]));
+    this.berths = (Array.isArray(data.berths) ? data.berths : []).filter((b) => fin(b.x, b.y, b.dx, b.dy, b.nx, b.ny));
+    // a fairway needs both lanes (route takes points 4 either side of abeam) and its turns
+    const f = data.fairway;
+    if (f && pts(f.up) && pts(f.down) && f.up.length >= 2 && f.down.length >= 2 && pts(f.turnE?.[2]) && pts(f.turnW?.[2])) this.fairway = f;
+    // the loop: at least two points apart (a path of one point, or none, has no length nor heading)
+    const tour = pts(data.tour) && data.tour.length >= 2 ? prepPath({ p: xyz(data.tour) }) : null;
+    this.tour = tour && tour.L > 1 ? tour : null;
+    if (this.tour) {
+      const ramp = V / ACC; // s to reach cruising speed
+      this.T = (this.tour.L - V * ramp) / V + 2 * ramp;
+      this.raft = [-this.tour.startD[1], this.tour.startD[0]]; // the boat at the pier lies bow west, the river to starboard
+    }
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 });
     const kind = (g: { body: THREE.BufferGeometry; accent: THREE.BufferGeometry; win: THREE.BufferGeometry }, n: number): Kind => {
       const inst = (geo: THREE.BufferGeometry, m: THREE.Material, colour: boolean, shadow: boolean) => {
@@ -214,7 +229,7 @@ export class Boats {
 
   // arc length along the loop t seconds after casting off (accelerate, cruise, slow to the pier)
   private sAt(t: number) {
-    const ramp = V / ACC, L = this.tour.L;
+    const ramp = V / ACC, L = this.tour!.L;
     if (t <= 0) return 0;
     if (t >= this.T) return L;
     if (t < ramp) return 0.5 * ACC * t * t;
@@ -263,9 +278,9 @@ export class Boats {
 
   // the day's cruise ships: which berths are taken (the same all day), and who comes in or leaves when
   private cruiseDay(d: number) {
-    const f = this.data.fairway, ships: Ship[] = [];
+    const f = this.fairway, ships: Ship[] = [];
     const share = Boats.berthShare(d), laidUp = d < 60;
-    this.data.berths.forEach((b, i) => {
+    this.berths.forEach((b, i) => {
       const h = hash(d * 37 + i * 101 + 0.5);
       if (h >= share) return;
       const raft = !laidUp && h < share * 0.45; // a second ship tied alongside
@@ -401,7 +416,7 @@ export class Boats {
     }
 
     // excursion boats
-    if (level < NO_TOURS_ABOVE) {
+    if (this.tour && level < NO_TOURS_ABOVE) {
       const deps = Boats.departures(d), at0 = this.a, at1 = this.b, P = this.tour, half = TOUR_L / 2, [rx, ry] = this.raft;
       const every = deps.length > 1 ? deps[1] - deps[0] : 3600;
       const n = Math.min(FLEET, deps.length, Math.ceil((this.T + TURN) / every)); // the boats the timetable needs
