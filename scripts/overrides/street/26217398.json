@@ -1,0 +1,22 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 26217398,
+    "geom": "810273741434",
+    "tags": "02d769106224",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "Spitalhofstraße: The carriageway measured on the DOP20 orthophoto is 6.5 m wide between kerbs (2 lanes with street-side parking). OSM tags sidewalk=both; the orthophoto confirms continuous paved sidewalks on both sides (~2.0 m left/north, ~2.0 m right/south) bounded by kerbs.",
+  "sources": [
+    "osm",
+    "dop20"
+  ],
+  "width": 6.5,
+  "surface": "asphalt",
+  "sidewalk": {
+    "left": 2.0,
+    "right": 2.0,
+    "surface": "paving_stones",
+    "kerb": true
+  }
+}
