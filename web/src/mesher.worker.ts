@@ -859,9 +859,28 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
       const rc = roofs.code(p.cx, p.cy, p.z1 - 1, 2, 1);
       if (rc) { nrm = 5 + 8 * ((rc - 1) >> 6); w = 1 + ((rc - 1) & 63); }
     }
-    out.reserve(4);
     const [b, c] = up ? [A, B] : [B, A], tb = b === L ? tL : tR, tc = c === L ? tL : tR;
-    v(P, tP, nrm, 3, w); v(b, tb, nrm, 3, w); v(c, tc, nrm, 3, w); v(c, tc, nrm, 3, w);
+    const n = Math.max(p.a, p.b);
+    if (n > 1 && p.roof && slopes) {
+      // under a slope its long leg runs along the slope's cells, a corner of theirs at every grid point on it, a little
+      // off the straight line (as roofs.ts emitFill's): through them, a fan from the short leg's end (as one edge it
+      // left slivers open along the leg)
+      const long = p.a >= p.b, apex = long ? B : A, ux = long ? -p.sx : 0, uy = long ? 0 : -p.sy;
+      const pt = (k: number) => [P[0] + ux * k, P[1] + uy * k];
+      const fwd = apex === c, ta = apex === L ? tL : tR;
+      for (let k = 0; k < n; k += 2) {
+        const ks: number[] = [];
+        for (let i = k; i <= Math.min(k + 2, n); i++) ks.push(i);
+        if (!fwd) ks.reverse();
+        if (ks.length === 2) ks.push(ks[1]);
+        out.reserve(4);
+        v(apex, ta, nrm, 3, w);
+        for (const i of ks) { const q = pt(i); v(q, i === 0 ? tP : i === n ? (long ? (A === L ? tL : tR) : (B === L ? tL : tR)) : top(q), nrm, 3, w); }
+      }
+    } else {
+      out.reserve(4);
+      v(P, tP, nrm, 3, w); v(b, tb, nrm, 3, w); v(c, tc, nrm, 3, w); v(c, tc, nrm, 3, w);
+    }
   }
   if (p.capBottom) {
     out.reserve(4);

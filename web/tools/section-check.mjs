@@ -10,7 +10,10 @@
 // planes on a grid rectangle (voxel faces, a ramp's or a sloped roof's merged tops) is split into its unit cells with
 // its attributes (per corner AO by the corner's place), the rest is compared as it is; the multisets must be equal. (A
 // face out through the node's border has its top edge sunk 1/64 m: where its merge is cut that edge moves, ignored; a
-// merged top takes the ground, vattr.z, of the cell it starts at: a top's unit cells are compared without it.)
+// merged top takes the ground, vattr.z, of the cell it starts at: a top's unit cells are compared without it. A slope's
+// top, roofs.ts, whose corners share their attributes is compared as the area each of its triangles covers of each
+// unit cell, by the triangle's plane: a merged one is a ladder of quads through points along its sides that depend on
+// where the merge is cut.)
 // Nothing is written. usage (in web/): node tools/section-check.mjs [tx_ty, default 63_21] [-v]; exit code 1 on a mismatch
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,7 +60,13 @@ function canon(m, into, sign) {
     const xs = vals('x'), ys = vals('y'), zs = vals('z');
     const combos = (a, b, ka, kb) => a.length === 2 && b.length === 2 && a.every((u) => b.every((w) => V.some((p) => p[ka] === u && p[kb] === w)));
     let done = false;
-    if (same) {
+    // a slope's top (roofs.ts: a merged one is drawn as a ladder of quads through the points along its sides, and how
+    // its merge is cut moves them): the area each of its triangles covers of each unit cell, by the triangle's plane
+    if (same && A[q * 16] % 8 === 5 && V.every((p) => p.ao === V[0].ao)) {
+      for (const [a, b, c] of [[0, 1, 2], [0, 2, 3]]) cover(V[a], V[b], V[c], `${V[0].rest} ${V[0].ao}`, sign, into);
+      done = true;
+    }
+    if (same && !done) {
       // in an axis plane: [plane axis, u axis, v axis, unit along u, along v]
       for (const [pk, ua, va, uu, vu, pv] of [['x', 'z', 'y', 1, 64, xs], ['z', 'x', 'y', 1, 64, zs], ['y', 'x', 'z', 1, 1, ys]]) {
         if (pv.length !== 1) continue;
@@ -82,6 +91,32 @@ function canon(m, into, sign) {
       }
     }
     if (!done) add(`C ${V.map((p) => `${p.x} ${p.y} ${p.z} ${p.ao} ${p.rest}`).sort().join('|')}`);
+  }
+}
+// (areas: in into's '~' keys, summed; equal meshes cancel them to 0)
+function cover(p0, p1, p2, rest, sign, into) {
+  const ux = p1.x - p0.x, uz = p1.z - p0.z, vx = p2.x - p0.x, vz = p2.z - p0.z, det = ux * vz - uz * vx;
+  if (!det) return;
+  const uy = p1.y - p0.y, vy = p2.y - p0.y, dx = (uy * vz - vy * uz) / det, dz = (ux * vy - vx * uy) / det;
+  const xs = [p0.x, p1.x, p2.x], zs = [p0.z, p1.z, p2.z];
+  for (let cx = Math.min(...xs); cx < Math.max(...xs); cx++) for (let cz = Math.min(...zs); cz < Math.max(...zs); cz++) {
+    let poly = [[p0.x, p0.z], [p1.x, p1.z], [p2.x, p2.z]];
+    for (const [ax, lim, keep] of [[0, cx, 1], [0, cx + 1, -1], [1, cz, 1], [1, cz + 1, -1]]) {
+      const o = [];
+      for (let i = 0; i < poly.length; i++) {
+        const p = poly[i], r = poly[(i + 1) % poly.length], dp = (p[ax] - lim) * keep, dr = (r[ax] - lim) * keep;
+        if (dp >= 0) o.push(p);
+        if ((dp >= 0) !== (dr >= 0)) { const t = dp / (dp - dr); o.push([p[0] + (r[0] - p[0]) * t, p[1] + (r[1] - p[1]) * t]); }
+      }
+      poly = o;
+    }
+    let ar = 0;
+    for (let i = 0; i < poly.length; i++) { const p = poly[i], r = poly[(i + 1) % poly.length]; ar += p[0] * r[1] - r[0] * p[1]; }
+    if (Math.abs(ar) < 1e-9) continue;
+    const h = p0.y + dx * (cx - p0.x) + dz * (cz - p0.z);
+    const k = `~T ${cx} ${cz} ${h.toFixed(4)} ${dx.toFixed(6)} ${dz.toFixed(6)} ${Math.sign(det)} ${rest}`;
+    const v = (into.get(k) ?? 0) + sign * Math.abs(ar) / 2;
+    if (Math.abs(v) > 1e-6) into.set(k, v); else into.delete(k);
   }
 }
 const bad = [];

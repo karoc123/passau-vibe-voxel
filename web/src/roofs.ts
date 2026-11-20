@@ -13,7 +13,8 @@
 // - lit by its plane (the plane code's normal, as the voxel roofs are); where regions meet, by the plane the height
 //   is taken from, so the light turns over a ridge where it runs, not along its cells' staircase
 // - the column's top face and its side faces from where the surface comes down to are not drawn (hidden); the surface
-//   is, merged into one quad over a rectangle of a region where it is the plane itself, and on each edge a vertical
+//   is, merged over a rectangle of a region where it is the plane itself (one quad, or a ladder of quads through the
+//   corners of what lies beside its sides: emitTops, no T-junctions), and on each edge a vertical
 //   face closes it from below wherever it is higher than what is beside it: an eave's edge, a gable's triangle (in
 //   the wall's material), the step to a lower roof; against a taller wall or roof, that wall comes down to it
 // - a flat roof cell of the same building beside a slope (the flat ridge of a fitted roof) is a level region of its
@@ -230,16 +231,43 @@ hidden,
   }
 
   function emitFill(out: SlopeSink, f: Fill, x0: number, y0: number, ground: Uint8Array) {
-    const { sx, sy, a, b, px, py } = f;
+    const { X, Y, sx, sy, a, b, px, py } = f;
     const [cp, cl, cr] = fillCorners(f);
     const P = [px, py], A = [px - a * sx, py], B = [px, py - b * sy];
     const hOf = new Map([[P, cp], [A, cl], [B, cr]]);
     const c0 = cp[2], r = regions[reg[c0]], top = vol[c0 + SS * T[c0]], gm = ground[c0], bd = bid[c0];
     const v = (q: number[], h: number, nrm: number, w: number, pal: number) => out.vertexQ(q[0] - 1 + x0, h, q[1] - 1 + y0, nrm, 3, gm, w, pal, bd);
-    // the slope over the triangle (P, A, B counter-clockwise from above: as emitPrism's lid)
+    // the slope over the triangle (P, A, B counter-clockwise from above: as emitPrism's lid). Its long leg runs along
+    // the cells' sides, a corner of theirs at every grid point on it, a little off the straight line from end to end
+    // (each rounded, or bent): through them, as a fan from the short leg's end (as one edge it left slivers open along
+    // the leg, a dotted line). The points: the lower of the two cells' corners there, as at P
     const up = -a * b * sx * sy > 0, [l1, l2] = up ? [A, B] : [B, A];
-    out.reserve(4);
-    for (const q of [P, l1, l2, l2]) { const [h, lit] = hOf.get(q)!; v(q, h, 5 + 8 * ((lit - 1) >> 6), 1 + ((lit - 1) & 63), top); }
+    const long = a >= b, apex = long ? B : A, n = long ? a : b;
+    const ux = long ? -sx : 0, uy = long ? 0 : -sy, row = long ? S * (Y + sy) : X + sx;
+    const legCell = (k: number) => (long ? X - k * sx + row : row + S * (Y - k * sy));
+    const legPt = (k: number) => {
+      if (k === 0) return cp;
+      if (k === n) return long ? cl : cr;
+      const g = [px + ux * k, py + uy * k], c1 = legCell(k - 1), c2 = legCell(k);
+      const p1 = [hq[c1 * 4 + cornerIdx(c1, g[0], g[1])], nq[c1 * 4 + cornerIdx(c1, g[0], g[1])]];
+      const p2 = [hq[c2 * 4 + cornerIdx(c2, g[0], g[1])], nq[c2 * 4 + cornerIdx(c2, g[0], g[1])]];
+      return p1[0] <= p2[0] ? p1 : p2;
+    };
+    // (the fan's triangles turn as (P, l1, l2): from the apex along the leg if the apex is l2, else back)
+    const fwd = apex === l2, sv = (q: number[], hl: number[]) => v(q, hl[0], 5 + 8 * ((hl[1] - 1) >> 6), 1 + ((hl[1] - 1) & 63), top);
+    const ha = hOf.get(apex)!;
+    if (n === 1) {
+      out.reserve(4);
+      for (const q of [P, l1, l2, l2]) sv(q, hOf.get(q)!);
+    } else for (let k = 0; k < n; k += 2) {
+      const m = Math.min(k + 2, n), ks: number[] = [];
+      for (let i = k; i <= m; i++) ks.push(i);
+      if (!fwd) ks.reverse();
+      if (ks.length === 2) ks.push(ks[1]);
+      out.reserve(4);
+      sv(apex, ha);
+      for (const i of ks) sv([px + ux * i, py + uy * i], legPt(i));
+    }
     // the fascia from A to B: an eave's in the roof's material, lit as the roof (as emitEdge's); else (the slope runs
     // along it) a gable's, in the wall's material under it, lit as a wall in that direction (a staircase wall's
     // 15° steps, mesher.worker.ts wallAngle) and ending at its foot (wallTopCode: no window up into it)
@@ -279,17 +307,17 @@ hidden,
   }
 
   function emitTops(sink: SlopeSink, x0: number, y0: number, ground: Uint8Array, parts: SlopeParts | null) {
-    const done = new Uint8Array(SS);
+    // each top's rectangle (its first cell, w, h), and which one each cell is in
+    const rid = new Int32Array(SS).fill(-1), rects: number[] = [];
     const ok = (c: number) => reg[c] >= 0 && pure[c * 4] && pure[c * 4 + 1] && pure[c * 4 + 2] && pure[c * 4 + 3] && !seam.bent(regions[reg[c]], c);
     for (let Y = 1; Y <= N; Y++) for (let X = 1; X <= N; X++) {
       const c = X + S * Y;
-      if (reg[c] < 0 || done[c]) continue;
-      const out = parts ? parts.at(X, Y) : sink;
-      if (!out) continue;
-      const r = regions[reg[c]], pal = vol[c + SS * T[c]];
+      if (reg[c] < 0 || rid[c] >= 0) continue;
+      if (!(parts ? parts.at(X, Y) : sink)) continue;
+      const pal = vol[c + SS * T[c]];
       let w = 1, h = 1;
       if (ok(c)) {
-        const same = (k: number) => !done[k] && reg[k] === reg[c] && ok(k) && vol[k + SS * T[k]] === pal;
+        const same = (k: number) => rid[k] < 0 && reg[k] === reg[c] && ok(k) && vol[k + SS * T[k]] === pal;
         // (a part's tops merge within its section)
         const lx = parts ? parts.last(X) : N, ly = parts ? parts.last(Y) : N;
         while (X + w <= lx && same(c + w)) w++;
@@ -298,7 +326,43 @@ hidden,
           h++;
         }
       }
-      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) done[c + i + S * j] = 1;
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) rid[c + i + S * j] = rects.length / 3;
+      rects.push(c, w, h);
+    }
+    // A merged top's side has a corner of what lies beside it at every grid point along it (a cell's top, the step or
+    // eave face under each cell, another top's corner), unless the cells beside the point are both of one merged top of
+    // the same plane. A corner on the side's middle that the quad has not (a T-junction) leaves a pixel open now and
+    // then: a sparse dotted line of what lies below, along the side. So the top goes through every such point: it is
+    // drawn as a ladder of quads between two chains of its outline, from its corner (X, Y) round either way to the
+    // opposite one
+    // (in a part of the node, the cells of another section always: they may be meshed again on their own, sections.ts)
+    const apart = (n: number, c: number) => !!parts && (parts.last(n % S) !== parts.last(c % S) || parts.last(Math.floor(n / S)) !== parts.last(Math.floor(c / S)));
+    const open = (n1: number, n2: number, c: number) =>
+      !(rid[n1] >= 0 && rid[n1] === rid[n2] && reg[n1] === reg[c]) || apart(n1, c) || apart(n2, c);
+    const ch1: number[] = [], ch2: number[] = [];
+    for (let k = 0; k < rects.length; k += 3) {
+      const c = rects[k], w = rects[k + 1], h = rects[k + 2], X = c % S, Y = (c - X) / S;
+      const out = parts ? parts.at(X, Y)! : sink;
+      const r = regions[reg[c]], pal = vol[c + SS * T[c]];
+      if (w > 1 || h > 1) {
+        // the chains as [x, y, s] (s: along the outline from (X, Y))
+        ch1.length = ch2.length = 0;
+        ch1.push(X, Y, 0); ch2.push(X, Y, 0);
+        for (let i = 1; i < w; i++) if (open(c + i - 1 - S, c + i - S, c)) ch1.push(X + i, Y, i);
+        ch1.push(X + w, Y, w);
+        for (let j = 1; j < h; j++) if (open(c + w + S * (j - 1), c + w + S * j, c)) ch1.push(X + w, Y + j, w + j);
+        for (let j = 1; j < h; j++) if (open(c - 1 + S * (j - 1), c - 1 + S * j, c)) ch2.push(X, Y + j, j);
+        ch2.push(X, Y + h, h);
+        for (let i = 1; i < w; i++) if (open(c + i - 1 + S * h, c + i + S * h, c)) ch2.push(X + i, Y + h, h + i);
+        ch1.push(X + w, Y + h, w + h); ch2.push(X + w, Y + h, w + h);
+        const n = (ch1.length + ch2.length) / 3;
+        // (its quads, ceil((n - 4) / 2), at most w + h - 1: never more than its cells)
+        if (n > 6) { ladder(out, r, pal, ground[c], bid[c], x0, y0); continue; }
+      }
+      top(out, c, X, Y, w, h, r, pal);
+    }
+
+    function top(out: SlopeSink, c: number, X: number, Y: number, w: number, h: number, r: Region, pal: number) {
       const q = w === 1 && h === 1 ? [hq[c * 4], hq[c * 4 + 1], hq[c * 4 + 2], hq[c * 4 + 3]]
         : [planeQ(r, X, Y), planeQ(r, X + w, Y), planeQ(r, X + w, Y + h), planeQ(r, X, Y + h)];
       const px = [X, X + w, X + w, X], py = [Y, Y, Y + h, Y + h];
@@ -316,6 +380,46 @@ hidden,
       for (const k of ord) {
         const lit = w === 1 && h === 1 ? nq[c * 4 + k] : r.lit;
         out.vertexQ(px[k] - 1 + x0, q[k], py[k] - 1 + y0, 5 + 8 * ((lit - 1) >> 6), 3, ground[c], 1 + ((lit - 1) & 63), pal, bid[c]);
+      }
+    }
+
+    // the ladder: chords from chain 1's point i to chain 2's j, first (0, 0) and (1, 1), then on along the outline one
+    // point at a time (whichever chain's next comes first), last the far corner; a quad between every other chord (a
+    // triangle at the end). No chord but the first and last has an end on the other's side, so none is degenerate
+    function ladder(out: SlopeSink, r: Region, pal: number, gm: number, b: number, x0: number, y0: number) {
+      const n1 = ch1.length / 3, n2 = ch2.length / 3, I = [0, 1], J = [0, 1];
+      let i = 1, j = 1;
+      while (i < n1 - 2 || j < n2 - 2) {
+        if (j >= n2 - 2 || (i < n1 - 2 && ch1[i * 3 + 5] <= ch2[j * 3 + 5])) i++; else j++;
+        I.push(i); J.push(j);
+      }
+      I.push(n1 - 1); J.push(n2 - 1);
+      const p: number[] = [];
+      const lit = 5 + 8 * ((r.lit - 1) >> 6), w = 1 + ((r.lit - 1) & 63);
+      for (let s = 0; s + 1 < I.length; s += 2) {
+        const e = Math.min(s + 2, I.length - 1);
+        p.length = 0;
+        const put = (x: number, y: number) => {
+          if (p.length && p[p.length - 2] === x && p[p.length - 1] === y) return;
+          if (p.length && p[0] === x && p[1] === y) return;
+          p.push(x, y);
+        };
+        for (let a = I[s]; a <= I[e]; a++) put(ch1[a * 3], ch1[a * 3 + 1]);
+        for (let a = J[e]; a >= J[s]; a--) put(ch2[a * 3], ch2[a * 3 + 1]);
+        const n = p.length / 2;
+        // facing up as emitTops' quads (clockwise in x, y), split along a diagonal with no point on the outline beside it
+        let area = 0;
+        for (let k = 0; k < n; k++) { const l = (k + 1) % n; area += p[k * 2] * p[l * 2 + 1] - p[l * 2] * p[k * 2 + 1]; }
+        const ord = n === 3 ? [0, 1, 2] : [0, 1, 2, 3];
+        if (area > 0) ord.reverse();
+        const tri = (a: number, b2: number, c2: number) =>
+          (p[ord[b2] * 2] - p[ord[a] * 2]) * (p[ord[c2] * 2 + 1] - p[ord[a] * 2 + 1]) - (p[ord[b2] * 2 + 1] - p[ord[a] * 2 + 1]) * (p[ord[c2] * 2] - p[ord[a] * 2]);
+        const o = n === 3 ? [0, 1, 2, 2] : tri(0, 1, 2) === 0 || tri(0, 2, 3) === 0 ? [1, 2, 3, 0] : [0, 1, 2, 3];
+        out.reserve(4);
+        for (const k of o) {
+          const x = p[ord[k] * 2], y = p[ord[k] * 2 + 1];
+          out.vertexQ(x - 1 + x0, planeQ(r, x, y), y - 1 + y0, lit, 3, gm, w, pal, b);
+        }
       }
     }
   }
