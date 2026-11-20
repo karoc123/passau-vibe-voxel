@@ -229,7 +229,7 @@ def main(argv):
     tunnels.FLOOR, tunnels.IDS = stitch(ws, "floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
     skip = np.zeros(len(palette) + 64, bool)
     ids = res[ws[0]]["ids"]
-    skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car)
+    skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11, 23)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car, wood)
     solid = ~skip
     solid[0] = False
     tin = dict(g=gi, nd_mean=stitch(ws, "deck_near", np.float32), surf=qa, water=stitch(ws, "twater", bool), solid=solid)

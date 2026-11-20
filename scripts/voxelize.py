@@ -65,6 +65,7 @@ def note(*a):
 
 # ---------------------------------------------------------------- materials / palette
 M_SOLID, M_WALL, M_GLASS, M_LEAF, M_WATER, M_LAMP, M_METAL, M_FLOODLIT, M_GRASS, M_MARK, M_SOIL, M_CAR, M_ROOF, M_CONCRETE, M_CLOCK, M_BRONZE, M_SIGN = range(17)
+M_WOOD = 23  # a tree's trunk and branches
 
 
 class Palette:
@@ -160,7 +161,10 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "ballast": pal("#8a8178"), "rail": pal("#55575d", M_METAL), "trambed": pal("#a9a59c"),
     "platform": pal("#b7b1a6"), "water": pal("#68654f", M_WATER), "mark": pal("#f1efe8", M_MARK),
     "bare": pal("#a8977c", M_SOIL),  # lawns before their grass arrives (tiles.py: grass is its own file)
-    "soil": pal("#7a5c45", M_SOIL), "trunk": pal("#6b4f3a"), "lamp": pal("#ffe2a8", M_LAMP),
+    "soil": pal("#7a5c45", M_SOIL), "lamp": pal("#ffe2a8", M_LAMP),
+    # wood (voxelMaterial.ts MAT.WOOD): trunks and the limbs in a broadleaf crown, the thinner branches out to its
+    # edge a paler grey-brown; drawn through the leaves around them (mesher.worker.ts), bare in winter
+    "trunk": pal("#6b4f3a", M_WOOD), "twig": pal("#746860", M_WOOD),
     "pole": pal("#3a3e42", M_METAL), "steps": pal("#a8a296"), "hatch": pal("#d9c860", M_MARK),
     "fence": pal("#dfe3e6", M_METAL), "crane": pal("#e7b23c", M_METAL), "crane_d": pal("#3d4249", M_METAL),
     "shelter": pal("#a9c3cf", M_GLASS), "deck": pal("#a7a49d", M_CONCRETE), "parking": pal("#6a6d73"),
@@ -168,6 +172,7 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "benchkerb": pal("#dcd9d1", M_CONCRETE), "pline": pal("#eeede6", M_MARK),  # a pitch's white lines
     "shore": pal("#9d9585"),  # a river bank's rip-rap and gravel: grey-brown stones, darker than any paving
 }
+WOOD_IDS = [C["trunk"], C["twig"]]
 # masonry of retaining walls and quays: rough granite and limestone blocks, a few tones voxel by voxel
 STONE = [pal(c) for c in ["#8f897e", "#9b9488", "#857f75", "#a39b8d", "#938a7c"]]
 PERENNIALS = [pal(c, M_LEAF) for c in ["#8e6fae", "#a690c4", "#6f9a4f", "#8aa27a", "#5f8a49", "#7c9c5a", "#c98fb0"]]
@@ -2437,6 +2442,130 @@ for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowes
         rr_, cc_ = r_ + dr, c_ + dc
         if 0 <= rr_ < D and 0 <= cc_ < W and not bmask[rr_, cc_]:
             vol[g[rr_, cc_]:g[rr_, cc_] + hb, rr_, cc_] = C["trunk"]
+# branches: a broadleaf crown's bare wood, inside its leaves -- what the viewer shows of it in winter, when the leaves
+# are gone (voxelMaterial.ts; mesher.worker.ts draws wood through the leaves around it). Per tree, from its own cells
+# and a generator seeded by its trunk's project grid cell (the same tree in every region): the trunk on up to a fork at
+# a quarter to two fifths of the crown's depth, a leader on towards the top, 3-5 limbs (more in a wider crown) out to
+# half the crown's reach in their direction and up, each forking into 1-3 branches (by the crown's width) that end a
+# metre or two inside the leaf surface near its rim; in wide crowns more off the leader and the limbs' middles. One
+# voxel thick, the branches paler (twig), never on the leaf surface (no brown specks in summer). Voxels only within
+# the tree's own crown cells, into its leaves or the air under its top; none in a conifer. (A packed forest's narrow
+# crowns get few branches: each wood voxel costs ~6 triangles, drawn all year.)
+n_wood = n_wtree = 0
+if trunks:
+    _isleaf = np.zeros(len(pal.entries) + 64, bool)
+    _isleaf[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF]] = True
+    _AZ = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+    _ST = np.arange(1, 2 * region.CROWN_R + 1) * 0.5
+    for i_, (r0_, c0_, thick_) in enumerate(trunks):
+        if con[i_] or not veg[r0_, c0_]:
+            continue
+        zb_ = int(g[r0_, c0_] + crown_bot[r0_, c0_])
+        zt_ = int(g[r0_, c0_] + crown_top[r0_, c0_])
+        if zt_ - zb_ < 4:
+            continue
+        own_id = i_ + 1
+        # the crown's reach along 16 directions from the trunk's centre: to the last of its own cells before a gap
+        _y = r0_ + 0.5 + np.outer(np.sin(_AZ), _ST)
+        _x = c0_ + 0.5 + np.outer(np.cos(_AZ), _ST)
+        _ri, _ci = np.floor(_y).astype(np.int64), np.floor(_x).astype(np.int64)
+        _in = (_ri >= 0) & (_ri < D) & (_ci >= 0) & (_ci < W)
+        _ri, _ci = np.clip(_ri, 0, D - 1), np.clip(_ci, 0, W - 1)
+        _in &= veg[_ri, _ci] & (own[_ri, _ci] == own_id)
+        _fo = np.argmin(_in, 1)
+        reach_ = np.where(_in.all(1), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
+        if reach_.max() < 2:
+            continue
+        rng_ = np.random.default_rng(cell_hash(r0_, c0_, "limbs"))
+
+        def reach_at(a):
+            f = (a % (2 * np.pi)) / (2 * np.pi) * 16
+            k = int(f) % 16
+            return reach_[k] + (reach_[(k + 1) % 16] - reach_[k]) * (f - int(f))
+
+        def crown_z(r, c):
+            """the crown's underside and top (absolute) at (r, c) if it is this tree's, else None"""
+            if 0 <= r < D and 0 <= c < W and veg[r, c] and own[r, c] == own_id:
+                return int(g[r, c] + crown_bot[r, c]), int(g[r, c] + crown_top[r, c])
+            return None
+
+        def put(z, r, c, col):
+            global n_wood
+            if not (0 <= r < D and 0 <= c < W and 0 <= z < H) or own[r, c] != own_id or z <= g[r, c]:
+                return
+            v = vol[z, r, c]
+            if col == C["twig"]:
+                # a branch stays under the leaf surface: inside a crown on all four sides and above (from the crowns'
+                # rasters, not the volume: the same whatever order the trees are drawn in)
+                for rn, cn, zn in ((r - 1, c, z), (r + 1, c, z), (r, c - 1, z), (r, c + 1, z), (r, c, z + 1)):
+                    if not (0 <= rn < D and 0 <= cn < W and veg[rn, cn]
+                            and g[rn, cn] + crown_bot[rn, cn] <= zn < g[rn, cn] + crown_top[rn, cn]):
+                        return
+            if (v == 0 and z < g[r, c] + crown_top[r, c]) or _isleaf[v]:
+                vol[z, r, c] = col
+                n_wood += 1
+
+        def seg(p, q, col):
+            d = np.subtract(q, p, dtype=np.float64)
+            n = int(np.ceil(np.abs(d).max()))
+            for t in range(n + 1):
+                x, y, z = (p + d * (t / max(n, 1)))
+                put(int(np.floor(z)), int(np.floor(y)), int(np.floor(x)), col)
+
+        def tip(a, frac, lo, hi, base):
+            """a point frac of the reach out along azimuth a (from the trunk), its height lo..hi of the way from the
+            crown's underside to a metre and a half under its top there (pulled in until it is in the crown)"""
+            for k in range(6):
+                d = frac * reach_at(a) * (1 - 0.15 * k)
+                x, y = c0_ + 0.5 + d * np.cos(a), r0_ + 0.5 + d * np.sin(a)
+                cz = crown_z(int(np.floor(y)), int(np.floor(x)))
+                if cz is not None and cz[1] - 1.5 > cz[0] + 0.5:
+                    b_, t_ = cz[0] + 0.5, cz[1] - 1.5
+                    z = b_ + (lo + (hi - lo) * rng_.random()) * (t_ - b_)
+                    return np.array([x, y, max(z, base)])
+            return None
+
+        n_wtree += 1
+        dz = zt_ - zb_
+        zf = zb_ + max(1, int(round((0.25 + 0.15 * rng_.random()) * dz)))
+        cx, cy = c0_ + 0.5, r0_ + 0.5
+        for z in range(zb_ + 1, zf + 1):  # the trunk on up to the fork
+            for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ else ((0, 0),):
+                put(z, r0_ + dr, c0_ + dc, C["trunk"])
+        fork = np.array([cx, cy, zf + 0.5])
+        rbar = float(np.mean(reach_))
+        nl = 3 + (rbar >= 4.5) + (rbar >= 6.5) + int(rng_.random() < 0.2)
+        a0 = rng_.random() * 2 * np.pi
+        # the leader: on up from the fork, leaning a little, two branches off its top
+        lean = rng_.random() * 2 * np.pi
+        top = np.array([cx + 0.6 * np.cos(lean), cy + 0.6 * np.sin(lean), zt_ - 1.5])
+        if top[2] > fork[2] + 1:
+            mid = fork + (top - fork) * 0.6
+            seg(fork, mid, C["trunk"])
+            seg(mid, top, C["twig"])
+            for k in range(2 if rbar >= 4 else 0):
+                t2 = tip(a0 + (k + 0.5) * 2 * np.pi / 2 + rng_.uniform(-0.4, 0.4), 0.45, 0.75, 1.0, top[2] - 1)
+                if t2 is not None:
+                    seg(mid, t2, C["twig"])
+        for k in range(nl):
+            a = a0 + (k + 0.5) * 2 * np.pi / nl + rng_.uniform(-0.3, 0.3)
+            e = tip(a, 0.45 + 0.15 * rng_.random(), 0.35, 0.7, fork[2] + 1)
+            if e is None:
+                continue
+            seg(fork, e, C["trunk"])
+            # branches off the limb's end: out to the rim, one up and one or two to the sides
+            for da, lo, hi in ((rng_.uniform(-0.25, 0.25), 0.7, 1.0), (rng_.uniform(0.45, 0.75), 0.4, 0.8),
+                               (-rng_.uniform(0.45, 0.75), 0.4, 0.8))[:1 + (rbar >= 4) + (rbar >= 6)]:
+                t2 = tip(a + da, 0.85 + 0.1 * rng_.random(), lo, hi, e[2] - 2)
+                if t2 is not None:
+                    seg(e, t2, C["twig"])
+            # and one off its middle, outwards and lower: the crown's waist
+            if rbar >= 5.5 and k % 2 == 0:
+                m2 = fork + (e - fork) * 0.5
+                t2 = tip(a + rng_.uniform(-0.5, 0.5), 0.8, 0.1, 0.4, m2[2] - 2)
+                if t2 is not None:
+                    seg(m2, t2, C["twig"])
+note("broadleaf crowns given branches:", n_wtree, "wood voxels:", n_wood)
 # the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
 # place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
 # the trunks at canopy tops tallest first, then row by row)
@@ -2927,7 +3056,7 @@ deck_h = np.where(deck, zt_ - g, 0).astype(np.float32)
 # deck edge (catenary masts, railings, green from the ortho) were extruded into dangling bits; and no tree crown grows
 # into the underside of a deck anywhere
 _leafy = np.zeros(len(pal.entries) + 64, bool)
-_leafy[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]]] = True
+_leafy[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS] = True
 _rw, _cw = np.nonzero(deck)
 _wet = water_[_rw, _cw]
 for _z in range(int(g.min()), int(zt_.max()) + 6):
@@ -3090,7 +3219,7 @@ tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the
 
 # ---------------------------------------------------------------- floating debris
 import debris
-debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]], dtype=vol.dtype), note, dbg=RDIR)
+debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
 
 # ---------------------------------------------------------------- export
 Hm = int(np.nonzero(vol.reshape(H, -1).any(axis=1))[0].max()) + 1
@@ -3154,7 +3283,7 @@ for f in sorted([f for f in feats if not f["part"]], key=lambda f: -f["area"]) +
 CORE_OUT["oid"] = _fp
 import tiles
 EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
-                         fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | {C["trunk"]},
+                         fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | set(WOOD_IDS),
                          grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
                          wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
 # nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
@@ -3210,7 +3339,7 @@ deck_near = np.where(_dd <= 2, deck_h[_ir, _ic], 0).astype(np.float32)
 # off the deck mask, on a bridge way (a viaduct whose arches are OSM buildings, a deck end): the top of what the
 # voxels hold there -- lamps, poles and leaves aside -- within the LiDAR's reach
 _skip = np.zeros(len(pal.entries) + 64, bool)
-_skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] + [C["trunk"], C["pole"], C["fence"]]] = True
+_skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] + WOOD_IDS + [C["pole"], C["fence"]]] = True
 _rb, _cb = np.nonzero((deck_col > 0) & (_dd > 2))
 _lim = g[_rb, _cb] + np.clip(np.round(nd_mean[_rb, _cb]), 0, 40).astype(int) + 3
 _top = g[_rb, _cb].copy()

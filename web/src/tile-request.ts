@@ -17,12 +17,15 @@ export interface TileContext {
   roofPal: Uint8Array;
   // per palette entry: leaves (a foliage tile's cover, mesher.worker.ts coverOf)
   leafPal: Uint8Array;
+  // per palette entry: 1 leaves, 2 wood (a tree's trunk and branches: meshed where it meets leaves too, mesher.worker.ts)
+  seePal: Uint8Array;
 }
 
 export function paletteFlags(palette: [number, number, number, number][]) {
   return {
     roofPal: Uint8Array.from(palette, (p) => (p[3] === MAT.ROOF ? PAL_ROOF : WALLS.has(p[3]) ? PAL_WALL : 0) | (pavedGround(p) ? PAL_GROUND : 0)),
     leafPal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : 0)),
+    seePal: Uint8Array.from(palette, (p) => (p[3] === MAT.LEAF ? 1 : p[3] === MAT.WOOD ? 2 : 0)),
   };
 }
 
@@ -39,6 +42,8 @@ export function tileRequest(c: TileContext, s: number, tx: number, ty: number, f
   if (foliage) {
     // ... and the base tile meshed again without what the grass covers (stream.ts coverBase)
     return { ...base, key: `f/${tx}_${ty}`, url: file(`1f/${tx}_${ty}`), under: file(`1/${tx}_${ty}`), keep: false, dataOnly: false, roof: null,
+      // (only at 1 m: a distance level's blocks of wood would cost a sixth more triangles there, for little seen)
+      see: c.seePal,
       base: { roof: c.roofPal, leaf: c.leafPal } };
   }
   // every level is meshed with its buildings and roof palette

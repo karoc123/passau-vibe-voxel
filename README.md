@@ -146,7 +146,12 @@ for them).
   been cut since). Every crown stands on a trunk: OSM's trees and the Einzelbäume register's (merged within 3 m, OSM
   keeping the species), one crown per trunk. Crown depth follows the laser's crown base (halfway to the default for
   broadleaved trees, whose winter scan reads low); crowns that stop the winter pulses (a fifth of them single returns)
-  are conifers: cones in needle green, evergreen in the viewer.
+  are conifers: cones in needle green, evergreen in the viewer. Inside every broadleaf crown stands its bare wood (a
+  material of its own, wood): the trunk on up to a fork, a leader, 3-5 limbs and branches out towards the rim a metre
+  or two under the leaves, one voxel thick, drawn per tree from a generator seeded by its trunk's project grid cell.
+  The viewer meshes wood where it meets leaves too (`mesher.worker.ts`, 1 m foliage tiles only) and lets the leaves
+  fall tree by tree in autumn, every one of them by winter, so a bare tree is its trunk and branches; on the 2-8 m
+  levels, which have no branches, a bare crown is a thinned grey-brown mass.
 - **Bridgeheads.** The terrain model leaves out bridges, and often with them the last metres of an approach or the
   plaza over a road diving under the bridgehead. Ground next to a deck at a bridge's end (within 20 m of a bridge way's
   end that a way on the ground goes on from) is lifted to the surface model's level where that stands 2 m or more over

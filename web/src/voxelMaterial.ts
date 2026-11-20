@@ -12,7 +12,7 @@ import { FLOODLIT, floodCapsules, LIT_N } from './lamplight';
 // what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
 export const REFL_MAX = 0.4;
 export const MAT = { SOLID: 0, WALL: 1, GLASS: 2, LEAF: 3, WATER: 4, LAMP: 5, METAL: 6, FLOODLIT: 7, GRASS: 8, MARK: 9, SOIL: 10, CAR: 11,
-  ROOF: 12, CONCRETE: 13, CLOCK: 14, BRONZE: 15, SIGN: 16, JET: 17, SIGNBAND: 18, RIBBON: 19, CLASSIC: 20, WINDOW: 21, TENEMENT: 22 } as const;
+  ROOF: 12, CONCRETE: 13, CLOCK: 14, BRONZE: 15, SIGN: 16, JET: 17, SIGNBAND: 18, RIBBON: 19, CLASSIC: 20, WINDOW: 21, TENEMENT: 22, WOOD: 23 } as const;
 
 type U<T> = { value: T };
 export interface VoxelUniforms {
@@ -27,6 +27,8 @@ export interface VoxelUniforms {
   uSnow: U<number>;
   uDay: U<number>;
   uFolOn: U<number>;
+  // 1 while every deciduous tree is in full leaf: wood's faces towards leaves are left out (BUILD_VERTEX)
+  uWoodHid: U<number>;
   uFolDate: U<THREE.Vector4[]>;
   uFolCol: U<THREE.Color[]>;
   uGrass: U<THREE.Color[]>;
@@ -56,7 +58,7 @@ export interface VoxelUniforms {
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
 
 export function makeUniforms(meta: Meta): VoxelUniforms {
-  return {
+  const U: VoxelUniforms = {
     uPalette: { value: makePaletteTexture(meta.palette) },
     uSize: { value: new THREE.Vector2(meta.W, meta.D) },
     uNight: { value: 0 },
@@ -84,7 +86,24 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     ...fieldUniforms(),
     ...floodlights(meta),
     ...cloudUniforms,
+    uWoodHid: { value: 0 },
   };
+  U.uWoodHid = { get value() { return woodHidden(U); } };
+  return U;
+}
+
+// Whether every deciduous class is in full leaf today, its trees' stagger included (FOLIAGE foliageOf: leaf = 1 from
+// d.x + 14 to d.z - 8 days, each tree up to 2.45 d.w days off its class), a day to spare; or foliage is off (leaves
+// always on). Then no branch can show, and the faces of wood towards leaves are left out (BUILD_VERTEX).
+function woodHidden(U: VoxelUniforms) {
+  if (U.uFolOn.value < 0.5) return 1;
+  const day = U.uDay.value;
+  for (const d of U.uFolDate.value) {
+    if (d.x < 0) continue;
+    const m = 2.45 * d.w + 1;
+    if (day - m < d.x + 14 || day + m > d.z - 8) return 0;
+  }
+  return 1;
 }
 
 // The ground's paved surfaces, detailed close up in the fragment shader (groundDetail): their palette entries by the
@@ -141,6 +160,9 @@ function floodlights(meta: Meta) {
 const FOLIAGE = `${FIELDS_GLSL}
   uniform vec4 uFolDate[${FOLIAGE_CLASSES}]; uniform vec3 uFolCol[${FOLIAGE_CLASSES}]; uniform float uDay; uniform float uFolOn; uniform vec3 uGrass[12]; uniform vec3 uLeaf;
   vec2 foliageCell(vec3 cell) { return foliageAtP(cell.xz + 0.5); }
+  // fine: the node shown here is a 1 m one -- its leaves are a foliage tile's, with the crown's branches under them
+  // (scripts/voxelize.py, mesher.worker.ts); else they are 2, 4 or 8 m blocks, with no branches in them
+  bool leafFine(vec3 cell) { return pageAt(cell.xz + 0.5).y == 1; }
   vec3 foliageOf(vec2 f) {
     int cls = int(f.r * 255.0 + 0.5);
     if (cls == 0) cls = 13;
@@ -165,10 +187,19 @@ const FOLIAGE = `${FIELDS_GLSL}
     vec3 fo = foliageOf(f);
     return (1.0 - fo.x) * fo.y * (1.0 - smoothstep(uFolDate[cls].z + 15.0, uFolDate[cls].z + 50.0, uDay));
   }
-  // leaves fall in clumps (2 m blocks mixed with single voxels), not as per-voxel noise; a bare crown keeps a
-  // clumped twig mass (~45 %) so it still reads as a tree's silhouette instead of scattered crumbs
-  bool leafOff(vec3 cell, vec3 fo) { return 0.6 * hash13(floor(cell * 0.5) * 1.3 + 5.1) + 0.4 * hash13(cell * 1.7 + 3.1) > fo.x; }
-  bool leafGone(vec3 cell, vec3 fo) { return leafOff(cell, fo) && 0.65 * hash13(floor(cell * 0.5) * 2.1 + 9.3) + 0.35 * hash13(cell * 2.3 + 7.7) > 0.45; }`;
+  // A leaf's turn to fall (0 first .. 1 last), against fo.x (in leaf, 1 .. 0): partly by 2 m clumps, mostly voxel by
+  // voxel. Fine (1 m, branches under the leaves): every leaf goes, so a bare crown is its trunk and branches.
+  // Coarse (2-8 m blocks, no branches): a bare crown keeps most of its blocks as a muted grey-brown mass of twigs
+  // (leafTwig), a fifth or so gone, the ground showing through, in the 1 m crowns' bark brown, so that from afar a wood in winter is a soft grey-brown, not crumbs.
+  float leafRank(vec3 cell) { return 0.35 * hash13(floor(cell * 0.5) * 1.3 + 5.1) + 0.65 * hash13(cell * 1.7 + 3.1); }
+  bool leafOff(vec3 cell, vec3 fo) { return leafRank(cell) >= fo.x; }
+  bool leafGone(vec3 cell, vec3 fo, bool fine) {
+    return leafOff(cell, fo) && (fine || 0.6 * hash13(floor(cell * 0.5) * 2.1 + 9.3) + 0.4 * hash13(cell * 2.3 + 7.7) > 0.72);
+  }
+  // a coarse bare crown's twigs: brown as the 1 m trees' bark beside it, a little paler on top where the sky lights them
+  vec3 leafTwig(vec3 cell, float h, float up) {
+    return mix(vec3(0.13, 0.085, 0.055), vec3(0.2, 0.14, 0.1), hash13(floor(cell * 0.5) + 2.7)) * (0.85 + 0.25 * h) * (0.92 + 0.1 * up);
+  }`;
 
 const NORMAL_FROM_IDX = `
   vec3 normalFromIdx(float i) {
@@ -182,7 +213,7 @@ const NORMAL_FROM_IDX = `
 
 // While the city loads (city.ts): a building shows once uBldOn says so; until stage 2 the rest is folded under the
 // terrain, after it a hidden building lies flat as a ground-coloured footprint.
-const BUILD_PARS = `uniform float uStage; uniform sampler2D uBldOn; attribute float vbld;`;
+const BUILD_PARS = `uniform float uStage; uniform sampler2D uBldOn; attribute float vbld; uniform float uWoodHid; uniform sampler2D uPalette;`;
 // (a sloped roof's vertex: the height's part below a metre in vattr.y's top 6 bits, the AO in its low 2; roofs.ts)
 const SUB_Y = 'floor(vattr.y / 4.0 + 0.01) / 64.0';
 const BUILD_VERTEX = `
@@ -195,6 +226,12 @@ const BUILD_VERTEX = `
       if (uStage < 1.5) transformed.y = vattr.z - 3.0;
       else { hideB = 1.0; transformed.y = vattr.z; }
     }
+  }
+  // wood seen only through leaves (mesher.worker.ts THRU), while every tree is in full leaf: left out, all four corners
+  // alike (a quad of no area)
+  if (uWoodHid > 0.5 && vattr.w > 126.5 && vattr.w < 127.5) {
+    int wp = int(vpal + 0.5);
+    if ((int(texelFetch(uPalette, ivec2(wp % 64, wp / 64), 0).a * 255.0 + 0.5) & 31) == ${MAT.WOOD}) transformed = vec3(0.0);
   }`;
 
 // What is the same at all of a face's corners reaches the fragment shader packed into one interpolated vec4 --
@@ -539,17 +576,22 @@ const SURFACE = `
     gRough = GLASS_ROUGH;
     col = glassCol(base, h);
     gEmissive = (vert ? glassSky(wN) : vec3(0.0)) + windowLight(cell, floor(cell.xz / 2.0) + floor(cell.y / 2.0) * 7.3, floor(cell.y / 3.0)) * uNight;
+  } else if (m == ${MAT.WOOD}) { // bark: a trunk, a crown's limbs and branches (scripts/voxelize.py)
+    col = base * (0.82 + 0.3 * h); gRough = 0.92;
   } else if (m == ${MAT.LEAF}) {
     col = base * uLeaf * (0.8 + 0.35 * h); gRough = 0.95;
     if (uFolOn > 0.5) {
       vec3 fo = foliageAt(cell);
+      bool fine = leafFine(cell);
       if (leafOff(cell, fo)) {
         #ifndef PREPASSED
-        if (leafGone(cell, fo)) discard;
+        if (leafGone(cell, fo, fine)) discard;
         #endif
-        col = mix(vec3(0.16, 0.13, 0.11), vec3(0.25, 0.21, 0.18), hash13(floor(cell * 0.5) + 2.7)) * (0.8 + 0.4 * h);
+        col = leafTwig(cell, h, vN.y);
       } else {
         col = mix(col, uFolCol[int(fo.z)] * (0.75 + 0.45 * h), smoothstep(0.0, 0.3, fo.y - 0.85 * hash13(cell * 0.9 + 1.3)));
+        // the last leaves to go, dry: browner as their turn comes
+        col = mix(col, vec3(0.42, 0.3, 0.17) * (0.8 + 0.3 * h), fo.y * smoothstep(fo.x - 0.3, fo.x, leafRank(cell)) * step(fo.x, 0.999));
       }
     }
   } else if (m == ${MAT.GRASS}) {
@@ -752,7 +794,7 @@ export function makeBuildDepthMaterial(uniforms: VoxelUniforms) {
         if (uFolOn > 0.5 && (int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) & 31) == ${MAT.LEAF}) {
           vec3 cell = floor(vVox - vN * 0.5 + 1e-3);
           vec3 fo = foliageAt(cell);
-          if (leafGone(cell, fo)) discard;
+          if (leafGone(cell, fo, leafFine(cell))) discard;
         }`);
   };
   m.customProgramCacheKey = () => 'voxel-build-depth';
@@ -863,7 +905,7 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
           int m = int(texelFetch(uPalette, ivec2(vPal % 64, vPal / 64), 0).a * 255.0 + 0.5) & 31;
           float wa = (vWallAng - 1.0) * 0.261799;
           vec3 cell = ${CELL};
-          if (m == ${MAT.LEAF} && uFolOn > 0.5 && leafGone(cell, foliageAt(cell))) discard;
+          if (m == ${MAT.LEAF} && uFolOn > 0.5 && leafGone(cell, foliageAt(cell), leafFine(cell))) discard;
           if (m == ${MAT.JET}) {
             float lvl = cell.y - floor(vGz + 0.5);
             bool vert = abs(vN.y) < 0.5;

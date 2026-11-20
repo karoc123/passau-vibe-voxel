@@ -21,6 +21,9 @@ export interface MeshRequest {
   // per palette entry, flags (chamfer.ts): PAL_ROOF, roof material, its staircases shaded as the roof
   // plane; PAL_WALL, a building's wall, its diagonal staircases chamfered flat
   roof: Uint8Array | null;
+  // per palette entry: 1 leaves, 2 wood -- a tree's trunk and branches are meshed where they meet its leaves too, so
+  // they show where the leaves go (autumn, winter: voxelMaterial.ts); none: as before (tile-request.ts seePal)
+  see?: Uint8Array | null;
   // a foliage tile only: mesh its base tile (under) again too, without the faces its grass and trunks cover
   base?: BaseRemesh | null;
 }
@@ -58,7 +61,7 @@ export async function meshJob(m: MeshRequest, load: (url: string) => Promise<Arr
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
   // (a foliage tile: its trunks reach down to the base's ramps, ramps.ts)
   const feet = m.base && m.s === 1 && under && 'ground' in under ? rampField(m.N, under.counts, offsetsOf(under.counts, (m.N + 2) ** 2), under.runs, (under as Columns).ground, m.base.roof ?? new Uint8Array()) : null;
-  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.roof ? bld : null, under, m.roof, planes, null, feet?.any ? feet : null);
+  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs }, m.roof ? bld : null, under, m.roof, planes, null, feet?.any ? feet : null, m.see ?? null);
   const base = m.base && under && 'ground' in under
     ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, (under as Columns).bld ?? null, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
   return { keep, out, base, fields };
@@ -92,6 +95,10 @@ const OCC = 65534; // the base tile under a foliage tile: solid for culling and 
 // where they left a pixel between them it showed through, a hairline along the tile's edge. INNER marks them (in
 // meshFaces' second mask, beside a wall's top) and they are drawn with their top edge sunk 1/64 m
 const INNER = 1;
+// A face of wood towards leaves (meshFaces see): vattr.w 127, which the shader reads as a wall's top out of reach
+// (roofs.ts wallTopCode: nothing) -- and, while every tree is in full leaf, as a face to leave out (voxelMaterial.ts
+// uWoodHid: the branches cost nothing in summer). (A foliage tile's faces carry no wall tops.)
+export const THRU = 127;
 
 class QuadBuffer {
   private cap = 1 << 14;
@@ -141,7 +148,8 @@ function topOf(c: RawColumns, off: Uint32Array, n: number) {
 // bldIds (1 m tiles): the building of each column, apron included (scripts/zones.py, 0: none); faces never merge across
 // buildings
 export function meshTile(N: number, s: number, x0: number, y0: number, cols: Columns, bldIds: Uint16Array | null, under: RawColumns | null,
-  roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null, feet: RampField | null = null): MeshOut {
+  roofPal: Uint8Array | null, planes: Uint16Array | null, cover: Uint8Array | null = null, feet: RampField | null = null,
+  see: Uint8Array | null = null): MeshOut {
   const S = N + 2, SS = S * S, { ground } = cols;
   const off = offsetsOf(cols.counts, SS), uoff = under && offsetsOf(under.counts, SS);
   const zmax = Math.max(topOf(cols, off, SS), under && uoff ? topOf(under, uoff, SS) : 0);
@@ -160,7 +168,7 @@ export function meshTile(N: number, s: number, x0: number, y0: number, cols: Col
   if (cover && cover.length < vol.length) { const c = new Uint8Array(vol.length); c.set(cover); cover = c; }
   // (1 m tiles) paved ground on a slope as ramps (ramps.ts)
   const ramps = roofPal && s === 1 ? rampField(N, cols.counts, off, cols.runs, ground, roofPal) : null;
-  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover, ramps?.any ? ramps : null, feet);
+  meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover, ramps?.any ? ramps : null, feet, see);
   return byFacing(out, !!bldIds, N, s, x0, y0);
 }
 
@@ -263,8 +271,10 @@ const coveredFace = (cover: Uint8Array, a: number, ni: number) => (cover[ni] ===
 
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
   bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer,
-  cover: Uint8Array | null = null, rp: RampField | null = null, feet: RampField | null = null) {
+  cover: Uint8Array | null = null, rp: RampField | null = null, feet: RampField | null = null, see: Uint8Array | null = null) {
   const S = N + 2, sx = S, sy = S;
+  // wood's faces towards leaves (see): drawn, their AO as if the leaves were not there (they are not, in winter)
+  const seeLeaf = see ? (k: number) => vol[k] < see.length && see[vol[k]] === 1 : undefined;
   // Ramps (ramps.ts): the top of paved ground with a corner off its voxel's top is drawn as its own quad (rampTops:
   // column, palette, building), and the side of its voxel towards paved ground across an edge with a free point is
   // left out: where the two tops do not meet there (one end pinned), a fill between them, out through the tile's
@@ -315,7 +325,8 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
             let key = 0;
             if (a !== 0 && a !== SOLID_BELOW && a !== OCC) {
               const ni = idx + dir * sd, nb = vol[ni];
-              if ((nb === 0 || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
+              const thru = see !== null && nb !== 0 && nb < see.length && see[nb] === 1 && a < see.length && see[a] === 2;
+              if ((nb === 0 || thru || (border && nb !== SOLID_BELOW && nb !== OCC)) && !(hidden && hidden[idx] & (1 << normalIdx))
                 && !(cover && coveredFace(cover, idx, ni))) {
                 const px = d === 0 ? sl : u === 0 ? i : j, py = d === 1 ? sl : u === 1 ? i : j;
                 const gm = ground[(px + 1) + S * (py + 1)];
@@ -339,10 +350,10 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
                 }
                 const rc = roofs && nb === 0 && roofPal![a] & PAL_ROOF ? roofs.code(px, py, pz, d, dir) : 0;
                 const ang = rc ? 24 + rc : d < 2 && nb === 0 ? wallAngle(N, px, py, pz, d, dir, cell) : 0;
-                const aob = nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
+                const aob = thru ? faceAO(vol, ni, su, sv, -1, null, seeLeaf) : nb === 0 ? faceAO(vol, ni, su, sv, rc ? -1 : ang ? d : -1, rc ? roofPal : null, aoSkip) : 255;
                 // < 2^53: ang < 25 (a wall's direction) or 25 + a roof's plane < 2009, palette < 4096, ids < 16384
                 key = (((ang * 4096 + a) * 256 + aob) * 256 + gm) * 16384 + bidAt(px, py) + 1;
-                top[i + j * nu] = nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
+                top[i + j * nu] = thru ? THRU : nb !== 0 ? INNER : wallTop && d < 2 && !rc && !(roofPal![a] & PAL_ROOF) ? wallTopCode(wallTop[(px + 1) + S * (py + 1)] - gm) : 0;
                 any = true;
               }
             }
