@@ -16,6 +16,8 @@
 // Every shot gets `ui=0&autores=0&weather=clear&date=7-15&hour=13` unless its query sets them; --q adds to all.
 // Tiny scene: `--crop 256` (or a shot query with crop=...) loads only the tiles within that many metres of the
 // camera's target (see ?crop= in README "Agent tools"), which is what makes a shot take seconds instead of minutes.
+// One object: `--focus bld:<id>` (bld:r<id> for a relation, street:<id>) shoots FOCUS_SHOTS round it (?focus=, the
+// object's box from data/objects/) with crop=fit unless --crop is given; with --shots too, those names only.
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -52,16 +54,21 @@ const SETS = {
   all: Object.keys(SHOTS),
 };
 const BASE = { ui: '0', autores: '0', weather: 'clear', date: '7-15', hour: '13' };
+// --focus: name -> the view's query (az: compass bearing the camera stands at, el: degrees over the horizon)
+export const FOCUS_SHOTS = {
+  'f-sw': 'az=225', 'f-se': 'az=135', 'f-ne': 'az=45', 'f-nw': 'az=315', 'f-top': 'az=190&el=70',
+  'f-night': 'az=225&hour=22',
+};
 
 const HELP = `usage: node tools/shoot.mjs --out DIR [--shots a,b,name=query] [--set ${Object.keys(SETS).join('|')}]
-  [--compare REFDIR] [--fail PCT] [--q "extra=query"] [--crop METRES] [--size WxH] [--phone]
+  [--compare REFDIR] [--fail PCT] [--q "extra=query"] [--crop METRES] [--size WxH] [--phone] [--focus bld:ID|street:ID]
   [--url http://host:port/] [--port 5194] [--no-build] [--no-shoot] [--wait MS] [--timeout MS]
   [--gl llvmpipe|swiftshader|gpu] [--eval "JS expression"] [--list]
-shots: ${Object.keys(SHOTS).join(', ')}`;
+shots: ${Object.keys(SHOTS).join(', ')}; with --focus: ${Object.keys(FOCUS_SHOTS).join(', ')}`;
 
 function args(argv) {
   const o = { shots: null, set: null, out: null, compare: null, fail: 0.5, q: '', crop: null, size: '1280x800', phone: false,
-    url: null, port: 5194, build: true, wait: 1500, timeout: 600000, gl: 'llvmpipe', list: false, shoot: true, eval: null };
+    url: null, port: 5194, build: true, wait: 1500, timeout: 600000, gl: 'llvmpipe', list: false, shoot: true, eval: null, focus: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = () => argv[++i];
     if (a === '--shots') o.shots = v().split(',');
@@ -82,6 +89,7 @@ function args(argv) {
     else if (a === '--list') o.list = true;
     else if (a === '--no-shoot') o.shoot = false;
     else if (a === '--eval') o.eval = v();
+    else if (a === '--focus') o.focus = v();
     else if (a === '-h' || a === '--help') { console.log(HELP); process.exit(0); }
     else { console.error('unknown argument', a, '\n' + HELP); process.exit(2); }
   }
@@ -91,7 +99,11 @@ function args(argv) {
 const opt = args(process.argv.slice(2));
 if (opt.list) { for (const [k, v] of Object.entries(SHOTS)) console.log(k.padEnd(18), v); for (const [k, v] of Object.entries(SETS)) console.log('set', k.padEnd(14), v.join(',')); process.exit(0); }
 if (!opt.out) { console.error(HELP); process.exit(2); }
-const names = opt.shots ?? (opt.shoot ? SETS[opt.set ?? 'default'] : fs.readdirSync(opt.out).filter((f) => f.endsWith('.png')).map((f) => f.slice(0, -4)));
+if (opt.focus) {
+  if (!/^(bld|street):[wr]?\d+$/.test(opt.focus)) { console.error('--focus: bld:<id>, bld:r<id> or street:<id>'); process.exit(2); }
+  for (const [k, v] of Object.entries(FOCUS_SHOTS)) SHOTS[k] = `focus=${opt.focus}&${v}${opt.crop ? '' : '&crop=fit'}`;
+}
+const names = opt.shots ?? (opt.focus && opt.shoot ? Object.keys(FOCUS_SHOTS) : null) ?? (opt.shoot ? SETS[opt.set ?? 'default'] : fs.readdirSync(opt.out).filter((f) => f.endsWith('.png')).map((f) => f.slice(0, -4)));
 if (!names) { console.error('unknown set', opt.set); process.exit(2); }
 const shots = names.map((n) => {
   const eq = n.indexOf('=');

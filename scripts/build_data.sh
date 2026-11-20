@@ -38,6 +38,8 @@ $S terrain -i $A scripts/window.py data/ground.npz $M -o $P/terrain data/terrain
   -- python scripts/terrain.py           # terrain/ (the bare land in chunks, while the tiles load and far off); data/terrain.bin
 $S zones -i $A scripts/window.py scripts/osm.py data/footprints.npz data/raw/osm.json $M -o data/zones.bin $P/zones.json \
   -- python scripts/zones.py             # data/zones.bin, zones.json (the building of each column; needs footprints.npz)
+$S objects -i $A data/raw/osm.json data/ground.npz -o $P/objects \
+  -- python scripts/objects.py           # objects/ (each building's and street's box, for the viewer's ?focus=; needs ground.npz)
 $S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/windows.bin \
   -- python scripts/windows.py           # windows.bin (what each building is, for its lit windows; needs footprints.npz)
 uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)

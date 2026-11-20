@@ -110,6 +110,7 @@ cells, the project grid's less the map's corner. The steps:
 | `boats.py` | `boats.json`: cruise-ship berths on the Danube quay, the excursion boats' loop |
 | `terrain.py` | `terrain/near`, `terrain/far{k}`: the bare land in chunks, shown while the tiles load and beyond the view distance; `data/terrain.bin` (the whole, for the tools) |
 | `zones.py` | `data/zones.bin` (the building of each 1 m column), `zones.json`: each building's box (a building shows once all its tiles are in), the building under each label (needs `data/footprints.npz`) |
+| `objects.py` | `objects/<k>.json`: every building's and street's box by OSM id, in 64 files by id, for the viewer's `?focus=` (needs `data/ground.npz`) |
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), per building, for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `data/foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `trees.json`) |
@@ -235,7 +236,7 @@ lists them and their parameters).
 surface model and the LoD2 roofs round it with the OSM outline (`look.png`, 5 px per metre, a 10 m grid) and prints
 what the parameters come from: its OSM tags, the heights over the ground (DOM20 percentiles, LoD2 eaves and ridge,
 the ridge's bearing, the roof type), towers in the surface model with their width at every 2 m of height, the
-roof's colour in the orthophoto. `overrides.py info` gives the object's place.
+roof's colour in the orthophoto. `overrides.py info` gives the object's place and its `?focus=` link.
 
 ## Viewer (web/)
 
@@ -311,6 +312,13 @@ one frame's ms, the nodes shown per level and console errors (look there first).
 `--fail` % (default 0.5) of pixels off by more than 24. The renderer is `--gl llvmpipe` (Mesa through ANGLE's
 Vulkan; falls back to `swiftshader`): compare only sets taken with the same `--gl` and `--size` (the two renderers
 differ by up to ~9 % px on glazing).
+
+**One object: `?focus=bld:<id>` / `?focus=street:<id>`** (`bld:r<id>` for a relation) frames that building or street
+(`web/src/focus.ts`; `&az=` the compass bearing the camera stands at, default 200, `&el=` degrees over the horizon,
+`&fit=` a distance factor, `&crop=fit` only the tiles round it). Its box comes from `data/objects/<id % 64>.json`
+(`scripts/objects.py`: every building's and street's box, split by id into 64 small files). `node tools/shoot.mjs
+--focus bld:<id> --out DIR` shoots it from four sides, from above and at night (`f-sw`, `f-se`, `f-ne`, `f-nw`,
+`f-top`, `f-night`), ~6 s a shot; `--compare` as above for before and after.
 
 Measured (WSL, 20 cores shared with other agents, 1280 x 800): a whole-city shot 45-77 s under SwiftShader (frames
 of 2-5 s), 33-50 s under llvmpipe; a `crop=192` shot 14-16 s under llvmpipe (~4 s to `__ready`, ~4 s loading, frames of

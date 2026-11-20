@@ -31,6 +31,7 @@ import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';
 import { AUTO_KEYS, DIST_MAX, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
+import { focusView } from './focus';
 import './style.css';
 
 declare global {
@@ -383,8 +384,10 @@ async function boot() {
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
   post.reflections.mapTop = meta.H;
   const v0 = views[qs.get('view') ?? ''] ?? views.overview, cam = qs.get('cam')?.split(',').map(Number);
-  camera.position.set(...(cam ? [cam[0], cam[1], cam[2]] as const : v0.pos));
-  controls.target.set(...(cam ? [cam[3], cam[4], cam[5]] as const : v0.target));
+  // ?focus=bld:<id> | street:<id>: one object framed (focus.ts)
+  const fo = qs.get('focus') ? await focusView(qs.get('focus')!, qs, camera.fov, camera.aspect) : null;
+  camera.position.set(...(fo ? fo.pos : cam ? [cam[0], cam[1], cam[2]] as const : v0.pos));
+  controls.target.set(...(fo ? fo.target : cam ? [cam[3], cam[4], cam[5]] as const : v0.target));
   post.taa.restart();
   daylight.uniforms = uniforms;
   daylight.bloom = post.bloom;
@@ -396,7 +399,7 @@ async function boot() {
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
-    crop: cropOf(qs.get('crop'), controls.target), pixelsHigh: () => post.height });
+    crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target), pixelsHigh: () => post.height });
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
@@ -430,7 +433,8 @@ async function boot() {
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
-// ?crop=x0,z0,x1,z1: those meeting that box of the map (metres). For quick screenshots and checks (web/tools/shoot.mjs)
+// ?crop=x0,z0,x1,z1: those meeting that box of the map (metres); with ?focus=, crop=fit: the object and 128 m round it.
+// For quick screenshots and checks (web/tools/shoot.mjs)
 function cropOf(q: string | null, t: THREE.Vector3): [number, number, number, number] | null {
   const v = q?.split(',').map(Number);
   if (!v || v.some((x) => !Number.isFinite(x))) return null;
