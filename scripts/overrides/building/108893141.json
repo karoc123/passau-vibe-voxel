@@ -1,0 +1,16 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 108893141,
+    "geom": "a974d5d30f24",
+    "tags": "e30fe7c401fa",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "The T-shaped building north of the Dom (building=church, no name in OSM): the orthophoto (DOP20, 0.2 m) shows rows of small dormers, ~2 m wide, on both slopes of the east-west wing (4.5 m apart: 6 on the north slope, 5 on the south) and 6 on the east slope of the north-south wing (~3 m apart). The roofs themselves stay LoD2's. Dormer positions read off the orthophoto in map cells, as EPSG:25832.",
+  "sources": ["osm", "dop20", "lod2"],
+  "parts": [
+    {"part": "dormer", "at": [829338.5, 5389812.0], "repeat": {"count": 6, "step": [4.5, 0]}, "width": 2, "depth": 2, "height": 2},
+    {"part": "dormer", "at": [829334.5, 5389806.0], "repeat": {"count": 5, "step": [4.5, 0]}, "width": 2, "depth": 2, "height": 2},
+    {"part": "dormer", "at": [829375.0, 5389815.0], "repeat": {"count": 6, "step": [0, -2.9]}, "width": 2, "depth": 2, "height": 2}
+  ]
+}
