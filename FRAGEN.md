@@ -16,6 +16,8 @@ Erledigte Fragen werden gestrichen bzw. entfernt.
     - Auto und Drohne fallen ins Loch.
     - Nach dem Neuladen ist das Loch weg.
     - In der Konsole stehen die Zeiten.
+    - Wiederholte Klicks auf dieselbe Kachel sind schneller als der erste.
+    - An den 16-m-Linien keine Risse, keine fehlenden Flächen und keine Helligkeitssprünge, vor allem an schrägen Fassaden, Dachkanten und Rampen.
 
 ## Vision (Server-Welt, GTA-artig)
 
