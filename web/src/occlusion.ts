@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ColumnData } from './types';
+import { TILE_N } from './tile-data';
 
 // Occlusion culling of the city's tile meshes against the city itself, on the CPU, each frame, for the main camera
 // only (the sun's shadow map draws every caster, as before).
@@ -53,7 +54,7 @@ export class Occlusion {
 
   // opaque: per palette entry, 1 where its voxels hide what is behind them
   // nx: the map's tiles in a row (the tiles' index)
-  constructor(private readonly nx: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = 128) {
+  constructor(private readonly nx: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = TILE_N) {
     this.colH = new Uint8Array((T + 2) * (T + 2));
   }
 

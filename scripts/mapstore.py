@@ -15,6 +15,8 @@ from collections import OrderedDict
 
 import numpy as np
 
+import tilefile
+
 
 class _Cover:
     """which window of a cover (a grid of windows, window.split / window.cover) holds a map cell"""
@@ -152,7 +154,7 @@ class MapRaster:
             yield r0 // s, self.box(r0 // s, r1 // s, 0, self.shape[1])
 
 
-VBLOCK = 128  # the volume's column blocks (a level-1 node's cells)
+VBLOCK = tilefile.N  # the volume's column blocks (a level-1 node's cells)
 
 
 def save_volume(path, vol):

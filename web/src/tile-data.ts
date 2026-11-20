@@ -6,13 +6,16 @@ export interface Columns extends RawColumns { ground: Uint8Array; planes?: Uint1
 // level and bed, foliage class and tree), spill RG per cell of twice the size with its apron ((N / 2 + 2)^2)
 export interface Fields { cell: Uint8Array; spill: Uint8Array }
 
-const MAGIC = 0x32545856; // "VXT2", little-endian
+// The node file's format (scripts/tilefile.py MAGIC, N): a node holds TILE_N x TILE_N cells (and its apron), so a level-1
+// tile is TILE_N m a side; meta.json tiles.N says the same
+export const TILE_MAGIC = 0x32545856; // "VXT2", little-endian
+export const TILE_N = 128;
 
 // A node file (scripts/tilefile.py): a header of tagged sections -- cnts, grnd, runs, and (levels, not foliage) plns,
 // bldg, flod, fols, spil (scripts/tile_fields.py)
 export function decodeTile(buf: ArrayBuffer, N: number) {
   const dv = new DataView(buf);
-  if (buf.byteLength < 8 || dv.getUint32(0, true) !== MAGIC) throw new Error('tile: not a VXT2 node file (scripts/tile_fields.py)');
+  if (buf.byteLength < 8 || dv.getUint32(0, true) !== TILE_MAGIC) throw new Error('tile: not a VXT2 node file (scripts/tile_fields.py)');
   const n = dv.getUint32(4, true), sec = new Map<string, [number, number]>();
   for (let k = 0, at = 8 + 8 * n; k < n; k++) {
     const o = 8 + 8 * k, tag = String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3)), len = dv.getUint32(o + 4, true);

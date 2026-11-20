@@ -1,5 +1,6 @@
 import type { Meta } from './types';
 import { hash } from './util';
+import { TILE_N as T } from './tile-data';
 
 // The light on the ground at night, per node shown (fields.ts uPageL, a page beside its other fields), drawn here from
 // the lists of lamps, never as a map of the whole:
@@ -21,9 +22,9 @@ export const lampColour = (x: number, y: number, origin: readonly [number, numbe
 const LAMP_STOPS: [number, number][] = [[0, 0.8], [0.12, 0.66], [0.3, 0.34], [0.52, 0.11], [0.8, 0.025], [1, 0]];
 const FLOOD_STOPS: [number, number][] = [[0, 0.6], [0.7, 0.52], [1, 0]];
 const FLOOD_RGB: [number, number, number] = [225, 235, 255];
-const T = 128, LIT_CELL = 8;
+const LIT_CELL = 8;
 // a page's side: a node's cells (of 2s m: as fields.ts uPageS) and one all round
-export const LAMP_PAGE = 66;
+export const LAMP_PAGE = T / 2 + 2;
 
 // Passau floodlights its cathedral, both fortresses, the town hall's tower and the churches above the rivers. Each is
 // a capsule in plan (from the label, a and b in metres off it, radius r) whose walls catch a warm wash at night,

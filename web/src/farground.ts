@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Meta } from './types';
 import { CUT_T } from './daylight';
 import { CHUNK, chunkTexture, fetchChunk, type TerrainChunk } from './terrain';
+import { TILE_N as T } from './tile-data';
 
 // The ground beyond the view distance (settings.ts dist): the bare terrain (scripts/terrain.py, data/terrain/far{k}),
 // no buildings, under the fog -- at the distance the fog is full (daylight.ts), so what it shows is the land's outline
@@ -16,7 +17,7 @@ import { CHUNK, chunkTexture, fetchChunk, type TerrainChunk } from './terrain';
 // level k is fetched while the camera is within NEAR * its side of it (or a tile in it is covered), and once it is
 // in, its coarser parent's piece over it is not drawn. Only while the far ground is on (a view distance set); what is
 // held follows the camera, not the map's area. Level 0 alone carries the tiles' mask (64 bits a piece, a uniform).
-const STEP = 16, Q = 64, T = 128, NEAR = 0.25, KEEP = 1.5;
+const STEP = 16, Q = 64, NEAR = 0.25, KEEP = 1.5;
 // past the view distance the far ground's fog thins again, from full at the distance to FAR_T of the way up its ramp
 // (smoothstep(0.7): 0.78 of the fog) at FAR_OUT times it
 const FAR_T = 0.7, FAR_OUT = 1.6;

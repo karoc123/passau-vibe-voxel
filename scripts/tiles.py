@@ -32,7 +32,7 @@ import tilefile
 
 import numpy as np
 
-N = 128
+N = tilefile.N
 LEVELS = (1, 2, 4, 8)
 LOD_LEVELS = (2, 4, 8)  # the distance levels: with roof planes, meshed like level 1 (slopes, chamfers)
 # levels built from the level of half their cell size (downsample's finer): 4 from 2, 8 from 4

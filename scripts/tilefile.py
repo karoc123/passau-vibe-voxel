@@ -23,6 +23,7 @@ import struct
 from pathlib import Path
 
 MAGIC = b"VXT2"
+N = 128  # a node's cells a side (and a level-1 tile's metres; meta.json tiles.N, web/src/tile-data.ts TILE_N)
 
 
 def pack(sections):

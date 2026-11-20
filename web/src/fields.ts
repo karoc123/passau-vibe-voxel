@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Fields } from './tile-data';
+import { TILE_N, type Fields } from './tile-data';
 import { dataTexture } from './util';
 import { LAMP_PAGE, type LampLight } from './lamplight';
 
@@ -18,7 +18,7 @@ import { LAMP_PAGE, type LampLight } from './lamplight';
 // (a quarter more at a time: the textures hold little more than the pages shown at the most so far).
 // uPageIdx: per 128 m tile of the map (a few hundred bytes; 235 x 235 for 30 km), the page of the node shown over it
 // and its cell size -- the shader's way from a point to its page (FIELDS_GLSL pageAt).
-const N = 128, M = N / 2 + 2, T = 128;
+const N = TILE_N, M = N / 2 + 2, T = TILE_N; // (the node's cells; the 1 m tile's side)
 const F_W = 2 * N, S_W = 2 * M, F_LAYER = F_W * F_W * 4, S_LAYER = S_W * S_W * 2, L = LAMP_PAGE, L_W = 2 * L, L_LAYER = L_W * L_W * 4;
 
 export interface FieldUniforms {

@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import type { Meta } from '../types';
 import { VoxelCollision } from './voxel-collision';
 import { MAT } from '../voxelMaterial';
+import { TILE_MAGIC as MAGIC, TILE_N as N } from '../tile-data';
 
 // Headless checks of the FPV drone's collision (voxel-collision.ts; web/tools/collision.mjs): a synthetic voxel world
 // (a ground height per column and boxes on it: walls, decks, water) written as real 1 m node files (VXT2, as
@@ -31,8 +32,6 @@ export interface WorldSpec {
   surface?: (x: number, z: number) => Surface; // the ground's top voxel (default road)
   boxes?: Box[];
 }
-
-const N = 128, MAGIC = 0x32545856;
 
 function encode(sections: [string, ArrayBufferView][]) {
   const pad = (n: number) => n + (-n & 3);

@@ -11,8 +11,8 @@ import { FarGround } from './farground';
 import { FieldPages } from './fields';
 import { loadTerrain } from './terrain';
 import type { LampLight } from './lamplight';
+import { TILE_N as T } from './tile-data';
 
-const T = 128;
 // The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
 // within the distance + LOAD_M of the camera along the ground, kept once in until it is further than + KEEP_M (so a
 // camera moving to and fro at the edge doesn't load and free the same tiles over and over), and freed FREE_MS after
@@ -54,6 +54,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // in range, whatever the camera does; no far ground. For quick screenshots and checks (web/tools/shoot.mjs)
   crop?: [number, number, number, number] | null;
 }) {
+  if (meta.tiles.N !== T) throw new Error(`city: tiles of ${meta.tiles.N} cells, the viewer's are ${T} (tile-data.ts TILE_N)`);
   const d = S.dims[1], total = d.nx * d.ny, index = (tx: number, ty: number) => ty * d.nx + tx;
   // the crop in tiles, inclusive
   const ct = crop && [Math.max(0, Math.floor(crop[0] / T)), Math.max(0, Math.floor(crop[1] / T)),

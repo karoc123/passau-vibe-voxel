@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import type { Meta } from './types';
 import { dataTexture, fetchGzip } from './util';
+import { TILE_N as T } from './tile-data';
 
 // The bare terrain (scripts/terrain.py), in square chunks of 256 height steps (257 samples a side, the last shared with
 // the next chunk) and 512 colour texels, clipped at the map's edges: data/terrain/near (heights every 4 m, colours
 // every 2 m: the first moment's ground, below) and data/terrain/far{k} (every 16 * 4^k and 8 * 4^k m: the far ground,
 // farground.ts). Fetched by what is near the camera, never the whole map at once.
 export const CHUNK = 256;
-const T = 128;
 
 export interface TerrainChunk {
   // heights: hw x hh samples (decimetres over the base), colours: cw x ch texels (sRGB)
