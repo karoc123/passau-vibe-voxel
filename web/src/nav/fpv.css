@@ -12,7 +12,7 @@ body.fpv-flying #bar > :not(.mode-tools),
 body.fpv-flying #bar .mode-tools > :not(.fpv-mode) {
   display: none;
 }
-body.fpv-flying #bar { right: auto; width: max-content; max-width: calc(100% - 28px); }
+body.fpv-flying #bar { right: auto; width: max-content; max-width: calc(100% - 28px - var(--sl) - var(--sr)); }
 body.fpv-flying #bar .mode-tools { padding-top: 0; }
 body.fpv-flying #bar .fpv-mode {
   display: flex;

@@ -1,9 +1,13 @@
-:root { --ink: #2b2a28; --accent: #c8643c; }
+:root { --ink: #2b2a28; --accent: #c8643c;
+  /* the safe area (index.html viewport-fit=cover): a notch, rounded corners, the home indicator; 0 on a desktop, so
+     every fixed control's edge offset below adds its side's inset and the desktop layout stays as it was */
+  --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px);
+  --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* pinches zoom the map, never the page */ background: #1b1d22; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
 #app canvas { display: block; }
 
-#bar { --t2: rgba(255,255,255,.62); position: fixed; left: 14px; top: 14px; z-index: 5; width: 340px; color: #fff;
+#bar { --t2: rgba(255,255,255,.62); position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
 #bar .search { position: relative; margin: 0 0 4px; }
 #bar .search input { width: 100%; height: 24px; border: 0; border-bottom: 1px solid rgba(255,255,255,.55); outline: 0; padding: 0 30px 0 20px; background: transparent; color: #fff; font: inherit; font-size: 11.5px; text-shadow: inherit;
@@ -47,11 +51,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .mode-button:focus-visible { outline: 1px solid #fff; outline-offset: 3px; border-radius: 2px; }
 #bar .mode-detail {
   margin-top: 2px; padding: 6px 8px; border-radius: 6px; background: rgba(16,17,20,.62);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); max-height: max(95px, calc(100dvh - 155px));
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); max-height: max(95px, calc(100dvh - 155px - var(--st) - var(--sb)));
   overflow: auto; overscroll-behavior: contain; touch-action: pan-y; line-height: 1.4;
 }
 #bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
-@media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px)); } }
+@media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px - var(--st) - var(--sb))); } }
 @media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
 /* the graphics panel (bar.ts Graphics): folded under a ⚙ row; inside, the presets and an "Advanced" fold */
 #bar .gear { padding-top: 6px; }
@@ -68,22 +72,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .adv[open] summary::before { content: '▾'; }
 #bar .dev .val { color: var(--t2); }
 #bar .gfx .note { padding-top: 6px; color: var(--t2); line-height: 1.35; }
-@media (max-width: 600px) { #bar { left: 8px; right: 8px; top: 8px; width: auto; } }
+@media (max-width: 600px) { #bar { left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
 @media (max-width: 600px), (max-height: 500px) { #bar .gfx.open { max-height: 55vh; overflow-y: auto; } }
 @media (max-width: 600px), (max-height: 500px) {
   #bar .val { flex-basis: 40%; }
   #bar .choices { column-gap: 7px; }
   #bar:has(.search li) .row { display: none; }
 }
-@media (max-height: 500px) { #bar { left: 8px; top: 8px; width: min(330px, calc(100vw - 16px)); } }
-#credits-button { position: fixed; right: 8px; bottom: 8px; z-index: 4; width: 44px; height: 44px;
+@media (max-height: 500px) { #bar { left: calc(8px + var(--sl)); top: calc(8px + var(--st)); width: min(330px, calc(100vw - 16px - var(--sl) - var(--sr))); } }
+#credits-button { position: fixed; right: calc(8px + var(--sr)); bottom: calc(8px + var(--sb)); z-index: 4; width: 44px; height: 44px;
   display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer;
   font: 600 14px Inter, system-ui, sans-serif; }
 #credits-button span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(16,17,20,.75); }
 #credits-button:is(:hover, :focus-visible) span, body:has(#credits:popover-open) #credits-button span { background: #2d3036; }
 #credits-button:focus-visible { outline: 1px solid #fff; border-radius: 6px; }
-#credits { position: fixed; inset: auto 12px 56px auto; margin: 0; width: min(352px, calc(100vw - 24px));
-  max-height: calc(100dvh - 96px); overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
+#credits { position: fixed; inset: auto calc(12px + var(--sr)) calc(56px + var(--sb)) auto; margin: 0; width: min(352px, calc(100vw - 24px - var(--sl) - var(--sr)));
+  max-height: calc(100dvh - 96px - var(--st) - var(--sb)); overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
   padding: 12px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; background: #202226; color: #eee;
   font: 12px/1.5 Inter, system-ui, sans-serif; }
 #credits > div + div { margin-top: 8px; }
@@ -116,17 +120,17 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 .label.near p, .label.pick p { display: flex; }
 
 #loading { position: fixed; inset: 0; background: linear-gradient(#c9d3dc, #e7e2d8 70%); z-index: 10; }
-#loading-text { position: fixed; left: 14px; top: 14px; color: #fff; font: 11px Inter, system-ui, sans-serif; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
-@media (max-width: 600px) { #loading-text { left: 8px; top: 8px; } }
+#loading-text { position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); color: #fff; font: 11px Inter, system-ui, sans-serif; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
+@media (max-width: 600px) { #loading-text { left: calc(8px + var(--sl)); top: calc(8px + var(--st)); } }
 #loading.hidden { display: none; } /* at once: the caption takes over in the same place */
 .noui #labels { display: none !important; }
 
 
 /* HUD: a legend, not a control panel -- outlines only, semi-transparent, never in the way of the pointer */
-#hud { --o: rgba(255,255,255,.55); position: fixed; left: 14px; bottom: 14px; z-index: 4; pointer-events: none;
+#hud { --o: rgba(255,255,255,.55); position: fixed; left: calc(14px + var(--sl)); bottom: calc(14px + var(--sb)); z-index: 4; pointer-events: none;
   font: 11px Inter, system-ui, sans-serif; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
-@media (max-width: 940px) { #hud.pedestrian { bottom: 64px; } }
-@media (max-width: 600px) { #hud.pedestrian { bottom: 94px; } }
+@media (max-width: 940px) { #hud.pedestrian { bottom: calc(64px + var(--sb)); } }
+@media (max-width: 600px) { #hud.pedestrian { bottom: calc(94px + var(--sb)); } }
 #hud .who { font-weight: 600; color: #fff; margin-bottom: 6px; }
 #hud .who:empty { display: none; }
 #hud .row { display: flex; align-items: flex-end; gap: 16px; }
@@ -143,25 +147,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #hud svg .btn { fill: var(--o); stroke: none; }
 #hud .on svg { stroke: #fff; } #hud .on svg .btn { fill: #fff; }
 #hud figcaption { font-size: 10.5px; }
-@media (max-width: 600px) { #hud { left: 8px; bottom: 8px; } }
+@media (max-width: 600px) { #hud { left: calc(8px + var(--sl)); bottom: calc(8px + var(--sb)); } }
 .noui #hud { display: none; }
 /* top right, in the legend's style: frames per second, and the one knob, how much of the city is drawn in detail */
-#perf { position: fixed; right: 14px; top: 14px; z-index: 4; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+#perf { position: fixed; right: calc(14px + var(--sr)); top: calc(14px + var(--st)); z-index: 4; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
 #perf .fps { color: #fff; font-weight: 500; min-height: 13px; }
 #perf .fps .mark { color: rgba(255,255,255,.62); margin-left: 4px; }
 @media (max-width: 600px) {
-  #perf { top: auto; right: 8px; bottom: 58px; }
-  #credits { bottom: 80px; }
+  #perf { top: auto; right: calc(8px + var(--sr)); bottom: calc(58px + var(--sb)); }
+  #credits { bottom: calc(80px + var(--sb)); }
 }
 .noui #perf { display: none; }
-.caption { position: fixed; left: 14px; top: 14px; z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
-  width: 340px; max-width: calc(100vw - 16px); color: #fff; font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); transition: opacity .8s; }
+.caption { position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
+  width: 340px; max-width: calc(100vw - 16px - var(--sl) - var(--sr)); color: #fff; font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); transition: opacity .8s; }
 .caption.off { opacity: 0; }
 .caption .txt { display: flex; justify-content: space-between; white-space: nowrap; }
 .caption .bar { position: relative; height: 2px; border-radius: 1px; background: rgba(255,255,255,.3); box-shadow: 0 0 2px rgba(0,0,0,.6); }
 .caption .bar i { display: block; height: 100%; width: 0; border-radius: 1px; background: #fff; transition: width .3s; }
-@media (max-width: 600px) { .caption { left: 8px; right: 8px; top: 8px; width: auto; max-width: none; } }
+@media (max-width: 600px) { .caption { left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; max-width: none; } }
 #bar, #labels, #hud { transition: opacity .6s; }
 .loading #bar, .loading #labels, .loading #hud { opacity: 0; pointer-events: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
@@ -174,7 +178,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 #bar .bar-fold:is(:hover, :focus-visible) { background: #2d3036; }
 #bar .bar-fold:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
 #bar .search { margin-left: 34px; }
-#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px); }
+#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px - var(--sl) - var(--sr)); }
 #bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
 #bar.folded .bar-fold { position: static; flex: none; }
 #bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
@@ -188,7 +192,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 }
 
 /* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
-#jump-button { display: none; position: fixed; right: 18px; bottom: 120px; z-index: 4; width: 60px; height: 60px; padding: 0;
+#jump-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(120px + var(--sb)); z-index: 4; width: 60px; height: 60px; padding: 0;
   border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
   touch-action: none; -webkit-user-select: none; user-select: none; }
 #jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
@@ -197,10 +201,9 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
    it, just above the "?" (#credits-button: 8 px in, 44 px), out of the stick's ring (radius <= 72 px around the thumb)
    and far from the bar (top left); the safe area keeps it off a notch or the home indicator */
 @media (pointer: coarse) and (orientation: landscape) {
-  #jump-button { width: 56px; height: 56px; right: max(10px, calc(env(safe-area-inset-right, 0px) + 6px));
-    bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 44px + 12px); }
+  #jump-button { width: 56px; height: 56px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
 }
-#hud .hint { max-width: min(300px, calc(100vw - 100px)); line-height: 1.4; }
+#hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
 #hud .hint:empty { display: none; }
 /* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */
 .stick-ring { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; box-sizing: border-box; border-radius: 50%;
