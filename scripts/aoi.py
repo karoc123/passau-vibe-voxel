@@ -35,7 +35,6 @@ GRID_X0, GRID_Y0 = CONFIG["grid"]["x0"], CONFIG["grid"]["y0"]  # EPSG:25832 of t
 CX, CY = float(CONFIG["anchor"]["x"]), float(CONFIG["anchor"]["y"])  # Dom St. Stephan, Passau
 THETA = math.radians(0.0)
 I0, J0 = round(CX - GRID_X0), round(GRID_Y0 - CY)  # project grid position of the anchor (the Dom: 1980, 733)
-DX = I0 - 700  # columns added in the west since the first trial cut: curated grid columns were traced on that one
 RAW = "data/raw"
 # the map: the window of the project grid that is built, its corner MAP_R0, MAP_C0 (project rows and columns, on
 # multiples of 1024 so that the map's and the project grid's blocks coincide), its size MAP_D x MAP_W. Passau: 3200 x

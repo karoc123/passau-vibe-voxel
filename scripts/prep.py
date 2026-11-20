@@ -16,7 +16,6 @@ from scipy import ndimage
 from aoi import D, RAW, W, to_world, world_bounds
 
 MINX, MINY, MAXX, MAXY = (round(v) for v in world_bounds(margin=10))
-BOUNDS = (MINX, MINY, MAXX, MAXY)
 
 
 def mosaic(pattern, res, nodata=-9999):

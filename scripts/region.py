@@ -167,31 +167,6 @@ def windowed_sizes(mask, block=64, margin=64, structure=None):
     return out
 
 
-def windowed_median(mask, values, min_size, block=64, margin=64):
-    """per cell of mask, the median of values over its connected component within the window of its block (int,
-    rounded down as np.median of ints is), where that component has min_size cells or more; -1 elsewhere"""
-    out = np.full(mask.shape, -1, np.int32)
-    for b in blocks(block):
-        w = _grow(b, margin)
-        sub = mask[w[0]:w[1], w[2]:w[3]]
-        if not sub.any():
-            continue
-        lab, n = ndimage.label(sub)
-        sz = np.bincount(lab.ravel())
-        i0, j0 = b[0] - w[0], b[2] - w[2]
-        core = lab[i0:i0 + b[1] - b[0], j0:j0 + b[3] - b[2]]
-        ids = np.unique(core[core > 0])
-        ids = ids[sz[ids] >= min_size]
-        if not len(ids):
-            continue
-        v = values[w[0]:w[1], w[2]:w[3]]
-        lut = np.full(n + 1, -1, np.int32)
-        for i in ids:
-            lut[i] = int(np.median(v[lab == i]))
-        out[b[0]:b[1], b[2]:b[3]] = lut[core]
-    return out
-
-
 def feature_parts(geom, rr, cc):
     """a feature's cells (rr, cc, those within the region) as [(block, cells it decides from)]: (None, all of them)
     once if it spans FMAX metres or less (spans: by its outline, not by its cells in the region); else per BLOCK block
