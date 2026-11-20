@@ -282,8 +282,11 @@ def edge_windows(vol, g, geom, win, rows, bay, w=2, margin=2.5, min_len=6, depth
     """Windows on every straight outer edge of a footprint, at any angle: as many bays (`bay` m apart) as fit
     between `margin` m from the ends, centred; rows (z above ground, height) the same on every edge. Each window
     cell walks in from outside to the first wall voxel at its height; that voxel (and depth-1 behind) is cleared and
-    the next one set to glass. Edges listed by index in `skip` are left alone."""
+    the next one set to glass. Edges listed by index in `skip` are left alone. A footprint reaching past the volume's
+    edge (a region's halo, scripts/region.py) gets its windows where its cells are in the volume."""
     n = 0
+    Hv, Dv, Wv = vol.shape
+    inside = lambda r, c: 0 <= r < Dv and 0 <= c < Wv  # noqa: E731
     geom = geom.simplify(1.2)  # OSM outlines carry every pilaster step: one straight run per facade
     xs, ys = geom.exterior.coords.xy
     pts = list(zip(xs, ys))
@@ -308,6 +311,8 @@ def edge_windows(vol, g, geom, win, rows, bay, w=2, margin=2.5, min_len=6, depth
             for t in np.arange(tc - w / 2 + 0.25, tc + w / 2, 0.5):
                 bx, by = x0 + ux * t, y0 + uy * t
                 r_, c_ = int(by + ny), int(bx + nx)
+                if not inside(r_, c_):
+                    continue
                 gz = int(g[r_, c_])
                 for zr, hh in rows:
                     for zz in range(hh):
@@ -315,12 +320,13 @@ def edge_windows(vol, g, geom, win, rows, bay, w=2, margin=2.5, min_len=6, depth
                         hit = None
                         for o in np.arange(-3, 4, 0.5):
                             r, c = int(by + ny * o), int(bx + nx * o)
-                            if vol[z, r, c]:
+                            if inside(r, c) and z < Hv and vol[z, r, c]:
                                 hit = o; break
                         if hit is None:
                             continue
-                        for d in range(depth):
-                            vol[z, int(by + ny * (hit + d)), int(bx + nx * (hit + d))] = 0
-                        vol[z, int(by + ny * (hit + depth)), int(bx + nx * (hit + depth))] = win
+                        for d in range(depth + 1):
+                            r, c = int(by + ny * (hit + d)), int(bx + nx * (hit + d))
+                            if inside(r, c):
+                                vol[z, r, c] = 0 if d < depth else win
             n += 1
     return n
