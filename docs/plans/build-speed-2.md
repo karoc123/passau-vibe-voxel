@@ -195,7 +195,7 @@ has its own workspace.
 Implement A1, A2, B1 first (two hours, the bulk of both targets); A3-A5 together (they all rerun prep or laser
 once); A6, B2, M1 whenever.
 
-### A1. The river blocks' median in a function (P4)
+### A1. The river blocks' median in a function (P4) -- done (branch bs2, see 8.)
 
 Where: `scripts/voxelize.py:3748-3752`. What: move the call into a small function defined just above, with a
 comment saying why:
@@ -221,7 +221,7 @@ Verify: `check.py golden --compare` on altstadt and kachlet (rivers, weir) from 
 `river colours from the ortho: N shades over M water cells` unchanged; the `[stage] river colours` line of a
 region's `log.txt` shows ~1 s.
 
-### A2. `tile_fields.py` over windows, in parallel (P7)
+### A2. `tile_fields.py` over windows, in parallel (P7) -- done, with the second half (see 8.)
 
 Where: `scripts/tile_fields.py:216-226` (`main`). What, as the previous plan's P7:
 
@@ -253,7 +253,7 @@ on the real data after the next build `git status --porcelain web/public/data` (
 build, run the new `tile_fields.py` on the committed data: P6 makes it rewrite nothing when the bytes are the same,
 so `git status` must stay empty.
 
-### B1. `voxelize.py --just ROW_COL[+ROW_COL]`: the named regions and nothing else
+### B1. `voxelize.py --just ROW_COL[+ROW_COL]`: the named regions and nothing else -- done (see 8.)
 
 Where: `scripts/regions.py:338-345`. What: like `--only` (same `pick`), but `todo` is the picked regions alone;
 the others stay as they are, stale manifests included. Print loudly what was left
@@ -349,7 +349,7 @@ Not further: the rest of the peak is the volume at its full height (1.5 GB at `H
 and features kept alive by the module namespace. Freeing those is a `del` hunt through 3900 lines for a few
 percent; the machine has six fast cores and six regions already run at once. **Drop the rest of P9.**
 
-### B2. `check.py`: after-steps side by side; fixtures side by side
+### B2. `check.py`: after-steps side by side; fixtures side by side -- done (see 8.)
 
 Where: `scripts/check.py:203-212`. What: run `AFTER[:-1]` (places ... phenology) in a
 `concurrent.futures.ThreadPoolExecutor` over `run(ws, fx, s)` (each is a subprocess with its own log), then
@@ -464,3 +464,36 @@ The serial chain prep -> laser (140 s after A3-A5) only matters when `data/raw`,
    print nothing; report the table of 1.1 again, the `[stage] river colours` sum, `tile_fields`' time, the
    regions' "at once" figure (summed walls / phase wall, from the `stats.json` files), and which estimates above
    were wrong.
+
+---
+
+## 8. Done: A1, A2, B1, B2 (branch `bs2`, 2026-11-21; no full build of the real map yet)
+
+Goldens recorded on `main` (a90289bd) for altstadt, hals, kachlet, then compared after the changes: **0 of 459 / 301 /
+459 outputs differ** (the three as shell jobs side by side, `-j 2` each). `check.py windows tile_fields --covers
+2x2,1024`: 0 of 345 differ; `check.py verify` on altstadt ok.
+
+- **A1** as planned (`_block_median`). Fixture regions' `[stage] river colours`, summed: altstadt 28.8 -> 2.4 s,
+  kachlet 26.8 -> 2.0 s, hals 10.4 -> 0.7 s (-92 %, as F1 predicted). The other stages' fixture times are not
+  comparable before/after (the record ran beside other jobs).
+- **A2**: `tile_fields.py -j N` (default `min(8, cores / 2)`), windows of 1024 m when no cover is given, a fork pool,
+  notes printed and counts summed in window order; `-j 1` without a cover is the old whole-map run (`check.py windows`
+  takes its reference that way). The plan's estimate of ~35 s did not hold for the pool alone: `caps.fields` is
+  memory-bound, so 8 processes ran 2.5 x slower each (on the committed map data, in a copy: one window after the other
+  200 s CPU; `-j 4` 74 s, `-j 8` 64-68 s, `-j 12` 62 s wall). With the second half -- in `caps.fields` the smoothing's
+  16 neighbour terms added in place over their overlap (`np.add(..., where=m)`, no `_shift` copies), terms, label
+  edges and corner sums of nodes that hold nothing skipped; the same values but the sign of a zero -- and `dtm` from
+  `prep.npz`'s sidecar where fresh: **the map's `tile_fields` 220 s / 12.2 GB -> 39 s / 0.64 GB** (wall, peak RSS of a
+  process; measured on the committed data in a scratch copy, the machine not idle). Every node file byte-identical to
+  the committed ones; `meta.json` equal as JSON (tris.mjs writes it in its own format later).
+- **B1**: `voxelize.py --just ROW_COL[,ROW_COL..]` (also `+`, and `x=COL,y=ROW`), `JUST=... sh scripts/build_data.sh`;
+  refused with `--only`/`--force` or when a region not named was never built; loud about what it left stale; no
+  `regions.stamp`. Checked on the altstadt workspace: a no-op edit of `voxelize.py`, `--just 0_0` built that region
+  only (no node file rewritten), `--status` listed the other three as `changed: code:voxelize.py`, a plain build then
+  built those three and wrote the stamp, a third run did nothing, and after the steps that follow, every output equal
+  to the golden of `main`. README "Incremental" says how to use it.
+- **B2**: `check.py build` runs the eight steps after voxelize side by side, then `tile_fields`: the steps after it
+  72-80 -> 49-58 s per fixture (three fixtures at once); a golden compare ~2 min each, the three side by side ~2.2 min.
+
+Still to confirm on the next full build of the real map: `git status --porcelain web/public/data` empty, the summed
+`[stage] river colours` (~460 s -> ~40 s expected), the region phase's wall, and `tile_fields` in the build (~40 s).
