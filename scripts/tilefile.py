@@ -85,6 +85,10 @@ SECTIONS = (
             "record's), zigzag(each of its 4 corner heights in 1/64 m less that top * 64); sorted by column, then the "
             "run's top; at most two a column (the ground's run, the column's last run: a deck) -- the sloped surface "
             "drawn and stood on (caps.py; web/src/core/surface.ts)", "tile_fields.py (caps.py)"),
+    Section("roof", "1 2 4 8 (nodes with sloped roofs)", "uint16[6 * n], planar: per record the column and the top of "
+            "its last run (the roof's voxel) as in caps, its 4 corner heights in 1/64 of a cell as zigzag differences "
+            "(corner 0 from the west neighbour's corner 1 or the top, 1 from 0, 2 from 1, 3 from 0) -- a pitched "
+            "roof's surface, drawn only (caps.py encode_roof; web/src/roofs.ts)", "tile_fields.py (caps.py)"),
 )
 ORDER = [s.tag for s in SECTIONS]
 
@@ -111,7 +115,11 @@ def write(path, sections, data=None):
             return False
     except FileNotFoundError:
         pass
-    p.write_bytes(data)
+    # (whole or not at all: another process may read it meanwhile -- tile_fields.py's windows read the columns of the
+    # nodes round their own)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, p)
     return True
 
 

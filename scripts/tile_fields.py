@@ -11,6 +11,8 @@ from the nodes shown (web/src/fields.ts).
         column is in (at 1 m each 2 m cell's four columns alike)
   caps  (level 1) the sloped surfaces of paved ground and bridge decks (caps.py: from data/surface.npz, prep.npz,
         ground.npz and the node's own columns); none without data/surface.npz (data built before it)
+  roof  (1, 2, 4, 8) the pitched roofs' surfaces (caps.py roof_section: from data/surface.npz's roof planes, the
+        buildings and the level-1 nodes' tops over the window's core and 16 m round it)
   spil  per cell of twice the node's size (2 m at level 1, where it is made; 4, 8, 16 m above), apron included: the
         light of lit windows on the street before them, two kinds (spill_map), at the cell's middle (between the 2 m
         cells): it is a soft light, blurred over ~6 m, read bilinear
@@ -151,6 +153,8 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     capf = caps.region_fields(region, D, W, base, TMP) if palette is not None else None
     paved = caps.cap_ids(palette) if capf is not None else None
     cst = caps.Stats()
+    # the roofs' corners (None: no data/surface.npz with roof_z, or caps.ROOFS off)
+    roofs = caps.region_roofs(region, D, W, N, TMP, OUT / "tiles", palette, zones, (win.r0, win.r1, win.c0, win.c1)) if palette is not None else None
     L = light.astype(np.float32)
     S, M = N + 2, N // 2 + 2
     written = {}
@@ -202,6 +206,11 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
                     sec["caps"] = cb
                 else:
                     sec.pop("caps", None)
+                rf = caps.roof_section(roofs, sec, ty * N, tx * N, N, D, W, s, cst) if roofs is not None else b""
+                if rf:
+                    sec["roof"] = rf
+                else:
+                    sec.pop("roof", None)
                 tilefile.write(f, sec)
                 n += 1
         written[s] = n
