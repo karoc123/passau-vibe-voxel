@@ -35,7 +35,7 @@ Bis du antwortest, setze ich jeweils die Empfehlung um.
 11. **Dächer:** Sollen die Dachschrägen gleich nach den Straßen ebenfalls auf die neuen Daten umgestellt werden, oder vorerst nicht? *Die Daten dafür entstehen im selben Neubau. Empfehlung: erst Straßen fertig, dann anhand von Bildern entscheiden.*
 12. **Bauen auf Schrägen:** Wenn ein Spieler eine schräge Straßenzelle nur umfärbt, soll sie schräg bleiben? Ein Abriss oder Krater macht sie ohnehin eckig. *Empfehlung: ja, das ist die einfache Regel.*
 13. **Glättung:** Lieber ruhiger fahren oder näher am vermessenen Gelände? *Empfehlung: zuerst der Standard, später in Minuten änderbar.*
-14. **Drohne:** Die Drohne stößt weiter an die Würfel, nicht an die glatten Flächen (bis etwa 0,9 m Unterschied an Dächern). *Empfehlung: erst einmal so lassen.*
+14. **Drohne:** *Entschieden: Die Drohne stößt vorerst weiter an die Würfel. In einem späteren Schritt bekommt sie die gemeinsamen Höhen (Straßen, Brücken, nach der Dachumstellung auch Dächer).*
 15. **Neubau der ganzen Karte (etwa 1 Stunde):** Wann darf er laufen? Er nimmt auch Lärchen, Schaldinger Pfeiler und Laternen mit.
 
 Weitere Fragen aus dem Fundament-Plan kommen hier dazu.
