@@ -386,6 +386,54 @@ for foot in getattr(_tun, "geoms", [_tun] if _tun else []):
     g[rr_[low], cc_[low]] = street
     n_tun += int(low.sum())
 note("ground over short road tunnels lifted to the street crossing them:", n_tun)
+# the street over a passage: a footway, cycleway or service road under a street carried over it on a short bridge, OSM
+# mapping the passage (tunnel=yes) and the street on it as plain ground (the Donauradweg under the B 8 at the
+# Haissengasse). The terrain model leaves the bridge out and spans its gap from portal to portal: a trench 2-4 m deep
+# across the street, the width of the structure (~14 m), and underpass.py sank its corridor under the trench's floor.
+# Each surface way crossing the passage within PASS_BAND m of it (between its portals) is lifted, across the way's
+# width, to the line between its ground PASS_BAND + 4 m from the passage on either side, where the ground lies 1-6 m
+# under that line and the surface model on it, over the terrain model (its lowest return within -1..+2 m of the street's
+# surface and 0.4 m or more over the terrain: the deck it saw, or a car on it; not a wall's foot beside a way along the
+# passage's band, open to the sky, nor a crown over a path across a wooded hill the passage is bored through, nor a
+# hollow the terrain model sees too). A way whose ground does not climb over the passage -- a path at the passage's own
+# level -- lifts nothing
+PASS_BAND = 8
+import shapely  # noqa: E402
+from ways import way_width as _way_width  # noqa: E402
+_xing = [(t_, l_) for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in ("rail", "light_rail", "tram"))
+         and t_.get("tunnel") in (None, "no") and t_.get("bridge") in (None, "no") and parse_len(t_.get("layer", 0)) >= 0]
+_xtree = STRtree([l_ for _, l_ in _xing])
+_dsm_lo = d4.min((1, 3)) - BASE  # (the surface model's lowest return per cell: the deck, not its cars or railings)
+n_pas = 0
+for _, t_, l_ in osm.lines:
+    hw_ = (t_.get("highway") or "").replace("_link", "")
+    if t_.get("tunnel") != "yes" or not hw_ or l_.length > 150 or hw_ in (
+            "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential"):
+        continue
+    band = l_.buffer(PASS_BAND, cap_style="flat")
+    for k in _xtree.query(band):
+        xt, sl = _xing[k]
+        x_ = sl.intersection(band)
+        if x_.is_empty or x_.length < 3:
+            continue
+        pr = [sl.project(Point(c_)) for g_ in getattr(x_, "geoms", [x_]) for c_ in g_.coords]
+        s0, s1 = min(pr) - 4, max(pr) + 4
+        qa, qb = sl.interpolate(s0), sl.interpolate(s1)
+        if s0 < 0 or s1 > sl.length or not all(0 <= q.y < D and 0 <= q.x < W for q in (qa, qb)):
+            continue
+        ga, gb = int(g[int(qa.y), int(qa.x)]), int(g[int(qb.y), int(qb.x)])
+        corr = sl.buffer(max(_way_width(xt), 2) / 2 + 1, cap_style="flat").intersection(band)
+        rr_, cc_ = cells_of(corr, fallback=False)
+        if not len(rr_):
+            continue
+        s_ = shapely.line_locate_point(sl, shapely.points(cc_ + 0.5, rr_ + 0.5))
+        street = np.round(ga + (gb - ga) * np.clip((s_ - s0) / (s1 - s0), 0, 1)).astype(g.dtype)
+        lo_ = _dsm_lo[rr_, cc_] - (street - 0.5)
+        low = (street - g[rr_, cc_] >= 1) & (street - g[rr_, cc_] <= 6) & (lo_ >= -1) & (lo_ <= 2) \
+            & (_dsm_lo[rr_, cc_] - (dtm[rr_, cc_] - BASE) >= 0.4)
+        g[rr_[low], cc_[low]] = street[low]
+        n_pas += int(low.sum())
+note("ground over passages lifted to the streets crossing them:", n_pas)
 # a carriageway or a railway tagged one layer down but with no tunnel is an open cut (a sunken
 # expressway, a railway cutting): it had been left out as if underground. Where the ground along it
 # stands 2 m or more under the ground 6-24 m to its sides (a dual carriageway's cut is 30 m wide), it is drawn and driven, its layer set to 0

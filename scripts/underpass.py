@@ -82,15 +82,25 @@ def build(vol, g, pal, C, osm, note):
     tun, land, steps = ways(osm)
     floor, wall, rail = C["paving2"], pal("#a9a59c"), pal("#c9c6be")
     roads = [C[k] for k in ("asphalt", "asphalt_l", "mark", "parking", "trambed", "sett", "cycle", "hatch", "road_paving")]
-    # the street over each passage: the highest ground along it; the corridor's walking level 4 m under it
-    level = {}
-    for wid, ns, ln in tun + land:
+    # the street over each passage: the highest ground along it; the corridor's walking level 4 m under it. A landing
+    # whose ground already lies 3 m or more under the street over its passage is no stairwell's foot the LiDAR filled:
+    # it is the open path the passage continues at its own level (a cycleway under a street on a short bridge, the
+    # Donauradweg under the B 8): a plain path, left as it is; sunk 4 m under its own ground it had set the passage's
+    # floor 4 m under the path at its portals, a buried corridor and a pit at each end
+    level, over, at_grade = {}, {}, set()
+    for k, (wid, ns, ln) in enumerate(tun + land):
         rr, cc = _cells(ln.buffer(0.5), D, W)
         if not len(rr):
             continue
         street = int(np.percentile(g[rr, cc], 90))
+        if k >= len(tun) and max(over.get(n, -1) for n in ns) - np.median(g[rr, cc]) >= 3:
+            at_grade.add(wid)
+            continue
         for n in ns:
             level[n] = min(level.get(n, 10 ** 6), street - 4)
+            if k < len(tun):
+                over[n] = max(over.get(n, -1), street)
+    land = [w for w in land if w[0] not in at_grade]
     n_t = n_s = 0
     for wid, ns, ln in steps:  # stairwells first: fill the LiDAR's pit to the street, then cut the stair
         top, bot = (ns[-1], ns[0]) if ns[0] in level else (ns[0], ns[-1])
@@ -138,6 +148,11 @@ def build(vol, g, pal, C, osm, note):
                 continue
             if g[r, c] >= zf + 4 and not opened:  # under the slab
                 vol[zf:zf + 3, r, c] = 0
+            elif g[r, c] == zf + 3 and not opened:
+                # a metre short of the slab: the street over the passage rounded a metre under the level it was
+                # measured at (zf: its 90th percentile less 4). Cut open to the sky it was a slot across the road;
+                # the ceiling comes down a metre there instead (the street's own surface is the slab)
+                vol[zf:zf + 2, r, c] = 0
             else:  # where it opens to a stairwell or a sunken court
                 vol[zf:g[r, c] + 1, r, c] = 0
             vol[zf - 1, r, c] = floor
@@ -145,7 +160,9 @@ def build(vol, g, pal, C, osm, note):
         wr, wc = _cells(ln.buffer(2.0, cap_style=2).difference(ln.buffer(1.5, cap_style=2)), D, W)
         for r, c in zip(wr, wc):  # the corridor's walls, where the ground's soil would show
             if WALK[r, c] < 0:
-                vol[zf:min(zf + 3, g[r, c]), r, c] = np.where(vol[zf:min(zf + 3, g[r, c]), r, c] != 0, wall, 0)
+                top = zf + 2 if g[r, c] == zf + 3 else min(zf + 3, g[r, c])  # (the street's own surface stays)
+                vol[zf:top, r, c] = np.where(vol[zf:top, r, c] != 0, wall, 0)
         IDS.add(wid)
         n_t += 1
-    note(f"underpasses: {n_t} passages, {n_s} stairwells carved")
+    note(f"underpasses: {n_t} passages, {n_s} stairwells carved, "
+         f"{len(at_grade)} landings at the passage's level left as paths")

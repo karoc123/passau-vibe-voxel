@@ -1,0 +1,29 @@
+{
+ "about": "Fixture map for scripts/check.py: 1024 x 1024 m west of the Altstadt (project rows 0-1024, columns 0-1024: EPSG:25832 x 827371-828395, y 5389476-5390500): the B 8 (Regensburger Strasse) along the Danube, the Donauradweg's underpass under it at the Haissengasse (OSM way 133369418, its terrain model spanning the street's short bridge as a trench) and the Obere Donaulaende. All but `about`, `name`, `map` and `regions` as in scripts/map.json (pinned for the project).",
+ "name": "Passau Haissengasse (fixture)",
+ "crs": 25832,
+ "grid": {
+  "x0": 827371,
+  "y0": 5390500
+ },
+ "anchor": {
+  "name": "Dom St. Stephan",
+  "x": 829351,
+  "y": 5389767
+ },
+ "map": {
+  "col0": 0,
+  "row0": 0,
+  "cols": 1024,
+  "rows": 1024
+ },
+ "base": 287,
+ "rivers": {
+  "level": 290.921,
+  "stretches": []
+ },
+ "regions": {
+  "size": 1024,
+  "jobs": 2
+ }
+}
