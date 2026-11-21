@@ -20,7 +20,8 @@ does not know about it rewrote the node. `decodeTile` ignored unknown tags too, 
   `reserved` flags.
 - **Today's tags**: `cnts grnd runs` (all levels, incl. `1f`), `plns bldg flod fols spil` (levels 1, 2, 4, 8), `room`
   (level 1, nodes with rooms; `interiors.py`), `caps` (level 1, nodes with sloped ground; after `brik`; `caps.py` via
-  `tile_fields.py`: docs/adr/0005-surface-caps.md).
+  `tile_fields.py`: docs/adr/0005-surface-caps.md), `roof` (levels 1, 2, 4, 8, nodes with sloped roofs; after `caps`;
+  likewise).
 - **`brik` reserved**: for future sub-metre bricks, a sparse k³ refinement of 1 m cells in which the 1 m voxel stays
   the cell's representative (0001). Only the name and its place in the order are taken. Nothing writes or reads it yet.
 - **Unknown tags are kept**: `write` emits the registry's tags in order, then any other tag sorted by name. The output

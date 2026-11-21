@@ -395,7 +395,7 @@ new files and `surface.npz` may differ).
 2.1 item 3, 2.2, 2.3, 2.5. Gates: fixtures build; `check.py windows tile_fields` (same bytes for every cover);
 `check.py verify` with the new caps checks; `caps.py --report` numbers in the commit message (sizes per kind, road
 share, mismatches, roughness). Tune `N_SMOOTH`/tolerances here — minutes per run, no region rebuild.
-Phase B's writer can land later than A's as long as it lands **before step R**.
+Phase B's writer can land later than A's as long as it lands **before step R**. (It did not: see Phase B's Done.)
 
 ### A3 — mesher reads caps (fixture data shows the new path)
 `meshInto`: `cols.caps && CAPS.use ? capField(...) : legacy`. `emitCaps` generalisation (3.2: caps not at the column
@@ -460,6 +460,52 @@ was never built (`tools/surface-gap.mjs` is the acceptance tool; its baseline re
   a street of dormers): go if no roof looks worse than today and `tiles.tris` at levels 2/4/8 is within +5 %.
   No-go → keep today's roof code, set `caps.ROOFS = False`, rerun `tile_fields` (drops the roof records), done.
 - **B5** delete the roof inference (3.5 phase B list). Gates: all; golden re-recorded once in B1's switch-over.
+
+**Done** (B1-B5, branch `roofs`, 2026-11-22; the real map not rebuilt -- the committed data has no `roof` section and
+draws voxel roofs until `tile_fields.py` runs again, see below). Differences from the plan, code reality and intent
+first:
+
+- **The roof writer did not exist** behind `caps.ROOFS = False` (only the flag and P2's rasters). Written now:
+  `caps.region_roofs`, `roof_fields`, `roof_section`, `encode_roof`/`decode_roof`; `ROOFS = True`.
+- **A section of its own, `roof`** (after `caps`, levels 1 2 4 8), not slot 1 of `caps`: the car, walkers, world and
+  drone read `caps` and must not get roofs (drawn only, 3.2); the caps keep their +-56 rule. Corners as differences
+  (corner 0 from the west neighbour's corner 1, 1 from 0, 2 from 1, 3 from 0): on the map 3.6 instead of 5.6 MB
+  gzipped at level 1. Liveness: the record's run is still the column's last (no "solid down to the lowest corner":
+  nothing stands on a roof's cap).
+- **Eligibility** (2.3 said `top == round(roof_z)`): voxelize.py rebuilds some roofs after `roof_z` (the Dom's: 2 m
+  off; rows a metre off), so a cell takes its plane moved by the median whole-metre offset of itself and its 8
+  neighbours (up to 3 m), and is in if its own offset is within a metre of that. Its voxel may then lie under or over
+  the cap: the mesher hides it. Holes (no plane of its own, 3 or 4 sides in its roof; a fitted roof's cells whose
+  distance to the eaves has no direction) take the neighbours' mean plane where their top fits within a metre.
+  Slopes under 10 degrees (no plane code) are level at their voxels' top, as the client's flat regions were.
+- **The meet** as 2.3 / `slopeBase`, but a corner's span is measured from its own plane, not from the voxels' top.
+- **`tidyPlanes` has no successor**: with the exact planes the Dom's towers and the old town's helms came out clean
+  (the crumpled cones were the fits'); fragments are LoD2's own small planes. Level cells get a record only next to a
+  sloped one of their building (8 neighbours): one surface for the merges (as voxel tops beside the slope, the
+  slope's corners lay along the voxel faces' edges: roof T-junctions in the four Altstadt nodes of 164ca18d: 106 with the inferred roofs; from the caps 124 without these records, 71 with them).
+- **Tops reading the caps cannot be merged by an exact plane** (each corner its plane rounded): `emitTops` merges
+  cells of one plane code whose corners lie within 1/64 m of the plane through the rectangle's corners and that meet
+  without steps, and draws the rectangle through the corners of its outline (the ladder, at the cells' own corners).
+  At level 1 a merge stops at its 16-column section's end also when the node is meshed whole, and the ladder takes the
+  points on a section's edge, so whole and sectioned meshes are the same (`section-check`). Cost: level 1 +0.5 % on
+  the Altstadt fixture (no cut: +0.0 %).
+- **The node-border skirt stays** (3.5 listed it with the inference): its reason now is a neighbouring node not
+  shown (as `capEdges` keeps one), not two estimates; it is sunk 1/64 m.
+- **B2** as planned: no memo, `bids`/`roofsChanged` gone (stream.ts, sections.ts, the tools), an edit re-meshes the
+  sections within `INFLUENCE`; `section-check` (with its roof carves) passes on fixture and map data with roofs.
+- `caps-check.mjs` skips roof-lit tops in its ground-cap planarity test and compares the `roof` sections of every
+  pair of neighbouring nodes at every level; `tile-roundtrip` writes and decodes a `roof` section and tests
+  `roofField`'s liveness.
+
+Numbers. Altstadt fixture (`check.py build`, tile_fields with the writer): every node's voxel and `caps` sections
+byte-identical, only `roof` added (167 of 344 nodes); `check.py windows tile_fields --covers 2x2,1024` and `verify`
+ok. Triangles (tris.mjs, against the inferred roofs on the same voxels): L1 +0.34 %, L2 +3.8 %, L4 +3.4 %, L8 +4.0 %
+(B4: within +5 %). Gzipped nodes: L1 +0.68 MB, L2 +0.23, L4 +0.06, L8 +0.01. The committed map data in a scratch copy,
+`tile_fields.py` rerun (40 windows, 63 s): `roof` +5.6 MB gzipped (L1 +3.9, L2 +1.3, L4 +0.33, L8 +0.05; with the
+ground caps (~10.6 MB) past the 12 MB of P3's acceptance: for the user), triangles L1 +0.8 %, L2 +1.5 %, L4 +1.5 %,
+L8 +0.3 %, 1c +1.6 %. Screenshots (fixture, before/after): the Dom's nave roof one plane instead of terraces, the
+old town's roofs from 1.5 km alike; left: a few small creases where a corner's span kept its own (the Dom's south
+aisle, its towers).
 
 ---
 

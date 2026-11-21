@@ -1,7 +1,8 @@
 # 0005 Sloped surfaces are data: the `caps` section
 
-Status: accepted (phase A: ground and bridge decks; phase B, roofs, not built: `caps.ROOFS = False`). Code:
-`scripts/caps.py` (writer, run by `scripts/tile_fields.py`), `web/src/core/surface.ts` (reader); checks:
+Status: accepted (phase A: ground and bridge decks; phase B: roofs, section `roof`, drawn only). Code:
+`scripts/caps.py` (writer, run by `scripts/tile_fields.py`), `web/src/core/surface.ts` (reader; roofs:
+`web/src/roofs.ts` `roofField`, `slopeBase`); checks:
 `web/tools/caps-check.mjs`, `web/tools/surface-gap.mjs` (baseline `docs/plans/surface-gap-baseline.json`),
 `web/tools/tile-roundtrip.mjs`, `scripts/check.py verify`. Plan: `docs/plans/surface-caps.md`.
 
@@ -39,7 +40,26 @@ considered and rejected (data and meshing cost).
   the cap's lowest corner; else the column is voxels. `effectiveColumns` is unchanged and the L0 `caps` ride beside
   the columns; dropping L2 restores them by itself. Player-made slopes (an L1 op that writes a cap) and bricks are
   reserved, not built.
-- **Distance levels** (2, 4, 8 m): no caps; their voxels as before.
+- **Distance levels** (2, 4, 8 m): no ground caps; their voxels as before. Roof caps, see below.
+- **Roofs (phase B)** are caps in a section of their own, `roof` (after `caps`; levels 1, 2, 4, 8): per column at most
+  one record, on its last run, corners within +-448/64 of its top, written as differences (corner 0 from the west
+  neighbour's corner 1 where that record is the column just before, else from the top; 1 from 0, 2 from 1, 3 from 0:
+  a third smaller gzipped than the caps' layout). The writer (`caps.roof_section`) takes each roof cell's own plane
+  (`surface.npz` `roof_z/gx/gy`, the planes voxelize.py rounded the roof from), meets them per grid point (ridge and
+  hip: the lowest; valley: the highest; else the mean; within one building 2 m, any 1 m; a corner moved more than its
+  span keeps its own: the rule the client's `slopeBase` had) on the map's grid from the rasters and the level-1
+  nodes' tops over the window and 16 m round it, so nodes agree on the columns they share; levels 2, 4, 8 take the
+  level-1 corners at their blocks' corners. Level cells next to a slope get a (flat) record too, so slope and level
+  tops are one surface for the mesher's merges. A separate section rather than slot 1 of `caps`: every ground reader
+  (car, walkers, drone) stays roof-free by construction, and the caps keep their +-56 rule. Liveness: the record's run
+  is still the column's last. The client draws them (`roofs.ts`; the plane codes, `plns`, still light them) and infers
+  nothing: the roof regions' fits, `tidyPlanes`, `tileSeams`, the sectioned meshing's roof memo and `ROOF_REACH` are
+  gone; a roof's slope depends only on its column and those round it, so an edit re-meshes the sections within
+  `INFLUENCE`. Merged tops: cells of one plane code whose corners lie in one plane to 1/64 m (the corners are planes
+  rounded each, never exactly linear), at level 1 within their 16-column section also when the node is meshed whole
+  (so whole and sectioned meshes are the same), drawn through every corner of what lies beside them.
+  **Roofs are drawn only, not collided as slopes**: the voxels stay the roofs for physics (nothing drives on a roof; a
+  walker or the drone on one is rare and the voxel within a metre of the slope), and the separate section keeps it so.
 - **Not capped:** lawns, fields, unpaved tracks and yards, stairs, water, anything with a voxel standing on it. They
   are voxels for every reader, the car included (its step wedges, `car.ts`, still help it up real steps).
 
@@ -55,10 +75,18 @@ considered and rejected (data and meshing cost).
   of the capped nodes +27 % against the same nodes drawn as voxels (`caps-check.mjs --all`).
 - Removed: `ramps.ts`/`core/caps-legacy.ts`, the car's field and Gaussian in `terrain.ts` (`DRIVE`, the car-only
   trimesh, the top voxels only the other bodies met, `NOT_CAR_GROUPS`), `caps-mode.ts`, the `PAL_GROUND` palette bit.
-  Kept: `chamfer.ts` (walls at an angle in plan), the roofs' inference and emitters (phase B would replace the
-  inference), `plns` (lighting), the car's step wedges (real steps, `G_CAR_ONLY`), `SEM.PAVED` (the paved ids, checked
+  Kept: `chamfer.ts` (walls at an angle in plan), the roofs' emitters (`roofs.ts` `emitTops`, `emitEdge`, the eaves'
+  filled steps, the node-border skirt), `plns` (lighting), the car's step wedges (real steps, `G_CAR_ONLY`), `SEM.PAVED` (the paved ids, checked
   against `caps.py` by `tile-roundtrip.mjs`).
 - Data without the section (a build without `data/surface.npz`, or before it) still loads: `caps` is an optional
   section and `meta.json` `world.formatVersion` was not bumped. Its streets are then drawn and driven as voxel stairs.
 - The cap's height is limited to +-56/64 m of its voxel top (`caps.CLAMP`) so the voxel below stays a floor for
-  physics. Roofs, if phase B is done, would be drawn only -- roofs collide as voxels.
+  physics. Roofs are drawn only -- they collide as voxels.
+- Phase B (branch `roofs`, measured on a scratch copy of the committed map data with this `tile_fields`; nothing of the
+  map rebuilt but that step): 1.60 M level-1 roof columns with a sloped record (+79 k level ones beside slopes),
+  level 2/4/8 records 0.41 M / 77 k / 9 k (aprons included); `roof` sections +5.6 MB gzipped over the levels (L1
+  +3.9, L2 +1.3, L4 +0.33, L8 +0.05; 27 MB raw). Triangles against the inferred roofs: L1 +0.8 %, L2 +1.5 %, L4 +1.5 %, L8 +0.3 % (Altstadt
+  fixture, the densest roofs: +0.3 / +3.8 / +3.4 / +4.0 %). T-junctions on roof-lit edges in the four Altstadt nodes of
+  164ca18d: 106 -> 71. Removed: `slopeBase`'s regions and fits, `tidyPlanes`, `tileSeams`, `fit`, `sections.ts`
+  `roofsChanged` and the edit jobs' `bids`, `mesher.worker.ts` `SectionMemo.slopes`, `slopeChange`, `ROOF_REACH`.
+  Data without the section draws its roofs as voxel staircases (rerun `tile_fields.py` to get them).
