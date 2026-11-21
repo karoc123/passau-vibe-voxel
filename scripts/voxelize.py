@@ -72,17 +72,28 @@ def note(*a):
 _TS = [_T0]
 
 
+def own_peak_mb():
+    """this process's own peak RSS (VmHWM: reset by exec, unlike ru_maxrss, which starts at what the parent held when
+    it forked -- 2.9 GB after regions.py cut the OSM)"""
+    import resource
+    try:
+        with open("/proc/self/status") as fh:
+            return next(int(x.split()[1]) for x in fh if x.startswith("VmHWM:")) / 1024
+    except (OSError, StopIteration):
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
 def stage(name):
     """the build's timing (not a note: the report stays as it was): the seconds since the last stage, the RSS now and
     its peak so far, printed and kept in out.json `timing` (regions.py: data/debug/timings.json)"""
-    import resource
     import time
     t = time.time()
     dt, _TS[0] = t - _TS[0], t
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    peak = own_peak_mb()
     with open("/proc/self/statm") as fh:
         now = int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2 ** 20
     RESULT.setdefault("timing", []).append([name, round(dt, 2), round(now), round(peak)])
+    RESULT["peak_mb"] = round(peak)  # (regions.py: stats.json, what the scheduler expects of the next build)
     print(f"[stage] {name}: {dt:.1f} s, RSS {now:.0f} MB, peak {peak:.0f} MB", flush=True)
 
 
@@ -740,7 +751,8 @@ for oid, t, line in osm.lines:
 note(f"roads taking their square's surface: {n_inherit}")
 if FEATURES_MODE:  # the feature pass: the large features' counts over the core, and done (regions.feature_pass)
     import region_inputs
-    json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process()), open(RDIR / "fstats.json", "w"))
+    json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process(), peak_mb=round(own_peak_mb())),
+              open(RDIR / "fstats.json", "w"))
     print("done")
     raise SystemExit(0)
 burn(gcol, foot_shapes + cycle_shapes)
@@ -3903,7 +3915,10 @@ def _owned(oid):
 RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in tunnels.IDS if _owned(o)),
               walk_ids=sorted(o for o in underpass.IDS if _owned(o)))
 # debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
-topz = Hm - 1 - np.argmax(vol[::-1] != 0, axis=0)
+# (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
+topz = np.full(vol.shape[1:], Hm - 1, np.int64)
+for _z in range(Hm):
+    topz[vol[_z] != 0] = _z
 topv = np.take_along_axis(vol, topz[None], 0)[0]
 palarr = np.array([e[:3] for e in pal.entries], np.uint8)
 CORE_OUT["topdown"] = np.clip(palarr[topv] * np.clip(0.55 + topz / 120, 0, 1.2)[..., None], 0, 255).astype(np.uint8)

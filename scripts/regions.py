@@ -122,6 +122,16 @@ def estimate(w, fpass):
         return 1.1 * (MEM_FPASS if fpass else MEM_PER_CELL * cells), cells / 1e6 * (5 if fpass else 60)
 
 
+def own_peak(result, ru):
+    """a region's process's own peak RSS in MB: as it recorded it (voxelize.own_peak_mb, in out.json / fstats.json),
+    else its ru_maxrss -- which starts at the driver's size when it forked (2.9 GB after cut_osm) and so overstated
+    every small region and feature pass"""
+    try:
+        return int(json.load(open(result))["peak_mb"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return round(ru.ru_maxrss / 1024)
+
+
 def build(ws, jobs, fpass=False, budget=None):
     """voxelize.py over each region in a process of its own, up to `jobs` at once; per region (wall s, peak RSS MB).
     fpass: the feature pass instead (VOXEL_FEATURES: over the region's core alone, the counts of its large features
@@ -176,7 +186,7 @@ def build(ws, jobs, fpass=False, budget=None):
         if status != 0:
             print(Path(log.name).read_text()[-3000:])
             raise SystemExit(f"region {w} failed")
-        stats[w] = (round(time.time() - t0, 1), round(ru.ru_maxrss / 1024))
+        stats[w] = (round(time.time() - t0, 1), own_peak(out / ("fstats.json" if fpass else "out.json"), ru))
         json.dump(dict(wall=stats[w][0], peak_mb=stats[w][1]), open(out / "stats.json", "w"))  # (what the next build expects)
         print(f"region {w}{' (feature pass)' if fpass else ''}: {stats[w][0]} s, peak {stats[w][1]} MB", flush=True)
     return stats
