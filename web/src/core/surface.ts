@@ -35,10 +35,6 @@ export interface CapField {
 
 export const NONE = -1;
 
-// the switch between the caps section and the legacy inference where a node has caps (default: caps; the viewer's
-// ?caps=0, the node tools' CAPS=0 force the legacy path, for measuring the one against the other)
-export const CAPS = { use: true };
-
 export function emptyCapField(S: number, under: Uint8Array, caps: boolean): CapField {
   return { S, z: new Uint16Array(S * S * 2), q: new Int32Array(S * S * 8), under, top: under, low: new Int32Array((S + 1) * (S + 1)).fill(NONE), pin: null, any: false, caps };
 }

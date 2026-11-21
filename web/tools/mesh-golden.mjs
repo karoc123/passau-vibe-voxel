@@ -8,6 +8,7 @@
 // and hashes (sha256) every buffer of every mesh. usage (in web/):
 //   node tools/mesh-golden.mjs write <file>   records the hashes
 //   node tools/mesh-golden.mjs check <file>   meshes again and compares; exit code 1 on any difference
+// (VOXEL_DATA, VOXEL_AT=tx_ty: other data, another place: tools/data-dir.mjs)
 // Nothing else is written.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,11 +16,12 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
+import { dataDir } from './data-dir.mjs';
 
 const [mode, out] = process.argv.slice(2);
 if (!['write', 'check'].includes(mode) || !out) { console.log('usage: node tools/mesh-golden.mjs write|check <file>'); process.exit(2); }
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dir = path.join(web, 'public/data');
+const dir = dataDir;
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
 const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
@@ -56,7 +58,7 @@ function hash(m) {
 
 const rec = {};
 const t0 = performance.now();
-const [mx, my] = [63, 21];
+const [mx, my] = (process.env.VOXEL_AT ?? '63_21').split('_').map(Number); // (VOXEL_AT: another place, tools/data-dir.mjs)
 for (const [tx, ty] of round(1, mx, my, 20)) {
   const k = `${tx}_${ty}`;
   const a = await mesher.meshJob(req.tileRequest(ctx, 1, tx, ty, false, file, true), load);

@@ -4,6 +4,7 @@
 import type { MeshRequest } from './mesher.worker';
 import { PAL_GROUND, PAL_ROOF, PAL_WALL, PAL_WATER } from './chamfer';
 import { RULES, semanticTable } from './core/semantics';
+import { CAPS } from './caps-mode';
 
 export interface TileContext {
   N: number;
@@ -37,7 +38,7 @@ export const tileOrigin = (c: TileContext, s: number, tx: number, ty: number) =>
 export function tileRequest(c: TileContext, s: number, tx: number, ty: number, foliage: boolean, file: (k: string) => string,
   keep = false, dataOnly = false): MeshRequest {
   const [x0, y0] = tileOrigin(c, s, tx, ty);
-  const base = { N: c.N, s, x0, y0 };
+  const base = { N: c.N, s, x0, y0, ...(CAPS.use ? {} : { noCaps: true }) };
   if (foliage) {
     // ... and the base tile meshed again without what the grass covers (stream.ts coverBase)
     return { ...base, key: `f/${tx}_${ty}`, url: file(`1f/${tx}_${ty}`), under: file(`1/${tx}_${ty}`), keep: false, dataOnly: false, roof: null,

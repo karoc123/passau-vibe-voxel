@@ -15,14 +15,16 @@
 // unit cell, by the triangle's plane: a merged one is a ladder of quads through points along its sides that depend on
 // where the merge is cut.)
 // Nothing is written. usage (in web/): node tools/section-check.mjs [tx_ty, default 63_21] [-v]; exit code 1 on a mismatch
+// (VOXEL_DATA: other data, tools/data-dir.mjs)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
+import { dataDir } from './data-dir.mjs';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dir = path.join(web, 'public/data'), verbose = process.argv.includes('-v');
+const dir = dataDir, verbose = process.argv.includes('-v');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
 const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
@@ -132,7 +134,7 @@ function compare(name, whole, secs) {
 }
 const put = (map, sec) => { if (sec) sec.ids.forEach((k, i) => map.set(k, sec.meshes[i])); return map; };
 
-const copy = (c) => ({ counts: c.counts.slice(), runs: c.runs.slice(), ground: c.ground.slice(), planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null });
+const copy = (c) => ({ counts: c.counts.slice(), runs: c.runs.slice(), ground: c.ground.slice(), planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, caps: c.caps ?? null });
 const baseReq = (tx, ty, cols, sections) => ({ ...req.tileRequest(ctx, 1, tx, ty, false, file, false), url: undefined, cols, sections });
 const folReq = (tx, ty, fol, base, sections) => ({ ...req.tileRequest(ctx, 1, tx, ty, true, file), url: undefined, cols: fol, under: base, sections });
 const topOf = (d, c) => { let k = 0; for (let i = 0; i < c; i++) k += d.counts[i]; const n = d.counts[c]; return n ? d.runs[(k + n - 1) * 3] + d.runs[(k + n - 1) * 3 + 1] : 0; };
@@ -172,7 +174,7 @@ for (let pass = 0; pass < 2; pass++) {
     for (const [cx, cy, cz] of sites(d)) {
       const e = new CO.EditableNode(N, cur, tx, ty);
       e.carveSphere([cx, cy, cz], 3);
-      const enc = { ...e.encode(), planes: d.planes, bld: d.bld };
+      const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps };
       let fenc = null;
       if (curF) { const f = new CO.EditableNode(N, curF, tx, ty); f.carveSphere([cx, cy, cz], 3); fenc = { ...f.encode(), ground: enc.ground }; }
       const gx = tx * N + cx, gy = ty * N + cy, hot = SE.hotBox(N, tx, ty, [gx - 3, gy - 3, gx + 4, gy + 4]);
