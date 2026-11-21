@@ -5,11 +5,17 @@ import { liveEdits } from '../core/live-edits';
 import { paletteMask, RULES, semanticTable } from '../core/semantics';
 import { TileCache } from '../core/tile-cache';
 import { fetchGzip } from '../fetch';
+import { capField, surfaceAt, type CapField } from '../core/surface';
+import { CAPS } from '../caps-mode';
 
 const RADIUS = 0.35;
 const CONCURRENT_LOADS = 4;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
-type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs };
+// caps: the node's sloped surfaces (core/surface.ts), what surface() reads -- the sweep keeps the voxels (a cap lies
+// within 0.875 m of its voxel's top; the drone is no ground vehicle)
+type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
+const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
+  ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: CAPS.use && v.base.caps ? capField(N, v.base) : null });
 export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
 // Normal as a signed one-based axis index (x, y, z).
 type Contact = { fraction: number; axis: number };
@@ -92,7 +98,7 @@ export class VoxelCollision {
     const key = tx + tz * this.nx;
     if (!this.tiles.delete(key) && !this.wanted.includes(key)) return;
     const v = this.cache.view(tx, tz);
-    if (v) this.tiles.set(key, { ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage) });
+    if (v) this.tiles.set(key, collisionTile(this.tileSide, v));
   }
 
   prefetch(p: Vector3, v: Vector3) {
@@ -125,7 +131,10 @@ export class VoxelCollision {
         if (!this.passable[data[j + 2]]) top = Math.max(top, data[j] + data[j + 1]);
       }
     }
-    return { ground: tile.ground[i], top };
+    // (the caps of the ground's run and of the run the drone settles on: as drawn)
+    if (!tile.caps) return { ground: tile.ground[i], top };
+    const fx = x - ix, fz = z - iz;
+    return { ground: surfaceAt(tile.caps, i, tile.ground[i], fx, fz), top: surfaceAt(tile.caps, i, top, fx, fz) };
   }
 
   // The drone's cube from p moved by d: how far it gets (fraction of d) and what it hits first
@@ -213,7 +222,7 @@ export class VoxelCollision {
         const wanted = this.wanted.includes(key);
         if (!wanted || this.held.has(key)) this.cache.release(tx, tz); else this.held.add(key);
         if (!wanted) return;
-        this.tiles.set(key, { ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage) });
+        this.tiles.set(key, collisionTile(this.tileSide, v));
         this.retryAt.delete(key);
       })
       .catch(() => this.retryAt.set(key, performance.now() + 1500))
