@@ -55,9 +55,10 @@ const at = (x, y) => { const n = area.get(`${Math.floor(x / N)}_${Math.floor(y /
 const runsOf = (cols, off, c) => Array.from(cols.runs.subarray(off[c] * 3, off[c + 1] * 3));
 const topOf = (r) => (r.length ? r[r.length - 3] + r[r.length - 2] : 0);
 
-// a wall colour for the box; paved ground (the car's ramps, physics/rapier/terrain.ts terrainPalette) for the road
-// (the physics' module only to pick the site: the columns are loaded and edited without it)
-const T = await imp('src/physics/rapier/terrain.ts'), pal = T.terrainPalette(meta.palette);
+// a wall colour for the box; paved ground (core/semantics.ts RULES.paved) for the road, solid (terrainPalette) for the
+// rest (the physics' module only to pick the site: the columns are loaded and edited without it)
+const T = await imp('src/physics/rapier/terrain.ts'), pal = T.terrainPalette(meta.palette), SEMx = await imp('src/core/semantics.ts');
+const pavedMask = SEMx.paletteMask(SEMx.semanticTable(meta.palette), SEMx.RULES.paved);
 const MAT_WALL = 1, wallId = meta.palette.findIndex((p) => p[3] === MAT_WALL);
 // a flat stretch: every column within r of (x, y) has its ground at g, nothing over it (base or foliage above g),
 // its top voxel accepted by `top`
@@ -71,7 +72,7 @@ function flatAt(x, y, r, g, top) {
   }
   return true;
 }
-const paved = (id) => pal.paved[id] !== 0;
+const paved = (id) => pavedMask[id] !== 0;
 const unpaved = (id) => pal.solid[id] === 1 && !paved(id);
 // the site of each kind nearest the Dom, in the middle node, at least 12 m from its edges
 function site(r, top, avoid = null) {

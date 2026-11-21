@@ -1,8 +1,5 @@
 import type * as THREE from 'three';
-import { PAL_GROUND } from './chamfer';
-import { rampField } from './core/caps-legacy';
 import { capField, surfaceAt, type CapField } from './core/surface';
-import { CAPS } from './caps-mode';
 import type { ColumnData, Meta } from './types';
 import { paletteMask, RULES, semanticTable } from './core/semantics';
 
@@ -25,26 +22,24 @@ export class World {
   private cacheVersion = -1;
   // per palette id: 1 where topSolid does not stand on it (leaves; ids past the palette: 0)
   private readonly leaf: Uint8Array;
-  private readonly paved: Uint8Array;
   // per 1 m tile: its caps (core/surface.ts), as the mesher draws them; null: none
-  private readonly ramps = new WeakMap<ColumnData, CapField | null>();
+  private readonly capFields = new WeakMap<ColumnData, CapField | null>();
 
   constructor(private readonly src: ColumnSource, meta: Meta) {
     this.W = meta.W;
     this.D = meta.D;
     const t = semanticTable(meta.palette);
     this.leaf = paletteMask(t, (f) => !RULES.standOnForWalker(f), 1, 4096);
-    this.paved = paletteMask(t, RULES.paved, PAL_GROUND);
   }
 
-  // node n's caps (core/surface.ts: its caps section, else the legacy inference), null: none or not level 1
-  private caps(n: ColumnData) {
+  // node n's caps (core/surface.ts: its caps section, live in its columns), null: none (its voxels' tops) or not level 1
+  private caps(n: ColumnData): CapField | null {
     if (n.s !== 1) return null;
-    let f = this.ramps.get(n);
+    let f = this.capFields.get(n);
     if (f === undefined) {
-      f = (CAPS.use && n.caps && capField(this.src.N, n, n.off)) || rampField(this.src.N, n.counts, n.off, n.runs, n.ground, this.paved);
-      if (!f.any) f = null;
-      this.ramps.set(n, f);
+      f = capField(this.src.N, n, n.off);
+      if (f && !f.any) f = null;
+      this.capFields.set(n, f);
     }
     return f;
   }

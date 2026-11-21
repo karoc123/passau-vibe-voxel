@@ -2,7 +2,7 @@
 // public/data/tiles on disk). A car-sized kinematic body moves along a line at a speed, 60 frames a second; each frame
 // the terrain is updated (builds within its budget) and the world stepped. Prints per-frame build and step times.
 // usage: node tools/rapier-car-bench.mjs [--budget MS] [--speed KMH] [--chunk-lead] [--no-couple] [x0 z0 x1 z1]
-// (VOXEL_DATA: other data, tools/data-dir.mjs; CAPS=0: the legacy surface where the data has caps)
+// (VOXEL_DATA: other data, tools/data-dir.mjs)
 import { runnerImport } from 'vite';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';

@@ -4,8 +4,8 @@
 //      corners, exactly the cap's corner (core/surface.ts cornerQ, 1/64 m, bit for bit);
 //   2. neighbouring nodes hold the same caps for the columns they share (a node's apron and its neighbour's own
 //      columns): their meshes meet at the border without a crack;
-//   3. the triangles of each node with caps, against the same node meshed on the legacy path (MeshRequest noCaps:
-//      core/caps-legacy.ts), and the time.
+//   3. the triangles of each node with caps, against the same node meshed without its caps section (plain voxels, as
+//      a node without caps is drawn), and the time.
 // usage (in web/): node tools/caps-check.mjs [tx_ty ...] [--all] [-v]; default: up to 20 nodes with caps round the
 // map's middle; exit code 1 on a mismatch
 import fs from 'node:fs';
@@ -69,7 +69,7 @@ function tops(m, f, x0, y0, what, seen) {
   return checked;
 }
 
-let tCaps = 0, tLegacy = 0, msCaps = 0, msLegacy = 0, ncols = 0, ncheck = 0;
+let tCaps = 0, tVox = 0, msCaps = 0, msVox = 0, ncols = 0, ncheck = 0;
 const rows = [];
 for (const [tx, ty] of nodes) {
   const d = dec(tx, ty), f = field(d);
@@ -80,9 +80,9 @@ for (const [tx, ty] of nodes) {
   const a = (await mesher.meshJob(r, load)).out;
   msCaps += performance.now() - t0;
   t0 = performance.now();
-  const b = (await mesher.meshJob({ ...r, noCaps: true }, load)).out;
-  msLegacy += performance.now() - t0;
-  tCaps += a.quads * 2; tLegacy += b.quads * 2;
+  const b = (await mesher.meshJob({ ...r, url: undefined, cols: { ...d, caps: null } }, load)).out;
+  msVox += performance.now() - t0;
+  tCaps += a.quads * 2; tVox += b.quads * 2;
   const [x0, y0] = req.tileOrigin(ctx, 1, tx, ty);
   const seen = new Set();
   ncheck += tops(a, f, x0, y0, `${tx}_${ty}`, seen);
@@ -106,7 +106,7 @@ for (const [tx, ty] of nodes) {
     }
   }
 }
-if (verbose) { console.log('node     legacy     caps   more'); for (const r of rows) console.log(r); }
-console.log(`caps-check: ${nodes.length} nodes, ${ncols} capped columns, ${ncheck} capped tops checked bit for bit; triangles ${tLegacy} legacy -> ${tCaps} caps (${((tCaps / tLegacy - 1) * 100).toFixed(1)} %), meshing ${(msLegacy / nodes.length).toFixed(0)} -> ${(msCaps / nodes.length).toFixed(0)} ms a node`);
+if (verbose) { console.log('node     voxels     caps   more'); for (const r of rows) console.log(r); }
+console.log(`caps-check: ${nodes.length} nodes, ${ncols} capped columns, ${ncheck} capped tops checked bit for bit; triangles ${tVox} voxels -> ${tCaps} caps (${((tCaps / tVox - 1) * 100).toFixed(1)} %), meshing ${(msVox / nodes.length).toFixed(0)} -> ${(msCaps / nodes.length).toFixed(0)} ms a node`);
 console.log(bad.length ? `FAIL caps-check: ${bad.length} mismatches` : 'PASS caps-check');
 process.exit(bad.length ? 1 : 0);

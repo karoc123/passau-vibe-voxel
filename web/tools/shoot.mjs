@@ -38,7 +38,7 @@ export const SHOTS = {
   dom: 'view=dom',
   eck: 'view=eck',
   street: STREET,
-  // the Schanzlbrücke's deck (ramped as a street, ramps.ts): along it from its south end, and from the side
+  // the Schanzlbrücke's deck (capped as a street, core/surface.ts): along it from its south end, and from the side
   'schanzl-deck': 'cam=1210,23,505,1232,19,575',
   'schanzl-side': 'cam=1190,26,548,1226,18,562',
   // the B 12's tube under the Georgsberg (scripts/tunnels.py): its south-east portal, inside, the north-west portal

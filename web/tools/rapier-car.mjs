@@ -21,14 +21,13 @@ const sc = await load('physics/rapier/scenarios.ts');
 const ds = await load('physics/rapier/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
-// --set key=value,...: the ride's numbers (car.ts RIDE) and the car's surface (terrain.ts DRIVE) changed for this run
+// --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run
 const setAt = args.indexOf('--set');
 if (setAt >= 0) {
   for (const kv of args[setAt + 1].split(',')) {
     const [k, v] = kv.split('=');
-    const o = k in sc.RIDE ? sc.RIDE : k in sc.DRIVE ? sc.DRIVE : null;
-    if (!o) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)}) or DRIVE (${Object.keys(sc.DRIVE)})`);
-    o[k] = +v;
+    if (!(k in sc.RIDE)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)})`);
+    sc.RIDE[k] = +v;
   }
 }
 
@@ -95,7 +94,7 @@ if (real >= 0) {
 // The real city (public/data on disk): across the Schanzlbrücke at 50 km/h, south to north along its carriageway (traffic
 // roads 186, 570, 149, 660, 111), off the street onto the deck over the Danube and back onto the street. The deck is a
 // slab over the river in whole metres (18 -> 19 -> 18 -> 17 m along it): a voxel staircase the car bumped over, unless
-// its top is ramped as a street's (ramps.ts). Judged by the body's vertical acceleration (max |dvy/dt|), the pitch
+// its top is capped as a street's (core/surface.ts). Judged by the body's vertical acceleration (max |dvy/dt|), the pitch
 // rate's peak and the share of samples with a wheel off the deck. Skipped when the data are not there. The points are in
 // the project grid (map cells + meta.origin), so the scenario holds whatever the map's extent.
 async function schanzlBridge() {

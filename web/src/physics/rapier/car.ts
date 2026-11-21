@@ -1,8 +1,7 @@
 // Rapier car: a drivable car on Rapier's DynamicRayCastVehicleController (raycast wheels on a chassis), with what the
 // voxel city needs on top of it (each switchable in CarTuning, for the scenarios in scenarios.ts):
-// - ground: the car drives on its own surface where the ground goes up or down in steps of a metre (terrain.ts
-//   DRIVE: the ground's 1 m terraces as ramps, paved or not, and smoother than the ramps as drawn); its wheels'
-//   rays see that, not the voxels' tops there.
+// - ground: the car drives on the surface drawn, as every body does (terrain.ts: the voxels, and the caps of sloped
+//   streets and bridge decks, core/surface.ts); its wheels' rays see the caps, not their voxels' tops.
 // - steps: a riser of up to STEP_MAX that is not the ground's (a platform, a low wall) ahead of the moving car, up or
 //   down, gets an invisible wedge on its low side, laid before the front wheels reach its foot (prisms on a smoothstep
 //   profile, as wide as the car's crossing needs, that only the car collides with and its wheels ride on), so it
@@ -210,7 +209,7 @@ export class RapierCar {
       // (sitting on the water's top its centre is ~0.9 m over it)
       if (w >= 0 && p.y < w + 1.2) this.status = 'water';
       // pushed into the ground (the colliders are a shell of voxels: a hard push can go through it): back on top
-      const top = this.terrain.solidTop(p.x + o.x, p.y, p.z + o.z, true);
+      const top = this.terrain.solidTop(p.x + o.x, p.y, p.z + o.z);
       if (top >= 0) {
         b.setTranslation({ x: p.x, y: top + 1, z: p.z }, true);
         b.setLinvel({ x: v.x, y: Math.max(0, v.y), z: v.z }, true);
@@ -279,11 +278,11 @@ export class RapierCar {
     if (nx * dx + nz * dz > -0.2) return false; // grazing it, not into it
     const o = terrain.origin, w = hit.witness1;
     const wx = w.x + o.x, wz = w.z + o.z;
-    // (just either side of the riser's plane on the grid: a smooth ramp (ramps.ts) has no rise there, a riser all of it)
+    // (just either side of the riser's plane on the grid: a cap (core/surface.ts) has no rise there, a riser all of it)
     const plane = ax ? Math.round(wx) : Math.round(wz);
     const gx = ax ? plane : wx, gz = ax ? wz : plane;
-    const below = terrain.groundAt(gx + nx * 0.05, gz + nz * 0.05, low + STEP_MAX + 0.05, true);
-    const top = below === null ? null : terrain.groundAt(gx - nx * 0.05, gz - nz * 0.05, below + STEP_MAX + 0.05, true);
+    const below = terrain.groundAt(gx + nx * 0.05, gz + nz * 0.05, low + STEP_MAX + 0.05);
+    const top = below === null ? null : terrain.groundAt(gx - nx * 0.05, gz - nz * 0.05, below + STEP_MAX + 0.05);
     if (below === null || top === null) return false;
     // (the riser's foot: the ground the lowest wheel is on, or a step above it under the belly)
     if (below < low - 0.35 || below > low + STEP_MAX) return false;
@@ -295,12 +294,12 @@ export class RapierCar {
     const len = this.half.z + reach, sx = -dz, sz = dx, wx = this.build.wheels[0].x;
     for (const side of [0, -wx, wx]) {
       let x = p.x + o.x + sx * side, z = p.z + o.z + sz * side;
-      let g = terrain.groundAt(x, z, low + 0.4, true);
+      let g = terrain.groundAt(x, z, low + 0.4);
       if (g === null || Math.abs(g - low) > 0.4) continue;
       for (let s = 0; s < len; s += 0.2) {
         const x1 = x + dx * 0.2, z1 = z + dz * 0.2;
         const cxd = Math.floor(x1) !== Math.floor(x), czd = Math.floor(z1) !== Math.floor(z);
-        const g1 = terrain.groundAt(x1, z1, g + 0.4, true);
+        const g1 = terrain.groundAt(x1, z1, g + 0.4);
         if (g1 === null) break;
         if ((cxd || czd) && g - g1 >= STEP_MIN) {
           if (g - g1 > STEP_MAX) break; // a drop: no wedge
@@ -308,7 +307,7 @@ export class RapierCar {
           const ax = cxd && (!czd || Math.abs(dx) > Math.abs(dz));
           const plane = ax ? Math.max(Math.floor(x), Math.floor(x1)) : Math.max(Math.floor(z), Math.floor(z1));
           const sgn = ax ? Math.sign(dx) : Math.sign(dz);
-          const below = terrain.groundAt(ax ? plane + sgn * 0.05 : x1, ax ? z1 : plane + sgn * 0.05, g + 0.05, true);
+          const below = terrain.groundAt(ax ? plane + sgn * 0.05 : x1, ax ? z1 : plane + sgn * 0.05, g + 0.05);
           if (below === null) break;
           return this.wedge(ax, plane, sgn, below, g, p, dx, dz);
         }
@@ -336,7 +335,7 @@ export class RapierCar {
     const same = (k: number) => {
       const lx = ax ? plane + nx * 0.05 : k + 0.5, lz = ax ? k + 0.5 : plane + nz * 0.05;
       const ux = ax ? plane - nx * 0.05 : k + 0.5, uz = ax ? k + 0.5 : plane - nz * 0.05;
-      const b = terrain.groundAt(lx, lz, below + 0.3, true), u = terrain.groundAt(ux, uz, top + 0.05, true);
+      const b = terrain.groundAt(lx, lz, below + 0.3), u = terrain.groundAt(ux, uz, top + 0.05);
       return b !== null && u !== null && Math.abs(b - below) < 0.15 && Math.abs(u - top) < 0.15
         && terrain.clear(ax ? plane - nx * 0.5 : k + 0.5, ax ? k + 0.5 : plane - nz * 0.5, top, 2);
     };

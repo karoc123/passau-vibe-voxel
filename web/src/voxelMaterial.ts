@@ -438,7 +438,7 @@ const FRAG_PARS = `
 
 // What the depth pre-pass (makeVoxelPrepassMaterial) has to compute just as SURFACE does: a fragment's cell, its hash,
 // and whether a fountain's jet is off there now (with wa, lvl and vert as in SURFACE)
-// (a ramp's top, ramps.ts, rises and falls up to a metre about the ground's: its cell is the ground's top voxel, so that
+// (a cap's top, core/surface.ts, rises and falls up to a metre about the ground's: its cell is the ground's top voxel, so that
 // what is hashed by the cell doesn't change along its contours)
 // (in the project grid's coordinates: the map's cell + uOrg)
 const CELL = '(vSlant > 0.5 ? floor(vec3(vVox.x - cos(wa), vVox.y + 1e-3, vVox.z - sin(wa))) : vN.y > 0.5 && abs(vVox.y - floor(vGz + 0.5)) < 0.999 '

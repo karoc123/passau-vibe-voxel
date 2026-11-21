@@ -4,11 +4,10 @@
 // drone's surface (nav/voxel-collision.ts) through the accessors below -- nobody else reads the corners -- so what is
 // drawn is what is stood and driven on. docs/plans/surface-caps.md.
 //
-// Two sources fill the same field:
-// - the node's `caps` section (scripts/caps.py, written by tile_fields.py): capField below, which decodes it and keeps
-//   only the records that are live in the columns given (an edit kills a cap by itself, nothing is recomputed);
-// - the legacy inference from the voxels (core/caps-legacy.ts rampField: the mesher's ramps of paved ground, the car's
-//   own surface), for data without the section. To be deleted once the data has caps everywhere.
+// The node's `caps` section (scripts/caps.py, written by tile_fields.py) fills it: capField below decodes it and keeps
+// only the records that are live in the columns given (an edit kills a cap by itself, nothing is recomputed). A node
+// without the section (levels 2, 4, 8; a level-1 node with no sloped ground), or a column without a live record, is
+// plain voxels for every reader: drawn, walked, driven and flown on as its voxels' tops (docs/adr/0005-surface-caps.md).
 // Per column at most two caps: slot 0 on the run ending at the ground (a street, a road under a bridge), slot 1 on the
 // column's last run above the ground (a bridge's deck). Heights in 1/64 of a cell (m at level 1) above the volume's
 // floor, as QuadBuffer.vertexQ carries them: drawn and collided numbers are the same integers.
@@ -26,27 +25,19 @@ export interface CapField {
   // per grid point ((S + 1)^2; point (X, Y) the corner before column (X, Y)): the lowest corner of a cap there that is
   // off its run's top, else NONE (how far a wall's or a trunk's face goes down to meet the surface beside it)
   low: Int32Array;
-  // legacy only (ramps.ts' grid of free points, NONE: pinned): which edges between two paved columns are filled
-  pin: Int32Array | null;
   any: boolean;
-  // from the caps section (else: legacy)
-  caps: boolean;
 }
 
 export const NONE = -1;
 
-export function emptyCapField(S: number, under: Uint8Array, caps: boolean): CapField {
-  return { S, z: new Uint16Array(S * S * 2), q: new Int32Array(S * S * 8), under, top: under, low: new Int32Array((S + 1) * (S + 1)).fill(NONE), pin: null, any: false, caps };
-}
+const emptyCapField = (S: number, under: Uint8Array): CapField =>
+  ({ S, z: new Uint16Array(S * S * 2), q: new Int32Array(S * S * 8), under, top: under, low: new Int32Array((S + 1) * (S + 1)).fill(NONE), any: false });
 
 // the slot of column c's cap on the run ending at ztop, -1: none
 export function capSlot(f: CapField, c: number, ztop: number): -1 | 0 | 1 {
   if (ztop <= 0) return -1;
   return f.z[2 * c] === ztop ? 0 : f.z[2 * c + 1] === ztop ? 1 : -1;
 }
-
-// any cap of column c: its slot (the top one first), -1: none
-export const capOf = (f: CapField, c: number): -1 | 0 | 1 => (f.z[2 * c + 1] ? 1 : f.z[2 * c] ? 0 : -1);
 
 // corner k of column c's cap in slot (1/64 cell)
 export const cornerQ = (f: CapField, c: number, slot: number, k: number) => f.q[8 * c + 4 * slot + k];
@@ -124,7 +115,7 @@ export function capField(N: number, cols: { counts: Uint16Array; runs: Uint16Arr
   if (!cols.caps) return null;
   const S = N + 2, SS = S * S, V = S + 1, { counts, runs, ground } = cols;
   if (!off) { off = new Uint32Array(SS + 1); for (let i = 0; i < SS; i++) off[i + 1] = off[i] + counts[i]; }
-  const f = emptyCapField(S, ground, true), recs = decodeCaps(cols.caps);
+  const f = emptyCapField(S, ground), recs = decodeCaps(cols.caps);
   let top: Uint8Array | null = null;
   for (let r = 0; r < recs.length; r += 6) {
     const c = recs[r], z = recs[r + 1];

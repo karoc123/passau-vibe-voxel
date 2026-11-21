@@ -4,11 +4,11 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { MAT } from '../../core/materials';
 import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
-import { DRIVE, RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
+import { RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
 import { encodeCaps } from '../../core/surface';
 
-// (the ride's and the car surface's numbers, for tools/rapier-car.mjs --set: the same module instances as the scenarios')
-export { DRIVE, RIDE };
+// (the ride's numbers, for tools/rapier-car.mjs --set: the same module instance as the scenarios')
+export { RIDE };
 
 const N = 64;
 // a voxel staircase g = b + clamp(floor((z - z0) / p), 0, n) as the road it rounds: through the steps' middles
@@ -17,7 +17,7 @@ export const stairs = (z: number, b: number, z0: number, p: number, n: number) =
 // the tuning the scenarios' cars get (tools/rapier-car.mjs --spike: the spike's car)
 export const scenarioTuning: { tuning: CarTuning } = { tuning: TUNED };
 const STEP = 1 / 60;
-// fixture palette: 0 earth (solid, not paved), 1 street (paved: ramps), 2 wall, 3 water
+// fixture palette: 0 earth (solid, not paved), 1 street (paved: capped where the scenario gives a surface), 2 wall, 3 water
 const PALETTE: [number, number, number, number][] = [[120, 100, 80, MAT.SOIL], [90, 90, 90, MAT.MARK], [200, 190, 180, MAT.WALL], [40, 80, 120, MAT.WATER]];
 export const EARTH = 0, STREET = 1, WALL = 2, WATER = 3;
 
@@ -30,7 +30,7 @@ export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; 
 // surf: the scenario's analytic road surface (m) at grid point (x, z) -- its caps, as scripts/caps.py would write them:
 // on each STREET column's ground run with nothing on it, and on a STREET run topping a column over its ground (a deck),
 // the four corners at surf, held within 56/64 m of the run's top (core/surface.ts). Every tile gets a caps section
-// (empty without surf: a scenario of real steps, which stay voxels); CAPS=0 (caps-mode.ts) ignores them.
+// (empty without surf: a scenario of real steps, which stay voxels).
 export function synthMap(tiles: number, col: (x: number, z: number) => Col, surf?: (x: number, z: number) => number): ScenarioMap {
   const meta = { W: tiles * N, D: tiles * N, tiles: { N }, palette: PALETTE };
   const pal = terrainPalette(PALETTE), S = N + 2;
@@ -192,8 +192,7 @@ export function mapColumns(map: ScenarioMap) {
 // Where to start a car on a path (world x, z points ~1 m apart, as densify gives; y: the road's height at each point,
 // traffic.json's, or one height for all): not at its first point (a road's end is a junction's corner, often in a
 // building's edge where the data's centreline cuts it) but `ahead` m in (default 5) or further, at the first point
-// where the car's body (its box over the ground there, heading along the path) is clear of solid voxels (a car's ramp's
-// top voxel, which it does not see, not counted). And how close the path runs to walls: `walls` points with a solid
+// where the car's body (its box over the ground there, heading along the path) is clear of solid voxels. And how close the path runs to walls: `walls` points with a solid
 // voxel 1.6-2.4 m over their ground (a wall, not a terrace's 1 m step nor a tree's crown) within `reach` m (default
 // 1.3) of them, away from its ends (3 m): a follower there
 // scrapes or hits them (road 1904 in the Altstadt, whose centreline runs along a house front); wallAt: the first (-1:
@@ -201,25 +200,21 @@ export function mapColumns(map: ScenarioMap) {
 export function safeStart(map: ScenarioMap, path: number[][], y: number[] | number, opts: { ahead?: number; reach?: number; build?: CarBuild } = {}) {
   const col = mapColumns(map), B = opts.build ?? CAR, reach = opts.reach ?? 1.3;
   const yAt = (i: number) => (typeof y === 'number' ? y : y[Math.min(i, y.length - 1)]);
-  // (the top of the highest solid at or below h, and the ground the car finds there: half a metre under it on the car's
-  // ramps, whose top voxel it does not see)
+  // (the top of the highest solid at or below h, and the ground the car finds there)
   const ground = (x: number, z: number, h: number) => {
     const q = col(x, z);
     if (!q) return null;
-    const { iv, off, top, carRamped } = q.tile;
+    const { iv, off } = q.tile;
     let t = 0;
     for (let k = off[q.c]; k < off[q.c + 1]; k += 2) if (iv[k + 1] <= h + 1e-3) t = iv[k + 1];
-    return { top: t, g: carRamped && carRamped[q.c] && t === top[q.c] ? t - 0.5 : t };
+    return { top: t, g: t };
   };
   // (any solid in [lo, hi) at (x, z), the car's view)
   const solid = (x: number, z: number, lo: number, hi: number) => {
     const q = col(x, z);
     if (!q) return true;
-    const { iv, off, top, carRamped } = q.tile;
-    for (let k = off[q.c]; k < off[q.c + 1]; k += 2) {
-      const top1 = carRamped && carRamped[q.c] && iv[k + 1] === top[q.c] ? iv[k + 1] - 1 : iv[k + 1];
-      if (iv[k] < hi && top1 > lo) return true;
-    }
+    const { iv, off } = q.tile;
+    for (let k = off[q.c]; k < off[q.c + 1]; k += 2) if (iv[k] < hi && iv[k + 1] > lo) return true;
     return false;
   };
   let L = 0;
@@ -389,7 +384,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     return river('river_deep', map, 40);
   },
   ramp_street() {
-    // a paved street climbing 1 m every 5 m (voxel stairs, smoothed by ramps.ts) for 40 m, at 50 km/h
+    // a paved street climbing 1 m every 5 m (voxel stairs, smoothed by its caps) for 40 m, at 50 km/h
     const map = synthMap(2, (x, z) => {
       const street = x >= 56 && x < 72;
       const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
@@ -408,7 +403,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     return { name: 'ramp_street', pass: end.z > 75 && jerk < 60, detail: d };
   },
   ramp_landing() {
-    // off a 3 m ledge at 50 km/h onto a paved street running down (1 m per 4 m, smoothed by ramps.ts)
+    // off a 3 m ledge at 50 km/h onto a paved street running down (1 m per 4 m, smoothed by its caps)
     const map = synthMap(2, (x, z) => {
       if (x < 56 || x >= 72) return { g: 30 };
       if (z < 40) return { g: 18 };
@@ -448,7 +443,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
   ramp_diag() { return slope('ramp_diag', (x, z) => 10 + Math.floor((x + z - 60) / 6), 40, 10, (x, z) => 10 + (x + z - 63) / 6); },
   // ... a steep old-town lane: 1 m per 4 m, 12 m wide between walls, at 30 km/h
   ramp_steep() { return slope('ramp_steep', (_x, z) => 10 + Math.max(0, Math.min(12, Math.floor((z - 30) / 4))), 30, 6, (_x, z) => stairs(z, 10, 30, 4, 12)); },
-  // a raised paved square (1 m) met at 30° at 30 km/h: a paved step (smoothed by ramps.ts)
+  // a raised paved square (1 m) met at 30° at 30 km/h: a paved step (smoothed by its caps)
   kerb_paved_diag() {
     const map = synthMap(2, (_x, z) => ({ g: z >= 50 ? 11 : 10, mat: STREET }));
     const s = new Sim(map, { x: 64, z: 30 }, 0.5, 30 / 3.6);
@@ -488,10 +483,9 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const L = s.log, end = L[L.length - 1];
     const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...feel(L), ...summary(s) };
     s.dispose();
-    // (with caps, core/surface.ts, an earth terrace is a step for every body, the bus too: it no longer rides up a
-    // 1 m step of earth on the car's private surface over all ground -- it stops at it, upright; legacy: it climbs)
-    const caps = !!map.tiles[0].tile.caps;
-    return { name: 'bus_terrace', pass: caps ? d.minUp > 0.9 && d.status === 'ok' && end.z < 52 : end.z > 65 && end.y > 11.5 && d.minUp > 0.9, detail: d };
+    // (an earth terrace is a step for every body, the bus too (core/surface.ts: earth gets no caps): it stops at it,
+    // upright)
+    return { name: 'bus_terrace', pass: d.minUp > 0.9 && d.status === 'ok' && end.z < 52, detail: d };
   },
   // floatiness: the body kicked at 30 km/h on level ground (as by a bump): down at 0.6 m/s (heave), nose up at 0.8
   // rad/s (pitch); how it swings back (settling(): overshoot, settle time to within 1 cm / 0.005 rad, frequency)

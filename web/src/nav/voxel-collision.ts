@@ -6,7 +6,6 @@ import { paletteMask, RULES, semanticTable } from '../core/semantics';
 import { TileCache } from '../core/tile-cache';
 import { fetchGzip } from '../fetch';
 import { capField, surfaceAt, type CapField } from '../core/surface';
-import { CAPS } from '../caps-mode';
 
 const RADIUS = 0.35;
 const CONCURRENT_LOADS = 4;
@@ -15,7 +14,7 @@ type Runs = { offsets: Uint32Array; data: Uint16Array };
 // within 0.875 m of its voxel's top; the drone is no ground vehicle)
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
 const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
-  ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: CAPS.use && v.base.caps ? capField(N, v.base) : null });
+  ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: capField(N, v.base) });
 export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
 // Normal as a signed one-based axis index (x, y, z).
 type Contact = { fraction: number; axis: number };

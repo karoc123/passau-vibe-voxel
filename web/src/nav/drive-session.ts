@@ -123,7 +123,7 @@ export class DriveSession {
   private onRoad(d: DrawnPose) {
     const rap = this.rap;
     if (!rap.onWheels || rap.car?.status !== 'ok') return false;
-    const g = rap.terrain.groundAt(d.x, d.z, d.y + 0.5, true);
+    const g = rap.terrain.groundAt(d.x, d.z, d.y + 0.5);
     return g !== null && Math.abs(g - d.y) < 1 && rap.terrain.waterAt(d.x, d.z) < 0;
   }
 

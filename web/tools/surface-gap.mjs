@@ -1,11 +1,11 @@
-// The gap between the surface the car drives on (src/physics/rapier/terrain.ts: the wheels' colliders, the car's own
-// smoothed ramp field) and the surface drawn (ramps.ts rampField as the mesher builds it; terrain.ts groundAt, not the
-// car's), on the real city (public/data on disk). The gate for one surface shared by the mesher and the car: run it
-// before, keep the JSON, run it after with --check.
-// - scan: over the paved columns of a few fixed areas (Altstadt by the Dom: flat; the hillside west of the Schanzlbrücke's
-//   south end: ramps; the Schanzlbrücke: deck; Spitzberg: slopes), three points a column, a ray with the wheels'
-//   collision groups against the drawn surface there, split by flat / ramp / deck (the column's ramped flag; deck: its
-//   surface over a bridge, not the ground).
+// The gap between the surface the car drives on (src/physics/rapier/terrain.ts: the wheels' colliders) and the surface
+// drawn (core/surface.ts: the caps as the mesher draws them; terrain.ts groundAt), on the real city (public/data on
+// disk). The gate for one surface shared by the mesher and the car: run it before, keep the JSON, run it after with
+// --check (docs/plans/surface-gap-baseline.json).
+// - scan: over the capped columns of a few fixed areas (Altstadt by the Dom: flat; the hillside west of the
+//   Schanzlbrücke's south end: ramps; the Schanzlbrücke: deck; Spitzberg: slopes), three points a column, a ray with the
+//   wheels' collision groups against the drawn surface there, split by flat / ramp / deck (ramp: the column has a cap;
+//   deck: its surface over a bridge, not the ground).
 // - drive: the car (scenarios.ts Sim, pure-pursuit follow) along a few fixed roads (traffic.json, by index, checked
 //   against its OSM way) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 % and 60 % along them (0 km/h):
 //   each touching wheel's contact point against the drawn surface under it, and the drawn wheel's bottom (the ground
@@ -23,7 +23,7 @@
 //   times F, default 1), a run the baseline had is missing or no longer gets to its road's end
 // Other data (a fixture's build: VOXEL_DATA, tools/data-dir.mjs): the areas moved to its map by the project grid (as
 // the main map's, MAIN_ORIGIN) and clipped to it, the roads found by their OSM way (the longest road of it), those
-// off the map skipped. CAPS=0: the legacy surface where the data has caps (caps-mode.ts), to compare.
+// off the map skipped.
 // ~1 min, one core; no rendering.
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -86,7 +86,7 @@ function stats(v) {
 const bins = () => ({ all: [], flat: [], ramp: [], deck: [] });
 const binStats = (b) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, stats(v)]));
 // a column's kind as drawn: deck (its surface a bridge's, over the ground), ramp, flat
-const kindOf = (tile, c) => (tile.top[c] !== tile.ground[c] ? 'deck' : tile.ramped && tile.ramped[c] ? 'ramp' : 'flat');
+const kindOf = (tile, c) => (tile.top[c] !== tile.ground[c] ? 'deck' : tile.caps && (tile.caps.z[2 * c] || tile.caps.z[2 * c + 1]) ? 'ramp' : 'flat');
 
 // ---- scan
 async function scan(name, [x0, z0, x1, z1]) {
@@ -105,12 +105,12 @@ async function scan(name, [x0, z0, x1, z1]) {
   let off = 0, miss = 0;
   for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
     const t = tiles.get(`${Math.floor(x / N)}_${Math.floor(z / N)}`);
-    if (!t || !t.ramps) continue;
+    if (!t || !t.caps) continue;
     const c = (x - Math.floor(x / N) * N) + 1 + t.S * ((z - Math.floor(z / N) * N) + 1);
-    if (!(t.ramps.z[2 * c] || t.ramps.z[2 * c + 1])) continue; // (a cap there: core/surface.ts)
+    if (!(t.caps.z[2 * c] || t.caps.z[2 * c + 1])) continue; // (a cap there: core/surface.ts)
     for (const [fx, fz] of [[0.25, 0.25], [0.75, 0.6], [0.5, 0.9]]) {
       const X = x + fx, Z = z + fz, top = t.top[c];
-      const drawn = terr.groundAt(X, Z, top + 0.01, false);
+      const drawn = terr.groundAt(X, Z, top + 0.01);
       const hit = world.castRay(new R.Ray({ x: X, y: top + 1.5, z: Z }, { x: 0, y: -1, z: 0 }), 4, true, undefined, T.WHEEL_GROUPS);
       if (drawn === null || !hit) { miss++; continue; }
       const d = top + 1.5 - hit.timeOfImpact - drawn;
@@ -166,7 +166,7 @@ function drive(map, path, st, kmh) {
       return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x];
     };
     const add = (b, x, y, z, lim) => {
-      const d = terr.groundAt(x, z, y + 0.6, false), cc = col(x, z);
+      const d = terr.groundAt(x, z, y + 0.6), cc = col(x, z);
       if (d === null || !cc || Math.abs(y - d) > lim) { off++; return; }
       b.all.push(y - d);
       b[kindOf(cc.tile, cc.c)].push(y - d);

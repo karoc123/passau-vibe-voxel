@@ -34,7 +34,7 @@ export function groundClass(p: PaletteEntry) {
   return 0;
 }
 
-// The ground drawn as ramps on a slope (ramps.ts): what is walked and driven on -- the paved classes above (not the
+// Paved ground, capped on a slope (scripts/caps.py: the same ids, tools/tile-roundtrip.mjs): what is walked and driven on -- the paved classes above (not the
 // railway's ballast), kerbs (level with the street in the voxels) and the markings on them. Not steps (#a8a296), the
 // quays' and retaining walls' stone, lawns (their grass is the foliage tile's) or earth.
 const BALLAST = '#8a8178', KERB = '#cfc7b8';

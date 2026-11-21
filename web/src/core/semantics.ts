@@ -12,7 +12,7 @@ export const SEM = {
   WATER: 1 << 2,
   LEAF: 1 << 3,
   GRASS: 1 << 4,
-  // paved ground: ramps on a slope (materials.ts pavedGround)
+  // paved ground: capped on a slope (materials.ts pavedGround; scripts/caps.py's paved ids, tools/tile-roundtrip.mjs)
   PAVED: 1 << 5,
   // a building's wall material (materials.ts WALL_MATS; plain SOLID among them)
   WALL: 1 << 6,
@@ -48,8 +48,6 @@ export type Rule = (flags: number) => boolean;
 export const RULES = {
   // the car and Rapier's bodies (physics/rapier/terrain.ts): grass and water are not solid
   solidForCar: (f: number) => (f & SEM.SOLID) !== 0,
-  // ... and the car's ground (its own ramp field over all ground): anything but water
-  groundForCar: (f: number) => (f & SEM.WALKABLE) !== 0,
   // the FPV drone (nav/voxel-collision.ts): the foliage tile's voxels but grass, and the top it settles on (base and
   // foliage) the highest voxel not grass; water is solid to it (the base tile's voxels all are, its sweep tests none)
   solidForDrone: (f: number) => (f & SEM.GRASS) === 0,
