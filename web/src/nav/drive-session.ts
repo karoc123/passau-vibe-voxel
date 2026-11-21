@@ -12,7 +12,7 @@ import type { DrawnPose, Obstacle, RapierDrive, Walker } from '../physics/rapier
 
 export const SINK_MS = 2000; // in the river this long, then back on the road
 export const CRASH_MS = 1100; // after a crash landing: shaken, no input
-const FALLEN_R = 35; // m: people knocked down lie there until the car is this far away (life.ts knockDown)
+const FALLEN_R = 35; // m: people knocked down lie there until the car is this far away and out of sight (life.ts knockDown, PED_POP_R)
 const SAFE_EVERY_MS = 400, SAFE_KEEP = 16; // where the car was on the road: every so often, the last so many
 const BACK_M = 12; // back on the road this far before where it left it
 export const NO_INPUT: CarInput = { gas: 0, brake: 0, steer: 0, handbrake: false };

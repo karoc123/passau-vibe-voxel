@@ -17,6 +17,14 @@ const BLEND = 7;
 const BOX_IN = 7, BOX_OUT = 9;
 const STEP = 1 / 30;
 const ACTIVE_R = 900, ACTIVE_CELL = 300;
+// Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the
+// hour's number, off the network, a dead end, the parked cars, the people knocked down), never in plain view. Closer
+// in a car at a dead end waits there, a rider turns back; the number over the hour's waits until enough are far.
+// Only the first fill (or a jump of the focus) puts them anywhere at once. (A car 300 m away is a few pixels tall, a
+// person 150 m away about as much: tools/popin-check.mjs checks 200 and 100 m.)
+export const CAR_POP_R = 300, PED_POP_R = 150;
+// the focus moved this far at once (or the first update): the circle is filled anew at once, near the focus too
+const JUMP_R = ACTIVE_R / 2;
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
@@ -24,8 +32,12 @@ const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-car'];
 // people knocked down by the driven car (knockDown): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
-// per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s
+// per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
+// PED_POP_R from the viewer
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
+// the cars parked by the player (takeWheel) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
+// never more than PARKED_MAX
+const PARKED = 8, PARKED_MAX = 24;
 
 // a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
 interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null }
@@ -43,6 +55,8 @@ function pickWeighted(w: number[], sum = w.reduce((a, b) => a + b, 0)) {
   return w.length - 1;
 }
 const anyOf = <T>(a: T[]) => a[(Math.random() * a.length) | 0];
+
+type Density = { cars: number; peds: number; bikes: number };
 
 export interface Picked { kind: Kind; obj: Rideable; label: string }
 
@@ -69,6 +83,9 @@ export class StreetLife {
   private readonly restr = new Map<string, { to: number; type: string }[]>();
   private readonly box = new Map<number, Set<Car>>();
   private active: { x: number; z: number } | null = null;
+  // where the viewer is (update's focus), and whether the circle is to be filled at once (populate)
+  private viewer = { x: 0, z: 0 };
+  private warm = true;
   private roadOn: boolean[] = [];
   private pedOn: boolean[] = [];
   // the ways in the circle (their indices) and the weights to pick them by, in the same order
@@ -111,8 +128,10 @@ export class StreetLife {
 
   update(dt: number, hour: number, night: number, focus: { x: number; z: number }) {
     dt = Math.min(dt, 0.1);
-    const A = this.active;
-    if (!A || (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 > 120 * 120) this.setActive(focus.x, focus.z);
+    const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
+    this.viewer.x = focus.x; this.viewer.z = focus.z;
+    if (d2 > JUMP_R * JUMP_R) this.warm = true;
+    if (d2 > 120 * 120) this.setActive(focus.x, focus.z);
     const hh = ((hour % 24) + 24) % 24;
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {
@@ -122,6 +141,7 @@ export class StreetLife {
       bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
         * (0.2 + 0.4 * (1 - Math.cos(2 * Math.PI * (this.day - 15) / 365))),
     };
+    if (this.warm) this.populate(density); // (drawn this frame)
     this.acc += dt;
     while (this.acc >= STEP) { this.step(STEP, density); this.acc -= STEP; }
     this.trains.update(dt, hh);
@@ -185,11 +205,15 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ spawning
+  // is (x, y) at least r m from the viewer (where an agent may come or go)?
+  private far(x: number, y: number, r: number) { return (x - this.viewer.x) ** 2 + (y - this.viewer.z) ** 2 >= r * r; }
+
   private spawnCar(fromSource: boolean) {
     const ei = fromSource && this.sources.length ? anyOf(this.sources) : this.roadAct[pickWeighted(this.roadW)];
     const e = this.roads[ei], lane = (Math.random() * e.lanes) | 0;
     const s = fromSource ? 0 : 10 + Math.random() * Math.max(0, e.L - 20 - BOX_IN - 12);
     if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return;
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, CAR_POP_R)) return; }
     const bus = e.c >= 2 && Math.random() < 0.06;
     const car: Car = {
       kind: 'car', id: this.idSeq++, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : 4.6, bus, prev: -1, prevOff: 0, next: -1,
@@ -204,15 +228,18 @@ export class StreetLife {
   }
 
   private spawnPed() {
-    const ei = this.pedAct[pickWeighted(this.pedW)], e = this.peds[ei];
-    this.people.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s: Math.random() * e.L, v: 1.05 + Math.random() * 0.55,
+    const ei = this.pedAct[pickWeighted(this.pedW)], e = this.peds[ei], s = Math.random() * e.L;
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, PED_POP_R)) return; }
+    this.people.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 1.05 + Math.random() * 0.55,
       lat: 0.35 + Math.random() * 1.0, ph: Math.random() * 6.28, wait: false, col: new THREE.Color(anyOf(SHIRTS)) });
   }
 
   private spawnRider() {
     const ei = this.bikeAct[pickWeighted(this.bikeW)], e = this.peds[ei];
     if (!e || !e.bk) return;
-    this.riders.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s: Math.random() * e.L, v: 4 + Math.random() * 1.8,
+    const s = Math.random() * e.L;
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, PED_POP_R)) return; }
+    this.riders.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 4 + Math.random() * 1.8,
       lat: 0.45 + Math.random() * 0.3, ph: Math.random() * 6.28, wait: false, bike: true, col: new THREE.Color(anyOf(SHIRTS)) });
   }
 
@@ -220,12 +247,14 @@ export class StreetLife {
   private laneOffset(e: Road, lane: number) { return e.o0 + lane * LANE_W; }
 
   private chooseNext(e: Road) {
-    let outs = (this.outs.get(e.b) ?? []).filter((j) => { const o = this.roads[j]; return turnOf(e, o) !== Turn.Back && !(o.b === e.a && o.w === e.w); });
+    const all = (this.outs.get(e.b) ?? []).filter((j) => this.roadOn[j]);
+    let outs = all.filter((j) => { const o = this.roads[j]; return turnOf(e, o) !== Turn.Back && !(o.b === e.a && o.w === e.w); });
     for (const r of this.restr.get(`${e.w}:${e.b}`) ?? []) {
       if (r.type.startsWith('only_')) outs = outs.filter((j) => this.roads[j].w === r.to);
       else if (r.type.startsWith('no_')) outs = outs.filter((j) => this.roads[j].w !== r.to);
     }
-    outs = outs.filter((j) => this.roadOn[j]);
+    // a dead end (nothing on but back): turn there rather than vanish
+    if (!outs.length && all.length) outs = all;
     if (!outs.length) return -1;
     return outs[pickWeighted(outs.map((j) => { const o = this.roads[j]; return (turnOf(e, o) === Turn.Straight ? 4 : 1) * o.c * (o.L > 6 ? 1 : 0.3); }))];
   }
@@ -303,6 +332,7 @@ export class StreetLife {
     if (nextRoad) for (let l = 0; l < nextRoad.lanes; l++) for (const o of nextRoad.lists[l]) {
       if ((l === nextLane || o.lcTo === nextLane) && o.s < 30) lead(o, e.L - car.s + o.s - o.len);
     }
+    if (!nextRoad && e.L - car.s < 40 && !this.mayLeave(car, e)) stop(e.L - car.s - 0.5, 'dead-end', null);
     const sg = e.sig;
     if (sg && car.s < sg.s + 0.3) {
       const st = signal(this.ctrls[sg.ctrl], this.t, sg.axis), d = sg.s - car.s;
@@ -348,26 +378,34 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ one tick
-  private step(dt: number, density: { cars: number; peds: number; bikes: number }) {
+  private step(dt: number, density: Density) {
     this.t += dt;
     if (((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0)) this.breakDeadlocks();
-    const targetCars = Math.min(MAX_CARS - this.detachedCars.length, Math.round(this.laneKm * 9 * density.cars));
-    const targetPeds = Math.min(MAX_PEOPLE, Math.round(this.pedKm * 24 * density.peds));
-    for (let k = 0; k < 6 && this.cars.length < targetCars; k++) this.spawnCar(this.cars.length > targetCars * 0.5);
-    for (let k = 0; k < 40 && this.people.length < targetPeds; k++) this.spawnPed();
-    // at July's evening peak 5 riders a km per unit of weight: 10 a km along a main road (at
-    // 5 m/s), 5 on an ordinary bike way
-    const targetBikes = Math.min(MAX_BIKES, Math.round(this.bikeKm * 5 * density.bikes));
-    for (let k = 0; k < 10 && this.riders.length < targetBikes; k++) this.spawnRider();
-    if (this.riders.length > targetBikes) this.riders.length = Math.max(0, targetBikes);
-    if (this.people.length > targetPeds) { // the person followed or walked stays in the crowd
-      this.people = [...this.people.filter((p) => p.ctl || p === this.keep), ...this.people.filter((p) => !p.ctl && p !== this.keep)];
-      this.people.length = targetPeds;
-    }
+    const targetCars = this.populate(density);
     this.snapshot();
     this.stepCars(dt, targetCars);
     this.stepPeople(dt);
     this.stepRiders(dt);
+  }
+
+  // As many as the hour wants, a few more a tick out of sight (all at once anywhere when warm: the first fill), and
+  // those over it out of sight gone. Returns the cars wanted.
+  private populate(density: Density) {
+    this.trimParked();
+    const targetCars = Math.min(MAX_CARS - PARKED_MAX, Math.round(this.laneKm * 9 * density.cars));
+    const targetPeds = Math.min(MAX_PEOPLE, Math.round(this.pedKm * 24 * density.peds));
+    const warm = this.warm, n = (k: number, target: number) => (warm ? 4 * target + 50 : k);
+    for (let k = 0, K = n(6, targetCars); k < K && this.cars.length < targetCars; k++) this.spawnCar(!warm && this.cars.length > targetCars * 0.5);
+    for (let k = 0, K = n(40, targetPeds); k < K && this.people.length < targetPeds; k++) this.spawnPed();
+    // at July's evening peak 5 riders a km per unit of weight: 10 a km along a main road (at
+    // 5 m/s), 5 on an ordinary bike way
+    const targetBikes = Math.min(MAX_BIKES, Math.round(this.bikeKm * 5 * density.bikes));
+    for (let k = 0, K = n(10, targetBikes); k < K && this.riders.length < targetBikes; k++) this.spawnRider();
+    this.warm = false;
+    // (the person followed or walked stays in the crowd)
+    if (this.riders.length > targetBikes) this.riders = this.trim(this.riders, targetBikes);
+    if (this.people.length > targetPeds) this.people = this.trim(this.people, targetPeds);
+    return targetCars;
   }
 
   // where everything is at the start of the tick: cars in a grid, and who physically blocks whom
@@ -452,12 +490,22 @@ export class StreetLife {
     }
   }
 
-  // past the end of its road: onto the next one (false: it leaves), or hold at the line if the lane there is full
+  // may a car leave the street at the end of road e (out of sight: CAR_POP_R from the viewer)?
+  private mayLeave(car: Car, e: Road) { const P = at(e, e.L, car.off, this.tmp); return this.far(P.x, P.y, CAR_POP_R); }
+
+  // past the end of its road: onto the next one (false: it leaves), or hold at the line if the lane there is full (or
+  // there is no way on and it may not leave here)
   private enterNext(car: Car, e: Road, s0: number, targetCars: number) {
     const lst = e.lists[car.lane];
     lst.splice(lst.indexOf(car), 1);
     car.lcTo = undefined;
-    if (car.next < 0 || this.cars.length > targetCars + 4) { this.boxLeave(car); return false; }
+    if ((car.next < 0 || this.cars.length > targetCars + 4) && this.mayLeave(car, e)) { this.boxLeave(car); return false; }
+    if (car.next < 0) {
+      lst.push(car);
+      Object.assign(car, { s: e.L - 0.01, v: 0, why: 'dead-end', by: null });
+      car.ds = car.s - s0;
+      return true;
+    }
     const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
     const hold = n.lists[lane].find((o) => o.s < car.len + 1.5);
     if (hold && !(car.ignore === hold && (car.ignoreT ?? 0) > this.t)) {
@@ -478,6 +526,19 @@ export class StreetLife {
       }
     }
     return true;
+  }
+
+  // the list cut to n, the newest out of sight PED_POP_R from the viewer first; none closer, nor kept or walked
+  private trim(list: Person[], n: number) {
+    let over = list.length - n;
+    const gone = new Set<Person>();
+    for (let i = list.length - 1; i >= 0 && over > 0; i--) {
+      const p = list[i];
+      if (p.ctl || p === this.keep) continue;
+      const P = p.rp ? { x: p.rp.x, y: p.rp.z } : at(this.peds[p.e], p.s, 0, this.tmp);
+      if (this.far(P.x, P.y, PED_POP_R)) { gone.add(p); over--; }
+    }
+    return gone.size ? list.filter((p) => !gone.has(p)) : list;
   }
 
   private stepPeople(dt: number) {
@@ -503,7 +564,7 @@ export class StreetLife {
   }
 
   // a rider keeps to the bike ways, the busier more often; off their end (into a street) they are gone, and another
-  // starts somewhere else
+  // starts somewhere else (in sight of the viewer they turn back instead)
   private stepRiders(dt: number) {
     this.riders = this.riders.filter((pe) => {
       const e = this.peds[pe.e];
@@ -515,7 +576,12 @@ export class StreetLife {
       pe.ph += pe.v * dt * 1.6;
       if (pe.s >= 0 && pe.s <= e.L) return true;
       const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j] && this.peds[j].bk);
-      if (!opts.length) return false;
+      if (!opts.length) {
+        const P = pe.rp ? { x: pe.rp.x, y: pe.rp.z } : at(e, pe.s, 0, this.tmp);
+        if (this.far(P.x, P.y, PED_POP_R)) return false;
+        pe.dir *= -1; pe.s = Math.min(Math.max(pe.s, 0), e.L);
+        return true;
+      }
       const [j, end] = opts[pickWeighted(opts.map(([k]) => this.peds[k].bk! * Math.max(this.peds[k].L, 5)))];
       const n = this.peds[j];
       pe.e = j;
@@ -527,16 +593,18 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ drawing
-  // a car's path at arc length s, blended across the junction node into a smooth arc
+  // a car's path at arc length s, blended across the junction nodes into smooth arcs (on a road shorter than 2 BLEND
+  // across both at once: the pulls towards the road before and the one after added, so it does not jump midway)
   private carPoint(car: Car, s: number, out: Pt, off = car.off) {
-    const e = this.roads[car.e], P = at(e, s, off, out);
+    const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z;
     if (s < BLEND && car.prev >= 0) {
-      const pe = this.roads[car.prev], Q = at(pe, pe.L + s, car.prevOff, this.tmp), w = smooth(-BLEND, BLEND, s);
-      P.x = Q.x + (P.x - Q.x) * w; P.y = Q.y + (P.y - Q.y) * w; P.z = Q.z + (P.z - Q.z) * w;
-    } else if (s > e.L - BLEND && car.next >= 0) {
+      const pe = this.roads[car.prev], Q = at(pe, pe.L + s, car.prevOff, this.tmp), w = 1 - smooth(-BLEND, BLEND, s);
+      P.x += (Q.x - x) * w; P.y += (Q.y - y) * w; P.z += (Q.z - z) * w;
+    }
+    if (s > e.L - BLEND && car.next >= 0) {
       const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
       const Q = at(n, s - e.L, this.laneOffset(n, lane), this.tmp), w = smooth(-BLEND, BLEND, s - e.L);
-      P.x += (Q.x - P.x) * w; P.y += (Q.y - P.y) * w; P.z += (Q.z - P.z) * w;
+      P.x += (Q.x - x) * w; P.y += (Q.y - y) * w; P.z += (Q.z - z) * w;
     }
     return P;
   }
@@ -650,7 +718,10 @@ export class StreetLife {
     if (i < 0 || !p.rp || p === this.keep) return false;
     list.splice(i, 1);
     const v = Math.hypot(vx, vz) || 1;
-    if (this.fallen.length >= MAX_FALLEN) this.fallen.shift();
+    if (this.fallen.length >= MAX_FALLEN) { // the oldest out of sight (else the oldest)
+      const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, PED_POP_R));
+      this.fallen.splice(Math.max(0, i), 1);
+    }
     this.fallen.push({
       col: p.col, bike: !!p.bike, at: p.rp.clone(), h: p.rh ?? 0, dx: vx / v, dz: vz / v, v: Math.min(FALL_V, v * 0.6), t: 0,
       bikeAt: p.bike ? p.rp.clone() : null,
@@ -658,9 +729,9 @@ export class StreetLife {
     return true;
   }
 
-  // the people knocked down further than r m from (x, z) gone (left behind)
+  // the people knocked down further than r m from (x, z) gone (left behind; never in sight of the viewer)
   clearFallen(x: number, z: number, r: number) {
-    this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r);
+    this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r || !this.far(f.at.x, f.at.z, PED_POP_R));
   }
 
   // the people knocked down, drawn from instance i0 on: sliding along the shove, tipping over towards it (about the
@@ -669,7 +740,7 @@ export class StreetLife {
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
     const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3();
-    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S);
+    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S || !this.far(f.at.x, f.at.z, PED_POP_R));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;
     for (let i = 0; i < n; i++) {
@@ -727,10 +798,18 @@ export class StreetLife {
     car.why = 'free';
     car.wait = 0;
     this.detachedCars.push(car);
-    // Keep recent player-parked cars around and leave ample room for the traffic fleet.
-    // (never the one driven or followed)
-    if (this.detachedCars.length > 8) this.detachedCars.splice(Math.max(0, this.detachedCars.findIndex((c) => c !== this.keep)), 1);
+    this.trimParked();
     return true;
+  }
+
+  // Keep recent player-parked cars around and leave ample room for the traffic fleet: of more than PARKED the oldest
+  // out of sight goes (never the one driven or followed); more than PARKED_MAX, the oldest anyway.
+  private trimParked() {
+    const D = this.detachedCars;
+    if (D.length <= PARKED) return;
+    let i = D.findIndex((c) => c !== this.keep && (!c.rp || this.far(c.rp.x, c.rp.z, CAR_POP_R)));
+    if (i < 0 && D.length > PARKED_MAX) i = D.findIndex((c) => c !== this.keep);
+    if (i >= 0) D.splice(i, 1);
   }
 
   private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.roadVehicles() : kind === 'person' ? this.people : []; }
