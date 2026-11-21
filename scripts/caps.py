@@ -70,6 +70,9 @@ def decode(buf):
 SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
 CLAMP = 56  # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor)
+# 1/64 m: a corner this near a whole metre is put on it (every column round its grid point alike: no lip), so a near
+# level street is flat voxel tops the mesher merges, not a field of quads a centimetre off (the triangles)
+SNAP = 2
 REACH = N_SMOOTH + N_RELAX + 1  # cells: how far from a column what decides its corners lies (tile_fields.py HALO)
 ROOFS = False  # phase B (roof caps): not written yet -- the client draws and collides roofs as voxels
 
@@ -268,6 +271,8 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
         zt = end[k]
         q = np.stack([Lr["q"][j][r_, c_] for j in range(4)], 1)
         qi = np.round(q * 64).astype(np.int64)
+        qr = np.round(qi / 64).astype(np.int64) * 64
+        qi = np.where(np.abs(qi - qr) <= SNAP, qr, qi)
         lo, hi = zt[:, None] * 64 - CLAMP, zt[:, None] * 64 + CLAMP
         st.add(**{f"{kind}_clamped": int(((qi < lo) | (qi > hi)).any(1).sum())})
         qi = np.clip(qi, lo, hi)
