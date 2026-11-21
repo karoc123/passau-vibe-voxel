@@ -2,11 +2,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash } from '../util';
 import { setCount } from './meshes';
-import { at, prepPath, pt, type Path, type PathData } from './path';
+import { at, farFrom, prepPath, pt, type Path, type PathData, type Viewer } from './path';
 
 // Trains on the open-air railway (scripts/traffic.py: the OSM route=train relations, one path per track, each route
 // with the stations it stops at): every route sends a train every half hour, from the map edge or a tunnel portal;
 // it brakes for its stations, waits, and keeps its distance behind the train ahead on the same track.
+// Like the street life (life.ts) a train comes and goes only POP_R from the viewer or further: one due to start
+// waits until the track's start is that far, one past its track's end (into a tunnel, off the map) runs on along the
+// track's last straight until it is that far. (Twice a car's distance: a train is 4 m tall and 80-170 m long.)
 
 export interface TrainService { ref: string; op: string; stops: number[] }
 export interface TrainPathData extends PathData { svc: TrainService[] }
@@ -15,6 +18,7 @@ interface Train { p: number; svc: TrainService; s: number; ds: number; v: number
 
 const CAR = 20, GAP = 1, V = 16, A = 0.7, B = 0.9, DWELL = 25, HEADWAY = 1800, SPACING = 70;
 const MAX_CARS = 240;
+export const POP_R = 600;
 // liveries: [body, lower band, stripe]; cars per train
 const LIVERY: [RegExp, number, number, number, number][] = [
   [/Intercity|DB|ČD|ÖBB|EC|IC/i, 0xdfe2e4, 0x1d3d6e, 0xd8892b, 8],
@@ -73,7 +77,13 @@ export class Trains {
 
   private len(tr: Train) { return tr.n * (CAR + GAP) - GAP; }
 
-  update(dt: number, hour: number) {
+  // is the train (both its ends) at least POP_R from the viewer?
+  private far(tr: Train, v: Viewer) {
+    const p = this.paths[tr.p], a = at(p, tr.s, 0, pt()), b = at(p, tr.s - this.len(tr), 0, pt());
+    return farFrom(v, a.x, a.y, a.z, POP_R) && farFrom(v, b.x, b.y, b.z, POP_R);
+  }
+
+  update(dt: number, hour: number, viewer: Viewer) {
     const run = !(hour > 0.25 && hour < 4.5);
     this.t += dt;
     // each track's trains, front first (by where they are at the start of the frame; on a track no train passes another)
@@ -94,6 +104,7 @@ export class Trains {
         const last = byPath[i].reduce((m, tr) => Math.min(m, tr.s - this.len(tr)), Infinity);
         if (last < SPACING + 40) { p.next[k] = this.t + 20; return; } // the track is occupied: try again in a while
         const g = byPath[i], tr = this.spawn(p, k, 0); // (behind the rest: their tails are past SPACING + 40)
+        if (!this.far(tr, viewer)) { this.list.pop(); p.next[k] = this.t + 5; return; } // in sight: a little later
         tr.ahead = g.length ? g[g.length - 1] : null;
         g.push(tr);
         p.next[k] = this.t + HEADWAY * (0.85 + 0.3 * hash(this.t + k));
@@ -120,7 +131,7 @@ export class Trains {
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const tr = this.list[i];
-      if (tr.s - this.len(tr) > this.paths[tr.p].L + 10) this.list.splice(i, 1);
+      if (tr.s - this.len(tr) > this.paths[tr.p].L + 10 && this.far(tr, viewer)) this.list.splice(i, 1);
     }
   }
 

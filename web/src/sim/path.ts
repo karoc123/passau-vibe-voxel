@@ -5,6 +5,9 @@ export interface PathData { p: [number, number, number][] }
 
 export interface Path extends PathData {
   cum: Float32Array;
+  // per point, the way to the right of it the offset path takes (at): the normal of a segment at either end, between
+  // two the mitre (along their normals' bisector, 1 / cos(half the turn) long, at most MITRE)
+  mit: Float32Array;
   L: number;
   startD: Dir;
   endD: Dir;
@@ -27,6 +30,20 @@ export function prepPath<T extends PathData>(e: T): T & Path {
   P.L = P.cum[n - 1];
   P.startD = dirAt(e, 0);
   P.endD = dirAt(e, n - 2);
+  P.mit = new Float32Array(2 * n);
+  // (the segments either side of point i of some length: a repeated point has none)
+  const seg = (i: number, step: number) => {
+    for (let j = i; j >= 0 && j < n - 1; j += step) if (P.cum[j + 1] > P.cum[j]) return dirAt(e, j);
+    return null;
+  };
+  for (let i = 0; i < n; i++) {
+    const a0 = seg(i - 1, -1), b0 = seg(i, 1), a = a0 ?? b0 ?? [1, 0], b = b0 ?? a;
+    let nx = -(a[1] + b[1]), ny = a[0] + b[0];
+    const l = Math.hypot(nx, ny);
+    if (l < 1e-6) { nx = -b[1]; ny = b[0]; } else { nx /= l; ny /= l; } // (a turn right back: the later segment's normal)
+    const k = Math.min(MITRE, 1 / Math.max(1e-6, nx * -b[1] + ny * b[0]));
+    P.mit[2 * i] = nx * k; P.mit[2 * i + 1] = ny * k;
+  }
   const d = Math.min(15, P.L), a = pt(), b = pt();
   const unit = (): Dir => { const l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return [(b.x - a.x) / l, (b.y - a.y) / l]; };
   at(P, P.L - d, 0, a); at(P, P.L, 0, b); P.endD15 = unit();
@@ -34,26 +51,39 @@ export function prepPath<T extends PathData>(e: T): T & Path {
   return P;
 }
 
-// the point at arc length s (extended straight beyond either end), off metres to the right
+// the mitre at a sharp corner at most this many times the offset (a turn of up to 120 degrees mitred in full)
+const MITRE = 2;
+
+// The point at arc length s (extended straight beyond either end), off metres to the right. Off the line it is on the
+// offset path that joins the segments' offsets at their corners mitred: from point to point the offset swings from one
+// corner's mitre to the next's, so a lane's path is continuous round a corner (on the segment's own normal it moved
+// sideways by up to off * sqrt 2 at a right angle, all at once).
 export function at(e: Path, s: number, off: number, out: Pt): Pt {
-  let x, y, z, dx, dy;
+  let x, y, z, nx, ny;
+  const m = e.mit, n = e.p.length;
   if (s <= 0) {
-    [dx, dy] = e.startD; const p = e.p[0];
-    x = p[0] + dx * s; y = p[1] + dy * s; z = p[2];
+    const [dx, dy] = e.startD, p = e.p[0];
+    x = p[0] + dx * s; y = p[1] + dy * s; z = p[2]; nx = m[0]; ny = m[1];
   } else if (s >= e.L) {
-    [dx, dy] = e.endD; const p = e.p[e.p.length - 1];
-    x = p[0] + dx * (s - e.L); y = p[1] + dy * (s - e.L); z = p[2];
+    const [dx, dy] = e.endD, p = e.p[n - 1];
+    x = p[0] + dx * (s - e.L); y = p[1] + dy * (s - e.L); z = p[2]; nx = m[2 * n - 2]; ny = m[2 * n - 1];
   } else {
     const c = e.cum;
     let lo = 0, hi = c.length - 1;
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] < s) lo = m; else hi = m; }
+    while (hi - lo > 1) { const k = (lo + hi) >> 1; if (c[k] < s) lo = k; else hi = k; }
     const a = e.p[lo], b = e.p[hi], seg = c[hi] - c[lo] || 1e-6, f = (s - c[lo]) / seg;
     x = a[0] + (b[0] - a[0]) * f; y = a[1] + (b[1] - a[1]) * f; z = a[2] + (b[2] - a[2]) * f;
-    dx = (b[0] - a[0]) / seg; dy = (b[1] - a[1]) / seg;
+    nx = m[2 * lo] + (m[2 * hi] - m[2 * lo]) * f; ny = m[2 * lo + 1] + (m[2 * hi + 1] - m[2 * lo + 1]) * f;
   }
-  out.x = x - dy * off; out.y = y + dx * off; out.z = z;
+  out.x = x + nx * off; out.y = y + ny * off; out.z = z;
   return out;
 }
+
+// Where things are looked at from: x, z on the ground (the grid's x, y), y the height (none: on the ground, the
+// distance along it). What moves comes and goes only far from it (life.ts, trains.ts).
+export interface Viewer { x: number; z: number; y?: number }
+// is the point (x, y on the grid, z its height) at least r m from the viewer?
+export const farFrom = (v: Viewer, x: number, y: number, z: number, r: number) => (x - v.x) ** 2 + (y - v.z) ** 2 + (v.y === undefined ? 0 : (v.y - z) ** 2) >= r * r;
 
 export const Turn = { Left: -1, Straight: 0, Right: 1, Back: 2 } as const;
 export type Turn = (typeof Turn)[keyof typeof Turn];

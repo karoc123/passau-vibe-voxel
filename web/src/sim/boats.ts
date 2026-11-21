@@ -36,6 +36,9 @@ const FLEET = 3, SLOT = TOUR_B + 1; // excursion boats, and their spacing rafted
 const SLIDE: XY = [45, 170]; // s after a boat casts off: the next one moves into its place
 const TURN = 10 * 60; // the least time at the pier between two trips
 const VC = 3.6, ACC_C = 0.015; // cruise ships under way: 13 km/h, m/s²
+// a ship comes in from (and leaves to) this far beyond its lane's end, the map's edge, straight on: it is not seen to
+// appear or vanish there (tools/popin-check.mjs)
+const RUN_OUT = 1000;
 const MORNING = 6 * 3600, LATEST_IN = 9.25 * 3600, EVENING = 18 * 3600, LATEST_OUT = 23.75 * 3600; // s after midnight
 const NO_TOURS_ABOVE = 3.5; // m above the survey day: the excursion boats stay in (Hochwassermarke)
 // cruise lines' accent colours (hull band, funnel, awnings)
@@ -148,6 +151,8 @@ function bezier(a: XY, c: XY, b: XY, n = 12): XY[] {
     return [u * u * a[0] + 2 * t * u * c[0] + t * t * b[0], u * u * a[1] + 2 * t * u * c[1] + t * t * b[1]] as XY;
   });
 }
+// RUN_OUT on from a, away from b
+const beyond = (a: XY, b: XY): XY => { const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [a[0] + (a[0] - b[0]) / l * RUN_OUT, a[1] + (a[1] - b[1]) / l * RUN_OUT]; };
 const arcLen = (p: XY[]) => p.reduce((l, q, k) => (k ? l + Math.hypot(q[0] - p[k - 1][0], q[1] - p[k - 1][1]) : 0), 0);
 
 export class Boats {
@@ -163,6 +168,8 @@ export class Boats {
   private lastHour = -1;
   private day = -1;
   private ships: Ship[] = [];
+  // the boats placed this frame: who (a cruise ship, or an excursion boat's number) and where (tools/popin-check.mjs)
+  readonly placed: [Ship | number, number, number][] = [];
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
   private readonly pos = new THREE.Vector3();
@@ -251,12 +258,13 @@ export class Boats {
       const from = Math.max(ia - 4, 1); // ~30 m short of abeam (the up lane runs westwards)
       const slip = bezier(f.up[from], f.up[ia], berth);
       const lane = east ? f.up.slice(0, from + 1) : [...f.down.slice(0, f.turnE[0] + 1), ...f.turnE[2], ...f.up.slice(f.turnE[1], from + 1)];
-      p = [...lane, ...slip];
+      p = [beyond(lane[0], lane[1]), ...lane, ...slip];
       return this.move(p, arcLen([f.up[from], ...slip]), true, hx, hy, t0);
     }
     const to = Math.min(ia + 4, f.up.length - 2);
     const slip = [berth, ...bezier(berth, f.up[ia], f.up[to])];
     p = [...slip, ...(east ? [...f.up.slice(to + 1, f.turnW[0] + 1), ...f.turnW[2], ...f.down.slice(f.turnW[1])] : f.up.slice(to + 1))];
+    p.push(beyond(p[p.length - 1], p[p.length - 2]));
     return this.move(p, arcLen(slip), false, hx, hy, t0);
   }
 
@@ -332,7 +340,7 @@ export class Boats {
     const w = mv.arrive ? smooth(P.L - mv.crab - 50, P.L - mv.crab + 5, sv) : 1 - smooth(mv.crab - 5, mv.crab + 50, sv);
     ang += wrapAngle(Math.atan2(mv.hx, mv.hy) - ang) * w;
     at(P, sv, 0, A);
-    this.put(this.cruise, A.x, A.y, z, Math.sin(ang), Math.cos(ang), s.len, s.lit, s.acc);
+    this.put(this.cruise, s, A.x, A.y, z, Math.sin(ang), Math.cos(ang), s.len, s.lit, s.acc);
   }
 
   // ---- excursion boats
@@ -372,7 +380,8 @@ export class Boats {
     return s;
   }
 
-  private put(k: Kind, x: number, y: number, z: number, dx: number, dy: number, len: number, lit: boolean, accent: number) {
+  private put(k: Kind, who: Ship | number, x: number, y: number, z: number, dx: number, dy: number, len: number, lit: boolean, accent: number) {
+    this.placed.push([who, x, y]);
     this.q.setFromAxisAngle(this.up, Math.atan2(dx, dy));
     this.scl.set(1, 1, len);
     this.m.compose(this.pos.set(x, z, y), this.q, this.scl);
@@ -405,6 +414,7 @@ export class Boats {
     const d = Math.round(day);
     if (d !== this.day) { this.day = d; this.ships = this.cruiseDay(d); }
     for (const k of [this.cruise, this.boat]) k.n = k.lit = k.dark_ = 0;
+    this.placed.length = 0;
 
     // cruise ships: moored, or coming in or leaving
     for (const s of this.ships) {
@@ -412,7 +422,7 @@ export class Boats {
       if (s.dep && clock > s.dep.t0 + s.dep.dur) continue; // gone
       const mv = s.arr && clock < s.arr.t0 + s.arr.dur ? s.arr : s.dep && clock > s.dep.t0 ? s.dep : null;
       if (mv) this.placeMoving(s, mv, clock, z);
-      else this.put(this.cruise, s.x, s.y, z, s.dx, s.dy, s.len, s.lit, s.acc);
+      else this.put(this.cruise, s, s.x, s.y, z, s.dx, s.dy, s.len, s.lit, s.acc);
     }
 
     // excursion boats
@@ -437,7 +447,7 @@ export class Boats {
         const dx = at0.x - at1.x, dy = at0.y - at1.y, l = Math.hypot(dx, dy) || 1;
         at(P, s, 0, at0);
         const lit = tr.on >= 0 || tr.next - clock < BOARD || clock - tr.back < AFTER;
-        this.put(this.boat, at0.x + rx * lat, at0.y + ry * lat, z + bob, dx / l, dy / l, 1, lit, TOUR_ACCENTS[b % TOUR_ACCENTS.length]);
+        this.put(this.boat, b, at0.x + rx * lat, at0.y + ry * lat, z + bob, dx / l, dy / l, 1, lit, TOUR_ACCENTS[b % TOUR_ACCENTS.length]);
       }
     }
 

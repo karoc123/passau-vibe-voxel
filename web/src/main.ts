@@ -488,7 +488,8 @@ renderer.setAnimationLoop((now) => {
     life.group.visible = !city || city.complete;
     if (life.group.visible) {
       life.day = daylight.day;
-      life.update(dt, daylight.hour, daylight.night, focus());
+      // (simulated round what is looked at; agents come and go far from the camera, which sees them)
+      life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
       boats?.update(dt, daylight.hour, daylight.day, daylight.night, flood?.level ?? 0);
     }
   }

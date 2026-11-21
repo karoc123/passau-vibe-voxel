@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hash, pushTo, smooth } from '../util';
 import type { World } from '../world';
 import { LifeMeshes, MAX_BIKES, MAX_CARS, MAX_PEOPLE, setCount } from './meshes';
-import { at, cellKey, landingLane, prepPath, pt, Turn, turnOf, type Pt } from './path';
+import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import { Trains } from './trains';
 import type { Agent, Car, Controller, Kind, PedEdge, Person, Pose, Rideable, Road, TrafficData } from './types';
 
@@ -83,8 +83,8 @@ export class StreetLife {
   private readonly restr = new Map<string, { to: number; type: string }[]>();
   private readonly box = new Map<number, Set<Car>>();
   private active: { x: number; z: number } | null = null;
-  // where the viewer is (update's focus), and whether the circle is to be filled at once (populate)
-  private viewer = { x: 0, z: 0 };
+  // where the viewer is (update's viewer: the camera), and whether the circle is to be filled at once (populate)
+  private viewer: Viewer = { x: 0, z: 0 };
   private warm = true;
   private roadOn: boolean[] = [];
   private pedOn: boolean[] = [];
@@ -106,6 +106,7 @@ export class StreetLife {
   private carGrid = new Map<number, Car[]>();
   private idSeq = 1;
   private readonly tmp = pt();
+  private readonly tmp2 = pt();
   // scratch points (carPoint uses tmp itself)
   private readonly sP = pt();
   private readonly sF = pt();
@@ -126,10 +127,12 @@ export class StreetLife {
 
   get group() { return this.M.group; }
 
-  update(dt: number, hour: number, night: number, focus: { x: number; z: number }) {
+  // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
+  // camera; by default the focus, on the ground), what agents come and go far from
+  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: Viewer = focus) {
     dt = Math.min(dt, 0.1);
     const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
-    this.viewer.x = focus.x; this.viewer.z = focus.z;
+    this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
     if (d2 > JUMP_R * JUMP_R) this.warm = true;
     if (d2 > 120 * 120) this.setActive(focus.x, focus.z);
     const hh = ((hour % 24) + 24) % 24;
@@ -144,7 +147,7 @@ export class StreetLife {
     if (this.warm) this.populate(density); // (drawn this frame)
     this.acc += dt;
     while (this.acc >= STEP) { this.step(STEP, density); this.acc -= STEP; }
-    this.trains.update(dt, hh);
+    this.trains.update(dt, hh, this.viewer);
     this.render(dt, night, this.acc);
   }
 
@@ -205,15 +208,15 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ spawning
-  // is (x, y) at least r m from the viewer (where an agent may come or go)?
-  private far(x: number, y: number, r: number) { return (x - this.viewer.x) ** 2 + (y - this.viewer.z) ** 2 >= r * r; }
+  // is (x, y) at height z at least r m from the viewer (where an agent may come or go)?
+  private far(x: number, y: number, z: number, r: number) { return farFrom(this.viewer, x, y, z, r); }
 
   private spawnCar(fromSource: boolean) {
     const ei = fromSource && this.sources.length ? anyOf(this.sources) : this.roadAct[pickWeighted(this.roadW)];
     const e = this.roads[ei], lane = (Math.random() * e.lanes) | 0;
     const s = fromSource ? 0 : 10 + Math.random() * Math.max(0, e.L - 20 - BOX_IN - 12);
     if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, CAR_POP_R)) return; }
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, CAR_POP_R)) return; }
     const bus = e.c >= 2 && Math.random() < 0.06;
     const car: Car = {
       kind: 'car', id: this.idSeq++, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : 4.6, bus, prev: -1, prevOff: 0, next: -1,
@@ -222,14 +225,14 @@ export class StreetLife {
       boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0, boxTurn: 0, block: null,
       geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 0 },
     };
-    car.next = this.chooseNext(e);
+    this.setNext(car, this.chooseNext(e));
     e.lists[lane].push(car);
     this.cars.push(car);
   }
 
   private spawnPed() {
     const ei = this.pedAct[pickWeighted(this.pedW)], e = this.peds[ei], s = Math.random() * e.L;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, PED_POP_R)) return; }
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
     this.people.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 1.05 + Math.random() * 0.55,
       lat: 0.35 + Math.random() * 1.0, ph: Math.random() * 6.28, wait: false, col: new THREE.Color(anyOf(SHIRTS)) });
   }
@@ -238,7 +241,7 @@ export class StreetLife {
     const ei = this.bikeAct[pickWeighted(this.bikeW)], e = this.peds[ei];
     if (!e || !e.bk) return;
     const s = Math.random() * e.L;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, PED_POP_R)) return; }
+    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
     this.riders.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 4 + Math.random() * 1.8,
       lat: 0.45 + Math.random() * 0.3, ph: Math.random() * 6.28, wait: false, bike: true, col: new THREE.Color(anyOf(SHIRTS)) });
   }
@@ -257,6 +260,13 @@ export class StreetLife {
     if (!outs.length && all.length) outs = all;
     if (!outs.length) return -1;
     return outs[pickWeighted(outs.map((j) => { const o = this.roads[j]; return (turnOf(e, o) === Turn.Straight ? 4 : 1) * o.c * (o.L > 6 ? 1 : 0.3); }))];
+  }
+
+  // the road a car on e takes next, and (when that one is too short to blend across on its own) the one after it, chosen
+  // now: carPoint blends into both before the car gets there
+  private setNext(car: Car, next: number) {
+    car.next = next;
+    car.next2 = next >= 0 && this.roads[next].L < BLEND ? this.chooseNext(this.roads[next]) : -1;
   }
 
   private nextTurn(car: Car, e: Road) { return car.next >= 0 ? turnOf(e, this.roads[car.next]) : Turn.Straight; }
@@ -491,7 +501,7 @@ export class StreetLife {
   }
 
   // may a car leave the street at the end of road e (out of sight: CAR_POP_R from the viewer)?
-  private mayLeave(car: Car, e: Road) { const P = at(e, e.L, car.off, this.tmp); return this.far(P.x, P.y, CAR_POP_R); }
+  private mayLeave(car: Car, e: Road) { const P = at(e, e.L, car.off, this.tmp); return this.far(P.x, P.y, P.z, CAR_POP_R); }
 
   // past the end of its road: onto the next one (false: it leaves), or hold at the line if the lane there is full (or
   // there is no way on and it may not leave here)
@@ -514,14 +524,15 @@ export class StreetLife {
       car.ds = car.s - s0;
       return true;
     }
-    Object.assign(car, { prev: car.e, prevOff: car.off, s: car.s - e.L, e: car.next, lane, off: this.laneOffset(n, lane) });
+    Object.assign(car, { prev2: car.prev, prev2Off: car.prevOff, prev: car.e, prevOff: car.off, s: car.s - e.L, e: car.next, lane, off: this.laneOffset(n, lane) });
     n.lists[lane].push(car);
-    car.next = this.chooseNext(n);
+    const n2 = car.next2 ?? -1;
+    this.setNext(car, n2 >= 0 && this.roadOn[n2] ? n2 : this.chooseNext(n));
     if (n.L < 25 && car.next >= 0) { // too short to change lanes later: take the next turn's lane now if it is free
       const wl = this.desiredLane(car, n);
       if (wl !== car.lane && this.laneGapOK(n, wl, car.s, car)) {
         n.lists[car.lane].splice(n.lists[car.lane].indexOf(car), 1);
-        car.lane = wl; car.off = this.laneOffset(n, wl);
+        car.lane = wl; // (its offset eases over: changeLane)
         n.lists[wl].push(car);
       }
     }
@@ -535,8 +546,8 @@ export class StreetLife {
     for (let i = list.length - 1; i >= 0 && over > 0; i--) {
       const p = list[i];
       if (p.ctl || p === this.keep) continue;
-      const P = p.rp ? { x: p.rp.x, y: p.rp.z } : at(this.peds[p.e], p.s, 0, this.tmp);
-      if (this.far(P.x, P.y, PED_POP_R)) { gone.add(p); over--; }
+      const P = p.rp ? { x: p.rp.x, y: p.rp.z, z: p.rp.y } : at(this.peds[p.e], p.s, 0, this.tmp);
+      if (this.far(P.x, P.y, P.z, PED_POP_R)) { gone.add(p); over--; }
     }
     return gone.size ? list.filter((p) => !gone.has(p)) : list;
   }
@@ -577,8 +588,8 @@ export class StreetLife {
       if (pe.s >= 0 && pe.s <= e.L) return true;
       const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j] && this.peds[j].bk);
       if (!opts.length) {
-        const P = pe.rp ? { x: pe.rp.x, y: pe.rp.z } : at(e, pe.s, 0, this.tmp);
-        if (this.far(P.x, P.y, PED_POP_R)) return false;
+        const P = pe.rp ? { x: pe.rp.x, y: pe.rp.z, z: pe.rp.y } : at(e, pe.s, 0, this.tmp);
+        if (this.far(P.x, P.y, P.z, PED_POP_R)) return false;
         pe.dir *= -1; pe.s = Math.min(Math.max(pe.s, 0), e.L);
         return true;
       }
@@ -593,18 +604,30 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ drawing
-  // a car's path at arc length s, blended across the junction nodes into smooth arcs (on a road shorter than 2 BLEND
-  // across both at once: the pulls towards the road before and the one after added, so it does not jump midway)
+  // A car's path at arc length s, blended across the junction nodes into smooth arcs: the roads before and after
+  // weighted by how far the car is from each node (smooth over BLEND either side of it), each pull added on, so
+  // that on a road shorter than 2 BLEND the car is drawn between both, and across a road shorter than BLEND the road
+  // beyond it pulls too (prev2, next2). Where the car moves onto the next road the sum is the same on either side.
   private carPoint(car: Car, s: number, out: Pt, off = car.off) {
-    const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z;
+    const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z, Q = this.tmp, R = this.tmp2;
+    // (P moved by w times the way from (ax, ay, az) to B)
+    const pull = (ax: number, ay: number, az: number, B: Pt, w: number) => { P.x += (B.x - ax) * w; P.y += (B.y - ay) * w; P.z += (B.z - az) * w; };
     if (s < BLEND && car.prev >= 0) {
-      const pe = this.roads[car.prev], Q = at(pe, pe.L + s, car.prevOff, this.tmp), w = 1 - smooth(-BLEND, BLEND, s);
-      P.x += (Q.x - x) * w; P.y += (Q.y - y) * w; P.z += (Q.z - z) * w;
+      const pe = this.roads[car.prev];
+      at(pe, pe.L + s, car.prevOff, Q);
+      pull(x, y, z, Q, 1 - smooth(-BLEND, BLEND, s));
+      const p2 = car.prev2 ?? -1;
+      if (p2 >= 0 && s + pe.L < BLEND) { const pp = this.roads[p2]; pull(Q.x, Q.y, Q.z, at(pp, pp.L + pe.L + s, car.prev2Off ?? 0, R), 1 - smooth(-BLEND, BLEND, s + pe.L)); }
     }
     if (s > e.L - BLEND && car.next >= 0) {
       const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
-      const Q = at(n, s - e.L, this.laneOffset(n, lane), this.tmp), w = smooth(-BLEND, BLEND, s - e.L);
-      P.x += (Q.x - x) * w; P.y += (Q.y - y) * w; P.z += (Q.z - z) * w;
+      at(n, s - e.L, this.laneOffset(n, lane), Q);
+      pull(x, y, z, Q, smooth(-BLEND, BLEND, s - e.L));
+      const n2 = car.next2 ?? -1;
+      if (n2 >= 0 && s - e.L - n.L > -BLEND) {
+        const nn = this.roads[n2], lane2 = landingLane(turnOf(n, nn), lane, nn.lanes);
+        pull(Q.x, Q.y, Q.z, at(nn, s - e.L - n.L, this.laneOffset(nn, lane2), R), smooth(-BLEND, BLEND, s - e.L - n.L));
+      }
     }
     return P;
   }
@@ -719,7 +742,7 @@ export class StreetLife {
     list.splice(i, 1);
     const v = Math.hypot(vx, vz) || 1;
     if (this.fallen.length >= MAX_FALLEN) { // the oldest out of sight (else the oldest)
-      const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, PED_POP_R));
+      const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
       this.fallen.splice(Math.max(0, i), 1);
     }
     this.fallen.push({
@@ -731,7 +754,7 @@ export class StreetLife {
 
   // the people knocked down further than r m from (x, z) gone (left behind; never in sight of the viewer)
   clearFallen(x: number, z: number, r: number) {
-    this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r || !this.far(f.at.x, f.at.z, PED_POP_R));
+    this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
   }
 
   // the people knocked down, drawn from instance i0 on: sliding along the shove, tipping over towards it (about the
@@ -740,7 +763,7 @@ export class StreetLife {
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
     const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3();
-    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S || !this.far(f.at.x, f.at.z, PED_POP_R));
+    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;
     for (let i = 0; i < n; i++) {
@@ -807,7 +830,7 @@ export class StreetLife {
   private trimParked() {
     const D = this.detachedCars;
     if (D.length <= PARKED) return;
-    let i = D.findIndex((c) => c !== this.keep && (!c.rp || this.far(c.rp.x, c.rp.z, CAR_POP_R)));
+    let i = D.findIndex((c) => c !== this.keep && (!c.rp || this.far(c.rp.x, c.rp.z, c.rp.y, CAR_POP_R)));
     if (i < 0 && D.length > PARKED_MAX) i = D.findIndex((c) => c !== this.keep);
     if (i >= 0) D.splice(i, 1);
   }

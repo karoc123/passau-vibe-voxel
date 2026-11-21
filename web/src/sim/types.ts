@@ -55,6 +55,11 @@ export interface Car extends Blocked {
   prev: number;
   prevOff: number;
   next: number;
+  // the road before prev and the one after next, with prev's offset there (-1, none: life.ts carPoint blends them in
+  // when prev or next is shorter than its blend)
+  prev2?: number;
+  prev2Off?: number;
+  next2?: number;
   brake: number;
   wait: number;
   ghost: number;
