@@ -148,8 +148,9 @@ export function follow(path: [number, number][], kmh: number): (s: Sim) => CarIn
     const fx = 2 * (r.x * r.z + r.w * r.y), fz = 1 - 2 * (r.x * r.x + r.y * r.y);
     let a = Math.atan2(path[k][0] - p.x, path[k][1] - p.z) - Math.atan2(fx, fz);
     a = Math.atan2(Math.sin(a), Math.cos(a));
-    const done = near >= path.length - 2;
-    return { ...cr(s), gas: done ? 0 : cr(s).gas, brake: done ? 1 : cr(s).brake, steer: Math.max(-1, Math.min(1, -a * 2.5)) };
+    // (at the end: brakes, then the handbrake -- brake held below 0.8 m/s is reverse gear: it backed off down the road)
+    const done = near >= path.length - 2, c = cr(s), v = s.car.kmh / 3.6;
+    return { gas: done ? 0 : c.gas, brake: done ? (v > 0.8 ? 1 : 0) : c.brake, steer: Math.max(-1, Math.min(1, -a * 2.5)), handbrake: done };
   };
 }
 
