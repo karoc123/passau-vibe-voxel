@@ -18,11 +18,27 @@ sh scripts/fetch_bayern.sh               # data/raw/{dsm,dtm,orto}_*.tif (DOM20,
                                          # data/raw/laser/*.laz, data/raw/baeume_aoi.csv, data/raw/treespecies_{2022,2016}.tif
                                          # (DLR Tree Species Germany, the map's window); skips files it has
 S="uv run python scripts/stamp.py"
-A="scripts/aoi.py scripts/map.json"      # (what every step reads of the map)
+A="scripts/aoi.py scripts/map.json#-regions"  # (what every step reads of the map: not how voxelize.py schedules the regions)
+# Steps that read nothing of each other run side by side (bg): each into its own log (data/cache/logs/NAME.log), shown
+# in a fixed order once all of a group are done (join); the build stops if any of them failed
+L=data/cache/logs
+mkdir -p $L
+JOBS=""
+bg() { _n=$1; shift; "$@" > $L/$_n.log 2>&1 & eval "pid_$_n=$!"; JOBS="$JOBS $_n"; }
+join() {
+  _fail=""
+  for _n in $JOBS; do
+    eval "_p=\$pid_$_n"
+    if wait "$_p"; then cat $L/$_n.log; else cat $L/$_n.log; echo "[$_n] FAILED (log: $L/$_n.log)"; _fail="$_fail $_n"; fi
+  done
+  JOBS=""
+  if [ -n "$_fail" ]; then echo "failed:$_fail"; exit 1; fi
+}
+bg lod2 $S lod2 -i $A data/raw/lod2 -o data/lod2.npz -- python scripts/lod2.py   # data/lod2.npz (LoD2 roof planes and footprints on the grid)
 $S prep -i $A data/raw/dsm_*.tif data/raw/dtm_*.tif data/raw/orto_*.tif -o data/prep.npz \
   -- python scripts/prep.py              # data/prep.npz
-$S lod2 -i $A data/raw/lod2 -o data/lod2.npz -- python scripts/lod2.py   # data/lod2.npz (LoD2 roof planes and footprints on the grid)
 $S laser -i $A data/raw/laser data/prep.npz -o data/laser.npz -- python scripts/laser.py  # data/laser.npz (LiDAR vegetation statistics per cell)
+join
 uv run python scripts/voxelize.py        # (reads data/raw/treespecies_*.tif too: scripts/region_inputs.py RAW_FILES)
                                          # (region by region: --regions NXxNY, -j N; only the regions that changed, --status
                                          # tells which; --only ROW_COL builds one again) tiles/, meta.json, data/trees.json,
@@ -32,24 +48,25 @@ uv run python scripts/voxelize.py        # (reads data/raw/treespecies_*.tif too
 P=web/public/data
 M="$P/meta.json#-tiles.tris,tiles.bytes,world" # (meta.json as voxelize.py wrote it: tile_fields.py, tris.mjs and
                                                # world_id.py add these)
-$S places -i $A scripts/osm.py data/raw/osm.json -o $P/places.json -- python scripts/places.py   # places.json (search index)
-$S flood -i $A data/ground.npz data/prep.npz $M -o data/flood.bin $P/flood.json \
+bg places $S places -i $A scripts/osm.py data/raw/osm.json -o $P/places.json -- python scripts/places.py   # places.json (search index)
+bg flood $S flood -i $A data/ground.npz data/prep.npz $M -o data/flood.bin $P/flood.json \
   -- python scripts/flood.py             # data/flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
-$S boats -i $A scripts/osm.py data/ground.npz data/raw/osm.json -o $P/boats.json \
+bg boats $S boats -i $A scripts/osm.py data/ground.npz data/raw/osm.json -o $P/boats.json \
   -- python scripts/boats.py             # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
-$S terrain -i $A scripts/window.py data/ground.npz $M -o $P/terrain data/terrain.bin \
+bg terrain $S terrain -i $A scripts/window.py data/ground.npz $M -o $P/terrain data/terrain.bin \
   -- python scripts/terrain.py           # terrain/ (the bare land in chunks, while the tiles load and far off); data/terrain.bin
-$S zones -i $A scripts/window.py scripts/osm.py scripts/lod2_ids.py data/footprints.npz data/raw/osm.json data/raw/lod2 $M \
+bg zones $S zones -i $A scripts/window.py scripts/osm.py scripts/lod2_ids.py data/footprints.npz data/raw/osm.json data/raw/lod2 $M \
   -o data/zones.bin $P/zones.json -- python scripts/zones.py  # data/zones.bin, zones.json (the building of each column
                                          # and each building's stable key; needs footprints.npz)
-$S objects -i $A data/raw/osm.json data/ground.npz -o $P/objects \
+bg objects $S objects -i $A data/raw/osm.json data/ground.npz -o $P/objects \
   -- python scripts/objects.py           # objects/ (each building's and street's box, for the viewer's ?focus=; needs ground.npz)
-$S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/windows.bin \
+bg windows $S windows -i $A scripts/osm.py data/footprints.npz data/raw/osm.json -o $P/windows.bin \
   -- python scripts/windows.py           # windows.bin (what each building is, for its lit windows; needs footprints.npz)
-uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
-$S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/alkis_tn.py data/raw/dwd data/raw/tn_09262.zip data/raw/tn_09275.zip \
+bg climate uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in data/raw/climate)
+bg phenology $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/alkis_tn.py data/raw/dwd data/raw/tn_09262.zip data/raw/tn_09275.zip \
   data/raw/treespecies_2022.tif data/raw/treespecies_2016.tif data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
+join                                     # (the steps above read only what voxelize.py wrote, not each other)
 $S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py data/zones.bin data/flood.bin data/foliage.bin \
   data/surface.npz data/prep.npz data/ground.npz data/qa_roadmask.bin.gz $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light, sloped caps

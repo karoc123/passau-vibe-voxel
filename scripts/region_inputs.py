@@ -52,7 +52,7 @@ def file_sha(path, cache={}):
     stamp = f"{st.st_size}:{st.st_mtime_ns}"
     db = CACHE / "files.json"
     if not cache:
-        cache.update(json.load(open(db)) if db.exists() else {})
+        cache.update(_load_json(db))
     hit = cache.get(str(p))
     if hit and hit[0] == stamp:
         return hit[1]
@@ -61,9 +61,23 @@ def file_sha(path, cache={}):
         for chunk in iter(lambda: fh.read(1 << 22), b""):
             h.update(chunk)
     cache[str(p)] = [stamp, h.hexdigest()]
+    # (several steps run side by side, build_data.sh: what another wrote since is kept, the file replaced whole)
     CACHE.mkdir(parents=True, exist_ok=True)
-    json.dump(cache, open(db, "w"))
+    disk = _load_json(db)
+    disk.update({str(p): cache[str(p)]})
+    cache.update({k: v for k, v in disk.items() if k not in cache})
+    tmp = db.with_name(f"files.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(disk))
+    os.replace(tmp, db)
     return h.hexdigest()
+
+
+def _load_json(path):
+    """a cache file's dict, or {} where it is missing or broken"""
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def code_sha(path, cache={}):
