@@ -5,6 +5,7 @@ Outputs (row 0 = grid row 0): dsm at 0.5 m, dtm at 1 m, orto at 0.2 m.
 """
 import glob
 import math
+import time
 
 import numpy as np
 import rasterio
@@ -16,6 +17,14 @@ from scipy import ndimage
 from aoi import D, RAW, W, to_world, world_bounds
 
 MINX, MINY, MAXX, MAXY = (round(v) for v in world_bounds(margin=10))
+_T = [time.time()]
+
+
+def tick(what):
+    """the seconds since the last tick (the step's phases: what to make faster)"""
+    t = time.time()
+    print(f"[{t - _T[0]:5.1f} s] {what}", flush=True)
+    _T[0] = t
 
 
 def mosaic(pattern, res, nodata=-9999):
@@ -69,14 +78,22 @@ def resample(src, src_res, out_res, order, band=1024, origin=None):
 
 
 _m, _t = mosaic("dsm_*.tif", 0.2)  # DOM20; sampled (nearest) at the pipeline's 0.5 m
+tick("dsm mosaic")
 dsm = resample(_m[0].astype(np.float32), 0.2, 0.5, order=0, origin=(_t.c, _t.f))  # nearest keeps spires
+tick("dsm resampled")
 _m, _t = mosaic("dtm_*.tif", 1.0)
 dtm = resample(_m[0].astype(np.float32), 1.0, 1.0, order=1, origin=(_t.c, _t.f))
+tick("dtm mosaic, resampled")
 del _m
 for n, a in (("dsm", dsm), ("dtm", dtm)):
     print(n, a.shape, float(a[a > -1000].min()), float(a.max()), int((a < -1000).sum()), "nodata")
-orto = resample(mosaic_rgb("orto_*.tif", 0.2), 0.2, 0.2, order=1)
+_o = mosaic_rgb("orto_*.tif", 0.2)
+tick("orto mosaic")
+orto = resample(_o, 0.2, 0.2, order=1)
+del _o
+tick("orto resampled")
 print("orto", orto.shape, orto.reshape(-1, 3).mean(0), int((orto.sum(-1) == 0).sum()), "empty px")
 np.savez_compressed("data/prep.npz", dsm=dsm, dtm=dtm, orto=orto)
+tick("data/prep.npz written")
 from PIL import Image
 Image.fromarray(orto[::4, ::4]).save("data/orto_preview.jpg", quality=85)

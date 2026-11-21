@@ -25,6 +25,7 @@ Output data/laser.npz, all (D, W) on the 1 m grid, heights above the DGM1 terrai
   n_ret    uint16  returns of any class (none: water, or no data)
 """
 import glob
+import time
 
 import laspy
 import numpy as np
@@ -52,7 +53,10 @@ def main():
     out = {k: np.zeros(D * W, np.int16 if k.startswith("veg_") and k != "veg_n" else np.uint16) for k in KEYS}
     files = sorted(glob.glob(f"{RAW}/laser/*.laz"))
     assert files, "no LAZ tiles in data/raw/laser (scripts/fetch_bayern.sh)"
+    t_read = t_count = 0.0
+    t_all = time.time()
     for p in files:
+        t = time.time()
         las = laspy.read(p)
         x, y, z = np.asarray(las.x), np.asarray(las.y), np.asarray(las.z, np.float32)
         cls = np.asarray(las.classification)
@@ -64,6 +68,8 @@ def main():
         ok = (c >= 0) & (c < W) & (r >= 0) & (r < D) & (cls != 7)
         c, r, z, cls, rn, nr, it = c[ok], r[ok], z[ok], cls[ok], rn[ok], nr[ok], it[ok]
         del x, y, las
+        t_read += time.time() - t
+        t = time.time()
         idx = r * W + c
         h = z - dtm[r, c]
         veg = cls == 20
@@ -86,8 +92,12 @@ def main():
         for k, q in (("veg_p10", 0.1), ("veg_p50", 0.5)):
             pc = percentile_per_cell(vi, vh, q, D * W)
             out[k] = np.where(pc > 0, pc, out[k])
+        t_count += time.time() - t
         print(p, int(ok.sum()), "points,", int(v.sum()), "vegetation returns above 1.5 m")
+    t = time.time()
     np.savez_compressed("data/laser.npz", **{k: a.reshape(D, W) for k, a in out.items()})
+    print(f"seconds: sheets read {t_read:.1f}, counted {t_count:.1f}, data/laser.npz written {time.time() - t:.1f}, "
+          f"in all {time.time() - t_all:.1f}")
     print("cells with vegetation returns:", int((out["veg_n"] > 0).sum()), "without any return:", int((out["n_ret"] == 0).sum()))
 
 
