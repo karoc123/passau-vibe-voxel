@@ -58,7 +58,8 @@ def decode(buf):
 # smooth profile. Linked: 4-neighbours (any two layers) whose tops differ by a metre at most and, two ground nodes the
 # terrain model knows, whose terrain differs by WALL_TOL at most (a wall the terrain model shows stays a step). Smoothed
 # N_SMOOTH times (each node: twice its own height and its links', averaged), then the fallback nodes alone N_RELAX more
-# times between the rest (their 1 m stairs become a slope between the good terrain around them). A grid point's height
+# times between the rest (their 1 m stairs become a slope between the good terrain around them), with them the deck
+# nodes (N_DECK rounds) and the ground at a deck's end (BLEND). A grid point's height
 # for a node: the mean over the nodes of the four columns around it that are linked to it there (through the square's
 # four edges), so neighbours on one surface take the same number and a wall keeps a riser; in 1/64 m, held within CLAMP
 # of the node's top. All on the map's grid from rasters within REACH of a cell: the same for any window cover.
@@ -74,12 +75,21 @@ SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
 # a deck's nodes alone, more rounds after those (with the fallback nodes'): a deck is smooth in truth, and its profile
 # (voxelize.py, the ways' heights interpolated over the deck) keeps a ripple of a few cm a car at 50-70 km/h rocks on
-N_DECK = 0
+N_DECK = 48
+# links: the ground nodes this near (over ground links) one linked to a deck relax with the fallback nodes, between the
+# deck and the ground beyond. The terrain model drops with the bridge it leaves out and climbs back past the deck's end
+# (the Schanzlbrücke's north end: 0.6 m under the deck's end, back at the road's level 5 m on), and held there the
+# ground bent the road into a sag of -4 % / +4 % over 6 m (altstadt fixture, schanzl@70: pitch jitter 0.077 -> 0.036
+# rad/s; BLEND 3: 0.053, 10: 0.028)
+BLEND = 6
 CLAMP = 56  # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor)
-# 1/64 m: a corner this near a whole metre is put on it (every column round its grid point alike: no lip), so a near
-# level street is flat voxel tops the mesher merges, not a field of quads a centimetre off (the triangles)
-SNAP = 2
-REACH = N_SMOOTH + N_RELAX + 1  # (N_DECK runs with N_RELAX: max of the two)
+# 1/64 m: a corner this near a whole metre is put on it (every column round its grid point alike). 0: off. At 2 a near
+# level street came out as flat voxel tops the mesher merges, but each corner it moved bent the surface by up to 2/64 m
+# within a metre: a level strip with a kink at each end (6 m of it on the Schanzlbrücke's crown at 18.000 m), and on a
+# 5 % grade single corners (a synthetic grade at 70 km/h: pitch jitter 0.043 -> 0.077 rad/s). Off it costs the altstadt
+# fixture +0.5 % level-1 triangles of the capped nodes (3.838 -> 3.858 M) and +3.9 % caps bytes (5.98 -> 6.21 MB raw)
+SNAP = 0
+REACH = N_SMOOTH + N_RELAX + BLEND + 1  # (N_DECK runs with N_RELAX: max of the two)
 assert N_DECK <= N_RELAX  # cells: how far from a column what decides its corners lies (tile_fields.py HALO)
 ROOFS = False  # phase B (roof caps): not written yet -- the client draws and collides roofs as voxels
 
@@ -178,6 +188,18 @@ def fields(gt, water, bld, steps, dtm, deck):
         # 1/64 removes)
         nbrs[a] = [t for t in nbrs[a] if t[1].any()]
     anyK = bool(L["K"]["ex"].any())
+    # the ground at a deck's end: the ground nodes within BLEND links (over the ground) of one linked to a deck node
+    G_K = [m for b, m, _ in nbrs["G"] if b == "K"]
+    G_G = [(m, (dy, dx)) for b, m, (dy, dx) in nbrs["G"] if b == "G"]
+    end = np.zeros((R, C), bool)
+    for m in G_K:
+        end |= m
+    for _ in range(BLEND - 1):
+        grow = end.copy()
+        for m, (dy, dx) in G_G:
+            grow |= m & _shift(end, dy, dx, False)
+        end = grow
+    L["G"]["end"] = end
 
     def step(only_fb, deck=False):
         new = {}
@@ -189,7 +211,7 @@ def fields(gt, water, bld, steps, dtm, deck):
             for b, m, (dy, dx) in nbrs[a]:
                 _add_shifted(s, m, L[b]["h"], dy, dx)
             h = s / (2 + L[a]["n"])
-            free = L[a]["fb"] | (deck & (a == "K"))
+            free = L[a]["fb"] | (deck & (a == "K")) | L[a].get("end", False)
             keep = ~L[a]["ex"] | (~free if only_fb else np.zeros_like(L[a]["ex"]))
             new[a] = np.where(keep, L[a]["h"], h)
         for a in "GK":
