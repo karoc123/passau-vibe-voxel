@@ -315,6 +315,7 @@ def region_fields(region, D, W, base, tmp="data"):
     """fields() over a region (ra, rb, ca, cb) of the map's rasters, or None without data/surface.npz (data from
     before it: no caps at all)"""
     from pathlib import Path
+    import sidecar
     import window as wmod
     tmp = Path(tmp)
     if not (tmp / "surface.npz").exists():
@@ -325,7 +326,11 @@ def region_fields(region, D, W, base, tmp="data"):
     bld = wmod.npz_region(tmp / "ground.npz", "b", region) > 0
     rgb = wmod.npz_region(tmp / "ground.npz", "rgb", region)
     steps = (rgb == np.array(quantised(STEPS), np.uint8)).all(-1)
-    dtm = wmod.npz_region(tmp / "prep.npz", "dtm", region).astype(np.float64) - base
+    # (prep.npz's dtm from its uncompressed copy where regions.py made a fresh one: else inflated from its start for
+    # every window of tile_fields.py; the same bytes)
+    sc = sidecar.load(tmp / "prep.npz", "dtm")
+    dtm = (np.array(sc[region[0]:region[1], region[2]:region[3]]) if sc is not None
+           else wmod.npz_region(tmp / "prep.npz", "dtm", region)).astype(np.float64) - base
     F = fields(gt, water, bld, steps, dtm, deck)
     D_, W_ = gt.shape
     qa = tmp / "qa_roadmask.bin.gz"

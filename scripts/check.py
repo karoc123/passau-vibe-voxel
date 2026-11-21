@@ -207,9 +207,12 @@ def build(ws, fx, jobs, cover=(), after=True):
     if extends(ws / "scripts" / "palette.json"):
         shutil.copy(ws / "scripts" / "palette.json", fx.home / "palette.json")
     t1 = time.time()
-    if after:
-        for s in AFTER:
-            run(ws, fx, s)
+    if after:  # side by side as in build_data.sh (they read nothing of each other), then tile_fields (reads theirs)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(len(AFTER) - 1) as ex:
+            for f in [ex.submit(run, ws, fx, s) for s in AFTER[:-1]]:
+                f.result()  # (the first that failed raises, in AFTER's order)
+        run(ws, fx, AFTER[-1])
     print(f"  {ws.relative_to(ROOT)}: voxelize {' '.join(cover) or '(default cover)'} {t1 - t:.0f} s"
           + (f", the steps after it {time.time() - t1:.0f} s" if after else ""), flush=True)
 
