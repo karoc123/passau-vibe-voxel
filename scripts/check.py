@@ -71,7 +71,7 @@ WSTEPS = {
     "terrain": dict(copy=[f"{PUB}/meta.json"], link=["data/ground.npz"], out=["data/terrain.bin", f"{PUB}/terrain"]),
     "tile_fields": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles", f"{PUB}/windows.bin"],
                         link=["data/zones.bin", "data/flood.bin", "data/foliage.bin", "data/surface.npz", "data/prep.npz",
-                              "data/ground.npz"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
+                              "data/ground.npz", "data/qa_roadmask.bin.gz"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
     "tiles_lod": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles"], link=[], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
 }
 

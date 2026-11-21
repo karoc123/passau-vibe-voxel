@@ -64,23 +64,29 @@ def decode(buf):
 # of the node's top. All on the map's grid from rasters within REACH of a cell: the same for any window cover.
 #
 # Which runs get a record (from the node's own columns, D1 of the plan: paved ground and decks only): the run ending
-# at the column's ground with air above, its top voxel paved (PAVED_IDS: web/src/core/materials.ts pavedGround), and
+# at the column's ground with air above, its top voxel paved (PAVED_IDS: web/src/core/materials.ts pavedGround) -- or
+# on a carriageway (data/qa_roadmask.bin.gz 1) any ground but grass and water (a strip of earth the data paints where a
+# bridge's way meets the road: a 15 cm dip at 50 km/h) --, and
 # the column's last run above the ground, its top a deck's surface (cap_ids: paved, the bare deck's concrete, a rail
 # deck's ballast), within DECK_TOL of the deck's profile. Lawns, fields, steps, water and anything standing on the
 # ground stay voxels.
 SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
+# a deck's nodes alone, more rounds after those (with the fallback nodes'): a deck is smooth in truth, and its profile
+# (voxelize.py, the ways' heights interpolated over the deck) keeps a ripple of a few cm a car at 50-70 km/h rocks on
+N_DECK = 0
 CLAMP = 56  # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor)
 # 1/64 m: a corner this near a whole metre is put on it (every column round its grid point alike: no lip), so a near
 # level street is flat voxel tops the mesher merges, not a field of quads a centimetre off (the triangles)
 SNAP = 2
-REACH = N_SMOOTH + N_RELAX + 1  # cells: how far from a column what decides its corners lies (tile_fields.py HALO)
+REACH = N_SMOOTH + N_RELAX + 1  # (N_DECK runs with N_RELAX: max of the two)
+assert N_DECK <= N_RELAX  # cells: how far from a column what decides its corners lies (tile_fields.py HALO)
 ROOFS = False  # phase B (roof caps): not written yet -- the client draws and collides roofs as voxels
 
 M_SOLID, M_MARK = 0, 9
 GROUND_HEX = ("#8f8981", "#a49f97", "#c6c2b8", "#b5b4af", "#b7b1a6", "#5f636b", "#6e7178", "#6a6d73", "#8a5a52",
               "#d8ccb5", "#8a8178", "#bdbab2")  # materials.ts GROUND_COLOURS
-BALLAST, KERB, STEPS = "#8a8178", "#cfc7b8", "#a8a296"
+BALLAST, KERB, STEPS, DECK = "#8a8178", "#cfc7b8", "#a8a296", "#a7a49d"
 
 
 def quantised(hex_):
@@ -100,11 +106,13 @@ M_SOIL, M_CONCRETE = 10, 13
 
 
 def cap_ids(palette):
-    """per palette id, (the ground's run may get a cap: paved_ids; a deck's top may: any deck surface -- paved, the
-    bare deck's concrete, a rail deck's ballast or track bed -- not a railing, a lamp, glass, leaves, water)"""
+    """per palette id, (the ground's run may get a cap: paved_ids, and the bare deck's concrete -- a bridge's way where
+    it is drawn on the ground at the bridge's end; a deck's top may: any deck surface -- paved, the bare deck, a rail
+    deck's ballast or track bed -- not a railing, a lamp, glass, leaves, water)"""
     paved = paved_ids(palette)
+    bare = np.array([e[3] == M_CONCRETE and tuple(e[:3]) == quantised(DECK) for e in palette], bool)
     deck = paved | np.array([e[3] in (M_SOLID, M_MARK, M_SOIL, M_CONCRETE) for e in palette], bool)
-    return paved, deck
+    return paved | bare, deck
 
 
 def _shift(a, dy, dx, fill):
@@ -124,8 +132,10 @@ def fields(gt, water, bld, steps, dtm, deck):
     gt = gt.astype(np.int64)
     dtm = dtm.astype(np.float64)
     ok = np.isfinite(dtm) & (np.abs(dtm - gt) <= SRC_TOL)
-    exG = ~water & ~bld & ~steps
     exK = np.isfinite(deck)
+    # (no ground node where a deck lies on the ground -- its slab of two voxels reaching down to it, at a bridge's end:
+    # that ground is no surface, and linked to the deck beside it, it pulled the deck's end down half a metre)
+    exG = ~water & ~bld & ~steps & ~(exK & (np.round(np.nan_to_num(deck)) - 2 <= gt))
     L = {"G": dict(ex=exG, top=gt, fb=exG & ~ok, h=np.where(ok, dtm, gt).astype(np.float64)),
          "K": dict(ex=exK, top=np.where(exK, np.round(np.nan_to_num(deck)), 0).astype(np.int64), fb=np.zeros_like(exK),
                    h=np.nan_to_num(deck).astype(np.float64))}
@@ -155,22 +165,23 @@ def fields(gt, water, bld, steps, dtm, deck):
     for a in "GK":
         L[a]["n"] = sum(m.astype(np.float64) for _, m, _ in nbrs[a])
 
-    def step(only_fb):
+    def step(only_fb, deck=False):
         new = {}
         for a in "GK":
             s = 2 * L[a]["h"]
             for b, m, (dy, dx) in nbrs[a]:
                 s = s + np.where(m, _shift(L[b]["h"], dy, dx, 0.0), 0.0)
             h = s / (2 + L[a]["n"])
-            keep = ~L[a]["ex"] | (~L[a]["fb"] if only_fb else np.zeros_like(L[a]["ex"]))
+            free = L[a]["fb"] | (deck & (a == "K"))
+            keep = ~L[a]["ex"] | (~free if only_fb else np.zeros_like(L[a]["ex"]))
             new[a] = np.where(keep, L[a]["h"], h)
         for a in "GK":
             L[a]["h"] = np.where(L[a]["ex"], new[a], 0.0)
 
     for _ in range(N_SMOOTH):
         step(False)
-    for _ in range(N_RELAX):
-        step(True)
+    for i in range(N_RELAX):
+        step(True, i < N_DECK)
     # the grid points: point (i, j) the corner before column (i, j); around it NW (i-1, j-1), NE (i-1, j), SW (i, j-1),
     # SE (i, j), the point their corner 2, 3, 1, 0. Eight nodes (4 columns x 2 layers), labelled by component over the
     # square's edges (NW-NE, SW-SE: east links; NW-SW, NE-SE: south links)
@@ -267,7 +278,8 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
     for kind, lay in (("ground", "G"), ("deck", "K")):
         Lr = F[lay]
         if kind == "ground":
-            sel = (end == grnd[col]) & (nxt0 != end) & pv
+            road = F["road"][lr[col], lc[col]] & inmap[col]
+            sel = (end == grnd[col]) & (nxt0 != end) & (pv | (road & dv))
         else:
             dk = F["deck"][lr[col], lc[col]]
             sel = last & (end > grnd[col]) & dv & np.isfinite(dk) & (np.abs(np.nan_to_num(dk) - end) <= DECK_TOL)
@@ -315,6 +327,9 @@ def region_fields(region, D, W, base, tmp="data"):
     steps = (rgb == np.array(quantised(STEPS), np.uint8)).all(-1)
     dtm = wmod.npz_region(tmp / "prep.npz", "dtm", region).astype(np.float64) - base
     F = fields(gt, water, bld, steps, dtm, deck)
+    D_, W_ = gt.shape
+    qa = tmp / "qa_roadmask.bin.gz"
+    F["road"] = (wmod.gz_region(qa, (D, W), np.uint8, region) == 1) if qa.exists() else np.zeros((D_, W_), bool)
     F["deck"], F["bld"] = deck, bld
     F["at"] = (region[0], region[2])
     return F
