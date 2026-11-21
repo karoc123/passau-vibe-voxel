@@ -126,7 +126,7 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | `windows.py` | `windows.bin`: what each building is (residential, office, church …), per building, for its windows at night (needs `data/footprints.npz`) |
 | `climate.py` | `climate.json`: the typical weather of each day (Open-Meteo, cached in `data/raw/climate`) |
 | `phenology.py` | `phenology.json`, `data/foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `data/trees.json`) |
-| `tile_fields.py` | into every node file of `tiles/` (`scripts/tilefile.py`: a header of tagged sections): per cell the building, the rivers' level and bed, foliage and the light of lit windows on the street, at the node's own cell size, from the `data/` maps above. Nothing of the map's size is loaded by the viewer whole: each node brings its part. Run again after `voxelize.py` or `tiles_lod.py` |
+| `tile_fields.py` | into every node file of `tiles/` (`scripts/tilefile.py`: a header of tagged sections): per cell the building, the rivers' level and bed, foliage and the light of lit windows on the street, at the node's own cell size, from the `data/` maps above; at 1 m the `caps` of sloped paved ground and bridge decks (`scripts/caps.py`, from `data/surface.npz`: docs/adr/0005-surface-caps.md). Nothing of the map's size is loaded by the viewer whole: each node brings its part. Run again after `voxelize.py` or `tiles_lod.py` |
 | `world_id.py` | `meta.json` `world`: the build id (a hash over the contents of `tiles/1` and `1f`), the palette's length and hash, origin, base, the project grid (docs/adr/0001-world-layers.md); every build, written only when it changed. `scripts/palette_check.py [REV]` checks the palette registry is append-only against a git revision |
 | `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`). In 8 processes (`--jobs K`), each node meshed again only when its files or the mesher's code changed (`data/cache/tris.json`; `--no-cache`) |
 | `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `data/terrain.bin`, `traffic.json`) |
@@ -283,7 +283,9 @@ size on screen and a budget of triangles drawn (the detail setting), the nodes n
 map at 8 m is the least it draws, and within ~100 m of a camera near the ground nothing is coarser than 2 m.
 Each node's file also brings what the shader reads per cell (the buildings, the rivers' levels and bed, foliage, the
 window light on the street: `scripts/tile_fields.py`); the nodes shown hold pages of two array textures
-(`web/src/fields.ts`), so no texture or array grows with the map. Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~900 m of the camera.
+(`web/src/fields.ts`), so no texture or array grows with the map. A 1 m node with sloped streets or bridge decks also
+brings their caps, the corner heights of those columns' tops, which the mesher, the walkers, the car and the drone all
+take as the one surface (`web/src/core/surface.ts`, docs/adr/0005-surface-caps.md); everything else is its voxels. Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~900 m of the camera.
 
 ```sh
 cd web
@@ -323,7 +325,7 @@ the road's under its axles, m/s, 0 for a car glued to the road; `heave`: how far
 drive over the top of a 25 % street (`airS`, `hopCm`, `landLoad`, `settleS`), `settle_heave`/`settle_pitch` kick the body
 on level ground (overshoot, settle time, frequency), `steer_step` holds half the steering at 50 km/h (`yawRise`,
 `yawGain`, `latG`, `rollDeg`). `--set stiffness=34,gravity=1.25,...` runs anything with other numbers for the ride
-(`car.ts` RIDE) or the car's surface (`terrain.ts` DRIVE: `tol`, `sigma`). `--real X,Z,HEADING,KMH,SECS` drives
+(`car.ts` RIDE). `--real X,Z,HEADING,KMH,SECS` drives
 straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
 ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). The `drive_*` scenarios
 (`src/physics/rapier/drive-scenarios.ts`) run the drive mode's glue (`src/nav/drive-session.ts`) in Rapier's drive
@@ -402,9 +404,9 @@ loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bot
 the same car where you stop, and **Esc** takes you back to the map.
 
 The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive-world.ts`,
-`car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks; the
-ground's 1 m steps are smoothed into a surface of the car's own, steps up to ~1 m that are not ground (platforms, low
-walls) get an invisible ramp. Traffic cars and buses near it are solid; hit one at more than ~15 km/h (between the
+`car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks;
+sloped streets and decks are the caps the viewer draws (one surface for everybody), steps up to ~1 m that are not
+capped (terraces, platforms, low walls) get an invisible ramp. Traffic cars and buses near it are solid; hit one at more than ~15 km/h (between the
 two) and it is knocked out of the traffic, tumbles and stays where it comes to rest. People walking or cycling that
 the car runs into are shoved away along the hit and tip over flat (a short scripted fall of the street life's figure,
 no physics: `sim/life.ts` `knockDown`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its

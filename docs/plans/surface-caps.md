@@ -441,6 +441,10 @@ Run 6 on the full data. If green → A8. If ride quality fails: tune `caps.py` (
 3.5 phase A list, `core/caps-legacy.ts`, `CAPS.use`, `?caps=0`. Update the comments that describe ramps
 (`terrain.ts` header, `car.ts` header, `mesher.worker.ts`), README's data section, ADR 0004's tag list, commit ADR 0005
 (8). Gates: all (golden recorded in R must stay byte-identical through the deletion).
+**Done** on branch `a8-legacy` (ADR: `docs/adr/0005-surface-caps.md`). Differences from the above: `tools/contact.mjs`
+was never built (`tools/surface-gap.mjs` is the acceptance tool; its baseline re-recorded on the caps data);
+`caps-check.mjs` compares against the node without its caps (voxels) instead of the legacy path; the roofs' inference
+(phase B) stays; `PAL_GROUND` and `RULES.groundForCar` went too; `formatVersion` was not bumped.
 
 ### Phase B — roofs (optional; data already there after R)
 - **B1** `roofs.ts`: `slopeBaseFromCaps(N, T, cols.caps, planes, bidAt)` returning today's `SlopeBase` shape
