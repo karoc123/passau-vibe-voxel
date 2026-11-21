@@ -207,7 +207,7 @@ def build(vol, g, pal, C, stone, note, tunnels):
             g[r, c] = z0  # cut open: the ground is the road now
         elif z1 > z0 and ((r, c) in wall or bore[(r, c)]):
             # the bore's floor is the column's ground: the tiles' ground is solid from 0 up to it for the viewer's
-            # collision (nav/voxel-collision.ts, physics/rapier/terrain.ts) and the car's surface, and the rock over
+            # collision (nav/voxel-collision.ts, physics/rapier/terrain.ts), and the rock over
             # the bore stays as the voxels above it (base runs); surface() gives back the hill's for the rasters
             if z0 < g[r, c] and (r, c) not in wall:
                 LOWERED[(r, c)] = int(g[r, c])
