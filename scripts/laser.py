@@ -35,22 +35,60 @@ from aoi import CX, CY, D, I0, J0, MAP_C0, MAP_R0, RAW, W
 KEYS = ("n_pulse", "n_canopy", "n_single", "n_ground", "int_canopy", "veg_n", "veg_top", "veg_p10", "veg_p50", "n_ret")
 
 
-def percentile_per_cell(idx, h, q, n_cells):
-    """q-quantile of h per cell index (lower nearest rank), cells without points 0."""
+def percentiles_per_cell(idx, h, qs, n_cells):
+    """per q of qs: the q-quantile of h per cell index (lower nearest rank), cells without points 0 (one sort)"""
     o = np.lexsort((h, idx))
     idx, h = idx[o], h[o]
     cnt = np.bincount(idx, minlength=n_cells)
     start = np.concatenate([[0], np.cumsum(cnt)[:-1]])
     have = cnt > 0
-    out = np.zeros(n_cells, h.dtype)
-    out[have] = h[start[have] + (q * (cnt[have] - 1)).astype(np.int64)]
-    return out
+    res = []
+    for q in qs:
+        out = np.zeros(n_cells, h.dtype)
+        out[have] = h[start[have] + (q * (cnt[have] - 1)).astype(np.int64)]
+        res.append(out)
+    return res
+
+
+def count(out, r, c, z, cls, rn, nr, it, dtm):
+    """one sheet's points (map row r, column c, ...) counted into out (KEYS: (D, W) arrays) over the box of cells they
+    lie in, not the whole map (each cell's counts, sums, maxima and ranks are those of the same points in the same
+    order); returns the number of vegetation returns 1.5 m or more above the ground"""
+    r0, r1, c0, c1 = int(r.min()), int(r.max()) + 1, int(c.min()), int(c.max()) + 1
+    bw, n = c1 - c0, (r1 - r0) * (c1 - c0)
+    box = {k: a[r0:r1, c0:c1] for k, a in out.items()}  # (views: written in place)
+
+    def add(k, a):
+        box[k] += a.reshape(r1 - r0, bw)
+    idx = (r - r0) * bw + (c - c0)
+    h = z - dtm[r, c]
+    veg = cls == 20
+    add("n_ret", np.minimum(np.bincount(idx, minlength=n), 65535).astype(np.uint16))
+    first = rn == 1
+    add("n_pulse", np.bincount(idx[first], minlength=n).astype(np.uint16))
+    can = first & veg & (h >= 3)
+    add("n_canopy", np.bincount(idx[can], minlength=n).astype(np.uint16))
+    add("n_single", np.bincount(idx[can & (nr == 1)], minlength=n).astype(np.uint16))
+    add("n_ground", np.bincount(idx[cls == 2], minlength=n).astype(np.uint16))
+    add("int_canopy", np.minimum(np.bincount(idx[can], weights=it[can], minlength=n) / 16, 65535).astype(np.uint16))
+    v = veg & (h >= 1.5)
+    vi, vh = idx[v], np.round(np.clip(h[v], 0, 3000) * 10).astype(np.int16)
+    add("veg_n", np.bincount(vi, minlength=n).astype(np.uint16))
+    top = np.zeros(n, np.int16)
+    np.maximum.at(top, vi, vh)
+    np.maximum(box["veg_top"], top.reshape(r1 - r0, bw), out=box["veg_top"])
+    # tiles share no cells (1 km sheets on whole metres, the grid on whole metres): a cell's percentiles come
+    # from one sheet
+    for k, pc in zip(("veg_p10", "veg_p50"), percentiles_per_cell(vi, vh, (0.1, 0.5), n)):
+        pc = pc.reshape(r1 - r0, bw)
+        box[k][...] = np.where(pc > 0, pc, box[k])
+    return int(v.sum())
 
 
 def main():
     dtm = np.asarray(np.load("data/prep.npz")["dtm"], np.float32)
     assert dtm.shape == (D, W)
-    out = {k: np.zeros(D * W, np.int16 if k.startswith("veg_") and k != "veg_n" else np.uint16) for k in KEYS}
+    out = {k: np.zeros((D, W), np.int16 if k.startswith("veg_") and k != "veg_n" else np.uint16) for k in KEYS}
     files = sorted(glob.glob(f"{RAW}/laser/*.laz"))
     assert files, "no LAZ tiles in data/raw/laser (scripts/fetch_bayern.sh)"
     t_read = t_count = 0.0
@@ -70,32 +108,11 @@ def main():
         del x, y, las
         t_read += time.time() - t
         t = time.time()
-        idx = r * W + c
-        h = z - dtm[r, c]
-        veg = cls == 20
-        out["n_ret"] += np.minimum(np.bincount(idx, minlength=D * W), 65535).astype(np.uint16)
-        first = rn == 1
-        out["n_pulse"] += np.bincount(idx[first], minlength=D * W).astype(np.uint16)
-        can = first & veg & (h >= 3)
-        out["n_canopy"] += np.bincount(idx[can], minlength=D * W).astype(np.uint16)
-        out["n_single"] += np.bincount(idx[can & (nr == 1)], minlength=D * W).astype(np.uint16)
-        out["n_ground"] += np.bincount(idx[cls == 2], minlength=D * W).astype(np.uint16)
-        out["int_canopy"] += np.minimum(np.bincount(idx[can], weights=it[can], minlength=D * W) / 16, 65535).astype(np.uint16)
-        v = veg & (h >= 1.5)
-        vi, vh = idx[v], np.round(np.clip(h[v], 0, 3000) * 10).astype(np.int16)
-        out["veg_n"] += np.bincount(vi, minlength=D * W).astype(np.uint16)
-        top = np.zeros(D * W, np.int16)
-        np.maximum.at(top, vi, vh)
-        out["veg_top"] = np.maximum(out["veg_top"], top)
-        # tiles share no cells (1 km sheets on whole metres, the grid on whole metres): a cell's percentiles come
-        # from one sheet
-        for k, q in (("veg_p10", 0.1), ("veg_p50", 0.5)):
-            pc = percentile_per_cell(vi, vh, q, D * W)
-            out[k] = np.where(pc > 0, pc, out[k])
+        nv = count(out, r, c, z, cls, rn, nr, it, dtm) if len(r) else 0
         t_count += time.time() - t
-        print(p, int(ok.sum()), "points,", int(v.sum()), "vegetation returns above 1.5 m")
+        print(p, int(ok.sum()), "points,", nv, "vegetation returns above 1.5 m")
     t = time.time()
-    np.savez_compressed("data/laser.npz", **{k: a.reshape(D, W) for k, a in out.items()})
+    np.savez_compressed("data/laser.npz", **out)
     print(f"seconds: sheets read {t_read:.1f}, counted {t_count:.1f}, data/laser.npz written {time.time() - t:.1f}, "
           f"in all {time.time() - t_all:.1f}")
     print("cells with vegetation returns:", int((out["veg_n"] > 0).sum()), "without any return:", int((out["n_ret"] == 0).sum()))
