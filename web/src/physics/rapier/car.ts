@@ -1,7 +1,8 @@
 // Rapier car: a drivable car on Rapier's DynamicRayCastVehicleController (raycast wheels on a chassis), with what the
 // voxel city needs on top of it (each switchable in CarTuning, for the scenarios in scenarios.ts):
 // - ground: the car drives on the surface drawn, as every body does (terrain.ts: the voxels, and the caps of sloped
-//   streets and bridge decks, core/surface.ts); its wheels' rays see the caps, not their voxels' tops.
+//   streets and bridge decks, core/surface.ts); its wheels' rays see the caps, not their voxels' tops; its dampers
+//   the drawn surface's slope, not its facets' 1/64 m kinks (dampers()).
 // - steps: a riser of up to STEP_MAX that is not the ground's (a platform, a low wall) ahead of the moving car, up or
 //   down, gets an invisible wedge on its low side, laid before the front wheels reach its foot (prisms on a smoothstep
 //   profile on the ground of the low side, as wide as the car's crossing needs, that only the car collides with and its
@@ -48,6 +49,7 @@ export const bus = (len: number): CarBuild => ({
 });
 const WHEEL_R = 0.36;
 const REST = 0.35;
+const MAX_SUSPENSION_FORCE = 60000; // N a wheel
 // The ride. Rapier's raycast wheels have no mass of their own: each pushes the chassis with
 // mass * (stiffness * compression - damping * its speed) (damping: `compression` while it is pushed in, `relaxation`
 // while it extends), never pulls, and leaves the ground once its spring is back at its rest length, so it hangs only
@@ -59,9 +61,12 @@ const REST = 0.35;
 //   (at most twice that), while a wheel touches: more grip and a body that stays on the road over crests at speed
 // - gripFront, gripRear: the tyres' frictionSlip (the most force per load); side: their lateral stiffness
 // - com: the centre of mass' drop under the body's origin (m)
+// - patch: the dampers take the ground's slope over this many m either side of a wheel's contact (0: the facet's, as
+//   Rapier), kinkMax: ... where it differs from the facet's by less than this (normals' distance; see dampers())
 // tools/rapier-car.mjs --set key=value,... runs the scenarios with others.
 export const RIDE = {
   stiffness: 34, compression: 4, relaxation: 5.5, gravity: 1.25, downforce: 0.4, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
+  patch: 0.8, kinkMax: 0.08,
 };
 // m/s into the ground: a fall of ~8 m (under the car's gravity)
 export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
@@ -125,7 +130,7 @@ export class RapierCar {
       c.setWheelSuspensionCompression(i, RIDE.compression);
       c.setWheelSuspensionRelaxation(i, RIDE.relaxation);
       c.setWheelMaxSuspensionTravel(i, 0.35);
-      c.setWheelMaxSuspensionForce(i, 60000);
+      c.setWheelMaxSuspensionForce(i, MAX_SUSPENSION_FORCE);
       c.setWheelFrictionSlip(i, w.front ? RIDE.gripFront : RIDE.gripRear);
       c.setWheelSideFrictionStiffness(i, RIDE.side);
     }
@@ -175,9 +180,10 @@ export class RapierCar {
       c.setWheelBrake(i, input.handbrake && !front ? BRAKE * 2 : brake);
     }
     // (the velocity before the springs' impulses: a landing's speed into the ground)
-    const lv = this.body.linvel();
+    const lv = this.body.linvel(), av = this.body.angvel(), com = this.body.worldCom();
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
     c.updateVehicle(dt, undefined, WHEEL_GROUPS);
+    if (RIDE.patch > 0 && this.terrain) this.dampers(lv, av, com, dt);
     if (RIDE.downforce && this.wheelsInContact()) {
       const r = this.body.rotation(), up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
       const f = -RIDE.downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
@@ -185,6 +191,55 @@ export class RapierCar {
     }
     if (this.tuning.steps) this.stepAssist(input, dt);
     if (this.tuning.air && this.wheelsInContact() === 0) this.airAssist(dt);
+  }
+
+  // The dampers on the ground's slope, not on its facets. Rapier's damper pushes on the chassis' speed at the wheel's
+  // contact along the hit triangle's normal: the drawn surface is flat facets (two triangles a 1 m column, corners in
+  // 1/64 m, core/surface.ts), so on a gentle grade the normal under a wheel steps by up to 1/64 per metre at a column's
+  // edge (the grade rounded column by column: flat, flat, 1/64, flat ...), and at speed the damper takes each step whole
+  // (at 70 km/h 0.3 m/s, a fifth of an axle's load: the body pitches on every 1.6 mm). So the damper here takes the
+  // slope of the drawn surface over RIDE.patch m either side of the contact (central differences of its heights,
+  // terrain.groundAt; one-sided at a riser, the facet's normal where neither side is the same surface or the wheel is
+  // on something else, a wedge): Rapier's damping force replaced by the same along that normal. Only for the small
+  // kinks: where the two normals differ by more than half of RIDE.kinkMax the facet's takes over (fully at kinkMax), so
+  // a real edge -- a hole, a deck's end, a wedge's foot -- is damped as it comes. The contact (on the
+  // drawn surface), the springs and the friction are Rapier's, the force along the facet's normal at the contact point
+  // as Rapier applies it. lv, av, com: the body's velocities and centre of mass before updateVehicle (what it used).
+  private dampers(lv: RAPIER.Vector, av: RAPIER.Vector, com: RAPIER.Vector, dt: number) {
+    const c = this.controller, b = this.body, m = b.mass(), t = this.terrain!, o = t.origin, H = RIDE.patch;
+    const r = b.rotation(), down = new THREE.Vector3(0, -1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+    for (let i = 0; i < this.build.wheels.length; i++) {
+      if (!c.wheelIsInContact(i)) continue;
+      const n = c.wheelContactNormal(i)!, p = c.wheelContactPoint(i)!;
+      const x = p.x + o.x, z = p.z + o.z;
+      // (a capped run's voxel top may be up to 56/64 m over its surface)
+      const at = (dx: number, dz: number) => {
+        const h = t.groundAt(x + dx, z + dz, p.y + 1);
+        return h !== null && Math.abs(h - p.y) < 0.4 * H + 0.05 ? h : null;
+      };
+      const h0 = at(0, 0);
+      if (h0 === null || Math.abs(h0 - p.y) > 0.02) continue; // (not on the drawn surface)
+      const slope = (a: number | null, b: number | null) =>
+        (a !== null && b !== null ? (a - b) / (2 * H) : a !== null ? (a - h0) / H : b !== null ? (h0 - b) / H : null);
+      const gx = slope(at(H, 0), at(-H, 0)), gz = slope(at(0, H), at(0, -H));
+      if (gx === null || gz === null) continue;
+      const gl = Math.hypot(gx, 1, gz), ex = -gx / gl, ey = 1 / gl, ez = -gz / gl;
+      // (as Rapier: the chassis' velocity at the contact along the normal, over the normal's cosine to the suspension)
+      const den = n.x * down.x + n.y * down.y + n.z * down.z, deS = ex * down.x + ey * down.y + ez * down.z;
+      if (den >= -0.1 || deS >= -0.1) continue;
+      const rx = p.x - com.x, ry = p.y - com.y, rz = p.z - com.z;
+      const vx = lv.x + av.y * rz - av.z * ry, vy = lv.y + av.z * rx - av.x * rz, vz = lv.z + av.x * ry - av.y * rx;
+      const raw = (n.x * vx + n.y * vy + n.z * vz) / -den;
+      const dn = Math.hypot(n.x - ex, n.y - ey, n.z - ez);
+      const w = Math.max(0, Math.min(1, (RIDE.kinkMax - dn) / (RIDE.kinkMax * 0.5)));
+      const soft = raw + w * ((ex * vx + ey * vy + ez * vz) / -deS - raw);
+      const damp = (v: number) => (v < 0 ? RIDE.compression : RIDE.relaxation) * v;
+      const spring = RIDE.stiffness * (REST - (c.wheelSuspensionLength(i) ?? REST)) / -den;
+      // (Rapier's force: never pulling, at most the wheel's maximum)
+      const force = (d: number) => Math.min(MAX_SUSPENSION_FORCE, Math.max(0, (spring - d) * m));
+      const dF = force(damp(soft)) - force(damp(raw));
+      if (dF) b.applyImpulseAtPoint({ x: n.x * dF * dt, y: n.y * dF * dt, z: n.z * dF * dt }, p, true);
+    }
   }
 
   // After the world's step: landings, wall hits, water. Returns what happened in this step.
