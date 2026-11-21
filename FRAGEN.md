@@ -27,4 +27,15 @@ Erledigte Fragen werden gestrichen bzw. entfernt.
 8. **Zerstörung:** Wann setzt sich Zerstörung zurück: erst beim Neuladen des Chunks, nach einer festen Zeit oder wenn kein Spieler in der Nähe ist? Sehen alle Spieler dieselben Trümmer?
 9. **Spielerzahl:** Wie viele Spieler sollen gleichzeitig auf einer Welt sein (10, 100, 1000)? Davon hängt die Server-Architektur stark ab.
 
+## Umbau „Schrägen als Daten“ (Plan: docs/plans/surface-caps.md)
+
+Bis du antwortest, setze ich jeweils die Empfehlung um.
+
+10. **Wiesen und Felder:** Sollen nur Straßen und Brücken glatte Oberflächen bekommen, während Wiesen und Felder 1-m-Stufen bleiben (auch für das Auto, das dort dann leicht holpert)? *Empfehlung: ja. Glatte Wiesen kosten später ein eigenes, größeres Datenformat (etwa +16 MB).*
+11. **Dächer:** Sollen die Dachschrägen gleich nach den Straßen ebenfalls auf die neuen Daten umgestellt werden, oder vorerst nicht? *Die Daten dafür entstehen im selben Neubau. Empfehlung: erst Straßen fertig, dann anhand von Bildern entscheiden.*
+12. **Bauen auf Schrägen:** Wenn ein Spieler eine schräge Straßenzelle nur umfärbt, soll sie schräg bleiben? Ein Abriss oder Krater macht sie ohnehin eckig. *Empfehlung: ja, das ist die einfache Regel.*
+13. **Glättung:** Lieber ruhiger fahren oder näher am vermessenen Gelände? *Empfehlung: zuerst der Standard, später in Minuten änderbar.*
+14. **Drohne:** Die Drohne stößt weiter an die Würfel, nicht an die glatten Flächen (bis etwa 0,9 m Unterschied an Dächern). *Empfehlung: erst einmal so lassen.*
+15. **Neubau der ganzen Karte (etwa 1 Stunde):** Wann darf er laufen? Er nimmt auch Lärchen, Schaldinger Pfeiler und Laternen mit.
+
 Weitere Fragen aus dem Fundament-Plan kommen hier dazu.
