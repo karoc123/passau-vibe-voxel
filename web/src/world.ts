@@ -1,7 +1,8 @@
 import type * as THREE from 'three';
 import { PAL_GROUND } from './chamfer';
 import { rampField } from './core/caps-legacy';
-import { capOf, surfaceAt, type CapField } from './core/surface';
+import { capField, surfaceAt, type CapField } from './core/surface';
+import { CAPS } from './caps-mode';
 import type { ColumnData, Meta } from './types';
 import { paletteMask, RULES, semanticTable } from './core/semantics';
 
@@ -36,25 +37,41 @@ export class World {
     this.paved = paletteMask(t, RULES.paved, PAL_GROUND);
   }
 
-  // the top of paved ground at (x, r) where it is a ramp (column i of node n), else null
-  // (deck: a bridge deck's top too, ramps.ts; else the ground's only)
-  private ramp(n: ColumnData, i: number, x: number, r: number, deck = true) {
+  // node n's caps (core/surface.ts: its caps section, else the legacy inference), null: none or not level 1
+  private caps(n: ColumnData) {
     if (n.s !== 1) return null;
     let f = this.ramps.get(n);
     if (f === undefined) {
-      f = rampField(this.src.N, n.counts, n.off, n.runs, n.ground, this.paved);
+      f = (CAPS.use && n.caps && capField(this.src.N, n, n.off)) || rampField(this.src.N, n.counts, n.off, n.runs, n.ground, this.paved);
       if (!f.any) f = null;
       this.ramps.set(n, f);
     }
-    const sl = f ? capOf(f, i) : -1;
-    return sl >= 0 && (deck || sl === 0) ? surfaceAt(f, i, f!.z[2 * i + sl], x - Math.floor(x), r - Math.floor(r)) : null;
+    return f;
+  }
+
+  // the surface of column i of node n's run ending at t (cells) at (x, r): its cap's height, else t * s
+  private capAt(n: ColumnData, i: number, t: number, x: number, r: number) {
+    const f = this.caps(n);
+    return f ? surfaceAt(f, i, t, x - Math.floor(x), r - Math.floor(r)) * n.s : t * n.s;
+  }
+
+  // the height of column i's cap in slot sl at (x, r), null: none
+  private slotAt(n: ColumnData, i: number, sl: number, x: number, r: number) {
+    const f = this.caps(n), z = f ? f.z[2 * i + sl] : 0;
+    return z ? surfaceAt(f, i, z, x - Math.floor(x), r - Math.floor(r)) : null;
   }
 
   // where something on the ground at level z (a path's point, scripts/traffic.py: whole metres) stands at (x, r): on a
-  // ramp near that level, its height there; else z
+  // cap near that level (within 1.5 m; of a deck and the road under it, the nearer), its height there; else z
   surface(x: number, r: number, z: number) {
-    const c = this.column(x, r), h = c && this.ramp(c[0], c[1], x, r);
-    return h != null && Math.abs(h - z) <= 1.5 ? h : z;
+    const c = this.column(x, r);
+    if (!c) return z;
+    let best = z, d = 1.5;
+    for (let sl = 1; sl >= 0; sl--) {
+      const h = this.slotAt(c[0], c[1], sl, x, r);
+      if (h !== null && Math.abs(h - z) <= d) { best = h; d = Math.abs(h - z); }
+    }
+    return best;
   }
 
   inside(x: number, r: number) { return x >= 0 && r >= 0 && x < this.W && r < this.D; }
@@ -77,7 +94,7 @@ export class World {
 
   groundAt(x: number, r: number) {
     const c = this.column(x, r);
-    return c ? this.ramp(c[0], c[1], x, r, false) ?? c[0].ground[c[1]] : 0;
+    return c ? this.slotAt(c[0], c[1], 0, x, r) ?? c[0].ground[c[1]] : 0;
   }
 
   // any voxel (core/semantics.ts RULES.solidForRay), or under the floor
@@ -108,15 +125,14 @@ export class World {
     const c = this.column(x, r);
     if (!c) return 0;
     const [n, i] = c, k = n.off[i + 1] - 1;
-    return this.ramp(n, i, x, r) ?? (k < n.off[i] ? n.ground[i] : (n.runs[k * 3] + n.runs[k * 3 + 1]) * n.s);
+    return k < n.off[i] ? n.ground[i] : this.capAt(n, i, n.runs[k * 3] + n.runs[k * 3 + 1], x, r);
   }
 
   topSolid(x: number, r: number) {
     const c = this.column(x, r);
     if (!c) return 0;
-    const [n, i] = c, R = n.runs, h = this.ramp(n, i, x, r);
-    if (h != null) return h;
-    for (let k = n.off[i + 1] - 1; k >= n.off[i]; k--) if (!this.leaf[R[k * 3 + 2]]) return (R[k * 3] + R[k * 3 + 1]) * n.s;
+    const [n, i] = c, R = n.runs;
+    for (let k = n.off[i + 1] - 1; k >= n.off[i]; k--) if (!this.leaf[R[k * 3 + 2]]) return this.capAt(n, i, R[k * 3] + R[k * 3 + 1], x, r);
     return n.ground[i];
   }
 
@@ -124,11 +140,11 @@ export class World {
   support(x: number, r: number, top: number) {
     const c = this.column(x, r);
     if (!c) return 0;
-    const [n, i] = c, R = n.runs, h = this.ramp(n, i, x, r);
-    if (h != null && h <= top) return h; // (paved ground: nothing stands on it)
-    let s = n.ground[i];
+    // (each run's top, its cap's height where it has one -- or the voxel's top, if the cap rises over `top`)
+    const [n, i] = c, R = n.runs, g0 = this.slotAt(n, i, 0, x, r);
+    let s = g0 !== null && g0 <= top ? g0 : n.ground[i];
     for (let k = n.off[i], e = n.off[i + 1]; k < e; k++) {
-      const t = (R[k * 3] + R[k * 3 + 1]) * n.s;
+      const z = R[k * 3] + R[k * 3 + 1], h = this.capAt(n, i, z, x, r), t = h <= top ? h : z * n.s;
       if (t <= top && t > s) s = t;
     }
     return s;
