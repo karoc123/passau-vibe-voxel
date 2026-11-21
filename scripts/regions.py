@@ -1,10 +1,15 @@
 """voxelize.py's driver: the map built region by region and put together, rebuilding only what changed.
 
 usage: uv run python scripts/voxelize.py [--regions NXxNY | --region-size METRES | --whole] [-j JOBS]
-                                         [--status | --only ROW_COL[+ROW_COL..] | --only x=COL,y=ROW | --force]
+                                         [--status | --only ROW_COL[+ROW_COL..] | --only x=COL,y=ROW | --force
+                                          | --just ROW_COL[,ROW_COL..] | --just x=COL,y=ROW]
   the cover: scripts/map.json's `regions` (size, jobs) unless given; every cover writes the same bytes
   (scripts/region_check.py). --status: which regions are up to date and what changed for the others; --only: build
   these regions again (and whatever else changed), e.g. to iterate on one place; --force: all of them
+  --just: build these regions and nothing else (after an edit of voxelize.py, to look at one place: the other regions
+  stay as they are, stale ones included, and the steps after them run on that mix); data/cache/regions.stamp is not
+  written, so the next build without --just builds what is stale and runs those steps again. Not a build to commit:
+  --status shows what is left. Refused when a region not named was never built
 
 A region is a core of the map on window.ALIGN (1024 m) boundaries (window.py) and a halo of region.HALO metres round
 it. Each region is built by voxelize.py in a process of its own (VOXEL_REGION, VOXEL_CORE, VOXEL_OUT, VOXEL_OSM in its
@@ -36,6 +41,7 @@ import gzip
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -277,11 +283,11 @@ def why_stale(w, osm_hash, table):
     return "changed: " + " ".join(diff) if diff else ("palette or files" if not fresh(w, m["key"]) else "up to date")
 
 
-def pick(ws, spec):
-    """the regions named by --only, '+'-separated: ROW_COL (a region's first map row and column, its cache folder's
-    name) or x=COL,y=ROW (the region whose core holds that map cell)"""
+def pick(ws, spec, flag="--only"):
+    """the regions named by --only or --just, '+' or ','-separated: ROW_COL (a region's first map row and column, its
+    cache folder's name) or x=COL,y=ROW (the region whose core holds that map cell)"""
     out = []
-    for item in spec.split("+"):
+    for item in re.split(r"[+,](?!y=)", spec):
         if item.startswith("x="):
             c, r = (int(v.split("=")[1]) for v in item.split(","))
             hit = [w for w in ws if w.holds(r, c)]
@@ -289,7 +295,7 @@ def pick(ws, spec):
             r0, c0 = map(int, item.split("_"))
             hit = [w for w in ws if (w.r0, w.c0) == (r0, c0)]
         if not hit:
-            raise SystemExit(f"--only {item}: no such region in the cover {[f'{w.r0}_{w.c0}' for w in ws]}")
+            raise SystemExit(f"{flag} {item}: no such region in the cover {[f'{w.r0}_{w.c0}' for w in ws]}")
         out += hit
     return out
 
@@ -335,14 +341,28 @@ def main(argv):
     import sidecar
     for p in region_inputs.RASTERS:  # (uncompressed copies of the map-sized inputs: what the regions read of them)
         sidecar.ensure(p)
-    force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
+    just = pick(ws, argv[argv.index("--just") + 1], "--just") if "--just" in argv else None
+    if just is not None and ("--only" in argv or "--force" in argv):
+        raise SystemExit("--just goes with neither --only nor --force")
+    if just is not None and "--status" not in argv:
+        never = [f"{w.r0}_{w.c0}" for w in ws if w not in just and not (rdir(w) / "out.json").exists()]
+        if never:
+            raise SystemExit(f"--just: regions {never} were never built: run without --just first")
+    force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else just or [])
     table = feature_pass(ws, jobs, osm_hashes, force, budget)
     if "--status" in argv:
         for w in ws:
             print(f"region {w.r0}_{w.c0} ({w}): {why_stale(w, osm_hashes[w], table)}")
         return
     todo = stale_regions(ws, osm_hashes, table, force)
+    left = []
+    if just is not None:  # the named regions alone: the others stay as they are, stale or not
+        left = [w for w in todo if w not in just]
+        todo = [w for w in todo if w in just]
     print(f"regions: {len(todo)} of {len(ws)} to build", [f"{w.r0}_{w.c0}" for w in todo], flush=True)
+    if left:
+        print(f"--just: {len(left)} regions are stale and were NOT built: {[f'{w.r0}_{w.c0}' for w in left]}; "
+              "run without --just before committing data", flush=True)
     stamp_f = Path("data/cache/regions.stamp")
     if not todo and stamp_f.exists() and stamp_f.read_text() == driver_stamp(ws) and all(p.exists() for p in DRIVER_OUT):
         print(f"nothing to do: every region and the steps after them are up to date ({round(time.time() - t_start, 1)} s)")
@@ -520,8 +540,11 @@ def main(argv):
          {str(w): stats[w] for w in stats}, "; the steps after them: peak",
          round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024), "MB")
     json.dump({"notes": notes}, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
-    stamp_f.write_text(driver_stamp(ws))
-    print("done")
+    if just is None:
+        stamp_f.write_text(driver_stamp(ws))
+        print("done")
+    else:  # (no stamp: the next plain build builds the regions left stale and runs the steps above again)
+        print(f"done (--just: the named regions only{f'; {len(left)} regions are stale and were NOT built, run without --just before committing data' if left else ''})")
 
 
 def write_timings(stats, res):

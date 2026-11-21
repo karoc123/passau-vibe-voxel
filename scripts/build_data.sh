@@ -39,9 +39,10 @@ $S prep -i $A data/raw/dsm_*.tif data/raw/dtm_*.tif data/raw/orto_*.tif -o data/
   -- python scripts/prep.py              # data/prep.npz
 $S laser -i $A data/raw/laser data/prep.npz -o data/laser.npz -- python scripts/laser.py  # data/laser.npz (LiDAR vegetation statistics per cell)
 join
-uv run python scripts/voxelize.py        # (reads data/raw/treespecies_*.tif too: scripts/region_inputs.py RAW_FILES)
+uv run python scripts/voxelize.py ${JUST:+--just $JUST}  # (reads data/raw/treespecies_*.tif too: region_inputs.py RAW_FILES)
                                          # (region by region: --regions NXxNY, -j N; only the regions that changed, --status
-                                         # tells which; --only ROW_COL builds one again) tiles/, meta.json, data/trees.json,
+                                         # tells which; --only ROW_COL builds one again; JUST=ROW_COL[,ROW_COL] builds those
+                                         # alone, the rest left stale: to look, not to commit) tiles/, meta.json, data/trees.json,
                                          # traffic.json, data/qa_roadmask.bin.gz; data/ground.npz, data/footprints.npz,
                                          # data/crowns.npz (needs data/lod2.npz, or NO_LOD2=1)
                                          # (scripts/tiles_lod.py: only tiles/2, 4 and 8 again, from tiles/1 and 1f)

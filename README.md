@@ -94,7 +94,12 @@ at ~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regio
 whole of `build_data.sh` takes 4 s. To iterate on one place: `uv run python scripts/voxelize.py --only x=COL,y=ROW`
 (the region holding that map cell, built again whatever its hash; `--status` lists the regions and what changed for
 each), then `sh scripts/build_data.sh` for the steps after it (the Altstadt's region: 2½ min, then 1 min; a small
-region at the map's edge: 20 s).
+region at the map's edge: 20 s). After an edit of `voxelize.py` (or a module the regions load) every region is stale;
+to look at one place first: `JUST=ROW_COL sh scripts/build_data.sh` (`voxelize.py --just ROW_COL[,ROW_COL..]` or
+`--just x=COL,y=ROW`: those regions alone, the others left as they are, stale ones included, and the steps after them
+run on that mix: ~3 min on the real map instead of ~9). It writes no `data/cache/regions.stamp`, so the next plain
+`sh scripts/build_data.sh` builds the regions left stale and runs the steps after them again: run it before
+committing data.
 
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
 size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
