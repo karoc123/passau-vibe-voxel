@@ -1,7 +1,9 @@
 """Mosaic the Bavarian DOM20 surface model (0.2 m), DGM1 terrain (1 m) and DOP20 orthophoto (scripts/fetch_bayern.sh),
 then resample onto the AOI grid (scripts/aoi.py).
 
-Outputs (row 0 = grid row 0): dsm at 0.5 m, dtm at 1 m, orto at 0.2 m.
+Outputs (row 0 = grid row 0): data/prep.npz dsm at 0.5 m, dtm at 1 m, cellcol (uint8 RGB at 1 m: the median of each
+cell's 5 x 5 ortho pixels, per channel); data/orto.npy the orthophoto at 0.2 m (for scripts/look.py; no step of the
+build reads it), data/orto_preview.jpg.
 """
 import glob
 import math
@@ -85,35 +87,41 @@ def resample(src, src_res, out_res, order, band=1024, origin=None):
     return out
 
 
-BAND = 256  # ortho rows a worker samples at once (~0.6 GB of float64 coordinates)
+S = 5  # ortho pixels per cell (0.2 m)
+BAND = 250  # ortho rows a worker samples at once: whole cells (a multiple of S), ~0.6 GB of float64 coordinates
 JOBS = min(8, os.cpu_count() or 1)
-_JOB = {}  # the mosaic and the shared output, inherited by the workers (fork)
+_JOB = {}  # the mosaic and the shared outputs, inherited by the workers (fork)
 
 
 def _orto_band(j0):
-    """the ortho's rows j0..j0 + BAND sampled (bilinear, as resample) into the shared output"""
-    src, out = _JOB["src"], _JOB["out"]
+    """the ortho's rows j0..j0 + BAND sampled (bilinear, as resample) into the shared output, and their cells' colour:
+    the median of each cell's S x S pixels per channel"""
+    src, out, cellcol = _JOB["src"], _JOB["out"], _JOB["cellcol"]
     j1 = min(j0 + BAND, out.shape[0])
     row, col = coords(j0, j1, out.shape[1], 0.2, 0.2)
     for k in range(3):
         out[j0:j1, :, k] = ndimage.map_coordinates(src[..., k], [row, col], order=1, mode="nearest")
+    med = np.median(out[j0:j1].reshape((j1 - j0) // S, S, -1, S, 3), axis=(1, 3))
+    cc = med.astype(np.uint8)
+    assert np.array_equal(cc, med), "the median of 25 bytes is one of them"
+    cellcol[j0 // S:j1 // S] = cc
 
 
 def resample_orto(src):
-    """the ortho on the grid at 0.2 m: resample(src, 0.2, 0.2, order=1) in row bands over JOBS processes, into memory
-    they share (each pixel from its own coordinates: the same values)"""
-    nj, ni = round(D / 0.2), round(W / 0.2)
+    """the ortho on the grid at 0.2 m (resample(src, 0.2, 0.2, order=1)) and each 1 m cell's colour (the median of
+    its 25 pixels: what voxelize.py reads), in row bands over JOBS processes, into memory they share"""
+    nj, ni = S * D, S * W
 
     def shared(shape):
         return np.frombuffer(mmap.mmap(-1, math.prod(shape)), np.uint8).reshape(shape)
-    _JOB.update(src=src, out=shared((nj, ni, 3)))
+    _JOB.update(src=src, out=shared((nj, ni, 3)), cellcol=shared((D, W, 3)))
     # fork: the workers read the mosaic as it is (Python 3.14 defaults to forkserver on Linux)
     with multiprocessing.get_context("fork").Pool(JOBS) as pool:
         for _ in pool.imap_unordered(_orto_band, range(0, nj, BAND)):
             pass
-    out = _JOB.pop("out")
+    out, cellcol = _JOB.pop("out"), np.array(_JOB.pop("cellcol"))
     _JOB.clear()
-    return out
+    return out, cellcol
 
 
 _m, _t = mosaic("dsm_*.tif", 0.2)  # DOM20; sampled (nearest) at the pipeline's 0.5 m
@@ -128,11 +136,13 @@ for n, a in (("dsm", dsm), ("dtm", dtm)):
     print(n, a.shape, float(a[a > -1000].min()), float(a.max()), int((a < -1000).sum()), "nodata")
 _o = mosaic_rgb("orto_*.tif", 0.2)
 tick("orto mosaic")
-orto = resample_orto(_o)
+orto, cellcol = resample_orto(_o)
 del _o
-tick(f"orto resampled ({JOBS} processes)")
+tick(f"orto resampled, cells' colours ({JOBS} processes)")
 print("orto", orto.shape, orto.reshape(-1, 3).mean(0), int((orto.sum(-1) == 0).sum()), "empty px")
-np.savez_compressed("data/prep.npz", dsm=dsm, dtm=dtm, orto=orto)
+np.savez_compressed("data/prep.npz", dsm=dsm, dtm=dtm, cellcol=cellcol)
 tick("data/prep.npz written")
+np.save("data/orto.npy", orto)  # (uncompressed: for look.py, which reads a box of it)
+tick("data/orto.npy written")
 from PIL import Image
 Image.fromarray(orto[::4, ::4]).save("data/orto_preview.jpg", quality=85)

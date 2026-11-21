@@ -223,8 +223,12 @@ for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts
                                                              "the surface model and OSM alone)" if "lod2" in _p else ""))
 if not os.environ.get("NO_LOD2") and "cen" not in np.load("data/lod2.npz").files:
     raise SystemExit("data/lod2.npz has no footprints (`cen`): rerun scripts/lod2.py")
+if "cellcol" not in np.load("data/prep.npz").files:
+    raise SystemExit("data/prep.npz has no cell colours (`cellcol`): rerun scripts/prep.py")
 z = region.load_npz("data/prep.npz")  # (the region's rows and columns)
-dsm, dtm, orto = z["dsm"], z["dtm"], z["orto"]
+dsm, dtm = z["dsm"], z["dtm"]
+cellcol = z["cellcol"].astype(np.float32)  # (each cell's colour: the median of its 5 x 5 ortho pixels, prep.py)
+del z
 LOD2 = region.load_npz("data/lod2.npz") if Path("data/lod2.npz").exists() else None
 d4 = dsm.reshape(D, 2, W, 2)
 dsm_max = d4.max((1, 3))
@@ -303,8 +307,6 @@ def wall_clean(dsm):
 
 
 nd_max_b = wall_clean(dsm).reshape(D, 2, W, 2).max((1, 3)) - dtm  # building tops
-cellcol = np.median(orto.reshape(D, 5, W, 5, 3), axis=(1, 3)).astype(np.float32)
-del orto, z  # (the ortho at 20 cm: used for cellcol alone)
 rgbsum = cellcol.sum(-1) + 1
 exg = (2 * cellcol[..., 1] - cellcol[..., 0] - cellcol[..., 2]) / rgbsum
 lum = cellcol @ np.array([0.299, 0.587, 0.114], np.float32)

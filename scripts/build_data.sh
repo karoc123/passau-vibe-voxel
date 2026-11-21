@@ -35,8 +35,8 @@ join() {
   if [ -n "$_fail" ]; then echo "failed:$_fail"; exit 1; fi
 }
 bg lod2 $S lod2 -i $A data/raw/lod2 -o data/lod2.npz -- python scripts/lod2.py   # data/lod2.npz (LoD2 roof planes and footprints on the grid)
-$S prep -i $A data/raw/dsm_*.tif data/raw/dtm_*.tif data/raw/orto_*.tif -o data/prep.npz \
-  -- python scripts/prep.py              # data/prep.npz
+$S prep -i $A data/raw/dsm_*.tif data/raw/dtm_*.tif data/raw/orto_*.tif -o data/prep.npz data/orto.npy \
+  -- python scripts/prep.py              # data/prep.npz, data/orto.npy (the ortho at 0.2 m, for scripts/look.py)
 $S laser -i $A data/raw/laser data/prep.npz -o data/laser.npz -- python scripts/laser.py  # data/laser.npz (LiDAR vegetation statistics per cell)
 join
 uv run python scripts/voxelize.py ${JUST:+--just $JUST}  # (reads data/raw/treespecies_*.tif too: region_inputs.py RAW_FILES)

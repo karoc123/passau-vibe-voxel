@@ -8,8 +8,8 @@ usage: uv run python scripts/look.py building|street ID [--out DIR] [--pad METRE
                  street's centre line) in red, a 10 m grid in white; north up, 5 px per metre
   DIR/look.json  the numbers, also printed
 
-Reads data/raw/osm.json, data/prep.npz, data/lod2.npz (only the box round the object). Open data only: Bayerische
-Vermessungsverwaltung (CC BY 4.0) and OpenStreetMap (ODbL).
+Reads data/raw/osm.json, data/orto.npy, data/prep.npz, data/lod2.npz (only the box round the object). Open data only:
+Bayerische Vermessungsverwaltung (CC BY 4.0) and OpenStreetMap (ODbL).
 """
 import json
 import math
@@ -57,7 +57,7 @@ def main(argv):
     if c1 <= c0 or r1 <= r0:
         raise SystemExit("the object is off the map")
     box = (r0, r1, c0, c1)
-    orto = window.npz_region("data/prep.npz", "orto", (r0 * S, r1 * S, c0 * S, c1 * S))
+    orto = np.array(np.load("data/orto.npy", mmap_mode="r")[r0 * S:r1 * S, c0 * S:c1 * S])
     dsm = window.npz_region("data/prep.npz", "dsm", (r0 * 2, r1 * 2, c0 * 2, c1 * 2))
     dtm = window.npz_region("data/prep.npz", "dtm", box)
     lz = window.npz_region("data/lod2.npz", "z", box)
