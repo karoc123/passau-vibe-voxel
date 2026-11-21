@@ -69,6 +69,23 @@ def note(*a):
     report["notes"].append(s)
 
 
+_TS = [_T0]
+
+
+def stage(name):
+    """the build's timing (not a note: the report stays as it was): the seconds since the last stage, the RSS now and
+    its peak so far, printed and kept in out.json `timing` (regions.py: data/debug/timings.json)"""
+    import resource
+    import time
+    t = time.time()
+    dt, _TS[0] = t - _TS[0], t
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    with open("/proc/self/statm") as fh:
+        now = int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2 ** 20
+    RESULT.setdefault("timing", []).append([name, round(dt, 2), round(now), round(peak)])
+    print(f"[stage] {name}: {dt:.1f} s, RSS {now:.0f} MB, peak {peak:.0f} MB", flush=True)
+
+
 # ---------------------------------------------------------------- materials / palette
 M_SOLID, M_WALL, M_GLASS, M_LEAF, M_WATER, M_LAMP, M_METAL, M_FLOODLIT, M_GRASS, M_MARK, M_SOIL, M_CAR, M_ROOF, M_CONCRETE, M_CLOCK, M_BRONZE, M_SIGN = range(17)
 M_WOOD = 23  # a tree's trunk and branches
@@ -187,6 +204,7 @@ LEAVES = [pal(c, M_LEAF) for c in ["#a3c65c", "#8db552", "#76a24a", "#618f43", "
 WALL_DEFAULTS = ["#d8cfc0", "#cbbfa8", "#e2d6bf", "#c4bbad", "#d9c7a7", "#cdc6ba", "#e6ddcc", "#bdb09b",
                  "#d3c3b0", "#c9c9c2"]
 
+stage("imports")
 # ---------------------------------------------------------------- rasters
 for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts/lod2.py")):
     if not Path(_p).exists() and not (_p == "data/lod2.npz" and os.environ.get("NO_LOD2")):
@@ -385,6 +403,7 @@ for oid, t, line in osm.lines:
         t["layer"] = "0"
 note("open cuts (layer -1, no tunnel) drawn:", len(OPEN_CUT))
 
+stage("rasters, cell colours, OSM")
 # ---------------------------------------------------------------- ground classes
 gcol = np.full((D, W), C["paving"], np.uint16)
 is_road = np.zeros((D, W), bool)
@@ -968,6 +987,7 @@ lm_mask = (lm > 0) & (_jm == 0) & np.isin(gcol, [C["asphalt"]])
 gcol[lm_mask] = C["mark"]
 note("lane marking cells:", int(lm_mask.sum()))
 
+stage("ground classes, roads, water")
 # ---------------------------------------------------------------- buildings
 feats = []
 for oid, typ, t, geom in osm.areas:
@@ -1824,6 +1844,7 @@ H = int(g.max() + max(topi.max(), nd_max.max(), 41) + 24)
 note("volume height", H)
 vol = np.zeros((H, D, W), np.uint16)
 
+stage("buildings")
 # ---------------------------------------------------------------- natural ground
 # open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
 # when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
@@ -2184,6 +2205,7 @@ for f in render:
         n_rb += 1
 note("rooftop structures in roof material:", n_rb)
 
+stage("natural ground, cemeteries")
 # ---------------------------------------------------------------- vegetation (LiDAR canopy + OSM trees)
 trees = [(oid, t, p) for oid, t, p in osm.nodes if t.get("natural") == "tree"]
 # every known tree (scripts/trees.py: OSM's tree nodes and the Bavarian single-tree register of the 2024 flight)
@@ -2822,6 +2844,7 @@ if trunks:
     _best = _map[own2]
 RESULT["crown_ids"] = _crown_ids
 
+stage("vegetation")
 # ---------------------------------------------------------------- fountains
 # A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
 # polygons, darker shard inlays, flush with the paving, slot drain round the edge, jets from steel rings ~2 m apart.
@@ -3346,6 +3369,7 @@ if len(rr):
 note("bridge deck cells:", int(deck.sum()))
 
 
+stage("fountains, beds, furniture")
 # ---------------------------------------------------------------- bridge piers
 # The decks stood on nothing between their abutments: the A 3's kilometre over the Danube at Schalding, the rail and
 # road bridges, the footbridges over the Ilz floated over the water and the valleys. A pier is a wall across the deck
@@ -3621,6 +3645,7 @@ for f in render:
     n_cw += landmarks.edge_windows(vol, g, f["geom"], _win, rows, 4.5)
 note("church windows:", n_cw)
 
+stage("bridge piers, vehicles")
 # ---------------------------------------------------------------- curated landmark details
 landmarks.apply_zones(vol, g, feats, pal, bmask, note)
 overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
@@ -3647,14 +3672,17 @@ carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
 RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
 tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
 
+stage("landmark details, underpasses, tunnels")
 # ---------------------------------------------------------------- floating debris
 import debris
 debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
 
+stage("drop_debris")
 # ---------------------------------------------------------------- export
 Hm = int(np.nonzero(vol.reshape(H, -1).any(axis=1))[0].max()) + 1
 vol = vol[:Hm]
 note("final height", Hm, "palette", len(pal.entries))
+stage("height crop")
 # the three rivers in their own colours, as the orthophoto shows them: the Danube dark green, the Inn milky grey-green
 # from the glaciers, the Ilz peat-black, and the bands running side by side below the Dreiflüsseeck. Per 8 m block the
 # median of the open water's cells (10 m off the banks, ships, bridges and their shadows' worst), a block with none
@@ -3699,6 +3727,7 @@ if _wm.any():
     _wid = np.array([pal(tuple(int(v) for v in u), M_WATER, q=8) for u in _uq], vol.dtype)
     vol[(g - 1)[_wm], np.nonzero(_wm)[0], np.nonzero(_wm)[1]] = _wid[_inv.ravel()]
     note(f"river colours from the ortho: {len(_uq)} shades over {int(_wm.sum())} water cells")
+stage("river colours")
 # the ground as the tiles show it before the foliage (grass as bare earth), for terrain.py: the first moment of loading
 _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
 _lut = np.array([e[:3] for e in pal.entries], np.uint8)
@@ -3716,8 +3745,10 @@ EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CL
                          fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | set(WOOD_IDS),
                          grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
                          wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
+stage("ground rgb, footprints")
 # nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
 debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db, dbg=RDIR)
+stage("support_floating")
 
 
 def plane_codes():
@@ -3747,6 +3778,7 @@ def plane_codes():
 
 
 PLANES = plane_codes()
+stage("plane codes")
 # the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
 import window
 from aoi import MAP_D, MAP_W
@@ -3758,6 +3790,7 @@ RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) 
                                                             _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
                                                             rooms=interiors.runs(_es[0].start, _es[0].stop, _es[1].start, _es[1].stop),
                                                             **EXPORT_IDS).items()}
+stage("tiles.export_window")
 # drivable-surface mask (1 = carriageway/road area, 2 = rails / track bed): regions.py writes it as qa_roadmask.bin.gz
 qa = np.zeros((D, W), np.uint8)
 qa[is_road] = 1
@@ -3815,9 +3848,12 @@ CORE_OUT["groundcol"] = palarr[gcol]
 # this region's core: the rasters (crowns' owners on the 2 m grid), the volume (for traffic.py and the labels: regions.py),
 # the lists in the map's order (lamps, jets), the palette's new colours
 _k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
+stage("qa, deck_near, topdown")
 np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
+stage("core.npz")
 import mapstore
 mapstore.save_volume(RDIR / "vol.npz", vol[(slice(None),) + CORE_SL])  # (compressed, in 128 m column blocks)
+stage("vol.npz")
 (RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
 # (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
 # this region's to add)
@@ -3831,5 +3867,6 @@ RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new 
 import region_inputs
 RESULT["deps"] = region_inputs.deps_of_process()
 RESULT["features_used"] = FEATURE_USED  # (the large features' decisions it took: regions.py rebuilds it when one changes)  # (the code this region read: regions.py rebuilds it when that changes)
+stage("palette, lists")
 json.dump(RESULT, open(RDIR / "out.json", "w"))
 print("done")

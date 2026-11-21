@@ -97,16 +97,17 @@ def build(ws, jobs, fpass=False):
             p = subprocess.Popen([sys.executable, str(HERE / "voxelize.py")], env=env, stdout=log, stderr=subprocess.STDOUT)
             # (the Popen kept too: one garbage-collected while running is reaped by subprocess's own cleanup on the next
             # Popen, and os.wait4 then found no child)
-            running[p.pid] = (w, time.time(), log, p)
+            running[p.pid] = (w, time.time(), log, p, out)
             print(f"region {w} ({'feature pass, its core alone' if fpass else f'with its halo rows {ra}-{rb}, cols {ca}-{cb}'}):"
                   " started", flush=True)
         pid, status, ru = os.wait4(-1, 0)
-        w, t0, log, _ = running.pop(pid)
+        w, t0, log, _, out = running.pop(pid)
         log.close()
         if status != 0:
             print(Path(log.name).read_text()[-3000:])
             raise SystemExit(f"region {w} failed")
         stats[w] = (round(time.time() - t0, 1), round(ru.ru_maxrss / 1024))
+        json.dump(dict(wall=stats[w][0], peak_mb=stats[w][1]), open(out / "stats.json", "w"))  # (what the next build expects)
         print(f"region {w}{' (feature pass)' if fpass else ''}: {stats[w][0]} s, peak {stats[w][1]} MB", flush=True)
     return stats
 
@@ -296,6 +297,7 @@ def main(argv):
         assert not any(res[w]["new_palette"] for w in ws), "the palette registry still lacks colours"
     for w in stats:
         write_manifest(w, osm_hashes[w], table)
+    write_timings(stats, res)
     palette = [tuple(e) for e in json.load(open(HERE / "palette.json"))["palette"]]
     for w in ws:
         notes.append(f"--- region {w}: " + (f"{stats[w][0]} s, peak {stats[w][1]} MB" if w in stats else "up to date, kept"))
@@ -453,6 +455,24 @@ def main(argv):
     json.dump({"notes": notes}, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
     stamp_f.write_text(driver_stamp(ws))
     print("done")
+
+
+def write_timings(stats, res):
+    """the regions built: per region its wall time, peak RSS and stages (voxelize.stage) into data/debug/timings.json,
+    and the stages summed over them printed"""
+    if not stats:
+        return
+    per = {f"{w.r0}_{w.c0}": dict(wall=stats[w][0], peak_mb=stats[w][1], timing=res[w].get("timing", [])) for w in stats}
+    json.dump(per, open(DBG / "timings.json", "w"), indent=1)
+    tot, peak = {}, {}
+    for r in per.values():
+        for name, dt, _, pk in r["timing"]:
+            tot[name] = tot.get(name, 0) + dt
+            peak[name] = max(peak.get(name, 0), pk)
+    cpu = sum(tot.values()) or 1
+    print(f"stages over the {len(per)} regions built (s summed, share, the largest peak RSS by then):")
+    for name, dt in tot.items():
+        print(f"  {name:40s} {dt:8.1f} s {100 * dt / cpu:5.1f} %  {peak[name]:6d} MB")
 
 
 def hist_median(hists):

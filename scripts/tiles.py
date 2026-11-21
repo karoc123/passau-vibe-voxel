@@ -31,6 +31,8 @@ A cell is solid when at least a quarter of its block is; its colour is the topmo
 block, so roofs stay roofs and the street stays paving when seen from above. Clock faces colour their whole block.
 Levels 4 and 8 also keep a deck over open air that the level below has (downsample's finer).
 """
+import time
+
 import interiors
 import tilefile
 
@@ -285,6 +287,7 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
     filled, saved = False, None  # (the rooms, filled for the coarser levels: interiors.fill)
     try:
         for s in levels:
+            t_lv = time.time()
             if s > 1 and not filled:
                 filled, saved = True, interiors.fill(vol, rooms)
             fin = done.get(s // 2) if s in CASCADE else None
@@ -297,6 +300,7 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
             gs = g if s == 1 else g[::s, ::s]  # ground metres at the block's corner column (shader only)
             ps = downsample_planes(planes, s) if s == 1 or s in LOD_LEVELS else None
             Hs = vs.shape[0]
+            t_ds = time.time() - t_lv
             Ds, Ws = -(-D // s), -(-W // s)  # the map at this level
             oy, ox = ra // s, ca // s  # the region's corner at this level
             split = s == 1 and len(fol_ids)
@@ -333,6 +337,7 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                     tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
                     nruns += len(runs)
             stats[s] = [tot, nruns, ftot]
+            print(f"[stage] tiles level {s}: downsample {t_ds:.1f} s, nodes {time.time() - t_lv - t_ds:.1f} s", flush=True)
             del vs, ps
             done.pop(s // 2, None)
     finally:
