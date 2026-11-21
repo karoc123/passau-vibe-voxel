@@ -99,14 +99,14 @@ const clear = (op) => ({ ...op, colour: 0, replace: CO.REPLACE_ALL });
 const L1 = LA.routeOps(f, BUILD, [BOX], nx, ny), L2 = LA.routeOps(f, BUILD, [CRATER], nx, ny);
 const L1f = LA.routeOps(f, BUILD, [clear(BOX)], nx, ny), L2f = LA.routeOps(f, BUILD, [clear(CRATER)], nx, ny);
 const deltas = (m, k) => (m.has(k) ? [m.get(k)] : []);
-// the area's columns as shown, with or without L2: base with its ground, planes, bld; foliage with the base's ground
+// the area's columns as shown, with or without L2: base with its ground, planes, bld, caps (kept as stream.ts does); foliage with the base's ground
 function compose(withL2) {
   const out = new Map();
   for (const [k, n] of area) {
     const t2 = withL2 ? deltas(L2, k) : [], t2f = withL2 ? deltas(L2f, k) : [];
     const b = LA.effectiveColumns(f, n.base, deltas(L1, k), t2);
     const fo = n.fol && LA.effectiveColumns(f, n.fol, deltas(L1f, k), t2f);
-    out.set(k, { base: { ...b, planes: n.base.planes, bld: n.base.bld }, fol: fo && { ...fo, ground: b.ground }, edited: b.runs !== n.base.runs });
+    out.set(k, { base: { ...b, planes: n.base.planes, bld: n.base.bld, caps: n.base.caps }, fol: fo && { ...fo, ground: b.ground }, edited: b.runs !== n.base.runs });
   }
   return out;
 }
