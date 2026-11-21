@@ -23,21 +23,18 @@
 //
 // The mean's window shrinks towards the tile's border, to the four columns at a point on it: the 1-cell apron is all a
 // tile sees of its neighbour, so both tiles must find the same height at the points they share.
-import { PAL_GROUND } from './chamfer';
-import type { Box } from './sections';
+//
+// LEGACY (docs/plans/surface-caps.md): the inference of the surface from the voxels, for data without the `caps`
+// section (scripts/caps.py). It comes out as a CapField (core/surface.ts): every paved column gets a cap (flat ones
+// too: the mesher's legacy rules tell them apart from the rest), in slot 1 where it is a deck, else slot 0; `pin` keeps
+// the grid of free points the legacy mesher's edge rule reads. To be deleted with the legacy path.
+import { PAL_GROUND } from '../chamfer';
+import type { Box } from '../sections';
+import { emptyCapField, NONE, type CapField } from './surface';
 
 export const RAMP_R = 3;
 // heights in 1/64 m (as roofs.ts and vattr.y's top 6 bits); PINNED: the point is pinned
-export const PINNED = -1;
-
-export interface RampField {
-  S: number; // columns a side, apron included (N + 2)
-  ground: Uint8Array; // per column, metres: the top of the ground (tile-data.ts), a deck's top where it is one
-  under: Uint8Array; // per column, metres: the tile's ground (under a deck: the ground below it)
-  paved: Uint8Array; // per column (S x S): paved ground (see above)
-  h: Int32Array; // per grid point ((S + 1)^2, point (X, Y) the corner before column (X, Y)): height in 1/64 m or PINNED
-  any: boolean; // any free point
-}
+export const PINNED = NONE;
 
 // The field of a 1 m tile's columns (apron included); pal: palette flags (PAL_GROUND); deck: those of a deck's top
 // (default: pal)
@@ -49,7 +46,7 @@ export const COVER_CLEAR = 3;
 // box (apron coordinates): only its columns and the points between them (meshing a part of a node, sections.ts; the
 // points within RAMP_R + 1 of its edge come out as if nothing were beyond it)
 export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs: Uint16Array, under: Uint8Array, pal: Uint8Array, deck = pal, covered = false,
-  box: Box | null = null): RampField {
+  box: Box | null = null): CapField {
   const S = N + 2, V = S + 1, paved = new Uint8Array(S * S), h = new Int32Array(V * V).fill(PINNED);
   let ground = under;
   // (solid: how far each column is solid from the bottom up, in cells)
@@ -97,34 +94,17 @@ export function rampField(N: number, counts: Uint16Array, off: Uint32Array, runs
     h[X + V * Y] = Math.round(mean * 8) * 8;
     any = true;
   }
-  return { S, ground, under, paved, h, any };
+  // (as a CapField: per paved column its corners, slot 1 a deck's)
+  const f = emptyCapField(S, under, false);
+  f.top = ground; f.low = h; f.pin = h; f.any = any;
+  for (let c = 0; c < S * S; c++) {
+    if (!paved[c]) continue;
+    const sl = ground[c] !== under[c] ? 1 : 0, X = c % S, Y = (c - X) / S;
+    f.z[2 * c + sl] = ground[c];
+    for (let k = 0; k < 4; k++) {
+      const q = h[X + (k === 1 || k === 2 ? 1 : 0) + V * (Y + (k >= 2 ? 1 : 0))];
+      f.q[8 * c + 4 * sl + k] = q === PINNED ? ground[c] * 64 : q;
+    }
+  }
+  return f;
 }
-
-// the height in 1/64 m of column (cx, cy)'s top (apron coordinates, 0 .. S - 1) at its corner k (0: (0, 0), 1: (1, 0),
-// 2: (1, 1), 3: (0, 1))
-export function cornerQ(f: RampField, c: number, k: number) {
-  const { S } = f, x = (c % S) + (k === 1 || k === 2 ? 1 : 0), y = Math.floor(c / S) + (k >= 2 ? 1 : 0), q = f.h[x + (S + 1) * y];
-  return q === PINNED ? f.ground[c] * 64 : q;
-}
-
-// is column c's top a ramp (a corner off its voxel's top)?
-export function ramped(f: RampField, c: number) {
-  if (!f.paved[c]) return false;
-  const g = f.ground[c] * 64;
-  for (let k = 0; k < 4; k++) if (cornerQ(f, c, k) !== g) return true;
-  return false;
-}
-
-// the top of paved column c at (fx, fy) within it (0..1), in metres: as its two triangles are drawn (the mesher's
-// diagonal: rampDiagonal)
-export function rampHeight(f: RampField, c: number, fx: number, fy: number) {
-  const q0 = cornerQ(f, c, 0), q1 = cornerQ(f, c, 1), q2 = cornerQ(f, c, 2), q3 = cornerQ(f, c, 3);
-  let q;
-  if (rampDiagonal02(q0, q1, q2, q3)) q = fx >= fy ? q0 + (q1 - q0) * fx + (q2 - q1) * fy : q0 + (q3 - q0) * fy + (q2 - q3) * fx;
-  else q = fx + fy <= 1 ? q0 + (q1 - q0) * fx + (q3 - q0) * fy : q2 + (q3 - q2) * (1 - fx) + (q1 - q2) * (1 - fy);
-  return q / 64;
-}
-
-// a ramp's quad is split along the diagonal 0-2 (else 1-3): the one whose ends are nearer in height, so a ramp up one
-// side bends along its contour
-export const rampDiagonal02 = (q0: number, q1: number, q2: number, q3: number) => Math.abs(q0 - q2) <= Math.abs(q1 - q3);

@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import { PAL_GROUND } from './chamfer';
-import { rampField, rampHeight, type RampField } from './ramps';
+import { rampField } from './core/caps-legacy';
+import { capOf, surfaceAt, type CapField } from './core/surface';
 import type { ColumnData, Meta } from './types';
 import { paletteMask, RULES, semanticTable } from './core/semantics';
 
@@ -24,8 +25,8 @@ export class World {
   // per palette id: 1 where topSolid does not stand on it (leaves; ids past the palette: 0)
   private readonly leaf: Uint8Array;
   private readonly paved: Uint8Array;
-  // per 1 m tile: its ramps (ramps.ts), as the mesher draws them; null: none
-  private readonly ramps = new WeakMap<ColumnData, RampField | null>();
+  // per 1 m tile: its caps (core/surface.ts), as the mesher draws them; null: none
+  private readonly ramps = new WeakMap<ColumnData, CapField | null>();
 
   constructor(private readonly src: ColumnSource, meta: Meta) {
     this.W = meta.W;
@@ -45,7 +46,8 @@ export class World {
       if (!f.any) f = null;
       this.ramps.set(n, f);
     }
-    return f && f.paved[i] && (deck || f.ground[i] === f.under[i]) ? rampHeight(f, i, x - Math.floor(x), r - Math.floor(r)) : null;
+    const sl = f ? capOf(f, i) : -1;
+    return sl >= 0 && (deck || sl === 0) ? surfaceAt(f, i, f!.z[2 * i + sl], x - Math.floor(x), r - Math.floor(r)) : null;
   }
 
   // where something on the ground at level z (a path's point, scripts/traffic.py: whole metres) stands at (x, r): on a

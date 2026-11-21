@@ -96,7 +96,7 @@ async function scan(name, [x0, z0, x1, z1]) {
     const t = tiles.get(`${Math.floor(x / N)}_${Math.floor(z / N)}`);
     if (!t || !t.ramps) continue;
     const c = (x - Math.floor(x / N) * N) + 1 + t.S * ((z - Math.floor(z / N) * N) + 1);
-    if (!t.ramps.paved[c]) continue;
+    if (!(t.ramps.z[2 * c] || t.ramps.z[2 * c + 1])) continue; // (a cap there: core/surface.ts)
     for (const [fx, fz] of [[0.25, 0.25], [0.75, 0.6], [0.5, 0.9]]) {
       const X = x + fx, Z = z + fz, top = t.top[c];
       const drawn = terr.groundAt(X, Z, top + 0.01, false);
