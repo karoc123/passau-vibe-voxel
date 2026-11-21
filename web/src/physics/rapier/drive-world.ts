@@ -92,6 +92,8 @@ export class RapierDrive {
   private acc = 0;
   private readonly prevP = new THREE.Vector3();
   private readonly curP = new THREE.Vector3();
+  private prevRide = 0;
+  private curRide = 0;
   private readonly prevQ = new THREE.Quaternion();
   private readonly curQ = new THREE.Quaternion();
   private readonly kin = new Map<object, Kin>();
@@ -152,7 +154,7 @@ export class RapierDrive {
     this.obstacles(obstacles, at, n * STEP);
     if (n) this.walkers(walkers, n * STEP, events);
     for (let i = 0; i < n; i++) {
-      this.prevP.copy(this.curP); this.prevQ.copy(this.curQ);
+      this.prevP.copy(this.curP); this.prevQ.copy(this.curQ); this.prevRide = this.curRide;
       for (const k of this.kin.values()) {
         const t = (i + 1) / n, p = k.from.clone().lerp(k.to, t);
         let dh = k.toH - k.fromH;
@@ -172,6 +174,7 @@ export class RapierDrive {
       this.stats.stepMs = ms;
       this.stats.stepMsMax = Math.max(this.stats.stepMsMax, ms);
       this.toWorld(car.body.translation(), this.curP);
+      this.curRide = car.ride;
       const r = car.body.rotation();
       this.curQ.set(r.x, r.y, r.z, r.w);
     }
@@ -190,7 +193,7 @@ export class RapierDrive {
       if (i > 10 && Math.hypot(v.x, v.y, v.z) < 0.3 && this.car.airTime === 0) break;
     }
     this.acc = 0;
-    this.prevP.copy(this.curP); this.prevQ.copy(this.curQ);
+    this.prevP.copy(this.curP); this.prevQ.copy(this.curQ); this.prevRide = this.curRide;
   }
 
   // the traffic cars knocked away and still moving, as drawn now
@@ -210,7 +213,8 @@ export class RapierDrive {
     if (!this.car) return null;
     const a = Math.min(1, this.acc / STEP);
     const p = this.prevP.clone().lerp(this.curP, a), q = this.prevQ.clone().slerp(this.curQ, a);
-    p.add(new THREE.Vector3(0, -this.car.build.ride, 0).applyQuaternion(q));
+    // (the ground point: the ride height the wheels hold now under the body's origin, along the car's up)
+    p.add(new THREE.Vector3(0, -(this.prevRide + (this.curRide - this.prevRide) * a), 0).applyQuaternion(q));
     const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
     return { x: p.x, y: p.y, z: p.z, h: e.y, pitch: -e.x, roll: e.z };
   }
@@ -242,6 +246,7 @@ export class RapierDrive {
     this.toWorld(this.car.body.translation(), this.curP);
     this.prevP.copy(this.curP);
     this.curQ.copy(q); this.prevQ.copy(q);
+    this.curRide = this.prevRide = build.ride;
     this.acc = 0;
   }
 

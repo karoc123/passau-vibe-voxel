@@ -92,6 +92,8 @@ export class RapierCar {
   private time = 0;
   private event: CarEvent | null = null;
   private readonly half: CarBuild['half'];
+  // the ground's height under the body's origin along its up, as its wheels hold it now (see afterStep)
+  ride: number;
 
   // heading: radians about y (0: +z), or a whole rotation
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
@@ -100,6 +102,7 @@ export class RapierCar {
     this.body = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q)
       .setCanSleep(false).setCcdEnabled(true).setAngularDamping(0.4).setGravityScale(RIDE.gravity));
     const HALF = this.half = build.half, MASS = build.mass;
+    this.ride = build.ride;
     const inertia = { x: MASS * (HALF.y ** 2 + HALF.z ** 2) / 3, y: MASS * (HALF.x ** 2 + HALF.z ** 2) / 3, z: MASS * (HALF.x ** 2 + HALF.y ** 2) / 3 };
     const walls = tuning.walls;
     // (a plain box: a rounded one (roundCuboid) glances no better and costs 3x the contact time against voxels; its
@@ -189,6 +192,7 @@ export class RapierCar {
     this.time += dt;
     const b = this.body, v = b.linvel(), pv = this.prevV;
     const wheels = this.wheelsInContact();
+    this.updateRide(dt);
     const touching = wheels > 0 || this.touchingWorld();
     if (!touching) this.airTime += dt;
     else {
@@ -416,6 +420,16 @@ export class RapierCar {
       w.position.set(p.x, -0.2 - len, p.z);
       w.rotation.set(c.wheelRotation(i) ?? 0, c.wheelSteering(i) ?? 0, 0, 'YXZ');
     }
+  }
+
+  // The ride height: the wheels' mount (0.2 under the origin), the touching wheels' mean suspension length and the
+  // wheel's radius; with no wheel down, the build's ride. Eased (~50 ms) so a wheel lifting moves it smoothly.
+  private updateRide(dt: number) {
+    const c = this.controller;
+    let n = 0, len = 0;
+    for (let i = 0; i < 4; i++) if (c.wheelIsInContact(i)) { n++; len += c.wheelSuspensionLength(i) ?? REST; }
+    const target = n ? 0.2 + len / n + WHEEL_R : this.build.ride;
+    this.ride += (target - this.ride) * (1 - Math.exp(-dt / 0.05));
   }
 
   wheelsInContact() {
