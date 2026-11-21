@@ -550,7 +550,7 @@ _floor = ndimage.binary_opening(_floor, iterations=2)
 gcol[_floor] = C["garden"]
 note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
 
-from ways import HW, ROADS, way_width  # noqa: E402  (the widths ways are drawn at: shared with overrides.py)
+from ways import HW, ROADS, unlit, way_width  # noqa: E402  (the widths ways are drawn at: shared with overrides.py)
 
 def on_bridge(t):
     return t.get("bridge") not in (None, "no") or t.get("man_made") == "bridge"
@@ -637,8 +637,11 @@ for oid, t, line in osm.lines:
         bridge_ways.append((oid, t, line, w / 2))
         if hw in ROADS or base in ROADS:
             bridge_road_polys.append(poly)
-        if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private"):
-            bridge_roads.append((line, w, oid))  # (not a footbridge tagged living_street for service vans only)
+        # (not a footbridge tagged living_street for service vans only; nor a bridge whose road is dark, ways.unlit,
+        # as traffic.py leaves it no street lamps: the A 3's Donaubrücke Schalding, lit=no, had one every 32 m)
+        if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private") \
+                and not unlit(t):
+            bridge_roads.append((line, w, oid))
         continue
     if t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT):
         lit_ground_ways.append(poly)
@@ -3512,7 +3515,8 @@ for i_, sl in enumerate(ndimage.find_objects(lab_), 1):
     n_pyl += 1
 note("bridge pylons from LiDAR:", n_pyl)
 # lamps on the bridges: OSM often maps none on the river bridges, but they
-# are lit -- put one every 32 m on each kerb of the deck, unless OSM has a lamp within 12 m. A kerb is
+# are lit -- put one every 32 m on each kerb of the deck, unless OSM has a lamp within 12 m (none on a dark road's
+# bridge: ways.unlit, as the streets' lamps). A kerb is
 # deck that carries no way of its own, with no carriageway or track within 4 m beyond it: the inner side of a
 # carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
 _bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])

@@ -29,3 +29,13 @@ def way_width(t):
     if base == "service" and t.get("service") in ("parking_aisle", "driveway", "alley"):
         w = 3.5
     return w
+
+
+def unlit(t):
+    """no street lamps along the way: OSM's lit=no, or a motorway or a road out of town (zone:traffic=DE:rural) not
+    tagged lit=yes. The one test for the lamps placed along the streets (traffic.py's dark flag, web/src/streetlamps.ts)
+    and those on the bridge decks (voxelize.py): the A 3's Donaubrücke Schalding (lit=no) had a deck lamp every 32 m"""
+    hw = t.get("highway") or ""
+    if hw == "construction":
+        hw = t.get("construction") or ""
+    return t.get("lit") == "no" or (t.get("lit") != "yes" and (hw.startswith("motorway") or t.get("zone:traffic") == "DE:rural"))
