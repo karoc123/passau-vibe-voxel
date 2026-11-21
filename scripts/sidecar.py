@@ -71,6 +71,9 @@ def ensure(path):
                 m.flush()
                 del m
                 os.replace(tmp, d / f"{k}.npy")
+    for f in d.glob("*.npy"):  # (an array the .npz no longer has: prep.npz's orto, 2.4 GB, before build-speed-2 A3)
+        if f.name[:-4] not in keys:
+            f.unlink()
     tmp = d / "stamp.tmp.json"
     tmp.write_text(json.dumps(dict(stamp=stamp, keys=keys)))
     os.replace(tmp, d / "stamp.json")
