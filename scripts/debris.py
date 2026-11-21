@@ -13,24 +13,42 @@ from scipy import ndimage
 import aoi
 
 
-def _owned(vol, occ_of, st, B, K):
+def _owned(vol, occ_of, st, B, K, floor=False):
     """per block of the project grid over the volume (a region's, aoi.R0/C0), the connected pieces of occ_of(sub)
     whose corner lies in the block and that span K cells or less across: yields (zi, ri, ci) (the region's indices,
-    z-major order) and, last, the number of bigger pieces left"""
+    z-major order) and, last, the number of bigger pieces left.
+    Only the layers that can hold a piece are labelled: none above the box's last voxel; below, none of the leading
+    empty layers of occ, and of its leading full layers (the slab) all but the last -- that one is a single sheet,
+    joined to the layers under it, so a piece touches it exactly when it is the piece holding the first layer, and
+    every other piece is the same. floor: that piece (the ground and what stands on it) is not yielded where the
+    slab was cut (the caller skips a piece starting at layer 0 itself where it was not)"""
     H, Dd, Ww = vol.shape
     n_big = 0
     for br in range((aoi.R0 // B) * B - aoi.R0, Dd, B):
         for bc in range((aoi.C0 // B) * B - aoi.C0, Ww, B):
             b0r, b1r, b0c, b1c = max(br, 0), min(br + B, Dd), max(bc, 0), min(bc + B, Ww)
             ra, rb, ca, cb = max(b0r - 1, 0), min(b1r + K + 1, Dd), max(b0c - 1, 0), min(b1c + K + 1, Ww)
-            occ = occ_of(vol[:, ra:rb, ca:cb], (ra, rb, ca, cb))
-            lab, k = ndimage.label(occ, st)
+            sub = vol[:, ra:rb, ca:cb]
+            used = np.flatnonzero(sub.any((1, 2)))
+            if not len(used):
+                continue
+            occ = occ_of(sub[:used[-1] + 1], (ra, rb, ca, cb))
+            lay = occ.reshape(occ.shape[0], -1)
+            filled = lay.any(1)
+            if not filled.any():
+                continue
+            e = int(np.argmax(filled))  # leading empty layers
+            f = 0 if e else int(np.argmin(lay.all(1))) if not lay.all() else occ.shape[0]  # leading full ones
+            z0 = e if e else max(f - 1, 0)
+            lab, k = ndimage.label(occ[z0:], st)
             if k == 0:
                 continue
             for lid, sl in enumerate(ndimage.find_objects(lab), 1):
                 if sl is None:
                     continue
                 zs, rs, cs = sl
+                cut_floor = floor and z0 > 0 and e == 0 and zs.start == 0
+                zs = slice(zs.start + z0, zs.stop + z0)
                 r0_, c0_ = rs.start + ra, cs.start + ca
                 if not (b0r <= r0_ < b1r and b0c <= c0_ < b1c):
                     continue  # (its corner in another block: that one judges it)
@@ -39,6 +57,8 @@ def _owned(vol, occ_of, st, B, K):
                 if rs.stop - rs.start > K + 1 or cs.stop - cs.start > K + 1:
                     n_big += 1
                     continue
+                if cut_floor:
+                    continue  # (the ground: see floor)
                 zi, ri, ci = np.nonzero(lab[sl] == lid)
                 yield zi + zs.start, ri + r0_, ci + c0_
     yield n_big
@@ -59,7 +79,7 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=128, K=64, dbg=Path("dat
         ra, rb, ca, cb = box
         # the ground itself is one big component (leave it out); trees: crowns hang on trunks drawn apart, small
         # crowns are real
-        return (sub != 0) & (zz >= g[ra:rb, ca:cb][None] - 1) & ~keep[sub]
+        return (sub != 0) & (zz[:sub.shape[0]] >= g[ra:rb, ca:cb][None] - 1) & ~keep[sub]
 
     n_big = 0
     for item in _owned(vol, occ_of, st, B, K):
@@ -129,7 +149,7 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
         return o
 
     comps, n_big = [], 0
-    for item in _owned(vol, occ_of, st, B, K):
+    for item in _owned(vol, occ_of, st, B, K, floor=True):
         if isinstance(item, int):
             n_big = item
             continue
