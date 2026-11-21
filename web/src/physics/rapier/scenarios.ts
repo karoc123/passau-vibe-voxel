@@ -148,11 +148,39 @@ const GAS: CarInput = { gas: 1, brake: 0, steer: 0, handbrake: false };
 // holds a speed (km/h) along the car's heading
 export const cruise = (kmh: number): ((s: Sim) => CarInput) => (s) => ({ gas: s.car.kmh < kmh ? 1 : 0, brake: s.car.kmh > kmh + 4 ? 0.3 : 0, steer: 0, handbrake: false });
 
-// follows a path (world x, z points) at a speed (km/h): pure pursuit, a point ahead by the speed
-export function follow(path: [number, number][], kmh: number): (s: Sim) => CarInput {
-  const cr = cruise(kmh);
+// The speed (m/s) a driver would take a path's bends at: at most lat m/s^2 across the way (the bend's curvature over
+// 3 m either side of each point), braking for them at BRAKE_PLAN m/s^2 ahead of time. (i, v): the most at path point
+// i, at most v (one call looks as far ahead as stopping from v takes).
+const BRAKE_PLAN = 3.5;
+export function bendSpeed(path: number[][], lat: number) {
+  const n = path.length, along = [0], kappa = new Float64Array(n);
+  for (let k = 1; k < n; k++) along.push(along[k - 1] + Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]));
+  const head = (a: number, b: number) => Math.atan2(path[b][0] - path[a][0], path[b][1] - path[a][1]);
+  for (let k = 0, a = 0, b = 0; k < n; k++) {
+    while (a < k && along[k] - along[a + 1] >= 3) a++;
+    while (b < n - 1 && along[b] - along[k] < 3) b++;
+    if (a >= k || b <= k) continue;
+    let d = head(k, b) - head(a, k);
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    kappa[k] = Math.abs(d) / Math.max(1, (along[b] - along[a]) / 2);
+  }
+  return (i: number, v: number) => {
+    let lim = v;
+    for (let k = i; k < n && along[k] - along[i] < v * v / (2 * BRAKE_PLAN) + 5; k++) {
+      if (kappa[k] < 1e-4) continue;
+      lim = Math.min(lim, Math.sqrt(lat / kappa[k] + 2 * BRAKE_PLAN * (along[k] - along[i])));
+    }
+    return lim;
+  };
+}
+
+// follows a path (world x, z points) at a speed (km/h): pure pursuit, a point ahead by the speed; lat: slower in the
+// bends, as a driver (bendSpeed: at most lat m/s^2 across the way), undefined: at that speed whatever the bend
+export function follow(path: [number, number][], kmh: number, lat?: number): (s: Sim) => CarInput {
+  const bends = lat ? bendSpeed(path, lat) : null;
   let near = 0;
   return (s) => {
+    const want = bends ? Math.min(kmh, bends(near, kmh / 3.6) * 3.6) : kmh, cr = cruise(want);
     const p = s.car.body.translation(), r = s.car.body.rotation();
     // (the nearest point, searched forward from the last one)
     for (let i = near; i < Math.min(path.length, near + 20); i++) if (Math.hypot(path[i][0] - p.x, path[i][1] - p.z) < Math.hypot(path[near][0] - p.x, path[near][1] - p.z)) near = i;
@@ -164,6 +192,8 @@ export function follow(path: [number, number][], kmh: number): (s: Sim) => CarIn
     a = Math.atan2(Math.sin(a), Math.cos(a));
     // (at the end: brakes, then the handbrake -- brake held below 0.8 m/s is reverse gear: it backed off down the road)
     const done = near >= path.length - 2, c = cr(s), v = s.car.kmh / 3.6;
+    // (into a bend too fast: harder the more over)
+    if (c.brake && bends) c.brake = Math.min(1, 0.3 + (s.car.kmh - want - 4) / 15);
     return { gas: done ? 0 : c.gas, brake: done ? (v > 0.8 ? 1 : 0) : c.brake, steer: Math.max(-1, Math.min(1, -a * 2.5)), handbrake: done };
   };
 }

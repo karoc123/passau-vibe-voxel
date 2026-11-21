@@ -6,9 +6,9 @@
 //   Schanzlbrücke's south end: ramps; the Schanzlbrücke: deck; Spitzberg: slopes), three points a column, a ray with the
 //   wheels' collision groups against the drawn surface there, split by flat / ramp / deck (ramp: the column has a cap;
 //   deck: its surface over a bridge, not the ground).
-// - drive: the car (scenarios.ts Sim, pure-pursuit follow) along a few fixed roads (traffic.json, by index, checked
-//   against its OSM way) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 % and 60 % along them (0 km/h):
-//   each touching wheel's contact point against the drawn surface under it, and the drawn wheel's bottom (the ground
+// - drive: the car (scenarios.ts Sim, pure-pursuit follow; slower in a bend than LAT allows) along a few fixed roads
+//   (traffic.json, by index, checked against its OSM way) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 %
+//   and 60 % along them (0 km/h): each touching wheel's contact point against the drawn surface under it, and the drawn wheel's bottom (the ground
 //   point drive-world.ts draws the car on: car.ride under the body's origin along its up, at the wheel's x, z) against
 //   the drawn surface there; how it rode (scenarios.ts feel: pitchJit rad/s, heave cm, liftPct). The car starts a few
 //   metres in where its box is clear of the voxels (scenarios.ts safeStart); a road whose centreline runs within 1.3 m
@@ -17,10 +17,11 @@
 // Gaps in cm (+: over the drawn surface, floating; -: under it, sunk): n, mean, |d| (mean of the absolute), p05, p95,
 // and the shares (%) more than 5 cm under (lo5) and over (hi5). Samples more than 1.2 m (scan) / 0.9 m (drive) off
 // are something else (a wall, a kerb, a deck over a road) and not counted.
-// usage (in web/): node tools/surface-gap.mjs [out.json] [--only scan|drive] [-v] [--check baseline.json [--tol F]]
+// usage (in web/): node tools/surface-gap.mjs [out.json] [--only scan|drive] [-v] [--check baseline.json [--tol F]] [--set k=v,...]
 //   out.json: all numbers, to diff or check against later; -v: the drive's gaps split by flat / ramp / deck too
 //   --check: exit code 1 if a gap or the ride got worse than the baseline's by more than the tolerances (TOL below,
-//   times F, default 1), a run the baseline had is missing or no longer gets to its road's end
+//   times F, default 1), a run the baseline had is missing or no longer gets to its road's end; --set: the ride's
+//   numbers (car.ts RIDE) changed for the run
 // Other data (a fixture's build: VOXEL_DATA, tools/data-dir.mjs): the areas moved to its map by the project grid (as
 // the main map's, MAIN_ORIGIN) and clipped to it, the roads found by their OSM way (the longest road of it), those
 // off the map skipped.
@@ -31,11 +32,17 @@ import { root, load, readMeta, realMap, realTile, roadPath, schanzlPath, traffic
 
 const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
-const outPath = args.find((a, i) => !a.startsWith('-') && !['--only', '--check', '--tol'].includes(args[i - 1]));
+const outPath = args.find((a, i) => !a.startsWith('-') && !['--only', '--check', '--tol', '--set'].includes(args[i - 1]));
 const only = opt('--only'), checkPath = opt('--check'), tolF = +(opt('--tol') ?? 1), verbose = args.includes('-v');
 if (!hasData()) { console.error('no public/data (meta.json, traffic.json)'); process.exit(2); }
 
 const sc = await load('physics/rapier/scenarios.ts');
+// --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run (as rapier-car.mjs --set)
+for (const kv of opt('--set')?.split(',') ?? []) {
+  const [k, v] = kv.split('=');
+  if (!(k in sc.RIDE)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)})`);
+  sc.RIDE[k] = +v;
+}
 const T = await load('physics/rapier/terrain.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
@@ -62,6 +69,9 @@ const ROADS = [
   { name: 'spitzberg_445', i: 445, w: 23653874 }, // 7.2 % down
 ];
 const SPEEDS = [30, 50, 70], PARK = [0.3, 0.6], MAX_LEN = 300;
+// m/s^2: the most the follower takes a bend with (scenarios.ts bendSpeed): slower in a bend it cannot take at the run's
+// speed (road 1948's first bend, ~20 m radius, at 70 km/h: off the road into the yards beside it)
+const LAT = 7;
 // the map the areas' world coordinates are of (its meta.json origin); other data: moved by the project grid
 const MAIN_ORIGIN = [-6144, -2048];
 const [shx, shz] = [MAIN_ORIGIN[0] - (meta.origin ?? [0, 0])[0], MAIN_ORIGIN[1] - (meta.origin ?? [0, 0])[1]];
@@ -145,11 +155,12 @@ function drive(map, path, st, kmh) {
   for (let k = 1; k < pts.length; k++) { L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); if (L > MAX_LEN && cut === pts.length) cut = k + 1; }
   pts = pts.slice(0, cut);
   L = Math.min(L, MAX_LEN);
-  const s = new sc.Sim(map, st.at, st.heading, kmh / 3.6);
+  // (a driver's speed in the bends, from the start: LAT)
+  const s = new sc.Sim(map, st.at, st.heading, kmh ? sc.bendSpeed(pts, LAT)(0, kmh / 3.6) : 0);
   const terr = s.terrain, c = s.car.controller, wh = s.car.build.wheels, end = pts[pts.length - 1];
   const contact = bins(), wheel = bins();
   let off = 0;
-  const f = kmh ? sc.follow(pts, kmh) : () => ({ gas: 0, brake: 0, steer: 0, handbrake: true });
+  const f = kmh ? sc.follow(pts, kmh, LAT) : () => ({ gas: 0, brake: 0, steer: 0, handbrake: true });
   const steps = Math.round((kmh ? L / (kmh / 3.6) * 1.6 + 2 : 3) * 60), log = [];
   const near = (p) => Math.hypot(p.x - end[0], p.z - end[1]);
   for (let i = 0; i < steps; i++) {
