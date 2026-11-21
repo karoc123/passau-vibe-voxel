@@ -4,8 +4,9 @@
 //   streets and bridge decks, core/surface.ts); its wheels' rays see the caps, not their voxels' tops.
 // - steps: a riser of up to STEP_MAX that is not the ground's (a platform, a low wall) ahead of the moving car, up or
 //   down, gets an invisible wedge on its low side, laid before the front wheels reach its foot (prisms on a smoothstep
-//   profile, as wide as the car's crossing needs, that only the car collides with and its wheels ride on), so it
-//   drives up or down as on a ramp instead of hitting the riser or dropping off it; higher is a wall (or a drop).
+//   profile on the ground of the low side, as wide as the car's crossing needs, that only the car collides with and its
+//   wheels ride on), so it drives up or down as on a ramp instead of hitting the riser or dropping off it; higher is a
+//   wall (or a drop).
 // - walls: the chassis has no friction or bounce against the world, so it glances along a wall instead of sticking to
 //   it; touching a wall turns the car towards the wall's direction (the way it slides).
 // - air: no wheel touching, the roll and pitch are damped and gently righted (the heading left alone).
@@ -346,15 +347,28 @@ export class RapierCar {
     while (hi + 1 < along0 + halfW && same(hi + 1)) hi++;
     // (one wedge per stretch of riser and side)
     if (this.wedges.some((w) => w.ax === ax && w.plane === plane && w.sgn === sgn && w.lo <= hi && w.hi >= lo)) return false;
-    // the prism: the riser's foot at `below`, its top edge at `top`, the slope running out WEDGE_LEN along n
+    // the prism: the riser's foot at `below`, its top edge at `top`, the slope running out WEDGE_LEN along n. Its top
+    // the lower of that smoothstep over the foot's level and the same rise over the ground on the low side (a sloped
+    // street's cap falling away from the riser: a wedge level with the foot would hang over it, its far end a wall in
+    // the air the chassis hits), its bottom down to that ground (no gap under it): it lies on the ground it ramps
     const colliders: RAPIER.Collider[] = [], K = WEDGE_SEG;
-    const h = (t: number) => { const u = 1 - t / WEDGE_LEN; return below + rise * (K > 1 ? u * u * (3 - 2 * u) : u); };
+    const s = (t: number) => { const u = 1 - t / WEDGE_LEN; return K > 1 ? u * u * (3 - 2 * u) : u; };
+    const ground = (ex: number, ez: number, t: number) => {
+      // (a run whose voxel top is up to a metre over the foot may have its cap under it)
+      const g = terrain.groundAt(ex + nx * t, ez + nz * t, below + 1.2);
+      return g === null || g > below ? below : Math.max(g, below - 1.5);
+    };
     for (let i = 0; i < K; i++) {
       const t0 = WEDGE_LEN * i / K, t1 = WEDGE_LEN * (i + 1) / K;
       const pts: number[] = [];
       for (const k of [lo, hi + 1]) {
         const ex = ax ? plane : k, ez = ax ? k : plane;
-        for (const [t, y] of [[t0, h(t0)], [t0, below - 0.02], [t1, below - 0.02], [t1, h(t1)]]) pts.push(ex + nx * t - o.x, y, ez + nz * t - o.z);
+        // (the ground just inside the wedge's end, a little off the riser's plane)
+        const sx = ax ? ex : k === lo ? k + 0.05 : k - 0.05, sz = ax ? (k === lo ? k + 0.05 : k - 0.05) : ez;
+        for (const t of [t0, t1]) {
+          const g = ground(sx, sz, Math.max(t, 0.05)), y = g + rise * s(t);
+          pts.push(ex + nx * t - o.x, y, ez + nz * t - o.z, ex + nx * t - o.x, g - 0.02, ez + nz * t - o.z);
+        }
       }
       const desc = this.R.ColliderDesc.convexHull(new Float32Array(pts));
       if (desc) colliders.push(this.world.createCollider(desc.setCollisionGroups(CAR_ONLY_GROUPS).setFriction(0.9)));
