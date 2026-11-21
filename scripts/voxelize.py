@@ -3745,11 +3745,18 @@ _open = ndimage.binary_erosion(_wm, iterations=10) & ~ndimage.binary_dilation(_c
 _B = 8
 assert R0 % _B == 0 and C0 % _B == 0 and D % _B == 0 and W % _B == 0
 _blk = np.where(_open[..., None], cellcol, np.nan).reshape(D // _B, _B, W // _B, _B, 3)
-with np.errstate(all="ignore"):
-    import warnings
-    with warnings.catch_warnings():
+
+
+def _block_median(blk):
+    # in a function, not at module level: numpy warns once per all-NaN block (150 000 a region), and each warning,
+    # ignored or not, looks up its caller's line -- at the end of this module's body ~90 us each, 460 s summed over
+    # the map's regions (docs/plans/build-speed-2.md F1)
+    with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        _bc = np.nanmedian(_blk, axis=(1, 3))
+        return np.nanmedian(blk, axis=(1, 3))
+
+
+_bc = _block_median(_blk)
 _has = np.isfinite(_bc[..., 0])
 if _wm.any():
     _bd, _near = ndimage.distance_transform_edt(~_has, return_indices=True) if _has.any() else \
