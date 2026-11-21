@@ -71,7 +71,8 @@ WSTEPS = {
     "terrain": dict(copy=[f"{PUB}/meta.json"], link=["data/ground.npz"], out=["data/terrain.bin", f"{PUB}/terrain"]),
     "tile_fields": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles", f"{PUB}/windows.bin"],
                         link=["data/zones.bin", "data/flood.bin", "data/foliage.bin", "data/surface.npz", "data/prep.npz",
-                              "data/ground.npz", "data/qa_roadmask.bin.gz"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
+                              "data/ground.npz", "data/qa_roadmask.bin.gz"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"],
+                        whole=["-j", "1"]),  # (else windows of 1024 m in a pool)
     "tiles_lod": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles"], link=[], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
 }
 
@@ -455,7 +456,7 @@ def windows(fx, jobs, steps, cvs, keep=False):
         return h
     for step in steps:
         t = time.time()
-        ref = one(step, [], home / step / "whole")
+        ref = one(step, WSTEPS[step].get("whole", []), home / step / "whole")
         for c in cvs:
             diff = differ(ref, one(step, ["--windows", c] if "x" in c else ["--window-size", c], home / step / c))
             print(f"{step}: {c}: {len(diff)} of {len(ref)} files differ from the whole fixture's", diff[:5], flush=True)

@@ -19,11 +19,16 @@ The tiles in tiles/1f (foliage) get none of it (their base tile's serves), only 
 Window by window (window.py): a window's nodes from its region of the data/ maps (the core and HALO around it), read
 as a stream, so the memory is a window's, not the map's; the files are the same for any cover of the map.
 
-usage: uv run python scripts/tile_fields.py [--windows NXxNY | --window-size METRES]   (after zones.py, flood.py,
-       windows.py, phenology.py; again after voxelize.py or tiles_lod.py rewrote nodes; web/tools/tris.mjs needs bldg)
+usage: uv run python scripts/tile_fields.py [--windows NXxNY | --window-size METRES] [-j N]   (after zones.py,
+       flood.py, windows.py, phenology.py; again after voxelize.py or tiles_lod.py rewrote nodes; web/tools/tris.mjs
+       needs bldg). -j N processes (default min(8, cores / 2)) over windows of 1024 m when no cover is given: ~35 s
+       for the map instead of ~205 s in one window, under 1 GB a process instead of 12 GB; -j 1 without a cover: the
+       whole map in one window
 """
 import gzip
 import json
+import multiprocessing
+import os
 import sys
 from pathlib import Path
 
@@ -213,16 +218,50 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     return written
 
 
+def _window_job(win):
+    """fields_window in a worker of main's pool: its notes collected, for the parent to print in window order"""
+    notes = []
+    meta = _JOB["meta"]
+    written = fields_window(win, meta["tiles"]["levels"], meta["tiles"]["N"], _JOB["table"],
+                            lambda *a: notes.append(" ".join(map(str, a))), meta["palette"], meta["base"])
+    return notes, written
+
+
+_JOB = {}  # what the workers read (set before the pool forks)
+
+
 def main():
     meta = json.loads((OUT / "meta.json").read_text())
     N, W, D = meta["tiles"]["N"], meta["W"], meta["D"]
     table = np.frombuffer(gzip.decompress((OUT / "windows.bin").read_bytes()), np.uint8)
+    argv = sys.argv
+    jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else min(8, max(1, (os.cpu_count() or 2) // 2))
+    # the whole map in one window unless a cover is given, or windows of ALIGN in a pool of `jobs` processes: the same
+    # bytes (each node belongs to the one window whose core holds its first cell; check.py windows), a window's memory
+    if jobs > 1 and "--windows" not in argv and "--window-size" not in argv:
+        wins = wmod.cover(D, W, wmod.ALIGN)
+    else:
+        wins = wmod.from_args(argv, D, W)
+    jobs = max(1, min(jobs, len(wins)))
     total = {}
-    for win in wmod.from_args(sys.argv, D, W):
-        for k, v in fields_window(win, meta["tiles"]["levels"], N, table, lambda *a: print(*a, flush=True), meta["palette"], meta["base"]).items():
+
+    def add(written):
+        for k, v in written.items():
             total[k] = total.get(k, 0) + v
+    if jobs == 1:
+        for win in wins:
+            add(fields_window(win, meta["tiles"]["levels"], N, table, lambda *a: print(*a, flush=True), meta["palette"], meta["base"]))
+    else:
+        _JOB.update(meta=meta, table=table)
+        # fork: the workers share the parent's table and meta (Python 3.14 defaults to forkserver on Linux)
+        with multiprocessing.get_context("fork").Pool(jobs) as pool:
+            for notes, written in pool.imap(_window_job, wins, chunksize=1):  # (in window order)
+                for n in notes:
+                    print(n, flush=True)
+                add(written)
     meta["tiles"]["bytes"] = sum(p.stat().st_size for lv in meta["tiles"]["levels"] for p in (OUT / "tiles" / str(lv["s"])).glob("*.bin"))
-    print("nodes:", total, f"levels' nodes now {meta['tiles']['bytes'] / 2 ** 20:.2f} MB gz")
+    print("nodes:", total, f"levels' nodes now {meta['tiles']['bytes'] / 2 ** 20:.2f} MB gz"
+          + (f" ({len(wins)} windows, {jobs} processes)" if len(wins) > 1 else ""))
     (OUT / "meta.json").write_text(json.dumps(meta))
 
 
