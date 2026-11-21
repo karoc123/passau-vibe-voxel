@@ -3341,6 +3341,13 @@ def bridgehead_fill(deck, zt_):
 
 BH_GRADE, BH_REACH = 0.12, 40
 _gn, _bh = bridgehead_fill(deck, zt_)
+# and a bridge way drawn on the ground under its level (up to 2 m: _bw) stands on ground lifted to it: the terrain
+# model drops with the bridge round an abutment (its pits 2-6 m deep along the edge of a short bridge's outline), and
+# the way's cells had kept that ground -- holes of 1-2 m in the carriageway beside the deck, deeper than the sloped
+# caps reach (caps.CLAMP): the primary_link bridge (OSM way 121880279) off the B 12 west of the Schanzlbrücke
+_bwl = _bw & (zt_ > _gn)
+_gn = np.where(_bwl, zt_, _gn).astype(np.int32)
+note("bridge ways on the ground: ground lifted to their level:", int(_bwl.sum()), "cells")
 _rh, _ch = np.nonzero(_gn > g)
 if len(_rh):
     # what stood on the old ground (a kerb, a post, a car) rises with it; under it soil, the top keeps its colour, and
@@ -3349,7 +3356,7 @@ if len(_rh):
     _lift = _g1 - _g0
     # open land no way or area is drawn on had been read as the slope of a pit (a meadow on the hillside): paved, as
     # the bridgehead round it, unless the ortho sees it green
-    _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03)
+    _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03) & ~_bwl[_rh, _ch]  # (a bridge way keeps its colours)
     gcol[_rh[_pv], _ch[_pv]] = C["paving"]
     vol[_g0[_pv] - 1, _rh[_pv], _ch[_pv]] = C["paving"]
     _old = np.stack([vol[np.minimum(_g0 - 1 + k, H - 1), _rh, _ch] for k in range(7)])
