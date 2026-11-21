@@ -50,8 +50,10 @@ uv run python scripts/climate.py         # climate.json (Open-Meteo, cached in d
 $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.json scripts/alkis_tn.py data/raw/dwd data/raw/tn_09262.zip data/raw/tn_09275.zip \
   data/raw/treespecies_2022.tif data/raw/treespecies_2016.tif data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
-$S tile_fields -i $A scripts/window.py scripts/tilefile.py data/zones.bin data/flood.bin data/foliage.bin $P/windows.bin $M \
-  -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light (from the data/ maps above)
+$S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py data/zones.bin data/flood.bin data/foliage.bin \
+  data/surface.npz data/prep.npz data/ground.npz $P/windows.bin $M \
+  -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light, sloped caps
+                                                 # (from the data/ maps above)
 uv run python scripts/world_id.py       # meta.json world (build id over tiles/1 and 1f, palette, grid): every
                                          # build, cheap; written only when it changed. Before tris, which records
                                          # meta.json whole as its output

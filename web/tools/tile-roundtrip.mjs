@@ -94,9 +94,18 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   if (SF.capField(2, { counts, runs: new Uint16Array(runs), ground, caps: null }) !== null) fail('capField without a section: not null');
 }
 
+// the paved ground in two languages: the ids scripts/caps.py caps (paved_ids) are those core/semantics.ts calls PAVED
+{
+  const { module: SE } = await runnerImport(`${root}src/core/semantics.ts`, { root, logLevel: 'error' });
+  const pal = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/palette.json'), 'utf8')).palette;
+  const py = JSON.parse(execFileSync('uv', ['run', '--quiet', 'python', 'scripts/caps.py', '--paved-ids'], { cwd: repo }).toString());
+  const ts = [...SE.semanticTable(pal)].flatMap((f, i) => (f & SE.SEM.PAVED ? [i] : []));
+  if (JSON.stringify(py) !== JSON.stringify(ts)) fail(`paved ids: caps.py ${py.length} (${py.slice(0, 8)}...), semantics.ts ${ts.length} (${ts.slice(0, 8)}...)`);
+}
+
 if (bad.length) {
   console.log(`tile round trip: ${bad.length} mismatches (files kept in ${dir})`);
   process.exit(1);
 }
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; registries agree)`);
+console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; registries agree; paved ids agree)`);

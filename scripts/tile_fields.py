@@ -9,6 +9,8 @@ from the nodes shown (web/src/fields.ts).
         (data/flood.bin, flood.py); at 2, 4, 8 m those of the cell's middle column
   fols  per cell, no apron: foliage class and tree (data/foliage.bin, phenology.py) of the 2 m cell the cell's middle
         column is in (at 1 m each 2 m cell's four columns alike)
+  caps  (level 1) the sloped surfaces of paved ground and bridge decks (caps.py: from data/surface.npz, prep.npz,
+        ground.npz and the node's own columns); none without data/surface.npz (data built before it)
   spil  per cell of twice the node's size (2 m at level 1, where it is made; 4, 8, 16 m above), apron included: the
         light of lit windows on the street before them, two kinds (spill_map), at the cell's middle (between the 2 m
         cells): it is a soft light, blurred over ~6 m, read bilinear
@@ -27,6 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
+import caps
 import tilefile
 import window as wmod
 
@@ -34,8 +37,10 @@ OUT = Path("web/public/data")
 TMP = Path("data")
 # map cells around a window's core that a node's sections read: spil at level 8 reaches 10 m out (its apron of 16 m
 # cells, the 2 m cells beside the middle), and what lights a 2 m cell lies within 8 m of it (the facade test beside
-# it, the two blurs of 3 + 3 cells); bldg's apron 8 m. The rest is the node's own cells
-HALO = 32
+# it, the two blurs of 3 + 3 cells); bldg's apron 8 m; caps' corners depend on what lies within caps.REACH (65 m: the
+# smoothing). The rest is the node's own cells. A multiple of 32 (the level-8 nodes' 16 m cells stay aligned)
+HALO = 96
+assert HALO >= caps.REACH + 1 and HALO % 32 == 0
 
 
 def spill_map(kind1, W, D, at=(0, 0)):
@@ -123,7 +128,7 @@ def cut_node(a, r0, c0, n, fill):
 
 
 
-def fields_window(win, levels, N, table, note=print):
+def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     """The sections of the nodes (every level in `levels`: meta.json tiles.levels) whose first row and column lie in the
     window's core, from the window's region of data/zones.bin, data/flood.bin, data/foliage.bin; table: windows.bin.
     Returns {level: nodes written}."""
@@ -137,6 +142,10 @@ def fields_window(win, levels, N, table, note=print):
     fcls = wmod.gz_region(TMP / "foliage.bin", (h2, w2), np.uint8, f2)
     ftree = wmod.gz_region(TMP / "foliage.bin", (h2, w2), np.uint8, f2, w2 * h2)
     light = spill_map(table[zones] & 7, W, D, (ra, ca))  # 2 m cells from (ra / 2, ca / 2)
+    # the sloped caps' corners over the region (None: no data/surface.npz, no caps written)
+    capf = caps.region_fields(region, D, W, base, TMP) if palette is not None else None
+    paved = caps.paved_ids(palette) if capf is not None else None
+    cst = caps.Stats()
     L = light.astype(np.float32)
     S, M = N + 2, N // 2 + 2
     written = {}
@@ -183,6 +192,11 @@ def fields_window(win, levels, N, table, note=print):
                 sec["fols"] = foliage(ty * N, tx * N).astype(np.uint8).tobytes()
                 # (the apron beyond the map: the light as at the map's edge)
                 sec["spil"] = spil(ty * (N // 2) - 1, tx * (N // 2) - 1).astype(np.uint8).transpose(2, 0, 1).tobytes()
+                cb = caps.node_section(capf, sec, ty * N, tx * N, N, D, W, paved, cst) if capf is not None and s == 1 else b""
+                if cb:
+                    sec["caps"] = cb
+                else:
+                    sec.pop("caps", None)
                 tilefile.write(f, sec)
                 n += 1
         written[s] = n
@@ -194,7 +208,8 @@ def fields_window(win, levels, N, table, note=print):
                 tilefile.write(f, tilefile.read(f, N))
                 nf += 1
     written["1f"] = nf
-    note(f"window {win}: lit 2 m cells in the region {int((light > 0).any(2).sum())}, nodes {written}")
+    note(f"window {win}: lit 2 m cells in the region {int((light > 0).any(2).sum())}, nodes {written}"
+         + (f"; caps: {dict(cst)}" if capf is not None else "; caps: none (no data/surface.npz)"))
     return written
 
 
@@ -204,7 +219,7 @@ def main():
     table = np.frombuffer(gzip.decompress((OUT / "windows.bin").read_bytes()), np.uint8)
     total = {}
     for win in wmod.from_args(sys.argv, D, W):
-        for k, v in fields_window(win, meta["tiles"]["levels"], N, table, lambda *a: print(*a, flush=True)).items():
+        for k, v in fields_window(win, meta["tiles"]["levels"], N, table, lambda *a: print(*a, flush=True), meta["palette"], meta["base"]).items():
             total[k] = total.get(k, 0) + v
     meta["tiles"]["bytes"] = sum(p.stat().st_size for lv in meta["tiles"]["levels"] for p in (OUT / "tiles" / str(lv["s"])).glob("*.bin"))
     print("nodes:", total, f"levels' nodes now {meta['tiles']['bytes'] / 2 ** 20:.2f} MB gz")

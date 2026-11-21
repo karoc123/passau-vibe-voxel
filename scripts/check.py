@@ -6,7 +6,8 @@ usage: uv run python scripts/check.py COMMAND [ARGS] [--fixture PATH] [-j JOBS] 
 
   verify                        hard checks on the fixture's build (see VERIFY): nothing floating left, carriageways
                                 in their own colour, LoD2 and the laser scan found where they should be, the moving
-                                things on the volume's surface (sunk / hover shares under a threshold)
+                                things on the volume's surface (sunk / hover shares under a threshold), the sloped
+                                caps (caps.py report: carriageway share, roughness, edge mismatches; CAPS)
   golden --record DIR           every output of a fresh fixture build (web/public/data, data/*.npz arrays, data/*.bin,
   golden --compare DIR          the inputs prep/lod2/laser.npz) hashed into DIR/golden.json, or compared with it: the
                                 guard of a refactor that must not change a byte. --incremental: build in the kept
@@ -69,7 +70,8 @@ WSTEPS = {
                   out=["data/zones.bin", f"{PUB}/zones.json"]),
     "terrain": dict(copy=[f"{PUB}/meta.json"], link=["data/ground.npz"], out=["data/terrain.bin", f"{PUB}/terrain"]),
     "tile_fields": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles", f"{PUB}/windows.bin"],
-                        link=["data/zones.bin", "data/flood.bin", "data/foliage.bin"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
+                        link=["data/zones.bin", "data/flood.bin", "data/foliage.bin", "data/surface.npz", "data/prep.npz",
+                              "data/ground.npz"], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
     "tiles_lod": dict(copy=[f"{PUB}/meta.json", f"{PUB}/tiles"], link=[], out=[f"{PUB}/tiles", f"{PUB}/meta.json"]),
 }
 
@@ -258,6 +260,9 @@ def differ(ref, got):
 LOD2_SHARE = 0.90     # building cells whose roof is LoD2's (0.965)
 LASER_SHARE = 0.80    # canopy cells whose height is the laser's (0.884)
 SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprints, each way, per region (1.35)
+# the sloped caps (caps.py report): the carriageway cells with a cap, the capped carriageway's roughness (the second
+# difference per metre, p99, cm), linked capped neighbours whose shared corners differ (altstadt: 0.984, 8.6, 0.0035)
+CAPS = dict(road_share=0.95, rough_p99_cm=12.0, mismatch_share=0.01)
 MATCH_SHARE = 0.40    # OSM outlines matched to a LoD2 footprint (0.493)
 SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
@@ -371,6 +376,20 @@ def verify(fx, jobs, ws=None):
             print(f"  surface {k}: {res['metres']} m walked, {name} {m} m ({share:.4f}, at most {lim}); worst (x, y, m): {worst[:3]}")
             if share > lim:
                 bad.append(f"{k} {name}: {share:.4f} of the metres walked (more than {lim}), worst (x, y, m): {worst}")
+    import caps
+    rep = caps.report(ws, note=lambda *a: None)
+    if not rep or not rep.get("nodes_with_caps"):
+        bad.append("no caps section in the fixture's nodes (caps.py, tile_fields.py; data/surface.npz?)")
+    else:
+        print(f"  caps: {rep.get('ground_capped', 0)} ground, {rep.get('deck_capped', 0)} deck columns, {rep['bytes']} B raw; "
+              f"carriageway share {rep['road_share']} (at least {CAPS['road_share']}), roughness p99 {rep['rough_p99_cm']} cm "
+              f"(at most {CAPS['rough_p99_cm']}), edge mismatches {rep['mismatch_share']} (at most {CAPS['mismatch_share']})")
+        if rep["road_share"] < CAPS["road_share"]:
+            bad.append(f"caps: carriageway share {rep['road_share']} under {CAPS['road_share']}")
+        if rep["rough_p99_cm"] is None or rep["rough_p99_cm"] > CAPS["rough_p99_cm"]:
+            bad.append(f"caps: roughness p99 {rep['rough_p99_cm']} cm over {CAPS['rough_p99_cm']}")
+        if rep["mismatch_share"] > CAPS["mismatch_share"]:
+            bad.append(f"caps: edge mismatches {rep['mismatch_share']} over {CAPS['mismatch_share']}")
     return bad
 
 
