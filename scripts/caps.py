@@ -123,6 +123,15 @@ def _shift(a, dy, dx, fill):
     return b
 
 
+def _add_shifted(s, m, h, dy, dx):
+    """s += np.where(m, _shift(h, dy, dx, 0.0), 0.0) in place, without the copies: where m is not (or beyond h), s is
+    left as it is instead of +0.0 added (the same but for the sign of a zero)"""
+    R, C = s.shape
+    t = slice(max(0, -dy), R - max(0, dy)), slice(max(0, -dx), C - max(0, dx))
+    st = s[t]
+    np.add(st, h[max(0, dy):R - max(0, -dy), max(0, dx):C - max(0, -dx)], out=st, where=m[t])
+
+
 def fields(gt, water, bld, steps, dtm, deck):
     """The corners of every node of a region (arrays of the region, all (R, C)): gt the tiles' ground (int), water,
     bld (a building), steps (the ground's top is steps), dtm (m over BASE, NaN unknown), deck (m over BASE, NaN none).
@@ -164,13 +173,21 @@ def fields(gt, water, bld, steps, dtm, deck):
             nbrs[a].append((b, _shift(link[b, a, "S"], -1, 0, False), (-1, 0)))
     for a in "GK":
         L[a]["n"] = sum(m.astype(np.float64) for _, m, _ in nbrs[a])
+        # (the terms whose mask holds nothing left out of the sums below: each added +0.0 -- most windows have no
+        # deck at all, 12 of the 16 terms; the same values, but for the sign of a zero, which the corners' rounding to
+        # 1/64 removes)
+        nbrs[a] = [t for t in nbrs[a] if t[1].any()]
+    anyK = bool(L["K"]["ex"].any())
 
     def step(only_fb, deck=False):
         new = {}
         for a in "GK":
+            if a == "K" and not anyK:  # (no deck node: every one kept)
+                new[a] = L[a]["h"]
+                continue
             s = 2 * L[a]["h"]
             for b, m, (dy, dx) in nbrs[a]:
-                s = s + np.where(m, _shift(L[b]["h"], dy, dx, 0.0), 0.0)
+                _add_shifted(s, m, L[b]["h"], dy, dx)
             h = s / (2 + L[a]["n"])
             free = L[a]["fb"] | (deck & (a == "K"))
             keep = ~L[a]["ex"] | (~free if only_fb else np.zeros_like(L[a]["ex"]))
@@ -201,6 +218,8 @@ def fields(gt, water, bld, steps, dtm, deck):
     for c1, c2, d in (("NW", "NE", "E"), ("SW", "SE", "E"), ("NW", "SW", "S"), ("NE", "SE", "S")):
         for a in "GK":
             for b in "GK":
+                if not link[a, b, d].any():  # (an edge that links nothing changes no label)
+                    continue
                 lk = at({"m": link[a, b, d]}, "m", c1, False)
                 edges.append((nodes.index((c1, a)), nodes.index((c2, b)), lk))
     lab = [np.where(e, i, 99) for i, e in enumerate(ex)]
@@ -211,10 +230,15 @@ def fields(gt, water, bld, steps, dtm, deck):
             lab[j] = np.where(lk, m, lab[j])
     for a in "GK":
         L[a]["q"] = np.full((4, R, C), np.nan)
+    has = [bool(e.any()) for e in ex]
     for i, (cl, a) in enumerate(nodes):
+        if not has[i]:  # (the node nowhere: its corners NaN, as they were)
+            continue
         s = np.zeros(P)
         n = np.zeros(P)
         for j in range(len(nodes)):
+            if not has[j]:  # (+0.0)
+                continue
             same = ex[j] & (lab[j] == lab[i])
             s += np.where(same, hh[j], 0.0)
             n += same
