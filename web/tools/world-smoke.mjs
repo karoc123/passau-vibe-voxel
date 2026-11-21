@@ -209,7 +209,7 @@ const restored = compose(false);
     else {
       const e = new CO.EditableNode(N, n.base, n.tx, n.ty), ef = n.fol && new CO.EditableNode(N, n.fol, n.tx, n.ty);
       e.apply(LA.toCellOp(f, BOX)); ef?.apply(LA.toCellOp(f, clear(BOX)));
-      const b = { ...e.encode(), planes: n.base.planes, bld: n.base.bld };
+      const b = { ...e.encode(), planes: n.base.planes, bld: n.base.bld, caps: n.base.caps };
       o = await meshCols(k, { base: b, fol: ef && { ...ef.encode(), ground: b.ground } });
       what = 'L0 + the box';
     }

@@ -455,7 +455,7 @@ export class TileStreamer implements ColumnSource {
     n.edited = true;
     // (the columns it changed, and the buildings whose roofs: what the sectioned jobs mesh again)
     const hot = region ? hotBox(this.N, n.tx, n.ty, region) : null, bids = hot ? roofsChanged(this.N, n.data, base, n.data.bld, hot) : [];
-    this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld });
+    this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld, caps: base.caps ?? n.data.caps });
     const f = this.nodes.get(`f/${n.tx}_${n.ty}`), wait: Promise<void>[] = [];
     // (its foliage's cover in its mesh: the foliage tile's job meshes the base again with the cover anyway, and the
     // plain mesh would be replaced by it at once -- not made, a whole node's meshing saved per edit; ADR 0003). An
@@ -635,12 +635,12 @@ export class TileStreamer implements ColumnSource {
     return this.quadIdx;
   }
 
-  private setData(n: TileNode, { counts, ground, runs, planes, bld, rooms }: Columns) {
+  private setData(n: TileNode, { counts, ground, runs, planes, bld, rooms, caps }: Columns) {
     const S = this.N + 2, off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + counts[i];
     const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
     n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null, bld: bld ?? null,
-      rooms: rooms ?? null, roomOff: rooms ? roomOffsets(rooms, S * S) : null };
+      rooms: rooms ?? null, roomOff: rooms ? roomOffsets(rooms, S * S) : null, caps: caps ?? null };
     this.version++;
   }
 

@@ -78,6 +78,11 @@ SECTIONS = (
     Section("brik", "1 (reserved)", "RESERVED, not written or read yet: sub-metre bricks, a sparse k^3 refinement of "
             "some 1 m cells (the 1 m voxel stays their representative; docs/adr/0001-world-layers.md)",
             "future (bricks)", reserved=True),
+    Section("caps", "1 (nodes with sloped ground)", "uint16[6 * n], planar: per record the column (apron included, as "
+            "cnts counts them) less the previous record's, zigzag(the top of the run it caps, less the previous "
+            "record's), zigzag(each of its 4 corner heights in 1/64 m less that top * 64); sorted by column, then the "
+            "run's top; at most two a column (the ground's run, the column's last run: a deck) -- the sloped surface "
+            "drawn and stood on (caps.py; web/src/core/surface.ts)", "tile_fields.py (caps.py)"),
 )
 ORDER = [s.tag for s in SECTIONS]
 

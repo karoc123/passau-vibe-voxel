@@ -79,7 +79,7 @@ for (let pass = 0; pass < 2; pass++) {
     const t1 = performance.now();
     const e = new CO.EditableNode(N, d, tx, ty), c = N / 2;
     e.carveSphere([c, c, d.ground[c + 1 + S * (c + 1)]], 3);
-    const enc = { ...e.encode(), planes: d.planes, bld: d.bld };
+    const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps };
     const t2 = performance.now();
     const m = await mesher.meshJob({ ...req.tileRequest(ctx, 1, tx, ty, false, file, false), url: undefined, cols: enc }, load);
     const t3 = performance.now();
@@ -102,7 +102,7 @@ for (let pass = 0; pass < 3; pass++) {
     const name = `${tx}_${ty}`, d = TD.decodeTile(raw(`1/${name}`), N), S = N + 2, c = N / 2;
     const e = new CO.EditableNode(N, d, tx, ty);
     e.carveSphere([c, c, d.ground[c + 1 + S * (c + 1)]], 3);
-    const enc = { ...e.encode(), planes: d.planes, bld: d.bld };
+    const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps };
     const hot = { x0: c - 3 + 1, y0: c - 3 + 1, x1: c + 4 + 1, y1: c + 4 + 1 };
     const job = { hot, id: `${name} ${pass} carved`, from: `${name} ${pass} all` };
     if (!has(`1f/${name}`)) {

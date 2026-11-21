@@ -88,3 +88,65 @@ export function edgeCorners(d: number, dir: number): [number, number, number, nu
   if (d === 0) return dir < 0 ? [0, 3, 1, 2] : [1, 2, 0, 3];
   return dir < 0 ? [0, 1, 3, 2] : [3, 2, 0, 1];
 }
+
+// ---- the caps section (scripts/caps.py writes it; core/tile-sections.ts): uint16[6 * n], planar -- per record the
+// column (apron included, as cnts counts them) less the previous record's, the zigzag of its run top less the previous
+// record's, and the zigzag of each corner less ztop * 64. Sorted by column, then ztop.
+const unzig = (u: number) => (u >>> 1) ^ -(u & 1);
+
+// the section's records as they are: [column, ztop, q0, q1, q2, q3] per record (q absolute, 1/64 cell)
+export function decodeCaps(caps: Uint16Array): Int32Array {
+  const n = Math.floor(caps.length / 6), out = new Int32Array(n * 6);
+  let c = 0, z = 0;
+  for (let i = 0; i < n; i++) {
+    c += caps[i];
+    z += unzig(caps[n + i]);
+    out[6 * i] = c; out[6 * i + 1] = z;
+    for (let k = 0; k < 4; k++) out[6 * i + 2 + k] = z * 64 + unzig(caps[(2 + k) * n + i]);
+  }
+  return out;
+}
+
+// The field of a level-1 node's caps section over its columns (as they are now: the file's, or edited), null: no caps
+// section. A record is kept only where it is live in these columns (the edit rule, docs/plans/surface-caps.md 5): a
+// run ends exactly at its ztop, no run starts there (the cell above is air) and the column is solid from the cell its
+// lowest corner is in up to ztop. Slot 0 if ztop is the column's ground, else 1 (a deck: the column's last run); a
+// record that breaks the writer's rules (a column past the node, a slot taken twice) is ignored.
+export function capField(N: number, cols: { counts: Uint16Array; runs: Uint16Array; ground: Uint8Array; caps?: Uint16Array | null }, off?: Uint32Array): CapField | null {
+  if (!cols.caps) return null;
+  const S = N + 2, SS = S * S, V = S + 1, { counts, runs, ground } = cols;
+  if (!off) { off = new Uint32Array(SS + 1); for (let i = 0; i < SS; i++) off[i + 1] = off[i] + counts[i]; }
+  const f = emptyCapField(S, ground, true), recs = decodeCaps(cols.caps);
+  let top: Uint8Array | null = null;
+  for (let r = 0; r < recs.length; r += 6) {
+    const c = recs[r], z = recs[r + 1];
+    if (c < 0 || c >= SS || z <= 0) continue;
+    const q0 = recs[r + 2], q1 = recs[r + 3], q2 = recs[r + 4], q3 = recs[r + 5], lo = Math.floor(Math.min(q0, q1, q2, q3) / 64);
+    // (the run ending at z, with nothing on it; solid down to lo through touching runs)
+    let k = -1;
+    for (let j = off[c], e = off[c] + counts[c]; j < e; j++) {
+      const z0 = runs[3 * j], z1 = z0 + runs[3 * j + 1];
+      if (z1 === z) { k = j; if (j + 1 < e && runs[3 * (j + 1)] === z) k = -1; break; }
+      if (z0 >= z) break;
+    }
+    if (k < 0) continue;
+    let bot = runs[3 * k];
+    for (let j = k - 1; j >= off[c] && bot > lo && runs[3 * j] + runs[3 * j + 1] === bot; j--) bot = runs[3 * j];
+    if (bot > lo) continue;
+    const sl = z === ground[c] ? 0 : 1;
+    if (f.z[2 * c + sl]) continue;
+    f.z[2 * c + sl] = z;
+    const o = 8 * c + 4 * sl;
+    f.q[o] = q0; f.q[o + 1] = q1; f.q[o + 2] = q2; f.q[o + 3] = q3;
+    f.any = true;
+    if (sl === 1) { top ??= Uint8Array.from(ground); top[c] = Math.min(255, z); }
+    // (the lowest corner at each grid point)
+    const X = c % S, Y = (c - X) / S;
+    for (let kk = 0; kk < 4; kk++) {
+      const p = X + (kk === 1 || kk === 2 ? 1 : 0) + V * (Y + (kk >= 2 ? 1 : 0)), q = f.q[o + kk];
+      if (f.low[p] === NONE || q < f.low[p]) f.low[p] = q;
+    }
+  }
+  if (top) f.top = top;
+  return f;
+}

@@ -104,6 +104,8 @@ export interface ColumnData {
   // level 1: the node's room spans (tile-data.ts decodeTile; null: none) and per column where its spans start (roomOffsets)
   rooms?: Uint16Array | null;
   roomOff?: Uint32Array | null;
+  // level 1: the node's caps section (tile-data.ts decodeTile; core/surface.ts capField), null: none
+  caps?: Uint16Array | null;
   s: number;
   x0: number;
   y0: number;

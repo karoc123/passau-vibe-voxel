@@ -17,6 +17,7 @@ import zlib from 'node:zlib';
 const root = fileURLToPath(new URL('..', import.meta.url)), repo = path.resolve(root, '..');
 const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
 const { module: TS } = await runnerImport(`${root}src/core/tile-sections.ts`, { root, logLevel: 'error' });
+const { module: SF } = await runnerImport(`${root}src/core/surface.ts`, { root, logLevel: 'error' });
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tile-roundtrip-'));
 execFileSync('uv', ['run', '--quiet', 'python', 'scripts/tile_roundtrip.py', dir, process.argv[2] ?? '1'], { cwd: repo, stdio: 'inherit' });
 
@@ -54,6 +55,8 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   same(F('bld'), t.bld, exp.bld);
   same(F('fields.cell'), t.fields?.cell, exp.cell);
   same(F('fields.spill'), t.fields?.spill, exp.spill);
+  same(F('caps'), t.caps, exp.caps);
+  if (t.caps) same(F('caps records'), SF.decodeCaps(t.caps), exp.capRecords);
   if (!withRooms) { if (t.rooms !== null) fail(F(`rooms: ${t.rooms.length / 4} spans, not none`)); continue; }
   same(F('rooms'), t.rooms, exp.rooms);
   if (!exp.rooms.length) fail(F('no room spans to test'));
@@ -66,9 +69,34 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   }
 }
 
+// The caps' liveness (core/surface.ts capField; the edit rule): a node of 2 x 2 columns (S 4), a cap on each of
+// columns 0..6 -- [runs, ground, caps [ztop, corners], the slots that must come out live]
+{
+  const cases = [
+    [[[0, 10, 1]], 10, [[10, [600, 640, 680, 650]]], [0]], // live, slot 0
+    [[[0, 10, 1], [10, 1, 2]], 10, [[10, [600, 640, 680, 650]]], []], // a voxel put on it: dead
+    [[[0, 5, 1], [5, 5, 2]], 10, [[10, [590, 640, 640, 640]]], [0]], // solid through touching runs: live
+    [[[0, 10, 1], [20, 2, 3]], 10, [[10, [620, 640, 640, 660]], [22, [1400, 1408, 1420, 1408]]], [0, 1]], // ground and deck
+    [[[0, 8, 1]], 8, [[10, [600, 640, 680, 650]]], []], // dug: the run ends lower, dead
+    [[[9, 1, 1]], 10, [[10, [540, 640, 640, 640]]], []], // not solid down to its lowest corner: dead
+    [[[0, 10, 1], [10, 2, 4]], 12, [[10, [600, 640, 680, 650]]], []], // built on: dead
+  ];
+  const S = 4, counts = new Uint16Array(S * S), ground = new Uint8Array(S * S), runs = [], recs = [];
+  cases.forEach(([rs, g, cs], c) => { counts[c] = rs.length; ground[c] = g; for (const r of rs) runs.push(...r); for (const [z, q] of cs) recs.push([c, z, ...q]); });
+  const n = recs.length, zz = (v) => ((v << 1) ^ (v >> 15)) & 0xffff, caps = new Uint16Array(6 * n);
+  recs.forEach((r, i) => { caps[i] = r[0] - (i ? recs[i - 1][0] : 0); caps[n + i] = zz(r[1] - (i ? recs[i - 1][1] : 0)); for (let k = 0; k < 4; k++) caps[(2 + k) * n + i] = zz(r[2 + k] - r[1] * 64); });
+  const f = SF.capField(2, { counts, runs: new Uint16Array(runs), ground, caps });
+  cases.forEach(([, , cs, live], c) => {
+    const got = [0, 1].filter((s) => f.z[2 * c + s] > 0);
+    if (JSON.stringify(got) !== JSON.stringify(live)) fail(`capField liveness, column ${c}: slots ${JSON.stringify(got)}, not ${JSON.stringify(live)}`);
+    for (const s of got) { const [z, q] = cs[s === 0 ? 0 : cs.length - 1]; if (SF.surfaceAt(f, c, z, 0, 0) !== q[0] / 64 || SF.cornerQ(f, c, s, 2) !== q[2]) fail(`capField column ${c}: corners`); }
+  });
+  if (SF.capField(2, { counts, runs: new Uint16Array(runs), ground, caps: null }) !== null) fail('capField without a section: not null');
+}
+
 if (bad.length) {
   console.log(`tile round trip: ${bad.length} mismatches (files kept in ${dir})`);
   process.exit(1);
 }
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; registries agree)`);
+console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; registries agree)`);

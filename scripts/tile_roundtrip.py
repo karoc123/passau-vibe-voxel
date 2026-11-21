@@ -7,6 +7,7 @@ usage: uv run python scripts/tile_roundtrip.py OUT_DIR [SEED]
   OUT_DIR/tile_extra.bin   the node with sections the registry does not decode: two unknown tags (one of odd length,
                          one empty), handed in out of order, and the reserved brik -- kept by tilefile.write (after
                          the registry's, sorted), read back and written again byte for byte; decodeTile's extra
+  (each with a caps section: records on ground runs and on decks, negative and positive corners, two in a column)
   OUT_DIR/expected.json  N; per column (apron included, row-major) its ground and runs [z0, len, palette] -- the runs
                          the volume was painted from, not column_runs' -- planes, buildings, the fields as
                          tile-data.ts Fields interleaves them, the room spans [column, z0, len, fill] in order, the
@@ -22,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+import caps
 import tilefile
 import tiles
 
@@ -93,10 +95,25 @@ def main():
     flod, fols = rng.integers(0, 256, 2 * a, dtype=np.uint8), rng.integers(0, 256, 2 * a, dtype=np.uint8)
     spil = rng.integers(0, 256, 2 * m, dtype=np.uint8)
     rooms = rooms_of(cols, rng)
+    # caps: on some columns' last run (a deck) and on a run below it (the ground's), corners within +-448 of its top
+    cc, cz, cq = [], [], []
+    for c, rs in enumerate(cols):
+        if not rs or c % 3:
+            continue
+        for z0, ln, _ in rs[-2:] if c % 2 else rs[-1:]:
+            q = (z0 + ln) * 64 + rng.integers(-448, 449, 4)
+            q[0] = (z0 + ln) * 64 - 448 if c % 9 == 0 else q[0]
+            cc.append(c), cz.append(z0 + ln), cq.append(q)
+    cap = caps.encode(cc, cz, cq)
+    o = np.lexsort((cz, cc))
+    want_caps = np.concatenate([np.array(cc)[o, None], np.array(cz)[o, None], np.array(cq)[o]], 1)
+    back_caps = caps.decode(cap)
+    assert (np.concatenate([back_caps[0][:, None], back_caps[1][:, None], back_caps[2]], 1) == want_caps).all(), "caps.decode"
+    assert len(cc) > 100
     room = tiles.room_section(rooms, 0, 0)
     out.mkdir(parents=True, exist_ok=True)
     sec = dict(cnts=counts.tobytes(), grnd=ground.tobytes(), runs=runs.tobytes(), plns=planes.tobytes(),
-               bldg=bld.tobytes(), flod=flod.tobytes(), fols=fols.tobytes(), spil=spil.tobytes())
+               bldg=bld.tobytes(), flod=flod.tobytes(), fols=fols.tobytes(), spil=spil.tobytes(), caps=cap)
     tilefile.write(out / "tile_noroom.bin", sec)
     tilefile.write(out / "tile.bin", dict(sec, room=room))
     # unknown tags kept, after the registry's, sorted (handed in before the known ones, out of order)
@@ -119,7 +136,8 @@ def main():
     spill = np.stack([spil[:m], spil[m:]], 1).ravel()
     exp = dict(N=N, ground=ground.tolist(), columns=[[list(r) for r in rs] for rs in cols], planes=planes.tolist(),
                bld=bld.tolist(), cell=cell.tolist(), spill=spill.tolist(), rooms=np.frombuffer(room, np.uint16).tolist(),
-               extra={t: list(v) for t, v in extra.items()}, registry=[[x.tag, x.reserved] for x in tilefile.SECTIONS])
+               extra={t: list(v) for t, v in extra.items()}, registry=[[x.tag, x.reserved] for x in tilefile.SECTIONS],
+               caps=np.frombuffer(cap, np.uint16).tolist(), capRecords=want_caps.ravel().tolist())
     (out / "expected.json").write_text(json.dumps(exp, separators=(",", ":")))
     print(f"{out / 'tile.bin'}: {S * S} columns, {len(runs)} runs, {sum(not c for c in cols)} empty, {len(rooms)} room spans")
 

@@ -58,16 +58,16 @@ export type MeshReply =
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
   (self as unknown as { postMessage(m: MeshReply, t: Transferable[]): void }).postMessage(msg, transfer);
 
-// (runs and rooms are decodeTile's own copies already)
-const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, rooms: c.rooms ?? null });
-const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : []), ...(c.rooms ? [c.rooms.buffer] : [])];
+// (runs, rooms and caps are decodeTile's own copies already)
+const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, rooms: c.rooms ?? null, caps: c.caps ?? null });
+const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : []), ...(c.rooms ? [c.rooms.buffer] : []), ...(c.caps ? [c.caps.buffer] : [])];
 
 // One request's meshes: the tile's own (out), a foliage tile's base tile meshed again (base), and the column data kept
 // (keep; dataOnly: that alone, no mesh). load: a tile file, unzipped (tools/tris.mjs reads them from disk)
 // (the buildings of the columns, bld, come with the tile: every level's own; a foliage tile has none)
 export async function meshJob(m: MeshRequest, load: (url: string) => Promise<ArrayBuffer>) {
-  const { counts, ground, runs, planes = null, bld = null, rooms = null, fields = null } = m.cols ? { ...m.cols, fields: null } : decodeTile(await load(m.url!), m.N);
-  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld, rooms }) : null;
+  const { counts, ground, runs, planes = null, bld = null, rooms = null, caps = null, fields = null } = m.cols ? { ...m.cols, fields: null } : decodeTile(await load(m.url!), m.N);
+  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld, rooms, caps }) : null;
   if (m.dataOnly) return { keep, out: null, base: undefined, fields: null };
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
   if (m.sections && m.s === 1) {
