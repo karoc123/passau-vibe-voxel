@@ -16,7 +16,7 @@ usage: uv run python scripts/check.py COMMAND [ARGS] [--fixture PATH] [-j JOBS] 
                                 metres; default 2x2), then the Python steps after it: every output the same bytes. The
                                 first cover is then built again: with nothing changed nothing may be built
                                 (--no-incremental skips it), and with region 0_0 built again alone (--only) the
-                                outputs must still be the same
+                                outputs must still be the same and no node file written again
   windows [STEP ...]            each windowed step (zones terrain tile_fields tiles_lod by default) over the whole
           [--covers C,C,..]     fixture and over each cover (default 2x2: both seams and a corner): the same bytes
   extent [--other PATH]         the fixture and a larger one (default scripts/fixtures/altstadt_wide.json: 1024 m more
@@ -414,11 +414,15 @@ def covers(fx, jobs, cvs, incremental=True, keep=False):
             noop = "nothing to do" in log.read_text()
             if not noop:
                 bad.append(f"cover {c}: built again with nothing changed (see {log})")
+            mt = tile_mtimes(ws)
             build(ws, fx, jobs, args + ["--only", "0_0"])
             diff = differ(ref, digest(ws))
+            touched = sorted(k for k, v in tile_mtimes(ws).items() if mt.get(k) != v)
             print(f"{c} again: {'nothing built' if noop else 'BUILT AGAIN with nothing changed'}; region 0_0 built again "
-                  f"alone: {len(diff)} outputs differ from the whole fixture's", diff[:8], flush=True)
+                  f"alone: {len(diff)} outputs differ from the whole fixture's", diff[:8], f"; node files rewritten: "
+                  f"{len(touched)}", touched[:5], flush=True)
             bad += [f"cover {c}, region 0_0 again: {k}" for k in diff]
+            bad += [f"cover {c}, region 0_0 again: {k} written again with nothing changed" for k in touched]
     if not keep:
         shutil.rmtree(home)
     return bad
@@ -460,6 +464,12 @@ def windows(fx, jobs, steps, cvs, keep=False):
     if not keep:
         shutil.rmtree(home)
     return bad
+
+
+def tile_mtimes(ws):
+    """{node file: mtime} of the workspace's tiles: a region built again with nothing changed must leave them be
+    (tilefile.write, tiles.export_window)"""
+    return {str(f.relative_to(ws)): f.stat().st_mtime_ns for f in sorted((ws / PUB / "tiles").rglob("*.bin"))}
 
 
 def golden(fx, jobs, record=None, compare=None, incremental=False, keep=False):

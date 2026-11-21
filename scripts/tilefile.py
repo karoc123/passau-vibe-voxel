@@ -12,6 +12,8 @@ and a later read-modify-write (tile_fields.py) does not drop it; decodeTile hand
 A file without the magic is the format before it (cnts grnd runs [plns], told apart by length).
 """
 import gzip
+import io
+import os
 import struct
 from pathlib import Path
 from typing import NamedTuple
@@ -87,12 +89,30 @@ SECTIONS = (
 ORDER = [s.tag for s in SECTIONS]
 
 
-def write(path, sections):
-    """sections: {tag: bytes}, the registry's in ORDER, then any other tag sorted (kept, not dropped); mtime 0:
-    rebuilds of unchanged nodes stay byte-identical"""
+def encode(path, sections):
+    """the bytes write(path, sections) puts in the file: gzip at level 9, mtime 0, the file's name in the header (as
+    gzip.GzipFile(path, "wb", compresslevel=9, mtime=0) writes them)"""
     tags = [t for t in ORDER if t in sections] + sorted(t for t in sections if t not in ORDER)
-    with gzip.GzipFile(Path(path), "wb", compresslevel=9, mtime=0) as fh:
+    buf = io.BytesIO()
+    with gzip.GzipFile(os.fspath(Path(path)), "wb", compresslevel=9, fileobj=buf, mtime=0) as fh:
         fh.write(pack([(t, sections[t]) for t in tags]))
+    return buf.getvalue()
+
+
+def write(path, sections, data=None):
+    """sections: {tag: bytes}, the registry's in ORDER, then any other tag sorted (kept, not dropped); mtime 0:
+    rebuilds of unchanged nodes stay byte-identical. A file that already holds these bytes is left as it is (its mtime
+    too: scripts/stamp.py's signature of tiles/, web/tools/tris.mjs' cache, a deploy by rsync see nothing changed).
+    data: encode(path, sections), when the caller has it. Returns whether the file was written"""
+    p = Path(path)
+    data = encode(p, sections) if data is None else data
+    try:
+        if p.stat().st_size == len(data) and p.read_bytes() == data:
+            return False
+    except FileNotFoundError:
+        pass
+    p.write_bytes(data)
+    return True
 
 
 def read(path, N):

@@ -46,14 +46,23 @@ def world(meta):
                 origin=meta.get("origin", [0, 0]), base=meta["base"], grid=dict(x0=g["x0"], y0=g["y0"]), voxel=1)
 
 
+def tiles_bytes(meta):
+    """meta.json tiles.bytes: the levels' node files as they are now (tile_fields.py's formula). Set here, every build:
+    regions.py writes the voxel sections' sum and tile_fields.py the real one, but tile_fields.py does not run when
+    the tiles it would write are those there already (tilefile.write leaves such a file be)"""
+    return sum(p.stat().st_size for lv in meta["tiles"]["levels"] for p in (OUT / "tiles" / str(lv["s"])).glob("*.bin"))
+
+
 def main():
     path = OUT / "meta.json"
     meta = json.loads(path.read_text())
     w = world(meta)
-    if meta.get("world") == w:
+    nb = tiles_bytes(meta)
+    if meta.get("world") == w and meta["tiles"].get("bytes") == nb:
         print("world", w["buildId"], "(unchanged)")
         return
     meta["world"] = w
+    meta["tiles"]["bytes"] = nb
     path.write_text(json.dumps(meta))
     print("world", w["buildId"], "palette", w["paletteLen"])
 

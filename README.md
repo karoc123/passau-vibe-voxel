@@ -102,7 +102,7 @@ size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG
 box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
 and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; elsewhere 290.921 m;
 stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
-across a weir), the anchor, and the default cover of regions (`size`, `jobs`). `MAP_CONFIG=path` picks another file. The project grid
+across a weir), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
 cells, the project grid's less the map's corner (`meta.json` `origin`). The viewer's shaders hash and pattern by the
@@ -128,7 +128,7 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | `phenology.py` | `phenology.json`, `data/foliage.bin` (DWD and iNaturalist, cached in `data/raw/dwd`; needs `data/trees.json`) |
 | `tile_fields.py` | into every node file of `tiles/` (`scripts/tilefile.py`: a header of tagged sections): per cell the building, the rivers' level and bed, foliage and the light of lit windows on the street, at the node's own cell size, from the `data/` maps above. Nothing of the map's size is loaded by the viewer whole: each node brings its part. Run again after `voxelize.py` or `tiles_lod.py` |
 | `world_id.py` | `meta.json` `world`: the build id (a hash over the contents of `tiles/1` and `1f`), the palette's length and hash, origin, base, the project grid (docs/adr/0001-world-layers.md); every build, written only when it changed. `scripts/palette_check.py [REV]` checks the palette registry is append-only against a git revision |
-| `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`) |
+| `web/tools/tris.mjs` | `meta.json` `tiles.tris`: every tile's triangles per level as the viewer meshes it (its own mesher, run in Node), for the render budget; the viewer needs it (needs the tiles' buildings, `tile_fields.py`). In 8 processes (`--jobs K`), each node meshed again only when its files or the mesher's code changed (`data/cache/tris.json`; `--no-cache`) |
 | `web/tools/lamps.mjs` | `streetlamps.json`: the street lamps placed along the streets in town (`web/src/streetlamps.ts`; needs `data/zones.bin`, `data/foliage.bin`, `data/terrain.bin`, `traffic.json`) |
 
 **Windows.** The steps after the volume (`tiles.py`'s export in `voxelize.py`, `tiles_lod.py`, `tile_fields.py`,

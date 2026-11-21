@@ -267,6 +267,21 @@ def room_section(rooms, r0, c0):
     return sp[np.lexsort((sp[:, 1], sp[:, 0]))].astype(np.uint16).tobytes()
 
 
+OWN = ("cnts", "grnd", "runs", "plns", "room")  # the sections export_window writes (the others: tile_fields.py)
+
+
+def same_voxels(f, sec):
+    """whether the node file f holds the voxel sections sec (OWN) already: then it is left as it is, with the sections
+    tile_fields.py added (their inputs unchanged, or its stamp runs it again), its bytes and mtime"""
+    if not f.exists():
+        return False
+    try:
+        old = tilefile.read(f, N)
+    except Exception:  # (a broken file: written again)
+        return False
+    return all(old.get(t) == sec.get(t) for t in OWN)
+
+
 def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, wall_ids=None,
                   levels=None, rooms=None):
     """The node files (of the given levels) whose first column and row lie in the window's core (window.Window), from
@@ -325,8 +340,10 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                         fol = np.where(f, nw, 0).astype(np.uint16)
                         nw = np.where(f, np.where(is_grass[nw], bare_id, 0), nw).astype(np.uint16)
                         fc, fr = column_runs(fol)
-                        tilefile.write(out / "1f" / f"{tx}_{ty}.bin", dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
-                        ftot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
+                        ff = out / "1f" / f"{tx}_{ty}.bin"
+                        fb = tilefile.encode(ff, dict(cnts=fc.tobytes(), grnd=gw.tobytes(), runs=fr.tobytes()))
+                        tilefile.write(ff, None, fb)  # (tile_fields.py only repacks these: they stay as written)
+                        ftot += len(fb)
                     counts, runs = column_runs(nw)
                     sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
                     if ps is not None:
@@ -334,8 +351,11 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                         sec["plns"] = plane_window(ps, r0 - oy, c0 - ox)
                     if s == 1 and (rm := room_section(rooms, r0 - oy, c0 - ox)):
                         sec["room"] = rm
-                    tilefile.write(out / str(s) / f"{tx}_{ty}.bin", sec)
-                    tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
+                    f = out / str(s) / f"{tx}_{ty}.bin"
+                    data = tilefile.encode(f, sec)
+                    if not same_voxels(f, sec):
+                        tilefile.write(f, sec, data)
+                    tot += len(data)  # (the voxel sections' file, as written: the notes and meta.json tiles.bytes)
                     nruns += len(runs)
             stats[s] = [tot, nruns, ftot]
             print(f"[stage] tiles level {s}: downsample {t_ds:.1f} s, nodes {time.time() - t_lv - t_ds:.1f} s", flush=True)
