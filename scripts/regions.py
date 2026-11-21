@@ -74,14 +74,78 @@ def rdir(w):
 FTABLE = Path("data/cache/features.json")  # the large features' decisions (features.py), what the regions look up
 
 
-def build(ws, jobs, fpass=False):
+def mem_available_mb():
+    """MemAvailable of /proc/meminfo, MB (None where there is none)"""
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return None
+
+
+def plan(argv):
+    """(jobs, memory budget MB or None): -j N on the command line: N at once, no budget (as before; check.py passes it);
+    else scripts/map.json regions.jobs (a number, or "auto": the cores less 4) as the cap and a budget of
+    REGION_MEM_GB, else regions.mem_gb, else 75 % of what is available now"""
+    if "-j" in argv:
+        return int(argv[argv.index("-j") + 1]), None
+    cfg = aoi.CONFIG.get("regions", {})
+    jobs = cfg.get("jobs", 1)
+    jobs = max(1, (os.cpu_count() or 5) - 4) if jobs == "auto" else int(jobs)
+    gb = os.environ.get("REGION_MEM_GB") or cfg.get("mem_gb")
+    budget = float(gb) * 1024 if gb else 0.75 * (mem_available_mb() or 8192)
+    return jobs, budget
+
+
+MEM_PER_CELL = 1.7e-3  # MB a region's process peaks at per cell of its box, until it was built once (stats.json)
+MEM_FPASS = 1500  # MB, the feature pass's, alike
+MEM_FLOOR = 2048  # MB: with less available than this, nothing more is started (the guard)
+
+
+def estimate(w, fpass):
+    """(peak MB with a margin, wall s) of region w's next build: its last build's (stats.json), else from its size"""
+    f = (rdir(w) / "fpass" if fpass else rdir(w)) / "stats.json"
+    try:
+        st = json.load(open(f))
+        return 1.1 * st["peak_mb"], st["wall"]
+    except (OSError, ValueError, KeyError):
+        ra, rb, ca, cb = w.region(region.HALO)
+        cells = (w.r1 - w.r0) * (w.c1 - w.c0) if fpass else (rb - ra) * (cb - ca)
+        return 1.1 * (MEM_FPASS if fpass else MEM_PER_CELL * cells), cells / 1e6 * (5 if fpass else 60)
+
+
+def build(ws, jobs, fpass=False, budget=None):
     """voxelize.py over each region in a process of its own, up to `jobs` at once; per region (wall s, peak RSS MB).
     fpass: the feature pass instead (VOXEL_FEATURES: over the region's core alone, the counts of its large features
-    into <region>/fpass/fstats.json)"""
+    into <region>/fpass/fstats.json). budget (MB, or None: `jobs` at once, in order): a region starts while the peaks
+    estimated of those running and its own stay within it (one always runs), the longest and largest first, and
+    nothing starts while the memory available is under MEM_FLOOR"""
     todo, running, stats = list(ws), {}, {}
+    est = {w: estimate(w, fpass) for w in ws}
+    if budget is not None:
+        todo.sort(key=lambda w: -est[w][0] * est[w][1])
+        print(f"{'feature pass' if fpass else 'regions'}: {len(todo)}, up to {jobs} at once within {budget / 1024:.1f} GB "
+              f"(estimated peaks {min(e[0] for e in est.values()) / 1024:.1f}-{max(e[0] for e in est.values()) / 1024:.1f} GB)",
+              flush=True)
+
+    def admit():
+        if len(running) >= jobs:
+            return None
+        if budget is None:
+            return 0
+        if not running:
+            return 0
+        avail = mem_available_mb()
+        if avail is not None and avail < MEM_FLOOR:
+            return None
+        used = sum(est[v[0]][0] for v in running.values())
+        return next((i for i, w in enumerate(todo) if used + est[w][0] <= budget), None)
+
     while todo or running:
-        while todo and len(running) < jobs:
-            w = todo.pop(0)
+        while todo and (i := admit()) is not None:
+            w = todo.pop(i)
             ra, rb, ca, cb = (w.r0, w.r1, w.c0, w.c1) if fpass else w.region(region.HALO)
             out = rdir(w) / "fpass" if fpass else rdir(w)
             out.mkdir(parents=True, exist_ok=True)
@@ -112,7 +176,7 @@ def build(ws, jobs, fpass=False):
     return stats
 
 
-def feature_pass(ws, jobs, osm_hashes, force=()):
+def feature_pass(ws, jobs, osm_hashes, force=(), budget=None):
     """the large features' decisions (features.py): each region's counts over its core (again where its inputs
     changed, as a region's build), added up -> data/cache/features.json (written when it changed); returns them"""
     import features
@@ -124,7 +188,7 @@ def feature_pass(ws, jobs, osm_hashes, force=()):
                 region_inputs.region_key(w, osm_hashes[w], json.load(open(f))["deps"])[0]:
             todo.append(w)
     if todo:
-        st = build(todo, jobs, fpass=True)
+        st = build(todo, jobs, fpass=True, budget=budget)
         print(f"feature pass: {len(todo)} regions, {round(max(v[0] for v in st.values()))} s the longest", flush=True)
         for w in todo:
             f = rdir(w) / "fpass" / "fstats.json"
@@ -254,7 +318,7 @@ def main(argv):
     import region_inputs
     import tiles
     t_start = time.time()
-    jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else aoi.CONFIG.get("regions", {}).get("jobs", 1)
+    jobs, budget = plan(argv)
     ws = cover(argv)
     notes = []
 
@@ -272,7 +336,7 @@ def main(argv):
     for p in region_inputs.RASTERS:  # (uncompressed copies of the map-sized inputs: what the regions read of them)
         sidecar.ensure(p)
     force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
-    table = feature_pass(ws, jobs, osm_hashes, force)
+    table = feature_pass(ws, jobs, osm_hashes, force, budget)
     if "--status" in argv:
         for w in ws:
             print(f"region {w.r0}_{w.c0} ({w}): {why_stale(w, osm_hashes[w], table)}")
@@ -284,7 +348,7 @@ def main(argv):
         print(f"nothing to do: every region and the steps after them are up to date ({round(time.time() - t_start, 1)} s)")
         return
     stamp_f.unlink(missing_ok=True)
-    stats = build(todo, jobs)
+    stats = build(todo, jobs, budget=budget)
     res = {w: json.load(open(rdir(w) / "out.json")) for w in ws}
     # the palette: colours met that the registry lacks go into it (sorted), and the regions that met them again
     new = sorted({tuple(e) for r in res.values() for e in r["new_palette"]})
@@ -295,7 +359,7 @@ def main(argv):
         note(f"palette: {len(add)} new colours added to scripts/palette.json")
         _write_palette(reg, add)
         again = [w for w in ws if res[w]["new_palette"]]
-        stats.update(build(again, jobs))
+        stats.update(build(again, jobs, budget=budget))
         res.update({w: json.load(open(rdir(w) / "out.json")) for w in again})
         assert not any(res[w]["new_palette"] for w in ws), "the palette registry still lacks colours"
     for w in stats:

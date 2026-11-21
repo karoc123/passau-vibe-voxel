@@ -1,5 +1,5 @@
 {
- "about": "The map: its extent, the volume's floor and the rivers' levels, in one place (read by scripts/aoi.py; MAP_CONFIG=path picks another file). grid: the project grid's corner in EPSG:25832 (column = easting - x0, row = y0 - northing), fixed for the project: hashes, noise and curated places key on it, so a cell looks the same whatever the extent. map: the window of the project grid that is built, its corner (col0, row0) on multiples of 1024 (window.ALIGN), any size. anchor: the place the grid was laid out from (Dom St. Stephan). base: the volume's floor, m a.s.l. (the lowest terrain less 3 m). rivers: the water level where OSM's outlines do not reach (the rivers taken from the terrain model): `level` everywhere, unless a stretch's box (EPSG:25832 x0, y0, x1, y1) holds the cell (the first that does). regions: the default cover of scripts/regions.py (size in metres, a multiple of 1024, or null: the whole map as one region) and how many regions build at once.",
+ "about": "The map: its extent, the volume's floor and the rivers' levels, in one place (read by scripts/aoi.py; MAP_CONFIG=path picks another file). grid: the project grid's corner in EPSG:25832 (column = easting - x0, row = y0 - northing), fixed for the project: hashes, noise and curated places key on it, so a cell looks the same whatever the extent. map: the window of the project grid that is built, its corner (col0, row0) on multiples of 1024 (window.ALIGN), any size. anchor: the place the grid was laid out from (Dom St. Stephan). base: the volume's floor, m a.s.l. (the lowest terrain less 3 m). rivers: the water level where OSM's outlines do not reach (the rivers taken from the terrain model): `level` everywhere, unless a stretch's box (EPSG:25832 x0, y0, x1, y1) holds the cell (the first that does). regions: the default cover of scripts/regions.py (size in metres, a multiple of 1024, or null: the whole map as one region) and how many build at once (a number, or auto: the cores less 4), within mem_gb of memory if given (else REGION_MEM_GB, else 75 % of what is available when the build starts; scripts/regions.py plan).",
  "name": "Passau",
  "crs": 25832,
  "grid": {"x0": 827371, "y0": 5390500},
@@ -34,5 +34,5 @@
   {"name": "Ilz below Hals", "box": [828960, 5391150, 829250, 5392600], "level": 293.9},
   {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9}
  ]},
- "regions": {"size": 1024, "jobs": 4}
+ "regions": {"size": 1024, "jobs": "auto"}
 }
