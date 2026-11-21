@@ -166,7 +166,8 @@ function makeJob(node: TileNode, dataOnly: boolean, prio: number, edit = false):
 
 // a copy of a node's columns to send to a worker, and their buffers
 function sendColumns(b: Columns) {
-  const c: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null };
+  // (caps: shared, read only; core/surface.ts capField reads them against these columns)
+  const c: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null, caps: b.caps ?? null };
   return { c, transfer: [c.counts.buffer, c.runs.buffer, c.ground.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : [])] as Transferable[] };
 }
 
