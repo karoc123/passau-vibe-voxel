@@ -54,10 +54,6 @@ def downsample(vol, s, face_ids=(), wall_ids=None, finer=None):
     H, D, W = vol.shape
     Hs, Ds, Ws = -(-H // s), -(-D // s), -(-W // s)
     out = np.zeros((Hs, Ds, Ws), np.uint16)
-    sides = wall_ids is not None and len(wall_ids)
-    if sides:
-        is_wall = np.zeros(65536, bool); is_wall[np.asarray(wall_ids, np.int64)] = True
-        wmode = np.zeros((Hs, Ds, Ws), np.uint16)  # the block's commonest wall voxel where walls are half of it
     need = s ** 3 // 4
     band = max(1, 256 // s)  # block rows per pass: bounded memory on a large volume
     for rb in range(0, Ds, band):
@@ -99,10 +95,8 @@ def downsample(vol, s, face_ids=(), wall_ids=None, finer=None):
             fv = blk.max((1, 3, 5), where=np.isin(blk, face_ids), initial=0)
             res = np.where((res != 0) & (fv > 0), fv, res)
         out[:, rb:rb + db, :] = res
-        if sides:
-            wmode[:, rb:rb + db, :] = wall_mode(blk, is_wall)
-    if sides:
-        side_walls(out, wmode)
+    if wall_ids is not None and len(wall_ids):
+        side_walls(out, vol, s, wall_ids)
     return out
 
 
@@ -114,23 +108,7 @@ def level_of(vol, s, face, wall_ids):
     return downsample(vol, s, face, wall_ids if s in LOD_LEVELS else None, fin)
 
 
-def wall_mode(blk, is_wall):
-    """per block (blk: (hb, s, db, s, wb, s)), its commonest wall voxel where walls are at least half of what is in it,
-    else 0"""
-    hb, s, db, _, wb, _ = blk.shape
-    f = blk.transpose(0, 2, 4, 1, 3, 5).reshape(hb, db, wb, s ** 3)
-    w = is_wall[f]
-    nw, nz = w.sum(3), (f != 0).sum(3)
-    best, bestn = np.zeros((hb, db, wb), np.uint16), np.zeros((hb, db, wb), np.int32)
-    for k in range(s ** 3):
-        c = f[..., k]
-        n = ((f == c[..., None]) & w).sum(3)
-        better = w[..., k] & (n > bestn)
-        best = np.where(better, c, best); bestn = np.where(better, n, bestn)
-    return np.where((nw > 0) & (2 * nw >= nz), best, 0).astype(np.uint16)
-
-
-def side_walls(out, wmode):
+def side_walls(out, vol, s, wall_ids):
     """A block takes the colour of its topmost voxel: on a wall under a roof that was the roof's wherever a roof voxel
     reached into it (a gable's slope, a deep eave), or the roof's thin layer over it was worn down a block, and from
     afar the town read orange, its walls banded with roof colour. A block of a facade -- open air beside it, and beside
@@ -138,7 +116,9 @@ def side_walls(out, wmode):
     commonest wall voxel instead -- the top block of a facade too, under the eave: half wall, its side is mostly wall
     at 1 m, and as roof it laid a 2 m band of roof colour along every eave (seen from above, the roof's outline gives up
     those blocks' width; from afar the facades are what is seen). Measured on the overview, the share of roof-orange
-    pixels at 2 m over the same at 1 m: +10 % before, +7 % after; close in on the old town +6 % before, +2 % after."""
+    pixels at 2 m over the same at 1 m: +10 % before, +7 % after; close in on the old town +6 % before, +2 % after.
+    out: the level (s m blocks of vol) as downsample made it, changed in place. A block's wall voxel is computed only for
+    the blocks it can change (solid, a facade): over every block it was a third of the whole build's time."""
     solid = out != 0
     face = np.zeros_like(solid)
     for ax, sh in ((1, 1), (1, -1), (2, 1), (2, -1)):
@@ -148,8 +128,29 @@ def side_walls(out, wmode):
         else:
             o[:, :, 0 if sh > 0 else -1] = False
         face[1:] |= o[1:] & o[:-1]
-    k = solid & face & (wmode != 0)
-    out[k] = wmode[k]
+    zi, yi, xi = np.nonzero(solid & face)
+    is_wall = np.zeros(65536, bool); is_wall[np.asarray(wall_ids, np.int64)] = True
+    H, D, W = vol.shape
+    # a block's s^3 voxels in the order (dz, dy, dx), 0 beyond the volume
+    dz, dy, dx = (a.ravel() for a in np.meshgrid(np.arange(s), np.arange(s), np.arange(s), indexing="ij"))
+    step = max(1, 2 ** 22 // s ** 3)  # blocks at a time: bounded memory
+    for a in range(0, len(zi), step):
+        z_, y_, x_ = zi[a:a + step], yi[a:a + step], xi[a:a + step]
+        Z, Y, X = z_[:, None] * s + dz, y_[:, None] * s + dy, x_[:, None] * s + dx
+        f = np.where((Z < H) & (Y < D) & (X < W), vol[np.minimum(Z, H - 1), np.minimum(Y, D - 1), np.minimum(X, W - 1)], 0)
+        f = f.astype(np.uint16)
+        # the block's commonest wall voxel where walls are at least half of what is in it (ties: the first in that order)
+        w = is_wall[f]
+        nw, nz = w.sum(1), (f != 0).sum(1)
+        best, bestn = np.zeros(len(z_), np.uint16), np.zeros(len(z_), np.int32)
+        for k in range(s ** 3):
+            c = f[:, k]
+            n = ((f == c[:, None]) & w).sum(1)
+            better = w[:, k] & (n > bestn)
+            best = np.where(better, c, best); bestn = np.where(better, n, bestn)
+        wm = np.where((nw > 0) & (2 * nw >= nz), best, 0).astype(np.uint16)
+        k = wm != 0
+        out[z_[k], y_[k], x_[k]] = wm[k]
 
 
 def downsample_planes(planes, s):
