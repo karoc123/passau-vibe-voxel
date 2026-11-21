@@ -268,6 +268,9 @@ def main(argv):
     levels = tiles.manifest(aoi.MAP_D, aoi.MAP_W)
     tiles.remove_stale(OUT / "tiles", levels, note, split=True)
     osm_hashes = region_inputs.cut_osm(ws, rdir)
+    import sidecar
+    for p in region_inputs.RASTERS:  # (uncompressed copies of the map-sized inputs: what the regions read of them)
+        sidecar.ensure(p)
     force = ws if "--force" in argv else (pick(ws, argv[argv.index("--only") + 1]) if "--only" in argv else [])
     table = feature_pass(ws, jobs, osm_hashes, force)
     if "--status" in argv:

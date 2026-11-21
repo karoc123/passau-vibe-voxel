@@ -45,8 +45,10 @@ def in_core(r, c):
 
 
 def load_npz(path, keys=None):
-    """the arrays of an .npz (map-sized, at whole multiples of the map's cell) cut to the region, read as a stream"""
+    """the arrays of an .npz (map-sized, at whole multiples of the map's cell) cut to the region: from its uncompressed
+    copy (sidecar.py) where there is a fresh one, else read as a stream"""
     import zipfile
+    import sidecar
     import window
     with zipfile.ZipFile(path) as z:
         names = [n[:-4] for n in z.namelist() if n.endswith(".npy")]
@@ -56,7 +58,8 @@ def load_npz(path, keys=None):
         s = rows // aoi.MAP_D
         assert rows == s * aoi.MAP_D and cols == s * aoi.MAP_W, (path, k)
         box = (aoi.MR0 * s, (aoi.MR0 + aoi.D) * s, aoi.MC0 * s, (aoi.MC0 + aoi.W) * s)
-        out[k] = window.npz_region(path, k, box)
+        m = sidecar.load(path, k)
+        out[k] = window.npz_region(path, k, box) if m is None else np.array(m[box[0]:box[1], box[2]:box[3]], order="C")
     return out
 
 

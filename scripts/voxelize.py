@@ -293,6 +293,7 @@ def wall_clean(dsm):
 
 nd_max_b = wall_clean(dsm).reshape(D, 2, W, 2).max((1, 3)) - dtm  # building tops
 cellcol = np.median(orto.reshape(D, 5, W, 5, 3), axis=(1, 3)).astype(np.float32)
+del orto, z  # (the ortho at 20 cm: used for cellcol alone)
 rgbsum = cellcol.sum(-1) + 1
 exg = (2 * cellcol[..., 1] - cellcol[..., 0] - cellcol[..., 2]) / rgbsum
 lum = cellcol @ np.array([0.299, 0.587, 0.114], np.float32)
