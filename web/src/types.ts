@@ -106,6 +106,8 @@ export interface ColumnData {
   roomOff?: Uint32Array | null;
   // level 1: the node's caps section (tile-data.ts decodeTile; core/surface.ts capField), null: none
   caps?: Uint16Array | null;
+  // every level: the node's roof section (tile-data.ts decodeTile; roofs.ts roofField), null: none
+  roofCaps?: Uint16Array | null;
   s: number;
   x0: number;
   y0: number;

@@ -43,24 +43,3 @@ export function hotBox(N: number, tx: number, ty: number, r: readonly number[]):
     x1: Math.min(N + 2, Math.ceil(r[2]) - tx * N + 1), y1: Math.min(N + 2, Math.ceil(r[3]) - ty * N + 1) };
   return b.x0 < b.x1 && b.y0 < b.y1 ? b : null;
 }
-
-interface Runs { counts: Uint16Array; runs: Uint16Array }
-// the buildings (bld, per column) whose roof an edit changed: a column of theirs in box whose top (its last run's end
-// and palette entry) differs between a and b -- a building's slopes are fitted to its whole roof (roofs.ts)
-export function roofsChanged(N: number, a: Runs, b: Runs, bld: Uint16Array | null | undefined, box: Box): number[] {
-  if (!bld) return [];
-  const S = N + 2, out = new Set<number>();
-  const offs = (c: Runs) => { const o = new Uint32Array(S * S + 1); for (let i = 0; i < S * S; i++) o[i + 1] = o[i] + c.counts[i]; return o; };
-  const oa = offs(a), ob = offs(b);
-  const top = (c: Runs, off: Uint32Array, i: number) => {
-    const n = c.counts[i];
-    if (!n) return -1;
-    const k = (off[i] + n - 1) * 3;
-    return (c.runs[k] + c.runs[k + 1]) * 65536 + c.runs[k + 2];
-  };
-  for (let Y = box.y0; Y < box.y1; Y++) for (let X = box.x0; X < box.x1; X++) {
-    const i = X + S * Y;
-    if (bld[i] && top(a, oa, i) !== top(b, ob, i)) out.add(bld[i]);
-  }
-  return [...out];
-}

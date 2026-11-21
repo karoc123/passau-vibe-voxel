@@ -66,7 +66,7 @@ for (const [tx, ty] of round(1, mx, my, 20)) {
   // carved at the middle, on its ground, meshed from the columns
   const d = TD.decodeTile(raw(`1/${k}`), N), e = new CO.EditableNode(N, d, tx, ty), c = N / 2;
   e.carveSphere([c, c, d.ground[c + 1 + S * (c + 1)]], 3);
-  const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps };
+  const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps, roofCaps: d.roofCaps };
   const b = await mesher.meshJob({ ...req.tileRequest(ctx, 1, tx, ty, false, file, false), url: undefined, cols: enc }, load);
   rec[`1/${k} carved`] = hash(b.out);
   if (!has(`1f/${k}`)) continue;

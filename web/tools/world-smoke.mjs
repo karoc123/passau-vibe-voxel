@@ -107,7 +107,7 @@ function compose(withL2) {
     const t2 = withL2 ? deltas(L2, k) : [], t2f = withL2 ? deltas(L2f, k) : [];
     const b = LA.effectiveColumns(f, n.base, deltas(L1, k), t2);
     const fo = n.fol && LA.effectiveColumns(f, n.fol, deltas(L1f, k), t2f);
-    out.set(k, { base: { ...b, planes: n.base.planes, bld: n.base.bld, caps: n.base.caps }, fol: fo && { ...fo, ground: b.ground }, edited: b.runs !== n.base.runs });
+    out.set(k, { base: { ...b, planes: n.base.planes, bld: n.base.bld, caps: n.base.caps, roofCaps: n.base.roofCaps }, fol: fo && { ...fo, ground: b.ground }, edited: b.runs !== n.base.runs });
   }
   return out;
 }
@@ -210,7 +210,7 @@ const restored = compose(false);
     else {
       const e = new CO.EditableNode(N, n.base, n.tx, n.ty), ef = n.fol && new CO.EditableNode(N, n.fol, n.tx, n.ty);
       e.apply(LA.toCellOp(f, BOX)); ef?.apply(LA.toCellOp(f, clear(BOX)));
-      const b = { ...e.encode(), planes: n.base.planes, bld: n.base.bld, caps: n.base.caps };
+      const b = { ...e.encode(), planes: n.base.planes, bld: n.base.bld, caps: n.base.caps, roofCaps: n.base.roofCaps };
       o = await meshCols(k, { base: b, fol: ef && { ...ef.encode(), ground: b.ground } });
       what = 'L0 + the box';
     }

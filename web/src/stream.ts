@@ -5,7 +5,7 @@ import { roomOffsets, type Columns, type Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type Region } from './core/live-edits';
-import { hotBox, perSide, roofsChanged, union, type Box } from './sections';
+import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {
   key: string;
@@ -36,13 +36,12 @@ export interface TileNode {
   stale?: boolean;
   // Meshed in sections (sections.ts; an edited 1 m node, its foliage tile): sec, each section's mesh (a child of mesh,
   // whose own geometry then draws nothing: sectionParent), null where it has none; secId: the job they are of (the
-  // worker's memo of the node, mesher.worker.ts meshSections); secHot, secBids: what the next job is to mesh again
+  // worker's memo of the node, mesher.worker.ts meshSections); secHot: what the next job is to mesh again
   // (null: every section; undefined: no sectioned job); secCovered: a base's sections are its foliage's cover;
   // worker: the worker its sectioned jobs go to (it keeps the memo)
   sec?: (THREE.Mesh | null)[];
   secId?: string;
   secHot?: Box | null;
-  secBids?: number[];
   secCovered?: boolean;
   worker?: Pooled;
   data?: ColumnData;
@@ -167,7 +166,7 @@ function makeJob(node: TileNode, dataOnly: boolean, prio: number, edit = false):
 // a copy of a node's columns to send to a worker, and their buffers
 function sendColumns(b: Columns) {
   // (caps: shared, read only; core/surface.ts capField reads them against these columns)
-  const c: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null, caps: b.caps ?? null };
+  const c: Columns = { counts: b.counts.slice(), runs: b.runs.slice(), ground: b.ground.slice(), planes: b.planes?.slice() ?? null, bld: b.bld?.slice() ?? null, caps: b.caps ?? null, roofCaps: b.roofCaps ?? null };
   return { c, transfer: [c.counts.buffer, c.runs.buffer, c.ground.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : [])] as Transferable[] };
 }
 
@@ -383,8 +382,8 @@ export class TileStreamer implements ColumnSource {
     if (edit) msg.key = n.editKey!;
     // (in sections: those the edits since its last job can have changed)
     if (edit && n.secHot !== undefined) {
-      msg.sections = { hot: n.secHot, bids: n.secBids ?? [], id: n.editKey, from: n.secId ?? null };
-      n.secHot = n.secBids = undefined;
+      msg.sections = { hot: n.secHot, id: n.editKey, from: n.secId ?? null };
+      n.secHot = undefined;
     }
     if (n.edited && n.data) {
       // (its columns, not its file; the data stays as it is here)
@@ -454,9 +453,9 @@ export class TileStreamer implements ColumnSource {
     const n = this.nodes.get(key);
     if (!n || n.foliage || n.s !== 1 || n.state !== 'ready' || !n.data) return null;
     n.edited = true;
-    // (the columns it changed, and the buildings whose roofs: what the sectioned jobs mesh again)
-    const hot = region ? hotBox(this.N, n.tx, n.ty, region) : null, bids = hot ? roofsChanged(this.N, n.data, base, n.data.bld, hot) : [];
-    this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld, caps: base.caps ?? n.data.caps });
+    // (the columns it changed: what the sectioned jobs mesh again)
+    const hot = region ? hotBox(this.N, n.tx, n.ty, region) : null;
+    this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld, caps: base.caps ?? n.data.caps, roofCaps: base.roofCaps ?? n.data.roofCaps });
     const f = this.nodes.get(`f/${n.tx}_${n.ty}`), wait: Promise<void>[] = [];
     // (its foliage's cover in its mesh: the foliage tile's job meshes the base again with the cover anyway, and the
     // plain mesh would be replaced by it at once -- not made, a whole node's meshing saved per edit; ADR 0003). An
@@ -464,9 +463,9 @@ export class TileStreamer implements ColumnSource {
     // sections and the cover's); without a foliage tile, its own; else as a whole
     if (f && f.covers && f.state === 'ready' && n.mesh && !n.editJob) {
       n.stale = true;
-      this.pend(f, hot, bids, !!(f.sec && n.sec && n.secCovered));
+      this.pend(f, hot, !!(f.sec && n.sec && n.secCovered));
     } else {
-      if (!f) this.pend(n, hot, bids, !!(n.sec && !n.secCovered));
+      if (!f) this.pend(n, hot, !!(n.sec && !n.secCovered));
       wait.push(this.remeshEdited(n));
     }
     if (f) {
@@ -615,14 +614,13 @@ export class TileStreamer implements ColumnSource {
   private unsection(n: TileNode, dispose = true) {
     if (!n.sec) return;
     for (const m of n.sec) if (m) { if (dispose) disposeGeometry(m.geometry); n.mesh?.remove(m); }
-    n.sec = n.secId = n.secHot = n.secBids = n.secCovered = undefined;
+    n.sec = n.secId = n.secHot = n.secCovered = undefined;
   }
 
-  // an edit's columns (hot) and changed roofs (bids) for n's next sectioned job; cont: n's sections are there to be
-  // meshed again in part (else all of them)
-  private pend(n: TileNode, hot: Box | null, bids: number[], cont: boolean) {
+  // an edit's columns (hot) for n's next sectioned job; cont: n's sections are there to be meshed again in part (else
+  // all of them)
+  private pend(n: TileNode, hot: Box | null, cont: boolean) {
     n.secHot = !cont || hot === null || n.secHot === null ? null : union(n.secHot ?? null, hot);
-    n.secBids = [...new Set([...(n.secBids ?? []), ...bids])];
   }
 
   // one index buffer for every tile: 0 1 2, 0 2 3 quad after quad (the mesher orders each quad's corners to fit it)
@@ -636,12 +634,12 @@ export class TileStreamer implements ColumnSource {
     return this.quadIdx;
   }
 
-  private setData(n: TileNode, { counts, ground, runs, planes, bld, rooms, caps }: Columns) {
+  private setData(n: TileNode, { counts, ground, runs, planes, bld, rooms, caps, roofCaps }: Columns) {
     const S = this.N + 2, off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + counts[i];
     const [x0, y0] = this.bounds(n.s, n.tx, n.ty);
     n.data = { s: n.s, x0, y0, S, counts, ground, runs, off, planes: planes ?? null, bld: bld ?? null,
-      rooms: rooms ?? null, roomOff: rooms ? roomOffsets(rooms, S * S) : null, caps: caps ?? null };
+      rooms: rooms ?? null, roomOff: rooms ? roomOffsets(rooms, S * S) : null, caps: caps ?? null, roofCaps: roofCaps ?? null };
     this.version++;
   }
 

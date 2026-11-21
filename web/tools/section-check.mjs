@@ -3,7 +3,7 @@
 //   1. the node's 16 sections meshed at once (sections: { hot: null }) are the node's mesh;
 //   2. after a sphere of 3 m carved (core/columns.ts EditableNode) at a few sites -- the middle on the ground, a
 //      section's corner, a roof, the node's edge, each on the column's top -- the sections of before, those the edit
-//      can have changed meshed again (sections: { hot, bids }, as stream.ts sends them) in their places, are the edited
+//      can have changed meshed again (sections: { hot }, as stream.ts sends them) in their places, are the edited
 //      node's mesh; likewise its foliage tile's mesh and the base's cover (the foliage job);
 //   3. the time of an edit's sectioned job (base; foliage + cover), mean and max, against the whole node's.
 // "Are the mesh" in the sense that greedy merges may be cut differently: every quad that lies in one of its axis
@@ -134,7 +134,7 @@ function compare(name, whole, secs) {
 }
 const put = (map, sec) => { if (sec) sec.ids.forEach((k, i) => map.set(k, sec.meshes[i])); return map; };
 
-const copy = (c) => ({ counts: c.counts.slice(), runs: c.runs.slice(), ground: c.ground.slice(), planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, caps: c.caps ?? null });
+const copy = (c) => ({ counts: c.counts.slice(), runs: c.runs.slice(), ground: c.ground.slice(), planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, caps: c.caps ?? null, roofCaps: c.roofCaps ?? null });
 const baseReq = (tx, ty, cols, sections) => ({ ...req.tileRequest(ctx, 1, tx, ty, false, file, false), url: undefined, cols, sections });
 const folReq = (tx, ty, fol, base, sections) => ({ ...req.tileRequest(ctx, 1, tx, ty, true, file), url: undefined, cols: fol, under: base, sections });
 const topOf = (d, c) => { let k = 0; for (let i = 0; i < c; i++) k += d.counts[i]; const n = d.counts[c]; return n ? d.runs[(k + n - 1) * 3] + d.runs[(k + n - 1) * 3 + 1] : 0; };
@@ -174,12 +174,12 @@ for (let pass = 0; pass < 2; pass++) {
     for (const [cx, cy, cz] of sites(d)) {
       const e = new CO.EditableNode(N, cur, tx, ty);
       e.carveSphere([cx, cy, cz], 3);
-      const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps };
+      const enc = { ...e.encode(), planes: d.planes, bld: d.bld, caps: d.caps, roofCaps: d.roofCaps };
       let fenc = null;
       if (curF) { const f = new CO.EditableNode(N, curF, tx, ty); f.carveSphere([cx, cy, cz], 3); fenc = { ...f.encode(), ground: enc.ground }; }
       const gx = tx * N + cx, gy = ty * N + cy, hot = SE.hotBox(N, tx, ty, [gx - 3, gy - 3, gx + 4, gy + 4]);
       const id = `${name} ${pass} ${i++}`;
-      const job = { hot, bids: SE.roofsChanged(N, cur, enc, d.bld, hot), id, from: noMemo ? null : from };
+      const job = { hot, id, from: noMemo ? null : from };
       from = id;
       let t0 = performance.now();
       const incB = await mesher.meshJob(baseReq(tx, ty, copy(enc), job), noLoad);

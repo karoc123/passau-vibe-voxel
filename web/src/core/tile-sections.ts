@@ -23,6 +23,7 @@ export const TILE_SECTIONS: readonly TileSection[] = [
   { tag: 'room', levels: '1 (nodes with rooms)', layout: 'uint16[4 * spans]: (column, z0, len, fill), sorted by column, then z0 (roomOffsets)', owner: 'interiors.py (tiles.room_section)' },
   { tag: 'brik', levels: '1 (reserved)', layout: 'RESERVED: sub-metre bricks, a sparse k^3 refinement of some 1 m cells (docs/adr/0001-world-layers.md)', owner: 'future (bricks)', reserved: true },
   { tag: 'caps', levels: '1 (nodes with sloped ground)', layout: 'uint16[6 * n], planar: per record the column less the previous one\'s, zigzag(ztop less the previous one\'s), zigzag(each of 4 corners less ztop * 64; 1/64 m); sorted by column, then ztop (core/surface.ts)', owner: 'tile_fields.py (caps.py)' },
+  { tag: 'roof', levels: '1 2 4 8 (nodes with sloped roofs)', layout: 'uint16[6 * n], planar: per record the column and its last run\'s top as caps, its 4 corners (1/64 cell) as zigzag differences: 0 from the west neighbour\'s 1 or the top, 1 from 0, 2 from 1, 3 from 0; a pitched roof\'s surface, drawn only (roofs.ts decodeRoofs)', owner: 'tile_fields.py (caps.py)' },
 ];
 
 // the tags decodeTile interprets (every registered one but the reserved)

@@ -18,6 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url)), repo = path.resolve(
 const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
 const { module: TS } = await runnerImport(`${root}src/core/tile-sections.ts`, { root, logLevel: 'error' });
 const { module: SF } = await runnerImport(`${root}src/core/surface.ts`, { root, logLevel: 'error' });
+const { module: RF } = await runnerImport(`${root}src/roofs.ts`, { root, logLevel: 'error' });
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tile-roundtrip-'));
 execFileSync('uv', ['run', '--quiet', 'python', 'scripts/tile_roundtrip.py', dir, process.argv[2] ?? '1'], { cwd: repo, stdio: 'inherit' });
 
@@ -57,6 +58,8 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   same(F('fields.spill'), t.fields?.spill, exp.spill);
   same(F('caps'), t.caps, exp.caps);
   if (t.caps) same(F('caps records'), SF.decodeCaps(t.caps), exp.capRecords);
+  same(F('roof'), t.roofCaps, exp.roof);
+  if (t.roofCaps) same(F('roof records'), RF.decodeRoofs(t.roofCaps), exp.roofRecords);
   if (!withRooms) { if (t.rooms !== null) fail(F(`rooms: ${t.rooms.length / 4} spans, not none`)); continue; }
   same(F('rooms'), t.rooms, exp.rooms);
   if (!exp.rooms.length) fail(F('no room spans to test'));
@@ -94,6 +97,22 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   if (SF.capField(2, { counts, runs: new Uint16Array(runs), ground, caps: null }) !== null) fail('capField without a section: not null');
 }
 
+// the roofs' liveness (roofs.ts roofField): 2 x 2 columns, a roof record on each of columns 0..3 -- column 0 its last
+// run ends at the record's top (live), 1 a run on it (dead), 2 its top a metre lower (dead), 3 no runs (dead)
+{
+  const counts = new Uint16Array(16), runs = [];
+  const put = (c, rs) => { counts[c] = rs.length; for (const r of rs) runs.push(...r); };
+  put(0, [[0, 10, 7]]); put(1, [[0, 10, 7], [10, 2, 8]]); put(2, [[0, 9, 7]]);
+  const recs = [[0, 10, 640, 700, 660, 600], [1, 10, 600, 610, 620, 630], [2, 10, 640, 640, 650, 640], [3, 10, 641, 640, 640, 640]];
+  const n = recs.length, zz = (v) => ((v << 1) ^ (v >> 15)) & 0xffff, roof = new Uint16Array(6 * n);
+  recs.forEach((r, i) => { roof[i] = r[0] - (i ? recs[i - 1][0] : 0); roof[n + i] = zz(r[1] - (i ? recs[i - 1][1] : 0)); roof[2 * n + i] = zz(r[2] - (i && roof[i] === 1 ? recs[i - 1][3] : r[1] * 64)); roof[3 * n + i] = zz(r[3] - r[2]); roof[4 * n + i] = zz(r[4] - r[3]); roof[5 * n + i] = zz(r[5] - r[2]); });
+  if (JSON.stringify([...RF.decodeRoofs(roof)]) !== JSON.stringify(recs.flat())) fail('decodeRoofs');
+  const f = RF.roofField(2, { counts, runs: new Uint16Array(runs), roofCaps: roof });
+  const live = f ? [0, 1, 2, 3].filter((c) => f.z[c]) : [];
+  if (JSON.stringify(live) !== '[0]' || f.q[1] !== 700) fail(`roofField liveness: live ${JSON.stringify(live)}`);
+  if (RF.roofField(2, { counts, runs: new Uint16Array(runs), roofCaps: null }) !== null) fail('roofField without a section: not null');
+}
+
 // the paved ground in two languages: the ids scripts/caps.py caps (paved_ids) are those core/semantics.ts calls PAVED
 {
   const { module: SE } = await runnerImport(`${root}src/core/semantics.ts`, { root, logLevel: 'error' });
@@ -108,4 +127,4 @@ if (bad.length) {
   process.exit(1);
 }
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; registries agree; paved ids agree)`);
+console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; roof; registries agree; paved ids agree)`);

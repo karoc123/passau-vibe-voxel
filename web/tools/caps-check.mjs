@@ -4,6 +4,8 @@
 //      corners, exactly the cap's corner (core/surface.ts cornerQ, 1/64 m, bit for bit);
 //   2. neighbouring nodes hold the same caps for the columns they share (a node's apron and its neighbour's own
 //      columns): their meshes meet at the border without a crack;
+//   2b. likewise the roofs' caps (the nodes' roof section, roofs.ts roofField) at every level: the same corners for the
+//      columns two neighbours share;
 //   3. the triangles of each node with caps, against the same node meshed without its caps section (plain voxels, as
 //      a node without caps is drawn), and the time.
 // usage (in web/): node tools/caps-check.mjs [tx_ty ...] [--all] [-v]; default: up to 20 nodes with caps round the
@@ -17,7 +19,7 @@ import { dataDir as dir, web } from './data-dir.mjs';
 globalThis.self ??= globalThis;
 const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
-const TD = await imp('src/tile-data.ts'), SF = await imp('src/core/surface.ts');
+const TD = await imp('src/tile-data.ts'), SF = await imp('src/core/surface.ts'), RF = await imp('src/roofs.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };
 const raw = (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
@@ -44,7 +46,9 @@ function tops(m, f, x0, y0, what, seen) {
   let checked = 0;
   const P = m.pos, A = m.attr;
   for (let q = 0; q < m.quads; q++) {
-    if (A[q * 16] % 8 !== 5) continue;
+    // (an up face: not a roof's slope, lit by its plane -- vattr.w 1..64, roofs.ts: merged where its corners lie in one
+    // plane to 1/64 m, not by the caps' rule)
+    if (A[q * 16] % 8 !== 5 || (A[q * 16 + 3] >= 1 && A[q * 16 + 3] <= 64)) continue;
     const V = [0, 1, 2, 3].map((k) => { const i = q * 4 + k; return { x: P[i * 3] - x0, z: P[i * 3 + 2] - y0, h: P[i * 3 + 1] * 64 + (A[i * 4 + 1] >> 2) }; });
     const xs = V.map((v) => v.x), zs = V.map((v) => v.z), X0 = Math.min(...xs), X1 = Math.max(...xs), Z0 = Math.min(...zs), Z1 = Math.max(...zs);
     const at = (x, z) => V.find((v) => v.x === x && v.z === z)?.h;
@@ -106,6 +110,29 @@ for (const [tx, ty] of nodes) {
     }
   }
 }
+// 2b. the roofs' caps across every border, every level
+let roofCols = 0;
+for (const lv of meta.tiles.levels) {
+  const s = lv.s, dl = (tx, ty) => has(`${s}/${tx}_${ty}`) ? TD.decodeTile(raw(`${s}/${tx}_${ty}`), N) : null;
+  const rows = new Map();
+  const get = (tx, ty) => { const k = `${tx}_${ty}`; if (!rows.has(k)) { const d = dl(tx, ty); rows.set(k, d && RF.roofField(N, d)); } return rows.get(k); };
+  for (let ty = 0; ty < lv.ny; ty++) for (let tx = 0; tx < lv.nx; tx++) {
+    const f = get(tx, ty);
+    if (!f) continue;
+    for (let c = 0; c < S * S; c++) if (f.z[c]) roofCols++;
+    for (const [ex, ey] of [[1, 0], [0, 1]]) {
+      const e = get(tx + ex, ty + ey);
+      if (!e) continue;
+      for (let k = 0; k < S; k++) for (const [ia, ib] of [[N, 0], [N + 1, 1]]) {
+        const ca = ex ? ia + S * k : k + S * ia, cb = ex ? ib + S * k : k + S * ib;
+        if (f.z[ca] !== e.z[cb]) { fail(`roof ${s}/${tx}_${ty} / +${ex},${ey}: column ${k}: z ${f.z[ca]} != ${e.z[cb]}`); continue; }
+        if (f.z[ca]) for (let q = 0; q < 4; q++) if (f.q[4 * ca + q] !== e.q[4 * cb + q]) fail(`roof ${s}/${tx}_${ty} / +${ex},${ey}: column ${k} corner ${q} differs`);
+      }
+    }
+  }
+  rows.clear();
+}
+console.log(`roofs: ${roofCols} capped columns (all levels), their nodes' shared columns compared`);
 if (verbose) { console.log('node     voxels     caps   more'); for (const r of rows) console.log(r); }
 console.log(`caps-check: ${nodes.length} nodes, ${ncols} capped columns, ${ncheck} capped tops checked bit for bit; triangles ${tVox} voxels -> ${tCaps} caps (${((tCaps / tVox - 1) * 100).toFixed(1)} %), meshing ${(msVox / nodes.length).toFixed(0)} -> ${(msCaps / nodes.length).toFixed(0)} ms a node`);
 console.log(bad.length ? `FAIL caps-check: ${bad.length} mismatches` : 'PASS caps-check');

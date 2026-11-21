@@ -44,7 +44,7 @@ export function installDig(S: TileStreamer, camera: THREE.Camera, dom: HTMLEleme
         // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs)
         fol = { ...f.encode(), ground: enc.ground };
       }
-      const done = S.replaceColumns(key, { ...enc, planes: base.planes, bld: base.bld, caps: base.caps }, fol,
+      const done = S.replaceColumns(key, { ...enc, planes: base.planes, bld: base.bld, caps: base.caps, roofCaps: base.roofCaps }, fol,
         [op.x - op.r, op.y - op.r, op.x + op.r + 1, op.y + op.r + 1]);
       if (done) { waits.push(done); nodes++; }
     }

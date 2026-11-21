@@ -4,9 +4,9 @@
 // LOD_LEVELS) are meshed as level 1 is, in cells -- roof planes, chamfered walls, sloped roofs -- and scaled to metres
 // on the way out.
 import { chamferWalls, PAL_ROOF, PAL_WATER, SLANT, type ChamferMemo, type Prism, type Staircase } from './chamfer';
-import { grow, meets, perSide, roofsChanged, SEC, sectionBox, sectionOf, sectionsMeeting, union, type Box } from './sections';
+import { grow, meets, perSide, SEC, sectionBox, sectionOf, sectionsMeeting, union, type Box } from './sections';
 import { capField, capRamped, capSlot, cornerQ, diagonal02, edgeCorners, NONE, type CapField } from './core/surface';
-import { slopeBase, slopeRoofs, wallTopCode, type SlopeBase, type SlopeParts } from './roofs';
+import { roofField, slopeRoofs, wallTopCode, type RoofField, type SlopeParts } from './roofs';
 import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
 import { fetchGzip } from './fetch';
 
@@ -35,11 +35,10 @@ export interface MeshRequest {
   sections?: SectionJob | null;
 }
 
-// hot: the columns an edit changed (apron coordinates), null: every section; bids: the buildings whose roofs (columns'
-// tops) it changed -- their slopes are fitted to the whole roof
+// hot: the columns an edit changed (apron coordinates), null: every section
 // id: this job's (stream.ts: the edit job's key), from: the job whose sections the node shows (the worker's memo of the
 // node is of that job: what changed since is found from it)
-export interface SectionJob { hot: Box | null; bids?: number[]; id?: string; from?: string | null }
+export interface SectionJob { hot: Box | null; id?: string; from?: string | null }
 // the sections meshed (sections.ts numbering) and their meshes
 export interface SectionMeshes { ids: number[]; meshes: MeshOut[] }
 
@@ -57,22 +56,22 @@ export type MeshReply =
 const post = (msg: MeshReply, transfer: Transferable[] = []) =>
   (self as unknown as { postMessage(m: MeshReply, t: Transferable[]): void }).postMessage(msg, transfer);
 
-// (runs, rooms and caps are decodeTile's own copies already)
-const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, rooms: c.rooms ?? null, caps: c.caps ?? null });
-const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : []), ...(c.rooms ? [c.rooms.buffer] : []), ...(c.caps ? [c.caps.buffer] : [])];
+// (runs, rooms and the caps are decodeTile's own copies already)
+const copyColumns = (c: Columns): Columns => ({ counts: c.counts.slice(), ground: c.ground.slice(), runs: c.runs, planes: c.planes?.slice() ?? null, bld: c.bld?.slice() ?? null, rooms: c.rooms ?? null, caps: c.caps ?? null, roofCaps: c.roofCaps ?? null });
+const columnBuffers = (c: Columns) => [c.counts.buffer, c.ground.buffer, c.runs.buffer, ...(c.planes ? [c.planes.buffer] : []), ...(c.bld ? [c.bld.buffer] : []), ...(c.rooms ? [c.rooms.buffer] : []), ...(c.caps ? [c.caps.buffer] : []), ...(c.roofCaps ? [c.roofCaps.buffer] : [])];
 
 // One request's meshes: the tile's own (out), a foliage tile's base tile meshed again (base), and the column data kept
 // (keep; dataOnly: that alone, no mesh). load: a tile file, unzipped (tools/tris.mjs reads them from disk)
 // (the buildings of the columns, bld, come with the tile: every level's own; a foliage tile has none)
 export async function meshJob(m: MeshRequest, load: (url: string) => Promise<ArrayBuffer>) {
-  const { counts, ground, runs, planes = null, bld = null, rooms = null, caps = null, fields = null } = m.cols ? { ...m.cols, fields: null } : decodeTile(await load(m.url!), m.N);
-  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld, rooms, caps }) : null;
+  const { counts, ground, runs, planes = null, bld = null, rooms = null, caps = null, roofCaps = null, fields = null } = m.cols ? { ...m.cols, fields: null } : decodeTile(await load(m.url!), m.N);
+  const keep = m.keep || m.dataOnly ? copyColumns({ counts, ground, runs, planes, bld, rooms, caps, roofCaps }) : null;
   if (m.dataOnly) return { keep, out: null, base: undefined, fields: null };
   const under = typeof m.under === 'string' ? decodeTile(await load(m.under), m.N) : m.under ?? null;
   if (m.sections && m.s === 1) {
     const ucols = m.base && under && 'ground' in under ? under as Columns : null;
     const node = m.key.split('!')[0];
-    const sec = meshSections(m.N, m.x0, m.y0, { counts, ground, runs, caps }, m.roof ? bld : null, under, m.roof, planes, m.see ?? null, m.sections,
+    const sec = meshSections(m.N, m.x0, m.y0, { counts, ground, runs, caps, roofCaps }, m.roof ? bld : null, under, m.roof, planes, m.see ?? null, m.sections,
       ucols && m.base ? { feet: true } : null, m.roof ? node : null);
     const baseSec = ucols && m.base ? meshSections(m.N, m.x0, m.y0, ucols, ucols.bld ?? null, null, m.base.roof, ucols.planes ?? null, null, m.sections,
       { fol: { counts, runs }, leaf: m.base.leaf }, `${node} cover`) : undefined;
@@ -80,7 +79,7 @@ export async function meshJob(m: MeshRequest, load: (url: string) => Promise<Arr
   }
   // (a foliage tile: its trunks reach down to the base's caps)
   const feet = m.base && m.s === 1 && under && 'ground' in under ? capField(m.N, under as Columns, offsetsOf(under.counts, (m.N + 2) ** 2)) : null;
-  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs, caps }, m.roof ? bld : null, under, m.roof, planes, null, feet?.any ? feet : null, m.see ?? null);
+  const out = meshTile(m.N, m.s, m.x0, m.y0, { counts, ground, runs, caps, roofCaps }, m.roof ? bld : null, under, m.roof, planes, null, feet?.any ? feet : null, m.see ?? null);
   const base = m.base && under && 'ground' in under
     ? meshTile(m.N, m.s, m.x0, m.y0, under as Columns, (under as Columns).bld ?? null, null, m.base.roof, (under as Columns).planes ?? null, coverOf(m.N, { counts, runs }, m.base.leaf)) : undefined;
   return { keep, out, base, fields, sec: undefined, baseSec: undefined };
@@ -187,8 +186,8 @@ interface Win {
   emit: Box; rv: Box; rch: Box; rs: Box; rl: Box;
   hot: Box | null; rel: Box[];
   check(comps: Staircase[], changed: { X: number; Y: number }[]): boolean;
-  // the roofs' regions (null: none), the steps kept (chamfer.ts ChamferMemo); found: the steps of this meshing
-  slopes: SlopeBase | null; steps: ChamferMemo | null; found: ChamferMemo['steps'] | null;
+  // the steps kept (chamfer.ts ChamferMemo); found: the steps of this meshing
+  steps: ChamferMemo | null; found: ChamferMemo['steps'] | null;
   // the eaves' steps found (roofs.ts), likewise
   checkSteps(steps: { X: number; Y: number }[]): boolean;
 }
@@ -220,7 +219,9 @@ function meshInto(N: number, s: number, x0: number, y0: number, cols: Columns, b
   // (1 m tiles) the ground's caps (core/surface.ts: the node's caps section, live in these columns): sloped ground and
   // decks; none: its voxels' tops
   const caps = roofPal && s === 1 ? capField(N, cols, off) : null;
-  return meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, out, cover, caps?.any ? caps : null, feet, see,
+  // the roofs' caps (roofs.ts: the node's roof section, live in these columns), every level; none: voxel roofs
+  const rf = roofPal ? roofField(N, cols, off) : null;
+  return meshFaces(N, s, x0, y0, vol, sz, ground, bidAt, roofPal, planes, rf, out, cover, caps?.any ? caps : null, feet, see,
     columnSpans(SS, cols, off, under, uoff, see, win ? rv : null), win);
 }
 
@@ -228,10 +229,7 @@ function meshInto(N: number, s: number, x0: number, y0: number, cols: Columns, b
 // and slopes of its own columns (greedy merges stop at its edges), so that together they are the node's mesh: those an
 // edit (job.hot) can have changed, or all. Each analysis runs in a box round the sections meshed (meshInto's boxes) in
 // the node's own coordinates, and comes out there as for the whole node. A column's faces depend on what lies within
-// INFLUENCE columns of it, apart from
-// - a building's slopes (roofs.ts), fitted to its whole roof: the roofs' regions and corners are made from the whole
-//   node's columns' tops (slopeBase), and an edit that changed a building's roof meshes again every section within
-//   ROOF_REACH of it;
+// INFLUENCE columns of it (a roof's slope too: its corners are the node's roof caps, roofs.ts), apart from
 // - a filled step of an eave (roofs.ts eaveSteps): it depends on the steps next to it, and on what lies under it (an
 //   edit there meshes its sections again);
 // - a staircase's chamfers (chamfer.ts): each step on the staircase's others, which may reach far: an edit meshes again
@@ -240,10 +238,10 @@ function meshInto(N: number, s: number, x0: number, y0: number, cols: Columns, b
 // What meshing asks for more is found as it goes, and it begins again with it. extra: a foliage tile's caps under its
 // trunks (feet; under is the base), or a base's cover (fol: its foliage tile's columns,
 // leaf: leafPal). memo: where this worker keeps the node's state for its next job (job.id, job.from).
-const INFLUENCE = 6, ROOF_REACH = 26;
+const INFLUENCE = 6;
 // a node's state between its sectioned jobs in this worker (stream.ts sends a node's edits to one worker): the columns
-// of job id, its steps (chamfer.ts) and its roofs' regions (roofs.ts slopeBase)
-interface SectionMemo { id: string; cols: RawColumns; steps: ChamferMemo['steps'] | null; slopes: SlopeBase | null }
+// of job id and its steps (chamfer.ts)
+interface SectionMemo { id: string; cols: RawColumns; steps: ChamferMemo['steps'] | null }
 const memos = new Map<string, SectionMemo>();
 // (per job and pass, for tools/section-check.mjs: passes, and the parts of the node read: the volume, chamfers, slopes;
 // jobs that found their node's memo)
@@ -252,41 +250,16 @@ export function meshSections(N: number, x0: number, y0: number, cols: Columns, b
   roofPal: Uint8Array | null, planes: Uint16Array | null, see: Uint8Array | null, job: SectionJob,
   extra: { feet?: boolean; fol?: RawColumns; leaf?: Uint8Array } | null = null, memo: string | null = null): SectionMeshes {
   const S = N + 2, SS = S * S, per = perSide(N), all: Box = { x0: 0, y0: 0, x1: S, y1: S };
-  const bidAt = (x: number, y: number) => (bldIds ? bldIds[(y + 1) * S + x + 1] : 0);
   const was = memo !== null && job.from ? memos.get(memo) : undefined, kept = was && was.id === job.from ? was : null;
-  let hot = job.hot, bids = job.bids ?? [];
+  let hot = job.hot;
   if (kept && hot) {
     // (what changed since the memo's columns, rather than what the job says: all of it)
     hot = changedBox(S, kept.cols, cols);
     if (!hot) { kept.id = job.id ?? ''; return { ids: [], meshes: [] }; }
-    bids = roofsChanged(N, kept.cols, cols, bldIds, hot);
-  }
-  // the roofs' regions, from the whole node's tops (the memo's while no roof changed)
-  let slopeB: SlopeBase | null = null;
-  if (roofPal && planes) {
-    if (kept && !bids.length) slopeB = kept.slopes;
-    else {
-      const T = new Uint16Array(SS), top = new Uint16Array(SS);
-      for (let c = 0, k = 0; c < SS; c++) {
-        const e = k + cols.counts[c] * 3;
-        for (let q = e - 3; q >= k; q -= 3) if (cols.runs[q + 1] && cols.runs[q + 2]) { T[c] = cols.runs[q] + cols.runs[q + 1]; top[c] = cols.runs[q + 2]; break; }
-        k = e;
-      }
-      slopeB = slopeBase(N, T, (c) => top[c], roofPal, bidAt, planes);
-    }
   }
   const want = new Set<number>();
   if (!hot) for (let k = 0; k < per * per; k++) want.add(k);
-  else {
-    for (const k of sectionsMeeting(N, grow(hot, INFLUENCE, S))) want.add(k);
-    // (a roof changed: its regions' corners, and the steps of the eaves next to them -- with the memo's regions, only
-    // the cells whose slope changed: within 8 of one, or, where a cell's region came or went, within ROOF_REACH)
-    const cell = (c: number, m: number) => grow({ x0: c % S, y0: Math.floor(c / S), x1: c % S + 1, y1: Math.floor(c / S) + 1 }, m, S);
-    if (bldIds && roofPal && planes && bids.length) for (let c = 0; c < SS; c++) {
-      const m = kept ? slopeChange(kept.slopes, slopeB, c, S) : bids.includes(bldIds[c]) ? ROOF_REACH : 0;
-      if (m) for (const k of sectionsMeeting(N, cell(c, m))) want.add(k);
-    }
-  }
+  else for (const k of sectionsMeeting(N, grow(hot, INFLUENCE, S))) want.add(k);
   // (the steps kept near the edit, whose prisms read round them: their sections at once, not after a first pass)
   if (hot && kept?.steps) {
     const h = grow(hot, 10, S);
@@ -316,7 +289,7 @@ export function meshSections(N: number, x0: number, y0: number, cols: Columns, b
     if (full) { rch = rs = rv = rl = all; }
     const outs: (QuadBuffer | null)[] = Array.from({ length: per * per }, (_, k) => (want.has(k) ? new QuadBuffer() : null));
     const r = rch;
-    const win: Win = { N, outs, emit, rv, rch: r, rs, rl, hot, rel, slopes: slopeB, steps: redo ? { steps: kept!.steps!, redo } : null, found: null,
+    const win: Win = { N, outs, emit, rv, rch: r, rs, rl, hot, rel, steps: redo ? { steps: kept!.steps!, redo } : null, found: null,
       check(comps, changed) {
         if (full) return true;
         let ok = true;
@@ -345,27 +318,11 @@ export function meshSections(N: number, x0: number, y0: number, cols: Columns, b
       // (the steps of the whole node: all looked for, or the memo's and those near the edit)
       const steps = roofPal && (full || redo) ? win.found ?? [] : null;
       memos.delete(memo);
-      memos.set(memo, { id: job.id, cols: { counts: cols.counts, runs: cols.runs }, steps, slopes: slopeB });
+      memos.set(memo, { id: job.id, cols: { counts: cols.counts, runs: cols.runs }, steps });
       for (const k of memos.keys()) if (memos.size > 8) memos.delete(k);
     }
     return { ids, meshes: ids.map((k) => byFacing(outs[k]!, !!bldIds, N, 1, x0, y0)) };
   }
-}
-
-// How far round column c a change of the roofs' regions (roofs.ts slopeBase, a before b) reaches: 0 none; 8 its
-// slope (its corners, their light, its region's plane, which of its neighbours share its region: a merged top); a
-// cell that came into a region or left one, ROOF_REACH (the steps of the eaves round it, and those next to them)
-function slopeChange(a: SlopeBase | null, b: SlopeBase | null, c: number, S: number) {
-  const ra = a ? a.reg[c] : -1, rb = b ? b.reg[c] : -1;
-  if ((ra >= 0) !== (rb >= 0)) return ROOF_REACH;
-  if (ra < 0) return 0;
-  const A = a!, B = b!, p = A.regions[ra], q = B.regions[rb];
-  if (p.code !== q.code || p.lit !== q.lit || p.flat !== q.flat || p.bid !== q.bid || A.seam.bent(p, c) !== B.seam.bent(q, c)) return 8;
-  for (let k = 0; k < 4; k++) if (A.hq[c * 4 + k] !== B.hq[c * 4 + k] || A.pure[c * 4 + k] !== B.pure[c * 4 + k] || A.nq[c * 4 + k] !== B.nq[c * 4 + k]) return 8;
-  // (a merged top: its plane at its corners, and whether the cells beside it are of its region)
-  if (p.e0 !== q.e0 || p.gxq !== q.gxq || p.gyq !== q.gyq) return 8;
-  for (const n of [c - 1, c + 1, c - S, c + S]) if (n >= 0 && n < S * S && (A.reg[n] === ra) !== (B.reg[n] === rb)) return 8;
-  return 0;
 }
 
 // the box of the columns whose runs differ between a and b (null: none)
@@ -524,7 +481,7 @@ function columnSpans(SS: number, c: RawColumns, off: Uint32Array, under: RawColu
 }
 
 function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Array, sz: number, ground: Uint8Array,
-  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, out: QuadBuffer,
+  bidAt: (x: number, y: number) => number, roofPal: Uint8Array | null, planes: Uint16Array | null, rf: RoofField | null, out: QuadBuffer,
   cover: Uint8Array | null = null, rp: CapField | null = null, feet: CapField | null = null, see: Uint8Array | null = null,
   spans: { top: Uint16Array; bot: Uint16Array } | null = null, win: Win | null = null): boolean {
   const S = N + 2, sx = S, sy = S;
@@ -553,8 +510,8 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   const ch = roofPal ? chamferWalls(N, vol, sz, ground, colTop, roofPal, bidAt, win ? { box: win.rch, hot: win.hot, rel: win.rel } : null, win?.steps ?? null) : null;
   if (win) win.found = ch?.steps ?? null;
   if (win && !win.check(ch?.comps ?? [], ch?.changed ?? [])) return false;
-  // pitched roofs as slopes (roofs.ts): they hide the voxel faces they stand for
-  const slopes = roofPal && planes && (!win || win.slopes) ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, ch?.hidden ?? new Uint8Array(S * S * sz), win ? win.rs : null, win?.slopes ?? null) : null;
+  // pitched roofs as slopes (roofs.ts, from the roofs' caps): they hide the voxel faces they stand for
+  const slopes = roofPal && rf ? slopeRoofs(N, vol, colTop, roofPal, bidAt, planes, rf, ch?.hidden ?? new Uint8Array(S * S * sz), win ? win.rs : null) : null;
   if (win && slopes && !win.checkSteps(slopes.steps)) return false;
   slopes?.hide();
   const hidden = ch?.hidden ?? (slopes ? slopes.hidden : undefined);
@@ -693,8 +650,9 @@ function meshFaces(N: number, s: number, x0: number, y0: number, vol: Uint16Arra
   }
   const parts: SlopeParts | null = win ? { at: (X, Y) => outAt(win, X - 1, Y - 1), last: (V) => secEnd(V - 1, N) } : null;
   // (at s > 1 the slopes come out in cells: scaled to metres here, heights in 1/64 of a cell to 1/64 m)
+  // (at 1 m a merged top stops at its section's end, meshed whole or in sections alike: sections.ts)
   slopes?.emit(s === 1 ? out : { reserve: (n) => out.reserve(n), vertexQ: (x, q, z, n, ao, g, w, pal, b) => out.vertexQ(x * s + x0, q * s, z * s + y0, n, ao, g, w, pal, b) },
-    s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground, s === 1, parts);
+    s === 1 ? x0 : 0, s === 1 ? y0 : 0, ground, s === 1, parts, s === 1 ? (V) => secEnd(V - 1, N) : null);
   return true;
 }
 
