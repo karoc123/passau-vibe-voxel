@@ -467,7 +467,7 @@ The serial chain prep -> laser (140 s after A3-A5) only matters when `data/raw`,
 
 ---
 
-## 8. Done: A1, A2, B1, B2 (branch `bs2`, 2026-11-21; no full build of the real map yet)
+## 8. Done: A1, A2, B1, B2 (branch `bs2`, 2026-11-21; no full build of the real map yet); A3-A6 (8.2)
 
 Goldens recorded on `main` (a90289bd) for altstadt, hals, kachlet, then compared after the changes: **0 of 459 / 301 /
 459 outputs differ** (the three as shell jobs side by side, `-j 2` each). `check.py windows tile_fields --covers
@@ -497,3 +497,41 @@ Goldens recorded on `main` (a90289bd) for altstadt, hals, kachlet, then compared
 
 Still to confirm on the next full build of the real map: `git status --porcelain web/public/data` empty, the summed
 `[stage] river colours` (~460 s -> ~40 s expected), the region phase's wall, and `tile_fields` in the build (~40 s).
+
+### 8.2 Done: A3, A4, A5, A6 (+ M1 for prep and laser; branch `bs3` on `main` 383d2cce, 2026-11-21; no full build yet)
+
+Goldens recorded on `main` 383d2cce for altstadt, hals, kachlet and the same fixtures built on `bs3` (six jobs side by
+side, `-j 2` each): **459 / 301 / 459 outputs, 2 differ in each, exactly the expected two** -- `data/prep.npz:orto`
+gone, `data/prep.npz:cellcol` new; nothing under `web/public/data`, no other array. The fixtures' new `orto.npy`
+equals the old `prep.npz:orto`, their `cellcol` the median of it (`np.array_equal`). `check.py verify` on altstadt
+ok; palette_check, `overrides.py check`, `interiors.py --test`, `sh -n scripts/build_data.sh` ok.
+
+On the real map (full inputs, run into a scratch folder, one at a time, the machine otherwise idle; M1's timers):
+
+| step | before | after | |
+|---|---|---|---|
+| `prep.py` | **212 s**, 12.0 GB peak: dsm 23, dtm 2, orto mosaic 32, **orto resample 87**, **`prep.npz` written 67** | **104 s**, 11.5 GB: dsm 20, dtm 2, orto mosaic 31, resample + cells' colours 19 (8 processes), `prep.npz` 30, `orto.npy` 1 | arrays: dsm, dtm equal; `orto.npy` equal to the old `orto`; `cellcol` equal to its 5 x 5 median; `orto_preview.jpg` the same bytes |
+| `laser.py` | **125 s**, 3.6 GB: sheets read 47, **counted 68**, written 10 | **87 s**, 3.1 GB: read 46, counted 30, written 10 | all ten arrays equal |
+
+- **A3** as planned, the median taken in A4's workers on bands of 250 rows (whole cells; asserted integral);
+  `prep.npz` 466 MB (dsm, dtm, cellcol); `data/orto.npy` 2.4 GB uncompressed, in prep's `-o` list; `look.py` reads a
+  box of it memory-mapped; `voxelize.py` refuses a `prep.npz` without `cellcol` ("rerun scripts/prep.py").
+  `sidecar.ensure` now deletes a copy of an array the `.npz` no longer has (else the old `orto.npy`, 2.4 GB, stays in
+  `data/cache/inputs/prep.npz/`).
+- **A4**: the ortho's row bands in `multiprocessing.get_context("fork").Pool(8)`, written into anonymous shared
+  memory (`mmap`), no pickling of results. 87 s -> 19 s with the medians. What is left of prep is serial: the ortho's
+  mosaic (31 s, rasterio reads with `Resampling.average`) and deflating dsm + dtm (~30 s). Not done here.
+- **A5** as planned (`count()` per sheet over its points' box, `percentiles_per_cell` one sort for both). The rest is
+  LAZ decoding (46 s, already parallel in `lazrs`). On a fixture laser takes as long as before (~80-130 s): it reads
+  all 40 sheets whatever the window.
+- **A6**: `topz` layer by layer; `voxelize.own_peak_mb()` reads `VmHWM`, into the stage timings and `out.json` /
+  `fstats.json` `peak_mb`; `regions.py` writes that into `stats.json` (falls back to `ru_maxrss`). Fixture regions
+  (altstadt, main -> bs3): the stage "qa, deck_near, topdown" no longer sets the peak (0_0: 2650 -> 2433 MB at that
+  stage, the region's peak 2650 -> 2500; 0_1024 2676 -> 2559; the thin ones 1121 -> 1016, 1069 -> 978), the stage
+  0.96 -> 0.48 s; feature passes report their own 475-598 MB instead of the inherited 609 everywhere.
+
+Still to confirm on the next full build of the real map (it reruns prep and laser once, as A3 changes prep's outputs,
+and then every region and feature pass: `prep.npz`'s arrays changed): `git status --porcelain web/public/data` empty;
+prep ~105 s and laser ~90 s in the build's log; the time before the feature pass (no 2.4 GB sidecar to copy and hash);
+the regions' `stats.json` peaks (the large ones ~-15 % expected) and how many ran at once; `data/cache/inputs/prep.npz/`
+without `orto.npy`; `look.py` on one building (reads `data/orto.npy`).
