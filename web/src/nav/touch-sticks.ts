@@ -20,6 +20,9 @@ interface StickEvents {
   onInterrupted?: () => void;
   /** with it, two fingers close together pinch (see PINCH_NEAR): d0 / d of the fingers' distance since the last call */
   onPinch?: (ratio: number) => void;
+  /** a side whose finger is no stick but the camera's: drawn without rings, and a second finger landing near it pinches
+   *  with it even while the other side's stick is held and moving (the drive mode: steer left, zoom right) */
+  camera?: Side;
 }
 
 // a second finger landing this close to a first that has hardly moved (a fraction of the screen's shorter side) makes
@@ -65,10 +68,12 @@ export class TouchSticks {
       const side = e.clientX < bounds.left + bounds.width / 2 ? 'left' : 'right';
       if (this.pinch) return;
       const held = [this.sticks.left, this.sticks.right].filter((s) => s !== null);
-      if (events.onPinch && held.length === 1) {
-        const s = held[0], x = s.startX + s.dx, y = s.startY - s.dy;
+      const cam = events.camera ? this.sticks[events.camera] : null;
+      const s = held.length === 1 ? held[0] : cam;
+      if (events.onPinch && s) {
+        const x = s.startX + s.dx, y = s.startY - s.dy;
         const d = Math.hypot(e.clientX - x, e.clientY - y);
-        if (Math.hypot(s.dx, s.dy) < PINCH_STILL && d < PINCH_NEAR * Math.min(bounds.width, bounds.height)) {
+        if ((s === cam || Math.hypot(s.dx, s.dy) < PINCH_STILL) && d < PINCH_NEAR * Math.min(bounds.width, bounds.height)) {
           canvas.setPointerCapture(e.pointerId);
           const sd = this.sideOf(s.id)!;
           this.sticks[sd] = null; // (no onEnd: not a tap)
@@ -84,7 +89,7 @@ export class TouchSticks {
         radius: clamp(Math.min(bounds.width, bounds.height) * 0.16, 42, 72),
         dx: 0, dy: 0, t: performance.now(),
       };
-      this.rings[side].show(this.sticks[side]!);
+      if (side !== events.camera) this.rings[side].show(this.sticks[side]!);
       events.onStart?.(side);
     });
     canvas.addEventListener('pointermove', e => {
@@ -101,7 +106,7 @@ export class TouchSticks {
       const stick = this.sticks[side]!;
       stick.dx = e.clientX - stick.startX;
       stick.dy = stick.startY - e.clientY;
-      this.rings[side].show(stick);
+      if (side !== this.events.camera) this.rings[side].show(stick);
       if (!this.undecided(stick)) events.onMove?.(side, stick);
     });
     canvas.addEventListener('pointerup', e => {

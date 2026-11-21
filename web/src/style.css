@@ -210,3 +210,14 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
 .stick-ring.knob { width: 46px; height: 46px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); }
 .noui .stick-ring { display: none; }
+/* driving on a touch screen: the handbrake (nav/drive.ts, held) where the right thumb rests, the left thumb on the one
+   stick; in the Jump button's place (on foot only), so above the "?" and clear of the bar, inside the safe area */
+#handbrake-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(110px + var(--sb)); z-index: 4; width: 72px; height: 72px;
+  padding: 0; border: 1.5px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff;
+  font: 600 12px/1.15 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em;
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#handbrake-button.held { background: rgba(220,60,50,.55); border-color: #fff; }
+@media (pointer: coarse) { body.driving:not(.noui) #handbrake-button { display: grid; place-items: center; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #handbrake-button { width: 68px; height: 68px; right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); }
+}

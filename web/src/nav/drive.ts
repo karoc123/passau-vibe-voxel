@@ -14,10 +14,15 @@ import './drive.css';
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
-const HANDBRAKE_THRESHOLD = 0.75;
+// the touch stick's steering: |x|^STEER_CURVE, so a small deflection steers gently and the full one locks
+const STEER_CURVE = 1.7;
 
 export class DriveMode {
   private readonly touch: TouchSticks;
+  // on a touch screen: one stick on the left (up gas, down brake then reverse, sideways steer), the handbrake under the
+  // right thumb (held), and the right side's fingers pinch the camera (style.css #handbrake-button)
+  private readonly handbrakeButton = el('button', '', 'Hand<br>brake');
+  private readonly handbrakeHeld = new Set<number>();
   private readonly keys = new Set<string>();
   private readonly panel = document.createElement('aside');
   private readonly action = el('button', 'mode-button', '', this.panel);
@@ -26,7 +31,7 @@ export class DriveMode {
   private readonly speed = el('div', 'drive-speed', '', this.details);
   private readonly help = el('div', 'drive-help', `
     <span class="drive-help-keys">W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit</span>
-    <span class="drive-help-touch">Drag left thumb up for gas or down to brake/reverse. Drag right thumb sideways to steer or down for the handbrake. Pinch to zoom.</span>
+    <span class="drive-help-touch">Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake. Pinch on the right to zoom.</span>
   `, this.details);
   private pending: Ride | null = null;
   private driving: { ride: Ride; session: DriveSession } | null = null;
@@ -43,7 +48,21 @@ export class DriveMode {
       if (idle) idle(() => this.loadRapier(), { timeout: 3000 }); else this.loadRapier();
     }, RAPIER_AFTER_MS);
     // two fingers close together pinch the chase camera in and out (at the eyes, the field of view; nav.ts zoomRide)
-    this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio) });
+    // (the right side is the camera's: no stick, only the pinch, so a drive never steers from the right thumb)
+    this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio), camera: 'right' });
+    const hb = this.handbrakeButton;
+    hb.id = 'handbrake-button';
+    hb.type = 'button';
+    hb.setAttribute('aria-label', 'Handbrake (hold)');
+    hb.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      hb.setPointerCapture(e.pointerId);
+      this.handbrakeHeld.add(e.pointerId);
+      hb.classList.add('held');
+    });
+    const release = (e: PointerEvent) => { this.handbrakeHeld.delete(e.pointerId); hb.classList.toggle('held', this.handbrakeHeld.size > 0); };
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) hb.addEventListener(type, release);
+    hb.addEventListener('contextmenu', (e) => e.preventDefault());
     this.panel.className = 'drive-mode';
     this.panel.setAttribute('aria-label', 'Drive a car');
     host.append(this.panel);
@@ -57,7 +76,7 @@ export class DriveMode {
       e.preventDefault();
     });
     addEventListener('keyup', e => this.keys.delete(e.code));
-    const clearInput = () => { this.keys.clear(); this.touch.clear(); };
+    const clearInput = () => { this.keys.clear(); this.touch.clear(); this.handbrakeHeld.clear(); hb.classList.remove('held'); };
     addEventListener('blur', clearInput);
     document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
     this.draw();
@@ -131,6 +150,8 @@ export class DriveMode {
     this.driving = null;
     this.nav.controlledRide = null;
     this.keys.clear();
+    this.handbrakeHeld.clear();
+    this.handbrakeButton.classList.remove('held');
     this.touch.setActive(false);
   }
 
@@ -157,10 +178,12 @@ export class DriveMode {
     catch { /* The keyboard still works when Gamepad API access is blocked. */ }
     const raw = pad?.axes[0] ?? 0;
     const stick = Math.sign(raw) * clamp((Math.abs(raw) - 0.12) / 0.88, 0, 1);
-    const { left, right } = this.touch;
+    // the one touch stick: up gas, down brake (below ~0.8 m/s reverse, car.ts), sideways steer on a curve
+    const left = this.touch.left;
     const pedal = left ? clamp(stickAxis(left.dy, left.radius), -1, 1) : 0;
-    const steering = right ? clamp(stickAxis(right.dx, right.radius), -1, 1) : 0;
-    const handbrake = !!right && stickAxis(-right.dy, right.radius) >= HANDBRAKE_THRESHOLD;
+    const sx = left ? clamp(stickAxis(left.dx, left.radius), -1, 1) : 0;
+    const steering = Math.sign(sx) * Math.abs(sx) ** STEER_CURVE;
+    const handbrake = this.handbrakeHeld.size > 0;
     return {
       gas: Math.max(pressed('KeyW', 'ArrowUp'), pad?.buttons[7]?.value ?? 0, pedal),
       brake: Math.max(pressed('KeyS', 'ArrowDown'), pad?.buttons[6]?.value ?? 0, -pedal),
