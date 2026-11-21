@@ -144,7 +144,7 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     light = spill_map(table[zones] & 7, W, D, (ra, ca))  # 2 m cells from (ra / 2, ca / 2)
     # the sloped caps' corners over the region (None: no data/surface.npz, no caps written)
     capf = caps.region_fields(region, D, W, base, TMP) if palette is not None else None
-    paved = caps.paved_ids(palette) if capf is not None else None
+    paved = caps.cap_ids(palette) if capf is not None else None
     cst = caps.Stats()
     L = light.astype(np.float32)
     S, M = N + 2, N // 2 + 2

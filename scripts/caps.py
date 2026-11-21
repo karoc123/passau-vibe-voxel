@@ -65,8 +65,9 @@ def decode(buf):
 #
 # Which runs get a record (from the node's own columns, D1 of the plan: paved ground and decks only): the run ending
 # at the column's ground with air above, its top voxel paved (PAVED_IDS: web/src/core/materials.ts pavedGround), and
-# the column's last run above the ground, paved, within DECK_TOL of a deck's surface. Lawns, fields, steps, water and
-# anything standing on the ground stay voxels.
+# the column's last run above the ground, its top a deck's surface (cap_ids: paved, the bare deck's concrete, a rail
+# deck's ballast), within DECK_TOL of the deck's profile. Lawns, fields, steps, water and anything standing on the
+# ground stay voxels.
 SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
 CLAMP = 56  # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor)
@@ -93,6 +94,17 @@ def paved_ids(palette):
     kerb = quantised(KERB)
     return np.array([e[3] == M_MARK or (e[3] == M_SOLID and (tuple(e[:3]) == kerb or tuple(e[:3]) in ground))
                      for e in palette], bool)
+
+
+M_SOIL, M_CONCRETE = 10, 13
+
+
+def cap_ids(palette):
+    """per palette id, (the ground's run may get a cap: paved_ids; a deck's top may: any deck surface -- paved, the
+    bare deck's concrete, a rail deck's ballast or track bed -- not a railing, a lamp, glass, leaves, water)"""
+    paved = paved_ids(palette)
+    deck = paved | np.array([e[3] in (M_SOLID, M_MARK, M_SOIL, M_CONCRETE) for e in palette], bool)
+    return paved, deck
 
 
 def _shift(a, dy, dx, fill):
@@ -236,8 +248,10 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
     end = runs[:, 0] + runs[:, 1]
     nxt0 = np.append(runs[1:, 0], -1)
     nxt0[off[1:][counts > 0] - 1] = -1  # (a column's last run: nothing over it)
+    paved, deckable = paved
     pid = np.minimum(runs[:, 2], len(paved) - 1)
-    pv = paved[pid] & (runs[:, 2] < len(paved))
+    known = runs[:, 2] < len(paved)
+    pv, dv = paved[pid] & known, deckable[pid] & known
     # map cell of each column (the apron: the neighbours' cells), inside the map
     Y, X = np.divmod(np.arange(S * S), S)
     mr, mc = r0 + Y - 1, c0 + X - 1
@@ -256,7 +270,7 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
             sel = (end == grnd[col]) & (nxt0 != end) & pv
         else:
             dk = F["deck"][lr[col], lc[col]]
-            sel = last & (end > grnd[col]) & pv & np.isfinite(dk) & (np.abs(np.nan_to_num(dk) - end) <= DECK_TOL)
+            sel = last & (end > grnd[col]) & dv & np.isfinite(dk) & (np.abs(np.nan_to_num(dk) - end) <= DECK_TOL)
         sel &= inmap[col]
         k = np.nonzero(sel)[0]
         c = col[k]
@@ -322,7 +336,7 @@ def report(root=".", windows=None, note=print):
     pub, tmp = root / "web/public/data", root / "data"
     meta = json.loads((pub / "meta.json").read_text())
     N, W, D, base = meta["tiles"]["N"], meta["W"], meta["D"], meta["base"]
-    paved = paved_ids(meta["palette"])
+    paved = cap_ids(meta["palette"])
     qa_all = None
     if (tmp / "qa_roadmask.bin.gz").exists():
         qa_all = np.frombuffer(gzip.decompress((tmp / "qa_roadmask.bin.gz").read_bytes()), np.uint8).reshape(D, W)
