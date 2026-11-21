@@ -14,7 +14,8 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { PAL_GROUND } from '../../chamfer';
 import { rampField } from '../../core/caps-legacy';
-import { capOf, capRamped, cornerQ, diagonal02, NONE, quadHeight, type CapField } from '../../core/surface';
+import { capField, capOf, capRamped, capSlot, cornerQ, diagonal02, NONE, quadHeight, surfaceAt, type CapField } from '../../core/surface';
+import { CAPS } from '../../caps-mode';
 import { liveEdits, type Region } from '../../core/live-edits';
 import { TileCache } from '../../core/tile-cache';
 import type { Meta } from '../../types';
@@ -55,10 +56,13 @@ export interface TerrainTile {
   // the same over all ground, paved or not (the car's: see DRIVE)
   car: CapField | null;
   carRamped: Uint8Array | null;
+  // the node's caps section (core/surface.ts): the one surface for every body -- then ramps is it too, ramped its
+  // columns with a cap, and there is no car's surface (car, carRamped null, no DRIVE)
+  caps?: CapField | null;
 }
 
-// the columns of a tile as decodeTile gives them (base: with the ground)
-export interface TileColumns { counts: Uint16Array; runs: Uint16Array; ground?: Uint8Array }
+// the columns of a tile as decodeTile gives them (base: with the ground, and its caps section if it has one)
+export interface TileColumns { counts: Uint16Array; runs: Uint16Array; ground?: Uint8Array; caps?: Uint16Array | null }
 
 // palette flags: solid (not grass, not water), water, paved ground (PAL_GROUND), any ground but water (PAL_GROUND)
 export function terrainPalette(palette: Meta['palette']) {
@@ -108,6 +112,13 @@ export function terrainTile(N: number, base: TileColumns & { ground: Uint8Array 
     }
     off[c + 1] = n;
   }
+  // (the caps section: one surface for all, core/surface.ts)
+  const cf = CAPS.use && base.caps ? capField(N, base, bo) : null;
+  if (cf) {
+    const r = new Uint8Array(C);
+    for (let c = 0; c < C; c++) r[c] = cf.z[2 * c] || cf.z[2 * c + 1] ? 1 : 0;
+    return { S, ground: base.ground, top: cf.top, iv: out.slice(0, n), off, water, ramps: cf, ramped: r, car: null, carRamped: null, caps: cf };
+  }
   // (decks: the car's top voxel of every deck column open, ramped or not, so its surface may dip under a flat deck's
   // top beside a step: DRIVE.deckTol)
   const field = (flags: Uint8Array, decks: boolean) => {
@@ -150,6 +161,7 @@ const kernel = (sigma: number, r: number) => Array.from({ length: 2 * r + 1 }, (
 // the car) and the car's surface (see DRIVE).
 // drive: the car's surface at the chunk's (CHUNK + 1)^2 grid points (1/64 m, NONE: each column's own top), null: none
 export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number, drive: Int32Array | null = null) {
+  if (tile.caps) return capShapes(tile, tile.caps, N, cx, cz);
   // (ground: the surface the ramps take, a bridge deck's top where it is one)
   const { S, iv, off, top: ground, ground: under, ramped: rmp, carRamped: crm } = tile;
   // (a column whose top voxel is not in the shell: a ramp, drawn or the car's)
@@ -197,6 +209,40 @@ export function chunkShapes(tile: TerrainTile, N: number, cx: number, cz: number
     }
   }
   return { vox: new Int32Array(vox), top: new Int32Array(top), verts: new Float32Array(verts), idx: new Uint32Array(idx), dverts: new Float32Array(dverts), didx: new Uint32Array(didx) };
+}
+
+// chunkShapes with a caps section: each cap's run's top voxel left out of the shell (the one under it kept, a floor),
+// its quad in the one trimesh every body meets (core/surface.ts: as the mesher draws it)
+function capShapes(tile: TerrainTile, f: CapField, N: number, cx: number, cz: number) {
+  const { S, iv, off, ground: under } = tile;
+  const lx0 = (cx * CHUNK) % N, lz0 = (cz * CHUNK) % N;
+  const vox: number[] = [], verts: number[] = [], idx: number[] = [];
+  const quad = (i: number, j: number, q0: number, q1: number, q2: number, q3: number) => {
+    const b = verts.length / 3;
+    verts.push(i, q0, j, i + 1, q1, j, i + 1, q2, j + 1, i, q3, j + 1);
+    if (diagonal02(q0, q1, q2, q3)) idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    else idx.push(b, b + 3, b + 1, b + 1, b + 3, b + 2);
+  };
+  // (a column's open voxels: its caps' runs' top voxels, -1 none)
+  const o0 = (c: number) => f.z[2 * c] - 1, o1 = (c: number) => f.z[2 * c + 1] - 1;
+  for (let j = 0; j < CHUNK; j++) for (let i = 0; i < CHUNK; i++) {
+    const c = lx0 + i + 1 + S * (lz0 + j + 1), ns = [c - 1, c + 1, c - S, c + S];
+    const a0 = o0(c), a1 = o1(c);
+    // below the lowest neighbouring ground all four sides are solid: nothing to see there but an interval's ends
+    const deep = Math.min(under[ns[0]], under[ns[1]], under[ns[2]], under[ns[3]], a0 >= 0 ? under[c] : 1e9) - 2;
+    for (let k = off[c]; k < off[c + 1]; k += 2) {
+      const lo = iv[k], hi = iv[k + 1];
+      for (let y = lo; y < hi; y++) {
+        if (y > lo && y < deep && y < hi - 1) y = Math.min(deep, hi - 1);
+        if (y === a0 || y === a1) continue;
+        let shell = y === hi - 1 || (y === lo && lo > 0) || y === a0 - 1 || y === a1 - 1;
+        for (let q = 0; q < 4 && !shell; q++) { const n = ns[q]; shell = y === o0(n) || y === o1(n) || !inside(tile, n, y); }
+        if (shell) vox.push(i, y, j);
+      }
+    }
+    for (let sl = 0; sl < 2; sl++) if (f.z[2 * c + sl]) quad(i, j, cornerQ(f, c, sl, 0) / 64, cornerQ(f, c, sl, 1) / 64, cornerQ(f, c, sl, 2) / 64, cornerQ(f, c, sl, 3) / 64);
+  }
+  return { vox: new Int32Array(vox), top: new Int32Array(0), verts: new Float32Array(verts), idx: new Uint32Array(idx), dverts: new Float32Array(0), didx: new Uint32Array(0) };
 }
 
 interface Chunk { colliders: RAPIER.Collider[]; vox: RAPIER.Collider | null; usedAt: number; voxels: number; tris: number }
@@ -342,14 +388,16 @@ export class RapierTerrain {
     return t && t.tile.water[t.c] ? t.tile.water[t.c] : -1;
   }
 
-  // The surface a body stands on at world (x, z), at or below `top`: the ramp's where the street is one (car: the car's
-  // ramps, as its field has them, not smoothed), else the top of the highest solid interval. null: not loaded.
+  // The surface a body stands on at world (x, z), at or below `top`: the top of the highest solid interval, its cap's
+  // where it has one (core/surface.ts; legacy: the ramp's where the street is one -- car: the car's ramps, as its field
+  // has them, not smoothed). null: not loaded.
   groundAt(x: number, z: number, top: number, car = false) {
     const t = this.column(x, z);
     if (!t) return null;
     const { iv, off } = t.tile;
     let h = 0;
     for (let k = off[t.c]; k < off[t.c + 1]; k += 2) if (iv[k + 1] <= top + 1e-3) h = iv[k + 1];
+    if (t.tile.caps) return surfaceAt(t.tile.caps, t.c, h, x - Math.floor(x), z - Math.floor(z));
     const f = car ? t.tile.car : t.tile.ramps;
     const sl = f ? capOf(f, t.c) : -1;
     if (h === t.tile.top[t.c] && sl >= 0) {
@@ -364,10 +412,12 @@ export class RapierTerrain {
   solidTop(x: number, y: number, z: number, car = false) {
     const t = this.column(x, z);
     if (!t) return -1;
-    const { iv, off, top: ground, carRamped } = t.tile;
+    const { iv, off, top: ground, carRamped, caps } = t.tile;
     const g = ground[t.c], open = car && !!carRamped && carRamped[t.c] === 1;
     for (let k = off[t.c]; k < off[t.c + 1]; k += 2) {
       if (y < iv[k] || y >= iv[k + 1]) continue;
+      // (a cap's run: its top voxel open, for every body)
+      if (caps && capSlot(caps, t.c, iv[k + 1]) >= 0) return y >= iv[k + 1] - 1 ? -1 : iv[k + 1] - 1;
       if (open && iv[k + 1] === g) return y >= g - 1 ? -1 : g - 1;
       return iv[k + 1];
     }
@@ -530,8 +580,9 @@ export class RapierTerrain {
     }
     if (top.length) colliders.push(this.world.createCollider(R.ColliderDesc.voxels(top, { x: 1, y: 1, z: 1 }).setTranslation(tx, 0, tz).setFriction(0.9).setCollisionGroups(NOT_CAR_GROUPS)));
     if (idx.length) {
-      colliders.push(this.world.createCollider(R.ColliderDesc.trimesh(verts, idx, R.TriMeshFlags.FIX_INTERNAL_EDGES)
-        .setTranslation(tx, 0, tz).setFriction(0.9).setCollisionGroups(NOT_CAR_GROUPS)));
+      // (the caps: every body's, as the voxels; the legacy drawn ramps: all but the car's, which has its own)
+      const d = R.ColliderDesc.trimesh(verts, idx, R.TriMeshFlags.FIX_INTERNAL_EDGES).setTranslation(tx, 0, tz).setFriction(0.9);
+      colliders.push(this.world.createCollider(tile.caps ? d : d.setCollisionGroups(NOT_CAR_GROUPS)));
     }
     if (didx.length) {
       // (only the wheels' rays meet it, as a rule: no internal edges to fix, which would cost ~1 ms a chunk)

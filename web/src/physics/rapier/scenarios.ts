@@ -5,11 +5,15 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { MAT } from '../../core/materials';
 import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
 import { DRIVE, RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
+import { encodeCaps } from '../../core/surface';
 
 // (the ride's and the car surface's numbers, for tools/rapier-car.mjs --set: the same module instances as the scenarios')
 export { DRIVE, RIDE };
 
 const N = 64;
+// a voxel staircase g = b + clamp(floor((z - z0) / p), 0, n) as the road it rounds: through the steps' middles
+export const stairs = (z: number, b: number, z0: number, p: number, n: number) => b + Math.max(0, Math.min(n, (z - z0 - p / 2) / p));
+
 // the tuning the scenarios' cars get (tools/rapier-car.mjs --spike: the spike's car)
 export const scenarioTuning: { tuning: CarTuning } = { tuning: TUNED };
 const STEP = 1 / 60;
@@ -23,13 +27,17 @@ export interface Col { g: number; mat?: number; runs?: [number, number, number][
 // a map of `tiles` x `tiles` tiles of N m from a column function of world (x, z)
 export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; palette: [number, number, number, number][] }; tiles: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] };
 
-export function synthMap(tiles: number, col: (x: number, z: number) => Col): ScenarioMap {
+// surf: the scenario's analytic road surface (m) at grid point (x, z) -- its caps, as scripts/caps.py would write them:
+// on each STREET column's ground run with nothing on it, and on a STREET run topping a column over its ground (a deck),
+// the four corners at surf, held within 56/64 m of the run's top (core/surface.ts). Every tile gets a caps section
+// (empty without surf: a scenario of real steps, which stay voxels); CAPS=0 (caps-mode.ts) ignores them.
+export function synthMap(tiles: number, col: (x: number, z: number) => Col, surf?: (x: number, z: number) => number): ScenarioMap {
   const meta = { W: tiles * N, D: tiles * N, tiles: { N }, palette: PALETTE };
   const pal = terrainPalette(PALETTE), S = N + 2;
   const out: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] = [];
   for (let tz = 0; tz < tiles; tz++) for (let tx = 0; tx < tiles; tx++) {
     const ground = new Uint8Array(S * S), counts = new Uint16Array(S * S), runs: number[] = [];
-    const frun: number[] = [], fcounts = new Uint16Array(S * S);
+    const frun: number[] = [], fcounts = new Uint16Array(S * S), recs: number[][] = [];
     for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
       const x = Math.min(meta.W - 1, Math.max(0, tx * N + i - 1)), z = Math.min(meta.D - 1, Math.max(0, tz * N + j - 1));
       const c = col(x, z), k = i + S * j;
@@ -37,8 +45,14 @@ export function synthMap(tiles: number, col: (x: number, z: number) => Col): Sce
       const r: [number, number, number][] = [[c.g - 1, c.g, c.mat ?? EARTH], ...(c.runs ?? [])];
       for (const [lo, hi, m] of r) runs.push(lo, hi - lo, m);
       counts[k] = r.length;
+      // (the capped run: the ground's with nothing on it, or the last over the ground, of STREET)
+      const last = r[r.length - 1], zt = r.length === 1 ? c.g : last[0] > c.g ? last[1] : 0;
+      if (!surf || !zt || last[2] !== STREET) continue;
+      const X = tx * N + i - 1, Z = tz * N + j - 1;
+      const q = [[X, Z], [X + 1, Z], [X + 1, Z + 1], [X, Z + 1]].map(([a, b]) => Math.min(zt * 64 + 56, Math.max(zt * 64 - 56, Math.round(surf(a, b) * 64))));
+      if (q.some((v) => v !== zt * 64)) recs.push([k, zt, ...q]);
     }
-    out.push({ tx, tz, tile: terrainTile(N, { ground, counts, runs: Uint16Array.from(runs) }, { counts: fcounts, runs: Uint16Array.from(frun) }, pal) });
+    out.push({ tx, tz, tile: terrainTile(N, { ground, counts, runs: Uint16Array.from(runs), caps: encodeCaps(recs) }, { counts: fcounts, runs: Uint16Array.from(frun) }, pal) });
   }
   return { meta, tiles: out };
 }
@@ -380,7 +394,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
       const street = x >= 56 && x < 72;
       const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
       return street ? { g, mat: STREET } : { g: g + 3 };
-    });
+    }, (_x, z) => stairs(z, 10, 30, 5, 8));
     const s = new Sim(map, { x: 64, z: 15 }, 0, 50 / 3.6);
     s.run(5, cruise(50));
     const L = s.log;
@@ -399,7 +413,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
       if (x < 56 || x >= 72) return { g: 30 };
       if (z < 40) return { g: 18 };
       return { g: Math.max(5, 14 - Math.floor((z - 40) / 4)), mat: STREET };
-    });
+    }, (_x, z) => 28 - stairs(z, 14, 40, 4, 9));
     const s = new Sim(map, { x: 64, z: 20 }, 0, 50 / 3.6);
     s.run(4, cruise(50));
     const L = s.log, end = L[L.length - 1];
@@ -419,7 +433,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
       if (z < 66) return { g: 4, runs: [[12, 14, STREET]] };
       if (z < 82) return { g: 10 + Math.floor((81 - z) / 4) + 1, mat: STREET };
       return { g: 10, mat: STREET };
-    });
+    }, (_x, z) => 10 + Math.max(0, Math.min(4, z < 56 ? (z - 28) / 4 : (84 - z) / 4)));
     const s = new Sim(map, { x: 64, z: 15 }, 0, 40 / 3.6);
     s.run(8, cruise(40));
     const L = s.log, end = L[L.length - 1];
@@ -429,11 +443,11 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     return { name: 'bridge', pass: end.z > 95 && minYOnDeck > 14, detail: d };
   },
   // wobble on slopes (wobble()): a paved street sloping sideways (1 m per 6 m across it), driven along at 40 km/h
-  ramp_cross() { return slope('ramp_cross', (x, z) => 10 + Math.floor((x - 40) / 6) + 0 * z, 40); },
+  ramp_cross() { return slope('ramp_cross', (x, z) => 10 + Math.floor((x - 40) / 6) + 0 * z, 40, 10, (x) => 10 + (x - 43) / 6); },
   // ... climbing diagonally (1 m per 6 m along x and along z)
-  ramp_diag() { return slope('ramp_diag', (x, z) => 10 + Math.floor((x + z - 60) / 6), 40); },
+  ramp_diag() { return slope('ramp_diag', (x, z) => 10 + Math.floor((x + z - 60) / 6), 40, 10, (x, z) => 10 + (x + z - 63) / 6); },
   // ... a steep old-town lane: 1 m per 4 m, 12 m wide between walls, at 30 km/h
-  ramp_steep() { return slope('ramp_steep', (_x, z) => 10 + Math.max(0, Math.min(12, Math.floor((z - 30) / 4))), 30, 6); },
+  ramp_steep() { return slope('ramp_steep', (_x, z) => 10 + Math.max(0, Math.min(12, Math.floor((z - 30) / 4))), 30, 6, (_x, z) => stairs(z, 10, 30, 4, 12)); },
   // a raised paved square (1 m) met at 30° at 30 km/h: a paved step (smoothed by ramps.ts)
   kerb_paved_diag() {
     const map = synthMap(2, (_x, z) => ({ g: z >= 50 ? 11 : 10, mat: STREET }));
@@ -459,7 +473,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const map = synthMap(2, (x, z) => {
       const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
       return x >= 56 && x < 72 ? { g, mat: STREET } : { g: g + 3 };
-    });
+    }, (_x, z) => stairs(z, 10, 30, 5, 8));
     const s = new Sim(map, { x: 64, z: 12 }, 0, 40 / 3.6, bus(12));
     s.run(6, cruise(40));
     const L = s.log, end = L[L.length - 1];
@@ -474,7 +488,10 @@ export const SCENARIOS: Record<string, () => Outcome> = {
     const L = s.log, end = L[L.length - 1];
     const d = { yEnd: r2(end.y), zEnd: r2(end.z), kmhEnd: r2(end.kmh), ...feel(L), ...summary(s) };
     s.dispose();
-    return { name: 'bus_terrace', pass: end.z > 65 && end.y > 11.5 && d.minUp > 0.9, detail: d };
+    // (with caps, core/surface.ts, an earth terrace is a step for every body, the bus too: it no longer rides up a
+    // 1 m step of earth on the car's private surface over all ground -- it stops at it, upright; legacy: it climbs)
+    const caps = !!map.tiles[0].tile.caps;
+    return { name: 'bus_terrace', pass: caps ? d.minUp > 0.9 && d.status === 'ok' && end.z < 52 : end.z > 65 && end.y > 11.5 && d.minUp > 0.9, detail: d };
   },
   // floatiness: the body kicked at 30 km/h on level ground (as by a bump): down at 0.6 m/s (heave), nose up at 0.8
   // rad/s (pitch); how it swings back (settling(): overshoot, settle time to within 1 cm / 0.005 rad, frequency)
@@ -518,8 +535,8 @@ export const SCENARIOS: Record<string, () => Outcome> = {
 };
 
 // a paved street on ground g(x, z) (walls 3 m high either side beyond `half` m of x = 64), driven along z from 15
-function slope(name: string, g: (x: number, z: number) => number, kmh: number, half = 10): Outcome {
-  const map = synthMap(2, (x, z) => (Math.abs(x + 0.5 - 64) <= half ? { g: g(x, z), mat: STREET } : { g: g(x, z) + 3 }));
+function slope(name: string, g: (x: number, z: number) => number, kmh: number, half = 10, surf?: (x: number, z: number) => number): Outcome {
+  const map = synthMap(2, (x, z) => (Math.abs(x + 0.5 - 64) <= half ? { g: g(x, z), mat: STREET } : { g: g(x, z) + 3 }), surf);
   const s = new Sim(map, { x: 64, z: 15 }, 0, kmh / 3.6);
   s.run(70 / (kmh / 3.6), cruise(kmh));
   const L = s.log, end = L[L.length - 1];
@@ -532,7 +549,7 @@ function crest(name: string, kmh: number): Outcome {
   const map = synthMap(2, (x, z) => {
     const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
     return x >= 56 && x < 72 ? { g, mat: STREET } : { g: g + 3 };
-  });
+  }, (_x, z) => stairs(z, 10, 30, 5, 8));
   const s = new Sim(map, { x: 64, z: 15 }, 0, kmh / 3.6);
   s.run(110 / (kmh / 3.6), cruise(kmh));
   const rest = s.log[0].y - s.log[0].road;

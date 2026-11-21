@@ -4,9 +4,10 @@ import { runnerImport } from 'vite';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { dataDir } from './data-dir.mjs';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
-export const DATA = `${root}public/data/`;
+export const DATA = `${dataDir}/`; // (VOXEL_DATA: a fixture's build, tools/data-dir.mjs)
 export const load = (p) => runnerImport(`${root}src/${p}`, { root, logLevel: 'error' }).then((m) => m.module);
 export const hasData = () => fs.existsSync(`${DATA}meta.json`) && fs.existsSync(`${DATA}traffic.json`);
 

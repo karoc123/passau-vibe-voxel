@@ -90,6 +90,18 @@ export function edgeCorners(d: number, dir: number): [number, number, number, nu
 // record's, and the zigzag of each corner less ztop * 64. Sorted by column, then ztop.
 const unzig = (u: number) => (u >>> 1) ^ -(u & 1);
 
+// the section's bytes (as uint16) from records [column, ztop, q0, q1, q2, q3] (q absolute; scripts/caps.py encode)
+export function encodeCaps(recs: number[][]): Uint16Array {
+  const r = [...recs].sort((a, b) => a[0] - b[0] || a[1] - b[1]), n = r.length, out = new Uint16Array(6 * n);
+  const zz = (v: number) => ((v << 1) ^ (v >> 15)) & 0xffff;
+  r.forEach((x, i) => {
+    out[i] = x[0] - (i ? r[i - 1][0] : 0);
+    out[n + i] = zz(x[1] - (i ? r[i - 1][1] : 0));
+    for (let k = 0; k < 4; k++) out[(2 + k) * n + i] = zz(x[2 + k] - x[1] * 64);
+  });
+  return out;
+}
+
 // the section's records as they are: [column, ztop, q0, q1, q2, q3] per record (q absolute, 1/64 cell)
 export function decodeCaps(caps: Uint16Array): Int32Array {
   const n = Math.floor(caps.length / 6), out = new Int32Array(n * 6);

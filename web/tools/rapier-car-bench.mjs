@@ -2,10 +2,12 @@
 // public/data/tiles on disk). A car-sized kinematic body moves along a line at a speed, 60 frames a second; each frame
 // the terrain is updated (builds within its budget) and the world stepped. Prints per-frame build and step times.
 // usage: node tools/rapier-car-bench.mjs [--budget MS] [--speed KMH] [--chunk-lead] [--no-couple] [x0 z0 x1 z1]
+// (VOXEL_DATA: other data, tools/data-dir.mjs; CAPS=0: the legacy surface where the data has caps)
 import { runnerImport } from 'vite';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { dataDir } from './data-dir.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
@@ -18,7 +20,7 @@ const { module: T } = await runnerImport(`${root}src/physics/rapier/terrain.ts`,
 const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
-const meta = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8'));
+const meta = JSON.parse(fs.readFileSync(`${dataDir}/meta.json`, 'utf8'));
 const N = meta.tiles.N;
 const world = new R.World({ x: 0, y: -9.81, z: 0 });
 world.timestep = 1 / 60;
@@ -26,7 +28,7 @@ const origin = { x: Math.floor(x0 / 16) * 16, z: Math.floor(z0 / 16) * 16 };
 const terrain = new T.RapierTerrain(R, world, meta, origin, { budgetMs: budget, couple: !noCouple });
 // the tiles along the way, decoded up front (the page loads them as it goes; here only the build costs count)
 const pal = T.terrainPalette(meta.palette);
-const read = (p) => zlib.gunzipSync(fs.readFileSync(`${root}public/data/tiles/${p}`)).buffer;
+const read = (p) => zlib.gunzipSync(fs.readFileSync(`${dataDir}/tiles/${p}`)).buffer;
 const seen = new Set(), decodeMs = [];
 const len = Math.hypot(x1 - x0, z1 - z0);
 for (let s = 0; s <= len; s += 16) for (const dx of [-64, 0, 64]) for (const dz of [-64, 0, 64]) {

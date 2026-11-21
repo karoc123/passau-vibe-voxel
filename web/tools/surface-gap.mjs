@@ -21,6 +21,9 @@
 //   out.json: all numbers, to diff or check against later; -v: the drive's gaps split by flat / ramp / deck too
 //   --check: exit code 1 if a gap or the ride got worse than the baseline's by more than the tolerances (TOL below,
 //   times F, default 1), a run the baseline had is missing or no longer gets to its road's end
+// Other data (a fixture's build: VOXEL_DATA, tools/data-dir.mjs): the areas moved to its map by the project grid (as
+// the main map's, MAIN_ORIGIN) and clipped to it, the roads found by their OSM way (the longest road of it), those
+// off the map skipped. CAPS=0: the legacy surface where the data has caps (caps-mode.ts), to compare.
 // ~1 min, one core; no rendering.
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -59,6 +62,14 @@ const ROADS = [
   { name: 'spitzberg_445', i: 445, w: 23653874 }, // 7.2 % down
 ];
 const SPEEDS = [30, 50, 70], PARK = [0.3, 0.6], MAX_LEN = 300;
+// the map the areas' world coordinates are of (its meta.json origin); other data: moved by the project grid
+const MAIN_ORIGIN = [-6144, -2048];
+const [shx, shz] = [MAIN_ORIGIN[0] - (meta.origin ?? [0, 0])[0], MAIN_ORIGIN[1] - (meta.origin ?? [0, 0])[1]];
+const moved = shx || shz;
+for (const [k, [x0, z0, x1, z1]] of Object.entries(AREAS)) {
+  const a = [Math.max(0, x0 + shx), Math.max(0, z0 + shz), Math.min(meta.W, x1 + shx), Math.min(meta.D, z1 + shz)];
+  if (a[2] - a[0] < 16 || a[3] - a[1] < 16) delete AREAS[k]; else AREAS[k] = a;
+}
 
 // tolerances for --check (cm, percentage points, rad/s), scaled by --tol
 const TOL = { abs: 0.5, p05: 1, p95: 1, lo5: 2, hi5: 2, pitchJit: 0.02, heave: 0.3, liftPct: 2 };
@@ -115,9 +126,15 @@ async function scan(name, [x0, z0, x1, z1]) {
 const traffic = await trafficRoads();
 async function roadOf(r) {
   if (r.schanzl) return { path: await schanzlPath(), y: 20 };
-  const road = traffic[r.i];
+  let i = r.i;
+  if (moved) { // (another map: the longest road of the way)
+    i = -1;
+    traffic.forEach((q, k) => { if (q.w === r.w && (i < 0 || q.p.length > traffic[i].p.length)) i = k; });
+    if (i < 0) return null;
+  }
+  const road = traffic[i];
   if (!road || road.w !== r.w) throw new Error(`${r.name}: traffic.json road ${r.i} is way ${road?.w}, not ${r.w} (regenerated? update ROADS)`);
-  const path = await roadPath(r.i);
+  const path = await roadPath(i);
   return { path, y: path.map((q) => q[2]) };
 }
 
@@ -178,7 +195,9 @@ const t0 = Date.now();
 if (only !== 'drive') for (const [name, a] of Object.entries(AREAS)) result.scan[name] = await scan(name, a);
 if (only !== 'scan') {
   for (const r of ROADS) {
-    const { path, y } = await roadOf(r);
+    const rd = await roadOf(r);
+    if (!rd || rd.path.some(([x, z]) => x < 0 || z < 0 || x >= meta.W || z >= meta.D)) { result.skipped[r.name] = 'not on this map'; continue; }
+    const { path, y } = rd;
     const map = await realMap(path.slice(0, MAX_LEN + 20), 48);
     const st = sc.safeStart(map, path, y);
     if (!st) { result.skipped[r.name] = 'no clear start'; continue; }
