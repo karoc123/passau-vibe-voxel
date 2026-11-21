@@ -154,6 +154,92 @@ export function follow(path: [number, number][], kmh: number): (s: Sim) => CarIn
   };
 }
 
+// A polyline's points (x, z[, y ...]) every metre or less, the last kept: a path for follow()
+export function densify(way: number[][]): number[][] {
+  const pts: number[][] = [];
+  for (let k = 0; k < way.length - 1; k++) {
+    const a = way[k], b = way[k + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1])));
+    for (let i = 0; i < n; i++) pts.push(a.map((v, j) => v + (b[j] - v) * i / n));
+  }
+  pts.push([...way[way.length - 1]]);
+  return pts;
+}
+
+// The column of a map at world (x, z): its tile and index there (null: off the tiles given)
+export function mapColumns(map: ScenarioMap) {
+  const N = map.meta.tiles.N, byKey = new Map(map.tiles.map((t) => [`${t.tx}_${t.tz}`, t.tile]));
+  return (x: number, z: number) => {
+    const tile = byKey.get(`${Math.floor(x / N)}_${Math.floor(z / N)}`);
+    if (!tile) return null;
+    return { tile, c: (Math.floor(x) - Math.floor(x / N) * N) + 1 + tile.S * ((Math.floor(z) - Math.floor(z / N) * N) + 1) };
+  };
+}
+
+// Where to start a car on a path (world x, z points ~1 m apart, as densify gives; y: the road's height at each point,
+// traffic.json's, or one height for all): not at its first point (a road's end is a junction's corner, often in a
+// building's edge where the data's centreline cuts it) but `ahead` m in (default 5) or further, at the first point
+// where the car's body (its box over the ground there, heading along the path) is clear of solid voxels (a car's ramp's
+// top voxel, which it does not see, not counted). And how close the path runs to walls: `walls` points with a solid
+// voxel 1.6-2.4 m over their ground (a wall, not a terrace's 1 m step nor a tree's crown) within `reach` m (default
+// 1.3) of them, away from its ends (3 m): a follower there
+// scrapes or hits them (road 1904 in the Altstadt, whose centreline runs along a house front); wallAt: the first (-1:
+// none). null: no clear point before the path's half (or no ground).
+export function safeStart(map: ScenarioMap, path: number[][], y: number[] | number, opts: { ahead?: number; reach?: number; build?: CarBuild } = {}) {
+  const col = mapColumns(map), B = opts.build ?? CAR, reach = opts.reach ?? 1.3;
+  const yAt = (i: number) => (typeof y === 'number' ? y : y[Math.min(i, y.length - 1)]);
+  // (the top of the highest solid at or below h, and the ground the car finds there: half a metre under it on the car's
+  // ramps, whose top voxel it does not see)
+  const ground = (x: number, z: number, h: number) => {
+    const q = col(x, z);
+    if (!q) return null;
+    const { iv, off, top, carRamped } = q.tile;
+    let t = 0;
+    for (let k = off[q.c]; k < off[q.c + 1]; k += 2) if (iv[k + 1] <= h + 1e-3) t = iv[k + 1];
+    return { top: t, g: carRamped && carRamped[q.c] && t === top[q.c] ? t - 0.5 : t };
+  };
+  // (any solid in [lo, hi) at (x, z), the car's view)
+  const solid = (x: number, z: number, lo: number, hi: number) => {
+    const q = col(x, z);
+    if (!q) return true;
+    const { iv, off, top, carRamped } = q.tile;
+    for (let k = off[q.c]; k < off[q.c + 1]; k += 2) {
+      const top1 = carRamped && carRamped[q.c] && iv[k + 1] === top[q.c] ? iv[k + 1] - 1 : iv[k + 1];
+      if (iv[k] < hi && top1 > lo) return true;
+    }
+    return false;
+  };
+  let L = 0;
+  const along = [0];
+  for (let k = 1; k < path.length; k++) along.push(L += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]));
+  let walls = 0, wallAt = -1;
+  for (let i = 0; i < path.length; i++) {
+    if (along[i] < 3 || along[i] > L - 3) continue;
+    const [x, z] = path[i], gr = ground(x, z, yAt(i) + 1);
+    if (!gr) continue;
+    const g = gr.g;
+    let hit = false;
+    for (let dz = -reach; dz <= reach + 1e-6 && !hit; dz += 0.25) for (let dx = -reach; dx <= reach + 1e-6 && !hit; dx += 0.25) {
+      if (dx * dx + dz * dz <= reach * reach && solid(x + dx, z + dz, g + 1.6, g + 2.4)) hit = true;
+    }
+    if (hit) { walls++; if (wallAt < 0) wallAt = i; }
+  }
+  for (let i = 0; i < path.length - 3 && along[i] < L / 2; i++) {
+    if (along[i] < (opts.ahead ?? 5)) continue;
+    const [x, z] = path[i], gr = ground(x, z, yAt(i) + 1);
+    if (!gr) continue;
+    const g = gr.g;
+    const h = Math.atan2(path[i + 2][0] - x, path[i + 2][1] - z), sn = Math.sin(h), cs = Math.cos(h);
+    // (the box from 0.6 m over the ground, so a ramp's rise under its ends is not a wall, to its roof)
+    let clear = true;
+    for (let a = -B.half.z; a <= B.half.z + 1e-6 && clear; a += B.half.z / 4) for (let b = -B.half.x; b <= B.half.x + 1e-6 && clear; b += B.half.x / 2) {
+      if (solid(x + cs * b + sn * a, z - sn * b + cs * a, g + 0.6, g + B.ride + B.half.y)) clear = false;
+    }
+    // (at.y: Sim's car starts on the highest ground at or below it)
+    if (clear) return { i, at: { x, y: gr.top + 0.01, z }, heading: h, walls, wallAt };
+  }
+  return null;
+}
+
 // How much the car wobbles, over the samples on the ground (from the first to the last with a wheel down): the pitch
 // and roll rates' jitter (rad/s: RMS of the rate less its 0.5 s moving mean, so a slope's change is not counted, its
 // bumps are), their peaks, the share of samples with fewer than four wheels down (liftPct) and how often a wheel left

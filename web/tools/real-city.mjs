@@ -1,0 +1,68 @@
+// Not a tool: what the tools driving the Rapier car in the real city (public/data on disk) share -- rapier-car.mjs,
+// surface-gap.mjs. The src modules (through vite's runner), the tiles as the car's terrain, the traffic roads.
+import { runnerImport } from 'vite';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import zlib from 'node:zlib';
+
+export const root = fileURLToPath(new URL('..', import.meta.url));
+export const DATA = `${root}public/data/`;
+export const load = (p) => runnerImport(`${root}src/${p}`, { root, logLevel: 'error' }).then((m) => m.module);
+export const hasData = () => fs.existsSync(`${DATA}meta.json`) && fs.existsSync(`${DATA}traffic.json`);
+
+let meta = null;
+export const readMeta = () => (meta ??= JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8')));
+
+// the tiles as terrainTile builds them (cached), with the decoded columns' ground
+const tiles = new Map();
+export async function realTile(tx, tz) {
+  const k = `${tx}_${tz}`;
+  if (!tiles.has(k)) {
+    if (!fs.existsSync(`${DATA}tiles/1/${k}.bin`)) { tiles.set(k, null); return null; }
+    const T = await load('physics/rapier/terrain.ts'), TD = await load('tile-data.ts');
+    const N = readMeta().tiles.N, pal = T.terrainPalette(readMeta().palette);
+    const read = (p) => zlib.gunzipSync(fs.readFileSync(`${DATA}tiles/${p}`)).buffer;
+    tiles.set(k, T.terrainTile(N, TD.decodeTile(read(`1/${k}.bin`), N), TD.decodeTile(read(`1f/${k}.bin`), N), pal));
+  }
+  return tiles.get(k);
+}
+
+// the real city's tiles within `reach` m of the points (x, z), as scenarios.ts Sim takes them (Rapier initialised)
+export async function realMap(points, reach) {
+  const R = (await import('@dimforge/rapier3d-compat')).default;
+  await R.init();
+  const N = readMeta().tiles.N, want = new Set();
+  for (const [x, z] of points) for (let tz = Math.floor((z - reach) / N); tz <= Math.floor((z + reach) / N); tz++) for (let tx = Math.floor((x - reach) / N); tx <= Math.floor((x + reach) / N); tx++) want.add(`${tx}_${tz}`);
+  const out = [];
+  for (const k of want) {
+    const [tx, tz] = k.split('_').map(Number), tile = await realTile(tx, tz);
+    if (tile) out.push({ tx, tz, tile });
+  }
+  return { meta: readMeta(), tiles: out };
+}
+
+// traffic.json's roads (p: [x, z, y] points)
+let traffic = null;
+export async function trafficRoads() {
+  if (!traffic) traffic = (await load('sim/traffic-pack.ts')).unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))).roads;
+  return traffic;
+}
+
+// Road i of traffic.json as a path to follow: points every metre (x, z, y), from its far end if rev
+export async function roadPath(i, rev = false) {
+  const sc = await load('physics/rapier/scenarios.ts');
+  const p = (await trafficRoads())[i].p.map((q) => [q[0], q[1], q[2]]);
+  if (rev) p.reverse();
+  return sc.densify(p);
+}
+
+// Across the Schanzlbrücke, south to north along its carriageway (traffic roads 186, 570, 149, 660, 111 when it was
+// drawn): the points in the project grid (map cells + meta.origin), so it holds whatever the map's extent; schanzlPath:
+// in world metres, every metre
+export const SCHANZL = [[1202, 459], [1205, 471], [1211, 489], [1215, 503], [1218, 515], [1223, 535], [1226, 549], [1229, 561], [1232, 576],
+  [1235, 590], [1238, 602], [1242, 620], [1246, 634], [1247, 642], [1249, 651], [1252, 666], [1254, 678], [1257, 692], [1259, 702]];
+export async function schanzlPath() {
+  const sc = await load('physics/rapier/scenarios.ts');
+  const [ox, oz] = readMeta().origin ?? [0, 0];
+  return sc.densify(SCHANZL.map(([x, z]) => [x - ox, z - oz]));
+}

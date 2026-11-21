@@ -9,15 +9,14 @@
 //          the real city: the car follows road I of public/data/traffic.json (REV 1: from its far end) at KMH (default
 //          30), steering by pure pursuit; prints how much it wobbled (scenarios.ts wobble) and what happened
 //        node tools/rapier-car.mjs --roads [KMH]: the steepest roads (the wobble benchmark), one line each
+//          (--road/--roads start a few metres in, clear of walls: scenarios.ts safeStart; walls=N: N points of the road
+//          within 1.3 m of a wall, where the follower may scrape it)
 //   --spike: the spike's car (no step wedges, wall glancing, air assist) for comparison
-import { runnerImport } from 'vite';
-import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { root, load, realMap, roadPath, SCHANZL } from './real-city.mjs';
 
 const args = process.argv.slice(2);
-const root = fileURLToPath(new URL('..', import.meta.url));
-const load = (p) => runnerImport(`${root}src/${p}`, { root, logLevel: 'error' }).then((m) => m.module);
 const sc = await load('physics/rapier/scenarios.ts');
 const ds = await load('physics/rapier/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
@@ -33,30 +32,10 @@ if (setAt >= 0) {
   }
 }
 
-// the real city's tiles within `reach` m of the points (x, z)
-async function realMap(points, reach) {
-  const T = await load('physics/rapier/terrain.ts'), TD = await load('tile-data.ts');
-  const R = (await import('@dimforge/rapier3d-compat')).default;
-  await R.init();
-  const meta = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8'));
-  const N = meta.tiles.N, pal = T.terrainPalette(meta.palette);
-  const read = (p) => zlib.gunzipSync(fs.readFileSync(`${root}public/data/tiles/${p}`)).buffer;
-  const want = new Set();
-  for (const [x, z] of points) for (let tz = Math.floor((z - reach) / N); tz <= Math.floor((z + reach) / N); tz++) for (let tx = Math.floor((x - reach) / N); tx <= Math.floor((x + reach) / N); tx++) want.add(`${tx}_${tz}`);
-  const tiles = [];
-  for (const k of want) {
-    if (!fs.existsSync(`${root}public/data/tiles/1/${k}.bin`)) continue;
-    const [tx, tz] = k.split('_').map(Number);
-    tiles.push({ tx, tz, tile: T.terrainTile(N, TD.decodeTile(read(`1/${k}.bin`), N), TD.decodeTile(read(`1f/${k}.bin`), N), pal) });
-  }
-  return { meta, tiles };
-}
-
 const fmt = (o) => Object.entries(o).map(([k, v]) => `${k}=${v}`).join(' ');
 const roadArgs = args.flatMap((a, i) => (a === '--road' ? [args[i + 1]] : []));
 const roadsAt = args.indexOf('--roads');
 if (roadArgs.length || roadsAt >= 0) {
-  const traffic = (await load('sim/traffic-pack.ts')).unpackTraffic(JSON.parse(fs.readFileSync(`${root}public/data/traffic.json`, 'utf8')));
   // the benchmark: the steepest roads of Passau (each with ~40 m at 15-25 %), both ways
   const bench = [435, 451, 533, 54, 139, 293, 358, 1, 421, 355];
   const kmhAll = roadsAt >= 0 && args[roadsAt + 1] && !args[roadsAt + 1].startsWith('--') ? +args[roadsAt + 1] : 30;
@@ -65,12 +44,12 @@ if (roadArgs.length || roadsAt >= 0) {
   const tot = { n: 0 };
   for (const k of KEYS) tot[k] = 0;
   for (const [i, kmh = 30, rev = 0] of runs) {
-    const pts = traffic.roads[i].p.map((q) => [q[0], q[1]]);
-    if (rev) pts.reverse();
-    const map = await realMap(pts, 48);
-    const a = Math.atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
-    const p0 = traffic.roads[i].p[rev ? traffic.roads[i].p.length - 1 : 0];
-    const s = new sc.Sim(map, { x: pts[0][0], y: p0[2] + 1.5, z: pts[0][1] }, a, kmh / 3.6);
+    // (from a few metres in, where the car's box is clear of the voxels: scenarios.ts safeStart)
+    const way = await roadPath(i, !!rev), map = await realMap(way, 48);
+    const st = sc.safeStart(map, way, way.map((q) => q[2]));
+    if (!st) { console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h  no clear start`); continue; }
+    const pts = way.slice(st.i);
+    const s = new sc.Sim(map, st.at, st.heading, kmh / 3.6);
     let L = 0;
     for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
     const f = sc.follow(pts, kmh);
@@ -83,7 +62,7 @@ if (roadArgs.length || roadsAt >= 0) {
     const w = sc.feel(log), last = s.log[s.log.length - 1];
     const ev = s.events.filter((e) => e.kind !== 'impact' || e.speed > 2).map((e) => `${e.kind}${e.crash ? '!' : ''}`);
     const left = Math.hypot(last.x - end[0], last.z - end[1]);
-    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
+    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m${st.walls ? ` walls=${st.walls}` : ''} ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
     for (const k of KEYS) tot[k] += w[k];
     tot.n++;
     if (args.includes('-v')) for (let k = 0; k < s.log.length; k += 15) { const l = s.log[k]; console.log(`  t ${l.t.toFixed(2)} ${l.x.toFixed(1)},${l.y.toFixed(2)},${l.z.toFixed(1)} ${l.kmh.toFixed(0)} km/h up ${l.up.toFixed(2)} wheels ${l.wheels} pr ${l.pr.toFixed(2)} rr ${l.rr.toFixed(2)}`); }
@@ -119,8 +98,6 @@ if (real >= 0) {
 // its top is ramped as a street's (ramps.ts). Judged by the body's vertical acceleration (max |dvy/dt|), the pitch
 // rate's peak and the share of samples with a wheel off the deck. Skipped when the data are not there. The points are in
 // the project grid (map cells + meta.origin), so the scenario holds whatever the map's extent.
-const SCHANZL = [[1202, 459], [1205, 471], [1211, 489], [1215, 503], [1218, 515], [1223, 535], [1226, 549], [1229, 561], [1232, 576],
-  [1235, 590], [1238, 602], [1242, 620], [1246, 634], [1247, 642], [1249, 651], [1252, 666], [1254, 678], [1257, 692], [1259, 702]];
 async function schanzlBridge() {
   if (!fs.existsSync(`${root}public/data/meta.json`)) return null;
   const [ox, oz] = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8')).origin ?? [0, 0];
