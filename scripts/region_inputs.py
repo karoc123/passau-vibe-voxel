@@ -192,10 +192,39 @@ def _osm_boxes(els):
 
 def cut_osm(ws, rdir, src=None):
     """each region's cut of data/raw/osm.json into rdir(w)/osm.json (written only when it changed); returns {w: hash
-    of its elements}"""
+    of its elements}. Kept in data/cache/inputs/osm_cut.json while what decides the cuts is as it was (the file's
+    hash, the override files', the cover, the margins, the config and the code: _cut_key) and every cut is there"""
+    src = Path(src or f"{aoi.RAW}/osm.json")
+    key = _cut_key(ws, src)
+    rec = _load_json(CACHE / "osm_cut.json")
+    names = {w: f"{w.r0},{w.r1},{w.c0},{w.c1}" for w in ws}
+    if rec.get("key") == key and all(names[w] in rec.get("hashes", {}) and (rdir(w) / "osm.json").exists()
+                                     and (rdir(w) / "osm.sha").exists()
+                                     and (rdir(w) / "osm.sha").read_text() == rec["cuts"][names[w]] for w in ws):
+        print("OSM cuts up to date (data/cache/inputs/osm_cut.json; the overrides' checks ran when they were made)")
+        return {w: rec["hashes"][names[w]] for w in ws}
+    out, cuts = _cut_osm(ws, rdir, src)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE / f"osm_cut.{os.getpid()}.tmp"
+    tmp.write_text(json.dumps(dict(key=key, hashes={names[w]: out[w] for w in ws}, cuts={names[w]: cuts[w] for w in ws})))
+    os.replace(tmp, CACHE / "osm_cut.json")
+    return out
+
+
+def _cut_key(ws, src):
+    """the hash of what decides the OSM cuts"""
+    import overrides
+    import region
+    d = dict(osm=file_sha(src), src=str(src), overrides=overrides.tree_sha(), cover=[[w.r0, w.r1, w.c0, w.c1, w.D, w.W] for w in ws],
+             margin=OSM_MARGIN, reach=OVERRIDE_REACH, halo=region.HALO, config=config_part(),
+             code={f: code_sha(HERE / f) for f in ("landmarks.py", "overrides.py", "region_inputs.py", "aoi.py")})
+    return sha(json.dumps(d, sort_keys=True).encode())
+
+
+def _cut_osm(ws, rdir, src):
+    """cut_osm's work: ({w: hash}, {w: the hash of its cut's elements, osm.sha})"""
     import landmarks
     import overrides
-    src = Path(src or f"{aoi.RAW}/osm.json")
     data = json.load(open(src))
     els = data.pop("elements")
     overrides.load()  # (every override file valid, or stop here)
@@ -206,7 +235,7 @@ def cut_osm(ws, rdir, src=None):
     bb = np.array([b if b is not None else (0, 0, 0, 0) for b in boxes], float).reshape(-1, 4)
     have = overrides.objects()
     ovm = np.array([(e["type"], e["id"]) in have for e in els], bool)
-    out = {}
+    out, cuts = {}, {}
     for w in ws:
         ra, rb, ca, cb = w.region(_halo())
         m = always | ((bb[:, 2] >= ca - OSM_MARGIN) & (bb[:, 0] <= cb + OSM_MARGIN)
@@ -228,7 +257,8 @@ def cut_osm(ws, rdir, src=None):
         close = ovm & (bb[:, 2] >= kc) & (bb[:, 0] <= kd) & (bb[:, 3] >= ka) & (bb[:, 1] <= kb)
         ov = overrides.keys_in([els[i] for i in np.flatnonzero(close)])
         out[w] = sha((h + json.dumps(ov)).encode()) if ov else h
-    return out
+        cuts[w] = h
+    return out, cuts
 
 
 def _halo():
