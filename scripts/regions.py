@@ -246,7 +246,7 @@ def driver_stamp(ws):
 
 
 DRIVER_OUT = [OUT / "meta.json", Path("data/trees.json"), OUT / "traffic.json", Path("data/qa_roadmask.bin.gz"),
-              Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz")]
+              Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz"), Path("data/surface.npz")]
 
 
 def main(argv):
@@ -324,6 +324,10 @@ def main(argv):
     mapstore.write_npz("data/ground.npz", dict(g=npz_entry("g", np.int16), rgb=npz_entry("rgb", np.uint8, (3,)),
                                                water=npz_entry("water", bool), b=npz_entry("b", np.int16)))
     mapstore.write_npz("data/footprints.npz", dict(oid=npz_entry("oid", np.int64)))
+    # the continuous surfaces under the voxels, for the sloped caps (caps.py, run by tile_fields.py)
+    mapstore.write_npz("data/surface.npz", dict(gt=npz_entry("gt", np.int16), deck=npz_entry("deck", np.float32),
+                                                roof_z=npz_entry("roof_z", np.float32), roof_gx=npz_entry("roof_gx", np.float32),
+                                                roof_gy=npz_entry("roof_gy", np.float32)))
     qa = R("qa", np.uint8)
     with gzip.GzipFile("data/qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
         for _, band in qa.bands():

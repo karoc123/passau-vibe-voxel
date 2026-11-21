@@ -1556,6 +1556,7 @@ overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note
 # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
 # contour lines of the street below across every flat roof and plane of LoD2
 topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
+_roof_f = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
 # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
 # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
 _cl = ndimage.grey_closing(topi, size=(3, 3))
@@ -3782,6 +3783,18 @@ CORE_OUT["deck_near"] = deck_near
 CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
 CORE_OUT["floor"] = tunnels.FLOOR if tunnels.FLOOR is not None else np.full((D, W), -1, np.int16)
 CORE_OUT["walk"] = underpass.WALK
+# the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
+# docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
+# it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
+# NaN elsewhere); roof_z: the roof's height at the cell's middle where its plane is known (the float zt was rounded
+# from), roof_gx / roof_gy: its rise per metre east / south (NaN: unknown)
+CORE_OUT["gt"] = g.astype(np.int16)
+CORE_OUT["deck"] = np.where(deck, deck_abs - BASE, np.nan).astype(np.float32)
+_rk = (PLANES > 0) | np.isfinite(ROOF_GX)
+CORE_OUT["roof_z"] = np.where(_rk, _roof_f, np.nan).astype(np.float32)
+CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.astype(np.float32)
+note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
+     "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
 _lines = {oid: l_ for oid, _, l_ in osm.lines}
 
 
