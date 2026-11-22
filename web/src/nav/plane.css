@@ -1,0 +1,35 @@
+/* the plane (nav/plane.ts): its panel in the bar's mode tools; while it flies the other modes' panels and the key
+   legend are hidden, the panel a compact strip as the drone's */
+#bar .plane-telemetry { font-variant-numeric: tabular-nums; font-weight: 600; }
+#bar .plane-status:empty { display: none; }
+#bar .plane-invert { display: flex; align-items: center; gap: 6px; color: var(--t2); cursor: pointer; }
+#bar .plane-help-touch { display: none; }
+@media (pointer: coarse) {
+  #bar .plane-help-keys { display: none; }
+  #bar .plane-help-touch { display: inline; }
+  #bar .plane-mode > button { min-height: 44px; }
+}
+body.plane-flying :is(#hud, .caption),
+body.plane-flying #bar > :not(.mode-tools),
+body.plane-flying #bar .mode-tools > :not(.plane-mode) { display: none; }
+body.plane-flying #bar { right: auto; width: max-content; max-width: calc(100% - 28px - var(--sl) - var(--sr)); }
+body.plane-flying #bar .plane-mode {
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 0 8px; border-radius: 6px; background: rgba(16,17,20,.62);
+}
+body.plane-flying #bar .plane-mode .mode-detail { display: contents; }
+body.plane-flying #bar .plane-status:not(:empty) { order: 1; flex-basis: 100%; padding-bottom: 6px; }
+body.plane-flying #bar .plane-help { order: 2; flex-basis: 100%; min-width: 0; white-space: normal; padding-bottom: 6px; color: var(--t2); }
+body.plane-flying #bar .plane-mode { max-width: 100%; box-sizing: border-box; }
+body.plane-flying #bar .plane-invert { order: 3; padding-bottom: 6px; }
+
+/* the throttle on a touch screen: a vertical slider under the right thumb; it stays where it is left */
+#plane-throttle { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(90px + var(--sb)); z-index: 4; width: 56px; height: min(42vh, 280px);
+  border: 1.5px solid rgba(255,255,255,.55); border-radius: 28px; background: rgba(16,17,20,.45); overflow: hidden;
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#plane-throttle .fill { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(255,170,60,.35); }
+#plane-throttle .knob { position: absolute; left: 6px; right: 6px; height: 24px; border-radius: 12px; background: rgba(255,255,255,.85); }
+#plane-throttle .val { position: absolute; top: 8px; left: 0; right: 0; text-align: center; color: #fff; font: 600 12px/1 Inter, system-ui, sans-serif; }
+@media (pointer: coarse) { body.plane-flying:not(.noui) #plane-throttle { display: block; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #plane-throttle { right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); height: min(55vh, 240px); }
+}

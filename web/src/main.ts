@@ -14,6 +14,7 @@ import { Labels } from './labels';
 import type { DriveMode } from './nav/drive';
 import type { FpvMode } from './nav/fpv';
 import type { BoatMode } from './nav/boat';
+import type { PlaneMode } from './nav/plane';
 import { flying, Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -78,6 +79,7 @@ movingActors.add(nav.actors);
 let fpv: FpvMode | null = null;
 let drive: DriveMode | null = null;
 let boat: BoatMode | null = null;
+let plane: PlaneMode | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -391,7 +393,7 @@ async function boot() {
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
   world = nav.world = streamer.world;
-  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' ? movingActors : null);
+  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.mode === 'plane' ? movingActors : null);
   nav.streamer = streamer;
   nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
@@ -439,12 +441,14 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  const [{ FpvMode }, { DriveMode }, { BoatMode }] = await Promise.all([
-    import('./nav/fpv'), import('./nav/drive'), import('./nav/boat'),
+  const [{ FpvMode }, { DriveMode }, { BoatMode }, { PlaneMode }] = await Promise.all([
+    import('./nav/fpv'), import('./nav/drive'), import('./nav/boat'), import('./nav/plane'),
   ]);
   fpv = new FpvMode(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
   boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, () => daylight.night, () => flood?.level ?? 0);
+  plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement,
+    { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => flood?.info?.river ?? null, park: () => drive?.park() });
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
@@ -469,6 +473,7 @@ renderer.setAnimationLoop((now) => {
   nav.update(dt);
   fpv?.update(dt);
   boat?.update(dt);
+  plane?.update(dt);
   const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
   walkButton.disabled = !world || nav.enteringWalk || flying(nav.mode);
