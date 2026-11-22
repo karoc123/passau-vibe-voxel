@@ -39,8 +39,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R7 | Smaller independent items | M each | **Ready** |
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
-| F5 | Trains and boats into the world sim | M | **Ready** |
-| Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
+| F5 | Trains and boats into the world sim | M | In progress (`f5`) |
+| Q3 | Underpass stairwells never cut a carriageway or a track | S–M | In progress (`q3`) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | In progress (`q8`) |
 | F7 | Motorbike handling | M | **Ready** |
@@ -221,13 +221,13 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 - **Waits for:** F5 (the trains' plain sim part). F4 landed the shared Rapier world. Fold F6 into F5 if the same
   agent does both.
-- **Today:** the player drives through trains. `nav/drive-session.ts` builds the car's obstacles from
-  `life.roadVehicles()` only. `sim/trains.ts` keeps its trains private and computes each coach's pose only when it
+- **Today:** the player drives through trains. The shared Rapier world (`physics/rapier/life-phys.ts`) handles road
+  vehicles. `sim/trains.ts` keeps its trains private and computes each coach's pose only when it
   draws (`render`), in three.js types. Walking, the boat and the planes collide with voxels only
   (`nav/voxel-collision.ts`), so they pass through trains too.
 - **Do:** the train sim publishes its coaches as boxes (entity id, pose, 2.9 × 4 × 20 m) in the tick's snapshot
   ([ADR 0007](../adr/0007-player-control-in-world-sim.md)). In the shared world each coach near a player is a
-  kinematic body that is never knocked away (today's `Obstacle` turns into a wreck when hit; a train must not).
+  kinematic body that stays on its track on impact.
 - **Do:** a hit at speed is an `impact` for the car (a crash for a bike), as a wall is.
 - **Not in scope:** trains stopping for a car on the track, and train collisions for walkers, boats and planes.
   Note them as open.
@@ -241,7 +241,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   (`steer / (1 + v / steerFall)`, moto 0.42 rad and 9 m/s).
 - **Today, falling:** on flat ground the bike does not tip. Measured with `scenarios.ts` `Sim`: 20–130 km/h at
   full lock, `up` stays 1 and all four hidden wheels stay down (at 130 km/h full lock it scrubs down to 18 km/h).
-  The rider comes off by the rules in `nav/drive-session.ts`: an `impact` or a `knock` of 7 m/s (25 km/h) or more
+  The rider comes off by the rules in `physics/rapier/player-car.ts`: an `impact` or a `knock` of 7 m/s (25 km/h) or more
   (`FALL_IMPACT`), which includes touching any traffic car and any wall or kerb that costs that speed in one step; a
   crash landing; or lying on its side. The righting in `car.ts` `bike()` works only with two or more wheels on the
   ground. `tools/vehicles.mjs` tests the bike at `steer` 0.33 and 0.5 only, never at keyboard lock, and has no test
