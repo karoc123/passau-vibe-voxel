@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../sim/life';
-import type { Pose } from '../sim/types';
+import type { Person, Pose } from '../sim/types';
 import type { TileStreamer } from '../stream';
 import type { View } from '../types';
 import { clamp, coarsePointer, ease } from '../util';
@@ -77,7 +77,7 @@ export class Nav {
   private landmark: THREE.Vector3 | null = null;
   private skyView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private orbitFov = 0;
-  private possessed: unknown = null;
+  private possessed: Person | null = null; // the person walked by the player (their ctl set) while riding them
   private jumpAsked = false;
   private walkPending = false;
   private zoomT = 0;
@@ -482,6 +482,7 @@ export class Nav {
     this.mode = 'orbit';
     this.pedestrian?.hide();
     this.ride = null;
+    this.release();
     this.marker.visible = false;
     if (this.life) this.life.keep = null;
     this.controls.enabled = true;
@@ -614,6 +615,7 @@ export class Nav {
     if (opts.thirdPerson) this.enterPedestrian();
     else { this.mode = 'walk'; this.pedestrian?.hide(); this.releasePedestrianMouse(); }
     this.ride = null;
+    this.release();
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
@@ -623,6 +625,7 @@ export class Nav {
     this.rememberSky();
     this.releasePedestrianMouse();
     this.pedestrian?.hide();
+    this.release();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
     this.landing = this.transition(1100);
     this.mode = 'ride';
@@ -632,6 +635,13 @@ export class Nav {
     this.marker.visible = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, this.ride);
+  }
+
+  // off the person walked: back to the crowd's own walk (sim/traffic.ts no longer keeps them), and following them
+  // again starts afresh from where they are (possess' init) instead of moving them to walkPos
+  private release() {
+    if (this.possessed) delete this.possessed.ctl;
+    this.possessed = null;
   }
 
   // out of the vehicle (a step to its side) or off the person, onto the street
@@ -806,12 +816,14 @@ export class Nav {
   }
 
   // walking as the person followed: W/S walk, A/D turn them, Q/E look, through their eyes; they stay where left
+  // while the ride lasts (release(): back to their own walk after)
   private possess(dt: number) {
     const R = this.ride!, o = R.obj, life = this.life;
     if (o.kind !== 'person' || !life) return;
     if (this.possessed !== o) {
       const p: Pose | null = life.pose('person', o);
       if (!p) return;
+      this.release();
       this.possessed = o;
       o.ctl = { x: p.x, y: p.y, z: p.z, h: p.h, moving: false };
       Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
