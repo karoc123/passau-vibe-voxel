@@ -140,7 +140,7 @@ export class Traffic {
   constructor(data: TrafficData, private readonly seed = DEFAULT_SEED) {
     this.rand = rng(seed);
     // At the default seed, keep the original train and boat timetables.
-    this.trains = new TrainTraffic(data.trains ?? [], seed - DEFAULT_SEED);
+    this.trains = new TrainTraffic(data.trains ?? [], (seed >>> 0) - DEFAULT_SEED);
     this.roads = data.roads.map((r, i) => Object.assign(prepPath(r), { i, lists: Array.from({ length: r.lanes }, () => []) }));
     this.peds = data.peds.map((e, i) => Object.assign(prepPath(e), { i }));
     this.ctrls = data.ctrls.map((c, i) => ({ ...c, off: hash(i + 1) * CYCLE }));
@@ -152,7 +152,7 @@ export class Traffic {
   get boats() { return this.boatTraffic; }
 
   setBoats(data: BoatData, waterTop: number) {
-    this.boatTraffic = new BoatTraffic(data, waterTop, this.seed - DEFAULT_SEED);
+    this.boatTraffic = new BoatTraffic(data, waterTop, (this.seed >>> 0) - DEFAULT_SEED);
   }
 
   private pick(w: number[], sum = w.reduce((a, b) => a + b, 0)) {
