@@ -22,6 +22,9 @@ export interface Facts {
 
 export interface Label extends Facts {
   alt?: string;
+  // what it is, for a map's icons (scripts/labels.py CATS: church, castle, bridge, tower, water, industry, transport,
+  // district, sport, park, education, health, shopping, culture, civic, sight)
+  cat?: string;
   x: number;
   y: number;
   z: number;

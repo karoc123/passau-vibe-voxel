@@ -24,6 +24,8 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
     ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };
+// (in every mode: main.ts)
+const LABELS: [string, string, string] = ['KeyN', '<span class="cap">N</span>', 'labels'];
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', moto: 'Following a motorbike' };
 
 // the key legend, bottom left: keys and mouse gestures as outlines, lit while in use
@@ -61,8 +63,8 @@ export class Hud {
         ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there · Pinch: zoom' : '';
       return;
     }
-    const items = [...MOUSE[mode]];
-    if (mode === 'walk' || ride?.kind === 'person') items.splice(items.length - 1, 0, ['Space', SPACE, 'jump']);
+    const items = [...MOUSE[mode], LABELS];
+    if (mode === 'walk' || ride?.kind === 'person') items.splice(items.length - 2, 0, ['Space', SPACE, 'jump']);
     $('.mouse', this.box).innerHTML = items.map(([k, icon, word]) => `<figure data-k="${k}">${icon}<figcaption>${word}</figcaption></figure>`).join('');
   }
 }

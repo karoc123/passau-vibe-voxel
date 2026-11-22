@@ -164,8 +164,19 @@ if (qs.get('ui') === '0') document.body.classList.add('noui');
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
 document.body.dataset.mode = document.body.dataset.nav = nav.mode;
 addEventListener('resize', onResize);
+// N shows and hides the map's labels (a searched place's stays), in every mode; remembered (localStorage LABELS_KEY)
+const LABELS_KEY = 'labels';
+let labelsOn = true;
+try { labelsOn = localStorage.getItem(LABELS_KEY) !== '0'; } catch { /* storage blocked: shown */ }
 addEventListener('keydown', (e) => {
   if (e.key === '/' && gameKey(e)) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
+  if (e.code === 'KeyN' && gameKey(e) && !e.repeat) {
+    labelsOn = !labelsOn;
+    if (labels) labels.visible = labelsOn;
+    try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
+    toast(labelsOn ? 'Labels on' : 'Labels off (N shows them)');
+    e.preventDefault();
+  }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
   if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !typing(e)
       && !getSelection()?.toString()) {
@@ -431,6 +442,7 @@ async function boot() {
   cutNow = -1; // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
+  labels.visible = labelsOn;
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
   fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),

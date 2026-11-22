@@ -43,6 +43,8 @@ const overlap = (r: Rect, q: Rect) => r.x0 < q.x1 + 6 && r.x1 + 6 > q.x0 && r.y0
 // first, then the shown ones keep their place before newcomers are fitted, and a newcomer fades in only after holding a free spot for SETTLE ms.
 export class Labels {
   gate: (x: number, z: number) => boolean = () => true;
+  // all labels shown (N toggles them, main.ts); off, only a searched place's
+  visible = true;
   private readonly host = $('#labels');
   private readonly pins: Pin[] = [];
   private picked: Pin | null = null;
@@ -102,7 +104,7 @@ export class Labels {
         for (let cy = Math.max(0, y0); cy <= y1; cy++) for (let cx = Math.max(0, x0); cx <= x1; cx++) this.near.push(...(this.grid.get(cy * 65536 + cx) ?? []));
       }
     }
-    const set = new Set(this.near);
+    const set = new Set(this.visible ? this.near : []);
     if (this.picked) set.add(this.picked);
     for (const L of this.live) set.add(L);
     return [...set];
@@ -124,7 +126,7 @@ export class Labels {
       this.setLevel(L, levelAt(d, L.far));
       [L.w, L.h] = L.dims[L.level];
       let fits = false, side = L.side, pinned = false;
-      if (shown < MAX && !L.occluded && inFront && x > -20 && x < innerWidth + 20 && this.gate(L.p.x, L.p.z)) {
+      if (shown < MAX && (this.visible || L === this.picked) && !L.occluded && inFront && x > -20 && x < innerWidth + 20 && this.gate(L.p.x, L.p.z)) {
         // the roof above the screen but the building in view: the label pinned to the top edge
         if (y < TOP + STEM + L.h && y > -innerHeight * 0.8) {
           v.copy(L.base).project(camera);
