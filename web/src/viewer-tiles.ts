@@ -1,5 +1,5 @@
 // The viewer's one TileCache (core/tile-cache.ts) over data/tiles/, seen through its live edits: the FPV drone's
-// collision (nav/fpv.ts) and the car's Rapier terrain (physics/rapier/drive-world.ts) share each node's fetch and decode.
+// collision (nav/fpv.ts) and the car's Rapier terrain (physics/rapier/life-phys.ts) share each node's fetch and decode.
 import { liveEdits } from './core/live-edits';
 import { TileCache } from './core/tile-cache';
 import { fetchGzip } from './fetch';

@@ -9,7 +9,7 @@
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import type { Agent, Car, Controller, PedEdge, Person, Road, TrafficData } from './types';
+import type { Agent, Car, Controller, PedEdge, Person, Road, RoadPose, TrafficData } from './types';
 
 export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
 const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
@@ -32,7 +32,7 @@ const JUMP_R = ACTIVE_R / 2;
 const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-car'];
-// the cars parked by the player (takeWheel) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
+// the cars parked by the player (detachCar) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
 // never more than PARKED_MAX
 const PARKED = 8, PARKED_MAX = 24;
 // Player edits (core/live-edits.ts, told by edited()): the paths' heights are baked (scripts/traffic.py), so only
@@ -55,7 +55,13 @@ export interface Ground {
 // may slow a car whose body is held up: its ghost waits); owns(c): c has a body; pose(c, a): the presentation's, after
 // it set the car's kinematic pose (rp, rh, pitch, roll) between the last two ticks (a: 0 at the last but one, 1 at the
 // last), puts it where its body is.
-export interface TrafficBodies { tick(dt: number, traffic: Traffic): void; owns(c: Car): boolean; pose(c: Car, a: number): void }
+export interface TrafficBodies {
+  beforeTick?(traffic: Traffic): void;
+  tick(dt: number, traffic: Traffic): void;
+  owns(c: Car): boolean;
+  controlled?(c: Car): boolean;
+  pose(c: Car, a: number): void;
+}
 
 // a car's kinematic pose: the ground point between its axles on its path, its heading, nose up
 export interface CarPose { x: number; y: number; z: number; h: number; pitch: number }
@@ -82,6 +88,8 @@ export class Traffic {
   riders: Person[] = [];
   // the people fallen into a hole since the presentation last took them (drawn falling: life.ts)
   dropped: Person[] = [];
+  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
+  tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
   edits: [number, number, number, number][] = [];
   day = 180;
@@ -400,6 +408,8 @@ export class Traffic {
   // ------------------------------------------------------------------ one tick
   private step(dt: number, density: Density) {
     this.t += dt;
+    this.tickNumber++;
+    this.bodies?.beforeTick?.(this);
     if (((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0)) this.breakDeadlocks();
     const targetCars = this.populate(density);
     this.snapshot();
@@ -471,8 +481,8 @@ export class Traffic {
       pushTo(this.carGrid, cellKey(C.x, C.y, G), c);
     }
     for (const c of this.detachedCars) {
-      const p = c.rp!;
-      const fx = Math.sin(c.rh ?? 0), fy = Math.cos(c.rh ?? 0), g = c.geo;
+      const p = c.detachedPose!;
+      const fx = Math.sin(p.h), fy = Math.cos(p.h), g = c.geo;
       g.px = p.x + fx * c.len / 2; g.py = p.z + fy * c.len / 2; g.cx = p.x; g.cy = p.z; g.z = p.y; g.fx = fx; g.fy = fy;
       pushTo(this.carGrid, cellKey(p.x, p.z, G), c);
     }
@@ -714,16 +724,18 @@ export class Traffic {
   // ------------------------------------------------------------------ following
   roadVehicles(): Car[] { return this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars; }
 
-  takeWheel(car: Car) {
-    if (this.detachedCars.includes(car)) return true;
+  detachCar(car: Car, pose: RoadPose) {
+    if (this.detachedCars.includes(car)) { car.detachedPose = { ...pose }; return true; }
     const i = this.cars.indexOf(car);
-    if (i < 0 || !car.rp) return false;
+    if (i < 0) return false;
+    car.detachedPose = { ...pose };
     this.removeCar(car);
     this.cars.splice(i, 1);
     car.block = null;
     car.by = null;
     car.why = 'free';
     car.wait = 0;
+    car.rp ??= { ...car.detachedPose };
     this.detachedCars.push(car);
     this.trimParked();
     return true;
@@ -734,8 +746,12 @@ export class Traffic {
   private trimParked() {
     const D = this.detachedCars;
     if (D.length <= PARKED) return;
-    let i = D.findIndex((c) => c !== this.keep && (!c.rp || this.far(c.rp.x, c.rp.z, c.rp.y, CAR_POP_R)));
-    if (i < 0 && D.length > PARKED_MAX) i = D.findIndex((c) => c !== this.keep);
+    const canTrim = (c: Car) => c !== this.keep && !this.bodies?.controlled?.(c);
+    let i = D.findIndex((c) => {
+      const p = c.detachedPose!;
+      return canTrim(c) && this.far(p.x, p.z, p.y, CAR_POP_R);
+    });
+    if (i < 0 && D.length > PARKED_MAX) i = D.findIndex(canTrim);
     if (i >= 0) D.splice(i, 1);
   }
 

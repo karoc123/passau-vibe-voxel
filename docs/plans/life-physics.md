@@ -8,9 +8,9 @@ options `lpmodel`, `lplost`, `lponly`, ... and `tools/life-phys-browser.mjs` are
 
 - **Cars near edits are bodies.** A traffic car within `NEAR` = 60 m of an edited box (at most 60, nearest the edits
   first) gets a body: the player car's chassis and raycast wheels (`physics/rapier/vehicle.ts`) with the lean AI
-  controller chasing its ghost, as in the prototype. Nothing edited: no body, no collider, no Rapier step, not even the
-  wasm loaded (`main.ts` loads `life-phys.ts` on the first edit, or with `?dig=1` ahead of it). `?lifephys=0` turns it
-  off; `?lpnear=`, `?lpmax=` are debug knobs.
+  controller chasing its ghost, as in the prototype. `main.ts` loads `life-phys.ts` on the first edit, with `?dig=1`,
+  or when the drive mode warms up. `?lifephys=0` disables AI body promotion around edits. `?lpnear=` and `?lpmax=`
+  are debug knobs.
 - **Dug holes**: a car driving into one falls through the real colliders, is a wreck (out of the traffic, parked,
   blocking the cars behind) and comes to rest; then its body stays as a fixed collider while it is near an edit, so
   the bodies coming up see it. Option A's car fall (`life.falling`, kinematic gravity) is gone: the hybrid covers it
@@ -25,10 +25,9 @@ options `lpmodel`, `lplost`, `lponly`, ... and `tools/life-phys-browser.mjs` are
   data is fixed (branch `clearance`).
 - **People and riders**: option A's simple gravity, unchanged (the traffic reports them in `Traffic.dropped`, the
   presentation draws them falling).
-- **The player's car near AI cars**: not bodies in the hybrid's world. The player's car lives in its own Rapier world
-  (`drive-world.ts`), where the traffic near it is kinematic boxes that a hard hit turns into dynamic wrecks: pushing
-  and crashing already work there. Bodies for the few cars round it would cost little (~0.1-0.2 ms a tick for 5, see
-  below) but only help if both cars are in one world: that is the "player car in the same world" step, left open.
+- **The player's car near AI cars**: F4 puts the player and AI bodies in one Rapier world. Path cars near a
+  driver have kinematic colliders. A hard collision can turn one into a wreck. See the
+  [shared road physics plan](shared-road-physics.md).
 - **Server seam**: `docs/adr/0006-world-sim-seam.md`. The world sim (`sim/traffic.ts`, `physics/rapier/life-phys.ts`
   and `core/`) has no three.js, DOM, camera or fetch (`tools/core-deps.mjs` checks it), runs on a fixed tick (1/30 s,
   two Rapier steps a tick), builds its colliders a fixed number of chunks a tick, draws from a seeded generator; the

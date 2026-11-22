@@ -14,6 +14,7 @@ import { Labels } from './labels';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
+import type { LifePhysics } from './physics/rapier/life-phys';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -459,15 +460,16 @@ async function boot() {
     life = nav.life = new StreetLife(scene, td, qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0);
     movingActors.add(life.group);
     life.world = world;
+    lifePhysLoading?.then((physics) => { if (life) life.bodies = physics; }).catch(() => {});
     // (player edits, ?dig=1: the people over a hole in them fall, the cars near them are bodies (lifePhysics); a node
     // freed is its file again)
     const N = meta.tiles.N;
     liveEdits.listen((tx, ty, node, region) => {
       life?.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
-      if (node) lifePhysics(meta);
+      if (node) lifePhysics(meta)?.catch(() => {});
     });
     window.__life = life;
-    if (qs.get('dig') === '1') lifePhysics(meta);
+    if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
     fetchJson<BoatData>('data/boats.json').then((bd) => {
       boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
       life!.group.add(boats.group); // shown, hidden and shadowed with the rest of the moving things
@@ -480,24 +482,26 @@ async function boot() {
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
+    roadPhysics: () => lifePhysics(meta, true)!,
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
 }
 
-// The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):
-// loaded on the first edit (or with ?dig=1, ahead of it); nothing edited, nothing loaded. ?lifephys=0: none (the cars
-// drive on over a hole); debug: ?lpnear= m round an edit, ?lpmax= most bodies.
-let lifePhysLoading: Promise<void> | null = null;
-function lifePhysics(meta: Meta) {
-  if (lifePhysLoading || qs.get('lifephys') === '0') return;
-  lifePhysLoading = (async () => {
+// The shared Rapier world loads on the first edit or when the drive mode warms up.
+let lifePhysLoading: Promise<LifePhysics> | null = null;
+function lifePhysics(meta: Meta, drive = false) {
+  if (!drive && qs.get('lifephys') === '0') return null;
+  return lifePhysLoading ??= (async () => {
     const [{ LifePhysics, DEFAULTS }, { viewerTileCache }] = await Promise.all([import('./physics/rapier/life-phys'), import('./viewer-tiles')]);
     const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
-    const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, { near: n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies) },
-      { cache: viewerTileCache(meta.tiles.N) });
+    const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, {
+      near: qs.get('lifephys') === '0' ? 0 : n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies),
+    }, { cache: viewerTileCache(meta.tiles.N) });
     if (life) life.bodies = p;
-  })();
+    if (drive) await p.warmTerrain(f);
+    return p;
+  })().catch((error) => { lifePhysLoading = null; console.warn('road physics', error); throw error; });
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;

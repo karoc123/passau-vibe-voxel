@@ -51,6 +51,7 @@ export interface Car extends Blocked {
   pitch?: number; // drawn nose up (radians) on a ramp (life.ts drawCars)
   roll?: number; // drawn left side up (radians): the driven car on uneven ground (nav/drive.ts)
   id: number;
+  detachedPose?: RoadPose; // authoritative pose out of traffic, independent of drawing
   e: number;
   lane: number;
   lcTo?: number;
@@ -104,3 +105,5 @@ export type Agent = Car;
 export type Rideable = Car | Person;
 export type Kind = 'car' | 'person';
 export interface Pose { x: number; y: number; z: number; h: number }
+
+export interface RoadPose extends Pose { pitch: number; roll: number }

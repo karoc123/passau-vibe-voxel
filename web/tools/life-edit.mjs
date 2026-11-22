@@ -239,13 +239,13 @@ async function block() {
     w.tick();
     for (const c of [...T.cars, ...T.detachedCars]) if (inBlock(c.rp)) inside++;
     for (const id of [car, behind]) {
-      const b = phys.bodies.get(id);
+      const b = phys.bodies.get(id.id);
       if (!b) continue;
       if (b.state === 'track') maxAlong = Math.max(maxAlong, Math.abs(b.along));
       phys.world.contactPairsWith(b.chassis, (other) => phys.world.contactPair(b.chassis, other, (m) => { if (m.numContacts() > 0 && !other.parent()?.isDynamic() && other.shape.type !== 9 && Math.abs(m.normal().y) < 0.6) touch++; }));
     }
   });
-  const b = phys.bodies.get(car), bb = phys.bodies.get(behind);
+  const b = phys.bodies.get(car.id), bb = phys.bodies.get(behind.id);
   const face = (q) => { const dx = Math.max(op.x - q.x, 0, q.x - (op.x + op.w)), dz = Math.max(op.y - q.z, 0, q.z - (op.y + op.d)); return Math.hypot(dx, dz); };
   const gap = car.rp && behind.rp ? Math.hypot(car.rp.x - behind.rp.x, car.rp.z - behind.rp.z) - (car.len + behind.len) / 2 : NaN;
   log(`  car ${car.id}: ${b ? b.state : 'no body'} v ${b ? f2(b.vb) : '-'} ${f2(face(car.rp))} m from the block, in traffic ${T.cars.includes(car)}, along max ${f2(maxAlong)}; car ${behind.id}: ${bb ? bb.state : 'no body'} gap ${f2(gap)} m`);
@@ -269,13 +269,13 @@ async function wreck() {
   for (let k = 0; k < 20 && !car; k++) { run(ctx, 0.5); car = pickCar(ctx, -99, 5, true); if (car && !phys.owns(car)) car = null; }
   if (!check(car, `a moving car with a body and one behind it near (${f.x}, ${f.z})`)) return null;
   const v0 = car.v, ok = phys.wreck(car, T, 'test');
-  check(ok, `the car has a body to wreck (${phys.bodies.get(car)?.state})`);
+  check(ok, `the car has a body to wreck (${phys.bodies.get(car.id)?.state})`);
   const w = watcher(ctx), t0 = ctx.t;
   let restAt = -1, touched = 0;
   const stoppers = new Set();
   run(ctx, 25, () => {
     w.tick();
-    const wb = phys.bodies.get(car);
+    const wb = phys.bodies.get(car.id);
     if (restAt < 0 && wb?.state === 'rest') restAt = ctx.t;
     if (!wb || wb.state !== 'rest') return;
     phys.world.contactPairsWith(wb.chassis, (other) => phys.world.contactPair(wb.chassis, other, (m) => { if (m.numContacts() > 0 && other.parent()?.isDynamic()) touched++; }));
@@ -303,7 +303,7 @@ async function motorbike() {
   const box = [x - 30, z - 30, x + 30, z + 30];
   T.edited(box);
   run(ctx, 3);
-  const b = phys.bodies.get(bike);
+  const b = phys.bodies.get(bike.id);
   check(b?.state === 'track' && b.build.bike && b.build.half.x === spec.build.half.x,
     'the motorbike tracks with its narrow Rapier body');
   T.edited(box, true);

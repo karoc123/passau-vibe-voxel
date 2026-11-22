@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { Meta } from '../types';
 import type { Nav } from './nav';
 import type { RiverPoints } from './river';
@@ -51,5 +52,6 @@ export interface CraftContext {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   env: CraftEnv;
+  roadPhysics: () => Promise<LifePhysics>;
   deployGlider: (source: PlayerCraft, at: CraftSpot) => boolean;
 }

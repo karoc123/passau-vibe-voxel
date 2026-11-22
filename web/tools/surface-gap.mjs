@@ -9,7 +9,7 @@
 // - drive: the car (scenarios.ts Sim, pure-pursuit follow; slower in a bend than LAT allows) along a few fixed roads
 //   (traffic.json, by OSM way and ends) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 %
 //   and 60 % along them (0 km/h): each touching wheel's contact point against the drawn surface under it, and the drawn wheel's bottom (the ground
-//   point drive-world.ts draws the car on: car.ride under the body's origin along its up, at the wheel's x, z) against
+//   point life-phys.ts draws the car on: car.ride under the body's origin along its up, at the wheel's x, z) against
 //   the drawn surface there; how it rode (scenarios.ts feel: pitchJit rad/s, heave cm, liftPct). The car starts a few
 //   metres in where its box is clear of the voxels (scenarios.ts safeStart); a road whose centreline runs within 1.3 m
 //   of a wall for 3 m or more is skipped (altstadt_1904: the follower scrapes the house fronts; fewer: walls=N in the

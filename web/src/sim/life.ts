@@ -10,13 +10,13 @@ import { VEHICLE_IDS, vehicleOf, type VehicleId } from './vehicles';
 // The street life's presentation: the traffic (sim/traffic.ts: the world sim, headless, on its fixed tick) drawn
 // between its last two ticks with instanced meshes, the trains, the people knocked down or fallen into a hole (an
 // effect: shoved, tipping over, no physics), picking an agent on screen. Nothing here feeds back into the sim but the
-// player's own doings (keep, takeWheel, knockDown).
+// player's focus and the road world's player commands.
 
 export { CAR_POP_R, PED_POP_R } from './traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
-// people knocked down by the driven car (knockDown): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
+// people knocked down by a driven car (Traffic.struck): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
 // per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
 // PED_POP_R from the viewer
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
@@ -69,7 +69,6 @@ export class StreetLife {
   get day() { return this.traffic.day; }
   set day(d: number) { this.traffic.day = d; }
   roadVehicles() { return this.traffic.roadVehicles(); }
-  takeWheel(car: Car) { return this.traffic.takeWheel(car); }
   edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
 
   // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
@@ -83,6 +82,11 @@ export class StreetLife {
     this.trains.update(Math.min(dt, 0.1), ((hour % 24) + 24) % 24, this.viewer);
     for (const p of T.dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
     T.dropped = [];
+    for (const { person, pose, vx, vz } of T.struck) {
+      const v = Math.hypot(vx, vz) || 1;
+      this.addFallen({ ...person, rp: pose, rh: pose.h }, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
+    }
+    T.struck = [];
     this.render(Math.min(dt, 0.1), night, T.acc);
   }
 
@@ -226,15 +230,6 @@ export class StreetLife {
     });
     setCount(this.riders.length, M.bike);
     return this.riders.length;
-  }
-
-  // A person walking or cycling hit by the driven car at (vx, vz) m/s: out of the crowd, shoved away along the hit and
-  // falling over (drawFallen), no physics. Returns whether they were there.
-  knockDown(p: Person, vx: number, vz: number) {
-    if (!p.rp || !this.traffic.removePerson(p)) return false;
-    const v = Math.hypot(vx, vz) || 1;
-    this.addFallen(p, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
-    return true;
   }
 
   // a person (drawn: rp) falls over, shoved along (dx, dz) at v m/s; vy: falling into a hole too, at vy m/s

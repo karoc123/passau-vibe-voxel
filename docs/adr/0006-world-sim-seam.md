@@ -37,7 +37,7 @@ two runs differed.
   `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`
   state and maths (`core/vec.ts`, three.js's arithmetic in its order), stepped by one fixed-step runner
   (`core/fixed-step.ts`), scanned by `tools/core-deps.mjs`. Their shells (`boat.ts`, `plane.ts`, `fpv.ts`, `drive.ts`)
-  read the input and draw them. They are not in the world sim yet (see below).
+  read the input and draw them. Road vehicles share the world tick and Rapier terrain, as described in [ADR 0007](0007-player-control-in-world-sim.md).
 - **Presentation** (`sim/life.ts` `StreetLife`, three.js): draws the sim between its last two ticks
   (`Traffic.carPose`, `personPoint`, `TrafficBodies.pose`), the trains, the effects that change nothing in the sim
   (people knocked down or falling: shoved, tipping, no physics), picking on screen. It never decides anything the sim
@@ -48,5 +48,4 @@ two runs differed.
 - The sim runs headless in node as it would on a server (`life-edit.mjs` does: no three.js, no StreetLife).
 - A client of a server would replace the sim by snapshots of its outputs and keep the presentation as it is; nothing
   here is networked yet.
-- Not in the world sim yet: the trains (`sim/trains.ts`, scenery on their own tracks, three.js), the boats, the
-  player's car (`drive-world.ts`: its own Rapier world, client side, the traffic as kinematic boxes in it).
+- Still open: bring the motion of trains and boats into the world sim.

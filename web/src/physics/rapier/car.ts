@@ -15,7 +15,7 @@
 // - landing: touching down from the air faster than crashSpeed() into the ground (a fall of ~8 m) is a crash (an event:
 //   the driver is shaken).
 // No three.js, no DOM (plain maths: core/vec.ts; tools/core-deps.mjs): the car steps the same headless and on a server.
-// It draws nothing: drive.ts draws the car from RapierDrive.drawn() (the vehicle's own model, its wheels included).
+// The shared world publishes its pose. StreetLife draws the vehicle model.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
@@ -74,9 +74,9 @@ export class RapierCar {
 
   // heading: radians about y (0: +z), or a whole rotation
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
-    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR) {
+    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR, existing?: ReturnType<typeof createVehicle>) {
     const q = typeof heading === 'number' ? axisAngle(quat(), vec3(0, 1, 0), heading) : heading;
-    const v = createVehicle(R, world, at, q, build, tuning.walls);
+    const v = existing ?? createVehicle(R, world, at, q, build, tuning.walls);
     this.body = v.body; this.chassis = v.chassis; this.controller = v.controller;
     this.half = build.half;
     this.ride = build.ride;
@@ -448,9 +448,13 @@ export class RapierCar {
     return n;
   }
 
-  dispose(world: RAPIER.World) {
-    for (const w of this.wedges) for (const c of w.colliders) world.removeCollider(c, false);
+  clearWedges() {
+    for (const w of this.wedges) for (const c of w.colliders) this.world.removeCollider(c, false);
     this.wedges.length = 0;
+  }
+
+  dispose(world: RAPIER.World) {
+    this.clearWedges();
     world.removeVehicleController(this.controller);
     world.removeRigidBody(this.body);
   }

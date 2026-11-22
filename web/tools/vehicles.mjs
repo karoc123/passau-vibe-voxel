@@ -10,7 +10,7 @@
 //                  or more, the right way (turning right: left side up)
 //   bike_curb   -- a 0.3 m kerb across the way (a street's cap stepping up over a metre) at 40 km/h, square and at 30°;
 //                  and a 1 m terrace (car.ts' wedge) at 30 km/h: over it, upright
-//   bike_wall   -- into a wall at 50 km/h through the drive (nav/drive-session.ts): the rider comes off (no input,
+//   bike_wall   -- into a wall at 50 km/h through the drive (physics/rapier/player-car.ts): the rider comes off (no input,
 //                  drawn on its side), then back on the road some way before it, upright, standing
 // The default car's own scenarios stay tools/rapier-car.mjs's.
 // usage (in web/): node tools/vehicles.mjs [-v] [type ...]; one line a check, exit code 1 if one fails
@@ -20,7 +20,7 @@ const args = process.argv.slice(2), verbose = args.includes('-v');
 const sc = await load('physics/rapier/scenarios.ts');
 const ds = await load('physics/rapier/drive-scenarios.ts');
 const { VEHICLES } = await load('sim/vehicles.ts');
-const { FALL_MS } = await load('nav/drive-session.ts');
+const { FALL_MS } = await load('physics/rapier/player-car.ts');
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 await RAPIER.init();
 
@@ -103,17 +103,18 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   check('moto bike_terrace', e.z > 58 && e.y > 11 && minUp(s.log) > 0.8, { zEnd: r2(e.z), yEnd: r2(e.y), minUp: minUp(s.log), steps: s.events.filter((v) => v.kind === 'step').length });
   s.dispose();
   // into a wall through the drive: the rider comes off, then back on the road
-  const d = ds.takeOver((_x, z) => (z >= 60 && z < 63 ? { g: 10, runs: [[10, 16, sc.WALL]] } : { g: 10 }), 64, 20, 50, [], [], b);
-  ds.run(d, 4, ds.cruise(50), (x) => x.session.fallUntil > 0);
-  const fell = d.session.fallUntil > 0, note = ds.said(d, 'Crash!'), at = d.now, held = d.session.held(at + 10);
+  const d = ds.takeOver((_x, z) => (z >= 60 && z < 63 ? { g: 10, runs: [[10, 16, sc.WALL]] } : { g: 10 }), 64, 20, 50, [], false, 'moto');
+  ds.run(d, 4, ds.cruise(50), (x) => !!x.snapshot?.fallMs);
+  const fell = !!d.snapshot?.fallMs, note = ds.said(d, 'Crash!'), at = d.traffic.t, held = (d.snapshot?.fallMs ?? 0) > FALL_MS - 1;
   ds.run(d, 0.6, ds.cruise(50));
   const side = Math.abs(d.car.roll ?? 0);
   ds.run(d, (FALL_MS + 200) / 1000, ds.cruise(50));
   ds.run(d, 1, () => ({ gas: 0, brake: 0, steer: 0, handbrake: true }));
-  const p = d.car.rp, rap = d.session.rap;
-  const det = { fell, note, held, sideRoll: r2(side), backAfterS: r2((d.now - at) / 1000), zBack: r2(p.z), onWheels: rap.onWheels, kmh: r2(d.session.kmh) };
-  d.session.park();
-  check('moto bike_wall', fell && note && held && side > 1.2 && rap.car === null && p.z < 50 && Math.abs(p.y - 10) < 0.5, det);
+  const p = d.car.rp, snapshot = d.snapshot;
+  const det = { fell, note, held, sideRoll: r2(side), backAfterS: r2(d.traffic.t - at), zBack: r2(p.z), onWheels: snapshot.onWheels, kmh: r2(d.kmh) };
+  d.park();
+  d.physics.dispose();
+  check('moto bike_wall', fell && note && held && side > 1.2 && !d.snapshot && p.z < 50 && Math.abs(p.y - 10) < 0.5, det);
 }
 
 for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(18)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);
