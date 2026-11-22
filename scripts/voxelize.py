@@ -706,15 +706,15 @@ for oid, t, line in osm.lines_with("railway"):
         for off in (-0.72, 0.72):
             try:
                 bridge_rails.append((line.offset_curve(off), C["rail"]))
-            except Exception:
-                pass
+            except Exception as exc:
+                note(f"skipped bridge rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
         continue
     rail_beds.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"]))
     for off in (-0.72, 0.72):
         try:
             rails.append((line.offset_curve(off), C["rail"]))
-        except Exception:
-            pass
+        except Exception as exc:
+            note(f"skipped rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
 burn(gcol, rail_beds)
 burn(explicit, [(s_, 1) for s_, _ in rail_beds])
 _pf = np.zeros((D, W), np.uint16)  # a platform mapped over the carriageway beside it stops at the road
@@ -923,7 +923,8 @@ for oid, t, line in osm.lines:
         off = -width / 2 + k * lw
         try:
             ln = line.offset_curve(off) if abs(off) > 0.2 else line
-        except Exception:
+        except Exception as exc:
+            note(f"skipped lane marking on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
             continue
         if ln.is_empty or ln.length < 4:
             continue

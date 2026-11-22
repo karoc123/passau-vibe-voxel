@@ -71,8 +71,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 ### R7. Smaller items from code-health 19 (M each, independent)
 
 - **`traffic.build`:** split it, and tie the 3.0 m lane spacing to `sim/path.ts` with a check.
-- **Silent `except Exception`:** around `offset_curve` (rails and lane markings are dropped without a note), log
-  what is dropped.
 - **Build time:** vegetation 21 %, `debris.support_floating` 17 %. See `data/debug/timings.json` and
   [build-speed-2.md](build-speed-2.md).
 
