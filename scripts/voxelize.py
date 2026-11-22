@@ -3830,6 +3830,47 @@ for _oid, _kind, _l, _s0, _s1 in GCTX.corridors:
 report["counters"]["under_bridge"] = _ub
 note("ways under bridges (corridors, ground steps of 2 m or more, blocked within the clearance, decks lower than it):",
      _ub["corridors"], _ub["steps"], _ub["blocked"], _ub["low"], _ub["worst"][:5])
+# the same along every tunnel=yes carriageway and railway the ground covers (tunnels.plan: a bore, a covered passage,
+# one left solid; not one open to the sky, under a deck or a building), each metre from its floor (tunnels.FLOOR, else
+# the grade between its portals or the ground under it: one left solid is blocked) to the first solid voxel (a deck
+# aside): blocked under tunnels.LOW m, low under the vehicle's clearance; and the street over a bore or a covered
+# passage whole (its surface's voxel there: holes)
+_tu = dict(ways=0, blocked=0, low=0, holes=0, worst=[])
+_planned = {x[0] for x in _bores}
+for _oid, _t, _l in osm.lines:
+    if _oid not in _planned or not ground.bed(_t):
+        continue
+    _mid = _l.interpolate(0.5, normalized=True)
+    if not in_core(int(_mid.y), int(_mid.x)) or not all(2 <= x < W - 2 and 2 <= y < D - 2 for x, y in (_l.coords[0], _l.coords[-1])):
+        continue
+    _pp = [_l.interpolate(v) for v in np.arange(1.0, _l.length - 0.99, 1.0)]
+    _rc = np.array([(int(q.y), int(q.x)) for q in _pp])
+    if not len(_rc):
+        continue
+    _fl = tunnels.FLOOR[_rc[:, 0], _rc[:, 1]].astype(int)
+    _gr = g[_rc[:, 0], _rc[:, 1]]
+    _za, _zb = (tunnels._portal_level(g, *p_) for p_ in (_l.coords[0], _l.coords[-1]))
+    _fl = np.where(_fl >= 0, _fl, np.minimum(_gr, tunnels._floor(_za, _zb, np.arange(1.0, _l.length - 0.99, 1.0)[:len(_rc)], _l.length, _gr)))
+    _clear = tunnels.CLEAR[ground.bed(_t)[0]]
+    _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
+    _room = np.full(len(_rc), _clear)
+    for _k in range(_clear - 1, -1, -1):
+        _z = _fl + _k
+        _m = (_z < _deck_lo) & (_z < vol.shape[0])
+        _hit = np.zeros(len(_rc), bool)
+        _hit[_m] = _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
+        _room[_hit] = _k
+    _st = np.array([tunnels.LOWERED.get((r_, c_), 0) for r_, c_ in _rc])
+    _hole = (_st > 0) & (vol[np.clip(_st - 1, 0, vol.shape[0] - 1), _rc[:, 0], _rc[:, 1]] == 0)
+    _tu["ways"] += 1
+    _tu["blocked"] += int((_room < tunnels.LOW).any())
+    _tu["low"] += int((_room < _clear).any())
+    _tu["holes"] += int(_hole.any())
+    if (_room < tunnels.LOW).any() or _hole.any():
+        _tu["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, int(_room.min()), int((_room < tunnels.LOW).sum()), int(_hole.sum())])
+report["counters"]["tunnels"] = _tu
+note("tunnel=yes carriageways and railways (ways, blocked under the least clearance, lower than the vehicle's, a hole in "
+     "the street over them):", _tu["ways"], _tu["blocked"], _tu["low"], _tu["holes"], _tu["worst"][:5])
 note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
      "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
 _lines = {oid: l_ for oid, _, l_ in osm.lines}

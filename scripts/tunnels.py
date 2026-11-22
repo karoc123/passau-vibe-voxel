@@ -12,9 +12,23 @@ road, with stone walls; at the face a stone portal wall frames the arch, 2 m hig
 Only ways under a hill: a tunnel whose ground never stands 2 m over the crown (under a street, a railway, a
 building) is left as it was (voxelize.py's other rules, underpass.py's passages).
 
+A carriageway or a railway tagged tunnel=yes that is not under a hill -- under a street, a junction on an embankment,
+a railway (the B 85 link 11773610 under the junction at -882, 667) -- is a covered passage: the ground passes lift
+the street over it to its level (ground.py tunnel, sag), and the passage is cut under that street after them. Its
+floor graded between its portals' ground as a bore's (rounded down a metre where the street leaves less than LOW m),
+its bed's width (ground.bed), the vehicle's clearance (CLEAR: 4 m a road, 5 m a train) or what the street over it
+leaves of it under a 1 m slab, LOW m at least; walls and ceiling lined. The stretch from a portal up to the first
+point the street stands LOW + 1 m over the floor or a way on the ground crosses over is an open cut (the approach).
+One the street over it leaves less than LOW m somewhere (a railway embankment the terrain model dips under) is left
+solid and noted. Only ways something covers: one that nothing covers (a street under a bridge's deck, at grade) is
+left as it is.
+
 FLOOR holds the driving or walking level (z of the first free voxel) of every bored cell, -1 elsewhere, and IDS the
-ways bored, for traffic.py (cars and walkers go through, not over the hill) and underpass.py (which leaves them).
+ways bored (and the covered passages carved), for traffic.py (cars and walkers go through, not over the hill) and
+underpass.py (which leaves them).
 """
+from collections import namedtuple
+
 import numpy as np
 
 from ways import cells, num
@@ -26,6 +40,11 @@ CARRIAGE = ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassifi
             "living_street")
 FOOT = ("footway", "path", "cycleway", "pedestrian", "bridleway")
 COVER = 2  # metres of ground over the crown that make a bore, not a cut
+# a covered passage: the vehicle's clearance (m), the least it is carved with (m), its profile in plan()'s entries
+# (kind "road" | "rail", the bed's half width, the clearance, the least room the street over it leaves along it)
+CLEAR = dict(road=4, rail=5)
+LOW = 3
+Covered = namedtuple("Covered", "kind half clear room")
 
 
 def _profile(t):
@@ -72,8 +91,59 @@ def _portal_level(g, x, y):
     return int(round(float(np.percentile(win, 30))))
 
 
+def _floor(z0, z1, s, L, top):
+    """a covered passage's floor at arc lengths s under the ground top: the grade between the portals' levels, rounded
+    down where rounded it left less than LOW m under a 1 m slab and rounded down it leaves that"""
+    zf = z0 + (z1 - z0) * np.clip(s / L, 0, 1)
+    z, zd = np.round(zf).astype(int), np.floor(zf).astype(int)
+    return np.where((top - 1 - z < LOW) & (top - 1 - zd >= LOW), zd, z)
+
+
+def _plan_covered(osm, g, out):
+    """the covered passages (module doc): appended to out as (way id, tags, line, Covered, z0, z1, a, b) -- covered
+    from a to b along it, cut open before and after; the ones carved into IDS"""
+    import shapely
+    from shapely.strtree import STRtree
+
+    from ground import bed
+    from ways import underground
+    D, W = g.shape
+    surf = [(t_, l_) for _, t_, l_ in osm.lines if bed(t_) and not underground(t_) and t_.get("bridge") in (None, "no")]
+    tree = STRtree([l_ for _, l_ in surf])
+    for oid, t, line in osm.lines:
+        if t.get("tunnel") != "yes" or oid in IDS or line.length < 3 or not bed(t):
+            continue
+        kind, half = bed(t)
+        x0, y0 = line.coords[0]
+        x1, y1 = line.coords[-1]
+        if not all(2 <= x < W - 2 and 2 <= y < D - 2 for x, y in ((x0, y0), (x1, y1))):
+            continue
+        z0, z1 = _portal_level(g, x0, y0), _portal_level(g, x1, y1)
+        L = line.length
+        ss = np.arange(0.0, L + 0.01, 0.5)
+        pts = shapely.line_interpolate_point(line, ss)
+        xs, ys = shapely.get_x(pts), shapely.get_y(pts)
+        top = g[np.clip(ys.astype(int), 0, D - 1), np.clip(xs.astype(int), 0, W - 1)].astype(int)
+        room = top - 1 - _floor(z0, z1, ss, L, top)
+        # a way on the ground crossing over it (not one going on from its portal: that one ends there)
+        over = np.zeros(len(ss), bool)
+        for k in tree.query(line):
+            t2, l2 = surf[k]
+            if l2.crosses(line):
+                over |= shapely.contains_xy(l2.buffer(bed(t2)[1], cap_style="flat"), xs, ys)
+        hold = ((room >= LOW) | over) & (room >= 0)  # (room < 0: the ground at the floor, open)
+        if not hold.any():
+            continue  # nothing over it: open to the sky
+        k = np.nonzero(hold)[0]
+        least = int(np.where(room < 0, 10 ** 6, room)[k[0]:k[-1] + 1].min())
+        out.append((oid, t, line, Covered(kind, half, CLEAR[kind], least), z0, z1, float(ss[k[0]]), float(ss[k[-1]])))
+        if least >= LOW:
+            IDS.add(oid)
+
+
 def plan(osm, g):
-    """the tunnels under a hill: [(way id, tags, line, profile, z0, z1, portal s0, portal s1)]; fills IDS"""
+    """the tunnels under a hill: [(way id, tags, line, profile, z0, z1, portal s0, portal s1)], then the covered
+    passages (_plan_covered: their profile a Covered); fills IDS"""
 
     IDS.clear()
     out = []
@@ -100,6 +170,7 @@ def plan(osm, g):
         k = np.nonzero(covered)[0]
         out.append((oid, t, line, prof, z0, z1, float(ss[k[0]]), float(ss[k[-1]])))
         IDS.add(oid)
+    _plan_covered(osm, g, out)
     return out
 
 
@@ -113,19 +184,28 @@ def surface(g):
 
 
 def build(vol, g, pal, C, stone, note, tunnels):
-    """bore the tunnels of plan() into vol; g drops to the road where the approach is cut open"""
+    """bore the tunnels of plan() into vol and carve its covered passages; g drops to the road where the approach is
+    cut open, and to the floor under a bore or a covered passage (LOWERED keeps the surface over it)"""
     global FLOOR
     LOWERED.clear()
     D, W = g.shape
-    H = vol.shape[0]
     FLOOR = np.full((D, W), -1, np.int16)
-    if not tunnels:
-        note("tunnels through the hills: none")
-        return
     lining = C["concrete"]  # (an existing entry: a new one would renumber every later palette colour)
     stone = np.asarray(stone, vol.dtype)
     from aoi import C0, R0  # (the project grid's rows and columns: the same stones in every region)
     masonry = lambda z, r, c: stone[((r + R0) * 7 + (c + C0) * 13 + z * 5) % len(stone)]  # noqa: E731
+    covered = [x for x in tunnels if isinstance(x[3], Covered)]
+    tunnels = [x for x in tunnels if not isinstance(x[3], Covered)]
+    _bore(vol, g, C, note, tunnels, lining, masonry)
+    _cover(vol, g, C, note, covered, lining, masonry)
+
+
+def _bore(vol, g, C, note, tunnels, lining, masonry):
+    D, W = g.shape
+    H = vol.shape[0]
+    if not tunnels:
+        note("tunnels through the hills: none")
+        return
     g0 = g.copy()
     clear = {}  # (r, c) -> [z0, z1): emptied
     floor = {}  # (r, c) -> (z, palette id): the road's (or the path's) surface voxel
@@ -218,3 +298,67 @@ def build(vol, g, pal, C, stone, note, tunnels):
             vol[z, r, c] = C["lamp"]
     note(f"tunnels through the hills: {len(tunnels)} ways, {len(clear)} columns bored or cut, {n_w} voxels of portal "
          f"wall, {n_l} of lining, {len(lamps)} lamps")
+
+
+def _cover(vol, g, C, note, covered, lining, masonry):
+    """carve the covered passages of plan() (module doc) under the street the ground passes left over them"""
+    if not covered:
+        return
+    D, W = g.shape
+    H = vol.shape[0]
+    n_c = n_cut = n_low = 0
+    for oid, t, line, (kind, half, clear, least), z0, z1, a, b in covered:
+        name = f"{t.get('name') or oid} ({oid}, {t.get('highway') or t.get('railway')})"
+        if least < LOW:
+            note(f"covered passage {name}: left solid, the street over it leaves {least} m (under {LOW})")
+            continue
+        L = line.length
+        rr, cc = cells(line.buffer(half + 1, cap_style="flat"), D, W)
+        s, d = _project(np.stack([cc + 0.5, rr + 0.5], 1), line)
+        keep = (s >= 0) & (s <= L) & np.array([(r, c) not in LOWERED for r, c in zip(rr.tolist(), cc.tolist())], bool)
+        rr, cc, s, d = rr[keep], cc[keep], s[keep], d[keep]
+        top = g[rr, cc].astype(int)
+        zf = _floor(z0, z1, s, L, top)
+        bed = d <= half
+        clr = {}  # (r, c) -> [z, z1) emptied, covered or cut open
+        lo_h = 10 ** 6
+        for r, c, s_, d_, z, t_ in zip(rr[bed].tolist(), cc[bed].tolist(), s[bed].tolist(), d[bed].tolist(),
+                                       zf[bed].tolist(), top[bed].tolist()):
+            if a <= s_ <= b:  # under the street: a 1 m slab over the passage
+                h = min(clear, t_ - 1 - z)
+                if h > 0:
+                    vol[z:z + h, r, c] = 0
+                    if z + h < t_ - 1:  # (the ceiling; where the slab is the street's own voxel, that stays)
+                        vol[z + h, r, c] = lining
+                    clr[(r, c)] = (z, z + h, True)
+                    lo_h = min(lo_h, h)
+                if t_ > z:
+                    LOWERED[(r, c)] = t_
+            elif t_ > z:  # the approach: cut open
+                vol[z:min(t_, H), r, c] = 0
+                clr[(r, c)] = (z, t_, False)
+                n_cut += 1
+            lo = max(min(t_, z) - 1, 0)  # (a floor over a dip: soil under it)
+            vol[lo:z, r, c] = np.where(vol[lo:z, r, c] == 0, C["soil"], vol[lo:z, r, c])
+            if kind == "rail":
+                v = C["rail"] if abs(d_ - 0.72) < 0.5 else C["ballast"]
+            else:
+                v = C["mark"] if d_ < 0.5 and s_ % 6.0 < 3.0 and half >= 2.5 else C["asphalt"]
+            vol[z - 1, r, c] = v
+            g[r, c] = z
+            FLOOR[r, c] = z if FLOOR[r, c] < 0 else min(int(FLOOR[r, c]), z)
+            n_c += 1
+        # the walls: what the passage bares of the ground beside it, lined (masonry along the cut)
+        for (r, c), (z, z1_, cov) in clr.items():
+            for r2, c2 in ((r, c + 1), (r, c - 1), (r + 1, c), (r - 1, c)):
+                if not (0 <= r2 < D and 0 <= c2 < W) or (r2, c2) in clr:
+                    continue
+                for z_ in range(z, min(z1_, int(LOWERED.get((r2, c2), g[r2, c2])) - (1 if cov else 0), H)):
+                    if vol[z_, r2, c2] != 0:
+                        vol[z_, r2, c2] = lining if cov else masonry(z_, r2, c2)
+        if lo_h < clear:
+            n_low += 1
+        note(f"covered passage {name}: {L:.0f} m, floor {z0} -> {z1}, under the street {a:.1f}-{b:.1f} m along it, "
+             f"clearance {lo_h if lo_h < 10 ** 6 else '-'} m at least (the vehicle's {clear})")
+    note(f"covered passages: {len(covered)} ways, {n_c} columns carved ({n_cut} cut open), {n_low} lower than the "
+         f"vehicle's clearance")
