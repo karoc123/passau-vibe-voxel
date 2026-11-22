@@ -2753,10 +2753,11 @@ for t in trunk_rec:  # the trunks placed at canopy tops: no database tree, an id
     if t is not None and t["src"] == "lidar":
         t["h"] = int(crown_top[int(t["y"]), int(t["x"])])
         all_trees.append(t)
-_tr = []
+_tr, _tr_t = [], []  # (_tr_t: each record's tree, for the bridgeheads' lift below)
 for t in all_trees:
     if not in_core(int(t["y"]), int(t["x"])):
         continue
+    _tr_t.append(t)
     rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
     for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
                         ("bv_height", "h_bv"), ("con", "con"), ("sp_rs", "sp_rs")):
@@ -3181,11 +3182,21 @@ if len(_rh):
     _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03) & ~_bwl[_rh, _ch]  # (a bridge way keeps its colours)
     gcol[_rh[_pv], _ch[_pv]] = C["paving"]
     vol[_g0[_pv] - 1, _rh[_pv], _ch[_pv]] = C["paving"]
-    _old = np.stack([vol[np.minimum(_g0 - 1 + k, H - 1), _rh, _ch] for k in range(7)])
-    for k in range(6, -1, -1):
-        _z = _g1 - 1 + k
-        _ok = (_z < H) & ((_old[k] != 0) | (_z <= _g0 + 5))  # (air written only where it moved from: not into a crown)
-        vol[_z[_ok], _rh[_ok], _ch[_ok]] = _old[k][_ok]
+    # the whole column from its top ground voxel up moves by the lift (a lamp's 10 m pole and head, a flagpole, a
+    # tree; 7 voxels had moved, which cut a lamp and left its light at the old height), and what was recorded of it
+    # (the lamps' heads, the trees' and the fountain jets' bases) with it
+    for _z in range(H - 1, int(_g1.min()) - 2, -1):
+        _s = _z - _lift
+        _ok = _s >= _g0 - 1
+        vol[_z, _rh[_ok], _ch[_ok]] = vol[_s[_ok], _rh[_ok], _ch[_ok]]
+    _L = np.zeros((D, W), np.int32)
+    _L[_rh, _ch] = _lift
+    lamps[:] = [(c_, r_, z_ + int(_L[r_, c_])) for c_, r_, z_ in lamps]
+    jets[:] = [(k_, [j_[0], j_[1] + int(_L[k_[2] - R0, k_[3] - C0]), j_[2]]) for k_, j_ in jets]
+    for t_, e_ in zip(_tr_t, RESULT["trees"]):
+        if t_.get("z") is not None and _L[int(t_["y"]), int(t_["x"])]:
+            t_["z"] += int(_L[int(t_["y"]), int(t_["x"])])
+            e_["rec"]["z"] = t_["z"]
     for k in range(int(_lift.max())):
         _m = k < _lift
         vol[_g0[_m] - 1 + k, _rh[_m], _ch[_m]] = C["soil"]
