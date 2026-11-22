@@ -37,7 +37,7 @@ blockers are gone into "Ready".
 | R1 | The plane does not start while you are driving (bug) | S | **Ready** |
 | R2 | Defect assertions on the fixtures | M | **Ready** |
 | R3 | Shared input, chase camera and panels | M | **Ready** |
-| R7 | Smaller independent items | M each | **Ready**, except the `voxelize.py` points: wait for P1+P3 |
+| R7 | Smaller independent items | M each | **Ready**, except `traffic.build` and the `except` sweep (pipeline files): wait for P1+P3 |
 | R8 | Design: sim player API, one world for many players | design | **Ready** |
 | F1 | AI motorbikes | S–M | **Ready** |
 | F3 | Camera distance per vehicle type | S | **Ready** (or inside R3) |
