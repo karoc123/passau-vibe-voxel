@@ -42,7 +42,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R5 | Check harnesses out of `src/` | M | Waits for R4 |
 | F2 | Walk to a vehicle and get in | M | Waits for R4 |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
-| Q1 | Water only where the cadastre or OSM has water | M | Ready to merge (`q1`) |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q4 | What passes under a bridge stays open | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
@@ -51,12 +50,12 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F7 | Motorbike handling | M | **Ready** |
 | F9 | More landmark labels, N toggles them | S–M | **Ready** (labels need a data rebuild) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| Q2 | A carriageway over water is a bridge | M | Waits for Q1 |
+| Q2 | A carriageway over water is a bridge | M | **Ready** (re-measure its list after the data rebuild Q1 needs) |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** (not in parallel with R4: same boat and plane shells) |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
 | F10 | Minimap on M, and the collection point for map features | M | Waits for F9 |
-| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q1–Q4, Q8, Q9 |
+| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2–Q4, Q8, Q9 |
 
 ## Packages
 
@@ -113,35 +112,16 @@ Rules for all of them, on top of the rules above:
   in the build report), so the spot cannot come back unnoticed.
 - R6 moves the same code in `voxelize.py`. Do not run a Q package in parallel with the R6 stage that holds its block.
 
-### Q1. Water only where the cadastre or OSM has water (M)
-
-- **Waits for:** nothing.
-- **Today:** `voxelize.py` ("# water", about line 713) takes OSM water areas and adds "rivers from the terrain
-  model": flat DGM cells (under 0.3 m relief in 5 m) within 0.8 m of the stretch's level, in bodies of 2000 cells or
-  more. Nothing ties such a body to a river. Above the Kachlet dam the level is 299.75 m and the villages behind the
-  dikes lie at that height, so streets and gardens become river and houses stand in it.
-- **Measured:** about 28 000 water cells lie more than 8 m from any ALKIS or OSM water, in about 10 patches, with
-  11 000 building cells standing in water. The two largest are the reported spots (7026 and 4975 cells). The laser
-  agrees: 65 % of those cells have ground returns, against 16 % on real river. ALKIS Tatsächliche Nutzung
-  (`Fließgewässer`, `Stehendes Gewässer`, `Hafenbecken`, already downloaded, read by `scripts/alkis_tn.py`) covers
-  the rivers of the whole map (2.98 M cells against the mask's 2.83 M).
-- **Do:** one rule for where water is. A terrain-derived water cell must lie in or near (start with 8 m) an ALKIS
-  water parcel or an OSM water area. ALKIS is the gate, not the shape: the bank still comes from the terrain model
-  (the comment at `TN = dict(...)` says why parcel lines are not drawn).
-- **Do:** look at the other direction too: 202 000 ALKIS water cells are not water in the build (banks, small
-  streams, under bridges). Decide per class whether that is right, and note it; do not draw parcels as water blindly.
-- **Do:** report counters: terrain water cells dropped by the gate, building cells standing in water (should be near 0
-  outside the Kachlet plant and the locks, at -2336,432 and -2427,563).
-- **Gates:** `check.py verify` on the fixtures; `golden --compare` will differ only where water changed, list it.
-  Boat and plane gates (`tools/boat.mjs`, `tools/plane.mjs`) stay green: the rivers themselves must not shrink.
-- **Verify spots:**
-  - Heining, houses in water: `?cam=-3104.3,165.3,-159.8,-3181.8,13,-99.6`
-  - Schalding, Schaldinger Straße in water: `?cam=-5842.8,151.8,-1406.6,-5661.3,13,-1375.6`
-  - other patches of the same kind: -5516,-1376; -3713,-1055; -2944,69; -3623,-968; -2547,5
+Landed in code, waiting for the next data rebuild: **Q1** (`e414b3ba`). After the rebuild, check Heining
+(`?cam=-3104.3,165.3,-159.8,-3181.8,13,-99.6`) and Schalding (`?cam=-5842.8,151.8,-1406.6,-5661.3,13,-1375.6`) are
+dry, read the `water_gate` counters in `data/debug/report.json` (about 22 000 cells dropped), and run
+`tools/boat.mjs` and `tools/plane.mjs`. ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
+possible later package.
 
 ### Q2. A carriageway over water is a bridge (M)
 
-- **Waits for:** Q1 (same block; Q1 removes most of the cases, what is left is this package's list).
+- **Waits for:** nothing. Q1 landed in code (`e414b3ba`, terrain water only within 8 m of ALKIS or OSM water). Its
+  tiles come with the next data rebuild; re-measure this list on that build (Q1 should take 9 of the 20 ways).
 - **Today:** water is painted after the roads and wins: `gcol[_wat | _lockm] = C["water"]`. A road OSM maps as plain
   ground over a culvert or an untagged bridge is cut by the water under it. The sag lift in `scripts/ground.py`
   would carry the road over the gap, but it skips ground within 1 m of the river level (`g > _riv + 1`).
@@ -325,7 +305,7 @@ Rules for all of them, on top of the rules above:
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** Q1–Q4, Q8, Q9. Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** Q2–Q4, Q8, Q9. Do nothing here before them; this is only the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
