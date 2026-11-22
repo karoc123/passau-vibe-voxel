@@ -5,6 +5,7 @@ import { holdPath, type Check } from './plane-checks';
 import { jetHold } from './jet-checks';
 import { VoxelCollision } from './voxel-collision';
 import { TileCache } from '../core/tile-cache';
+import type { Vec3 } from '../core/vec';
 import { liveEdits } from '../core/live-edits';
 import { fetchGzip } from '../fetch';
 
@@ -17,7 +18,7 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // the collision's prefetch, not held to its 160 ms between new wishes (in the viewer a frame's worth of flight; here
 // the steps run far faster than real time)
-const prefetch = (col: VoxelCollision, p: Vector3, v: Vector3) => { (col as unknown as { nextPrefetch: number }).nextPrefetch = 0; col.prefetch(p, v); };
+const prefetch = (col: VoxelCollision, p: Vec3, v: Vec3) => { (col as unknown as { nextPrefetch: number }).nextPrefetch = 0; col.prefetch(p, v); };
 
 async function known<T>(col: VoxelCollision, x: number, z: number, read: () => T | null) {
   for (let i = 0; i < 4000; i++) {

@@ -20,7 +20,7 @@ export function box(w: number, h: number, l: number, x: number, y: number, z: nu
 
 const basis = new THREE.Matrix4(), left = new THREE.Vector3();
 /** a model (nose +z, up +y, left +x) at p, its nose along fwd and its up along up (unit, across each other) */
-export function orient(g: THREE.Object3D, p: THREE.Vector3, fwd: THREE.Vector3, up: THREE.Vector3) {
+export function orient(g: THREE.Object3D, p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) {
   g.position.copy(p);
   g.quaternion.setFromRotationMatrix(basis.makeBasis(left.crossVectors(up, fwd), up, fwd));
 }
@@ -90,7 +90,7 @@ export class PlaneModel {
   }
 
   /** placed at the flight's point, the nose along `fwd`, the cockpit's up along `up` (PlaneFlight.attitude) */
-  orient(p: THREE.Vector3, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
+  orient(p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
 
   /** the propeller by the engine (0..1), the lamps by the night (0 day .. 1 night) */
   animate(dt: number, engine: number, night: number, now: number) {

@@ -1,8 +1,9 @@
-import { Vector3 } from 'three';
-import type { Sweep } from './voxel-collision';
+import { FixedStep } from '../core/fixed-step';
+import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../core/vec';
+import type { Sweep } from './sweep';
 
 // The small floatplane's flight (plane.ts draws it and reads the input; web/tools/plane.mjs checks it headless). No DOM,
-// no scene: input in, pose out, the world reached through PlaneWorld (the collision's sweep and surface, the rivers'
+// no scene, no three.js (plain { x, y, z }: core/vec.ts; tools/core-deps.mjs): input in, pose out, the world reached through PlaneWorld (the collision's sweep and surface, the rivers'
 // water). A point with heading, flight-path angle, bank and airspeed, stepped at a fixed rate. Not a simulator, but its
 // speed is energy: thrust (the throttle, a lever the player sets) against drag (parasitic, and induced by the lift it
 // pulls) and the path's slope (climbing costs speed, diving gains it). Lift is bounded by speed: the load factor it can
@@ -140,7 +141,7 @@ export interface PlaneWorld {
   W: number;
   D: number;
   H: number; // the map's top (meta.H)
-  sweep(p: Vector3, d: Vector3): Sweep;
+  sweep(p: Vec3, d: Vec3): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
   // the water's surface at (x, z); -1: no water; null: not known yet (its tile not in)
   water(x: number, z: number): number | null;
@@ -160,7 +161,7 @@ const levelTop = (c: PlaneConfig) => Math.sqrt(c.THRUST / c.CD0);
 const smooth = (t: number) => { const u = clamp(t, 0, 1); return u * u * (3 - 2 * u); };
 
 export class PlaneFlight {
-  readonly p = new Vector3();
+  readonly p = vec3();
   heading = 0;
   gamma = 0; // flight-path angle, + up
   bank = 0;
@@ -178,27 +179,27 @@ export class PlaneFlight {
   readonly events: PlaneEvent[] = [];
   private crashLeft = 0;
   private crashAt = 0;
-  private acc = 0;
+  private readonly clock: FixedStep;
   private nextSafe = 0;
   private safe: Safe[] = [];
   private start: Safe = { x: 0, y: 0, z: 0, heading: 0, speed: 0, water: false, t: 0 };
-  private readonly d = new Vector3();
-  private readonly q = new Vector3();
+  private readonly d = vec3();
+  private readonly q = vec3();
   // the aerobatic law's attitude: the path's direction and the lift's (across it); heading, gamma, bank derived
-  private readonly fw = new Vector3(0, 0, 1);
-  private readonly lu = new Vector3(0, 1, 0);
+  private readonly fw = vec3(0, 0, 1);
+  private readonly lu = vec3(0, 1, 0);
 
-  constructor(readonly cfg: PlaneConfig = PLANE) {}
+  constructor(readonly cfg: PlaneConfig = PLANE) { this.clock = new FixedStep(cfg.STEP, cfg.MAX_STEPS); }
 
   reset(pose: PlanePose) {
     this.start = { x: pose.x, y: pose.y, z: pose.z, heading: pose.heading, speed: pose.speed ?? (pose.water ? 0 : this.cfg.RESPAWN_SPEED), water: !!pose.water, t: 0 };
     this.safe = [];
-    this.t = this.nextSafe = this.acc = 0;
+    this.t = this.nextSafe = this.clock.acc = 0;
     this.place(this.start);
   }
 
   private place(s: Safe) {
-    this.p.set(s.x, s.y, s.z);
+    set(this.p, s.x, s.y, s.z);
     this.heading = s.heading;
     this.gamma = this.bank = this.pitchRate = this.roll = 0;
     this.v = s.speed;
@@ -215,35 +216,35 @@ export class PlaneFlight {
   private syncFrame(level = false) {
     if (!this.cfg.AEROBATIC) return;
     const f = this.fw, u = this.lu, cg = Math.cos(this.gamma);
-    f.set(Math.sin(this.heading) * cg, Math.sin(this.gamma), Math.cos(this.heading) * cg);
-    if (level) u.set(0, 1, 0);
-    u.addScaledVector(f, -u.dot(f));
-    if (u.lengthSq() < 1e-6) u.set(0, 1, 0).addScaledVector(f, -f.y);
-    u.normalize();
+    set(f, Math.sin(this.heading) * cg, Math.sin(this.gamma), Math.cos(this.heading) * cg);
+    if (level) set(u, 0, 1, 0);
+    addScaled(u, f, -dot(u, f));
+    if (lengthSq(u) < 1e-6) addScaled(set(u, 0, 1, 0), f, -f.y);
+    normalize(u);
   }
 
   /** the drawn attitude: where the nose points and the cockpit's up (the path's frame turned up by alpha) */
-  attitude(fwd: Vector3, up: Vector3) {
-    if (this.cfg.AEROBATIC && this.state === 'air') { fwd.copy(this.fw); up.copy(this.lu); }
+  attitude<T extends Vec3>(fwd: T, up: Vec3): T {
+    if (this.cfg.AEROBATIC && this.state === 'air') { copy(fwd, this.fw); copy(up, this.lu); }
     else {
       const sh = Math.sin(this.heading), ch = Math.cos(this.heading), sg = Math.sin(this.gamma), cg = Math.cos(this.gamma);
       const sb = Math.sin(this.bank), cb = Math.cos(this.bank);
-      fwd.set(sh * cg, sg, ch * cg);
+      set(fwd, sh * cg, sg, ch * cg);
       // the level up across the path (r) and the right wing (f x r), the lift tilted by the bank towards the right
-      up.set(-sg * sh * cb - ch * sb, cg * cb, -sg * ch * cb + sh * sb);
+      set(up, -sg * sh * cb - ch * sb, cg * cb, -sg * ch * cb + sh * sb);
     }
     const ca = Math.cos(this.aoa), sa = Math.sin(this.aoa), fx = fwd.x, fy = fwd.y, fz = fwd.z;
-    fwd.multiplyScalar(ca).addScaledVector(up, sa);
-    up.multiplyScalar(ca).add(this.q.set(fx, fy, fz).multiplyScalar(-sa));
+    addScaled(scale(fwd, ca), up, sa);
+    add(scale(up, ca), scale(set(this.q, fx, fy, fz), -sa));
     return fwd;
   }
 
   /** where it moves (m/s), for the collision's prefetch */
-  velocity(out = new Vector3()) {
-    if (this.state === 'crashed') return out.set(0, 0, 0);
-    if (this.cfg.AEROBATIC && this.state === 'air') return out.copy(this.fw).multiplyScalar(this.v);
+  velocity<T extends Vec3 = Vec3>(out: T = vec3() as T): T {
+    if (this.state === 'crashed') return set(out, 0, 0, 0);
+    if (this.cfg.AEROBATIC && this.state === 'air') return scale(copy(out, this.fw), this.v);
     const c = Math.cos(this.gamma);
-    return out.set(Math.sin(this.heading) * c, Math.sin(this.gamma), Math.cos(this.heading) * c).multiplyScalar(this.v);
+    return scale(set(out, Math.sin(this.heading) * c, Math.sin(this.gamma), Math.cos(this.heading) * c), this.v);
   }
 
   /** the nose over the flight path (drawn): the angle of attack the lift asks, followed (ALPHA_FOLLOW, ALPHA_RATE) */
@@ -253,16 +254,9 @@ export class PlaneFlight {
     return clamp(this.load / Math.max(0.05, (this.v / this.cfg.V_STALL) ** 2), -0.5, 1.2) * this.cfg.ALPHA_STALL;
   }
 
-  /** a frame: as many fixed steps as dt holds (at most MAX_STEPS); false if it waited for a tile */
+  /** a frame: as many fixed steps as dt holds (at most MAX_STEPS: core/fixed-step.ts); false if it waited for a tile */
   advance(input: PlaneInput, dt: number, w: PlaneWorld) {
-    const c = this.cfg;
-    this.acc = Math.min(this.acc + Math.max(0, dt), c.STEP * c.MAX_STEPS);
-    let ok = true;
-    while (this.acc >= c.STEP) {
-      this.acc -= c.STEP;
-      if (!this.step(input, c.STEP, w)) { this.acc = 0; ok = false; break; }
-    }
-    return ok;
+    return this.clock.run(dt, (step) => this.step(input, step, w));
   }
 
   /** one step; false if it waited for a collision tile (nothing changed) */
@@ -300,7 +294,7 @@ export class PlaneFlight {
     const drag = c.CD0 * v * v + c.KI * (n * g) ** 2 / (v * v);
     this.v = clamp(v + (thrust - drag - g * Math.sin(this.gamma)) * dt, c.V_MIN, c.V_MAX);
     // the move: inside the map's walls and under the ceiling, onto the water, through the collision
-    const d = this.velocity(this.d).multiplyScalar(dt);
+    const d = scale(this.velocity(this.d), dt);
     this.edge(d, ceil, w);
     const p = this.p, ny = p.y + d.y;
     let touch = false;
@@ -312,12 +306,12 @@ export class PlaneFlight {
     const s = w.sweep(p, d);
     if (s === 'loading') return false;
     if (!s.hit) {
-      p.add(d);
+      add(p, d);
       if (touch) this.touchdown();
       return true;
     }
-    const len = d.length();
-    p.addScaledVector(d, len > 0 ? Math.max(0, s.fraction - 0.002 / len) : 0);
+    const len = length(d);
+    addScaled(p, d, len > 0 ? Math.max(0, s.fraction - 0.002 / len) : 0);
     if (s.hit === 'city edge') return true;
     if (s.hit === 'ceiling') { this.gamma = Math.min(this.gamma, 0); this.syncFrame(); return true; }
     const sink = -v * Math.sin(this.gamma);
@@ -373,16 +367,16 @@ export class PlaneFlight {
     this.stalled = nCmd > nMax + 0.05 && v < c.V_STALL * 1.3;
     // f' = (n g lu + gravity across the path) / v; the lift re-squared to the path, then rolled about it
     const k = g * dt / v;
-    f.set(f.x + (n * u.x + f.y * f.x) * k, f.y + (n * u.y - 1 + f.y * f.y) * k, f.z + (n * u.z + f.y * f.z) * k).normalize();
-    u.addScaledVector(f, -u.dot(f)).normalize();
-    const a = this.roll * dt, w = this.q.crossVectors(f, u);
-    u.multiplyScalar(Math.cos(a)).addScaledVector(w, Math.sin(a)).normalize();
+    normalize(set(f, f.x + (n * u.x + f.y * f.x) * k, f.y + (n * u.y - 1 + f.y * f.y) * k, f.z + (n * u.z + f.y * f.z) * k));
+    normalize(addScaled(u, f, -dot(u, f)));
+    const a = this.roll * dt, w = cross(this.q, f, u);
+    normalize(addScaled(scale(u, Math.cos(a)), w, Math.sin(a)));
     // heading, gamma, bank: read off the frame (the bank against the level up across the path; kept at the vertical)
     this.gamma = Math.asin(clamp(f.y, -1, 1));
     if (Math.abs(f.y) < 0.999) {
       this.heading = Math.atan2(f.x, f.z);
-      const r = this.d.set(-f.y * f.x, 1 - f.y * f.y, -f.y * f.z).normalize();
-      this.bank = Math.atan2(u.dot(w.crossVectors(f, r)), u.dot(r));
+      const r = normalize(set(this.d, -f.y * f.x, 1 - f.y * f.y, -f.y * f.z));
+      this.bank = Math.atan2(dot(u, cross(w, f, r)), dot(u, r));
     }
     return n;
   }
@@ -415,16 +409,16 @@ export class PlaneFlight {
       this.events.push({ type: 'takeoff' });
       return this.fly(input, dt, w);
     }
-    const p = this.p, d = this.d.set(Math.sin(this.heading), 0, Math.cos(this.heading)).multiplyScalar(this.v * dt);
+    const p = this.p, d = scale(set(this.d, Math.sin(this.heading), 0, Math.cos(this.heading)), this.v * dt);
     this.edge(d, Infinity, w);
     const wl = w.water(p.x + d.x, p.z + d.z);
     if (wl === null) return false;
     if (wl < 0) { this.bump('bank'); return true; }
     d.y = wl + c.FLOAT_H - p.y;
-    const s = w.sweep(this.q.copy(p).setY(p.y + c.WATER_LIFT), d);
+    const s = w.sweep(set(this.q, p.x, p.y + c.WATER_LIFT, p.z), d);
     if (s === 'loading') return false;
     if (s.hit && s.hit !== 'city edge') { this.bump(s.hit); return true; }
-    p.add(d);
+    add(p, d);
     return true;
   }
 
@@ -435,7 +429,7 @@ export class PlaneFlight {
   }
 
   // the map's walls: no move out past EDGE (the move along them stays), none over the ceiling
-  private edge(d: Vector3, ceil: number, w: PlaneWorld) {
+  private edge(d: Vec3, ceil: number, w: PlaneWorld) {
     const c = this.cfg, p = this.p, lo = c.EDGE;
     let at = false;
     const fit = (k: 'x' | 'z', hi: number) => {
@@ -495,7 +489,7 @@ export class PlaneFlight {
 export interface CollisionLike {
   width: number;
   depth: number;
-  sweep(p: Vector3, d: Vector3): Sweep;
+  sweep(p: Vec3, d: Vec3): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
   waterColumn(x: number, z: number, y0: number, y1: number): { water: number } | null;
 }

@@ -1,5 +1,6 @@
 import { JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput } from './plane-flight';
 import { BoxWorld, fly, levelSpeed, type Check } from './plane-checks';
+import { dot, length, vec3 } from '../core/vec';
 
 // Headless checks of the jet (plane-flight.ts JET: the floatplane's core with the aerobatic law; web/tools/plane.mjs
 // --type jet). The synthetic world of plane-checks.ts. Limits from JET where it sets them.
@@ -219,7 +220,7 @@ export function runJetChecks(c: PlaneConfig = JET): Check[] {
     }
     f.reset({ x: 500, y: 400, z: 1500, heading: Math.PI / 2, speed: 110 });
     let inp: PlaneInput = HANDS_OFF(0.8), bad = '', crashes = 0, respawns = 0;
-    const fw = f.p.clone(), up = f.p.clone();
+    const fw = vec3(), up = vec3();
     for (let t = 0; t < 600 && !bad; t += c.STEP) {
       if (rnd() < 0.02) inp = { turn: Math.round(rnd() * 2 - 1) * (rnd() < 0.6 ? 1 : 0), pitch: Math.round(rnd() * 2 - 1) * (rnd() < 0.5 ? 1 : 0), throttle: rnd() };
       f.step(inp, c.STEP, w);
@@ -227,7 +228,7 @@ export function runJetChecks(c: PlaneConfig = JET): Check[] {
       const p = f.p;
       f.attitude(fw, up);
       if (![p.x, p.y, p.z, f.v, f.heading, f.gamma, f.bank, fw.x, up.y].every(Number.isFinite)) bad = `NaN at ${r1(t)}`;
-      else if (Math.abs(fw.length() - 1) > 1e-6 || Math.abs(up.length() - 1) > 1e-6 || Math.abs(fw.dot(up)) > 1e-6) bad = `frame at ${r1(t)}`;
+      else if (Math.abs(length(fw) - 1) > 1e-6 || Math.abs(length(up) - 1) > 1e-6 || Math.abs(dot(fw, up)) > 1e-6) bad = `frame at ${r1(t)}`;
       else if (p.x < c.EDGE - 1e-6 || p.x > w.W - c.EDGE + 1e-6 || p.z < c.EDGE - 1e-6 || p.z > w.D - c.EDGE + 1e-6) bad = `outside at ${r1(t)}`;
       else if (p.y > w.H + c.CEILING + 1e-6) bad = `over the ceiling at ${r1(t)}`;
     }

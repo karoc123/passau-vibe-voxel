@@ -1,4 +1,5 @@
-import type { Vector3 } from 'three';
+import { component, type Vec3 } from '../core/vec';
+import type { ImpactKind, Sweep } from './sweep';
 import type { Meta } from '../types';
 import type { RawColumns } from '../tile-data';
 import { liveEdits } from '../core/live-edits';
@@ -17,10 +18,7 @@ type Runs = { offsets: Uint32Array; data: Uint16Array };
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
 const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
   ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: capField(N, v.base) });
-export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
-// Normal as a signed one-based axis index (x, y, z).
-type Contact = { fraction: number; axis: number };
-export type Sweep = (Contact & { hit: ImpactKind }) | { fraction: number; hit: null } | 'loading';
+export type { ImpactKind, Sweep } from './sweep';
 
 function runsOf(columns: RawColumns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
@@ -29,12 +27,12 @@ function runsOf(columns: RawColumns): Runs {
 }
 
 // Sweeps the craft's cube (the drone's 70 cm) through one column segment, expanded by its half side r.
-function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number, r: number) {
+function contact(p: Vec3, d: Vec3, x: number, lo: number, hi: number, z: number, limit: number, r: number) {
   let enter = 0, leave = limit, axis = 0;
   for (let i = 0; i < 3; i++) {
     const min = (i === 0 ? x : i === 1 ? lo : z) - r;
     const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + r;
-    const start = p.getComponent(i), move = d.getComponent(i);
+    const start = component(p, i), move = component(d, i);
     if (Math.abs(move) < 1e-10) {
       if (start < min || start > max) return null;
       continue;
@@ -51,7 +49,7 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
   // A craft already inside a voxel (e.g. at a corner) falls back to its opposing motion axis.
   if (axis === 0) {
     const i = Math.abs(d.x) >= Math.abs(d.y) && Math.abs(d.x) >= Math.abs(d.z) ? 0 : Math.abs(d.y) >= Math.abs(d.z) ? 1 : 2;
-    axis = d.getComponent(i) > 0 ? -(i + 1) : i + 1;
+    axis = component(d, i) > 0 ? -(i + 1) : i + 1;
   }
   return { fraction: enter, axis };
 }
@@ -110,7 +108,7 @@ export class VoxelCollision {
     if (v) this.tiles.set(key, collisionTile(this.tileSide, v));
   }
 
-  prefetch(p: Vector3, v: Vector3) {
+  prefetch(p: Vec3, v: Vec3) {
     const now = performance.now();
     if (now >= this.nextPrefetch) {
       this.nextPrefetch = now + 160;
@@ -150,14 +148,14 @@ export class VoxelCollision {
   }
 
   // The drone's cube from p moved by d: how far it gets (fraction of d) and what it hits first
-  sweep(p: Vector3, d: Vector3): Sweep {
+  sweep(p: Vec3, d: Vec3): Sweep {
     let fraction = 1;
     let hit: ImpactKind | null = null, normalAxis = 0;
     const result = (): Sweep => hit ? { fraction, hit, axis: normalAxis } : { fraction, hit: null };
     // Reserve room for the drone at the edges of the model.
     for (const [axis, extent] of [[0, this.width], [1, this.ceiling], [2, this.depth]]) {
       const r = this.radius;
-      const start = p.getComponent(axis), move = d.getComponent(axis), end = start + move;
+      const start = component(p, axis), move = component(d, axis), end = start + move;
       if (end >= r && end <= extent - r) continue;
       const limit = (end < r ? r : extent - r);
       const t = move === 0 ? 0 : Math.max(0, (limit - start) / move);

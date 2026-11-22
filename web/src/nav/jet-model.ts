@@ -81,7 +81,7 @@ export class JetModel {
     this.group.visible = false;
   }
 
-  orient(p: THREE.Vector3, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
+  orient(p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
 
   /** the exhaust by the engine (0..1; the afterburner over AB_FROM), the lamps by the night (0 day .. 1 night) */
   animate(_dt: number, engine: number, night: number, now: number) {

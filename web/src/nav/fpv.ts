@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
 import { viewerTileCache } from '../viewer-tiles';
+import { FixedStep } from '../core/fixed-step';
+import { add, component, copy, length, set, type Vec3 } from '../core/vec';
 import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fpv-flight';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
@@ -59,7 +61,7 @@ export class FpvMode {
   private controller: FlightInput | null = null;
   private spawnYaw = 0;
   private savedNear: number | null = null;
-  private accumulator = 0;
+  private readonly clock = new FixedStep(FIXED_STEP, Infinity, 0.1);
   private nextStatus = 0;
   private waitingForTile = false;
   private impact: { at: number; strength: number; message: string } | null = null;
@@ -154,8 +156,8 @@ export class FpvMode {
   private restart() {
     this.keys.clear();
     this.touch.reset();
-    this.flight.velocity.set(0, 0, 0);
-    this.accumulator = 0;
+    set(this.flight.velocity, 0, 0, 0);
+    this.clock.acc = 0;
     this.waitingForTile = false;
     this.notice = '';
     this.impact = null;
@@ -186,7 +188,7 @@ export class FpvMode {
     this.device = source === 'controller' ? this.radio.deviceKey : null;
     this.phase = 'flying';
     this.notice = '';
-    this.accumulator = 0;
+    this.clock.acc = 0;
     this.keys.clear();
     this.renderPanel();
   }
@@ -198,21 +200,14 @@ export class FpvMode {
     this.phase = 'paused';
     this.notice = reason;
     this.waitingForTile = false;
-    this.accumulator = 0;
+    this.clock.acc = 0;
     this.renderPanel();
   }
 
   private advance(dt: number) {
     const input = this.flightInput();
     if (!input) return;
-    this.accumulator += clamp(dt, 0, 0.1);
-    while (this.accumulator >= FIXED_STEP) {
-      this.accumulator -= FIXED_STEP;
-      if (!this.flight.step(input, FIXED_STEP, this.move)) {
-        this.accumulator = 0;
-        break;
-      }
-    }
+    this.clock.run(dt, (step) => this.flight.step(input, step, this.move));
   }
 
   private flightInput(): FlightInput | null {
@@ -228,12 +223,12 @@ export class FpvMode {
     return this.source === 'keyboard' ? this.keyboard() : this.controller;
   }
 
-  private readonly move = (position: THREE.Vector3, displacement: THREE.Vector3, velocity: THREE.Vector3) => {
+  private readonly move = (position: Vec3, displacement: Vec3, velocity: Vec3) => {
     const collision = this.collision.sweep(position, displacement);
     this.waitingForTile = collision === 'loading';
     if (collision === 'loading') return false;
     if (!collision.hit) {
-      position.add(displacement);
+      add(position, displacement);
       return true;
     }
 
@@ -241,7 +236,7 @@ export class FpvMode {
     this.nextPosition.copy(position).addScaledVector(displacement, fraction);
     // At low normal speed, use the remaining part of the step to slide along the surface.
     const axis = Math.abs(collision.axis) - 1;
-    const approach = -velocity.getComponent(axis) * Math.sign(collision.axis);
+    const approach = -component(velocity, axis) * Math.sign(collision.axis);
     let nextContact: Exclude<Sweep, 'loading'> | null = null;
     if (approach < REBOUND_SPEED) {
       this.slide.copy(displacement).multiplyScalar(1 - fraction).setComponent(axis, 0);
@@ -257,14 +252,14 @@ export class FpvMode {
       }
     }
 
-    position.copy(this.nextPosition);
+    copy(position, this.nextPosition);
     this.resolveContact(collision.hit, collision.axis);
     if (nextContact?.hit) this.resolveContact(nextContact.hit, nextContact.axis);
     return true;
   };
 
-  private clearanceFraction(fraction: number, travel: THREE.Vector3) {
-    const distance = travel.length();
+  private clearanceFraction(fraction: number, travel: Vec3) {
+    const distance = length(travel);
     return distance > 0 ? Math.max(0, fraction - SURFACE_CLEARANCE / distance) : fraction;
   }
 
@@ -337,6 +332,6 @@ export class FpvMode {
     const terrain = this.collision.surface(p.x, p.z);
     const altitude = terrain ? `${Math.round(p.y - terrain.ground)} m AGL` : `${Math.round(p.y)} m`;
     const throttle = flyingWithTouch ? ` · ${this.touch.throttlePercent}% throttle` : '';
-    this.telemetry.textContent = `${altitude} · ${Math.round(this.flight.velocity.length() * 3.6)} km/h${throttle}`;
+    this.telemetry.textContent = `${altitude} · ${Math.round(length(this.flight.velocity) * 3.6)} km/h${throttle}`;
   }
 }

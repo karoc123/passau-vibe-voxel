@@ -1,6 +1,6 @@
-import { Vector3 } from 'three';
+import { component, type Vec3 } from '../core/vec';
 import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
-import type { ImpactKind, Sweep } from './voxel-collision';
+import type { ImpactKind, Sweep } from './sweep';
 
 // Headless checks of the plane's flight (plane-flight.ts; web/tools/plane.mjs). A synthetic world of boxes (ground,
 // hills, walls, roofs, a river whose water is the ground's top as in the voxels), swept the way VoxelCollision sweeps
@@ -33,7 +33,7 @@ export class BoxWorld implements PlaneWorld {
     return this.at(x, z).water;
   }
 
-  sweep(p: Vector3, d: Vector3): Sweep {
+  sweep(p: Vec3, d: Vec3): Sweep {
     const R = this.R;
     let fraction = 1, hit: ImpactKind | null = null, axis = 0;
     const all: Block[] = [{ x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9, top: this.ground, kind: 'terrain' }, ...this.blocks];
@@ -41,7 +41,7 @@ export class BoxWorld implements PlaneWorld {
       const lo = [b.x0 - R, -1e9, b.z0 - R], hi = [b.x1 + R, b.top + R, b.z1 + R];
       let enter = 0, leave = 1, ax = 0, miss = false;
       for (let i = 0; i < 3 && !miss; i++) {
-        const s = p.getComponent(i), m = d.getComponent(i);
+        const s = component(p, i), m = component(d, i);
         if (Math.abs(m) < 1e-10) { if (s < lo[i] || s > hi[i]) miss = true; continue; }
         const a = (lo[i] - s) / m, c = (hi[i] - s) / m, e = Math.min(a, c);
         if (e >= enter) { enter = e; ax = -Math.sign(m) * (i + 1); }
