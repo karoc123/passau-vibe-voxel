@@ -47,7 +47,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with Q4's deck-width step or R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
-| F9 | More landmark labels, N toggles them | S–M | In progress (`f9`) |
+| F9 | More landmark labels, N toggles them | S–M | Ready to merge (`f9`) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | **Ready** |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
