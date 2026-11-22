@@ -9,6 +9,7 @@ import type { World } from '../world';
 import { rideCamera } from './ride';
 import { follow } from './chase-rig';
 import { gameKey, onFocusLoss } from './input';
+import type { PlayerCraft } from './craft';
 import { Pedestrian } from './pedestrian';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -22,11 +23,9 @@ import { HEAD, STEP, walkStep } from './walk';
 //          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's); two fingers
 //          close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
-//   fpv, boat, plane: a craft (fpv.ts the drone, boat.ts the speedboat, plane.ts the floatplane) owns the camera and the input
-export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian' | 'boat' | 'plane';
-export type Craft = 'fpv' | 'boat' | 'plane';
-// a craft owns the camera and the input: Nav leaves the keys, the pointer and the wheel to it
-export const flying = (m: Mode) => m === 'fpv' || m === 'boat' || m === 'plane';
+//   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
+//          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
+export type Mode = 'orbit' | 'walk' | 'ride' | 'pedestrian' | 'craft';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
@@ -54,7 +53,8 @@ const WALK_NEAR = 0.2;
 export class Nav {
   mode: Mode = 'orbit';
   ride: Ride | null = null;
-  controlledRide: Ride | null = null;
+  /** the craft the player is in (craft.ts): in mode craft, or the car driven in mode ride */
+  craft: PlayerCraft | null = null;
   // the driven car's camera: shaken by a crash, dipped by a splash (nav/drive.ts); its height followed smoothly
   readonly rideShake = new THREE.Vector3();
   private rideY: number | null = null;
@@ -158,7 +158,9 @@ export class Nav {
 
   private get pedestrianActive() { return this.mode === 'pedestrian'; }
   private get onFoot() { return this.mode === 'walk' || this.mode === 'pedestrian'; }
-  private get driving() { return this.ride !== null && this.ride === this.controlledRide; }
+  private get driving() { return this.craft !== null && this.mode === 'ride'; }
+  /** a craft owns the camera and the input */
+  get craftView() { return this.mode === 'craft'; }
 
   private axis(pos: Action, neg: Action) { return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0); }
 
@@ -171,7 +173,7 @@ export class Nav {
         if (this.mode !== 'orbit') this.flyUp();
         return;
       }
-      if (flying(this.mode) || this.driving) return;
+      if (this.craftView || this.driving) return;
       if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.mode === 'pedestrian') {
           if (!e.repeat) this.jumpBuffer = 0.14;
@@ -241,7 +243,7 @@ export class Nav {
       if (this.pedestrianActive && document.pointerLockElement === dom) this.lookWithMouse(e);
     });
     dom.addEventListener('pointerdown', (e) => {
-      if (flying(this.mode) || (this.pedestrianActive && document.pointerLockElement === dom)) return;
+      if (this.craftView || (this.pedestrianActive && document.pointerLockElement === dom)) return;
       if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -315,7 +317,7 @@ export class Nav {
   }
 
   private wheel(e: WheelEvent) {
-    if (flying(this.mode)) return;
+    if (this.craftView) return;
     if (this.mode === 'orbit') { this.zoomT = performance.now(); return; }
     e.preventDefault();
     if (this.mode === 'pedestrian') { this.pedestrian?.zoom(clamp(e.deltaY * 0.003, -0.4, 0.4)); return; }
@@ -373,7 +375,7 @@ export class Nav {
 
   // what a click would do here: a hand over people and vehicles, a ring on the street where you would walk
   private hover(cx: number, cy: number, type: string) {
-    if (flying(this.mode)) return;
+    if (this.craftView) return;
     const now = performance.now();
     if (type === 'touch' || now - this.hoverT < 60 || now - this.quietT < 350) return;
     this.hoverT = now;
@@ -396,7 +398,7 @@ export class Nav {
 
   // a person or vehicle under the click is followed (generous from the air, tight on the street); else walk there
   private tap(cx: number, cy: number) {
-    if (flying(this.mode) || this.driving) return;
+    if (this.craftView || this.driving) return;
     const coarse = coarsePointer(), air = this.mode === 'orbit';
     const ag = this.mode === 'pedestrian' ? null : this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
     if (ag) { this.startRide(ag); return; }
@@ -493,23 +495,31 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
+  /** a craft that owns the camera could be entered now: from the map or a ride */
   get canStartCraft() {
     return this.world !== null && !this.walkPending && (this.mode === 'orbit' || this.mode === 'ride');
   }
 
-  // Switch to a craft from the map or a ride, keeping the current view for its spawn.
-  startCraft(mode: Craft) {
+  // Into a craft (craft.ts). One that owns the camera: from the map or a ride, keeping the current view for its
+  // spawn. The car: it takes the ride followed. false: not now
+  enterCraft(c: PlayerCraft) {
+    if (c.view === 'ride') {
+      if (this.mode !== 'ride' || !this.ride) return false;
+      if (this.craft !== c) this.dropCraft();
+      this.craft = c;
+      return true;
+    }
     if (!this.canStartCraft) return false;
     this.rememberSky();
     if (this.mode === 'ride') {
-      // DriveMode parks when its ride ends, before the craft updates on the next frame.
-      this.leaveRide();
+      this.leaveRide(); // (the car driven parked: dropCraft)
       this.landing = null;
     }
     this.cancelFly();
     this.keys.clear();
     this.turned = false;
-    this.mode = mode;
+    this.mode = 'craft';
+    this.craft = c;
     this.controls.enabled = false;
     this.marker.visible = false;
     this.dom.style.cursor = 'default';
@@ -517,9 +527,24 @@ export class Nav {
     return true;
   }
 
+  // out of the craft (the car's Park): it lets go. One that owns the camera leaves to the map
+  leaveCraft() {
+    const own = this.craftView;
+    this.dropCraft();
+    if (own) this.setOrbit();
+  }
+
+  // whatever leaves the craft (the map, a ride, a walk, another craft): it is told once (leave())
+  private dropCraft() {
+    const c = this.craft;
+    if (!c) return;
+    this.craft = null;
+    c.leave();
+  }
+
   async togglePedestrian(captureMouse: boolean) {
     if (this.mode === 'pedestrian') { this.flyUp(); return; }
-    if (!this.world || this.walkPending || flying(this.mode)) return;
+    if (!this.world || this.walkPending || this.craftView) return;
     const entry = {};
     this.pedestrianStart = entry;
     if (captureMouse) this.requestPedestrianMouse();
@@ -633,6 +658,7 @@ export class Nav {
     this.releasePedestrianMouse();
     this.pedestrian?.hide();
     this.release();
+    this.dropCraft();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
     this.landing = this.transition(1100);
     this.mode = 'ride';
@@ -645,6 +671,7 @@ export class Nav {
   }
 
   private leaveRide() {
+    this.dropCraft();
     this.ride = null;
     this.rideY = null;
     this.jumpAsked = false;

@@ -3,7 +3,8 @@ import type { Meta } from '../types';
 import { clamp } from '../util';
 import type { CarInput } from '../physics/rapier/car';
 import type { RapierDrive } from '../physics/rapier/drive-world';
-import { flying, type Nav, type Ride } from './nav';
+import type { Nav, Ride } from './nav';
+import type { CraftContext, PlayerCraft } from './craft';
 import { CRASH_MS, DriveSession, SINK_MS } from './drive-session';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { VEHICLE_IDS, VEHICLES, vehicleOf, type VehicleId } from '../sim/vehicles';
@@ -14,7 +15,8 @@ import './drive.css';
 
 // The drive mode: the player takes the wheel of a traffic car, driven on Rapier (physics/rapier/drive-world.ts,
 // loaded in the background once the city is shown; drive-session.ts: one drive). Here: the panel, the input, the
-// camera's shake. Out of focus it holds still (input.ts).
+// camera's shake. A craft on the ride's camera (craft.ts): Nav follows the car taken and tells it when it is left (the
+// car parks). Out of focus it holds still (input.ts).
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
 
 const KEYS: ReadonlySet<string> = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
@@ -28,7 +30,12 @@ const readChoice = (): 'any' | VehicleId => {
 // the touch stick's steering: |x|^STEER_CURVE, so a small deflection steers gently and the full one locks
 const STEER_CURVE = 1.7;
 
-export class DriveMode {
+export class DriveMode implements PlayerCraft {
+  readonly id = 'drive';
+  readonly view = 'ride';
+  private readonly nav: Nav;
+  private readonly focus: Vector3;
+  private readonly meta: Meta;
   private readonly touch: TouchSticks;
   // on a touch screen: one stick on the left (up gas, down brake then reverse, sideways steer), the handbrake under the
   // right thumb (held), and the right side's fingers pinch the camera (style.css #handbrake-button)
@@ -46,7 +53,8 @@ export class DriveMode {
   private rapierLoad: Promise<void> | null = null;
   private rapierMod: typeof import('../physics/rapier/drive-world') | null = null;
 
-  constructor(private readonly nav: Nav, private readonly focus: Vector3, private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
+  constructor({ nav, target, meta, host, canvas }: CraftContext) {
+    this.nav = nav; this.focus = target; this.meta = meta;
     Object.assign(window, { __drive: this });
     setTimeout(() => {
       const idle = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
@@ -56,7 +64,7 @@ export class DriveMode {
     // (the right side is the camera's: no stick, only the pinch, so a drive never steers from the right thumb)
     this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio), camera: 'right' });
     const P = this.panel = new ModePanel(host, 'drive', 'Drive a car');
-    this.action = P.button('', () => this.activate());
+    this.action = P.button('', () => this.toggle());
     this.typeButton = P.button('', () => this.cycleType(), 'drive-type');
     this.typeButton.title = 'What to drive (V)';
     this.speed = P.line('speed');
@@ -64,7 +72,7 @@ export class DriveMode {
       'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake. Pinch on the right to zoom.');
     addEventListener('keydown', e => {
       if (!gameKey(e)) return;
-      if (e.code === 'KeyV' && !this.driving && !flying(this.nav.mode) && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
+      if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.driving.session.reset(); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
@@ -73,11 +81,7 @@ export class DriveMode {
     this.draw();
   }
 
-  /** a car is driven (body[data-mode=drive], main.ts) */
-  get active() { return this.driving !== null; }
-
   update(dt: number) {
-    if (this.driving && this.nav.ride !== this.driving.ride) this.park();
     if (this.pending) this.prepare(this.pending);
     const session = this.driving?.session;
     if (session) {
@@ -98,12 +102,18 @@ export class DriveMode {
     if (sink > 0) offset.y -= 1.6 * Math.sin(Math.min(1, (1 - sink) * 4) * Math.PI / 2);
   }
 
-  private activate() {
-    if (this.driving) { this.park(); return; }
-    if (flying(this.nav.mode)) return;
+  // the panel's button: take the wheel, or park
+  private toggle() {
+    if (this.driving) this.nav.leaveCraft();
+    else this.enter();
+  }
+
+  // take the wheel of the car followed, else of the one nearest the focus (once Rapier is loaded: prepare)
+  enter() {
+    if (this.driving || this.nav.craftView) return false;
     if (this.nav.ride?.obj.kind !== 'car') {
       const life = this.nav.life;
-      if (!life?.group.visible) return;
+      if (!life?.group.visible) return false;
       const choice = life.nearest('car', this.focus, null);
       if (choice) this.nav.startRide(choice);
       else {
@@ -111,7 +121,9 @@ export class DriveMode {
         if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
       }
     }
-    if (this.nav.ride?.obj.kind === 'car') this.pending = this.nav.ride;
+    if (this.nav.ride?.obj.kind !== 'car') return false;
+    this.pending = this.nav.ride;
+    return true;
   }
 
   // takes the wheel once Rapier is loaded
@@ -136,18 +148,18 @@ export class DriveMode {
     const at = car.rp ?? pose;
     const start = { x: at.x, y: at.y, z: at.z, h: car.rh ?? pose.h, pitch: car.pitch ?? 0, roll: car.roll ?? 0 };
     this.driving = { ride, session: new DriveSession(life, car, rap, m.buildOf(car), start, performance.now()) };
-    this.nav.controlledRide = ride;
+    this.nav.enterCraft(this);
     this.touch.setActive(true);
     this.keys.clear();
     this.panel.silence();
   }
 
-  park() {
+  // left (Park, the map, a walk, another ride or craft): the car parks where it is
+  leave() {
     if (!this.driving) return;
     this.driving.session.park();
     this.nav.rideShake.set(0, 0, 0);
     this.driving = null;
-    this.nav.controlledRide = null;
     this.keys.clear();
     this.handbrake.release();
     this.touch.setActive(false);

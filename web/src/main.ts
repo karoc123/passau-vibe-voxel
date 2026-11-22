@@ -11,11 +11,8 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
-import type { DriveMode } from './nav/drive';
-import type { FpvMode } from './nav/fpv';
-import type { BoatMode } from './nav/boat';
-import type { PlaneMode } from './nav/plane';
-import { flying, Nav, type Mode, type Ride } from './nav/nav';
+import type { CraftContext, PlayerCraft } from './nav/craft';
+import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -78,10 +75,14 @@ const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
 movingActors.add(nav.actors);
-let fpv: FpvMode | null = null;
-let drive: DriveMode | null = null;
-let boat: BoatMode | null = null;
-let plane: PlaneMode | null = null;
+// the player's crafts (nav/craft.ts), one line each; their panels in this order. Loaded once the city is shown (boot)
+const CRAFTS = () => [
+  import('./nav/fpv').then((m) => m.FpvMode),
+  import('./nav/drive').then((m) => m.DriveMode),
+  import('./nav/boat').then((m) => m.BoatMode),
+  import('./nav/plane').then((m) => m.PlaneMode),
+];
+let crafts: PlayerCraft[] = [];
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -112,7 +113,7 @@ walkButton.type = 'button';
 walkButton.disabled = true;
 walkButton.addEventListener('click', e => {
   walkButton.blur();
-  drive?.park();
+  nav.leaveCraft(); // (the car driven parks; you step out beside it)
   const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
   void nav.togglePedestrian(!touch && !coarsePointer());
 });
@@ -159,8 +160,9 @@ jumpButton.setAttribute('aria-label', 'Jump');
 jumpButton.addEventListener('pointerdown', (e) => { e.preventDefault(); nav.jump(); });
 jumpButton.addEventListener('click', (e) => { if (e.detail === 0) nav.jump(); }); // (the keyboard)
 if (qs.get('ui') === '0') document.body.classList.add('noui');
-// which mode is on, for style.css (one attribute, set each frame below): nav.ts Mode, or drive while a car is driven
-document.body.dataset.mode = nav.mode;
+// which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
+// (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
+document.body.dataset.mode = document.body.dataset.nav = nav.mode;
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
   if (e.key === '/' && gameKey(e)) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
@@ -327,7 +329,7 @@ const onBridge = (kind: string, name: string) => /^(foot)?bridge$/.test(kind) ||
 // frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
 function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '', kind = pin?.kind ?? '') {
   if (!world) return;
-  if (flying(nav.mode)) nav.setOrbit();
+  if (nav.craftView) nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
   if (nav.mode !== 'orbit') {
@@ -402,7 +404,7 @@ async function boot() {
   world = nav.world = streamer.world;
   // the moving casters: street life (the cars and the motorbike driven are its own), and nav.actors' walker, boat,
   // floatplane and jet (the FPV drone has no model)
-  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.mode === 'boat' || nav.mode === 'plane' ? movingActors : null);
+  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.craftView ? movingActors : null);
   nav.streamer = streamer;
   nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
@@ -460,14 +462,9 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  const [{ FpvMode }, { DriveMode }, { BoatMode }, { PlaneMode }] = await Promise.all([
-    import('./nav/fpv'), import('./nav/drive'), import('./nav/boat'), import('./nav/plane'),
-  ]);
-  fpv = new FpvMode(nav, camera, controls.target, meta, modeTools, renderer.domElement);
-  drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
-  const env = { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints };
-  boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, env);
-  plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, env);
+  const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
+    env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints } };
+  crafts = (await Promise.all(CRAFTS())).map((C) => new C(ctx));
 }
 
 // The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):
@@ -503,19 +500,19 @@ renderer.setAnimationLoop((now) => {
   stepWeather(now);
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
-  drive?.update(dt);
+  // (the car before Nav: it moves, then the ride camera follows it; the crafts that own the camera after Nav)
+  for (const c of crafts) if (c.view === 'ride') c.update(dt);
   nav.update(dt);
-  fpv?.update(dt);
-  boat?.update(dt);
-  plane?.update(dt);
-  const bodyMode = drive?.active ? 'drive' : nav.mode;
+  for (const c of crafts) if (c.view === 'own') c.update(dt);
+  const bodyMode = nav.craft?.id ?? nav.mode;
   if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
+  if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
   const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
-  walkButton.disabled = !world || nav.enteringWalk || flying(nav.mode);
+  walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, gfx.now.tilt && !flying(nav.mode), camera.position.distanceTo(controls.target));
+  post.setHeight(above, gfx.now.tilt && !nav.craftView, camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   viewCut(above);
   daylight.setFogFrom(viewDist, above);

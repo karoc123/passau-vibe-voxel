@@ -7,7 +7,7 @@ import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fp
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
-import type { Meta } from '../types';
+import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
 import { clamp, el } from '../util';
 import { gameKey, HeldKeys, inFocus, onFocusLoss } from './input';
 import { modeButton, ModePanel } from './mode-panel';
@@ -24,7 +24,13 @@ type InputSource = 'controller' | 'keyboard' | 'touch';
 
 // The viewer owns the camera and render loop; this mode supplies the flight pose. Out of focus it pauses and wants
 // arming again (input.ts: the radio's throttle may have moved meanwhile).
-export class FpvMode {
+export class FpvMode implements PlayerCraft {
+  readonly id = 'fpv';
+  readonly view = 'own';
+  private readonly nav: Nav;
+  private readonly camera: THREE.PerspectiveCamera;
+  private readonly target: THREE.Vector3;
+  private on = false;
   private readonly radio = new FpvInput();
   private readonly touch: FpvTouch;
   private readonly hasTouch = navigator.maxTouchPoints > 0;
@@ -58,8 +64,8 @@ export class FpvMode {
   private impact: { at: number; strength: number; message: string } | null = null;
   private notice = '';
 
-  constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera,
-    private readonly target: THREE.Vector3, meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement) {
+  constructor({ nav, camera, target, meta, host, canvas }: CraftContext) {
+    this.nav = nav; this.camera = camera; this.target = target;
     this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
     // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
@@ -99,18 +105,7 @@ export class FpvMode {
   }
 
   update(dt: number) {
-    const active = this.nav.mode === 'fpv';
-    if (!active && this.savedNear !== null) {
-      this.collision.release();
-      this.camera.near = this.savedNear;
-      this.camera.updateProjectionMatrix();
-      this.savedNear = null;
-      this.keys.clear();
-      this.touch.reset();
-      this.phase = 'loading';
-      this.notice = '';
-      this.renderPanel();
-    }
+    const active = this.on;
     // (the radio read, and its setup drawn, only while the drone is on)
     this.controller = active ? this.radio.update() : null;
     if (active) {
@@ -130,22 +125,46 @@ export class FpvMode {
     }
   }
 
+  // the panel's button: in (where the camera is) or out
   private toggle() {
-    if (this.nav.mode === 'fpv') {
+    if (this.on) {
       this.touch.setActive(false);
       this.nav.flyUp();
       return;
     }
-    if (!this.nav.startCraft('fpv')) return;
+    this.enter();
+  }
+
+  // into the drone at a spot (heading h: the way it faces), else where the camera is, facing the way it looks
+  enter(at?: CraftSpot) {
+    if (this.on || !this.nav.enterCraft(this)) return false;
+    this.on = true;
     const position = this.camera.position, offset = this.target.clone().sub(position);
-    this.spawn.set(clamp(position.x, 16, this.collision.width - 16), position.y,
-      clamp(position.z, 16, this.collision.depth - 16));
-    this.spawnYaw = Math.atan2(-offset.x, -offset.z);
+    const x = at?.x ?? position.x, z = at?.z ?? position.z;
+    this.spawn.set(clamp(x, 16, this.collision.width - 16), at?.y ?? position.y, clamp(z, 16, this.collision.depth - 16));
+    // (the drone's yaw: its camera looks along -z)
+    this.spawnYaw = at ? at.h + Math.PI : Math.atan2(-offset.x, -offset.z);
     this.savedNear = this.camera.near;
     this.camera.near = 0.15;
     this.camera.fov = 74;
     this.camera.updateProjectionMatrix();
     this.restart();
+    return true;
+  }
+
+  leave() {
+    this.on = false;
+    this.collision.release();
+    if (this.savedNear !== null) {
+      this.camera.near = this.savedNear;
+      this.camera.updateProjectionMatrix();
+      this.savedNear = null;
+    }
+    this.keys.clear();
+    this.touch.reset();
+    this.phase = 'loading';
+    this.notice = '';
+    this.renderPanel();
   }
 
   private restart() {
@@ -176,7 +195,7 @@ export class FpvMode {
   }
 
   private arm(source: InputSource) {
-    if (this.nav.mode !== 'fpv' || (this.phase !== 'ready' && this.phase !== 'paused')) return;
+    if (!this.on || (this.phase !== 'ready' && this.phase !== 'paused')) return;
     if (source === 'controller' && (!this.controller || this.controller.throttle > ARM_THROTTLE)) return;
     this.source = source;
     this.touch.setActive(source === 'touch');
@@ -191,7 +210,7 @@ export class FpvMode {
   private pause(reason: string) {
     this.keys.clear();
     this.touch.reset();
-    if (this.nav.mode !== 'fpv' || this.phase !== 'flying') return;
+    if (!this.on || this.phase !== 'flying') return;
     this.phase = 'paused';
     this.notice = reason;
     this.waitingForTile = false;
@@ -287,7 +306,7 @@ export class FpvMode {
   }
 
   private readonly keyDown = (e: KeyboardEvent) => {
-    if (this.nav.mode !== 'fpv' || !gameKey(e)) return;
+    if (!this.on || !gameKey(e)) return;
     if (e.code === 'KeyT' && !e.repeat) this.restart();
     else if (e.code === 'Enter' && !e.repeat) this.arm(this.source);
     else if (!(this.source === 'keyboard' && this.phase === 'flying' && this.keys.press(e))) return;
@@ -295,7 +314,7 @@ export class FpvMode {
   };
 
   private renderPanel() {
-    const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
+    const active = this.on, flying = active && this.phase === 'flying';
     const flyingWithTouch = flying && this.source === 'touch';
     const P = this.panel, canArm = active && (this.phase === 'ready' || this.phase === 'paused');
     P.active = active;
