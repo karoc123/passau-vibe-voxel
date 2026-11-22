@@ -1,7 +1,7 @@
 // Exercise the same player commands and shared tick that the viewer uses on synthetic terrain.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../../sim/traffic';
-import type { Car } from '../../sim/types';
+import type { Car, TrainPathData } from '../../sim/types';
 import type { VehicleId } from '../../sim/vehicles';
 import type { CarInput } from './car';
 import { LifePhysics } from './life-phys';
@@ -38,13 +38,13 @@ export class Drive {
   }
 }
 
-export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], withPedestrian = false, choice?: VehicleId): Drive {
+export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], withPedestrian = false, choice?: VehicleId, trains?: TrainPathData[]): Drive {
   const map = synthMap(2, col);
   const physics = new LifePhysics(map.meta, { x, z }, { chunksPerTick: 99 }, { load: () => Promise.reject(null) });
   for (const t of map.tiles) physics.terrain.setTile(t.tx, t.tz, t.tile);
   const y = col(Math.floor(x), Math.floor(z)).g, car = carAt(x, y, z);
   car.v = kmh / 3.6;
-  const traffic = new Traffic({ roads: [], peds: withPedestrian ? [{ p: [[x - 2, 50, y], [x + 2, 50, y]], a: 0, b: 1, w: 1 }] : [], ctrls: [] });
+  const traffic = new Traffic({ roads: [], peds: withPedestrian ? [{ p: [[x - 2, 50, y], [x + 2, 50, y]], a: 0, b: 1, w: 1 }] : [], ctrls: [], trains });
   traffic.bodies = physics;
   traffic.detachedCars.push(car, ...others);
   if (withPedestrian) traffic.people.push({ kind: 'person', e: 0, dir: 1, s: 2, v: 0, lat: 0, ph: 0, wait: false, col: '#fff' });
@@ -63,6 +63,14 @@ export function run(d: Drive, seconds: number, input: (d: Drive) => CarInput, un
 export const cruise = (kmh: number) => (d: Drive): CarInput => ({ gas: d.kmh < kmh ? 1 : 0, brake: 0, steer: 0, handbrake: false });
 export const said = (d: Drive, text: string) => d.notes.some((n) => n.text.startsWith(text));
 const street = (): Col => ({ g: 10, mat: 1 });
+const testTrack = (start: number, stops: number[]): TrainPathData[] =>
+  [{ p: [[start, 50, 10], [start + 1200, 50, 10]], svc: [{ ref: 'R', op: '', stops }] }];
+
+function kinematicBodies(d: Drive) {
+  const bodies: RAPIER.RigidBody[] = [];
+  d.physics.world.forEachRigidBody((body) => { if (body.isKinematic()) bodies.push(body); });
+  return bodies;
+}
 
 function sharedReplay() {
   const map = synthMap(2, street);
@@ -110,6 +118,44 @@ function sharedReplay() {
 }
 
 export const DRIVE_SCENARIOS: Record<string, () => Outcome> = {
+  drive_standing_coach() {
+    const d = takeOver(street, 64, 25, 50, [], false, 'car', testTrack(-1100, [1134.5]));
+    const viewer = { x: 64, z: 50 };
+    // Let the scheduled train brake and dwell across the test street before the driver takes the wheel.
+    for (let i = 1; i <= 20 / STEP; i++) d.traffic.trains.tick(i * STEP, STEP, 12, viewer);
+    const start = d.traffic.trains.coachBoxes().next().value!;
+    let approachKmh = 0;
+    const throttle = cruise(50);
+    run(d, 4, (drive) => {
+      if (!said(drive, 'Contact')) approachKmh = drive.kmh;
+      return throttle(drive);
+    });
+    const coach = d.traffic.trains.coachBoxes().next().value!;
+    const x = coach.x - d.physics.origin.x, z = coach.z - d.physics.origin.z, y = coach.y + coach.size.y / 2;
+    const aligned = kinematicBodies(d).some((body) => {
+      const p = body.translation();
+      return Math.hypot(p.x - x, p.y - y, p.z - z) < 0.01;
+    });
+    const stoppedZ = d.snapshot!.pose.z;
+    const endKmh = d.kmh, impact = said(d, 'Contact');
+    const coachStayed = start.id === coach.id && start.x === coach.x && aligned;
+    d.park();
+    const released = !kinematicBodies(d).length;
+    d.physics.dispose();
+    const detail = { approachKmh: r2(approachKmh), endKmh: r2(endKmh), stoppedZ: r2(stoppedZ), impact, coachStayed, released };
+    return { name: 'drive_standing_coach', pass: approachKmh >= 48 && stoppedZ > 44 && stoppedZ < 48.5 &&
+      impact && coachStayed && released && Math.abs(endKmh) < 1, detail };
+  },
+  drive_moving_coach_bike() {
+    const d = takeOver(street, 64, 50, 0, [], false, 'moto', testTrack(-1020, []));
+    const start = d.traffic.trains.coachBoxes().next().value!;
+    run(d, 4, () => PARK, (drive) => !!drive.snapshot?.fallMs);
+    const coach = d.traffic.trains.coachBoxes().next().value!;
+    const detail = { fell: !!d.snapshot?.fallMs && said(d, 'Crash! You came off'),
+      movedM: r2(coach.x - start.x), sameCoach: start.id === coach.id };
+    d.physics.dispose();
+    return { name: 'drive_moving_coach_bike', pass: detail.fell && detail.movedM > 5 && detail.sameCoach, detail };
+  },
   drive_shared_replay() {
     const { snapshots, ...checks } = sharedReplay();
     const identical = JSON.stringify(snapshots) === JSON.stringify(sharedReplay().snapshots);

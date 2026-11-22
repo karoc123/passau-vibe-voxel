@@ -47,6 +47,9 @@ the same interface with one player.
   timetables and flood limits. Both run in the traffic tick using world time, day, water level and seed.
   They publish plain coach and vessel poses. Meshes, paint, lights and boat bobbing stay in presentation.
   The player boat joins the world clock when its control moves there.
+- Train coaches publish 2.9 × 4 × 20 m boxes. Near a player driver the shared Rapier world moves kinematic colliders
+  to the coach poses over the two physics substeps. Player cars and bikes register impacts and trains keep their
+  scheduled movement. Collisions with walkers, boats and aircraft and trains stopping for track obstructions are open.
 - Copy `BOAT`, `PLANE`, `RIDE` and related defaults into read-only tuning for each world instance. Pass that tuning
   to the cores and physics constructors, with vehicle-specific overrides resolved at creation. Tools that vary tuning
   create worlds with different settings. A run can be reproduced from its build, seed, tuning and input history.
