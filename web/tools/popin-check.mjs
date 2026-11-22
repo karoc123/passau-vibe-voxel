@@ -7,9 +7,9 @@
 // (R: CAR_R for cars, PED_R for people and riders.) Agents in front of the viewer (within 60 degrees of its heading)
 // are counted apart. The first frame (the street filled for the first time) is not checked. Math.random is seeded:
 // the run is the same every time.
-// The trains and boats (--transit; sim/trains.ts, sim/boats.ts, on traffic.json's tracks and boats.json) the same way,
+// The train and boat sim poses (--transit, on traffic.json's tracks and boats.json) the same way,
 // for viewers standing at each track's ends and stations, the fairway's ends, the berths and the pier: the trains
-// over TRAIN_S s at 20 fps (one run per viewer: their coming and going depends on where the viewer is), the boats over
+// over TRAIN_S s at 30 ticks/s (one run per viewer: their coming and going depends on where the viewer is), the boats over
 // a spring and a summer day at 2 fps (theirs does not: one run a day, all the viewers). R: TRAIN_R, SHIP_R; a jump is more than JUMP m
 // beyond what they may move in the frame.
 // usage (in web/): node tools/popin-check.mjs [-v] [--street | --transit] [--seconds S] [--seed N] [--jump M]; both
@@ -37,7 +37,7 @@ const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
 const { StreetLife } = await load('sim/life.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
-const loaded = TRANSIT ? { trains: await load('sim/trains.ts'), boats: await load('sim/boats.ts') } : null;
+const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
 const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
@@ -155,7 +155,7 @@ function follow(vs, R, allow) {
 }
 
 function transit() {
-  const { Trains } = loaded.trains, { Boats } = loaded.boats;
+  const { TrainTraffic } = loaded.trains, { BoatTraffic } = loaded.boats, { STEP } = loaded.world;
   const tp = (td.trains ?? []).map((d) => prepPath({ p: d.p.map((q) => [...q]) })), P = pt();
   const tv = [];
   tp.forEach((p, i) => {
@@ -164,17 +164,13 @@ function transit() {
   });
   // (one viewer for the places closer than 50 m)
   const uniq = (vs) => vs.filter((v, i) => !vs.slice(0, i).some((u) => Math.hypot(u.x - v.x, u.z - v.z) < 50));
-  const dt = 1 / 20, H0 = 7;
+  const dt = STEP, H0 = 7;
   for (const v of uniq(tv)) {
-    const trains = new Trains(td.trains ?? []), check = follow([v], { train: TRAIN_R }, { train: JUMP + 17 * dt });
-    const keys = new Map(), key = (tr, k) => { if (!keys.has(tr)) keys.set(tr, []); return (keys.get(tr)[k] ??= { tr }); }; // (a train's car k)
-    for (let f = 0, F = Math.round(TRAIN_S / dt); f < F; f++) {
-      trains.update(dt, H0 + f * dt / 3600, { x: v.x, z: v.z });
-      trains.render(0, 0);
-      const now = new Map(), a = trains.body.instanceMatrix.array;
-      let n = 0;
-      for (const tr of trains.list) for (let k = 0; k < tr.n && n < trains.body.count; k++, n++) now.set(key(tr, k), ['train', a[n * 16 + 12], a[n * 16 + 14]]);
-      check(now, f * dt);
+    const trains = new TrainTraffic(td.trains ?? []), check = follow([v], { train: TRAIN_R }, { train: JUMP + 17 * dt });
+    for (let f = 1, F = Math.round(TRAIN_S / dt); f <= F; f++) {
+      const t = f * dt;
+      trains.tick(t, dt, H0 + t / 3600, v);
+      check(new Map(Array.from(trains.coaches(), ({ id, x, z }) => [id, ['train', x, z]])), t);
     }
   }
   const bd = JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8')), fw = bd.fairway;
@@ -187,10 +183,10 @@ function transit() {
   if (bd.tour?.length) bv.push({ name: 'pier', x: bd.tour[0][0], z: bd.tour[0][1] });
   const bdt = 0.5;
   for (const day of DAYS) {
-    const boats = new Boats(bd, 4), check = follow(uniq(bv), { ship: SHIP_R, boat: SHIP_R }, { ship: JUMP + 4 * bdt, boat: JUMP + 4 * bdt });
+    const boats = new BoatTraffic(bd, 4), check = follow(uniq(bv), { ship: SHIP_R, boat: SHIP_R }, { ship: JUMP + 4 * bdt, boat: JUMP + 4 * bdt });
     for (let f = 0, F = Math.round(24 * 3600 / bdt); f < F; f++) {
-      boats.update(f ? bdt : 0, 0, day, 0, 0);
-      check(new Map(boats.placed.map(([who, x, z]) => [who, [typeof who === 'number' ? 'boat' : 'ship', x, z]])), f * bdt);
+      boats.tick(f * bdt, 0, day, 0);
+      check(new Map(boats.poses.map(({ id, kind, x, z }) => [`${kind}:${id}`, [kind, x, z]])), f * bdt);
     }
   }
   console.log(`  transit: ${uniq(tv).length} viewers by the tracks for ${TRAIN_S} s, ${uniq(bv).length} by the river for days ${DAYS.join(', ')}`);

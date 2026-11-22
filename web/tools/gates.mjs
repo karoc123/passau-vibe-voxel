@@ -32,7 +32,7 @@ const named = args.filter((a, i) => !a.startsWith('-') && !['--golden', '-j'].in
 const tsc = path.join(web, 'node_modules/typescript/bin/tsc');
 const GATES = [
   { name: 'tsc', cmd: [tsc, '--noEmit'], set: 'fast', secs: 0.7, guards: 'all of src/ (types)' },
-  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, guards: 'src/core/, sim/traffic.ts, physics/rapier/life-phys.ts, the vehicle cores (boat-motion, craft-motion, plane-flight, fpv-flight, rapier/car) and their imports: no three.js, no DOM' },
+  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, guards: 'src/core/, sim/{traffic,train-traffic,boat-traffic}.ts, physics/rapier/life-phys.ts, the vehicle cores (boat-motion, craft-motion, plane-flight, fpv-flight, rapier/car) and their imports: no three.js, no DOM' },
   { name: 'bld-ids', cmd: ['tools/bld-ids.mjs'], set: 'fast', secs: 0.4, guards: 'mesher.worker.ts greedy merge, building ids' },
   { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)' },
   { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)' },
@@ -45,9 +45,9 @@ const GATES = [
   { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 34, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },
   { name: 'caps-check', cmd: ['tools/caps-check.mjs'], set: 'fast', data: true, secs: 6, guards: 'core/surface.ts, mesher caps, roofs.ts (20 nodes)' },
   { name: 'plane', cmd: ['tools/plane.mjs'], set: 'fast', expect: 32, secs: 12.5, guards: 'nav/plane-flight.ts, plane-checks.ts, jet-checks.ts, plane-real.ts, core/safe-trail.ts' },
-  { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/traffic.ts, physics/rapier/life-phys.ts, core/live-edits.ts, car.ts' },
+  { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/traffic.ts, train-traffic.ts, boat-traffic.ts, physics/rapier/life-phys.ts, core/live-edits.ts, car.ts' },
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections' },
-  { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'sim/life.ts, sim/trains.ts, sim/boats.ts' },
+  { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'sim/life.ts, sim/train-traffic.ts, sim/boat-traffic.ts' },
   { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps' },
   { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', '../docs/plans/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
   { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)' },

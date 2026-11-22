@@ -15,8 +15,9 @@
 // In every one, every tick: nothing drawn in an edited box stands more than 1 m over the ground there without coming
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
-// The dig is run twice: the bodies and the cars bit-identical. Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto ...]; prints one PASS line, or the failures and exit 1
+// The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
+// Prints the costs (the bodies' tick, the colliders).
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -313,6 +314,56 @@ async function motorbike() {
   return ctx;
 }
 
+function transit() {
+  const data = { roads: [], peds: [], ctrls: [], trains: td.trains };
+  const boats = JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8'));
+  const focus = { x: 7000, z: 2900 };
+  function replay(ticksPerFrame, seed) {
+    const world = new Traffic(data, seed);
+    world.day = 200;
+    world.setBoats(boats, 4);
+    const snapshots = [];
+    const snapshot = () => ({
+      tick: world.tickNumber,
+      coaches: [...world.trains.coaches()],
+      vessels: world.boats.poses,
+    });
+    const advance = (ticks, hour, level) => {
+      for (let i = 0; i < ticks; i += ticksPerFrame)
+        world.update(STEP * ticksPerFrame, hour, focus, focus, level);
+      snapshots.push(snapshot());
+    };
+    Math.random = noRandom;
+    try {
+      world.update(STEP / 4, 10, focus);
+      check(world.tickNumber === 0 && !world.boats.poses.length, 'boats wait for the first world tick');
+      advance(30, 10, 0);
+      advance(60, 10, 0);
+      advance(2, 10, 4);
+      advance(2, 15, 0);
+      check(world.boats.previous.every((p) => world.boats.poses.some((q) =>
+        p.kind === q.kind && p.id === q.id && Math.hypot(p.x - q.x, p.z - q.z) < 0.2)),
+      'clock resets avoid interpolating between distant poses');
+    } finally {
+      Math.random = realRandom;
+    }
+    return snapshots;
+  }
+  const a = replay(1, SEED), b = replay(2, SEED), c = replay(1, SEED + 1);
+  check(JSON.stringify(a) === JSON.stringify(b), 'train and boat snapshots are bit-identical at two frame rates');
+  check(JSON.stringify(a[0].coaches) !== JSON.stringify(c[0].coaches)
+    && JSON.stringify(a[0].vessels) !== JSON.stringify(c[0].vessels), 'the world seed changes rail and river traffic');
+  const rail = a[0].coaches.find((p) => a[1].coaches.some((q) => p.id === q.id && Math.hypot(p.x - q.x, p.z - q.z) > 1));
+  check(rail && rail.y > 0, 'the train publishes moving coach poses at rail height');
+  const tour = a[0].vessels.find((p) => p.kind === 'boat' && p.underway);
+  check(tour && a[1].vessels.some((p) => p.kind === 'boat' && p.id === tour.id && Math.hypot(p.x - tour.x, p.z - tour.z) > 1),
+    'a boat on the timetable moves on the world tick');
+  check(a[2].vessels.length && a[2].vessels.every((p) => p.kind === 'ship' && p.y === 8),
+    'the same tick raises ships with the flood and suspends tours');
+  check(a[3].vessels.some((p) => p.kind === 'boat' && p.y === 4), 'clock and flood changes restore scheduled tours');
+  results.transit = { replay: 'same', coaches: a[0].coaches.length, vessels: a[0].vessels.length };
+}
+
 const want = (k) => !only.length || only.includes(k);
 const costs = [], chunks = [], bodies = [];
 const done = (ctx) => {
@@ -331,6 +382,7 @@ if (want('dig')) {
 if (want('block')) done(await block());
 if (want('wreck')) done(await wreck());
 if (want('moto')) done(await motorbike());
+if (want('transit')) transit();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
 console.log(`PASS life-edit: ${Object.entries(results).map(([k, v]) => `${k} ${typeof v === 'string' ? v : Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`).join('; ')}; ${cost}`);

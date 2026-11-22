@@ -4,6 +4,8 @@ import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from './path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from './traffic';
 import { Trains } from './trains';
+import { Boats } from './boats';
+import type { BoatData } from './boat-traffic';
 import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from './types';
 import { VEHICLE_IDS, vehicleOf, type VehicleId } from './vehicles';
 
@@ -36,7 +38,8 @@ const setRp = (o: { rp?: Vec3 }, x: number, y: number, z: number) => { const p =
 export class StreetLife {
   world: World | null = null;
   readonly traffic: Traffic;
-  readonly trains: Trains;
+  private readonly trains = new Trains();
+  private boats: Boats | null = null;
   private fallen: Fallen[] = [];
   private readonly M: LifeMeshes;
   private readonly heads: [number, number, number, number, number, number][];
@@ -52,8 +55,15 @@ export class StreetLife {
     this.traffic = new Traffic(data, seed);
     this.heads = data.heads ?? [];
     this.M = new LifeMeshes(scene, this.heads);
-    this.trains = new Trains(data.trains ?? []);
     this.M.group.add(this.trains.group);
+  }
+
+  setBoats(data: BoatData, waterTop: number) {
+    this.traffic.setBoats(data, waterTop);
+    if (!this.boats) {
+      this.boats = new Boats();
+      this.group.add(this.boats.group);
+    }
   }
 
   get group() { return this.M.group; }
@@ -73,13 +83,12 @@ export class StreetLife {
 
   // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
   // camera; by default the focus, on the ground), what agents come and go far from
-  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus) {
+  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus, riverLevel = 0) {
     const T = this.traffic;
     T.ground = this.world;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    T.update(dt, hour, focus, viewer);
+    T.update(dt, hour, focus, viewer, riverLevel);
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
-    this.trains.update(Math.min(dt, 0.1), ((hour % 24) + 24) % 24, this.viewer);
     for (const p of T.dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
     T.dropped = [];
     for (const { person, pose, vx, vz } of T.struck) {
@@ -118,7 +127,9 @@ export class StreetLife {
   // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
     this.drawCars(lead / STEP, night, dt);
-    this.trains.render(0, night);
+    const back = 1 - lead / STEP;
+    this.trains.render(this.traffic.trains.coaches(back), night);
+    if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();

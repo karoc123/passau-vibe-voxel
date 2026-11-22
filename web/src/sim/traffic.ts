@@ -7,6 +7,8 @@
 // at signalled crossings. Density follows the hour. Near player edits some cars are physical bodies (`bodies`:
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
+import { BoatTraffic, type BoatData } from './boat-traffic';
+import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import type { Agent, Car, Controller, PedEdge, Person, Road, RoadPose, TrafficData } from './types';
@@ -82,6 +84,8 @@ export class Traffic {
   readonly roads: Road[];
   readonly peds: PedEdge[];
   readonly ctrls: Controller[];
+  readonly trains: TrainTraffic;
+  private boatTraffic: BoatTraffic | null = null;
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
@@ -133,14 +137,22 @@ export class Traffic {
   private readonly pA = pt();
   private readonly pB = pt();
 
-  constructor(data: TrafficData, seed = DEFAULT_SEED) {
+  constructor(data: TrafficData, private readonly seed = DEFAULT_SEED) {
     this.rand = rng(seed);
+    // At the default seed, keep the original train and boat timetables.
+    this.trains = new TrainTraffic(data.trains ?? [], seed - DEFAULT_SEED);
     this.roads = data.roads.map((r, i) => Object.assign(prepPath(r), { i, lists: Array.from({ length: r.lanes }, () => []) }));
     this.peds = data.peds.map((e, i) => Object.assign(prepPath(e), { i }));
     this.ctrls = data.ctrls.map((c, i) => ({ ...c, off: hash(i + 1) * CYCLE }));
     this.roads.forEach((e, i) => { pushTo(this.outs, e.a, i); pushTo(this.ins, e.b, i); });
     this.peds.forEach((e, i) => { pushTo(this.padj, e.a, [i, 0]); pushTo(this.padj, e.b, [i, 1]); });
     for (const [fr, via, to, type] of data.restr ?? []) pushTo(this.restr, `${fr}:${via}`, { to, type });
+  }
+
+  get boats() { return this.boatTraffic; }
+
+  setBoats(data: BoatData, waterTop: number) {
+    this.boatTraffic = new BoatTraffic(data, waterTop, this.seed - DEFAULT_SEED);
   }
 
   private pick(w: number[], sum = w.reduce((a, b) => a + b, 0)) {
@@ -153,7 +165,7 @@ export class Traffic {
   // The ticks due after dt s (at most 0.1 s of them). focus: the middle of what is simulated (the active circle: what
   // is looked at); viewer: where it is seen from (the camera; by default the focus, on the ground), what agents come
   // and go far from.
-  update(dt: number, hour: number, focus: { x: number; z: number }, viewer: Viewer = focus) {
+  update(dt: number, hour: number, focus: { x: number; z: number }, viewer: Viewer = focus, riverLevel = 0) {
     dt = Math.min(dt, 0.1);
     const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
@@ -170,7 +182,7 @@ export class Traffic {
     };
     if (this.warm) this.populate(density); // (drawn this frame)
     this.acc += dt;
-    while (this.acc >= STEP) { this.step(STEP, density); this.acc -= STEP; }
+    while (this.acc >= STEP) { this.step(STEP, density, hour, riverLevel); this.acc -= STEP; }
   }
 
   // a signal's state now: green, amber, red
@@ -406,7 +418,7 @@ export class Traffic {
   }
 
   // ------------------------------------------------------------------ one tick
-  private step(dt: number, density: Density) {
+  private step(dt: number, density: Density, hour: number, riverLevel: number) {
     this.t += dt;
     this.tickNumber++;
     this.bodies?.beforeTick?.(this);
@@ -418,6 +430,8 @@ export class Traffic {
     this.stepPeople(dt);
     this.stepRiders(dt);
     this.bodies?.tick(dt, this);
+    this.trains.tick(this.t, dt, hour, this.viewer);
+    this.boatTraffic?.tick(this.t, hour, this.day, riverLevel);
   }
 
   // ------------------------------------------------------------------ player edits
