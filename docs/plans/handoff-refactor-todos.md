@@ -48,11 +48,10 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | In progress (`q2`) |
-| Q9 | A road or rail tunnel under a street is a covered passage | M | Ready to merge (`q9`, needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
 | F10 | Minimap on M, and the collection point for map features | M | **Ready** |
-| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2, Q8, Q9 |
+| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2, Q8 |
 
 ## Packages
 
@@ -218,81 +217,9 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
   `voxelize.py --just` on its region.
 - **Verify spot:** Dietzing over the B 85: `?cam=-2107,138.8,-1709,-2087,115.7,-1658` (road-defects #11).
 
-### Q9. A road or rail tunnel under a street is a covered passage, not solid ground (M)
-
-- **Waits for:** nothing. Q4 landed (`8bc0774f`): `ground.under_bridge` keeps a corridor under bridges (`ctx.corridor`,
-  skipped by the tunnel, passage, sag, bridgehead and bridge-way lifts), and `data/debug/ground_passes.npz` says which
-  pass changed a cell. Reuse `ground.bed()`, the line-between-ends level and the `under_bridge` verify counter's
-  pattern. `tunnel=yes` ways are not in the corridor set; layer −1 open cuts need open_cut to run before `under_bridge`.
-- **Today:** a way tagged `tunnel=yes` is left out of the ground (`ways.underground`). `tunnels.py` bores it only
-  under a hill (2 m or more of ground over a 6 m crown). `underpass.py` carves only foot passages. Nothing carves a
-  carriageway or a railway in a tunnel under a street, an embankment or a junction. The ground passes fill its trench
-  up to the street on purpose: `ground.py` `tunnel` (the street over a short road tunnel, 1.5–6 m) and `sag`
-  (road-defects #4 at -882,667, the junction over this tunnel's ramp, fixed 7a9a5d40). The result is a whole street
-  with solid earth under it, and the ramp ends at a wall.
-- **Measured (data of 9781149b):** B 85 link 11773610 (`primary_link`, `tunnel=yes`, `layer=-1`, 37 m). Its
-  portals stand at ground 15 (west, -896,656, where the ramp 96131677 comes down) and 14 (east, -860,664, on to way
-  8010553). Along the tunnel the built ground is 19–20 (the street on the layer-1 junction ways 96131676, 122157777,
-  96131670 and the embankment road 122157776), the DTM is 16.5–19 (interpolated under the structure) and the DSM is
-  20. The laser has no ground return there. `gsrc` (the sag lift's source) is set over the trench south-east of the
-  line. By its rule, the tunnel lift takes the cells on the line itself; this was not traced, and Q4's per-pass
-  arrays would make it a lookup. A screenshot at the spot shows the ramp running into an earth wall. A read-only
-  scan of the ground raster found other `tunnel=yes` carriageways and railways under shallow cover whose built ground
-  stands 3 m or more over the line between their portals for most of their length:
-  - service 1205663780 under the St 2125 (-1640,595), the passage of road-defects #5;
-  - Granitbahn 836854485 (rail, 12 m, 2033,1034);
-  - Stelzhamerstraße 8022045 (tertiary, 41 m, -1282,1156), a third of its length.
-
-  Check each in the voxels: the scan reads the ground raster, not the tiles.
-- **Do:** one rule: a `tunnel=yes` carriageway or railway that `tunnels.py` does not bore and `underpass.py` does
-  not take is carved as a covered passage:
-  - the floor graded between its portals' ground, as `tunnels.py` does;
-  - the width of its bed;
-  - the vehicle's clearance: 4 m for a road and 5 m for a train. Where the street over it leaves less room, carve
-    what fits, down to about 3 m, and note it;
-  - the street on a 1 m slab over it, at the level the ground passes give.
-
-  The passes keep lifting the street, and the passage is cut after them. Prefer a "covered" profile in `tunnels.py`
-  over a new module: that keeps one place for tunnels, and `traffic.py` already reads `tunnels.FLOOR`, so cars drive
-  through.
-- **Do:** a `verify` check: along every `tunnel=yes` carriageway and railway, the clearance from the floor to the
-  first solid voxel is at least the vehicle's, and the street over it has no hole.
-- **Gates:** `check.py verify` on the fixtures. The `b85` fixture holds this tunnel and the #4 patches (the street
-  over it, `min_m` 19), which must hold. The `kachlet` fixture holds the St 2125 passage (#5): its patches must
-  hold. The walkers' and cars' paths (`traffic.py`) must still connect.
-- **Verify spots:**
-  - the ramp into the tunnel: `?cam=-957.8,53.2,614.6,-894,16.8,656.7` (road-defects #12)
-  - the street over it, which must stay whole: `?cam=-806.7,49.5,685.6,-881.7,17,667.6` (road-defects #4)
-- **Done on `q9` (ready to merge, needs a full data rebuild):** `tunnels.py` plans a "covered" profile after the bores
-  (`_plan_covered`, `Covered`, `CLEAR` 4/5 m, `LOW` 3 m) and carves it in `build` after the bores (`_cover`): floor
-  graded between the portals (rounded down a metre where rounding left under 3 m), the bed's width (`ground.bed`),
-  `min(clearance, street - 1 - floor)` under the street's own voxel as the 1 m slab, walls and ceiling lined in
-  concrete; the stretch from a portal to the first point that is covered (street ≥ floor + 4, or a ground way crossing
-  over) is cut open. The ground there drops to the floor (`gt`, collision) and `LOWERED` keeps the street for the
-  rasters (`ground.npz` g), as for a bore. Carved ways join `tunnels.IDS`, so `traffic.py` drives them on `FLOOR`.
-  One whose street leaves under 3 m somewhere is left solid and noted. Verify: voxelize.py's `tunnels` counter (every
-  `tunnel=yes` carriageway/railway `tunnels.plan` took: floor-to-first-solid ≥ 3 m, else blocked; under the vehicle's
-  clearance counted as low; the street's voxel over every lowered cell, else a hole), failed in `check.py verify` on
-  blocked or holes. Results:
-  - B 85 link 11773610: covered 2.0–34.5 m, floor 15 → 14, clearance 4 m, street 20 on its own voxel; ramp 96131677
-    runs in at 15. Traffic drives it (b85 road metres walked 17 875 → 17 913, sunk/hover unchanged).
-  - service 1205663780 (kachlet): covered 2.0–15.5 m, floor 18 → 19, clearance 3 m (low: the sag lift puts the St 2125
-    at 22–23; OSM maxheight 3.5). Not driven (traffic drives no service roads).
-  - Granitbahn 836854485 (altstadt): covered 1–11 m, floor 8, clearance 4 m under the Mariahilfstraße at 13 (low for 5).
-  - also the two rail tubes 24153461 / 101216178 under the ZOB (170 m, floor 15, 5 m clear, street 22–23): their north
-    portals (1285, 993) are blocked 3 m by the walls of building 96488064 carried down into the trench (Q7 spot fix;
-    no committed fixture holds them, a temporary one did).
-  - Stelzhamerstraße 8022045: left solid. The railway embankment over it is 14–15 only in its middle third, and on the
-    slopes the tracks (27355998, 593528918, …) cross at 0–1 m over the floor: carving would cut the tracks. The
-    `tunnels` counter reports it blocked (no committed fixture holds it). Needs the embankment's level (Q7).
-- **Deviation:** `check.py` defect patches of kind `road` read the street from `ground.npz` g (the surface: over a
-  bore or a covered passage the street, not the floor `gt` now is); the b85 #4 and kachlet #5 patches hold with that.
-- **Gates:** `check.sh --fixture` PASS; verify b85 ok, kachlet and haissengasse only their failures on main (LoD2
-  share; ped sunk/hover), altstadt ok. Web gates not run (no pipeline output read by them changed shape).
-
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** Q2, Q8, Q9. Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** Q2, Q8 (Q9 landed `d3cc0443`, data rebuild pending). Do nothing here before them; this is only the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
@@ -302,6 +229,11 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
   - B 12 bridge over the Rottalbahn (way 34755059): 25 m long; the deck is wider than three lanes.
   - Dietzing bridge over the B 85 (way 106617552, -2087,-1658): drawn along the deck's north edge, both ends
     6–8 m short of the banks. Realign it only if Q8 leaves the deck low.
+  - Stelzhamerstraße tunnel (way 8022045, -1282,1156): left solid by Q9 (the `tunnels` counter reports it blocked).
+    The railway embankment over it is high only in its middle third; on the slopes tracks 27355998 and 593528918
+    run 0–1 m over the floor. Needs the embankment level corrected.
+  - Rail tunnels 24153461 and 101216178 under the ZOB: north portal (1285,993) blocked for 3 m by the walls of
+    building 96488064 carried down into the trench.
 - Road spots older than this list are in [road-defects.md](road-defects.md).
 
 ## Feature packages
