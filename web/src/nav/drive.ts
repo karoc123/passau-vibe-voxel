@@ -6,6 +6,7 @@ import type { RapierDrive } from '../physics/rapier/drive-world';
 import { flying, type Nav, type Ride } from './nav';
 import { CRASH_MS, DriveSession, SINK_MS } from './drive-session';
 import { stickAxis, TouchSticks } from './touch-sticks';
+import { VEHICLE_IDS, VEHICLES, vehicleOf, type VehicleId } from '../sim/vehicles';
 import './drive.css';
 
 // The drive mode: the player takes the wheel of a traffic car, driven on Rapier (physics/rapier/drive-world.ts,
@@ -14,6 +15,13 @@ import './drive.css';
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
+// what the player takes the wheel of (the type button, V): 'any', the traffic vehicle as it is, or a type of the
+// catalog (sim/vehicles.ts) the vehicle taken becomes; remembered
+const CHOICES: ('any' | VehicleId)[] = ['any', ...VEHICLE_IDS];
+const CHOICE_KEY = 'voxel.drive.vehicle';
+const readChoice = (): 'any' | VehicleId => {
+  try { const v = localStorage.getItem(CHOICE_KEY); return CHOICES.includes(v as VehicleId) ? v as VehicleId : 'any'; } catch { return 'any'; }
+};
 // the touch stick's steering: |x|^STEER_CURVE, so a small deflection steers gently and the full one locks
 const STEER_CURVE = 1.7;
 
@@ -26,11 +34,13 @@ export class DriveMode {
   private readonly keys = new Set<string>();
   private readonly panel = document.createElement('aside');
   private readonly action = el('button', 'mode-button', '', this.panel);
+  private readonly typeButton = el('button', 'mode-button drive-type', '', this.panel);
+  private choice = readChoice();
   private readonly details = el('div', 'mode-detail', '', this.panel);
   private readonly status = el('div', 'drive-status', '', this.details);
   private readonly speed = el('div', 'drive-speed', '', this.details);
   private readonly help = el('div', 'drive-help', `
-    <span class="drive-help-keys">W/S accelerate and brake/reverse · A/D steer · Space handbrake · Esc exit</span>
+    <span class="drive-help-keys">W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · Esc exit</span>
     <span class="drive-help-touch">Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake. Pinch on the right to zoom.</span>
   `, this.details);
   private pending: Ride | null = null;
@@ -69,9 +79,15 @@ export class DriveMode {
     this.status.setAttribute('role', 'status');
     this.action.type = 'button';
     this.action.addEventListener('click', () => { this.activate(); this.action.blur(); });
+    this.typeButton.type = 'button';
+    this.typeButton.title = 'What to drive (V)';
+    this.typeButton.addEventListener('click', () => { this.cycleType(); this.typeButton.blur(); });
     addEventListener('keydown', e => {
-      if (!this.driving || !KEYS.has(e.code) || e.ctrlKey || e.metaKey || e.altKey ||
-          (e.target as Element).closest?.('input, textarea, select, button, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || (e.target as Element).closest?.('input, textarea, select, button, [contenteditable]')) return;
+      if (e.code === 'KeyV' && !this.driving && !this.panel.hidden && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
+      if (!this.driving) return;
+      if (e.code === 'KeyT') { if (!e.repeat) this.driving.session.reset(); e.preventDefault(); return; }
+      if (!KEYS.has(e.code)) return;
       this.keys.add(e.code);
       e.preventDefault();
     });
@@ -89,7 +105,7 @@ export class DriveMode {
     if (session) {
       const now = performance.now();
       if (document.hasFocus() && !document.hidden) for (const n of session.update(dt, this.input(), now)) this.say(n.text, n.ms);
-      session.present();
+      session.present(now);
       this.shake(session, now);
     }
     this.draw();
@@ -133,10 +149,18 @@ export class DriveMode {
     if (!rap || !m) { this.loadRapier(); return; }
     this.pending = null;
     if (!life.takeWheel(car)) return;
+    // (out of the traffic now: it becomes the type chosen)
+    if (this.choice !== 'any') {
+      const t = VEHICLES[this.choice];
+      car.vt = t.id === 'car' || t.id === 'bus' ? undefined : t.id;
+      car.bus = t.id === 'bus';
+      car.len = t.len;
+      if (t.paint) car.col = t.paint;
+    }
     // (a car parked on its side or roof is taken as it lies)
     const at = car.rp ?? pose;
     const start = { x: at.x, y: at.y, z: at.z, h: car.rh ?? pose.h, pitch: car.pitch ?? 0, roll: car.roll ?? 0 };
-    this.driving = { ride, session: new DriveSession(life, car, rap, m.buildFor(car.bus, car.len), start, performance.now()) };
+    this.driving = { ride, session: new DriveSession(life, car, rap, m.buildOf(car), start, performance.now()) };
     this.nav.controlledRide = ride;
     this.touch.setActive(true);
     this.keys.clear();
@@ -164,6 +188,12 @@ export class DriveMode {
       this.rapier = await m.loadRapierDrive(this.meta, { x: f.x, z: f.z });
       (window as unknown as { __rapierLoadMs: number }).__rapierLoadMs = performance.now() - t0;
     }).catch((e) => { console.warn('rapier', e); });
+  }
+
+  private cycleType() {
+    this.choice = CHOICES[(CHOICES.indexOf(this.choice) + 1) % CHOICES.length];
+    try { localStorage.setItem(CHOICE_KEY, this.choice); } catch { /* not remembered */ }
+    this.draw();
   }
 
   private say(message: string, ms: number) {
@@ -197,8 +227,11 @@ export class DriveMode {
     this.panel.hidden = flying(this.nav.mode);
     document.body.classList.toggle('driving', !!active);
     this.panel.classList.toggle('mode-active', !!(active || this.pending));
-    const label = active ? 'Park car' : 'Take the wheel';
+    const label = active ? `Park ${active.ride.obj.kind === 'car' ? vehicleOf(active.ride.obj).name.toLowerCase() : 'car'}` : 'Take the wheel';
     if (this.action.textContent !== label) this.action.textContent = label;
+    this.typeButton.hidden = !!active || !!this.pending;
+    const type = `Vehicle: ${this.choice === 'any' ? 'any' : VEHICLES[this.choice].name}`;
+    if (this.typeButton.textContent !== type) this.typeButton.textContent = type;
     const life = this.nav.life;
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
       (!following && !life.roadVehicles().some(c => c.rp))));
