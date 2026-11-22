@@ -8,8 +8,10 @@
 // (kg), wheels (chassis space; the front ones steer, the rear ones are driven), the engine's force per driven wheel
 // (N), the brakes (Rapier's brake impulse a wheel), the top speed (m/s, the engine cut off over it), ride: the ground's
 // height under the body's origin at rest. tune: what differs from RIDE (vehicle.ts) and the steering (car.ts: steer,
-// the front wheels' most angle, rad; steerFall, m/s: the angle halved at this speed). bike: a two-wheeler (car.ts:
-// kept upright on its wheels, drawn leaning into its turns; its four wheels hidden, two drawn).
+// the front wheels' most angle, rad; steerFall, m/s: the angle halved at this speed; latG, g: at speed the angle no
+// more than turns it at this sideways acceleration, the whole lock asking that and no more; steerRamp, s: the input
+// turns the bars from straight to full lock over this long, back twice as fast, instead of at once). bike: a
+// two-wheeler (car.ts: kept upright on its wheels, drawn leaning into its turns; its four wheels hidden, two drawn).
 export interface CarBuild {
   half: { x: number; y: number; z: number }; mass: number; wheels: { x: number; z: number; front: boolean }[];
   engine: number; brake: number; top: number; ride: number;
@@ -17,7 +19,7 @@ export interface CarBuild {
 }
 export interface Tune {
   stiffness?: number; compression?: number; relaxation?: number; downforce?: number; gripFront?: number; gripRear?: number;
-  side?: number; com?: number; steer?: number; steerFall?: number;
+  side?: number; com?: number; steer?: number; steerFall?: number; latG?: number; steerRamp?: number;
 }
 
 // A model part: a box w x h x l (m), its bottom centre at (x, y, z), and its colour: 'paint' (the vehicle's own,
@@ -153,7 +155,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
     chase: { back: 6.5, up: 2.6 },
     build: {
       half: { x: 0.32, y: 0.5, z: 1.0 }, mass: 260, wheels: wheels4(0.3, 0.72, -0.72), engine: 950, brake: 13, top: 39, ride: 0.84,
-      tune: { gripFront: 1.9, gripRear: 1.8, com: 0.62, steer: 0.42, steerFall: 9, downforce: 0.3 },
+      tune: { gripFront: 1.9, gripRear: 1.8, com: 0.62, steer: 0.42, steerFall: 9, latG: 0.8, steerRamp: 0.3, downforce: 0.3 },
       bike: true,
     },
     model: [

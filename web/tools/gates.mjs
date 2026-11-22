@@ -42,7 +42,7 @@ const GATES = [
   { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 11, secs: 1.2, guards: 'nav/craft-motion.ts and craft-collision.ts' },
   { name: 'world-smoke', cmd: ['tools/world-smoke.mjs'], set: 'fast', data: true, secs: 2.5, guards: 'core/ stack, layers, mesher from columns, rapier terrain.ts' },
   { name: 'rapier-car', cmd: ['tools/rapier-car.mjs'], set: 'fast', expect: 45, secs: 3.1, guards: 'physics/rapier/ (car.ts, life-phys.ts, player-car.ts, terrain.ts, scenarios)' },
-  { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 34, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },
+  { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 35, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },
   { name: 'caps-check', cmd: ['tools/caps-check.mjs'], set: 'fast', data: true, secs: 6, guards: 'core/surface.ts, mesher caps, roofs.ts (20 nodes)' },
   { name: 'plane', cmd: ['tools/plane.mjs'], set: 'fast', expect: 32, secs: 12.5, guards: 'nav/plane-flight.ts, plane-checks.ts, jet-checks.ts, plane-real.ts, core/safe-trail.ts' },
   { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/traffic.ts, train-traffic.ts, boat-traffic.ts, physics/rapier/life-phys.ts, core/live-edits.ts, car.ts' },
