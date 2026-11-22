@@ -37,19 +37,16 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
-| F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
-| F5 | Trains and boats into the world sim | M | Waits for F4 |
+| F5 | Trains and boats into the world sim | M | **Ready** |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
-| Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | In progress (`q8`) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
-| F10 | Minimap on M, and the collection point for map features | M | **Ready** |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q8 |
 
 ## Packages
@@ -141,26 +138,6 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 - **Verify spots:** `?cam=-5819.4,178.2,351.3,-5850.7,108.9,435`; others of the kind at -1102,1292; 2919,-85;
   -5099,519.
 
-### Q6. Roof caps at a ridge: no spikes (S–M)
-
-- **Waits for:** nothing.
-- **Today:** `scripts/caps.py` `roof_fields` gives each roof cell its plane's height at its four corners and lets
-  the cells round a grid point meet at one height: the lowest plane at a ridge. A cell whose corner would move more
-  than its `span` (0.75 m + half its rise per metre) keeps its own plane. On a ridge that runs diagonally across the
-  grid, a ridge cell's far corner lies up to 0.7 m past the ridge line, its own plane overshoots there by about a
-  metre, the corner does not "fit" and keeps the overshoot: a pyramid on every second or third ridge cell. The
-  voxels show the same rhythm (the ridge cells' tops alternate 14 and 15 at -4073,1187).
-- **Confidence:** read from the code and the rasters (`surface.npz` `roof_z`, `roof_gx`, `roof_gy`), not
-  reproduced. First step: run `roof_fields` on this window and confirm which corners keep their own plane.
-- **Do:** one rule: at a ridge or hip a cell's corner is never higher than the lowest of the planes that meet
-  there (the roof is the lower envelope of its planes). The `span` test may still let a cell keep its own plane
-  downwards, not upwards.
-- **Do:** a number for it in `caps.report`: roof corners more than 0.5 m over the lowest neighbouring plane at a
-  ridge, before and after.
-- **Gates:** `tools/caps-check.mjs`, `tools/mesh-golden.mjs` (differences only at ridges), `shoot.mjs --compare` on
-  `dom`. Only `tile_fields.py` runs again, the voxels do not change.
-- **Verify spot:** `?cam=-4122.1,119.3,1202,-4073,103.3,1187.1`
-
 ### Q8. A bridge deck does not sag to the ground beside it (S–M)
 
 - **Waits for:** nothing. Do not run it in parallel with R6's deck stage (same block in `voxelize.py`, "# bridges /
@@ -232,21 +209,9 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
   [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 
-### F4. The player car in the same Rapier world as the AI bodies (M–L)
-
-- **Waits for:** nothing. `physics/rapier/car.ts` is already free of three.js and the drive runs on `FixedStep`.
-- **Why:** collisions between the player car and AI cars, and destruction, need one physics world. It is also the
-  shape a server needs: one world, many players.
-- **Today:** `RapierDrive` (`physics/rapier/drive-world.ts`) owns its own world with one car. AI cars near edits are
-  bodies in `physics/rapier/life-phys.ts`.
-- **Design:** follow [ADR 0007](../adr/0007-player-control-in-world-sim.md) (player-keyed commands, one shared world).
-- **Do:** one shared world with one collider budget. The player car is a body like the others, keyed by a player id.
-- **Do:** write a short plan first and measure step cost with `tools/life-phys*.mjs`.
-- **Gates:** `rapier-car` 42/42 and `vehicles` 34/34 must stay green (counts may change only with a reason).
-
 ### F5. Trains and boats into the world sim (M)
 
-- **Waits for:** F4. The target design is [ADR 0007](../adr/0007-player-control-in-world-sim.md).
+- **Waits for:** nothing. F4 landed. The target design is [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 - **Today:** `sim/trains.ts` and `sim/boats.ts` sit in `sim/` but are three.js presentation with their own motion.
   ADR 0006 notes this.
 - **Do:** split each into a plain sim part (positions on their tracks or rivers, fixed 1/30 s tick, seeded RNG, no
@@ -254,7 +219,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F6. Trains have hitboxes (S–M)
 
-- **Waits for:** F5 (the trains' plain sim part), which waits for F4 (one Rapier world). Fold it into F5 if the same
+- **Waits for:** F5 (the trains' plain sim part). F4 landed the shared Rapier world. Fold F6 into F5 if the same
   agent does both.
 - **Today:** the player drives through trains. `nav/drive-session.ts` builds the car's obstacles from
   `life.roadVehicles()` only. `sim/trains.ts` keeps its trains private and computes each coach's pose only when it
@@ -266,8 +231,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Do:** a hit at speed is an `impact` for the car (a crash for a bike), as a wall is.
 - **Not in scope:** trains stopping for a car on the track, and train collisions for walkers, boats and planes.
   Note them as open.
-- **Not recommended:** an interim list of train boxes passed into `RapierDrive.update` today. F4 replaces that
-  code.
 - **Gates:** `rapier-car` and `vehicles` stay green; one new scenario: a car at 50 km/h into a standing coach stops.
 
 ### F7. Motorbike handling (M)
@@ -339,19 +302,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   the same at the surveyed level).
 - **Check by hand:** the boat above and below the Kachlet dam, the floatplane landing on the Danube and the Inn,
   the cruise ships at the quay.
-
-### F10. Minimap on M, and the collection point for map features (M)
-
-- **Waits for:** nothing. F9 landed: labels in `meta.json` carry a `cat` (church, castle, bridge, tower, water,
-  industry, transport, district, sport, park, education, health, shopping, culture, civic, sight) for icons; the
-  curated list is `PLACES` in `scripts/labels.py`; N is wired in `main.ts` via `gameKey` (add M the same way).
-- **Do:** M toggles a minimap: north-up or heading-up, the player's position and heading, rivers and main roads,
-  the labels of F9 as icons. Draw it from data the viewer already has (`meta.json` labels, the low-LOD tiles or
-  a small pre-rendered map image from the pipeline); no new data source.
-- **Keep it a seam:** the minimap reads positions from the sim side (player, later other players and vehicles), so
-  multiplayer markers are a data change, not a rewrite (see ADR 0006, 0007).
-- **Collect here:** further map ideas belong in this package's section rather than a new file: click to set a
-  waypoint, a full-screen map, showing other players, places from the search.
 
 ### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
 
