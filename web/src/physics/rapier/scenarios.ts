@@ -49,7 +49,7 @@ export function synthMap(tiles: number, col: (x: number, z: number) => Col, surf
       const last = r[r.length - 1], zt = r.length === 1 ? c.g : last[0] > c.g ? last[1] : 0;
       if (!surf || !zt || last[2] !== STREET) continue;
       const X = tx * N + i - 1, Z = tz * N + j - 1;
-      const q = [[X, Z], [X + 1, Z], [X + 1, Z + 1], [X, Z + 1]].map(([a, b]) => Math.min(zt * 64 + 56, Math.max(zt * 64 - 56, Math.round(surf(a, b) * 64))));
+      const q = [[X, Z], [X + 1, Z], [X + 1, Z + 1], [X, Z + 1]].map(([a, b]) => Math.min(zt * 64 + 60, Math.max(zt * 64 - 60, Math.round(surf(a, b) * 64))));
       if (q.some((v) => v !== zt * 64)) recs.push([k, zt, ...q]);
     }
     out.push({ tx, tz, tile: terrainTile(N, { ground, counts, runs: Uint16Array.from(runs), caps: encodeCaps(recs) }, { counts: fcounts, runs: Uint16Array.from(frun) }, pal) });

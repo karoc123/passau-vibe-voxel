@@ -199,7 +199,8 @@ column is not water (G also not where `b > 0`).
    Assert `g == grnd` on the node's columns inside the map (note and skip the column otherwise).
 
 Parameters (module constants in `caps.py`, tuned in step P3 without a region rebuild): `SRC_TOL 0.75`, `WALL_TOL 0.6`,
-`N_SMOOTH 16`, `N_RELAX 48`, `CLAMP 56`.
+`N_SMOOTH 16`, `N_RELAX 48`, `CLAMP 56` (60 since docs/plans/road-clearance.md; ±56 / ±0.875 m below is that
+first value).
 
 Measured on the Altstadt window (`probe2.py`, carriageway cells of `qa_roadmask`, second difference of the surface per
 metre, linked triples only): raw voxels p99 100 cm; raw terrain model p99 30 cm; this diffusion at 16 iterations
@@ -355,7 +356,8 @@ Principle: **a node with a `caps` section takes the new path, a node without tak
 `web/public/data` has no caps, so every real-data gate keeps running the legacy code byte-identically until the
 rebuild. The new path is exercised on fixture builds (they do contain caps once P1–P3 are in). A switch
 `CAPS.use` (exported from `core/surface.ts`, default `true`; `?caps=0` in the viewer, `CAPS=0` env in the tools)
-forces the legacy path on data that has caps, for A/B measurement. Both the legacy path and the switch are removed in A8.
+forces the legacy path on data that has caps, for A/B measurement. Both the legacy path and the switch are removed in A8
+(done: neither `?caps=0` nor `CAPS=0` exists any more).
 
 Tools on fixture data: add `tools/data-dir.mjs` (`export const dataDir = process.env.VOXEL_DATA ?? <web>/public/data`)
 and use it in `mesh-golden`, `rapier-car`, `collision`, `world-smoke`, `section-check`, `contact` (new). Fixture data

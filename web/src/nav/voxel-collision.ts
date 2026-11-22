@@ -13,7 +13,7 @@ export interface CollisionOptions { radius?: number; horizon?: number }
 const CONCURRENT_LOADS = 4;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
 // caps: the node's sloped surfaces (core/surface.ts), what surface() reads -- the sweep keeps the voxels (a cap lies
-// within 0.875 m of its voxel's top; the drone is no ground vehicle)
+// within caps.CLAMP, 60/64 m, of its voxel's top; a craft is no ground vehicle)
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
 const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
   ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: capField(N, v.base) });
@@ -56,7 +56,8 @@ function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: n
   return { fraction: enter, axis };
 }
 
-// The FPV drone's collision (fpv.ts): a small cache of the 1 m tiles near it, independent of visibility,
+// A craft's collision (one each: the FPV drone, fpv.ts; the boat, boat.ts; the floatplane and the jet, plane.ts, with
+// their own radius and horizon): a small cache of the 1 m tiles near it, independent of visibility,
 // render budget and the mesh-worker queue. The nodes' files come through a TileCache (core/tile-cache.ts: given, e.g.
 // the viewer's shared one, or its own fetching data/tiles/), held while near.
 export class VoxelCollision {
@@ -96,7 +97,7 @@ export class VoxelCollision {
     this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
     this.wet = paletteMask(semanticTable(meta.palette), RULES.water);
     this.cache = cache ?? new TileCache({ N: this.tileSide, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits });
-    // (one per page, fpv.ts: listens as long as the page lives)
+    // (one per craft: listens as long as the page lives)
     liveEdits.listen((tx, tz) => this.invalidate(tx, tz));
   }
 

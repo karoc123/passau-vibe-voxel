@@ -104,7 +104,8 @@ gets stuck is put back on its kinematic ghost.
   (now an option; the player's default is unchanged). Live edits (`core/live-edits.ts`) invalidate and rebuild the
   chunks they touch, exactly as for the player car.
 - Hooks in `life.ts`: an optional `bodies` (null by default), `pathPoint()`, and skipping option A for owned cars.
-  `main.ts` wires `?lifephys=1&lpr=&lpmax=&lpmodel=&lpguide=&lplost=&lponly=`.
+  `main.ts` wired `?lifephys=1&lpr=&lpmax=&lpmodel=&lpguide=&lplost=&lponly=` (prototype only; of these only
+  `?lifephys=0`, `?lpnear=` and `?lpmax=` are left: README, "URL parameters").
 - Tools (in `web/`):
   - `tools/life-phys.mjs`: headless benchmark, plus `--dig` and `--block`;
   - `tools/life-phys-scan.mjs`: scans the paths for room for a physical car;
