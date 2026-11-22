@@ -38,11 +38,11 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
-| R4 | Craft interface and `nav.ts` split | L | **Ready** |
+| R4 | Craft interface and `nav.ts` split | L | In progress (`r4`) |
 | R5 | Check harnesses out of `src/` | M | Waits for R4 |
 | F2 | Walk to a vehicle and get in | M | Waits for R4 |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
-| Q1 | Water only where the cadastre or OSM has water | M | **Ready** (not in parallel with R6's water stage) |
+| Q1 | Water only where the cadastre or OSM has water | M | In progress (`q1`) |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q4 | What passes under a bridge stays open | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
