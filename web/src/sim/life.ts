@@ -38,9 +38,17 @@ const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 // the cars parked by the player (takeWheel) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
 // never more than PARKED_MAX
 const PARKED = 8, PARKED_MAX = 24;
+// Player edits (?dig=1, core/live-edits.ts): the paths' heights are baked (scripts/traffic.py), so only where the city
+// was edited is the ground under an agent looked at (World.support, the edited columns): more than HOLE m under its
+// path's height and it falls (G m/s^2) until it meets what is there (the ground, the water's voxels), gone LANDED_S s
+// later. Nothing edited: nothing looked at.
+const HOLE = 1, G = 9.81, LANDED_S = 2, FALL_MAX_S = 8;
 
 // a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
-interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null }
+// (vy: falling into an edited hole, its vertical speed; land: when it met the ground)
+interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null; vy?: number; land?: number }
+// a car fallen into an edited hole: moving on at v (while over the hole) and down at vy; land: when it met the ground
+interface Falling { c: Car; vy: number; t: number; land: number }
 
 function phase(ctrl: Controller, t: number, axis: number) {
   const u = ((t + ctrl.off) % CYCLE + CYCLE) % CYCLE;
@@ -70,6 +78,9 @@ export class StreetLife {
   people: Person[] = [];
   riders: Person[] = [];
   private fallen: Fallen[] = [];
+  // the boxes edited (map metres [x0, y0, x1, y1), a metre round): only an agent in one has its ground looked at
+  private edits: [number, number, number, number][] = [];
+  readonly falling: Falling[] = [];
   day = 180;
   private t = 0;
   private acc = 0;
@@ -393,9 +404,67 @@ export class StreetLife {
     if (((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0)) this.breakDeadlocks();
     const targetCars = this.populate(density);
     this.snapshot();
+    if (this.edits.length) this.dropOverHoles();
     this.stepCars(dt, targetCars);
     this.stepPeople(dt);
     this.stepRiders(dt);
+  }
+
+  // ------------------------------------------------------------------ player edits
+  // Box (map metres [x0, y0, x1, y1)) was edited (stream.ts replaceColumns, through core/live-edits.ts), or, cleared,
+  // is its files' again (the node freed): the edits meeting it are forgotten.
+  edited(box: [number, number, number, number], cleared = false) {
+    if (cleared) this.edits = this.edits.filter((b) => !(b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3]));
+    else this.edits.push([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
+  }
+
+  // is the ground at (x, y) more than HOLE m under height z, in an edited box?
+  private hole(x: number, y: number, z: number) {
+    const W = this.world;
+    if (!W || !this.edits.some((b) => x >= b[0] && y >= b[1] && x < b[2] && y < b[3])) return false;
+    return W.support(x, y, z + 1.5) < z - HOLE;
+  }
+
+  // the cars (their middles, at the tick's start: snapshot), people and riders over a hole fall
+  private dropOverHoles() {
+    const gone = new Set<Car>();
+    for (const c of this.cars) {
+      const g = c.geo;
+      if (c === this.keep || !this.hole(g.cx, g.cy, g.z)) continue;
+      this.removeCar(c);
+      gone.add(c);
+      c.rp ??= new THREE.Vector3(g.cx, g.z, g.cy);
+      c.rh ??= Math.atan2(g.fx, g.fy);
+      c.brake = 1;
+      this.falling.push({ c, vy: 0, t: 0, land: -1 });
+    }
+    if (gone.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !gone.has(c)));
+    const drop = (list: Person[]) => list.filter((p) => {
+      if (p.ctl || p === this.keep || !p.rp || !this.hole(p.rp.x, p.rp.z, p.rp.y)) return true;
+      this.addFallen(p, 0, 1, 0, 0);
+      return false;
+    });
+    this.people = drop(this.people);
+    this.riders = drop(this.riders);
+  }
+
+  // the cars falling: on along their heading at their speed while over the hole, down until the ground, gone LANDED_S s after
+  private moveFalling(dt: number) {
+    const W = this.world;
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i], c = f.c, p = c.rp!;
+      f.t += dt;
+      if ((f.land >= 0 && f.t - f.land > LANDED_S) || f.t > FALL_MAX_S || !W) { this.falling.splice(i, 1); continue; }
+      if (f.land >= 0) continue;
+      const fx = Math.sin(c.rh ?? 0), fz = Math.cos(c.rh ?? 0), nx = p.x + fx * c.v * dt, nz = p.z + fz * c.v * dt;
+      // (on only while over the hole: not across it onto its far rim)
+      if (c.v > 0 && W.support(nx, nz, p.y + 0.5) < p.y - HOLE) { p.x = nx; p.z = nz; } else c.v = 0;
+      const g = W.support(p.x, p.z, p.y);
+      f.vy -= G * dt;
+      p.y += f.vy * dt;
+      c.pitch = Math.min(0.6, (c.pitch ?? 0) + dt * 0.8); // (nose down)
+      if (p.y <= g) { p.y = g; f.land = f.t; c.v = 0; }
+    }
   }
 
   // As many as the hour wants, a few more a tick out of sight (all at once anywhere when warm: the first fill), and
@@ -635,6 +704,7 @@ export class StreetLife {
   // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
     const back = 1 - lead / STEP;
+    if (this.falling.length) this.moveFalling(dt);
     this.drawCars(back, night);
     this.trains.render(0, night);
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
@@ -673,7 +743,9 @@ export class StreetLife {
       draw(c, i);
     });
     this.detachedCars.forEach((c, i) => draw(c, this.cars.length + i));
-    setCount(this.cars.length + this.detachedCars.length, M.body, M.dark, M.head, M.tail);
+    let n = this.cars.length + this.detachedCars.length;
+    for (const f of this.falling) if (n < MAX_CARS) draw(f.c, n++);
+    setCount(n, M.body, M.dark, M.head, M.tail);
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 
@@ -741,15 +813,17 @@ export class StreetLife {
     if (i < 0 || !p.rp || p === this.keep) return false;
     list.splice(i, 1);
     const v = Math.hypot(vx, vz) || 1;
+    this.addFallen(p, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
+    return true;
+  }
+
+  // a person (drawn: rp) falls over, shoved along (dx, dz) at v m/s; vy: falling into a hole too, at vy m/s
+  private addFallen(p: Person, dx: number, dz: number, v: number, vy?: number) {
     if (this.fallen.length >= MAX_FALLEN) { // the oldest out of sight (else the oldest)
       const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
       this.fallen.splice(Math.max(0, i), 1);
     }
-    this.fallen.push({
-      col: p.col, bike: !!p.bike, at: p.rp.clone(), h: p.rh ?? 0, dx: vx / v, dz: vz / v, v: Math.min(FALL_V, v * 0.6), t: 0,
-      bikeAt: p.bike ? p.rp.clone() : null,
-    });
-    return true;
+    this.fallen.push({ col: p.col, bike: !!p.bike, at: p.rp!.clone(), h: p.rh ?? 0, dx, dz, v, t: 0, bikeAt: p.bike ? p.rp!.clone() : null, vy });
   }
 
   // the people knocked down further than r m from (x, z) gone (left behind; never in sight of the viewer)
@@ -763,7 +837,7 @@ export class StreetLife {
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
     const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3();
-    this.fallen = this.fallen.filter((f) => f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
+    this.fallen = this.fallen.filter((f) => (f.land === undefined || f.t - f.land <= LANDED_S) && (f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R)));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;
     for (let i = 0; i < n; i++) {
@@ -773,7 +847,15 @@ export class StreetLife {
       f.at.x += f.dx * step; f.at.z += f.dz * step;
       if (f.bikeAt) { f.bikeAt.x += f.dx * step * 0.5; f.bikeAt.z += f.dz * step * 0.5; }
       f.v *= Math.exp(-FALL_DRAG * dt);
-      if (this.world) f.at.y = this.world.surface(f.at.x, f.at.z, f.at.y);
+      if (f.vy !== undefined) { // (into a hole: down until the ground)
+        if (f.land === undefined && this.world) {
+          const g = this.world.support(f.at.x, f.at.z, f.at.y);
+          f.vy -= G * dt;
+          f.at.y += f.vy * dt;
+          if (f.at.y <= g) { f.at.y = g; f.land = f.t; }
+          if (f.bikeAt) f.bikeAt.y = f.at.y;
+        }
+      } else if (this.world) f.at.y = this.world.surface(f.at.x, f.at.z, f.at.y);
       const k = Math.min(1, f.t / FALL_S), a = k * k * Math.PI / 2;
       // (up turned towards the shove: about up x shove)
       tip.setFromAxisAngle(axis.set(f.dz, 0, -f.dx), a);

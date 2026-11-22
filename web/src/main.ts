@@ -24,6 +24,7 @@ import { Boats, type BoatData } from './sim/boats';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
+import { liveEdits } from './core/live-edits';
 import type { Facts, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
@@ -432,6 +433,9 @@ async function boot() {
     life = nav.life = new StreetLife(scene, td);
     movingActors.add(life.group);
     life.world = world;
+    // (player edits, ?dig=1: the agents over a hole in them fall; a node freed is its file again)
+    const N = meta.tiles.N;
+    liveEdits.listen((tx, ty, node, region) => life?.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node));
     window.__life = life;
     fetchJson<BoatData>('data/boats.json').then((bd) => {
       boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
