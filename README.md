@@ -322,6 +322,13 @@ code 1 on a failure; check any change to `voxel-collision.ts` or the tile format
 footbridge bounced off, under a bridge, put in and unstuck; then on the real data (skipped without it): put in near
 the Altstadt, a lap, under the Schanzlbrücke, into the bank. Exit code 1 on a failure.
 
+**Plane: `node tools/plane.mjs`** (~6 s). The floatplane's flight (`src/nav/plane-flight.ts`) on a synthetic world of
+boxes (`src/nav/plane-checks.ts`): level flight, the throttle's range, stall and recovery, climbing costs speed, the
+turn, the map's wall, the ceiling, a water landing with taxi and takeoff, crashes on land and on water and the
+respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`src/nav/plane-real.ts`, skipped
+without it): the Danube flown from the west edge to the Altstadt 60 m over its water, and landed on, taxied and taken
+off from. `--set KEY=VALUE` changes a `PLANE` number. Exit code 1 on a failure.
+
 **Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
 slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
 across ids, one id still merges into one top. Ids are 16-bit end to end; the map's stay below 60000 (`scripts/zones.py` fails there), 60000..65535 are reserved for players' builds. Exit
@@ -437,6 +444,19 @@ downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T
 exits; touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
 the bridges. The motion is `web/src/nav/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
 the mode is `nav/boat.ts`; design and controls in `docs/plans/boat.md`.
+
+## Plane
+
+Click **Plane** in the toolbar (from the map view) to fly a small floatplane from where the camera is, or **Plane on
+the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
+nose down/up (flight convention; "Invert pitch" in the panel swaps), Shift or R throttle up, Space or F down (held,
+stepless 0–100 %), T back to the last safe point, Esc exits; the wheel moves the camera. Touch: the left thumb is the
+stick, the throttle a slider on the right, pinch zooms. Gamepad (standard): left stick, RT/LT or the right stick's Y
+for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
+stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings near level) to float and taxi; past
+~97 km/h with the stick pulled it takes off. Land, roofs and fast or steep water are a crash: back at a safe pose ~3 s
+earlier. The flight is `web/src/nav/plane-flight.ts` (no DOM, fixed step, all numbers in `PLANE`), checked by
+`tools/plane.mjs`; the mode is `nav/plane.ts`; design in `docs/plans/plane.md`.
 
 ## Third-person walking
 

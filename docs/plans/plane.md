@@ -4,7 +4,7 @@ A new way to move: a small propeller plane, somewhat faster than the FPV drone, 
 An arcade model, not a simulator: it always flies forward, banks to turn, levels itself when the controls are let go,
 and keeps itself off the ground unless the player pushes it down on purpose.
 
-Status: plan only, nothing built. Written against `main` at `31d7b594`.
+Status: built (phases 0–3 and the water landing; phase 4's streaming measurement not done). Written against `main` at `31d7b594`.
 
 ## Revision (after review, overrides the plan below where they differ)
 

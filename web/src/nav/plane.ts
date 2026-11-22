@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
-import type { Nav } from './nav';
+import { flying, type Nav } from './nav';
 import { collisionWorld, PLANE, PlaneFlight, waterTop, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
 import { PlaneModel } from './plane-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -82,6 +82,7 @@ export class PlaneMode {
   private readonly v3 = new THREE.Vector3();
   private readonly v4 = new THREE.Vector3();
   private nextPanel = 0;
+  private savedFov = 0;
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera, private readonly target: THREE.Vector3,
     private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement, private readonly env: PlaneEnv) {
@@ -159,6 +160,7 @@ export class PlaneMode {
       this.env.park();
       if (!this.nav.startCraft('plane')) return false;
       this.enterFrom = { p: this.camera.position.clone(), q: this.camera.quaternion.clone(), fov: this.camera.fov, t0: performance.now() };
+      this.savedFov = this.camera.fov;
     }
     const m = PLANE.EDGE + 230;
     this.start = { x: clamp(s.x, m, this.meta.W - m), z: clamp(s.z, m, this.meta.D - m), y: s.y ?? 200, heading: s.h ?? 0, water: !!s.water };
@@ -249,6 +251,7 @@ export class PlaneMode {
     this.enterFrom = null;
     this.scripted = null;
     this.camera.up.set(0, 1, 0);
+    if (this.savedFov) { this.camera.fov = this.savedFov; this.camera.updateProjectionMatrix(); this.savedFov = 0; }
   }
 
   private say(text: string, ms: number) { this.notice = text; this.noticeUntil = performance.now() + ms; }
@@ -356,8 +359,9 @@ export class PlaneMode {
 
   // ------------------------------------------------------------------ the panel
   private draw() {
-    const active = this.nav.mode === 'plane', f = this.flight, flying = active && this.phase === 'flying';
+    const active = this.nav.mode === 'plane', f = this.flight, on = active && this.phase === 'flying';
     document.body.classList.toggle('plane-flying', active);
+    this.panel.hidden = flying(this.nav.mode) && !active;
     this.panel.classList.toggle('mode-active', active);
     this.details.hidden = !active;
     this.help.hidden = this.phase !== 'flying';
@@ -373,13 +377,13 @@ export class PlaneMode {
     const now = performance.now();
     const msg = now < this.noticeUntil ? this.notice :
       this.phase === 'loading' ? 'Loading collision tiles near the start…' :
-      !flying ? '' :
+      !on ? '' :
       this.blurred || document.hidden ? 'Paused (window not in focus)' :
       f.waiting ? 'Waiting for the next collision tile…' :
       f.stalled ? 'Stall! Nose down or more throttle' :
       f.atEdge ? 'Map edge: turn back' : '';
     if (this.status.textContent !== msg) this.status.textContent = msg;
-    if (!flying) { this.telemetry.textContent = ''; return; }
+    if (!on) { this.telemetry.textContent = ''; return; }
     const su = this.collision.surface(f.p.x, f.p.z);
     const where = f.state === 'water' ? 'on the water' : su ? `${Math.round(f.p.y - PLANE.RADIUS - su.ground)} m AGL` : `${Math.round(f.p.y)} m`;
     const text = `${Math.round(f.v * 3.6)} km/h · ${where} · throttle ${pct}%`;
