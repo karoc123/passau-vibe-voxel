@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { Pose } from '../sim/types';
+import { vehicleOf } from '../sim/vehicles';
 import type { World } from '../world';
 import type { Ride } from './nav';
 
 // where the camera sits: at the eyes (first person) or behind and above (chase)
 const RIG = {
   person: { eye: [1.62, 0.2], back: 4.5, up: 2.2, fov: 65 },
-  car: { eye: [1.3, 2.45], back: 9, up: 3.6, fov: 62 }, // dashcam just past the bonnet
+  car: { eye: [1.3, 2.45], fov: 62 }, // dashcam just past the bonnet
 };
 
 export function rideCamera(R: Ride, pose: Pose, world: World | null) {
@@ -22,7 +23,8 @@ export function rideCamera(R: Ride, pose: Pose, world: World | null) {
     return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: THREE.MathUtils.clamp(rig.fov * R.zoom, 25, 80) };
   }
   // (zoomed: further back and higher up alike, the same angle down)
-  const back = rig.back * R.zoom, high = rig.up * R.zoom;
+  const chase = R.obj.kind === 'car' ? vehicleOf(R.obj).chase : RIG.person;
+  const back = chase.back * R.zoom, high = chase.up * R.zoom;
   const pos = base.clone().addScaledVector(new THREE.Vector3(look.x, 0, look.z).normalize(), -back);
   pos.y = base.y + high;
   return { pos: world ? clearOf(world, base, pos, high, R.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };
@@ -38,5 +40,5 @@ function clearOf(world: World, base: THREE.Vector3, pos: THREE.Vector3, up: numb
     if (clear(p)) return p;
   }
   const d = pos.clone().sub(eye), L = d.length(), t = world.raycast(eye, d.divideScalar(L), L);
-  return eye.addScaledVector(d, Math.max(minDist, t - 0.8));
+  return eye.addScaledVector(d, Math.min(L, Math.max(minDist, t - 0.8)));
 }

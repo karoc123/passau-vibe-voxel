@@ -74,7 +74,8 @@ wheels).
 ## How to add a type
 
 1. An entry in `VEHICLES` (and its id in `VehicleId`): `build` (start from the nearest type; `tune` only what
-   differs), `len`, `model` (boxes; the wheels at the build's wheel positions, their bottom on the ground; lamps).
+   differs), `len`, `chase` (the camera's distance behind and above the vehicle, in metres at normal zoom), and
+   `model` (boxes; the wheels at the build's wheel positions, their bottom on the ground; lamps).
 2. A top-speed range in `tools/vehicles.mjs` TOP; run it.
 3. Optionally in the traffic's mix: `trafficType`.
 
@@ -85,5 +86,5 @@ is the voxels').
 
 - Getting into a particular vehicle from the street on foot. When taking the wheel with a type selected, the
   chooser turns the vehicle taken into the type.
-- Per-type chase camera distance (the bus' and the bike's are the car's); per-type wheel radius (all 0.36 m).
+- Per-type wheel radius (all 0.36 m).
 - A rider thrown from the bike as a body: the bike and rider fall over together, drawn.

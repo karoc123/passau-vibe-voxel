@@ -33,6 +33,7 @@ export interface VehicleType {
   name: string;
   build: CarBuild;
   len: number; // m: its length in the traffic (its spacing; the drive's obstacles)
+  chase: { back: number; up: number }; // m from the vehicle pose at normal zoom
   paint?: string; // its own colour (a bus's yellow), else the traffic car's
   model: Part[];
 }
@@ -59,6 +60,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // the traffic's car, as the player's has always driven (its numbers are tools/rapier-car.mjs's: keep them)
   car: {
     id: 'car', name: 'Car', len: 4.6,
+    chase: { back: 9, up: 3.6 },
     build: { half: { x: 0.9, y: 0.45, z: 2.1 }, mass: 1200, wheels: wheels4(0.82, 1.35, -1.3), engine: 2600, brake: 45, top: 22, ride: 0.84 },
     model: [
       [1.8, 0.75, 4.4, 0, 0.3, 0, 'paint'], [1.62, 0.62, 2.3, 0, 1.05, -0.25, 'paint'],
@@ -70,6 +72,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // fast, low and grippy: twice the car's pull, stiffer and lower, more downforce
   coupe: {
     id: 'coupe', name: 'Coupé', len: 4.6,
+    chase: { back: 8.5, up: 3.4 },
     build: {
       half: { x: 0.92, y: 0.36, z: 2.2 }, mass: 1250, wheels: wheels4(0.84, 1.42, -1.38), engine: 4600, brake: 62, top: 50, ride: 0.84,
       tune: { stiffness: 44, compression: 4.6, relaxation: 6.2, downforce: 0.6, gripFront: 2.0, gripRear: 1.95, com: 0.5 },
@@ -85,6 +88,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // a transporter: heavy, slow, soft
   van: {
     id: 'van', name: 'Van', len: 5.4,
+    chase: { back: 10.5, up: 4.2 },
     build: {
       half: { x: 1.0, y: 0.9, z: 2.55 }, mass: 2400, wheels: wheels4(0.88, 1.75, -1.7), engine: 3400, brake: 85, top: 26, ride: 0.84,
       tune: { stiffness: 24, compression: 3.0, relaxation: 4.2, downforce: 0.25, gripFront: 1.4, gripRear: 1.35, steer: 0.5 },
@@ -99,6 +103,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // a pickup: between the car and the van, a load bed behind its cab
   pickup: {
     id: 'pickup', name: 'Pickup', len: 5.4,
+    chase: { back: 10, up: 4 },
     build: {
       half: { x: 0.95, y: 0.55, z: 2.6 }, mass: 1900, wheels: wheels4(0.86, 1.7, -1.6), engine: 3800, brake: 70, top: 30, ride: 0.84,
       tune: { stiffness: 30, compression: 3.6, relaxation: 5, gripFront: 1.55, gripRear: 1.45 },
@@ -114,6 +119,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // the traffic's bus (12 m)
   bus: {
     id: 'bus', name: 'Bus', len: 12, paint: '#f2c230',
+    chase: { back: 17, up: 6.8 },
     build: busBuild(12),
     model: [
       [2.5, 1.0, 12, 0, 0.3, 0, 'paint'], [2.52, 1.05, 11.62, 0, 1.3, 0.2, 'glass'], [2.5, 0.55, 12, 0, 2.35, 0, 'paint'],
@@ -126,6 +132,7 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   // leaning into its turns (drawn: car.ts lean)
   moto: {
     id: 'moto', name: 'Motorbike', len: 2.2,
+    chase: { back: 6.5, up: 2.6 },
     build: {
       half: { x: 0.32, y: 0.5, z: 1.0 }, mass: 260, wheels: wheels4(0.3, 0.72, -0.72), engine: 950, brake: 13, top: 39, ride: 0.84,
       tune: { gripFront: 1.9, gripRear: 1.8, com: 0.62, steer: 0.42, steerFall: 9, downforce: 0.3 },
