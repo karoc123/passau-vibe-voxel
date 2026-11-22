@@ -88,8 +88,47 @@ export const PLANE = {
   RESPAWN_AGL: 60, // m over the top at the pose, at least
   RESPAWN_SPEED: 45,
   RESPAWN_THROTTLE: 0.6,
+  // the flight law. false: the stick asks a bank angle and a climb or dive of the path (held in a turn); true
+  // (aerobatic): the stick asks a roll rate and a pitch rate about the wings, the attitude a free frame (loops, rolls,
+  // inverted flight), hands off the path and the bank hold (the wings level themselves only within BANK_TRIM of level)
+  AEROBATIC: false,
+  BANK_TRIM: 0,
 };
 export type PlaneConfig = typeof PLANE;
+
+// The small aerobatic jet (a two-seat trainer, ~9 m, single engine): the floatplane's core with its own numbers and the
+// aerobatic flight law. Fast (level top ~450 km/h, dives to ~630), it bleeds speed in hard pulls (induced drag at up
+// to 7 g), stalls at ~190 km/h and sharper than the floatplane, rolls at 200 deg/s. No floats: any water is a splash.
+export const JET: PlaneConfig = {
+  ...PLANE,
+  THRUST: 5.6, // ~0.57 g at full throttle (the last 15 % drawn as the afterburner)
+  SPOOL: 1.2, // a turbine spools up slower than a propeller
+  CD0: 0.000358, // level top at full throttle sqrt(THRUST / CD0) = 125 m/s (450 km/h)
+  KI: 12,
+  V_STALL: 46, // m/s (166 km/h)
+  STALL_FADE: 0.2,
+  N_MAX: 7,
+  V_MAX: 175, // m/s (630 km/h, a dive's limit)
+  ROLL_RATE: 200 * D,
+  ROLL_ACCEL: 520 * D,
+  BANK_LEVEL: 1.2,
+  BANK_TRIM: 35 * D,
+  PITCH_RATE: 34 * D, // about the wings: a full pull at ~400 km/h is a loop ~400 m high
+  PITCH_FOLLOW: 5,
+  PITCH_ACCEL: 70 * D, // (~10 g/s of onset at 400 km/h)
+  ALPHA_STALL: 12 * D,
+  CEILING: 560, // (VoxelCollision's ceiling is meta.H + 600): room for a loop over the city
+  CEILING_FADE: 200,
+  RADIUS: 1.2,
+  HORIZON: 3, // s; VoxelCollision fetches along the path, so ~375 m ahead at the top speed leaves no gap
+  SKIM_SINK: 3,
+  FLOAT_H: 1.3, // (no floats: the belly; over RADIUS, so that water is met before the ground under it)
+  WATER_SPEED: 0, // any touch of water is a crash
+  RESPAWN_AGL: 120,
+  RESPAWN_SPEED: 100,
+  RESPAWN_THROTTLE: 0.8,
+  AEROBATIC: true,
+};
 
 export interface PlaneInput {
   turn: number; // -1..1, +1 right
@@ -145,6 +184,9 @@ export class PlaneFlight {
   private start: Safe = { x: 0, y: 0, z: 0, heading: 0, speed: 0, water: false, t: 0 };
   private readonly d = new Vector3();
   private readonly q = new Vector3();
+  // the aerobatic law's attitude: the path's direction and the lift's (across it); heading, gamma, bank derived
+  private readonly fw = new Vector3(0, 0, 1);
+  private readonly lu = new Vector3(0, 1, 0);
 
   constructor(readonly cfg: PlaneConfig = PLANE) {}
 
@@ -165,11 +207,41 @@ export class PlaneFlight {
     this.stalled = this.atEdge = false;
     this.load = 1;
     this.aoa = this.alphaWant();
+    this.syncFrame(true);
+  }
+
+  // the aerobatic frame after heading or gamma were set: the path's direction from them, the lift kept across it (or,
+  // `level`, wings level)
+  private syncFrame(level = false) {
+    if (!this.cfg.AEROBATIC) return;
+    const f = this.fw, u = this.lu, cg = Math.cos(this.gamma);
+    f.set(Math.sin(this.heading) * cg, Math.sin(this.gamma), Math.cos(this.heading) * cg);
+    if (level) u.set(0, 1, 0);
+    u.addScaledVector(f, -u.dot(f));
+    if (u.lengthSq() < 1e-6) u.set(0, 1, 0).addScaledVector(f, -f.y);
+    u.normalize();
+  }
+
+  /** the drawn attitude: where the nose points and the cockpit's up (the path's frame turned up by alpha) */
+  attitude(fwd: Vector3, up: Vector3) {
+    if (this.cfg.AEROBATIC && this.state === 'air') { fwd.copy(this.fw); up.copy(this.lu); }
+    else {
+      const sh = Math.sin(this.heading), ch = Math.cos(this.heading), sg = Math.sin(this.gamma), cg = Math.cos(this.gamma);
+      const sb = Math.sin(this.bank), cb = Math.cos(this.bank);
+      fwd.set(sh * cg, sg, ch * cg);
+      // the level up across the path (r) and the right wing (f x r), the lift tilted by the bank towards the right
+      up.set(-sg * sh * cb - ch * sb, cg * cb, -sg * ch * cb + sh * sb);
+    }
+    const ca = Math.cos(this.aoa), sa = Math.sin(this.aoa), fx = fwd.x, fy = fwd.y, fz = fwd.z;
+    fwd.multiplyScalar(ca).addScaledVector(up, sa);
+    up.multiplyScalar(ca).add(this.q.set(fx, fy, fz).multiplyScalar(-sa));
+    return fwd;
   }
 
   /** where it moves (m/s), for the collision's prefetch */
   velocity(out = new Vector3()) {
     if (this.state === 'crashed') return out.set(0, 0, 0);
+    if (this.cfg.AEROBATIC && this.state === 'air') return out.copy(this.fw).multiplyScalar(this.v);
     const c = Math.cos(this.gamma);
     return out.set(Math.sin(this.heading) * c, Math.sin(this.gamma), Math.cos(this.heading) * c).multiplyScalar(this.v);
   }
@@ -221,24 +293,7 @@ export class PlaneFlight {
     const c = this.cfg, g = c.G, v = this.v;
     const lift = smooth((v / c.V_STALL - (1 - c.STALL_FADE)) / c.STALL_FADE);
     const nMax = Math.min(c.N_MAX, (v / c.V_STALL) ** 2) * lift;
-    // bank: the stick sets the target, let go it levels; mushy near the stall; the roll rate eases in and out
-    const turn = clamp(input.turn, -1, 1), auth = (0.35 + 0.65 * lift) * c.ROLL_RATE;
-    const roll = clamp((turn * c.BANK_MAX - this.bank) * (turn ? c.BANK_FOLLOW : c.BANK_LEVEL), -auth, auth);
-    this.roll += clamp(roll - this.roll, -c.ROLL_ACCEL * dt, c.ROLL_ACCEL * dt);
-    this.bank += this.roll * dt;
-    // pitch: the path's turn rate the stick asks (the elevator following it), as a load factor (wings' lift tilted by
-    // the bank), bounded by speed
-    const pitch = clamp(input.pitch, -1, 1);
-    const qWant = pitch ? pitch * c.PITCH_RATE : clamp(-this.gamma * c.PITCH_LEVEL, -c.PITCH_LEVEL_RATE, c.PITCH_LEVEL_RATE);
-    this.pitchRate += clamp((qWant - this.pitchRate) * c.PITCH_FOLLOW, -c.PITCH_ACCEL, c.PITCH_ACCEL) * dt;
-    const q = this.pitchRate;
-    const cb = Math.max(0.2, Math.cos(this.bank)), cg = Math.cos(this.gamma);
-    const nCmd = (cg + q * v / g) / cb;
-    const n = clamp(nCmd, -0.5 * nMax, nMax);
-    this.load = n;
-    this.stalled = nCmd > nMax + 0.05 && v < c.V_STALL * 1.3;
-    this.gamma = clamp(this.gamma + (n * cb - cg) * g / v * dt, -c.GAMMA_MAX, c.GAMMA_MAX);
-    this.heading -= n * Math.sin(this.bank) * g / (v * Math.max(0.2, cg)) * dt;
+    const n = c.AEROBATIC ? this.aerobatic(input, dt, lift, nMax) : this.banked(input, dt, lift, nMax);
     // speed: thrust (fading under the ceiling) against drag and the slope
     const ceil = w.H + c.CEILING;
     const thrust = this.engine * c.THRUST * clamp((ceil - this.p.y) / c.CEILING_FADE, 0, 1);
@@ -264,16 +319,72 @@ export class PlaneFlight {
     const len = d.length();
     p.addScaledVector(d, len > 0 ? Math.max(0, s.fraction - 0.002 / len) : 0);
     if (s.hit === 'city edge') return true;
-    if (s.hit === 'ceiling') { this.gamma = Math.min(this.gamma, 0); return true; }
+    if (s.hit === 'ceiling') { this.gamma = Math.min(this.gamma, 0); this.syncFrame(); return true; }
     const sink = -v * Math.sin(this.gamma);
     if (s.axis === 2 && sink < c.SKIM_SINK) {
       this.gamma = Math.max(this.gamma, c.SKIM_PITCH);
+      this.syncFrame();
       this.v *= c.SKIM_KEEP;
       this.events.push({ type: 'skim' });
       return true;
     }
     this.crash(s.hit);
     return true;
+  }
+
+  // the stick asks a bank and the path's climb or dive (the load factor holding it in a turn); returns the load factor
+  private banked(input: PlaneInput, dt: number, lift: number, nMax: number) {
+    const c = this.cfg, g = c.G, v = this.v;
+    // bank: the stick sets the target, let go it levels; mushy near the stall; the roll rate eases in and out
+    const turn = clamp(input.turn, -1, 1), auth = (0.35 + 0.65 * lift) * c.ROLL_RATE;
+    const roll = clamp((turn * c.BANK_MAX - this.bank) * (turn ? c.BANK_FOLLOW : c.BANK_LEVEL), -auth, auth);
+    this.roll += clamp(roll - this.roll, -c.ROLL_ACCEL * dt, c.ROLL_ACCEL * dt);
+    this.bank += this.roll * dt;
+    // pitch: the path's turn rate the stick asks (the elevator following it), as a load factor (wings' lift tilted by
+    // the bank), bounded by speed
+    const pitch = clamp(input.pitch, -1, 1);
+    const qWant = pitch ? pitch * c.PITCH_RATE : clamp(-this.gamma * c.PITCH_LEVEL, -c.PITCH_LEVEL_RATE, c.PITCH_LEVEL_RATE);
+    this.pitchRate += clamp((qWant - this.pitchRate) * c.PITCH_FOLLOW, -c.PITCH_ACCEL, c.PITCH_ACCEL) * dt;
+    const q = this.pitchRate;
+    const cb = Math.max(0.2, Math.cos(this.bank)), cg = Math.cos(this.gamma);
+    const nCmd = (cg + q * v / g) / cb;
+    const n = clamp(nCmd, -0.5 * nMax, nMax);
+    this.load = n;
+    this.stalled = nCmd > nMax + 0.05 && v < c.V_STALL * 1.3;
+    this.gamma = clamp(this.gamma + (n * cb - cg) * g / v * dt, -c.GAMMA_MAX, c.GAMMA_MAX);
+    this.heading -= n * Math.sin(this.bank) * g / (v * Math.max(0.2, cg)) * dt;
+    return n;
+  }
+
+  // aerobatic: the stick asks a roll rate and a pitch rate about the wings; the path turns by the lift (along lu) and the
+  // part of gravity across it, in a free frame (no limit at the vertical: loops, rolls, inverted). Hands off, the
+  // pitch rate dies away (the path holds: n = lu.y) and the bank holds, or levels within BANK_TRIM of level
+  private aerobatic(input: PlaneInput, dt: number, lift: number, nMax: number) {
+    const c = this.cfg, g = c.G, v = this.v, f = this.fw, u = this.lu;
+    const turn = clamp(input.turn, -1, 1), auth = (0.35 + 0.65 * lift) * c.ROLL_RATE;
+    const trim = Math.abs(this.bank) < c.BANK_TRIM && Math.abs(f.y) < 0.9;
+    const roll = turn ? turn * auth : trim ? clamp(-this.bank * c.BANK_LEVEL, -auth, auth) : 0;
+    this.roll += clamp(roll - this.roll, -c.ROLL_ACCEL * dt, c.ROLL_ACCEL * dt);
+    const pitch = clamp(input.pitch, -1, 1);
+    this.pitchRate += clamp((pitch * c.PITCH_RATE - this.pitchRate) * c.PITCH_FOLLOW, -c.PITCH_ACCEL, c.PITCH_ACCEL) * dt;
+    const nCmd = this.pitchRate * v / g + u.y;
+    const n = clamp(nCmd, -0.5 * nMax, nMax);
+    this.load = n;
+    this.stalled = nCmd > nMax + 0.05 && v < c.V_STALL * 1.3;
+    // f' = (n g lu + gravity across the path) / v; the lift re-squared to the path, then rolled about it
+    const k = g * dt / v;
+    f.set(f.x + (n * u.x + f.y * f.x) * k, f.y + (n * u.y - 1 + f.y * f.y) * k, f.z + (n * u.z + f.y * f.z) * k).normalize();
+    u.addScaledVector(f, -u.dot(f)).normalize();
+    const a = this.roll * dt, w = this.q.crossVectors(f, u);
+    u.multiplyScalar(Math.cos(a)).addScaledVector(w, Math.sin(a)).normalize();
+    // heading, gamma, bank: read off the frame (the bank against the level up across the path; kept at the vertical)
+    this.gamma = Math.asin(clamp(f.y, -1, 1));
+    if (Math.abs(f.y) < 0.999) {
+      this.heading = Math.atan2(f.x, f.z);
+      const r = this.d.set(-f.y * f.x, 1 - f.y * f.y, -f.y * f.z).normalize();
+      this.bank = Math.atan2(u.dot(w.crossVectors(f, r)), u.dot(r));
+    }
+    return n;
   }
 
   // on the water: as gentle as WATER_* asks, it floats; else a crash
@@ -300,6 +411,7 @@ export class PlaneFlight {
     if (this.v >= c.V_TAKEOFF && input.pitch > 0.2) {
       this.state = 'air';
       this.gamma = 2 * D;
+      this.syncFrame();
       this.events.push({ type: 'takeoff' });
       return this.fly(input, dt, w);
     }

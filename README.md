@@ -327,7 +327,11 @@ boxes (`src/nav/plane-checks.ts`): level flight, the throttle's range, stall and
 turn, the map's wall, the ceiling, a water landing with taxi and takeoff, crashes on land and on water and the
 respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`src/nav/plane-real.ts`, skipped
 without it): the Danube flown from the west edge to the Altstadt 60 m over its water, and landed on, taxied and taken
-off from. `--set KEY=VALUE` changes a `PLANE` number. Exit code 1 on a failure.
+off from. Then the jet (`JET`, `src/nav/jet-checks.ts`): level top speed, stall, roll rate, a loop, inverted flight,
+a hard turn, smooth pitch (the floatplane's criteria), the map's wall, crash and respawn, a gentle touch of water (a
+splash), 10 min of random input; on the real data a low pass along the Danube and over the Altstadt at ~410 km/h with
+every collision file 1 s late (no wait for a tile once under way). `--type floatplane|jet` runs one; `--set KEY=VALUE`
+changes a number of the types run. Exit code 1 on a failure.
 
 **Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
 slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
@@ -459,6 +463,13 @@ stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings
 ~97 km/h with the stick pulled it takes off. Land, roofs and fast or steep water are a crash: back at a safe pose ~3 s
 earlier. The flight is `web/src/nav/plane-flight.ts` (no DOM, fixed step, all numbers in `PLANE`), checked by
 `tools/plane.mjs`; the mode is `nav/plane.ts`; design in `docs/plans/plane.md`.
+
+**Jet** in the same panel: a small aerobatic trainer, started in the air only (it needs no runway and cannot land).
+The same keys, but A/D roll (200°/s; let go and the bank holds, within ~35° of level the wings level themselves) and
+W/S pitch about the wings (hold S for a loop); let go and it holds its path, so a turn is bank and pull. ~450 km/h
+level at full throttle (the last 15 % of the lever drawn as the afterburner), ~630 in a dive, up to 7 g; hard pulls
+bleed speed, below ~166 km/h it stalls. Any water is a splash. Its numbers are `JET` in `plane-flight.ts` (the same
+core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
 
 ## Third-person walking
 

@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 const WHITE = 0xf2f2ee, BLUE = 0x1f4f9a, GLASS = 0x1c2630, DARK = 0x2a2c30, FLOAT = 0xd8d8d2, RED = 0xb02a22;
 
-function box(w: number, h: number, l: number, x: number, y: number, z: number, hex: number, rx = 0, rz = 0) {
+export function box(w: number, h: number, l: number, x: number, y: number, z: number, hex: number, rx = 0, rz = 0) {
   const g = new THREE.BoxGeometry(w, h, l);
   if (rx) g.rotateX(rx);
   if (rz) g.rotateZ(rz);
@@ -16,6 +16,13 @@ function box(w: number, h: number, l: number, x: number, y: number, z: number, h
   for (let i = 0; i < a.length; i += 3) a.set([c.r, c.g, c.b], i);
   g.setAttribute('color', new THREE.BufferAttribute(a, 3));
   return g;
+}
+
+const basis = new THREE.Matrix4(), left = new THREE.Vector3();
+/** a model (nose +z, up +y, left +x) at p, its nose along fwd and its up along up (unit, across each other) */
+export function orient(g: THREE.Object3D, p: THREE.Vector3, fwd: THREE.Vector3, up: THREE.Vector3) {
+  g.position.copy(p);
+  g.quaternion.setFromRotationMatrix(basis.makeBasis(left.crossVectors(up, fwd), up, fwd));
 }
 
 export class PlaneModel {
@@ -82,11 +89,8 @@ export class PlaneModel {
     this.group.visible = false;
   }
 
-  /** placed at the flight's point, turned by heading, nose angle (+ up) and bank (+ right wing down) */
-  pose(p: THREE.Vector3, heading: number, nose: number, bank: number) {
-    this.group.position.copy(p);
-    this.group.rotation.set(-nose, heading, bank, 'YXZ');
-  }
+  /** placed at the flight's point, the nose along `fwd`, the cockpit's up along `up` (PlaneFlight.attitude) */
+  orient(p: THREE.Vector3, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
 
   /** the propeller by the engine (0..1), the lamps by the night (0 day .. 1 night) */
   animate(dt: number, engine: number, night: number, now: number) {

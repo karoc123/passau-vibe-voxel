@@ -2,7 +2,11 @@ import { Vector3 } from 'three';
 import type { Meta } from '../types';
 import { collisionWorld, PlaneFlight, waterTop, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
 import { holdPath, type Check } from './plane-checks';
+import { jetHold } from './jet-checks';
 import { VoxelCollision } from './voxel-collision';
+import { TileCache } from '../core/tile-cache';
+import { liveEdits } from '../core/live-edits';
+import { fetchGzip } from '../fetch';
 
 // The plane on the real data (web/tools/plane.mjs, which serves the node files from public/data/tiles to fetch): the
 // real VoxelCollision with the plane's radius and horizon, its water (waterColumn) as the viewer reads it. The Danube's line is
@@ -78,14 +82,22 @@ function follow(line: { x: number; z: number }[], f: PlaneFlight, ahead: number)
   return Math.max(-1, Math.min(1, -wrap(want - f.heading) * 2.5));
 }
 
+// the Danube from the west edge (where it enters at z ~260..550) to the Altstadt's Ort (x ~7900), found once
+let danubeLine: ReturnType<typeof riverLine> | null = null;
+function danube(col: VoxelCollision) {
+  if (!danubeLine) {
+    const t0 = performance.now();
+    danubeLine = riverLine(col, 100, 7900, 200, 700);
+    danubeLine.then((line) => console.log(`(the Danube's line: ${line.length} points in ${Math.round(performance.now() - t0)} ms)`));
+  }
+  return danubeLine;
+}
+
 export async function runRealChecks(meta: Meta, c: PlaneConfig): Promise<Check[]> {
   const out: Check[] = [];
   const col = new VoxelCollision(meta, undefined, { radius: c.RADIUS, horizon: c.HORIZON });
   const w = collisionWorld(col, meta.H);
-  // the Danube from the west edge (where it enters at z ~260..550) to the Altstadt's Ort (x ~7900)
-  const t0 = performance.now();
-  const line = await riverLine(col, 100, 7900, 200, 700);
-  console.log(`(the Danube's line: ${line.length} points in ${Math.round(performance.now() - t0)} ms)`);
+  const line = await danube(col);
   const end = line[line.length - 1];
   if (line.length < 40) {
     out.push({ name: 'danube_line', pass: false, detail: { points: line.length, endX: end?.x } });
@@ -146,5 +158,84 @@ export async function runRealChecks(meta: Meta, c: PlaneConfig): Promise<Check[]
       detail: { at: `${Math.round(s0.x)},${Math.round(s0.z)}`, water: wl, touchdownX: Math.round(touchX), taxiTurned: turned, tookOffAndClimbedTo: Math.round(f.p.y - wl),
         bumps: taxi.events.filter((e) => e.type === 'bump').length, ...(crash ? { crash: crash.what, kmh: crash.kmh } : {}) } });
   }
+  return out;
+}
+
+// The jet on the real data: low and fast along the Danube from the west edge to the Altstadt, then over the Altstadt's
+// roofs towards the Inn (the follower banks and pulls as a pilot would, at most 70 deg; it keeps EYE m over what lies
+// ahead). The collision's prefetch runs as in the viewer (a new wish every 160 ms of flight, loads started every step),
+// and every node file arrives LATENCY s of flight after it was asked for (a slow connection; the files on disk would
+// come at once), so `waitsUnderWay` counts the steps a tile was not in when the jet got there: with HORIZON long enough
+// for the speed, none once under way.
+const LATENCY = 1;
+export async function runJetRealChecks(meta: Meta, c: PlaneConfig): Promise<Check[]> {
+  const out: Check[] = [];
+  let t = 0;
+  // (each file due LATENCY after it was asked for, in flight time; the flight waits for a due file still being read,
+  // so the run does not depend on the machine's speed)
+  const due: { at: number; file: ArrayBuffer | null; go: (b: ArrayBuffer) => void }[] = [];
+  const slow = new TileCache({ N: meta.tiles.N, edits: liveEdits, load: (path) => new Promise<ArrayBuffer>((go) => {
+    const d = { at: t + LATENCY, file: null as ArrayBuffer | null, go };
+    due.push(d);
+    fetchGzip(`data/tiles/${path}`).then((b) => { d.file = b; });
+  }) });
+  const col = new VoxelCollision(meta, slow, { radius: c.RADIUS, horizon: c.HORIZON });
+  const w = collisionWorld(col, meta.H);
+  const line = await danube(new VoxelCollision(meta, undefined, { radius: c.RADIUS }));
+  if (line.length < 40) return [{ name: 'jet_city', pass: false, detail: { points: line.length } }];
+  // the route: the river's line, then on east over the Altstadt (x 7900..8700, its middle z ~ the Ort's)
+  const end = line[line.length - 1];
+  const route = [...line.map((q) => ({ x: q.x, z: q.z })), { x: end.x + 400, z: end.z + 60 }, { x: end.x + 800, z: end.z + 120 }];
+  const p0 = line[0], EYE = 70;
+  const f = new PlaneFlight(c);
+  const release = async () => {
+    while (due.some((d) => d.at <= t && !d.file)) await sleep(1);
+    for (let i = due.length - 1; i >= 0; i--) if (due[i].at <= t) { const d = due.splice(i, 1)[0]; d.go(d.file!); }
+    await sleep(0); // (the released files decoded into tiles)
+  };
+  for (let i = 0; i < 4000 && !col.surface(p0.x, p0.z); i++) { prefetch(col, new Vector3(p0.x, 0, p0.z), new Vector3()); t += 0.01; await release(); }
+  f.reset({ x: p0.x, y: p0.water + EYE, z: p0.z, heading: Math.atan2(line[3].x - p0.x, line[3].z - p0.z), speed: 110 });
+  f.engine = 0.9;
+  const vel = new Vector3();
+  t = 0;
+  let nextPrefetch = 0, waits = 0, waitsUnderWay = 0, minClear = Infinity, maxKmh = 0, sumKmh = 0, n = 0, maxBank = 0;
+  let crash: { what: string; kmh: number } | undefined;
+  const ahead = (d: number) => {
+    let top = -Infinity;
+    for (let s = 0; s <= d; s += 25) {
+      const su = w.surface(f.p.x + Math.sin(f.heading) * s, f.p.z + Math.cos(f.heading) * s);
+      if (su) top = Math.max(top, su.top);
+    }
+    return top;
+  };
+  const xEnd = end.x + 800;
+  while (t < 200 && f.p.x < xEnd) {
+    // (a new wish every 160 ms of flight, as the viewer's frames make it; loads started every step, as every frame)
+    if (t >= nextPrefetch) { nextPrefetch = t + 0.16; (col as unknown as { nextPrefetch: number }).nextPrefetch = 0; }
+    col.prefetch(f.p, f.velocity(vel));
+    let k = route.findIndex((q) => q.x > f.p.x + 450);
+    if (k < 0) k = route.length - 1;
+    const q = route[k], err = wrap(Math.atan2(q.x - f.p.x, q.z - f.p.z) - f.heading);
+    const bank = Math.max(-70, Math.min(70, -err * 180 / Math.PI * 2.5)) * Math.PI / 180;
+    const want = Math.max(ahead(400), f.p.x < end.x ? line[Math.max(0, line.findIndex((l) => l.x >= f.p.x))].water : 0) + EYE;
+    const inp = jetHold(f, bank, Math.max(-0.2, Math.min(0.25, (want - f.p.y) * 0.01)), 0.9);
+    if (due.length) await release();
+    if (!f.step(inp, c.STEP, w)) {
+      // (the flight holds, the clock goes on: as the viewer, which waits frames for the tile)
+      waits++;
+      if (t > 1) waitsUnderWay++;
+      t += c.STEP;
+      continue;
+    }
+    t += c.STEP;
+    for (const e of f.events.splice(0)) if (e.type === 'crash') crash ??= e;
+    if (crash) break;
+    const su = w.surface(f.p.x, f.p.z);
+    if (su) minClear = Math.min(minClear, f.p.y - c.RADIUS - su.top);
+    maxKmh = Math.max(maxKmh, f.v * 3.6); sumKmh += f.v * 3.6; n++; maxBank = Math.max(maxBank, Math.abs(f.bank));
+  }
+  out.push({ name: 'jet_city', pass: !crash && f.p.x >= xEnd - 1 && waitsUnderWay === 0,
+    detail: { km: r1((f.p.x - p0.x) / 1000), s: Math.round(t), avgKmh: Math.round(sumKmh / Math.max(1, n)), maxKmh: Math.round(maxKmh), maxBank: Math.round(maxBank * 180 / Math.PI),
+      minClear: Math.round(minClear), waitsAtStart: waits - waitsUnderWay, waitsUnderWay, horizon: `${c.HORIZON} s`, latency: `${LATENCY} s`, ...(crash ? { crash: crash.what, at: `${Math.round(f.p.x)},${Math.round(f.p.z)}` } : {}) } });
   return out;
 }

@@ -113,9 +113,12 @@ export class VoxelCollision {
     const now = performance.now();
     if (now >= this.nextPrefetch) {
       this.nextPrefetch = now + 160;
-      const current = this.near(p.x, p.z);
-      const ahead = this.near(p.x + v.x * this.horizon, p.z + v.z * this.horizon);
-      this.wanted = [...new Set([...current, ...ahead])];
+      // round the craft and round points along its path out to the horizon, no more than two nodes apart (so that
+      // their 3 x 3 neighbourhoods touch: no node on the way is left out however fast it flies)
+      const keys = this.near(p.x, p.z);
+      const steps = Math.max(1, Math.ceil(Math.hypot(v.x, v.z) * this.horizon / (2 * this.tileSide)));
+      for (let k = 1; k <= steps; k++) keys.push(...this.near(p.x + v.x * this.horizon * k / steps, p.z + v.z * this.horizon * k / steps));
+      this.wanted = [...new Set(keys)];
       // Keep only the current and predictive neighbourhoods, including during quick resets.
       for (const key of this.tiles.keys()) if (!this.wanted.includes(key)) this.tiles.delete(key);
       for (const key of this.held) if (!this.wanted.includes(key)) { this.held.delete(key); this.cache.release(key % this.nx, Math.floor(key / this.nx)); }

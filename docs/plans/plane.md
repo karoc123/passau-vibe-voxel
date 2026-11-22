@@ -41,6 +41,58 @@ The first draft was found too easy. Changed, in priority over everything below:
 Consequently the checks `speeds`, `guard_*`, `edge` turn-back and `danube` turned back at the east edge are replaced
 by `throttle`, `stall`, `climb_costs`, `boundary`, `water_*`, `crash_*` (web/tools/plane.mjs).
 
+## Second aircraft: the jet (built)
+
+Asked for: "ein ganz anderes Flugzeug". A small two-seat aerobatic jet trainer (red and white, ~9 m, 7.6 m span),
+picked with a third button **Jet** in the plane panel. Chosen over a glider (no thermals in the data, and over a
+9.3 x 3.5 km map a glider's best moments, ridge lift and long thermalling, have little room; it would also be a
+slower variant of what the floatplane already does) and over a VTOL (hovering needs its own control scheme and would
+blur into the drone). The jet differs in every axis the player feels: three times the stall speed, nearly twice the
+speed, a roll rate 2.5 times the floatplane's, loops and inverted flight, and no water.
+
+- **One core, two definitions.** `PlaneFlight` takes a `PlaneConfig`; `PLANE` (floatplane, unchanged) and `JET`
+  (`{ ...PLANE, ... }`) are plain objects next to each other in `plane-flight.ts`, server-usable. One switch,
+  `AEROBATIC`, picks the flight law; everything else (energy, stall, ceiling, map wall, collision, crash, respawn,
+  safe poses) is shared code. The floatplane's 21 checks print the same numbers as before.
+- **Aerobatic law.** The attitude is a free frame (the path's direction `fw` and the lift's `lu`), not heading /
+  path angle / bank, so nothing is singular at the vertical: loops, rolls on a vertical line, inverted flight. The
+  stick asks a roll rate (200°/s, eased by `ROLL_ACCEL`) and a pitch rate about the wings (34°/s, the elevator
+  following at `PITCH_FOLLOW` / `PITCH_ACCEL` as the floatplane's); the load factor is `pitchRate v / g + lu.y`,
+  bounded by speed as before. Hands off, the pitch rate dies away and the path holds (`n = lu.y`); the bank holds,
+  and only within `BANK_TRIM` (35°) of level do the wings level themselves. No ground guard, no auto-turn. To turn
+  level: bank and pull (a 75° bank needs ~4 g).
+- **Numbers** (`JET`): thrust 5.6 m/s² (~0.57 g), `CD0` 0.000358, `KI` 12: level top at full throttle 447 km/h,
+  half throttle 310; stall 46 m/s (166 km/h, floatplane 86) with a sharper fade (`STALL_FADE` 0.2); `N_MAX` 7;
+  dive limit 175 m/s; a loop from 420 km/h at full pull: 15 s, 420 m high, ~240 km/h over the top, 6.4 g; a 75°
+  level turn: 4 g, radius ~340 m, bleeds speed at full throttle. Turbine spool 1.2 /s. Ceiling `meta.H + 560` (under
+  the collision's `meta.H + 600`), room for a loop over the city. Respawn 120 m over the top at 360 km/h.
+- **Start, landing.** In the air only, at the camera, kept `EDGE + 5 s` of flight from the wall. `WATER_SPEED` 0: any
+  touch of water is a splash. No landing (no runway in Passau).
+- **Map and speed.** The map's wall is a clamp, so it holds at any speed (`jet_boundary`: 450 km/h into each edge and
+  a corner). At 125 m/s the map is crossed north to south in ~28 s: tight, but it is a jet.
+- **Collision tiles ahead.** `VoxelCollision.prefetch` held the 3 x 3 nodes round the craft and round one point
+  `horizon` s ahead; past ~2 nodes (256 m) between them the nodes on the way were not held. It now samples the path
+  every 2 nodes out to the horizon (the drone and the floatplane at cruise: one point, as before). Measured
+  (`jet_city`: the jet low along the Danube and over the Altstadt at ~410 km/h, every node file 1 s late in flight
+  time, loads 4 at a time as the viewer): no wait for a tile once under way with `HORIZON` 1 s or more, 25 waited
+  steps at 0.3 s; at 1.1 s latency waits remain at any horizon (4 concurrent loads give ~3.6 nodes/s, the jet needs
+  ~3 nodes/s across its path). `JET.HORIZON` 3 s (dives, turns).
+- **Drawn detail.** The streamer keeps a coarse node until the finer ones are ready, so nothing goes missing at
+  speed; what lags is detail. Not measured in a browser at 450 km/h (software GL runs at 2-15 fps here).
+- **Presentation** (`nav/plane.ts`, `nav/jet-model.ts`): per aircraft a model, a chase camera and the help line. The
+  jet's chase camera follows its nose and its up (lagged), so it rolls with the jet through loops; field of view
+  60–78° by speed; the panel shows the load factor. The model: boxes merged with vertex colours (as the floatplane),
+  nav lights and a strobe, a landing light by night, the nozzle's glow and a flame of two additive cones that grows
+  over the last 15 % of the throttle (the afterburner, drawn only), `MeshBasicMaterial` (no new shader).
+- **Checks** (`tools/plane.mjs`, `--type floatplane|jet`): `jet_top`, `jet_stall`, `jet_roll`, `jet_loop`,
+  `jet_inverted`, `jet_turn`, `jet_pitch_smooth` (the floatplane's pitch criteria; the bank's per-step limits from
+  `ROLL_RATE` / `ROLL_ACCEL`), `jet_boundary`, `jet_crash` (ground, respawn, a gentle touch of water), `jet_fuzz`
+  (frame stays orthonormal), `jet_city` (real data).
+
+Open: the throttle has no real reheat step (the flame is drawn over 85 %, the thrust is linear); no sound; touch and
+gamepad share the floatplane's mapping (stick sideways = roll rate) and are not tried on a device; the jet's chase
+camera rolling fully with it may want a "horizon-level camera" toggle after a try by hand.
+
 ## Offene Fragen
 
 Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils die Empfehlung umgesetzt.
