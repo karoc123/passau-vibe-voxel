@@ -152,7 +152,7 @@ export class RapierCar {
       if (!c.wheelIsInContact(i)) continue;
       const n = c.wheelContactNormal(i)!, p = c.wheelContactPoint(i)!;
       const x = p.x + o.x, z = p.z + o.z;
-      // (a capped run's voxel top may be up to 56/64 m over its surface)
+      // (a capped run's voxel top may be up to 60/64 m over its surface)
       const at = (dx: number, dz: number) => {
         const h = t.groundAt(x + dx, z + dz, p.y + 1);
         return h !== null && Math.abs(h - p.y) < 0.4 * H + 0.05 ? h : null;

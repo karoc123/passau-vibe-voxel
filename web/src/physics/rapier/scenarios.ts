@@ -29,7 +29,7 @@ export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; 
 
 // surf: the scenario's analytic road surface (m) at grid point (x, z) -- its caps, as scripts/caps.py would write them:
 // on each STREET column's ground run with nothing on it, and on a STREET run topping a column over its ground (a deck),
-// the four corners at surf, held within 56/64 m of the run's top (core/surface.ts). Every tile gets a caps section
+// the four corners at surf, held within 60/64 m of the run's top (core/surface.ts). Every tile gets a caps section
 // (empty without surf: a scenario of real steps, which stay voxels).
 export function synthMap(tiles: number, col: (x: number, z: number) => Col, surf?: (x: number, z: number) => number): ScenarioMap {
   const meta = { W: tiles * N, D: tiles * N, tiles: { N }, palette: PALETTE };
