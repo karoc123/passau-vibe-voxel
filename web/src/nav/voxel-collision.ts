@@ -68,6 +68,8 @@ export class VoxelCollision {
   // per palette id: 1 where the drone passes it in the foliage tile and does not settle on it (not core/semantics.ts
   // solidForDrone: grass; ids past the palette: solid)
   private readonly passable: Uint8Array;
+  // per palette id: 1 for water (the boat's column, waterColumn)
+  private readonly wet: Uint8Array;
   private readonly cache: TileCache;
   // the nodes this holds one reference to in the cache
   private readonly held = new Set<number>();
@@ -86,6 +88,7 @@ export class VoxelCollision {
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
     this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
+    this.wet = paletteMask(semanticTable(meta.palette), RULES.water);
     this.cache = cache ?? new TileCache({ N: this.tileSide, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits });
     // (one per page, fpv.ts: listens as long as the page lives)
     liveEdits.listen((tx, tz) => this.invalidate(tx, tz));
@@ -190,6 +193,33 @@ export class VoxelCollision {
       }
     }
     return result();
+  }
+
+  // The boat's view of column (x, z) (nav/boat-motion.ts): the top of its water (the river is the ground's top
+  // voxel(s), physics/rapier/terrain.ts) or -1 where the ground's top is no water, and whether anything solid is in it
+  // between y0 and y1 (the ground: up to the water's bottom; the runs over it, foliage that is no grass; the water not).
+  // null: not loaded.
+  waterColumn(x: number, z: number, y0: number, y1: number): { water: number; blocked: boolean } | null {
+    if (x < 0 || z < 0 || x >= this.width || z >= this.depth) return { water: -1, blocked: true };
+    const ix = Math.floor(x), iz = Math.floor(z), tile = this.tileAt(ix, iz);
+    if (!tile) return null;
+    const i = this.column(ix, iz), g = tile.ground[i];
+    let water = -1, solid = g, blocked = false;
+    const { offsets, data } = tile.base;
+    for (let j = offsets[i]; j < offsets[i + 1]; j += 3) {
+      const lo = data[j], hi = lo + data[j + 1];
+      if (this.wet[data[j + 2]]) {
+        if (hi >= g && lo < solid) { solid = lo; water = Math.max(water, hi); }
+      } else if (hi > g && lo < y1 && hi > y0) blocked = true;
+    }
+    if (!blocked) {
+      const f = tile.foliage;
+      for (let j = f.offsets[i]; j < f.offsets[i + 1]; j += 3) {
+        const lo = f.data[j], hi = lo + f.data[j + 1];
+        if (!this.passable[f.data[j + 2]] && !this.wet[f.data[j + 2]] && lo < y1 && hi > y0) { blocked = true; break; }
+      }
+    }
+    return { water, blocked: blocked || solid > y0 };
   }
 
   private column(x: number, z: number) {
