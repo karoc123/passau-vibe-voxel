@@ -47,7 +47,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| Q2 | A carriageway over water is a bridge | M | In progress (`q2`) |
+| Q2 | A carriageway over water is a bridge | M | Ready to merge (`q2`) |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | In progress (`q9`) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
@@ -120,6 +120,28 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 - **Do:** a build counter and a `verify` check: metres of non-bridge way centreline on water, per way.
 - **Gates:** `check.py verify`, a new patch for the B 8 in `road-defects.json` (kind `road`).
 - **Verify spot:** Heining, B 8 "bridge missing": `?cam=-2966.1,109.8,-189.4,-3047.6,13,-87.1`
+- **Landed on `q2` (not merged, data not rebuilt):** `scripts/culvert.py`, called in `voxelize.py` right after the
+  water is painted. Re-measured on the data of `bf9671e3`: 12 ways with 3 m or more on water (450 m); Q1 took the rest.
+  The rule picks the ground lift, not the deck: the deck code needs 2 m of air (`nd_mean > 2`) and drops a scrap of
+  deck with less, and these roads stand 1–1.5 m over the water. A stretch of a non-bridge way over water is carried
+  over when the surface model's lowest return along it stays 0.6 m under to 1 m over the line between the banks'
+  ground (80 % of its metres), the line stands at most 2 m over the water's level, and the stretch is 150 m at most.
+  The way's cells from bank to bank are ground at that line again, in the ways' colours (the caps' source too).
+  Map-wide (simulated on the built rasters): 6 ways carried, B 8 (8 m), Kachlet service road 1169805556 (125 m),
+  Schaldinger Straße and Birgmeierweg (28 m), Heininger Straße (5 m), and some 1 m edges. Left on water: the
+  Donauradweg 401782105 (164 m: drawn a few metres into the Danube; the surface model there is water noise 2–3 m
+  over the river), path 328435617 (32 m) and footways at Hals (under crowns): all paths, no carriageway.
+- **Counter and check:** `way_water` in the build report (per way, metres in the core: carried, left, and the
+  carriageways and railways left); `check.py verify` fails on a carriageway or railway with 3 m or more left on water
+  (`WET_MAX`) and lists the paths. New fixture `scripts/fixtures/heining.json` (1280 × 1152 m) with the B 8 `road`
+  patch (`min_m` 14): fails on main (13 m, water), passes on `q2`.
+- **Verify vs main:** every fixture's failures are the same as on main (kachlet and gaissa: the LoD2 move ratio;
+  haissengasse and hals: the ped surface shares, hals' cap roughness). Carried on the fixtures: heining 13 m,
+  kachlet 127 m, schalding 28 m, altstadt 2 m, the rest 0 (their outputs unchanged). Fast gates and `check.sh` pass.
+- **Deviation:** a way higher than 2 m over the water stays wet (a dam in the river otherwise): the
+  Anton-Niederleuthner-Brücke's end (8027919, primary, no `bridge` tag, 6 m over the Ilz) and footway 853342668
+  beside it, 2 m and 8 m left on water in the altstadt fixture. They are for Q7 (tag them in OSM).
+- **Needs a full data rebuild** after the merge.
 
 ### Q3. Underpass stairwells never cut a carriageway or a track (S–M)
 
@@ -270,7 +292,9 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
-    it is `tunnel=yes`.
+    it is `tunnel=yes`. (Q2 carries it over as a culvert; a `bridge=culvert` tag in OSM is still right.)
+  - Anton-Niederleuthner-Brücke's end (way 8027919, primary, near 2613,477) and footway 853342668 beside it: no
+    `bridge` tag, 6 m over the Ilz, so Q2 leaves them on water (2 m and 8 m of centreline).
   - Passage under the B 8 (way 73518491) and under the railway (way 73518482): mapped shorter than the road and the
     tracks are wide; the steps 73518490 and 73518489 start inside them.
   - B 12 bridge over the Rottalbahn (way 34755059): 25 m long; the deck is wider than three lanes.
