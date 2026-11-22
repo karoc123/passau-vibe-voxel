@@ -32,7 +32,7 @@ const named = args.filter((a, i) => !a.startsWith('-') && !['--golden', '-j'].in
 const tsc = path.join(web, 'node_modules/typescript/bin/tsc');
 const GATES = [
   { name: 'tsc', cmd: [tsc, '--noEmit'], set: 'fast', secs: 0.7, guards: 'all of src/ (types)' },
-  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, guards: 'src/core/, sim/traffic.ts, physics/rapier/life-phys.ts and their imports: no three.js, no DOM' },
+  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, guards: 'src/core/, sim/traffic.ts, physics/rapier/life-phys.ts, the vehicle cores (boat-motion, plane-flight, fpv-flight, rapier/car) and their imports: no three.js, no DOM' },
   { name: 'bld-ids', cmd: ['tools/bld-ids.mjs'], set: 'fast', secs: 0.4, guards: 'mesher.worker.ts greedy merge, building ids' },
   { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)' },
   { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)' },

@@ -28,14 +28,13 @@ it on its own branch, and report.
 
 ## Status of the code-health list
 
-Done on main: items 1 (gate runner, without CI), 6, 8 (web part) and 17 (web part).
+Done on main: items 1 (gate runner, without CI), 6, 7, 8 (web part), 9 (C1: plane, drone and car cores are plain,
+`core/vec.ts`, one `core/fixed-step.ts`, scanned by `core-deps`) and 17 (web part).
 
 In progress, do not start anything that touches the same files:
 
 - **P1+P3:** items 2, 3, 4, 5, and the Python parts of 8 and 17. Files: `scripts/ways.py`, `voxelize.py`, `traffic.py`,
   `clearance.py`, `tunnels.py`, `underpass.py`, `regions.py`.
-- **C1:** items 7 and 9. Files: `physics/rapier/car.ts`, `nav/plane-flight.ts`, `nav/fpv-flight.ts`, the shells' pose
-  code, `tools/core-deps.mjs`.
 
 Check `git log` for whether they have landed before you start a package that waits for them.
 
@@ -63,7 +62,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R3. Shared input, chase camera and panels (code-health 11, 12 = N2, M)
 
-- **Waits for:** C1, which touches the same shells.
+- **Waits for:** nothing (C1 has landed). The shells already hold `FixedStep` clocks and plain vectors from the cores.
 - **Do:** one gamepad reader, one typing guard and one focus-loss policy (`nav/input.ts`). Plus `ChaseRig`, `SafeTrail`
   (unstick/T), `ModePanel`, `river.ts`, and one `data-mode` attribute on `body` instead of per-mode body classes and CSS
   hide lists.
@@ -82,7 +81,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R5. Check harnesses out of `src/` (code-health 16 = T2, M)
 
-- **Waits for:** C1. R3 and R4 should preferably have landed too, to avoid conflicts.
+- **Waits for:** preferably R3 and R4, to avoid conflicts.
 - **Do:** move `nav/*-checks.ts`, `plane-real.ts` and `physics/rapier/*scenarios.ts` to `web/checks/`, with one
   synthetic-world fixture and one result type.
 - **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
