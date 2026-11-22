@@ -37,21 +37,16 @@ blockers are gone into "Ready".
 | R1 | The plane does not start while you are driving (bug) | S | **Ready** |
 | R2 | Defect assertions on the fixtures | M | **Ready** |
 | R3 | Shared input, chase camera and panels | M | **Ready** |
-| R7 | Smaller independent items | M each | **Ready**, except `traffic.build` and the `except` sweep (pipeline files): wait for P1+P3 |
+| R7 | Smaller independent items | M each | **Ready** |
 | R8 | Design: sim player API, one world for many players | design | **Ready** |
 | F1 | AI motorbikes | S–M | **Ready** |
 | F3 | Camera distance per vehicle type | S | **Ready** (or inside R3) |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
 | R4 | Craft interface and `nav.ts` split | L | Waits for R3 |
 | R5 | Check harnesses out of `src/` | M | Waits for R3, R4 |
-| R6 | Split `voxelize.py` into stages | L | Waits for P1+P3 (see below), R2 |
+| R6 | Split `voxelize.py` into stages | L | Waits for R2 |
 | F2 | Walk to a vehicle and get in | M | Waits for R1, R4 |
 | F5 | Trains and boats into the world sim | M | Waits for F4, R8 |
-
-Not in this list because it is being done right now: **P1+P3**, the pipeline cleanup (shared way helpers in
-`scripts/ways.py`, one ordered list of ground-height passes, the bridgehead lift before furniture). It edits
-`voxelize.py`, `traffic.py`, `clearance.py`, `tunnels.py`, `underpass.py`, `regions.py`, so do not start pipeline
-work on those files until it is on `main`.
 
 ## Packages
 
@@ -66,7 +61,9 @@ work on those files until it is on `main`.
 
 ### R2. Defect assertions on the fixtures (code-health 14, M)
 
-- **Waits for:** nothing. It touches only `check.py` and `scripts/fixtures/`, not P1+P3's files.
+- **Waits for:** nothing. It touches only `check.py` and `scripts/fixtures/`.
+- **Known:** `check.py verify` already fails on main for haissengasse (2), hals (2), kachlet (1), gaissa (1); gaissa's
+  full build also fails with an `IndexError` in `phenology.py`. Fix or explain these first.
 - **Do:** give each fixed road defect one assertion, using the fixtures `b85`, `gaissa`, `haissengasse`, `hals`,
   `kachlet`, `schalding`. Example: "no carriageway cell more than 1 m under its neighbours at this spot". Defect spots
   are in [road-defects.md](road-defects.md).
@@ -101,7 +98,8 @@ work on those files until it is on `main`.
 
 ### R6. Split `voxelize.py` into stages (code-health 13 = P4, L)
 
-- **Waits for:** P1+P3 (in progress), and R2 as its guard.
+- **Waits for:** R2 as its guard. The ground-height passes are already in `scripts/ground.py` (`GROUND_PASSES`), the
+  way helpers in `scripts/ways.py`.
 - **Do:** one stage per commit, `def stage(ctx)` over an explicit context. Each commit must be byte-exact under
   `check.py golden --compare` (no data rebuild needed).
 - **Cut:** the proposal is in code-health 13.
