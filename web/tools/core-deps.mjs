@@ -1,5 +1,7 @@
 // The rule of web/src/core/ (docs/adr/0001-world-layers.md): no three.js, no DOM, so the viewer, the node tools and a
-// Node server share it. A static scan of every module under src/core/ and everything it imports, transitively
+// Node server share it. The same for the world sim (docs/plans/life-physics.md "The server seam"): the traffic
+// (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts). A static scan of every module under src/core/,
+// those two, and everything they import, transitively
 // (relative imports, type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
@@ -74,6 +76,7 @@ const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) queue.push([f, null]); } };
 walk(core);
+for (const f of ['sim/traffic.ts', 'physics/rapier/life-phys.ts']) queue.push([path.join(src, f), null]);
 while (queue.length) {
   const [file, via] = queue.shift();
   if (seen.has(file)) continue;
@@ -94,4 +97,4 @@ while (queue.length) {
 const scanned = [...seen].map(rel).sort();
 if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
-console.log(`PASS core-deps: ${scanned.length} modules (src/core and what it imports) free of three.js, util.ts, voxelMaterial.ts and DOM globals`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals`);

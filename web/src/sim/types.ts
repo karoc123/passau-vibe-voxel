@@ -1,6 +1,7 @@
-import type * as THREE from 'three';
 import type { Path, PathData } from './path';
-import type { TrainPathData } from './trains';
+
+// a point in the world (x east, y up, z south: as three.js', without it: the sim runs headless)
+export interface Vec3 { x: number; y: number; z: number }
 
 export interface SignalRef { ctrl: number; axis: number }
 export interface Controller { x: number; y: number; off: number }
@@ -18,6 +19,10 @@ export interface Road extends RoadData, Path { i: number; lists: Car[][] }
 export interface PedData extends PathData { a: number; b: number; w: number; x?: SignalRef; side?: number; bk?: number }
 export interface PedEdge extends PedData, Path { i: number }
 
+// a railway track and the routes on it (sim/trains.ts)
+export interface TrainService { ref: string; op: string; stops: number[] }
+export interface TrainPathData extends PathData { svc: TrainService[] }
+
 export interface TrafficData {
   roads: RoadData[];
   peds: PedData[];
@@ -34,7 +39,9 @@ interface Blocked {
   by: Agent | null;
   ignore?: Agent | null;
   ignoreT?: number;
-  rp?: THREE.Vector3;
+  // its pose: drawn (the presentation's, sim/life.ts), or, out of the traffic (a parked car, a wreck), where it is:
+  // the ground point under it and its heading
+  rp?: Vec3;
   rh?: number;
 }
 
@@ -50,7 +57,7 @@ export interface Car extends Blocked {
   off: number;
   len: number;
   bus: boolean;
-  col: THREE.Color;
+  col: string; // its paint ('#rrggbb')
   v0f: number;
   prev: number;
   prevOff: number;
@@ -84,9 +91,9 @@ export interface Person {
   lat: number;
   ph: number;
   wait: boolean;
-  col: THREE.Color;
+  col: string; // their shirt ('#rrggbb')
   bike?: boolean;
-  rp?: THREE.Vector3;
+  rp?: Vec3; // drawn (sim/life.ts)
   rh?: number;
   ctl?: { x: number; y: number; z: number; h: number; moving: boolean };
 }

@@ -10,14 +10,13 @@
 // streets and bridge decks), one trimesh of the caps' triangles in place of their runs' top voxels, met by every body as
 // the mesher draws it. A node without caps, or a column without one, is its voxels. Neighbouring chunks' voxel colliders are coupled (combineVoxelStates), so a body
 // sliding across a chunk border meets no inner edge there. Chunks are built nearest first within a time budget per
-// frame, those ahead of a moving body (along its velocity) before those behind. Chunks no body has needed for a while
+// frame (or a number of chunks: the world sim's, deterministic), those ahead of a moving body (along its velocity) before those behind. Chunks no body has needed for a while
 // are removed. Physics coordinates are the world's minus `origin` (f32 precision near the action).
 import RAPIER from '@dimforge/rapier3d-compat';
 import { capField, capSlot, cornerQ, diagonal02, surfaceAt, type CapField } from '../../core/surface';
 import { liveEdits, type Region } from '../../core/live-edits';
 import { TileCache } from '../../core/tile-cache';
 import type { Meta } from '../../types';
-import { fetchGzip } from '../../fetch';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 
 export const CHUNK = 16;
@@ -154,9 +153,13 @@ export interface TerrainStats {
 export interface TerrainOptions {
   // the nodes' files (core/tile-cache.ts; e.g. the viewer's shared one); default: its own, with `load`
   cache?: TileCache;
-  // a tile's bytes (ungzipped) by its path under data/tiles/ ('1/3_4.bin'); default: fetched
+  // a tile's bytes (ungzipped) by its path under data/tiles/ ('1/3_4.bin'); one of cache or load is given (the loader
+  // injected: no fetch here, the world sim runs headless)
   load?: (path: string) => Promise<ArrayBuffer>;
   budgetMs?: number;
+  // at most this many chunks built an update instead of budgetMs: the same chunks whatever the machine's speed
+  // (deterministic: the world sim, life-phys.ts)
+  budgetChunks?: number;
   couple?: boolean; // couple neighbouring chunks' voxels (default true)
   reach?: number; // m: chunks within this of a body are built (default REACH)
   needNow?: number; // m: a body with an unbuilt chunk within this is not ready (default NEED_NOW)
@@ -171,6 +174,7 @@ export class RapierTerrain {
   private readonly chunks = new Map<number, Chunk>();
   private readonly cache: TileCache;
   budgetMs: number;
+  budgetChunks: number;
   couple: boolean;
   reach: number;
   needNow: number;
@@ -183,8 +187,10 @@ export class RapierTerrain {
     this.nx = Math.ceil(meta.W / this.N);
     this.nz = Math.ceil(meta.D / this.N);
     this.pal = terrainPalette(meta.palette);
-    this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load ?? ((p) => fetchGzip(`data/tiles/${p}`)), edits: liveEdits });
+    if (!opts.cache && !opts.load) throw new Error('RapierTerrain: a cache or a load is needed');
+    this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load!, edits: liveEdits });
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
+    this.budgetChunks = opts.budgetChunks ?? Infinity;
     this.couple = opts.couple ?? true;
     this.reach = opts.reach ?? REACH;
     this.needNow = opts.needNow ?? NEED_NOW;
@@ -220,7 +226,7 @@ export class RapierTerrain {
   setTile(tx: number, tz: number, t: TerrainTile) { this.tiles.set(tx + tz * this.nx, t); }
 
   // Builds what the bodies at `points` (world coordinates, with their velocity if they move) need, within the frame's
-  // budget. Returns, per point, whether its close surroundings are built (a body whose aren't should be frozen).
+  // budget (budgetMs, or budgetChunks). Returns, per point, whether its close surroundings are built (a body whose aren't should be frozen).
   // `now`: the clock chunks age by (ms; default: performance.now()).
   update(points: { x: number; z: number; vx?: number; vz?: number }[], now = performance.now()): boolean[] {
     const start = performance.now();
@@ -245,14 +251,15 @@ export class RapierTerrain {
       if (p.vx !== undefined && p.vz !== undefined && Math.hypot(p.vx, p.vz) > 2) consider(p.x + p.vx * LEAD_S, p.z + p.vz! * LEAD_S, 6);
     }
     const order = [...want].sort((a, b) => a[1] - b[1]);
-    let spent = 0;
+    let spent = 0, built = 0;
     for (const [key] of order) {
-      if (spent > this.budgetMs) break;
+      if (built >= this.budgetChunks || (this.budgetChunks === Infinity && spent > this.budgetMs)) break;
       const cx = key % 4096, cz = Math.floor(key / 4096);
       const tile = this.tile(Math.floor((cx * CHUNK) / this.N), Math.floor((cz * CHUNK) / this.N));
       if (!tile) continue;
       const t0 = performance.now();
       this.chunks.set(key, this.build(tile, cx, cz, now));
+      built++;
       const ms = performance.now() - t0;
       spent += ms;
       this.stats.builds++;

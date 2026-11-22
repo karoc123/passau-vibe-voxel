@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
+import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from './traffic';
+export { MAX_BIKES, MAX_CARS, MAX_PEOPLE };
 
 function box(w: number, h: number, l: number, x: number, y: number, z: number, hex?: number) {
   const g = new THREE.BoxGeometry(w, h, l).translate(x, y + h / 2, z);

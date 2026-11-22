@@ -1,4 +1,4 @@
-// EXPERIMENT (docs/plans/life-physics.md): where the traffic's paths (traffic.json, heights baked) leave no room for a
+// (docs/plans/life-physics.md) Where the traffic's paths (traffic.json, heights baked) leave no room for a
 // physical car: every metre of every road's centreline, solid voxels (the Rapier terrain's: terrainTile) between 0.6 and
 // 1.8 m over the path's height (a car's body), or the ground more than 0.5 m over / 1.5 m under it (a step, a hole).
 // usage (in web/): node tools/life-phys-scan.mjs [-v]   prints the share of road length blocked, and the worst roads

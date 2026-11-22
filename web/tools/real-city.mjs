@@ -67,3 +67,27 @@ export async function schanzlPath() {
   const [ox, oz] = readMeta().origin ?? [0, 0];
   return sc.densify(SCHANZL.map(([x, z]) => [x - ox, z - oz]));
 }
+
+// a tile's bytes (ungzipped) by its path under data/ tiles ('1/3_4.bin')
+export const rawTile = (p) => { const b = zlib.gunzipSync(fs.readFileSync(`${DATA}tiles/${p}`)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
+
+// The World (src/world.ts) over the level-1 node files, read when first asked for, as the streamer holds them
+// (stream.ts setData): W; its source (src.nodes: the nodes by '1/tx_ty', to put edited ones in, then src.version++);
+// colData(tx, ty, columns): a node's columns as the source holds them (tools/life-edit.mjs, life-phys.mjs)
+export async function nodeWorld() {
+  const { World } = await load('world.ts'), TD = await load('tile-data.ts'), meta = readMeta(), N = meta.tiles.N, S = N + 2;
+  const colData = (tx, ty, c) => {
+    const off = new Uint32Array(S * S + 1);
+    for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + c.counts[i];
+    return { ...c, s: 1, x0: tx * N, y0: ty * N, S, off, roomOff: c.rooms ? TD.roomOffsets(c.rooms, S * S) : null };
+  };
+  const nodes = new Map();
+  const src = { N, levels: [1], version: 0, nodes, columns(key) {
+    if (!nodes.has(key)) {
+      const t = key.split('/')[1], [tx, ty] = t.split('_').map(Number);
+      nodes.set(key, fs.existsSync(`${DATA}tiles/1/${t}.bin`) ? colData(tx, ty, TD.decodeTile(rawTile(`1/${t}.bin`), N)) : undefined);
+    }
+    return nodes.get(key);
+  } };
+  return { W: new World(src, meta), src, colData };
+}

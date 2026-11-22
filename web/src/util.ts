@@ -1,18 +1,7 @@
 import * as THREE from 'three';
 
-export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-export const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
-export const ease = (t: number) => t * t * (3 - 2 * t);
-export const smooth = (a: number, b: number, x: number) => ease(clamp((x - a) / (b - a), 0, 1));
-export const hash = (n: number) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-export const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+export { lerp, clamp, ease, smooth, hash, wrapAngle, pushTo } from './core/num';
 export const coarsePointer = () => matchMedia('(pointer: coarse)').matches;
-
-export function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {
-  const list = map.get(key);
-  if (list) list.push(value);
-  else map.set(key, [value]);
-}
 
 export { fetchGzip, fetchJson } from './fetch';
 

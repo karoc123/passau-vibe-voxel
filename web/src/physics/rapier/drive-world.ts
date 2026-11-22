@@ -15,6 +15,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
+import { warmUp } from './vehicle';
 import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 import { viewerTileCache } from '../../viewer-tiles';
 
@@ -58,29 +59,6 @@ export function loadRapierDrive(meta: Meta, focus: { x: number; z: number }) {
     (window as unknown as { __rapierLoad: object }).__rapierLoad = { initMs: t1 - t0, warmMs: t2 - t1, tileMs: t3 - t2, decodeMs: d.terrain.stats.decodeMsMax };
     return d;
   })();
-}
-
-// The first step of a world with voxels in it costs ~100 ms (and more in a busy page) once, whatever is in it: taken
-// here, in a throwaway world, with the load, instead of as a hitch on the first frame the car drives.
-export function warmUp() {
-  const w = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  const vox: number[] = [];
-  for (let z = 0; z < 8; z++) for (let x = 0; x < 8; x++) vox.push(x, 0, z, x, x === 7 ? 1 : 0, z);
-  w.createCollider(RAPIER.ColliderDesc.voxels(new Int32Array(vox), { x: 1, y: 1, z: 1 }));
-  w.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array([0, 1, 0, 8, 1, 0, 8, 1, 8]), new Uint32Array([0, 2, 1])));
-  const b = w.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(3, 1.5, 3));
-  const col = w.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.45, 2), b);
-  const k = w.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(6, 1.5, 6));
-  w.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.7, 2), k);
-  const c = w.createVehicleController(b);
-  c.addWheel({ x: 0, y: -0.2, z: 0 }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, 0.35, 0.36);
-  for (let i = 0; i < 3; i++) {
-    c.updateVehicle(1 / 60);
-    w.castShape(b.translation(), b.rotation(), { x: 1, y: 0, z: 0 }, col.shape, 0.02, 2, false, undefined, undefined, col);
-    k.setNextKinematicTranslation({ x: 6, y: 1.5, z: 6 + i * 0.1 });
-    w.step();
-  }
-  w.free();
 }
 
 export class RapierDrive {

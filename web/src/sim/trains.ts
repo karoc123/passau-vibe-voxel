@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash } from '../util';
 import { setCount } from './meshes';
-import { at, farFrom, prepPath, pt, type Path, type PathData, type Viewer } from './path';
+import { at, farFrom, prepPath, pt, type Path, type Viewer } from './path';
+import type { TrainPathData, TrainService } from './types';
+export type { TrainPathData, TrainService };
 
 // Trains on the open-air railway (scripts/traffic.py: the OSM route=train relations, one path per track, each route
 // with the stations it stops at): every route sends a train every half hour, from the map edge or a tunnel portal;
@@ -11,8 +13,6 @@ import { at, farFrom, prepPath, pt, type Path, type PathData, type Viewer } from
 // waits until the track's start is that far, one past its track's end (into a tunnel, off the map) runs on along the
 // track's last straight until it is that far. (Twice a car's distance: a train is 4 m tall and 80-170 m long.)
 
-export interface TrainService { ref: string; op: string; stops: number[] }
-export interface TrainPathData extends PathData { svc: TrainService[] }
 interface TrainPath extends TrainPathData, Path { next: number[] }
 interface Train { p: number; svc: TrainService; s: number; ds: number; v: number; n: number; wait: number; done: Set<number>; liv: number; ahead?: Train | null }
 

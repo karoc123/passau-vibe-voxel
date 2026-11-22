@@ -1,4 +1,3 @@
-import { Vector3 } from 'three';
 import type { StreetLife } from '../sim/life';
 import type { Car, Person, Pose } from '../sim/types';
 import type { CarBuild, CarInput } from '../physics/rapier/car';
@@ -15,6 +14,8 @@ export const CRASH_MS = 1100; // after a crash landing: shaken, no input
 const FALLEN_R = 35; // m: people knocked down lie there until the car is this far away and out of sight (life.ts knockDown, PED_POP_R)
 const SAFE_EVERY_MS = 400, SAFE_KEEP = 16; // where the car was on the road: every so often, the last so many
 const BACK_M = 12; // back on the road this far before where it left it
+// (a car's pose, its object kept)
+const setRp = (c: Car, x: number, y: number, z: number) => { const p = (c.rp ??= { x, y, z }); p.x = x; p.y = y; p.z = z; };
 export const NO_INPUT: CarInput = { gas: 0, brake: 0, steer: 0, handbrake: false };
 
 // what the drive needs of the street life
@@ -95,11 +96,11 @@ export class DriveSession {
     const { car, rap } = this, d = rap.drawn();
     for (const [key, w] of rap.wrecks()) {
       const c = key as Car;
-      (c.rp ??= new Vector3()).set(w.x, w.y, w.z);
+      setRp(c, w.x, w.y, w.z);
       Object.assign(c, { rh: w.h, pitch: w.pitch, roll: w.roll, v: 0, brake: 1 });
     }
     if (d) {
-      (car.rp ??= new Vector3()).set(d.x, d.y, d.z);
+      setRp(car, d.x, d.y, d.z);
       Object.assign(car, { rh: d.h, pitch: d.pitch, roll: d.roll });
       car.v = this.kmh / 3.6;
     }
@@ -137,7 +138,7 @@ export class DriveSession {
     this.crashUntil = 0;
     if (!pose) return;
     this.rap.begin({ ...pose, pitch: 0, roll: 0 }, 0, this.build);
-    (this.car.rp ??= new Vector3()).set(pose.x, pose.y, pose.z);
+    setRp(this.car, pose.x, pose.y, pose.z);
     Object.assign(this.car, { rh: pose.h, pitch: 0, roll: 0 });
   }
 }

@@ -17,6 +17,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
+import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, WHEEL_R, type CarBuild } from './vehicle';
 
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
 export type CarStatus = 'ok' | 'water';
@@ -32,42 +33,7 @@ export interface CarTuning {
 export const TUNED: CarTuning = { steps: true, walls: true, air: true };
 export const SPIKE: CarTuning = { steps: false, walls: false, air: false };
 
-// what is driven: the chassis' half extents (m), its mass (kg), the wheels (chassis space), the engine's force per
-// driven (rear) wheel (N), the brakes, the top speed (m/s); ride: the ground's height under the body's origin at rest
-export interface CarBuild {
-  half: { x: number; y: number; z: number }; mass: number; wheels: { x: number; z: number; front: boolean }[];
-  engine: number; brake: number; top: number; ride: number;
-}
-const wheels4 = (x: number, zf: number, zr: number) => [
-  { x, z: zf, front: true }, { x: -x, z: zf, front: true }, { x, z: zr, front: false }, { x: -x, z: zr, front: false },
-];
-export const CAR: CarBuild = { half: { x: 0.9, y: 0.45, z: 2.1 }, mass: 1200, wheels: wheels4(0.82, 1.35, -1.3), engine: 2600, brake: 45, top: 22, ride: 0.84 };
-// a bus of `len` m (the traffic's: 12): its chassis as high as its body (the traffic's 2.55 m less the wheels)
-export const bus = (len: number): CarBuild => ({
-  half: { x: 1.25, y: 0.95, z: len / 2 - 0.1 }, mass: 11000, wheels: wheels4(1.1, len / 2 - 2.4, -(len / 2 - 3)),
-  engine: 14000, brake: 400, top: 17, ride: 0.84,
-});
-const WHEEL_R = 0.36;
-const REST = 0.35;
-const MAX_SUSPENSION_FORCE = 60000; // N a wheel
-// The ride. Rapier's raycast wheels have no mass of their own: each pushes the chassis with
-// mass * (stiffness * compression - damping * its speed) (damping: `compression` while it is pushed in, `relaxation`
-// while it extends), never pulls, and leaves the ground once its spring is back at its rest length, so it hangs only
-// as far as the car sags on it (g * gravity / (4 stiffness): a stiffer spring loses the ground sooner over a crest).
-// - stiffness, compression, relaxation: per wheel (heave ~sqrt(stiffness) / pi Hz, damping ratio ~damping /
-//   sqrt(stiffness))
-// - gravity: the car's own gravity (a multiple of g): how fast it comes back down over a crest
-// - downforce: pressed onto its wheels' ground (along its own down) by this many g at 50 km/h, with the speed squared
-//   (at most twice that), while a wheel touches: more grip and a body that stays on the road over crests at speed
-// - gripFront, gripRear: the tyres' frictionSlip (the most force per load); side: their lateral stiffness
-// - com: the centre of mass' drop under the body's origin (m)
-// - patch: the dampers take the ground's slope over this many m either side of a wheel's contact (0: the facet's, as
-//   Rapier), kinkMax: ... where it differs from the facet's by less than this (normals' distance; see dampers())
-// tools/rapier-car.mjs --set key=value,... runs the scenarios with others.
-export const RIDE = {
-  stiffness: 34, compression: 4, relaxation: 5.5, gravity: 1.25, downforce: 0.4, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
-  patch: 0.8, kinkMax: 0.08,
-};
+export { CAR, bus, RIDE, type CarBuild } from './vehicle';
 // m/s into the ground: a fall of ~8 m (under the car's gravity)
 export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
 const MAX_STEER = 0.55;
@@ -104,37 +70,11 @@ export class RapierCar {
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
     private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR) {
     const q = typeof heading === 'number' ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading) : heading;
-    this.body = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q)
-      .setCanSleep(false).setCcdEnabled(true).setAngularDamping(0.4).setGravityScale(RIDE.gravity));
-    const HALF = this.half = build.half, MASS = build.mass;
+    const v = createVehicle(R, world, at, q, build, tuning.walls);
+    this.body = v.body; this.chassis = v.chassis; this.controller = v.controller;
+    const HALF = this.half = build.half;
     this.ride = build.ride;
-    const inertia = { x: MASS * (HALF.y ** 2 + HALF.z ** 2) / 3, y: MASS * (HALF.x ** 2 + HALF.z ** 2) / 3, z: MASS * (HALF.x ** 2 + HALF.y ** 2) / 3 };
-    const walls = tuning.walls;
-    // (a plain box: a rounded one (roundCuboid) glances no better and costs 3x the contact time against voxels; its
-    // bottom 0.25 m over the wheels' axles)
-    const desc = R.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setTranslation(0, HALF.y - 0.45, 0);
-    // (the centre of mass low, under the floor: it rolls less)
-    desc.setMassProperties(MASS, { x: 0, y: -RIDE.com - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
-      .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS).setCollisionGroups(CAR_GROUPS);
-    if (walls) desc.setFriction(0).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min);
-    else desc.setFriction(0.3);
-    this.chassis = world.createCollider(desc, this.body);
     this.shape = this.chassis.shape;
-    const c = world.createVehicleController(this.body);
-    c.indexUpAxis = 1;
-    c.setIndexForwardAxis = 2;
-    for (const w of build.wheels) {
-      c.addWheel({ x: w.x, y: -0.2, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, REST, WHEEL_R);
-      const i = c.numWheels() - 1;
-      c.setWheelSuspensionStiffness(i, RIDE.stiffness);
-      c.setWheelSuspensionCompression(i, RIDE.compression);
-      c.setWheelSuspensionRelaxation(i, RIDE.relaxation);
-      c.setWheelMaxSuspensionTravel(i, 0.35);
-      c.setWheelMaxSuspensionForce(i, MAX_SUSPENSION_FORCE);
-      c.setWheelFrictionSlip(i, w.front ? RIDE.gripFront : RIDE.gripRear);
-      c.setWheelSideFrictionStiffness(i, RIDE.side);
-    }
-    this.controller = c;
 
     const paint = new THREE.MeshStandardMaterial({ color: 0xc8302a, roughness: 0.5 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x223040, roughness: 0.2 });

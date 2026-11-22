@@ -1,789 +1,170 @@
 import * as THREE from 'three';
-import { hash, pushTo, smooth } from '../util';
 import type { World } from '../world';
-import { LifeMeshes, MAX_BIKES, MAX_CARS, MAX_PEOPLE, setCount } from './meshes';
-import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
+import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
+import { farFrom, pt } from './path';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from './traffic';
 import { Trains } from './trains';
-import type { Agent, Car, Controller, Kind, PedEdge, Person, Pose, Rideable, Road, TrafficData } from './types';
+import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from './types';
 
-// Live streets on the real OSM networks (scripts/traffic.py): fixed-time signals; cars with the Intelligent Driver
-// Model per lane, turn lanes, OSM turn restrictions and junction "box" locks; people on footpaths, waiting for green
-// at signalled crossings. Density follows the hour.
+// The street life's presentation: the traffic (sim/traffic.ts: the world sim, headless, on its fixed tick) drawn
+// between its last two ticks with instanced meshes, the trains, the people knocked down or fallen into a hole (an
+// effect: shoved, tipping over, no physics), picking an agent on screen. Nothing here feeds back into the sim but the
+// player's own doings (keep, takeWheel, knockDown).
 
-const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
-const LANE_W = 3.0;
-const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
-const BLEND = 7;
-const BOX_IN = 7, BOX_OUT = 9;
-const STEP = 1 / 30;
-const ACTIVE_R = 900, ACTIVE_CELL = 300;
-// Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the
-// hour's number, off the network, a dead end, the parked cars, the people knocked down), never in plain view. Closer
-// in a car at a dead end waits there, a rider turns back; the number over the hour's waits until enough are far.
-// Only the first fill (or a jump of the focus) puts them anywhere at once. (A car 300 m away is a few pixels tall, a
-// person 150 m away about as much: tools/popin-check.mjs checks 200 and 100 m.)
-export const CAR_POP_R = 300, PED_POP_R = 150;
-// the focus moved this far at once (or the first update): the circle is filled anew at once, near the focus too
-const JUMP_R = ACTIVE_R / 2;
+export { CAR_POP_R, PED_POP_R } from './traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
-const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];
-const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
-const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-car'];
 // people knocked down by the driven car (knockDown): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
 // per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
 // PED_POP_R from the viewer
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
-// the cars parked by the player (takeWheel) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
-// never more than PARKED_MAX
-const PARKED = 8, PARKED_MAX = 24;
-// Player edits (?dig=1, core/live-edits.ts): the paths' heights are baked (scripts/traffic.py), so only where the city
-// was edited is the ground under an agent looked at (World.support, the edited columns): more than HOLE m under its
-// path's height and it falls (G m/s^2) until it meets what is there (the ground, the water's voxels), gone LANDED_S s
-// later. Nothing edited: nothing looked at.
-const HOLE = 1, G = 9.81, LANDED_S = 2, FALL_MAX_S = 8;
+// fallen into a hole (the traffic's dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
+const G = 9.81, LANDED_S = 2;
 
 // a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
 // (vy: falling into an edited hole, its vertical speed; land: when it met the ground)
 interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null; vy?: number; land?: number }
-// a car fallen into an edited hole: moving on at v (while over the hole) and down at vy; land: when it met the ground
-interface Falling { c: Car; vy: number; t: number; land: number }
-
-function phase(ctrl: Controller, t: number, axis: number) {
-  const u = ((t + ctrl.off) % CYCLE + CYCLE) % CYCLE;
-  return ((u - (axis === 0 ? 0 : CYCLE / 2)) % CYCLE + CYCLE) % CYCLE;
-}
-const signal = (ctrl: Controller, t: number, axis: number) => { const k = phase(ctrl, t, axis); return k < GREEN ? 'G' : k < GREEN + AMBER ? 'Y' : 'R'; };
-const pedGreen = (ctrl: Controller, t: number, axis: number) => phase(ctrl, t, axis) < PED_GREEN;
-
-function pickWeighted(w: number[], sum = w.reduce((a, b) => a + b, 0)) {
-  let r = Math.random() * sum;
-  for (let i = 0; i < w.length; i++) { r -= w[i]; if (r <= 0) return i; }
-  return w.length - 1;
-}
-const anyOf = <T>(a: T[]) => a[(Math.random() * a.length) | 0];
-
-type Density = { cars: number; peds: number; bikes: number };
 
 export interface Picked { kind: Kind; obj: Rideable; label: string }
 
-// Optional physical bodies for some cars (the ?lifephys=1 experiment, physics/rapier/life-phys.ts): stepped each frame
-// after the traffic's ticks, before drawing; pose() may put a car's drawn pose (rp, rh, pitch, roll) where its body is
-// (called after the kinematic pose is set); a car it owns is not dropped over holes here (its body falls). None: as before.
-export interface LifeBodies { step(dt: number, life: StreetLife): void; pose(c: Car): void; owns(c: Car): boolean }
+const setRp = (o: { rp?: Vec3 }, x: number, y: number, z: number) => { const p = (o.rp ??= { x, y, z }); p.x = x; p.y = y; p.z = z; return p; };
 
 export class StreetLife {
   world: World | null = null;
-  keep: Rideable | null = null;
-  bodies: LifeBodies | null = null;
-  readonly peds: PedEdge[];
-  readonly cars: Car[] = [];
-  private readonly detachedCars: Car[] = [];
+  readonly traffic: Traffic;
   readonly trains: Trains;
-  people: Person[] = [];
-  riders: Person[] = [];
   private fallen: Fallen[] = [];
-  // the boxes edited (map metres [x0, y0, x1, y1), a metre round): only an agent in one has its ground looked at
-  private edits: [number, number, number, number][] = [];
-  readonly falling: Falling[] = [];
-  day = 180;
-  private t = 0;
-  private acc = 0;
   private readonly M: LifeMeshes;
-  private readonly roads: Road[];
-  private readonly ctrls: Controller[];
   private readonly heads: [number, number, number, number, number, number][];
-  private readonly outs = new Map<number, number[]>();
-  private readonly ins = new Map<number, number[]>();
-  private readonly padj = new Map<number, [number, number][]>();
-  private readonly restr = new Map<string, { to: number; type: string }[]>();
-  private readonly box = new Map<number, Set<Car>>();
-  private active: { x: number; z: number } | null = null;
-  // where the viewer is (update's viewer: the camera), and whether the circle is to be filled at once (populate)
-  private viewer: Viewer = { x: 0, z: 0 };
-  private warm = true;
-  private roadOn: boolean[] = [];
-  private pedOn: boolean[] = [];
-  // the ways in the circle (their indices) and the weights to pick them by, in the same order
-  private roadAct: number[] = [];
-  private pedAct: number[] = [];
-  private bikeAct: number[] = [];
-  private roadW: number[] = [];
-  private pedW: number[] = [];
-  private bikeW: number[] = [];
-  // the roads and footways by ACTIVE_CELL m cell of their ends and middle, for setActive (built on its first call)
-  private wayGrid: { roads: Map<number, number[]>; peds: Map<number, number[]>; heads: Map<number, number[]> } | null = null;
+  private headGrid: Map<number, number[]> | null = null;
+  private headsFor: { x: number; z: number } | null = null;
   // the signal heads drawn (their indices)
   private headAct: number[] = [];
-  private bikeKm = 0;
-  private sources: number[] = [];
-  private laneKm = 0;
-  private pedKm = 0;
-  private carGrid = new Map<number, Car[]>();
-  private idSeq = 1;
-  private readonly tmp = pt();
-  private readonly tmp2 = pt();
-  // scratch points (carPoint uses tmp itself)
-  private readonly sP = pt();
-  private readonly sF = pt();
-  private readonly sC = pt();
+  private viewer: { x: number; z: number; y?: number } = { x: 0, z: 0 };
+  private readonly cols = new Map<string, THREE.Color>();
 
-  constructor(scene: THREE.Scene, data: TrafficData) {
-    this.roads = data.roads.map((r, i) => Object.assign(prepPath(r), { i, lists: Array.from({ length: r.lanes }, () => []) }));
-    this.peds = data.peds.map((e, i) => Object.assign(prepPath(e), { i }));
-    this.ctrls = data.ctrls.map((c, i) => ({ ...c, off: hash(i + 1) * CYCLE }));
+  constructor(scene: THREE.Scene, data: TrafficData, seed = DEFAULT_SEED) {
+    this.traffic = new Traffic(data, seed);
     this.heads = data.heads ?? [];
-    this.roads.forEach((e, i) => { pushTo(this.outs, e.a, i); pushTo(this.ins, e.b, i); });
-    this.peds.forEach((e, i) => { pushTo(this.padj, e.a, [i, 0]); pushTo(this.padj, e.b, [i, 1]); });
-    for (const [fr, via, to, type] of data.restr ?? []) pushTo(this.restr, `${fr}:${via}`, { to, type });
     this.M = new LifeMeshes(scene, this.heads);
     this.trains = new Trains(data.trains ?? []);
     this.M.group.add(this.trains.group);
   }
 
   get group() { return this.M.group; }
+  // (the sim's, as the drive and the walk see them)
+  get cars() { return this.traffic.cars; }
+  get people() { return this.traffic.people; }
+  get riders() { return this.traffic.riders; }
+  get peds() { return this.traffic.peds; }
+  get keep() { return this.traffic.keep; }
+  set keep(k: Rideable | null) { this.traffic.keep = k; }
+  get bodies() { return this.traffic.bodies; }
+  set bodies(b: TrafficBodies | null) { this.traffic.bodies = b; }
+  get day() { return this.traffic.day; }
+  set day(d: number) { this.traffic.day = d; }
+  roadVehicles() { return this.traffic.roadVehicles(); }
+  takeWheel(car: Car) { return this.traffic.takeWheel(car); }
+  edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
 
   // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
   // camera; by default the focus, on the ground), what agents come and go far from
-  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: Viewer = focus) {
-    dt = Math.min(dt, 0.1);
-    const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
+  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus) {
+    const T = this.traffic;
+    T.ground = this.world;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    if (d2 > JUMP_R * JUMP_R) this.warm = true;
-    if (d2 > 120 * 120) this.setActive(focus.x, focus.z);
-    const hh = ((hour % 24) + 24) % 24;
-    const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
-    const density = {
-      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)),
-      peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)),
-      // the counters' day: the commute to work and home, a lunch hump, little at night; a fifth of July's in January
-      bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
-        * (0.2 + 0.4 * (1 - Math.cos(2 * Math.PI * (this.day - 15) / 365))),
-    };
-    if (this.warm) this.populate(density); // (drawn this frame)
-    this.acc += dt;
-    while (this.acc >= STEP) { this.step(STEP, density); this.acc -= STEP; }
-    this.trains.update(dt, hh, this.viewer);
-    this.bodies?.step(dt, this);
-    this.render(dt, night, this.acc);
+    T.update(dt, hour, focus, viewer);
+    if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
+    this.trains.update(Math.min(dt, 0.1), ((hour % 24) + 24) % 24, this.viewer);
+    for (const p of T.dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
+    T.dropped = [];
+    this.render(Math.min(dt, 0.1), night, T.acc);
   }
 
-  // ------------------------------------------------------------------ the area around the camera
-  // Only a circle around the focus is simulated: roads leaving it are exits, roads entering it are sources, and
-  // agents left outside are removed.
-  // (the ways looked at are those with an end or the middle in the cells the circle touches, not all of the map's)
-  private setActive(x: number, z: number) {
-    const R = ACTIVE_R, probes = (e: { p: number[][] }) => [e.p[0], e.p[e.p.length >> 1], e.p[e.p.length - 1]];
-    const near = (e: { p: number[][] }) => probes(e).some((q) => (q[0] - x) ** 2 + (q[1] - z) ** 2 < R * R);
-    const C = ACTIVE_CELL, key = (cx: number, cy: number) => cy * 65536 + cx;
-    if (!this.wayGrid) {
-      const index = (ways: { p: number[][] }[]) => {
-        const g = new Map<number, number[]>();
-        ways.forEach((e, i) => { for (const k of new Set(probes(e).map((q) => key(Math.floor(q[0] / C), Math.floor(q[1] / C))))) pushTo(g, k, i); });
-        return g;
-      };
-      const heads = new Map<number, number[]>();
-      this.heads.forEach(([hx, hy], i) => pushTo(heads, key(Math.floor(hx / C), Math.floor(hy / C)), i));
-      this.wayGrid = { roads: index(this.roads), peds: index(this.peds), heads };
-      this.roadOn = new Array(this.roads.length).fill(false);
-      this.pedOn = new Array(this.peds.length).fill(false);
+  // the signal heads near the active circle (and their poles)
+  private placeHeads(A: { x: number; z: number }) {
+    const C = ACTIVE_CELL, HR = ACTIVE_R + HEADS_OUT, { x, z } = A;
+    if (!this.headGrid) {
+      this.headGrid = new Map();
+      this.heads.forEach(([hx, hy], i) => { const k = activeKey(Math.floor(hx / C), Math.floor(hy / C)); const l = this.headGrid!.get(k); if (l) l.push(i); else this.headGrid!.set(k, [i]); });
     }
-    const inCircle = (g: Map<number, number[]>, ways: { p: number[][] }[]) => {
-      const out = new Set<number>();
-      for (let cy = Math.floor((z - R) / C); cy <= Math.floor((z + R) / C); cy++)
-        for (let cx = Math.floor((x - R) / C); cx <= Math.floor((x + R) / C); cx++)
-          for (const i of g.get(key(cx, cy)) ?? []) if (!out.has(i) && near(ways[i])) out.add(i);
-      return [...out].sort((a, b) => a - b);
-    };
-    for (const i of this.roadAct) this.roadOn[i] = false;
-    for (const i of this.pedAct) this.pedOn[i] = false;
-    this.roadAct = inCircle(this.wayGrid.roads, this.roads);
-    this.pedAct = inCircle(this.wayGrid.peds, this.peds);
-    for (const i of this.roadAct) this.roadOn[i] = true;
-    for (const i of this.pedAct) this.pedOn[i] = true;
-    this.roadW = this.roadAct.map((i) => { const e = this.roads[i]; return e.L * e.lanes * e.c; });
-    this.laneKm = this.roadAct.reduce((a, i) => a + this.roads[i].L * this.roads[i].lanes, 0) / 1000;
-    this.sources = this.roadAct.filter((i) => { const e = this.roads[i]; return e.L > 15 && !(this.ins.get(e.a) ?? []).some((j) => this.roadOn[j]); });
-    this.pedW = this.pedAct.map((i) => this.peds[i].L * this.peds[i].w);
-    this.pedKm = this.pedAct.reduce((a, i) => a + this.peds[i].L, 0) / 1000;
-    this.bikeAct = this.pedAct.filter((i) => this.peds[i].bk);
-    this.bikeW = this.bikeAct.map((i) => this.peds[i].L * this.peds[i].bk!);
-    this.bikeKm = this.bikeW.reduce((a, w) => a + w, 0) / 1000;
-    this.riders = this.riders.filter((p) => this.pedOn[p.e]);
-    const out = new Set(this.cars.filter((c) => !this.roadOn[c.e] && c !== this.keep));
-    for (const c of out) this.removeCar(c);
-    if (out.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !out.has(c)));
-    this.people = this.people.filter((p) => this.pedOn[p.e] || p === this.keep || p.ctl);
-    const HR = ACTIVE_R + HEADS_OUT;
     this.headAct = [];
     for (let cy = Math.floor((z - HR) / C); cy <= Math.floor((z + HR) / C); cy++)
       for (let cx = Math.floor((x - HR) / C); cx <= Math.floor((x + HR) / C); cx++)
-        for (const i of this.wayGrid.heads.get(key(cx, cy)) ?? []) if ((this.heads[i][0] - x) ** 2 + (this.heads[i][1] - z) ** 2 < HR * HR) this.headAct.push(i);
+        for (const i of this.headGrid.get(activeKey(cx, cy)) ?? []) if ((this.heads[i][0] - x) ** 2 + (this.heads[i][1] - z) ** 2 < HR * HR) this.headAct.push(i);
     this.headAct.sort((a, b) => a - b);
     this.M.poles(this.heads, this.headAct);
-    this.active = { x, z };
+    this.headsFor = A;
   }
 
-  // ------------------------------------------------------------------ spawning
-  // is (x, y) at height z at least r m from the viewer (where an agent may come or go)?
   private far(x: number, y: number, z: number, r: number) { return farFrom(this.viewer, x, y, z, r); }
 
-  private spawnCar(fromSource: boolean) {
-    const ei = fromSource && this.sources.length ? anyOf(this.sources) : this.roadAct[pickWeighted(this.roadW)];
-    const e = this.roads[ei], lane = (Math.random() * e.lanes) | 0;
-    const s = fromSource ? 0 : 10 + Math.random() * Math.max(0, e.L - 20 - BOX_IN - 12);
-    if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, CAR_POP_R)) return; }
-    const bus = e.c >= 2 && Math.random() < 0.06;
-    const car: Car = {
-      kind: 'car', id: this.idSeq++, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : 4.6, bus, prev: -1, prevOff: 0, next: -1,
-      v0f: 0.85 + Math.random() * 0.25, col: new THREE.Color(bus ? '#f2c230' : anyOf(CAR_COLOURS)),
-      off: this.laneOffset(e, lane), brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null,
-      boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0, boxTurn: 0, block: null,
-      geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 0 },
-    };
-    this.setNext(car, this.chooseNext(e));
-    e.lists[lane].push(car);
-    this.cars.push(car);
-  }
-
-  private spawnPed() {
-    const ei = this.pedAct[pickWeighted(this.pedW)], e = this.peds[ei], s = Math.random() * e.L;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
-    this.people.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 1.05 + Math.random() * 0.55,
-      lat: 0.35 + Math.random() * 1.0, ph: Math.random() * 6.28, wait: false, col: new THREE.Color(anyOf(SHIRTS)) });
-  }
-
-  private spawnRider() {
-    const ei = this.bikeAct[pickWeighted(this.bikeW)], e = this.peds[ei];
-    if (!e || !e.bk) return;
-    const s = Math.random() * e.L;
-    if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
-    this.riders.push({ kind: 'person', e: ei, dir: Math.random() < 0.5 ? 1 : -1, s, v: 4 + Math.random() * 1.8,
-      lat: 0.45 + Math.random() * 0.3, ph: Math.random() * 6.28, wait: false, bike: true, col: new THREE.Color(anyOf(SHIRTS)) });
-  }
-
-  // ------------------------------------------------------------------ routing
-  private laneOffset(e: Road, lane: number) { return e.o0 + lane * LANE_W; }
-
-  private chooseNext(e: Road) {
-    const all = (this.outs.get(e.b) ?? []).filter((j) => this.roadOn[j]);
-    let outs = all.filter((j) => { const o = this.roads[j]; return turnOf(e, o) !== Turn.Back && !(o.b === e.a && o.w === e.w); });
-    for (const r of this.restr.get(`${e.w}:${e.b}`) ?? []) {
-      if (r.type.startsWith('only_')) outs = outs.filter((j) => this.roads[j].w === r.to);
-      else if (r.type.startsWith('no_')) outs = outs.filter((j) => this.roads[j].w !== r.to);
-    }
-    // a dead end (nothing on but back): turn there rather than vanish
-    if (!outs.length && all.length) outs = all;
-    if (!outs.length) return -1;
-    return outs[pickWeighted(outs.map((j) => { const o = this.roads[j]; return (turnOf(e, o) === Turn.Straight ? 4 : 1) * o.c * (o.L > 6 ? 1 : 0.3); }))];
-  }
-
-  // the road a car on e takes next, and (when that one is too short to blend across on its own) the one after it, chosen
-  // now: carPoint blends into both before the car gets there
-  private setNext(car: Car, next: number) {
-    car.next = next;
-    car.next2 = next >= 0 && this.roads[next].L < BLEND ? this.chooseNext(this.roads[next]) : -1;
-  }
-
-  private nextTurn(car: Car, e: Road) { return car.next >= 0 ? turnOf(e, this.roads[car.next]) : Turn.Straight; }
-
-  private desiredLane(car: Car, e: Road) {
-    if (car.next < 0 || e.lanes === 1) return car.lane;
-    const t = this.nextTurn(car, e);
-    return t === Turn.Left ? 0 : t === Turn.Right ? e.lanes - 1 : car.lane;
-  }
-
-  private laneGapOK(e: Road, lane: number, s: number, car: Car | null) {
-    const myLen = car ? car.len : 4.6;
-    if (e.lists[lane].some((o) => o !== car && o.s > s - myLen - 5 && o.s - o.len < s + 7)) return false;
-    return !e.lists.some((l) => l.some((o) => o !== car && o.lcTo === lane && Math.abs(o.s - s) < 12));
-  }
-
-  private removeCar(c: Car) {
-    const l = this.roads[c.e].lists[c.lane];
-    l.splice(l.indexOf(c), 1);
-    this.boxLeave(c);
-  }
-
-  // ------------------------------------------------------------------ junction box
-  // May this car enter junction n now? Fine alongside: the same approach in lanes ordered like their turns, parallel
-  // approaches, opposite flows that don't turn left; never two into the same road at once.
-  private boxBlocker(car: Car, e: Road, n: number): Car | null {
-    const myTurn = this.nextTurn(car, e);
-    for (const h of this.box.get(n) ?? []) {
-      if (h === car) continue;
-      if (h.boxFrom === e.i) {
-        const dl = car.lane - h.boxLane, dt = myTurn - h.boxTurn;
-        if (dl === 0) continue;
-        if (dl * dt < 0) return h;
-        if (h.boxTo === car.next && car.next >= 0) {
-          const lanes = this.roads[car.next].lanes;
-          if (landingLane(myTurn, car.lane, lanes) === landingLane(h.boxTurn as Turn, h.boxLane, lanes)) return h;
-        }
-        continue;
-      }
-      if (h.boxTo === car.next && car.next >= 0) return h;
-      const he = this.roads[h.boxFrom], dot = he.endD[0] * e.endD[0] + he.endD[1] * e.endD[1];
-      if (dot > 0.75) continue;
-      if (dot < -0.75 && myTurn !== Turn.Left && h.boxTurn !== Turn.Left) continue;
-      return h;
-    }
-    return null;
-  }
-
-  private boxEnter(car: Car, e: Road, n: number) {
-    Object.assign(car, { boxNode: n, boxFrom: e.i, boxTo: car.next, boxLane: car.lane, boxT: this.t, boxTurn: this.nextTurn(car, e) });
-    const set = this.box.get(n) ?? new Set<Car>();
-    this.box.set(n, set.add(car));
-  }
-
-  private boxLeave(car: Car) {
-    if (car.boxNode >= 0) { this.box.get(car.boxNode)?.delete(car); car.boxNode = -1; }
-  }
-
-  // ------------------------------------------------------------------ what a car must keep its distance to
-  private carObstacle(car: Car, e: Road): [number, number] {
-    let gap = Infinity, lv = 0, why = 'free', by: Agent | null = null;
-    const stop = (d: number, reason: string, who: Agent | null, speed = 0) => { if (d < gap) { gap = Math.max(d, 0.01); lv = speed; why = reason; by = who; } };
-    const assertive = car.ghost > 0;
-    const ig = car.ignore && (car.ignoreT ?? 0) > this.t ? car.ignore : null;
-    const lead = (o: Car, g: number) => { if (!(o === ig && o.e !== car.e) && g < gap) { gap = g; lv = o.v; why = o.e === car.e ? 'leader' : 'next-edge-car'; by = o; } };
-    for (const o of e.lists[car.lane]) if (o !== car && o.s > car.s) lead(o, o.s - o.len - car.s);
-    for (let l = 0; l < e.lanes; l++) {
-      if (l === car.lane) continue;
-      for (const o of e.lists[l]) if (o.s > car.s && (o.lcTo === car.lane || car.lcTo === l)) lead(o, o.s - o.len - car.s);
-    }
-    const turn = this.nextTurn(car, e), nextRoad = car.next >= 0 ? this.roads[car.next] : null;
-    const nextLane = nextRoad ? landingLane(turn, car.lane, nextRoad.lanes) : 0;
-    if (nextRoad) for (let l = 0; l < nextRoad.lanes; l++) for (const o of nextRoad.lists[l]) {
-      if ((l === nextLane || o.lcTo === nextLane) && o.s < 30) lead(o, e.L - car.s + o.s - o.len);
-    }
-    if (!nextRoad && e.L - car.s < 40 && !this.mayLeave(car, e)) stop(e.L - car.s - 0.5, 'dead-end', null);
-    const sg = e.sig;
-    if (sg && car.s < sg.s + 0.3) {
-      const st = signal(this.ctrls[sg.ctrl], this.t, sg.axis), d = sg.s - car.s;
-      if (st === 'R' || (st === 'Y' && d > (car.v * car.v) / (2 * IDM.b) + 1)) stop(d, 'signal', null);
-    }
-    const nearJunction = nextRoad && car.boxNode !== e.b && e.L - car.s < BOX_IN + 15;
-    if (nearJunction && !assertive) { // only into the junction with room to clear it on the exit road
-      let room = Infinity, rb: Car | null = null;
-      for (const o of nextRoad.lists[nextLane]) if (o.v < 2 && o.s - o.len < room) { room = o.s - o.len; rb = o; }
-      if (room < car.len + 2 && nextRoad.L > car.len + 4 && rb !== ig) stop(e.L - BOX_IN - car.s, 'no-room-exit', rb);
-    }
-    const b = car.block;
-    if (b && b.o !== ig) { // physical blocker; circular waits are broken after 6 s when the blocker is stuck too
-      const align = b.o.geo.fx * car.geo.fx + b.o.geo.fy * car.geo.fy, sameDir = align > 0.7;
-      if ((sameDir || !assertive) && !(car.wait > 6 && b.o.wait > 3 && !sameDir)) stop(b.gap, 'spatial', b.o, b.o.v * Math.max(0, align));
-    }
-    if (nearJunction && !assertive) {
-      const blocker = this.boxBlocker(car, e, e.b);
-      if (blocker && car.wait <= 10 && !(ig && blocker === ig)) stop(e.L - BOX_IN - car.s, 'box-busy', blocker);
-    }
-    car.why = assertive && why === 'free' ? 'assertive' : why;
-    car.by = by;
-    return [gap, lv];
-  }
-
-  // Every waiting agent waits for one other (by), so cycles are cheap to find; in each, the one with the softest
-  // reason ignores its blocker for a few seconds.
-  private breakDeadlocks() {
-    const rank = (a: Agent) => { const i = SOFT.indexOf(a.why); return i < 0 ? 99 : i; };
-    const state = new Map<Agent, 1 | 2>();
-    for (const a0 of this.cars) {
-      if (state.has(a0)) continue;
-      const path: Agent[] = [];
-      let a: Agent | null = a0;
-      while (a && !state.has(a) && a.v < 0.3 && a.by) { state.set(a, 1); path.push(a); a = a.by; }
-      if (a && state.get(a) === 1) {
-        let best: Agent | null = null;
-        for (const m of path.slice(path.indexOf(a))) if (rank(m) < 99 && (!best || rank(m) < rank(best))) best = m;
-        if (best) { best.ignore = best.by; best.ignoreT = this.t + 4; }
-      }
-      for (const p of path) state.set(p, 2);
-    }
-  }
-
-  // ------------------------------------------------------------------ one tick
-  private step(dt: number, density: Density) {
-    this.t += dt;
-    if (((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0)) this.breakDeadlocks();
-    const targetCars = this.populate(density);
-    this.snapshot();
-    if (this.edits.length) this.dropOverHoles();
-    this.stepCars(dt, targetCars);
-    this.stepPeople(dt);
-    this.stepRiders(dt);
-  }
-
-  // ------------------------------------------------------------------ player edits
-  // Box (map metres [x0, y0, x1, y1)) was edited (stream.ts replaceColumns, through core/live-edits.ts), or, cleared,
-  // is its files' again (the node freed): the edits meeting it are forgotten.
-  edited(box: [number, number, number, number], cleared = false) {
-    if (cleared) this.edits = this.edits.filter((b) => !(b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3]));
-    else this.edits.push([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
-  }
-
-  // is the ground at (x, y) more than HOLE m under height z, in an edited box?
-  private hole(x: number, y: number, z: number) {
-    const W = this.world;
-    if (!W || !this.edits.some((b) => x >= b[0] && y >= b[1] && x < b[2] && y < b[3])) return false;
-    return W.support(x, y, z + 1.5) < z - HOLE;
-  }
-
-  // the cars (their middles, at the tick's start: snapshot), people and riders over a hole fall
-  private dropOverHoles() {
-    const gone = new Set<Car>();
-    for (const c of this.cars) {
-      const g = c.geo;
-      if (c === this.keep || this.bodies?.owns(c) || !this.hole(g.cx, g.cy, g.z)) continue;
-      this.removeCar(c);
-      gone.add(c);
-      c.rp ??= new THREE.Vector3(g.cx, g.z, g.cy);
-      c.rh ??= Math.atan2(g.fx, g.fy);
-      c.brake = 1;
-      this.falling.push({ c, vy: 0, t: 0, land: -1 });
-    }
-    if (gone.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !gone.has(c)));
-    const drop = (list: Person[]) => list.filter((p) => {
-      if (p.ctl || p === this.keep || !p.rp || !this.hole(p.rp.x, p.rp.z, p.rp.y)) return true;
-      this.addFallen(p, 0, 1, 0, 0);
-      return false;
-    });
-    this.people = drop(this.people);
-    this.riders = drop(this.riders);
-  }
-
-  // the cars falling: on along their heading at their speed while over the hole, down until the ground, gone LANDED_S s after
-  private moveFalling(dt: number) {
-    const W = this.world;
-    for (let i = this.falling.length - 1; i >= 0; i--) {
-      const f = this.falling[i], c = f.c, p = c.rp!;
-      f.t += dt;
-      if ((f.land >= 0 && f.t - f.land > LANDED_S) || f.t > FALL_MAX_S || !W) { this.falling.splice(i, 1); continue; }
-      if (f.land >= 0) continue;
-      const fx = Math.sin(c.rh ?? 0), fz = Math.cos(c.rh ?? 0), nx = p.x + fx * c.v * dt, nz = p.z + fz * c.v * dt;
-      // (on only while over the hole: not across it onto its far rim)
-      if (c.v > 0 && W.support(nx, nz, p.y + 0.5) < p.y - HOLE) { p.x = nx; p.z = nz; } else c.v = 0;
-      const g = W.support(p.x, p.z, p.y);
-      f.vy -= G * dt;
-      p.y += f.vy * dt;
-      c.pitch = Math.min(0.6, (c.pitch ?? 0) + dt * 0.8); // (nose down)
-      if (p.y <= g) { p.y = g; f.land = f.t; c.v = 0; }
-    }
-  }
-
-  // As many as the hour wants, a few more a tick out of sight (all at once anywhere when warm: the first fill), and
-  // those over it out of sight gone. Returns the cars wanted.
-  private populate(density: Density) {
-    this.trimParked();
-    const targetCars = Math.min(MAX_CARS - PARKED_MAX, Math.round(this.laneKm * 9 * density.cars));
-    const targetPeds = Math.min(MAX_PEOPLE, Math.round(this.pedKm * 24 * density.peds));
-    const warm = this.warm, n = (k: number, target: number) => (warm ? 4 * target + 50 : k);
-    for (let k = 0, K = n(6, targetCars); k < K && this.cars.length < targetCars; k++) this.spawnCar(!warm && this.cars.length > targetCars * 0.5);
-    for (let k = 0, K = n(40, targetPeds); k < K && this.people.length < targetPeds; k++) this.spawnPed();
-    // at July's evening peak 5 riders a km per unit of weight: 10 a km along a main road (at
-    // 5 m/s), 5 on an ordinary bike way
-    const targetBikes = Math.min(MAX_BIKES, Math.round(this.bikeKm * 5 * density.bikes));
-    for (let k = 0, K = n(10, targetBikes); k < K && this.riders.length < targetBikes; k++) this.spawnRider();
-    this.warm = false;
-    // (the person followed or walked stays in the crowd)
-    if (this.riders.length > targetBikes) this.riders = this.trim(this.riders, targetBikes);
-    if (this.people.length > targetPeds) this.people = this.trim(this.people, targetPeds);
-    return targetCars;
-  }
-
-  // where everything is at the start of the tick: cars in a grid, and who physically blocks whom
-  private snapshot() {
-    const G = 8;
-    this.carGrid = new Map();
-    for (const c of this.cars) {
-      const P = this.carPoint(c, c.s, this.sP), F = this.carPoint(c, c.s + 1, this.sF), C = this.carPoint(c, c.s - c.len / 2, this.sC);
-      const l = Math.hypot(F.x - P.x, F.y - P.y) || 1, g = c.geo;
-      g.px = P.x; g.py = P.y; g.cx = C.x; g.cy = C.y; g.z = P.z; g.fx = (F.x - P.x) / l; g.fy = (F.y - P.y) / l;
-      c.block = null;
-      pushTo(this.carGrid, cellKey(C.x, C.y, G), c);
-    }
-    for (const c of this.detachedCars) {
-      const p = c.rp!;
-      const fx = Math.sin(c.rh ?? 0), fy = Math.cos(c.rh ?? 0), g = c.geo;
-      g.px = p.x + fx * c.len / 2; g.py = p.z + fy * c.len / 2; g.cx = p.x; g.cy = p.z; g.z = p.y; g.fx = fx; g.fy = fy;
-      pushTo(this.carGrid, cellKey(p.x, p.z, G), c);
-    }
-    for (const c of this.cars) {
-      const g0 = c.geo, gx = (g0.px / G) | 0, gy = (g0.py / G) | 0;
-      let best = Infinity, who: Car | null = null;
-      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (const o of this.carGrid.get((gx + i) * 100003 + (gy + j)) ?? []) {
-        if (o === c || Math.abs(o.geo.z - g0.z) > 2) continue;
-        const rx = o.geo.cx - g0.px, ry = o.geo.cy - g0.py;
-        const along = rx * g0.fx + ry * g0.fy, lat = Math.abs(rx * g0.fy - ry * g0.fx);
-        const cosd = Math.abs(o.geo.fx * g0.fx + o.geo.fy * g0.fy), sind = Math.sqrt(Math.max(0, 1 - cosd * cosd));
-        const he = (o.len / 2) * cosd + 0.9 * sind, hl = (o.len / 2) * sind + 0.9 * cosd;
-        if (lat < 0.95 + hl && along + he > 0.3 && along - he < 12 && along - he - 0.6 < best) { best = along - he - 0.6; who = o; }
-      }
-      if (who) c.block = { o: who, gap: best };
-    }
-    for (const c of this.cars) { // both block each other: whoever entered the junction first (else the lower id) goes
-      const b = c.block;
-      if (b && b.o.block?.o === c) {
-        const pc = c.boxNode >= 0 ? c.boxT : Infinity, po = b.o.boxNode >= 0 ? b.o.boxT : Infinity;
-        if (pc < po || (pc === po && c.id < b.o.id)) c.block = null;
-      }
-    }
-  }
-
-  private stepCars(dt: number, targetCars: number) {
-    const removed = new Set<Car>();
-    for (const car of this.cars) {
-      const e = this.roads[car.e], s0 = car.s, off0 = car.off, e0 = car.e;
-      this.changeLane(car, e, dt);
-      let v0 = e.v * car.v0f;
-      if (car.next >= 0 && e.L - car.s < 30 && this.nextTurn(car, e) !== Turn.Straight) v0 = Math.min(v0, this.nextTurn(car, e) === Turn.Right ? 4.5 : 6);
-      const [gap, lv] = this.carObstacle(car, e);
-      const ss = IDM.s0 + Math.max(0, car.v * IDM.T + (car.v * (car.v - lv)) / (2 * Math.sqrt(IDM.a * IDM.b)));
-      const acc = Math.max(-9, IDM.a * (1 - (car.v / Math.max(v0, 0.1)) ** 4 - (gap === Infinity ? 0 : (ss / Math.max(gap, 0.1)) ** 2)));
-      car.brake = acc < -0.8 || car.v < 0.3 ? 1 : 0;
-      car.v = Math.max(0, car.v + acc * dt);
-      car.wait = car.v < 0.3 ? car.wait + dt : 0;
-      // stuck too long for a soft reason: push through for a few metres
-      if (car.ghost <= 0 && ((car.wait > 15 && SOFT.slice(0, 4).includes(car.why)) || (car.wait > 25 && SOFT.slice(4).includes(car.why)))) { car.ghost = 8; car.wait = 0; }
-      if (car.ghost > 0) { car.ghost -= car.v * dt; if (car.v < 1.5 && gap > 3) car.v = 1.5; }
-      car.s += car.v * dt;
-      if (car.next >= 0 && car.boxNode !== e.b && e.L - car.s < BOX_IN) { this.boxLeave(car); this.boxEnter(car, e, e.b); }
-      if (car.s > e.L && !this.enterNext(car, e, s0, targetCars)) { removed.add(car); continue; }
-      if (car.boxNode >= 0 && car.e !== car.boxFrom && car.s > BOX_OUT) this.boxLeave(car);
-      car.ds = car.e === e0 ? car.s - s0 : car.s + e.L - s0;
-      car.dOff = car.e === e0 ? car.off - off0 : 0;
-    }
-    if (removed.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !removed.has(c)));
-  }
-
-  private changeLane(car: Car, e: Road, dt: number) {
-    const want = this.desiredLane(car, e);
-    if (want !== car.lane && car.lcTo === undefined && car.s > 4 && e.L - car.s > 15) {
-      const step = want > car.lane ? 1 : -1;
-      if (this.laneGapOK(e, car.lane + step, car.s, car)) car.lcTo = car.lane + step;
-    }
-    if (car.lcTo === undefined) { car.off += (this.laneOffset(e, car.lane) - car.off) * Math.min(1, dt * 3); return; }
-    const tgt = this.laneOffset(e, car.lcTo);
-    car.off += Math.sign(tgt - car.off) * Math.min(Math.abs(tgt - car.off), 1.4 * dt * Math.max(0.4, Math.min(1, car.v / 5)));
-    if (Math.abs(tgt - car.off) < 0.05) {
-      const lst = e.lists[car.lane];
-      lst.splice(lst.indexOf(car), 1);
-      car.lane = car.lcTo; car.lcTo = undefined;
-      e.lists[car.lane].push(car);
-    }
-  }
-
-  // may a car leave the street at the end of road e (out of sight: CAR_POP_R from the viewer)?
-  private mayLeave(car: Car, e: Road) { const P = at(e, e.L, car.off, this.tmp); return this.far(P.x, P.y, P.z, CAR_POP_R); }
-
-  // past the end of its road: onto the next one (false: it leaves), or hold at the line if the lane there is full (or
-  // there is no way on and it may not leave here)
-  private enterNext(car: Car, e: Road, s0: number, targetCars: number) {
-    const lst = e.lists[car.lane];
-    lst.splice(lst.indexOf(car), 1);
-    car.lcTo = undefined;
-    if ((car.next < 0 || this.cars.length > targetCars + 4) && this.mayLeave(car, e)) { this.boxLeave(car); return false; }
-    if (car.next < 0) {
-      lst.push(car);
-      Object.assign(car, { s: e.L - 0.01, v: 0, why: 'dead-end', by: null });
-      car.ds = car.s - s0;
-      return true;
-    }
-    const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
-    const hold = n.lists[lane].find((o) => o.s < car.len + 1.5);
-    if (hold && !(car.ignore === hold && (car.ignoreT ?? 0) > this.t)) {
-      lst.push(car);
-      Object.assign(car, { s: e.L - 0.01, v: 0, why: 'hold-at-line', by: hold });
-      car.ds = car.s - s0;
-      return true;
-    }
-    Object.assign(car, { prev2: car.prev, prev2Off: car.prevOff, prev: car.e, prevOff: car.off, s: car.s - e.L, e: car.next, lane, off: this.laneOffset(n, lane) });
-    n.lists[lane].push(car);
-    const n2 = car.next2 ?? -1;
-    this.setNext(car, n2 >= 0 && this.roadOn[n2] ? n2 : this.chooseNext(n));
-    if (n.L < 25 && car.next >= 0) { // too short to change lanes later: take the next turn's lane now if it is free
-      const wl = this.desiredLane(car, n);
-      if (wl !== car.lane && this.laneGapOK(n, wl, car.s, car)) {
-        n.lists[car.lane].splice(n.lists[car.lane].indexOf(car), 1);
-        car.lane = wl; // (its offset eases over: changeLane)
-        n.lists[wl].push(car);
-      }
-    }
-    return true;
-  }
-
-  // the list cut to n, the newest out of sight PED_POP_R from the viewer first; none closer, nor kept or walked
-  private trim(list: Person[], n: number) {
-    let over = list.length - n;
-    const gone = new Set<Person>();
-    for (let i = list.length - 1; i >= 0 && over > 0; i--) {
-      const p = list[i];
-      if (p.ctl || p === this.keep) continue;
-      const P = p.rp ? { x: p.rp.x, y: p.rp.z, z: p.rp.y } : at(this.peds[p.e], p.s, 0, this.tmp);
-      if (this.far(P.x, P.y, P.z, PED_POP_R)) { gone.add(p); over--; }
-    }
-    return gone.size ? list.filter((p) => !gone.has(p)) : list;
-  }
-
-  private stepPeople(dt: number) {
-    for (const pe of this.people) {
-      if (pe.ctl) continue;
-      const e = this.peds[pe.e];
-      if (pe.wait) {
-        if (!e.x || !pedGreen(this.ctrls[e.x.ctrl], this.t, e.x.axis)) continue;
-        pe.wait = false;
-      }
-      pe.s += pe.v * dt * pe.dir;
-      pe.ph += pe.v * dt * 4.2;
-      if (pe.s >= 0 && pe.s <= e.L) continue;
-      const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j]);
-      if (!opts.length) { pe.dir *= -1; pe.s = Math.min(Math.max(pe.s, 0), e.L); continue; }
-      const [j, end] = opts[pickWeighted(opts.map(([k]) => this.peds[k].w))];
-      const n = this.peds[j];
-      pe.e = j;
-      pe.dir = end === 0 ? 1 : -1;
-      pe.s = end === 0 ? 0 : n.L;
-      if (n.x && !pedGreen(this.ctrls[n.x.ctrl], this.t, n.x.axis)) pe.wait = true;
-    }
-  }
-
-  // a rider keeps to the bike ways, the busier more often; off their end (into a street) they are gone, and another
-  // starts somewhere else (in sight of the viewer they turn back instead)
-  private stepRiders(dt: number) {
-    this.riders = this.riders.filter((pe) => {
-      const e = this.peds[pe.e];
-      if (pe.wait) {
-        if (!e.x || !pedGreen(this.ctrls[e.x.ctrl], this.t, e.x.axis)) return true;
-        pe.wait = false;
-      }
-      pe.s += pe.v * dt * pe.dir;
-      pe.ph += pe.v * dt * 1.6;
-      if (pe.s >= 0 && pe.s <= e.L) return true;
-      const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j] && this.peds[j].bk);
-      if (!opts.length) {
-        const P = pe.rp ? { x: pe.rp.x, y: pe.rp.z, z: pe.rp.y } : at(e, pe.s, 0, this.tmp);
-        if (this.far(P.x, P.y, P.z, PED_POP_R)) return false;
-        pe.dir *= -1; pe.s = Math.min(Math.max(pe.s, 0), e.L);
-        return true;
-      }
-      const [j, end] = opts[pickWeighted(opts.map(([k]) => this.peds[k].bk! * Math.max(this.peds[k].L, 5)))];
-      const n = this.peds[j];
-      pe.e = j;
-      pe.dir = end === 0 ? 1 : -1;
-      pe.s = end === 0 ? 0 : n.L;
-      if (n.x && !pedGreen(this.ctrls[n.x.ctrl], this.t, n.x.axis)) pe.wait = true;
-      return true;
-    });
+  private col(hex: string) {
+    let c = this.cols.get(hex);
+    if (!c) this.cols.set(hex, c = new THREE.Color(hex));
+    return c;
   }
 
   // ------------------------------------------------------------------ drawing
-  // A car's path at arc length s, blended across the junction nodes into smooth arcs: the roads before and after
-  // weighted by how far the car is from each node (smooth over BLEND either side of it), each pull added on, so
-  // that on a road shorter than 2 BLEND the car is drawn between both, and across a road shorter than BLEND the road
-  // beyond it pulls too (prev2, next2). Where the car moves onto the next road the sum is the same on either side.
-  private carPoint(car: Car, s: number, out: Pt, off = car.off) {
-    const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z, Q = this.tmp, R = this.tmp2;
-    // (P moved by w times the way from (ax, ay, az) to B)
-    const pull = (ax: number, ay: number, az: number, B: Pt, w: number) => { P.x += (B.x - ax) * w; P.y += (B.y - ay) * w; P.z += (B.z - az) * w; };
-    if (s < BLEND && car.prev >= 0) {
-      const pe = this.roads[car.prev];
-      at(pe, pe.L + s, car.prevOff, Q);
-      pull(x, y, z, Q, 1 - smooth(-BLEND, BLEND, s));
-      const p2 = car.prev2 ?? -1;
-      if (p2 >= 0 && s + pe.L < BLEND) { const pp = this.roads[p2]; pull(Q.x, Q.y, Q.z, at(pp, pp.L + pe.L + s, car.prev2Off ?? 0, R), 1 - smooth(-BLEND, BLEND, s + pe.L)); }
-    }
-    if (s > e.L - BLEND && car.next >= 0) {
-      const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
-      at(n, s - e.L, this.laneOffset(n, lane), Q);
-      pull(x, y, z, Q, smooth(-BLEND, BLEND, s - e.L));
-      const n2 = car.next2 ?? -1;
-      if (n2 >= 0 && s - e.L - n.L > -BLEND) {
-        const nn = this.roads[n2], lane2 = landingLane(turnOf(n, nn), lane, nn.lanes);
-        pull(Q.x, Q.y, Q.z, at(nn, s - e.L - n.L, this.laneOffset(nn, lane2), R), smooth(-BLEND, BLEND, s - e.L - n.L));
-      }
-    }
-    return P;
-  }
-
   // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
-    const back = 1 - lead / STEP;
-    if (this.falling.length) this.moveFalling(dt);
-    this.drawCars(back, night);
+    this.drawCars(lead / STEP, night);
     this.trains.render(0, night);
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
   }
 
-  private drawCars(back: number, night: number) {
-    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
-    const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
-    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world, meshes = [M.body, M.dark, M.head, M.tail];
+  // a: how far from the last but one tick to the last (0..1)
+  private drawCars(a: number, night: number) {
+    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+    const tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), meshes = [M.body, M.dark, M.head, M.tail], T = this.traffic, back = 1 - a, B = this.traffic.bodies;
+    const pose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
     const draw = (c: Car, i: number) => {
-      this.bodies?.pose(c);
-      m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
+      B?.pose(c, a);
+      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
       for (const mesh of meshes) mesh.setMatrixAt(i, m);
-      M.body.setColorAt(i, c.col);
+      M.body.setColorAt(i, this.col(c.col));
       M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
-    this.cars.forEach((c, i) => {
-      // Both axles on the blended path: the body follows the curve.
-      const s = c.s - c.ds * back, off = c.off - c.dOff * back;
-      this.carPoint(c, s, A, off);
-      this.carPoint(c, s - (c.len - 1.2), B, off);
-      c.rh = Math.atan2(A.x - B.x, A.y - B.y);
-      // on a ramp (world.ts surface: the paths' heights are whole metres) both axles on it, the body pitched between them
-      if (W) {
-        const za = W.surface(A.x, A.y, A.z), zb = W.surface(B.x, B.y, B.z);
-        if (za !== A.z || zb !== B.z) {
-          c.pitch = Math.atan2(za - zb, Math.hypot(A.x - B.x, A.y - B.y) || 1);
-          c.rp = (c.rp ?? new THREE.Vector3()).set((A.x + B.x) / 2, (za + zb) / 2, (A.y + B.y) / 2);
-          draw(c, i);
-          return;
-        }
-      }
-      c.pitch = 0;
-      c.rp = (c.rp ?? new THREE.Vector3()).set((A.x + B.x) / 2, Math.max(A.z, B.z), (A.y + B.y) / 2);
+    T.cars.forEach((c, i) => {
+      T.carPose(c, c.s - c.ds * back, c.off - c.dOff * back, pose);
+      setRp(c, pose.x, pose.y, pose.z);
+      c.rh = pose.h; c.pitch = pose.pitch; c.roll = 0;
       draw(c, i);
     });
-    this.detachedCars.forEach((c, i) => draw(c, this.cars.length + i));
-    let n = this.cars.length + this.detachedCars.length;
-    for (const f of this.falling) if (n < MAX_CARS) draw(f.c, n++);
-    setCount(n, M.body, M.dark, M.head, M.tail);
+    T.detachedCars.forEach((c, i) => draw(c, T.cars.length + i));
+    setCount(T.cars.length + T.detachedCars.length, M.body, M.dark, M.head, M.tail);
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 
   private drawPeople(dt: number, lead: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-    const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10);
+    const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), T = this.traffic;
     this.people.forEach((p, i) => {
       let bob = 0;
       if (p.ctl) { // walked by the player (nav): where they put them
         const C = p.ctl;
-        p.rp = (p.rp ?? new THREE.Vector3()).set(C.x, C.y, C.z); p.rh = C.h;
+        setRp(p, C.x, C.y, C.z); p.rh = C.h;
         if (C.moving) { p.ph += dt * 9; bob = Math.sin(p.ph); }
       } else {
-        const e = this.peds[p.e], ds = p.wait ? 0 : p.v * lead;
-        at(e, p.s + ds * p.dir, 0, A);
-        at(e, p.s + (ds + 0.5) * p.dir, 0, B);
-        const l = Math.hypot(B.x - A.x, B.y - A.y) || 1, dx = (B.x - A.x) / l, dy = (B.y - A.y) / l;
-        const lat = e.side === undefined ? p.lat : p.lat * e.side * p.dir;
-        const x = A.x - dy * lat, y = A.y + dx * lat, h = Math.atan2(dx, dy);
-        const z = this.world ? this.world.surface(x, y, A.z) : A.z;
-        if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 6) { p.rp = new THREE.Vector3(x, z, y); p.rh = h; }
-        p.rp.lerp(pos.set(x, z, y), k);
+        const ds = p.wait ? 0 : p.v * lead;
+        T.personPoint(p, ds, A);
+        T.personPoint(p, ds + 0.5, B);
+        const h = Math.atan2(B.x - A.x, B.y - A.y);
+        if (!p.rp || Math.hypot(p.rp.x - A.x, p.rp.z - A.y) > 6) { setRp(p, A.x, A.z, A.y); p.rh = h; }
+        const r = p.rp!;
+        r.x += (A.x - r.x) * k; r.y += (A.z - r.y) * k; r.z += (A.y - r.z) * k;
         p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
         if (!p.wait) bob = Math.sin(p.ph + ds * 4.2);
       }
-      pos.copy(p.rp);
+      pos.set(p.rp!.x, p.rp!.y, p.rp!.z);
       pos.y += 0.05 * Math.abs(bob);
       m.compose(pos, q.setFromAxisAngle(up, p.rh!), one);
       M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
-      M.torso.setColorAt(i, p.col);
+      M.torso.setColorAt(i, this.col(p.col));
     });
     return this.people.length;
   }
@@ -792,23 +173,23 @@ export class StreetLife {
   private drawRiders(dt: number, lead: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), sit = new THREE.Vector3(1, 0.82, 1);
-    const one = new THREE.Vector3(1, 1, 1);
+    const one = new THREE.Vector3(1, 1, 1), T = this.traffic;
     this.riders.forEach((p, i) => {
-      const e = this.peds[p.e], ds = p.wait ? 0 : p.v * lead;
-      at(e, p.s + ds * p.dir, 0, A);
-      at(e, p.s + (ds + 1) * p.dir, 0, B);
-      const l = Math.hypot(B.x - A.x, B.y - A.y) || 1, dx = (B.x - A.x) / l, dy = (B.y - A.y) / l;
-      const x = A.x - dy * p.lat, y = A.y + dx * p.lat, h = Math.atan2(dx, dy);
-      const z = this.world ? this.world.surface(x, y, A.z) : A.z;
-      if (!p.rp || Math.hypot(p.rp.x - x, p.rp.z - y) > 8) { p.rp = new THREE.Vector3(x, z, y); p.rh = h; }
-      p.rp.lerp(pos.set(x, z, y), k);
+      const ds = p.wait ? 0 : p.v * lead;
+      T.personPoint(p, ds, A);
+      T.personPoint(p, ds + 1, B);
+      const h = Math.atan2(B.x - A.x, B.y - A.y);
+      if (!p.rp || Math.hypot(p.rp.x - A.x, p.rp.z - A.y) > 8) { setRp(p, A.x, A.z, A.y); p.rh = h; }
+      const r = p.rp!;
+      r.x += (A.x - r.x) * k; r.y += (A.z - r.y) * k; r.z += (A.y - r.z) * k;
       p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
       q.setFromAxisAngle(up, p.rh!);
-      M.bike.setMatrixAt(i, m.compose(p.rp, q, one));
-      pos.copy(p.rp); pos.y += 0.45;
+      pos.set(r.x, r.y, r.z);
+      M.bike.setMatrixAt(i, m.compose(pos, q, one));
+      pos.y += 0.45;
       m.compose(pos, q, sit);
       M.legs.setMatrixAt(i0 + i, m); M.torso.setMatrixAt(i0 + i, m);
-      M.torso.setColorAt(i0 + i, p.col);
+      M.torso.setColorAt(i0 + i, this.col(p.col));
     });
     setCount(this.riders.length, M.bike);
     return this.riders.length;
@@ -817,9 +198,7 @@ export class StreetLife {
   // A person walking or cycling hit by the driven car at (vx, vz) m/s: out of the crowd, shoved away along the hit and
   // falling over (drawFallen), no physics. Returns whether they were there.
   knockDown(p: Person, vx: number, vz: number) {
-    const list = p.bike ? this.riders : this.people, i = list.indexOf(p);
-    if (i < 0 || !p.rp || p === this.keep) return false;
-    list.splice(i, 1);
+    if (!p.rp || !this.traffic.removePerson(p)) return false;
     const v = Math.hypot(vx, vz) || 1;
     this.addFallen(p, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
     return true;
@@ -831,7 +210,8 @@ export class StreetLife {
       const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
       this.fallen.splice(Math.max(0, i), 1);
     }
-    this.fallen.push({ col: p.col, bike: !!p.bike, at: p.rp!.clone(), h: p.rh ?? 0, dx, dz, v, t: 0, bikeAt: p.bike ? p.rp!.clone() : null, vy });
+    const at = new THREE.Vector3(p.rp!.x, p.rp!.y, p.rp!.z);
+    this.fallen.push({ col: this.col(p.col), bike: !!p.bike, at, h: p.rh ?? 0, dx, dz, v, t: 0, bikeAt: p.bike ? at.clone() : null, vy });
   }
 
   // the people knocked down further than r m from (x, z) gone (left behind; never in sight of the viewer)
@@ -889,43 +269,12 @@ export class StreetLife {
     const LAMP = { R: [2.2, 0.12, 0.08, 3.95], Y: [2.2, 1.3, 0.1, 3.6], G: [0.1, 2.0, 0.6, 3.25] };
     this.headAct.forEach((h, i) => {
       const [x, row, gz, rot, ctrl, axis] = this.heads[h];
-      const [r, g, b, hy] = LAMP[signal(this.ctrls[ctrl], this.t, axis)], a = rot + Math.PI;
+      const [r, g, b, hy] = LAMP[this.traffic.signal(ctrl, axis)], a = rot + Math.PI;
       m.compose(pos.set(x + Math.sin(a) * 0.19, gz + hy, row + Math.cos(a) * 0.19), q.setFromAxisAngle(up, a), one);
       M.lamp.setMatrixAt(i, m);
       M.lamp.setColorAt(i, col.setRGB(r, g, b));
     });
     setCount(this.headAct.length, M.lamp);
-  }
-
-  // a car's drawn path (carPoint) at arc length s on its road, for what steers a body along it (LifeBodies)
-  pathPoint(car: Car, s: number, out: Pt, off = car.off) { return this.carPoint(car, s, out, off); }
-
-  // ------------------------------------------------------------------ following
-  roadVehicles(): Car[] { return this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars; }
-
-  takeWheel(car: Car) {
-    if (this.detachedCars.includes(car)) return true;
-    const i = this.cars.indexOf(car);
-    if (i < 0 || !car.rp) return false;
-    this.removeCar(car);
-    this.cars.splice(i, 1);
-    car.block = null;
-    car.by = null;
-    car.why = 'free';
-    car.wait = 0;
-    this.detachedCars.push(car);
-    this.trimParked();
-    return true;
-  }
-
-  // Keep recent player-parked cars around and leave ample room for the traffic fleet: of more than PARKED the oldest
-  // out of sight goes (never the one driven or followed); more than PARKED_MAX, the oldest anyway.
-  private trimParked() {
-    const D = this.detachedCars;
-    if (D.length <= PARKED) return;
-    let i = D.findIndex((c) => c !== this.keep && (!c.rp || this.far(c.rp.x, c.rp.z, c.rp.y, CAR_POP_R)));
-    if (i < 0 && D.length > PARKED_MAX) i = D.findIndex((c) => c !== this.keep);
-    if (i >= 0) D.splice(i, 1);
   }
 
   private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.roadVehicles() : kind === 'person' ? this.people : []; }

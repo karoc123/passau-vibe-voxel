@@ -1,13 +1,83 @@
-# Street life on Rapier: a measured prototype (option B)
+# Street life on Rapier: the A+B hybrid
 
-Status: experiment on branch `lifephys`, behind `?lifephys=1`. With the flag off nothing changes: all gates pass.
+Status: **the hybrid is the default** (branch `hybrid`, after the prototype de357ddf and option A 8a075c34). The section
+"Default behaviour" below describes it; the sections after it are the prototype's measurements (`?lifephys=1`, its
+options `lpmodel`, `lplost`, `lponly`, ... and `tools/life-phys-browser.mjs` are gone; see de357ddf to rerun them).
+
+## Default behaviour
+
+- **Cars near edits are bodies.** A traffic car within `NEAR` = 60 m of an edited box (at most 60, nearest the edits
+  first) gets a body: the player car's chassis and raycast wheels (`physics/rapier/vehicle.ts`) with the lean AI
+  controller chasing its ghost, as in the prototype. Nothing edited: no body, no collider, no Rapier step, not even the
+  wasm loaded (`main.ts` loads `life-phys.ts` on the first edit, or with `?dig=1` ahead of it). `?lifephys=0` turns it
+  off; `?lpnear=`, `?lpmax=` are debug knobs.
+- **Dug holes**: a car driving into one falls through the real colliders, is a wreck (out of the traffic, parked,
+  blocking the cars behind) and comes to rest; then its body stays as a fixed collider while it is near an edit, so
+  the bodies coming up see it. Option A's car fall (`life.falling`, kinematic gravity) is gone: the hybrid covers it
+  (a car over a hole has a body within ~0.2 s of the edit: its colliders first, 3 chunks a tick).
+- **Look-ahead** (one shape cast a body a tick): a body brakes for what stands across its way. When that is a body, a
+  wreck or something in an edited box (a placed block, a crater's far wall) it is **held**: its ghost waits for it
+  (the car's speed is the body's), so it stays in the traffic and the cars behind queue as for any car. A wall the
+  city was built with (the data's defects on the paths, see "Losing the ghost") does not hold it: the ghost goes on.
+- **Losing the ghost** (3 m across, 10 m along, 2.5 m in height, rolled over, water): within 12 m of an edit a wreck;
+  further away the body goes and the car is drawn back onto its ghost, blended over 0.6-2 s (4 m/s, no pop), with no
+  body for 8 s (1 s within 24 m of an edit). This also covers the roads with voxels in the car's envelope until the
+  data is fixed (branch `clearance`).
+- **People and riders**: option A's simple gravity, unchanged (the traffic reports them in `Traffic.dropped`, the
+  presentation draws them falling).
+- **The player's car near AI cars**: not bodies in the hybrid's world. The player's car lives in its own Rapier world
+  (`drive-world.ts`), where the traffic near it is kinematic boxes that a hard hit turns into dynamic wrecks: pushing
+  and crashing already work there. Bodies for the few cars round it would cost little (~0.1-0.2 ms a tick for 5, see
+  below) but only help if both cars are in one world: that is the "player car in the same world" step, left open.
+- **Server seam**: `docs/adr/0006-world-sim-seam.md`. The world sim (`sim/traffic.ts`, `physics/rapier/life-phys.ts`
+  and `core/`) has no three.js, DOM, camera or fetch (`tools/core-deps.mjs` checks it), runs on a fixed tick (1/30 s,
+  two Rapier steps a tick), builds its colliders a fixed number of chunks a tick, draws from a seeded generator; the
+  presentation (`sim/life.ts`) draws it between its last two ticks. Two runs from one seed are bit-identical
+  (`tools/life-edit.mjs`).
+
+### Numbers (node 22, WSL2, real data, hour 17)
+
+- **Nothing edited**: 0 ms: no body, no collider, no Rapier step (`life-edit.mjs` checks it every tick of the warm-up).
+- **Bench** (`life-phys.mjs`, an 8 m box marked edited in a busy street at (6500, 2600), 521 cars active, 30 s):
+
+  | NEAR | bodies avg / max | bodies' tick avg / p99 / max (ms) | of it Rapier steps / colliders | chunks built | resyncs |
+  |---|---|---|---|---|---|
+  | 30 m  | 1.1 / 4  | 0.28 / 1.6 / 6.0 | 0.07 / 0.05 | 56  | 0 |
+  | 60 m  | 2.6 / 5  | 0.33 / 1.8 / 3.1 | 0.07 / 0.05 | 68  | 6 |
+  | 100 m | 7.1 / 12 | 0.67 / 2.3 / 3.6 | 0.16 / 0.16 | 283 | 9 |
+
+  At the bridge (4381, 2697), with NEAR 60: 1.3 bodies, 0.33 / 1.8 ms. The whole traffic tick is 2.0-2.3 ms with
+  bodies (1/30 s tick). The p99 is the collider builds (3 chunks a tick, ~0.4 ms each). The resyncs at 60 m all happen
+  at two spots, (6449, 2596) and (6502, 2562): along the path, roads with voxels in the car's envelope (the
+  `clearance` branch's data fix). They blend over up to 2 s (largest gap 10 m).
+- **Gate scenarios** (`life-edit.mjs`): the bodies' tick averages 0.53 ms, p99 2.4 ms, max 7 ms (an edit's first
+  collider builds); 6-15 bodies and 54-204 chunks per scenario. A car gets its body 0.23 s after the dig (its
+  colliders first). Longest hover over the hole: 0.07 s.
+- NEAR stays 60 m: at 14 m/s a car reaches the edit in ~4 s, much more than the 0.2 s its body needs. 100 m triples
+  the bodies and resyncs for no gain at the edit.
+
+### Checks
+
+- `node tools/life-edit.mjs [-v] [dig|block|wreck]` (the gate; the world sim alone, headless, `Math.random` off):
+  - dig: a sphere of r 4 dug 6 m ahead of a car on the bridge deck (4388, 2679): the car gets a body, falls 11 m to
+    the ground, is a wreck at rest there; the cars behind fall in too or stop at the rim; the people there fall;
+  - block: a 7x7x3 m block 25 m ahead of a car at (6503, 2556): it stops before it, still in the traffic (its ghost
+    held), the car behind it stops behind it, nobody touches it;
+  - wreck: a car near an edit wrecked at 8 m/s: it comes to rest on the road, the cars coming up stop behind it;
+  - in all: nothing hovers over an edited box (more than 1 m over the ground for more than 0.25 s), no body further
+    than 69 m from an edit, nothing done before the edit; the dig twice: bit-identical.
+- `node tools/life-phys.mjs [--at X,Z] [--run S] NEAR[:MAX] ...` (the bench: an edit marked round a busy street,
+  every car near it a body; the costs, the resyncs).
+
+## The prototype (de357ddf)
+
 Question: how bad does it get if the AI cars near the player are real Rapier bodies instead of kinematic agents?
 Short answer: the physics is cheap enough. Keeping the cars on their lanes is not. About 1 body in 150 body-seconds
 loses its lane, and most of those losses come from the world's geometry and the traffic paths, not from Rapier. The
 destruction case works well. Recommendation: **A+B hybrid**. Cars get bodies only near edits. Elsewhere, a body that
 gets stuck is put back on its kinematic ghost.
 
-## What was built
+### What was built
 
 - `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). The traffic simulation stays as it is (`sim/life.ts`: IDM,
   lanes, signals, junction boxes). Every car within `R` of the focus (at most `maxBodies` cars, nearest first) also gets
@@ -40,7 +110,7 @@ gets stuck is put back on its kinematic ghost.
   - `tools/life-phys-scan.mjs`: scans the paths for room for a physical car;
   - `tools/life-phys-browser.mjs`: Chrome via playwright on port 5211.
 
-## Numbers (node 22, WSL2, real data, hour 17, 60 Hz fixed step, 20 s measured after 2 s of start-up)
+### Numbers (node 22, WSL2, real data, hour 17, 60 Hz fixed step, 20 s measured after 2 s of start-up)
 
 Physics time per frame, in ms (one 60 Hz step a frame), at map (6500, 2600). The count was capped with `lpmax`
 (R = 500, 521 cars active):
@@ -86,7 +156,7 @@ By radius (natural counts, car model with look):
 - Caveat: at 7 fps the 4-step cap leaves the bodies' clock behind the ghosts' clock, which inflates the losses there
   (51 in 15 s at R = 300). Treat the browser figures as cost only, not quality.
 
-## Behaviour
+### Behaviour
 
 - **Lanes, curves, slopes and caps in normal driving: good.**
   - The mean lateral error to the ghost is 0.06-0.10 m for the car and 0.04 m for the box. The mean error along the
@@ -123,7 +193,7 @@ By radius (natural counts, car model with look):
   in the traffic blocks the cars behind it, because the kinematic snapshot already treats detached cars as obstacles.
   So a crash closes the road, plausibly.
 
-## The destruction case (`tools/life-phys.mjs --dig`, real data)
+### The destruction case (`tools/life-phys.mjs --dig`, real data)
 
 A sphere of radius 4 was dug into the deck at (4388, 2678), deck height 20.6 m, 6 m ahead of a body doing 41 km/h:
 - The body drove into the hole and **fell through the real colliders** to the ground at 9.0 m in about 1 s, became a
@@ -143,7 +213,7 @@ Placed block (`--block`, a 7×7×3 m block 15 m ahead of a body doing 41 km/h):
 - With look-ahead it brakes and stops in front of the block.
 - The traffic simulation itself never sees the block: the ghosts would drive through it. Only the bodies stop.
 
-## Server hosting
+### Server hosting
 
 - **Determinism**: two runs with the same seed and an unlimited collider budget gave bit-identical body positions in
   the same process. With the default 2 ms wall-clock build budget they differ: which colliders exist depends on timing.
@@ -158,7 +228,7 @@ Placed block (`--block`, a 7×7×3 m block 15 m ahead of a body doing 41 km/h):
   - Colliders scale with the area of the bubbles. At R = 300 that is about 600 chunks and ~300k voxels per bubble.
 - The hybrid's server cost is close to zero away from edits.
 
-## Effort to productionize
+### Effort to productionize
 
 | piece | B fully | hybrid (only near edits, resync elsewhere) |
 |---|---|---|
@@ -169,7 +239,7 @@ Placed block (`--block`, a 7×7×3 m block 15 m ahead of a body doing 41 km/h):
 | Drawing: wheels and roll from the body; browser performance (budget at 60 fps, step cap); tests and gates | 2-3 days | 1-2 days |
 | **Total** | **~3-5 weeks, and quality depends on data fixes** | **~1-1.5 weeks** |
 
-## Recommendation
+### Recommendation
 
 **A+B hybrid, not B fully.**
 - B fully is affordable: about 2.5 ms per frame for 60 cars at R = 300, and ~30 µs per car-tick on a server. But a
@@ -188,15 +258,7 @@ Placed block (`--block`, a 7×7×3 m block 15 m ahead of a body doing 41 km/h):
   - make the ghost wait for a body that is behind it near an edit, instead of declaring a wreck;
   - let the IDM see placed blocks.
 
-## Reproduce
+### Reproduce (the prototype's)
 
-In `web/`:
-- `node tools/life-phys.mjs --at 6500,2600 --run 20 --contacts 500:10 500:30 500:60 500:100`. Model options:
-  `--model box`, `--assists`, `--no-look`, `--guide 0.3`, `--lost resync`, `--only edits`. Add `-v` (and `TRACE=1`)
-  for the losses.
-- `node tools/life-phys.mjs --dig [-v] [--only edits] [--model box]`
-- `node tools/life-phys.mjs --block [-v] [--no-look]`
-- `node tools/life-phys.mjs --at 4381,2697 --run 10 --det 200:1000` (run twice and compare the hashes)
-- `node tools/life-phys-scan.mjs`
-- `node tools/life-phys-browser.mjs --run 15 100:1000 200:1000 300:1000`
-- In the page: `?lifephys=1&lpr=300&lpmax=100`, with `&dig=1` to dig.
+The prototype's tools and options are in de357ddf (`git show de357ddf:web/tools/life-phys.mjs`); the default mode's
+are under "Checks" above.
