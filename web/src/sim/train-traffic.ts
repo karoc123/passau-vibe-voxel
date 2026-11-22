@@ -13,6 +13,9 @@ interface TrainPath extends TrainPathData, Path { next: number[] }
 interface Train { id: number; p: number; svc: TrainService; s: number; ds: number; v: number; n: number; wait: number; done: Set<number>; express: boolean; ahead?: Train | null }
 
 export const COACH_LENGTH = 20;
+export const COACH_WIDTH = 2.9;
+const COACH_HEIGHT = 4;
+const COACH_SIZE = Object.freeze({ x: COACH_WIDTH, y: COACH_HEIGHT, z: COACH_LENGTH });
 const GAP = 1, V = 16, A = 0.7, B = 0.9, DWELL = 25, HEADWAY = 1800, SPACING = 70;
 export const POP_R = 600;
 
@@ -25,6 +28,10 @@ export interface CoachPose {
   readonly z: number;
   readonly heading: number;
   readonly express: boolean;
+}
+
+export interface CoachBox extends CoachPose {
+  readonly size: typeof COACH_SIZE;
 }
 
 export class TrainTraffic {
@@ -130,5 +137,10 @@ export class TrainTraffic {
         };
       }
     }
+  }
+
+  // Boxes use the same base and heading as the rendered coaches, at the latest simulation tick.
+  *coachBoxes(): IterableIterator<CoachBox> {
+    for (const pose of this.coaches()) yield { ...pose, size: COACH_SIZE };
   }
 }

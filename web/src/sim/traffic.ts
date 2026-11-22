@@ -429,8 +429,8 @@ export class Traffic {
     this.stepCars(dt, targetCars);
     this.stepPeople(dt);
     this.stepRiders(dt);
-    this.bodies?.tick(dt, this);
     this.trains.tick(this.t, dt, hour, this.viewer);
+    this.bodies?.tick(dt, this);
     this.boatTraffic?.tick(this.t, hour, this.day, riverLevel);
   }
 

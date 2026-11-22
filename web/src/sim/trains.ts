@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { setCount } from './meshes';
-import { COACH_LENGTH, type CoachPose } from './train-traffic';
+import { COACH_LENGTH, COACH_WIDTH, type CoachPose } from './train-traffic';
 
 const MAX_CARS = 240;
 const EXPRESS = [0xdfe2e4, 0x1d3d6e, 0xd8892b];
@@ -30,7 +30,7 @@ export class Trains {
       return mesh;
     };
     const L = COACH_LENGTH;
-    this.body = inst(mergeGeometries([box(2.9, 2.75, L, 1.3), box(2.5, 0.3, L - 1.5, 4.05)]), std({ color: 0xffffff }), true);
+    this.body = inst(mergeGeometries([box(COACH_WIDTH, 2.75, L, 1.3), box(2.5, 0.3, L - 1.5, 4.05)]), std({ color: 0xffffff }), true);
     this.band = inst(box(2.92, 1.0, L, 0.3), std({ color: 0xffffff }), true);
     this.stripe = inst(box(2.94, 0.25, L - 0.6, 3.2), std({ color: 0xffffff }), true);
     this.win = inst(box(2.96, 0.95, L - 2.4, 2.05), this.winMat, false);

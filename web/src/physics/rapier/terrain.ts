@@ -21,7 +21,7 @@ import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 
 export const CHUNK = 16;
 // collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
-// meets (the steps' wedges: car.ts) G_CAR_ONLY; other bodies, and queries that should see the city as drawn, use
+// meets (the steps' wedges and train coaches) G_CAR_ONLY; other bodies, and queries for the static city, use
 // WORLD_GROUPS. The terrain's colliders (voxels and caps) are in every group.
 export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1;
 export const CAR_GROUPS = (G_CAR << 16) | 0xffff;

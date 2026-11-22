@@ -22,13 +22,15 @@
 // The world's colliders: terrain.ts (the player car's streaming), REACH m round every body; live edits
 // (core/live-edits.ts) rebuild the chunks they touch.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { axisAngle, quat, quatMul, rotate, vec3 } from '../../core/vec';
+import { wrapAngle } from '../../core/num';
+import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
 import { STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import type { CoachBox } from '../../sim/train-traffic';
 import type { Car, RoadPose } from '../../sim/types';
 import type { Meta } from '../../types';
-import { CAR_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
+import { CAR_GROUPS, CAR_ONLY_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 import { createVehicle, createWheels, REST, WHEEL_R, warmUp, type CarBuild } from './vehicle';
 import { buildOf, VEHICLES, type VehicleId } from '../../sim/vehicles';
 import { RapierCar, type CarInput } from './car';
@@ -76,6 +78,12 @@ interface Body {
   lat: number; along: number; vb: number; held: boolean;
   water: boolean;
 }
+interface CoachBody {
+  body: RAPIER.RigidBody;
+  collider: RAPIER.Collider;
+  from: CoachBox;
+  to: CoachBox;
+}
 type PlayerCommand =
   | { kind: 'claim'; player: string; entityId: number; choice?: VehicleId }
   | { kind: 'release' | 'reset'; player: string };
@@ -102,6 +110,8 @@ export class LifePhysics implements TrafficBodies {
   private commands: PlayerCommand[] = [];
   private readonly fades = new Map<Car, Fade>();
   private readonly byCollider = new Map<number, Body>();
+  private readonly coachBodies = new Map<string, CoachBody>();
+  private readonly coachColliders = new Set<number>();
   private readonly cool = new Map<Car, number>();
   private edits: [number, number, number, number][] = [];
   t = 0;
@@ -259,11 +269,12 @@ export class LifePhysics implements TrafficBodies {
     return d;
   }
 
-  // One traffic tick (after the cars moved)
+  // One traffic tick (after the cars and trains moved)
   tick(dt: number, T: Traffic) {
     this.edits = T.edits;
     const st = this.stats;
-    if (!this.edits.length && !this.drivers.size && !this.bodies.size && !this.fades.size && !this.terrain.stats.chunks) {
+    if (!this.edits.length && !this.drivers.size && !this.bodies.size && !this.coachBodies.size &&
+        !this.fades.size && !this.terrain.stats.chunks) {
       st.tickMs = st.stepMs = st.terrainMs = 0;
       return;
     }
@@ -342,6 +353,7 @@ export class LifePhysics implements TrafficBodies {
     st.notReady = 0;
     for (let i = 0; i < requests.length; i++) requests[i](ready[i]);
     for (const [c, p] of paths) if (!this.bodies.has(c.id) && !want.has(c)) this.pathBody(c, p);
+    this.syncCoaches(T, driveDist);
 
     const now = T.tickNumber * TICK * 1000;
     const cmds = new Map<Body, Cmd>();
@@ -353,11 +365,12 @@ export class LifePhysics implements TrafficBodies {
     }
     let stp = 0;
     for (let k = 0; k < SUB; k++) {
+      this.moveCoaches((k + 1) / SUB);
       for (const [c, p] of paths) {
         const b = this.bodies.get(c.id);
         if (b?.state === 'path') this.movePathBody(b, p, (k + 1) / SUB);
       }
-      const velocities = new Map<Body, { x: number; y: number; z: number }>();
+      const velocities = new Map<Body, Vec3>();
       for (const b of this.bodies.values()) {
         if (!b.ctl || !b.body.isEnabled()) continue;
         if (b.drive) {
@@ -377,7 +390,10 @@ export class LifePhysics implements TrafficBodies {
       for (const b of this.bodies.values()) {
         if (!b.ctl || !b.body.isEnabled()) continue;
         if (b.drive) {
-          const event = b.drive.afterStep(STEP);
+          const before = velocities.get(b);
+          const speed = before && b.driver ? this.coachImpact(b, before) : 0;
+          let event = b.drive.afterStep(STEP);
+          if (speed > 2 && (event?.kind !== 'impact' || speed > event.speed)) event = { kind: 'impact', speed };
           if (b.state === 'park' && b.drive.status === 'water') b.water = true;
           if (event) b.driver?.contact(T.tickNumber, now, event, !!b.build.bike, b.drive.lean);
         } else this.afterStep(b);
@@ -426,8 +442,71 @@ export class LifePhysics implements TrafficBodies {
 
   dispose() {
     for (const b of [...this.bodies.values()]) this.remove(b);
+    this.coachBodies.clear();
+    this.coachColliders.clear();
     this.terrain.dispose();
     this.world.free();
+  }
+
+  // Coaches interact with player chassis as kinematic walls. They never enter the road vehicle wreck path.
+  private syncCoaches(T: Traffic, driveDist: (x: number, z: number) => number) {
+    const nearby = new Set<string>();
+    if (this.drivers.size) {
+      for (const box of T.trains.coachBoxes()) {
+        const { x, y, z, size } = box;
+        if (driveDist(x, z) > DRIVE_RADIUS + size.z / 2) continue;
+        nearby.add(box.id);
+        const existing = this.coachBodies.get(box.id);
+        if (existing) {
+          existing.from = existing.to;
+          existing.to = box;
+          continue;
+        }
+        const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased()
+          .setTranslation(x - this.origin.x, y + size.y / 2, z - this.origin.z)
+          .setRotation(axisAngle(quat(), vec3(0, 1, 0), box.heading)));
+        const collider = this.world.createCollider(RAPIER.ColliderDesc.cuboid(size.x / 2, size.y / 2, size.z / 2)
+          .setCollisionGroups(CAR_ONLY_GROUPS), body);
+        this.coachBodies.set(box.id, { body, collider, from: box, to: box });
+        this.coachColliders.add(collider.handle);
+      }
+    }
+    for (const [id, coach] of this.coachBodies) {
+      if (nearby.has(id)) continue;
+      this.coachColliders.delete(coach.collider.handle);
+      this.world.removeRigidBody(coach.body);
+      this.coachBodies.delete(id);
+    }
+  }
+
+  private moveCoaches(a: number) {
+    for (const { body, from, to } of this.coachBodies.values()) {
+      body.setNextKinematicTranslation({ x: mix(from.x, to.x, a) - this.origin.x,
+        y: mix(from.y, to.y, a) + to.size.y / 2, z: mix(from.z, to.z, a) - this.origin.z });
+      const heading = from.heading + wrapAngle(to.heading - from.heading) * a;
+      body.setNextKinematicRotation(axisAngle(quat(), vec3(0, 1, 0), heading));
+    }
+  }
+
+  // The car core detects lost speed against walls. Relative speed also covers a moving train hitting a stopped car.
+  private coachImpact(player: Body, velocity: Vec3) {
+    let speed = 0;
+    if (!this.coachColliders.size) return speed;
+    this.world.contactPairsWith(player.chassis, (collider) => {
+      if (!this.coachColliders.has(collider.handle)) return;
+      const train = collider.parent()!.linvel();
+      this.world.contactPair(player.chassis, collider, (contact, flipped) => {
+        const n = contact.normal(), sign = flipped ? -1 : 1;
+        if (Math.abs(n.y) > 0.5) return;
+        for (let i = 0; i < contact.numContacts(); i++) {
+          if (contact.contactImpulse(i) <= 0) continue;
+          const closing = sign * ((velocity.x - train.x) * n.x + (velocity.z - train.z) * n.z);
+          speed = Math.max(speed, closing);
+          break;
+        }
+      });
+    });
+    return speed;
   }
 
   // ------------------------------------------------------------------ bodies
@@ -664,7 +743,7 @@ export class LifePhysics implements TrafficBodies {
     for (const list of [T.people, T.riders]) for (let i = list.length - 1; i >= 0; i--) hit(list[i]);
   }
 
-  private hitTraffic(player: Body, velocities: Map<Body, { x: number; y: number; z: number }>, T: Traffic, now: number) {
+  private hitTraffic(player: Body, velocities: Map<Body, Vec3>, T: Traffic, now: number) {
     const v = velocities.get(player)!;
     const hits: Body[] = [];
     this.world.contactPairsWith(player.chassis, (collider) => {
