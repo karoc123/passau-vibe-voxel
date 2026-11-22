@@ -2,12 +2,16 @@ import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
-import { flying, type Nav } from './nav';
+import type { Nav } from './nav';
 import { collisionWorld, JET, PLANE, PlaneFlight, waterTop, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
+import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
+import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
+import { ModePanel } from './mode-panel';
+import { nearestRiver, type RiverPoints } from './river';
 import './plane.css';
 
 // The plane mode: the glue round plane-flight.ts (the flight, pure): the panel, the input (keyboard, touch, gamepad),
@@ -19,14 +23,14 @@ import './plane.css';
 // (held, gradual; not Ctrl: Ctrl+W would close the tab), T back to the last safe point, Esc exit (nav.ts). Touch: the
 // left thumb is a stick (sideways turn, up nose down), the throttle a slider on the right that stays where it is left,
 // a pinch on the right zooms. Gamepad (standard mapping): left stick turn and pitch, RT/LT (or the right stick up/down)
-// move the throttle.
+// move the throttle. Out of focus it holds still (input.ts).
 
-const KEYS = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyF', 'Space']);
+const KEYS: ReadonlySet<string> = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyF', 'Space']);
 const THROTTLE_RATE = 0.5; // /s the lever moves while a key is held (0 to full in 2 s)
 const INVERT_KEY = 'plane-invert-v1';
 const ENTER_MS = 600;
 const CRASH_TINT_MS = 1200;
-const DEAD = 0.12;
+const Z = new THREE.Vector3(0, 0, 1);
 
 // the aircraft: the flight's numbers (plane-flight.ts, the same on a server) and what only the viewer needs
 type Chase = { back: number; up: number; look: number; lag: number; rollLag: number; fov: (v: number) => number };
@@ -48,15 +52,8 @@ export interface PlaneEnv {
   level: () => number;
   /** 0 by day .. 1 by night (daylight.ts) */
   night: () => number;
-  /** the river's cells (flood.json river: x, z pairs), for a start on the water */
-  river: () => number[] | null;
-}
-
-function button(label: string, run: () => void, parent: HTMLElement) {
-  const b = el('button', 'mode-button', label, parent);
-  b.type = 'button';
-  b.addEventListener('click', () => { run(); b.blur(); });
-  return b;
+  /** the river's points (river.ts), for a start on the water */
+  river: () => RiverPoints | null;
 }
 
 const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'; } catch { return false; } };
@@ -70,49 +67,43 @@ export class PlaneMode {
   flight!: PlaneFlight;
   private model!: PlaneModel | JetModel;
   private readonly touch: TouchSticks;
-  private readonly keys = new Set<string>();
-  private readonly panel = document.createElement('aside');
+  private readonly keys = new HeldKeys(KEYS);
+  private readonly panel: ModePanel;
   private readonly enter: HTMLButtonElement;
   private readonly enterWater: HTMLButtonElement;
   private readonly enterJet: HTMLButtonElement;
-  private readonly details = el('div', 'mode-detail', '', this.panel);
-  private readonly status = el('div', 'plane-status', '', this.details);
-  private readonly telemetry = el('div', 'plane-telemetry', '', this.details);
-  private readonly help = el('div', 'plane-help', '', this.details);
+  private readonly telemetry: HTMLDivElement;
+  private readonly help: HTMLDivElement;
   private readonly invertBox: HTMLInputElement;
+  private readonly rig: ChaseRig;
   private readonly tint = el('div', 'fpv-impact-tint plane-tint');
   private readonly slider = el('div', '', '<div class="fill"></div><div class="knob"></div><span class="val"></span>');
   private throttle = 0.6;
   private invert = readInvert();
   private phase: 'off' | 'loading' | 'flying' = 'off';
   private start: { x: number; z: number; y: number; heading: number; water: boolean } | null = null;
-  private notice = '';
-  private noticeUntil = 0;
   private crashAt = -1e9;
-  private blurred = false;
   private scripted: PlaneInput | null = null;
   private zoom = 1;
-  private enterFrom: { p: THREE.Vector3; q: THREE.Quaternion; fov: number; t0: number } | null = null;
-  private readonly cam = { yaw: 0, pitch: 0, fov: 62, fwd: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
+  private readonly cam = { yaw: 0, pitch: 0, fwd: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
   private readonly fwd = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
   private readonly v3 = new THREE.Vector3();
   private readonly v4 = new THREE.Vector3();
+  private readonly bank = new THREE.Quaternion();
   private nextPanel = 0;
-  private savedFov = 0;
 
   constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera, private readonly target: THREE.Vector3,
     private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement, private readonly env: PlaneEnv) {
+    const P = this.panel = new ModePanel(host, 'plane', 'Plane');
+    this.enter = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
+    this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
+    this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));
+    this.telemetry = P.line('telemetry');
+    this.help = P.help('', '');
+    this.rig = new ChaseRig(camera);
     this.use(AIRCRAFT.floatplane);
-    this.panel.className = 'plane-mode';
-    this.panel.setAttribute('aria-label', 'Plane');
-    this.enter = button('Plane', () => this.toggle(false, AIRCRAFT.floatplane), this.panel);
-    this.enterWater = button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane), this.panel);
-    this.enterJet = button('Jet', () => this.toggle(false, AIRCRAFT.jet), this.panel);
-    this.panel.append(this.details);
-    host.append(this.panel);
-    this.status.setAttribute('role', 'status');
-    const label = el('label', 'plane-invert', '<input type="checkbox"> Invert pitch', this.details);
+    const label = el('label', 'plane-invert', '<input type="checkbox"> Invert pitch', P.details);
     this.invertBox = label.querySelector('input')!;
     this.invertBox.checked = this.invert;
     this.invertBox.addEventListener('change', () => {
@@ -140,16 +131,12 @@ export class PlaneMode {
       this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.6, 2.2);
     }, { passive: false });
     addEventListener('keydown', (e) => {
-      if (this.nav.mode !== 'plane' || e.metaKey || e.ctrlKey || e.altKey ||
-          (e.target as Element).closest?.('input:not([type=checkbox]), select, textarea, [contenteditable]')) return;
+      if (this.nav.mode !== 'plane' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.backToSafe(); }
-      else if (KEYS.has(e.code)) this.keys.add(e.code);
-      else return;
+      else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => { this.blurred = true; this.keys.clear(); this.touch.clear(); });
-    addEventListener('focus', () => { this.blurred = false; });
+    onFocusLoss(() => this.touch.clear());
     Object.assign(window, { __plane: {
       start: (s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) => this.startAt(s),
       pose: () => ({ ...this.flight.p, heading: this.flight.heading, gamma: this.flight.gamma, bank: this.flight.bank, kmh: this.flight.v * 3.6, state: this.flight.state, throttle: this.throttle,
@@ -170,7 +157,7 @@ export class PlaneMode {
     }
     if (this.collision !== m.collision) this.collision?.release();
     this.type = type;
-    this.help.innerHTML = `<span class="plane-help-keys">${type.help[0]}</span><span class="plane-help-touch">${type.help[1]}</span>`;
+    this.panel.setHelp(this.help, ...type.help);
     ({ flight: this.flight, model: this.model, collision: this.collision, world: this.world } = m);
   }
 
@@ -180,9 +167,9 @@ export class PlaneMode {
     const pos = this.camera.position, look = this.target.clone().sub(pos);
     let x = pos.x, z = pos.z, heading = Math.atan2(look.x, look.z);
     if (water) {
-      const r = this.nearestRiver(this.target.x, this.target.z);
-      if (!r) { this.say('No river near the view', 2500); return; }
-      [x, z] = r;
+      const r = nearestRiver(this.env.river() ?? [], this.target.x, this.target.z);
+      if (!r) { this.panel.say('No river near the view', 2500); return; }
+      ({ x, z } = r);
     }
     this.startAt({ x, z, y: pos.y, h: heading, water, type: type === AIRCRAFT.jet ? 'jet' : 'floatplane' });
   }
@@ -191,8 +178,7 @@ export class PlaneMode {
     if (this.nav.mode !== 'plane') {
       if (!this.nav.startCraft('plane')) return false;
       this.use(AIRCRAFT[s.type ?? 'floatplane']);
-      this.enterFrom = { p: this.camera.position.clone(), q: this.camera.quaternion.clone(), fov: this.camera.fov, t0: performance.now() };
-      this.savedFov = this.camera.fov;
+      this.rig.begin(ENTER_MS);
     }
     // (clear of the map's wall: ~5 s of flight at the start's speed)
     const c = this.type.cfg, m = c.EDGE + Math.max(230, 5 * c.RESPAWN_SPEED);
@@ -201,20 +187,9 @@ export class PlaneMode {
     this.phase = 'loading';
     this.keys.clear();
     this.touch.setActive(true);
-    this.notice = '';
+    this.panel.silence();
+    this.draw();
     return true;
-  }
-
-  // the river cell (flood.json) nearest (x, z): where the river can be; the water itself is found in the voxels then
-  private nearestRiver(x: number, z: number): [number, number] | null {
-    const r = this.env.river();
-    if (!r?.length) return null;
-    let best: [number, number] | null = null, d = Infinity;
-    for (let k = 0; k < r.length; k += 2) {
-      const e = (r[k] - x) ** 2 + (r[k + 1] - z) ** 2;
-      if (e < d) { d = e; best = [r[k] + 12, r[k + 1] + 12]; }
-    }
-    return best;
   }
 
   // once the start's collision tiles are in: in the air, clear over the highest column round it; on the water, at the
@@ -225,7 +200,7 @@ export class PlaneMode {
     if (s.water) {
       const found = this.openWater(s.x, s.z);
       if (found === null) return;
-      if (!found) { this.say('No open water here: starting in the air', 3000); s.water = false; return; }
+      if (!found) { this.panel.say('No open water here: starting in the air', 3000); s.water = false; return; }
       this.flight.reset({ x: found.x, y: found.water + this.type.cfg.FLOAT_H, z: found.z, heading: found.heading, water: true });
       this.throttle = 0;
     } else {
@@ -284,13 +259,9 @@ export class PlaneMode {
     this.keys.clear();
     this.touch.setActive(false);
     this.model.group.visible = false;
-    this.enterFrom = null;
     this.scripted = null;
-    this.camera.up.set(0, 1, 0);
-    if (this.savedFov) { this.camera.fov = this.savedFov; this.camera.updateProjectionMatrix(); this.savedFov = 0; }
+    this.rig.end();
   }
-
-  private say(text: string, ms: number) { this.notice = text; this.noticeUntil = performance.now() + ms; }
 
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
@@ -308,21 +279,17 @@ export class PlaneMode {
 
   private fly(dt: number) {
     const f = this.flight, now = performance.now();
-    const paused = this.blurred || document.hidden;
-    if (!paused) {
-      const input = this.input(dt);
-      f.advance(input, dt, this.world);
-    }
+    if (inFocus()) f.advance(this.input(dt), dt, this.world);
     this.collision.prefetch(f.p, f.velocity(this.v3));
     for (const e of f.events.splice(0)) {
       if (e.type === 'crash') {
         this.crashAt = now;
-        this.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back at a safe point…` : `Crash! (${e.what}, ${e.kmh} km/h) Back at a safe point…`, 0);
+        this.panel.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back at a safe point…` : `Crash! (${e.what}, ${e.kmh} km/h) Back at a safe point…`, 0);
       } else if (e.type === 'respawn') { this.throttle = e.throttle; }
-      else if (e.type === 'skim') this.say('Careful!', 1500);
-      else if (e.type === 'touchdown') this.say('On the water', 2000);
-      else if (e.type === 'takeoff') this.say('Airborne', 1500);
-      else if (e.type === 'bump') this.say('Bump', 1200);
+      else if (e.type === 'skim') this.panel.say('Careful!', 1500);
+      else if (e.type === 'touchdown') this.panel.say('On the water', 2000);
+      else if (e.type === 'takeoff') this.panel.say('Airborne', 1500);
+      else if (e.type === 'bump') this.panel.say('Bump', 1200);
     }
     this.model.group.visible = f.state !== 'crashed';
     this.model.orient(f.p, f.attitude(this.fwd, this.up), this.up);
@@ -332,11 +299,8 @@ export class PlaneMode {
 
   private input(dt: number): PlaneInput {
     if (this.scripted) return this.scripted;
-    const has = (...codes: string[]) => codes.some((c) => this.keys.has(c));
-    let pad: Gamepad | undefined;
-    try { pad = Array.from(navigator.getGamepads?.() ?? []).find((p) => p?.connected && p.mapping === 'standard') ?? undefined; }
-    catch { /* the keyboard still works when the Gamepad API is blocked */ }
-    const dz = (v: number | undefined) => { const a = v ?? 0; return Math.sign(a) * clamp((Math.abs(a) - DEAD) / (1 - DEAD), 0, 1); };
+    const has = (...codes: string[]) => this.keys.any(...codes) > 0;
+    const pad = gamepad(), dz = padAxis;
     // the throttle lever: keys and triggers move it, the slider sets it (pointer handlers)
     let lever = (has('ShiftLeft', 'ShiftRight', 'KeyR') ? 1 : 0) - (has('Space', 'KeyF') ? 1 : 0);
     if (pad) lever += (pad.buttons[7]?.value ?? 0) - (pad.buttons[6]?.value ?? 0) - dz(pad.axes[3]);
@@ -359,59 +323,42 @@ export class PlaneMode {
   // lag, rolled by a quarter of its bank; the jet's along its nose and its up, both lagged (it rolls with the jet,
   // through loops and inverted). Kept clear of what the collision holds; the field of view by speed; shaken by a crash
   private chase(dt: number, now: number) {
-    const f = this.flight, cam = this.camera, c = this.cam, ch = this.type.chase, aero = this.type.cfg.AEROBATIC;
+    const f = this.flight, c = this.cam, ch = this.type.chase, aero = this.type.cfg.AEROBATIC;
     let fwd: THREE.Vector3, off: THREE.Vector3;
     if (aero) {
       f.attitude(this.fwd, this.up);
-      c.fwd.lerp(this.fwd, 1 - Math.exp(-ch.lag * dt)).normalize();
-      c.up.lerp(this.up, 1 - Math.exp(-ch.rollLag * dt));
+      c.fwd.lerp(this.fwd, follow(ch.lag, dt)).normalize();
+      c.up.lerp(this.up, follow(ch.rollLag, dt));
       c.up.addScaledVector(c.fwd, -c.up.dot(c.fwd)).normalize();
       c.yaw = Math.atan2(c.fwd.x, c.fwd.z);
       fwd = this.v3.copy(c.fwd);
       off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom).addScaledVector(c.up, ch.up * this.zoom);
     } else {
-      c.yaw += Math.atan2(Math.sin(f.heading - c.yaw), Math.cos(f.heading - c.yaw)) * (1 - Math.exp(-ch.lag * dt));
-      c.pitch += (f.gamma * 0.7 - c.pitch) * (1 - Math.exp(-ch.rollLag * dt));
+      c.yaw = followAngle(c.yaw, f.heading, ch.lag, dt);
+      c.pitch += (f.gamma * 0.7 - c.pitch) * follow(ch.rollLag, dt);
       fwd = this.v3.set(Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch), Math.cos(c.yaw) * Math.cos(c.pitch));
       off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom);
       off.y += ch.up * this.zoom;
     }
     const hit = f.state !== 'crashed' ? this.collision.sweep(f.p, off) : 'loading';
-    const k = hit !== 'loading' && hit.hit ? Math.max(0.15, hit.fraction - 0.5 / off.length()) : 1;
-    const want = off.multiplyScalar(k).add(f.p);
+    const want = off.multiplyScalar(clearShare(hit, off, 0.15, 0.5)).add(f.p);
     const look = fwd.multiplyScalar(ch.look).add(f.p);
     const crash = (now - this.crashAt) / CRASH_TINT_MS;
-    if (crash < 1) {
-      const a = 0.8 * (1 - crash) ** 2;
-      want.x += Math.sin(now * 0.071) * a; want.y += Math.sin(now * 0.093 + 1) * a; want.z += Math.sin(now * 0.057 + 2) * a;
-    }
-    if (aero) cam.up.copy(c.up); else cam.up.set(0, 1, 0);
-    cam.position.copy(want);
-    cam.lookAt(look);
-    if (!aero) cam.rotateZ(-f.bank * 0.25);
-    c.fov += (ch.fov(f.v) - c.fov) * (1 - Math.exp(-2 * dt));
-    let fov = c.fov;
-    // the entry: from where the map camera was to the chase pose
-    const E = this.enterFrom;
-    if (E) {
-      const t = Math.min(1, (now - E.t0) / ENTER_MS), e = t * t * (3 - 2 * t);
-      cam.position.lerpVectors(E.p, cam.position, e);
-      cam.quaternion.slerpQuaternions(E.q, cam.quaternion.clone(), e);
-      fov = E.fov + (fov - E.fov) * e;
-      if (t >= 1) this.enterFrom = null;
-    }
-    if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
+    if (crash < 1) shake(want, 0.8 * (1 - crash) ** 2, now);
+    const up = this.camera.up.copy(aero ? c.up : THREE.Object3D.DEFAULT_UP);
+    const q = this.rig.look(want, look, up);
+    if (!aero) q.multiply(this.bank.setFromAxisAngle(Z, -f.bank * 0.25));
+    // (from where the map camera was to the chase pose over the entry)
+    this.rig.place(want, q, ch.fov(f.v), dt);
     // (the shadows' fit and the fog read the target: ahead of the plane)
     this.target.copy(f.p).addScaledVector(this.v3.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)), aero ? 200 : 150);
   }
 
   // ------------------------------------------------------------------ the panel
   private draw() {
-    const active = this.nav.mode === 'plane', f = this.flight, on = active && this.phase === 'flying';
-    document.body.classList.toggle('plane-flying', active);
-    this.panel.hidden = flying(this.nav.mode) && !active;
-    this.panel.classList.toggle('mode-active', active);
-    this.details.hidden = !active;
+    const active = this.nav.mode === 'plane', f = this.flight, on = active && this.phase === 'flying', P = this.panel;
+    P.active = active;
+    P.details.hidden = !active;
     this.help.hidden = this.phase !== 'flying';
     this.enter.textContent = active ? `Exit ${this.type.label}` : 'Plane';
     const canStart = this.nav.canStartCraft;
@@ -424,20 +371,18 @@ export class PlaneMode {
     (this.slider.querySelector('.knob') as HTMLElement).style.bottom = `calc(${this.throttle} * (100% - 24px))`;
     this.slider.querySelector('.val')!.textContent = `${pct}%`;
     this.slider.setAttribute('aria-valuenow', String(pct));
-    const now = performance.now();
-    const msg = (on && f.state === 'crashed') || now < this.noticeUntil ? this.notice :
-      this.phase === 'loading' ? 'Loading collision tiles near the start…' :
+    const msg = on && f.state === 'crashed' ? P.last : P.saying ||
+      (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       !on ? '' :
-      this.blurred || document.hidden ? 'Paused (window not in focus)' :
+      !inFocus() ? PAUSED :
       f.waiting ? 'Waiting for the next collision tile…' :
       f.stalled ? 'Stall! Nose down or more throttle' :
-      f.atEdge ? 'Map edge: turn back' : '';
-    if (this.status.textContent !== msg) this.status.textContent = msg;
+      f.atEdge ? 'Map edge: turn back' : '');
+    ModePanel.text(P.status, msg);
     if (!on) { this.telemetry.textContent = ''; return; }
     const su = this.collision.surface(f.p.x, f.p.z);
     const where = f.state === 'water' ? 'on the water' : su ? `${Math.round(f.p.y - f.cfg.RADIUS - su.ground)} m AGL` : `${Math.round(f.p.y)} m`;
     const g = f.cfg.AEROBATIC && f.state === 'air' ? ` · ${f.load.toFixed(1)} g` : '';
-    const text = `${Math.round(f.v * 3.6)} km/h · ${where}${g} · throttle ${pct}%`;
-    if (this.telemetry.textContent !== text) this.telemetry.textContent = text;
+    ModePanel.text(this.telemetry, `${Math.round(f.v * 3.6)} km/h · ${where}${g} · throttle ${pct}%`);
   }
 }

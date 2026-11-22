@@ -1,4 +1,5 @@
-import { flying, type Mode, type Ride } from './nav/nav';
+import type { Mode, Ride } from './nav/nav';
+import { typing } from './nav/input';
 import { $, coarsePointer, el } from './util';
 
 export interface Rect { x0: number; x1: number; y0: number; y1: number }
@@ -39,7 +40,7 @@ export class Hud {
     box.innerHTML = `<div class="who"></div>${this.touch ? '<div class="hint"></div>'
       : `<div class="row"><div class="keys">${KEYS.map(([c, k, g]) => `<span class="cap" data-k="${c}">${k}${g && `<i>${g}</i>`}</span>`).join('')}</div><div class="mouse"></div></div>`}`;
     const lit = (k: string, on: boolean) => box.querySelectorAll(`[data-k="${k}"]`).forEach((n) => n.classList.toggle('on', on));
-    addEventListener('keydown', (e) => { if (!(e.target as Element).closest?.('input:not([type=range])')) lit(ALIAS[e.code] ?? e.code, true); });
+    addEventListener('keydown', (e) => { if (!typing(e)) lit(ALIAS[e.code] ?? e.code, true); });
     addEventListener('keyup', (e) => lit(ALIAS[e.code] ?? e.code, false));
     addEventListener('blur', () => box.querySelectorAll('.on').forEach((n) => n.classList.remove('on')));
     dom.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') lit(e.button === 2 || e.shiftKey ? 'r' : 'l', true); });
@@ -53,7 +54,7 @@ export class Hud {
   }
 
   set(mode: Mode, ride: Ride | null) {
-    this.box.hidden = flying(mode);
+    // (hidden in a craft and while driving: style.css, body[data-mode])
     this.box.classList.toggle('pedestrian', mode === 'pedestrian');
     const label = ride?.obj.kind === 'car' && ride.obj.vt === 'moto' ? 'moto' : ride?.label;
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.kind] : '';

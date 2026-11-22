@@ -1,4 +1,5 @@
 import { FixedStep } from '../core/fixed-step';
+import { SafeTrail } from '../core/safe-trail';
 import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../core/vec';
 import type { Sweep } from './sweep';
 
@@ -153,7 +154,7 @@ export type PlaneEvent =
   | { type: 'skim' | 'touchdown' | 'takeoff' | 'bump' }
   | { type: 'crash'; what: string; kmh: number }
   | { type: 'respawn'; throttle: number };
-type Safe = Required<PlanePose> & { t: number };
+type Safe = Required<PlanePose>;
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 // the level speed at full throttle (thrust = parasitic drag, roughly)
@@ -180,21 +181,23 @@ export class PlaneFlight {
   private crashLeft = 0;
   private crashAt = 0;
   private readonly clock: FixedStep;
-  private nextSafe = 0;
-  private safe: Safe[] = [];
-  private start: Safe = { x: 0, y: 0, z: 0, heading: 0, speed: 0, water: false, t: 0 };
+  private readonly safe: SafeTrail<Safe>;
+  private start: Safe = { x: 0, y: 0, z: 0, heading: 0, speed: 0, water: false };
   private readonly d = vec3();
   private readonly q = vec3();
   // the aerobatic law's attitude: the path's direction and the lift's (across it); heading, gamma, bank derived
   private readonly fw = vec3(0, 0, 1);
   private readonly lu = vec3(0, 1, 0);
 
-  constructor(readonly cfg: PlaneConfig = PLANE) { this.clock = new FixedStep(cfg.STEP, cfg.MAX_STEPS); }
+  constructor(readonly cfg: PlaneConfig = PLANE) {
+    this.clock = new FixedStep(cfg.STEP, cfg.MAX_STEPS);
+    this.safe = new SafeTrail(cfg.SAFE_EVERY, cfg.SAFE_KEEP);
+  }
 
   reset(pose: PlanePose) {
-    this.start = { x: pose.x, y: pose.y, z: pose.z, heading: pose.heading, speed: pose.speed ?? (pose.water ? 0 : this.cfg.RESPAWN_SPEED), water: !!pose.water, t: 0 };
-    this.safe = [];
-    this.t = this.nextSafe = this.clock.acc = 0;
+    this.start = { x: pose.x, y: pose.y, z: pose.z, heading: pose.heading, speed: pose.speed ?? (pose.water ? 0 : this.cfg.RESPAWN_SPEED), water: !!pose.water };
+    this.safe.reset();
+    this.t = this.clock.acc = 0;
     this.place(this.start);
   }
 
@@ -279,7 +282,7 @@ export class PlaneFlight {
     const da = c.ALPHA_RATE * dt;
     this.aoa += clamp((this.alphaWant() - this.aoa) * Math.min(1, c.ALPHA_FOLLOW * dt), -da, da);
     this.t += dt;
-    if (this.t >= this.nextSafe) this.record(w);
+    if (this.safe.due(this.t)) this.record(w);
     return true;
   }
 
@@ -453,10 +456,9 @@ export class PlaneFlight {
   // the newest safe pose at least SAFE_AGE old (else the start), SAFE: level, at least RESPAWN_AGL over the top there
   respawn(w: PlaneWorld) {
     const c = this.cfg, now = this.state === 'crashed' ? this.crashAt : this.t;
-    let k = this.safe.length - 1;
-    while (k >= 0 && this.safe[k].t > now - c.SAFE_AGE) k--;
-    const s = k >= 0 ? { ...this.safe[k] } : { ...this.start };
-    this.safe.length = Math.max(0, k + 1);
+    const k = this.safe.find((_, t) => t <= now - c.SAFE_AGE);
+    const s = { ...(this.safe.get(k) ?? this.start) };
+    this.safe.cut(k + 1);
     if (!s.water) {
       const top = w.surface(s.x, s.z)?.top ?? s.y - c.RESPAWN_AGL;
       s.y = Math.min(w.H + c.CEILING - 10, Math.max(s.y, top + c.RESPAWN_AGL));
@@ -464,13 +466,13 @@ export class PlaneFlight {
     } else s.speed = 0;
     this.place(s);
     this.engine = s.water ? 0 : c.RESPAWN_THROTTLE;
-    this.nextSafe = this.t + c.SAFE_EVERY;
+    this.safe.wait(this.t);
     this.events.push({ type: 'respawn', throttle: this.engine });
   }
 
   private record(w: PlaneWorld) {
     const c = this.cfg;
-    this.nextSafe = this.t + c.SAFE_EVERY;
+    this.safe.wait(this.t);
     let ok = false;
     if (this.state === 'water') ok = this.v < 15;
     else if (this.state === 'air' && !this.stalled) {
@@ -478,8 +480,7 @@ export class PlaneFlight {
       ok = !!s && this.p.y - s.top >= c.SAFE_AGL;
     }
     if (!ok) return;
-    this.safe.push({ x: this.p.x, y: this.p.y, z: this.p.z, heading: this.heading, speed: this.v, water: this.state === 'water', t: this.t });
-    if (this.safe.length > c.SAFE_KEEP) this.safe.shift();
+    this.safe.push({ x: this.p.x, y: this.p.y, z: this.p.z, heading: this.heading, speed: this.v, water: this.state === 'water' }, this.t);
   }
 }
 

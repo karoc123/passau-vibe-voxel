@@ -278,7 +278,7 @@ LT slow. The drone's RC-radio calibration (`fpv-input.ts`) is not used.
   `180 km/h · 140 m AGL` (tabular figures; over the ground under the plane, from `surface().ground`); a status line
   for the notes ("Pull up", "Map edge", "Careful!", "Crash! Back in the air…", "Waiting for the next collision
   tile…"); a help line in a keys and a touch variant chosen by `@media (pointer: coarse)` as `drive.css` does; the
-  "Invert pitch" checkbox (`localStorage`, key `plane-invert-v1`). `body.plane-flying` hides `#hud` and the other
+  "Invert pitch" checkbox (`localStorage`, key `plane-invert-v1`). `body[data-mode=plane]` hides `#hud` and the other
   modes' panels.
 
 ## Model
@@ -338,7 +338,7 @@ own port, never 5173.
 
 - `nav.ts`: `Mode` gets `'plane'`; `export const flying = (m: Mode) => m === 'fpv' || m === 'plane'`;
   `startFpv()` → `startCraft(mode)`. The checks in `nav.ts` (6), `main.ts` (3: `goPlace`, the Walk button, the
-  tilt-shift), `drive.ts` (2), `hud.ts` (1) use `flying()`. `body.fpv` stays the drone's.
+  tilt-shift), `drive.ts` (2), `hud.ts` (1) use `flying()`. `body[data-mode=fpv]` stays the drone's.
 - `voxel-collision.ts`: `constructor(meta, cache?, { radius = 0.35, horizon = 2.2 } = {})`.
 - Gates: `node tools/collision.mjs` passes unchanged (same numbers); `node tools/core-deps.mjs`; the drone and the
   car smoke-tested by hand (enter, fly/drive, Esc).

@@ -2,6 +2,7 @@ import type { StreetLife } from '../sim/life';
 import type { Car, Person, Pose } from '../sim/types';
 import type { CarBuild, CarInput } from '../physics/rapier/car';
 import type { DrawnPose, Obstacle, RapierDrive, Walker } from '../physics/rapier/drive-world';
+import { SafeTrail } from '../core/safe-trail';
 
 // One drive of a traffic car on Rapier (physics/rapier/drive-world.ts), between the car's world and the street life:
 // what the car meets (the traffic and the people near it), what that does to them (a car knocked out of the traffic, a
@@ -29,7 +30,7 @@ export interface Note { text: string; ms: number }
 
 export class DriveSession {
   // recent poses on the road (on its wheels, on the ground, no water under it), to come back to from the river
-  safe: { pose: Pose; t: number }[] = [];
+  readonly safe = new SafeTrail<Pose>(SAFE_EVERY_MS, SAFE_KEEP);
   sinkUntil = 0;
   crashUntil = 0;
   fallUntil = 0; // a bike's rider came off: back on the road then
@@ -41,7 +42,7 @@ export class DriveSession {
   constructor(readonly life: DriveLife, readonly car: Car, readonly rap: RapierDrive, private readonly build: CarBuild, start: DrawnPose, now: number) {
     rap.begin(start, car.v, build);
     // (where it was taken: a traffic car's place on the road, upright)
-    this.safe.push({ pose: { x: start.x, y: start.y, z: start.z, h: start.h }, t: now });
+    this.safe.push({ x: start.x, y: start.y, z: start.z, h: start.h }, now);
   }
 
   // is the player's input ignored now (sinking, shaken by a crash)?
@@ -94,11 +95,8 @@ export class DriveSession {
       this.sinkUntil = now + SINK_MS;
       notes.push({ text: 'Splash! Back on the road in a moment…', ms: SINK_MS });
     }
-    const d = rap.drawn(), last = this.safe.at(-1);
-    if (d && (!last || now - last.t > SAFE_EVERY_MS) && this.onRoad(d)) {
-      this.safe.push({ pose: { x: d.x, y: d.y, z: d.z, h: d.h }, t: now });
-      if (this.safe.length > SAFE_KEEP) this.safe.shift();
-    }
+    const d = rap.drawn();
+    if (d && this.safe.due(now) && this.onRoad(d)) this.safe.push({ x: d.x, y: d.y, z: d.z, h: d.h }, now);
     return notes;
   }
 
@@ -156,10 +154,10 @@ export class DriveSession {
 
   // back where the car last was on the road, some BACK_M m before where it left it, standing still
   private respawn() {
-    const safe = this.safe, edge = safe.at(-1)?.pose;
-    const i = edge ? safe.findLastIndex((s) => Math.hypot(s.pose.x - edge.x, s.pose.z - edge.z) > BACK_M) : -1;
-    const pose = safe[Math.max(0, i)]?.pose ?? edge;
-    this.safe = safe.slice(0, Math.max(1, i + 1));
+    const safe = this.safe, edge = safe.newest;
+    const i = edge ? safe.find((p) => Math.hypot(p.x - edge.x, p.z - edge.z) > BACK_M) : -1;
+    const pose = safe.get(Math.max(0, i)) ?? edge;
+    safe.cut(Math.max(1, i + 1));
     this.sinkUntil = 0;
     this.crashUntil = 0;
     this.fallUntil = 0;

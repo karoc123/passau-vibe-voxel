@@ -42,6 +42,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .mode-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; padding-top: 5px; }
 #bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
 #bar .mode-tools [hidden] { display: none; }
+/* the mode on: body[data-mode] (main.ts), nav.ts's Mode or `drive` while a car is driven. In a craft and while driving
+   the key legend is hidden; in a craft the other modes' panels too (the active one is .mode-active, nav/mode-panel.ts) */
+body:is([data-mode=fpv], [data-mode=boat], [data-mode=plane], [data-mode=drive]) #hud { display: none; }
+body:is([data-mode=fpv], [data-mode=boat], [data-mode=plane]) #bar .mode-tools > :not(.mode-active) { display: none; }
+body[data-mode=fpv] #labels { display: none; }
+/* the plane, and the drone while it flies: a compact strip of its panel alone (nav/plane.css, nav/fpv.css: their own) */
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) :is(#hud, .caption),
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools) { display: none; }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100% - 28px - var(--sl) - var(--sr)); }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active {
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 0 8px; border-radius: 6px; background: rgba(16,17,20,.62);
+}
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active .mode-detail { display: contents; }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active .mode-status:not(:empty) { order: 1; flex-basis: 100%; padding-bottom: 6px; }
+/* a mode's help line: the keys, or on a touch screen what the thumbs do */
+#bar .mode-help-touch { display: none; }
+@media (pointer: coarse) {
+  #bar .mode-help-keys { display: none; }
+  #bar .mode-help-touch { display: inline; }
+}
 #bar .mode-button {
   padding: 0; min-height: 24px; border: 0; background: none; color: #fff;
   font: inherit; font-weight: 500; text-shadow: inherit; cursor: pointer;
@@ -196,7 +216,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
   touch-action: none; -webkit-user-select: none; user-select: none; }
 #jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
-@media (pointer: coarse) { body.on-foot:not(.noui) #jump-button { display: grid; place-items: center; } }
+@media (pointer: coarse) { body:is([data-mode=walk], [data-mode=pedestrian]):not(.noui) #jump-button { display: grid; place-items: center; } }
 /* landscape: the right thumb rests ~100-150 px in from the bottom right corner, so the button sits on the edge beside
    it, just above the "?" (#credits-button: 8 px in, 44 px), out of the stick's ring (radius <= 72 px around the thumb)
    and far from the bar (top left); the safe area keeps it off a notch or the home indicator */
@@ -217,7 +237,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   font: 600 12px/1.15 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em;
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #handbrake-button.held, #boat-drift-button.held { background: rgba(220,60,50,.55); border-color: #fff; }
-@media (pointer: coarse) { body.driving:not(.noui) #handbrake-button, body.boating:not(.noui) #boat-drift-button { display: grid; place-items: center; } }
+@media (pointer: coarse) { body[data-mode=drive]:not(.noui) #handbrake-button, body[data-mode=boat]:not(.noui) #boat-drift-button { display: grid; place-items: center; } }
 @media (pointer: coarse) and (orientation: landscape) {
   #handbrake-button, #boat-drift-button { width: 68px; height: 68px; right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); }
 }

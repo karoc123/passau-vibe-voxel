@@ -7,6 +7,8 @@ import type { View } from '../types';
 import { clamp, coarsePointer, ease } from '../util';
 import type { World } from '../world';
 import { rideCamera } from './ride';
+import { follow } from './chase-rig';
+import { gameKey, onFocusLoss } from './input';
 import { Pedestrian } from './pedestrian';
 import { backOff, EYE, findStreet, openSpot, walkNet } from './spots';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -162,7 +164,7 @@ export class Nav {
 
   private bindKeys() {
     addEventListener('keydown', (e) => {
-      if ((e.target as Element).closest?.('input:not([type=range]), textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!gameKey(e)) return;
       this.shift = e.shiftKey;
       if (e.code === 'Escape') {
         if (this.pedestrianStart) this.releasePedestrianMouse();
@@ -192,7 +194,7 @@ export class Nav {
       if (k) this.keys.delete(k);
       if (this.turned && ![...this.keys].some((a) => a[0] === 't')) { this.turned = false; this.retarget(); }
     });
-    addEventListener('blur', () => this.keys.clear());
+    onFocusLoss(() => this.keys.clear());
   }
 
   private requestPedestrianMouse() {
@@ -746,7 +748,7 @@ export class Nav {
     } else if (this.goal) this.walkToGoal(dt);
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
-    this.place(this.walkPos, q, WALK_FOV, false);
+    this.place(this.walkPos, q, WALK_FOV, false, dt);
     const look = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
   }
@@ -775,7 +777,7 @@ export class Nav {
     }
     this.stand(dt);
     const view = pedestrian.frame(p.x, this.feet, p.z, p.x - x, p.z - z, this.vy !== 0, dt, world);
-    this.place(view.position, view.rotation, view.fov, false);
+    this.place(view.position, view.rotation, view.fov, false, dt);
     this.controls.target.copy(view.target);
   }
 
@@ -789,8 +791,9 @@ export class Nav {
     if (G.stuck > 0.4) { this.goal = null; this.marker.visible = false; }
   }
 
-  // the camera to (pos, q, fov), gliding there over the landing transition; settle: then ease back to fov
-  private place(pos: THREE.Vector3, q: THREE.Quaternion, fov: number, settle: boolean) {
+  // the camera to (pos, q, fov), gliding there over the landing transition; settle: then ease back to fov (rate 6.3/s:
+  // a tenth of the way a frame at 60 fps)
+  private place(pos: THREE.Vector3, q: THREE.Quaternion, fov: number, settle: boolean, dt: number) {
     const cam = this.camera, L = this.landing;
     if (L) {
       const t = Math.min(1, (performance.now() - L.t0) / L.ms), e = ease(t);
@@ -801,7 +804,7 @@ export class Nav {
     } else {
       cam.position.copy(pos);
       cam.quaternion.copy(q);
-      if (settle && Math.abs(cam.fov - fov) > 0.01) cam.fov += (fov - cam.fov) * 0.1;
+      if (settle && Math.abs(cam.fov - fov) > 0.01) cam.fov += (fov - cam.fov) * follow(6.3, dt);
     }
     cam.updateProjectionMatrix();
   }
@@ -821,10 +824,10 @@ export class Nav {
       this.rideY = y == null || Math.abs(pose.y - y) > 40 ? pose.y : y + (pose.y - y) * (1 - Math.exp(-9 * dt));
       pose.y = this.rideY;
     } else this.rideY = null;
-    const { pos, look, fov } = rideCamera(R, pose, this.world);
+    const { pos, look, fov } = rideCamera(R, pose, this.world, dt);
     if (this.driving) pos.add(this.rideShake);
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, pos.clone().add(look), new THREE.Vector3(0, 1, 0)));
-    this.place(pos, q, fov, true);
+    this.place(pos, q, fov, true, dt);
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
   }
 

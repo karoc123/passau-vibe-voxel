@@ -10,11 +10,12 @@ const RIG = {
   car: { eye: [1.3, 2.45], fov: 62 }, // dashcam just past the bonnet
 };
 
-export function rideCamera(R: Ride, pose: Pose, world: World | null) {
+export function rideCamera(R: Ride, pose: Pose, world: World | null, dt: number) {
   const rig = RIG[R.kind], h = pose.h;
   const fw = new THREE.Vector3(Math.sin(h), 0, Math.cos(h)), base = new THREE.Vector3(pose.x, pose.y, pose.z);
-  // looking around springs back to straight ahead a few seconds after letting go (vehicles turn under you)
-  if (R.kind !== 'person' && performance.now() - R.idle > 5000) { R.dyaw *= 0.98; R.dpitch *= 0.98; }
+  // looking around springs back to straight ahead a few seconds after letting go (vehicles turn under you): at
+  // 1.2 /s, as 2 % a frame at 60 fps
+  if (R.kind !== 'person' && performance.now() - R.idle > 5000) { const k = Math.exp(-1.2 * dt); R.dyaw *= k; R.dpitch *= k; }
   const yaw = h + R.dyaw, pitch = (R.view === 'eyes' ? -0.04 : -0.22) + R.dpitch;
   const look = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
   if (R.view === 'eyes') {

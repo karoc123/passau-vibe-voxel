@@ -9,6 +9,8 @@
 // Pure: no DOM, no three.js; the world through one query (BoatWorld, which VoxelCollision.waterColumn answers). Runs
 // in node (tools/boat.mjs, nav/boat-checks.ts) as in the viewer.
 
+import { SafeTrail } from '../core/safe-trail';
+
 export interface BoatInput {
   throttle: number; // -1..1: forwards, backwards (braking first while still going forwards)
   steer: number; // -1..1: +1 right
@@ -63,13 +65,19 @@ export class BoatMotion {
   waiting = false; // a column under it not loaded: the step held
   private accel = 0;
   private bumpT = -1;
-  // recent poses on open water (every SAFE_EVERY s of steps), for reset()
-  private safe: BoatPose[] = [];
-  private safeT = 0;
+  // recent poses on open water (every SAFE_EVERY s of steps, the first at 0.5 s), for unstick()
+  private readonly safe = new SafeTrail<BoatPose>(SAFE_EVERY, SAFE_KEEP);
+
+  constructor() { this.safe.wait(0); }
 
   reset(p: BoatPose) {
+    this.place(p);
+    this.safe.clear({ ...p }, this.t);
+  }
+
+  // standing still at p
+  private place(p: BoatPose) {
     Object.assign(this, { x: p.x, y: p.y, z: p.z, h: p.h, vx: 0, vz: 0, yaw: 0, pitch: 0, roll: 0, accel: 0, waiting: false });
-    this.safe = [{ ...p }];
   }
 
   get pose(): BoatPose { return { x: this.x, y: this.y, z: this.z, h: this.h }; }
@@ -162,11 +170,7 @@ export class BoatMotion {
     const rollTo = clamp(-this.yaw * this.speed * 0.022, -0.22, 0.22);
     this.roll += (rollTo - this.roll) * (1 - Math.exp(-4 * dt));
     this.t += dt;
-    if (this.t - this.safeT >= SAFE_EVERY && fit) {
-      this.safeT = this.t;
-      this.safe.push(this.pose);
-      if (this.safe.length > SAFE_KEEP) this.safe.shift();
-    }
+    if (this.safe.due(this.t) && fit) this.safe.push(this.pose, this.t);
     return events;
   }
 
@@ -211,11 +215,9 @@ export class BoatMotion {
   // nearest spot found round it. false: nothing loaded there yet
   unstick(world: BoatWorld): boolean {
     const here = findSpawn(world, this.x, this.z, this.h, 0);
-    const back = here ?? [...this.safe].reverse().find((p) => this.fits(world, p.x, p.z, p.h, p.y)) ?? findSpawn(world, this.x, this.z, this.h, 60);
+    const back = here ?? this.safe.get(this.safe.find((p) => !!this.fits(world, p.x, p.z, p.h, p.y))) ?? findSpawn(world, this.x, this.z, this.h, 60);
     if (!back) return false;
-    const safe = this.safe;
-    this.reset(back);
-    this.safe = safe;
+    this.place(back);
     return true;
   }
 }
@@ -243,37 +245,4 @@ export function findSpawn(world: BoatWorld, x: number, z: number, h: number, rad
     }
   }
   return null;
-}
-
-// Where to put the boat in: the river point (flood.json's river: x, z pairs every 24 m over the rivers) nearest (x, z),
-// in the middle of its cell; null: none
-export function nearestRiver(river: ArrayLike<number>, x: number, z: number): { x: number; z: number } | null {
-  let best: { x: number; z: number } | null = null, bd = Infinity;
-  for (let k = 0; k + 1 < river.length; k += 2) {
-    const d = (river[k] - x) ** 2 + (river[k + 1] - z) ** 2;
-    if (d < bd) { bd = d; best = { x: river[k] + 0.5, z: river[k + 1] + 0.5 }; }
-  }
-  return best;
-}
-
-// Downstream at (x, z), roughly, as a heading: along the river's points within 120 m (their principal axis), the way
-// that leads towards `eck` (the Dreiflüsseeck, where the Inn and the Ilz flow into the Danube: meta.views.eck), and
-// east (+x) from it on (the Danube's way out of the map). Without an eck: east.
-export function downstream(river: ArrayLike<number>, x: number, z: number, eck?: { x: number; z: number }) {
-  const to = eck && x < eck.x - 60 ? [eck.x - x, eck.z - z] : [1, 0];
-  let n = 0, mx = 0, mz = 0, sxx = 0, sxz = 0, szz = 0;
-  const near: number[] = [];
-  for (let k = 0; k + 1 < river.length; k += 2) {
-    if ((river[k] - x) ** 2 + (river[k + 1] - z) ** 2 >= 120 * 120) continue;
-    near.push(river[k], river[k + 1]); mx += river[k]; mz += river[k + 1]; n++;
-  }
-  let ax = to[0], az = to[1];
-  if (n >= 3) {
-    mx /= n; mz /= n;
-    for (let k = 0; k < near.length; k += 2) { const dx = near[k] - mx, dz = near[k + 1] - mz; sxx += dx * dx; sxz += dx * dz; szz += dz * dz; }
-    const th = 0.5 * Math.atan2(2 * sxz, sxx - szz);
-    ax = Math.cos(th); az = Math.sin(th);
-    if (ax * to[0] + az * to[1] < 0) { ax = -ax; az = -az; }
-  }
-  return Math.atan2(ax, az);
 }

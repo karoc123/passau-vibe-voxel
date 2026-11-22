@@ -9,6 +9,8 @@ import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
+import { gameKey, HeldKeys, inFocus, onFocusLoss } from './input';
+import { modeButton, ModePanel } from './mode-panel';
 import './fpv.css';
 
 const FIXED_STEP = 1 / 120;
@@ -16,44 +18,33 @@ const ARM_THROTTLE = 0.06;
 const IMPACT_MESSAGE_MS = 950;
 const SURFACE_CLEARANCE = 0.002;
 const CAMERA_PITCH_AXIS = new THREE.Vector3(1, 0, 0);
-const FLIGHT_KEYS = ['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyR', 'KeyF'];
+const FLIGHT_KEYS: ReadonlySet<string> = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
 type Phase = 'loading' | 'ready' | 'flying' | 'paused';
 type InputSource = 'controller' | 'keyboard' | 'touch';
 
-function button(label: string, run: () => void) {
-  const node = document.createElement('button');
-  node.className = 'mode-button';
-  node.type = 'button';
-  node.textContent = label;
-  node.addEventListener('click', () => { run(); node.blur(); });
-  return node;
-}
-
-// The viewer owns the camera and render loop; this mode supplies the flight pose.
+// The viewer owns the camera and render loop; this mode supplies the flight pose. Out of focus it pauses and wants
+// arming again (input.ts: the radio's throttle may have moved meanwhile).
 export class FpvMode {
   private readonly radio = new FpvInput();
   private readonly touch: FpvTouch;
   private readonly hasTouch = navigator.maxTouchPoints > 0;
   private readonly collision: VoxelCollision;
   private readonly flight = new FpvFlight();
-  private readonly keys = new Set<string>();
+  private readonly keys = new HeldKeys(FLIGHT_KEYS);
   private readonly spawn = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
   private readonly nextPosition = new THREE.Vector3();
   private readonly slide = new THREE.Vector3();
   private readonly tilt = new THREE.Quaternion();
   private readonly impactTint = el('div', 'fpv-impact-tint');
-  private readonly panel = document.createElement('aside');
-  private readonly details = el('div', 'mode-detail', '', this.panel);
-  private readonly status = el('div', 'fpv-status', '', this.details);
-  private readonly telemetry = el('div', 'fpv-telemetry', '', this.details);
-  private readonly actions = el('div', 'fpv-actions', '', this.details);
-  private readonly enterExit = button('FPV Acro', () => this.toggle());
-  private readonly armRadio = button('Arm controller', () => this.arm('controller'));
-  private readonly armKeys = button('Fly with keyboard', () => this.arm('keyboard'));
-  private readonly armTouch = button('Fly with touch', () => this.arm('touch'));
-  private readonly reset = button('Reset flight', () => this.restart());
-  private readonly options = el('div', 'fpv-options', '', this.details);
+  private readonly panel: ModePanel;
+  private readonly telemetry: HTMLDivElement;
+  private readonly enterExit: HTMLButtonElement;
+  private readonly armRadio: HTMLButtonElement;
+  private readonly armKeys: HTMLButtonElement;
+  private readonly armTouch: HTMLButtonElement;
+  private readonly reset: HTMLButtonElement;
+  private readonly options: HTMLDivElement;
 
   private phase: Phase = 'loading';
   private source: InputSource = 'controller';
@@ -76,12 +67,15 @@ export class FpvMode {
       this.camera.updateProjectionMatrix();
     });
     this.impactTint.setAttribute('aria-hidden', 'true');
-    this.panel.className = 'fpv-mode';
-    this.panel.setAttribute('aria-label', 'FPV Acro');
-    this.panel.prepend(this.enterExit);
-    host.append(this.panel);
-    this.status.setAttribute('role', 'status');
-    this.actions.append(this.armTouch, this.armRadio, this.armKeys, this.reset);
+    const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro');
+    this.enterExit = P.button('FPV Acro', () => this.toggle());
+    this.telemetry = P.line('telemetry');
+    const actions = P.line('actions');
+    this.armTouch = modeButton('Fly with touch', () => this.arm('touch'), actions);
+    this.armRadio = modeButton('Arm controller', () => this.arm('controller'), actions);
+    this.armKeys = modeButton('Fly with keyboard', () => this.arm('keyboard'), actions);
+    this.reset = modeButton('Reset flight', () => this.restart(), actions);
+    this.options = P.line('options');
     this.options.append(this.radio.element);
     const angle = el('label', 'row fpv-camera-angle', '', this.options);
     const value = el('span', 'val', '', angle);
@@ -100,8 +94,7 @@ export class FpvMode {
     range.addEventListener('input', setTilt);
     setTilt();
     addEventListener('keydown', this.keyDown);
-    addEventListener('keyup', e => this.keys.delete(e.code));
-    addEventListener('blur', () => this.pause('Window lost focus. Arm again to resume.'));
+    onFocusLoss(() => this.pause('Window lost focus. Arm again to resume.'));
     this.renderPanel();
   }
 
@@ -118,7 +111,8 @@ export class FpvMode {
       this.notice = '';
       this.renderPanel();
     }
-    this.controller = this.radio.update();
+    // (the radio read, and its setup drawn, only while the drone is on)
+    this.controller = active ? this.radio.update() : null;
     if (active) {
       const p = this.phase === 'loading' ? this.spawn : this.flight.position;
       this.collision.prefetch(p, this.flight.velocity);
@@ -212,7 +206,7 @@ export class FpvMode {
   }
 
   private flightInput(): FlightInput | null {
-    if (!document.hasFocus() || document.hidden) {
+    if (!inFocus()) {
       this.pause('Window lost focus. Arm again to resume.');
       return null;
     }
@@ -293,22 +287,20 @@ export class FpvMode {
   }
 
   private readonly keyDown = (e: KeyboardEvent) => {
-    if (this.nav.mode !== 'fpv' || e.metaKey || e.ctrlKey || e.altKey ||
-        (e.target as Element).closest?.('input, select, textarea, button, [contenteditable]')) return;
+    if (this.nav.mode !== 'fpv' || !gameKey(e)) return;
     if (e.code === 'KeyT' && !e.repeat) this.restart();
     else if (e.code === 'Enter' && !e.repeat) this.arm(this.source);
-    else if (FLIGHT_KEYS.includes(e.code) && this.source === 'keyboard' && this.phase === 'flying') this.keys.add(e.code);
-    else return;
+    else if (!(this.source === 'keyboard' && this.phase === 'flying' && this.keys.press(e))) return;
     e.preventDefault();
   };
 
   private renderPanel() {
     const active = this.nav.mode === 'fpv', flying = active && this.phase === 'flying';
     const flyingWithTouch = flying && this.source === 'touch';
-    document.body.classList.toggle('fpv-flying', flying);
-    const canArm = active && (this.phase === 'ready' || this.phase === 'paused');
-    this.panel.classList.toggle('mode-active', active);
-    this.details.hidden = !active;
+    const P = this.panel, canArm = active && (this.phase === 'ready' || this.phase === 'paused');
+    P.active = active;
+    P.el.classList.toggle('flying', flying); // (style.css: the compact strip while it flies)
+    P.details.hidden = !active;
     this.enterExit.textContent = active ? 'Exit FPV' : 'FPV Acro';
     this.enterExit.disabled = !active && !this.nav.canStartCraft;
     this.armRadio.hidden = !canArm;
@@ -317,7 +309,7 @@ export class FpvMode {
     this.armTouch.hidden = !canArm || !this.hasTouch;
     this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
     this.options.hidden = !active || flying;
-    this.status.hidden = !active;
+    P.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
@@ -327,7 +319,7 @@ export class FpvMode {
       this.waitingForTile ? 'Waiting for the next collision tile…' :
       flying ? (this.impact?.message ?? '') :
       this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : controls);
-    if (this.status.textContent !== content) this.status.textContent = content;
+    ModePanel.text(P.status, content);
 
     const p = this.flight.position;
     const terrain = this.collision.surface(p.x, p.z);

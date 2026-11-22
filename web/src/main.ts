@@ -16,6 +16,7 @@ import type { FpvMode } from './nav/fpv';
 import type { BoatMode } from './nav/boat';
 import type { PlaneMode } from './nav/plane';
 import { flying, Nav, type Mode, type Ride } from './nav/nav';
+import { gameKey, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -89,6 +90,8 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
+// the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
+let riverPoints: number[] | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
@@ -156,11 +159,13 @@ jumpButton.setAttribute('aria-label', 'Jump');
 jumpButton.addEventListener('pointerdown', (e) => { e.preventDefault(); nav.jump(); });
 jumpButton.addEventListener('click', (e) => { if (e.detail === 0) nav.jump(); }); // (the keyboard)
 if (qs.get('ui') === '0') document.body.classList.add('noui');
+// which mode is on, for style.css (one attribute, set each frame below): nav.ts Mode, or drive while a car is driven
+document.body.dataset.mode = nav.mode;
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
-  if (e.key === '/' && !(e.metaKey || e.ctrlKey || e.altKey) && !(e.target as Element).closest?.('input')) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
+  if (e.key === '/' && gameKey(e)) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
-  if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !(e.target as Element).closest?.('input, textarea')
+  if (e.key === 'c' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !typing(e)
       && !getSelection()?.toString()) {
     const text = nav.spotText();
     if (!text) return;
@@ -245,9 +250,6 @@ function applyGfx(c: Partial<Gfx>) {
 
 function onMode(m: Mode, ride: Ride | null) {
   post.taa.restart(); // (the camera jumps)
-  document.body.classList.toggle('walking', m !== 'orbit');
-  document.body.classList.toggle('fpv', m === 'fpv');
-  document.body.classList.toggle('on-foot', m === 'walk' || m === 'pedestrian');
   hud?.set(m, ride);
 }
 
@@ -433,7 +435,8 @@ async function boot() {
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
-  flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); }).catch((e) => console.warn('flood', e));
+  flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); riverPoints = flood!.info?.river ?? []; })
+    .catch((e) => { riverPoints = []; console.warn('flood', e); });
   fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
@@ -462,9 +465,9 @@ async function boot() {
   ]);
   fpv = new FpvMode(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
-  boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, () => daylight.night, () => flood?.level ?? 0);
-  plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement,
-    { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => flood?.info?.river ?? null });
+  const env = { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints };
+  boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, env);
+  plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, env);
 }
 
 // The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):
@@ -505,6 +508,8 @@ renderer.setAnimationLoop((now) => {
   fpv?.update(dt);
   boat?.update(dt);
   plane?.update(dt);
+  const bodyMode = drive?.active ? 'drive' : nav.mode;
+  if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
   const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
   walkButton.disabled = !world || nav.enteringWalk || flying(nav.mode);

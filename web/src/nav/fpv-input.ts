@@ -1,4 +1,5 @@
 import type { FlightInput } from './fpv-flight';
+import { gamepads } from './input';
 import './fpv-input.css';
 
 const CHANNELS = [
@@ -179,11 +180,7 @@ export class FpvInput {
   private get pad() { return this.pads.find(p => p.index === this.selectedIndex && p.id === this.selectedId); }
 
   update(): FlightInput | null {
-    try {
-      this.pads = Array.from(navigator.getGamepads?.() ?? []).filter((pad): pad is Gamepad => !!pad?.connected);
-    } catch {
-      this.pads = [];
-    }
+    this.pads = gamepads();
     if (!this.selected && this.pads.length) this.select(this.pads.find(pad => pad.axes.length >= 4) ?? this.pads[0]);
     const pad = this.pad;
     if (pad && (pad.axes.length !== this.selectedAxes || pad.mapping !== this.selectedMapping)) this.select(pad);
