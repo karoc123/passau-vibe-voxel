@@ -28,46 +28,23 @@ it on its own branch, and report.
 
 ## Overview
 
-Everything below is not done yet. "Ready" means it can start now. "Waits" means: start only after the named work is
-on `main` (check `git log`). When a package lands, delete its section and its row here, and turn "Waits" rows whose
-blockers are gone into "Ready".
+"Ready" means it can start now. "In progress" names the working branch. "Ready to merge" means the verified
+local branch can be merged into `main`. "Waits" means: start only after the named work is on `main` (check
+`git log`). When a package lands, delete its section and its row here, and turn "Waits" rows whose blockers are
+gone into "Ready". For a partially completed package, remove the landed item and keep the rest of the package open.
 
-| Package | What | Size | Start |
+| Package | What | Size | Status |
 |---|---|---|---|
-| R1 | The plane does not start while you are driving (bug) | S | **Ready** |
-| R2 | Defect assertions on the fixtures | M | **Ready** |
 | R3 | Shared input, chase camera and panels | M | **Ready** |
+| R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
-| R8 | Design: sim player API, one world for many players | design | **Ready** |
-| F1 | AI motorbikes | S–M | **Ready** |
-| F3 | Camera distance per vehicle type | S | **Ready** (or inside R3) |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
 | R4 | Craft interface and `nav.ts` split | L | Waits for R3 |
 | R5 | Check harnesses out of `src/` | M | Waits for R3, R4 |
-| R6 | Split `voxelize.py` into stages | L | Waits for R2 |
-| F2 | Walk to a vehicle and get in | M | Waits for R1, R4 |
-| F5 | Trains and boats into the world sim | M | Waits for F4, R8 |
+| F2 | Walk to a vehicle and get in | M | Waits for R4 |
+| F5 | Trains and boats into the world sim | M | Waits for F4 |
 
 ## Packages
-
-### R1. The plane does not start while you are driving (bug, S)
-
-- **Waits for:** nothing.
-- **Symptom (read from the code, not reproduced):** pressing the plane button while driving parks the car
-  (`PlaneEnv.park`), but `startCraft` refuses because the mode is `ride`, not `orbit`. So the car is parked and no
-  plane appears.
-- **Check:** whether boat and drone have the same problem.
-- **Fix:** leave the ride cleanly before starting a craft, for all crafts. Verify in the browser.
-
-### R2. Defect assertions on the fixtures (code-health 14, M)
-
-- **Waits for:** nothing. It touches only `check.py` and `scripts/fixtures/`.
-- **Known:** `check.py verify` already fails on main for haissengasse (2), hals (2), kachlet (1), gaissa (1); gaissa's
-  full build also fails with an `IndexError` in `phenology.py`. Fix or explain these first.
-- **Do:** give each fixed road defect one assertion, using the fixtures `b85`, `gaissa`, `haissengasse`, `hals`,
-  `kachlet`, `schalding`. Example: "no carriageway cell more than 1 m under its neighbours at this spot". Defect spots
-  are in [road-defects.md](road-defects.md).
-- **Do:** write counters as JSON beside the notes, instead of `verify` parsing prose by regex.
 
 ### R3. Shared input, chase camera and panels (code-health 11, 12 = N2, M)
 
@@ -98,7 +75,8 @@ blockers are gone into "Ready".
 
 ### R6. Split `voxelize.py` into stages (code-health 13 = P4, L)
 
-- **Waits for:** R2 as its guard. The ground-height passes are already in `scripts/ground.py` (`GROUND_PASSES`), the
+- **Waits for:** nothing. The defect assertions in `check.py verify` (`scripts/fixtures/road-defects.json`) are
+  its guard. The ground-height passes are already in `scripts/ground.py` (`GROUND_PASSES`), the
   way helpers in `scripts/ways.py`.
 - **Do:** one stage per commit, `def stage(ctx)` over an explicit context. Each commit must be byte-exact under
   `check.py golden --compare` (no data rebuild needed).
@@ -112,50 +90,21 @@ blockers are gone into "Ready".
 - **`traffic.build`:** split it, and tie the 3.0 m lane spacing to `sim/path.ts` with a check.
 - **Silent `except Exception`:** around `offset_curve` (rails and lane markings are dropped without a note), log
   what is dropped.
-- **`VoxelCollision`:** release instances, so `liveEdits` listeners do not pile up. `plane-real.ts` pokes a private
-  field.
 - **Build time:** vegetation 21 %, `debris.support_floating` 17 %. See `data/debug/timings.json` and
   [build-speed-2.md](build-speed-2.md).
-
-### R8. Design: presentation writes into the sim; one local player assumed (code-health 15, design only)
-
-- **Waits for:** nothing.
-- **Do:** write down the target in ADR 0006 or a new ADR:
-  - a sim player API (`takeWheel`, `removePerson`, a player id) instead of `drive.ts` and `nav.ts` writing into
-    traffic objects;
-  - boats and trains into the world sim;
-  - tuning objects that are no longer mutable module globals;
-  - the player car in the same Rapier world as the AI bodies.
-- **Do not:** implement it beyond small, safe steps. This is the groundwork for splitting off a server later.
 
 ## Feature packages
 
 These add behaviour, so they are judged in the browser as well as by the gates. Each comes with a short plan in
 `docs/plans/` if it is bigger than S.
 
-### F1. AI motorbikes (S–M)
-
-- **Waits for:** nothing.
-- **Today:** the motorbike exists in the catalogue (`sim/vehicles.ts`) for the player only. AI traffic draws cars,
-  vans, pickups, buses (see [vehicles.md](vehicles.md)).
-- **Do:** add the motorbike to the AI mix, with its own length, lean in curves (presentation only) and a rider.
-- **Do:** keep the world sim (`sim/traffic.ts`) free of three.js, and keep the seeded RNG (`core/num.ts`) so `?seed=`
-  stays reproducible.
-- **Gates:** `vehicles`, `life-edit`.
-
 ### F2. Walk to a specific vehicle and get in (M)
 
-- **Waits for:** R1 (leaving a ride cleanly) and R4.
+- **Waits for:** R4.
 - **Do:** when walking, a key or tap near a parked or moving vehicle (car, bus, motorbike, boat at the bank, plane on
   the water) enters it. Leaving puts the walker beside it, and the vehicle stays where it was left.
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
-  R8.
-
-### F3. Camera distance per vehicle type (S)
-
-- **Waits for:** nothing. If R3 is running, do it inside R3's `ChaseRig` instead.
-- **Do:** the chase camera's distance and height come from the vehicle catalogue (bus further back and higher,
-  motorbike closer).
+  [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 
 ### F4. The player car in the same Rapier world as the AI bodies (M–L)
 
@@ -164,13 +113,14 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   shape a server needs: one world, many players.
 - **Today:** `RapierDrive` (`physics/rapier/drive-world.ts`) owns its own world with one car. AI cars near edits are
   bodies in `physics/rapier/life-phys.ts`.
+- **Design:** follow [ADR 0007](../adr/0007-player-control-in-world-sim.md) (player-keyed commands, one shared world).
 - **Do:** one shared world with one collider budget. The player car is a body like the others, keyed by a player id.
 - **Do:** write a short plan first and measure step cost with `tools/life-phys*.mjs`.
 - **Gates:** `rapier-car` 42/42 and `vehicles` 30/30 must stay green (counts may change only with a reason).
 
 ### F5. Trains and boats into the world sim (M)
 
-- **Waits for:** F4 and R8.
+- **Waits for:** F4. The target design is [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 - **Today:** `sim/trains.ts` and `sim/boats.ts` sit in `sim/` but are three.js presentation with their own motion.
   ADR 0006 notes this.
 - **Do:** split each into a plain sim part (positions on their tracks or rivers, fixed 1/30 s tick, seeded RNG, no
