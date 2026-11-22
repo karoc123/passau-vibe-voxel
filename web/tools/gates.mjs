@@ -47,9 +47,9 @@ const GATES = [
   { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/traffic.ts, physics/rapier/life-phys.ts, core/live-edits.ts, car.ts' },
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections' },
   { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'sim/life.ts, sim/trains.ts, sim/boats.ts' },
-  { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 60, guards: 'as caps-check, every node with caps' },
-  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', '../docs/plans/surface-gap-baseline.json'], set: 'full', data: true, secs: 60, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
-  { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 30, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)' },
+  { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps' },
+  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', '../docs/plans/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
+  { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)' },
 ];
 
 const hasData = fs.existsSync(path.join(dataDir, 'meta.json'));

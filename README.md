@@ -312,9 +312,9 @@ No analytics: the page loads nothing beyond its own files and the Google font.
 For agents (and people) changing the code. All run from `web/` with no GPU and no extra dependency; in a git
 worktree first `ln -s <main checkout>/web/node_modules web/node_modules` (don't install).
 
-**Gates: `node tools/gates.mjs`** (`pnpm gates`; ~20 s alone on 20 cores, up to a minute on a busy machine). tsc and
+**Gates: `node tools/gates.mjs`** (`pnpm gates`; under a minute, its longest gate `life-edit`). tsc and
 the headless checks below in parallel, a PASS / FAIL table with times, exit code 1 on a failure. Run it before every
-commit. `--full` (`pnpm gates:full`, a few minutes) adds `section-check`, `popin-check`, `caps-check --all`,
+commit. `--full` (`pnpm gates:full`, ~3 min) adds `section-check`, `popin-check`, `caps-check --all`,
 `surface-gap --check docs/plans/surface-gap-baseline.json` and, with `--golden FILE` (recorded before the change by
 `node tools/mesh-golden.mjs write FILE`), `mesh-golden check`; run it for changes to the mesher, the surface, the car
 or the street life. `--list` shows each gate's set and the files it guards; `node tools/gates.mjs plane boat` runs
