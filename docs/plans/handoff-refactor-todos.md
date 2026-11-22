@@ -35,12 +35,11 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| R3 | Shared input, chase camera and panels | M | Ready to merge (`r3`) |
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
-| R4 | Craft interface and `nav.ts` split | L | Waits for R3 |
-| R5 | Check harnesses out of `src/` | M | Waits for R3, R4 |
+| R4 | Craft interface and `nav.ts` split | L | **Ready** |
+| R5 | Check harnesses out of `src/` | M | Waits for R4 |
 | F2 | Walk to a vehicle and get in | M | Waits for R4 |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
 | Q1 | Water only where the cadastre or OSM has water | M | **Ready** (not in parallel with R6's water stage) |
@@ -54,26 +53,16 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | Waits for Q1 |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
-| F8 | Water surface from the world, river slider removed | M–L | Waits for R3 |
+| F8 | Water surface from the world, river slider removed | M–L | **Ready** (not in parallel with R4: same boat and plane shells) |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
-| F10 | Minimap on M, and the collection point for map features | M | Waits for R3, F9 |
+| F10 | Minimap on M, and the collection point for map features | M | Waits for F9 |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q1–Q4, Q8, Q9 |
 
 ## Packages
 
-### R3. Shared input, chase camera and panels (code-health 11, 12 = N2, M)
-
-- **Waits for:** nothing. The shells already hold `FixedStep` clocks and plain vectors from the cores.
-- **Do:** one gamepad reader, one typing guard and one focus-loss policy (`nav/input.ts`). Plus `ChaseRig`, `SafeTrail`
-  (unstick/T), `ModePanel`, `river.ts`, and one `data-mode` attribute on `body` instead of per-mode body classes and CSS
-  hide lists.
-- **Do:** make smoothing frame-rate independent (`1 - exp(-k dt)`).
-- **Feel:** must stay the same. Check the boat, plane, jet, drone and car by hand in the browser, and keep the gates
-  green.
-
 ### R4. Craft interface and `nav.ts` split (code-health 10, 19 first point = N3, L)
 
-- **Waits for:** R3.
+- **Waits for:** nothing (R3 landed: `nav/input.ts`, `nav/chase-rig.ts`, `nav/mode-panel.ts`, `core/safe-trail.ts`).
 - **Do:** a `PlayerCraft` interface (`enter`, `leave`, `update`, `hudText`), a registry in `main.ts`, and Nav calling
   `leave()` instead of every craft polling `nav.mode`.
 - **Do:** reduce the 83 literal mode comparisons. Then split `class Nav` into a mode machine, orbit input, a foot
@@ -82,7 +71,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 ### R5. Check harnesses out of `src/` (code-health 16 = T2, M)
 
-- **Waits for:** R3 and R4 (they move the same shells).
+- **Waits for:** R4 (it moves the same shells).
 - **Do:** move `nav/*-checks.ts`, `plane-real.ts` and `physics/rapier/*scenarios.ts` to `web/checks/`, with one
   synthetic-world fixture and one result type.
 - **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
@@ -401,7 +390,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F7. Motorbike handling (M)
 
-- **Waits for:** nothing. It is in `physics/rapier/car.ts` and `sim/vehicles.ts`, not in the input shells R3 moves.
+- **Waits for:** nothing. It is in `physics/rapier/car.ts` and `sim/vehicles.ts`, not in the input shells.
 - **Today, steering:** the keyboard gives `steer` -1 or 1 at once (`nav/drive.ts`). `car.ts` `step` eases the wheel
   angle with `dt * 8`, a time constant of 0.125 s, so A or D is full lock at once. The lock falls with speed
   (`steer / (1 + v / steerFall)`, moto 0.42 rad and 9 m/s).
@@ -430,7 +419,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F8. Water surface from the world, river slider removed (M–L)
 
-- **Waits for:** R3 (it makes the shared `river.ts` this builds on, and moves the boat's and the plane's shells).
+- **Waits for:** nothing. R3 landed the shared `nav/river.ts` this builds on; `main.ts` passes the river points to boat and plane.
 - **Decision:** the owner wants the river-level slider gone, and sees it as a smell that boat and plane read the
   flood level at all. It is more than a few lines (below), so it is a package.
 - **Why boat and plane read it today:** the voxels hold the rivers as surveyed. The slider does not change the
@@ -446,7 +435,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
     data that happens to live in the slider's file.
 - **Goal:** no craft and no sim reads a level from the presentation. The water surface at a place comes from the
   world data through one module.
-- **Do, step 1 (code only, no data change):** one water module (`river.ts` from R3, plain, no three.js): the
+- **Do, step 1 (code only, no data change):** one water module (`nav/river.ts`, plain, no three.js): the
   water top at (x, z) from `VoxelCollision.waterColumn`, and the nearest water to a point. Boat, plane and
   `sim/boats.ts` use it. Remove the `level` parameters from `BoatMode`, `PlaneMode` `env`, `collisionWorld` and
   `Boats.update`, and `NO_TOURS_ABOVE`. `sim/boats.ts` takes the water top where each ship is, not `voxel_top`.
@@ -485,7 +474,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F10. Minimap on M, and the collection point for map features (M)
 
-- **Waits for:** R3 (shared input and panels), F9 (the label set it shows).
+- **Waits for:** F9 (the label set it shows). Shared input (`nav/input.ts`, add M via `gameKey`) and panels are in.
 - **Do:** M toggles a minimap: north-up or heading-up, the player's position and heading, rivers and main roads,
   the labels of F9 as icons. Draw it from data the viewer already has (`meta.json` labels, the low-LOD tiles or
   a small pre-rendered map image from the pipeline); no new data source.
