@@ -44,7 +44,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
-| Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with R6's deck stage) |
+| Q8 | A bridge deck does not sag to the ground beside it | S–M | In progress (`q8`) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
