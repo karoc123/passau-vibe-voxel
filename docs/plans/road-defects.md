@@ -10,3 +10,4 @@ Collected first, fixed generally where possible; only what the general fix canno
 | 2 | 914, 12, 709 | `?cam=909.5,50.1,738.2,914.7,12,709.3` | carriageway slightly dented, ~45 m east of #1 | open, being diagnosed |
 | 3 | 775, 6, 499 | `?cam=789.9,34.3,607,775.6,6.2,499` | carriageway slightly dented | open, being diagnosed |
 | 4 | -882, 16, 667 | `?cam=-806.7,49.5,685.6,-881.7,17,667.6` | hole in the road | open, being diagnosed |
+| 5 | -1641, 19, 599 | `?cam=-1721.6,55.8,644.8,-1640.3,19,599.3` | carriageway dented / holed | open, being diagnosed |
