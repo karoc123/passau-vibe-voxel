@@ -3208,6 +3208,30 @@ is_road |= _bw & (_bwr > 0)
 note("deck scraps on the ground dropped:", int(_scrap.sum()), "cells; bridge ways drawn on the ground where it reaches "
      "their level:", int(_bw.sum()), "cells")
 
+# the deck as wide as the surface model shows it: OSM draws a deck narrower than it stands (the B 12 over the
+# Rottalbahn, project col -2004, row 1076: drawn 9.3 m wide, 25 m along the track in the surface model), and its edges
+# beside the drawn way had been left to the ground passes, which took them for an embankment and stood a strip of
+# ground at the deck's level across the track. Grown out from the deck a cell at a time, up to DECK_GROW m: an open
+# cell (no building, water, crown, bridge way drawn on the ground) whose surface model's lowest return lies within
+# DECK_TOL m of the deck's level beside it, over ground DECK_AIR m or more lower, is deck at that level (the highest
+# beside it: the same in every region)
+DECK_GROW, DECK_TOL, DECK_AIR = 6, 1.0, 2
+_dlo = GCTX.dsm_low() + BASE
+_open = ~deck & ~bmask & ~veg & (gcol != C["water"]) & ~_bw & (deck_col == 0)
+_n_wide = 0
+for _ in range(DECK_GROW):
+    _lv = ndimage.grey_dilation(np.where(deck, deck_abs, -np.inf), size=(3, 3), mode="constant", cval=-np.inf)
+    _new = _open & np.isfinite(_lv) & (np.abs(_dlo - _lv) <= DECK_TOL) & (_lv - BASE - g >= DECK_AIR)
+    if not _new.any():
+        break
+    deck_lay[_new] = ndimage.grey_dilation(np.where(deck, deck_lay, 0), size=(3, 3))[_new]
+    deck_abs[_new] = _lv[_new]
+    deck |= _new
+    _open &= ~_new
+    _n_wide += int(_new.sum())
+deck_col[deck & (deck_col == 0)] = C["deck"]
+zt_ = np.where(deck, np.round(deck_abs - BASE).astype(np.int32), zt_)
+note("deck cells added beside the drawn ways where the surface model holds the deck:", _n_wide)
 
 # the ground at the bridgeheads and under the bridge ways drawn on it (ground.py, phase "decks")
 GCTX.__dict__.update(g=g, deck=deck, zt=zt_, bw=_bw, bmask=bmask, veg=veg, water=gcol == C["water"], river_lv=RIVER_LV,
@@ -3769,6 +3793,43 @@ CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.a
 # model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
 CORE_OUT["gsrc"] = SAG_SRC
 CORE_OUT["gpass"] = ground.changed_bits(GCTX)  # (data/debug/ground_passes.npz: which ground pass changed each cell)
+# the ways kept open under bridges (ground.under_bridge), checked on the finished volume (check.py verify): along each
+# corridor's centreline, every metre from UB_PAD m before it to UB_PAD m after it, no step of 2 m or more in the
+# ground, and nothing solid within the vehicle's clearance over the ground (leaves, lamps' light, cars and the deck
+# aside: a deck lower than that is the surface model's, noted as low). Each corridor counted by the region whose core
+# holds its middle
+UB_PAD = 5
+_ub = dict(corridors=0, steps=0, blocked=0, low=0, worst=[])
+_solid = ~_skip
+_solid[[C["pole"], C["fence"]] + WOOD_IDS] = True
+_solid[0] = False
+for _oid, _kind, _l, _s0, _s1 in GCTX.corridors:
+    _mid = _l.interpolate((_s0 + _s1) / 2)
+    if not in_core(int(_mid.y), int(_mid.x)):
+        continue
+    _ss = np.arange(max(_s0 - UB_PAD, 0), min(_s1 + UB_PAD, _l.length) + 0.01, 1.0)
+    _pp = [_l.interpolate(v) for v in _ss]
+    _rc = np.array([(int(q.y), int(q.x)) for q in _pp if 0 <= q.y < D and 0 <= q.x < W])
+    if len(_rc) < 2:
+        continue
+    _gl = g[_rc[:, 0], _rc[:, 1]]
+    _clear = ground.T["ub_clear"][_kind]
+    _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
+    _blk = np.zeros(len(_rc), bool)
+    for _k in range(_clear):
+        _z = _gl + _k
+        _m = (_z < _deck_lo) & (_z < vol.shape[0])
+        _blk[_m] |= _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
+    _step = int(np.abs(np.diff(_gl)).max())
+    _ub["corridors"] += 1
+    _ub["steps"] += int(_step >= 2)
+    _ub["blocked"] += int(_blk.any())
+    _ub["low"] += int((_deck_lo - _gl < _clear).any())
+    if _step >= 2 or _blk.any():
+        _ub["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, _step, int(_blk.sum())])
+report["counters"]["under_bridge"] = _ub
+note("ways under bridges (corridors, ground steps of 2 m or more, blocked within the clearance, decks lower than it):",
+     _ub["corridors"], _ub["steps"], _ub["blocked"], _ub["low"], _ub["worst"][:5])
 note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
      "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
 _lines = {oid: l_ for oid, _, l_ in osm.lines}
