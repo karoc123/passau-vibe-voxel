@@ -281,7 +281,7 @@ export class PlaneMode {
     for (const e of f.events.splice(0)) {
       if (e.type === 'crash') {
         this.crashAt = now;
-        this.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back in the air…` : `Crash! (${e.what}, ${e.kmh} km/h) Back in the air…`, PLANE.CRASH_S * 1000 + 600);
+        this.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back at a safe point…` : `Crash! (${e.what}, ${e.kmh} km/h) Back at a safe point…`, 0);
       } else if (e.type === 'respawn') { this.throttle = e.throttle; }
       else if (e.type === 'skim') this.say('Careful!', 1500);
       else if (e.type === 'touchdown') this.say('On the water', 2000);
@@ -375,7 +375,7 @@ export class PlaneMode {
     this.slider.querySelector('.val')!.textContent = `${pct}%`;
     this.slider.setAttribute('aria-valuenow', String(pct));
     const now = performance.now();
-    const msg = now < this.noticeUntil ? this.notice :
+    const msg = (on && f.state === 'crashed') || now < this.noticeUntil ? this.notice :
       this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       !on ? '' :
       this.blurred || document.hidden ? 'Paused (window not in focus)' :
