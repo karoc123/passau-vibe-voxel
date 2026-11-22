@@ -61,6 +61,7 @@ export interface Check { name: string; pass: boolean; detail: Record<string, unk
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const kmh = (v: number) => Math.round(v * 3.6);
 const deg = (v: number) => r1(v * 180 / Math.PI);
+const deg2 = (v: number) => Math.round(v * 18000 / Math.PI) / 100;
 const HANDS_OFF = (throttle: number): PlaneInput => ({ turn: 0, pitch: 0, throttle });
 
 // runs `secs` of fixed steps, input from a function of the flight; returns the events and the lowest and highest points
@@ -191,6 +192,36 @@ export function runPlaneChecks(c: PlaneConfig = PLANE): Check[] {
     const b0 = f.bank;
     fly(f, w, 2.5, () => HANDS_OFF(0.6));
     add('hands_off_bank', Math.abs(f.bank) < 3 * Math.PI / 180, { from: deg(b0), after25s: deg(f.bank) });
+  }
+
+  // pitch_smooth: at cruise, W held 2 s (nose down) and let go 3 s, then S held 2 s (nose up) and let go 3 s, then a
+  // full roll in and out: the drawn attitude (nose = path + alpha, bank) moves continuously, never in a step (the most
+  // per step, and the most its per-step change itself changes, at the presses and releases), and the path lags the
+  // nose: 0.4 s into the pull the nose has risen clearly more than the path, which then follows it
+  {
+    const w = open(c), f = new PlaneFlight(c);
+    f.reset({ x: 3000, y: 400, z: 1500, heading: 0, speed: 45 });
+    f.engine = 0.6;
+    const at = (t: number): PlaneInput => ({ turn: t >= 10 && t < 12 ? 1 : 0, pitch: t < 2 ? -1 : t >= 5 && t < 7 ? 1 : 0, throttle: 0.6 });
+    let nose = f.gamma + f.alpha, bank = f.bank, dn0 = 0, db0 = 0, maxStep = 0, maxJerk = 0, maxRoll = 0, maxRollJerk = 0;
+    let lead = 0, pathRise = 0, nose5 = 0, gamma5 = 0, alphaEnd = 0;
+    for (let k = 0; k < 15 * 60; k++) {
+      const t = k * c.STEP;
+      if (k === 5 * 60) { nose5 = nose; gamma5 = f.gamma; }
+      f.step(at(t), c.STEP, w);
+      const n = f.gamma + f.alpha, dn = n - nose, db = f.bank - bank;
+      if (k > 0) { maxJerk = Math.max(maxJerk, Math.abs(dn - dn0)); maxRollJerk = Math.max(maxRollJerk, Math.abs(db - db0)); }
+      maxStep = Math.max(maxStep, Math.abs(dn)); maxRoll = Math.max(maxRoll, Math.abs(db));
+      if (k === Math.round(5.4 * 60)) { lead = (n - nose5) - (f.gamma - gamma5); pathRise = f.gamma - gamma5; }
+      if (k === Math.round(6.4 * 60)) pathRise = f.gamma - gamma5;
+      nose = n; bank = f.bank; dn0 = dn; db0 = db;
+      if (k === 10 * 60 - 1) alphaEnd = f.alpha;
+    }
+    const D1 = Math.PI / 180;
+    add('pitch_smooth', f.state === 'air' && maxStep < 1 * D1 && maxJerk < 0.1 * D1 && maxRoll < 2 * D1 && maxRollJerk < 0.15 * D1 && lead > 2 * D1 && pathRise > 5 * D1 &&
+      alphaEnd < 6 * D1,
+      { maxNosePerStep: deg2(maxStep), maxNoseJerk: deg2(maxJerk), maxBankPerStep: deg2(maxRoll), maxBankJerk: deg2(maxRollJerk),
+        noseLeads04s: deg(lead), pathUp14s: deg(pathRise), alphaSettled: deg(alphaEnd) });
   }
 
   // boundary: full throttle at the east edge, then the north edge and the corner: never out, never a crash

@@ -1,6 +1,6 @@
 // The plane's flight (src/nav/plane-flight.ts) headless: src/nav/plane-checks.ts on a synthetic world of boxes (level
 // flight, throttle range, stall and recovery, climbing costs speed, turn, the map's wall, the ceiling, water landing,
-// taxi and takeoff, crashes on land and on water, respawn, skim, loading, fuzz). Then, on the real data (public/data)
+// taxi and takeoff, crashes on land and on water, respawn, skim, loading, fuzz, pitch_smooth: no snap on W/S). Then, on the real data (public/data)
 // if it is there, through the real VoxelCollision (node files read from disk) and its water: the Danube flown from
 // the west edge to the Altstadt 60 m over its water by a simple follower (no crash), and a landing on it, a taxi and a
 // takeoff.

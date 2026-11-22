@@ -32,16 +32,27 @@ export const PLANE = {
   N_MAX: 3.5, // the most load factor ever pulled
   V_MIN: 6,
   V_MAX: 100, // (a dive's limit)
-  // bank: towards turn x BANK_MAX at BANK_FOLLOW /s, at most ROLL_RATE; hands off back to level at BANK_LEVEL /s
+  // bank: towards turn x BANK_MAX at BANK_FOLLOW /s, at most ROLL_RATE; hands off back to level at BANK_LEVEL /s. The
+  // roll rate itself builds up and dies down at most ROLL_ACCEL (no snap into or out of a roll)
   BANK_MAX: 65 * D,
   BANK_FOLLOW: 3,
   BANK_LEVEL: 1.5,
   ROLL_RATE: 80 * D,
-  // pitch: the path turns up or down at PITCH_RATE by the stick; hands off it levels at PITCH_LEVEL /s (gently)
+  ROLL_ACCEL: 300 * D, // rad/s^2
+  // pitch: the stick asks the path to turn up or down at PITCH_RATE; hands off it levels at PITCH_LEVEL /s, at most
+  // PITCH_LEVEL_RATE (gently). The elevator: the path's turn rate follows what is asked at PITCH_FOLLOW /s, changing
+  // at most PITCH_ACCEL, so the load factor, the nose and then the path build up over ~0.5 s, never in a step
   PITCH_RATE: 26 * D,
   PITCH_LEVEL: 0.35,
+  PITCH_LEVEL_RATE: 10 * D,
+  PITCH_FOLLOW: 5,
+  PITCH_ACCEL: 60 * D, // rad/s^2
   GAMMA_MAX: 80 * D,
   ALPHA_STALL: 14 * D, // the nose over the path at the stall (drawn only)
+  // the drawn nose over the path follows the lift's at ALPHA_FOLLOW /s (the airframe's inertia), at most ALPHA_RATE
+  // (takeoff, touchdown, skim: no snap)
+  ALPHA_FOLLOW: 10,
+  ALPHA_RATE: 40 * D, // rad/s
   // the ceiling: meta.H + CEILING; thrust fades over the last CEILING_FADE m below it
   CEILING: 450,
   CEILING_FADE: 150,
@@ -114,6 +125,9 @@ export class PlaneFlight {
   heading = 0;
   gamma = 0; // flight-path angle, + up
   bank = 0;
+  pitchRate = 0; // the path's pitch rate the elevator holds (rad/s), following the stick
+  roll = 0; // the bank's rate (rad/s)
+  aoa = 0; // the nose over the path, drawn (alpha)
   v = 0; // airspeed (afloat: over the water)
   engine = 0; // 0..1, follows the lever
   state: PlaneState = 'air';
@@ -144,12 +158,13 @@ export class PlaneFlight {
   private place(s: Safe) {
     this.p.set(s.x, s.y, s.z);
     this.heading = s.heading;
-    this.gamma = this.bank = 0;
+    this.gamma = this.bank = this.pitchRate = this.roll = 0;
     this.v = s.speed;
     this.state = s.water ? 'water' : 'air';
     this.crashLeft = 0;
     this.stalled = this.atEdge = false;
     this.load = 1;
+    this.aoa = this.alphaWant();
   }
 
   /** where it moves (m/s), for the collision's prefetch */
@@ -159,8 +174,9 @@ export class PlaneFlight {
     return out.set(Math.sin(this.heading) * c, Math.sin(this.gamma), Math.cos(this.heading) * c).multiplyScalar(this.v);
   }
 
-  /** the nose over the flight path (drawn): the angle of attack the lift asks */
-  get alpha() {
+  /** the nose over the flight path (drawn): the angle of attack the lift asks, followed (ALPHA_FOLLOW, ALPHA_RATE) */
+  get alpha() { return this.aoa; }
+  private alphaWant() {
     if (this.state !== 'air') return 0;
     return clamp(this.load / Math.max(0.05, (this.v / this.cfg.V_STALL) ** 2), -0.5, 1.2) * this.cfg.ALPHA_STALL;
   }
@@ -186,14 +202,16 @@ export class PlaneFlight {
       this.t += dt;
       return true;
     }
-    const snapshot = [this.p.x, this.p.y, this.p.z, this.heading, this.gamma, this.bank, this.v, this.engine];
+    const snapshot = [this.p.x, this.p.y, this.p.z, this.heading, this.gamma, this.bank, this.v, this.engine, this.pitchRate, this.roll];
     this.engine += (clamp(input.throttle, 0, 1) - this.engine) * (1 - Math.exp(-c.SPOOL * dt));
     const ok = this.state === 'air' ? this.fly(input, dt, w) : this.float(input, dt, w);
     this.waiting = !ok;
     if (!ok) {
-      [this.p.x, this.p.y, this.p.z, this.heading, this.gamma, this.bank, this.v, this.engine] = snapshot;
+      [this.p.x, this.p.y, this.p.z, this.heading, this.gamma, this.bank, this.v, this.engine, this.pitchRate, this.roll] = snapshot;
       return false;
     }
+    const da = c.ALPHA_RATE * dt;
+    this.aoa += clamp((this.alphaWant() - this.aoa) * Math.min(1, c.ALPHA_FOLLOW * dt), -da, da);
     this.t += dt;
     if (this.t >= this.nextSafe) this.record(w);
     return true;
@@ -203,12 +221,17 @@ export class PlaneFlight {
     const c = this.cfg, g = c.G, v = this.v;
     const lift = smooth((v / c.V_STALL - (1 - c.STALL_FADE)) / c.STALL_FADE);
     const nMax = Math.min(c.N_MAX, (v / c.V_STALL) ** 2) * lift;
-    // bank: the stick sets the target, let go it levels; mushy near the stall
+    // bank: the stick sets the target, let go it levels; mushy near the stall; the roll rate eases in and out
     const turn = clamp(input.turn, -1, 1), auth = (0.35 + 0.65 * lift) * c.ROLL_RATE;
-    this.bank += clamp((turn * c.BANK_MAX - this.bank) * (turn ? c.BANK_FOLLOW : c.BANK_LEVEL), -auth, auth) * dt;
-    // pitch: the path's turn rate the stick asks, as a load factor (wings' lift tilted by the bank), bounded by speed
+    const roll = clamp((turn * c.BANK_MAX - this.bank) * (turn ? c.BANK_FOLLOW : c.BANK_LEVEL), -auth, auth);
+    this.roll += clamp(roll - this.roll, -c.ROLL_ACCEL * dt, c.ROLL_ACCEL * dt);
+    this.bank += this.roll * dt;
+    // pitch: the path's turn rate the stick asks (the elevator following it), as a load factor (wings' lift tilted by
+    // the bank), bounded by speed
     const pitch = clamp(input.pitch, -1, 1);
-    const q = pitch ? pitch * c.PITCH_RATE : -this.gamma * c.PITCH_LEVEL;
+    const qWant = pitch ? pitch * c.PITCH_RATE : clamp(-this.gamma * c.PITCH_LEVEL, -c.PITCH_LEVEL_RATE, c.PITCH_LEVEL_RATE);
+    this.pitchRate += clamp((qWant - this.pitchRate) * c.PITCH_FOLLOW, -c.PITCH_ACCEL, c.PITCH_ACCEL) * dt;
+    const q = this.pitchRate;
     const cb = Math.max(0.2, Math.cos(this.bank)), cg = Math.cos(this.gamma);
     const nCmd = (cg + q * v / g) / cb;
     const n = clamp(nCmd, -0.5 * nMax, nMax);
@@ -258,7 +281,7 @@ export class PlaneFlight {
     const c = this.cfg, sink = -this.v * Math.sin(this.gamma);
     if (sink > c.WATER_SINK || this.v > c.WATER_SPEED || Math.abs(this.bank) > c.WATER_BANK) { this.crash('water'); return; }
     this.state = 'water';
-    this.gamma = 0;
+    this.gamma = this.pitchRate = this.roll = 0;
     this.v *= c.WATER_KEEP;
     this.stalled = false;
     this.load = 1;
@@ -268,7 +291,7 @@ export class PlaneFlight {
   private float(input: PlaneInput, dt: number, w: PlaneWorld) {
     const c = this.cfg, v = this.v;
     this.bank *= Math.exp(-4 * dt);
-    this.gamma = 0;
+    this.gamma = this.pitchRate = this.roll = 0;
     this.load = 1;
     this.stalled = false;
     this.heading -= clamp(input.turn, -1, 1) * c.TAXI_TURN * Math.min(1, (v + 1) / 5) * Math.min(1, 12 / Math.max(v, 1)) * dt;

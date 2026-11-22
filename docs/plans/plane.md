@@ -28,6 +28,14 @@ The first draft was found too easy. Changed, in priority over everything below:
    the takeoff speed with the stick pulled. Too fast or too steep onto water is a crash ("Splash"). Land and roofs:
    a crash, except a shallow skim (a bounce, as below). Crash: tint and shake, then back at a safe pose ~3 s old.
 5. Pitch: flight convention with an "Invert pitch" toggle (question 2 A, unchanged).
+   **Inertia (feedback after phase 2: W/S snapped the drawn nose):** the stick no longer sets the load factor in one
+   step. It asks a path pitch rate that the elevator state `pitchRate` follows (`PITCH_FOLLOW` 5 /s, at most
+   `PITCH_ACCEL` 60 °/s²); the load factor, the drawn angle of attack and then the path build up over ~0.5 s, the
+   path visibly trailing the nose. Hands-off levelling asks at most `PITCH_LEVEL_RATE` 10 °/s (no pushover into
+   negative g after a steep climb). The roll rate eases in and out (`ROLL_ACCEL` 300 °/s²); the drawn angle of attack
+   follows the lift's (`ALPHA_FOLLOW` 10 /s, at most `ALPHA_RATE` 40 °/s, so takeoff and touchdown do not snap
+   either). Check `pitch_smooth`: nose at most 1°/step, its per-step change changing at most 0.1°, the nose 2°+ ahead
+   of the path 0.4 s into a pull.
 6. Start: in the air from orbit (unchanged), and a second button to start floating on the Danube.
 
 Consequently the checks `speeds`, `guard_*`, `edge` turn-back and `danube` turned back at the east edge are replaced
@@ -194,7 +202,7 @@ other. Telling it apart is phase 5.
 | T | back to the last safe point | drone reset |
 | Esc | exit | all modes |
 
-Keys are digital; the model's roll and pitch rates do the smoothing. Wheel: camera distance.
+Keys are digital; the model's roll rate, elevator (`pitchRate`) and drawn angle of attack do the smoothing. Wheel: camera distance.
 
 **Touch**: `TouchSticks(canvas, { onPinch, camera: 'right' })` exactly as the drive mode. Left stick: sideways turn
 (`|x|^1.5`, gentle near the middle), up/down pitch. Thumb off: level flight. Right: two hold buttons `Fast` above
