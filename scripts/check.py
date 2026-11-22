@@ -333,7 +333,8 @@ def defect_checks(ws, fx):
     """Check patches from road-defects.md and the fixtures' documented fixes on the built map.
 
     Boxes are half-open [x0, z0, x1, z1] on the project grid. Road and water heights are metres above
-    the map base. Deck height is clearance above the water. Dry: no water in the box (land the rivers from the
+    the map base (a road's: its surface, over a bore or a covered passage the street, not the floor under it,
+    data/ground.npz g). Deck height is clearance above the water. Dry: no water in the box (land the rivers from the
     terrain model must not take). Every column must have the expected surface.
     """
     checks = json.loads((SCRIPTS / "fixtures/road-defects.json").read_text()).get(fx.name, [])
@@ -346,7 +347,7 @@ def defect_checks(ws, fx):
     with np.load(data / "surface.npz") as s:
         ground, deck = s["gt"], s["deck"]
     with np.load(data / "ground.npz") as g:
-        water = g["water"]
+        water, street = g["water"], g["g"]  # (street: over a bore or a covered passage its surface, not the floor)
     roads = np.frombuffer(gzip.decompress((data / "qa_roadmask.bin.gz").read_bytes()), np.uint8).reshape(ground.shape)
     meta = json.loads((ws / PUB / "meta.json").read_text())
     vol = mapstore.MapVolume(fx.cover(), lambda w: data / "cache/regions" / f"{w.r0}_{w.c0}", meta["H"])
@@ -362,6 +363,7 @@ def defect_checks(ws, fx):
             g = ground[r, c]
             kind = patch["kind"]
             if kind == "road":
+                g = street[r, c]
                 height, present, top = g, roads[r, c] == 1, g
             elif kind == "deck":
                 d = deck[r, c]
@@ -462,6 +464,19 @@ def verify(fx, jobs, ws=None):
         if tot["steps"] or tot["blocked"]:
             bad.append(f"ways under bridges: {tot['steps']} with a ground step, {tot['blocked']} blocked "
                        f"(way, col, row, step m, blocked m): {worst[:5]}")
+    # a tunnel under a street is a covered passage (tunnels.py, voxelize.py's tunnels counter): along every tunnel=yes
+    # carriageway and railway, room over its floor and no hole in the street over it
+    tu = [r.get("tunnels") for r in regions]
+    if any(u is None for u in tu):
+        bad.append("tunnels: no tunnels counter in the report (tunnels.py)")
+    else:
+        tot = {k: sum(u[k] for u in tu) for k in ("ways", "blocked", "low", "holes")}
+        worst = [w for u in tu for w in u["worst"]]
+        print(f"  tunnels: {tot['ways']} carriageways and railways, {tot['blocked']} blocked, {tot['holes']} with a hole "
+              f"in the street over them (0 each); lower than the vehicle's clearance {tot['low']}")
+        if tot["blocked"] or tot["holes"]:
+            bad.append(f"tunnels: {tot['blocked']} blocked, {tot['holes']} with a hole in the street over them "
+                       f"(way, col, row, least room m, blocked m, holes): {worst[:5]}")
     bad.extend(defect_checks(ws, fx))
     return bad
 
