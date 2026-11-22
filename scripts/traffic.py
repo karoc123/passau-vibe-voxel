@@ -157,7 +157,8 @@ def join_bike_ways(peds, pn, note, nodes_xy=None, fit_ok=None):
                     best[m] = (nd, (i, n))
                     heapq.heappush(q, (nd, m))
     linked = 0
-    if nodes_xy is not None:  # gaps: OSM's ways stopping short of each other, stretches dropped as through a wall
+    if nodes_xy is not None and any(e.get("bk") for e in peds):  # gaps: OSM's ways stopping short of each other,
+        # stretches dropped as through a wall (a map with no cycle way has none)
         from scipy.spatial import cKDTree
         z_of = {}
         for e in peds:

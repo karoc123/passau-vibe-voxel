@@ -42,12 +42,11 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F5 | Trains and boats into the world sim | M | In progress (`f5`) |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | In progress (`q3`) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
-| Q8 | A bridge deck does not sag to the ground beside it | S–M | In progress (`q8`) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
-| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q8 |
+| Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
 
@@ -138,46 +137,9 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 - **Verify spots:** `?cam=-5819.4,178.2,351.3,-5850.7,108.9,435`; others of the kind at -1102,1292; 2919,-85;
   -5099,519.
 
-### Q8. A bridge deck does not sag to the ground beside it (S–M)
-
-- **Waits for:** nothing. Do not run it in parallel with R6's deck stage (same block in `voxelize.py`, "# bridges /
-  decks"). Q4's deck-width step (after `_bw`, reads only `deck_abs`) sits below the profile code and should not clash.
-- **Today:** the deck's height is a profile along each bridge way. Each metre takes the 30th percentile of the
-  surface model sampled across the way (±0.7 × half width, ±1.5 m along). Over land a sample is kept down to 1.5 m
-  *under* the terrain model (`h_ > gd_ - 1.5`); only over water must it stand 1.5 m over it. The median filters after
-  that knock down only what stands *over* the profile (pylons, cables). Then every point takes the 10th percentile
-  of its layer within 10 m. So nothing removes a dip, and that last step spreads a dip 10 m each way. Where a way
-  runs along the edge of its deck (OSM a metre or two off it) or the deck is narrow, some samples fall beside the
-  deck onto the road or rail under the bridge, and a short bridge sinks to it.
-- **Measured (data of 9781149b):** Dietzing (way 106617552, service, `bridge=yes`, `layer=1`, 23 m over the
-  B 85 cutting). The way runs along the deck's north edge (lower rows). Its raw profile is 121–122 m over BASE,
-  except for 3 samples mid-span at 114.8–115.5 (the B 85 under it, DTM 114.2). The built deck (`surface.npz` `deck`)
-  is 115.1 at the west end and rises to 121 at the east end. The surface model is level at 121.5 over the whole
-  span. Both OSM ends lie 6–8 m short of the banks, on the cutting's slopes. The end extension carries the deck on
-  level from its end height until the ground comes within 1.5 m, so it starts from 115 and stops at once. A read-only
-  scan of the raw profiles found 9 of 107 bridge ways with mid-span samples within 1.5 m of the terrain model (not
-  over water) between samples 3 m or more over it. These are candidates to look at, not findings: the scan does not
-  move footbridges as `snap_footbridge` does. They are path 1210300121 (-1746,797), footway 412953527 (1236,470),
-  primary_link 121880279 (1149,486), Stockbauersteig 27663642 (1652,-1749), Innsteg 8092867, and with no deck at all
-  Poststeg 8099444, footway 401782358 and path 163931217 (in the road-defects scan already).
-- **Do:** one rule: a deck is the level the surface model holds over the gap, never the ground seen beside the deck.
-  Between a way's first and last sample that stand clearly over the terrain (3 m or more), drop the samples within
-  1.5 m of the terrain model, as over water. Only the ends may come down to the ground (abutments, ramps).
-- **Do:** where a way's samples on one side see the ground and on the other side the deck, take the profile on the
-  deck's side. This is the sideways shift `snap_footbridge` does for footbridges of 15 m or more, applied to the
-  profile of every bridge way.
-- **Do:** keep the 10th-percentile step (it was added for cable stays over the outer lanes), but run it on the
-  profile with the dips already dropped.
-- **Do:** a build counter and a `verify` check: bridge ways whose built deck lies 2 m or more under the way's own deck
-  level (the median of its samples 3 m or more over the terrain) anywhere between its ends.
-- **Gates:** `check.py verify` (the Gaißabrücke `deck` patch and the bridgehead cases in `road-defects.json` must
-  hold); `clearance.py` lane scan not worse. No fixture covers the Dietzing bridge, so iterate with
-  `voxelize.py --just` on its region.
-- **Verify spot:** Dietzing over the B 85: `?cam=-2107,138.8,-1709,-2087,115.7,-1658` (road-defects #11).
-
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** Q8 (Q2 and Q9 landed, data rebuild pending). Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** nothing (Q2, Q8, Q9 landed; take measurements on data rebuilt after Q8). Do nothing here before them; this is only the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under

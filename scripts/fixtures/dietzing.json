@@ -1,0 +1,290 @@
+{
+ "about": "Fixture map for scripts/check.py: 1152 x 1024 m south of the Kachlet fixture (project rows -2048..-1024, columns -3072..-1920): the Dietzing bridge (OSM way 106617552, service, bridge=yes, layer=1) over the B 85 cutting at project col -2087, row -1658, a deck the surface model holds level at 121.5 m over the cutting's road at 114 m (handoff Q8, road-defects #11). All but `about`, `name`, `map` and `regions` as in scripts/map.json (pinned for the project).",
+ "name": "Passau Dietzing bridge (fixture)",
+ "crs": 25832,
+ "grid": {
+  "x0": 827371,
+  "y0": 5390500
+ },
+ "anchor": {
+  "name": "Dom St. Stephan",
+  "x": 829351,
+  "y": 5389767
+ },
+ "map": {
+  "col0": -3072,
+  "row0": -2048,
+  "cols": 1152,
+  "rows": 1024
+ },
+ "base": 287,
+ "rivers": {
+  "level": 290.921,
+  "stretches": [
+   {
+    "name": "Danube above the Kachlet dam (and the Gaißa)",
+    "box": [
+     821000,
+     5388900,
+     824880,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824880,
+     5389847,
+     824900,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824900,
+     5389873,
+     824920,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824920,
+     5389900,
+     824940,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824940,
+     5389926,
+     824960,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824960,
+     5389953,
+     824980,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     824980,
+     5389979,
+     825000,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     825000,
+     5390006,
+     825020,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     825020,
+     5390032,
+     825040,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     825040,
+     5390059,
+     825060,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     825060,
+     5390085,
+     825080,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam, along the weir",
+    "box": [
+     825080,
+     5390112,
+     825100,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube above the Kachlet dam: the locks' upper approach, up to the north chamber's upper gate",
+    "box": [
+     825100,
+     5390138,
+     825120,
+     5392600
+    ],
+    "level": 299.75
+   },
+   {
+    "name": "Danube below the Kachlet dam",
+    "box": [
+     825000,
+     5389300,
+     826200,
+     5390300
+    ],
+    "level": 291.5
+   },
+   {
+    "name": "Danube from Heining to Hacklberg",
+    "box": [
+     826200,
+     5389300,
+     827371,
+     5390100
+    ],
+    "level": 291.35
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir (the power station's residual flow), its north bend",
+    "box": [
+     828580,
+     5392000,
+     828960,
+     5392600
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, its middle",
+    "box": [
+     828660,
+     5391800,
+     828960,
+     5392000
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, down to the weir (OSM way 440171244)",
+    "box": [
+     828750,
+     5391520,
+     828960,
+     5391800
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828900,
+     5391511,
+     828910,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828910,
+     5391503,
+     828920,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828920,
+     5391495,
+     828930,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828930,
+     5391488,
+     828940,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz: the loop below the Hals weir, along the weir",
+    "box": [
+     828940,
+     5391480,
+     828960,
+     5391520
+    ],
+    "level": 295.85
+   },
+   {
+    "name": "Ilz above the Hals weir",
+    "box": [
+     827900,
+     5391380,
+     828960,
+     5392600
+    ],
+    "level": 301.4
+   },
+   {
+    "name": "Ilz below Hals",
+    "box": [
+     828960,
+     5391150,
+     829250,
+     5392600
+    ],
+    "level": 293.9
+   },
+   {
+    "name": "Ilz above Ilzstadt",
+    "box": [
+     829100,
+     5390800,
+     829560,
+     5391150
+    ],
+    "level": 292.9
+   }
+  ]
+ },
+ "regions": {
+  "size": 1024,
+  "jobs": 2
+ }
+}

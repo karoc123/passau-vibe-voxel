@@ -272,6 +272,16 @@ MATCH_SHARE = 0.40    # matched OSM outlines moved onto their LoD2 footprints (0
 SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
 WET_MAX = 3           # m: a carriageway's or a railway's centreline on water (culvert.py; 9 m on the B 8 before it)
+# bridge ways the deck_sag counter (voxelize.py, handoff Q8) finds sagging that are known and are no deck on the ground
+# beside it: their own level is a surface over the way (crowns), or a dip that is not the ground. Listed, not failed
+DECK_SAG_KNOWN = {
+    8099444: "Poststeg (haissengasse): samples 5 m under its deck mid-span, over the tracks, not the ground",
+    80143938: "hiking path (haissengasse): crowns 45 m up the slope over its east half (taller than veg allows)",
+    138602284: "path (haissengasse): crowns 35 m over it, outside veg",
+    27663642: "Stockbauersteig (hals): crowns over its east end, its west end's ramp smoothed into the bank",
+    1169724321: "Steffelmuehlweg (kachlet): crowns over a short bridge the ortho does not see green",
+    1272598946: "footway (altstadt): crowns over 3 m of it",
+}
 
 
 M_LEAF, M_LAMP, M_CAR = 3, 5, 11
@@ -335,8 +345,9 @@ def defect_checks(ws, fx):
 
     Boxes are half-open [x0, z0, x1, z1] on the project grid. Road and water heights are metres above
     the map base (a road's: its surface, over a bore or a covered passage the street, not the floor under it,
-    data/ground.npz g). Deck height is clearance above the water. Dry: no water in the box (land the rivers from the
-    terrain model must not take). Every column must have the expected surface.
+    data/ground.npz g). Deck height is clearance above the water; bridge: a deck over land, its surface above the map
+    base. Dry: no water in the box (land the rivers from the terrain model must not take). Every column must have the
+    expected surface.
     """
     checks = json.loads((SCRIPTS / "fixtures/road-defects.json").read_text()).get(fx.name, [])
     if not checks:
@@ -371,6 +382,9 @@ def defect_checks(ws, fx):
                 height, present, top = d - g, water[r, c] & np.isfinite(d), np.rint(np.nan_to_num(d))
             elif kind == "water":
                 height, present, top = g, water[r, c], g
+            elif kind == "bridge":  # a deck over land: its surface, m over the map base
+                d = deck[r, c]
+                height, present, top = d, np.isfinite(d), np.rint(np.nan_to_num(d))
             elif kind == "dry":  # land, no water: ground of any height
                 height, present, top = g, ~water[r, c], g
             else:
@@ -469,6 +483,19 @@ def verify(fx, jobs, ws=None):
         if tot["steps"] or tot["blocked"]:
             bad.append(f"ways under bridges: {tot['steps']} with a ground step, {tot['blocked']} blocked "
                        f"(way, col, row, step m, blocked m): {worst[:5]}")
+    # a bridge deck does not sag to the ground beside it (voxelize.py's deck_sag counter, "# bridges / decks"): along
+    # every bridge way's span, the built deck nowhere SAG_M m or more under the way's own deck level
+    sg = [r.get("deck_sag") for r in regions]
+    if any(s is None for s in sg):
+        bad.append("bridge decks: no deck_sag counter in the report (voxelize.py)")
+    else:
+        worst = [w for s in sg for w in s["worst"]]
+        new = [w for w in worst if w[0] not in DECK_SAG_KNOWN]
+        print(f"  bridge decks: {sum(s['ways'] for s in sg)} ways with a span, {len(new)} sagging 2 m or more under "
+              f"their own level (0); known (DECK_SAG_KNOWN): {[w[0] for w in worst if w[0] in DECK_SAG_KNOWN]}")
+        if new:
+            bad.append(f"bridge decks: {len(new)} ways sag 2 m or more under their own level "
+                       f"(way, col, row, m, metres): {new[:5]}")
     # a tunnel under a street is a covered passage (tunnels.py, voxelize.py's tunnels counter): along every tunnel=yes
     # carriageway and railway, room over its floor and no hole in the street over it
     tu = [r.get("tunnels") for r in regions]

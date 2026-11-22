@@ -7,7 +7,8 @@ from the repository root. Each fixture builds under `data/check/<fixture>/base/`
 [road-defects.json](road-defects.json) defines the local checks for [the fixed road defects](../../docs/plans/road-defects.md)
 and the nearby fixture features. Each box covers a half-open rectangle in project
 coordinates, ordered `[x0, z0, x1, z1]`. Road and water heights use the map base.
-Deck heights measure clearance above the water. A `dry` box must hold no water.
+Deck heights measure clearance above the water, `bridge` heights a deck's surface over land (map base). A `dry` box
+must hold no water.
 
 ## Baseline results
 
@@ -16,6 +17,7 @@ apply across the whole fixture, including areas outside the local defects.
 
 | Fixture | Existing failure |
 |---|---|
+| `dietzing` | 11 of 50 LoD2-matched outlines moved (22.0%, minimum 40%; fixture added with Q8) |
 | `gaissa` | 30 of 93 LoD2-matched outlines moved (32.3%, minimum 40%) |
 | `haissengasse` | Footpaths sunk 2.09% and hovering 2.12% (maximum 1.50% each) |
 | `hals` | Footpaths hovering 3.22% (maximum 1.50%), cap roughness p99 14.45 cm (maximum 12 cm) |

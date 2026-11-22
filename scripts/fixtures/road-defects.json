@@ -8,6 +8,14 @@
       ]
     }
   ],
+  "dietzing": [
+    {
+      "name": "Dietzing bridge over the B 85 cutting at its own level, not the road under it (road-defects #11, handoff Q8)",
+      "patches": [
+        {"kind": "bridge", "box": [-2087, -1658, -2077, -1655], "min_m": 120}
+      ]
+    }
+  ],
   "gaissa": [
     {
       "name": "Gaißabrücke deck over the river",

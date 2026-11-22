@@ -766,6 +766,7 @@ _pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _
 if _pool.min() < _pool.max():
     _best, _bestd = _pool.copy(), np.abs(dtm - _lv64).astype(np.float32)
     _pw = _w0 | _flat
+    _pm = _d = _i = _j = _dl = _take = None  # (a region with no pool's water in it)
     for p_ in np.unique(_pool):
         _pm = (_pool == p_) & _pw
         if not _pm.any():
@@ -3070,10 +3071,20 @@ deck_col = np.where(deck & (deck_col == 0), C["deck"], deck_col)
 # nothing stands above the river, then a 25 m running median and a 15 m mean. Every deck cell takes the height of the
 # nearest profile point of its own layer: one smooth level, so cars drive on it. (The cell-by-cell lowest return
 # picked up cells half over the water at the deck edges and broke the decks into steps metres apart.)
+# A deck is the level the surface model holds over the gap, never the ground seen beside it: where the samples on one
+# side of the way see the ground (within DECK_DIP m of the terrain model) and those on the other side the deck
+# (DECK_OVER m or more over it), the profile is the deck's side (a way drawn along its deck's edge); and between a
+# way's first and last sample DECK_OVER m or more over the terrain, a sample within DECK_DIP m of it is dropped, as over
+# water: only the ends come down to the ground (abutments, ramps). A way's point under a crown counts for neither (a
+# footbridge under trees stood in their tops). The Dietzing bridge over the B 85 cutting (way 106617552, project col
+# -2087, row -1658; road-defects #11) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
+# it, and the 10th percentile within 10 m below took the whole 23 m deck down to it
+DECK_OVER, DECK_DIP = 3.0, 1.5
 from scipy.spatial import cKDTree
 water_ = gcol == C["water"]
 prof = []  # per way: (x, y, h, layer) every metre
-for line, hw, layer, _ in bridge_lines:
+deck_own = []  # per way: (OSM id, points, the way's own deck level per point: NaN off the span) for the sag counter
+for (line, hw, layer, _), oid_ in zip(bridge_lines, [b_[0] for b_ in bridge_ways]):
     n_ = max(2, int(line.length) + 1)
     P_ = np.array([line.interpolate(v_).coords[0] for v_ in np.linspace(0, line.length, n_)])
     T_ = np.gradient(P_, axis=0)
@@ -3089,9 +3100,27 @@ for line, hw, layer, _ in bridge_lines:
     Sb_ = bmask[np.clip(Y_.astype(int), 0, D - 1), np.clip(X_.astype(int), 0, W - 1)] & ~bmask[pr_, pc_][:, None]
     with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        h_ = np.nanpercentile(np.where(Sb_, np.nan, S_), 30, axis=1)
+        S_ = np.where(Sb_, np.nan, S_)
+        h_ = np.nanpercentile(S_, 30, axis=1)
+        hl_, hr_ = (np.nanpercentile(S_[:, s_], 30, axis=1) for s_ in (b_ < 0, b_ > 0))
     gd_ = dtm[pr_, pc_]
-    ok_ = np.isfinite(h_) & (deck_lay[pr_, pc_] <= layer + 1) & ((h_ > gd_ + 1.5) | (~water_[pr_, pc_] & (h_ > gd_ - 1.5)))
+    lo_, hi_ = np.fmin(hl_, hr_), np.fmax(hl_, hr_)
+    crown_ = veg[pr_, pc_]
+    h_ = np.where(~crown_ & (lo_ < gd_ + DECK_DIP) & (hi_ >= gd_ + DECK_OVER), hi_, h_)  # (the deck's side of the way)
+    span_ = np.zeros(n_, bool)
+    over_ = np.nonzero(~crown_ & (h_ >= gd_ + DECK_OVER) & (deck_lay[pr_, pc_] <= layer + 1))[0]  # (NaN: False)
+    if len(over_):
+        span_[over_[0]:over_[-1] + 1] = True
+    ok_ = np.isfinite(h_) & (deck_lay[pr_, pc_] <= layer + 1) \
+        & ((h_ > gd_ + DECK_DIP) | (~water_[pr_, pc_] & ~span_ & (h_ > gd_ - DECK_DIP)))
+    # the way's own deck level: the median of its samples DECK_OVER m or more over the terrain within 15 m (a long
+    # bridge climbs), on its span
+    own_ = np.full(n_, np.nan)
+    for i_ in np.nonzero(span_)[0]:
+        near_ = over_[np.abs(over_ - i_) <= 15]
+        if len(near_):
+            own_[i_] = np.median(h_[near_])
+    deck_own.append((oid_, P_, own_))
     if ok_.sum() >= 2:
         h_ = np.interp(np.arange(n_), np.nonzero(ok_)[0], h_[ok_])
     else:  # hidden all along (a walkway slung under a higher deck): straight between its ends' ground
@@ -3846,6 +3875,26 @@ for _oid, _kind, _l, _s0, _s1 in GCTX.corridors:
 report["counters"]["under_bridge"] = _ub
 note("ways under bridges (corridors, ground steps of 2 m or more, blocked within the clearance, decks lower than it):",
      _ub["corridors"], _ub["steps"], _ub["blocked"], _ub["low"], _ub["worst"][:5])
+# a bridge deck does not sag to the ground beside it (check.py verify): each bridge way's built deck, every metre of its
+# span (its first to last sample DECK_OVER m or more over the terrain) where a deck is built, against the way's own
+# deck level there (the profile's DECK_OVER samples within 15 m): sagging where it lies SAG_M m or more under it. Each
+# way counted by the region whose core holds its middle
+SAG_M = 2.0
+_sg = dict(ways=0, sagging=0, worst=[])
+for _oid, _P, _own in deck_own:
+    _mid = _P[len(_P) // 2]
+    if not np.isfinite(_own).any() or not in_core(int(_mid[1]), int(_mid[0])):
+        continue
+    _r, _c = np.clip(_P[:, 1].astype(int), 0, D - 1), np.clip(_P[:, 0].astype(int), 0, W - 1)
+    _drop = np.where(deck[_r, _c] & np.isfinite(_own), _own - deck_abs[_r, _c], 0)
+    _sg["ways"] += 1
+    if _drop.max() >= SAG_M:
+        _sg["sagging"] += 1
+        _sg["worst"].append([_oid, round(float(_mid[0])) + C0, round(float(_mid[1])) + R0, round(float(_drop.max()), 1),
+                             int((_drop >= SAG_M).sum())])
+report["counters"]["deck_sag"] = _sg
+note("bridge ways (with a span over the terrain, their built deck SAG_M m or more under their own level):",
+     _sg["ways"], _sg["sagging"], _sg["worst"][:5])
 # the same along every tunnel=yes carriageway and railway the ground covers (tunnels.plan: a bore, a covered passage,
 # one left solid; not one open to the sky, under a deck or a building), each metre from its floor (tunnels.FLOOR, else
 # the grade between its portals or the ground under it: one left solid is blocked) to the first solid voxel (a deck
