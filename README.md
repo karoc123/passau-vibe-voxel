@@ -297,12 +297,13 @@ collide as voxels); everything else is its voxels. Tiles are meshed in workers; 
 ```sh
 cd web
 pnpm check                                   # tsc
+pnpm gates                                   # tsc + the fast headless checks (node tools/gates.mjs), see "Agent tools"
 pnpm build                                   # static site in web/dist
 node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screenshot (see "Agent tools")
 ```
 
-`web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`) and the agent checks below (`shoot.mjs`,
-`collision.mjs`, `bld-ids.mjs`, `rapier-car.mjs`, `rapier-car-bench.mjs`).
+`web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
+and the benches; `data-dir.mjs` and `real-city.mjs` are shared helpers, not tools.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
@@ -310,6 +311,37 @@ No analytics: the page loads nothing beyond its own files and the Google font.
 
 For agents (and people) changing the code. All run from `web/` with no GPU and no extra dependency; in a git
 worktree first `ln -s <main checkout>/web/node_modules web/node_modules` (don't install).
+
+**Gates: `node tools/gates.mjs`** (`pnpm gates`; ~20 s alone on 20 cores, up to a minute on a busy machine). tsc and
+the headless checks below in parallel, a PASS / FAIL table with times, exit code 1 on a failure. Run it before every
+commit. `--full` (`pnpm gates:full`, a few minutes) adds `section-check`, `popin-check`, `caps-check --all`,
+`surface-gap --check docs/plans/surface-gap-baseline.json` and, with `--golden FILE` (recorded before the change by
+`node tools/mesh-golden.mjs write FILE`), `mesh-golden check`; run it for changes to the mesher, the surface, the car
+or the street life. `--list` shows each gate's set and the files it guards; `node tools/gates.mjs plane boat` runs
+those only; `-v` prints every gate's output. The pipeline's quick gates: `scripts/check.sh` (from anywhere:
+`palette_check.py`, `overrides.py check`, `interiors.py --test`; `--fixture` adds `check.py verify` on the fixture
+map, minutes).
+
+The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a failure (details in each file's header):
+
+| tool | checks | set |
+|---|---|---|
+| `core-deps` | `src/core/`, the world sim and what they import: no three.js, no DOM (ADR 0001) | fast |
+| `layers` | `core/layers.ts` on a synthetic world: L0 + L1 + L2 edits, two builds, deltas encoded | fast |
+| `edit-roundtrip` | `core/columns.ts` on a real node: thousands of random edits against a dense reference | fast |
+| `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `tile-data.ts` reads (needs `uv`) | fast |
+| `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
+| `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
+| `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
+| `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
+| `section-check` | sectioned re-meshing of an edited node equals the whole node's mesh | full |
+| `popin-check` | the street life, trains and boats: nothing appears, vanishes or jumps near a moving viewer | full |
+| `surface-gap` | the car's surface against the drawn one on the real city; `--check` against the baseline | full |
+| `mesh-golden` | the mesher's output hashed: `write FILE` before a change, `check FILE` after | full, with `--golden` |
+
+Benches and diagnostics (not gates): `remesh-bench` (meshing an edited node from columns: times, and equal buffers),
+`mesh-profile` (where a node's meshing time goes, V8 profiler), `life-phys` (the traffic's bodies near edits: cost,
+lost ghosts), `life-phys-scan` (where the traffic's paths leave no room for a car), `rapier-car-bench`.
 
 **FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/nav/voxel-collision.ts`)
 over a small synthetic world (`src/nav/collision-checks.ts`: a ground height per column, boxes for walls and decks,

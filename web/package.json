@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "gates": "node tools/gates.mjs",
+    "gates:full": "node tools/gates.mjs --full"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",
