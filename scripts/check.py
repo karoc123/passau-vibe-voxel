@@ -413,6 +413,14 @@ def verify(fx, jobs, ws=None):
         bad.append("no carriageway sanity counter in the report")
     elif nbad:
         bad.append(f"{nbad} carriageways painted as pavement")
+    openings = [r.get("underpass_open_bed") for r in regions]
+    if any(o is None for o in openings):
+        bad.append("underpasses: no counter for open walking cells on roads and rail beds")
+    else:
+        road, rail = (sum(o[key] for o in openings) for key in ("road", "rail"))
+        print(f"  underpasses: {road} open walking cells on roads, {rail} on rail beds (0 each)")
+        if road or rail:
+            bad.append(f"underpasses: {road} open walking cells on roads, {rail} on rail beds")
     for label, key, used, total, lim in (
         ("LoD2 roofs taken", "lod2_roofs", "used", "total", LOD2_SHARE),
         ("canopy heights from the laser", "laser_canopy", "used", "total", LASER_SHARE),

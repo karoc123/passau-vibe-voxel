@@ -530,6 +530,7 @@ def main(argv):
     # traffic.py over the whole network, on what the regions handed over
     traffic.OPEN_CUT = {o for r in res.values() for o in r["open_cut"]}
     underpass.WALK, underpass.IDS = R("walk", np.int16), {o for r in res.values() for o in r["walk_ids"]}
+    underpass.SHIFTED = {o for r in res.values() for o in r.get("shifted_stairs", ())}
     tunnels.FLOOR, tunnels.IDS = R("floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
     skip = np.zeros(len(palette) + 64, bool)
     ids = res[ws[0]]["ids"]
@@ -546,7 +547,7 @@ def main(argv):
         import pickle                  # the rasters put together: map-sized)
         whole = lambda a: a.box(0, D_, 0, W_) if isinstance(a, mapstore.MapRaster) else a  # noqa: E731
         pickle.dump(dict({k: whole(v) for k, v in tin.items()}, open_cut=traffic.OPEN_CUT, walk=whole(underpass.WALK),
-                         ids=underpass.IDS, bore=whole(tunnels.FLOOR), bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
+                         ids=underpass.IDS, shifted_stairs=underpass.SHIFTED, bore=whole(tunnels.FLOOR), bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
     json.dump(trafficpack.pack(traffic.build(note=note, vol=vol, **tin)), open(OUT / "traffic.json", "w"), separators=(",", ":"))
     # debug lists of the regions, one after the other
     for name in ("lod2_reverted", "thin_parts", "floating", "floating_left", "supports"):

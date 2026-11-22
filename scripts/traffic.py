@@ -32,7 +32,7 @@ _T = Transformer.from_crs(4326, CRS, always_xy=True)
 OPEN_CUT = set()  # layer -1 ways that are open cuts, not tunnels (voxelize.py)
 
 
-def fit(p, offs, vol, solid, W, D, step=0.5, decks=False):
+def fit(p, offs, vol, solid, W, D, step=0.5, decks=False, rise_ahead=True):
     """a path's heights onto the voxels as drawn: every 0.5 m, across the offsets the bodies use, the free level over
     the drawn surface nearest the path's own height (a deck, not the street under it); the highest across, then over
     1 m along, so a body rises before a step instead of cutting into it. Returns the points (the path's corners and
@@ -82,7 +82,7 @@ def fit(p, offs, vol, solid, W, D, step=0.5, decks=False):
     zh = np.clip(hi, 1, H - 2)
     deck = (hi > best) & (hi - best <= 9) & solid[vol[zh - 1, r0, c0]] & ~solid[vol[zh, r0, c0]] & ~solid[vol[zh + 1, r0, c0]]
     best = np.where(deck, hi, best)
-    zf = maximum_filter1d(best, 5)
+    zf = maximum_filter1d(best, 5) if rise_ahead else best
     run = longest = 0
     for b in blocked:
         run = run + 1 if b else 0
@@ -430,7 +430,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 res.append((w, run))
         return res
 
-    def pts_of(seq, bridge):
+    def pts_of(seq, bridge, spacing=3):
         """points of a node chain; long segments get a point every 3 m with its own height, so a vehicle follows a
         bridge deck (or a ramp) instead of the straight line between two far-apart OSM nodes"""
         out = []
@@ -443,8 +443,8 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             xb, yb = nodes[b]
             L = math.hypot(xb - xa, yb - ya)
             on = br and (bridge or b in bridge_nodes)  # both ends on the bridge: the whole segment is
-            for k in range(1, int(L // 3)):
-                f = k * 3 / L
+            for k in range(1, int(L // spacing)):
+                f = k * spacing / L
                 x, y = xa + (xb - xa) * f, ya + (yb - ya) * f
                 out.append([round(x, 1), round(y, 1), z_at(x, y, on)])
         # a lone point standing off both neighbours (a bridge end node reading a lamp base, a gap cell) is noise:
@@ -621,7 +621,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
     pways = [w for w in ways if (w["tags"]["highway"] in WALK or w["tags"].get("footway") == "sidewalk")
              and (not underground(w["tags"]) or w["id"] in underpass.IDS or w["id"] in bored) and w["tags"].get("access") not in ("no", "private")]
     ped_sig = {n for n, t in ntags.items() if t.get("crossing") == "traffic_signals" or t.get("crossing:signals") == "yes"}
-    peds, pidx = [], {}
+    peds, pidx, shifted_edges = [], {}, set()
 
     def pnode(n):
         if n not in pidx:
@@ -645,14 +645,15 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
     for w, seg in split(pways):
         t = w["tags"]
         bridge = t.get("bridge") not in (None, "no")
-        p = pts_of(seg, bridge)
+        shifted = w["id"] in underpass.SHIFTED
+        p = pts_of(seg, bridge, spacing=0.5 if shifted else 3)
         L = length(p)
         if L < 0.8:
             continue
         up = max(level_of(t), layer_of(t)) >= 1
         if w["id"] in bored:
             p = bore_z(p)
-        elif w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
+        elif shifted or w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
             zs = [int(underpass.WALK[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
             p = [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
         elif vol is not None and not bridge and up:
@@ -664,6 +665,8 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 on_roof[pnode(seg[0])], on_roof[pnode(seg[-1])] = zs[0], zs[-1]
         e = dict(a=pnode(seg[0]), b=pnode(seg[-1]), p=p, L=round(L, 1),
                  w=WEIGHT.get(t["highway"], 1.0) * (1.5 if t.get("footway") == "sidewalk" else 1.0))
+        if shifted:
+            shifted_edges.add(len(peds))
         bk = bike_weight(t)
         if bk:
             e["bk"] = bk
@@ -889,11 +892,14 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             tr["p"] = p_
             n_lift += lift
         keep = []
-        for e in peds:  # people keep 0.35-1.35 m to their right (both sides of the line), else all on its free side
+        sides = ((None, (-1.35, -0.35, 0.35, 1.35)), (1, (0.35, 1.35)), (-1, (-1.35, -0.35)), (0, (0.0,)))
+        for i, e in enumerate(peds):  # keep 0.35-1.35 m to the right, or try the free side
+            shifted = i in shifted_edges
+            # Walk down the middle of a narrow, adjusted stair. An early rise here would hit the approach's roof.
+            choices = ((0, (0.0,)),) if shifted else sides
             for side, offs, p0 in [(sd, of, p0) for p0 in filter(None, (e["p"], e.pop("flat", None)))
-                                   for sd, of in ((None, (-1.35, -0.35, 0.35, 1.35)), (1, (0.35, 1.35)),
-                                                  (-1, (-1.35, -0.35)), (0, (0.0,)))]:
-                p, lift, blocked = fit(p0, offs, vol, solid, W, D)
+                                   for sd, of in choices]:
+                p, lift, blocked = fit(p0, offs, vol, solid, W, D, rise_ahead=not shifted)
                 if blocked <= 2:
                     break
             else:  # mapped through a wall: nobody walks there
@@ -928,6 +934,7 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     tin = pickle.load(open("data/cache/traffic_in.pkl", "rb"))
     import underpass
     OPEN_CUT, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
+    underpass.SHIFTED = tin.pop("shifted_stairs", set())
     import tunnels
     tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
     import trafficpack
