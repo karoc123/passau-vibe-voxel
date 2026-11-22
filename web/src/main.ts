@@ -214,7 +214,7 @@ function makeControls() {
 // a trackpad pinch arrives as Ctrl+wheel, which OrbitControls amplifies 10x: re-sent as a plain wheel at ~3x
 function tamePinch(dom: HTMLElement) {
   dom.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey || !e.isTrusted || nav.mode !== 'orbit') return;
+    if (!e.ctrlKey || !e.isTrusted || !nav.onMap) return;
     e.stopImmediatePropagation(); e.preventDefault();
     dom.dispatchEvent(new WheelEvent('wheel', { deltaY: e.deltaY * 3, deltaMode: e.deltaMode, clientX: e.clientX, clientY: e.clientY, bubbles: true, cancelable: true }));
   }, { capture: true, passive: false });
@@ -255,7 +255,7 @@ function onMode(m: Mode, ride: Ride | null) {
   hud?.set(m, ride);
 }
 
-const focus = () => (nav.mode === 'orbit' ? controls.target : camera.position);
+const focus = () => (nav.onMap ? controls.target : camera.position);
 
 function setHour(h: number) {
   daylight.apply(h);
@@ -332,8 +332,8 @@ function goPlace(x: number, y: number, size: number, pin: Facts | null, name = p
   if (nav.craftView) nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
-  if (nav.mode !== 'orbit') {
-    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name), thirdPerson: nav.mode === 'pedestrian' });
+  if (!nav.onMap) {
+    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name), thirdPerson: nav.third });
     return;
   }
   const t = new THREE.Vector3(x + 0.5, g + Math.min(h * 0.5, 60), y + 0.5);
@@ -351,7 +351,7 @@ function goView(v: View) {
 
 function onLabel(l: Label) {
   const v = Object.values(views).find((w) => w.label === l.name);
-  if (v && nav.mode === 'orbit') goView(v);
+  if (v && nav.onMap) goView(v);
   else goPlace(l.x, l.y, 60, null, l.name, l.kind);
 }
 
@@ -404,7 +404,7 @@ async function boot() {
   world = nav.world = streamer.world;
   // the moving casters: street life (the cars and the motorbike driven are its own), and nav.actors' walker, boat,
   // floatplane and jet (the FPV drone has no model)
-  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.craftView ? movingActors : null);
+  daylight.casters(streamer.group, () => life || nav.third || nav.craftView ? movingActors : null);
   nav.streamer = streamer;
   nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
@@ -507,10 +507,10 @@ renderer.setAnimationLoop((now) => {
   const bodyMode = nav.craft?.id ?? nav.mode;
   if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
   if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
-  const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
+  const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.third ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
   walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
-  if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
+  if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
   post.setHeight(above, gfx.now.tilt && !nav.craftView, camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);

@@ -95,7 +95,7 @@ export class DriveMode implements PlayerCraft {
 
   // the camera shaken by a crash and dipped by a splash
   private shakeCamera(session: DriveSession, now: number) {
-    const offset = this.nav.rideShake.set(0, 0, 0);
+    const offset = this.nav.rideCamera.shake.set(0, 0, 0);
     const crash = (session.crashUntil - now) / CRASH_MS;
     if (crash > 0) shake(offset, 0.45 * crash * crash, now);
     const sink = (session.sinkUntil - now) / SINK_MS;
@@ -158,7 +158,7 @@ export class DriveMode implements PlayerCraft {
   leave() {
     if (!this.driving) return;
     this.driving.session.park();
-    this.nav.rideShake.set(0, 0, 0);
+    this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.keys.clear();
     this.handbrake.release();
