@@ -481,6 +481,15 @@ if _ng is not None:
                  if t_.get("bridge") not in (None, "no") and (t_.get("highway") or t_.get("railway"))]
          + [(a_ if t_.get("man_made") == "bridge" else a_.buffer(1), 1) for _, _, t_, a_ in osm.areas
             if t_.get("man_made") == "bridge" or t_.get("building") or t_.get("building:part")])
+    # nor a way going on from a tunnel's portal, within 12 m of it: it leaves the passage at the passage's level,
+    # under the street's deck (the service road out of the passage 1205663780 under the St 2125 at -1642, 602 had
+    # been lifted 4 m onto the deck over its portal)
+    _k = lambda p_: (round(p_[0], 3), round(p_[1], 3))  # noqa: E731
+    _portals = {_k(p_) for _, t_, l_ in osm.lines if t_.get("tunnel") not in (None, "no") and t_.get("highway")
+                for p_ in (l_.coords[0], l_.coords[-1])}
+    burn(_over, [(l_.buffer(max(_way_width(t_), 2) / 2 + 1, cap_style="flat").intersection(Point(p_).buffer(12)), 1)
+                 for _, t_, l_ in osm.lines if t_.get("highway") and t_.get("tunnel") in (None, "no")
+                 for p_ in (l_.coords[0], l_.coords[-1]) if _k(p_) in _portals])
     _dep = _lo3 - g
     _riv = _river_level(np.arange(D)[:, None], np.arange(W)[None, :]) - BASE
     _open = (_dep >= SAG_MIN) & (_dep <= SAG_MAX) & _smooth & (_ng == 0) & (_over == 0) & (g > _riv + 1)
