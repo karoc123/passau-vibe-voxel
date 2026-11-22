@@ -449,6 +449,19 @@ def verify(fx, jobs, ws=None):
             bad.append(f"caps: roughness p99 {rep['rough_p99_cm']} cm over {CAPS['rough_p99_cm']}")
         if rep["mismatch_share"] > CAPS["mismatch_share"]:
             bad.append(f"caps: edge mismatches {rep['mismatch_share']} over {CAPS['mismatch_share']}")
+    # what passes under a bridge stays open (ground.under_bridge, voxelize.py's under_bridge counter): along every
+    # railway and carriageway that a bridge crosses over, no step of 2 m in the ground and nothing in the clearance
+    ub = [r.get("under_bridge") for r in regions]
+    if any(u is None for u in ub):
+        bad.append("ways under bridges: no under_bridge counter in the report (ground.under_bridge)")
+    else:
+        tot = {k: sum(u[k] for u in ub) for k in ("corridors", "steps", "blocked", "low")}
+        worst = [w for u in ub for w in u["worst"]]
+        print(f"  ways under bridges: {tot['corridors']} corridors, {tot['steps']} with a ground step of 2 m or more, "
+              f"{tot['blocked']} blocked within the clearance (0 each); decks lower than the clearance {tot['low']}")
+        if tot["steps"] or tot["blocked"]:
+            bad.append(f"ways under bridges: {tot['steps']} with a ground step, {tot['blocked']} blocked "
+                       f"(way, col, row, step m, blocked m): {worst[:5]}")
     bad.extend(defect_checks(ws, fx))
     return bad
 

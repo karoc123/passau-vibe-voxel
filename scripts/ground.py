@@ -16,13 +16,16 @@ needs data/laser.npz (its ground returns); without it, it does nothing. The sag 
 b85 fixture stay up to 3 m lower (project col -1012..-978, row 435..486); without the passage lift 27-120 cells per
 fixture (haissengasse: the B 8 over the Donauradweg, road-defects.md #1; gaissa, kachlet, altstadt) stay up to 4 m
 lower. So all four stay.
+
+None of them lifts in the corridor a railway or a carriageway keeps under a bridge (under_bridge, the first after the
+terrain's own two: ctx.corridor). Which pass changed which cell: data/debug/ground_passes.npz (changed_bits).
 """
 import numpy as np
 from scipy import ndimage
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 
-from ways import MAIN_ROADS, ROADS, layer_of, num, way_width
+from ways import MAIN_ROADS, ROADS, layer_of, num, underground, way_width
 
 T = dict(
     # walls: the terrain's drop within a cell's neighbours that makes a wall (m); the share of it within 3 x 3 (else a
@@ -44,7 +47,12 @@ T = dict(
     # bh_seed (m); the terrain this far under the surface model (m), level within bh_flat over 3 x 3 (m); a piece of at
     # least bh_cells cells
     bh_grade=0.12, bh_reach=40, bh_seed=20, bh_depth=2, bh_flat=1.5, bh_cells=30,
+    # under a bridge: the deck in the surface model within ub_deck (m) of its level at the crossing, at most ub_reach (m)
+    # along the way each side of it; the line's ends ub_end (m) past it; a deck at least ub_gap (m) over the ground at
+    # the crossing; cells up to ub_move (m) over the line lowered to it; the vehicle's clearance (m) over the line
+    ub_deck=1.5, ub_reach=60, ub_end=3, ub_gap=2, ub_move=6, ub_clear=dict(rail=5, road=4),
 )
+RAILS = ("rail", "light_rail", "tram", "narrow_gauge", "subway")
 
 
 class Ctx:
@@ -157,7 +165,7 @@ def tunnel(ctx):
             continue
         street = int(np.median(levels))
         rr_, cc_ = ctx.cells_of(foot)
-        low = (street - g[rr_, cc_] >= d0) & (street - g[rr_, cc_] <= d1)
+        low = (street - g[rr_, cc_] >= d0) & (street - g[rr_, cc_] <= d1) & ~ctx.corridor[rr_, cc_]
         g[rr_[low], cc_[low]] = street
         n += int(low.sum())
     ctx.note("ground over short road tunnels lifted to the street crossing them:", n)
@@ -208,7 +216,7 @@ def passage(ctx):
             street = np.round(ga + (gb - ga) * np.clip((s_ - s0) / (s1 - s0), 0, 1)).astype(g.dtype)
             lo_ = dsm_lo[rr_, cc_] - (street - 0.5)
             low = (street - g[rr_, cc_] >= d0) & (street - g[rr_, cc_] <= d1) & (lo_ >= k0) & (lo_ <= k1) \
-                & (dsm_lo[rr_, cc_] - (dtm[rr_, cc_] - ctx.BASE) >= T["pass_over_dtm"])
+                & (dsm_lo[rr_, cc_] - (dtm[rr_, cc_] - ctx.BASE) >= T["pass_over_dtm"]) & ~ctx.corridor[rr_, cc_]
             g[rr_[low], cc_[low]] = street[low]
             n += int(low.sum())
     ctx.note("ground over passages lifted to the streets crossing them:", n)
@@ -253,6 +261,7 @@ def sag(ctx):
     ctx.burn(_over, [(l_.buffer(max(way_width(t_), 2) / 2 + 1, cap_style="flat").intersection(Point(p_).buffer(T["sag_portal"])), 1)
                      for _, t_, l_ in osm.lines if t_.get("highway") and t_.get("tunnel") in (None, "no")
                      for p_ in (l_.coords[0], l_.coords[-1]) if _node(p_) in portals])
+    _over[ctx.corridor] = 1  # (nor the corridor a way keeps under a bridge: under_bridge)
     _dep = _lo3 - g
     _riv = ctx.river_level(np.arange(D)[:, None], np.arange(W)[None, :]) - ctx.BASE
     _open = (_dep >= s0) & (_dep <= s1) & _smooth & (_ng == 0) & (_over == 0) & (g > _riv + 1)
@@ -318,6 +327,117 @@ def open_cut(ctx):
     return g
 
 
+def bed(t):
+    """("rail" | "road", the half width of its bed in m) of a railway or a carriageway on the ground, else None"""
+    if t.get("railway") in RAILS:
+        return "rail", 1.4 if t.get("railway") == "tram" else 1.9
+    if t.get("highway") in ROADS and way_width(t):
+        return "road", way_width(t) / 2
+    return None
+
+
+def crossings(osm):
+    """(id, tags, line, crossing point's distance along the line) of every railway and carriageway on the ground that
+    a bridge way (a road, path or track on a bridge) crosses over: the lines cross with no node there in common"""
+    surf = [(oid, t_, l_) for oid, t_, l_ in osm.lines if bed(t_) and t_.get("bridge") in (None, "no")
+            and t_.get("man_made") != "bridge" and not underground(t_)]
+    br = [l_ for _, t_, l_ in osm.lines if t_.get("bridge") not in (None, "no") and (t_.get("highway") or t_.get("railway"))]
+    tree = STRtree(br)
+    out = []
+    for oid, t_, l_ in surf:
+        nodes = {_node(p_) for p_ in l_.coords}
+        for k in sorted(tree.query(l_, predicate="intersects")):
+            x_ = l_.intersection(br[k])
+            for p_ in getattr(x_, "geoms", [x_]):
+                if p_.geom_type == "Point" and _node(p_.coords[0]) not in nodes:
+                    out.append((oid, t_, l_, l_.project(p_)))
+    return sorted(out, key=lambda c_: (c_[0], round(c_[3], 3)))
+
+
+def under_bridge(ctx):
+    """What passes under a bridge stays open. The terrain model leaves the bridge out and spans its gap between the
+    embankments: the ground under a deck stands too high, and its edges beside the drawn way (OSM draws a deck
+    narrower than it is) looked like an embankment to the lifts -- the bridgehead lift raised a strip at the deck's
+    level across the Rottalbahn under the B 12 (road-defects.md #10). Every railway and carriageway on the ground that
+    a bridge way crosses over keeps a clear corridor at its own level: from ub_end m before the deck to ub_end m after
+    it (the deck: the surface model at the deck's level at the crossing, and the laser seeing no ground under it, along
+    the way), its bed's width and a metre each side, its level the line between its ground at the two ends. The cells
+    in it up to ub_move m over the line are lowered to it (the terrain model interpolated too high under the deck); a
+    dip under it stays (a road dropping under a bridge for its clearance: filled, it humped by 1-2 m under the A 3 at
+    Schalding, -5160, -1735), and no later pass lifts in it (ctx.corridor: the tunnel, passage, sag and bridgehead lifts
+    and the bridge ways' skip it -- the sag lift had raised a road under the rail bridge by the station, -1930, 960, to
+    the deck, its stretch across the Ilztalbahn under it). Runs before the lifts, on the terrain model's ground. A deck
+    under ub_gap m over the ground at the crossing or over the line (the way is at the deck's level: on the same
+    embankment), or a way that ends under the deck, keeps its ground; so does a layer -1 way (open_cut runs later).
+    ctx.corridors: (id, kind, line, s0, s1) of each, for the build's check (voxelize.py: under_bridge in the report)"""
+    import shapely
+    from shapely.ops import substring
+    g, D, W = ctx.g.copy(), ctx.D, ctx.W
+    lo, lo3 = ctx.dsm_low(), ctx.dsm_low(3, "median")
+    ng = ctx.n_ground
+    ctx.corridor = np.zeros((D, W), bool)
+    ctx.corridors = []
+    n_cells = n_low = n_skip = 0
+
+    def at(a, q):
+        return a[min(max(int(q.y), 0), D - 1), min(max(int(q.x), 0), W - 1)]
+
+    for oid, t_, l_, sx in crossings(ctx.osm):
+        kind, half = bed(t_)
+        px = l_.interpolate(sx)
+        if not (0 <= px.y < D and 0 <= px.x < W):
+            continue
+        deck = float(at(lo3, px))
+        if deck - at(g, px) < T["ub_gap"]:
+            n_skip += 1
+            continue
+        # the deck along the way: each metre from the crossing on, while the surface model stays at the deck's level,
+        # the ground under it (the terrain model's span) ub_gap m lower, and the laser sees no ground under it
+        ends = []
+        for sgn in (-1, 1):
+            s, last = sx, sx
+            while abs(s - sx) < T["ub_reach"]:
+                s += sgn
+                if not 0 <= s <= l_.length:
+                    last = None
+                    break
+                q = l_.interpolate(s)
+                if not (0 <= q.y < D and 0 <= q.x < W):
+                    last = None
+                    break
+                if abs(at(lo, q) - deck) > T["ub_deck"] or deck - at(g, q) < T["ub_gap"] \
+                        or (ng is not None and at(ng, q) > 0):
+                    break
+                last = s
+            ends.append(None if last is None else last + sgn * T["ub_end"])
+        s0, s1 = ends
+        if s0 is None or s1 is None or s0 < 0 or s1 > l_.length:
+            n_skip += 1
+            continue
+        qa, qb = l_.interpolate(s0), l_.interpolate(s1)
+        if not all(0 <= q.y < D and 0 <= q.x < W for q in (qa, qb)):
+            continue
+        ga, gb = int(at(g, qa)), int(at(g, qb))
+        if deck - max(ga, gb) < T["ub_gap"]:  # (the way at the deck's level: beside it, or on it untagged)
+            n_skip += 1
+            continue
+        rr_, cc_ = ctx.cells_of(substring(l_, s0, s1).buffer(half + 1, cap_style="flat"), fallback=False)
+        if not len(rr_):
+            continue
+        f_ = np.clip((shapely.line_locate_point(l_, shapely.points(cc_ + 0.5, rr_ + 0.5)) - s0) / (s1 - s0), 0, 1)
+        line = np.round(ga + (gb - ga) * f_).astype(g.dtype)
+        mv = (g[rr_, cc_] > line) & (g[rr_, cc_] - line <= T["ub_move"])
+        n_cells += int(mv.sum())
+        g[rr_[mv], cc_[mv]] = line[mv]
+        ctx.corridor[rr_, cc_] = True
+        n_low += int(deck - max(ga, gb) < T["ub_clear"][kind])
+        ctx.corridors.append((oid, kind, l_, s0, s1))
+    ctx.note("ways under bridges kept open: corridors", len(ctx.corridors), "cells lowered to their line", n_cells,
+             "; decks lower than the vehicle's clearance over the line", n_low, "; crossings left (no gap, or the way ends "
+             "under the deck)", n_skip)
+    return g
+
+
 # ---------------------------------------------------------------- phase "decks"
 
 def bridgehead(ctx):
@@ -354,6 +474,9 @@ def bridgehead(ctx):
     # nor the banks: over the water the surface model is a smooth sheet metres up (the Ilz under its bridges), and
     # ground within 2 m of the rivers' level is their bank or bed
     near_water = ndimage.binary_dilation(ctx.water, iterations=4) | (g <= ctx.river_lv - ctx.BASE + 2)
+    # nor the corridor a way keeps under a bridge (under_bridge): the test above is the way's, not the crossing's -- a
+    # way that comes off some other bridge far away (the Rottalbahn, off its bridge east of the B 12) had no protection
+    under[ctx.corridor] = 1
     cand = ~deck & ~ctx.bmask & ~near_water & ~ctx.veg & flat & (dmin - g >= T["bh_depth"]) & (under == 0)
     # (and the ground lifted to the surface model already, ctx.src: still part of the piece it lies in -- else the
     # piece round it shrank under the opening and the size below and fell back to the trench, 3 m under the road)
@@ -391,7 +514,7 @@ def bridge_way(ctx):
     model drops with the bridge round an abutment (its pits 2-6 m deep along the edge of a short bridge's outline), and
     the way's cells had kept that ground -- holes of 1-2 m in the carriageway beside the deck, deeper than the sloped
     caps reach (caps.CLAMP): the primary_link bridge (OSM way 121880279) off the B 12 west of the Schanzlbrücke"""
-    lift = ctx.bw & (ctx.zt > ctx.g)
+    lift = ctx.bw & (ctx.zt > ctx.g) & ~ctx.corridor
     ctx.note("bridge ways on the ground: ground lifted to their level:", int(lift.sum()), "cells")
     return np.where(lift, ctx.zt, ctx.g).astype(np.int32)
 
@@ -400,6 +523,7 @@ def bridge_way(ctx):
 GROUND_PASSES = [
     ("walls", "terrain", walls),
     ("pits", "terrain", pits),
+    ("under_bridge", "terrain", under_bridge),
     ("tunnel", "terrain", tunnel),
     ("passage", "terrain", passage),
     ("sag", "terrain", sag),
@@ -424,3 +548,13 @@ def run(ctx, phase):
     ctx.note(f"ground passes ({phase}), cells changed:", ", ".join(f"{n} {ctx.counts[n]}" for n, ph, _ in GROUND_PASSES
                                                                 if ph == phase))
     return ctx.g
+
+
+def changed_bits(ctx):
+    """which pass changed each cell: bit k for GROUND_PASSES[k] (uint16), for data/debug/ground_passes.npz -- "who
+    lifted this cell" is a lookup there (its `names` in bit order)"""
+    bits = np.zeros((ctx.D, ctx.W), np.uint16)
+    for k, (name, _, _) in enumerate(GROUND_PASSES):
+        if name in ctx.changed:
+            bits |= ctx.changed[name].astype(np.uint16) << k
+    return bits

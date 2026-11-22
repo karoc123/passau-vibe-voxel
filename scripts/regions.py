@@ -328,7 +328,7 @@ def driver_stamp(ws):
 
 DRIVER_OUT = [OUT / "meta.json", Path("data/trees.json"), OUT / "traffic.json", Path("data/qa_roadmask.bin.gz"),
               Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz"), Path("data/surface.npz"),
-              DBG / "report.json"]
+              DBG / "report.json", DBG / "ground_passes.npz"]
 
 
 def main(argv):
@@ -428,6 +428,11 @@ def main(argv):
     mapstore.write_npz("data/surface.npz", dict(gt=npz_entry("gt", np.int16), deck=npz_entry("deck", np.float32),
                                                 roof_z=npz_entry("roof_z", np.float32), roof_gx=npz_entry("roof_gx", np.float32),
                                                 roof_gy=npz_entry("roof_gy", np.float32), gsrc=npz_entry("gsrc", np.float32)))
+    # which ground pass changed each cell (ground.changed_bits): bit k for names[k]
+    import ground
+    names = np.array([n for n, _, _ in ground.GROUND_PASSES])
+    mapstore.write_npz(DBG / "ground_passes.npz", dict(bits=npz_entry("gpass", np.uint16),
+                                                       names=(names.shape, names.dtype, iter([names]))))
     qa = R("qa", np.uint8)
     with gzip.GzipFile("data/qa_roadmask.bin.gz", "wb", compresslevel=9, mtime=0) as fh:  # mostly zeros: 12 MB -> ~0.3 MB
         for _, band in qa.bands():
