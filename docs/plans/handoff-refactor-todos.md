@@ -47,11 +47,10 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| Q2 | A carriageway over water is a bridge | M | In progress (`q2`) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
 | F10 | Minimap on M, and the collection point for map features | M | **Ready** |
-| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2, Q8 |
+| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q8 |
 
 ## Packages
 
@@ -101,24 +100,6 @@ Rules for all of them, on top of the rules above:
 
 Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
 green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.
-
-### Q2. A carriageway over water is a bridge (M)
-
-- **Waits for:** nothing. Q1 landed in code (`e414b3ba`, terrain water only within 8 m of ALKIS or OSM water). Its
-  data is built (`12eb1e87`); re-measure this list on it first (Q1 should take 9 of the 20 ways).
-- **Today:** water is painted after the roads and wins: `gcol[_wat | _lockm] = C["water"]`. A road OSM maps as plain
-  ground over a culvert or an untagged bridge is cut by the water under it. The sag lift in `scripts/ground.py`
-  would carry the road over the gap, but it skips ground within 1 m of the river level (`g > _riv + 1`).
-- **Measured:** 20 ways have 3 m or more of centreline on water (684 m). 9 of them are Q1's false water. The rest
-  are real crossings: the B 8 over the Baderbachl mouth (way 73317832, 9 m; the surface model runs through at
-  301.3 m, the terrain model drops to 299.8 m, OSM tags the stream `tunnel=yes` but not the road `bridge`), the
-  Donauradweg (way 401782105, 84 m), a service road at the Kachlet (1169805556, 124 m), and footways.
-- **Do:** one rule: a way not tagged bridge or tunnel that crosses water, with the surface model continuous along
-  it (within about 1 m of the way's ground on both banks), keeps its surface. Either a deck with the water under it
-  (preferred, it is a bridge) or ground lifted as the sag lift does; pick one and use the deck code that exists.
-- **Do:** a build counter and a `verify` check: metres of non-bridge way centreline on water, per way.
-- **Gates:** `check.py verify`, a new patch for the B 8 in `road-defects.json` (kind `road`).
-- **Verify spot:** Heining, B 8 "bridge missing": `?cam=-2966.1,109.8,-189.4,-3047.6,13,-87.1`
 
 ### Q3. Underpass stairwells never cut a carriageway or a track (S–M)
 
@@ -219,11 +200,13 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** Q2, Q8 (Q9 landed `d3cc0443`, data rebuild pending). Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** Q8 (Q2 and Q9 landed, data rebuild pending). Do nothing here before them; this is only the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
-    it is `tunnel=yes`.
+    it is `tunnel=yes`. (Q2 carries it over as a culvert; a `bridge=culvert` tag in OSM is still right.)
+  - Anton-Niederleuthner-Brücke's end (way 8027919, primary, near 2613,477) and footway 853342668 beside it: no
+    `bridge` tag, 6 m over the Ilz, so Q2 leaves them on water (2 m and 8 m of centreline).
   - Passage under the B 8 (way 73518491) and under the railway (way 73518482): mapped shorter than the road and the
     tracks are wide; the steps 73518490 and 73518489 start inside them.
   - B 12 bridge over the Rottalbahn (way 34755059): 25 m long; the deck is wider than three lanes.
