@@ -20,7 +20,7 @@ it on its own branch, and report.
 
 ## Gates
 
-- `cd web && node tools/gates.mjs` runs the fast set (14 gates, about 25 s). `--full` runs all 19, and
+- `cd web && node tools/gates.mjs` runs the fast set (15 gates, about 25 s). `--full` runs all 20, and
   `--golden FILE` adds the mesh comparison: record it with `node tools/mesh-golden.mjs write FILE` *before* the change.
 - `scripts/check.sh` runs palette, overrides and interiors. `scripts/check.sh --fixture` also runs `check.py verify`
   (minutes). Some verify failures already exist on main, so compare against main and do not expect all-green.
@@ -46,6 +46,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
+| New vehicles | Camper van, paraglider, hovercraft and helicopter | M | **Ready to merge** (`new-vehicles`) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
@@ -242,7 +243,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Design:** follow [ADR 0007](../adr/0007-player-control-in-world-sim.md) (player-keyed commands, one shared world).
 - **Do:** one shared world with one collider budget. The player car is a body like the others, keyed by a player id.
 - **Do:** write a short plan first and measure step cost with `tools/life-phys*.mjs`.
-- **Gates:** `rapier-car` 42/42 and `vehicles` 30/30 must stay green (counts may change only with a reason).
+- **Gates:** `rapier-car` 42/42 and `vehicles` 34/34 must stay green (counts may change only with a reason).
 
 ### F5. Trains and boats into the world sim (M)
 
@@ -295,9 +296,21 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   glancing scrape or a nudge on a car's corner; raise or split `FALL_IMPACT`. Righting also with one wheel down and
   for a short time in the air. Keep the wheelie.
 - **Feel:** "it should be fun". Judge it in the browser on a real street with traffic.
-- **Gates:** `vehicles` 30/30 plus new checks in `tools/vehicles.mjs`: `bike_keys` (steer 1 held from 0 at 30, 60
+- **Gates:** `vehicles` 34/34 plus new checks in `tools/vehicles.mjs`: `bike_keys` (steer 1 held from 0 at 30, 60
   and 100 km/h: upright, turns, the wheel angle takes 0.3 s or more to reach its lock), `bike_scrape` (a wall at
   10° at 50 km/h: stays on), `bike_wall` unchanged (head-on: comes off). `rapier-car` 42/42.
+
+### New vehicles (M)
+
+- The camper van is selectable and appears occasionally in street traffic. It is heavier, taller and slower than the van.
+- Deploy a steerable paraglider from either aircraft at 35 m or more above the surface. A dry landing switches to
+  third-person walking. Water landings return to the map.
+- Start the hovercraft near the map focus on land or water and drive across low banks in both directions.
+- Start the helicopter on clear land near the map focus, take off vertically, hover, fly and land.
+- [Controls](../../README.md#paraglider-hovercraft-and-helicopter).
+  The motion is stepped independently of three.js, using the viewer's voxel data for collisions.
+- **Gates:** `craft-motion` covers bank crossings, walls, helicopter takeoff, hover and landing, and glider steering and landing.
+  `vehicles` now covers the camper van's speed, curves and climb. No data rebuild is needed for this package.
 
 ### F8. Water surface from the world, river slider removed (M–L)
 
@@ -375,8 +388,3 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   over water (Fritz-Abelein-Brücke, Triftsperre).
 - **Aircraft:** wings do not collide. The floatplane's streaming measurement (phase 4 in [plane.md](plane.md)) is
   not done.
-- **Vehicle ideas (not planned, from the user, 2026-11-22):** each would be a `PlayerCraft` in `nav/craft.ts`.
-  - Camper van: another drivable car body (heavier, taller, slower).
-  - Parachute or paraglider: leaving the plane in the air opens a canopy instead of dropping the walker.
-  - Hovercraft: drives on water and on land.
-  - Helicopter: hovers, takes off and lands vertically.

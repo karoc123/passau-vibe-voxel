@@ -144,6 +144,12 @@ export class VoxelCollision {
     }
   }
 
+  // The collision runs include integer voxel tops. Hull clearance must respect those even on sloped caps.
+  voxelGround(x: number, z: number) {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    return this.tileAt(ix, iz)?.ground[this.column(ix, iz)] ?? null;
+  }
+
   surface(x: number, z: number) {
     const ix = Math.floor(x), iz = Math.floor(z);
     const tile = this.tileAt(ix, iz);

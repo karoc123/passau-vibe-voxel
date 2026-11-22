@@ -81,6 +81,8 @@ const CRAFTS = () => [
   import('./nav/drive').then((m) => m.DriveMode),
   import('./nav/boat').then((m) => m.BoatMode),
   import('./nav/plane').then((m) => m.PlaneMode),
+  import('./nav/special-craft').then((m) => m.HovercraftMode),
+  import('./nav/special-craft').then((m) => m.HelicopterMode),
 ];
 let crafts: PlayerCraft[] = [];
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
@@ -474,9 +476,13 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
+  const [{ ParagliderMode }, modes] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS())]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
-    env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints } };
-  crafts = (await Promise.all(CRAFTS())).map((C) => new C(ctx));
+    env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints },
+    deployGlider: (source, at) => glider.deploy(source, at),
+  };
+  const glider = new ParagliderMode(ctx);
+  crafts = [...modes.map((C) => new C(ctx)), glider];
 }
 
 // The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):

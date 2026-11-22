@@ -25,7 +25,7 @@ const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 await RAPIER.init();
 
 // km/h: the top speed each type should reach on the flat
-const TOP = { car: [70, 85], coupe: [160, 185], van: [85, 100], pickup: [95, 115], bus: [55, 65], moto: [130, 150] };
+const TOP = { car: [70, 85], coupe: [160, 185], van: [85, 100], camper: [65, 78], pickup: [95, 115], bus: [55, 65], moto: [130, 150] };
 const r2 = (x) => Math.round(x * 100) / 100;
 const out = [];
 const check = (name, pass, detail) => out.push({ name, pass, detail });

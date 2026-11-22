@@ -432,7 +432,15 @@ export class Nav {
 
   // Into a craft (craft.ts). One that owns the camera: from the map or a ride, keeping the current view for its
   // spawn. The car: it takes the ride followed. false: not now
-  enterCraft(c: PlayerCraft) {
+  enterCraft(c: PlayerCraft, from?: PlayerCraft) {
+    if (from) {
+      if (!this.craftView || this.craft !== from || c.view !== 'own' || from === c) return false;
+      this.dropCraft();
+      this.craft = c;
+      this.keys.clear();
+      this.onMode(this.mode, null);
+      return true;
+    }
     if (c.view === 'ride') {
       if (!this.riding || !this.ride) return false;
       if (this.craft !== c) this.dropCraft();

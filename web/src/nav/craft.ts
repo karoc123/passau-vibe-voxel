@@ -51,4 +51,5 @@ export interface CraftContext {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   env: CraftEnv;
+  deployGlider: (source: PlayerCraft, at: CraftSpot) => boolean;
 }

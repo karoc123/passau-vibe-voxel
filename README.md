@@ -356,6 +356,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `tile-data.ts` reads (needs `uv`) | fast |
 | `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
 | `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
+| `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
 | `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
 | `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
 | `section-check` | sectioned re-meshing of an edited node equals the whole node's mesh | full |
@@ -481,7 +482,7 @@ Click **Take the wheel** in the top-left toolbar to drive the car you're followi
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, T puts it back on the road, and **Esc** takes you back to the map. **Vehicle: …** beside
-**Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus or motorbike
+**Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus, motorbike or camper van
 (`web/src/sim/vehicles.ts`, docs/plans/vehicles.md).
 
 The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive-world.ts`,
@@ -526,6 +527,18 @@ W/S pitch about the wings (hold S for a loop); let go and it holds its path, so 
 level at full throttle (the last 15 % of the lever drawn as the afterburner), ~630 in a dive, up to 7 g; hard pulls
 bleed speed, below ~166 km/h it stalls. Any water is a splash. Its numbers are `JET` in `plane-flight.ts` (the same
 core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
+
+## Paraglider, hovercraft and helicopter
+
+- In the floatplane or jet, press **G** or click **Deploy paraglider** at least 35 m above the surface.
+  Steer with A/D, dive with W and brake with S. Land on dry ground to continue on foot.
+- Click **Hovercraft** in the map toolbar to start near the view on land or water. W/S move forward and reverse,
+  A/D steer. Approach low banks and ramps to cross between land and water.
+- Click **Helicopter** in the map toolbar to start on clear land near the view. Space climbs, Shift descends,
+  W/S fly forward and backward, and A/D turn. Release the controls to hover and use Shift for a vertical landing.
+
+The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch
+stick or gamepad triggers control climb and descent. **Esc** returns to the map.
 
 ## Third-person walking
 

@@ -54,7 +54,7 @@ export const busBuild = (len: number): CarBuild => ({
   engine: 14000, brake: 400, top: 17, ride: 0.84,
 });
 
-export type VehicleId = 'car' | 'coupe' | 'van' | 'pickup' | 'bus' | 'moto';
+export type VehicleId = 'car' | 'coupe' | 'van' | 'pickup' | 'bus' | 'moto' | 'camper';
 
 export const VEHICLES: Record<VehicleId, VehicleType> = {
   // the traffic's car, as the player's has always driven (its numbers are tools/rapier-car.mjs's: keep them)
@@ -98,6 +98,24 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
       [1.98, 0.08, 5.22, 0, 0.55, 0, 'trim'],
       ...tyres(0.86, 1.75, -1.7, 0.3, 0.66, 0.72),
       ...lamps('head', 0.68, 0.75, 2.58, 0.36, 0.2), ...lamps('tail', 0.86, 0.9, -2.58, 0.18, 0.4),
+    ],
+  },
+  camper: {
+    id: 'camper', name: 'Camper van', len: 6.6, paint: '#e7ddc4',
+    chase: { back: 12.5, up: 5 },
+    build: {
+      half: { x: 1.1, y: 1.17, z: 3.15 }, mass: 3700, wheels: wheels4(0.94, 2.0, -1.83),
+      engine: 4600, brake: 125, top: 20, ride: 0.84,
+      tune: { stiffness: 29, compression: 3.8, relaxation: 5.2, gripFront: 1.5, gripRear: 1.42, steer: 0.48 },
+    },
+    model: [
+      [2.17, 0.75, 6.4, 0, 0.34, 0, 'paint'], [2.07, 1.35, 1.9, 0, 1.06, 2.15, 'paint'],
+      [2.18, 2.36, 4.45, 0, 0.54, -0.96, 'paint'], [2.13, 0.44, 1.55, 0, 2.45, 1.85, 'paint'],
+      [1.86, 0.53, 0.06, 0, 1.64, 3.11, 'glass'], [2.09, 0.54, 0.7, 0, 1.64, 2.47, 'glass'],
+      [2.2, 0.53, 1.45, 0, 1.78, -1.6, 'glass'], [2.21, 0.11, 4.4, 0, 1.32, -0.96, 'steel'],
+      [0.78, 0.12, 0.67, 0, 2.9, -0.7, 'trim'],
+      ...tyres(0.94, 2.0, -1.83, 0.34, 0.72, 0.76),
+      ...lamps('head', 0.71, 0.72, 3.2), ...lamps('tail', 0.89, 0.86, -3.2, 0.2, 0.35),
     ],
   },
   // a pickup: between the car and the van, a load bed behind its cab
@@ -170,12 +188,13 @@ export function modelHalf(t: VehicleType) {
 }
 
 // Vehicle types are chosen by id without a random draw: about 1 in 14 a coupé, 1 in 12 a van, 1 in 16 a pickup,
-// and 1 in 20 a motorbike among vehicles other than buses. The rest are cars.
+// 1 in 20 a motorbike and 1 in 56 a camper van among vehicles other than buses. The rest are cars.
 export function trafficType(id: number): VehicleId {
   const k = (Math.imul(id + 1, 2654435761) >>> 0) % 336;
   if (k < 24) return 'coupe';
   if (k < 52) return 'van';
   if (k < 73) return 'pickup';
   if (k < 90) return 'moto';
+  if (k < 96) return 'camper';
   return 'car';
 }
