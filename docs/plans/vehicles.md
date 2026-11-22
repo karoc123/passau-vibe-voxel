@@ -30,9 +30,11 @@ the car's own set as before, the same geometry), `sim/life.ts` drawCars puts eac
 buses are now drawn with the bus model (before: the car's boxes stretched).
 
 **The traffic** draws some of its cars from the catalog (`trafficType(id)`: from the car's id, no random number drawn,
-so the sim's stream is as it was): about 1 in 14 a coupé, 1 in 12 a van, 1 in 16 a pickup, each with its own length
-in the lane; its bodies near edits (`life-phys.ts`) are built from the type, as the obstacles the player's car meets
-(`drive-world.ts`: the box its model fills, its mass).
+so the sim draws the same random numbers when spawning each vehicle): about 1 in 14 a coupé, 1 in 12 a van,
+1 in 16 a pickup and 1 in 20 a motorbike. The motorbike uses its 2.2 m catalogue length and the same rider model
+as the player's. The renderer leans the bike and rider together based on speed and lane curvature. The lean
+fades when a Rapier body takes over near an edit. Its bodies (`life-phys.ts`) and the obstacles the player's car
+meets (`drive-world.ts`) use the type's own dimensions and mass.
 
 ## Choosing and driving
 
@@ -81,7 +83,7 @@ is the voxels').
 
 ## Left out
 
-- The traffic's motorbikes; a type picked from the traffic (walking up to a van) rather than the chosen type: the
+- Getting into a particular vehicle from the street on foot. When taking the wheel with a type selected, the
   chooser turns the vehicle taken into the type.
 - Per-type chase camera distance (the bus' and the bike's are the car's); per-type wheel radius (all 0.36 m).
 - A rider thrown from the bike as a body: the bike and rider fall over together, drawn.

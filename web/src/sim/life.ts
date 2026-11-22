@@ -22,6 +22,8 @@ const HEADS_OUT = 600;
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 // fallen into a hole (the traffic's dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
 const G = 9.81, LANDED_S = 2;
+// the drawn lean of a motorbike tracking its lane
+const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
 
 // a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
 // (vy: falling into an edited hole, its vertical speed; land: when it met the ground)
@@ -44,6 +46,7 @@ export class StreetLife {
   private headAct: number[] = [];
   private viewer: { x: number; z: number; y?: number } = { x: 0, z: 0 };
   private readonly cols = new Map<string, THREE.Color>();
+  private readonly bikeLeans = new WeakMap<Car, number>();
 
   constructor(scene: THREE.Scene, data: TrafficData, seed = DEFAULT_SEED) {
     this.traffic = new Traffic(data, seed);
@@ -110,7 +113,7 @@ export class StreetLife {
   // ------------------------------------------------------------------ drawing
   // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
-    this.drawCars(lead / STEP, night);
+    this.drawCars(lead / STEP, night, dt);
     this.trains.render(0, night);
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
@@ -118,27 +121,48 @@ export class StreetLife {
   }
 
   // a: how far from the last but one tick to the last (0..1)
-  private drawCars(a: number, night: number) {
+  private drawCars(a: number, night: number, dt: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     const tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
     const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, back = 1 - a, B = this.traffic.bodies;
     const pose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+    const before = pt(), middle = pt(), after = pt(), ease = 1 - Math.exp(-dt / LEAN_S);
+    const laneLean = (c: Car, s: number, off: number) => {
+      if (B?.owns(c)) return 0;
+      const centre = s - (c.len - 1.2) / 2;
+      T.pathPoint(c, centre - LEAN_SAMPLE, before, off);
+      T.pathPoint(c, centre, middle, off);
+      T.pathPoint(c, centre + LEAN_SAMPLE, after, off);
+      const ax = middle.x - before.x, az = middle.y - before.y;
+      const bx = after.x - middle.x, bz = after.y - middle.y;
+      // Signed heading change over the distance between the centres of the two chords.
+      const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
+      const distance = Math.max(1, (Math.hypot(ax, az) + Math.hypot(bx, bz)) / 2);
+      return THREE.MathUtils.clamp(Math.atan(c.v * c.v * turn / (G * distance)), -LEAN_MAX, LEAN_MAX);
+    };
     // (each type its own meshes, its instances counted)
     const n = {} as Record<VehicleId, number>;
     for (const id of VEHICLE_IDS) n[id] = 0;
-    const draw = (c: Car) => {
+    const draw = (c: Car, lean = 0) => {
       B?.pose(c, a);
       const t = vehicleOf(c), V = M.vehicles[t.id], i = n[t.id]++;
-      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, 1, c.len / t.len));
+      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, (c.roll ?? 0) + lean)), sc.set(1, 1, c.len / t.len));
       V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
       V.body.setColorAt(i, this.col(c.col));
       V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
     for (const c of T.cars) {
-      T.carPose(c, c.s - c.ds * back, c.off - c.dOff * back, pose);
+      const s = c.s - c.ds * back, off = c.off - c.dOff * back;
+      T.carPose(c, s, off, pose);
       setRp(c, pose.x, pose.y, pose.z);
       c.rh = pose.h; c.pitch = pose.pitch; c.roll = 0;
-      draw(c);
+      let lean = 0;
+      if (c.vt === 'moto') {
+        const previous = this.bikeLeans.get(c) ?? 0;
+        lean = previous + (laneLean(c, s, off) - previous) * ease;
+        this.bikeLeans.set(c, lean);
+      }
+      draw(c, lean);
     }
     for (const c of T.detachedCars) draw(c);
     for (const id of VEHICLE_IDS) {

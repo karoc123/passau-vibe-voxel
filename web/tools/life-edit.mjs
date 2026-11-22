@@ -11,11 +11,12 @@
 //          still in the traffic), the car behind it stops behind it; nobody touches it or ends up in it.
 //   wreck  a car near an edit wrecked (LifePhysics.wreck): it comes to rest on the road, the cars coming up behind it
 //          stop behind it, none touches it.
+//   moto   a moving motorbike gets its catalogue body near an edit, then returns to lane tracking when it clears.
 // In every one, every tick: nothing drawn in an edited box stands more than 1 m over the ground there without coming
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
 // The dig is run twice: the bodies and the cars bit-identical. Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -148,17 +149,17 @@ function watcher(ctx) {
 
 // a moving car, its ground at least `deck` m over the ground under it, nearest the focus; with a car close behind it
 // (within 30 m, in its lane) if `follower`
-function pickCar(ctx, deck, minV, follower = false) {
+function pickCar(ctx, deck, minV, follower = false, near = { ...ctx.focus, radius: 120 }) {
   const { T, W } = ctx;
   let car = null, bd = Infinity;
   for (const c of T.cars) {
     const p = drawn(ctx, c);
     if (p.y - W.groundAt(p.x, p.z) < deck || c.v < minV || c.bus) continue;
     if (follower && !behindOf(ctx, c)) continue;
-    const d = Math.hypot(p.x - ctx.focus.x, p.z - ctx.focus.z);
+    const d = Math.hypot(p.x - near.x, p.z - near.z);
     if (d < bd) { bd = d; car = c; }
   }
-  return bd < 120 ? car : null;
+  return bd < near.radius ? car : null;
 }
 
 // the car behind c in its lane (within 30 m: its kinematic pose behind c's, less than 1.5 m across)
@@ -184,8 +185,10 @@ const results = {};
 
 async function dig() {
   const ctx = await setup(BRIDGE), { T, phys, W } = ctx;
-  const car = pickCar(ctx, 8, 3);
-  if (!check(car, `a moving car on the bridge deck near (${ctx.focus.x}, ${ctx.focus.z})`)) return null;
+  // The straight approach keeps the hole in the vehicle's path. Warming the traffic still uses the bridge focus.
+  const near = { x: 4350, z: 2780, radius: 15 };
+  const car = pickCar(ctx, 8, 3, false, near);
+  if (!check(car, `a moving car on the bridge deck within ${near.radius} m of (${near.x}, ${near.z})`)) return ctx;
   const p = drawn(ctx, car), deck = p.y, R = 4;
   const ax = p.x + Math.sin(car.rh) * 6, az = p.z + Math.cos(car.rh) * 6;
   const op = { kind: 'sphere', x: Math.floor(ax), y: Math.floor(az), z: Math.floor(deck) - 1, r: R, id: 0 };
@@ -209,7 +212,7 @@ async function dig() {
   log(`  car ${car.id}: body after ${f2(bodyAt)} s, lowest ${f2(minY)}, lost ${lost ? `at ${f2(lost.t)} (${lost.why})` : 'never'}, rest ${rest ? `at y ${f2(rest.at[1])}` : 'never'}; ${fallers.size} car(s) fell in, ${rim} held near the rim; ${dropped} person(s) fell`);
   check(bodyAt >= 0 && bodyAt < 0.3, `the car gets a body as the edit lands (${f2(bodyAt)} s)`);
   check(Math.abs(minY - below) < 1, `it falls through the deck to the ground under it (lowest ${f2(minY)}, ground ${f2(below)})`);
-  check(lost && rest && T.detachedCars.includes(car), `it is a wreck at rest down there (lost: ${lost?.why}, rest: ${rest ? f2(rest.at[1]) : 'never'})`);
+  check(lost && rest && Math.abs(rest.at[1] - below) < 2 && T.detachedCars.includes(car), `it is a wreck at rest down there (lost: ${lost?.why}, rest: ${rest ? f2(rest.at[1]) : 'never'})`);
   const hover = w.report();
   results.dig = { car: car.id, fell: f2(deck - minY), fallers: fallers.size, rim, hover: f2(hover) };
   return ctx;
@@ -283,6 +286,29 @@ async function wreck() {
   return ctx;
 }
 
+async function motorbike() {
+  const ctx = await setup(STREET), { T, phys, focus: f } = ctx;
+  const bike = T.cars.filter((c) => c.vt === 'moto' && c.v > 3)
+    .map((c) => {
+      const p = drawn(ctx, c);
+      return { car: c, distance: Math.hypot(p.x - f.x, p.z - f.z) };
+    }).sort((a, b) => a.distance - b.distance)[0]?.car;
+  if (!check(bike, 'seeded traffic includes a moving motorbike')) return ctx;
+  const { x, z } = bike.rp, spec = VH.VEHICLES.moto;
+  check(bike.len === spec.len, 'the motorbike uses its catalogue length');
+  const box = [x - 30, z - 30, x + 30, z + 30];
+  T.edited(box);
+  run(ctx, 3);
+  const b = phys.bodies.get(bike);
+  check(b?.state === 'track' && b.build.bike && b.build.half.x === spec.build.half.x,
+    'the motorbike tracks with its narrow Rapier body');
+  T.edited(box, true);
+  run(ctx, 0.2);
+  check(!phys.owns(bike) && T.cars.includes(bike), 'clearing the edit returns the motorbike to lane tracking');
+  results.moto = { id: bike.id, tracked: b?.state === 'track', released: !phys.owns(bike) };
+  return ctx;
+}
+
 const want = (k) => !only.length || only.includes(k);
 const costs = [], chunks = [], bodies = [];
 const done = (ctx) => {
@@ -300,6 +326,7 @@ if (want('dig')) {
 }
 if (want('block')) done(await block());
 if (want('wreck')) done(await wreck());
+if (want('moto')) done(await motorbike());
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
 console.log(`PASS life-edit: ${Object.entries(results).map(([k, v]) => `${k} ${typeof v === 'string' ? v : Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`).join('; ')}; ${cost}`);

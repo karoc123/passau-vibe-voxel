@@ -25,7 +25,7 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
     ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };
-const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus' };
+const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', moto: 'Following a motorbike' };
 
 // the key legend, bottom left: keys and mouse gestures as outlines, lit while in use
 export class Hud {
@@ -55,7 +55,8 @@ export class Hud {
   set(mode: Mode, ride: Ride | null) {
     this.box.hidden = flying(mode);
     this.box.classList.toggle('pedestrian', mode === 'pedestrian');
-    $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? WHO[ride.kind] : '';
+    const label = ride?.obj.kind === 'car' && ride.obj.vt === 'moto' ? 'moto' : ride?.label;
+    $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.kind] : '';
     if (this.touch) {
       $('.hint', this.box).textContent = mode === 'walk' || mode === 'pedestrian'
         ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there · Pinch: zoom' : '';

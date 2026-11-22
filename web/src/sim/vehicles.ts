@@ -162,9 +162,13 @@ export function modelHalf(t: VehicleType) {
   return { x, y: y / 2, z };
 }
 
-// The traffic's variety: of the cars (not buses) spawned, by their id (no random number drawn: the sim's stream stays
-// as it was), about 1 in 14 a coupé, 1 in 12 a van, 1 in 16 a pickup; the rest the car
+// Vehicle types are chosen by id without a random draw: about 1 in 14 a coupé, 1 in 12 a van, 1 in 16 a pickup,
+// and 1 in 20 a motorbike among vehicles other than buses. The rest are cars.
 export function trafficType(id: number): VehicleId {
   const k = (Math.imul(id + 1, 2654435761) >>> 0) % 336;
-  return k < 24 ? 'coupe' : k < 52 ? 'van' : k < 73 ? 'pickup' : 'car';
+  if (k < 24) return 'coupe';
+  if (k < 52) return 'van';
+  if (k < 73) return 'pickup';
+  if (k < 90) return 'moto';
+  return 'car';
 }
