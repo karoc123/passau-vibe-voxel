@@ -118,11 +118,58 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
   - the player car in the same Rapier world as the AI bodies.
 - **Do not:** implement it beyond small, safe steps. This is the groundwork for splitting off a server later.
 
-## Not refactoring, but open (for later feature work)
+## Feature packages
+
+These add behaviour, so they are judged in the browser as well as by the gates. Each comes with a short plan in
+`docs/plans/` if it is bigger than S.
+
+### F1. AI motorbikes (S–M)
+
+- **Waits for:** nothing.
+- **Today:** the motorbike exists in the catalogue (`sim/vehicles.ts`) for the player only. AI traffic draws cars,
+  vans, pickups, buses (see [vehicles.md](vehicles.md)).
+- **Do:** add the motorbike to the AI mix, with its own length, lean in curves (presentation only) and a rider.
+- **Do:** keep the world sim (`sim/traffic.ts`) free of three.js, and keep the seeded RNG (`core/num.ts`) so `?seed=`
+  stays reproducible.
+- **Gates:** `vehicles`, `life-edit`.
+
+### F2. Walk to a specific vehicle and get in (M)
+
+- **Waits for:** R1 (leaving a ride cleanly), preferably R4.
+- **Do:** when walking, a key or tap near a parked or moving vehicle (car, bus, motorbike, boat at the bank, plane on
+  the water) enters it. Leaving puts the walker beside it, and the vehicle stays where it was left.
+- **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
+  R8.
+
+### F3. Camera distance per vehicle type (S)
+
+- **Waits for:** nothing, or do it inside R3's `ChaseRig`.
+- **Do:** the chase camera's distance and height come from the vehicle catalogue (bus further back and higher,
+  motorbike closer).
+
+### F4. The player car in the same Rapier world as the AI bodies (M–L)
+
+- **Waits for:** nothing (C1 has landed: `physics/rapier/car.ts` is plain, the drive runs on `FixedStep`).
+- **Why:** collisions between the player car and AI cars, and destruction, need one physics world. It is also the
+  shape a server needs: one world, many players.
+- **Today:** `RapierDrive` (`physics/rapier/drive-world.ts`) owns its own world with one car. AI cars near edits are
+  bodies in `physics/rapier/life-phys.ts`.
+- **Do:** one shared world with one collider budget. The player car is a body like the others, keyed by a player id.
+- **Do:** write a short plan first and measure step cost with `tools/life-phys*.mjs`.
+- **Gates:** `rapier-car` 42/42 and `vehicles` 30/30 must stay green (counts may change only with a reason).
+
+### F5. Trains and boats into the world sim (M)
+
+- **Waits for:** preferably F4 and R8.
+- **Today:** `sim/trains.ts` and `sim/boats.ts` sit in `sim/` but are three.js presentation with their own motion.
+  ADR 0006 notes this.
+- **Do:** split each into a plain sim part (positions on their tracks or rivers, fixed 1/30 s tick, seeded RNG, no
+  three.js) and a presentation part. Add the sim parts to `tools/core-deps.mjs`.
+
+## Also open (for later)
 
 - **Road spots the general fixes do not reach:** see [road-defects.md](road-defects.md). They are road 1360 under a
   building, Bräugasse, Triftsperrstraße, the Schulstraße kink, road 2510, Steffelmühlweg, and bridges without a deck
   over water (Fritz-Abelein-Brücke, Triftsperre).
-- **No AI motorbikes,** and no camera distance per vehicle type.
 - **Aircraft:** wings do not collide. The floatplane's streaming measurement (phase 4 in [plane.md](plane.md)) is
   not done.
