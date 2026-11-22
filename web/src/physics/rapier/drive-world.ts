@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
 import { warmUp } from './vehicle';
+import { FixedStep } from '../../core/fixed-step';
 import { modelHalf, VEHICLES, type VehicleId } from '../../sim/vehicles';
 import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 import { viewerTileCache } from '../../viewer-tiles';
@@ -64,7 +65,8 @@ export class RapierDrive {
   readonly origin: { x: number; z: number };
   car: RapierCar | null = null;
   private pending: { pose: DrawnPose; speed: number; build: CarBuild } | null = null;
-  private acc = 0;
+  // the fixed steps (core/fixed-step.ts): a frame counts for at most 0.25 s, at most MAX_STEPS steps
+  private readonly clock = new FixedStep(STEP, MAX_STEPS, 0.25);
   private readonly prevP = new THREE.Vector3();
   private readonly curP = new THREE.Vector3();
   private prevRide = 0;
@@ -121,13 +123,11 @@ export class RapierDrive {
     if (!at) return [];
     const v = this.car?.body.linvel();
     const [ready] = this.terrain.update([{ x: at.x, z: at.z, vx: v?.x, vz: v?.z }]);
-    if (!ready) { this.acc = 0; return 'loading'; }
+    if (!ready) { this.clock.acc = 0; return 'loading'; }
     if (this.pending) this.place();
     const car = this.car!;
     const events: DriveEvent[] = [];
-    this.acc += Math.min(dt, 0.25);
-    const n = Math.min(MAX_STEPS, Math.floor(this.acc / STEP));
-    this.acc = n === MAX_STEPS ? 0 : this.acc - n * STEP;
+    const n = this.clock.take(dt);
     this.obstacles(obstacles, at, n * STEP);
     if (n) this.walkers(walkers, n * STEP, events);
     for (let i = 0; i < n; i++) {
@@ -171,7 +171,7 @@ export class RapierDrive {
       const v = this.car.body.linvel();
       if (i > 10 && Math.hypot(v.x, v.y, v.z) < 0.3 && this.car.airTime === 0) break;
     }
-    this.acc = 0;
+    this.clock.acc = 0;
     this.prevP.copy(this.curP); this.prevQ.copy(this.curQ); this.prevRide = this.curRide;
     Object.assign(this.prevLean, this.curLean);
   }
@@ -191,7 +191,7 @@ export class RapierDrive {
   // the car as drawn now (between its last two steps)
   drawn(): DrawnPose | null {
     if (!this.car) return null;
-    const a = Math.min(1, this.acc / STEP);
+    const a = Math.min(1, this.clock.alpha);
     const p = this.prevP.clone().lerp(this.curP, a), q = this.prevQ.clone().slerp(this.curQ, a);
     // (the ground point: the ride height the wheels hold now under the body's origin, along the car's up)
     p.add(new THREE.Vector3(0, -(this.prevRide + (this.curRide - this.prevRide) * a), 0).applyQuaternion(q));
@@ -240,7 +240,7 @@ export class RapierDrive {
     this.curRide = this.prevRide = build.ride;
     Object.assign(this.curLean, { lean: 0, wheelie: 0 });
     Object.assign(this.prevLean, this.curLean);
-    this.acc = 0;
+    this.clock.acc = 0;
   }
 
   // the traffic near the car as kinematic boxes, moved over the frame's steps (`span` s) from where they were to where

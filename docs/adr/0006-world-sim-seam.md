@@ -33,6 +33,11 @@ two runs differed.
   "the viewer" becomes the set of players' positions.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
   wrecks with their pose), and events (`Traffic.dropped`: people fallen into a hole).
+- **The player's vehicles' cores** (`nav/boat-motion.ts`, `nav/plane-flight.ts`, `nav/fpv-flight.ts`,
+  `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`
+  state and maths (`core/vec.ts`, three.js's arithmetic in its order), stepped by one fixed-step runner
+  (`core/fixed-step.ts`), scanned by `tools/core-deps.mjs`. Their shells (`boat.ts`, `plane.ts`, `fpv.ts`, `drive.ts`)
+  read the input and draw them. They are not in the world sim yet (see below).
 - **Presentation** (`sim/life.ts` `StreetLife`, three.js): draws the sim between its last two ticks
   (`Traffic.carPose`, `personPoint`, `TrafficBodies.pose`), the trains, the effects that change nothing in the sim
   (people knocked down or falling: shoved, tipping, no physics), picking on screen. It never decides anything the sim

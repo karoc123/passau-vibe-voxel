@@ -3,6 +3,7 @@ import type { Meta } from '../types';
 import { clamp, el, fetchJson } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 import { VoxelCollision } from './voxel-collision';
+import { FixedStep } from '../core/fixed-step';
 import { BoatMotion, downstream, findSpawn, nearestRiver, NO_BOAT_INPUT, type BoatInput, type BoatWorld } from './boat-motion';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
@@ -47,7 +48,7 @@ export class BoatMode {
   private river: number[] | null = null;
   private riverLoad: Promise<void> | null = null;
   private start: { x: number; z: number; h: number; t0: number } | null = null;
-  private acc = 0;
+  private readonly clock = new FixedStep(STEP, MAX_STEPS, 0.1);
   private zoom = 1;
   private camYaw = 0;
   private camY = 0;
@@ -137,17 +138,16 @@ export class BoatMode {
       const m = this.motion;
       this.collision.prefetch(new THREE.Vector3(m.x, m.y, m.z), new THREE.Vector3(m.vx, 0, m.vz));
       const input = document.hasFocus() && !document.hidden ? this.input() : NO_BOAT_INPUT;
-      this.acc = Math.min(this.acc + Math.min(dt, 0.1), MAX_STEPS * STEP);
-      while (this.acc >= STEP) {
-        this.acc -= STEP;
-        const ev = m.step(input, STEP, this.world);
-        if (ev === 'loading') { this.acc = 0; break; }
+      this.clock.run(dt, (step) => {
+        const ev = m.step(input, step, this.world);
+        if (ev === 'loading') return false;
         for (const e of ev) {
           this.say(e.speed > 5 ? 'Crash!' : 'Bump!', 600);
           this.shakeUntil = performance.now() + 450;
           this.shakeA = clamp(e.speed / 20, 0.08, 0.5);
         }
-      }
+        return true;
+      });
       const d = m.drawn(), lift = Math.max(0, this.level());
       d.y += lift;
       this.model.update(d, m.speed, this.night(), m.t);
@@ -186,7 +186,7 @@ export class BoatMode {
     const at = findSpawn(this.world, s.x, s.z, s.h, SPAWN_REACH);
     if (!at) { this.say('No open water near here.', 2500); this.nav.flyUp(); return; }
     this.motion.reset(at);
-    this.acc = 0;
+    this.clock.acc = 0;
     this.zoom = 1;
     this.camYaw = at.h;
     this.camY = at.y;

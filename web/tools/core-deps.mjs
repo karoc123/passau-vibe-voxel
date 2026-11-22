@@ -1,7 +1,9 @@
 // The rule of web/src/core/ (docs/adr/0001-world-layers.md): no three.js, no DOM, so the viewer, the node tools and a
 // Node server share it. The same for the world sim (docs/plans/life-physics.md "The server seam"): the traffic
-// (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts). A static scan of every module under src/core/,
-// those two, and everything they import, transitively
+// (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts); and for the player's vehicles' cores (what a
+// server would step or check for each player: nav/boat-motion.ts, nav/plane-flight.ts, nav/fpv-flight.ts,
+// physics/rapier/car.ts; their shells draw them). A static scan of every module under src/core/, those, and everything
+// they import, transitively
 // (relative imports, type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
@@ -76,7 +78,9 @@ const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) queue.push([f, null]); } };
 walk(core);
-for (const f of ['sim/traffic.ts', 'physics/rapier/life-phys.ts']) queue.push([path.join(src, f), null]);
+const SEAM = ['sim/traffic.ts', 'physics/rapier/life-phys.ts',
+  'nav/boat-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts'];
+for (const f of SEAM) queue.push([path.join(src, f), null]);
 while (queue.length) {
   const [file, via] = queue.shift();
   if (seen.has(file)) continue;
@@ -91,10 +95,13 @@ while (queue.length) {
     for (const [test, what] of BANNED_MODULES) if (test(spec, target)) bad.push(`${where(lineOf(code, m.index))}: imports ${spec}: ${what}`);
     if (target && !seen.has(target)) queue.push([target, file]);
   }
-  for (const m of bare.matchAll(DOM_RE)) bad.push(`${where(lineOf(bare, m.index))}: DOM global ${m[0]}`);
+  // (a name the module declares or imports is its own, not the DOM's: a core's PlaneEvent, CarEvent)
+  const own = new Set([...bare.matchAll(/\b(?:type|interface|class|enum)\s+([\w$]+)/g)].map((m) => m[1]));
+  for (const m of code.matchAll(/\bimport\s+(?:type\s+)?\{([^}]*)\}/g)) for (const n of m[1].split(',')) { const k = n.trim().split(/\s+as\s+/).pop().replace(/^type\s+/, ''); if (k) own.add(k); }
+  for (const m of bare.matchAll(DOM_RE)) if (!own.has(m[0])) bad.push(`${where(lineOf(bare, m.index))}: DOM global ${m[0]}`);
 }
 
 const scanned = [...seen].map(rel).sort();
 if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
-console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim, the player's vehicles' cores and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals`);
