@@ -50,10 +50,13 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with Q4's deck-width step or R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
+| F9 | More landmark labels, N toggles them | S–M | **Ready** (labels need a data rebuild) |
+| F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | Waits for Q1 |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
 | F8 | Water surface from the world, river slider removed | M–L | Waits for R3 |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
+| F10 | Minimap on M, and the collection point for map features | M | Waits for R3, F9 |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q1–Q4, Q8, Q9 |
 
 ## Packages
@@ -465,6 +468,46 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   the same at the surveyed level).
 - **Check by hand:** the boat above and below the Kachlet dam, the floatplane landing on the Danube and the Inn,
   the cruise ships at the quay.
+
+### F9. More landmark labels, N toggles them (S–M)
+
+- **Today:** 32 curated labels (`scripts/landmarks.py` `LABELS`, `EXTRA_LABELS`, building overrides' labels, put
+  together by `scripts/labels.py`). The search knows 1,890 OSM places (`web/public/data/places.json`); that is far
+  too many to show.
+- **Do:** add about 20–40 more *striking* places as curated labels, chosen by the agent: things a visitor would
+  look for from afar (e.g. the Klinikum, ZOB, Dreiländerhalle, Peschl-Terrasse, the Kachlet, stadiums, pools, large
+  towers and churches not yet labelled). `places.json` (attraction, memorial, place of worship, large buildings)
+  is a source of candidates. Pick and build them in directly; the owner adjusts afterwards if something does not
+  fit, so no list for approval.
+- **Do:** key N shows and hides all labels (respect the typing guard; one line in the help/keys panel). Keep the
+  existing decluttering and `far` distances.
+- **Rebuild:** labels go through the pipeline, so a data rebuild (or the label step) is needed; say which.
+
+### F10. Minimap on M, and the collection point for map features (M)
+
+- **Waits for:** R3 (shared input and panels), F9 (the label set it shows).
+- **Do:** M toggles a minimap: north-up or heading-up, the player's position and heading, rivers and main roads,
+  the labels of F9 as icons. Draw it from data the viewer already has (`meta.json` labels, the low-LOD tiles or
+  a small pre-rendered map image from the pipeline); no new data source.
+- **Keep it a seam:** the minimap reads positions from the sim side (player, later other players and vehicles), so
+  multiplayer markers are a data change, not a rewrite (see ADR 0006, 0007).
+- **Collect here:** further map ideas belong in this package's section rather than a new file: click to set a
+  waypoint, a full-screen map, showing other players, places from the search.
+
+### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
+
+- **Today:** the map is one rectangle (`scripts/map.json` `map`: 9,344 x 3,456 m, corner on 1,024 m blocks). Each
+  1,024 m block is already built as its own region (`scripts/regions.py`, `window.cover`). The Klinikum lies just
+  south of the map's edge, Ingling roughly 1.2 km beyond it (estimated from approximate coordinates; check).
+- **Why not just a bigger rectangle:** 2 km more to the south over the full width is about 19 km2 of mostly
+  irrelevant land; following the Inn is about 4–6 km2.
+- **Do:** let `map.json` name the built blocks (the rectangle stays the bounding box; a block not listed is empty).
+  Adapt what assumes a full rectangle: `scripts/fetch_bayern.sh` (downloads the rectangle's 1 km tiles), the
+  region cover, `mapstore.py`'s assembly and the whole-map passes (labels, traffic, flood, boats), the viewer's
+  tile index (empty tiles already exist), and the map's edge at a missing block (what the player sees and that
+  vehicles cannot leave).
+- **Do:** then add the blocks along the Inn from the Innstadt to Ingling (Kraftwerk Passau-Ingling).
+- **Rebuild:** yes, plus the downloads for the new blocks (open data, CC BY 4.0, as today).
 
 ## Also open (for later)
 
