@@ -42,18 +42,17 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
-| Q4 | What passes under a bridge stays open | M | Ready to merge (`q4`) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
-| Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with Q4's deck-width step or R6's deck stage) |
+| Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with R6's deck stage) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | **Ready** |
-| Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
+| Q9 | A road or rail tunnel under a street is a covered passage | M | **Ready** |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
 | F10 | Minimap on M, and the collection point for map features | M | **Ready** |
-| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2–Q4, Q8, Q9 |
+| Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2, Q8, Q9 |
 
 ## Packages
 
@@ -142,32 +141,6 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
   - B 8, hole in the lane: `?cam=-3791.6,106,-728.3,-3840.6,14,-681.5`
   - the same passage under the railway, hole in the track: `?cam=-3791.6,106,-728.3,-3867.3,16.2,-659`
 
-### Q4. What passes under a bridge stays open (M)
-
-- **Waits for:** nothing.
-- **Today:** the Rottalbahn (way 1464156379) runs at level 22–23 under the B 12 bridge (way 34755059, deck at
-  28). In the build a strip of ground at 28 stands across the track at the deck's east edge (g = 28 at -1997,1074
-  on the track's centreline; the terrain model there is 23.6), and under the deck the ground is 24–25, a metre or
-  two over the track (the terrain model is interpolated under the bridge). OSM's bridge way is 25 m long and drawn
-  9.3 m wide; the surface model shows the deck about 25 m along the track. So the real deck is wider than the drawn
-  one and its edges are taken for an embankment.
-- **Not yet known:** which pass lifts the strip. `surface.npz` `gsrc` is empty there, so it is not the sag lift;
-  the bridgehead lift excludes ways under a bridge by its `under` mask, but only 2.9 m round the track. Find out
-  first.
-- **Do first:** write each ground pass's changed cells to `data/debug` (`ground.run` already keeps
-  `ctx.changed[name]`), one small array or image per pass, so "who lifted this cell" is a lookup. Keep it.
-- **Do:** one rule: a way on the ground that crosses under a bridge deck keeps a clear corridor at its own level,
-  from before the deck to after it: its bed's width, its level the line between its ground on either side, at least
-  the vehicle's height clear (a train 5 m, a road 4 m). No ground pass lifts in it, and ground the terrain model
-  interpolated too high in it is lowered to the line.
-- **Do:** the deck's width from the surface model where it is wider than the drawn way (the cells at deck level
-  beside the deck, over ground 2 m or more lower), instead of leaving them to the ground passes.
-- **Do:** a `verify` check: along every railway and carriageway centreline that crosses under a deck, no step of
-  2 m or more and the clearance kept.
-- **Gates:** `check.py verify` on all fixtures (the bridgehead cases in `road-defects.json` must hold);
-  `clearance.py` lane scan not worse.
-- **Verify spot:** Rottalbahn under the B 12: `?cam=-2077,55.1,1078.8,-2008.8,24,1078.8`
-
 ### Q5. A crown over a roof is not a tower (S–M)
 
 - **Waits for:** nothing.
@@ -210,8 +183,8 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 
 ### Q8. A bridge deck does not sag to the ground beside it (S–M)
 
-- **Waits for:** nothing. Do not run it in parallel with Q4's deck-width step or R6's deck stage. All three change
-  the same block in `voxelize.py` ("# bridges / decks").
+- **Waits for:** nothing. Do not run it in parallel with R6's deck stage (same block in `voxelize.py`, "# bridges /
+  decks"). Q4's deck-width step (after `_bw`, reads only `deck_abs`) sits below the profile code and should not clash.
 - **Today:** the deck's height is a profile along each bridge way. Each metre takes the 30th percentile of the
   surface model sampled across the way (±0.7 × half width, ±1.5 m along). Over land a sample is kept down to 1.5 m
   *under* the terrain model (`h_ > gd_ - 1.5`); only over water must it stand 1.5 m over it. The median filters after
@@ -247,8 +220,10 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 
 ### Q9. A road or rail tunnel under a street is a covered passage, not solid ground (M)
 
-- **Waits for:** Q4. Both change the same ground passes, and Q4's per-pass debug arrays and corridor rule are the
-  tools for this package. One agent may do both together.
+- **Waits for:** nothing. Q4 landed (`8bc0774f`): `ground.under_bridge` keeps a corridor under bridges (`ctx.corridor`,
+  skipped by the tunnel, passage, sag, bridgehead and bridge-way lifts), and `data/debug/ground_passes.npz` says which
+  pass changed a cell. Reuse `ground.bed()`, the line-between-ends level and the `under_bridge` verify counter's
+  pattern. `tunnel=yes` ways are not in the corridor set; layer −1 open cuts need open_cut to run before `under_bridge`.
 - **Today:** a way tagged `tunnel=yes` is left out of the ground (`ways.underground`). `tunnels.py` bores it only
   under a hill (2 m or more of ground over a 6 m crown). `underpass.py` carves only foot passages. Nothing carves a
   carriageway or a railway in a tunnel under a street, an embankment or a junction. The ground passes fill its trench
@@ -291,7 +266,7 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** Q2–Q4, Q8, Q9. Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** Q2, Q8, Q9. Do nothing here before them; this is only the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
