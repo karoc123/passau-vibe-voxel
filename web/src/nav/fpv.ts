@@ -224,6 +224,14 @@ export class FpvMode implements PlayerCraft {
     this.clock.run(dt, (step) => this.flight.step(input, step, this.move));
   }
 
+  get mapPose() {
+    if (!this.on || this.phase === 'loading') return null;
+    const { x, y, z } = this.flight.position, q = this.flight.attitude;
+    // The horizontal components of the drone's forward vector (attitude rotating −z).
+    const dx = -2 * (q.x * q.z + q.w * q.y), dz = -1 + 2 * (q.x ** 2 + q.y ** 2);
+    return { x, y, z, h: Math.atan2(dx, dz) };
+  }
+
   private flightInput(): FlightInput | null {
     if (!inFocus()) {
       this.pause('Window lost focus. Arm again to resume.');

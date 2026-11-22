@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { Meta } from '../types';
+import type { Pose } from '../sim/types';
 import type { Nav } from './nav';
 import type { RiverPoints } from './river';
 
@@ -22,6 +23,8 @@ export interface PlayerCraft {
   /** body[data-mode] while it is on (its CSS) */
   readonly id: string;
   readonly view: 'own' | 'ride';
+  /** simulation position and heading while active (the ride itself supplies a drive's pose) */
+  readonly mapPose?: Pose | null;
   /** get in: at a spot (tools; later F2, walking up to it) or, without one, where the view is. false: not now */
   enter(at?: CraftSpot): boolean;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */

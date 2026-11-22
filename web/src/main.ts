@@ -11,6 +11,7 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import { Minimap } from './minimap';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
@@ -92,6 +93,7 @@ const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
+let minimap: Minimap | null = null;
 let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
@@ -177,6 +179,10 @@ addEventListener('keydown', (e) => {
     if (labels) labels.visible = labelsOn;
     try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
     toast(labelsOn ? 'Labels on' : 'Labels off (N shows them)');
+    e.preventDefault();
+  }
+  if (e.code === 'KeyM' && gameKey(e) && !e.repeat && minimap) {
+    minimap.toggle();
     e.preventDefault();
   }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
@@ -445,15 +451,22 @@ async function boot() {
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   labels.visible = labelsOn;
+  const mapView = minimap = new Minimap(meta);
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
   fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
-  flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); riverPoints = flood!.info?.river ?? []; })
+  flood.load().then(() => {
+    bar.river.input.disabled = false;
+    flood!.setLevel(RIVER.surveyed);
+    riverPoints = flood!.info?.river ?? [];
+    mapView.setRiver(riverPoints);
+  })
     .catch((e) => { riverPoints = []; console.warn('flood', e); });
   fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
+    mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
     life = nav.life = new StreetLife(scene, td, qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0);
@@ -574,7 +587,8 @@ renderer.setAnimationLoop((now) => {
     bar.showRiver(now - riverSeen < 2000);
   }
   barRect ??= bar.rect;
-  labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
+  minimap?.update(now, nav.mapPose, barRect.bottom);
+  labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
 });
 
 window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,

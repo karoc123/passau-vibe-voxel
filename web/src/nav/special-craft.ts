@@ -154,6 +154,11 @@ class SpecialCraft implements PlayerCraft {
     }
   }
 
+  get mapPose() {
+    if (this.phase !== 'on' && this.phase !== 'landing') return null;
+    return { ...this.motion.p, h: this.motion.heading };
+  }
+
   private activate(x: number, y: number, z: number, heading: number, speed = 0) {
     this.motion.reset({ x, y, z }, heading, speed);
     this.start = null;

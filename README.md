@@ -10,7 +10,8 @@ extent is set in `scripts/map.json`).
 The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
-(`/`) finds streets, squares, buildings and stops.
+(`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
+and heading, rivers, roads and nearby landmarks.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).

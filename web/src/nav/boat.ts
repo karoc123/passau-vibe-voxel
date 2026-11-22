@@ -90,6 +90,7 @@ export class BoatMode implements PlayerCraft {
   }
 
   get pose() { return this.phase === 'on' ? this.motion.pose : null; }
+  get mapPose() { return this.pose; }
 
   // the panel's button: into the boat (from the map or a ride), or out of it
   toggle() {
