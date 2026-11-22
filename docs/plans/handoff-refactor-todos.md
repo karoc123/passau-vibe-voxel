@@ -42,7 +42,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
-| Q4 | What passes under a bridge stays open | M | In progress (`q4`) |
+| Q4 | What passes under a bridge stays open | M | Ready to merge (`q4`) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
 | Q8 | A bridge deck does not sag to the ground beside it | S–M | **Ready** (not in parallel with Q4's deck-width step or R6's deck stage) |
