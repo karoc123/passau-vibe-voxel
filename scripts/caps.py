@@ -379,6 +379,13 @@ def region_fields(region, D, W, base, tmp="data"):
     sc = sidecar.load(tmp / "prep.npz", "dtm")
     dtm = (np.array(sc[region[0]:region[1], region[2]:region[3]]) if sc is not None
            else wmod.npz_region(tmp / "prep.npz", "dtm", region)).astype(np.float64) - base
+    # where voxelize.py lifted the ground to the surface model (a carriageway on a structure the terrain model left
+    # out: surface.npz gsrc), that surface is the ground's source, not the terrain model's trench under it
+    import zipfile
+    with zipfile.ZipFile(tmp / "surface.npz") as z_:
+        if "gsrc.npy" in z_.namelist():
+            gs = wmod.npz_region(tmp / "surface.npz", "gsrc", region)
+            dtm = np.where(np.isfinite(gs), gs, dtm)
     F = fields(gt, water, bld, steps, dtm, deck)
     D_, W_ = gt.shape
     qa = tmp / "qa_roadmask.bin.gz"

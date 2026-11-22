@@ -447,6 +447,83 @@ for _, t_, l_ in osm.lines:
         g[rr_[low], cc_[low]] = street[low]
         n_pas += int(low.sum())
 note("ground over passages lifted to the streets crossing them:", n_pas)
+# a carriageway on a structure no tag tells of: the terrain model leaves out what carries a road -- a culvert or a short
+# bridge mapped as plain road (the B 85 by the Danube at project col 775, row 499: a trench 6 m deep and 40 m long),
+# a junction on a deck over the ramp of a tunnel (-882, 667), an approach on its abutment's wedge before the mapped
+# bridge (the B 8 at 914, 709), the street over a passage whose ways end on it (-1641, 599: the lift above needs them
+# to reach 12 m past it) -- and the road dipped with the terrain, 1-6 m, into a trench or a dent. Where the laser saw
+# no ground under the road (no ground return in the cell: a deck, not a lawn or a forest floor under a crown) and the
+# surface model's lowest return over 3 x 3 m is smooth and stands 1-7 m over the ground, the ground of a carriageway
+# (not on a bridge or under one, not in a building, not by the river) is lifted to that return -- a stretch at a time
+# (8-connected, 150 m across at most: region-local), where its rim meets carriageway the terrain model agrees with
+# (the surface model within a metre of the ground) at the level it is lifted to (the median step there a metre at most:
+# a canopy, a roof or a deck over the road stands metres over the road's ground at its rim). The surface it was lifted
+# to is the caps' source there (SAG_SRC, data/surface.npz gsrc), not the terrain model under it
+# the pavements, the median and the verges beside such a stretch (6 m round it at most, through cells passing the same
+# tests but for the carriageway) rise with it: no pit left along the road
+from ways import ROADS as _ROADS  # noqa: E402
+from aoi import river_level as _river_level  # noqa: E402
+SAG_MIN, SAG_MAX, SAG_SPAN, SAG_SIDE = 1, 7, 150, 6
+SAG_SRC = np.full((D, W), np.nan, np.float32)
+_ng = region.load_npz("data/laser.npz", ["n_ground"])["n_ground"] \
+    if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER") else None
+if _ng is not None:
+    _lo3 = ndimage.minimum_filter(_dsm_lo, 3)
+    _smooth = ndimage.maximum_filter(_lo3, 3) - ndimage.minimum_filter(_lo3, 3) <= 0.6
+    _cw = np.zeros((D, W), np.uint8)
+    burn(_cw, [(l_.buffer(_way_width(t_) / 2, cap_style="flat"), 1) for _, t_, l_ in osm.lines
+               if t_.get("highway") in _ROADS and t_.get("tunnel") in (None, "no") and t_.get("covered") in (None, "no")
+               and t_.get("bridge") in (None, "no") and parse_len(t_.get("layer", 0)) >= 0 and _way_width(t_)])
+    _over = np.zeros((D, W), np.uint8)
+    # (under a bridge: its ways' width and a metre each side, not past their ends -- the approach up to a bridge's
+    # first node is a carriageway like any other -- and its outline)
+    burn(_over, [(l_.buffer(max(_way_width(t_), 2) / 2 + 1, cap_style="flat"), 1) for _, t_, l_ in osm.lines
+                 if t_.get("bridge") not in (None, "no") and (t_.get("highway") or t_.get("railway"))]
+         + [(a_ if t_.get("man_made") == "bridge" else a_.buffer(1), 1) for _, _, t_, a_ in osm.areas
+            if t_.get("man_made") == "bridge" or t_.get("building") or t_.get("building:part")])
+    _dep = _lo3 - g
+    _riv = _river_level(np.arange(D)[:, None], np.arange(W)[None, :]) - BASE
+    _open = (_dep >= SAG_MIN) & (_dep <= SAG_MAX) & _smooth & (_ng == 0) & (_over == 0) & (g > _riv + 1)
+    _cand = (_cw > 0) & _open
+    _to = np.round(_lo3).astype(np.int32)
+    _agree = (_cw > 0) & ~_cand & (np.abs(_dep) < 1)
+    _nb = ndimage.grey_dilation(np.where(_agree, g, -10000), size=(3, 3))
+    _lab, _n = ndimage.label(_cand, np.ones((3, 3), bool))
+    n_sag_c = 0
+    _up = np.zeros((D, W), bool)
+    for _i, _sl in enumerate(ndimage.find_objects(_lab)):
+        _k = _lab[_sl] == _i + 1
+        _e = _k & (_nb[_sl] > -5000)
+        if _e.sum() < 2 or max(_sl[0].stop - _sl[0].start, _sl[1].stop - _sl[1].start) > SAG_SPAN \
+                or np.median(np.abs(_to[_sl][_e] - _nb[_sl][_e])) > 1:
+            continue
+        _up[_sl] |= _k
+        n_sag_c += 1
+    n_sag_r = int(_up.sum())
+    n_fill = 0
+    if n_sag_r:
+        # round it (SAG_SIDE m) the surface model stands from half a metre over the ground: the stretch's rim, where
+        # the ground rounds to the same metre but the terrain model lies 0.5-1 m under the road (the caps would dip
+        # to it), and the pavements beside it
+        _rim = (_dep >= 0.4) & (_dep <= SAG_MAX) & _smooth & (_ng == 0) & (_over == 0) & (g > _riv + 1)
+        _up = ndimage.binary_dilation(_up, np.ones((3, 3), bool), iterations=SAG_SIDE, mask=_rim | _up)
+        # and the cells in it the surface model does not see (a crown over the road, a lorry): the level of the
+        # nearest lifted cell (SAG_SIDE m at most), where the surface model stands at it or over it and the laser saw
+        # no ground under it either -- no pit left in the road under a tree
+        _d, (_ir, _ic) = ndimage.distance_transform_edt(~_up, return_indices=True)
+        _f = np.where(_up, _to, _to[_ir, _ic])
+        _hole = ~_up & (_d <= SAG_SIDE) & (_f - g >= 1) & (_f - g <= SAG_MAX) & (_lo3 >= _f - 0.5) & (_ng == 0) \
+            & (_over == 0) & (g > _riv + 1)
+        n_fill = int(_hole.sum())
+        SAG_SRC[_hole] = _lo3[_ir, _ic][_hole]
+        g = np.where(_hole, _f, g).astype(g.dtype)
+    g = np.where(_up, np.maximum(g, _to), g).astype(g.dtype)
+    SAG_SRC[_up] = _lo3[_up]
+    n_sag = int(_up.sum())
+    note("carriageways on structures the terrain model left out: ground lifted to the surface model:", n_sag, "cells in",
+         n_sag_c, "stretches, of them on the carriageways", n_sag_r, "; under crowns and lorries in them:", n_fill)
+else:
+    note("no data/laser.npz: carriageways on untagged structures not lifted")
 # a carriageway or a railway tagged one layer down but with no tunnel is an open cut (a sunken
 # expressway, a railway cutting): it had been left out as if underground. Where the ground along it
 # stands 2 m or more under the ground 6-24 m to its sides (a dual carriageway's cut is 30 m wide), it is drawn and driven, its layer set to 0
@@ -963,8 +1040,12 @@ for _b in region.blocks(64):
 note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
 gcol[_wat | _lockm] = C["water"]
 # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
-# it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay)
-_calm = (gcol == C["water"]) & (nd_max < 4)
+# it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay) -- but under a bridge way, a low
+# deck stays too: the Gaißabrücke (OSM way 24857080, project col -4741, row -1612) stands 3.2 m over the Gaißa, and
+# its 25 m over the water had been calmed away (no deck: the road broke off at both banks)
+_calm_keep = np.zeros((D, W), np.uint8)
+burn(_calm_keep, [(p_, 1) for p_, _, _ in bridge_shapes])
+_calm = (gcol == C["water"]) & (nd_max < 4) & (_calm_keep == 0)
 for _a in (nd_max, nd_mean, nd_max_b):
     _a[_calm] = 0
 exg[_calm] = -1
@@ -3903,6 +3984,9 @@ CORE_OUT["deck"] = np.where(deck, deck_abs - BASE, np.nan).astype(np.float32)
 _rk = (PLANES > 0) | np.isfinite(ROOF_GX)
 CORE_OUT["roof_z"] = np.where(_rk, _roof_f, np.nan).astype(np.float32)
 CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.astype(np.float32)
+# gsrc: the ground's surface where it was lifted to the surface model (SAG_SRC: a carriageway on a structure the terrain
+# model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
+CORE_OUT["gsrc"] = SAG_SRC
 note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
      "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
 _lines = {oid: l_ for oid, _, l_ in osm.lines}
