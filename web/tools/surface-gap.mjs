@@ -7,12 +7,12 @@
 //   wheels' collision groups against the drawn surface there, split by flat / ramp / deck (ramp: the column has a cap;
 //   deck: its surface over a bridge, not the ground).
 // - drive: the car (scenarios.ts Sim, pure-pursuit follow; slower in a bend than LAT allows) along a few fixed roads
-//   (traffic.json, by index, checked against its OSM way) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 %
+//   (traffic.json, by OSM way and ends) at 30 / 50 / 70 km/h, and parked (handbrake, 3 s) at 30 %
 //   and 60 % along them (0 km/h): each touching wheel's contact point against the drawn surface under it, and the drawn wheel's bottom (the ground
 //   point drive-world.ts draws the car on: car.ride under the body's origin along its up, at the wheel's x, z) against
 //   the drawn surface there; how it rode (scenarios.ts feel: pitchJit rad/s, heave cm, liftPct). The car starts a few
 //   metres in where its box is clear of the voxels (scenarios.ts safeStart); a road whose centreline runs within 1.3 m
-//   of a wall for 3 m or more is skipped (road 1904: the follower scrapes the house fronts; fewer: walls=N in the
+//   of a wall for 3 m or more is skipped (altstadt_1904: the follower scrapes the house fronts; fewer: walls=N in the
 //   table). At most 300 m of each road.
 // Gaps in cm (+: over the drawn surface, floating; -: under it, sunk): n, mean, |d| (mean of the absolute), p05, p95,
 // and the shares (%) more than 5 cm under (lo5) and over (hi5). Samples more than 1.2 m (scan) / 0.9 m (drive) off
@@ -55,18 +55,20 @@ const AREAS = {
   schanzl: [7330, 2500, 7420, 2760], // the Schanzlbrücke's deck and its approaches
   spitzberg: [6860, 3150, 7060, 3380], // Spitzbergstraße and around: 5-10 % slopes
 };
-// the roads driven: traffic.json road index and its OSM way (to notice a regenerated traffic.json), or the Schanzlbrücke
+// the roads driven: their OSM way and their ends (x, z: from, to), the traffic.json road of that way whose first and
+// last points are nearest them (within 20 m each: its index shifts when traffic.json is regenerated), or the
+// Schanzlbrücke. The names keep the road's index when the baseline was recorded (data bf9671e3).
 const ROADS = [
-  { name: 'altstadt_60', i: 60, w: 7623837 }, // flat, 212 m
-  { name: 'altstadt_1904', i: 1904, w: 136323330 }, // flat, along house fronts: skipped (walls)
-  { name: 'donaukai_1630', i: 1630, w: 108322891 }, // flat by the Danube
-  { name: 'ramps_1948', i: 1948, w: 137551261 }, // 5 % up (its first 300 m)
-  { name: 'ramps_1949', i: 1949, w: 137551261 }, // 5 % down
-  { name: 'ramps_1681', i: 1681, w: 121880279 }, // up and down 16 m over 250 m
+  { name: 'altstadt_60', w: 7623837, from: [8101, 2880], to: [8176, 3078] }, // flat, 212 m
+  { name: 'altstadt_1904', w: 136323330, from: [8151, 2732], to: [8218, 2753] }, // flat, along house fronts: skipped (walls)
+  { name: 'donaukai_1630', w: 108322891, from: [8345, 2640], to: [8034, 2601] }, // flat by the Danube
+  { name: 'ramps_1948', w: 137551261, from: [7143, 2318], to: [7250, 2324] }, // 5 % up (its first 300 m)
+  { name: 'ramps_1949', w: 137551261, from: [7250, 2324], to: [7143, 2318] }, // 5 % down
+  { name: 'ramps_1681', w: 121880279, from: [7109, 2545], to: [7355, 2537] }, // up and down 16 m over 250 m
   { name: 'schanzl', schanzl: true }, // over the bridge's deck, south to north
-  { name: 'spitzberg_2214', i: 2214, w: 264781335 }, // 5.7 % up, 349 m
-  { name: 'spitzberg_44', i: 44, w: 7609622 }, // 9.5 % up
-  { name: 'spitzberg_445', i: 445, w: 23653874 }, // 7.2 % down
+  { name: 'spitzberg_2214', w: 264781335, from: [7089, 3185], to: [6772, 3293] }, // 5.7 % up, 349 m
+  { name: 'spitzberg_44', w: 7609622, from: [6928, 3285], to: [6936, 3400] }, // 9.5 % up
+  { name: 'spitzberg_445', w: 23653874, from: [6936, 3400], to: [7052, 3314] }, // 7.2 % down
 ];
 const SPEEDS = [30, 50, 70], PARK = [0.3, 0.6], MAX_LEN = 300;
 // m/s^2: the most the follower takes a bend with (scenarios.ts bendSpeed): slower in a bend it cannot take at the run's
@@ -136,14 +138,15 @@ async function scan(name, [x0, z0, x1, z1]) {
 const traffic = await trafficRoads();
 async function roadOf(r) {
   if (r.schanzl) return { path: await schanzlPath(), y: 20 };
-  let i = r.i;
+  let i = -1;
   if (moved) { // (another map: the longest road of the way)
-    i = -1;
     traffic.forEach((q, k) => { if (q.w === r.w && (i < 0 || q.p.length > traffic[i].p.length)) i = k; });
     if (i < 0) return null;
+  } else { // the road of the way from r.from to r.to
+    const off = (q) => Math.max(Math.hypot(q.p[0][0] - r.from[0], q.p[0][1] - r.from[1]), Math.hypot(q.p.at(-1)[0] - r.to[0], q.p.at(-1)[1] - r.to[1]));
+    traffic.forEach((q, k) => { if (q.w === r.w && (i < 0 || off(q) < off(traffic[i]))) i = k; });
+    if (i < 0 || off(traffic[i]) > 20) throw new Error(`${r.name}: no traffic.json road of way ${r.w} from (${r.from}) to (${r.to}) (regenerated? update ROADS)`);
   }
-  const road = traffic[i];
-  if (!road || road.w !== r.w) throw new Error(`${r.name}: traffic.json road ${r.i} is way ${road?.w}, not ${r.w} (regenerated? update ROADS)`);
   const path = await roadPath(i);
   return { path, y: path.map((q) => q[2]) };
 }

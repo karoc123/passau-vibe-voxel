@@ -186,9 +186,13 @@ const results = {};
 async function dig() {
   const ctx = await setup(BRIDGE), { T, phys, W } = ctx;
   // The straight approach keeps the hole in the vehicle's path. Warming the traffic still uses the bridge focus.
-  const near = { x: 4350, z: 2780, radius: 15 };
-  const car = pickCar(ctx, 8, 3, false, near);
-  if (!check(car, `a moving car on the bridge deck within ${near.radius} m of (${near.x}, ${near.z})`)) return ctx;
+  // The car must be too fast to stop short of the hole (at 4 m/s its look-ahead brakes it at the rim, held: it never
+  // falls); the first one so on the deck there, waiting for it in half seconds (which car it is depends on the traffic
+  // as traffic.json has it).
+  const near = { x: 4350, z: 2780, radius: 15 }, MIN_V = 7;
+  let car = null;
+  for (let k = 0; k < 40 && !(car = pickCar(ctx, 8, MIN_V, false, near)); k++) run(ctx, 0.5);
+  if (!check(car, `a car at ${MIN_V} m/s or more on the bridge deck within ${near.radius} m of (${near.x}, ${near.z})`)) return ctx;
   const p = drawn(ctx, car), deck = p.y, R = 4;
   const ax = p.x + Math.sin(car.rh) * 6, az = p.z + Math.cos(car.rh) * 6;
   const op = { kind: 'sphere', x: Math.floor(ax), y: Math.floor(az), z: Math.floor(deck) - 1, r: R, id: 0 };
