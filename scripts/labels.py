@@ -1,9 +1,13 @@
 """Every label on the map and how far away it shows.
 
-The curated landmarks (landmarks.LABELS, EXTRA_LABELS, the building overrides' labels) plus the named parks, gardens, marinas
-and harbours of 2.5 ha or more that none of them names. `far` is the camera distance (m) up to which a label shows;
-the viewer adds its English name or kind closer in, then its facts and website.
+The curated landmarks (landmarks.LABELS, EXTRA_LABELS, the building overrides' labels), the further places of PLACES
+below, plus the named parks, gardens, marinas and harbours of 2.5 ha or more that none of them names. `far` is the
+camera distance (m) up to which a label shows; the viewer adds its English name or kind closer in, then its facts and
+website. Every label carries a `cat` (CATS: one of a few categories, for a map's icons), from its kind unless it
+names its own.
 """
+import re
+
 import numpy as np
 from scipy import ndimage
 from shapely.geometry import Point
@@ -12,6 +16,103 @@ import landmarks
 from aoi import W, D
 
 DEFAULT_FAR = 5000  # m, for a curated label that gives no `far` of its own
+
+# Further landmarks, put on the map here in the whole-map pass (regions.py) rather than in landmarks.py: a change here
+# rebuilds only that pass (voxelize.py reuses every region), not the regions. The things a visitor looks for from afar,
+# picked from OSM (data/raw/osm.json; places.json, the search's, lists the same): name -> facts as landmarks.LABELS
+# (en, kind, year, alt, far, site; cat to override the one CATS gives the kind), at (EPSG:25832 x, y: the OSM
+# outline's centre or node), r (m, default 6: the label stands on the highest voxel within r of `at`, a roof or a
+# spire). Off the map: left out. Order = priority on screen within one `far`.
+PLACES = {
+    # the Altstadt and the Innstadt
+    "Peschl-Terrasse": dict(kind="beer terrace over the Danube", alt="Peschl Brauerei", at=(828991, 5389911), r=12,
+                            far=3000),
+    "Zentraler Omnibusbahnhof": dict(en="Central bus station", kind="bus station", alt="ZOB Busbahnhof",
+                                     at=(828663, 5389538), r=20, far=3000),
+    "Stadtgalerie": dict(kind="shopping centre", at=(828645, 5389654), r=40, far=3000),
+    "Stadtturm": dict(kind="tower block", alt="Hochhaus", at=(828697, 5389514), r=12, far=3000),
+    "Votivkirche": dict(kind="church", at=(828824, 5389669), r=12, far=3000),
+    "Stadttheater Passau": dict(en="Town theatre", kind="theatre", at=(829319, 5389700), r=10, far=1500),
+    "Museum Moderner Kunst": dict(en="Museum of Modern Art", kind="museum", at=(829887, 5389829), r=8, far=1500),
+    "RömerMuseum Kastell Boiotro": dict(en="Roman museum", kind="museum", alt="Römermuseum", at=(829128, 5389261),
+                                        r=10, far=1500),
+    "Schiffsanlegestelle": dict(en="Boat landing", kind="Danube boat landing",
+                                alt="Schiffanlegestelle Wurm+Noe Rathaus", at=(829239, 5389972), far=1500),
+    "Löwenbrauerei": dict(en="Löwenbräu brewery", kind="brewery", alt="Bayerische Löwenbrauerei Stockbauer",
+                          at=(828557, 5389342), r=15, far=3000),
+    "Klinikum Passau – Hellge-Klinik": dict(en="Passau hospital (Hellge clinic)", kind="hospital",
+                                            alt="Krankenhaus Klinikum", at=(828055, 5389180), r=30, far=5000),
+    "Sankt Anton": dict(kind="church", alt="St. Anton", at=(827710, 5389093), r=12, far=3000),
+    "Christi Himmelfahrt": dict(kind="church", at=(827310, 5389328), r=12, far=3000),
+    # Ilzstadt, Hals and up the Ilz
+    "St. Salvator": dict(kind="church", alt="Salvatorkirche", at=(829895, 5390065), r=12, far=3000),
+    "St. Bartholomäus": dict(kind="church", at=(830061, 5390157), r=12, far=3000),
+    "Achatiuskirche": dict(kind="church", at=(829164, 5391066), r=10, far=3000),
+    "Kraftwerk Hals": dict(en="Hals power station", kind="Ilz power station", at=(829018, 5391457), r=10, far=3000),
+    "Halser Ilzschleifen": dict(en="Ilz loops at Hals", kind="river bathing spot", at=(828804, 5391487), r=3, far=1500),
+    "Burg Reschenstein": dict(en="Reschenstein castle ruin", kind="castle ruin", at=(828467, 5392181), r=10, far=3000),
+    "Triftsperre": dict(en="Log-driving weir", kind="weir on the Ilz", alt="Trifttunnel", at=(828451, 5392317), r=10,
+                        far=3000),
+    # west of the station: Hacklberg, Haidenhof, Auerbach
+    "Schloss Freudenhain": dict(kind="palace", alt="Gymnasium Freudenhain", at=(828100, 5390256), r=20, far=3000),
+    "St. Konrad": dict(kind="church", at=(827493, 5390248), r=12, far=3000),
+    "Glockengießerei Perner": dict(en="Perner bell foundry", kind="bell foundry", at=(827375, 5389945), r=15, far=1500),
+    "Winterhafen Racklau": dict(en="Racklau winter harbour", kind="harbour", alt="Hafen Racklau", at=(826563, 5389590),
+                                far=3000),
+    "St. Josef": dict(kind="church", alt="Auerbach", at=(825900, 5389150), r=12, far=3000),
+    "Skatepark Passau": dict(kind="skatepark", at=(825624, 5389614), r=3, far=1500),
+    # up the Danube: the Kachlet, Heining, Neustift, Schalding
+    "Schleuse Kachlet": dict(en="Kachlet locks", kind="Danube locks", alt="Schleusen Kachlet", at=(825183, 5390126),
+                             r=3, far=5000),
+    "Kirche St. Korona": dict(kind="church", at=(825704, 5392439), r=10, far=3000),
+    "Auferstehung Christi": dict(kind="church", alt="Neustift", at=(824144, 5389325), r=12, far=3000),
+    "Babalu Funpark": dict(kind="indoor playground", at=(823747, 5390822), r=20, far=1500),
+    "SV Schalding-Heining": dict(kind="football ground", alt="Stadion Reischlhof Sportplatz", at=(822482, 5390910),
+                                 r=3, far=3000),
+    "St. Michael, Schalding": dict(kind="church", alt="Schalding", at=(821707, 5391776), r=12, far=3000),
+    "Hafen Passau": dict(en="Port of Passau", kind="Danube port", alt="bayernhafen Schalding", at=(823050, 5391559),
+                         r=3, far=5000),
+}
+
+# what a label is, for a map's icons: the first category one of whose words starts a word of its kind; else "sight"
+CATS = [
+    ("church", ("cathedral", "church", "abbey", "chapel")),
+    ("castle", ("fortress", "castle", "palace")),
+    ("bridge", ("bridge", "footbridge")),
+    ("tower", ("tower",)),
+    ("water", ("dam", "lock", "weir", "harbour", "port", "marina", "confluence", "boat", "bathing")),
+    ("industry", ("power", "brewery", "foundry")),
+    ("transport", ("station",)),
+    ("district", ("district",)),
+    ("sport", ("football", "stadium", "skate", "sport", "swimming", "playground")),
+    ("park", ("park", "garden")),
+    ("education", ("university", "school")),
+    ("health", ("hospital", "clinic")),
+    ("shopping", ("shopping",)),
+    ("culture", ("theatre", "museum")),
+    ("civic", ("town hall",)),
+]
+
+
+def cat_of(kind):
+    k = (kind or "").lower()
+    return next((c for c, words in CATS if any(re.search(rf"\b{w}", k) for w in words)), "sight")
+
+
+def places(top_at):
+    """the labels of PLACES that stand on the map, in map cells"""
+    from aoi import MAP_D, MAP_W, MC0, MR0, to_grid
+    out = []
+    for n, f in PLACES.items():
+        c, r = (int(v) for v in to_grid(*f["at"]))
+        c, r = c + MC0, r + MR0
+        if not (0 <= r < MAP_D and 0 <= c < MAP_W):
+            continue
+        k = f.get("r", 6)
+        z = max(top_at(rr, cc) for rr in range(max(r - k, 0), min(r + k + 1, MAP_D))
+                for cc in range(max(c - k, 0), min(c + k + 1, MAP_W)) if (rr - r) ** 2 + (cc - c) ** 2 <= k * k)
+        out.append(landmarks.label(n, {a: v for a, v in f.items() if a != "r"}, c, r, z))
+    return out
 
 
 def site_of(tags):
@@ -45,6 +146,7 @@ def roof_height(labels, osm, top_at):
 def finish(labels):
     for l in labels:
         l["far"] = l.get("far") or DEFAULT_FAR
+        l["cat"] = l.get("cat") or cat_of(l.get("kind"))
     labels.sort(key=lambda l: -l["far"])  # (stable: the curated order within one distance)
     kept = []
     for l in labels:
@@ -87,6 +189,7 @@ def greens(osm, labels, top_at):
 def assemble(curated, osm, top_at):
     curated = list(curated)
     roof_height(curated, osm, top_at)
+    curated += places(top_at)
     return finish(curated + greens(osm, curated, top_at))
 
 

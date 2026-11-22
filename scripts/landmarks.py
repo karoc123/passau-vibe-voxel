@@ -7,6 +7,8 @@ import numpy as np
 from shapely.geometry import Point
 from scipy import ndimage
 
+# (Further landmarks go in labels.py PLACES: placed in the whole-map pass, so a change there rebuilds no region.
+# A change here, even to these dicts, rebuilds every region.)
 # OSM name -> what a label shows; order = label priority (decluttering keeps earlier ones).
 # Facts, all optional except kind: en (the English name, shown instead of kind), kind (what it is), height (m),
 # year (built or opened), rebuilt, by (architect), building (under construction), alt (other names for search),
