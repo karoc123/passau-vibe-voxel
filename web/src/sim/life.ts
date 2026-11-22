@@ -68,9 +68,15 @@ type Density = { cars: number; peds: number; bikes: number };
 
 export interface Picked { kind: Kind; obj: Rideable; label: string }
 
+// Optional physical bodies for some cars (the ?lifephys=1 experiment, physics/rapier/life-phys.ts): stepped each frame
+// after the traffic's ticks, before drawing; pose() may put a car's drawn pose (rp, rh, pitch, roll) where its body is
+// (called after the kinematic pose is set); a car it owns is not dropped over holes here (its body falls). None: as before.
+export interface LifeBodies { step(dt: number, life: StreetLife): void; pose(c: Car): void; owns(c: Car): boolean }
+
 export class StreetLife {
   world: World | null = null;
   keep: Rideable | null = null;
+  bodies: LifeBodies | null = null;
   readonly peds: PedEdge[];
   readonly cars: Car[] = [];
   private readonly detachedCars: Car[] = [];
@@ -159,6 +165,7 @@ export class StreetLife {
     this.acc += dt;
     while (this.acc >= STEP) { this.step(STEP, density); this.acc -= STEP; }
     this.trains.update(dt, hh, this.viewer);
+    this.bodies?.step(dt, this);
     this.render(dt, night, this.acc);
   }
 
@@ -430,7 +437,7 @@ export class StreetLife {
     const gone = new Set<Car>();
     for (const c of this.cars) {
       const g = c.geo;
-      if (c === this.keep || !this.hole(g.cx, g.cy, g.z)) continue;
+      if (c === this.keep || this.bodies?.owns(c) || !this.hole(g.cx, g.cy, g.z)) continue;
       this.removeCar(c);
       gone.add(c);
       c.rp ??= new THREE.Vector3(g.cx, g.z, g.cy);
@@ -717,6 +724,7 @@ export class StreetLife {
     const A = pt(), B = pt(), tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
     const eu = new THREE.Euler(0, 0, 0, 'YXZ'), W = this.world, meshes = [M.body, M.dark, M.head, M.tail];
     const draw = (c: Car, i: number) => {
+      this.bodies?.pose(c);
       m.compose(c.rp!, q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
       for (const mesh of meshes) mesh.setMatrixAt(i, m);
       M.body.setColorAt(i, c.col);
@@ -888,6 +896,9 @@ export class StreetLife {
     });
     setCount(this.headAct.length, M.lamp);
   }
+
+  // a car's drawn path (carPoint) at arc length s on its road, for what steers a body along it (LifeBodies)
+  pathPoint(car: Car, s: number, out: Pt, off = car.off) { return this.carPoint(car, s, out, off); }
 
   // ------------------------------------------------------------------ following
   roadVehicles(): Car[] { return this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars; }

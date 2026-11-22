@@ -437,6 +437,9 @@ async function boot() {
     const N = meta.tiles.N;
     liveEdits.listen((tx, ty, node, region) => life?.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node));
     window.__life = life;
+    // EXPERIMENT ?lifephys=1 (docs/plans/life-physics.md): the cars near the focus as Rapier bodies; lpr= radius (m),
+    // lpmax= most bodies, lpmodel=car|box, lpguide= g, lplost=wreck|resync, lponly=all|edits
+    if (qs.get('lifephys') === '1') lifePhysics(life, meta);
     fetchJson<BoatData>('data/boats.json').then((bd) => {
       boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
       life!.group.add(boats.group); // shown, hidden and shadowed with the rest of the moving things
@@ -453,6 +456,20 @@ async function boot() {
   boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, () => daylight.night, () => flood?.level ?? 0);
   plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement,
     { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => flood?.info?.river ?? null, park: () => drive?.park() });
+}
+
+// the ?lifephys=1 experiment (physics/rapier/life-phys.ts), loaded only then
+let lifePhys: { viewer: { x: number; z: number } } | null = null;
+async function lifePhysics(l: StreetLife, meta: Meta) {
+  const [{ LifePhysics }, { viewerTileCache }] = await Promise.all([import('./physics/rapier/life-phys'), import('./viewer-tiles')]);
+  const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
+  const model = qs.get('lpmodel') === 'box' ? 'box' : 'car', lost = qs.get('lplost') === 'resync' ? 'resync' : 'wreck', only = qs.get('lponly') === 'edits' ? 'edits' : 'all';
+  const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, { radius: n('lpr', 200), maxBodies: n('lpmax', 60), model, guide: n('lpguide', 0), lost, only },
+    { cache: viewerTileCache(meta.tiles.N) });
+  p.viewer = { x: f.x, z: f.z };
+  l.bodies = p;
+  lifePhys = p;
+  (window as unknown as { __lifephys: unknown }).__lifephys = p;
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
@@ -502,6 +519,7 @@ renderer.setAnimationLoop((now) => {
     if (life.group.visible) {
       life.day = daylight.day;
       // (simulated round what is looked at; agents come and go far from the camera, which sees them)
+      if (lifePhys) { const f = focus(); lifePhys.viewer = { x: f.x, z: f.z }; }
       life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
       boats?.update(dt, daylight.hour, daylight.day, daylight.night, flood?.level ?? 0);
     }

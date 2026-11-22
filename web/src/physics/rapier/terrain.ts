@@ -158,6 +158,8 @@ export interface TerrainOptions {
   load?: (path: string) => Promise<ArrayBuffer>;
   budgetMs?: number;
   couple?: boolean; // couple neighbouring chunks' voxels (default true)
+  reach?: number; // m: chunks within this of a body are built (default REACH)
+  needNow?: number; // m: a body with an unbuilt chunk within this is not ready (default NEED_NOW)
 }
 
 export class RapierTerrain {
@@ -170,6 +172,8 @@ export class RapierTerrain {
   private readonly cache: TileCache;
   budgetMs: number;
   couple: boolean;
+  reach: number;
+  needNow: number;
   private readonly unlisten: () => void;
   readonly stats: TerrainStats = { chunks: 0, voxels: 0, tris: 0, tilesLoading: 0, builds: 0, buildMsTotal: 0, buildJsMsTotal: 0, buildMsMax: 0, lastFrameBuildMs: 0, frameBuildMsMax: 0, slowest: { ms: 0, js: 0, voxels: 0, rest: 0, n: 0 }, decodeMsMax: 0 };
 
@@ -182,6 +186,8 @@ export class RapierTerrain {
     this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load ?? ((p) => fetchGzip(`data/tiles/${p}`)), edits: liveEdits });
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
     this.couple = opts.couple ?? true;
+    this.reach = opts.reach ?? REACH;
+    this.needNow = opts.needNow ?? NEED_NOW;
     // (an edited node, core/live-edits.ts: its tile and the chunks it changed built again)
     this.unlisten = liveEdits.listen((tx, tz, _n, region) => this.invalidate(tx, tz, region));
   }
@@ -219,6 +225,7 @@ export class RapierTerrain {
   update(points: { x: number; z: number; vx?: number; vz?: number }[], now = performance.now()): boolean[] {
     const start = performance.now();
     const want = new Map<number, number>();
+    const REACH = this.reach;
     const consider = (x: number, z: number, bias: number) => {
       const c0x = Math.floor((x - REACH) / CHUNK), c1x = Math.floor((x + REACH) / CHUNK);
       const c0z = Math.floor((z - REACH) / CHUNK), c1z = Math.floor((z + REACH) / CHUNK);
@@ -270,6 +277,7 @@ export class RapierTerrain {
 
   // are the chunks within NEED_NOW of p built (or off the map)?
   ready(p: { x: number; z: number }) {
+    const NEED_NOW = this.needNow;
     const c0x = Math.floor((p.x - NEED_NOW) / CHUNK), c1x = Math.floor((p.x + NEED_NOW) / CHUNK);
     const c0z = Math.floor((p.z - NEED_NOW) / CHUNK), c1z = Math.floor((p.z + NEED_NOW) / CHUNK);
     for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
