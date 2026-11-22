@@ -534,14 +534,18 @@ core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
 ## Paraglider, hovercraft and helicopter
 
 - In the floatplane or jet, press **G** or click **Deploy paraglider** at least 35 m above the surface.
-  Steer with A/D, dive with W and brake with S. Land on dry ground to continue on foot.
-- Click **Hovercraft** in the map toolbar to start near the view on land or water. W/S move forward and reverse,
-  A/D steer. Approach low banks and ramps to cross between land and water.
+  Steer with A/D, W is the speed bar, S brakes (flare before touching down). Hands up it glides about 8:1 at 40 km/h.
+  Land on dry ground to continue on foot.
+- Click **Hovercraft** in the map toolbar to start near the view on land or water. W thrust, S brakes then backs,
+  A/D steer. It keeps its momentum and drifts through turns; approach low banks and ramps to cross between land and water.
 - Click **Helicopter** in the map toolbar to start on clear land near the view. Space climbs, Shift descends,
-  W/S fly forward and backward, and A/D turn. Release the controls to hover and use Shift for a vertical landing.
+  W/S tilt the nose to fly forward and back, A/D turn and Q/E slide sideways. It gathers speed over a few seconds
+  (up to 160 km/h) and settles into a hover when the stick is let go; on its skids it stays put until Space lifts it.
 
-The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch
-stick or gamepad triggers control climb and descent. **Esc** returns to the map.
+The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch or
+gamepad stick climbs and descends (up/down) and slides sideways; the gamepad triggers climb and descend too.
+Their motion laws and numbers are `CRAFT` in `web/src/nav/craft-motion.ts`, the models (at the walker's and the
+cars' scale) `web/src/nav/craft-models.ts`. **Esc** returns to the map.
 
 ## Third-person walking
 

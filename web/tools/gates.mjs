@@ -39,7 +39,7 @@ const GATES = [
   { name: 'tile-roundtrip', cmd: ['tools/tile-roundtrip.mjs'], set: 'fast', secs: 2, guards: 'node file format: scripts/tilefile.py, tiles.py column_runs, tile-data.ts, core/tile-sections.ts (needs uv)' },
   { name: 'boat', cmd: ['tools/boat.mjs'], set: 'fast', expect: 20, secs: 1.7, guards: 'nav/boat-motion.ts, river.ts, boat-checks.ts, core/safe-trail.ts' },
   { name: 'collision', cmd: ['tools/collision.mjs'], set: 'fast', expect: 16, secs: 2.7, guards: 'nav/voxel-collision.ts, the tile format' },
-  { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 11, secs: 1.2, guards: 'nav/craft-motion.ts and craft-collision.ts' },
+  { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 19, secs: 1.2, guards: 'nav/craft-motion.ts and craft-collision.ts' },
   { name: 'world-smoke', cmd: ['tools/world-smoke.mjs'], set: 'fast', data: true, secs: 2.5, guards: 'core/ stack, layers, mesher from columns, rapier terrain.ts' },
   { name: 'rapier-car', cmd: ['tools/rapier-car.mjs'], set: 'fast', expect: 45, secs: 3.1, guards: 'physics/rapier/ (car.ts, life-phys.ts, player-car.ts, terrain.ts, scenarios)' },
   { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 34, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },

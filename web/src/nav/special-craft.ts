@@ -13,15 +13,17 @@ import { stickAxis, TouchSticks } from './touch-sticks';
 import { VoxelCollision } from './voxel-collision';
 import './special-craft.css';
 
-const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight']);
+const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
+// the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
+// `drop` m under the motion's point (the paraglider's is the pilot's middle, its model's origin the feet)
 const CONFIG = {
-  hovercraft: { name: 'Hovercraft', back: 10, up: 4,
-    help: ['W/S forward and reverse · A/D steer · Esc exit', 'Left stick: forward, reverse and steer.'] },
-  helicopter: { name: 'Helicopter', back: 14, up: 5,
-    help: ['W/S forward and back · A/D turn · Space climb · Shift descend · Esc exit',
-      'Left stick: forward, back and turn. Right stick: climb and descend.'] },
-  paraglider: { name: 'Paraglider', back: 8, up: 4.4,
-    help: ['A/D steer · W dive · S brake · Esc exit', 'Left stick: turn, dive and brake.'] },
+  hovercraft: { name: 'Hovercraft', back: 12, up: 4.5, look: 0.8, drop: 0,
+    help: ['W/S thrust and reverse · A/D steer (it drifts) · Esc exit', 'Left stick: thrust, reverse and steer.'] },
+  helicopter: { name: 'Helicopter', back: 17, up: 6, look: 1.2, drop: 0,
+    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
+      'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
+  paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
+    help: ['A/D steer · W speed bar · S brake (flare to land) · Esc exit', 'Left stick: turn, speed bar and brake.'] },
 } as const;
 
 class SpecialCraft implements PlayerCraft {
@@ -196,22 +198,27 @@ class SpecialCraft implements PlayerCraft {
       turn: clamp(keys.any('KeyD', 'ArrowRight') - keys.any('KeyA', 'ArrowLeft') + padAxis(pad?.axes[0]) +
         (left ? stickAxis(left.dx, left.radius) : 0), -1, 1),
       lift: clamp(keys.any('Space') - keys.any('ShiftLeft', 'ShiftRight') + (pad?.buttons[7]?.value ?? 0) -
-        (pad?.buttons[6]?.value ?? 0) + (right ? stickAxis(right.dy, right.radius) : 0), -1, 1),
+        (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right ? stickAxis(right.dy, right.radius) : 0), -1, 1),
+      side: clamp(keys.any('KeyE') - keys.any('KeyQ') + padAxis(pad?.axes[2]) +
+        (right ? stickAxis(right.dx, right.radius) : 0), -1, 1),
     };
   }
 
   private render(dt: number) {
-    const m = this.motion, { group, rotor } = this.model, cfg = CONFIG[this.id];
-    group.position.set(m.p.x, m.p.y, m.p.z);
-    group.rotation.set(m.pitch, m.heading, m.bank, 'YXZ');
-    if (rotor && inFocus()) rotor.rotation.y = (rotor.rotation.y + 18 * dt) % (2 * Math.PI);
+    const m = this.motion, { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
+    group.position.set(m.p.x, m.p.y - cfg.drop, m.p.z);
+    group.rotation.set(-m.pitch, m.heading, m.bank, 'YXZ');
+    // the rotors idle slower on the skids
+    const spin = this.id === 'helicopter' && inFocus() ? (m.grounded ? 9 : 24) * dt : 0;
+    if (rotor) rotor.rotation.y = (rotor.rotation.y + spin) % (2 * Math.PI);
+    if (tailRotor) tailRotor.rotation.x = (tailRotor.rotation.x + 4 * spin) % (2 * Math.PI);
     this.camYaw = followAngle(this.camYaw, m.heading, 4, dt);
     this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom);
     const eye = this.pos.copy(group.position);
-    eye.y += this.id === 'paraglider' ? 1.9 : 1;
+    eye.y += cfg.look;
     eye.addScaledVector(this.offset, clearShare(this.collision.sweep(eye, this.offset), this.offset, 0.12, 0.25));
     this.look.copy(group.position);
-    this.look.y += this.id === 'paraglider' ? 1.7 : 0.6;
+    this.look.y += cfg.look;
     const cam = this.rig.place(eye, this.rig.look(eye, this.look), 58, dt);
     this.ctx.target.copy(cam.position).addScaledVector(cam.getWorldDirection(this.look), 10);
   }
@@ -228,7 +235,8 @@ class SpecialCraft implements PlayerCraft {
     ModePanel.text(this.panel.status, this.phase === 'finding' ? 'Looking for a clear starting spot…' :
       this.phase === 'landing' ? 'Landing…' : on && !inFocus() ? PAUSED :
       on && this.result === 'loading' ? 'Loading collision tiles…' :
-      on && this.result === 'blocked' ? 'Obstacle ahead' : this.panel.saying);
+      on && this.result === 'blocked' ? 'Obstacle ahead' :
+      on && this.id === 'helicopter' && this.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
     if (!on) return;
     const { p, speed } = this.motion;
     const height = this.id === 'hovercraft' ? null : this.collision.surface(p.x, p.z)?.top;

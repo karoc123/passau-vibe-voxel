@@ -3,15 +3,20 @@ import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
 export const CRAFT_RADIUS = { hovercraft: 0.53, helicopter: 0.59, paraglider: 0.45 };
-export const SPAWN_HEIGHT = { hovercraft: HOVER_HEIGHT, helicopter: 0.87, paraglider: GLIDER_HEIGHT };
+export const SPAWN_HEIGHT = { hovercraft: HOVER_HEIGHT, helicopter: 1.1, paraglider: GLIDER_HEIGHT };
 
-// Cubes along the skirt, skids and rotor, and the pilot and canopy. Rotate the probes with the heading.
+// Cubes (CRAFT_RADIUS half-size) over each model (craft-models.ts), rotated with the heading: the hovercraft's skirt,
+// cabin and fan ducts; the helicopter's skids and cabin, tail, and the rotor disc's rim (10 m) and middle; the pilot
+// and the wing's arc.
+const rim = (r: number, y: number) => Array.from({ length: 8 }, (_, i): [number, number, number] =>
+  [r * Math.sin(i * Math.PI / 4), y, r * Math.cos(i * Math.PI / 4)]);
 const PROBES: Record<CraftKind, readonly [number, number, number][]> = {
-  hovercraft: [[0, 0, 0], [-0.76, 0, 1.4], [0.76, 0, 1.4], [-0.76, 0, -1.4], [0.76, 0, -1.4], [0, 0.65, -1.45]],
-  helicopter: [[0, -0.25, 0], [0, 0, 1.4], [0, 0, -1.35], [0, 0.25, -3.2],
-    [-1.5, 1.28, 0], [1.5, 1.28, 0], [-2.9, 1.28, 0], [2.9, 1.28, 0],
-    [0, 1.28, -1.5], [0, 1.28, 1.5], [0, 1.28, -2.9], [0, 1.28, 2.9]],
-  paraglider: [[0, 0, 0], [0, 2.8, 0], [-2.1, 2.55, -0.1], [2.1, 2.55, -0.1]],
+  hovercraft: [[0, 0, 0], [-0.77, 0, 2.3], [0.77, 0, 2.3], [-0.77, 0, -2.3], [0.77, 0, -2.3], [-0.77, 0, 0], [0.77, 0, 0],
+    [0, 0.75, 0.5], [-0.66, 1.0, -2.3], [0.66, 1.0, -2.3]],
+  helicopter: [[0, -0.5, 0.3], [-0.5, -0.5, 1.2], [0.5, -0.5, 1.2], [-0.5, -0.5, -0.7], [0.5, -0.5, -0.7],
+    [0, 0.5, 1.5], [0, 0.6, -2.4], [0, 0.7, -4.3], [0, 1.0, -5.75],
+    ...rim(4.4, 2.0), ...rim(2.2, 2.0)],
+  paraglider: [[0, 0, 0], [0, 0.95, 0], [0, 7.1, 0.15], [-2.7, 6.4, 0.15], [2.7, 6.4, 0.15], [-4.6, 4.6, 0.15], [4.6, 4.6, 0.15]],
 };
 
 export function craftWorld(kind: CraftKind, col: VoxelCollision, level: () => number): CraftMotionWorld {
