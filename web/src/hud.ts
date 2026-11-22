@@ -21,6 +21,7 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
   fpv: [],
   boat: [],
+  plane: [],
   pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
     ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };

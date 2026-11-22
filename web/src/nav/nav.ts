@@ -20,11 +20,11 @@ import { HEAD, STEP, walkStep } from './walk';
 //          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's); two fingers
 //          close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
-//   fpv, boat: a craft (fpv.ts the drone, boat.ts the speedboat) owns the camera and the input
-export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian' | 'boat';
-export type Craft = 'fpv' | 'boat';
+//   fpv, boat, plane: a craft (fpv.ts the drone, boat.ts the speedboat, plane.ts the floatplane) owns the camera and the input
+export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian' | 'boat' | 'plane';
+export type Craft = 'fpv' | 'boat' | 'plane';
 // a craft owns the camera and the input: Nav leaves the keys, the pointer and the wheel to it
-export const flying = (m: Mode) => m === 'fpv' || m === 'boat';
+export const flying = (m: Mode) => m === 'fpv' || m === 'boat' || m === 'plane';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
@@ -492,7 +492,7 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
-  // Switch from the map camera to a craft (the FPV drone, the boat).
+  // Switch from the map camera to a craft (the FPV drone, the boat, the plane).
   startCraft(mode: Craft) {
     if (!this.world || this.walkPending || this.mode !== 'orbit') return false;
     this.rememberSky();

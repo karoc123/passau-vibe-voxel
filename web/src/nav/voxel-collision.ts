@@ -7,7 +7,9 @@ import { TileCache } from '../core/tile-cache';
 import { fetchGzip } from '../fetch';
 import { capField, surfaceAt, type CapField } from '../core/surface';
 
-const RADIUS = 0.35;
+// the drone's cube's half side and how far ahead (s) its tiles are fetched; the plane passes its own (plane.ts)
+const RADIUS = 0.35, HORIZON = 2.2;
+export interface CollisionOptions { radius?: number; horizon?: number }
 const CONCURRENT_LOADS = 4;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
 // caps: the node's sloped surfaces (core/surface.ts), what surface() reads -- the sweep keeps the voxels (a cap lies
@@ -26,12 +28,12 @@ function runsOf(columns: RawColumns): Runs {
   return { offsets, data: columns.runs };
 }
 
-// Sweeps the drone's 70 cm cube through one column segment, expanded by its half.
-function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number) {
+// Sweeps the craft's cube (the drone's 70 cm) through one column segment, expanded by its half side r.
+function contact(p: Vector3, d: Vector3, x: number, lo: number, hi: number, z: number, limit: number, r: number) {
   let enter = 0, leave = limit, axis = 0;
   for (let i = 0; i < 3; i++) {
-    const min = (i === 0 ? x : i === 1 ? lo : z) - RADIUS;
-    const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + RADIUS;
+    const min = (i === 0 ? x : i === 1 ? lo : z) - r;
+    const max = (i === 0 ? x + 1 : i === 1 ? hi : z + 1) + r;
     const start = p.getComponent(i), move = d.getComponent(i);
     if (Math.abs(move) < 1e-10) {
       if (start < min || start > max) return null;
@@ -61,6 +63,8 @@ export class VoxelCollision {
   readonly width: number;
   readonly depth: number;
   readonly ceiling: number;
+  readonly radius: number;
+  private readonly horizon: number;
   private readonly tileSide: number;
   private readonly row: number;
   private readonly nx: number;
@@ -79,7 +83,9 @@ export class VoxelCollision {
   private wanted: number[] = [];
   private nextPrefetch = 0;
 
-  constructor(meta: Meta, cache?: TileCache) {
+  constructor(meta: Meta, cache?: TileCache, { radius = RADIUS, horizon = HORIZON }: CollisionOptions = {}) {
+    this.radius = radius;
+    this.horizon = horizon;
     this.width = meta.W;
     this.depth = meta.D;
     this.ceiling = meta.H + 600;
@@ -108,7 +114,7 @@ export class VoxelCollision {
     if (now >= this.nextPrefetch) {
       this.nextPrefetch = now + 160;
       const current = this.near(p.x, p.z);
-      const ahead = this.near(p.x + v.x * 2.2, p.z + v.z * 2.2);
+      const ahead = this.near(p.x + v.x * this.horizon, p.z + v.z * this.horizon);
       this.wanted = [...new Set([...current, ...ahead])];
       // Keep only the current and predictive neighbourhoods, including during quick resets.
       for (const key of this.tiles.keys()) if (!this.wanted.includes(key)) this.tiles.delete(key);
@@ -146,7 +152,7 @@ export class VoxelCollision {
     const result = (): Sweep => hit ? { fraction, hit, axis: normalAxis } : { fraction, hit: null };
     // Reserve room for the drone at the edges of the model.
     for (const [axis, extent] of [[0, this.width], [1, this.ceiling], [2, this.depth]]) {
-      const r = RADIUS;
+      const r = this.radius;
       const start = p.getComponent(axis), move = d.getComponent(axis), end = start + move;
       if (end >= r && end <= extent - r) continue;
       const limit = (end < r ? r : extent - r);
@@ -158,12 +164,13 @@ export class VoxelCollision {
       }
     }
 
-    const minX = Math.max(0, Math.floor(Math.min(p.x, p.x + d.x * fraction) - RADIUS));
-    const maxX = Math.min(this.width - 1, Math.floor(Math.max(p.x, p.x + d.x * fraction) + RADIUS));
-    const minZ = Math.max(0, Math.floor(Math.min(p.z, p.z + d.z * fraction) - RADIUS));
-    const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + RADIUS));
-    const minY = Math.min(p.y, p.y + d.y * fraction) - RADIUS;
-    const maxY = Math.max(p.y, p.y + d.y * fraction) + RADIUS;
+    const R = this.radius;
+    const minX = Math.max(0, Math.floor(Math.min(p.x, p.x + d.x * fraction) - R));
+    const maxX = Math.min(this.width - 1, Math.floor(Math.max(p.x, p.x + d.x * fraction) + R));
+    const minZ = Math.max(0, Math.floor(Math.min(p.z, p.z + d.z * fraction) - R));
+    const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + R));
+    const minY = Math.min(p.y, p.y + d.y * fraction) - R;
+    const maxY = Math.max(p.y, p.y + d.y * fraction) + R;
     if (minY > this.ceiling - 600) return result();
 
     for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
@@ -172,7 +179,7 @@ export class VoxelCollision {
       const i = this.column(x, z);
       const ground = tile.ground[i];
       if (minY <= ground) {
-        const groundContact = contact(p, d, x, 0, ground, z, fraction);
+        const groundContact = contact(p, d, x, 0, ground, z, fraction, R);
         if (groundContact) {
           ({ fraction, axis: normalAxis } = groundContact);
           hit = 'terrain';
@@ -184,7 +191,7 @@ export class VoxelCollision {
           if (lo > maxY) break;
           if (hi < minY) continue;
           if (kind === 'foliage' && this.passable[runs.data[j + 2]]) continue;
-          const voxelContact = contact(p, d, x, lo, hi, z, fraction);
+          const voxelContact = contact(p, d, x, lo, hi, z, fraction, R);
           if (voxelContact && (voxelContact.fraction < fraction || !hit)) {
             ({ fraction, axis: normalAxis } = voxelContact);
             hit = kind;
