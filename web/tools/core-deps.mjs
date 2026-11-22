@@ -78,7 +78,7 @@ const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) queue.push([f, null]); } };
 walk(core);
-const SEAM = ['sim/traffic.ts', 'physics/rapier/life-phys.ts',
+const SEAM = ['sim/traffic.ts', 'sim/train-traffic.ts', 'sim/boat-traffic.ts', 'physics/rapier/life-phys.ts',
   'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts'];
 for (const f of SEAM) queue.push([path.join(src, f), null]);
 while (queue.length) {

@@ -1,6 +1,7 @@
 # 0007 Player control in the world sim
 
-Status: road physics implemented in F4. See the [plan and measurements](../plans/shared-road-physics.md). Builds on [ADR 0006](0006-world-sim-seam.md).
+F4 implemented [shared road physics](../plans/shared-road-physics.md). F5 added train and boat motion to the world
+clock. Both build on [ADR 0006](0006-world-sim-seam.md).
 
 The street sim already runs without a renderer, but driving and walking a followed pedestrian still write into its
 objects from the viewer. A server-hosted world needs to decide who controls each vehicle or pedestrian and apply the
@@ -42,11 +43,10 @@ the same interface with one player.
   stable tie-break at equal priority. The host controls when inputs and terrain edits become visible to a tick. Replay
   uses those tick assignments and the same terrain build and readiness schedule, so arrival times and rendering frames
   cannot silently change the result.
-- Move train routes, dwell times and spacing out of `sim/trains.ts`, and boat routes, timetables and flood limits out
-  of `sim/boats.ts`, into plain simulation state advanced from the world clock. Sample the same world time, day and
-  water level on a tick. Use the world seed for route choices that need randomness. Train length belongs in the sim
-  because it affects spacing. Meshes, paint, lights and boat bobbing stay in presentation. The existing player boat
-  core can be stepped from the world clock when player boat control joins it.
+- `sim/train-traffic.ts` owns train routes, dwell times and spacing. `sim/boat-traffic.ts` owns boat routes,
+  timetables and flood limits. Both run in the traffic tick using world time, day, water level and seed.
+  They publish plain coach and vessel poses. Meshes, paint, lights and boat bobbing stay in presentation.
+  The player boat joins the world clock when its control moves there.
 - Copy `BOAT`, `PLANE`, `RIDE` and related defaults into read-only tuning for each world instance. Pass that tuning
   to the cores and physics constructors, with vehicle-specific overrides resolved at creation. Tools that vary tuning
   create worlds with different settings. A run can be reproduced from its build, seed, tuning and input history.
@@ -56,11 +56,11 @@ the same interface with one player.
 1. As the first increment of F4, introduce player-keyed commands and snapshot reads for the local player. Use the
    existing models and behavior to move control writes and collision outcomes out of the viewer.
 2. Move player cars into the shared physics world. Measure shared collider and stepping costs with
-   `web/tools/life-phys*.mjs`, and keep the existing `rapier-car` and `vehicles` gates green.
-3. Move boat and train motion into the world tick in F5. Extend `web/tools/core-deps.mjs` to guard the new sim code
-   and `web/tools/life-edit.mjs` or a headless scenario to exercise two players. Replay two claims to the same car,
-   player and traffic collisions in edited terrain, and releasing control while the second player continues. Compare
-   outcomes and snapshots in runs with the same build of Rapier. Cross-machine replay needs separate validation.
+   `web/tools/life-phys*.mjs`, and keep the existing `rapier-car` and `vehicles` gates green. The Rapier scenarios
+   replay two claims to one car, collisions with traffic and one player releasing while another continues.
+3. F5 moved boat and train motion into the world tick. `web/tools/core-deps.mjs` guards the transit sim and
+   `web/tools/life-edit.mjs` checks determinism at two rendering rates. `web/tools/popin-check.mjs --transit`
+   checks the real map for visible arrivals, removals and jumps. Cross-machine replay needs separate validation.
 
 Network transport, reconnect policy, area and collider limits for widely separated players, and authoritative aircraft
 control are open. The policy for sharing transient edits remains in [ADR 0001](0001-world-layers.md).

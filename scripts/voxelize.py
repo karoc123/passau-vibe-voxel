@@ -3668,7 +3668,11 @@ import tunnels
 _bores = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
 import underpass
 underpass.SKIP = set(tunnels.IDS)
-underpass.build(vol, g, pal, C, osm, note)
+_rail_bed = np.zeros((D, W), bool)
+for _shape, _ in rail_beds:
+    _rr, _cc = cells_of(_shape, fallback=False)
+    _rail_bed[_rr, _cc] = True
+underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed)
 carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
 RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
 tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
@@ -3824,6 +3828,7 @@ CORE_OUT["deck_near"] = deck_near
 CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
 CORE_OUT["floor"] = tunnels.FLOOR if tunnels.FLOOR is not None else np.full((D, W), -1, np.int16)
 CORE_OUT["walk"] = underpass.WALK
+report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL)
 # the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
 # docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
 # it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
@@ -3948,7 +3953,7 @@ def _owned(oid):
 
 
 RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in tunnels.IDS if _owned(o)),
-              walk_ids=sorted(o for o in underpass.IDS if _owned(o)))
+              walk_ids=sorted(o for o in underpass.IDS if _owned(o)), shifted_stairs=sorted(underpass.SHIFTED))
 # debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
 # (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
 topz = np.full(vol.shape[1:], Hm - 1, np.int64)

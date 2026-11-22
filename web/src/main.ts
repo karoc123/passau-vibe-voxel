@@ -20,7 +20,7 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './sim/life';
-import { Boats, type BoatData } from './sim/boats';
+import type { BoatData } from './sim/boat-traffic';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
@@ -95,7 +95,7 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
-let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
+let life: StreetLife | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
@@ -484,8 +484,7 @@ async function boot() {
     window.__life = life;
     if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
     fetchJson<BoatData>('data/boats.json').then((bd) => {
-      boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
-      life!.group.add(boats.group); // shown, hidden and shadowed with the rest of the moving things
+      life?.setBoats(bd, flood?.info?.voxel_top ?? 4);
     }).catch((e) => console.warn('boats', e));
   });
   $('#loading').classList.add('hidden');
@@ -566,8 +565,7 @@ renderer.setAnimationLoop((now) => {
     if (life.group.visible) {
       life.day = daylight.day;
       // (simulated round what is looked at; agents come and go far from the camera, which sees them)
-      life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
-      boats?.update(dt, daylight.hour, daylight.day, daylight.night, flood?.level ?? 0);
+      life.update(dt, daylight.hour, daylight.night, focus(), camera.position, flood?.level ?? 0);
     }
   }
   daylight.sky.mesh.position.copy(camera.position);
