@@ -50,9 +50,16 @@ export async function trafficRoads() {
 }
 
 // Road i of traffic.json as a path to follow: points every metre (x, z, y), from its far end if rev
-export async function roadPath(i, rev = false) {
-  const sc = await load('physics/rapier/scenarios.ts');
-  const p = (await trafficRoads())[i].p.map((q) => [q[0], q[1], q[2]]);
+// (lane: on its first lane's path as the traffic drives it, o0 m to the right of the road's line: sim/path.ts at)
+export async function roadPath(i, rev = false, lane = false) {
+  const sc = await load('physics/rapier/scenarios.ts'), r = (await trafficRoads())[i];
+  let p = r.p.map((q) => [q[0], q[1], q[2]]);
+  if (lane) {
+    const { prepPath, at } = await load('sim/path.ts'), e = prepPath({ p }), P = { x: 0, y: 0, z: 0 }, q = [];
+    for (let d = 0; d < e.L; d += 1) { at(e, d, r.o0, P); q.push([P.x, P.y, P.z]); }
+    at(e, e.L, r.o0, P); q.push([P.x, P.y, P.z]);
+    p = q;
+  }
   if (rev) p.reverse();
   return sc.densify(p);
 }

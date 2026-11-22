@@ -82,7 +82,16 @@ N_DECK = 48
 # ground bent the road into a sag of -4 % / +4 % over 6 m (altstadt fixture, schanzl@70: pitch jitter 0.077 -> 0.036
 # rad/s; BLEND 3: 0.053, 10: 0.028)
 BLEND = 6
-CLAMP = 56  # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor)
+# a carriageway is one surface: two neighbouring cells of it (data/qa_roadmask.bin.gz 1) whose tops differ by a metre at
+# most are linked even where the terrain model shows a wall between them (a kerb, a bank the mask runs over, a scar in
+# the model on a steep street): the riser the cap kept there was a step a car's wheel hit or dropped off (steps of
+# 0.6 m or more under a car's footprint on 0.94 % of the lanes' length, 0.05 % with this and traffic.place_lanes:
+# docs/plans/road-clearance.md)
+ROAD_WALLS = True
+# 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor), 1/16 m over it.
+# (56 until the carriageways were linked over the terrain model's walls, ROAD_WALLS: on the steep streets of the Hals
+# fixture the corners clamped apart rose to 1.1 % of the linked edges; at 60: 0.75 %, the roughness p99 20.6 -> 14.5 cm)
+CLAMP = 60
 # 1/64 m: a corner this near a whole metre is put on it (every column round its grid point alike). 0: off. At 2 a near
 # level street came out as flat voxel tops the mesher merges, but each corner it moved bent the surface by up to 2/64 m
 # within a metre: a level strip with a kink at each end (6 m of it on the Schanzlbrücke's crown at 18.000 m), and on a
@@ -144,15 +153,26 @@ def _add_shifted(s, m, h, dy, dx):
     np.add(st, h[max(0, dy):R - max(0, -dy), max(0, dx):C - max(0, -dx)], out=st, where=m[t])
 
 
-def fields(gt, water, bld, steps, dtm, deck):
+def fields(gt, water, bld, steps, dtm, deck, road=None):
     """The corners of every node of a region (arrays of the region, all (R, C)): gt the tiles' ground (int), water,
-    bld (a building), steps (the ground's top is steps), dtm (m over BASE, NaN unknown), deck (m over BASE, NaN none).
+    bld (a building), steps (the ground's top is steps), dtm (m over BASE, NaN unknown), deck (m over BASE, NaN none),
+    road (the carriageway: two neighbours on it are linked over a wall the terrain model shows, ROAD_WALLS).
     Returns dict(G=..., K=...): per layer (ex: exists, top: int top, fb: fallback, h: smoothed height, q: corners
     float [4, R, C] in m, NaN where the node is not)."""
     R, C = gt.shape
     gt = gt.astype(np.int64)
     dtm = dtm.astype(np.float64)
     ok = np.isfinite(dtm) & (np.abs(dtm - gt) <= SRC_TOL)
+    if road is not None and ROAD_WALLS:
+        # (a carriageway's cell at such a wall takes the voxels' top as its source, as a fallback node: relaxed between
+        # the terrain round it, it stays within its run's CLAMP; on the terrain model's two levels, the corners the
+        # two sides share were clamped apart)
+        d0 = np.nan_to_num(dtm)
+        wall = np.zeros_like(ok)
+        for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            wall |= (_shift(road & ok, dy, dx, False) & (np.abs(d0 - _shift(d0, dy, dx, 0.0)) > WALL_TOL)
+                     & (np.abs(gt - _shift(gt, dy, dx, 0)) <= 1))
+        ok &= ~(road & wall)
     exK = np.isfinite(deck)
     # (no ground node where a deck lies on the ground -- its slab of two voxels reaching down to it, at a bridge's end:
     # that ground is no surface, and linked to the deck beside it, it pulled the deck's end down half a metre)
@@ -173,7 +193,10 @@ def fields(gt, water, bld, steps, dtm, deck):
                 m = A["ex"] & _shift(B["ex"], dy, dx, False) & (np.abs(A["top"] - _shift(B["top"], dy, dx, 0)) <= 1)
                 if a == b == "G":
                     known = ~A["fb"] & ~_shift(B["fb"], dy, dx, True)
-                    m &= ~known | (np.abs(dtm0 - _shift(dtm0, dy, dx, 0.0)) <= WALL_TOL)
+                    flat = np.abs(dtm0 - _shift(dtm0, dy, dx, 0.0)) <= WALL_TOL
+                    if road is not None and ROAD_WALLS:
+                        flat |= road & _shift(road, dy, dx, False)
+                    m &= ~known | flat
                 link[a, b, d] = m
     # (per node, its links in the four directions: (other layer, mask, shift to read the other's value))
     nbrs = {a: [] for a in "GK"}
@@ -386,10 +409,11 @@ def region_fields(region, D, W, base, tmp="data"):
         if "gsrc.npy" in z_.namelist():
             gs = wmod.npz_region(tmp / "surface.npz", "gsrc", region)
             dtm = np.where(np.isfinite(gs), gs, dtm)
-    F = fields(gt, water, bld, steps, dtm, deck)
     D_, W_ = gt.shape
     qa = tmp / "qa_roadmask.bin.gz"
-    F["road"] = (wmod.gz_region(qa, (D, W), np.uint8, region) == 1) if qa.exists() else np.zeros((D_, W_), bool)
+    road = (wmod.gz_region(qa, (D, W), np.uint8, region) == 1) if qa.exists() else np.zeros((D_, W_), bool)
+    F = fields(gt, water, bld, steps, dtm, deck, road)
+    F["road"] = road
     F["deck"], F["bld"] = deck, bld
     F["at"] = (region[0], region[2])
     return F

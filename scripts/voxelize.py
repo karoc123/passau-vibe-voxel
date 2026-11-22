@@ -2516,7 +2516,10 @@ for t in all_trees:
     if canopy_near[r, c]:
         if not veg[r, c] and _vd[r, c] <= 2.5:  # the point just off its crown's LiDAR cells: under the nearest one
             r, c = int(_vr[r, c]), int(_vc[r, c])
-        if veg[r, c] and not trunk_ok_db[r, c] and _dbd[r, c] <= 3:  # mapped onto the road edge: to the kerb side
+        if veg[r, c] and not trunk_ok_db[r, c]:  # mapped onto the road edge: to the kerb side (more than 3 m into
+            if _dbd[r, c] > 3:                     # the carriageway: not drawn, the cars drive there --
+                t["drawn"] = "none"                # docs/plans/road-clearance.md)
+                continue
             r, c = int(_dbr[r, c]), int(_dbc[r, c])
         if veg[r, c] and trunk_at[max(0, r - 1):r + 2, max(0, c - 1):c + 2].any():  # a trunk beside it already
             t["drawn"] = "none"
@@ -2536,6 +2539,9 @@ for t in all_trees:
         t["drawn"] = "none"  # under another tree's crown edge: its own crown is not resolved
         continue
     if t["src"] == "bv":  # the register's crowns are in the surface model: none there now, none drawn
+        t["drawn"] = "none"
+        continue
+    if is_road[r, c]:  # (a tree planted since, mapped on the carriageway: none -- the cars drive there)
         t["drawn"] = "none"
         continue
     n_new += 1
@@ -2769,6 +2775,13 @@ if trunks:
     note("crown cells of the other kind than their 2 m cell's owner (evergreen / deciduous) left out:", int(_odd.sum()),
          "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
     veg &= ~_odd
+# a crown over a carriageway keeps ROAD_CLEAR m clear of its ground (a street tree is pruned for the traffic; the
+# sloped caps lift the drawn street up to 56/64 m over its voxel, and a car's body reaches 1.8 m over it:
+# docs/plans/road-clearance.md); over the trunk's own cell too (none stands on a carriageway)
+ROAD_CLEAR = 3
+_lift = veg & is_road & (crown_bot < ROAD_CLEAR)
+crown_bot[_lift] = ROAD_CLEAR
+note("crown cells over carriageways lifted to", ROAD_CLEAR, "m:", int(_lift.sum()))
 LEAVES_ = np.array(LEAVES, np.uint16)
 rr, cc = np.nonzero(veg)
 if trunks:

@@ -231,6 +231,117 @@ def trim_portal(p, reach=8.0):
     return head(head(p)[::-1])[::-1]
 
 
+# a car's footprint across its lane's path (m to the right; a car is ~1.8 m wide), and how far a lane may be moved
+# sideways to find room for it (place_lanes)
+FOOT = (-0.8, -0.4, 0.0, 0.4, 0.8)
+SHIFT = 3.0
+
+
+def place_lanes(p, offs, vol, solid, csolid, W, D, road=None, step=1.0):
+    """A road's path moved sideways where its lanes leave the drawn carriageway (docs/plans/road-clearance.md): the
+    mapped centreline along a house's wall, a narrow street where a lane 1.5 m right of the line is in the wall, on the
+    kerb or over the step to the pavement. Every `step` m, each lane's footprint (offs: the lanes' offsets, FOOT across
+    each) needs a free level near the path's height (a floor under it, 2 m clear of anything a car hits: csolid, poles
+    and lamps too), all within a metre of each other, and on the carriageway (road: the mask, 1). Where the path as
+    mapped has none, the nearest sideways move (0.5 m steps, up to SHIFT) that has is taken -- else the nearest with
+    room off the carriageway's mask --; the moves are held 4 m on either side and eased over 9 m, so the path bends
+    gently round the obstacle. Returns the points (the moved stretches densified, simplified to 5 cm), the metres moved
+    and the metres left without room."""
+    P = np.array(p, float)
+    seg = np.hypot(*np.diff(P[:, :2], axis=0).T)
+    cum = np.concatenate([[0], np.cumsum(seg)])
+    if cum[-1] < 4 * step:
+        return p, 0, 0
+    s = np.arange(0, cum[-1], step)
+    x, y, z0 = (np.interp(s, cum, P[:, k]) for k in range(3))
+    k = np.clip(np.searchsorted(cum, s, side="right") - 1, 0, len(P) - 2)
+    t = (P[k + 1, :2] - P[k, :2]) / np.maximum(seg[k], 1e-6)[:, None]
+    H = vol.shape[0]
+    zi = np.floor(z0 + 0.5).astype(int)
+    feet = np.array([o + f for o in offs for f in FOOT])
+
+    def room(d, sel, strict):
+        lev, ok = [], np.ones(len(sel), bool)
+        for o in feet:
+            c = np.clip((x[sel] - t[sel, 1] * (o + d)).astype(int), 0, W - 1)
+            r = np.clip((y[sel] + t[sel, 0] * (o + d)).astype(int), 0, D - 1)
+            cand = np.full(len(c), -99)
+            for dz in (0, 1, -1):
+                zz = np.clip(zi[sel] + dz, 1, H - 2)
+                free = solid[vol[zz - 1, r, c]] & ~csolid[vol[zz, r, c]] & ~csolid[vol[zz + 1, r, c]]
+                cand = np.where((cand == -99) & free, zz, cand)
+            lev.append(cand)
+            if strict and road is not None:
+                ok &= np.asarray(road[r, c]) == 1
+        lev = np.array(lev)
+        return (lev != -99).all(0) & (lev.max(0) - lev.min(0) <= 1) & ok
+
+    delta = np.zeros(len(s))
+    allk = np.arange(len(s))
+    bad = np.nonzero(~room(0.0, allk, True))[0]
+    if not len(bad):
+        return p, 0, 0
+    left = np.ones(len(bad), bool)
+    # (on the carriageway's mask first; where no move finds room there, room off it, the path as mapped first)
+    for strict in (True, False):
+        for m in ([] if strict else [0.0]) + list(np.arange(0.5, SHIFT + 1e-6, 0.5)):
+            for d in ((m, -m) if m else (0.0,)):
+                if not left.any():
+                    break
+                sel = bad[left]
+                ok = room(d, sel, strict)
+                delta[sel[ok]] = d
+                left[np.nonzero(left)[0][ok]] = False
+    if not (delta != 0).any():
+        return p, 0, int(left.sum() * step)
+    # held 4 m on either side (the larger move wins), then eased over 9 m
+    hold = int(round(4 / step))
+    big = np.zeros(len(s))
+    for j in range(-hold, hold + 1):
+        sh = np.roll(delta, j)
+        if j > 0:
+            sh[:j] = 0
+        elif j < 0:
+            sh[j:] = 0
+        big = np.where(np.abs(sh) > np.abs(big), sh, big)
+    ker = np.ones(2 * hold + 1) / (2 * hold + 1)
+    sm = np.convolve(np.pad(big, hold, mode="edge"), ker, mode="valid")
+    moved = np.abs(sm) > 0.01
+    # the new points: the mapped ones where nothing moved, the samples moved sideways elsewhere (and the path's ends,
+    # moved as their samples are)
+    out, j, n = [], 0, len(s)
+    while j < n:
+        if not moved[j]:
+            j += 1
+            continue
+        a = j
+        while j < n and moved[j]:
+            j += 1
+        out.append((a, j))
+    pts = []
+    corner = 0  # (the next mapped point to copy)
+    for a, b_ in out:
+        lo, hi = s[a], (s[b_ - 1] if b_ < n else cum[-1])
+        while corner < len(P) and cum[corner] < lo - 1e-6:
+            pts.append([float(v) for v in P[corner]])
+            corner += 1
+        while corner < len(P) and cum[corner] <= hi + 1e-6:  # (the mapped points inside the stretch: replaced)
+            corner += 1
+        q = np.stack([x[a:b_] - t[a:b_, 1] * sm[a:b_], y[a:b_] + t[a:b_, 0] * sm[a:b_]], 1)
+        zz = z0[a:b_]
+        if b_ == n:  # (to the path's end: its end point moved as the last sample)
+            q = np.vstack([q, [P[-1, 0] - t[-1, 1] * sm[-1], P[-1, 1] + t[-1, 0] * sm[-1]]])
+            zz = np.append(zz, P[-1, 2])
+        keep = range(len(q))
+        if len(q) >= 3:
+            keep = sorted({int(np.argmin(np.hypot(q[:, 0] - u, q[:, 1] - v)))
+                           for u, v in LineString(q).simplify(0.05).coords})
+        pts += [[float(q[i, 0]), float(q[i, 1]), float(zz[i])] for i in keep]
+    pts += [[float(v) for v in r_] for r_ in P[corner:]]
+    pts = [[round(a_, 1), round(b2, 1), c_] for a_, b2, c_ in pts]
+    return pts, int(moved.sum() * step), int(left.sum() * step)
+
+
 def track_clearance(surf):
     """the carriageway mask with ~1 m round the track bed counted as track bed (so cars keep off the rails): reach
     1 cell, so made region by region on a raster of the regions (mapstore.MapRaster) and the same as over the whole
@@ -259,7 +370,7 @@ def off_surface(surf, r, c, reach):
     return None
 
 
-def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
+def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None):
     """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
@@ -763,7 +874,15 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     if vol is not None:
         n_lift = 0
         deg = Counter([e["a"] for e in roads] + [e["b"] for e in roads])
+        n_moved = n_room = 0
         for e in roads:
+            if csolid is not None:  # (the lanes onto the carriageway as drawn first, then their heights)
+                offs = [e["o0"] + k * 3.0 for k in range(e["lanes"])]
+                e["p"], mv, nr = place_lanes(e["p"], offs, vol, solid, csolid, W, D, surf)
+                if mv:
+                    e["L"] = round(length(e["p"]), 1)
+                n_moved += mv
+                n_room += nr
             lo, hi = e["o0"] - 0.8, e["o0"] + (e["lanes"] - 1) * 3.0 + 0.8
             e["p"], lift, _ = fit(e["p"], np.linspace(lo, hi, max(2, int(hi - lo) + 1)), vol, solid, W, D, decks=True)
             n_lift += lift
@@ -796,6 +915,9 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
                 e["side"] = side
             n_lift += lift
             keep.append(e)
+        if csolid is not None:
+            note(f"traffic: lanes moved sideways onto the carriageway as drawn over {n_moved} m (place_lanes), "
+                 f"{n_room} m with no room for a car found within {SHIFT} m")
         note(f"traffic: paths fitted to the voxels ({n_lift} m lifted onto the drawn surface), "
              f"{len(peds) - len(keep)} footpath edges through walls dropped")
         peds = keep

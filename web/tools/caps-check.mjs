@@ -64,7 +64,7 @@ function tops(m, f, x0, y0, what, seen) {
       const lo = Math.min(...want), hi = Math.max(...want);
       for (let s = 0; s < 2; s++) {
         const z = f.z[2 * c + s];
-        if (!z || lo > z * 64 + 56 || hi < z * 64 - 56) continue;
+        if (!z || lo > z * 64 + 60 || hi < z * 64 - 60) continue; // (caps.CLAMP)
         if ([0, 1, 2, 3].every((k) => SF.cornerQ(f, c, s, k) === want[k])) { checked++; seen.add(2 * c + s); }
         else fail(`${what}: top over column (${(c % S) - 1}, ${Math.floor(c / S) - 1}) corners ${want}, its cap's ${[0, 1, 2, 3].map((k) => SF.cornerQ(f, c, s, k))}`);
       }

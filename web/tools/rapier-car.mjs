@@ -5,9 +5,10 @@
 //        node tools/rapier-car.mjs [--spike] --real X,Z,HEADING_DEG,KMH,SECONDS[,STEER[,V0]]
 //          the real city (public/data/tiles on disk): the car dropped at (X, Z) heading HEADING_DEG (0: +z, 90: +x),
 //          held at KMH (STEER -1..1 held; starting at V0 km/h, default KMH) for SECONDS; prints its path every 0.5 s and what happened
-//        node tools/rapier-car.mjs --road I[,KMH[,REV]] [--road ...]
-//          the real city: the car follows road I of public/data/traffic.json (REV 1: from its far end) at KMH (default
-//          30), steering by pure pursuit; prints how much it wobbled (scenarios.ts wobble) and what happened
+//        node tools/rapier-car.mjs --road I[,KMH[,REV[,LANE]]] [--road ...]
+//          the real city: the car follows road I of public/data/traffic.json (REV 1: from its far end; LANE 1: on its
+//          first lane's path, as the traffic drives it, not the road's line) at KMH (default 30), steering by pure
+//          pursuit; prints how much it wobbled (scenarios.ts wobble) and what happened
 //        node tools/rapier-car.mjs --roads [KMH]: the steepest roads (the wobble benchmark), one line each
 //          (--road/--roads start a few metres in, clear of walls: scenarios.ts safeStart; walls=N: N points of the road
 //          within 1.3 m of a wall, where the follower may scrape it)
@@ -42,9 +43,9 @@ if (roadArgs.length || roadsAt >= 0) {
   const KEYS = ['pitchJit', 'rollJit', 'liftPct', 'lifts', 'vyErr', 'heave', 'lightPct', 'airPct'];
   const tot = { n: 0 };
   for (const k of KEYS) tot[k] = 0;
-  for (const [i, kmh = 30, rev = 0] of runs) {
+  for (const [i, kmh = 30, rev = 0, lane = 0] of runs) {
     // (from a few metres in, where the car's box is clear of the voxels: scenarios.ts safeStart)
-    const way = await roadPath(i, !!rev), map = await realMap(way, 48);
+    const way = await roadPath(i, !!rev, !!lane), map = await realMap(way, 48);
     const st = sc.safeStart(map, way, way.map((q) => q[2]));
     if (!st) { console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h  no clear start`); continue; }
     const pts = way.slice(st.i);
@@ -61,7 +62,7 @@ if (roadArgs.length || roadsAt >= 0) {
     const w = sc.feel(log), last = s.log[s.log.length - 1];
     const ev = s.events.filter((e) => e.kind !== 'impact' || e.speed > 2).map((e) => `${e.kind}${e.crash ? '!' : ''}`);
     const left = Math.hypot(last.x - end[0], last.z - end[1]);
-    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m${st.walls ? ` walls=${st.walls}` : ''} ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
+    console.log(`road ${String(i).padEnd(4)} ${rev ? 'rev' : 'fwd'}${lane ? ' lane' : ''} ${kmh} km/h ${L.toFixed(0).padStart(4)} m  ${fmt(w)} minUp=${Math.min(...log.map((l) => l.up)).toFixed(2)} left=${left.toFixed(0)}m${st.walls ? ` walls=${st.walls}` : ''} ${s.car.status} ${ev.length ? ev.join(',') : ''}`);
     for (const k of KEYS) tot[k] += w[k];
     tot.n++;
     if (args.includes('-v')) for (let k = 0; k < s.log.length; k += 15) { const l = s.log[k]; console.log(`  t ${l.t.toFixed(2)} ${l.x.toFixed(1)},${l.y.toFixed(2)},${l.z.toFixed(1)} ${l.kmh.toFixed(0)} km/h up ${l.up.toFixed(2)} wheels ${l.wheels} pr ${l.pr.toFixed(2)} rr ${l.rr.toFixed(2)}`); }

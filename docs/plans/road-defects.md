@@ -16,3 +16,30 @@ Collected first, fixed generally where possible; only what the general fix canno
 Map-wide scan: [road-defects-scan.md](road-defects-scan.md). Still open from it (need a look, no overrides yet):
 bridges with no deck over water — Fritz-Abelein-Brücke (deck 1.1 m over water), Triftsperre (0.7 m), paths 163931217 and 1113369109;
 131 small dent stretches the sag lift does not take (no rim the DGM agrees with), the larger ones listed in the scan.
+
+## Carriageway clearance: what the general fixes do not reach
+
+From [road-clearance.md](road-clearance.md). This is the lane scan after its general fixes: lanes on the carriageway as
+drawn, one cap surface per carriageway, crowns 3 m clear. None of these has an override. Each needs a look.
+
+The first three are data conflicts. The fourth is the follower's error, not the data.
+
+| voxel (x, z) | where | what |
+|---|---|---|
+| 2333-2358, 1420-1442 | roads 1359 and 1360, way 73518484 (residential, unnamed) | a building (LoD2/ALKIS) spans the whole carriageway for 30 m, and no passage or tunnel is mapped |
+| 8559-8581, 2707-2710 | Bräugasse, roads 133 and 134 (way 7864013) | a lane narrower than a car between house walls: 5 m in the wall |
+| 6890-6900, 619-681 | Triftsperrstraße, road 1690 (way 122276595) | the carriageway's edge drops 2.3 m under a car's right wheels for about 35 m, with no room to move the lane (a narrow road on an embankment) |
+| 6367, 2520 | Schulstraße westbound, road 1342 | a building corner where the street kinks by 43°; the player car's follower cuts the kink and stops there (the lane itself is 1.8 m clear) |
+| 803, 116 | road 2510 (way 693917949, primary) | the path's end at a junction 2.5 m over the drawn surface (8 m, both lanes) |
+| 3316, 3183 | Steffelmühlweg, road 2094 (way 163930982) | path over a hole at a small bridge's deck (7 m) |
+
+Summed classes (995 m on 382 km of lanes; full map before the voxel fix):
+
+- leaves: 569 m, expected to go with the full rebuild (crown clearance; the Altstadt fixture went from 51 to 0 m);
+- buildings: 94 m on 42 roads, mostly short building corners in alleys narrower than a car;
+- holes: 84 m;
+- steps: 190 m;
+- trunks: 41 m;
+- stone: 16 m.
+
+The full lists come from `scripts/clearance.py` on a scan dump.

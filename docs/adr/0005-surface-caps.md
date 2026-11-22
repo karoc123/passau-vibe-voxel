@@ -51,7 +51,7 @@ considered and rejected (data and meshing cost).
   nodes' tops over the window and 16 m round it, so nodes agree on the columns they share; levels 2, 4, 8 take the
   level-1 corners at their blocks' corners. Level cells next to a slope get a (flat) record too, so slope and level
   tops are one surface for the mesher's merges. A separate section rather than slot 1 of `caps`: every ground reader
-  (car, walkers, drone) stays roof-free by construction, and the caps keep their +-56 rule. Liveness: the record's run
+  (car, walkers, drone) stays roof-free by construction, and the caps keep their +-CLAMP rule. Liveness: the record's run
   is still the column's last. The client draws them (`roofs.ts`; the plane codes, `plns`, still light them) and infers
   nothing: the roof regions' fits, `tidyPlanes`, `tileSeams`, the sectioned meshing's roof memo and `ROOF_REACH` are
   gone; a roof's slope depends only on its column and those round it, so an edit re-meshes the sections within
@@ -80,8 +80,9 @@ considered and rejected (data and meshing cost).
   against `caps.py` by `tile-roundtrip.mjs`).
 - Data without the section (a build without `data/surface.npz`, or before it) still loads: `caps` is an optional
   section and `meta.json` `world.formatVersion` was not bumped. Its streets are then drawn and driven as voxel stairs.
-- The cap's height is limited to +-56/64 m of its voxel top (`caps.CLAMP`) so the voxel below stays a floor for
-  physics. Roofs are drawn only -- they collide as voxels.
+- The cap's height is limited to +-60/64 m of its voxel top (`caps.CLAMP`; 56/64 until the carriageways were linked over
+  the terrain model's walls, docs/plans/road-clearance.md) so the voxel below stays a floor for physics. Roofs are
+  drawn only -- they collide as voxels.
 - Phase B (branch `roofs`, measured on a scratch copy of the committed map data with this `tile_fields`; nothing of the
   map rebuilt but that step): 1.60 M level-1 roof columns with a sloped record (+79 k level ones beside slopes),
   level 2/4/8 records 0.41 M / 77 k / 9 k (aprons included); `roof` sections +5.6 MB gzipped over the levels (L1

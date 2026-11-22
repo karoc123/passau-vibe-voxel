@@ -530,7 +530,12 @@ def main(argv):
     skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11, 23)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car, wood)
     solid = ~skip
     solid[0] = False
-    tin = dict(g=g, nd_mean=R("deck_near", np.float32), surf=qa, water=R("twater", bool), solid=solid)
+    # what a car hits (web/src/core/semantics.ts solidForCar: all but grass and water; leaves, poles, lamps too):
+    # traffic.place_lanes keeps the lanes clear of it
+    csolid = np.zeros(len(palette) + 64, bool)
+    csolid[[i for i, e in enumerate(palette) if e[3] not in (4, 8)]] = True
+    csolid[0] = False
+    tin = dict(g=g, nd_mean=R("deck_near", np.float32), surf=qa, water=R("twater", bool), solid=solid, csolid=csolid)
     if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py;
         import pickle                  # the rasters put together: map-sized)
         whole = lambda a: a.box(0, D_, 0, W_) if isinstance(a, mapstore.MapRaster) else a  # noqa: E731
