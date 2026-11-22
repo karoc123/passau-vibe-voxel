@@ -446,6 +446,10 @@ def verify(fx, jobs, ws=None):
         print(f"  caps: {rep.get('ground_capped', 0)} ground, {rep.get('deck_capped', 0)} deck columns, {rep['bytes']} B raw; "
               f"carriageway share {rep['road_share']} (at least {CAPS['road_share']}), roughness p99 {rep['rough_p99_cm']} cm "
               f"(at most {CAPS['rough_p99_cm']}), edge mismatches {rep['mismatch_share']} (at most {CAPS['mismatch_share']})")
+        overshoots = rep["roof_ridge_overshoots"]
+        print(f"  roofs: {overshoots} written corners more than 0.5 m above a ridge (0)")
+        if overshoots:
+            bad.append(f"roofs: {overshoots} written corners more than 0.5 m above a ridge")
         if rep["road_share"] < CAPS["road_share"]:
             bad.append(f"caps: carriageway share {rep['road_share']} under {CAPS['road_share']}")
         if rep["rough_p99_cm"] is None or rep["rough_p99_cm"] > CAPS["rough_p99_cm"]:

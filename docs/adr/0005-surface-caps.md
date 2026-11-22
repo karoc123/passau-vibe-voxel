@@ -46,9 +46,11 @@ considered and rejected (data and meshing cost).
   neighbour's corner 1 where that record is the column just before, else from the top; 1 from 0, 2 from 1, 3 from 0:
   a third smaller gzipped than the caps' layout). The writer (`caps.roof_section`) takes each roof cell's own plane
   (`surface.npz` `roof_z/gx/gy`, the planes voxelize.py rounded the roof from), meets them per grid point (ridge and
-  hip: the lowest; valley: the highest; else the mean; within one building 2 m, any 1 m; a corner moved more than its
-  span keeps its own: the rule the client's `slopeBase` had) on the map's grid from the rasters and the level-1
-  nodes' tops over the window and 16 m round it, so nodes agree on the columns they share; levels 2, 4, 8 take the
+  hip: the lowest; valley: the highest; else the mean). Planes meet within 2 m on one building and within 1 m across
+  buildings. At a ridge with opposing slopes on one building, the lower plane extends up to a 3 m gap. A corner
+  moved more than its span keeps its own plane except when that plane rises above the lowest at a ridge or hip.
+  The writer works on the map's grid from the rasters and the level-1 nodes' tops over the window and 16 m round it,
+  so nodes agree on the columns they share. Levels 2, 4, 8 take the
   level-1 corners at their blocks' corners. Level cells next to a slope get a (flat) record too, so slope and level
   tops are one surface for the mesher's merges. A separate section rather than slot 1 of `caps`: every ground reader
   (car, walkers, drone) stays roof-free by construction, and the caps keep their +-CLAMP rule. Liveness: the record's run
