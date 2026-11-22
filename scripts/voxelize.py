@@ -766,6 +766,7 @@ _pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _
 if _pool.min() < _pool.max():
     _best, _bestd = _pool.copy(), np.abs(dtm - _lv64).astype(np.float32)
     _pw = _w0 | _flat
+    _pm = _d = _i = _j = _dl = _take = None  # (a region with no pool's water in it)
     for p_ in np.unique(_pool):
         _pm = (_pool == p_) & _pw
         if not _pm.any():
