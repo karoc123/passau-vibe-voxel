@@ -20,7 +20,11 @@ import { HEAD, STEP, walkStep } from './walk';
 //          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's); two fingers
 //          close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
-export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian';
+//   fpv, boat: a craft (fpv.ts the drone, boat.ts the speedboat) owns the camera and the input
+export type Mode = 'orbit' | 'walk' | 'ride' | 'fpv' | 'pedestrian' | 'boat';
+export type Craft = 'fpv' | 'boat';
+// a craft owns the camera and the input: Nav leaves the keys, the pointer and the wheel to it
+export const flying = (m: Mode) => m === 'fpv' || m === 'boat';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
@@ -165,7 +169,7 @@ export class Nav {
         if (this.mode !== 'orbit') this.flyUp();
         return;
       }
-      if (this.mode === 'fpv' || this.driving) return;
+      if (flying(this.mode) || this.driving) return;
       if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.mode === 'pedestrian') {
           if (!e.repeat) this.jumpBuffer = 0.14;
@@ -235,7 +239,7 @@ export class Nav {
       if (this.pedestrianActive && document.pointerLockElement === dom) this.lookWithMouse(e);
     });
     dom.addEventListener('pointerdown', (e) => {
-      if (this.mode === 'fpv' || (this.pedestrianActive && document.pointerLockElement === dom)) return;
+      if (flying(this.mode) || (this.pedestrianActive && document.pointerLockElement === dom)) return;
       if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -309,7 +313,7 @@ export class Nav {
   }
 
   private wheel(e: WheelEvent) {
-    if (this.mode === 'fpv') return;
+    if (flying(this.mode)) return;
     if (this.mode === 'orbit') { this.zoomT = performance.now(); return; }
     e.preventDefault();
     if (this.mode === 'pedestrian') { this.pedestrian?.zoom(clamp(e.deltaY * 0.003, -0.4, 0.4)); return; }
@@ -367,7 +371,7 @@ export class Nav {
 
   // what a click would do here: a hand over people and vehicles, a ring on the street where you would walk
   private hover(cx: number, cy: number, type: string) {
-    if (this.mode === 'fpv') return;
+    if (flying(this.mode)) return;
     const now = performance.now();
     if (type === 'touch' || now - this.hoverT < 60 || now - this.quietT < 350) return;
     this.hoverT = now;
@@ -390,7 +394,7 @@ export class Nav {
 
   // a person or vehicle under the click is followed (generous from the air, tight on the street); else walk there
   private tap(cx: number, cy: number) {
-    if (this.mode === 'fpv' || this.driving) return;
+    if (flying(this.mode) || this.driving) return;
     const coarse = coarsePointer(), air = this.mode === 'orbit';
     const ag = this.mode === 'pedestrian' ? null : this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
     if (ag) { this.startRide(ag); return; }
@@ -488,14 +492,14 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
-  // Switch from the map camera to FPV.
-  startFpv() {
+  // Switch from the map camera to a craft (the FPV drone, the boat).
+  startCraft(mode: Craft) {
     if (!this.world || this.walkPending || this.mode !== 'orbit') return false;
     this.rememberSky();
     this.cancelFly();
     this.keys.clear();
     this.turned = false;
-    this.mode = 'fpv';
+    this.mode = mode;
     this.controls.enabled = false;
     this.marker.visible = false;
     this.dom.style.cursor = 'default';
@@ -505,7 +509,7 @@ export class Nav {
 
   async togglePedestrian(captureMouse: boolean) {
     if (this.mode === 'pedestrian') { this.flyUp(); return; }
-    if (!this.world || this.walkPending || this.mode === 'fpv') return;
+    if (!this.world || this.walkPending || flying(this.mode)) return;
     const entry = {};
     this.pedestrianStart = entry;
     if (captureMouse) this.requestPedestrianMouse();

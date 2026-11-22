@@ -13,7 +13,7 @@ import { Hud } from './hud';
 import { Labels } from './labels';
 import type { DriveMode } from './nav/drive';
 import type { FpvMode } from './nav/fpv';
-import { Nav, type Mode, type Ride } from './nav/nav';
+import { flying, Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -316,7 +316,7 @@ function flyTo(v: Pick<View, 'pos' | 'target' | 'ms'>) {
 // frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
 function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '') {
   if (!world) return;
-  if (nav.mode === 'fpv') nav.setOrbit();
+  if (flying(nav.mode)) nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
   if (nav.mode !== 'orbit') {
@@ -467,10 +467,10 @@ renderer.setAnimationLoop((now) => {
   fpv?.update(dt);
   const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
-  walkButton.disabled = !world || nav.enteringWalk || nav.mode === 'fpv';
+  walkButton.disabled = !world || nav.enteringWalk || flying(nav.mode);
   if (nav.mode === 'orbit') { controls.update(); nav.clamp(); keepInside(); }
   const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, gfx.now.tilt && nav.mode !== 'fpv', camera.position.distanceTo(controls.target));
+  post.setHeight(above, gfx.now.tilt && !flying(nav.mode), camera.position.distanceTo(controls.target));
   const viewDist = camera.position.distanceTo(controls.target);
   viewCut(above);
   daylight.setFogFrom(viewDist, above);

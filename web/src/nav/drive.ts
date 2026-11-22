@@ -3,7 +3,7 @@ import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import type { CarInput } from '../physics/rapier/car';
 import type { RapierDrive } from '../physics/rapier/drive-world';
-import type { Nav, Ride } from './nav';
+import { flying, type Nav, type Ride } from './nav';
 import { CRASH_MS, DriveSession, SINK_MS } from './drive-session';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import './drive.css';
@@ -109,7 +109,7 @@ export class DriveMode {
 
   private activate() {
     if (this.driving) { this.park(); return; }
-    if (this.nav.mode === 'fpv') return;
+    if (flying(this.nav.mode)) return;
     if (this.nav.ride?.obj.kind !== 'car') {
       const life = this.nav.life;
       if (!life?.group.visible) return;
@@ -194,7 +194,7 @@ export class DriveMode {
 
   private draw() {
     const active = this.driving, following = this.nav.ride?.obj.kind === 'car';
-    this.panel.hidden = this.nav.mode === 'fpv';
+    this.panel.hidden = flying(this.nav.mode);
     document.body.classList.toggle('driving', !!active);
     this.panel.classList.toggle('mode-active', !!(active || this.pending));
     const label = active ? 'Park car' : 'Take the wheel';

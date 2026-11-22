@@ -139,7 +139,7 @@ export class FpvMode {
       this.nav.flyUp();
       return;
     }
-    if (!this.nav.startFpv()) return;
+    if (!this.nav.startCraft('fpv')) return;
     const position = this.camera.position, offset = this.target.clone().sub(position);
     this.spawn.set(clamp(position.x, 16, this.collision.width - 16), position.y,
       clamp(position.z, 16, this.collision.depth - 16));

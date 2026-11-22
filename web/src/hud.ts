@@ -1,4 +1,4 @@
-import type { Mode, Ride } from './nav/nav';
+import { flying, type Mode, type Ride } from './nav/nav';
 import { $, coarsePointer, el } from './util';
 
 export interface Rect { x0: number; x1: number; y0: number; y1: number }
@@ -20,6 +20,7 @@ const MOUSE: Record<Mode, [string, string, string][]> = {
   walk: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
   fpv: [],
+  boat: [],
   pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
     ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };
@@ -51,7 +52,7 @@ export class Hud {
   }
 
   set(mode: Mode, ride: Ride | null) {
-    this.box.hidden = mode === 'fpv';
+    this.box.hidden = flying(mode);
     this.box.classList.toggle('pedestrian', mode === 'pedestrian');
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' ? WHO[ride.label] ?? WHO[ride.kind] : '';
     if (this.touch) {
