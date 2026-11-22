@@ -7,11 +7,12 @@ import { FixedStep } from '../core/fixed-step';
 import { BoatMotion, findSpawn, type BoatInput, type BoatWorld } from './boat-motion';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
+import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
-import { downstream, nearestRiver, type RiverPoints } from './river';
+import { downstream, nearestRiver } from './river';
 import './boat.css';
 
 // The boat mode: a speedboat of the player's own on the rivers, driven like the car (W/S throttle and reverse, A/D
@@ -30,16 +31,13 @@ const INTRO_MS = 900;
 
 type Phase = 'off' | 'finding' | 'on';
 
-export interface BoatEnv {
-  /** 0 by day .. 1 by night (daylight.ts) */
-  night: () => number;
-  /** the river level slider, m over the survey day (flood.ts) */
-  level: () => number;
-  /** the river's points (river.ts); null while not loaded */
-  river: () => RiverPoints | null;
-}
-
-export class BoatMode {
+export class BoatMode implements PlayerCraft {
+  readonly id = 'boat';
+  readonly view = 'own';
+  private readonly nav: Nav;
+  private readonly target: THREE.Vector3;
+  private readonly meta: Meta;
+  private readonly env: CraftEnv;
   private readonly collision: VoxelCollision;
   private readonly world: BoatWorld;
   private readonly motion = new BoatMotion();
@@ -63,8 +61,8 @@ export class BoatMode {
   private readonly look = new THREE.Vector3();
   private readonly pos = new THREE.Vector3();
 
-  constructor(private readonly nav: Nav, camera: THREE.PerspectiveCamera, private readonly target: THREE.Vector3,
-    private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement, private readonly env: BoatEnv) {
+  constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
+    this.nav = nav; this.target = target; this.meta = meta; this.env = env;
     Object.assign(window, { __boat: this });
     this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
     this.world = this.collision;
@@ -77,13 +75,13 @@ export class BoatMode {
     this.help = P.help('W/S throttle and reverse · A/D steer · Space drift · T unstick · Esc exit',
       'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift. Pinch on the right to zoom.');
     addEventListener('keydown', (e) => {
-      if (this.nav.mode !== 'boat' || !gameKey(e)) return;
+      if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.unstick(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
     canvas.addEventListener('wheel', (e) => {
-      if (this.nav.mode !== 'boat') return;
+      if (this.phase === 'off') return;
       e.preventDefault();
       this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.5, 2.2);
     }, { passive: false });
@@ -93,27 +91,25 @@ export class BoatMode {
 
   get pose() { return this.phase === 'on' ? this.motion.pose : null; }
 
-  // into the boat (from the map or a ride), or out of it
+  // the panel's button: into the boat (from the map or a ride), or out of it
   toggle() {
-    if (this.phase !== 'off') { this.nav.flyUp(); return; }
-    if (!this.nav.startCraft('boat')) return;
-    this.start = null;
+    if (this.phase !== 'off') this.nav.flyUp();
+    else this.enter();
+  }
+
+  // into the boat at (x, z) heading h (tools), else on the water nearest the map's focus, facing downstream
+  enter(at?: CraftSpot) {
+    if (this.phase !== 'off' || !this.nav.enterCraft(this)) return false;
+    this.start = at ? { x: at.x, z: at.z, h: at.h, t0: performance.now() } : null;
     this.phase = 'finding';
     this.panel.silence();
     this.draw();
-  }
-
-  // for tools: into the boat at (x, z) heading h (0: +z, pi/2: +x), else where the toggle would put it
-  enter(at?: { x: number; z: number; h: number }) {
-    this.toggle();
-    if (this.phase === 'finding' && at) this.start = { ...at, t0: performance.now() };
+    return true;
   }
 
   update(dt: number) {
-    const active = this.nav.mode === 'boat';
-    if (!active && this.phase !== 'off') this.leave();
-    if (active && this.phase === 'finding') this.find();
-    if (active && this.phase === 'on') {
+    if (this.phase === 'finding') this.find();
+    if (this.phase === 'on') {
       const m = this.motion;
       this.collision.prefetch(new THREE.Vector3(m.x, m.y, m.z), new THREE.Vector3(m.vx, 0, m.vz));
       if (inFocus()) {
@@ -172,7 +168,7 @@ export class BoatMode {
     this.rig.begin(INTRO_MS);
   }
 
-  private leave() {
+  leave() {
     this.collision.release();
     this.phase = 'off';
     this.model.visible = false;

@@ -17,9 +17,9 @@ the same interface with one player.
   players request the same car in one tick, the first eligible command in the world's recorded order wins. Following a
   vehicle with the camera uses a pose from the snapshot and carries no driving rights.
 - The sim owns vehicle type changes, pedestrian control, parking and collision consequences. In the current viewer
-  `nav.ts` writes `person.ctl`, `drive.ts` changes the car type, `DriveSession` publishes poses back into cars, and
-  `StreetLife.knockDown` calls `Traffic.removePerson`. Move those writes behind the sim interface. Keep
-  `removePerson` as an internal operation on an entity id when the sim confirms a collision or other removal, and
+  `nav.ts` and `nav/foot.ts` write `person.ctl`, `drive.ts` changes the car type, `DriveSession` publishes poses
+  back into cars, and `StreetLife.knockDown` calls `Traffic.removePerson`. Move those writes behind the sim
+  interface. Keep `removePerson` as an internal operation on an entity id when the sim confirms a collision or other removal, and
   publish the event for the renderer to animate.
 - Publish tick-numbered snapshots of entity poses and control state, with events tied to the tick that produced them.
   The renderer interpolates for drawing and picking. It can retain a local selection by id. The sim derives active

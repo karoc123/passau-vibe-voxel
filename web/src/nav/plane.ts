@@ -3,6 +3,7 @@ import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 import type { Nav } from './nav';
+import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
 import { collisionWorld, JET, PLANE, PlaneFlight, waterTop, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
@@ -11,7 +12,7 @@ import { VoxelCollision } from './voxel-collision';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
-import { nearestRiver, type RiverPoints } from './river';
+import { nearestRiver } from './river';
 import './plane.css';
 
 // The plane mode: the glue round plane-flight.ts (the flight, pure): the panel, the input (keyboard, touch, gamepad),
@@ -47,18 +48,16 @@ const AIRCRAFT: Record<AircraftId, Aircraft> = {
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
 };
 
-export interface PlaneEnv {
-  /** the river level slider, m over the survey day (flood.ts) */
-  level: () => number;
-  /** 0 by day .. 1 by night (daylight.ts) */
-  night: () => number;
-  /** the river's points (river.ts), for a start on the water */
-  river: () => RiverPoints | null;
-}
-
 const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'; } catch { return false; } };
 
-export class PlaneMode {
+export class PlaneMode implements PlayerCraft {
+  readonly id = 'plane';
+  readonly view = 'own';
+  private readonly nav: Nav;
+  private readonly camera: THREE.PerspectiveCamera;
+  private readonly target: THREE.Vector3;
+  private readonly meta: Meta;
+  private readonly env: CraftEnv;
   private type: Aircraft = AIRCRAFT.floatplane;
   // per aircraft (made when first flown): its flight, model, and collision (the fuselage's radius, the horizon)
   private readonly made = new Map<Aircraft, { flight: PlaneFlight; model: PlaneModel | JetModel; collision: VoxelCollision; world: PlaneWorld }>();
@@ -69,7 +68,7 @@ export class PlaneMode {
   private readonly touch: TouchSticks;
   private readonly keys = new HeldKeys(KEYS);
   private readonly panel: ModePanel;
-  private readonly enter: HTMLButtonElement;
+  private readonly enterButton: HTMLButtonElement;
   private readonly enterWater: HTMLButtonElement;
   private readonly enterJet: HTMLButtonElement;
   private readonly telemetry: HTMLDivElement;
@@ -93,10 +92,10 @@ export class PlaneMode {
   private readonly bank = new THREE.Quaternion();
   private nextPanel = 0;
 
-  constructor(private readonly nav: Nav, private readonly camera: THREE.PerspectiveCamera, private readonly target: THREE.Vector3,
-    private readonly meta: Meta, host: HTMLElement, canvas: HTMLCanvasElement, private readonly env: PlaneEnv) {
+  constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
+    this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
     const P = this.panel = new ModePanel(host, 'plane', 'Plane');
-    this.enter = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
+    this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
     this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
     this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));
     this.telemetry = P.line('telemetry');
@@ -126,12 +125,12 @@ export class PlaneMode {
     sl.addEventListener('contextmenu', (e) => e.preventDefault());
     this.touch = new TouchSticks(canvas, { onPinch: (ratio) => { this.zoom = clamp(this.zoom * ratio, 0.6, 2.2); }, camera: 'right' });
     canvas.addEventListener('wheel', (e) => {
-      if (this.nav.mode !== 'plane') return;
+      if (this.phase === 'off') return;
       e.preventDefault();
       this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.6, 2.2);
     }, { passive: false });
     addEventListener('keydown', (e) => {
-      if (this.nav.mode !== 'plane' || !gameKey(e)) return;
+      if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.backToSafe(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
@@ -162,8 +161,17 @@ export class PlaneMode {
   }
 
   // ------------------------------------------------------------------ entering and leaving
+  // into the floatplane at a spot (tools), else in the air where the camera is
+  enter(at?: CraftSpot) {
+    if (this.phase !== 'off') return false;
+    if (at) return this.startAt(at);
+    this.toggle(false, AIRCRAFT.floatplane);
+    return this.phase !== 'off';
+  }
+
+  // the panel's buttons: in (on the river nearest the view, or in the air where the camera is), or out
   private toggle(water: boolean, type: Aircraft) {
-    if (this.nav.mode === 'plane') { this.nav.flyUp(); return; }
+    if (this.phase !== 'off') { this.nav.flyUp(); return; }
     const pos = this.camera.position, look = this.target.clone().sub(pos);
     let x = pos.x, z = pos.z, heading = Math.atan2(look.x, look.z);
     if (water) {
@@ -175,8 +183,8 @@ export class PlaneMode {
   }
 
   private startAt(s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) {
-    if (this.nav.mode !== 'plane') {
-      if (!this.nav.startCraft('plane')) return false;
+    if (this.phase === 'off') {
+      if (!this.nav.enterCraft(this)) return false;
       this.use(AIRCRAFT[s.type ?? 'floatplane']);
       this.rig.begin(ENTER_MS);
     }
@@ -252,7 +260,7 @@ export class PlaneMode {
     this.flight.respawn(this.world);
   }
 
-  private leave() {
+  leave() {
     this.collision.release();
     this.phase = 'off';
     this.start = null;
@@ -265,8 +273,7 @@ export class PlaneMode {
 
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
-    const active = this.nav.mode === 'plane';
-    if (!active && this.phase !== 'off') this.leave();
+    const active = this.phase !== 'off';
     if (active) {
       if (this.phase === 'loading') this.prepare();
       if (this.phase === 'flying') this.fly(dt);
@@ -356,13 +363,13 @@ export class PlaneMode {
 
   // ------------------------------------------------------------------ the panel
   private draw() {
-    const active = this.nav.mode === 'plane', f = this.flight, on = active && this.phase === 'flying', P = this.panel;
+    const active = this.phase !== 'off', f = this.flight, on = active && this.phase === 'flying', P = this.panel;
     P.active = active;
     P.details.hidden = !active;
     this.help.hidden = this.phase !== 'flying';
-    this.enter.textContent = active ? `Exit ${this.type.label}` : 'Plane';
+    this.enterButton.textContent = active ? `Exit ${this.type.label}` : 'Plane';
     const canStart = this.nav.canStartCraft;
-    this.enter.disabled = !active && !canStart;
+    this.enterButton.disabled = !active && !canStart;
     this.enterWater.hidden = this.enterJet.hidden = active;
     this.enterJet.disabled = !canStart;
     this.enterWater.disabled = !canStart || !this.env.river()?.length;

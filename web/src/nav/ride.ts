@@ -4,13 +4,39 @@ import { vehicleOf } from '../sim/vehicles';
 import type { World } from '../world';
 import type { Ride } from './nav';
 
+// The ride camera (nav.ts mode ride): following a pedestrian or a vehicle, at the eyes (first person) or behind and
+// above (chase), kept clear of what is between; the car driven (drive.ts) through it too, its height followed with a
+// short lag and shaken by a crash. Nav glides the camera there (glide.ts).
+export class RideCamera {
+  /** the driven car's camera: shaken by a crash, dipped by a splash (drive.ts) */
+  readonly shake = new THREE.Vector3();
+  private y: number | null = null;
+
+  /** the ride is over: the next starts afresh */
+  reset() { this.y = null; }
+
+  /** where the camera goes following R at pose (driving: the car driven) */
+  frame(R: Ride, pose: Pose, world: World | null, driving: boolean, dt: number) {
+    if (driving && R.view === 'behind') {
+      // through jumps, drops and landings the chase camera's height follows the car with a short lag
+      const y = this.y;
+      this.y = y == null || Math.abs(pose.y - y) > 40 ? pose.y : y + (pose.y - y) * (1 - Math.exp(-9 * dt));
+      pose.y = this.y;
+    } else this.y = null;
+    const { pos, look, fov } = rideCamera(R, pose, world, dt);
+    if (driving) pos.add(this.shake);
+    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, pos.clone().add(look), new THREE.Vector3(0, 1, 0)));
+    return { pos, q, look, fov };
+  }
+}
+
 // where the camera sits: at the eyes (first person) or behind and above (chase)
 const RIG = {
   person: { eye: [1.62, 0.2], back: 4.5, up: 2.2, fov: 65 },
   car: { eye: [1.3, 2.45], fov: 62 }, // dashcam just past the bonnet
 };
 
-export function rideCamera(R: Ride, pose: Pose, world: World | null, dt: number) {
+function rideCamera(R: Ride, pose: Pose, world: World | null, dt: number) {
   const rig = RIG[R.kind], h = pose.h;
   const fw = new THREE.Vector3(Math.sin(h), 0, Math.cos(h)), base = new THREE.Vector3(pose.x, pose.y, pose.z);
   // looking around springs back to straight ahead a few seconds after letting go (vehicles turn under you): at

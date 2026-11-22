@@ -42,10 +42,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .mode-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; padding-top: 5px; }
 #bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
 #bar .mode-tools [hidden] { display: none; }
-/* the mode on: body[data-mode] (main.ts), nav.ts's Mode or `drive` while a car is driven. In a craft and while driving
-   the key legend is hidden; in a craft the other modes' panels too (the active one is .mode-active, nav/mode-panel.ts) */
-body:is([data-mode=fpv], [data-mode=boat], [data-mode=plane], [data-mode=drive]) #hud { display: none; }
-body:is([data-mode=fpv], [data-mode=boat], [data-mode=plane]) #bar .mode-tools > :not(.mode-active) { display: none; }
+/* the mode on (main.ts): body[data-mode], nav.ts's Mode or the craft's id while in one (nav/craft.ts: fpv, boat, plane,
+   drive); body[data-nav=craft] while a craft owns the camera. Then and while driving the key legend is hidden; in a
+   craft that owns the camera the other modes' panels too (the active one is .mode-active, nav/mode-panel.ts) */
+body:is([data-nav=craft], [data-mode=drive]) #hud { display: none; }
+body[data-nav=craft] #bar .mode-tools > :not(.mode-active) { display: none; }
 body[data-mode=fpv] #labels { display: none; }
 /* the plane, and the drone while it flies: a compact strip of its panel alone (nav/plane.css, nav/fpv.css: their own) */
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) :is(#hud, .caption),
