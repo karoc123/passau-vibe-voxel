@@ -420,7 +420,9 @@ Roof and wall collisions follow the source voxels, including where a rendered ro
 Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
-the same car where you stop, and **Esc** takes you back to the map.
+the same car where you stop, T puts it back on the road, and **Esc** takes you back to the map. **Vehicle: …** beside
+**Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus or motorbike
+(`web/src/sim/vehicles.ts`, docs/plans/vehicles.md).
 
 The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive-world.ts`,
 `car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks;
