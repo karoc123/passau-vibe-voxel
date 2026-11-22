@@ -44,7 +44,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | Q6 | Roof caps at a ridge: no spikes | S–M | **Ready** |
-| Q8 | A bridge deck does not sag to the ground beside it | S–M | In progress (`q8`) |
+| Q8 | A bridge deck does not sag to the ground beside it | S–M | Ready to merge (`q8`) |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
@@ -197,6 +197,31 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
   hold); `clearance.py` lane scan not worse. No fixture covers the Dietzing bridge, so iterate with
   `voxelize.py --just` on its region.
 - **Verify spot:** Dietzing over the B 85: `?cam=-2107,138.8,-1709,-2087,115.7,-1658` (road-defects #11).
+- **Landed on `q8` (not yet on main):**
+  - The rule is in "# bridges / decks" (`DECK_OVER` 3 m, `DECK_DIP` 1.5 m). Where one side of a way sees the ground and
+    the other the deck, the profile takes the deck's side. Inside the span, samples within 1.5 m of the terrain are
+    dropped. The 10th percentile and Q4's widening are unchanged and run after this.
+  - Dietzing: the deck rose from 115 to 121 before. It is now level at 121–122 over the whole span and runs on to both
+    banks.
+  - Guard: the `deck_sag` counter in the build report, checked by `check.py verify`. There is a new fixture,
+    `dietzing`, and a `bridge` patch kind in `road-defects.json` for #11.
+  - Fixture verify failures are the same as on main. The new fixture fails only the LoD2 outline share (11 of 50),
+    which is listed in `scripts/fixtures/README.md`. The counter found 9 sagging ways before and 6 after. Fixed:
+    Dietzing, path 163931217 and path 1210300121.
+- **Deviations:**
+  - The "own level" is the median of the over-terrain samples within 15 m, not over the whole way, because a long
+    bridge climbs.
+  - A way's point under a crown (`veg`) counts neither for the span nor for the side rule. Without this, an 8 m
+    footbridge at Hals (way 305848749) stood in the treetops as a floating clump.
+  - The 6 ways still sagging are not a deck on the ground. Their own level comes from crowns over the way (paths
+    80143938 and 138602284, Stockbauersteig, Steffelmühlweg, footway 1272598946), or from the Poststeg's 5 m dips
+    over the tracks. They are listed in `check.py` `DECK_SAG_KNOWN` and do not fail verify.
+  - The fixture needed two edge-case fixes, both neutral for the map: the pool cut's `del` in `voxelize.py`, and
+    `traffic.join_bike_ways` when a map has no cycle way.
+  - The `clearance.py` lane scan was not run, because it needs the rebuilt tiles. The `under_bridge` counter shows 0
+    blocked in every fixture.
+- **Rebuild:** needed. The change alters committed tiles wherever a bridge deck changes.
+- **Q7:** the Dietzing realignment is not needed, because Q8 lifts the deck.
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
