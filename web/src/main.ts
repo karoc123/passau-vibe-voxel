@@ -318,14 +318,18 @@ function flyTo(v: Pick<View, 'pos' | 'target' | 'ms'>) {
   };
 }
 
+// a bridge searched or clicked: walked to on its deck, not under it (a label of kind bridge/footbridge, a place of kind
+// bridge, or a street over one: Passau's are named …brücke / …steg); nav's setWalk lands on a deck only if there is one
+const onBridge = (kind: string, name: string) => /^(foot)?bridge$/.test(kind) || (kind === 'street' && /(brücke|steg)$/i.test(name));
+
 // frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
-function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '') {
+function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '', kind = pin?.kind ?? '') {
   if (!world) return;
   if (flying(nav.mode)) nav.setOrbit();
   const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
   labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
   if (nav.mode !== 'orbit') {
-    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: /^(Most|Kładka|Wiadukt)\b/.test(name), thirdPerson: nav.mode === 'pedestrian' });
+    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name), thirdPerson: nav.mode === 'pedestrian' });
     return;
   }
   const t = new THREE.Vector3(x + 0.5, g + Math.min(h * 0.5, 60), y + 0.5);
@@ -344,7 +348,7 @@ function goView(v: View) {
 function onLabel(l: Label) {
   const v = Object.values(views).find((w) => w.label === l.name);
   if (v && nav.mode === 'orbit') goView(v);
-  else goPlace(l.x, l.y, 60, null, l.name);
+  else goPlace(l.x, l.y, 60, null, l.name, l.kind);
 }
 
 // moving vehicles are hard to click from the air: the nearest one to what you look at
@@ -356,7 +360,7 @@ function followNearest(kind: Kind) {
 function searchItems(meta: Meta): SearchItem[] {
   return [
     ...Object.values(meta.views).map((v) => ({ name: v.label, kind: 'viewpoint', featured: true, go: () => goView(v) })),
-    ...meta.labels.map((l) => ({ name: l.name, alt: [l.en, l.alt].join(' '), kind: l.kind, go: () => goPlace(l.x, l.y, Math.max(40, (l.R ?? 20) * 1.4), null, l.name) })),
+    ...meta.labels.map((l) => ({ name: l.name, alt: [l.en, l.alt].join(' '), kind: l.kind, go: () => goPlace(l.x, l.y, Math.max(40, (l.R ?? 20) * 1.4), null, l.name, l.kind) })),
     { name: 'Follow a car', alt: 'car bus Auto ride follow', kind: 'action', go: () => followNearest('car') },
     { name: 'Follow someone', alt: 'person people pedestrian Fußgänger walk with follow', kind: 'action', go: () => followNearest('person') },
   ];
@@ -394,7 +398,9 @@ async function boot() {
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
   world = nav.world = streamer.world;
-  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.mode === 'plane' ? movingActors : null);
+  // the moving casters: street life (the cars and the motorbike driven are its own), and nav.actors' walker, boat,
+  // floatplane and jet (the FPV drone has no model)
+  daylight.casters(streamer.group, () => life || nav.mode === 'pedestrian' || nav.mode === 'boat' || nav.mode === 'plane' ? movingActors : null);
   nav.streamer = streamer;
   nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
