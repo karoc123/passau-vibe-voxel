@@ -50,16 +50,10 @@ let loading: Promise<RapierDrive> | null = null;
 // Rapier, warmed up, and the drive's world (once per page; `focus`: where to decode a first tile)
 export function loadRapierDrive(meta: Meta, focus: { x: number; z: number }) {
   return loading ??= (async () => {
-    const t0 = performance.now();
     await RAPIER.init();
-    const t1 = performance.now();
     warmUp();
-    const t2 = performance.now();
     const d = new RapierDrive(meta, focus);
     await d.warmTerrain(focus);
-    const t3 = performance.now();
-    // (how long each part took: Rapier's init (the wasm compiled), its first step, the first tile fetched and decoded)
-    (window as unknown as { __rapierLoad: object }).__rapierLoad = { initMs: t1 - t0, warmMs: t2 - t1, tileMs: t3 - t2, decodeMs: d.terrain.stats.decodeMsMax };
     return d;
   })();
 }
@@ -91,7 +85,6 @@ export class RapierDrive {
     this.origin = { x: Math.floor(focus.x / CHUNK) * CHUNK, z: Math.floor(focus.z / CHUNK) * CHUNK };
     // (the viewer's shared node files, unless told where to load them from)
     this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, terrain.cache || terrain.load ? terrain : { ...terrain, cache: viewerTileCache(meta.tiles.N) });
-    (globalThis as unknown as { __rapierDrive: RapierDrive }).__rapierDrive = this;
   }
 
   // The tile under `focus` decoded (the decoding's first run, ~30-50 ms with the JIT's warm-up, out of the way) and

@@ -23,7 +23,7 @@ Camera presets (`?view=`): `overview`, `dom`, `oberhaus`, `fromoberhaus`, `eck`,
 `hacklberg`, `ilztal`, `north`, `city`. Other URL parameters: `cam=x,y,z,tx,ty,tz` (x and z in the project grid's
 metres: column = easting − 827371, row = 5390500 − northing, y over the volume's floor; so a link keeps its place
 when the map grows; the viewer works in map cells, the project grid's less `meta.json` `origin`), `date=M-D`, `hour=`, `weather=clear|cloudy|rain|snow`, `tilt=0`, `ui=0`, `crop=R` (a tiny
-scene: see "Agent tools").
+scene: see "Agent tools"). All of them: "URL parameters".
 
 > **Derived from [warsaw-vibe-voxel](https://github.com/stared/warsaw-vibe-voxel) by Piotr Migdał (MIT licence, see
 > `LICENSE`).** The pipeline and the viewer are his; this repository ports them to Passau and Bavarian open data.
@@ -306,6 +306,30 @@ node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screen
 and the benches; `data-dir.mjs` and `real-city.mjs` are shared helpers, not tools.
 
 No analytics: the page loads nothing beyond its own files and the Google font.
+
+## URL parameters
+
+Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings.ts`), in one place.
+
+| Parameter | What |
+|---|---|
+| `view=` | a camera preset (above; default `overview`) |
+| `cam=x,y,z,tx,ty,tz` | camera and target in the project grid's metres (above); Ctrl+C in the viewer copies one |
+| `focus=bld:<id>`, `bld:r<id>`, `street:<id>` | frame one building or street (`focus.ts`); with `az=` (bearing, default 200), `el=` (degrees up), `fit=` (distance factor) |
+| `crop=R`, `crop=x0,z0,x1,z1`, `crop=fit` | a tiny scene: only the tiles within R m / that box / round the `focus=` object ("Agent tools") |
+| `date=M-D`, `hour=`, `weather=clear\|cloudy\|rain\|snow` | the day, the hour (decimal) and the weather; the viewer writes them back as they change |
+| `ui=0` | no panels (for screenshots) |
+| `seed=` | the street life's random seed (default: a new one each load) |
+| `autores=1\|0` | measure resolution and detail once even under automation (`1`) or never (`0`; `autores.ts`) |
+| `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch); loads the cars' physics ahead |
+| `lifephys=0` | no Rapier bodies for traffic cars near edits (they drive on over a hole; docs/plans/life-physics.md) |
+| `lpnear=`, `lpmax=` | debug knobs of those bodies: the reach round an edit in m (default 60), the most bodies (default 60) |
+| `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the ⚙ panel), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
+
+Page globals for the console and agent tools (none needed by the viewer): `window.__ready` (first frame drawn),
+`__three` (camera, scene, renderer, daylight, `city()`, `setGfx` …: `main.ts`), `__streamer`, `__life` (read by
+`tools/shoot.mjs`), and the crafts' scripting hooks `__drive`, `__boat` (docs/plans/boat.md), `__plane` (`start`,
+`pose`, `script`: docs/plans/plane.md).
 
 ## Agent tools (checking a change)
 

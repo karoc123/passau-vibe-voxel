@@ -181,12 +181,10 @@ export class DriveMode {
 
   private loadRapier() {
     if (this.rapierLoad) return;
-    const t0 = performance.now();
     this.rapierLoad = import('../physics/rapier/drive-world').then(async (m) => {
       this.rapierMod = m;
       const f = this.focus;
       this.rapier = await m.loadRapierDrive(this.meta, { x: f.x, z: f.z });
-      (window as unknown as { __rapierLoadMs: number }).__rapierLoadMs = performance.now() - t0;
     }).catch((e) => { console.warn('rapier', e); });
   }
 

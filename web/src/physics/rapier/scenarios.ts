@@ -1,6 +1,6 @@
-// Rapier car: reproducible driving scenarios on synthetic voxel terrain, run headless (tools/rapier-car.mjs) or in the
-// page (window.__rapierScenarios). Each builds a small map (2 x 2 tiles of 64 m), drops the car, drives it with scripted
-// input at a fixed 1/60 s step and judges the outcome from its telemetry.
+// Rapier car: reproducible driving scenarios on synthetic voxel terrain, run headless (tools/rapier-car.mjs). Each
+// builds a small map (2 x 2 tiles of 64 m), drops the car, drives it with scripted input at a fixed 1/60 s step and
+// judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { MAT } from '../../core/materials';
 import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';

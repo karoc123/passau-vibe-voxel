@@ -479,7 +479,6 @@ function lifePhysics(meta: Meta) {
     const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, { near: n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies) },
       { cache: viewerTileCache(meta.tiles.N) });
     if (life) life.bodies = p;
-    (window as unknown as { __lifephys: unknown }).__lifephys = p;
   })();
 }
 
