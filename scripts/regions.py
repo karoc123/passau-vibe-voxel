@@ -4,7 +4,7 @@ usage: uv run python scripts/voxelize.py [--regions NXxNY | --region-size METRES
                                          [--status | --only ROW_COL[+ROW_COL..] | --only x=COL,y=ROW | --force
                                           | --just ROW_COL[,ROW_COL..] | --just x=COL,y=ROW]
   the cover: scripts/map.json's `regions` (size, jobs) unless given; every cover writes the same bytes
-  (scripts/region_check.py). --status: which regions are up to date and what changed for the others; --only: build
+  (scripts/check.py covers). --status: which regions are up to date and what changed for the others; --only: build
   these regions again (and whatever else changed), e.g. to iterate on one place; --force: all of them
   --just: build these regions and nothing else (after an edit of voxelize.py, to look at one place: the other regions
   stay as they are, stale ones included, and the steps after them run on that mix); data/cache/regions.stamp is not
@@ -598,19 +598,6 @@ def hist_median(hists):
             hi_v = v
             break
     return (lo_v + hi_v) / 2
-
-
-def tunnelish(t):
-    """voxelize.tunnelish"""
-    import re
-
-    def num(v):
-        m = re.match(r"\s*(-?[0-9]+(?:[.,][0-9]+)?)", str(v))
-        return float(m.group(1).replace(",", ".")) if m else None
-    lv = num(t.get("level", "0").split(";")[0] or 0)
-    return t.get("tunnel") in ("yes", "building_passage", "culvert") or num(t.get("layer", 0)) < 0 \
-        or t.get("covered") == "yes" or t.get("indoor") == "yes" or t.get("location") == "underground" \
-        or bool(lv and lv < 0)
 
 
 def _write_palette(reg, add):

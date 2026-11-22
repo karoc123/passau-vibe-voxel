@@ -1,18 +1,17 @@
 """Pedestrian underpasses: the passages OSM maps one level under the street, carved into the ground as corridors 3 m high under a 1 m slab, and the stairs down to them
 cut as open stairwells with a parapet round them. The LiDAR saw only part way down a stairwell: its ragged pit is filled
-back to the street first. Deeper levels (a metro's concourses) are left solid; their stairs from the street are cut
+back to the street first. Deeper levels (level -2 and under) are left solid; their stairs from the street are cut
 down to the first level. WALK holds the walking level of every carved cell for traffic.py, IDS the ways walked.
 """
 import json
 
 import numpy as np
 from pyproj import Transformer
-from rasterio.features import rasterize
-from affine import Affine
 from shapely.geometry import LineString
 from shapely.strtree import STRtree
 
 from aoi import CRS, OSM_PATH, to_grid
+from ways import cells, num
 
 WALK = None
 IDS = set()
@@ -25,10 +24,8 @@ def _levels(t):
     out = []
     for k in ("level", "layer"):
         for v in str(t.get(k, "")).replace(",", ";").split(";"):
-            try:
-                out.append(float(v))
-            except ValueError:
-                pass
+            if num(v) is not None:
+                out.append(num(v))
     return out
 
 
@@ -57,21 +54,11 @@ def ways(osm):
         (tun if down and t["highway"] != "steps" and 0 not in lv else other).append(w)
     tnodes = {n for _, ns, _ in tun for n in ns}
     hw = {e["id"]: e["tags"]["highway"] for e in data["elements"] if e["type"] == "way" and "highway" in e.get("tags", {})}
-    # the landing at a stairwell's foot: a short plain footway from a passage's end, open to the sky (Solec's)
+    # the landing at a stairwell's foot: a short plain footway from a passage's end, open to the sky
     land = [w for w in other if hw[w[0]] != "steps" and w[2].length < 15 and tnodes & set(w[1])]
     lnodes = tnodes | {n for _, ns, _ in land for n in ns}
     steps = [w for w in other if hw[w[0]] == "steps" and (w[1][0] in lnodes or w[1][-1] in lnodes)]
     return tun, land, steps
-
-
-def _cells(geom, D, W):
-    c0, r0, c1, r1 = (int(v) for v in geom.bounds)
-    c0, r0, c1, r1 = max(c0, 0), max(r0, 0), min(c1 + 1, W), min(r1 + 1, D)
-    if c1 <= c0 or r1 <= r0:
-        return np.zeros(0, int), np.zeros(0, int)
-    m = rasterize([(geom, 1)], out_shape=(r1 - r0, c1 - c0), transform=Affine.translation(c0, r0))
-    rr, cc = np.nonzero(m)
-    return rr + r0, cc + c0
 
 
 def build(vol, g, pal, C, osm, note):
@@ -89,7 +76,7 @@ def build(vol, g, pal, C, osm, note):
     # floor 4 m under the path at its portals, a buried corridor and a pit at each end
     level, over, at_grade = {}, {}, set()
     for k, (wid, ns, ln) in enumerate(tun + land):
-        rr, cc = _cells(ln.buffer(0.5), D, W)
+        rr, cc = cells(ln.buffer(0.5), D, W)
         if not len(rr):
             continue
         street = int(np.percentile(g[rr, cc], 90))
@@ -111,7 +98,7 @@ def build(vol, g, pal, C, osm, note):
             hi, lo = a, b
         else:
             hi, lo = b, a
-        rr, cc = _cells(ln.buffer(3.0), D, W)
+        rr, cc = cells(ln.buffer(3.0), D, W)
         if not len(rr):  # (a stairwell beyond the region's volume: its passage's end is in it)
             continue
         ring = g[rr, cc]
@@ -124,14 +111,14 @@ def build(vol, g, pal, C, osm, note):
             vol[g[r, c] - 1:street, r, c] = C["paving"]
             g[r, c] = street
         L = max(np.linalg.norm(lo - hi), 1e-6)
-        sr, sc = _cells(ln.buffer(1.3, cap_style=2), D, W)
+        sr, sc = cells(ln.buffer(1.3, cap_style=2), D, W)
         for r, c in zip(sr, sc):
             t = np.clip(np.dot(np.array([c + 0.5, r + 0.5]) - hi, (lo - hi) / L) / L, 0, 1)
             z = int(round(street + (zf - street) * t))
             vol[z:street + 1, r, c] = 0
             vol[z - 1, r, c] = floor
             WALK[r, c] = z
-        pr, pc = _cells(ln.buffer(2.3, cap_style=2).difference(ln.buffer(1.3, cap_style=2)), D, W)
+        pr, pc = cells(ln.buffer(2.3, cap_style=2).difference(ln.buffer(1.3, cap_style=2)), D, W)
         for r, c in zip(pr, pc):  # the parapet round the opening, where the ground stands at the street
             if WALK[r, c] < 0 and g[r, c] >= street:
                 vol[street, r, c] = rail
@@ -142,7 +129,7 @@ def build(vol, g, pal, C, osm, note):
         zf = min(level.get(n, 10 ** 6) for n in ns)
         if zf > 10 ** 5:
             continue
-        rr, cc = _cells(ln.buffer(1.5, cap_style=2), D, W)
+        rr, cc = cells(ln.buffer(1.5, cap_style=2), D, W)
         for r, c in zip(rr, cc):
             if WALK[r, c] >= 0:
                 continue
@@ -157,7 +144,7 @@ def build(vol, g, pal, C, osm, note):
                 vol[zf:g[r, c] + 1, r, c] = 0
             vol[zf - 1, r, c] = floor
             WALK[r, c] = zf
-        wr, wc = _cells(ln.buffer(2.0, cap_style=2).difference(ln.buffer(1.5, cap_style=2)), D, W)
+        wr, wc = cells(ln.buffer(2.0, cap_style=2).difference(ln.buffer(1.5, cap_style=2)), D, W)
         for r, c in zip(wr, wc):  # the corridor's walls, where the ground's soil would show
             if WALK[r, c] < 0:
                 top = zf + 2 if g[r, c] == zf + 3 else min(zf + 3, g[r, c])  # (the street's own surface stays)

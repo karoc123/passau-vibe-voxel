@@ -44,7 +44,7 @@ OUT = Path("web/public/data")
 TMP = Path("data")
 # map cells around a window's core that a node's sections read: spil at level 8 reaches 10 m out (its apron of 16 m
 # cells, the 2 m cells beside the middle), and what lights a 2 m cell lies within 8 m of it (the facade test beside
-# it, the two blurs of 3 + 3 cells); bldg's apron 8 m; caps' corners depend on what lies within caps.REACH (65 m: the
+# it, the two blurs of 3 + 3 cells); bldg's apron 8 m; caps' corners depend on what lies within caps.REACH (71 m: the
 # smoothing). The rest is the node's own cells. A multiple of 32 (the level-8 nodes' 16 m cells stay aligned)
 HALO = 96
 assert HALO >= caps.REACH + 1 and HALO % 32 == 0

@@ -18,7 +18,7 @@ from scipy.ndimage import grey_closing, maximum_filter1d
 from shapely.geometry import LineString
 
 from aoi import CRS, D, RAW, W, to_grid
-from ways import unlit
+from ways import layer_of, level_of, num, underground, unlit
 
 DRIVE = {"motorway": 22, "trunk": 16, "primary": 14, "secondary": 13.9, "tertiary": 12.5, "unclassified": 11,
          "residential": 9, "motorway_link": 14, "trunk_link": 12, "primary_link": 11, "secondary_link": 11,
@@ -29,19 +29,7 @@ WALK = {"footway", "pedestrian", "path", "steps", "living_street", "platform", "
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
 
-def _num(v, default=None):
-    try:
-        return float(str(v).split(";")[0].split()[0].replace(",", "."))
-    except (ValueError, IndexError, AttributeError):
-        return default
-
-
 OPEN_CUT = set()  # layer -1 ways that are open cuts, not tunnels (voxelize.py)
-
-
-def underground(t):
-    return (t.get("tunnel") in ("yes", "building_passage") or _num(t.get("layer"), 0) < 0 or t.get("indoor") == "yes"
-            or t.get("location") == "underground" or (_num(t.get("level"), 0) or 0) < 0 or t.get("covered") == "yes")
 
 
 def fit(p, offs, vol, solid, W, D, step=0.5, decks=False):
@@ -511,14 +499,14 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         ow = t.get("oneway") in ("yes", "true", "1") or t.get("junction") in ("roundabout", "circular") \
             or hw in ("motorway",)
         rev = t.get("oneway") == "-1"
-        lanes = _num(t.get("lanes"))
-        lf, lb = _num(t.get("lanes:forward")), _num(t.get("lanes:backward"))
+        lanes = num(t.get("lanes"))
+        lf, lb = num(t.get("lanes:forward")), num(t.get("lanes:backward"))
         if ow or rev:
             lf = lanes or 1
         else:
             lf = lf or max(1, (lanes or 2) // 2)
             lb = lb or max(1, (lanes or 2) - lf)
-        v = (_num(t.get("maxspeed")) or 50) / 3.6
+        v = (num(t.get("maxspeed")) or 50) / 3.6
         v = min(v, DRIVE[hw] + 2)
         bridge = t.get("bridge") not in (None, "no")
         dirs = [(seg, int(lf), "forward")] if not rev else [(seg[::-1], int(lf), "backward")]
@@ -579,7 +567,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 v = surf[r, c]
                 ok.append((v == 1).mean() >= 0.5 and (v == 2).mean() <= 0.25)
             # longest contiguous run of valid lanes (keep at least the best single lane)
-            best, cur, bs = (0, 0), 0, 0
+            best, cur = (0, 0), 0
             for l, good in enumerate(ok + [False]):
                 if good:
                     cur += 1
@@ -661,7 +649,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         L = length(p)
         if L < 0.8:
             continue
-        up = max(_num(t.get("level"), 0) or 0, _num(t.get("layer"), 0) or 0) >= 1
+        up = max(level_of(t), layer_of(t)) >= 1
         if w["id"] in bored:
             p = bore_z(p)
         elif w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
@@ -822,7 +810,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                     x, y = _T.transform(p_["lon"], p_["lat"])
                     i, j = to_grid(x, y)
                     nodes[nid] = (float(i), float(j))
-            if tg.get("tunnel") not in (None, "no") or tg.get("covered") == "yes" or _num(tg.get("layer"), 0) < 0:
+            if tg.get("tunnel") not in (None, "no") or tg.get("covered") == "yes" or layer_of(tg) < 0:
                 tunnel_nodes.update(e["nodes"][1:-1])
     # ---------------- trains: the route=train relations (one per direction), on the open-air track only -- a piece
     # ends where the line goes into a tunnel or leaves the map. Routes on the

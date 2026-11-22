@@ -15,16 +15,10 @@ from scipy import ndimage
 from scipy.spatial import cKDTree
 
 from aoi import D, RAW, W, to_grid
+from ways import num
 
 BV_CSV = Path(RAW) / "baeume_aoi.csv"
 MERGE_M, BUILDING_M = 3.0, 1.0
-
-
-def _num(v):
-    try:
-        return float(str(v).replace(",", ".").split()[0])
-    except (ValueError, IndexError, TypeError):
-        return None
 
 
 def register():
@@ -50,8 +44,8 @@ def load(osm_trees, buildings=None):
         if not (0 <= p.x < W and 0 <= p.y < D):
             continue
         out.append(dict(id=f"osm:{oid}", src="osm", k=k_osm, x=float(p.x), y=float(p.y), species=tg.get("species") or tg.get("genus"),
-                        trunk_cm=_num(tg.get("circumference")) and _num(tg.get("circumference")) * 100,
-                        height=_num(tg.get("height")), leaf_type=tg.get("leaf_type"), osm=oid))
+                        trunk_cm=num(tg.get("circumference")) and num(tg.get("circumference")) * 100,
+                        height=num(tg.get("height")), leaf_type=tg.get("leaf_type"), osm=oid))
     reg = register()
     if not reg:
         return out

@@ -1,6 +1,6 @@
 """What makes voxelize.py's synthesis region-local: the volume of a region's core comes out the same whether the region
 is the whole map or a piece of it (the core and a halo of HALO metres round it), so the map can be built region by
-region and the cores put together (voxelize.py, scripts/region_check.py proves it byte for byte).
+region and the cores put together (voxelize.py; `scripts/check.py covers` proves it byte for byte).
 
 The rule: what decides a cell lies within a bounded distance of it (its reach), and the reaches along every chain of
 the build add up to less than HALO. Hence:

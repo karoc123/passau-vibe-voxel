@@ -9,7 +9,7 @@ the column's ground run has a cap; steep: the path climbs more than 8 % over 16 
 surface; "in a wall": no surface under the path at all) by what the solid is (the foliage tile's leaves, a trunk, a
 building's wall over a building's cell, a lamp or a pole, a parked car, a deck, stone or concrete), hole (the surface
 1.5 m or more under the path: near a bridge's deck, within 12 m of the road's end, elsewhere), and any of them on a way
-mapped underground (tunnel, building passage, covered, layer < 0)."""
+mapped underground (ways.underground: tunnel, building passage, culvert, covered, indoor, layer or level < 0)."""
 import collections
 import json
 import sys
@@ -17,14 +17,10 @@ import sys
 import numpy as np
 
 import trafficpack
+from ways import underground
 
 M_LEAF, M_WOOD, M_LAMP, M_METAL, M_CAR = 3, 23, 5, 6, 11
 WALLS = {0, 1, 2, 7, 13, 15, 19, 20, 21, 22}  # (web/src/core/materials.ts WALL_MATS)
-
-
-def underground(t):
-    return (t.get("tunnel") in ("yes", "building_passage") or t.get("covered") == "yes"
-            or float((t.get("layer") or "0").split(";")[0] or 0) < 0)
 
 
 def grade(p, x, z):

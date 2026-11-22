@@ -15,9 +15,9 @@ building) is left as it was (voxelize.py's other rules, underpass.py's passages)
 FLOOR holds the driving or walking level (z of the first free voxel) of every bored cell, -1 elsewhere, and IDS the
 ways bored, for traffic.py (cars and walkers go through, not over the hill) and underpass.py (which leaves them).
 """
-import math
-
 import numpy as np
+
+from ways import cells, num
 
 FLOOR = None
 IDS = set()
@@ -28,22 +28,15 @@ FOOT = ("footway", "path", "cycleway", "pedestrian", "bridleway")
 COVER = 2  # metres of ground over the crown that make a bore, not a cut
 
 
-def _num(v):
-    try:
-        return float(str(v).split(";")[0].replace(",", ".").split()[0])
-    except (ValueError, IndexError):
-        return None
-
-
 def _profile(t):
     """(road half width, bore half width, wall height, crown height, is a road) of a tunnelled way"""
     hw = (t.get("highway") or "").replace("_link", "")
     if hw in CARRIAGE:
-        lanes = _num(t.get("lanes")) or (1 if t.get("oneway") in ("yes", "-1") or hw == "service" else 2)
-        w = _num(t.get("width")) or lanes * 3.1  # (voxelize.py draws a carriageway lanes x 3.1 m wide)
+        lanes = num(t.get("lanes")) or (1 if t.get("oneway") in ("yes", "-1") or hw == "service" else 2)
+        w = num(t.get("width")) or lanes * 3.1  # (voxelize.py draws a carriageway lanes x 3.1 m wide)
         return w / 2, w / 2 + 1.0, 4.0, 6.0, True
     if hw in FOOT:
-        w = min(max(_num(t.get("width")) or 2.0, 1.5), 4.0)
+        w = min(max(num(t.get("width")) or 2.0, 1.5), 4.0)
         return w / 2, w / 2 + 0.3, 2.6, 3.2, False
     return None
 
@@ -69,18 +62,6 @@ def _project(P, line):
         best_d[k], best_s[k] = d[k], s[k]
         s0 += L
     return best_s, best_d
-
-
-def _cells(geom, D, W):
-    from affine import Affine
-    from rasterio.features import rasterize
-    c0, r0, c1, r1 = (int(math.floor(v)) for v in geom.bounds)
-    c0, r0, c1, r1 = max(c0, 0), max(r0, 0), min(c1 + 2, W), min(r1 + 2, D)
-    if c1 <= c0 or r1 <= r0:
-        return np.zeros(0, int), np.zeros(0, int)
-    m = rasterize([(geom, 1)], out_shape=(r1 - r0, c1 - c0), transform=Affine.translation(c0, r0))
-    rr, cc = np.nonzero(m)
-    return rr + r0, cc + c0
 
 
 def _portal_level(g, x, y):
@@ -159,7 +140,7 @@ def build(vol, g, pal, C, stone, note, tunnels):
     # footways first: where a sidewalk's tube runs into the carriageway's, the road's floor wins
     for oid, t, line, (hr, hb, hw_, hc, road), z0, z1, sp0, sp1 in sorted(tunnels, key=lambda x: x[3][4]):
         L = line.length
-        rr, cc = _cells(line.buffer(hb + 2), D, W)
+        rr, cc = cells(line.buffer(hb + 2), D, W)
         s, d = _project(np.stack([cc + 0.5, rr + 0.5], 1), line)
         keep = (s >= -1.5) & (s <= L + 1.5)
         rr, cc, s, d = rr[keep], cc[keep], s[keep], d[keep]

@@ -13,7 +13,6 @@ are the region's; a region writes its core: the tiles of its core, its rows and 
 what lies in it of the lists (data/cache/regions/, regions.py stitches them).
 """
 import colorsys
-import gzip
 import hashlib
 import json
 import math
@@ -32,12 +31,13 @@ from shapely.geometry import LineString, Point, shape
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, THETA, W
+from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, W
 from osm import OSM
 import landmarks
 import overrides
 import region
 from region import boxmean, in_core
+from ways import MAIN_ROADS, cells as _way_cells, layer_of, parse_len, underground
 
 if __name__ == "__main__" and not os.environ.get("VOXEL_REGION"):  # the driver: region by region (scripts/regions.py)
     import regions
@@ -161,13 +161,6 @@ def parse_colour(s):
     if s_ > 0.62 and 0.12 < l_ < 0.9:
         rgb = tuple(round(v * 255) for v in colorsys.hls_to_rgb(h_, l_, 0.62))
     return rgb
-
-
-def parse_len(s):
-    if s is None:
-        return None
-    m = re.match(r"\s*(-?[0-9]+(?:[.,][0-9]+)?)", str(s))
-    return float(m.group(1).replace(",", ".")) if m else None
 
 
 def soften(rgb, amt=0.12):
@@ -317,17 +310,8 @@ note("OSM timestamp", osm.timestamp, "areas", len(osm.areas), "lines", len(osm.l
 
 
 def cells_of(geom, all_touched=False, fallback=True):
-    minx, miny, maxx, maxy = geom.bounds
-    c0, r0 = max(int(math.floor(minx)), 0), max(int(math.floor(miny)), 0)
-    c1, r1 = min(int(math.ceil(maxx)), W), min(int(math.ceil(maxy)), D)
-    if c0 >= c1 or r0 >= r1:
-        return np.zeros(0, int), np.zeros(0, int)
-    m = rasterio.features.rasterize([(geom, 1)], out_shape=(r1 - r0, c1 - c0),
-                                    transform=Affine.translation(c0, r0), all_touched=all_touched, dtype=np.uint8)
-    rr, cc = np.nonzero(m)
-    if len(rr) == 0 and not all_touched and fallback:
-        return cells_of(geom, True)
-    return rr + r0, cc + c0
+    """ways.cells on the region's grid; a geometry holding no cell's centre takes the cells it touches"""
+    return _way_cells(geom, D, W, all_touched, fallback)
 
 
 def decided(geom, decide, shape_=None, fid=None):
@@ -371,12 +355,11 @@ def burn(target, shapes, all_touched=False):
 # cars on it dipped into the cut. A short tunnelled carriageway (under 150 m) crossed by surface ways: the street level
 # is where those ways stand 4 m clear of it on either side; its footprint lower than that by 1.5-6 m is lifted to it
 _surf = [l_ for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") == "tram") and t_.get("tunnel") is None
-         and parse_len(t_.get("layer", 0)) >= 0]
+         and layer_of(t_) >= 0]
 _stree = STRtree(_surf)
 n_tun = 0
 _tun = [l_.buffer((parse_len(t_.get("lanes")) or 2) * 1.6 + 2, cap_style="flat") for _, t_, l_ in osm.lines
-        if t_.get("tunnel") == "yes" and l_.length <= 150 and (t_.get("highway") or "").replace("_link", "") in
-        ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential")]
+        if t_.get("tunnel") == "yes" and l_.length <= 150 and (t_.get("highway") or "").replace("_link", "") in MAIN_ROADS]
 # a dual carriageway's two tunnels and the strip between them are one crossing
 from shapely.ops import unary_union as _uu
 _tun = _uu(_tun).buffer(6).buffer(-6) if _tun else None
@@ -414,14 +397,13 @@ PASS_BAND = 8
 import shapely  # noqa: E402
 from ways import way_width as _way_width  # noqa: E402
 _xing = [(t_, l_) for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in ("rail", "light_rail", "tram"))
-         and t_.get("tunnel") in (None, "no") and t_.get("bridge") in (None, "no") and parse_len(t_.get("layer", 0)) >= 0]
+         and t_.get("tunnel") in (None, "no") and t_.get("bridge") in (None, "no") and layer_of(t_) >= 0]
 _xtree = STRtree([l_ for _, l_ in _xing])
 _dsm_lo = d4.min((1, 3)) - BASE  # (the surface model's lowest return per cell: the deck, not its cars or railings)
 n_pas = 0
 for _, t_, l_ in osm.lines:
     hw_ = (t_.get("highway") or "").replace("_link", "")
-    if t_.get("tunnel") != "yes" or not hw_ or l_.length > 150 or hw_ in (
-            "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential"):
+    if t_.get("tunnel") != "yes" or not hw_ or l_.length > 150 or hw_ in MAIN_ROADS:
         continue
     band = l_.buffer(PASS_BAND, cap_style="flat")
     for k in _xtree.query(band):
@@ -473,7 +455,7 @@ if _ng is not None:
     _cw = np.zeros((D, W), np.uint8)
     burn(_cw, [(l_.buffer(_way_width(t_) / 2, cap_style="flat"), 1) for _, t_, l_ in osm.lines
                if t_.get("highway") in _ROADS and t_.get("tunnel") in (None, "no") and t_.get("covered") in (None, "no")
-               and t_.get("bridge") in (None, "no") and parse_len(t_.get("layer", 0)) >= 0 and _way_width(t_)])
+               and t_.get("bridge") in (None, "no") and layer_of(t_) >= 0 and _way_width(t_)])
     _over = np.zeros((D, W), np.uint8)
     # (under a bridge: its ways' width and a metre each side, not past their ends -- the approach up to a bridge's
     # first node is a carriageway like any other -- and its outline)
@@ -538,10 +520,9 @@ else:
 # stands 2 m or more under the ground 6-24 m to its sides (a dual carriageway's cut is 30 m wide), it is drawn and driven, its layer set to 0
 OPEN_CUT = set()
 for oid, t, line in osm.lines:
-    if not ((t.get("highway") or "").replace("_link", "") in ("motorway", "trunk", "primary", "secondary", "tertiary",
-                                                                "unclassified", "residential") or t.get("railway") == "rail"):
+    if not ((t.get("highway") or "").replace("_link", "") in MAIN_ROADS or t.get("railway") == "rail"):
         continue
-    if parse_len(t.get("layer", 0)) >= 0 or t.get("tunnel") not in (None, "no") or t.get("covered") not in (None, "no") \
+    if layer_of(t) >= 0 or t.get("tunnel") not in (None, "no") or t.get("covered") not in (None, "no") \
             or t.get("location") == "underground" or t.get("indoor") == "yes" or line.length < 10:
         continue
     rr_, cc_ = cells_of(line.buffer(1.5, cap_style="flat"))
@@ -563,12 +544,6 @@ SURF = {"asphalt": "asphalt", "paving_stones": "paving", "sett": "sett", "cobble
         "concrete:plates": "concrete", "gravel": "gravel", "fine_gravel": "gravel", "compacted": "gravel",
         "grass": "grass", "ground": "dirt", "dirt": "dirt", "unhewn_cobblestone": "sett", "paved": "paving",
         "wood": "track", "metal": "rail", "rubber": "cycle", "tartan": "cycle", "artificial_turf": "grass"}
-
-
-def tunnelish(t):
-    return t.get("tunnel") in ("yes", "building_passage", "culvert") or parse_len(t.get("layer", 0)) < 0 \
-        or t.get("covered") == "yes" or t.get("indoor") == "yes" or t.get("location") == "underground" \
-        or parse_len(t.get("level", "0").split(";")[0] or 0) and parse_len(t.get("level", "0").split(";")[0]) < 0
 
 
 def _pitch_key(shape):
@@ -596,7 +571,7 @@ def _car_park(rr_, cc_):  # an untagged car park the ortho sees pale is paved (a
 
 
 for oid, typ, t, geom in osm.areas:
-    if tunnelish(t) or "building" in t or "building:part" in t:
+    if underground(t) or "building" in t or "building:part" in t:
         continue
     if t.get("place") == "square" or t.get("highway") == "pedestrian" or t.get("landuse") in ("commercial", "retail", "residential"):
         containers.append((geom, C[SURF.get(t.get("surface"), "paving")]))
@@ -632,7 +607,7 @@ for oid, typ, t, geom in osm.areas:
 # a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
 # in the colour the ortho sees along it -- the stadium's black lanes were lost in the oval's lawn
 for oid, t, line in osm.lines:
-    if t.get("leisure") == "track" and not tunnelish(t) and line.length >= 40:
+    if t.get("leisure") == "track" and not underground(t) and line.length >= 40:
         band = line.buffer(3, cap_style="flat")
         key = _pitch_key(band.buffer(-1))
         if key:
@@ -640,7 +615,7 @@ for oid, t, line in osm.lines:
 # cells some map feature paints on purpose (a square, a car park, a path, a carriageway, a platform): what is left in
 # the default paving is open land OSM says nothing about (see "natural ground" below)
 explicit = np.zeros((D, W), np.uint8)
-burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not tunnelish(t_) and "building" not in t_ and (
+burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not underground(t_) and "building" not in t_ and (
     t_.get("place") == "square" or t_.get("highway") == "pedestrian" or "surface" in t_ or t_.get("amenity") == "parking")])
 containers.sort(key=lambda s: -s[0].area)
 soft.sort(key=lambda s: -(s[2] if len(s) > 2 else s[0].area))
@@ -656,7 +631,7 @@ burn(gcol, [(g_, c_) for g_, c_ in soft if c_ in (C["grass"], C["grass2"]) and _
 # a construction site is bare earth only where the ortho sees it so (plots fenced for a building site that
 # fenced plots were lawn and trees then)
 _con = np.zeros((D, W), np.uint16)
-burn(_con, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" and not tunnelish(t_)])
+burn(_con, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" and not underground(t_)])
 _cm = (_con > 0) & (gcol == C["dirt"])
 _cg = ndimage.median_filter(((exg > 0.04) | (lum < 70)).astype(np.uint8), 9) > 0  # (a crown's shadow on the lawn is lawn)
 _cp = ndimage.median_filter(((exg <= 0.04) & (lum >= 70) & (cellcol[..., 0] < cellcol[..., 2] + 12)).astype(np.uint8), 9) > 0
@@ -691,7 +666,7 @@ except FileNotFoundError:
 # harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
 # hay field) wherever the stubble was pale. Arable land and orchards in the cadastre that OSM leaves out too
 _fm = (tn == TN["arable"]).astype(np.uint8)
-burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not tunnelish(t_)])
+burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not underground(t_)])
 _fm = (_fm > 0) & (gcol == C["paving"])
 if _fm.any():
     _fex, _flum = ndimage.median_filter(exg, 5), ndimage.median_filter(lum, 5)
@@ -753,7 +728,7 @@ def area_surface(line):
 _bld0 = np.zeros((D, W), np.uint8)
 burn(_bld0, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("building") not in (None, "no", "roof", "carport", "canopy",
                                                                                    "staircase", "bridge")
-             and not tunnelish(t_)])
+             and not underground(t_)])
 _bld0 = _bld0 > 0
 
 
@@ -785,7 +760,7 @@ for oid, t, line in osm.lines:
     hw = t.get("highway")
     if hw == "construction":
         hw = t.get("construction")
-    if not hw or tunnelish(t) or hw in ("corridor", "elevator", "proposed"):
+    if not hw or underground(t) or hw in ("corridor", "elevator", "proposed"):
         continue
     base = hw.replace("_link", "")
     w = way_width(t)
@@ -799,8 +774,8 @@ for oid, t, line in osm.lines:
             note(f"footbridge {t.get('name') or oid} moved {_off:+.1f} m onto its deck in the surface model")
     if on_bridge(t):
         key = SURF.get(t.get("surface"), "asphalt") if (hw in ROADS or base in ROADS) else ("cycle" if hw == "cycleway" else SURF.get(t.get("surface"), "paving"))
-        bridge_shapes.append((poly, C[key], int(parse_len(t.get("layer")) or 1)))
-        bridge_lines.append((line, w / 2, int(parse_len(t.get("layer")) or 1), C[key]))
+        bridge_shapes.append((poly, C[key], int(layer_of(t) or 1)))
+        bridge_lines.append((line, w / 2, int(layer_of(t) or 1), C[key]))
         bridge_ways.append((oid, t, line, w / 2))
         if hw in ROADS or base in ROADS:
             bridge_road_polys.append(poly)
@@ -858,7 +833,7 @@ AH = {"footway": "paving", "pedestrian": "paving", "cycleway": "cycle", "traffic
       "passing_place": "asphalt", "shoulder": "asphalt", "prohibited": "asphalt_l", "parking_lane": "parking"}
 area_hw = []
 for oid, typ, t, geom in osm.areas_with("area:highway"):
-    if tunnelish(t) or t.get("landuse") == "grass":  # (a lawn mapped as a pedestrian area: the castle gardens')
+    if underground(t) or t.get("landuse") == "grass":  # (a lawn mapped as a pedestrian area: the castle gardens')
         continue
     v = t["area:highway"]
     if v == "yes" and t.get("junction"):  # a junction's square of carriageway (a roundabout's)
@@ -907,14 +882,14 @@ carriageway_sanity(lambda r, c: gcol[r, c], "ground colours")
 # rails & trams (only open-air)
 rail_beds, rails = [], []
 for oid, t, line in osm.lines_with("railway"):
-    if tunnelish(t) or t["railway"] not in ("rail", "tram", "light_rail", "subway"):
+    if underground(t) or t["railway"] not in ("rail", "tram", "light_rail", "subway"):
         continue
     if t["railway"] == "subway":
         continue
     tram = t["railway"] == "tram"
     if on_bridge(t):
-        bridge_shapes.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"], int(parse_len(t.get("layer")) or 1)))
-        bridge_lines.append((line, 1.4 if tram else 1.9, int(parse_len(t.get("layer")) or 1), C["trambed" if tram else "ballast"]))
+        bridge_shapes.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"], int(layer_of(t) or 1)))
+        bridge_lines.append((line, 1.4 if tram else 1.9, int(layer_of(t) or 1), C["trambed" if tram else "ballast"]))
         bridge_ways.append((oid, t, line, 1.4 if tram else 1.9))
         for off in (-0.72, 0.72):
             try:
@@ -931,14 +906,14 @@ for oid, t, line in osm.lines_with("railway"):
 burn(gcol, rail_beds)
 burn(explicit, [(s_, 1) for s_, _ in rail_beds])
 _pf = np.zeros((D, W), np.uint16)  # a platform mapped over the carriageway beside it stops at the road
-burn(_pf, [(geom, 1) for oid, typ, t, geom in osm.areas_with("railway", ("platform",)) if not tunnelish(t)])
+burn(_pf, [(geom, 1) for oid, typ, t, geom in osm.areas_with("railway", ("platform",)) if not underground(t)])
 gcol[(_pf > 0) & (road_mask == 0)] = C["platform"]
 explicit[_pf > 0] = 1
 burn(gcol, rails, all_touched=True)
 
 # water
 water = [(geom, C["granite_d"] if t.get("fountain") == "splash_pad" else C["water"]) for oid, typ, t, geom in osm.areas
-         if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not tunnelish(t)]
+         if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not underground(t)]
 burn(gcol, water)
 # Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
 # terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
@@ -1065,7 +1040,7 @@ if _locks:
     g[_lockm] = _locklev[_lockm]
     note("water overrides (own level): (way, cells, water top m a.s.l.)",
          [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in _locks])
-splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not tunnelish(t)]
+splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not underground(t)]
 
 # zebra crossings + lane markings on asphalt
 asph = np.isin(gcol, [C["asphalt"], C["asphalt_l"], C["parking"], C["road_paving"]])
@@ -1074,7 +1049,7 @@ for oid, t, line in osm.lines:
     if not (t.get("footway") == "crossing" or t.get("cycleway") == "crossing" or
             (t.get("highway") in ("footway", "cycleway", "path") and "crossing" in t)):
         continue
-    if t.get("crossing") in ("unmarked", "no") or tunnelish(t):
+    if t.get("crossing") in ("unmarked", "no") or underground(t):
         continue
     cyc = t.get("highway") == "cycleway" or t.get("cycleway") == "crossing"
     rr, cc = cells_of(line.buffer(1.5 if cyc else 2.2, cap_style="flat"))
@@ -1094,7 +1069,7 @@ note("zebra crossings:", n_cross)
 lane_lines = []
 for oid, t, line in osm.lines:
     hw = t.get("highway")
-    if hw not in ("primary", "secondary", "trunk", "primary_link", "secondary_link") or tunnelish(t):
+    if hw not in ("primary", "secondary", "trunk", "primary_link", "secondary_link") or underground(t):
         continue
     lanes = int(parse_len(t.get("lanes")) or (2 if hw in ("primary", "secondary", "tertiary") else 1))
     if lanes < 2:
@@ -1122,7 +1097,7 @@ for oid, t, line in osm.lines:
 _deg, _hw = {}, {}
 for oid, t, line in osm.lines:
     b = (t.get("highway") or "").replace("_link", "")
-    if b not in HW or b not in ROADS or tunnelish(t) or on_bridge(t):
+    if b not in HW or b not in ROADS or underground(t) or on_bridge(t):
         continue
     xy = [tuple(np.round(p, 1)) for p in line.coords]
     for k, p in enumerate(xy):
@@ -1131,7 +1106,7 @@ for oid, t, line in osm.lines:
         _wd = parse_len(t.get("width")) or (parse_len(t.get("lanes")) or 0) * 3.1
         _hw[p] = max(_hw.get(p, 0), HW[b] / 2, _wd / 2)
 _junc = [Point(p).buffer(_hw[p] + 4) for p, d in _deg.items() if d >= 3]
-_junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not tunnelish(t)]
+_junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not underground(t)]
 lm = np.zeros((D, W), np.uint16)
 burn(lm, [(l, 1) for l in lane_lines], all_touched=False)
 _jm = np.zeros((D, W), np.uint16)
@@ -1148,7 +1123,7 @@ for oid, typ, t, geom in osm.areas:
     bld = t.get("building") not in (None, "no") and not part
     if not (part or bld) or t.get("building") == "construction" or t.get("location") == "underground":
         continue
-    if parse_len(t.get("layer", 0)) < 0 and not part:
+    if layer_of(t) < 0 and not part:
         continue
     h = parse_len(t.get("height"))
     lv = parse_len(t.get("building:levels"))
@@ -1156,7 +1131,7 @@ for oid, typ, t, geom in osm.areas:
         h = lv * 3.2 + (parse_len(t.get("roof:height")) or (parse_len(t.get("roof:levels")) or 0) * 2.8)
     mh = parse_len(t.get("min_height"))
     if mh is None and t.get("building:min_level"):
-        mh = parse_len(t["building:min_level"]) * 3.2
+        mh = parse_len(t["building:min_level"], 0) * 3.2
     if t.get("building") in ("roof", "carport") and mh is None:
         mh = 2.5
     rr, cc = cells_of(geom)
@@ -2071,7 +2046,7 @@ CEM_STONES = [pal(c) for c in ("#9a9790", "#a8a59d", "#b8b3a8", "#c4c0b6", "#8d8
 grave_stones = []  # (row, col, palette id)
 n_cem = 0
 for oid, typ, t, geom in osm.areas:
-    if not (t.get("landuse") == "cemetery" or t.get("amenity") == "grave_yard") or tunnelish(t):
+    if not (t.get("landuse") == "cemetery" or t.get("amenity") == "grave_yard") or underground(t):
         continue
     rr_, cc_ = cells_of(geom)
     if not len(rr_):
@@ -2776,7 +2751,7 @@ if trunks:
          "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
     veg &= ~_odd
 # a crown over a carriageway keeps ROAD_CLEAR m clear of its ground (a street tree is pruned for the traffic; the
-# sloped caps lift the drawn street up to 56/64 m over its voxel, and a car's body reaches 1.8 m over it:
+# sloped caps lift the drawn street up to caps.CLAMP = 60/64 m over its voxel, and a car's body reaches 1.8 m over it:
 # docs/plans/road-clearance.md); over the trunk's own cell too (none stands on a carriageway)
 ROAD_CLEAR = 3
 _lift = veg & is_road & (crown_bot < ROAD_CLEAR)
@@ -3051,7 +3026,7 @@ note("splash-pad fountain jets:", n_jets)
 # small leisure=garden / flowerbed islands are raised perennial beds edged with concrete bench-kerbs
 n_beds = 0
 for oid, typ, t, geom in osm.areas:
-    if not (t.get("leisure") == "garden" or t.get("landuse") == "flowerbed") or tunnelish(t) or not (4 <= geom.area <= 400):
+    if not (t.get("leisure") == "garden" or t.get("landuse") == "flowerbed") or underground(t) or not (4 <= geom.area <= 400):
         continue
     rr, cc = cells_of(geom)
     k = ~bmask[rr, cc]
@@ -3131,13 +3106,13 @@ lamp_xy = np.array([(c, r) for c, r, _ in lamps] + [(int(p.x), int(p.y)) for _, 
 # park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
 # which stood dark at night. Along their walks a 4 m lamp every ~25 m, a metre and a half beside the way on soft
 # ground or paving (never on the way itself, a carriageway or in a building), none within 12 m of another lamp
-_parks = [g_ for _, _, t_, g_ in osm.areas if t_.get("leisure") == "park" and not tunnelish(t_)]
+_parks = [g_ for _, _, t_, g_ in osm.areas if t_.get("leisure") == "park" and not underground(t_)]
 _park_u = _uu(_parks).buffer(0) if _parks else None
 _pwalk = np.zeros((D, W), np.uint8)
 burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
 n_pl = 0
 for oid, t, line in osm.lines:
-    if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or tunnelish(t) or on_bridge(t):
+    if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or underground(t) or on_bridge(t):
         continue
     name = (t.get("name") or "").lower()
     seg = line if ("promenade" in name or name == "ortspitze") else (line.intersection(_park_u) if _park_u is not None else None)
@@ -3411,7 +3386,7 @@ def bridgehead_fill(deck, zt_):
     ends = {_k(p_) for _, t_, l_ in osm.lines if on_bridge(t_) and (t_.get("highway") or t_.get("railway"))
             for p_ in (l_.coords[0], l_.coords[-1])}
     ground = [(t_, l_) for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in (
-        "rail", "tram", "light_rail", "subway", "narrow_gauge")) and not on_bridge(t_) and not tunnelish(t_)]
+        "rail", "tram", "light_rail", "subway", "narrow_gauge")) and not on_bridge(t_) and not underground(t_)]
     under = np.zeros((D, W), np.uint8)
     burn(under, [(l_.buffer((parse_len(t_.get("width")) or HW.get((t_.get("highway") or "").replace("_link", ""), 0)
                              or (3.8 if t_.get("railway") else 2)) / 2 + 1), 1) for t_, l_ in ground
@@ -3460,7 +3435,7 @@ def bridgehead_fill(deck, zt_):
 
 
 BH_GRADE, BH_REACH = 0.12, 40
-_gn, _bh = bridgehead_fill(deck, zt_)
+_gn, _ = bridgehead_fill(deck, zt_)
 # and a bridge way drawn on the ground under its level (up to 2 m: _bw) stands on ground lifted to it: the terrain
 # model drops with the bridge round an abutment (its pits 2-6 m deep along the edge of a short bridge's outline), and
 # the way's cells had kept that ground -- holes of 1-2 m in the carriageway beside the deck, deeper than the sloped
@@ -3588,11 +3563,11 @@ def bridge_piers():
     clr = np.zeros((D, W), np.uint8)  # ways on the ground (and their margins)
     burn(clr, [(l_.buffer(max(way_width(t_) if t_.get("highway") else 3.8, 2.0) / 2 + PIER_CLEAR), 1)
                for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in _rail_kinds)
-               and not on_bridge(t_) and not tunnelish(t_)])
+               and not on_bridge(t_) and not underground(t_)])
     burn(clr, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("railway") == "platform"])
     blay = np.zeros((D, W), np.uint16)  # the lowest layer of a bridge way over the cell (+1)
-    for oid_, t_, l_, hw_ in sorted(bridge_ways, key=lambda x: -int(parse_len(x[1].get("layer")) or 1)):
-        burn(blay, [(l_.buffer(hw_ + PIER_CLEAR), int(parse_len(t_.get("layer")) or 1) + 1)])
+    for oid_, t_, l_, hw_ in sorted(bridge_ways, key=lambda x: -int(layer_of(x[1]) or 1)):
+        burn(blay, [(l_.buffer(hw_ + PIER_CLEAR), int(layer_of(t_) or 1) + 1)])
     outlines = [(g_, t_.get("bridge:structure")) for _, _, t_, g_ in osm.areas_with("man_made", ("bridge",))]
     pier = np.zeros((D, W), bool)
 
@@ -3665,7 +3640,7 @@ def bridge_piers():
             mapped.add(i)
         if near:
             _, i, oid_, t_, l_, hw_ = min(near, key=lambda x: (x[0], x[2]))
-            n_osm += place(l_, l_.project(p_), int(parse_len(t_.get("layer")) or 1), 20.0, 2.0, True)
+            n_osm += place(l_, l_.project(p_), int(layer_of(t_) or 1), 20.0, 2.0, True)
     order = sorted(range(len(bridge_ways)), key=lambda i: (-bridge_ways[i][2].length, bridge_ways[i][0]))
     for i in order:
         if i in mapped:
@@ -3681,7 +3656,7 @@ def bridge_piers():
         n = int(round(l_.length / span))
         thick = 2.0 if span >= 30 else 1.0
         for k in range(1, n):
-            n_der += place(l_, l_.length * k / n, int(parse_len(t_.get("layer")) or 1), span, thick)
+            n_der += place(l_, l_.length * k / n, int(layer_of(t_) or 1), span, thick)
     # down from the deck's underside through the air and the river to the ground or the bed
     rr, cc = np.nonzero(pier)
     top = deck_top[rr, cc] - 2
@@ -3699,7 +3674,7 @@ def bridge_piers():
     return pier
 
 
-pier_mask = bridge_piers()
+bridge_piers()
 # bridge pylons (a cable-stayed bridge's mast): compact LiDAR blobs far above the deck inside a bridge
 pyl = (bridge_area > 0) & (nd_max > np.where(deck_h > 0, deck_h, nd_mean) + 45) & ~bmask  # the stays fan out low; only the mast stands this high
 pyl = ndimage.binary_opening(pyl, iterations=2)  # the cable-stay fan is a thin sheet in the LiDAR; the mast is thick
