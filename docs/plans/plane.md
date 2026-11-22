@@ -6,6 +6,33 @@ and keeps itself off the ground unless the player pushes it down on purpose.
 
 Status: plan only, nothing built. Written against `main` at `31d7b594`.
 
+## Revision (after review, overrides the plan below where they differ)
+
+The first draft was found too easy. Changed, in priority over everything below:
+
+1. **Less automation.** No ground guard (no automatic pull-up), no automatic turn back at the map edge, no three
+   fixed speeds. The map edge is a plain wall: the plane's position is clamped inside the box (outward movement
+   dropped), the HUD says "Map edge". What stays: bank (and, weakly, the flight path) level themselves when the stick
+   is let go. Nothing else steers for the player.
+2. **Stepless throttle**, 0–100 %, a state the player sets: keyboard Shift / R up, Space / F down (held, gradual; not
+   Ctrl: Ctrl+W closes the tab); touch: a vertical slider on the right that stays where it is left, the left stick
+   stays turn and pitch; gamepad: RT / LT (or the right stick's Y) move it.
+3. **Energy, semi-realistic.** Speed comes from thrust (throttle), drag (parasitic + induced) and the path's slope
+   (climbing costs speed, diving gains it). Lift is limited by speed (load factor at most `(v / V_STALL)^2`, faded to
+   nothing over the last 30 % below the stall speed): too slow, the plane sinks and its nose drops; diving or throttle
+   recovers. No spin, no wind. Level top speed at full throttle ~245 km/h (drone: 158 / 197), stall ~86 km/h. All
+   numbers in one `PLANE` object.
+4. **Floatplane: water landing and takeoff are in scope** (was phase 5). Touching water (Danube, Inn, Ilz: the voxels'
+   water runs, as `physics/rapier/terrain.ts` reads them, plus the river level slider when raised) slowly, shallowly
+   and nearly wings-level floats the plane; it taxis on the water (stick turns, throttle moves) and takes off past
+   the takeoff speed with the stick pulled. Too fast or too steep onto water is a crash ("Splash"). Land and roofs:
+   a crash, except a shallow skim (a bounce, as below). Crash: tint and shake, then back at a safe pose ~3 s old.
+5. Pitch: flight convention with an "Invert pitch" toggle (question 2 A, unchanged).
+6. Start: in the air from orbit (unchanged), and a second button to start floating on the Danube.
+
+Consequently the checks `speeds`, `guard_*`, `edge` turn-back and `danube` turned back at the east edge are replaced
+by `throttle`, `stall`, `climb_costs`, `boundary`, `water_*`, `crash_*` (web/tools/plane.mjs).
+
 ## Offene Fragen
 
 Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils die Empfehlung umgesetzt.
