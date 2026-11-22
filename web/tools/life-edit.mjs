@@ -26,7 +26,7 @@ const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, H
 const meta = readMeta(), N = meta.tiles.N;
 const TD = await load('tile-data.ts'), CO = await load('core/columns.ts');
 const { Traffic, STEP } = await load('sim/traffic.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
-const LP = await load('physics/rapier/life-phys.ts');
+const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 await RAPIER.init();
@@ -103,6 +103,15 @@ function drawn(ctx, c) {
   return c.rp;
 }
 
+// how far a car's lowest edge is under its drawn ground point (m, <= 0): 0 on its wheels; lying on its side (a van
+// fallen into a hole) its flank is the bottom, half its width under the point (its model's box, sim/vehicles.ts)
+function lowEdge(c) {
+  const m = VH.modelHalf(VH.vehicleOf(c)), r = c.roll ?? 0, k = Math.cos(c.pitch ?? 0);
+  let low = 0;
+  for (const x of [-m.x, m.x]) for (const y of [0, 2 * m.y]) low = Math.min(low, (x * Math.sin(r) + y * Math.cos(r)) * k);
+  return low;
+}
+
 // the per-tick checks in the edited boxes: hovering, bodies far from the edits
 function watcher(ctx) {
   const { T, phys, W } = ctx, hover = new Map(), lastY = new Map(), worst = { t: 0, what: '' };
@@ -121,7 +130,7 @@ function watcher(ctx) {
   };
   return {
     tick() {
-      for (const c of [...T.cars, ...T.detachedCars]) { const p = drawn(ctx, c); look(`car ${c.id}${phys.owns(c) ? ' (body)' : ''}`, c, p.x, p.y, p.z); }
+      for (const c of [...T.cars, ...T.detachedCars]) { const p = drawn(ctx, c); look(`car ${c.id}${phys.owns(c) ? ' (body)' : ''}`, c, p.x, p.y + lowEdge(c), p.z); }
       for (const p of [...T.people, ...T.riders]) { T.personPoint(p, 0, P); look('person', p, P.x, P.z, P.y); }
       for (const b of phys.bodies.values()) {
         if (b.state !== 'track') continue;
@@ -191,7 +200,7 @@ async function dig() {
   run(ctx, 15, () => {
     w.tick();
     if (bodyAt < 0 && phys.owns(car)) bodyAt = ctx.t - t0;
-    if (car.rp) minY = Math.min(minY, car.rp.y);
+    if (car.rp) minY = Math.min(minY, car.rp.y + lowEdge(car));
     for (const c of [...T.cars, ...T.detachedCars]) if (c.rp && c.rp.y < deck - 3 && Math.hypot(c.rp.x - ax, c.rp.z - az) < 8) fallers.add(c.id);
     dropped += T.dropped.length; T.dropped = [];
   });
