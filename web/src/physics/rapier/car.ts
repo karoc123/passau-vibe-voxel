@@ -60,6 +60,8 @@ export class RapierCar {
   status: CarStatus = 'ok';
   airTime = 0;
   private steer = 0;
+  private bars = 0; // the steering input as the bars follow it (CarBuild tune steerRamp)
+  private readonly base: number; // m: the wheelbase
   private readonly wedges: Wedge[] = [];
   private readonly shape: RAPIER.Shape;
   private prevV = { x: 0, y: 0, z: 0 };
@@ -80,6 +82,8 @@ export class RapierCar {
     this.body = v.body; this.chassis = v.chassis; this.controller = v.controller;
     this.half = build.half;
     this.ride = build.ride;
+    const zs = build.wheels.map((w) => w.z);
+    this.base = Math.max(...zs) - Math.min(...zs);
     this.shape = this.chassis.shape;
   }
 
@@ -92,7 +96,17 @@ export class RapierCar {
     const c = this.controller, v = c.currentVehicleSpeed();
     // steering eased, less of it at speed
     const T = this.build.tune;
-    const target = -input.steer * (T?.steer ?? MAX_STEER) / (1 + Math.abs(v) / (T?.steerFall ?? STEER_FALL));
+    let lock = (T?.steer ?? MAX_STEER) / (1 + Math.abs(v) / (T?.steerFall ?? STEER_FALL));
+    // (latG: at speed no more than turns it at latG g on its wheelbase, v^2 tan(angle) / base: a short one turns fast)
+    if (T?.latG) lock = Math.min(lock, Math.atan(T.latG * 9.81 * this.base / Math.max(1, v * v)));
+    // (steerRamp: the bars follow the input at a rate, back towards straight twice as fast: a key turns them in over
+    // a fraction of a second, a tap a little; an analog stick moved slowly is followed as it is)
+    if (T?.steerRamp) {
+      const out = Math.abs(input.steer) > Math.abs(this.bars) && input.steer * this.bars >= 0;
+      const most = dt / T.steerRamp * (out ? 1 : 2);
+      this.bars += Math.max(-most, Math.min(most, input.steer - this.bars));
+    } else this.bars = input.steer;
+    const target = -this.bars * lock;
     this.steer += (target - this.steer) * Math.min(1, dt * 8);
     let engine = 0, brake = 0;
     const B = this.build, BRAKE = B.brake;

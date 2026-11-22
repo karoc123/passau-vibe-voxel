@@ -6,8 +6,12 @@
 //   steep   -- a paved street rising 1 m every 5 m (20 %, voxel stairs under caps) for 40 m from rest: up it, upright
 // the motorbike also:
 //   bike_rest   -- 5 s standing, no input: upright
-//   bike_lean   -- the fast curve both ways: upright (the body), drawn leaning into the turn (car.ts lean) by 0.3 rad
-//                  or more, the right way (turning right: left side up)
+//   bike_lean   -- the fast curve both ways at half lock: upright (the body), drawn leaning into the turn (car.ts lean)
+//                  by 0.3 rad or more, the right way (turning right: left side up)
+//   bike_keys   -- a key (steer 1) held from straight at 60 km/h: the bars turned in over a fraction of a second (0.1 s
+//                  in, under a quarter of the angle held), the turn held at no more than 0.9 g sideways with a steady
+//                  yaw rate (no slide, no wobble), straight again within 0.6 s of letting go; and a 0.15 s tap: a
+//                  small lean (under 0.25 rad), not a swing to full lean
 //   bike_curb   -- a 0.3 m kerb across the way (a street's cap stepping up over a metre) at 40 km/h, square and at 30°;
 //                  and a 1 m terrace (car.ts' wedge) at 30 km/h: over it, upright
 //   bike_wall   -- into a wall at 50 km/h through the drive (physics/rapier/player-car.ts): the rider comes off (no input,
@@ -66,8 +70,28 @@ for (const [id, t] of Object.entries(VEHICLES)) {
     s.dispose();
     s = new sc.Sim(flat, { x: 256, z: 100 }, 0, k1 / 3.6, b);
     let leanL = 0;
-    s.run(4, (sim) => { leanL = Math.min(leanL, sim.car.lean); return { ...sc.cruise(k1)(sim), steer: -0.33 }; });
-    check('moto bike_lean', lean > 0.3 && leanL < -0.3 && minUp(s.log) > 0.9 && minUp(L) > 0.9, { right: r2(lean), left: r2(leanL), minUp: Math.min(minUp(L), minUp(s.log)) });
+    s.run(4, (sim) => { leanL = Math.min(leanL, sim.car.lean); return { ...sc.cruise(k1)(sim), steer: -0.5 }; });
+    const sL = s.log;
+    s.dispose();
+    s = new sc.Sim(flat, { x: 256, z: 100 }, 0, k1 / 3.6, b);
+    lean = 0;
+    s.run(4, (sim) => { lean = Math.max(lean, sim.car.lean); return { ...sc.cruise(k1)(sim), steer: 0.5 }; });
+    check('moto bike_lean', lean > 0.3 && leanL < -0.3 && minUp(s.log) > 0.9 && minUp(sL) > 0.9, { right: r2(lean), left: r2(leanL), minUp: Math.min(minUp(sL), minUp(s.log)) });
+    s.dispose();
+    // a key held at 60 km/h from 0.5 s to 2 s, then let go; and a tap
+    s = new sc.Sim(flat, { x: 256, z: 50 }, 0, 60 / 3.6, b);
+    s.run(3, (sim) => ({ ...sc.cruise(60)(sim), steer: sim.t >= 0.5 && sim.t < 2 ? 1 : 0 }));
+    const at = (t) => s.log.find((l) => l.t >= t - 1e-6), held = s.log.filter((l) => l.t > 1.5 && l.t < 2);
+    const angle = Math.abs(at(1.95).steer), in01 = Math.abs(at(0.6).steer) / angle;
+    const latG = Math.max(...held.map((l) => Math.abs(l.yr) * Math.hypot(l.vx, l.vz) / 9.81));
+    const mean = held.reduce((q, l) => q + l.yr, 0) / held.length, wobble = Math.max(...held.map((l) => Math.abs(l.yr - mean)));
+    const after = Math.abs(at(2.6).yr);
+    s.dispose();
+    s = new sc.Sim(flat, { x: 256, z: 50 }, 0, 60 / 3.6, b);
+    let tap = 0;
+    s.run(2, (sim) => { tap = Math.max(tap, Math.abs(sim.car.lean)); return { ...sc.cruise(60)(sim), steer: sim.t >= 0.5 && sim.t < 0.65 ? 1 : 0 }; });
+    check('moto bike_keys', in01 < 0.25 && latG < 0.9 && wobble < 0.02 && after < 0.05 && tap < 0.25 && minUp(s.log) > 0.99,
+      { in01: r2(in01), angle: Math.round(angle * 1000) / 1000, latG: r2(latG), wobble: Math.round(wobble * 1000) / 1000, yawAfter: r2(after), tapLean: r2(tap) });
   }
   s.dispose();
   // steep

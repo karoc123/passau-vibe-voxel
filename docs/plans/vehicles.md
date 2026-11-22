@@ -59,12 +59,21 @@ the centre of mass low (0.22 m over the ground), and `car.ts` `bike()`:
   (`drive-session.ts` fall: "Crash! You came off the bike", no input, the bike drawn falling on its side over
   FALL_MS 1.6 s), then back on the road as from the river.
 - steering: less lock (0.42 rad) than the car but on a short wheelbase, halved at 9 m/s (the car: 14).
+- steering at speed (`tune` latG 0.8, steerRamp 0.3): the lock is also capped so that it turns at no more than
+  0.8 g sideways on its 1.44 m wheelbase (`atan(latG g base / v^2)`: 0.16 rad at 30 km/h, 0.04 at 60), and the input
+  turns the bars over 0.3 s from straight to full lock, back twice as fast. Before, a key snapped the short bike to a
+  lock that asked 2.9 g at 60 km/h: the body spun round faster than the path (a slide), the drawn lean jumped to its
+  0.7 rad limit within a tenth of a second and back, and every correction on A/D twitched the whole bike and the chase
+  camera with it. Now a key held at 60 km/h leans in over ~0.5 s to 0.67 rad, a short tap only to 0.1 rad. The touch
+  stick and the gamepad go through the same ramp (a slow stick is followed as it is). The car's steering is unchanged
+  (no latG, no steerRamp).
 
 ## Checks
 
-`node tools/vehicles.mjs [type ...]` (34 checks): each type's top speed within its range from rest on a flat km, half
+`node tools/vehicles.mjs [type ...]` (35 checks): each type's top speed within its range from rest on a flat km, half
 lock at 50 km/h (bus 30), a third of the lock at 80 % of its top speed (at most 120 km/h), up a 20 % street from rest;
-the motorbike at rest 5 s, leaning both ways in the fast curve (the body upright), over a 0.3 m kerb square and at
+the motorbike at rest 5 s, leaning both ways in the fast curve at half lock (the body upright), a key held and tapped
+at 60 km/h (`bike_keys`: the bars in over a fraction of a second, under 0.9 g, no wobble, a tap a small lean), over a 0.3 m kerb square and at
 30°, up a 1 m terrace (the wedge), and into a wall through the drive (falls off, held, drawn on its side, back on the
 road). The default car keeps `tools/rapier-car.mjs` (42, output identical to before but for timings).
 
