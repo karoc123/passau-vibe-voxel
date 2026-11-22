@@ -49,6 +49,10 @@ export function createVehicle(R: typeof RAPIER, world: RAPIER.World, at: { x: nu
   if (walls) desc.setFriction(0).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min);
   else desc.setFriction(0.3);
   const chassis = world.createCollider(desc, body);
+  return { body, chassis, controller: createWheels(world, body, build) };
+}
+
+export function createWheels(world: RAPIER.World, body: RAPIER.RigidBody, build: CarBuild) {
   const c = world.createVehicleController(body);
   c.indexUpAxis = 1;
   c.setIndexForwardAxis = 2;
@@ -63,7 +67,7 @@ export function createVehicle(R: typeof RAPIER, world: RAPIER.World, at: { x: nu
     c.setWheelFrictionSlip(i, rideOf(build, w.front ? 'gripFront' : 'gripRear'));
     c.setWheelSideFrictionStiffness(i, rideOf(build, 'side'));
   }
-  return { body, chassis, controller: c };
+  return c;
 }
 
 // The first step of a world with voxels in it costs ~100 ms (and more in a busy page) once, whatever is in it: taken

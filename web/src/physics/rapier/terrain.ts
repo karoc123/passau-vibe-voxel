@@ -250,7 +250,7 @@ export class RapierTerrain {
       // where it is heading: what it will reach soon, a little after what is close now
       if (p.vx !== undefined && p.vz !== undefined && Math.hypot(p.vx, p.vz) > 2) consider(p.x + p.vx * LEAD_S, p.z + p.vz! * LEAD_S, 6);
     }
-    const order = [...want].sort((a, b) => a[1] - b[1]);
+    const order = [...want].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     let spent = 0, built = 0;
     for (const [key] of order) {
       if (built >= this.budgetChunks || (this.budgetChunks === Infinity && spent > this.budgetMs)) break;

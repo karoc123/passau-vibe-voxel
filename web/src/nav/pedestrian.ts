@@ -44,6 +44,8 @@ export class Pedestrian {
   private cycle = 0;
   private gait = 0;
 
+  get facing() { return this.heading; }
+
   constructor(scene: THREE.Object3D) {
     const material = (color: number) => new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
     const jacket = material(0x984837), collar = material(0x723a2f), trousers = material(0x343a49);

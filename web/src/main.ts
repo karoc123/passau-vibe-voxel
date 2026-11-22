@@ -11,9 +11,11 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import { Minimap } from './minimap';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
+import type { LifePhysics } from './physics/rapier/life-phys';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -92,6 +94,7 @@ const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
+let minimap: Minimap | null = null;
 let life: StreetLife | null = null, boats: Boats | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
@@ -177,6 +180,10 @@ addEventListener('keydown', (e) => {
     if (labels) labels.visible = labelsOn;
     try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
     toast(labelsOn ? 'Labels on' : 'Labels off (N shows them)');
+    e.preventDefault();
+  }
+  if (e.code === 'KeyM' && gameKey(e) && !e.repeat && minimap) {
+    minimap.toggle();
     e.preventDefault();
   }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
@@ -445,29 +452,37 @@ async function boot() {
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   labels.visible = labelsOn;
+  const mapView = minimap = new Minimap(meta);
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
   fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
-  flood.load().then(() => { bar.river.input.disabled = false; flood!.setLevel(RIVER.surveyed); riverPoints = flood!.info?.river ?? []; })
+  flood.load().then(() => {
+    bar.river.input.disabled = false;
+    flood!.setLevel(RIVER.surveyed);
+    riverPoints = flood!.info?.river ?? [];
+    mapView.setRiver(riverPoints);
+  })
     .catch((e) => { riverPoints = []; console.warn('flood', e); });
   fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
+    mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
     life = nav.life = new StreetLife(scene, td, qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0);
     movingActors.add(life.group);
     life.world = world;
+    lifePhysLoading?.then((physics) => { if (life) life.bodies = physics; }).catch(() => {});
     // (player edits, ?dig=1: the people over a hole in them fall, the cars near them are bodies (lifePhysics); a node
     // freed is its file again)
     const N = meta.tiles.N;
     liveEdits.listen((tx, ty, node, region) => {
       life?.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
-      if (node) lifePhysics(meta);
+      if (node) lifePhysics(meta)?.catch(() => {});
     });
     window.__life = life;
-    if (qs.get('dig') === '1') lifePhysics(meta);
+    if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
     fetchJson<BoatData>('data/boats.json').then((bd) => {
       boats = new Boats(bd, flood?.info?.voxel_top ?? 4);
       life!.group.add(boats.group); // shown, hidden and shadowed with the rest of the moving things
@@ -480,24 +495,26 @@ async function boot() {
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
+    roadPhysics: () => lifePhysics(meta, true)!,
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
 }
 
-// The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):
-// loaded on the first edit (or with ?dig=1, ahead of it); nothing edited, nothing loaded. ?lifephys=0: none (the cars
-// drive on over a hole); debug: ?lpnear= m round an edit, ?lpmax= most bodies.
-let lifePhysLoading: Promise<void> | null = null;
-function lifePhysics(meta: Meta) {
-  if (lifePhysLoading || qs.get('lifephys') === '0') return;
-  lifePhysLoading = (async () => {
+// The shared Rapier world loads on the first edit or when the drive mode warms up.
+let lifePhysLoading: Promise<LifePhysics> | null = null;
+function lifePhysics(meta: Meta, drive = false) {
+  if (!drive && qs.get('lifephys') === '0') return null;
+  return lifePhysLoading ??= (async () => {
     const [{ LifePhysics, DEFAULTS }, { viewerTileCache }] = await Promise.all([import('./physics/rapier/life-phys'), import('./viewer-tiles')]);
     const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
-    const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, { near: n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies) },
-      { cache: viewerTileCache(meta.tiles.N) });
+    const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, {
+      near: qs.get('lifephys') === '0' ? 0 : n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies),
+    }, { cache: viewerTileCache(meta.tiles.N) });
     if (life) life.bodies = p;
-  })();
+    if (drive) await p.warmTerrain(f);
+    return p;
+  })().catch((error) => { lifePhysLoading = null; console.warn('road physics', error); throw error; });
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
@@ -574,7 +591,8 @@ renderer.setAnimationLoop((now) => {
     bar.showRiver(now - riverSeen < 2000);
   }
   barRect ??= bar.rect;
-  labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects]);
+  minimap?.update(now, nav.mapPose, barRect.bottom);
+  labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
 });
 
 window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,

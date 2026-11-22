@@ -67,6 +67,7 @@ export class Nav {
   private readonly glide: Glide;
   private readonly orbit: OrbitInput;
   private readonly foot: Foot;
+  private readonly mapDirection = new THREE.Vector3();
   private landmark: THREE.Vector3 | null = null;
   private skyView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private orbitFov = 0;
@@ -128,6 +129,22 @@ export class Nav {
     if (this.onFoot) this.foot.jump(this.third);
   }
 
+
+  /** The controlled or followed entity's pose. In orbit mode, mark the map focus and view bearing. */
+  readonly mapPose = (): Pose => {
+    const craft = this.craft?.mapPose;
+    if (craft) return craft;
+    if (this.onFoot) {
+      const foot = this.foot, { x, z } = foot.pos;
+      return { x, y: foot.feet, z, h: this.third ? foot.pedestrian?.facing ?? foot.yaw : foot.yaw };
+    }
+    const ride = this.ride;
+    const followed = ride && this.life?.pose(ride.kind, ride.obj);
+    if (followed) return followed;
+    const { x, y, z } = this.onMap ? this.controls.target : this.camera.position;
+    const f = this.camera.getWorldDirection(this.mapDirection);
+    return { x, y, z, h: Math.atan2(f.x, f.z) };
+  };
 
   get life() { return this.lifeRef; }
   set life(l: StreetLife | null) { this.lifeRef = l; this.net = null; }

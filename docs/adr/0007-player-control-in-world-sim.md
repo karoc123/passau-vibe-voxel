@@ -1,6 +1,6 @@
 # 0007 Player control in the world sim
 
-Status: proposed. Builds on [ADR 0006](0006-world-sim-seam.md).
+Status: road physics implemented in F4. See the [plan and measurements](../plans/shared-road-physics.md). Builds on [ADR 0006](0006-world-sim-seam.md).
 
 The street sim already runs without a renderer, but driving and walking a followed pedestrian still write into its
 objects from the viewer. A server-hosted world needs to decide who controls each vehicle or pedestrian and apply the

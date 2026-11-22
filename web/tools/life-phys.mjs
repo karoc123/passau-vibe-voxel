@@ -5,7 +5,7 @@
 //   bodies (avg, max), the bodies' tick (avg, p99, max ms; of which the world's steps and the colliders), the
 //   colliders (chunks built, voxels, cap triangles), bodies spawned / released / put back on their ghosts (resync, with
 //   the largest blend) / wrecked / held up, the cars waiting for their colliders (notReady), the whole traffic tick.
-// usage (in web/): node tools/life-phys.mjs [--at X,Z] [--hour H] [--run S] [--box M] [--no-look] [-v] NEAR[:MAX] ...
+// usage (in web/): node tools/life-phys.mjs [--at X,Z] [--hour H] [--run S] [--box M] [--driver] [--no-look] [-v] NEAR[:MAX] ...
 //   (default: 30 60 100; MAX: the most bodies, default life-phys.ts MAX_BODIES; --box: the edited box's side, m)
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile, readMeta } from './real-city.mjs';
@@ -13,6 +13,7 @@ import { DATA, load, nodeWorld, rawTile, readMeta } from './real-city.mjs';
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); if (i < 0) return d; const v = argv[i + 1]; argv.splice(i, 2); return v; };
 const flag = (k) => { const i = argv.indexOf(k); if (i < 0) return false; argv.splice(i, 1); return true; };
+const driver = flag('--driver');
 const verbose = flag('-v'), look = !flag('--no-look');
 const [AX, AZ] = opt('--at', '6500,2600').split(',').map(Number);
 const HOUR = +opt('--hour', 17), RUN = +opt('--run', 30), BOX = +opt('--box', 8), WARM = 20;
@@ -36,8 +37,18 @@ for (const [near, max] of configs) {
   for (let tz = Math.floor((AZ - want) / N); tz <= Math.floor((AZ + want) / N); tz++) for (let tx = Math.floor((AX - want) / N); tx <= Math.floor((AX + want) / N); tx++) await phys.terrain.prefetch(tx * N + 1, tz * N + 1);
   T.bodies = phys;
   T.edited([AX - BOX / 2, AZ - BOX / 2, AX + BOX / 2, AZ + BOX / 2]);
+  if (driver) {
+    const nearFocus = (c) => Math.hypot(c.geo.cx - AX, c.geo.cy - AZ);
+    const closest = [...T.cars].sort((a, b) => nearFocus(a) - nearFocus(b) || a.id - b.id)[0];
+    if (!closest) throw new Error('no traffic car to drive at the benchmark site');
+    phys.takeWheel('benchmark', closest.id);
+  }
   const tick = [], step = [], ter = [], nb = [], all = [];
   for (let i = 0; i < RUN / STEP; i++) {
+    if (driver) {
+      const s = phys.driverSnapshot('benchmark');
+      phys.input('benchmark', { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false });
+    }
     const t0 = performance.now();
     T.update(STEP, HOUR, focus);
     all.push(performance.now() - t0);
@@ -46,7 +57,7 @@ for (const [near, max] of configs) {
   }
   const s = phys.stats, ts = phys.terrain.stats;
   const row = {
-    near, max: max ?? LP.MAX_BODIES, cars: T.cars.length, bodies: f2(avg(nb)), bodiesMax: Math.max(...nb),
+    driver: driver ? phys.driverSnapshot('benchmark')?.entityId ?? 'missing' : 'none', near, max: max ?? LP.MAX_BODIES, cars: T.cars.length, bodies: f2(avg(nb)), bodiesMax: Math.max(...nb),
     tickAvg: f2(avg(tick)), tickP99: f2(pct(tick, 0.99)), tickMax: f2(Math.max(...tick)), steps: f2(avg(step)), colliders: f2(avg(ter)),
     usPerBodyTick: f2(avg(tick) / Math.max(0.01, avg(nb)) * 1000), trafficTick: f2(avg(all)),
     chunks: ts.chunks, builds: ts.builds, voxels: ts.voxels, tris: ts.tris,

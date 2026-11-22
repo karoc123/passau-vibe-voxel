@@ -1,0 +1,51 @@
+#minimap-button {
+  position: fixed;
+  right: calc(56px + var(--sr));
+  bottom: calc(8px + var(--sb));
+  z-index: 4;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: 600 11px Inter, system-ui, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#minimap-button span {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: rgba(16,17,20,.85);
+}
+#minimap-button:is(:hover, :focus-visible, :active) span { background: #2d3036; }
+#minimap-button[aria-pressed=true] span { border-color: rgba(255,255,255,.55); }
+#minimap-button:focus-visible { outline: 1px solid #fff; border-radius: 6px; }
+#minimap {
+  --minimap-size: clamp(148px, 32vmin, 236px);
+  box-sizing: content-box;
+  position: fixed;
+  top: calc(42px + var(--st));
+  right: calc(14px + var(--sr));
+  z-index: 4;
+  width: var(--minimap-size);
+  height: var(--minimap-size);
+  border: 1px solid #a4ada9;
+  border-radius: 8px;
+  background: #222b2a;
+  box-shadow: 0 3px 12px rgba(0,0,0,.38);
+  pointer-events: none;
+}
+@media (max-width: 600px) {
+  #minimap {
+    top: clamp(calc(12px + var(--st)), calc(var(--bar-bottom, 0px) + 12px), calc(100dvh - var(--minimap-size) - var(--sb) - 130px));
+    right: calc(8px + var(--sr));
+  }
+}
+.noui :is(#minimap, #minimap-button), .loading :is(#minimap, #minimap-button) { display: none; }

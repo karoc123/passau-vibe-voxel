@@ -239,6 +239,11 @@ export class PlaneMode implements PlayerCraft {
 
   // open water within ~100 m of (x, z): the water column with the longest straight water run through it (8
   // directions, up to 300 m); null: tiles not in yet; false: none
+  get mapPose() {
+    if (this.phase !== 'flying') return null;
+    return { ...this.flight.p, h: this.flight.heading };
+  }
+
   private openWater(x: number, z: number) {
     const col = this.collision;
     let best: { x: number; z: number; water: number; heading: number; run: number } | null = null;

@@ -10,7 +10,8 @@ extent is set in `scripts/map.json`).
 The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
-(`/`) finds streets, squares, buildings and stops.
+(`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
+and heading, rivers, roads and nearby landmarks.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).
@@ -408,8 +409,9 @@ on level ground (overshoot, settle time, frequency), `steer_step` holds half the
 (`car.ts` RIDE). `--real X,Z,HEADING,KMH,SECS` drives
 straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
 ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). The `drive_*` scenarios
-(`src/physics/rapier/drive-scenarios.ts`) run the drive mode's glue (`src/nav/drive-session.ts`) in Rapier's drive
-world with a stand-in street life: a traffic car knocked out of the traffic (`drive_knock`), a person knocked down
+(`src/physics/rapier/drive-scenarios.ts`) run player commands through the shared world on synthetic terrain. They cover
+competing claims, two drivers and a collision with an AI body (`drive_shared_replay`), a car knocked out of traffic
+(`drive_knock`), a person knocked down
 (`drive_person`), into the river and back on the bank ~12 m before its edge (`drive_river_respawn`), parked in the
 river (`drive_park_in_river`), a crash landing that holds the input (`drive_crash_landing`). `node
 tools/rapier-car-bench.mjs`: collider build and step costs along a route.
@@ -485,20 +487,21 @@ the same car where you stop, T puts it back on the road, and **Esc** takes you b
 **Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus, motorbike or camper van
 (`web/src/sim/vehicles.ts`, docs/plans/vehicles.md).
 
-The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `drive-world.ts`,
+The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `life-phys.ts`,
 `car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks;
 sloped streets and decks are the caps the viewer draws (one surface for everybody), steps up to ~1 m that are not
 capped (terraces, platforms, low walls) get an invisible ramp. Traffic cars and buses near it are solid; hit one at more than ~15 km/h (between the
-two) and it is knocked out of the traffic, tumbles and stays where it comes to rest. People walking or cycling that
+two) and it is knocked out of the traffic, tumbles and stays where it comes to rest. The player and nearby traffic
+bodies use the same Rapier world and voxel colliders. People walking or cycling that
 the car runs into are shoved away along the hit and tip over flat (a short scripted fall of the street life's figure,
-no physics: `sim/life.ts` `knockDown`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
+no physics: `sim/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
 ~1.5 s after the city is shown; taking the wheel before that waits for it. Rapier is the only car physics. The mode's
-panel and input are `web/src/nav/drive.ts`; one drive (the traffic and people near the car, knock-outs, the river and
-back, crash landings, where to come back to: the last poses on its wheels on the terrain's ground with no water under
-it) is `nav/drive-session.ts`, with no DOM, checked headless by `tools/rapier-car.mjs` (`drive_*`).
+panel and input are `web/src/nav/drive.ts`. The shared road world resolves player commands and contacts, and
+`physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless
+in `tools/rapier-car.mjs` (`drive_*`).
 
 ## Boat
 

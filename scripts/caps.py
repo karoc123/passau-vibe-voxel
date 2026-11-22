@@ -425,7 +425,8 @@ def report(root=".", windows=None, note=print):
     columns skipped, the share of carriageway cells (data/qa_roadmask.bin.gz 1, no building) with a ground cap (flat
     or not), edge mismatches (two capped neighbours linked as one surface whose shared corners differ: the clamp's),
     and the roughness of the capped carriageway (the second difference of the cells' middle heights per metre along
-    rows and columns, triples of linked capped cells: p50, p99, cm). Returns the numbers."""
+    rows and columns, triples of linked capped cells: p50, p99, cm). Also counts written roof corners more than
+    half a metre above the lowest plane at a ridge. Returns the numbers."""
     import gzip
     import json
     from pathlib import Path
@@ -441,19 +442,33 @@ def report(root=".", windows=None, note=print):
         qa_all = np.frombuffer(gzip.decompress((tmp / "qa_roadmask.bin.gz").read_bytes()), np.uint8).reshape(D, W)
     tot = Stats()
     d2s, road_n, road_c, edges, mism = [], 0, 0, 0, 0
-    for win in windows or wmod.cover(D, W, None):
+    ridge_overshoots = 0
+    for win in windows or wmod.cover(D, W, wmod.ALIGN):
         region = ra, rb, ca, cb = win.region(REACH + 31)
         F = region_fields(region, D, W, base, tmp)
         if F is None:
             note("caps report: no data/surface.npz")
             return None
+        roofs = None
+        if (tmp / "zones.bin").exists():
+            zones = wmod.gz_region(tmp / "zones.bin", (D, W), np.uint16, region)
+            roofs = region_roofs(region, D, W, N, tmp, pub / "tiles", meta["palette"], zones,
+                                 (win.r0, win.r1, win.c0, win.c1), measure_ridges=True)
         st = Stats()
         st.cells = []
         for ty in range(win.r0 // N, -(-win.r1 // N)):
             for tx in range(win.c0 // N, -(-win.c1 // N)):
                 f = pub / "tiles" / "1" / f"{tx}_{ty}.bin"
                 if win.holds(ty * N, tx * N) and f.exists():
-                    node_section(F, tilefile.read(f, N), ty * N, tx * N, N, D, W, paved, st)
+                    sec = tilefile.read(f, N)
+                    node_section(F, sec, ty * N, tx * N, N, D, W, paved, st)
+                    if roofs is not None and sec.get("roof"):
+                        col, _, q = decode_roof(sec["roof"])
+                        y, x = np.divmod(col, N + 2)
+                        # Count each column once. The tile's apron repeats its neighbours' columns.
+                        own = (y >= 1) & (y <= N) & (x >= 1) & (x <= N)
+                        y, x = y[own] + ty * N - 1 - ra, x[own] + tx * N - 1 - ca
+                        ridge_overshoots += int((q[own].T - roofs["ridge_limit"][:, y, x] > 32).sum())
         for k, v in st.items():
             tot.add(**{k: v})
         # the window's core: the ground caps' corners as a raster (NaN: none)
@@ -487,6 +502,7 @@ def report(root=".", windows=None, note=print):
     d2 = d2[np.isfinite(d2)]
     out = {k: v for k, v in tot.items()}
     out.update(road_cells=road_n, road_capped=road_c, road_share=round(road_c / max(road_n, 1), 4),
+               roof_ridge_overshoots=ridge_overshoots,
                linked_edges=edges, edge_mismatches=mism, mismatch_share=round(mism / max(edges, 1), 5),
                rough_p50_cm=round(100 * float(np.percentile(d2, 50)), 2) if len(d2) else None,
                rough_p99_cm=round(100 * float(np.percentile(d2, 99)), 2) if len(d2) else None, rough_n=int(len(d2)))
@@ -503,10 +519,10 @@ def report(root=".", windows=None, note=print):
 # with no plane of its own amid its roof's (three or four sides) takes theirs, where its top fits it. A slope cell (10
 # degrees and more, as plane_codes ships a plane code) is that plane; a flatter one (a fitted roof's flat ridge, a flat
 # roof beside a slope) is level at its voxels' top. Each grid point takes, per cell around it, the cell's plane there,
-# and the cells that meet at it -- of one building within 2 m, any within a metre -- one height: the lowest plane's at
-# a ridge or hip (each rises towards the other), the highest one's in a valley, else their mean; a cell the result
-# would move more than its span (0.75 m + half its rise per metre) off its own plane keeps its own (roofs.ts
-# slopeBase's rule, before this). The cap is drawn only: its voxels may lie under or over it (the mesher hides them).
+# and the cells that meet at it -- of one building within 2 m (3 m for opposing slopes at a ridge), any within a
+# metre -- one height: the lowest plane's at a ridge or hip, the highest one's in a valley, else their mean.
+# A cell keeps its own plane if the result moves it more than its span (0.75 m + half its rise per metre), except
+# when that plane rises above the lowest at a ridge or hip. The mesher hides voxels under or over the drawn cap.
 # On the map's grid, from the rasters and the nodes' tops: two nodes hold the same corners for the columns they share.
 # A cell whose four corners are its voxels' top gets a record only next to a sloped one of its building.
 # Levels 2, 4, 8: a block's corners are the level-1 corners of the roof cells at its own four corners, divided by s,
@@ -569,11 +585,12 @@ def node_tops(sec, N):
     return top.reshape(S, S)[1:-1, 1:-1], pal.reshape(S, S)[1:-1, 1:-1]
 
 
-def roof_fields(roof_z, gx, gy, bid, top, roof):
+def roof_fields(roof_z, gx, gy, bid, top, roof, *, measure_ridges=False):
     """The roof cells' corners over a region (arrays (R, C)): roof_z, gx, gy (surface.npz, m over BASE; NaN unknown),
     bid (the building, 0 none), top (the column's top, -1 not known), roof (its top voxel is roof material). Returns
     dict(q: corners [4, R, C] in 1/64 m (int64; meaningless where not part), part: roof cells, g: |gx| + |gy| of the
-    plane (0 on a level cell), mism: cells with a plane whose top is not round(roof_z))."""
+    plane (0 on a level cell), mism: cells with a plane whose top is not round(roof_z)). With measure_ridges, adds
+    ridge_limit: the lowest plane at each ridge corner in 1/64 m (inf elsewhere)."""
     R, C = roof_z.shape
     fin = np.isfinite(roof_z) & np.isfinite(gx) & np.isfinite(gy)
     rz = np.nan_to_num(roof_z).astype(np.float64)
@@ -637,19 +654,26 @@ def roof_fields(roof_z, gx, gy, bid, top, roof):
     ggy = [at(gy_, d, 0.0) for _, d, _, _ in CELLS]
     pos = [p for _, _, _, p in CELLS]
     pairs = [(i, j) for i in range(4) for j in range(i + 1, 4)]
-    # the cells that meet: of one building within 2 m, any within 1 m (a step that small drawn as a wall zigzags)
     lab = [np.where(ex[i], i, 9) for i in range(4)]
-    link = {}
+    link, sl, ridge_gap = {}, {}, {}
     for i, j in pairs:
+        dx, dy = pos[j][0] - pos[i][0], pos[j][1] - pos[i][1]
+        rise_i = ggx[i] * dx + ggy[i] * dy
+        rise_j = -(ggx[j] * dx + ggy[j] * dy)
+        sl[i, j] = (ggx[i] - ggx[j]) * dx + (ggy[i] - ggy[j]) * dy
         d = np.abs(v[i] - v[j])
-        link[i, j] = ex[i] & ex[j] & ((d <= 64) | ((b[i] == b[j]) & (d <= 128)))
+        # Opposing slopes on a diagonal ridge can overshoot at the grid point by more than the ordinary 2 m
+        # limit. Keep that limit for steps unless both slopes face each other on the same building.
+        facing = (rise_i > 0.05) & (rise_j > 0.05)
+        same = b[i] == b[j]
+        both = ex[i] & ex[j]
+        link[i, j] = both & ((d <= 64) | (same & (d <= 128)))
+        ridge_gap[i, j] = both & same & facing & (d > 128) & (d <= 192)
     for _ in range(3):
         for i, j in pairs:
             m = np.where(link[i, j], np.minimum(lab[i], lab[j]), 9)
             lab[i] = np.where(link[i, j], m, lab[i])
             lab[j] = np.where(link[i, j], m, lab[j])
-    # the slope between two cells' planes along the way from i to j: > 0 each rises towards the other (a ridge)
-    sl = {(i, j): (ggx[i] - ggx[j]) * (pos[j][0] - pos[i][0]) + (ggy[i] - ggy[j]) * (pos[j][1] - pos[i][1]) for i, j in pairs}
 
     def meet(mem):
         """per point, the height the members meet at (NaN: fewer than 2)"""
@@ -663,28 +687,46 @@ def roof_fields(roof_z, gx, gy, bid, top, roof):
             both = mem[i] & mem[j]
             ridge |= both & (sl[i, j] > 0.1)
             valley |= both & (sl[i, j] < -0.1)
-        h = np.where(ridge & ~valley, lo, np.where(valley & ~ridge, hi, mean))
-        return np.where(n >= 2, h, np.nan)
+        crest = ridge & ~valley
+        h = np.where(crest, lo, np.where(valley & ~ridge, hi, mean))
+        return np.where(n >= 2, h, np.nan), crest
 
     def fits(i, h):
         return np.abs(h - v[i]) <= sp[i]
 
-    hs = [v[i] for i in range(4)]
+    hs = v.copy()
+    ridge_limit = np.full((4, R, C), np.inf) if measure_ridges else None
     for g in range(4):
         mem = [ex[i] & (lab[i] == g) for i in range(4)]
-        h = meet(mem)
-        okh = np.isfinite(h)
-        allfit = okh.copy()
+        h, crest = meet(mem)
+        # The lower envelope at a crest takes precedence over the span fallback.
+        allfit = np.isfinite(h)
         for i in range(4):
             allfit &= ~mem[i] | fits(i, h)
         # (some do not fit: the rest meet without them, if they all fit then)
-        mem2 = [mem[i] & np.where(okh, fits(i, h), False) for i in range(4)]
-        h2 = meet(mem2)
+        mem2 = [mem[i] & ~crest & fits(i, h) for i in range(4)]
+        h2, _ = meet(mem2)
         all2 = np.isfinite(h2)
         for i in range(4):
             all2 &= ~mem2[i] | fits(i, h2)
-        for i in range(4):
-            hs[i] = np.where(allfit & mem[i], h, np.where(~allfit & all2 & mem2[i], h2, hs[i]))
+        for i, (_, (dy, dx), k_, _) in enumerate(CELLS):
+            crest_member = crest & mem[i]
+            hs[i] = np.where((allfit & mem[i]) | crest_member, h,
+                             np.where(~allfit & all2 & mem2[i], h2, hs[i]))
+            if ridge_limit is not None:
+                slc = np.s_[dy:dy + R, dx:dx + C]
+                np.copyto(ridge_limit[k_], np.round(h[slc]), where=crest_member[slc])
+    # Apply the lower plane across a wide diagonal crest after the ordinary corner fits.
+    for (i, j), gap in ridge_gap.items():
+        if not gap.any():
+            continue
+        lower = np.minimum(v[i], v[j])
+        for m, (_, (dy, dx), k_, _) in enumerate(CELLS):
+            shares = gap & ((lab[m] == lab[i]) | (lab[m] == lab[j]))
+            np.minimum(hs[m], lower, out=hs[m], where=shares)
+            if ridge_limit is not None:
+                slc = np.s_[dy:dy + R, dx:dx + C]
+                np.minimum(ridge_limit[k_], np.round(lower[slc]), out=ridge_limit[k_], where=shares[slc])
     q = np.zeros((4, R, C), np.int64)
     for (_, d, k_, _), hh in zip(CELLS, hs):
         q[k_] = np.round(hh[d[0]:d[0] + R, d[1]:d[1] + C]).astype(np.int64)
@@ -696,11 +738,14 @@ def roof_fields(roof_z, gx, gy, bid, top, roof):
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             near |= _shift(sloped, dy, dx, False) & (_shift(bid, dy, dx, 0) == bid)
-    return dict(q=q, part=part, g=np.abs(gx_) + np.abs(gy_), mism=known & ~part, shifted=part & (off != 0), holes=hole,
-                keep=part & near, top=top)
+    F = dict(q=q, part=part, g=np.abs(gx_) + np.abs(gy_), mism=known & ~part, shifted=part & (off != 0), holes=hole,
+             keep=part & near, top=top)
+    if ridge_limit is not None:
+        F["ridge_limit"] = ridge_limit
+    return F
 
 
-def region_roofs(region, D, W, N, tmp, tiles_dir, palette, zones, core):
+def region_roofs(region, D, W, N, tmp, tiles_dir, palette, zones, core, *, measure_ridges=False):
     """roof_fields() over a region of the map: the rasters of data/surface.npz, the buildings (zones, the region's), and
     the columns' tops from the level-1 nodes over the core and 16 m round it (what the corners of the core's nodes and
     their aprons, at every level, read). None without the rasters (data from before them)."""
@@ -733,7 +778,7 @@ def region_roofs(region, D, W, N, tmp, tiles_dir, palette, zones, core):
                 pal[ya:yb, xa:xb] = p_[ya - y0:yb - y0, xa - x0:xb - x0]
     rid = roof_ids(palette)
     roof = rid[np.minimum(pal, len(rid) - 1)] & (pal < len(rid))
-    F = roof_fields(rz, gx, gy, zones, top, roof)
+    F = roof_fields(rz, gx, gy, zones, top, roof, measure_ridges=measure_ridges)
     F["at"] = (ra, ca)
     F["rid"] = rid
     return F
@@ -814,8 +859,11 @@ def main(argv):
         return
     if "--report" in argv:
         import window as wmod
-        meta = json.loads(open("web/public/data/meta.json").read())
-        out = report(".", wmod.from_args(argv, meta["D"], meta["W"]))
+        windows = None
+        if "--windows" in argv or "--window-size" in argv:
+            meta = json.loads(open("web/public/data/meta.json").read())
+            windows = wmod.from_args(argv, meta["D"], meta["W"])
+        out = report(".", windows)
         raise SystemExit(0 if out else 1)
     print(__doc__)
     print("usage: uv run python scripts/caps.py --paved-ids | --report [--windows NXxNY | --window-size METRES]")
