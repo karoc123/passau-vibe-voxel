@@ -3405,6 +3405,9 @@ def bridgehead_fill(deck, zt_):
     # ground within 2 m of the rivers' level is their bank or bed
     near_water = ndimage.binary_dilation(gcol == C["water"], iterations=4) | (g <= RIVER_LV - BASE + 2)
     cand = ~deck & ~bmask & ~near_water & ~veg & flat & (dmin - g >= 2) & (under == 0)
+    # (and the ground lifted to the surface model already, SAG_SRC: still part of the piece it lies in -- else the
+    # piece round it shrank under the opening and the size below and fell back to the trench, 3 m under the road)
+    cand |= np.isfinite(SAG_SRC) & ~deck & ~bmask & ~near_water & (under == 0)
     NEG = np.float32(-1e4)
     src = deck & (seed > 0)
     cone = np.where(src, zt_, NEG).astype(np.float32)  # the highest a cell may stand: the deck less 12 % per metre
