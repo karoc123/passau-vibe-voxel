@@ -14,8 +14,10 @@
 // - water: the chassis' centre down at the water's top at its column ends the drive (status 'water').
 // - landing: touching down from the air faster than crashSpeed() into the ground (a fall of ~8 m) is a crash (an event:
 //   the driver is shaken).
+// No three.js, no DOM (plain maths: core/vec.ts; tools/core-deps.mjs): the car steps the same headless and on a server.
+// It draws nothing: drive.ts draws the car from RapierDrive.drawn() (the vehicle's own model, its wheels included).
 import RAPIER from '@dimforge/rapier3d-compat';
-import * as THREE from 'three';
+import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
 import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild } from './vehicle';
 
@@ -55,8 +57,6 @@ export class RapierCar {
   readonly body: RAPIER.RigidBody;
   readonly chassis: RAPIER.Collider;
   readonly controller: RAPIER.DynamicRayCastVehicleController;
-  readonly mesh = new THREE.Group();
-  readonly wheels: THREE.Mesh[] = [];
   status: CarStatus = 'ok';
   airTime = 0;
   private steer = 0;
@@ -75,29 +75,12 @@ export class RapierCar {
   // heading: radians about y (0: +z), or a whole rotation
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
     private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR) {
-    const q = typeof heading === 'number' ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading) : heading;
+    const q = typeof heading === 'number' ? axisAngle(quat(), vec3(0, 1, 0), heading) : heading;
     const v = createVehicle(R, world, at, q, build, tuning.walls);
     this.body = v.body; this.chassis = v.chassis; this.controller = v.controller;
-    const HALF = this.half = build.half;
+    this.half = build.half;
     this.ride = build.ride;
     this.shape = this.chassis.shape;
-
-    const paint = new THREE.MeshStandardMaterial({ color: 0xc8302a, roughness: 0.5 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0x223040, roughness: 0.2 });
-    const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-    const box = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 2, HALF.y * 2, HALF.z * 2), paint);
-    box.position.y = HALF.y - 0.45;
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 1.7, 0.55, HALF.z * 1.0), glass);
-    cabin.position.set(0, HALF.y + 0.27, -0.2);
-    this.mesh.add(box, cabin);
-    for (const m of [box, cabin]) { m.castShadow = true; m.receiveShadow = true; }
-    const wg = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.28, 16).rotateZ(Math.PI / 2);
-    for (let i = 0; i < build.wheels.length; i++) {
-      const wm = new THREE.Mesh(wg, tyre);
-      wm.castShadow = true;
-      this.wheels.push(wm);
-      this.mesh.add(wm);
-    }
   }
 
   // km/h along the chassis' forward axis
@@ -120,7 +103,7 @@ export class RapierCar {
     }
     if (input.gas > 0 && v < -0.5) brake = input.gas * BRAKE;
     if (!input.gas && !input.brake) brake = BRAKE * 0.027; // rolling resistance
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0, n = c.numWheels(); i < n; i++) {
       const front = B.wheels[i].front;
       c.setWheelSteering(i, front ? this.steer : 0);
       c.setWheelEngineForce(i, front ? 0 : engine);
@@ -133,7 +116,7 @@ export class RapierCar {
     if (RIDE.patch > 0 && this.terrain) this.dampers(lv, av, com, dt);
     const downforce = rideOf(B, 'downforce');
     if (downforce && this.wheelsInContact()) {
-      const r = this.body.rotation(), up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+      const up = rotate(vec3(0, 1, 0), this.body.rotation());
       const f = -downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
       this.body.applyImpulse({ x: up.x * f, y: up.y * f, z: up.z * f }, true);
     }
@@ -146,12 +129,12 @@ export class RapierCar {
   // leaning into its turn as far as its sideways acceleration (speed x yaw rate) asks; a wheelie under full throttle
   // from low speed. In the air: airAssist rights it, the lean eases off.
   private bike(input: CarInput, v: number, dt: number) {
-    const b = this.body, r = b.rotation(), q = new THREE.Quaternion(r.x, r.y, r.z, r.w), w = b.angvel();
+    const b = this.body, q = b.rotation(), w = b.angvel();
     const ground = this.wheelsInContact() >= 2;
     if (ground) {
-      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q), f = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+      const up = rotate(vec3(0, 1, 0), q), f = rotate(vec3(0, 0, 1), q);
       // (the roll error: about the forward axis, the turn that brings its up to the world's)
-      const err = up.clone().cross(new THREE.Vector3(0, 1, 0)).dot(f), wf = w.x * f.x + w.y * f.y + w.z * f.z;
+      const err = dot(cross(vec3(), up, vec3(0, 1, 0)), f), wf = w.x * f.x + w.y * f.y + w.z * f.z;
       const d = (err * 10 - wf) * Math.min(1, dt * 25);
       b.setAngvel({ x: w.x + f.x * d, y: w.y + f.y * d, z: w.z + f.z * d }, true);
     }
@@ -177,7 +160,7 @@ export class RapierCar {
   // as Rapier applies it. lv, av, com: the body's velocities and centre of mass before updateVehicle (what it used).
   private dampers(lv: RAPIER.Vector, av: RAPIER.Vector, com: RAPIER.Vector, dt: number) {
     const c = this.controller, b = this.body, m = b.mass(), t = this.terrain!, o = t.origin, H = RIDE.patch;
-    const r = b.rotation(), down = new THREE.Vector3(0, -1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+    const down = rotate(vec3(0, -1, 0), b.rotation());
     const compression = rideOf(this.build, 'compression'), relaxation = rideOf(this.build, 'relaxation'), stiffness = rideOf(this.build, 'stiffness');
     for (let i = 0; i < this.build.wheels.length; i++) {
       if (!c.wheelIsInContact(i)) continue;
@@ -277,7 +260,7 @@ export class RapierCar {
       // from rest, against the riser: the way the input pushes
       const dir = input.gas > 0 ? 1 : input.brake > 0 ? -1 : 0;
       if (!dir) return;
-      const f = new THREE.Vector3(0, 0, dir).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+      const f = rotate(vec3(0, 0, dir), r);
       dx = f.x; dz = f.z; hs = 0;
     }
     const d = Math.hypot(dx, dz);
@@ -286,7 +269,7 @@ export class RapierCar {
     const reach = hs ? WEDGE_LEN - (this.half.z - this.build.wheels[0].z) + 0.3 + Math.min(hs, 25) * dt * 3 : 1;
     // the ground under the car: its lowest wheel contact
     let low = Infinity;
-    for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) low = Math.min(low, this.controller.wheelContactPoint(i)!.y);
+    for (let i = 0, n = this.controller.numWheels(); i < n; i++) if (this.controller.wheelIsInContact(i)) low = Math.min(low, this.controller.wheelContactPoint(i)!.y);
     if (low === Infinity) low = p.y - 1.3; // (no wheel down: the chassis' belly is on something about here)
     if (!this.stepUp(p, r, dx, dz, reach, low) && hs) this.stepDown(p, dx, dz, reach, low);
   }
@@ -410,10 +393,9 @@ export class RapierCar {
   // In the air: roll and pitch damped and gently righted (a car that flips on landing ends no drive, but it shouldn't
   // somersault off every ledge)
   private airAssist(dt: number) {
-    const b = this.body, r = b.rotation(), w = b.angvel();
-    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+    const b = this.body, w = b.angvel(), up = rotate(vec3(0, 1, 0), b.rotation());
     // the axis that would right it, scaled by how far off it is
-    const axis = up.clone().cross(new THREE.Vector3(0, 1, 0));
+    const axis = cross(vec3(), up, vec3(0, 1, 0));
     const k = 1 - Math.exp(-2.5 * dt), right = 3;
     b.setAngvel({ x: w.x + (axis.x * right - w.x) * k, y: w.y, z: w.z + (axis.z * right - w.z) * k }, true);
   }
@@ -441,7 +423,7 @@ export class RapierCar {
     // the heading wanted: the velocity with its part into the wall taken out
     const into = v.x * nx + v.z * nz;
     const tx = v.x - nx * Math.max(0, into), tz = v.z - nz * Math.max(0, into);
-    const r = b.rotation(), q = new THREE.Quaternion(r.x, r.y, r.z, r.w), f = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    const f = rotate(vec3(0, 0, 1), b.rotation());
     const sign = f.x * tx + f.z * tz >= 0 ? 1 : -1;
     const want = Math.atan2(tx * sign, tz * sign), have = Math.atan2(f.x, f.z);
     let d = want - have;
@@ -450,30 +432,19 @@ export class RapierCar {
     b.setAngvel({ x: w.x, y: w.y + (d * 6 - w.y) * Math.min(1, dt * 10), z: w.z }, true);
   }
 
-  // wheel meshes in chassis space, from the controller's state (render after the body's pose is set)
-  syncWheels() {
-    const c = this.controller;
-    for (let i = 0; i < 4; i++) {
-      const w = this.wheels[i], len = c.wheelSuspensionLength(i) ?? REST;
-      const p = this.build.wheels[i];
-      w.position.set(p.x, -0.2 - len, p.z);
-      w.rotation.set(c.wheelRotation(i) ?? 0, c.wheelSteering(i) ?? 0, 0, 'YXZ');
-    }
-  }
-
   // The ride height: the wheels' mount (0.2 under the origin), the touching wheels' mean suspension length and the
   // wheel's radius; with no wheel down, the build's ride. Eased (~50 ms) so a wheel lifting moves it smoothly.
   private updateRide(dt: number) {
     const c = this.controller;
     let n = 0, len = 0;
-    for (let i = 0; i < 4; i++) if (c.wheelIsInContact(i)) { n++; len += c.wheelSuspensionLength(i) ?? REST; }
+    for (let i = 0; i < c.numWheels(); i++) if (c.wheelIsInContact(i)) { n++; len += c.wheelSuspensionLength(i) ?? REST; }
     const target = n ? 0.2 + len / n + WHEEL_R : this.build.ride;
     this.ride += (target - this.ride) * (1 - Math.exp(-dt / 0.05));
   }
 
   wheelsInContact() {
     let n = 0;
-    for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) n++;
+    for (let i = 0, k = this.controller.numWheels(); i < k; i++) if (this.controller.wheelIsInContact(i)) n++;
     return n;
   }
 
@@ -482,6 +453,5 @@ export class RapierCar {
     this.wedges.length = 0;
     world.removeVehicleController(this.controller);
     world.removeRigidBody(this.body);
-    this.mesh.removeFromParent();
   }
 }
