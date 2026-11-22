@@ -11,7 +11,11 @@ the cars or railings on it), carriageway_mask, way_ends (a set of ways' end node
 Four of the passes are one idea -- the terrain model dropped under a structure; lift to the street or the surface model
 -- for four ways to tell the structure: a short road tunnel under streets (tunnel), a passage under a street on a
 short bridge (passage), a carriageway the laser saw no ground under (sag), a bridge's end (bridgehead). The sag lift
-needs data/laser.npz (its ground returns); without it, it does nothing.
+needs data/laser.npz (its ground returns); without it, it does nothing. The sag lift does not subsume the other two
+(the terrain passes over the fixtures with and without them, 2026-11-22): without the tunnel lift 48 cells of the
+b85 fixture stay up to 3 m lower (project col -1012..-978, row 435..486); without the passage lift 27-120 cells per
+fixture (haissengasse: the B 8 over the Donauradweg, road-defects.md #1; gaissa, kachlet, altstadt) stay up to 4 m
+lower. So all four stay.
 """
 import numpy as np
 from scipy import ndimage
