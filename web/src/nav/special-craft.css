@@ -1,0 +1,4 @@
+#bar .special-craft .craft-telemetry { font-variant-numeric: tabular-nums; font-weight: 600; }
+#bar .special-craft .mode-status:empty { display: none; }
+#bar .special-craft .mode-help { white-space: normal; }
+#bar.folded .mode-tools .special-craft.mode-active { flex: 1 1 auto; max-width: 100%; }

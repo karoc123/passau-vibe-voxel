@@ -30,6 +30,7 @@ const KEYS: ReadonlySet<string> = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'Arro
 const THROTTLE_RATE = 0.5; // /s the lever moves while a key is held (0 to full in 2 s)
 const INVERT_KEY = 'plane-invert-v1';
 const ENTER_MS = 600;
+const MIN_GLIDER_AGL = 35;
 const CRASH_TINT_MS = 1200;
 const Z = new THREE.Vector3(0, 0, 1);
 
@@ -40,11 +41,11 @@ type AircraftId = 'floatplane' | 'jet';
 const AIRCRAFT: Record<AircraftId, Aircraft> = {
   floatplane: { cfg: PLANE, label: 'plane', model: () => new PlaneModel(PLANE.FLOAT_H),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
-    help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · T last safe point · Esc exit',
+    help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle. Pinch on the right to zoom.'] },
   jet: { cfg: JET, label: 'jet', model: () => new JetModel(),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
-    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · T last safe point · Esc exit',
+    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
 };
 
@@ -71,6 +72,8 @@ export class PlaneMode implements PlayerCraft {
   private readonly enterButton: HTMLButtonElement;
   private readonly enterWater: HTMLButtonElement;
   private readonly enterJet: HTMLButtonElement;
+  private readonly deployButton: HTMLButtonElement;
+  private readonly deployGlider: CraftContext['deployGlider'];
   private readonly telemetry: HTMLDivElement;
   private readonly help: HTMLDivElement;
   private readonly invertBox: HTMLInputElement;
@@ -92,12 +95,14 @@ export class PlaneMode implements PlayerCraft {
   private readonly bank = new THREE.Quaternion();
   private nextPanel = 0;
 
-  constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
+  constructor({ nav, camera, target, meta, host, canvas, env, deployGlider }: CraftContext) {
     this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
+    this.deployGlider = deployGlider;
     const P = this.panel = new ModePanel(host, 'plane', 'Plane');
     this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
     this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
     this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));
+    this.deployButton = P.button('Deploy paraglider', () => this.jump());
     this.telemetry = P.line('telemetry');
     this.help = P.help('', '');
     this.rig = new ChaseRig(camera);
@@ -132,6 +137,7 @@ export class PlaneMode implements PlayerCraft {
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.backToSafe(); }
+      else if (e.code === 'KeyG') { if (!e.repeat) this.jump(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
@@ -255,6 +261,22 @@ export class PlaneMode implements PlayerCraft {
     return best;
   }
 
+  private jump() {
+    if (this.phase !== 'flying' || this.flight.state !== 'air') return;
+    const { p, heading } = this.flight;
+    const surface = this.collision.surface(p.x, p.z);
+    const water = this.world.water(p.x, p.z);
+    if (!surface || water === null) {
+      this.panel.say('Wait for the collision tiles to load.', 2500);
+      return;
+    }
+    if (p.y - Math.max(surface.top, water) < MIN_GLIDER_AGL) {
+      this.panel.say(`Climb to at least ${MIN_GLIDER_AGL} m above the surface to deploy.`, 2500);
+      return;
+    }
+    this.deployGlider(this, { x: p.x, y: p.y - 3, z: p.z, h: heading });
+  }
+
   private backToSafe() {
     if (this.phase !== 'flying') return;
     this.flight.respawn(this.world);
@@ -372,6 +394,7 @@ export class PlaneMode implements PlayerCraft {
     this.enterButton.disabled = !active && !canStart;
     this.enterWater.hidden = this.enterJet.hidden = active;
     this.enterJet.disabled = !canStart;
+    this.deployButton.hidden = !on || f.state !== 'air';
     this.enterWater.disabled = !canStart || !this.env.river()?.length;
     const pct = Math.round(this.throttle * 100);
     (this.slider.querySelector('.fill') as HTMLElement).style.height = `${pct}%`;
