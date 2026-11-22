@@ -333,7 +333,8 @@ def defect_checks(ws, fx):
     """Check patches from road-defects.md and the fixtures' documented fixes on the built map.
 
     Boxes are half-open [x0, z0, x1, z1] on the project grid. Road and water heights are metres above
-    the map base. Deck height is clearance above the water. Every column must have the expected surface.
+    the map base. Deck height is clearance above the water. Dry: no water in the box (land the rivers from the
+    terrain model must not take). Every column must have the expected surface.
     """
     checks = json.loads((SCRIPTS / "fixtures/road-defects.json").read_text()).get(fx.name, [])
     if not checks:
@@ -367,6 +368,8 @@ def defect_checks(ws, fx):
                 height, present, top = d - g, water[r, c] & np.isfinite(d), np.rint(np.nan_to_num(d))
             elif kind == "water":
                 height, present, top = g, water[r, c], g
+            elif kind == "dry":  # land, no water: ground of any height
+                height, present, top = g, ~water[r, c], g
             else:
                 raise Failed(f"{check['name']}: unknown surface {kind!r}")
             # A raster can mark a surface even if the finished volume has a hole in it.

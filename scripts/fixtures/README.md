@@ -7,7 +7,7 @@ from the repository root. Each fixture builds under `data/check/<fixture>/base/`
 [road-defects.json](road-defects.json) defines the local checks for [the fixed road defects](../../docs/plans/road-defects.md)
 and the nearby fixture features. Each box covers a half-open rectangle in project
 coordinates, ordered `[x0, z0, x1, z1]`. Road and water heights use the map base.
-Deck heights measure clearance above the water.
+Deck heights measure clearance above the water. A `dry` box must hold no water.
 
 ## Baseline results
 

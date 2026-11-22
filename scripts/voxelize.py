@@ -448,16 +448,29 @@ TN_KEY = {("Wald", ""): "forest", ("Gehölz", ""): "copse", ("Landwirtschaft", "
           ("Sport-, Freizeit- und Erholungsfläche", "Kleingarten"): "park",
           ("Sport-, Freizeit- und Erholungsfläche", "Erholungsfläche"): "park",
           ("Unland/Vegetationslose Fläche", ""): "waste", ("Platz", "Parkplatz"): "parking", ("Friedhof", ""): "cemetery"}
+# Its water parcels gate the rivers taken from the terrain model (# water below): where they are, not their shape. The
+# parcels are not drawn as water. Of the ~200 000 parcel cells the build of 2026-11 left land (whole map): flowing water
+# 176 000 -- 63 000 the strip within 3 m of the drawn water (the parcel line is not the bank), 2 300 under decks and
+# buildings, 110 000 the streams (parcels 3-10 m wide falling 6-80 m along their course: no flat body at one level,
+# drawn as water they would stand in steps; right as land); standing water 23 000, ponds of 30-60 m OSM does not map
+# (each would need a level of its own: not done); harbour basins 3 400, nearly all the bank strip
+TN_WATER = ("Fließgewässer", "Stehendes Gewässer", "Hafenbecken")
 tn = np.zeros((D, W), np.uint16)
+tn_water = None  # (None: no cadastre, no gate)
 try:
     import alkis_tn
     from shapely.affinity import affine_transform
     from aoi import EU, EV, I0, J0, world_bounds
     _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1] - C0, J0 - CX * EV[0] - CY * EV[1] - R0]  # (to the region's cells)
-    _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in alkis_tn.read(world_bounds(5))
-           if (n_, b_) in TN_KEY]
+    _tnr = alkis_tn.read(world_bounds(5))
+    _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in _tnr if (n_, b_) in TN_KEY]
     burn(tn, _tn)
     note("ALKIS land use cells:", {k: int((tn == v).sum()) for k, v in TN.items()})
+    tn_water = np.zeros((D, W), np.uint16)
+    burn(tn_water, [(affine_transform(g_, _tm), 1) for n_, _, g_ in _tnr if n_ in TN_WATER])
+    tn_water = tn_water > 0
+    note("ALKIS water cells:", int(tn_water.sum()))
+    del _tnr
 except FileNotFoundError:
     note("no ALKIS land use (data/raw/tn_09262.zip, tn_09275.zip): open land by the ortho alone")
 # farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
@@ -729,6 +742,12 @@ _lv64 = np.broadcast_to(RIVER_LV, (D, W))
 RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
 _w0 = gcol == C["water"]
 _near_lv = np.abs(dtm - RIVER_LV) < 0.8
+# the gate: a river from the terrain model lies in or within WATER_GATE of mapped water (an ALKIS water parcel or OSM's
+# water). Nothing else ties a flat body at the river's level to a river: above the Kachlet dam the villages behind
+# the dikes (Heining, Schalding) lie at the pool's 299.75 m, and their streets and gardens became river with the houses
+# standing in it. The cadastre decides where, the terrain still draws the bank
+WATER_GATE = 8  # m
+_wgate = (ndimage.distance_transform_edt(~(_w0 | tn_water)) <= WATER_GATE) if tn_water is not None else np.ones((D, W), bool)
 _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
 # the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
 # one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
@@ -757,6 +776,7 @@ if _pool.min() < _pool.max():
     _pool = _best
     del _best, _bestd, _pw, _pm, _d, _i, _j, _dl, _take
 _wat = np.zeros((D, W), bool)
+_wgated = np.zeros((D, W), bool)  # (terrain water the gate dropped, for the report)
 _wlev = np.full((D, W), -1, np.int32)
 # water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
 # the bodies' medians are taken without it, and its own level after
@@ -807,7 +827,8 @@ for _b in region.blocks(64):
     _fl, _fn = ndimage.label(_flat[_ws])
     _big = (np.bincount(_fl.ravel()) >= 2000)[_fl] & (_fl > 0)
     _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
-    _ww = (_w0[_ws] | _big) & ~_lockm[_ws]
+    _wgated[_b[0]:_b[1], _b[2]:_b[3]] = (_big & ~_wgate[_ws] & ~_w0[_ws] & ~_lockm[_ws])[_bs]
+    _ww = (_w0[_ws] | (_big & _wgate[_ws])) & ~_lockm[_ws]
     _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
     _bl, _bn = _bodies(_ww, _pool[_ws], _pool0[_ws])
     _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
@@ -821,6 +842,11 @@ for _b in region.blocks(64):
             _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
         _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
 note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
+from aoi import CORE as _RCORE  # noqa: E402
+_core_s = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
+report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gated=tn_water is not None)
+note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
+del _wgated
 gcol[_wat | _lockm] = C["water"]
 # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
 # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay) -- but under a bridge way, a low
@@ -1521,6 +1547,16 @@ topi[_pit] = _cl[_pit]
 note("roof pits filled:", int(_pit.sum()))
 boti = np.round(bot_rel).astype(np.int32)
 bmask &= topi >= 2
+# buildings standing in water: near none but the Kachlet plant's and the locks' (Q1's gate, # water)
+_biw = np.zeros((D, W), bool)
+_biw[_core_s] = (bmask & (gcol == C["water"]))[_core_s]
+report["counters"]["water_gate"]["buildings_in_water"] = int(_biw.sum())
+_l, _n = ndimage.label(_biw)
+_sz = np.bincount(_l.ravel())[1:]
+note("building cells standing in water:", int(_biw.sum()), "the largest (cells, project col, row):",
+     [(int(_sz[i]), *(int(v) for v in np.round(np.array(ndimage.center_of_mass(_biw, _l, i + 1))[::-1] + (C0, R0))))
+      for i in np.argsort(-_sz)[:5]])
+del _biw, _l, _n, _sz
 
 
 # colours/materials per feature

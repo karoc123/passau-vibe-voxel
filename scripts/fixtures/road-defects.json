@@ -67,6 +67,12 @@
         {"kind": "water", "box": [-2281, 280, -2274, 286], "min_m": 13, "max_m": 13},
         {"kind": "water", "box": [-2248, 297, -2243, 303], "min_m": 5, "max_m": 5}
       ]
+    },
+    {
+      "name": "Heining behind the dike is land, not the Kachlet pool (handoff Q1)",
+      "patches": [
+        {"kind": "dry", "box": [-2952, 61, -2936, 77]}
+      ]
     }
   ],
   "schalding": [
@@ -74,6 +80,13 @@
       "name": "A 3 approach to the Donaubrücke Schalding",
       "patches": [
         {"kind": "road", "box": [-5172, -1925, -5167, -1918], "min_m": 58}
+      ]
+    },
+    {
+      "name": "Schalding behind the dike is land, not the Kachlet pool (handoff Q1)",
+      "patches": [
+        {"kind": "dry", "box": [-5668, -1383, -5656, -1371]},
+        {"kind": "dry", "box": [-5524, -1384, -5508, -1368]}
       ]
     }
   ]
