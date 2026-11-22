@@ -43,7 +43,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
-| F6 | Trains have hitboxes | S–M | **Ready** |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
@@ -145,20 +144,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
   [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 
-### F6. Trains have hitboxes (S–M)
-
-- **Waits for:** nothing. F4 landed the shared Rapier world and F5 landed the fixed-step train sim.
-- **Today:** the player drives through trains. The shared Rapier world (`physics/rapier/life-phys.ts`) handles road
-  vehicles. `sim/train-traffic.ts` exposes coach poses through `TrainTraffic.coaches()`. Walking, the boat and the
-  planes collide with voxels only (`nav/voxel-collision.ts`), so they pass through trains too.
-- **Do:** the train sim publishes its coaches as boxes (entity id, pose, 2.9 × 4 × 20 m) in the tick's snapshot
-  ([ADR 0007](../adr/0007-player-control-in-world-sim.md)). In the shared world each coach near a player is a
-  kinematic body that stays on its track on impact.
-- **Do:** a hit at speed is an `impact` for the car (a crash for a bike), as a wall is.
-- **Not in scope:** trains stopping for a car on the track, and train collisions for walkers, boats and planes.
-  Note them as open.
-- **Gates:** `rapier-car` and `vehicles` stay green; one new scenario: a car at 50 km/h into a standing coach stops.
-
 ### F7. Motorbike handling (M)
 
 - **Waits for:** nothing. It is in `physics/rapier/car.ts` and `sim/vehicles.ts`, not in the input shells.
@@ -186,7 +171,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Feel:** "it should be fun". Judge it in the browser on a real street with traffic.
 - **Gates:** `vehicles` 34/34 plus new checks in `tools/vehicles.mjs`: `bike_keys` (steer 1 held from 0 at 30, 60
   and 100 km/h: upright, turns, the wheel angle takes 0.3 s or more to reach its lock), `bike_scrape` (a wall at
-  10° at 50 km/h: stays on), `bike_wall` unchanged (head-on: comes off). `rapier-car` 42/42.
+  10° at 50 km/h: stays on), `bike_wall` unchanged (head-on: comes off). `rapier-car` 45/45.
 
 ### F8. Water surface from the world, river slider removed (M–L)
 
