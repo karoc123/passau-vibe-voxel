@@ -309,7 +309,7 @@ export class FpvMode {
     this.panel.classList.toggle('mode-active', active);
     this.details.hidden = !active;
     this.enterExit.textContent = active ? 'Exit FPV' : 'FPV Acro';
-    this.enterExit.disabled = !active && this.nav.mode !== 'orbit';
+    this.enterExit.disabled = !active && !this.nav.canStartCraft;
     this.armRadio.hidden = !canArm;
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;

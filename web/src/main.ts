@@ -464,7 +464,7 @@ async function boot() {
   drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
   boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, () => daylight.night, () => flood?.level ?? 0);
   plane = new PlaneMode(nav, camera, controls.target, meta, modeTools, renderer.domElement,
-    { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => flood?.info?.river ?? null, park: () => drive?.park() });
+    { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => flood?.info?.river ?? null });
 }
 
 // The traffic's cars near player edits as Rapier bodies (physics/rapier/life-phys.ts, docs/plans/life-physics.md):

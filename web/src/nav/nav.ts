@@ -481,10 +481,8 @@ export class Nav {
     if (this.mode === 'pedestrian') { this.keys.clear(); this.shift = false; }
     this.mode = 'orbit';
     this.pedestrian?.hide();
-    this.ride = null;
-    this.release();
+    this.leaveRide();
     this.marker.visible = false;
-    if (this.life) this.life.keep = null;
     this.controls.enabled = true;
     if (this.orbitFov) this.setFov(this.orbitFov);
     this.controls.target.copy(this.camera.position).add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(30));
@@ -493,10 +491,19 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
-  // Switch from the map camera to a craft (the FPV drone, the boat, the plane).
+  get canStartCraft() {
+    return this.world !== null && !this.walkPending && (this.mode === 'orbit' || this.mode === 'ride');
+  }
+
+  // Switch to a craft from the map or a ride, keeping the current view for its spawn.
   startCraft(mode: Craft) {
-    if (!this.world || this.walkPending || this.mode !== 'orbit') return false;
+    if (!this.canStartCraft) return false;
     this.rememberSky();
+    if (this.mode === 'ride') {
+      // DriveMode parks when its ride ends, before the craft updates on the next frame.
+      this.leaveRide();
+      this.landing = null;
+    }
     this.cancelFly();
     this.keys.clear();
     this.turned = false;
@@ -610,12 +617,10 @@ export class Nav {
     this.walkPos.y = this.feet + EYE;
     this.goal = null;
     this.marker.visible = false;
-    if (this.life) this.life.keep = null;
     this.landing = this.transition(opts.ms ?? 900);
     if (opts.thirdPerson) this.enterPedestrian();
     else { this.mode = 'walk'; this.pedestrian?.hide(); this.releasePedestrianMouse(); }
-    this.ride = null;
-    this.release();
+    this.leaveRide();
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
@@ -635,6 +640,14 @@ export class Nav {
     this.marker.visible = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, this.ride);
+  }
+
+  private leaveRide() {
+    this.ride = null;
+    this.rideY = null;
+    this.jumpAsked = false;
+    this.release();
+    if (this.life) this.life.keep = null;
   }
 
   // off the person walked: back to the crowd's own walk (sim/traffic.ts no longer keeps them), and following them

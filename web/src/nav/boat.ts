@@ -112,10 +112,10 @@ export class BoatMode {
 
   get pose() { return this.phase === 'on' ? this.motion.pose : null; }
 
-  // into the boat (from the map), or out of it
+  // into the boat (from the map or a ride), or out of it
   toggle() {
     if (this.phase !== 'off') { this.nav.flyUp(); return; }
-    if (this.nav.mode !== 'orbit' || !this.nav.startCraft('boat')) return;
+    if (!this.nav.startCraft('boat')) return;
     this.loadRiver();
     this.start = null;
     this.phase = 'finding';
@@ -281,7 +281,7 @@ export class BoatMode {
     this.panel.classList.toggle('mode-active', active);
     const label = active ? 'Exit boat' : 'Boat';
     if (this.action.textContent !== label) this.action.textContent = label;
-    this.action.disabled = !active && this.nav.mode !== 'orbit';
+    this.action.disabled = !active && !this.nav.canStartCraft;
     this.details.hidden = !active && performance.now() >= this.noteUntil;
     this.speed.hidden = this.help.hidden = !on;
     const message = this.phase === 'finding' ? 'Looking for water…' : on && this.motion.waiting ? 'Loading collision tiles…' :

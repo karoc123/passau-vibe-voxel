@@ -50,8 +50,6 @@ export interface PlaneEnv {
   night: () => number;
   /** the river's cells (flood.json river: x, z pairs), for a start on the water */
   river: () => number[] | null;
-  /** park the car if one is driven (drive.ts) */
-  park: () => void;
 }
 
 function button(label: string, run: () => void, parent: HTMLElement) {
@@ -190,9 +188,8 @@ export class PlaneMode {
 
   private startAt(s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) {
     if (this.nav.mode !== 'plane') {
-      this.use(AIRCRAFT[s.type ?? 'floatplane']);
-      this.env.park();
       if (!this.nav.startCraft('plane')) return false;
+      this.use(AIRCRAFT[s.type ?? 'floatplane']);
       this.enterFrom = { p: this.camera.position.clone(), q: this.camera.quaternion.clone(), fov: this.camera.fov, t0: performance.now() };
       this.savedFov = this.camera.fov;
     }
@@ -415,10 +412,11 @@ export class PlaneMode {
     this.details.hidden = !active;
     this.help.hidden = this.phase !== 'flying';
     this.enter.textContent = active ? `Exit ${this.type.label}` : 'Plane';
-    this.enter.disabled = !active && this.nav.mode !== 'orbit';
+    const canStart = this.nav.canStartCraft;
+    this.enter.disabled = !active && !canStart;
     this.enterWater.hidden = this.enterJet.hidden = active;
-    this.enterJet.disabled = this.nav.mode !== 'orbit';
-    this.enterWater.disabled = this.nav.mode !== 'orbit' || !this.env.river()?.length;
+    this.enterJet.disabled = !canStart;
+    this.enterWater.disabled = !canStart || !this.env.river()?.length;
     const pct = Math.round(this.throttle * 100);
     (this.slider.querySelector('.fill') as HTMLElement).style.height = `${pct}%`;
     (this.slider.querySelector('.knob') as HTMLElement).style.bottom = `calc(${this.throttle} * (100% - 24px))`;

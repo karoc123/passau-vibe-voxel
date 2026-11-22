@@ -1,6 +1,6 @@
 #bar .drive-speed { font-variant-numeric: tabular-nums; font-weight: 600; }
 #bar .drive-status:empty { display: none; }
-body.driving :is(#hud, .fpv-mode) { display: none; }
+body.driving #hud { display: none; }
 
 #bar .drive-help-touch { display: none; }
 @media (pointer: coarse) {
