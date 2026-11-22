@@ -38,9 +38,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
-| R4 | Craft interface and `nav.ts` split | L | Ready to merge (`r4`) |
-| R5 | Check harnesses out of `src/` | M | Waits for R4 |
-| F2 | Walk to a vehicle and get in | M | Waits for R4 |
+| R5 | Check harnesses out of `src/` | M | **Ready** |
+| F2 | Walk to a vehicle and get in | M | **Ready** |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
 | Q3 | Underpass stairwells never cut a carriageway or a track | S–M | **Ready** |
 | Q4 | What passes under a bridge stays open | M | **Ready** |
@@ -52,25 +51,16 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q2 | A carriageway over water is a bridge | M | **Ready** (re-measure its list after the data rebuild Q1 needs) |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
-| F8 | Water surface from the world, river slider removed | M–L | **Ready** (not in parallel with R4: same boat and plane shells) |
+| F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
 | F10 | Minimap on M, and the collection point for map features | M | Waits for F9 |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | Waits for Q2–Q4, Q8, Q9 |
 
 ## Packages
 
-### R4. Craft interface and `nav.ts` split (code-health 10, 19 first point = N3, L)
-
-- **Waits for:** nothing (R3 landed: `nav/input.ts`, `nav/chase-rig.ts`, `nav/mode-panel.ts`, `core/safe-trail.ts`).
-- **Do:** a `PlayerCraft` interface (`enter`, `leave`, `update`, `hudText`), a registry in `main.ts`, and Nav calling
-  `leave()` instead of every craft polling `nav.mode`.
-- **Do:** reduce the 83 literal mode comparisons. Then split `class Nav` into a mode machine, orbit input, a foot
-  controller and the ride camera.
-- **Test:** adding a new craft (e.g. a helicopter) should afterwards need one new file plus one registry line.
-
 ### R5. Check harnesses out of `src/` (code-health 16 = T2, M)
 
-- **Waits for:** R4 (it moves the same shells).
+- **Waits for:** nothing (R4 landed: `nav/craft.ts` `PlayerCraft`, `CRAFTS` in `main.ts`, `nav/orbit.ts`, `nav/foot.ts`).
 - **Do:** move `nav/*-checks.ts`, `plane-real.ts` and `physics/rapier/*scenarios.ts` to `web/checks/`, with one
   synthetic-world fixture and one result type.
 - **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
@@ -324,7 +314,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F2. Walk to a specific vehicle and get in (M)
 
-- **Waits for:** R4.
+- **Waits for:** nothing. R4 landed: enter and leave go through `PlayerCraft` (`nav/craft.ts`) and `nav.leaveCraft()`; walking is `nav/foot.ts`.
 - **Do:** when walking, a key or tap near a parked or moving vehicle (car, bus, motorbike, boat at the bank, plane on
   the water) enters it. Leaving puts the walker beside it, and the vehicle stays where it was left.
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
