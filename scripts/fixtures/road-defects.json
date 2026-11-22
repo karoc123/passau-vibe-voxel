@@ -44,6 +44,15 @@
       ]
     }
   ],
+  "heining": [
+    {
+      "name": "B 8 over the Baderbachl mouth, a road over water with no bridge tag (handoff Q2)",
+      "patches": [
+        {"kind": "road", "box": [-3048, -88, -3046, -86], "min_m": 14},
+        {"kind": "road", "box": [-3046, -86, -3044, -84], "min_m": 14}
+      ]
+    }
+  ],
   "hals": [
     {
       "name": "Ilz levels on either side of the Hals weir",

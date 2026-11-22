@@ -726,6 +726,7 @@ burn(gcol, rails, all_touched=True)
 # water
 water = [(geom, C["granite_d"] if t.get("fountain") == "splash_pad" else C["water"]) for oid, typ, t, geom in osm.areas
          if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not underground(t)]
+_gcol_dry = gcol.copy()  # (the ways' colours under the water: culvert.carry gives them back)
 burn(gcol, water)
 # Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
 # terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
@@ -848,6 +849,21 @@ report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gat
 note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
 del _wgated
 gcol[_wat | _lockm] = C["water"]
+# a way over water with no bridge tag, where the surface model holds its banks' level across: carried over on ground
+# (a culvert; scripts/culvert.py, handoff Q2)
+import culvert  # noqa: E402
+_ww0, _ = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
+_cv, _cvl, _cvd = culvert.carry(osm, (gcol == C["water"]) & ~_lockm, g, GCTX.dsm_low(), np.where(_wlev >= 0, _wlev, g),
+                                cells_of)
+gcol[_cv], g[_cv], SAG_SRC[_cv] = _gcol_dry[_cv], _cvl[_cv], _cvl[_cv]
+_ww, _ww_hard = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
+# (per way, metres of its centreline in the core: on water before the rule, carried over by it, left on water; the
+# carriageways and railways of those left: check.py verify)
+report["counters"]["way_water"] = dict(carried={k_: m_ - _ww.get(k_, 0) for k_, m_ in _ww0.items() if m_ > _ww.get(k_, 0)},
+                                       left=_ww, hard=_ww_hard)
+note("ways over water with no bridge tag carried over (way, metres):", _cvd, "; cells", int(_cv.sum()),
+     "; ways left on water (way: metres in the core):", _ww)
+del _gcol_dry, _cv, _cvl, _ww0
 # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
 # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay) -- but under a bridge way, a low
 # deck stays too: the Gaißabrücke (OSM way 24857080, project col -4741, row -1612) stands 3.2 m over the Gaißa, and

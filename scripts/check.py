@@ -271,6 +271,7 @@ CAPS = dict(road_share=0.95, rough_p99_cm=12.0, mismatch_share=0.01)
 MATCH_SHARE = 0.40    # matched OSM outlines moved onto their LoD2 footprints (0.493)
 SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
+WET_MAX = 3           # m: a carriageway's or a railway's centreline on water (culvert.py; 9 m on the B 8 before it)
 
 
 M_LEAF, M_LAMP, M_CAR = 3, 5, 11
@@ -462,6 +463,25 @@ def verify(fx, jobs, ws=None):
         if tot["steps"] or tot["blocked"]:
             bad.append(f"ways under bridges: {tot['steps']} with a ground step, {tot['blocked']} blocked "
                        f"(way, col, row, step m, blocked m): {worst[:5]}")
+    # a way over water with no bridge tag (scripts/culvert.py, voxelize.py's way_water counter): metres of centreline
+    # on water per way; a carriageway or a railway with WET_MAX m or more left on water fails (paths are listed)
+    ww = [r.get("way_water") for r in regions]
+    if any(w is None for w in ww):
+        bad.append("ways over water: no way_water counter in the report (culvert.py)")
+    else:
+        per = {k: {} for k in ("carried", "left", "hard")}
+        for w in ww:
+            for k in per:
+                for oid, m in w[k].items():
+                    per[k][oid] = per[k].get(oid, 0) + m
+        left = sorted(((m, oid) for oid, m in per["left"].items()), reverse=True)
+        hard = sorted(((m, oid) for oid, m in per["hard"].items() if m >= WET_MAX), reverse=True)
+        print(f"  ways over water with no bridge tag: {sum(per['carried'].values())} m carried over on "
+              f"{len(per['carried'])} ways; left on water (m, way): {left[:8]}; carriageways and railways with "
+              f"{WET_MAX} m or more {len(hard)} (0)")
+        if hard:
+            bad.append(f"ways over water: {len(hard)} carriageways or railways with {WET_MAX} m or more of centreline "
+                       f"on water (m, way): {hard[:5]}")
     bad.extend(defect_checks(ws, fx))
     return bad
 
