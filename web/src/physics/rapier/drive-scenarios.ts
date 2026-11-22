@@ -5,7 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { Vector3 } from 'three';
 import { DriveSession, CRASH_MS, SINK_MS, type DriveLife, type Note } from '../../nav/drive-session';
 import type { Car, Person } from '../../sim/types';
-import type { CarInput } from './car';
+import type { CarBuild, CarInput } from './car';
 import { buildFor, RapierDrive } from './drive-world';
 import { synthMap, WATER, type Col, type Outcome } from './scenarios';
 
@@ -27,10 +27,11 @@ class StandInLife implements DriveLife {
   clearFallen() {}
 }
 
-interface Drive { session: DriveSession; life: StandInLife; car: Car; notes: (Note & { t: number })[]; now: number }
+export interface Drive { session: DriveSession; life: StandInLife; car: Car; notes: (Note & { t: number })[]; now: number }
 
-// the car (at x, z on the ground there, heading +z at `kmh`) taken over in a world of synthMap(2, col)
-function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], people: Person[] = []): Drive {
+// the car (at x, z on the ground there, heading +z at `kmh`) taken over in a world of synthMap(2, col), driven as
+// `build` (tools/vehicles.mjs: the catalog's types)
+export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], people: Person[] = [], build?: CarBuild): Drive {
   const map = synthMap(2, col);
   const rap = new RapierDrive(map.meta, { x, z }, { budgetMs: 1e9, load: () => Promise.reject(null) });
   for (const t of map.tiles) rap.terrain.setTile(t.tx, t.tz, t.tile);
@@ -39,24 +40,24 @@ function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh:
   car.v = kmh / 3.6;
   const life = new StandInLife([car, ...others], people);
   const now = 1e4;
-  const session = new DriveSession(life, car, rap, buildFor(false, car.len), { x, y, z, h: 0, pitch: 0, roll: 0 }, now);
+  const session = new DriveSession(life, car, rap, build ?? buildFor(false, car.len), { x, y, z, h: 0, pitch: 0, roll: 0 }, now);
   return { session, life, car, notes: [], now };
 }
 
 // `seconds` of frames with input(d) (as the drive mode's update: the session's frame, then the Car drawn), or until
 // until(d)
-function run(d: Drive, seconds: number, input: (d: Drive) => CarInput, until?: (d: Drive) => boolean) {
+export function run(d: Drive, seconds: number, input: (d: Drive) => CarInput, until?: (d: Drive) => boolean) {
   for (let i = 0; i < seconds * 60; i++) {
     d.now += FRAME_MS;
     for (const n of d.session.update(FRAME_MS / 1000, input(d), d.now)) d.notes.push({ ...n, t: d.now });
-    d.session.present();
+    d.session.present(d.now);
     if (until?.(d)) break;
   }
   return d;
 }
 
-const cruise = (kmh: number) => (d: Drive): CarInput => ({ gas: d.session.kmh < kmh ? 1 : 0, brake: 0, steer: 0, handbrake: false });
-const said = (d: Drive, text: string) => d.notes.some((n) => n.text.startsWith(text));
+export const cruise = (kmh: number) => (d: Drive): CarInput => ({ gas: d.session.kmh < kmh ? 1 : 0, brake: 0, steer: 0, handbrake: false });
+export const said = (d: Drive, text: string) => d.notes.some((n) => n.text.startsWith(text));
 const street = (): Col => ({ g: 10, mat: 1 });
 
 export const DRIVE_SCENARIOS: Record<string, () => Outcome> = {

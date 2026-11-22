@@ -28,7 +28,8 @@ import { STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '..
 import type { Car } from '../../sim/types';
 import type { Meta } from '../../types';
 import { CHUNK, RapierTerrain, WHEEL_GROUPS, type TerrainOptions } from './terrain';
-import { bus, CAR, createVehicle, REST, WHEEL_R, warmUp, type CarBuild } from './vehicle';
+import { createVehicle, REST, WHEEL_R, warmUp, type CarBuild } from './vehicle';
+import { buildOf } from '../../sim/vehicles';
 export { liveEdits };
 
 export const SUB = 2; // physics steps a traffic tick
@@ -224,7 +225,7 @@ export class LifePhysics implements TrafficBodies {
   // ------------------------------------------------------------------ bodies
   // a body for car c at its kinematic pose, moving at its speed
   private spawn(c: Car, T: Traffic) {
-    const K = T.carPose(c, c.s, c.off, this.pose0), build = c.bus ? bus(c.len) : CAR;
+    const K = T.carPose(c, c.s, c.off, this.pose0), build = buildOf(c);
     const sy = Math.sin(K.h / 2), cy = Math.cos(K.h / 2), sx = Math.sin(-K.pitch / 2), cx = Math.cos(-K.pitch / 2);
     const q = { x: cy * sx, y: sy * cx, z: -sy * sx, w: cy * cx }; // (yaw h, then pitch: YXZ)
     const ride = build.ride + 0.05, up = upOf(q.x, q.y, q.z, q.w);
@@ -280,7 +281,7 @@ export class LifePhysics implements TrafficBodies {
     let a = Math.atan2(B.x - px, B.y - pz) - Math.atan2(f.x, f.z);
     a = Math.atan2(Math.sin(a), Math.cos(a));
     // (pure pursuit: the arc through the point Ld ahead, the wheels' angle for it)
-    const wb = c.bus ? c.len - 5.4 : 2.65;
+    const W = b.build.wheels, wb = W[0].z - W[2].z;
     const ang = Math.max(-AI_STEER, Math.min(AI_STEER, Math.atan(wb * 2 * Math.sin(a) / Ld)));
     let want = Math.max(0, Math.min(c.v + 6, c.v + b.along));
     // (along the path's grade: the road rising ahead is not in the way)

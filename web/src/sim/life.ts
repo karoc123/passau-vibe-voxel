@@ -5,6 +5,7 @@ import { farFrom, pt } from './path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from './traffic';
 import { Trains } from './trains';
 import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from './types';
+import { VEHICLE_IDS, vehicleOf, type VehicleId } from './vehicles';
 
 // The street life's presentation: the traffic (sim/traffic.ts: the world sim, headless, on its fixed tick) drawn
 // between its last two ticks with instanced meshes, the trains, the people knocked down or fallen into a hole (an
@@ -120,23 +121,31 @@ export class StreetLife {
   private drawCars(a: number, night: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     const tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
-    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), meshes = [M.body, M.dark, M.head, M.tail], T = this.traffic, back = 1 - a, B = this.traffic.bodies;
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, back = 1 - a, B = this.traffic.bodies;
     const pose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
-    const draw = (c: Car, i: number) => {
+    // (each type its own meshes, its instances counted)
+    const n = {} as Record<VehicleId, number>;
+    for (const id of VEHICLE_IDS) n[id] = 0;
+    const draw = (c: Car) => {
       B?.pose(c, a);
-      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, c.bus ? 1.75 : 1, c.bus ? c.len / 4.4 : 1));
-      for (const mesh of meshes) mesh.setMatrixAt(i, m);
-      M.body.setColorAt(i, this.col(c.col));
-      M.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
+      const t = vehicleOf(c), V = M.vehicles[t.id], i = n[t.id]++;
+      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, c.roll ?? 0)), sc.set(1, 1, c.len / t.len));
+      V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
+      V.body.setColorAt(i, this.col(c.col));
+      V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
-    T.cars.forEach((c, i) => {
+    for (const c of T.cars) {
       T.carPose(c, c.s - c.ds * back, c.off - c.dOff * back, pose);
       setRp(c, pose.x, pose.y, pose.z);
       c.rh = pose.h; c.pitch = pose.pitch; c.roll = 0;
-      draw(c, i);
-    });
-    T.detachedCars.forEach((c, i) => draw(c, T.cars.length + i));
-    setCount(T.cars.length + T.detachedCars.length, M.body, M.dark, M.head, M.tail);
+      draw(c);
+    }
+    for (const c of T.detachedCars) draw(c);
+    for (const id of VEHICLE_IDS) {
+      const V = M.vehicles[id];
+      setCount(n[id], V.body, V.dark, V.head, V.tail);
+      V.body.visible = V.dark.visible = V.head.visible = V.tail.visible = n[id] > 0;
+    }
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 

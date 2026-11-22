@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import type { Meta } from '../../types';
 import { bus, CAR, RapierCar, type CarBuild, type CarEvent, type CarInput } from './car';
 import { warmUp } from './vehicle';
+import { modelHalf, VEHICLES, type VehicleId } from '../../sim/vehicles';
 import { CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 import { viewerTileCache } from '../../viewer-tiles';
 
@@ -27,13 +28,13 @@ const MAX_WRECKS = 4, WRECK_REST_S = 0.8, WRECK_MAX_S = 20;
 const HIT_SPEED = 2.5; // m/s: slower, the car nudges people aside unreported (they walk on)
 
 // something on the road the car meets (a traffic car or bus): its ground point and heading, length, kind
-export interface Obstacle { key: object; x: number; y: number; z: number; h: number; len: number; bus: boolean }
+export interface Obstacle { key: object; x: number; y: number; z: number; h: number; len: number; bus: boolean; vt?: VehicleId }
 // a person near the car (walking or cycling): their ground point
 export interface Walker { key: object; x: number; y: number; z: number }
 // what the car did to them: knocked a traffic car away (now a wreck: drawn from wrecks()), hit a person (vx, vz: the
 // car's velocity then, m/s)
 export type DriveEvent = CarEvent | { kind: 'knock'; key: object; speed: number } | { kind: 'person'; key: object; speed: number; vx: number; vz: number };
-interface Kin { body: RAPIER.RigidBody; collider: RAPIER.Collider; from: THREE.Vector3; fromH: number; to: THREE.Vector3; toH: number; seen: boolean; lift: number; v: THREE.Vector3 }
+interface Kin { body: RAPIER.RigidBody; collider: RAPIER.Collider; mass: number; from: THREE.Vector3; fromH: number; to: THREE.Vector3; toH: number; seen: boolean; lift: number; v: THREE.Vector3 }
 interface Wreck { body: RAPIER.RigidBody; lift: number; age: number; still: number }
 
 // The drawn pose: the ground point under the body's origin (as a traffic car's rp), heading, pitch (nose up), roll
@@ -41,6 +42,8 @@ export interface DrawnPose { x: number; y: number; z: number; h: number; pitch: 
 
 // what is driven, for a traffic car or bus of `len` m
 export const buildFor = (isBus: boolean, len: number): CarBuild => (isBus ? bus(len) : CAR);
+// what is driven, for a traffic car of any type (sim/vehicles.ts)
+export { buildOf } from '../../sim/vehicles';
 
 let loading: Promise<RapierDrive> | null = null;
 
@@ -72,6 +75,9 @@ export class RapierDrive {
   private readonly curP = new THREE.Vector3();
   private prevRide = 0;
   private curRide = 0;
+  // a bike's lean and wheelie (car.ts) at the last two steps
+  private readonly prevLean = { lean: 0, wheelie: 0 };
+  private readonly curLean = { lean: 0, wheelie: 0 };
   private readonly prevQ = new THREE.Quaternion();
   private readonly curQ = new THREE.Quaternion();
   private readonly kin = new Map<object, Kin>();
@@ -133,6 +139,7 @@ export class RapierDrive {
     if (n) this.walkers(walkers, n * STEP, events);
     for (let i = 0; i < n; i++) {
       this.prevP.copy(this.curP); this.prevQ.copy(this.curQ); this.prevRide = this.curRide;
+      Object.assign(this.prevLean, this.curLean);
       for (const k of this.kin.values()) {
         const t = (i + 1) / n, p = k.from.clone().lerp(k.to, t);
         let dh = k.toH - k.fromH;
@@ -153,6 +160,7 @@ export class RapierDrive {
       this.stats.stepMsMax = Math.max(this.stats.stepMsMax, ms);
       this.toWorld(car.body.translation(), this.curP);
       this.curRide = car.ride;
+      this.curLean.lean = car.lean; this.curLean.wheelie = car.wheelie;
       const r = car.body.rotation();
       this.curQ.set(r.x, r.y, r.z, r.w);
     }
@@ -172,6 +180,7 @@ export class RapierDrive {
     }
     this.acc = 0;
     this.prevP.copy(this.curP); this.prevQ.copy(this.curQ); this.prevRide = this.curRide;
+    Object.assign(this.prevLean, this.curLean);
   }
 
   // the traffic cars knocked away and still moving, as drawn now
@@ -194,7 +203,12 @@ export class RapierDrive {
     // (the ground point: the ride height the wheels hold now under the body's origin, along the car's up)
     p.add(new THREE.Vector3(0, -(this.prevRide + (this.curRide - this.prevRide) * a), 0).applyQuaternion(q));
     const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
-    return { x: p.x, y: p.y, z: p.z, h: e.y, pitch: -e.x, roll: e.z };
+    // (a bike: leaning into its turn about its wheels' line on the ground; its front up in a wheelie, about its rear
+    // wheel's contact)
+    const lean = this.prevLean.lean + (this.curLean.lean - this.prevLean.lean) * a;
+    const wheelie = this.prevLean.wheelie + (this.curLean.wheelie - this.prevLean.wheelie) * a;
+    if (wheelie) p.y += Math.sin(wheelie) * -this.car.build.wheels[2].z;
+    return { x: p.x, y: p.y, z: p.z, h: e.y, pitch: -e.x + wheelie, roll: e.z + lean };
   }
 
   // is the car on its wheels, upright?
@@ -203,6 +217,12 @@ export class RapierDrive {
     if (!c || c.wheelsInContact() < 3) return false;
     const r = c.body.rotation();
     return 1 - 2 * (r.x * r.x + r.z * r.z) > 0.9;
+  }
+
+  // is the car more up than on its side?
+  get upright() {
+    const r = this.car?.body.rotation();
+    return !r || 1 - 2 * (r.x * r.x + r.z * r.z) > 0.5;
   }
 
   get velocity() {
@@ -225,6 +245,8 @@ export class RapierDrive {
     this.prevP.copy(this.curP);
     this.curQ.copy(q); this.prevQ.copy(q);
     this.curRide = this.prevRide = build.ride;
+    Object.assign(this.curLean, { lean: 0, wheelie: 0 });
+    Object.assign(this.prevLean, this.curLean);
     this.acc = 0;
   }
 
@@ -236,13 +258,15 @@ export class RapierDrive {
       if (Math.abs(o.x - at.x) > OBSTACLE_R || Math.abs(o.z - at.z) > OBSTACLE_R || this.wrecked.has(o.key)) continue;
       let k = this.kin.get(o.key);
       if (!k) {
-        const half = o.bus ? { x: 1.25, y: 1.3, z: o.len / 2 } : { x: 0.85, y: 0.65, z: o.len / 2 - 0.1 };
-        const lift = half.y + 0.15;
+        // (a type of the catalog other than the car: the box its model fills, a little shorter, clear of the ground)
+        const t = o.vt && VEHICLES[o.vt], m = t && modelHalf(t);
+        const half = o.bus ? { x: 1.25, y: 1.3, z: o.len / 2 } : m ? { x: m.x - 0.05, y: m.y - 0.08, z: m.z - 0.1 } : { x: 0.85, y: 0.65, z: o.len / 2 - 0.1 };
+        const lift = half.y + 0.15, mass = o.bus ? 11000 : t ? t.build.mass : 1200;
         const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased()
           .setTranslation(o.x - this.origin.x, o.y + lift, o.z - this.origin.z)
           .setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.h)));
         const collider = this.world.createCollider(RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setFriction(0.3).setCollisionGroups(WORLD_GROUPS), body);
-        k = { body, collider, from: new THREE.Vector3(o.x, o.y, o.z), fromH: o.h, to: new THREE.Vector3(), toH: o.h, seen: true, lift, v: new THREE.Vector3() };
+        k = { body, collider, mass, from: new THREE.Vector3(o.x, o.y, o.z), fromH: o.h, to: new THREE.Vector3(), toH: o.h, seen: true, lift, v: new THREE.Vector3() };
         this.kin.set(o.key, k);
       }
       k.to.set(o.x, o.y, o.z);
@@ -267,11 +291,9 @@ export class RapierDrive {
       const t = k.body.translation(), r = k.body.rotation(), half = (k.collider.shape as RAPIER.Cuboid).halfExtents;
       this.world.removeRigidBody(k.body);
       this.kin.delete(key);
-      const isBus = half.x > 1;
       const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(t.x, t.y, t.z).setRotation(r)
         .setLinvel(k.v.x, k.v.y, k.v.z).setCcdEnabled(true).setAngularDamping(0.3));
-      const mass = isBus ? 11000 : 1200;
-      this.world.createCollider(RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setMass(mass).setFriction(0.6)
+      this.world.createCollider(RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setMass(k.mass).setFriction(0.6)
         .setRestitution(0.1).setCollisionGroups(WORLD_GROUPS), body);
       // (drawn with its box on the ground: a kinematic one floats 0.15 m over it, clear of the voxels)
       this.wrecked.set(key, { body, lift: half.y, age: 0, still: 0 });

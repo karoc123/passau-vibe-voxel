@@ -17,7 +17,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
-import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, WHEEL_R, type CarBuild } from './vehicle';
+import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild } from './vehicle';
 
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
 export type CarStatus = 'ok' | 'water';
@@ -36,7 +36,10 @@ export const SPIKE: CarTuning = { steps: false, walls: false, air: false };
 export { CAR, bus, RIDE, type CarBuild } from './vehicle';
 // m/s into the ground: a fall of ~8 m (under the car's gravity)
 export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
-const MAX_STEER = 0.55;
+const MAX_STEER = 0.55, STEER_FALL = 14; // rad, m/s (CarBuild tune: steer, steerFall)
+// a bike (CarBuild bike): drawn leaning into its turns, at most LEAN_MAX (rad), eased over LEAN_S; a wheelie of up to
+// WHEELIE (rad) under full throttle from low speed; kept upright on its wheels (bike())
+const LEAN_MAX = 0.7, LEAN_S = 0.12, WHEELIE = 0.16;
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
 // m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
 // ones launch the car off their top and drop its front at their foot: tools/rapier-car.mjs terrace_*)
@@ -65,6 +68,9 @@ export class RapierCar {
   private readonly half: CarBuild['half'];
   // the ground's height under the body's origin along its up, as its wheels hold it now (see afterStep)
   ride: number;
+  // a bike's: drawn leaning into its turn (rad, left side up as a Car's roll), its front up in a wheelie (rad)
+  lean = 0;
+  wheelie = 0;
 
   // heading: radians about y (0: +z), or a whole rotation
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
@@ -102,7 +108,8 @@ export class RapierCar {
     this.event = null;
     const c = this.controller, v = c.currentVehicleSpeed();
     // steering eased, less of it at speed
-    const target = -input.steer * MAX_STEER / (1 + Math.abs(v) / 14);
+    const T = this.build.tune;
+    const target = -input.steer * (T?.steer ?? MAX_STEER) / (1 + Math.abs(v) / (T?.steerFall ?? STEER_FALL));
     this.steer += (target - this.steer) * Math.min(1, dt * 8);
     let engine = 0, brake = 0;
     const B = this.build, BRAKE = B.brake;
@@ -124,13 +131,36 @@ export class RapierCar {
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
     c.updateVehicle(dt, undefined, WHEEL_GROUPS);
     if (RIDE.patch > 0 && this.terrain) this.dampers(lv, av, com, dt);
-    if (RIDE.downforce && this.wheelsInContact()) {
+    const downforce = rideOf(B, 'downforce');
+    if (downforce && this.wheelsInContact()) {
       const r = this.body.rotation(), up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
-      const f = -RIDE.downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
+      const f = -downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
       this.body.applyImpulse({ x: up.x * f, y: up.y * f, z: up.z * f }, true);
     }
     if (this.tuning.steps) this.stepAssist(input, dt);
     if (this.tuning.air && this.wheelsInContact() === 0) this.airAssist(dt);
+    if (B.bike) this.bike(input, v, dt);
+  }
+
+  // A bike on its wheels kept upright (its roll rate pulled to what rights it, firmly: no balance to keep), and drawn
+  // leaning into its turn as far as its sideways acceleration (speed x yaw rate) asks; a wheelie under full throttle
+  // from low speed. In the air: airAssist rights it, the lean eases off.
+  private bike(input: CarInput, v: number, dt: number) {
+    const b = this.body, r = b.rotation(), q = new THREE.Quaternion(r.x, r.y, r.z, r.w), w = b.angvel();
+    const ground = this.wheelsInContact() >= 2;
+    if (ground) {
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q), f = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+      // (the roll error: about the forward axis, the turn that brings its up to the world's)
+      const err = up.clone().cross(new THREE.Vector3(0, 1, 0)).dot(f), wf = w.x * f.x + w.y * f.y + w.z * f.z;
+      const d = (err * 10 - wf) * Math.min(1, dt * 25);
+      b.setAngvel({ x: w.x + f.x * d, y: w.y + f.y * d, z: w.z + f.z * d }, true);
+    }
+    // (turning left -- yaw rate up -- leans it left: its left side down, a negative roll)
+    const lean = ground ? Math.max(-LEAN_MAX, Math.min(LEAN_MAX, -Math.atan(v * w.y / 9.81))) : 0;
+    const k = 1 - Math.exp(-dt / LEAN_S);
+    this.lean += (lean - this.lean) * k;
+    const pull = ground && input.gas > 0.9 && v > 1 && v < 12 ? WHEELIE * (1 - v / 12) : 0;
+    this.wheelie += (pull - this.wheelie) * (1 - Math.exp(-dt / (pull > this.wheelie ? 0.25 : 0.15)));
   }
 
   // The dampers on the ground's slope, not on its facets. Rapier's damper pushes on the chassis' speed at the wheel's
@@ -148,6 +178,7 @@ export class RapierCar {
   private dampers(lv: RAPIER.Vector, av: RAPIER.Vector, com: RAPIER.Vector, dt: number) {
     const c = this.controller, b = this.body, m = b.mass(), t = this.terrain!, o = t.origin, H = RIDE.patch;
     const r = b.rotation(), down = new THREE.Vector3(0, -1, 0).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w));
+    const compression = rideOf(this.build, 'compression'), relaxation = rideOf(this.build, 'relaxation'), stiffness = rideOf(this.build, 'stiffness');
     for (let i = 0; i < this.build.wheels.length; i++) {
       if (!c.wheelIsInContact(i)) continue;
       const n = c.wheelContactNormal(i)!, p = c.wheelContactPoint(i)!;
@@ -173,8 +204,8 @@ export class RapierCar {
       const dn = Math.hypot(n.x - ex, n.y - ey, n.z - ez);
       const w = Math.max(0, Math.min(1, (RIDE.kinkMax - dn) / (RIDE.kinkMax * 0.5)));
       const soft = raw + w * ((ex * vx + ey * vy + ez * vz) / -deS - raw);
-      const damp = (v: number) => (v < 0 ? RIDE.compression : RIDE.relaxation) * v;
-      const spring = RIDE.stiffness * (REST - (c.wheelSuspensionLength(i) ?? REST)) / -den;
+      const damp = (v: number) => (v < 0 ? compression : relaxation) * v;
+      const spring = stiffness * (REST - (c.wheelSuspensionLength(i) ?? REST)) / -den;
       // (Rapier's force: never pulling, at most the wheel's maximum)
       const force = (d: number) => Math.min(MAX_SUSPENSION_FORCE, Math.max(0, (spring - d) * m));
       const dF = force(damp(soft)) - force(damp(raw));

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from './traffic';
+import { PALETTE, VEHICLE_IDS, VEHICLES, type VehicleId, type VehicleType } from './vehicles';
 export { MAX_BIKES, MAX_CARS, MAX_PEOPLE };
 
 function box(w: number, h: number, l: number, x: number, y: number, z: number, hex?: number) {
@@ -24,9 +25,30 @@ function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, n: number, { 
   return m;
 }
 
-// instanced meshes for every car, person, bike and signal head; the simulation writes their matrices
+// a vehicle type's meshes (sim/vehicles.ts, its model's parts by colour): its paint (white, coloured per instance),
+// its fixed colours (glass, tyres, trim: vertex colours), its head lamps (headMat: brighter at night) and tail lamps
+// (coloured per instance: brighter when braking)
+export interface VehicleMeshes { body: THREE.InstancedMesh; dark: THREE.InstancedMesh; head: THREE.InstancedMesh; tail: THREE.InstancedMesh }
+
+function vehicleMeshes(t: VehicleType, n: number, mats: { body: THREE.Material; dark: THREE.Material; head: THREE.Material; tail: THREE.Material }): VehicleMeshes {
+  const parts = (want: (c: string) => boolean, colour: boolean) => {
+    const gs = t.model.filter((p) => want(p[6])).map(([w, h, l, x, y, z, c]) => box(w, h, l, x, y, z, colour ? new THREE.Color(PALETTE[c as keyof typeof PALETTE]).getHex() : undefined));
+    return gs.length ? merge(...gs) : new THREE.BufferGeometry();
+  };
+  const fixed = (c: string) => c !== 'paint' && c !== 'head' && c !== 'tail';
+  return {
+    body: instanced(parts((c) => c === 'paint', false), mats.body, n, { shadow: true, color: true }),
+    dark: instanced(parts(fixed, true), mats.dark, n, { shadow: true }),
+    head: instanced(parts((c) => c === 'head', false), mats.head, n),
+    tail: instanced(parts((c) => c === 'tail', false), mats.tail, n, { color: true }),
+  };
+}
+
+// instanced meshes for every car (of each type), person, bike and signal head; the simulation writes their matrices
 export class LifeMeshes {
   readonly group = new THREE.Group();
+  // the vehicles' meshes by type; the car's also as body, dark, head and tail
+  readonly vehicles = {} as Record<VehicleId, VehicleMeshes>;
   readonly body: THREE.InstancedMesh;
   readonly dark: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
@@ -39,12 +61,9 @@ export class LifeMeshes {
   readonly headMat = new THREE.MeshBasicMaterial({ color: 0xfff3dd });
 
   constructor(scene: THREE.Scene, heads: [number, number, number, number, ...number[]][]) {
-    const C = MAX_CARS, wheel = (x: number, z: number) => box(0.3, 0.6, 0.7, x, 0, z, 0x161616);
-    this.body = instanced(merge(box(1.8, 0.75, 4.4, 0, 0.3, 0), box(1.62, 0.62, 2.3, 0, 1.05, -0.25)), std({ color: 0xffffff }), C, { shadow: true, color: true });
-    this.dark = instanced(merge(box(1.66, 0.5, 2.2, 0, 1.1, -0.25, 0x1d2329), wheel(-0.8, 1.3), wheel(0.8, 1.3), wheel(-0.8, -1.35), wheel(0.8, -1.35)),
-      std({ vertexColors: true, roughness: 0.15, metalness: 0.5 }), C, { shadow: true });
-    this.head = instanced(merge(box(0.4, 0.2, 0.1, -0.6, 0.65, 2.2), box(0.4, 0.2, 0.1, 0.6, 0.65, 2.2)), this.headMat, C);
-    this.tail = instanced(merge(box(0.4, 0.2, 0.1, -0.6, 0.7, -2.2), box(0.4, 0.2, 0.1, 0.6, 0.7, -2.2)), new THREE.MeshBasicMaterial({ color: 0xffffff }), C, { color: true });
+    const mats = { body: std({ color: 0xffffff }), dark: std({ vertexColors: true, roughness: 0.15, metalness: 0.5 }), head: this.headMat, tail: new THREE.MeshBasicMaterial({ color: 0xffffff }) };
+    for (const id of VEHICLE_IDS) this.vehicles[id] = vehicleMeshes(VEHICLES[id], MAX_CARS, mats);
+    ({ body: this.body, dark: this.dark, head: this.head, tail: this.tail } = this.vehicles.car);
     const P = MAX_PEOPLE + MAX_BIKES;
     this.legs = instanced(merge(box(0.18, 0.85, 0.22, -0.1, 0, 0, 0x2b3240), box(0.18, 0.85, 0.22, 0.1, 0, 0, 0x2b3240),
       box(0.3, 0.3, 0.3, 0, 1.45, 0, 0xe0b48f), box(0.32, 0.1, 0.32, 0, 1.72, 0, 0x3a2a20)), std({ vertexColors: true, roughness: 0.9, metalness: 0 }), P);
@@ -58,7 +77,8 @@ export class LifeMeshes {
     this.pole.castShadow = true;
     this.lamp = instanced(new THREE.BoxGeometry(0.3, 0.3, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }), H, { color: true });
     this.pole.count = 0; // (the signals near the focus: poles())
-    this.group.add(this.body, this.dark, this.head, this.tail, this.legs, this.torso, this.bike, this.pole, this.lamp);
+    for (const id of VEHICLE_IDS) { const V = this.vehicles[id]; this.group.add(V.body, V.dark, V.head, V.tail); }
+    this.group.add(this.legs, this.torso, this.bike, this.pole, this.lamp);
     scene.add(this.group);
   }
 

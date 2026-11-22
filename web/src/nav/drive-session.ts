@@ -11,6 +11,10 @@ import type { DrawnPose, Obstacle, RapierDrive, Walker } from '../physics/rapier
 
 export const SINK_MS = 2000; // in the river this long, then back on the road
 export const CRASH_MS = 1100; // after a crash landing: shaken, no input
+// a bike (CarBuild bike) crashes -- a crash landing, a wall or a car hit at FALL_IMPACT m/s or more, or tipped over --
+// and its rider comes off: drawn falling on its side over FALL_MS, no input, then back on the road (as from the river)
+export const FALL_MS = 1600;
+const FALL_IMPACT = 7;
 const FALLEN_R = 35; // m: people knocked down lie there until the car is this far away and out of sight (life.ts knockDown, PED_POP_R)
 const SAFE_EVERY_MS = 400, SAFE_KEEP = 16; // where the car was on the road: every so often, the last so many
 const BACK_M = 12; // back on the road this far before where it left it
@@ -28,6 +32,8 @@ export class DriveSession {
   safe: { pose: Pose; t: number }[] = [];
   sinkUntil = 0;
   crashUntil = 0;
+  fallUntil = 0; // a bike's rider came off: back on the road then
+  private fallSide = 1;
   waiting = false; // the car's ground not built yet: held still
   private input: CarInput = NO_INPUT;
 
@@ -39,21 +45,21 @@ export class DriveSession {
   }
 
   // is the player's input ignored now (sinking, shaken by a crash)?
-  held(now: number) { return now < this.sinkUntil || now < this.crashUntil; }
+  held(now: number) { return now < this.sinkUntil || now < this.crashUntil || now < this.fallUntil; }
 
   get kmh() { return this.rap.car?.kmh ?? 0; }
 
   // One frame of `dt` s at `now` (ms): returns what to tell the player.
   update(dt: number, input: CarInput, now: number): Note[] {
     const { life, car, rap } = this, notes: Note[] = [];
-    if (this.sinkUntil && now >= this.sinkUntil) { this.respawn(); return notes; }
+    if ((this.sinkUntil && now >= this.sinkUntil) || (this.fallUntil && now >= this.fallUntil)) { this.respawn(); return notes; }
     this.input = this.held(now) ? NO_INPUT : input;
     const p = car.rp;
     const obstacles: Obstacle[] = [];
     for (const other of life.roadVehicles()) {
       const q = other.rp;
       if (other === car || !q || (p && (Math.abs(q.x - p.x) > 40 || Math.abs(q.z - p.z) > 40))) continue;
-      obstacles.push({ key: other, x: q.x, y: q.y, z: q.z, h: other.rh ?? 0, len: other.len, bus: other.bus });
+      obstacles.push({ key: other, x: q.x, y: q.y, z: q.z, h: other.rh ?? 0, len: other.len, bus: other.bus, vt: other.vt });
     }
     // the people near it, walking or cycling (not one being walked by the player)
     const walkers: Walker[] = [];
@@ -66,7 +72,10 @@ export class DriveSession {
     this.waiting = events === 'loading';
     if (events === 'loading') return notes;
     for (const e of events) {
-      if (e.kind === 'knock') {
+      if (this.build.bike && !this.fallUntil && ((e.kind === 'landing' && e.crash) || ((e.kind === 'impact' || e.kind === 'knock') && e.speed >= FALL_IMPACT))) {
+        if (e.kind === 'knock') life.takeWheel(e.key as Car);
+        this.fall(now, notes);
+      } else if (e.kind === 'knock') {
         // (out of the traffic: it lies where it is knocked to)
         life.takeWheel(e.key as Car);
         notes.push({ text: 'Crash!', ms: 600 });
@@ -79,6 +88,8 @@ export class DriveSession {
         else if (e.speed > 6) notes.push({ text: 'Hard landing', ms: 700 });
       }
     }
+    // (a bike on its side or roof: the rider is off)
+    if (this.build.bike && !this.fallUntil && rap.car && rap.car.airTime === 0 && !rap.upright) this.fall(now, notes);
     if (rap.car?.status === 'water' && !this.sinkUntil) {
       this.sinkUntil = now + SINK_MS;
       notes.push({ text: 'Splash! Back on the road in a moment…', ms: SINK_MS });
@@ -91,8 +102,19 @@ export class DriveSession {
     return notes;
   }
 
-  // The car (and the traffic cars it knocked away) drawn where their bodies are
-  present() {
+  // a bike's rider comes off: falling to the side it leant to
+  private fall(now: number, notes: Note[]) {
+    this.fallUntil = now + FALL_MS;
+    this.fallSide = (this.rap.car?.lean ?? 0) < 0 ? -1 : 1;
+    notes.push({ text: 'Crash! You came off the bike', ms: FALL_MS });
+  }
+
+  // Back on the road now (the player's T): where it last was on it, a little way back
+  reset() { this.respawn(); }
+
+  // The car (and the traffic cars it knocked away) drawn where their bodies are; a bike whose rider came off on its
+  // side (`now`: ms, the clock update was given)
+  present(now = 0) {
     const { car, rap } = this, d = rap.drawn();
     for (const [key, w] of rap.wrecks()) {
       const c = key as Car;
@@ -102,6 +124,10 @@ export class DriveSession {
     if (d) {
       setRp(car, d.x, d.y, d.z);
       Object.assign(car, { rh: d.h, pitch: d.pitch, roll: d.roll });
+      if (this.fallUntil) {
+        const k = Math.min(1, Math.max(0, (FALL_MS - (this.fallUntil - now)) / 450));
+        car.roll = d.roll + (this.fallSide * 1.45 - d.roll) * k * k;
+      }
       car.v = this.kmh / 3.6;
     }
     car.brake = this.input.brake > 0 || this.input.handbrake ? 1 : 0;
@@ -111,7 +137,7 @@ export class DriveSession {
   // roof too, or in the air: where it lands)
   park() {
     const { rap, car } = this;
-    if (this.sinkUntil || rap.car?.status === 'water') this.respawn();
+    if (this.sinkUntil || this.fallUntil || rap.car?.status === 'water') this.respawn();
     else rap.settle();
     this.present();
     rap.end();
@@ -136,6 +162,7 @@ export class DriveSession {
     this.safe = safe.slice(0, Math.max(1, i + 1));
     this.sinkUntil = 0;
     this.crashUntil = 0;
+    this.fallUntil = 0;
     if (!pose) return;
     this.rap.begin({ ...pose, pitch: 0, roll: 0 }, 0, this.build);
     setRp(this.car, pose.x, pose.y, pose.z);

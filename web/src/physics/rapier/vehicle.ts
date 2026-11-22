@@ -3,22 +3,12 @@
 // from, so the world sim runs headless (tools/core-deps.mjs).
 import RAPIER from '@dimforge/rapier3d-compat';
 import { CAR_GROUPS } from './terrain';
+import { busBuild, VEHICLES, type CarBuild } from '../../sim/vehicles';
 
-// what is driven: the chassis' half extents (m), its mass (kg), the wheels (chassis space), the engine's force per
-// driven (rear) wheel (N), the brakes, the top speed (m/s); ride: the ground's height under the body's origin at rest
-export interface CarBuild {
-  half: { x: number; y: number; z: number }; mass: number; wheels: { x: number; z: number; front: boolean }[];
-  engine: number; brake: number; top: number; ride: number;
-}
-const wheels4 = (x: number, zf: number, zr: number) => [
-  { x, z: zf, front: true }, { x: -x, z: zf, front: true }, { x, z: zr, front: false }, { x: -x, z: zr, front: false },
-];
-export const CAR: CarBuild = { half: { x: 0.9, y: 0.45, z: 2.1 }, mass: 1200, wheels: wheels4(0.82, 1.35, -1.3), engine: 2600, brake: 45, top: 22, ride: 0.84 };
-// a bus of `len` m (the traffic's: 12): its chassis as high as its body (the traffic's 2.55 m less the wheels)
-export const bus = (len: number): CarBuild => ({
-  half: { x: 1.25, y: 0.95, z: len / 2 - 0.1 }, mass: 11000, wheels: wheels4(1.1, len / 2 - 2.4, -(len / 2 - 3)),
-  engine: 14000, brake: 400, top: 17, ride: 0.84,
-});
+// what is driven (sim/vehicles.ts: the catalog, its CarBuild): the car, a bus of `len` m
+export type { CarBuild } from '../../sim/vehicles';
+export const CAR: CarBuild = VEHICLES.car.build;
+export const bus = busBuild;
 export const WHEEL_R = 0.36;
 export const REST = 0.35;
 export const MAX_SUSPENSION_FORCE = 60000; // N a wheel
@@ -40,6 +30,8 @@ export const RIDE = {
   stiffness: 34, compression: 4, relaxation: 5.5, gravity: 1.25, downforce: 0.4, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
   patch: 0.8, kinkMax: 0.08,
 };
+// a number of the ride for `build`: its own (CarBuild tune), else RIDE's
+export const rideOf = (build: CarBuild, k: 'stiffness' | 'compression' | 'relaxation' | 'downforce' | 'gripFront' | 'gripRear' | 'side' | 'com') => build.tune?.[k] ?? RIDE[k];
 
 // The chassis (a box, its bottom 0.25 m over the wheels' axles; its centre of mass low, under the floor: it rolls
 // less) and the wheels of `build` at `at` (physics coordinates), rotated q. walls: no friction or bounce against the
@@ -52,7 +44,7 @@ export function createVehicle(R: typeof RAPIER, world: RAPIER.World, at: { x: nu
   const inertia = { x: MASS * (HALF.y ** 2 + HALF.z ** 2) / 3, y: MASS * (HALF.x ** 2 + HALF.z ** 2) / 3, z: MASS * (HALF.x ** 2 + HALF.y ** 2) / 3 };
   // (a plain box: a rounded one (roundCuboid) glances no better and costs 3x the contact time against voxels)
   const desc = R.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setTranslation(0, HALF.y - 0.45, 0);
-  desc.setMassProperties(MASS, { x: 0, y: -RIDE.com - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
+  desc.setMassProperties(MASS, { x: 0, y: -rideOf(build, 'com') - (HALF.y - 0.45), z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
     .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS).setCollisionGroups(CAR_GROUPS);
   if (walls) desc.setFriction(0).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min);
   else desc.setFriction(0.3);
@@ -63,13 +55,13 @@ export function createVehicle(R: typeof RAPIER, world: RAPIER.World, at: { x: nu
   for (const w of build.wheels) {
     c.addWheel({ x: w.x, y: -0.2, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, REST, WHEEL_R);
     const i = c.numWheels() - 1;
-    c.setWheelSuspensionStiffness(i, RIDE.stiffness);
-    c.setWheelSuspensionCompression(i, RIDE.compression);
-    c.setWheelSuspensionRelaxation(i, RIDE.relaxation);
+    c.setWheelSuspensionStiffness(i, rideOf(build, 'stiffness'));
+    c.setWheelSuspensionCompression(i, rideOf(build, 'compression'));
+    c.setWheelSuspensionRelaxation(i, rideOf(build, 'relaxation'));
     c.setWheelMaxSuspensionTravel(i, 0.35);
     c.setWheelMaxSuspensionForce(i, MAX_SUSPENSION_FORCE);
-    c.setWheelFrictionSlip(i, w.front ? RIDE.gripFront : RIDE.gripRear);
-    c.setWheelSideFrictionStiffness(i, RIDE.side);
+    c.setWheelFrictionSlip(i, rideOf(build, w.front ? 'gripFront' : 'gripRear'));
+    c.setWheelSideFrictionStiffness(i, rideOf(build, 'side'));
   }
   return { body, chassis, controller: c };
 }

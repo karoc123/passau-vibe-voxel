@@ -7,6 +7,7 @@
 // at signalled crossings. Density follows the hour. Near player edits some cars are physical bodies (`bodies`:
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
+import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import type { Agent, Car, Controller, PedEdge, Person, Road, TrafficData } from './types';
 
@@ -225,14 +226,15 @@ export class Traffic {
     const s = fromSource ? 0 : 10 + this.rand() * Math.max(0, e.L - 20 - BOX_IN - 12);
     if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return;
     if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, CAR_POP_R)) return; }
-    const bus = e.c >= 2 && this.rand() < 0.06;
+    const bus = e.c >= 2 && this.rand() < 0.06, id = this.idSeq++, vt = bus ? undefined : trafficType(id);
     const car: Car = {
-      kind: 'car', id: this.idSeq++, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : 4.6, bus, prev: -1, prevOff: 0, next: -1,
+      kind: 'car', id, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : VEHICLES[vt!].len, bus, prev: -1, prevOff: 0, next: -1,
       v0f: 0.85 + this.rand() * 0.25, col: bus ? '#f2c230' : this.anyOf(CAR_COLOURS),
       off: this.laneOffset(e, lane), brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null,
       boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0, boxTurn: 0, block: null,
       geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 0 },
     };
+    if (vt !== 'car') car.vt = vt;
     this.setNext(car, this.chooseNext(e));
     e.lists[lane].push(car);
     this.cars.push(car);

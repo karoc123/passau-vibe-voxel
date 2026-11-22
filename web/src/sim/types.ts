@@ -1,4 +1,5 @@
 import type { Path, PathData } from './path';
+import type { VehicleId } from './vehicles';
 
 // a point in the world (x east, y up, z south: as three.js', without it: the sim runs headless)
 export interface Vec3 { x: number; y: number; z: number }
@@ -57,6 +58,7 @@ export interface Car extends Blocked {
   off: number;
   len: number;
   bus: boolean;
+  vt?: VehicleId; // its type (sim/vehicles.ts; none: the car, or a bus)
   col: string; // its paint ('#rrggbb')
   v0f: number;
   prev: number;
