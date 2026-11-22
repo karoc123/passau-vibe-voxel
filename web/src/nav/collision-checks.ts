@@ -138,30 +138,34 @@ export async function runCollisionChecks(): Promise<CheckOutcome[]> {
     { x0: 100, x1: 103, z0: 0, z1: 256, y0: 10, y1: 20, mat: 'wall' },
     { x0: 150, x1: 170, z0: 100, z1: 120, y0: 14, y1: 15, mat: 'deck' },
   ] });
-  const out: CheckOutcome[] = [];
-  // (before its tiles are in, a sweep waits)
-  const fresh = new VoxelCollision(w.meta).sweep(new Vector3(64, 15, 64), new Vector3(0, -10, 0));
-  out.push({ name: 'collision_loading', pass: fresh === 'loading', detail: { sweep: typeof fresh === 'string' ? fresh : fresh.hit } });
-  await loaded(w);
-  const sweep = (name: string, from: [number, number, number], d: [number, number, number], hit: string, axis: number, at: number, along: 0 | 1 | 2) => {
-    const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
-    const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
-    const got = s === 'loading' ? null : s.hit ? s.axis : null;
-    const ok = s !== 'loading' && s.hit === hit && got === axis && near(end, at);
-    out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
-  };
-  // falling onto the road: on it, the cube's half over its top, the normal up
-  sweep('collision_fall', [64, 15, 64], [0, -10, 0], 'terrain', 2, 10.35, 1);
-  // flying into the wall along +x: stopped short of it, the normal -x
-  sweep('collision_wall', [90, 12, 64], [20, 0, 0], 'structure', -1, 99.65, 0);
-  // falling onto the deck (a run over the ground, not the ground)
-  sweep('collision_deck', [160, 20, 110], [0, -10, 0], 'structure', 2, 15.35, 1);
-  // out of the map along -x: the city's edge
-  sweep('collision_edge', [5, 12, 64], [-10, 0, 0], 'city edge', 1, 0.35, 0);
-  // what the drone settles on, and its ground: the deck's top over the road's
-  const s = w.collision.surface(160, 110), g = w.collision.surface(64, 64);
-  out.push({ name: 'collision_surface', pass: s?.top === 15 && s.ground === 10 && g?.top === 10, detail: { deckTop: s?.top ?? null, deckGround: s?.ground ?? null, roadTop: g?.top ?? null } });
-  return out;
+  try {
+    const out: CheckOutcome[] = [];
+    // (before its tiles are in, a sweep waits)
+    const fresh = w.collision.sweep(new Vector3(64, 15, 64), new Vector3(0, -10, 0));
+    out.push({ name: 'collision_loading', pass: fresh === 'loading', detail: { sweep: typeof fresh === 'string' ? fresh : fresh.hit } });
+    await loaded(w);
+    const sweep = (name: string, from: [number, number, number], d: [number, number, number], hit: string, axis: number, at: number, along: 0 | 1 | 2) => {
+      const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
+      const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
+      const got = s === 'loading' ? null : s.hit ? s.axis : null;
+      const ok = s !== 'loading' && s.hit === hit && got === axis && near(end, at);
+      out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
+    };
+    // falling onto the road: on it, the cube's half over its top, the normal up
+    sweep('collision_fall', [64, 15, 64], [0, -10, 0], 'terrain', 2, 10.35, 1);
+    // flying into the wall along +x: stopped short of it, the normal -x
+    sweep('collision_wall', [90, 12, 64], [20, 0, 0], 'structure', -1, 99.65, 0);
+    // falling onto the deck (a run over the ground, not the ground)
+    sweep('collision_deck', [160, 20, 110], [0, -10, 0], 'structure', 2, 15.35, 1);
+    // out of the map along -x: the city's edge
+    sweep('collision_edge', [5, 12, 64], [-10, 0, 0], 'city edge', 1, 0.35, 0);
+    // what the drone settles on, and its ground: the deck's top over the road's
+    const s = w.collision.surface(160, 110), g = w.collision.surface(64, 64);
+    out.push({ name: 'collision_surface', pass: s?.top === 15 && s.ground === 10 && g?.top === 10, detail: { deckTop: s?.top ?? null, deckGround: s?.ground ?? null, roadTop: g?.top ?? null } });
+    return out;
+  } finally {
+    w.collision.release();
+  }
 }
 
 // The drone flown along a path on the real data (tools/collision.mjs: through a tunnel under a hill, scripts/tunnels.py)
@@ -170,15 +174,19 @@ export async function runCollisionChecks(): Promise<CheckOutcome[]> {
 export async function sweepPath(meta: Meta, files: Map<string, Uint8Array>, path: [number, number, number][], lift: number) {
   serve(files);
   const c = new VoxelCollision(meta);
-  for (let k = 0; k < path.length - 1; k++) {
-    const p = new Vector3(path[k][0], path[k][2] + lift, path[k][1]);
-    const d = new Vector3(path[k + 1][0] - path[k][0], path[k + 1][2] - path[k][2], path[k + 1][1] - path[k][1]);
-    let s = c.sweep(p, d);
-    for (let i = 0; s === 'loading' && i < 2000; i++) { c.prefetch(p, d); await new Promise((r) => setTimeout(r, 5)); s = c.sweep(p, d); }
-    if (s === 'loading') throw new Error('collision tiles never loaded');
-    if (s.hit) return { at: k, hit: s.hit, fraction: r3(s.fraction), x: path[k][0], z: path[k][1], y: path[k][2] + lift };
+  try {
+    for (let k = 0; k < path.length - 1; k++) {
+      const p = new Vector3(path[k][0], path[k][2] + lift, path[k][1]);
+      const d = new Vector3(path[k + 1][0] - path[k][0], path[k + 1][2] - path[k][2], path[k + 1][1] - path[k][1]);
+      let s = c.sweep(p, d);
+      for (let i = 0; s === 'loading' && i < 2000; i++) { c.prefetch(p, d); await new Promise((r) => setTimeout(r, 5)); s = c.sweep(p, d); }
+      if (s === 'loading') throw new Error('collision tiles never loaded');
+      if (s.hit) return { at: k, hit: s.hit, fraction: r3(s.fraction), x: path[k][0], z: path[k][1], y: path[k][2] + lift };
+    }
+    return null;
+  } finally {
+    c.release();
   }
-  return null;
 }
 
 // The walker's World (world.ts) over a test world's level-1 files, as the viewer's tile streamer holds them (stream.ts
@@ -234,39 +242,43 @@ export const HALL: Pick<WorldSpec, 'boxes' | 'rooms'> = {
 // the wall beside it, and climbs the stairs onto the gallery; World.inRoom knows the room, the door and the outside
 export async function runRoomChecks(): Promise<CheckOutcome[]> {
   const w = await makeWorld({ size: [256, 256], ground: () => 10, ...HALL });
-  await loaded(w);
-  const out: CheckOutcome[] = [];
-  const sweep = (name: string, from: [number, number, number], d: [number, number, number], axis: number, at: number, along: 0 | 1 | 2) => {
-    const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
-    const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
-    const got = s === 'loading' ? null : s.hit ? s.axis : null;
-    const ok = s !== 'loading' && s.hit === 'structure' && got === axis && near(end, at);
-    out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
-  };
-  // (three.js axes: x east, y up, z = the row)
-  sweep('room_drone_door', [90, 11.5, 120], [40, 0, 0], -1, 127.65, 0); // in through the door to the far wall
-  sweep('room_drone_roof', [115, 12, 125], [0, 10, 0], -2, 17.65, 1); // up to the roof's underside
-  sweep('room_drone_side', [115, 12, 120], [0, 0, 30], -3, 137.65, 2); // across to the north wall
-  sweep('room_drone_lintel', [90, 15, 120], [20, 0, 0], -1, 99.65, 0); // over the door: the wall
-  const world = await worldOf(w);
-  // a walker at 6 m/s in 1/60 s strides, standing on what is under it after each (nav.ts stand, at once)
-  const walk = (x: number, z: number, dx: number, dz: number, metres: number) => {
-    const P = { x, z };
-    let feet = world.support(x, z, 10 + STEP);
-    const L = Math.hypot(dx, dz), m = { x: dx / L * 0.1, z: dz / L * 0.1 };
-    for (let i = 0; i < metres * 10; i++) { walkStep(world, P, feet, m); feet = world.support(P.x, P.z, feet + STEP); }
-    return { x: r3(P.x), z: r3(P.z), feet };
-  };
-  const a = walk(90.5, 120, 1, 0, 50);
-  out.push({ name: 'room_walk_in', pass: a.x > 120 && a.x < 128 && a.feet === 10, detail: { ...a, want: 'x 120..128 (in, at the far wall)' } });
-  const b = walk(115, 120, 0, -1, 30); // (under the gallery: 3 m of headroom)
-  out.push({ name: 'room_walk_stays', pass: b.z > 102 && b.z < 103 && b.feet === 10, detail: { ...b, want: 'z 102..103 (in, at the south wall)' } });
-  const c = walk(90.5, 112, 1, 0, 30);
-  out.push({ name: 'room_walk_wall', pass: c.x < 100, detail: { ...c, want: 'x < 100 (outside)' } });
-  const d = walk(105, 104, 1, 0, 30);
-  out.push({ name: 'room_walk_gallery', pass: d.feet === 14 && d.x > 116, detail: { ...d, want: 'on the gallery (14 m), x > 116' } });
-  const inR = { hall: world.inRoom(115, 120, 12), door: world.inRoom(101, 120, 11), lintel: world.inRoom(101, 120, 14),
-    street: world.inRoom(90, 120, 12), roof: world.inRoom(115, 120, 19), gallery: world.inRoom(120, 105, 13.5), seam: world.inRoom(127.5, 130, 17.9) };
-  out.push({ name: 'room_inroom', pass: inR.hall && inR.door && !inR.lintel && !inR.street && !inR.roof && !inR.gallery && inR.seam, detail: inR });
-  return out;
+  try {
+    await loaded(w);
+    const out: CheckOutcome[] = [];
+    const sweep = (name: string, from: [number, number, number], d: [number, number, number], axis: number, at: number, along: 0 | 1 | 2) => {
+      const p = new Vector3(...from), m = new Vector3(...d), s = w.collision.sweep(p, m);
+      const end = s === 'loading' ? NaN : p.getComponent(along) + m.getComponent(along) * s.fraction;
+      const got = s === 'loading' ? null : s.hit ? s.axis : null;
+      const ok = s !== 'loading' && s.hit === 'structure' && got === axis && near(end, at);
+      out.push({ name, pass: ok, detail: { hit: s === 'loading' ? 'loading' : s.hit, axis: got, end: r3(end), want: at } });
+    };
+    // (three.js axes: x east, y up, z = the row)
+    sweep('room_drone_door', [90, 11.5, 120], [40, 0, 0], -1, 127.65, 0); // in through the door to the far wall
+    sweep('room_drone_roof', [115, 12, 125], [0, 10, 0], -2, 17.65, 1); // up to the roof's underside
+    sweep('room_drone_side', [115, 12, 120], [0, 0, 30], -3, 137.65, 2); // across to the north wall
+    sweep('room_drone_lintel', [90, 15, 120], [20, 0, 0], -1, 99.65, 0); // over the door: the wall
+    const world = await worldOf(w);
+    // a walker at 6 m/s in 1/60 s strides, standing on what is under it after each (nav.ts stand, at once)
+    const walk = (x: number, z: number, dx: number, dz: number, metres: number) => {
+      const P = { x, z };
+      let feet = world.support(x, z, 10 + STEP);
+      const L = Math.hypot(dx, dz), m = { x: dx / L * 0.1, z: dz / L * 0.1 };
+      for (let i = 0; i < metres * 10; i++) { walkStep(world, P, feet, m); feet = world.support(P.x, P.z, feet + STEP); }
+      return { x: r3(P.x), z: r3(P.z), feet };
+    };
+    const a = walk(90.5, 120, 1, 0, 50);
+    out.push({ name: 'room_walk_in', pass: a.x > 120 && a.x < 128 && a.feet === 10, detail: { ...a, want: 'x 120..128 (in, at the far wall)' } });
+    const b = walk(115, 120, 0, -1, 30); // (under the gallery: 3 m of headroom)
+    out.push({ name: 'room_walk_stays', pass: b.z > 102 && b.z < 103 && b.feet === 10, detail: { ...b, want: 'z 102..103 (in, at the south wall)' } });
+    const c = walk(90.5, 112, 1, 0, 30);
+    out.push({ name: 'room_walk_wall', pass: c.x < 100, detail: { ...c, want: 'x < 100 (outside)' } });
+    const d = walk(105, 104, 1, 0, 30);
+    out.push({ name: 'room_walk_gallery', pass: d.feet === 14 && d.x > 116, detail: { ...d, want: 'on the gallery (14 m), x > 116' } });
+    const inR = { hall: world.inRoom(115, 120, 12), door: world.inRoom(101, 120, 11), lintel: world.inRoom(101, 120, 14),
+      street: world.inRoom(90, 120, 12), roof: world.inRoom(115, 120, 19), gallery: world.inRoom(120, 105, 13.5), seam: world.inRoom(127.5, 130, 17.9) };
+    out.push({ name: 'room_inroom', pass: inR.hall && inR.door && !inR.lintel && !inR.street && !inR.roof && !inR.gallery && inR.seam, detail: inR });
+    return out;
+  } finally {
+    w.collision.release();
+  }
 }

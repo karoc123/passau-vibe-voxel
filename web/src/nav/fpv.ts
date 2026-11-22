@@ -108,6 +108,7 @@ export class FpvMode {
   update(dt: number) {
     const active = this.nav.mode === 'fpv';
     if (!active && this.savedNear !== null) {
+      this.collision.release();
       this.camera.near = this.savedNear;
       this.camera.updateProjectionMatrix();
       this.savedNear = null;

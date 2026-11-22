@@ -81,6 +81,7 @@ export class VoxelCollision {
   private readonly retryAt = new Map<number, number>();
   private wanted: number[] = [];
   private nextPrefetch = 0;
+  private unlisten: (() => void) | undefined;
 
   constructor(meta: Meta, cache?: TileCache, { radius = RADIUS, horizon = HORIZON }: CollisionOptions = {}) {
     this.radius = radius;
@@ -95,22 +96,35 @@ export class VoxelCollision {
     this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
     this.wet = paletteMask(semanticTable(meta.palette), RULES.water);
     this.cache = cache ?? new TileCache({ N: this.tileSide, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits });
-    // (one per craft: listens as long as the page lives)
-    liveEdits.listen((tx, tz) => this.invalidate(tx, tz));
+  }
+
+  // A craft has left. Drop its local tiles and holds, and resume on its next prefetch.
+  release() {
+    this.unlisten?.();
+    this.unlisten = undefined;
+    this.nextPrefetch = 0;
+    this.wanted = [];
+    this.tiles.clear();
+    this.retryAt.clear();
+    for (const key of this.held) this.cache.release(key % this.nx, Math.floor(key / this.nx));
+    this.held.clear();
+    // In-flight loads check the current wanted list on arrival, which may have changed on re-entry.
   }
 
   // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): its tile is read again, now where the
   // cache has it (its files in, or live columns with its foliage too), else loaded again
-  invalidate(tx: number, tz: number) {
+  private invalidate(tx: number, tz: number) {
     const key = tx + tz * this.nx;
     if (!this.tiles.delete(key) && !this.wanted.includes(key)) return;
     const v = this.cache.view(tx, tz);
     if (v) this.tiles.set(key, collisionTile(this.tileSide, v));
   }
 
-  prefetch(p: Vec3, v: Vec3) {
+  // A check stepping faster than wall time can ask for a fresh neighbourhood on demand.
+  prefetch(p: Vec3, v: Vec3, refresh = false) {
+    this.unlisten ??= this.cache.edits?.listen((tx, tz) => this.invalidate(tx, tz));
     const now = performance.now();
-    if (now >= this.nextPrefetch) {
+    if (refresh || now >= this.nextPrefetch) {
       this.nextPrefetch = now + 160;
       // round the craft and round points along its path out to the horizon, no more than two nodes apart (so that
       // their 3 x 3 neighbourhoods touch: no node on the way is left out however fast it flies)
@@ -263,7 +277,9 @@ export class VoxelCollision {
         this.tiles.set(key, collisionTile(this.tileSide, v));
         this.retryAt.delete(key);
       })
-      .catch(() => this.retryAt.set(key, performance.now() + 1500))
+      .catch(() => {
+        if (this.wanted.includes(key)) this.retryAt.set(key, performance.now() + 1500);
+      })
       .finally(() => this.inFlight.delete(key));
   }
 }

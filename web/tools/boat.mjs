@@ -34,7 +34,11 @@ if (hasData() && fs.existsSync(`${DATA}flood.json`)) {
     throw new Error(`collision tiles never loaded at ${x}, ${z}`);
   };
   const river = JSON.parse(fs.readFileSync(`${DATA}flood.json`, 'utf8')).river ?? [];
-  out.push(...await m.runRealChecks(c, meta, river, need));
+  try {
+    out.push(...await m.runRealChecks(c, meta, river, need));
+  } finally {
+    c.release();
+  }
 } else console.log('skip  real data             (no public/data)');
 
 if (process.argv.includes('--json')) console.log(JSON.stringify(out, null, 1));

@@ -198,6 +198,7 @@ export class BoatMode {
   }
 
   private leave() {
+    this.collision.release();
     this.phase = 'off';
     this.model.visible = false;
     this.touch.setActive(false);

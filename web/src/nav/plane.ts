@@ -168,6 +168,7 @@ export class PlaneMode {
       this.nav.actors.add(m.model.group);
       this.made.set(type, m);
     }
+    if (this.collision !== m.collision) this.collision?.release();
     this.type = type;
     this.help.innerHTML = `<span class="plane-help-keys">${type.help[0]}</span><span class="plane-help-touch">${type.help[1]}</span>`;
     ({ flight: this.flight, model: this.model, collision: this.collision, world: this.world } = m);
@@ -277,6 +278,7 @@ export class PlaneMode {
   }
 
   private leave() {
+    this.collision.release();
     this.phase = 'off';
     this.start = null;
     this.keys.clear();
