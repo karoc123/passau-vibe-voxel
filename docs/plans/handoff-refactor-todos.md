@@ -38,7 +38,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
-| R4 | Craft interface and `nav.ts` split | L | In progress (`r4`) |
+| R4 | Craft interface and `nav.ts` split | L | Ready to merge (`r4`) |
 | R5 | Check harnesses out of `src/` | M | Waits for R4 |
 | F2 | Walk to a vehicle and get in | M | Waits for R4 |
 | F5 | Trains and boats into the world sim | M | Waits for F4 |
