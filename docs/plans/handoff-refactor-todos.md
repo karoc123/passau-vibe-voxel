@@ -434,3 +434,8 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   over water (Fritz-Abelein-Brücke, Triftsperre).
 - **Aircraft:** wings do not collide. The floatplane's streaming measurement (phase 4 in [plane.md](plane.md)) is
   not done.
+- **Vehicle ideas (not planned, from the user, 2026-11-22):** each would be a `PlayerCraft` in `nav/craft.ts`.
+  - Camper van: another drivable car body (heavier, taller, slower).
+  - Parachute or paraglider: leaving the plane in the air opens a canopy instead of dropping the walker.
+  - Hovercraft: drives on water and on land.
+  - Helicopter: hovers, takes off and lands vertically.
