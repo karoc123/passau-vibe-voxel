@@ -26,21 +26,34 @@ it on its own branch, and report.
   (minutes). Some verify failures already exist on main, so compare against main and do not expect all-green.
 - `node tools/gates.mjs --list` shows which gate guards which files.
 
-## Status of the code-health list
+## Overview
 
-Done on main: items 1 (gate runner, without CI), 6, 7, 8 (web part), 9 (C1: plane, drone and car cores are plain,
-`core/vec.ts`, one `core/fixed-step.ts`, scanned by `core-deps`) and 17 (web part).
+Everything below is not done yet. "Ready" means it can start now. "Waits" means: start only after the named work is
+on `main` (check `git log`). When a package lands, delete its section and its row here, and turn "Waits" rows whose
+blockers are gone into "Ready".
 
-In progress, do not start anything that touches the same files:
+| Package | What | Size | Start |
+|---|---|---|---|
+| R1 | The plane does not start while you are driving (bug) | S | **Ready** |
+| R2 | Defect assertions on the fixtures | M | **Ready** |
+| R3 | Shared input, chase camera and panels | M | **Ready** |
+| R7 | Smaller independent items | M each | **Ready**, except the `voxelize.py` points: wait for P1+P3 |
+| R8 | Design: sim player API, one world for many players | design | **Ready** |
+| F1 | AI motorbikes | S–M | **Ready** |
+| F3 | Camera distance per vehicle type | S | **Ready** (or inside R3) |
+| F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
+| R4 | Craft interface and `nav.ts` split | L | Waits for R3 |
+| R5 | Check harnesses out of `src/` | M | Waits for R3, R4 |
+| R6 | Split `voxelize.py` into stages | L | Waits for P1+P3 (see below), R2 |
+| F2 | Walk to a vehicle and get in | M | Waits for R1, R4 |
+| F5 | Trains and boats into the world sim | M | Waits for F4, R8 |
 
-- **P1+P3:** items 2, 3, 4, 5, and the Python parts of 8 and 17. Files: `scripts/ways.py`, `voxelize.py`, `traffic.py`,
-  `clearance.py`, `tunnels.py`, `underpass.py`, `regions.py`.
-
-Check `git log` for whether they have landed before you start a package that waits for them.
+Not in this list because it is being done right now: **P1+P3**, the pipeline cleanup (shared way helpers in
+`scripts/ways.py`, one ordered list of ground-height passes, the bridgehead lift before furniture). It edits
+`voxelize.py`, `traffic.py`, `clearance.py`, `tunnels.py`, `underpass.py`, `regions.py`, so do not start pipeline
+work on those files until it is on `main`.
 
 ## Packages
-
-Ordered roughly by value. "Waits for" means: start only after that work is on main.
 
 ### R1. The plane does not start while you are driving (bug, S)
 
@@ -53,8 +66,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R2. Defect assertions on the fixtures (code-health 14, M)
 
-- **Waits for:** nothing, but coordinate with P1+P3 if it is still open: it touches `check.py` and
-  `scripts/fixtures/` only.
+- **Waits for:** nothing. It touches only `check.py` and `scripts/fixtures/`, not P1+P3's files.
 - **Do:** give each fixed road defect one assertion, using the fixtures `b85`, `gaissa`, `haissengasse`, `hals`,
   `kachlet`, `schalding`. Example: "no carriageway cell more than 1 m under its neighbours at this spot". Defect spots
   are in [road-defects.md](road-defects.md).
@@ -62,7 +74,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R3. Shared input, chase camera and panels (code-health 11, 12 = N2, M)
 
-- **Waits for:** nothing (C1 has landed). The shells already hold `FixedStep` clocks and plain vectors from the cores.
+- **Waits for:** nothing. The shells already hold `FixedStep` clocks and plain vectors from the cores.
 - **Do:** one gamepad reader, one typing guard and one focus-loss policy (`nav/input.ts`). Plus `ChaseRig`, `SafeTrail`
   (unstick/T), `ModePanel`, `river.ts`, and one `data-mode` attribute on `body` instead of per-mode body classes and CSS
   hide lists.
@@ -81,7 +93,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R5. Check harnesses out of `src/` (code-health 16 = T2, M)
 
-- **Waits for:** preferably R3 and R4, to avoid conflicts.
+- **Waits for:** R3 and R4 (they move the same shells).
 - **Do:** move `nav/*-checks.ts`, `plane-real.ts` and `physics/rapier/*scenarios.ts` to `web/checks/`, with one
   synthetic-world fixture and one result type.
 - **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
@@ -89,7 +101,7 @@ Ordered roughly by value. "Waits for" means: start only after that work is on ma
 
 ### R6. Split `voxelize.py` into stages (code-health 13 = P4, L)
 
-- **Waits for:** P1+P3, and R2 as its guard.
+- **Waits for:** P1+P3 (in progress), and R2 as its guard.
 - **Do:** one stage per commit, `def stage(ctx)` over an explicit context. Each commit must be byte-exact under
   `check.py golden --compare` (no data rebuild needed).
 - **Cut:** the proposal is in code-health 13.
@@ -135,7 +147,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F2. Walk to a specific vehicle and get in (M)
 
-- **Waits for:** R1 (leaving a ride cleanly), preferably R4.
+- **Waits for:** R1 (leaving a ride cleanly) and R4.
 - **Do:** when walking, a key or tap near a parked or moving vehicle (car, bus, motorbike, boat at the bank, plane on
   the water) enters it. Leaving puts the walker beside it, and the vehicle stays where it was left.
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
@@ -143,13 +155,13 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F3. Camera distance per vehicle type (S)
 
-- **Waits for:** nothing, or do it inside R3's `ChaseRig`.
+- **Waits for:** nothing. If R3 is running, do it inside R3's `ChaseRig` instead.
 - **Do:** the chase camera's distance and height come from the vehicle catalogue (bus further back and higher,
   motorbike closer).
 
 ### F4. The player car in the same Rapier world as the AI bodies (M–L)
 
-- **Waits for:** nothing (C1 has landed: `physics/rapier/car.ts` is plain, the drive runs on `FixedStep`).
+- **Waits for:** nothing. `physics/rapier/car.ts` is already free of three.js and the drive runs on `FixedStep`.
 - **Why:** collisions between the player car and AI cars, and destruction, need one physics world. It is also the
   shape a server needs: one world, many players.
 - **Today:** `RapierDrive` (`physics/rapier/drive-world.ts`) owns its own world with one car. AI cars near edits are
@@ -160,7 +172,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F5. Trains and boats into the world sim (M)
 
-- **Waits for:** preferably F4 and R8.
+- **Waits for:** F4 and R8.
 - **Today:** `sim/trains.ts` and `sim/boats.ts` sit in `sim/` but are three.js presentation with their own motion.
   ADR 0006 notes this.
 - **Do:** split each into a plain sim part (positions on their tracks or rivers, fixed 1/30 s tick, seeded RNG, no
