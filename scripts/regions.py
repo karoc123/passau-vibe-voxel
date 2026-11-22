@@ -327,7 +327,8 @@ def driver_stamp(ws):
 
 
 DRIVER_OUT = [OUT / "meta.json", Path("data/trees.json"), OUT / "traffic.json", Path("data/qa_roadmask.bin.gz"),
-              Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz"), Path("data/surface.npz")]
+              Path("data/ground.npz"), Path("data/footprints.npz"), Path("data/crowns.npz"), Path("data/surface.npz"),
+              DBG / "report.json"]
 
 
 def main(argv):
@@ -554,7 +555,9 @@ def main(argv):
     note(f"regions: {len(ws)} ({len(stats)} built), {round(time.time() - t_start)} s in all; per region built (s, peak MB):",
          {str(w): stats[w] for w in stats}, "; the steps after them: peak",
          round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024), "MB")
-    json.dump({"notes": notes}, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
+    # --just can retain regions built before counters were recorded.
+    counters = {f"{w.r0}_{w.c0}": res[w].get("counters", {}) for w in ws}
+    json.dump({"notes": notes, "counters": counters}, open(DBG / "report.json", "w"), indent=1, ensure_ascii=False)
     if just is None:
         stamp_f.write_text(driver_stamp(ws))
         print("done")

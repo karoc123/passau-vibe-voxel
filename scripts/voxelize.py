@@ -50,7 +50,7 @@ RDIR = Path(os.environ.get("VOXEL_OUT", "data/cache/regions/whole"))  # this reg
 OUT.mkdir(parents=True, exist_ok=True)
 DBG.mkdir(parents=True, exist_ok=True)
 RDIR.mkdir(parents=True, exist_ok=True)
-report = {"notes": []}
+report = {"notes": [], "counters": {"carriageways": {}}}
 RESULT = {}  # what this region hands to regions.py besides its rasters (lists, counts): data/cache/regions/*/out.json
 # the large features (spanning region.FMAX or more), decided whole (features.py): VOXEL_FEATURES, the feature pass, counts
 # what decides them over the region (its core alone) and stops; a build looks up the decisions (VOXEL_FEATURE_TABLE)
@@ -669,6 +669,7 @@ def carriageway_sanity(surface, stage):
         if off >= 6:
             bad.append((int(off), oid, (rc[0][0] + R0, rc[0][1] + C0)))
     SANITY[stage] = cnt
+    report["counters"]["carriageways"][stage] = len(bad)
     bad.sort(reverse=True)
     note(f"carriageway sanity ({stage}): {len(bad)} roads with 6+ m of their centreline painted as pavement: {bad[:8]}")
     if bad:
@@ -1080,8 +1081,10 @@ def align_to_lod2(outlines, parts):
             f["geom"] = translate(f["geom"], dx, dy)
             n_moved += len(f["rr"])
     sh = np.array([(dx, dy) for _, dx, dy in shifts]) if shifts else np.zeros((0, 2))
+    mean_shift = sh.mean(0).round(2).tolist() if len(sh) else None
+    report["counters"]["osm_lod2"] = dict(moved=len(shifts), matched=len(matched), mean_shift_m=mean_shift)
     note(f"OSM outlines moved onto their LoD2 footprints: {len(shifts)} of {len(matched)} matched "
-         f"(mean shift {sh.mean(0).round(2).tolist() if len(sh) else 0} m east/south)")
+         f"(mean shift {mean_shift if mean_shift is not None else 0} m east/south)")
     # the cells: owner of every building cell (outlines by size, small last; then rendered parts)
     owner = np.zeros((D, W), np.int32)
     allf = sorted(outlines, key=lambda f: -f["area"]) + [p for p in parts if p.get("parent") is not None]
@@ -1436,7 +1439,9 @@ def lod2_roofs(top):
     ROOF_GX[use], ROOF_GY[use] = lgx[use], lgy[use]
     pitched = use & (sl >= 0.3)
     json.dump(REVERTED, open(RDIR / "lod2_reverted.json", "w"), indent=0)
-    note("LoD2 roofs taken:", int(use.sum()), "of", int(bmask.sum()), "building cells; pitched:", int(pitched.sum()),
+    used, total = int(use.sum()), int(bmask.sum())
+    report["counters"]["lod2_roofs"] = dict(used=used, total=total)
+    note("LoD2 roofs taken:", used, "of", total, "building cells; pitched:", int(pitched.sum()),
          "; buildings left to the surface model:", n_rev)
     return pitched
 
@@ -2220,7 +2225,9 @@ if LZ is not None:
     _lt = np.where(_lt >= 2, _lt, ndimage.median_filter(_lt, 3))
     _use = veg & (_lt >= 2) & (nd_mean >= 0.6 * _lt)
     _nv = _lt + np.clip(nd_mean - _lt, 0, 1.5)
-    note("canopy heights from the laser:", int(_use.sum()), "of", int(veg.sum()), "cells; surface model minus laser, median",
+    used, total = int(_use.sum()), int(veg.sum())
+    report["counters"]["laser_canopy"] = dict(used=used, total=total)
+    note("canopy heights from the laser:", used, "of", total, "cells; surface model minus laser, median",
          round(float(np.median((nd_mean - _lt)[_use])), 2) if _use.any() else None, "m, |diff| > 2 m:",
          round(float((np.abs(nd_mean - _lt)[_use] > 2).mean()), 3) if _use.any() else None)
     nd_mean = np.where(_use, _nv, nd_mean)
@@ -3764,7 +3771,7 @@ _gc = CORE_OUT["g"][CORE_SL].astype(np.int64)  # (a histogram of the core's grou
 RESULT["g_hist"] = [int(_gc.min()), np.bincount((_gc - _gc.min()).ravel()).tolist()]
 RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
               lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
-              jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], notes=report["notes"],
+              jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], **report,
               osm_timestamp=osm.timestamp)
 import region_inputs
 RESULT["deps"] = region_inputs.deps_of_process()

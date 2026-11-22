@@ -4,10 +4,10 @@ costs does not grow with the map of scripts/map.json.
 
 usage: uv run python scripts/check.py COMMAND [ARGS] [--fixture PATH] [-j JOBS] [--keep]
 
-  verify                        hard checks on the fixture's build (see VERIFY): nothing floating left, carriageways
+  verify                        hard checks on the fixture's build: nothing floating left, carriageways
                                 in their own colour, LoD2 and the laser scan found where they should be, the moving
                                 things on the volume's surface (sunk / hover shares under a threshold), the sloped
-                                caps (caps.py report: carriageway share, roughness, edge mismatches; CAPS)
+                                caps (carriageway share, roughness, edge mismatches), and local road defects
   golden --record DIR           every output of a fresh fixture build (web/public/data, data/*.npz arrays, data/*.bin,
   golden --compare DIR          the inputs prep/lod2/laser.npz) hashed into DIR/golden.json, or compared with it: the
                                 guard of a refactor that must not change a byte. --incremental: build in the kept
@@ -46,7 +46,6 @@ import ast
 import hashlib
 import json
 import os
-import re
 import resource
 import shutil
 import subprocess
@@ -269,22 +268,9 @@ SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprin
 # the sloped caps (caps.py report): the carriageway cells with a cap, the capped carriageway's roughness (the second
 # difference per metre, p99, cm), linked capped neighbours whose shared corners differ (altstadt: 0.984, 8.6, 0.0035)
 CAPS = dict(road_share=0.95, rough_p99_cm=12.0, mismatch_share=0.01)
-MATCH_SHARE = 0.40    # OSM outlines matched to a LoD2 footprint (0.493)
+MATCH_SHARE = 0.40    # matched OSM outlines moved onto their LoD2 footprints (0.493)
 SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
-
-
-def notes_of(ws):
-    return json.load(open(ws / "data/debug/report.json"))["notes"]
-
-
-def sums(notes, pattern):
-    """per match of pattern (two integer groups) in the notes: the totals of both"""
-    ms = [re.search(pattern, n) for n in notes]
-    ms = [m for m in ms if m]
-    if not ms:
-        raise Failed(f"no note matches {pattern!r}: the build's report changed, update scripts/check.py")
-    return sum(int(m.group(1)) for m in ms), sum(int(m.group(2)) for m in ms), ms
 
 
 M_LEAF, M_LAMP, M_CAR = 3, 5, 11
@@ -343,8 +329,63 @@ def surface(ws, fx):
     return out
 
 
+def defect_checks(ws, fx):
+    """Check patches from road-defects.md and the fixtures' documented fixes on the built map.
+
+    Boxes are half-open [x0, z0, x1, z1] on the project grid. Road and water heights are metres above
+    the map base. Deck height is clearance above the water. Every column must have the expected surface.
+    """
+    checks = json.loads((SCRIPTS / "fixtures/road-defects.json").read_text()).get(fx.name, [])
+    if not checks:
+        return []
+
+    import gzip
+    import mapstore
+    data = ws / "data"
+    with np.load(data / "surface.npz") as s:
+        ground, deck = s["gt"], s["deck"]
+    with np.load(data / "ground.npz") as g:
+        water = g["water"]
+    roads = np.frombuffer(gzip.decompress((data / "qa_roadmask.bin.gz").read_bytes()), np.uint8).reshape(ground.shape)
+    meta = json.loads((ws / PUB / "meta.json").read_text())
+    vol = mapstore.MapVolume(fx.cover(), lambda w: data / "cache/regions" / f"{w.r0}_{w.c0}", meta["H"])
+
+    bad = []
+    for check in checks:
+        broken = []
+        for patch in check["patches"]:
+            x0, z0, x1, z1 = patch["box"]
+            if not (fx.col0 <= x0 < x1 <= fx.col0 + fx.W and fx.row0 <= z0 < z1 <= fx.row0 + fx.D):
+                raise Failed(f"{check['name']}: patch {patch['box']} is outside {fx.name}")
+            r, c = np.ogrid[z0 - fx.row0:z1 - fx.row0, x0 - fx.col0:x1 - fx.col0]
+            g = ground[r, c]
+            kind = patch["kind"]
+            if kind == "road":
+                height, present, top = g, roads[r, c] == 1, g
+            elif kind == "deck":
+                d = deck[r, c]
+                height, present, top = d - g, water[r, c] & np.isfinite(d), np.rint(np.nan_to_num(d))
+            elif kind == "water":
+                height, present, top = g, water[r, c], g
+            else:
+                raise Failed(f"{check['name']}: unknown surface {kind!r}")
+            # A raster can mark a surface even if the finished volume has a hole in it.
+            present &= (top > 0) & (top <= meta["H"]) & (vol[np.clip(top.astype(int) - 1, 0, meta["H"] - 1), r, c] != 0)
+            low, high = patch.get("min_m", -np.inf), patch.get("max_m", np.inf)
+            failed = ~present | (height < low) | (height > high)
+            if failed.any():
+                iz, ix = np.argwhere(failed)[0]
+                found = f"{height[iz, ix]:.2f} m" if present[iz, ix] else "missing"
+                broken.append(f"{kind} at ({x0 + ix}, {z0 + iz}): {found}, expected {low:g}..{high:g} m "
+                              f"({int(failed.sum())}/{failed.size} columns fail in {patch['box']})")
+        print(f"  defect: {check['name']}: {'FAIL' if broken else 'ok'}")
+        if broken:
+            bad.append(f"{check['name']}: " + ", ".join(broken))
+    return bad
+
+
 def verify(fx, jobs, ws=None):
-    """the hard checks (VERIFY in the docstring) on the fixture's workspace; returns the failures"""
+    """the hard checks on the fixture's workspace; returns the failures"""
     ws = ws or base(fx, jobs, after=False)
     bad = []
     dbg = ws / "data/debug"
@@ -354,23 +395,32 @@ def verify(fx, jobs, ws=None):
         print(f"  {name}.json: {len(items)}")
         if items:
             bad.append(f"{len(items)} {what}: {items[:5]} (data/debug/{name}.json)")
-    notes = notes_of(ws)
-    ms =[m for m in (re.search(r"carriageway sanity \((.*?)\): (\d+) roads", x) for x in notes) if m]
-    nbad = sum(int(m.group(2)) for m in ms)
-    print(f"  carriageway sanity: {len(ms)} notes, {nbad} roads painted as pavement")
-    if not ms:
-        bad.append("no carriageway sanity note in the report")
+    report = json.loads((dbg / "report.json").read_text())
+    counters = report.get("counters", {})
+    if not counters or any(not region for region in counters.values()):
+        raise Failed("missing region counters in data/debug/report.json, rebuild the fixture")
+    regions = list(counters.values())
+    carriageways = [count for r in regions for count in r["carriageways"].values()]
+    nbad = sum(carriageways)
+    print(f"  carriageway sanity: {len(carriageways)} checks, {nbad} roads painted as pavement")
+    if not carriageways:
+        bad.append("no carriageway sanity counter in the report")
     elif nbad:
         bad.append(f"{nbad} carriageways painted as pavement")
-    for label, pat, lim in (("LoD2 roofs taken", r"LoD2 roofs taken: (\d+) of (\d+) building cells", LOD2_SHARE),
-                            ("canopy heights from the laser", r"canopy heights from the laser: (\d+) of (\d+) cells", LASER_SHARE),
-                            ("OSM outlines matched to LoD2", r"OSM outlines moved onto their LoD2 footprints: (\d+) of (\d+)", MATCH_SHARE)):
-        a, b, _ = sums(notes, pat)
+    for label, key, used, total, lim in (
+        ("LoD2 roofs taken", "lod2_roofs", "used", "total", LOD2_SHARE),
+        ("canopy heights from the laser", "laser_canopy", "used", "total", LASER_SHARE),
+        ("matched OSM outlines moved onto LoD2", "osm_lod2", "moved", "matched", MATCH_SHARE),
+    ):
+        samples = [r[key] for r in regions if key in r]
+        if not samples:
+            bad.append(f"{label}: no counter in the report")
+            continue
+        a, b = sum(s[used] for s in samples), sum(s[total] for s in samples)
         print(f"  {label}: {a} of {b} ({a / max(b, 1):.3f}, at least {lim})")
         if a < lim * b:
             bad.append(f"{label}: {a} of {b}, under {lim}")
-    shifts = [tuple(map(float, m.groups())) for m in
-              (re.search(r"LoD2 footprints: .*mean shift \[([-\d.e]+), ([-\d.e]+)\]", x) for x in notes) if m]
+    shifts = [r["osm_lod2"]["mean_shift_m"] for r in regions if r.get("osm_lod2", {}).get("mean_shift_m") is not None]
     worst = max((max(abs(dx), abs(dy)) for dx, dy in shifts), default=None)
     print(f"  OSM outlines' mean shift onto LoD2: up to {worst} m (at most {SHIFT_MAX})")
     if worst is None or worst > SHIFT_MAX:
@@ -396,6 +446,7 @@ def verify(fx, jobs, ws=None):
             bad.append(f"caps: roughness p99 {rep['rough_p99_cm']} cm over {CAPS['rough_p99_cm']}")
         if rep["mismatch_share"] > CAPS["mismatch_share"]:
             bad.append(f"caps: edge mismatches {rep['mismatch_share']} over {CAPS['mismatch_share']}")
+    bad.extend(defect_checks(ws, fx))
     return bad
 
 
