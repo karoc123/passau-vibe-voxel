@@ -13,6 +13,7 @@ import { Hud } from './hud';
 import { Labels } from './labels';
 import type { DriveMode } from './nav/drive';
 import type { FpvMode } from './nav/fpv';
+import type { BoatMode } from './nav/boat';
 import { flying, Nav, type Mode, type Ride } from './nav/nav';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -76,6 +77,7 @@ const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v
 movingActors.add(nav.actors);
 let fpv: FpvMode | null = null;
 let drive: DriveMode | null = null;
+let boat: BoatMode | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -437,11 +439,12 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  const [{ FpvMode }, { DriveMode }] = await Promise.all([
-    import('./nav/fpv'), import('./nav/drive'),
+  const [{ FpvMode }, { DriveMode }, { BoatMode }] = await Promise.all([
+    import('./nav/fpv'), import('./nav/drive'), import('./nav/boat'),
   ]);
   fpv = new FpvMode(nav, camera, controls.target, meta, modeTools, renderer.domElement);
   drive = new DriveMode(nav, controls.target, meta, modeTools, renderer.domElement);
+  boat = new BoatMode(nav, camera, controls.target, meta, modeTools, renderer.domElement, () => daylight.night, () => flood?.level ?? 0);
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
@@ -465,6 +468,7 @@ renderer.setAnimationLoop((now) => {
   drive?.update(dt);
   nav.update(dt);
   fpv?.update(dt);
+  boat?.update(dt);
   const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.mode === 'pedestrian' ? 'Exit walk' : 'Walk';
   if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
   walkButton.disabled = !world || nav.enteringWalk || flying(nav.mode);

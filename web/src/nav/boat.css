@@ -1,0 +1,10 @@
+#bar .boat-speed { font-variant-numeric: tabular-nums; font-weight: 600; }
+#bar .boat-status:empty { display: none; }
+body.boating :is(#hud, .fpv-mode, .drive-mode) { display: none; }
+
+#bar .boat-help-touch { display: none; }
+@media (pointer: coarse) {
+  #bar .boat-help-keys { display: none; }
+  #bar .boat-help-touch { display: inline; }
+  #bar .boat-mode > button { min-height: 44px; }
+}

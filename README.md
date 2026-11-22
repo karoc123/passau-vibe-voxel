@@ -317,6 +317,11 @@ written as real node files and served through a stubbed fetch): a sweep before t
 cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
 code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
 
+**Boat: `node tools/boat.mjs`** (~2 s). The player's boat (`src/nav/boat-motion.ts`) on a synthetic channel
+(`src/nav/boat-checks.ts`, served as `collision.mjs`'s world): speed, turning, drifting, the bank, a pier and a low
+footbridge bounced off, under a bridge, put in and unstuck; then on the real data (skipped without it): put in near
+the Altstadt, a lap, under the Schanzlbrücke, into the bank. Exit code 1 on a failure.
+
 **Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
 slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
 across ids, one id still merges into one top. Ids are 16-bit end to end; the map's stay below 60000 (`scripts/zones.py` fails there), 60000..65535 are reserved for players' builds. Exit
@@ -424,6 +429,14 @@ another). Driving into the river ends in a splash and a restart a little way bac
 panel and input are `web/src/nav/drive.ts`; one drive (the traffic and people near the car, knock-outs, the river and
 back, crash landings, where to come back to: the last poses on its wheels on the terrain's ground with no water under
 it) is `nav/drive-session.ts`, with no DOM, checked headless by `tools/rapier-car.mjs` (`drive_*`).
+
+## Boat
+
+Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
+downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
+exits; touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
+the bridges. The motion is `web/src/nav/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
+the mode is `nav/boat.ts`; design and controls in `docs/plans/boat.md`.
 
 ## Third-person walking
 
