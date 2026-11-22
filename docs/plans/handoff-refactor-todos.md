@@ -49,7 +49,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F7 | Motorbike handling | M | **Ready** |
 | F9 | More landmark labels, N toggles them | S–M | **Ready** (labels need a data rebuild) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| Q2 | A carriageway over water is a bridge | M | **Ready** (re-measure its list after the data rebuild Q1 needs) |
+| Q2 | A carriageway over water is a bridge | M | **Ready** |
 | Q9 | A road or rail tunnel under a street is a covered passage | M | Waits for Q4 |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | F6 | Trains have hitboxes | S–M | Waits for F5 |
@@ -102,16 +102,13 @@ Rules for all of them, on top of the rules above:
   in the build report), so the spot cannot come back unnoticed.
 - R6 moves the same code in `voxelize.py`. Do not run a Q package in parallel with the R6 stage that holds its block.
 
-Landed in code, waiting for the next data rebuild: **Q1** (`e414b3ba`). After the rebuild, check Heining
-(`?cam=-3104.3,165.3,-159.8,-3181.8,13,-99.6`) and Schalding (`?cam=-5842.8,151.8,-1406.6,-5661.3,13,-1375.6`) are
-dry, read the `water_gate` counters in `data/debug/report.json` (about 22 000 cells dropped), and run
-`tools/boat.mjs` and `tools/plane.mjs`. ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
-possible later package.
+Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
+green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.
 
 ### Q2. A carriageway over water is a bridge (M)
 
 - **Waits for:** nothing. Q1 landed in code (`e414b3ba`, terrain water only within 8 m of ALKIS or OSM water). Its
-  tiles come with the next data rebuild; re-measure this list on that build (Q1 should take 9 of the 20 ways).
+  data is built (`12eb1e87`); re-measure this list on it first (Q1 should take 9 of the 20 ways).
 - **Today:** water is painted after the roads and wins: `gcol[_wat | _lockm] = C["water"]`. A road OSM maps as plain
   ground over a culvert or an untagged bridge is cut by the water under it. The sag lift in `scripts/ground.py`
   would carry the road over the gap, but it skips ground within 1 m of the river level (`g > _riv + 1`).
