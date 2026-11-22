@@ -35,7 +35,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| R3 | Shared input, chase camera and panels | M | In progress (`r3`) |
+| R3 | Shared input, chase camera and panels | M | Ready to merge (`r3`) |
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Smaller independent items | M each | **Ready** |
 | F4 | The player car in the same Rapier world as the AI bodies | M–L | **Ready** |
