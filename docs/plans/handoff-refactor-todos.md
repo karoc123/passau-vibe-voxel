@@ -39,13 +39,11 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R7 | Smaller independent items | M each | **Ready** |
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
-| F5 | Trains and boats into the world sim | M | In progress (`f5`) |
-| Q3 | Underpass stairwells never cut a carriageway or a track | S–M | In progress (`q3`) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike handling | M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
-| F6 | Trains have hitboxes | S–M | Waits for F5 |
+| F6 | Trains have hitboxes | S–M | **Ready** |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
@@ -96,26 +94,6 @@ Rules for all of them, on top of the rules above:
 
 Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
 green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.
-
-### Q3. Underpass stairwells never cut a carriageway or a track (S–M)
-
-- **Waits for:** nothing.
-- **Today:** `scripts/underpass.py` `build` cuts each stair as `ln.buffer(1.3)` down from the street and puts a
-  parapet round it (`buffer(2.3)`). Only the pit fill skips road voxels (`road = np.isin(...)`); the stair cut, the
-  parapet and the corridor's open branch (`vol[zf:g + 1] = 0`) do not. Where OSM draws the passage shorter than the
-  road is wide, the stair starts inside the drawn carriageway and the road gets a hole with parapet blocks on it.
-- **Measured:** of 20 stairs at passage ends, 2 cut a bed, and they are the two reported spots: steps 73518490
-  start 3.1 m from the B 8's centreline (drawn 6.2 m wide), steps 73518489 start 0.2 m from the track's centreline
-  (the passage 73518482 ends under the rail).
-- **Do:** one rule: inside a carriageway (`road_mask`) or a rail bed the passage stays covered. The corridor runs on
-  under the bed along the stair's line and the stair opens at the bed's edge plus a margin (about 1 m). No parapet
-  voxel on a carriageway or a bed.
-- **Do:** a `verify` check: no cell with `WALK >= 0` open to the sky on a carriageway or a rail bed.
-- **Gates:** `check.py verify` (the haissengasse fixture has the B 8 over the Donauradweg underpass, it must not
-  change); the walkers still get through (`traffic.py` reads `underpass.WALK`).
-- **Verify spots:**
-  - B 8, hole in the lane: `?cam=-3791.6,106,-728.3,-3840.6,14,-681.5`
-  - the same passage under the railway, hole in the track: `?cam=-3791.6,106,-728.3,-3867.3,16.2,-659`
 
 ### Q5. A crown over a roof is not a tower (S–M)
 
@@ -169,22 +147,12 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
   [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 
-### F5. Trains and boats into the world sim (M)
-
-- **Waits for:** nothing. F4 landed. The target design is [ADR 0007](../adr/0007-player-control-in-world-sim.md).
-- **Today:** `sim/trains.ts` and `sim/boats.ts` sit in `sim/` but are three.js presentation with their own motion.
-  ADR 0006 notes this.
-- **Do:** split each into a plain sim part (positions on their tracks or rivers, fixed 1/30 s tick, seeded RNG, no
-  three.js) and a presentation part. Add the sim parts to `tools/core-deps.mjs`.
-
 ### F6. Trains have hitboxes (S–M)
 
-- **Waits for:** F5 (the trains' plain sim part). F4 landed the shared Rapier world. Fold F6 into F5 if the same
-  agent does both.
+- **Waits for:** nothing. F4 landed the shared Rapier world and F5 landed the fixed-step train sim.
 - **Today:** the player drives through trains. The shared Rapier world (`physics/rapier/life-phys.ts`) handles road
-  vehicles. `sim/trains.ts` keeps its trains private and computes each coach's pose only when it
-  draws (`render`), in three.js types. Walking, the boat and the planes collide with voxels only
-  (`nav/voxel-collision.ts`), so they pass through trains too.
+  vehicles. `sim/train-traffic.ts` exposes coach poses through `TrainTraffic.coaches()`. Walking, the boat and the
+  planes collide with voxels only (`nav/voxel-collision.ts`), so they pass through trains too.
 - **Do:** the train sim publishes its coaches as boxes (entity id, pose, 2.9 × 4 × 20 m) in the tick's snapshot
   ([ADR 0007](../adr/0007-player-control-in-world-sim.md)). In the shared world each coach near a player is a
   kinematic body that stays on its track on impact.
@@ -233,7 +201,7 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   - `nav/boat.ts`: `lift = Math.max(0, this.level())`, the drawn hull raised (the physics stays on the voxels'
     water, `VoxelCollision.waterColumn`).
   - `nav/plane-flight.ts` `collisionWorld(c, H, level)`: `water()` returns the voxels' water top plus the rise.
-  - `sim/boats.ts` `update(..., level)`: the ships float at `waterTop + level`, and no tours above 3.5 m.
+  - `sim/boat-traffic.ts` `BoatTraffic.tick(..., level)`: the ships float at `waterTop + level`, and no tours above 3.5 m.
     `waterTop` is one number for the whole map (`flood.json` `voxel_top`), which is wrong wherever a ship is not on
     that stretch.
   - Boat and plane also read `flood.json` `river` (points every 24 m) to find water to start on. That is world
@@ -242,8 +210,9 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   world data through one module.
 - **Do, step 1 (code only, no data change):** one water module (`nav/river.ts`, plain, no three.js): the
   water top at (x, z) from `VoxelCollision.waterColumn`, and the nearest water to a point. Boat, plane and
-  `sim/boats.ts` use it. Remove the `level` parameters from `BoatMode`, `PlaneMode` `env`, `collisionWorld` and
-  `Boats.update`, and `NO_TOURS_ABOVE`. `sim/boats.ts` takes the water top where each ship is, not `voxel_top`.
+  `sim/boat-traffic.ts` use it. Remove the `level` parameters from `BoatMode`, `PlaneMode` `env`, `collisionWorld`
+  and `BoatTraffic.tick` (including the forwarding from `Traffic.update`), and remove `NO_TOURS_ABOVE`.
+  `BoatTraffic` uses the local water top at each ship position.
 - **Do, step 2 (code only):** remove the slider (`bar.ts` `river`, `onRiver`, `showRiver`; `main.ts` `RIVER`,
   `flood.setLevel`, `riverSeen`), `flood.ts` (the sheets, `uLevel`, `uBoxes`, `uSpill0`), `uDrop` and the sandbank
   branch in `voxelMaterial.ts`, `FloodInfo` fields nobody reads, the README's and `docs/plans/boat.md`,
