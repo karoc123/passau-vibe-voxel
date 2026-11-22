@@ -3768,6 +3768,7 @@ CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.a
 # gsrc: the ground's surface where it was lifted to the surface model (SAG_SRC: a carriageway on a structure the terrain
 # model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
 CORE_OUT["gsrc"] = SAG_SRC
+CORE_OUT["gpass"] = ground.changed_bits(GCTX)  # (data/debug/ground_passes.npz: which ground pass changed each cell)
 note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
      "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
 _lines = {oid: l_ for oid, _, l_ in osm.lines}

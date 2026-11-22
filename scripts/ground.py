@@ -424,3 +424,13 @@ def run(ctx, phase):
     ctx.note(f"ground passes ({phase}), cells changed:", ", ".join(f"{n} {ctx.counts[n]}" for n, ph, _ in GROUND_PASSES
                                                                 if ph == phase))
     return ctx.g
+
+
+def changed_bits(ctx):
+    """which pass changed each cell: bit k for GROUND_PASSES[k] (uint16), for data/debug/ground_passes.npz -- "who
+    lifted this cell" is a lookup there (its `names` in bit order)"""
+    bits = np.zeros((ctx.D, ctx.W), np.uint16)
+    for k, (name, _, _) in enumerate(GROUND_PASSES):
+        if name in ctx.changed:
+            bits |= ctx.changed[name].astype(np.uint16) << k
+    return bits
