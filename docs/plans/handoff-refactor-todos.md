@@ -139,7 +139,7 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 
-- **Waits for:** nothing (Q2, Q8, Q9 landed; take measurements on data rebuilt after Q8). Do nothing here before them; this is only the list of what may be left.
+- **Waits for:** nothing (Q2, Q8, Q9 landed; take measurements on data rebuilt after Q8). This is the list of what may be left.
 - **Preferred fix:** correct OpenStreetMap itself (open data, and the next extract carries it), else an override in
   `scripts/overrides/`.
   - B 8 over the Baderbachl mouth (way 73317832 near -3048,-88): the road has no `bridge` tag, the stream under
@@ -149,8 +149,6 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
   - Passage under the B 8 (way 73518491) and under the railway (way 73518482): mapped shorter than the road and the
     tracks are wide; the steps 73518490 and 73518489 start inside them.
   - B 12 bridge over the Rottalbahn (way 34755059): 25 m long; the deck is wider than three lanes.
-  - Dietzing bridge over the B 85 (way 106617552, -2087,-1658): drawn along the deck's north edge, both ends
-    6–8 m short of the banks. Realign it only if Q8 leaves the deck low.
   - Stelzhamerstraße tunnel (way 8022045, -1282,1156): left solid by Q9 (the `tunnels` counter reports it blocked).
     The railway embankment over it is high only in its middle third; on the slopes tracks 27355998 and 593528918
     run 0–1 m over the floor. Needs the embankment level corrected.
