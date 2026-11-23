@@ -2,7 +2,7 @@
 // a server share it; tools/core-deps.mjs scans it with the sim). Each type: its body on Rapier's raycast wheels
 // (physics/rapier/vehicle.ts createVehicle: the chassis' box, mass, wheels, engine, brakes, top speed, and what it
 // tunes differently from the car's ride, RIDE), its length in the traffic, and its model (boxes in its own frame:
-// x left, y up from the ground, z forward; drawn by sim/meshes.ts). docs/plans/vehicles.md: how to add one.
+// x left, y up from the ground, z forward; drawn by view/meshes.ts). docs/plans/vehicles.md: how to add one.
 
 // The chassis and its drive: half extents of the chassis' box (m; its bottom 0.45 m under the body's origin), mass
 // (kg), wheels (chassis space; the front ones steer, the rear ones are driven), the engine's force per driven wheel

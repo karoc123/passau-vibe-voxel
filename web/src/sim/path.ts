@@ -80,7 +80,7 @@ export function at(e: Path, s: number, off: number, out: Pt): Pt {
 }
 
 // Where things are looked at from: x, z on the ground (the grid's x, y), y the height (none: on the ground, the
-// distance along it). What moves comes and goes only far from it (life.ts, trains.ts).
+// distance along it). What moves comes and goes only far from it (view/life.ts, view/trains.ts).
 export interface Viewer { x: number; z: number; y?: number }
 // is the point (x, y on the grid, z its height) at least r m from the viewer?
 export const farFrom = (v: Viewer, x: number, y: number, z: number, r: number) => (x - v.x) ** 2 + (y - v.z) ** 2 + (v.y === undefined ? 0 : (v.y - z) ** 2) >= r * r;

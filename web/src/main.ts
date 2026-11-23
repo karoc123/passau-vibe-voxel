@@ -18,7 +18,7 @@ import type { LifePhysics } from './physics/rapier/life-phys';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
-import { StreetLife } from './sim/life';
+import { StreetLife } from './view/life';
 import type { BoatData } from './sim/boat-traffic';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';

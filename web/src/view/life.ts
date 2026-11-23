@@ -1,20 +1,20 @@
 import * as THREE from 'three';
 import type { World } from '../world';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
-import { farFrom, pt } from './path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from './traffic';
+import { farFrom, pt } from '../sim/path';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from '../sim/traffic';
 import { Trains } from './trains';
 import { Boats } from './boats';
-import type { BoatData } from './boat-traffic';
-import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from './types';
-import { VEHICLE_IDS, vehicleOf, type VehicleId } from './vehicles';
+import type { BoatData } from '../sim/boat-traffic';
+import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from '../sim/types';
+import { VEHICLE_IDS, vehicleOf, type VehicleId } from '../sim/vehicles';
 
 // The street life's presentation: the traffic (sim/traffic.ts: the world sim, headless, on its fixed tick) drawn
 // between its last two ticks with instanced meshes, the trains, the people knocked down or fallen into a hole (an
 // effect: shoved, tipping over, no physics), picking an agent on screen. Nothing here feeds back into the sim but the
 // player's focus and the road world's player commands.
 
-export { CAR_POP_R, PED_POP_R } from './traffic';
+export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
