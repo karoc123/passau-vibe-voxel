@@ -979,275 +979,6 @@ def ground_classes(ctx):
                      rail_beds=rail_beds, rails=rails, road_lines=road_lines, splash_pads=splash_pads, tn=tn)
 
 
-STAGES = [  # (its name in the build's timing, the stage)
-    ("rasters, cell colours, OSM", rasters),
-    ("ground classes, roads, water", ground_classes),
-]
-ctx = Ctx()
-for _name, _run in STAGES:
-    _run(ctx)
-    stage(_name)
-# (the stages to come are module code still: what they read of the ones above)
-(GCTX, LOD2, OPEN_CUT, RIVER_LV, SAG_SRC, SANITY, TN, _core_s, _jm, _locks, bridge_lines, bridge_rails,
- bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm, dsm_mean, dtm, exg, explicit,
- foot_shapes, g, gcol, is_road, lit_ground_ways, lm, lum, nd_max, nd_max_b, nd_mean, osm, parking_mask, rail_beds,
- rails, rgbsum, road_lines, splash_pads, tn) = (
-    ctx.GCTX, ctx.LOD2, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.SAG_SRC, ctx.SANITY, ctx.TN, ctx._core_s, ctx._jm, ctx._locks,
-    ctx.bridge_lines, ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways,
-    ctx.cellcol, ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.foot_shapes, ctx.g,
-    ctx.gcol, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_max_b, ctx.nd_mean, ctx.osm,
-    ctx.parking_mask, ctx.rail_beds, ctx.rails, ctx.rgbsum, ctx.road_lines, ctx.splash_pads, ctx.tn)
-# ---------------------------------------------------------------- buildings
-feats = []
-for oid, typ, t, geom in osm.areas:
-    part = t.get("building:part") not in (None, "no")
-    bld = t.get("building") not in (None, "no") and not part
-    if not (part or bld) or t.get("building") == "construction" or t.get("location") == "underground":
-        continue
-    if layer_of(t) < 0 and not part:
-        continue
-    h = parse_len(t.get("height"))
-    lv = parse_len(t.get("building:levels"))
-    if h is None and lv is not None:
-        h = lv * 3.2 + (parse_len(t.get("roof:height")) or (parse_len(t.get("roof:levels")) or 0) * 2.8)
-    mh = parse_len(t.get("min_height"))
-    if mh is None and t.get("building:min_level"):
-        mh = parse_len(t["building:min_level"], 0) * 3.2
-    if t.get("building") in ("roof", "carport") and mh is None:
-        mh = 2.5
-    rr, cc = cells_of(geom)
-    if len(rr) == 0:
-        continue
-    feats.append(dict(id=oid, typ=typ, tags=t, geom=geom, part=part, rr=rr, cc=cc, maxh=h, minh=mh or 0.0,
-                      area=geom.area))
-note("building features:", len(feats), "parts:", sum(f["part"] for f in feats))
-
-
-def lod2_only_buildings():
-    """Buildings LoD2 has and OSM does not (sheds, garages, back houses, a school's wing: ~380 of them, 19,000 cells
-    the surface model stands 3 m and more over): a building of LoD2's footprint where OSM has no building on 80 % of it,
-    the surface model agrees with its roof (medians within 3 m) and OSM maps no construction site over it (a block
-    being pulled down since the flight) and no bridge through it; not a strip under 4 m wide (a wall, a deck)."""
-    if LOD2 is None or "cen" not in LOD2:
-        return []
-    z_ = LOD2
-    lb = np.where(z_["cen"], z_["bid"], 0)
-    lz_ = z_["z"] - dtm
-    have = np.zeros((D, W), bool)
-    for f in feats:
-        have[f["rr"], f["cc"]] = True
-    have |= ndimage.binary_dilation(have, iterations=1)  # (an outline a cell short of its LoD2 footprint)
-    site = np.zeros((D, W), np.uint8)
-    burn(site, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" or "demolished:building" in t_
-                or t_.get("building") == "construction"])
-    # nor a bridge: LoD2 models the Poststeg's deck as a building (its OSM way 4 m beside it)
-    burn(site, [(l_.buffer(8), 1) for _, t_, l_ in osm.lines if on_bridge(t_)])
-    out = []
-    for i, sl_ in enumerate(ndimage.find_objects(lb), 1):
-        if sl_ is None:
-            continue
-        m = lb[sl_] == i
-        n = int(m.sum())
-        if n < 20 or have[sl_][m].mean() > 0.2 or site[sl_][m].mean() > 0.3:
-            continue
-        hz, hd = float(np.nanmedian(lz_[sl_][m])), float(np.median(nd_max_b[sl_][m]))
-        if hz < 2.5 or abs(hz - hd) > 3:
-            continue
-        if ndimage.distance_transform_edt(np.pad(m, 1)).max() < 2.5:
-            continue  # a strip 4 m wide or less: a wall (the fortresses' curtain walls), a deck -- not a house
-        rr, cc = np.nonzero(m)
-        rr, cc = rr + sl_[0].start, cc + sl_[1].start
-        polys = [shape(s) for s, v in rasterio.features.shapes(m.astype(np.uint8), mask=m,
-                 transform=Affine.translation(sl_[1].start, sl_[0].start)) if v]
-        geom = max(polys, key=lambda p: p.area)
-        out.append(dict(id=-i, typ="lod2", tags={"building": "yes"}, geom=geom, part=False, rr=rr, cc=cc, maxh=None,
-                        minh=0.0, area=float(n)))
-    note(f"buildings from LoD2 alone (none in OSM): {len(out)}, {sum(len(f['rr']) for f in out)} cells")
-    return out
-
-
-feats += lod2_only_buildings()
-
-outlines = [f for f in feats if not f["part"]]
-parts = [f for f in feats if f["part"]]
-otree = STRtree([f["geom"] for f in outlines])
-for p in parts:  # parts inherit colours/material/name from their outline
-    rp = p["geom"].representative_point()
-    # inside several outlines (a block relation, the same outline mapped twice): the smallest -- never the spatial
-    # index's order, which changes with the map
-    hits = sorted((outlines[i] for i in otree.query(rp, predicate="within")), key=lambda o: (round(o["area"], 1), -o["id"]))
-    for o in hits:
-        o["has_parts"] = True
-    if hits:
-        p["parent"] = hits[0]
-for p in parts:
-    if "parent" not in p:
-        cands = [outlines[i] for i in otree.query(p["geom"], predicate="intersects")]
-        if cands:
-            p["parent"] = max(cands, key=lambda o: (round(o["geom"].intersection(p["geom"]).area, 1), -o["id"]))
-            p["parent"]["has_parts"] = True
-for o in outlines:
-    # outline with parts not rendered (OSM simple-3D convention) if parts cover most of it
-    if o.get("has_parts"):
-        covered = sum(p["geom"].intersection(o["geom"]).area for p in parts if p.get("parent") is o)
-        o["render"] = covered < 0.6 * o["area"]
-    else:
-        o["render"] = True
-for p in parts:
-    p["render"] = True
-render = [f for f in feats if f["render"]]
-
-
-def align_to_lod2(outlines, parts):
-    """OSM's outlines are traced from imagery and stand up to 4 m off the surface model in places (the Dom's 3 m to
-    the north-west; over the town ~1 m east on average): the voxels missed a strip of every such building on one side
-    and stood a sliver of wall in the street on the other. The LoD2 footprints (scripts/lod2.py: the cadastre's, the
-    surface model's position) are the reference; OSM keeps the tags.
-    Per outline: the LoD2 buildings it covers (a third of one, or it covers a third of the outline's cells), and the
-    whole-metre shift up to 4 m that fits the outline best onto them (by the share of cells in common; it must gain
-    4 points over staying and end at 0.6 or more). The outline and its parts move by it. Then the cells: an LoD2
-    footprint's cells no building has go to the nearest outline (or its nearest part) within 4 m that covers that
-    LoD2 building; an outline's cells outside every LoD2 footprint where the surface model stands under 2.5 m (a
-    sliver of street) go, when the outline has LoD2 buildings at all. Outlines LoD2 does not know (built since) stay."""
-    if LOD2 is None:
-        return
-    z_ = LOD2
-    if "cen" not in z_:
-        note("data/lod2.npz has no footprints (rerun scripts/lod2.py): OSM outlines left where they are")
-        return
-    lb = np.where(z_["cen"], z_["bid"], 0)
-    lcount = np.bincount(lb.ravel())
-    kids = {}
-    for p in parts:
-        if p.get("parent") is not None:
-            kids.setdefault(id(p["parent"]), []).append(p)
-    shifts, matched = [], {}
-    for o in outlines:
-        rr, cc = o["rr"], o["cc"]
-        if len(rr) < 12 or o["tags"].get("building") in ("roof", "carport", "canopy"):
-            continue
-        ids, n = np.unique(lb[rr, cc], return_counts=True)
-        k = (ids > 0) & ((n >= 0.33 * lcount[ids]) | (n >= 0.33 * len(rr)))
-        if not k.any():
-            continue
-        ids = ids[k]
-        matched[id(o)] = set(ids.tolist())
-        P = 4
-        r0, c0 = rr.min() - P, cc.min() - P
-        r1, c1 = rr.max() + P + 1, cc.max() + P + 1
-        if r0 < 0 or c0 < 0 or r1 > D or c1 > W:
-            continue
-        L_ = np.isin(lb[r0:r1, c0:c1], ids)
-        m_ = np.zeros(L_.shape, bool)
-        m_[rr - r0, cc - c0] = True
-        nL, nm = int(L_.sum()), len(rr)
-        best, iou0 = None, None
-        for dy in range(-P, P + 1):
-            for dx in range(-P, P + 1):
-                inter = int((np.roll(m_, (dy, dx), (0, 1)) & L_).sum())
-                iou = inter / (nL + nm - inter)
-                if dx == 0 and dy == 0:
-                    iou0 = iou
-                score = iou - 0.004 * math.hypot(dx, dy)  # (of equal fits the smaller shift)
-                if best is None or score > best[0]:
-                    best = (score, iou, dx, dy)
-        _, iou, dx, dy = best
-        if (dx or dy) and iou >= 0.6 and iou - iou0 >= 0.04:
-            shifts.append((o, dx, dy))
-    from shapely.affinity import translate
-    n_moved = 0
-    for o, dx, dy in shifts:
-        for f in [o] + kids.get(id(o), []):
-            ok = (f["rr"] + dy >= 0) & (f["rr"] + dy < D) & (f["cc"] + dx >= 0) & (f["cc"] + dx < W)
-            f["rr"], f["cc"] = f["rr"][ok] + dy, f["cc"][ok] + dx
-            f["geom"] = translate(f["geom"], dx, dy)
-            n_moved += len(f["rr"])
-    sh = np.array([(dx, dy) for _, dx, dy in shifts]) if shifts else np.zeros((0, 2))
-    mean_shift = sh.mean(0).round(2).tolist() if len(sh) else None
-    report["counters"]["osm_lod2"] = dict(moved=len(shifts), matched=len(matched), mean_shift_m=mean_shift)
-    note(f"OSM outlines moved onto their LoD2 footprints: {len(shifts)} of {len(matched)} matched "
-         f"(mean shift {mean_shift if mean_shift is not None else 0} m east/south)")
-    # the cells: owner of every building cell (outlines by size, small last; then rendered parts)
-    owner = np.zeros((D, W), np.int32)
-    allf = sorted(outlines, key=lambda f: -f["area"]) + [p for p in parts if p.get("parent") is not None]
-    for i_, f in enumerate(allf, 1):
-        owner[f["rr"], f["cc"]] = i_
-    root = lambda f: f if not f["part"] else f["parent"]
-    # add: LoD2 footprint cells no feature has, to the nearest feature whose outline matched that LoD2 building
-    free = (lb > 0) & (owner == 0)
-    d_, (ir, ic) = ndimage.distance_transform_edt(owner == 0, return_indices=True)
-    rr_, cc_ = np.nonzero(free & (d_ <= 4))
-    add = {}
-    for r, c in zip(rr_, cc_):
-        f = allf[owner[ir[r, c], ic[r, c]] - 1]
-        if not f["render"]:
-            continue  # (an outline drawn through its parts only)
-        if lb[r, c] in matched.get(id(root(f)), ()):
-            add.setdefault(id(f), (f, []))[1].append((r, c))
-    n_add = 0
-    for f, cells in add.values():
-        a_ = np.array(cells)
-        f["rr"], f["cc"] = np.r_[f["rr"], a_[:, 0]], np.r_[f["cc"], a_[:, 1]]
-        n_add += len(a_)
-    # drop: cells off every LoD2 footprint, low in the surface model, of matched outlines
-    far = lb == 0
-    low = nd_max_b < 2.5
-    n_drop = 0
-    for f in allf:
-        if id(root(f)) not in matched:
-            continue
-        k = far[f["rr"], f["cc"]] & low[f["rr"], f["cc"]]
-        if k.any() and k.mean() < 0.5:
-            f["rr"], f["cc"] = f["rr"][~k], f["cc"][~k]
-            n_drop += int(k.sum())
-    note(f"building cells from the LoD2 footprints: {n_add} added, {n_drop} dropped (no building there)")
-
-
-align_to_lod2(outlines, parts)
-
-
-def close_slots():
-    """A slot 1 m wide between two buildings that the surface model sees roofed (3 m and more up, not green): two OSM
-    outlines that do not quite meet (the Veste Niederhaus' main block and its east wing: a dark gap down the whole
-    facade). It goes to the building next to it with the higher roof. Not over a mapped way (a passage, steps)."""
-    own = np.zeros((D, W), np.int32)
-    fs = [f for f in render]
-    for i_, f in enumerate(fs, 1):
-        own[f["rr"], f["cc"]] = i_
-    bm = own > 0
-    # a 1 m gap with two different buildings on its two sides (a 2 m one is as likely an alley the map lacks)
-    closed = np.zeros((D, W), bool)
-    for ax in (0, 1):
-        a_, b_ = region.shift(own, 1, ax), region.shift(own, -1, ax)
-        closed |= (a_ > 0) & (b_ > 0) & (a_ != b_)
-    ways = np.zeros((D, W), np.uint8)
-    burn(ways, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines if t_.get("highway")])
-    slot = closed & ~bm & (nd_max_b >= 3) & (exg < 0.06) & (ways == 0)
-    if not slot.any():
-        return
-    hi = np.where(bm, nd_max_b, -1.0)
-    best = np.zeros((D, W), np.int32)
-    bh = np.full((D, W), -1.0)
-    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-        o_ = region.shift2(own, (dr, dc))
-        h_ = region.shift2(hi, (dr, dc))
-        k_ = slot & (o_ > 0) & (h_ > bh)
-        best[k_], bh[k_] = o_[k_], h_[k_]
-    rr_, cc_ = np.nonzero(slot & (best > 0))
-    add = {}
-    for r, c in zip(rr_, cc_):
-        add.setdefault(best[r, c], []).append((r, c))
-    for i_, cells in add.items():
-        f = fs[i_ - 1]
-        a_ = np.array(cells)
-        f["rr"], f["cc"] = np.r_[f["rr"], a_[:, 0]], np.r_[f["cc"], a_[:, 1]]
-    note("slots between buildings closed (roofed in the surface model):", len(rr_), "cells")
-
-
-close_slots()
-
-
-
 def tag(f, k):
     v = f["tags"].get(k)
     if v is None and f.get("parent") is not None:
@@ -1255,618 +986,867 @@ def tag(f, k):
     return v
 
 
-bmask = np.zeros((D, W), bool)
-for f in render:
-    bmask[f["rr"], f["cc"]] = True
-
-# feature-level source decision (the surface model vs current OSM)
-top = np.where(bmask, nd_max_b, 0.0).astype(np.float32)
-src_osm = []
-for f in render:
-    if f["maxh"] is None:
-        continue
-    v = nd_max_b[f["rr"], f["cc"]]
-    med, p90 = float(np.median(v)), float(np.percentile(v, 90))
-    f["dsm_med"] = med
-    if f["maxh"] - p90 > 8:
-        small = f["area"] < 80 and p90 > 0.7 * f["maxh"]  # needle on top of a tall building
-        rh = parse_len(f["tags"].get("roof:height")) or 0
-        pointed = f["tags"].get("roof:shape") in ("pyramidal", "conical", "onion", "spire", "dome") and rh >= 3
-        if pointed and len(f["rr"]) >= 9 and p90 > 0.6 * (f["maxh"] - rh):
-            # a tower's pointed roof the LiDAR missed (a church's bell towers: 61 m of tower, a 15 m pyramid): it
-            # rises from the eaves to its peak by distance from the part's edge -- not the whole footprint at 76 m
-            rr_, cc_ = f["rr"], f["cc"]
-            m_ = np.zeros((rr_.max() - rr_.min() + 3, cc_.max() - cc_.min() + 3), bool)
-            m_[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1] = True
-            dep = ndimage.distance_transform_edt(m_)[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1]
-            roof_ = (f["maxh"] - rh) + rh * (dep - 1) / max(dep.max() - 1, 1)
-            top[rr_, cc_] = np.maximum(top[rr_, cc_], roof_)
-            src_osm.append((f["id"], tag(f, "name"), round(p90, 1), f["maxh"], "pointed roof"))
-        elif small or p90 < 0.35 * f["maxh"]:  # else: nothing tall there in the surface model -> built after the flight
-            # spire/needle under-sampled by LiDAR, or built after the flight
-            top[f["rr"], f["cc"]] = np.maximum(top[f["rr"], f["cc"]], f["maxh"])
-            src_osm.append((f["id"], tag(f, "name"), round(p90, 1), f["maxh"], "spire" if small else "new"))
-for s in src_osm:
-    note("OSM height used (LiDAR lower):", s)
-# OSM buildings absent in LiDAR without height info
-for f in render:
-    if f["maxh"] is None and np.median(nd_max[f["rr"], f["cc"]]) < 1.5:
-        top[f["rr"], f["cc"]] = 3.2 * (parse_len(tag(f, "building:levels")) or 1)
-        note("no LiDAR + no height -> levels:", f["id"], tag(f, "name"))
-
-# tree canopy over low roofs: clip to OSM height
-cell_maxh = np.full((D, W), np.nan, np.float32)
-for f in sorted(render, key=lambda f: f["maxh"] or 0):
-    if f["maxh"] is not None:
-        cell_maxh[f["rr"], f["cc"]] = np.fmax(cell_maxh[f["rr"], f["cc"]], f["maxh"])
-# a crown that is not green (a copper beech over a low house) is still rough: the DSM's spread over 3 m is ~4 m in a
-# crown, under 1 m on a roof. Only over a small low house standing among crowns (a ring round it, away from other
-# buildings, tall and green or rough) whose raised cells are mostly rough: a mistagged tower is smooth on top
-_m = boxmean(dsm, 6)
-rough = np.sqrt(np.maximum(boxmean(dsm * dsm, 6) - _m * _m, 0)).reshape(D, 2, W, 2).max((1, 3))
-under_tree = np.zeros((D, W), bool)
-for f in render:
-    if f["part"] or f.get("has_parts") or f["maxh"] is None or f["maxh"] > 8 or f["area"] >= 400:
-        continue
-    r0, r1, c0, c1 = max(f["rr"].min() - 5, 0), min(f["rr"].max() + 6, D), max(f["cc"].min() - 5, 0), min(f["cc"].max() + 6, W)
-    own = np.zeros((r1 - r0, c1 - c0), bool)
-    own[f["rr"] - r0, f["cc"] - c0] = True
-    ring = ndimage.binary_dilation(own, iterations=4) & ~ndimage.binary_dilation(bmask[r0:r1, c0:c1] & ~own, iterations=3) & ~own
-    crown = (nd_max[r0:r1, c0:c1] > f["maxh"] + 3) & ((exg[r0:r1, c0:c1] > 0.06) | (rough[r0:r1, c0:c1] > 2.5))
-    raised = nd_max[f["rr"], f["cc"]] > f["maxh"] + 3
-    if ring.sum() > 10 and crown[ring].mean() > 0.25 and raised.any() and (rough[f["rr"], f["cc"]][raised] > 2.5).mean() > 0.6:
-        under_tree[f["rr"], f["cc"]] = True
-over = bmask & ((exg > 0.06) | under_tree) & np.isfinite(cell_maxh) & (top > cell_maxh + 3)
-top[over] = cell_maxh[over]
-note("roof cells under tree canopy clipped:", int(over.sum()), "of them rough, not green:", int((over & ~(exg > 0.06)).sum()))
-
-# bottoms (overhangs: roofs/carports/stacked parts with no part below)
-bot_rel = np.full((D, W), 1e9, np.float32)
-# outlines drawn only through their parts count too: a part starting at 19 m with no part mapped under it (a tower
-# over its podium, a ministry's top floors) stands on its outline's walls, it does not hover over the street
-for f in feats:
-    if f["render"] or f.get("has_parts"):
-        bot_rel[f["rr"], f["cc"]] = np.minimum(bot_rel[f["rr"], f["cc"]], f["minh"])
-bot_rel[~bmask] = 0
-bot_rel[bot_rel < 2.5] = 0
-
-top_dsm = top.copy()  # the surface model's roofs (with OSM's spires and the clipped crowns), before any smoothing
-# de-noise low roofs (LiDAR clutter) in building interiors; keep towers/spires untouched
-interior = ndimage.binary_erosion(bmask, iterations=1)
-top_med = ndimage.median_filter(top, size=3)
-smooth_roof = interior & (top < 45) & (np.abs(top_med - top) < 4)
-top = np.where(smooth_roof, top_med, top)
-
-
-def flatten_roofs(top):
-    """Flat roofs flat: per building part, if most of the roof lies within 1.5 m of its median, snap every cell within
-    2.5 m to it, and snap blobs above or below it smaller than 15 cells (LiDAR speckle on the roof, a 1 m slot down a
-    wall where the edge returns came low). Rooftop structures bigger than that, pitched roofs and towers stay.
-    The levels are absolute (above sea level), not heights over the ground: a flat roof over a sloping street is
-    level, where a constant height over the ground tilted it with the terrain -- every 1 m contour of the street ran
-    across the roof as a step (the shopping centres and blocks on the hillsides)."""
-    n_f = n_c = 0
-    for f in sorted(render, key=lambda f: -len(f["rr"])):  # parents first, their parts after
-        rr, cc = f["rr"], f["cc"]
-        if len(rr) < 30 or ((f.get("minh") or 0) >= 2.5 and np.median(bot_rel[rr, cc]) >= 2.5):
-            continue  # parts on stilts (canopies, cantilevers): snapping their top under their bottom left fragments
-            # (a part on its podium -- a curved wing from 8 m -- stands on something: its roof is snapped too)
-        if float(np.median(top[rr, cc])) < 3:
+def buildings(ctx):
+    """The buildings as features: OSM's outlines and parts with LoD2's, their heights, their roofs (LoD2's, fitted,
+    flattened) and their wall and roof styles; the volume (vol)."""
+    (LOD2, _core_s, cellcol, dsm, dtm, exg, g, gcol, nd_max, nd_max_b, osm) = (
+        ctx.LOD2, ctx._core_s, ctx.cellcol, ctx.dsm, ctx.dtm, ctx.exg, ctx.g, ctx.gcol, ctx.nd_max, ctx.nd_max_b,
+        ctx.osm)
+    # ---------------------------------------------------------------- buildings
+    feats = []
+    for oid, typ, t, geom in osm.areas:
+        part = t.get("building:part") not in (None, "no")
+        bld = t.get("building") not in (None, "no") and not part
+        if not (part or bld) or t.get("building") == "construction" or t.get("location") == "underground":
             continue
-        gr = dtm[rr, cc] - BASE  # the ground under each cell: heights below are over BASE, written back over the ground
-        v = top[rr, cc] + gr
-        med = float(np.median(v))
-        if np.mean(np.abs(v - med) <= 1.5) < 0.6:
-            # several roof levels (one OSM outline over a whole theatre or palace): snap each column to its 5x5
-            # neighbourhood's median within 2.5 m, so every terrace is flat and the real setbacks stay
-            if len(rr) >= 200:
-                r0, c0 = rr.min(), cc.min()
-                box = np.zeros((rr.max() - r0 + 3, cc.max() - c0 + 3), np.float32)
-                inside = np.zeros(box.shape, bool)
-                box[rr - r0 + 1, cc - c0 + 1] = v
-                inside[rr - r0 + 1, cc - c0 + 1] = True
-                # outside the outline: the nearest inside height (zeros there pulled the median down at every edge,
-                # notching the roofline)
-                _, (ir, ic) = ndimage.distance_transform_edt(~inside, return_indices=True)
-                lm = ndimage.median_filter(box[ir, ic], 5)[rr - r0 + 1, cc - c0 + 1]
-                k = (np.abs(v - lm) <= 2.5) & (lm - gr > 3)
-                n_c += int((k & (v != lm)).sum())
-                top[rr[k], cc[k]] = lm[k] - gr[k]
-                # then the roof's own levels: peaks of its height histogram (1 m bins, 6 % of the roof or 40 cells);
-                # cells within 1.5 m of a level go to it -- 1 m terraces of LiDAR noise between them (lumpy
-                # podium roofs) were drawn as steps
-                v2 = top[rr, cc] + gr
-                hist = np.bincount(np.clip(np.round(v2).astype(int), 0, 400), minlength=402)
-                lev = [h for h in range(1, 401) if hist[h] >= max(40, 0.06 * len(v2)) and hist[h] >= hist[h - 1] and hist[h] >= hist[h + 1]]
-                if lev:
-                    # levels closer than 2.5 m are one level with noise (two neighbouring 1 m bins): the larger stays
-                    lev = sorted(lev, key=lambda h: -hist[h])
-                    keep_ = []
-                    for h in lev:
-                        if all(abs(h - k_) >= 2.5 for k_ in keep_):
-                            keep_.append(h)
-                    lev = np.array(sorted(keep_), np.float32)
-                    j = np.argmin(np.abs(v2[:, None] - lev[None]), axis=1)
-                    k2 = np.abs(v2 - lev[j]) <= 1.5
-                    n_c += int((k2 & (v2 != lev[j])).sum())
-                    top[rr[k2], cc[k2]] = lev[j][k2] - gr[k2]
-                n_f += 1
+        if layer_of(t) < 0 and not part:
             continue
-        r0, c0 = rr.min(), cc.min()
-        off = np.zeros((rr.max() - r0 + 1, cc.max() - c0 + 1), bool)
-        off[rr - r0, cc - c0] = np.abs(v - med) > 2.5
-        lab, n = ndimage.label(off)
-        if n:
-            size = ndimage.sum(off, lab, range(1, n + 1))
-            keep = np.concatenate([[False], size >= 15])  # big blobs: real structures
-            snap = ~keep[lab[rr - r0, cc - c0]]
+        h = parse_len(t.get("height"))
+        lv = parse_len(t.get("building:levels"))
+        if h is None and lv is not None:
+            h = lv * 3.2 + (parse_len(t.get("roof:height")) or (parse_len(t.get("roof:levels")) or 0) * 2.8)
+        mh = parse_len(t.get("min_height"))
+        if mh is None and t.get("building:min_level"):
+            mh = parse_len(t["building:min_level"], 0) * 3.2
+        if t.get("building") in ("roof", "carport") and mh is None:
+            mh = 2.5
+        rr, cc = cells_of(geom)
+        if len(rr) == 0:
+            continue
+        feats.append(dict(id=oid, typ=typ, tags=t, geom=geom, part=part, rr=rr, cc=cc, maxh=h, minh=mh or 0.0,
+                          area=geom.area))
+    note("building features:", len(feats), "parts:", sum(f["part"] for f in feats))
+
+    def lod2_only_buildings():
+        """Buildings LoD2 has and OSM does not (sheds, garages, back houses, a school's wing: ~380 of them, 19,000 cells
+        the surface model stands 3 m and more over): a building of LoD2's footprint where OSM has no building on 80 % of it,
+        the surface model agrees with its roof (medians within 3 m) and OSM maps no construction site over it (a block
+        being pulled down since the flight) and no bridge through it; not a strip under 4 m wide (a wall, a deck)."""
+        if LOD2 is None or "cen" not in LOD2:
+            return []
+        z_ = LOD2
+        lb = np.where(z_["cen"], z_["bid"], 0)
+        lz_ = z_["z"] - dtm
+        have = np.zeros((D, W), bool)
+        for f in feats:
+            have[f["rr"], f["cc"]] = True
+        have |= ndimage.binary_dilation(have, iterations=1)  # (an outline a cell short of its LoD2 footprint)
+        site = np.zeros((D, W), np.uint8)
+        burn(site, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" or "demolished:building" in t_
+                    or t_.get("building") == "construction"])
+        # nor a bridge: LoD2 models the Poststeg's deck as a building (its OSM way 4 m beside it)
+        burn(site, [(l_.buffer(8), 1) for _, t_, l_ in osm.lines if on_bridge(t_)])
+        out = []
+        for i, sl_ in enumerate(ndimage.find_objects(lb), 1):
+            if sl_ is None:
+                continue
+            m = lb[sl_] == i
+            n = int(m.sum())
+            if n < 20 or have[sl_][m].mean() > 0.2 or site[sl_][m].mean() > 0.3:
+                continue
+            hz, hd = float(np.nanmedian(lz_[sl_][m])), float(np.median(nd_max_b[sl_][m]))
+            if hz < 2.5 or abs(hz - hd) > 3:
+                continue
+            if ndimage.distance_transform_edt(np.pad(m, 1)).max() < 2.5:
+                continue  # a strip 4 m wide or less: a wall (the fortresses' curtain walls), a deck -- not a house
+            rr, cc = np.nonzero(m)
+            rr, cc = rr + sl_[0].start, cc + sl_[1].start
+            polys = [shape(s) for s, v in rasterio.features.shapes(m.astype(np.uint8), mask=m,
+                     transform=Affine.translation(sl_[1].start, sl_[0].start)) if v]
+            geom = max(polys, key=lambda p: p.area)
+            out.append(dict(id=-i, typ="lod2", tags={"building": "yes"}, geom=geom, part=False, rr=rr, cc=cc, maxh=None,
+                            minh=0.0, area=float(n)))
+        note(f"buildings from LoD2 alone (none in OSM): {len(out)}, {sum(len(f['rr']) for f in out)} cells")
+        return out
+
+    feats += lod2_only_buildings()
+
+    outlines = [f for f in feats if not f["part"]]
+    parts = [f for f in feats if f["part"]]
+    otree = STRtree([f["geom"] for f in outlines])
+    for p in parts:  # parts inherit colours/material/name from their outline
+        rp = p["geom"].representative_point()
+        # inside several outlines (a block relation, the same outline mapped twice): the smallest -- never the spatial
+        # index's order, which changes with the map
+        hits = sorted((outlines[i] for i in otree.query(rp, predicate="within")), key=lambda o: (round(o["area"], 1), -o["id"]))
+        for o in hits:
+            o["has_parts"] = True
+        if hits:
+            p["parent"] = hits[0]
+    for p in parts:
+        if "parent" not in p:
+            cands = [outlines[i] for i in otree.query(p["geom"], predicate="intersects")]
+            if cands:
+                p["parent"] = max(cands, key=lambda o: (round(o["geom"].intersection(p["geom"]).area, 1), -o["id"]))
+                p["parent"]["has_parts"] = True
+    for o in outlines:
+        # outline with parts not rendered (OSM simple-3D convention) if parts cover most of it
+        if o.get("has_parts"):
+            covered = sum(p["geom"].intersection(o["geom"]).area for p in parts if p.get("parent") is o)
+            o["render"] = covered < 0.6 * o["area"]
         else:
-            snap = np.ones(len(rr), bool)
-        n_c += int((snap & (v != med)).sum())
-        top[rr[snap], cc[snap]] = med - gr[snap]
-        n_f += 1
-    note(f"flat roofs: {n_f} parts, {n_c} cells snapped")
+            o["render"] = True
+    for p in parts:
+        p["render"] = True
+    render = [f for f in feats if f["render"]]
 
+    def align_to_lod2(outlines, parts):
+        """OSM's outlines are traced from imagery and stand up to 4 m off the surface model in places (the Dom's 3 m to
+        the north-west; over the town ~1 m east on average): the voxels missed a strip of every such building on one side
+        and stood a sliver of wall in the street on the other. The LoD2 footprints (scripts/lod2.py: the cadastre's, the
+        surface model's position) are the reference; OSM keeps the tags.
+        Per outline: the LoD2 buildings it covers (a third of one, or it covers a third of the outline's cells), and the
+        whole-metre shift up to 4 m that fits the outline best onto them (by the share of cells in common; it must gain
+        4 points over staying and end at 0.6 or more). The outline and its parts move by it. Then the cells: an LoD2
+        footprint's cells no building has go to the nearest outline (or its nearest part) within 4 m that covers that
+        LoD2 building; an outline's cells outside every LoD2 footprint where the surface model stands under 2.5 m (a
+        sliver of street) go, when the outline has LoD2 buildings at all. Outlines LoD2 does not know (built since) stay."""
+        if LOD2 is None:
+            return
+        z_ = LOD2
+        if "cen" not in z_:
+            note("data/lod2.npz has no footprints (rerun scripts/lod2.py): OSM outlines left where they are")
+            return
+        lb = np.where(z_["cen"], z_["bid"], 0)
+        lcount = np.bincount(lb.ravel())
+        kids = {}
+        for p in parts:
+            if p.get("parent") is not None:
+                kids.setdefault(id(p["parent"]), []).append(p)
+        shifts, matched = [], {}
+        for o in outlines:
+            rr, cc = o["rr"], o["cc"]
+            if len(rr) < 12 or o["tags"].get("building") in ("roof", "carport", "canopy"):
+                continue
+            ids, n = np.unique(lb[rr, cc], return_counts=True)
+            k = (ids > 0) & ((n >= 0.33 * lcount[ids]) | (n >= 0.33 * len(rr)))
+            if not k.any():
+                continue
+            ids = ids[k]
+            matched[id(o)] = set(ids.tolist())
+            P = 4
+            r0, c0 = rr.min() - P, cc.min() - P
+            r1, c1 = rr.max() + P + 1, cc.max() + P + 1
+            if r0 < 0 or c0 < 0 or r1 > D or c1 > W:
+                continue
+            L_ = np.isin(lb[r0:r1, c0:c1], ids)
+            m_ = np.zeros(L_.shape, bool)
+            m_[rr - r0, cc - c0] = True
+            nL, nm = int(L_.sum()), len(rr)
+            best, iou0 = None, None
+            for dy in range(-P, P + 1):
+                for dx in range(-P, P + 1):
+                    inter = int((np.roll(m_, (dy, dx), (0, 1)) & L_).sum())
+                    iou = inter / (nL + nm - inter)
+                    if dx == 0 and dy == 0:
+                        iou0 = iou
+                    score = iou - 0.004 * math.hypot(dx, dy)  # (of equal fits the smaller shift)
+                    if best is None or score > best[0]:
+                        best = (score, iou, dx, dy)
+            _, iou, dx, dy = best
+            if (dx or dy) and iou >= 0.6 and iou - iou0 >= 0.04:
+                shifts.append((o, dx, dy))
+        from shapely.affinity import translate
+        n_moved = 0
+        for o, dx, dy in shifts:
+            for f in [o] + kids.get(id(o), []):
+                ok = (f["rr"] + dy >= 0) & (f["rr"] + dy < D) & (f["cc"] + dx >= 0) & (f["cc"] + dx < W)
+                f["rr"], f["cc"] = f["rr"][ok] + dy, f["cc"][ok] + dx
+                f["geom"] = translate(f["geom"], dx, dy)
+                n_moved += len(f["rr"])
+        sh = np.array([(dx, dy) for _, dx, dy in shifts]) if shifts else np.zeros((0, 2))
+        mean_shift = sh.mean(0).round(2).tolist() if len(sh) else None
+        report["counters"]["osm_lod2"] = dict(moved=len(shifts), matched=len(matched), mean_shift_m=mean_shift)
+        note(f"OSM outlines moved onto their LoD2 footprints: {len(shifts)} of {len(matched)} matched "
+             f"(mean shift {mean_shift if mean_shift is not None else 0} m east/south)")
+        # the cells: owner of every building cell (outlines by size, small last; then rendered parts)
+        owner = np.zeros((D, W), np.int32)
+        allf = sorted(outlines, key=lambda f: -f["area"]) + [p for p in parts if p.get("parent") is not None]
+        for i_, f in enumerate(allf, 1):
+            owner[f["rr"], f["cc"]] = i_
+        root = lambda f: f if not f["part"] else f["parent"]
+        # add: LoD2 footprint cells no feature has, to the nearest feature whose outline matched that LoD2 building
+        free = (lb > 0) & (owner == 0)
+        d_, (ir, ic) = ndimage.distance_transform_edt(owner == 0, return_indices=True)
+        rr_, cc_ = np.nonzero(free & (d_ <= 4))
+        add = {}
+        for r, c in zip(rr_, cc_):
+            f = allf[owner[ir[r, c], ic[r, c]] - 1]
+            if not f["render"]:
+                continue  # (an outline drawn through its parts only)
+            if lb[r, c] in matched.get(id(root(f)), ()):
+                add.setdefault(id(f), (f, []))[1].append((r, c))
+        n_add = 0
+        for f, cells in add.values():
+            a_ = np.array(cells)
+            f["rr"], f["cc"] = np.r_[f["rr"], a_[:, 0]], np.r_[f["cc"], a_[:, 1]]
+            n_add += len(a_)
+        # drop: cells off every LoD2 footprint, low in the surface model, of matched outlines
+        far = lb == 0
+        low = nd_max_b < 2.5
+        n_drop = 0
+        for f in allf:
+            if id(root(f)) not in matched:
+                continue
+            k = far[f["rr"], f["cc"]] & low[f["rr"], f["cc"]]
+            if k.any() and k.mean() < 0.5:
+                f["rr"], f["cc"] = f["rr"][~k], f["cc"][~k]
+                n_drop += int(k.sum())
+        note(f"building cells from the LoD2 footprints: {n_add} added, {n_drop} dropped (no building there)")
 
-flatten_roofs(top)
+    align_to_lod2(outlines, parts)
 
+    def close_slots():
+        """A slot 1 m wide between two buildings that the surface model sees roofed (3 m and more up, not green): two OSM
+        outlines that do not quite meet (the Veste Niederhaus' main block and its east wing: a dark gap down the whole
+        facade). It goes to the building next to it with the higher roof. Not over a mapped way (a passage, steps)."""
+        own = np.zeros((D, W), np.int32)
+        fs = [f for f in render]
+        for i_, f in enumerate(fs, 1):
+            own[f["rr"], f["cc"]] = i_
+        bm = own > 0
+        # a 1 m gap with two different buildings on its two sides (a 2 m one is as likely an alley the map lacks)
+        closed = np.zeros((D, W), bool)
+        for ax in (0, 1):
+            a_, b_ = region.shift(own, 1, ax), region.shift(own, -1, ax)
+            closed |= (a_ > 0) & (b_ > 0) & (a_ != b_)
+        ways = np.zeros((D, W), np.uint8)
+        burn(ways, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines if t_.get("highway")])
+        slot = closed & ~bm & (nd_max_b >= 3) & (exg < 0.06) & (ways == 0)
+        if not slot.any():
+            return
+        hi = np.where(bm, nd_max_b, -1.0)
+        best = np.zeros((D, W), np.int32)
+        bh = np.full((D, W), -1.0)
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            o_ = region.shift2(own, (dr, dc))
+            h_ = region.shift2(hi, (dr, dc))
+            k_ = slot & (o_ > 0) & (h_ > bh)
+            best[k_], bh[k_] = o_[k_], h_[k_]
+        rr_, cc_ = np.nonzero(slot & (best > 0))
+        add = {}
+        for r, c in zip(rr_, cc_):
+            add.setdefault(best[r, c], []).append((r, c))
+        for i_, cells in add.items():
+            f = fs[i_ - 1]
+            a_ = np.array(cells)
+            f["rr"], f["cc"] = np.r_[f["rr"], a_[:, 0]], np.r_[f["cc"], a_[:, 1]]
+        note("slots between buildings closed (roofed in the surface model):", len(rr_), "cells")
 
-_DIST_GRAD = None
+    close_slots()
 
-
-def _fit_grad(rr, cc, k, slope_m):
-    """The plane of a roof fitted as eave + k x distance to the open side (core_roofs, dsm_pitched_roofs): rising k per
-    metre away from the nearest wall; flat where it is capped at the ridge (slope_m False)."""
-    global _DIST_GRAD
-    if _DIST_GRAD is None:
-        _d = ndimage.distance_transform_edt(bmask).astype(np.float32)
-        _DIST_GRAD = np.gradient(boxmean(_d, 3))
-    gy_, gx_ = _DIST_GRAD[0][rr, cc], _DIST_GRAD[1][rr, cc]
-    n_ = np.hypot(gx_, gy_)
-    ok = slope_m & (n_ > 0.3)
-    ROOF_GX[rr, cc] = np.where(ok, k * gx_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
-    ROOF_GY[rr, cc] = np.where(ok, k * gy_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
-
-
-def core_roofs(top):
-    """The historic core's tiled roofs as the ortho shows them: clean slopes from the street and the courtyard up to a
-    ridge. The 1 m LiDAR made them noisy terraces (every dormer, chimney and sample). Per house in the historic core
-    whose roof is pitched (3 m or more between its eaves and its top): height = eave + slope x distance to the nearest
-    open cell (street or courtyard; through party walls, as a terrace of houses is roofed), fitted to the LiDAR on the
-    cells within 8 m of the open side, capped at the house's ridge (95th percentile)."""
-    core = np.zeros((D, W), bool)
-    core[cells_of(CORE_GEOM)] = True
-    dist = ndimage.distance_transform_edt(bmask)
-    n_h = 0
+    bmask = np.zeros((D, W), bool)
     for f in render:
-        rr, cc = f["rr"], f["cc"]
-        if len(rr) < 20 or not core[rr, cc].mean() > 0.5 or (f.get("minh") or 0) > 2:
+        bmask[f["rr"], f["cc"]] = True
+
+    # feature-level source decision (the surface model vs current OSM)
+    top = np.where(bmask, nd_max_b, 0.0).astype(np.float32)
+    src_osm = []
+    for f in render:
+        if f["maxh"] is None:
             continue
-        v, d = top[rr, cc].astype(float), dist[rr, cc]
-        if np.percentile(v, 95) - np.percentile(v, 10) < 3:
+        v = nd_max_b[f["rr"], f["cc"]]
+        med, p90 = float(np.median(v)), float(np.percentile(v, 90))
+        f["dsm_med"] = med
+        if f["maxh"] - p90 > 8:
+            small = f["area"] < 80 and p90 > 0.7 * f["maxh"]  # needle on top of a tall building
+            rh = parse_len(f["tags"].get("roof:height")) or 0
+            pointed = f["tags"].get("roof:shape") in ("pyramidal", "conical", "onion", "spire", "dome") and rh >= 3
+            if pointed and len(f["rr"]) >= 9 and p90 > 0.6 * (f["maxh"] - rh):
+                # a tower's pointed roof the LiDAR missed (a church's bell towers: 61 m of tower, a 15 m pyramid): it
+                # rises from the eaves to its peak by distance from the part's edge -- not the whole footprint at 76 m
+                rr_, cc_ = f["rr"], f["cc"]
+                m_ = np.zeros((rr_.max() - rr_.min() + 3, cc_.max() - cc_.min() + 3), bool)
+                m_[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1] = True
+                dep = ndimage.distance_transform_edt(m_)[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1]
+                roof_ = (f["maxh"] - rh) + rh * (dep - 1) / max(dep.max() - 1, 1)
+                top[rr_, cc_] = np.maximum(top[rr_, cc_], roof_)
+                src_osm.append((f["id"], tag(f, "name"), round(p90, 1), f["maxh"], "pointed roof"))
+            elif small or p90 < 0.35 * f["maxh"]:  # else: nothing tall there in the surface model -> built after the flight
+                # spire/needle under-sampled by LiDAR, or built after the flight
+                top[f["rr"], f["cc"]] = np.maximum(top[f["rr"], f["cc"]], f["maxh"])
+                src_osm.append((f["id"], tag(f, "name"), round(p90, 1), f["maxh"], "spire" if small else "new"))
+    for s in src_osm:
+        note("OSM height used (LiDAR lower):", s)
+    # OSM buildings absent in LiDAR without height info
+    for f in render:
+        if f["maxh"] is None and np.median(nd_max[f["rr"], f["cc"]]) < 1.5:
+            top[f["rr"], f["cc"]] = 3.2 * (parse_len(tag(f, "building:levels")) or 1)
+            note("no LiDAR + no height -> levels:", f["id"], tag(f, "name"))
+
+    # tree canopy over low roofs: clip to OSM height
+    cell_maxh = np.full((D, W), np.nan, np.float32)
+    for f in sorted(render, key=lambda f: f["maxh"] or 0):
+        if f["maxh"] is not None:
+            cell_maxh[f["rr"], f["cc"]] = np.fmax(cell_maxh[f["rr"], f["cc"]], f["maxh"])
+    # a crown that is not green (a copper beech over a low house) is still rough: the DSM's spread over 3 m is ~4 m in a
+    # crown, under 1 m on a roof. Only over a small low house standing among crowns (a ring round it, away from other
+    # buildings, tall and green or rough) whose raised cells are mostly rough: a mistagged tower is smooth on top
+    _m = boxmean(dsm, 6)
+    rough = np.sqrt(np.maximum(boxmean(dsm * dsm, 6) - _m * _m, 0)).reshape(D, 2, W, 2).max((1, 3))
+    under_tree = np.zeros((D, W), bool)
+    for f in render:
+        if f["part"] or f.get("has_parts") or f["maxh"] is None or f["maxh"] > 8 or f["area"] >= 400:
             continue
-        m = (d <= 8) & (v > 3)
-        if m.sum() < 8:
-            continue
-        for _ in range(3):  # least squares, dropping dormers and chimneys (2 m+ off the slope) each round
-            A = np.c_[np.ones(m.sum()), d[m]]
-            (e, k), *_ = np.linalg.lstsq(A, v[m], rcond=None)
-            m &= np.abs(v - (e + k * d)) < 2
+        r0, r1, c0, c1 = max(f["rr"].min() - 5, 0), min(f["rr"].max() + 6, D), max(f["cc"].min() - 5, 0), min(f["cc"].max() + 6, W)
+        own = np.zeros((r1 - r0, c1 - c0), bool)
+        own[f["rr"] - r0, f["cc"] - c0] = True
+        ring = ndimage.binary_dilation(own, iterations=4) & ~ndimage.binary_dilation(bmask[r0:r1, c0:c1] & ~own, iterations=3) & ~own
+        crown = (nd_max[r0:r1, c0:c1] > f["maxh"] + 3) & ((exg[r0:r1, c0:c1] > 0.06) | (rough[r0:r1, c0:c1] > 2.5))
+        raised = nd_max[f["rr"], f["cc"]] > f["maxh"] + 3
+        if ring.sum() > 10 and crown[ring].mean() > 0.25 and raised.any() and (rough[f["rr"], f["cc"]][raised] > 2.5).mean() > 0.6:
+            under_tree[f["rr"], f["cc"]] = True
+    over = bmask & ((exg > 0.06) | under_tree) & np.isfinite(cell_maxh) & (top > cell_maxh + 3)
+    top[over] = cell_maxh[over]
+    note("roof cells under tree canopy clipped:", int(over.sum()), "of them rough, not green:", int((over & ~(exg > 0.06)).sum()))
+
+    # bottoms (overhangs: roofs/carports/stacked parts with no part below)
+    bot_rel = np.full((D, W), 1e9, np.float32)
+    # outlines drawn only through their parts count too: a part starting at 19 m with no part mapped under it (a tower
+    # over its podium, a ministry's top floors) stands on its outline's walls, it does not hover over the street
+    for f in feats:
+        if f["render"] or f.get("has_parts"):
+            bot_rel[f["rr"], f["cc"]] = np.minimum(bot_rel[f["rr"], f["cc"]], f["minh"])
+    bot_rel[~bmask] = 0
+    bot_rel[bot_rel < 2.5] = 0
+
+    top_dsm = top.copy()  # the surface model's roofs (with OSM's spires and the clipped crowns), before any smoothing
+    # de-noise low roofs (LiDAR clutter) in building interiors; keep towers/spires untouched
+    interior = ndimage.binary_erosion(bmask, iterations=1)
+    top_med = ndimage.median_filter(top, size=3)
+    smooth_roof = interior & (top < 45) & (np.abs(top_med - top) < 4)
+    top = np.where(smooth_roof, top_med, top)
+
+    def flatten_roofs(top):
+        """Flat roofs flat: per building part, if most of the roof lies within 1.5 m of its median, snap every cell within
+        2.5 m to it, and snap blobs above or below it smaller than 15 cells (LiDAR speckle on the roof, a 1 m slot down a
+        wall where the edge returns came low). Rooftop structures bigger than that, pitched roofs and towers stay.
+        The levels are absolute (above sea level), not heights over the ground: a flat roof over a sloping street is
+        level, where a constant height over the ground tilted it with the terrain -- every 1 m contour of the street ran
+        across the roof as a step (the shopping centres and blocks on the hillsides)."""
+        n_f = n_c = 0
+        for f in sorted(render, key=lambda f: -len(f["rr"])):  # parents first, their parts after
+            rr, cc = f["rr"], f["cc"]
+            if len(rr) < 30 or ((f.get("minh") or 0) >= 2.5 and np.median(bot_rel[rr, cc]) >= 2.5):
+                continue  # parts on stilts (canopies, cantilevers): snapping their top under their bottom left fragments
+                # (a part on its podium -- a curved wing from 8 m -- stands on something: its roof is snapped too)
+            if float(np.median(top[rr, cc])) < 3:
+                continue
+            gr = dtm[rr, cc] - BASE  # the ground under each cell: heights below are over BASE, written back over the ground
+            v = top[rr, cc] + gr
+            med = float(np.median(v))
+            if np.mean(np.abs(v - med) <= 1.5) < 0.6:
+                # several roof levels (one OSM outline over a whole theatre or palace): snap each column to its 5x5
+                # neighbourhood's median within 2.5 m, so every terrace is flat and the real setbacks stay
+                if len(rr) >= 200:
+                    r0, c0 = rr.min(), cc.min()
+                    box = np.zeros((rr.max() - r0 + 3, cc.max() - c0 + 3), np.float32)
+                    inside = np.zeros(box.shape, bool)
+                    box[rr - r0 + 1, cc - c0 + 1] = v
+                    inside[rr - r0 + 1, cc - c0 + 1] = True
+                    # outside the outline: the nearest inside height (zeros there pulled the median down at every edge,
+                    # notching the roofline)
+                    _, (ir, ic) = ndimage.distance_transform_edt(~inside, return_indices=True)
+                    lm = ndimage.median_filter(box[ir, ic], 5)[rr - r0 + 1, cc - c0 + 1]
+                    k = (np.abs(v - lm) <= 2.5) & (lm - gr > 3)
+                    n_c += int((k & (v != lm)).sum())
+                    top[rr[k], cc[k]] = lm[k] - gr[k]
+                    # then the roof's own levels: peaks of its height histogram (1 m bins, 6 % of the roof or 40 cells);
+                    # cells within 1.5 m of a level go to it -- 1 m terraces of LiDAR noise between them (lumpy
+                    # podium roofs) were drawn as steps
+                    v2 = top[rr, cc] + gr
+                    hist = np.bincount(np.clip(np.round(v2).astype(int), 0, 400), minlength=402)
+                    lev = [h for h in range(1, 401) if hist[h] >= max(40, 0.06 * len(v2)) and hist[h] >= hist[h - 1] and hist[h] >= hist[h + 1]]
+                    if lev:
+                        # levels closer than 2.5 m are one level with noise (two neighbouring 1 m bins): the larger stays
+                        lev = sorted(lev, key=lambda h: -hist[h])
+                        keep_ = []
+                        for h in lev:
+                            if all(abs(h - k_) >= 2.5 for k_ in keep_):
+                                keep_.append(h)
+                        lev = np.array(sorted(keep_), np.float32)
+                        j = np.argmin(np.abs(v2[:, None] - lev[None]), axis=1)
+                        k2 = np.abs(v2 - lev[j]) <= 1.5
+                        n_c += int((k2 & (v2 != lev[j])).sum())
+                        top[rr[k2], cc[k2]] = lev[j][k2] - gr[k2]
+                    n_f += 1
+                continue
+            r0, c0 = rr.min(), cc.min()
+            off = np.zeros((rr.max() - r0 + 1, cc.max() - c0 + 1), bool)
+            off[rr - r0, cc - c0] = np.abs(v - med) > 2.5
+            lab, n = ndimage.label(off)
+            if n:
+                size = ndimage.sum(off, lab, range(1, n + 1))
+                keep = np.concatenate([[False], size >= 15])  # big blobs: real structures
+                snap = ~keep[lab[rr - r0, cc - c0]]
+            else:
+                snap = np.ones(len(rr), bool)
+            n_c += int((snap & (v != med)).sum())
+            top[rr[snap], cc[snap]] = med - gr[snap]
+            n_f += 1
+        note(f"flat roofs: {n_f} parts, {n_c} cells snapped")
+
+    flatten_roofs(top)
+
+    _DIST_GRAD = None
+
+    def _fit_grad(rr, cc, k, slope_m):
+        """The plane of a roof fitted as eave + k x distance to the open side (core_roofs, dsm_pitched_roofs): rising k per
+        metre away from the nearest wall; flat where it is capped at the ridge (slope_m False)."""
+        nonlocal _DIST_GRAD
+        if _DIST_GRAD is None:
+            _d = ndimage.distance_transform_edt(bmask).astype(np.float32)
+            _DIST_GRAD = np.gradient(boxmean(_d, 3))
+        gy_, gx_ = _DIST_GRAD[0][rr, cc], _DIST_GRAD[1][rr, cc]
+        n_ = np.hypot(gx_, gy_)
+        ok = slope_m & (n_ > 0.3)
+        ROOF_GX[rr, cc] = np.where(ok, k * gx_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
+        ROOF_GY[rr, cc] = np.where(ok, k * gy_ / np.maximum(n_, 1e-6), np.where(slope_m, np.nan, 0))
+
+    def core_roofs(top):
+        """The historic core's tiled roofs as the ortho shows them: clean slopes from the street and the courtyard up to a
+        ridge. The 1 m LiDAR made them noisy terraces (every dormer, chimney and sample). Per house in the historic core
+        whose roof is pitched (3 m or more between its eaves and its top): height = eave + slope x distance to the nearest
+        open cell (street or courtyard; through party walls, as a terrace of houses is roofed), fitted to the LiDAR on the
+        cells within 8 m of the open side, capped at the house's ridge (95th percentile)."""
+        core = np.zeros((D, W), bool)
+        core[cells_of(CORE_GEOM)] = True
+        dist = ndimage.distance_transform_edt(bmask)
+        n_h = 0
+        for f in render:
+            rr, cc = f["rr"], f["cc"]
+            if len(rr) < 20 or not core[rr, cc].mean() > 0.5 or (f.get("minh") or 0) > 2:
+                continue
+            v, d = top[rr, cc].astype(float), dist[rr, cc]
+            if np.percentile(v, 95) - np.percentile(v, 10) < 3:
+                continue
+            m = (d <= 8) & (v > 3)
             if m.sum() < 8:
-                break
-        if not (0.4 <= k <= 2.5) or m.sum() < 8:
-            continue
-        ridge = np.percentile(v, 95)
-        top[rr, cc] = np.minimum(e + k * d, ridge)
-        _fit_grad(rr, cc, k, e + k * d < ridge)
-        n_h += 1
-    note("historic core: pitched roofs fitted:", n_h)
+                continue
+            for _ in range(3):  # least squares, dropping dormers and chimneys (2 m+ off the slope) each round
+                A = np.c_[np.ones(m.sum()), d[m]]
+                (e, k), *_ = np.linalg.lstsq(A, v[m], rcond=None)
+                m &= np.abs(v - (e + k * d)) < 2
+                if m.sum() < 8:
+                    break
+            if not (0.4 <= k <= 2.5) or m.sum() < 8:
+                continue
+            ridge = np.percentile(v, 95)
+            top[rr, cc] = np.minimum(e + k * d, ridge)
+            _fit_grad(rr, cc, k, e + k * d < ridge)
+            n_h += 1
+        note("historic core: pitched roofs fitted:", n_h)
 
+    REVERTED = []  # buildings left to the surface model (data/debug/lod2_reverted.json)
+    LOD2_USE = np.zeros((D, W), bool)  # the cells whose roof LoD2 gives
+    # the roof plane under each cell where it is known exactly (LoD2's plane, or a fitted pitched roof's slope): its rise per
+    # metre east and south. The viewer lit a pitched roof by a plane estimated from the 1 m voxel steps, and a slope rounded
+    # to whole metres reads as noise there -- every roof a mottle of light and dark voxels. Shipped per column (plane_codes)
+    ROOF_GX = np.full((D, W), np.nan, np.float32)
+    ROOF_GY = np.full((D, W), np.nan, np.float32)
 
-REVERTED = []  # buildings left to the surface model (data/debug/lod2_reverted.json)
-LOD2_USE = np.zeros((D, W), bool)  # the cells whose roof LoD2 gives
-# the roof plane under each cell where it is known exactly (LoD2's plane, or a fitted pitched roof's slope): its rise per
-# metre east and south. The viewer lit a pitched roof by a plane estimated from the 1 m voxel steps, and a slope rounded
-# to whole metres reads as noise there -- every roof a mottle of light and dark voxels. Shipped per column (plane_codes)
-ROOF_GX = np.full((D, W), np.nan, np.float32)
-ROOF_GY = np.full((D, W), np.nan, np.float32)
+    def lod2_roofs(top):
+        """The roofs of the LoD2 building models (scripts/lod2.py: planes fitted to the laser scan per building -- ridges,
+        hips, eaves, flat decks) wherever they agree with the surface model. The DOM20 is matched from aerial images: on a
+        pitched roof every 1 m sample is a step of its own, so the old town's roofs were grey terraces and blobs; the
+        planes give each a clean slope up to a straight ridge. Per cell: the LoD2 roof within 3.5 m of the surface model;
+        or off it in a patch of under 30 cells (a chimney, an aerial, a crown over the roof up to 6 m above it; a notch
+        where the samples fell down a wall). A tower or a spire LoD2 lacks (a big patch above it, OSM's heights) and a
+        building LoD2 does not know keep the surface model.
+        Returns the cells of pitched roofs (a slope of 0.3 or more) taken from LoD2."""
+        if LOD2 is None:
+            note("no data/lod2.npz (scripts/lod2.py): roofs from the surface model only")
+            return np.zeros((D, W), bool)
+        z_ = LOD2
+        lz, sl = z_["z"] - dtm, z_["slope"]
+        if "gx" not in z_:
+            raise SystemExit("data/lod2.npz has no plane gradients (`gx`, `gy`): rerun scripts/lod2.py")
+        lgx, lgy = z_["gx"], z_["gy"]
+        have = np.isfinite(lz)
+        # an OSM outline a cell or two wider than the LoD2 building (along a wall, a misregistered corner): its roof's
+        # nearest cell
+        d_, (ir, ic) = ndimage.distance_transform_edt(~have, return_indices=True)
+        fill = bmask & ~have & (d_ <= 2)
+        lz = np.where(fill, lz[ir, ic], lz)
+        sl = np.where(fill, sl[ir, ic], sl)
+        lgx, lgy = np.where(fill, lgx[ir, ic], lgx), np.where(fill, lgy[ir, ic], lgy)
+        cand = bmask & np.isfinite(lz) & (lz > 2) & ~(top_dsm > nd_max_b + 1)  # (not where OSM's heights raised it)
+        dlt = top_dsm - lz
+        use = cand & (np.abs(dlt) <= 3.5)
+        # (a small tower or turret over the roof -- 6 m and more, or a part OSM maps taller -- is no chimney)
+        tower = np.nan_to_num(cell_maxh) > lz + 4
+        for off, cap in ((cand & (dlt > 3.5) & (dlt <= 6) & ~tower, 30), (cand & (dlt < -3.5), 30)):
+            lab, n = ndimage.label(off)
+            if n:
+                use |= off & np.r_[False, ndimage.sum(off, lab, range(1, n + 1)) < cap][lab]
+        # a building the two disagree on over half its roof (rebuilt since one of them, a courtyard roofed over): all of it
+        # from the surface model -- patches of planes among the stepped samples read as rubble
+        n_rev = 0
+        for f in render:
+            u_ = use[f["rr"], f["cc"]]
+            if 0 < u_.mean() < 0.5:
+                use[f["rr"], f["cc"]] = False
+                n_rev += 1
+                REVERTED.append(dict(id=f["id"], name=tag(f, "name"), r=int(f["rr"].mean()), c=int(f["cc"].mean()),
+                                     n=len(f["rr"]), lod2=round(float(u_.mean()), 2)))
+        top[use] = lz[use]
+        LOD2_USE[...] = use
+        ROOF_GX[use], ROOF_GY[use] = lgx[use], lgy[use]
+        pitched = use & (sl >= 0.3)
+        json.dump(REVERTED, open(RDIR / "lod2_reverted.json", "w"), indent=0)
+        used, total = int(use.sum()), int(bmask.sum())
+        report["counters"]["lod2_roofs"] = dict(used=used, total=total)
+        note("LoD2 roofs taken:", used, "of", total, "building cells; pitched:", int(pitched.sum()),
+             "; buildings left to the surface model:", n_rev)
+        return pitched
 
-
-def lod2_roofs(top):
-    """The roofs of the LoD2 building models (scripts/lod2.py: planes fitted to the laser scan per building -- ridges,
-    hips, eaves, flat decks) wherever they agree with the surface model. The DOM20 is matched from aerial images: on a
-    pitched roof every 1 m sample is a step of its own, so the old town's roofs were grey terraces and blobs; the
-    planes give each a clean slope up to a straight ridge. Per cell: the LoD2 roof within 3.5 m of the surface model;
-    or off it in a patch of under 30 cells (a chimney, an aerial, a crown over the roof up to 6 m above it; a notch
-    where the samples fell down a wall). A tower or a spire LoD2 lacks (a big patch above it, OSM's heights) and a
-    building LoD2 does not know keep the surface model.
-    Returns the cells of pitched roofs (a slope of 0.3 or more) taken from LoD2."""
-    if LOD2 is None:
-        note("no data/lod2.npz (scripts/lod2.py): roofs from the surface model only")
-        return np.zeros((D, W), bool)
-    z_ = LOD2
-    lz, sl = z_["z"] - dtm, z_["slope"]
-    if "gx" not in z_:
-        raise SystemExit("data/lod2.npz has no plane gradients (`gx`, `gy`): rerun scripts/lod2.py")
-    lgx, lgy = z_["gx"], z_["gy"]
-    have = np.isfinite(lz)
-    # an OSM outline a cell or two wider than the LoD2 building (along a wall, a misregistered corner): its roof's
-    # nearest cell
-    d_, (ir, ic) = ndimage.distance_transform_edt(~have, return_indices=True)
-    fill = bmask & ~have & (d_ <= 2)
-    lz = np.where(fill, lz[ir, ic], lz)
-    sl = np.where(fill, sl[ir, ic], sl)
-    lgx, lgy = np.where(fill, lgx[ir, ic], lgx), np.where(fill, lgy[ir, ic], lgy)
-    cand = bmask & np.isfinite(lz) & (lz > 2) & ~(top_dsm > nd_max_b + 1)  # (not where OSM's heights raised it)
-    dlt = top_dsm - lz
-    use = cand & (np.abs(dlt) <= 3.5)
-    # (a small tower or turret over the roof -- 6 m and more, or a part OSM maps taller -- is no chimney)
-    tower = np.nan_to_num(cell_maxh) > lz + 4
-    for off, cap in ((cand & (dlt > 3.5) & (dlt <= 6) & ~tower, 30), (cand & (dlt < -3.5), 30)):
-        lab, n = ndimage.label(off)
-        if n:
-            use |= off & np.r_[False, ndimage.sum(off, lab, range(1, n + 1)) < cap][lab]
-    # a building the two disagree on over half its roof (rebuilt since one of them, a courtyard roofed over): all of it
-    # from the surface model -- patches of planes among the stepped samples read as rubble
-    n_rev = 0
-    for f in render:
-        u_ = use[f["rr"], f["cc"]]
-        if 0 < u_.mean() < 0.5:
-            use[f["rr"], f["cc"]] = False
-            n_rev += 1
-            REVERTED.append(dict(id=f["id"], name=tag(f, "name"), r=int(f["rr"].mean()), c=int(f["cc"].mean()),
-                                 n=len(f["rr"]), lod2=round(float(u_.mean()), 2)))
-    top[use] = lz[use]
-    LOD2_USE[...] = use
-    ROOF_GX[use], ROOF_GY[use] = lgx[use], lgy[use]
-    pitched = use & (sl >= 0.3)
-    json.dump(REVERTED, open(RDIR / "lod2_reverted.json", "w"), indent=0)
-    used, total = int(use.sum()), int(bmask.sum())
-    report["counters"]["lod2_roofs"] = dict(used=used, total=total)
-    note("LoD2 roofs taken:", used, "of", total, "building cells; pitched:", int(pitched.sum()),
-         "; buildings left to the surface model:", n_rev)
-    return pitched
-
-
-def dsm_pitched_roofs(top):
-    """A pitched roof LoD2 does not give (a building it lacks or disagrees on: rebuilt, a castle's wing, a tower's
-    house) stayed the surface model's: a noisy staircase of 1 m samples, every dormer and matching error a step. As
-    core_roofs does for the old town: per building whose roof is not LoD2's and is pitched (3 m or more between its
-    eaves and its top), eave + slope x distance to the nearest open cell, fitted to the surface model (least squares,
-    dropping dormers and chimneys 2 m off), capped at its ridge (95th percentile) -- where the fit is a roof: a slope of
-    0.3 to 1.5 and 60 % of the building within 1.5 m of it (a tower on a flat block, terraces of a stepped one are no
-    such roof). Returns the cells fitted."""
-    dist = ndimage.distance_transform_edt(bmask)
-    out = np.zeros((D, W), bool)
-    n_h = 0
-    for f in render:
-        rr, cc = f["rr"], f["cc"]
-        if len(rr) < 30 or (f.get("minh") or 0) > 2 or LOD2_USE[rr, cc].mean() > 0.2:
-            continue
-        k_ = ~LOD2_USE[rr, cc]
-        rr, cc = rr[k_], cc[k_]
-        v, d = top[rr, cc].astype(float), dist[rr, cc]
-        if np.percentile(v, 95) - np.percentile(v, 10) < 3:
-            continue
-        m = (d <= 8) & (v > 3)
-        if m.sum() < 12:
-            continue
-        for _ in range(3):
-            A = np.c_[np.ones(m.sum()), d[m]]
-            (e, k), *_ = np.linalg.lstsq(A, v[m], rcond=None)
-            m &= np.abs(v - (e + k * d)) < 2
+    def dsm_pitched_roofs(top):
+        """A pitched roof LoD2 does not give (a building it lacks or disagrees on: rebuilt, a castle's wing, a tower's
+        house) stayed the surface model's: a noisy staircase of 1 m samples, every dormer and matching error a step. As
+        core_roofs does for the old town: per building whose roof is not LoD2's and is pitched (3 m or more between its
+        eaves and its top), eave + slope x distance to the nearest open cell, fitted to the surface model (least squares,
+        dropping dormers and chimneys 2 m off), capped at its ridge (95th percentile) -- where the fit is a roof: a slope of
+        0.3 to 1.5 and 60 % of the building within 1.5 m of it (a tower on a flat block, terraces of a stepped one are no
+        such roof). Returns the cells fitted."""
+        dist = ndimage.distance_transform_edt(bmask)
+        out = np.zeros((D, W), bool)
+        n_h = 0
+        for f in render:
+            rr, cc = f["rr"], f["cc"]
+            if len(rr) < 30 or (f.get("minh") or 0) > 2 or LOD2_USE[rr, cc].mean() > 0.2:
+                continue
+            k_ = ~LOD2_USE[rr, cc]
+            rr, cc = rr[k_], cc[k_]
+            v, d = top[rr, cc].astype(float), dist[rr, cc]
+            if np.percentile(v, 95) - np.percentile(v, 10) < 3:
+                continue
+            m = (d <= 8) & (v > 3)
             if m.sum() < 12:
-                break
-        if not (0.3 <= k <= 1.5) or m.sum() < 12:
-            continue
-        ridge = np.percentile(v, 95)
-        model = np.minimum(e + k * d, ridge)
-        if np.mean(np.abs(v - model) <= 1.5) < 0.6:
-            continue
-        # (a chimney, a dormer or a turret 2 m and more over the slope in a patch of 6 cells and more stays)
-        up = v - model > 2
-        if up.any():
-            box = np.zeros((rr.max() - rr.min() + 1, cc.max() - cc.min() + 1), bool)
-            box[rr[up] - rr.min(), cc[up] - cc.min()] = True
-            lab, n = ndimage.label(box)
-            big = np.r_[False, ndimage.sum(box, lab, range(1, n + 1)) >= 6]
-            up &= big[lab[rr - rr.min(), cc - cc.min()]]
-        top[rr, cc] = np.where(up, v, model)
-        _fit_grad(rr, cc, k, (e + k * d < ridge) & ~up)
-        ROOF_GX[rr[up], cc[up]] = ROOF_GY[rr[up], cc[up]] = np.nan
-        out[rr, cc] = True
-        n_h += 1
-    note("pitched roofs fitted to the surface model where LoD2 gives none:", n_h, "buildings,", int(out.sum()), "cells")
-    return out
+                continue
+            for _ in range(3):
+                A = np.c_[np.ones(m.sum()), d[m]]
+                (e, k), *_ = np.linalg.lstsq(A, v[m], rcond=None)
+                m &= np.abs(v - (e + k * d)) < 2
+                if m.sum() < 12:
+                    break
+            if not (0.3 <= k <= 1.5) or m.sum() < 12:
+                continue
+            ridge = np.percentile(v, 95)
+            model = np.minimum(e + k * d, ridge)
+            if np.mean(np.abs(v - model) <= 1.5) < 0.6:
+                continue
+            # (a chimney, a dormer or a turret 2 m and more over the slope in a patch of 6 cells and more stays)
+            up = v - model > 2
+            if up.any():
+                box = np.zeros((rr.max() - rr.min() + 1, cc.max() - cc.min() + 1), bool)
+                box[rr[up] - rr.min(), cc[up] - cc.min()] = True
+                lab, n = ndimage.label(box)
+                big = np.r_[False, ndimage.sum(box, lab, range(1, n + 1)) >= 6]
+                up &= big[lab[rr - rr.min(), cc - cc.min()]]
+            top[rr, cc] = np.where(up, v, model)
+            _fit_grad(rr, cc, k, (e + k * d < ridge) & ~up)
+            ROOF_GX[rr[up], cc[up]] = ROOF_GY[rr[up], cc[up]] = np.nan
+            out[rr, cc] = True
+            n_h += 1
+        note("pitched roofs fitted to the surface model where LoD2 gives none:", n_h, "buildings,", int(out.sum()), "cells")
+        return out
+
+    CORE_GEOM = landmarks.historic_core()
+    core_roofs(top)
+    pitched_m = lod2_roofs(top)
+    pitched_m |= dsm_pitched_roofs(top)
+    overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note)  # (scripts/overrides/building)
+    # the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
+    # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
+    # contour lines of the street below across every flat roof and plane of LoD2
+    topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
+    _roof_f = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
+    # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
+    # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
+    _cl = ndimage.grey_closing(topi, size=(3, 3))
+    _pit = bmask & (_cl - topi >= 1) & (_cl - topi <= 3) & (ndimage.minimum_filter(bmask.astype(np.uint8), 3) > 0)
+    _pit[cells_of(CORE_GEOM)] = False
+    _pit &= ~pitched_m  # (a valley between two LoD2 roofs is no pit)
+    _pl, _pn = ndimage.label(_pit)
+    if _pn:
+        _pit &= np.r_[False, ndimage.sum(_pit, _pl, range(1, _pn + 1)) <= 3][_pl]
+    topi[_pit] = _cl[_pit]
+    note("roof pits filled:", int(_pit.sum()))
+    boti = np.round(bot_rel).astype(np.int32)
+    bmask &= topi >= 2
+    # buildings standing in water: near none but the Kachlet plant's and the locks' (Q1's gate, # water)
+    _biw = np.zeros((D, W), bool)
+    _biw[_core_s] = (bmask & (gcol == C["water"]))[_core_s]
+    report["counters"]["water_gate"]["buildings_in_water"] = int(_biw.sum())
+    _l, _n = ndimage.label(_biw)
+    _sz = np.bincount(_l.ravel())[1:]
+    note("building cells standing in water:", int(_biw.sum()), "the largest (cells, project col, row):",
+         [(int(_sz[i]), *(int(v) for v in np.round(np.array(ndimage.center_of_mass(_biw, _l, i + 1))[::-1] + (C0, R0))))
+          for i in np.argsort(-_sz)[:5]])
+    del _biw, _l, _n, _sz
+
+    # colours/materials per feature
+    SACRED = {"church", "cathedral", "chapel", "basilica", "synagogue", "mosque", "temple", "shrine"}
+    CORE = CORE_GEOM
+    # a historic core's plasters where OSM gives no colour: ochre, terracotta, salmon, ivory, cream, an odd sage -- warm,
+    # rarely cool (the upstream project's palette for a rebuilt old town; Passau's own pastels are not measured yet)
+    CORE_WALLS = ["#d9a441", "#b55a3f", "#d98f6e", "#efe3c4", "#c98a5a", "#e6d3a3", "#e8c78f", "#b9775a", "#dcb47c",
+                  "#9daa87", "#c2866e", "#e9d6b4"]
+
+    # buildings that are structures, not houses: the shader's facade of storeys of windows over a ground floor of shop
+    # windows (M_WALL) on them read as housing -- the Kachlet power station (power=plant, building=industrial, its outline
+    # across the Danube) was a 350 m palace of windows. They get plain walls (M_SOLID)
+    PLAIN_BUILDINGS = {"industrial", "warehouse", "hangar", "silo", "storage_tank", "transformer_tower", "service",
+                       "digester", "bunker", "water_tower", "barn", "farm_auxiliary", "cowshed", "stable", "sty", "garage",
+                       "garages", "shed", "carport", "tank", "pumping_station", "bridge", "dam", "weir"}
+    PLAIN_MAN_MADE = {"works", "water_works", "wastewater_plant", "silo", "storage_tank", "tank", "water_tower",
+                      "pumping_station", "reservoir_covered", "kiln", "gasometer", "dam", "weir", "lock_gate"}
+
+    def plain_walls(f, btype):
+        return (btype in PLAIN_BUILDINGS or tag(f, "power") is not None or tag(f, "man_made") in PLAIN_MAN_MADE
+                or tag(f, "waterway") in ("dam", "weir", "lock_gate"))
+
+    def wall_style(f):
+        t = f["tags"]
+        mat_tag = (tag(f, "building:material") or "").lower()
+        col = parse_colour(t.get("building:colour") or t.get("colour")) or \
+            (parse_colour(f["parent"]["tags"].get("building:colour")) if f.get("parent") else None)
+        btype = tag(f, "building") or ""
+        h = f["maxh"] or float(np.median(top[f["rr"], f["cc"]]))
+        glass = "glass" in mat_tag or (not mat_tag and h > 45 and btype in ("office", "commercial", "hotel", "yes", "retail")
+                                       and "building:colour" not in t)
+        if glass:
+            return pal(soften(col or hex_rgb("#8aa4b4"), 0.08), M_GLASS)
+        if mat_tag in ("concrete",) and col is None:
+            col = hex_rgb("#c9c6bd")
+        if mat_tag in ("brick",) and col is None:
+            col = hex_rgb("#a95f45")
+        core = CORE.contains(f["geom"].representative_point())
+        if col is None:
+            walls = CORE_WALLS if core else WALL_DEFAULTS
+            col = hex_rgb(walls[stable_hash(f["id"]) % len(walls)])
+        if btype in SACRED or tag(f, "amenity") == "place_of_worship":
+            return pal(soften(col), M_CLASSIC)  # stone or brick, tall windows: not the shader's office grid of storeys
+        if plain_walls(f, btype):
+            return pal(soften(col), M_SOLID)  # a plant, a works, a shed: no storeys of house windows (the shader's M_WALL)
+        if core:
+            return pal(soften(col), M_TENEMENT)
+        return pal(soften(col), M_WALL)
+
+    ROOF_OVERRULED = []
+
+    # roof colours: each roof its own, the median of what the orthophoto sees on it (in CIELAB, so that a median of hues
+    # is a hue), with the ortho's haze taken out. Five hand-picked red-browns for every tiled roof were ~2x too saturated and
+    # much darker than the tiles (DOP20, Altstadt clay tiles: median RGB 188,151,133, 10-90 % 138,112,97 .. 222,179,163):
+    # the town read as one saturated orange where the ortho shows muted salmon and terracotta, roof by roof.
+    # ROOF_DEHAZE is the one knob: the ortho is taken as  seen = roof * t + ROOF_HAZE * (1 - t).  1 keeps its colours as
+    # they are (pale, milky); lower deepens and saturates them (0.75: the tiles' median becomes 174,125,100)
+    ROOF_DEHAZE = 0.75
+    ROOF_HAZE = np.array([230.0, 230.0, 232.0])
+    LUMW = np.array([0.299, 0.587, 0.114])
+    _XYZ = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+    _WP = np.array([0.95047, 1.0, 1.08883])
+
+    def rgb_lab(c):
+        """sRGB 0..255 (... x 3) -> CIELAB (D65)"""
+        c = np.asarray(c, float) / 255
+        x = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92) @ _XYZ.T / _WP
+        f = np.where(x > 216 / 24389, np.cbrt(x), (24389 / 27 * x + 16) / 116)
+        return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+    def lab_rgb(lab):
+        lab = np.asarray(lab, float)
+        fy = (lab[..., 0] + 16) / 116
+        f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+        x = np.where(f ** 3 > 216 / 24389, f ** 3, (116 * f - 16) / (24389 / 27)) * _WP
+        l_ = np.clip(x @ np.linalg.inv(_XYZ).T, 0, 1)
+        return np.clip(255 * np.where(l_ > 0.0031308, 1.055 * l_ ** (1 / 2.4) - 0.055, 12.92 * l_), 0, 255)
+
+    def lab_median(c):
+        return lab_rgb(np.median(rgb_lab(c), 0))
+
+    def dehaze(rgb):
+        return tuple(float(v) for v in np.clip((np.asarray(rgb, float) - ROOF_HAZE * (1 - ROOF_DEHAZE)) / ROOF_DEHAZE, 0, 255))
+
+    # a tiled roof the ortho can't tell (too small, or so tall its lean puts facade and street into the roof's cells) that
+    # OSM calls red: the measured tiles' 10th to 90th percentile, dehazed like the rest
+    ROOF_TILES = [dehaze(c) for c in ((138, 112, 97), (163, 131, 115), (188, 151, 133), (205, 165, 148), (222, 179, 163))]
+    # (neutral to faintly warm: the sky's blue fill turned cool greys lilac)
+    ROOF_GREYS = ["#55565a", "#646568", "#747577", "#858584", "#979692", "#aeaca6", "#c2bfb8"]
+    ROOF_COPPER = ["#86a99a", "#7d9f91"]
+    ROOF_LOG = {"tiles": 0, "copper": 0, "grey": 0, "copper_untagged": []}
+
+    def ortho_roof(f):
+        """What the orthophoto sees on a roof: the share of its cells that are clay-tile red (hue red to orange,
+        saturated) and their median colour, the median colour of all its cells, and the share and median colour of its
+        copper-patina cells. Not the cells under a crown (one standing over the roof, or green: exg), deep shadow or glare.
+        A house's median over all cells mixed the tiles' sunlit orange and shaded brown with dormers, skylights, gutters
+        and the street seen past the eaves: tiled roofs came out beige, pink or lilac -- the tiles' own cells it is."""
+        rr, cc = f["rr"], f["cc"]
+        c0 = cellcol[rr, cc].astype(float)
+        L = c0 @ LUMW
+        lit = (L > 40) & (L < 235) & ~over[rr, cc]
+        ok = lit & (exg[rr, cc] < 0.06)
+        c = c0[ok] if ok.sum() >= 3 else c0
+        mx, mn = c.max(1), c.min(1)
+        s = (mx - mn) / np.maximum(mx, 1)
+        tile = (c[:, 0] > c[:, 1] + 12) & (c[:, 0] > c[:, 2] + 25) & (s > 0.15)
+        # copper patina by its hue: in this ortho a pale sage, a* -3 .. -9 with b* under 12 (a crown's green is yellow, b*
+        # 20-30; slate, metal and the ortho's bluish shadow sit at a* about 0). Patina is green to exg: the lit cells.
+        # Checked on the ortho roof by roof: the long roof south-east of the Dom (skylights between its copper strips:
+        # 37 % of its cells), the old university, the Ilzstadt's churches
+        cl = c0[lit] if lit.sum() >= 3 else c0
+        lab = rgb_lab(cl)
+        cop = (lab[:, 1] < -3) & (lab[:, 2] < 12) & (lab[:, 2] > -10) & (lab[:, 0] > 35)
+        return (tile.mean(), (lab_median(c[tile]) if tile.any() else None), lab_median(c),
+                cop.mean(), (lab_median(cl[cop]) if cop.any() else None))
+
+    def grey_roof(col, pitched):
+        """sheet metal, slate, concrete, gravel: the ortho's lightness, dehazed, and a trace of its hue (mostly sky and
+        shadow: a blue-grey turned lilac under the sky's fill); a pitched roof no lighter than a pale metal (white sheet
+        roofs read as snow)"""
+        lab = rgb_lab(dehaze(col))
+        lab[1:] = np.clip(lab[1:] * 0.3, -3, 5)
+        lab[0] = np.clip(lab[0], 36, 66 if pitched else 80)  # (dehazed, a tar roof went black)
+        return tuple(lab_rgb(lab))
+
+    def roof_style(f):
+        col = parse_colour(tag(f, "roof:colour"))
+        mat = (tag(f, "roof:material") or "").lower()
+        if col is None and mat == "glass":
+            return pal(soften(hex_rgb("#93adbf"), 0.06), M_GLASS)  # glass atrium roofs (a university hall): blue-grey
+        rr, cc = f["rr"], f["cc"]
+        h = float(np.median(top[rr, cc]))
+        pitched = pitched_m[rr, cc].mean() >= 0.4
+        copper_tag = mat == "copper" or (col is not None and col[1] > col[0] + 15 and col[1] >= col[2])
+        pick = lambda shades: shades[stable_hash(f["id"]) % len(shades)]
+        # (from 80 m up the ortho's lean puts facade and street into the roof's cells: OSM's colour, if any)
+        if len(rr) >= 3 and (h < 80 or col is None):
+            ft, tc, mc, fc, cop = ortho_roof(f)
+            if ft >= 0.3:  # clay tiles: their own median colour, dehazed
+                ROOF_LOG["tiles"] += 1
+                return pal(dehaze(tc), M_ROOF, q=12)
+            # copper patina: by its hue on over a third of the roof, or a tenth where OSM says copper (or a green roof),
+            # in the patina cells' own colour. (A fixed mint for the ortho's green-blue tint over all cells had fired on
+            # slate, metal, bluish shadow and crowns over the eaves: mint roofs all over the town)
+            if fc >= 0.35 or (copper_tag and fc >= 0.1):
+                ROOF_LOG["copper"] += 1
+                if not copper_tag:
+                    ROOF_LOG["copper_untagged"].append((f["id"], int(rr.mean()), int(cc.mean()), len(rr)))
+                return pal(dehaze(cop), M_ROOF, q=12)
+            if col is not None and np.linalg.norm(np.subtract(col, mc)) > 110:
+                ROOF_OVERRULED.append((f["id"], tag(f, "roof:colour")))
+            ROOF_LOG["grey"] += 1
+            return pal(grey_roof(mc, pitched), M_ROOF, q=12)
+        if col is None:
+            return pal(soften(hex_rgb("#7d7f84"), 0.05), M_ROOF, q=12)
+        if copper_tag:
+            return pal(soften(hex_rgb(pick(ROOF_COPPER)), 0.05), M_ROOF, q=12)
+        if col[0] > col[2] + 35 and col[0] > col[1] + 18:
+            return pal(pick(ROOF_TILES[1:4]), M_ROOF, q=12)
+        return pal(grey_roof(col, pitched), M_ROOF, q=12)
+
+    _GREY_L = sorted((float(np.dot(hex_rgb(h_), LUMW)), h_) for h_ in ROOF_GREYS)
+    n_dim = 0
+    for f in render:
+        f["wall"] = landmarks.wall_override(f, pal) or wall_style(f)
+        _ro = landmarks.roof_override(f, pal)
+        f["roof"] = _ro or roof_style(f)
+        # a pale flat roof (gravel, membrane: the ortho's glare) on a pale facade was the facade's own colour -- whole
+        # blocks of the newer districts read as white boxes with no top. A flat grey roof within 30 of its facade's
+        # lightness takes the palette's grey next under 30 darker than the facade
+        if _ro is None and not tag(f, "roof:colour"):
+            _r, _w = pal.entries[f["roof"]], pal.entries[f["wall"]]
+            _rl, _wl = float(np.dot(_r[:3], LUMW)), float(np.dot(_w[:3], LUMW))
+            _grey = max(_r[:3]) - min(_r[:3]) < 24
+            if _r[3] == M_ROOF and _w[3] != M_GLASS and _grey and abs(_rl - _wl) < 30 and pitched_m[f["rr"], f["cc"]].mean() < 0.4:
+                _cand = [h_ for l_, h_ in _GREY_L if l_ <= _wl - 30] or [_GREY_L[0][1]]
+                f["roof"] = pal(soften(hex_rgb(_cand[-1]), 0.05), M_ROOF, q=12)
+                n_dim += 1
+    note("pale flat roofs darkened under their facade:", n_dim)
+    note("roofs by the ortho (tiles / copper / grey):", ROOF_LOG["tiles"], ROOF_LOG["copper"], ROOF_LOG["grey"],
+         "copper OSM does not tag:", len(ROOF_LOG["copper_untagged"]), ROOF_LOG["copper_untagged"][:12])
+    note("roof palette entries:", len({e for e in pal.entries if e[3] == M_ROOF}))
+    for f in render:
+        wc, rc = parse_colour(tag(f, "building:colour")), parse_colour(tag(f, "roof:colour"))
+        if pal.entries[f["wall"]][3] == M_GLASS and wc is not None and wc == rc:
+            f["roof"] = f["wall"]
+
+    # parts under 1 m wide along a bigger one (a dark frame round a glass box, trims, fins): at 1 m they are one
+    # cell per step of a rotated wall, a dotted staircase that striped the whole facade -- they take the bigger part's wall
+    THIN_LOG = []
+    _pl = [f for f in render if f["part"] and f["maxh"]]
+    _thin, _thk = [], []
+    for f in _pl:
+        rr_, cc_ = f["rr"], f["cc"]
+        m_ = np.zeros((rr_.max() - rr_.min() + 3, cc_.max() - cc_.min() + 3), bool)
+        m_[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1] = True
+        from shapely.affinity import translate as _tr
+        _mr = _tr(f["geom"], C0, R0).minimum_rotated_rectangle  # (in the project grid's coordinates, as above)
+        _xy = np.array(_mr.exterior.coords)
+        _ang = math.degrees(math.atan2(_xy[1, 1] - _xy[0, 1], _xy[1, 0] - _xy[0, 0])) % 90
+        rotated = 12 < _ang < 78  # on the grid a 1 m frame or band draws cleanly (a tower's white frame, its bands)
+        (_thin if ndimage.distance_transform_edt(m_).max() <= 1.5 and rotated else _thk).append(f)  # (1.41: 2 across on a diagonal)
+    _bb = np.array([(f["rr"].min(), f["rr"].max(), f["cc"].min(), f["cc"].max()) for f in _thk]) if _thk else np.zeros((0, 4))
+    n_thin = 0
+    for f in _thin:
+        rr_, cc_ = f["rr"], f["cc"]
+        lo_ = f["minh"] or 0
+        # parts overlap (a lobby under a tower): every thick part within 2 m spanning the same storeys, the biggest wins
+        k_ = np.nonzero((_bb[:, 0] <= rr_.max() + 2) & (_bb[:, 1] >= rr_.min() - 2) & (_bb[:, 2] <= cc_.max() + 2) & (_bb[:, 3] >= cc_.min() - 2))[0]
+        best = None
+        for k in k_:
+            p_ = _thk[k]
+            if abs(p_["maxh"] - f["maxh"]) > 6 or abs((p_["minh"] or 0) - lo_) > 6:
+                continue
+            r0_, c0_ = rr_.min() - 2, cc_.min() - 2
+            m_ = np.zeros((rr_.max() - r0_ + 3, cc_.max() - c0_ + 3), bool)
+            m_[rr_ - r0_, cc_ - c0_] = True
+            m_ = ndimage.binary_dilation(m_, iterations=2)
+            q_ = (p_["rr"] >= r0_) & (p_["rr"] < r0_ + m_.shape[0]) & (p_["cc"] >= c0_) & (p_["cc"] < c0_ + m_.shape[1])
+            if q_.any() and m_[p_["rr"][q_] - r0_, p_["cc"][q_] - c0_].any() and (best is None or len(p_["rr"]) > len(best["rr"])):
+                best = p_
+        if best is not None:
+            if best["wall"] != f["wall"]:
+                THIN_LOG.append((f["id"], int(rr_.mean()), int(cc_.mean()), pal.entries[f["wall"]][:4], pal.entries[best["wall"]][:4], len(rr_)))
+            f["wall"] = best["wall"]
+            n_thin += 1
+    note("thin parts given their neighbour's wall:", n_thin, "of", len(_thin))
+    json.dump(THIN_LOG, open(RDIR / "thin_parts.json", "w"))
+
+    note("OSM roof colours overruled by the ortho:", len(ROOF_OVERRULED), ROOF_OVERRULED[:8])
+    # (room over the tallest of anything in the region -- buildings, the surface model's masts and pylons, crowns up to 40 m,
+    # the set pieces' lanterns -- so that nothing is cut off, whatever the region holds; the export trims to what is there)
+    H = int(g.max() + max(topi.max(), nd_max.max(), 41) + 24)
+    note("volume height", H)
+    vol = np.zeros((H, D, W), np.uint16)
+    vars(ctx).update(CORE=CORE, H=H, ROOF_GX=ROOF_GX, ROOF_GY=ROOF_GY, SACRED=SACRED, _roof_f=_roof_f, bmask=bmask,
+                     boti=boti, cell_maxh=cell_maxh, feats=feats, over=over, pitched_m=pitched_m, render=render,
+                     top=top, topi=topi, vol=vol)
 
 
-CORE_GEOM = landmarks.historic_core()
-core_roofs(top)
-pitched_m = lod2_roofs(top)
-pitched_m |= dsm_pitched_roofs(top)
-overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note)  # (scripts/overrides/building)
-# the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
-# and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
-# contour lines of the street below across every flat roof and plane of LoD2
-topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
-_roof_f = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
-# single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
-# the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
-_cl = ndimage.grey_closing(topi, size=(3, 3))
-_pit = bmask & (_cl - topi >= 1) & (_cl - topi <= 3) & (ndimage.minimum_filter(bmask.astype(np.uint8), 3) > 0)
-_pit[cells_of(CORE_GEOM)] = False
-_pit &= ~pitched_m  # (a valley between two LoD2 roofs is no pit)
-_pl, _pn = ndimage.label(_pit)
-if _pn:
-    _pit &= np.r_[False, ndimage.sum(_pit, _pl, range(1, _pn + 1)) <= 3][_pl]
-topi[_pit] = _cl[_pit]
-note("roof pits filled:", int(_pit.sum()))
-boti = np.round(bot_rel).astype(np.int32)
-bmask &= topi >= 2
-# buildings standing in water: near none but the Kachlet plant's and the locks' (Q1's gate, # water)
-_biw = np.zeros((D, W), bool)
-_biw[_core_s] = (bmask & (gcol == C["water"]))[_core_s]
-report["counters"]["water_gate"]["buildings_in_water"] = int(_biw.sum())
-_l, _n = ndimage.label(_biw)
-_sz = np.bincount(_l.ravel())[1:]
-note("building cells standing in water:", int(_biw.sum()), "the largest (cells, project col, row):",
-     [(int(_sz[i]), *(int(v) for v in np.round(np.array(ndimage.center_of_mass(_biw, _l, i + 1))[::-1] + (C0, R0))))
-      for i in np.argsort(-_sz)[:5]])
-del _biw, _l, _n, _sz
-
-
-# colours/materials per feature
-SACRED = {"church", "cathedral", "chapel", "basilica", "synagogue", "mosque", "temple", "shrine"}
-CORE = CORE_GEOM
-# a historic core's plasters where OSM gives no colour: ochre, terracotta, salmon, ivory, cream, an odd sage -- warm,
-# rarely cool (the upstream project's palette for a rebuilt old town; Passau's own pastels are not measured yet)
-CORE_WALLS = ["#d9a441", "#b55a3f", "#d98f6e", "#efe3c4", "#c98a5a", "#e6d3a3", "#e8c78f", "#b9775a", "#dcb47c",
-              "#9daa87", "#c2866e", "#e9d6b4"]
-
-
-# buildings that are structures, not houses: the shader's facade of storeys of windows over a ground floor of shop
-# windows (M_WALL) on them read as housing -- the Kachlet power station (power=plant, building=industrial, its outline
-# across the Danube) was a 350 m palace of windows. They get plain walls (M_SOLID)
-PLAIN_BUILDINGS = {"industrial", "warehouse", "hangar", "silo", "storage_tank", "transformer_tower", "service",
-                   "digester", "bunker", "water_tower", "barn", "farm_auxiliary", "cowshed", "stable", "sty", "garage",
-                   "garages", "shed", "carport", "tank", "pumping_station", "bridge", "dam", "weir"}
-PLAIN_MAN_MADE = {"works", "water_works", "wastewater_plant", "silo", "storage_tank", "tank", "water_tower",
-                  "pumping_station", "reservoir_covered", "kiln", "gasometer", "dam", "weir", "lock_gate"}
-
-
-def plain_walls(f, btype):
-    return (btype in PLAIN_BUILDINGS or tag(f, "power") is not None or tag(f, "man_made") in PLAIN_MAN_MADE
-            or tag(f, "waterway") in ("dam", "weir", "lock_gate"))
-
-
-def wall_style(f):
-    t = f["tags"]
-    mat_tag = (tag(f, "building:material") or "").lower()
-    col = parse_colour(t.get("building:colour") or t.get("colour")) or \
-        (parse_colour(f["parent"]["tags"].get("building:colour")) if f.get("parent") else None)
-    btype = tag(f, "building") or ""
-    h = f["maxh"] or float(np.median(top[f["rr"], f["cc"]]))
-    glass = "glass" in mat_tag or (not mat_tag and h > 45 and btype in ("office", "commercial", "hotel", "yes", "retail")
-                                   and "building:colour" not in t)
-    if glass:
-        return pal(soften(col or hex_rgb("#8aa4b4"), 0.08), M_GLASS)
-    if mat_tag in ("concrete",) and col is None:
-        col = hex_rgb("#c9c6bd")
-    if mat_tag in ("brick",) and col is None:
-        col = hex_rgb("#a95f45")
-    core = CORE.contains(f["geom"].representative_point())
-    if col is None:
-        walls = CORE_WALLS if core else WALL_DEFAULTS
-        col = hex_rgb(walls[stable_hash(f["id"]) % len(walls)])
-    if btype in SACRED or tag(f, "amenity") == "place_of_worship":
-        return pal(soften(col), M_CLASSIC)  # stone or brick, tall windows: not the shader's office grid of storeys
-    if plain_walls(f, btype):
-        return pal(soften(col), M_SOLID)  # a plant, a works, a shed: no storeys of house windows (the shader's M_WALL)
-    if core:
-        return pal(soften(col), M_TENEMENT)
-    return pal(soften(col), M_WALL)
-
-
-
-ROOF_OVERRULED = []
-
-
-# roof colours: each roof its own, the median of what the orthophoto sees on it (in CIELAB, so that a median of hues
-# is a hue), with the ortho's haze taken out. Five hand-picked red-browns for every tiled roof were ~2x too saturated and
-# much darker than the tiles (DOP20, Altstadt clay tiles: median RGB 188,151,133, 10-90 % 138,112,97 .. 222,179,163):
-# the town read as one saturated orange where the ortho shows muted salmon and terracotta, roof by roof.
-# ROOF_DEHAZE is the one knob: the ortho is taken as  seen = roof * t + ROOF_HAZE * (1 - t).  1 keeps its colours as
-# they are (pale, milky); lower deepens and saturates them (0.75: the tiles' median becomes 174,125,100)
-ROOF_DEHAZE = 0.75
-ROOF_HAZE = np.array([230.0, 230.0, 232.0])
-LUMW = np.array([0.299, 0.587, 0.114])
-_XYZ = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
-_WP = np.array([0.95047, 1.0, 1.08883])
-
-
-def rgb_lab(c):
-    """sRGB 0..255 (... x 3) -> CIELAB (D65)"""
-    c = np.asarray(c, float) / 255
-    x = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92) @ _XYZ.T / _WP
-    f = np.where(x > 216 / 24389, np.cbrt(x), (24389 / 27 * x + 16) / 116)
-    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
-
-
-def lab_rgb(lab):
-    lab = np.asarray(lab, float)
-    fy = (lab[..., 0] + 16) / 116
-    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
-    x = np.where(f ** 3 > 216 / 24389, f ** 3, (116 * f - 16) / (24389 / 27)) * _WP
-    l_ = np.clip(x @ np.linalg.inv(_XYZ).T, 0, 1)
-    return np.clip(255 * np.where(l_ > 0.0031308, 1.055 * l_ ** (1 / 2.4) - 0.055, 12.92 * l_), 0, 255)
-
-
-def lab_median(c):
-    return lab_rgb(np.median(rgb_lab(c), 0))
-
-
-def dehaze(rgb):
-    return tuple(float(v) for v in np.clip((np.asarray(rgb, float) - ROOF_HAZE * (1 - ROOF_DEHAZE)) / ROOF_DEHAZE, 0, 255))
-
-
-# a tiled roof the ortho can't tell (too small, or so tall its lean puts facade and street into the roof's cells) that
-# OSM calls red: the measured tiles' 10th to 90th percentile, dehazed like the rest
-ROOF_TILES = [dehaze(c) for c in ((138, 112, 97), (163, 131, 115), (188, 151, 133), (205, 165, 148), (222, 179, 163))]
-# (neutral to faintly warm: the sky's blue fill turned cool greys lilac)
-ROOF_GREYS = ["#55565a", "#646568", "#747577", "#858584", "#979692", "#aeaca6", "#c2bfb8"]
-ROOF_COPPER = ["#86a99a", "#7d9f91"]
-ROOF_LOG = {"tiles": 0, "copper": 0, "grey": 0, "copper_untagged": []}
-
-
-def ortho_roof(f):
-    """What the orthophoto sees on a roof: the share of its cells that are clay-tile red (hue red to orange,
-    saturated) and their median colour, the median colour of all its cells, and the share and median colour of its
-    copper-patina cells. Not the cells under a crown (one standing over the roof, or green: exg), deep shadow or glare.
-    A house's median over all cells mixed the tiles' sunlit orange and shaded brown with dormers, skylights, gutters
-    and the street seen past the eaves: tiled roofs came out beige, pink or lilac -- the tiles' own cells it is."""
-    rr, cc = f["rr"], f["cc"]
-    c0 = cellcol[rr, cc].astype(float)
-    L = c0 @ LUMW
-    lit = (L > 40) & (L < 235) & ~over[rr, cc]
-    ok = lit & (exg[rr, cc] < 0.06)
-    c = c0[ok] if ok.sum() >= 3 else c0
-    mx, mn = c.max(1), c.min(1)
-    s = (mx - mn) / np.maximum(mx, 1)
-    tile = (c[:, 0] > c[:, 1] + 12) & (c[:, 0] > c[:, 2] + 25) & (s > 0.15)
-    # copper patina by its hue: in this ortho a pale sage, a* -3 .. -9 with b* under 12 (a crown's green is yellow, b*
-    # 20-30; slate, metal and the ortho's bluish shadow sit at a* about 0). Patina is green to exg: the lit cells.
-    # Checked on the ortho roof by roof: the long roof south-east of the Dom (skylights between its copper strips:
-    # 37 % of its cells), the old university, the Ilzstadt's churches
-    cl = c0[lit] if lit.sum() >= 3 else c0
-    lab = rgb_lab(cl)
-    cop = (lab[:, 1] < -3) & (lab[:, 2] < 12) & (lab[:, 2] > -10) & (lab[:, 0] > 35)
-    return (tile.mean(), (lab_median(c[tile]) if tile.any() else None), lab_median(c),
-            cop.mean(), (lab_median(cl[cop]) if cop.any() else None))
-
-
-def grey_roof(col, pitched):
-    """sheet metal, slate, concrete, gravel: the ortho's lightness, dehazed, and a trace of its hue (mostly sky and
-    shadow: a blue-grey turned lilac under the sky's fill); a pitched roof no lighter than a pale metal (white sheet
-    roofs read as snow)"""
-    lab = rgb_lab(dehaze(col))
-    lab[1:] = np.clip(lab[1:] * 0.3, -3, 5)
-    lab[0] = np.clip(lab[0], 36, 66 if pitched else 80)  # (dehazed, a tar roof went black)
-    return tuple(lab_rgb(lab))
-
-
-def roof_style(f):
-    col = parse_colour(tag(f, "roof:colour"))
-    mat = (tag(f, "roof:material") or "").lower()
-    if col is None and mat == "glass":
-        return pal(soften(hex_rgb("#93adbf"), 0.06), M_GLASS)  # glass atrium roofs (a university hall): blue-grey
-    rr, cc = f["rr"], f["cc"]
-    h = float(np.median(top[rr, cc]))
-    pitched = pitched_m[rr, cc].mean() >= 0.4
-    copper_tag = mat == "copper" or (col is not None and col[1] > col[0] + 15 and col[1] >= col[2])
-    pick = lambda shades: shades[stable_hash(f["id"]) % len(shades)]
-    # (from 80 m up the ortho's lean puts facade and street into the roof's cells: OSM's colour, if any)
-    if len(rr) >= 3 and (h < 80 or col is None):
-        ft, tc, mc, fc, cop = ortho_roof(f)
-        if ft >= 0.3:  # clay tiles: their own median colour, dehazed
-            ROOF_LOG["tiles"] += 1
-            return pal(dehaze(tc), M_ROOF, q=12)
-        # copper patina: by its hue on over a third of the roof, or a tenth where OSM says copper (or a green roof),
-        # in the patina cells' own colour. (A fixed mint for the ortho's green-blue tint over all cells had fired on
-        # slate, metal, bluish shadow and crowns over the eaves: mint roofs all over the town)
-        if fc >= 0.35 or (copper_tag and fc >= 0.1):
-            ROOF_LOG["copper"] += 1
-            if not copper_tag:
-                ROOF_LOG["copper_untagged"].append((f["id"], int(rr.mean()), int(cc.mean()), len(rr)))
-            return pal(dehaze(cop), M_ROOF, q=12)
-        if col is not None and np.linalg.norm(np.subtract(col, mc)) > 110:
-            ROOF_OVERRULED.append((f["id"], tag(f, "roof:colour")))
-        ROOF_LOG["grey"] += 1
-        return pal(grey_roof(mc, pitched), M_ROOF, q=12)
-    if col is None:
-        return pal(soften(hex_rgb("#7d7f84"), 0.05), M_ROOF, q=12)
-    if copper_tag:
-        return pal(soften(hex_rgb(pick(ROOF_COPPER)), 0.05), M_ROOF, q=12)
-    if col[0] > col[2] + 35 and col[0] > col[1] + 18:
-        return pal(pick(ROOF_TILES[1:4]), M_ROOF, q=12)
-    return pal(grey_roof(col, pitched), M_ROOF, q=12)
-
-
-_GREY_L = sorted((float(np.dot(hex_rgb(h_), LUMW)), h_) for h_ in ROOF_GREYS)
-n_dim = 0
-for f in render:
-    f["wall"] = landmarks.wall_override(f, pal) or wall_style(f)
-    _ro = landmarks.roof_override(f, pal)
-    f["roof"] = _ro or roof_style(f)
-    # a pale flat roof (gravel, membrane: the ortho's glare) on a pale facade was the facade's own colour -- whole
-    # blocks of the newer districts read as white boxes with no top. A flat grey roof within 30 of its facade's
-    # lightness takes the palette's grey next under 30 darker than the facade
-    if _ro is None and not tag(f, "roof:colour"):
-        _r, _w = pal.entries[f["roof"]], pal.entries[f["wall"]]
-        _rl, _wl = float(np.dot(_r[:3], LUMW)), float(np.dot(_w[:3], LUMW))
-        _grey = max(_r[:3]) - min(_r[:3]) < 24
-        if _r[3] == M_ROOF and _w[3] != M_GLASS and _grey and abs(_rl - _wl) < 30 and pitched_m[f["rr"], f["cc"]].mean() < 0.4:
-            _cand = [h_ for l_, h_ in _GREY_L if l_ <= _wl - 30] or [_GREY_L[0][1]]
-            f["roof"] = pal(soften(hex_rgb(_cand[-1]), 0.05), M_ROOF, q=12)
-            n_dim += 1
-note("pale flat roofs darkened under their facade:", n_dim)
-note("roofs by the ortho (tiles / copper / grey):", ROOF_LOG["tiles"], ROOF_LOG["copper"], ROOF_LOG["grey"],
-     "copper OSM does not tag:", len(ROOF_LOG["copper_untagged"]), ROOF_LOG["copper_untagged"][:12])
-note("roof palette entries:", len({e for e in pal.entries if e[3] == M_ROOF}))
-for f in render:
-    wc, rc = parse_colour(tag(f, "building:colour")), parse_colour(tag(f, "roof:colour"))
-    if pal.entries[f["wall"]][3] == M_GLASS and wc is not None and wc == rc:
-        f["roof"] = f["wall"]
-
-# parts under 1 m wide along a bigger one (a dark frame round a glass box, trims, fins): at 1 m they are one
-# cell per step of a rotated wall, a dotted staircase that striped the whole facade -- they take the bigger part's wall
-THIN_LOG = []
-_pl = [f for f in render if f["part"] and f["maxh"]]
-_thin, _thk = [], []
-for f in _pl:
-    rr_, cc_ = f["rr"], f["cc"]
-    m_ = np.zeros((rr_.max() - rr_.min() + 3, cc_.max() - cc_.min() + 3), bool)
-    m_[rr_ - rr_.min() + 1, cc_ - cc_.min() + 1] = True
-    from shapely.affinity import translate as _tr
-    _mr = _tr(f["geom"], C0, R0).minimum_rotated_rectangle  # (in the project grid's coordinates, as above)
-    _xy = np.array(_mr.exterior.coords)
-    _ang = math.degrees(math.atan2(_xy[1, 1] - _xy[0, 1], _xy[1, 0] - _xy[0, 0])) % 90
-    rotated = 12 < _ang < 78  # on the grid a 1 m frame or band draws cleanly (a tower's white frame, its bands)
-    (_thin if ndimage.distance_transform_edt(m_).max() <= 1.5 and rotated else _thk).append(f)  # (1.41: 2 across on a diagonal)
-_bb = np.array([(f["rr"].min(), f["rr"].max(), f["cc"].min(), f["cc"].max()) for f in _thk]) if _thk else np.zeros((0, 4))
-n_thin = 0
-for f in _thin:
-    rr_, cc_ = f["rr"], f["cc"]
-    lo_ = f["minh"] or 0
-    # parts overlap (a lobby under a tower): every thick part within 2 m spanning the same storeys, the biggest wins
-    k_ = np.nonzero((_bb[:, 0] <= rr_.max() + 2) & (_bb[:, 1] >= rr_.min() - 2) & (_bb[:, 2] <= cc_.max() + 2) & (_bb[:, 3] >= cc_.min() - 2))[0]
-    best = None
-    for k in k_:
-        p_ = _thk[k]
-        if abs(p_["maxh"] - f["maxh"]) > 6 or abs((p_["minh"] or 0) - lo_) > 6:
-            continue
-        r0_, c0_ = rr_.min() - 2, cc_.min() - 2
-        m_ = np.zeros((rr_.max() - r0_ + 3, cc_.max() - c0_ + 3), bool)
-        m_[rr_ - r0_, cc_ - c0_] = True
-        m_ = ndimage.binary_dilation(m_, iterations=2)
-        q_ = (p_["rr"] >= r0_) & (p_["rr"] < r0_ + m_.shape[0]) & (p_["cc"] >= c0_) & (p_["cc"] < c0_ + m_.shape[1])
-        if q_.any() and m_[p_["rr"][q_] - r0_, p_["cc"][q_] - c0_].any() and (best is None or len(p_["rr"]) > len(best["rr"])):
-            best = p_
-    if best is not None:
-        if best["wall"] != f["wall"]:
-            THIN_LOG.append((f["id"], int(rr_.mean()), int(cc_.mean()), pal.entries[f["wall"]][:4], pal.entries[best["wall"]][:4], len(rr_)))
-        f["wall"] = best["wall"]
-        n_thin += 1
-note("thin parts given their neighbour's wall:", n_thin, "of", len(_thin))
-json.dump(THIN_LOG, open(RDIR / "thin_parts.json", "w"))
-
-note("OSM roof colours overruled by the ortho:", len(ROOF_OVERRULED), ROOF_OVERRULED[:8])
-# (room over the tallest of anything in the region -- buildings, the surface model's masts and pylons, crowns up to 40 m,
-# the set pieces' lanterns -- so that nothing is cut off, whatever the region holds; the export trims to what is there)
-H = int(g.max() + max(topi.max(), nd_max.max(), 41) + 24)
-note("volume height", H)
-vol = np.zeros((H, D, W), np.uint16)
-
-stage("buildings")
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+    ("ground classes, roads, water", ground_classes),
+    ("buildings", buildings),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
+# (the stages to come are module code still: what they read of the ones above)
+(CORE, GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, TN, _jm, _locks, _roof_f, bmask, boti,
+ bridge_lines, bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cell_maxh, cellcol,
+ cycle_shapes, dsm, dsm_mean, dtm, exg, explicit, feats, foot_shapes, g, gcol, is_road, lit_ground_ways, lm, lum,
+ nd_max, nd_mean, osm, over, parking_mask, pitched_m, rail_beds, rails, render, rgbsum, road_lines, splash_pads, tn,
+ top, topi, vol) = (
+    ctx.CORE, ctx.GCTX, ctx.H, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC,
+    ctx.SANITY, ctx.TN, ctx._jm, ctx._locks, ctx._roof_f, ctx.bmask, ctx.boti, ctx.bridge_lines, ctx.bridge_rails,
+    ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways, ctx.cell_maxh, ctx.cellcol,
+    ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g,
+    ctx.gcol, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.over,
+    ctx.parking_mask, ctx.pitched_m, ctx.rail_beds, ctx.rails, ctx.render, ctx.rgbsum, ctx.road_lines,
+    ctx.splash_pads, ctx.tn, ctx.top, ctx.topi, ctx.vol)
 # ---------------------------------------------------------------- natural ground
 # open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
 # when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
