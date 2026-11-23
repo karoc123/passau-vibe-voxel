@@ -35,7 +35,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| M1 | Chase camera placed after this frame's poses (the car judder), with a judder gate ([plan](smooth-motion-and-lag.md)) | S | **Ready** |
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
 | E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
@@ -134,6 +133,12 @@ snapshot `crafts` (all placed, full core state); shells `board(craft)`, F boards
 `nav/crafts-view.ts` draws crafts not piloted locally; life-edit scenario `left`. Open from E8: no on-screen hint for F,
 not on foot; 1–2 frames on leave where nobody draws the craft; paraglider still removed on leave; the parked-car cap
 (8/24) kept beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence; no interest filter for crafts.
+
+M1 landed: the frame is input (car, Nav's controls, own-camera crafts) → `sim.update` → `life.update` (this frame's
+poses) → `Nav.place` (the ride camera) → what reads the camera; `Rider.update` split into `control` and `place`.
+`tools/judder.mjs` (needs a dev server and Chrome; not in the gate runner): J and E 0.0 / ≤ 0.04 cm in all 7 patterns at
+80 km/h (before: J 36.9 cm), camera 9.00 m behind. Open: crafts with their own camera still place it before the sim
+(M3/E13); `life.update`'s viewer is last frame's camera; the worker's snapshot clock (M4).
 
 ### E7. Commands a server can trust (M, from E2's open points)
 

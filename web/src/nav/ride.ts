@@ -74,13 +74,20 @@ export class Rider {
     return { at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.kind === 'person' };
   }
 
-  /** a frame of the ride (driving: the car driven), the camera placed. What is followed left the map: the nearest one
-   * of its kind to follow instead, or 'off' (none: onto the street) */
-  update(dt: number, driving: boolean): Picked | 'off' | null {
+  /** a frame of the ride before the sim's update: the walk's commands sent (walking as the person followed) */
+  control(dt: number) {
     const R = this.ride!, H = this.host, life = H.life();
     // (the seat refused: walked by another, or gone from the crowd)
     if (life?.client.results(LOCAL_PLAYER, 'walkAs').some((r) => !r.ok)) this.walking = null;
     if (R.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.obj)) this.walkAs(dt);
+  }
+
+  /** a frame of the ride after the sim's update and the street's drawing (driving: the car driven): the camera placed
+   * on the pose drawn this frame (placed before it, the camera trails the drawn car by a frame's distance, which
+   * jumps on an uneven frame: docs/plans/smooth-motion-and-lag.md). What is followed left the map: the nearest one of
+   * its kind to follow instead, or 'off' (none: onto the street) */
+  place(dt: number, driving: boolean): Picked | 'off' | null {
+    const R = this.ride!, H = this.host, life = H.life();
     const pose = life?.pose(R.kind, R.obj);
     if (!pose) return life?.nearest(R.kind, { x: H.camera.position.x, z: H.camera.position.z }, R.obj) ?? 'off';
     const { pos, q, look, fov } = this.camera.frame(R, pose, H.world(), driving, dt);

@@ -547,11 +547,20 @@ renderer.setAnimationLoop((now) => {
   stepWeather(now);
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
-  // (the car before Nav: it moves, then the ride camera follows it; the crafts that own the camera after Nav)
+  // the frame's order (docs/plans/smooth-motion-and-lag.md): the players' input (the car's, Nav's, the crafts that own
+  // the camera), the sim's update, this frame's poses drawn, then the ride camera on them, then what reads the camera
   for (const c of crafts) if (c.view === 'ride') c.update(dt);
   nav.update(dt);
   for (const c of crafts) if (c.view === 'own') c.update(dt);
   craftsView?.update(sim, dt, daylight.night);
+  if (sim && life) {
+    // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
+    // far from the camera, which sees them
+    sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
+    life.group.visible = !city || city.complete;
+    if (life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
+  }
+  nav.place(dt);
   const bodyMode = nav.craft?.id ?? nav.mode;
   if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
   if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
@@ -574,13 +583,6 @@ renderer.setAnimationLoop((now) => {
   const cp = camera.position;
   precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
   if (city?.complete) document.body.classList.remove('loading');
-  if (sim && life) {
-    // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
-    // far from the camera, which sees them
-    sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
-    life.group.visible = !city || city.complete;
-    if (life.group.visible) life.update(dt, daylight.night, camera.position);
-  }
   daylight.sky.mesh.position.copy(camera.position);
   streamer?.update(camera);
   daylight.fitShadow(focus(), camera, viewDist, map);

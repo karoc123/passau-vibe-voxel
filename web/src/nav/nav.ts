@@ -626,8 +626,13 @@ export class Nav {
     this.fitNear();
     if (this.third) this.foot.updatePedestrian(dt, this.footStick());
     else if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
-    else if (this.riding) this.updateRide(dt);
+    else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
+  }
+
+  /** after the sim's update and the street's drawing (main.ts): the ride's camera on this frame's poses */
+  place(dt: number) {
+    if (this.riding) this.updateRide(Math.min(dt, 0.1));
   }
 
   // the near plane on foot (WALK_NEAR) and back
@@ -643,7 +648,7 @@ export class Nav {
   }
 
   private updateRide(dt: number) {
-    const next = this.rider.update(dt, this.driving);
+    const next = this.rider.place(dt, this.driving);
     if (next === 'off') this.hopOff();
     else if (next) { const { view, zoom } = this.ride!; this.startRide(next); Object.assign(this.ride!, { view, zoom }); }
   }
