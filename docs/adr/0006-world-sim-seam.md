@@ -19,8 +19,8 @@ two runs differed.
 - **One host**: `sim/world-sim.ts` `WorldSim` owns the `Traffic` and loads the road physics (`LifePhysics`) through a
   loader it is given (the viewer: a lazy import of Rapier on the first edit or drive; the tools: tiles from disk). The
   viewer (`main.ts`), the tools (`life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs`) and later a server create it and
-  call `update(dt, { hour, day, focus, viewer })` the same way. In the viewer it is ticked only while the street life is
-  drawn (`main.ts`, as before the host existed); ticking it always is a one-line change left to the owner.
+  call `update(dt, { hour, day, focus, viewer })` the same way. In the viewer it is ticked every frame once the traffic is
+  loaded, whether or not the street life is drawn yet (`main.ts`; ADR 0008).
 - **World sim**: `sim/traffic.ts` (cars, people, riders, signals, edits, the people over a hole) and
   `physics/rapier/life-phys.ts` (the cars near edits as Rapier bodies, their colliders: `terrain.ts`, `vehicle.ts`),
   on `core/`. It imports no three.js, no `util.ts`, no DOM and no `fetch`: `tools/core-deps.mjs` scans all of

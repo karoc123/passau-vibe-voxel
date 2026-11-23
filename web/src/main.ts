@@ -552,13 +552,11 @@ renderer.setAnimationLoop((now) => {
   precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
   if (city?.complete) document.body.classList.remove('loading');
   if (sim && life) {
+    // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
+    // far from the camera, which sees them
+    sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
     life.group.visible = !city || city.complete;
-    // (the world sim ticks only while it is drawn: ungating it is the owner's decision, docs/adr/0006)
-    if (life.group.visible) {
-      // (simulated round what is looked at; agents come and go far from the camera, which sees them)
-      sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
-      life.update(dt, daylight.night, camera.position);
-    }
+    if (life.group.visible) life.update(dt, daylight.night, camera.position);
   }
   daylight.sky.mesh.position.copy(camera.position);
   streamer?.update(camera);
