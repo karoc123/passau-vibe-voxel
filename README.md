@@ -331,8 +331,8 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the ⚙ panel), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
 
 Page globals for the console and agent tools (none needed by the viewer): `window.__ready` (first frame drawn),
-`__three` (camera, scene, renderer, daylight, `city()`, `setGfx` …: `main.ts`), `__streamer`, `__life` (read by
-`tools/shoot.mjs`).
+`__three` (camera, scene, renderer, daylight, `city()`, `setGfx` …: `main.ts`), `__streamer`, `__sim` (the world sim,
+`sim/world-sim.ts`) and `__life` (its presentation; both read by `tools/shoot.mjs`).
 
 ## Agent tools (checking a change)
 
@@ -501,7 +501,8 @@ spatial checks. It can jump, flip and land on its roof, where it stays (park it,
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
 ~1.5 s after the city is shown; taking the wheel before that waits for it. Rapier is the only car physics. The mode's
-panel and input are `web/src/nav/drive.ts`. The shared road world resolves player commands and contacts, and
+panel and input are `web/src/nav/drive.ts`; it sends the local player's commands to the world sim
+(`web/src/sim/world-sim.ts`, which `main.ts` creates and ticks). The shared road world resolves player commands and contacts, and
 `physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless
 in `tools/rapier-car.mjs` (`drive_*`).
 

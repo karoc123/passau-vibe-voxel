@@ -87,6 +87,8 @@ export class Traffic {
   readonly roads: Road[];
   readonly peds: PedEdge[];
   readonly ctrls: Controller[];
+  // the signal heads ([x, z, ground, rotation, controller, axis]: drawn by view/life.ts, their lights from signal())
+  readonly heads: NonNullable<TrafficData['heads']>;
   readonly trains: TrainTraffic;
   private boatTraffic: BoatTraffic | null = null;
   readonly cars: Car[] = [];
@@ -147,6 +149,7 @@ export class Traffic {
     this.roads = data.roads.map((r, i) => Object.assign(prepPath(r), { i, lists: Array.from({ length: r.lanes }, () => []) }));
     this.peds = data.peds.map((e, i) => Object.assign(prepPath(e), { i }));
     this.ctrls = data.ctrls.map((c, i) => ({ ...c, off: hash(i + 1) * CYCLE }));
+    this.heads = data.heads ?? [];
     this.roads.forEach((e, i) => { pushTo(this.outs, e.a, i); pushTo(this.ins, e.b, i); });
     this.peds.forEach((e, i) => { pushTo(this.padj, e.a, [i, 0]); pushTo(this.padj, e.b, [i, 1]); });
     for (const [fr, via, to, type] of data.restr ?? []) pushTo(this.restr, `${fr}:${via}`, { to, type });

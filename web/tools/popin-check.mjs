@@ -1,6 +1,7 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
-// viewer drives along the road network (and stands still a while), the life is updated every frame as main.ts does
-// (focus: the viewer), and every car, person and rider drawn is followed from frame to frame. Flagged:
+// viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked and
+// the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
 //   jump    -- an agent drawn in both frames, within R m, moved more than JUMP m in one frame
@@ -35,7 +36,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
@@ -76,7 +77,7 @@ function run({ name, at: start, h0, h1 }) {
     visited.set(cur, (visited.get(cur) ?? 0) + 1);
   }
 
-  const life = new StreetLife(new THREE.Scene(), td);
+  const sim = new WorldSim(td), T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;
   const viewer = { x: 0, z: 0, hx: 0, hz: 1 };
@@ -97,11 +98,13 @@ function run({ name, at: start, h0, h1 }) {
     }
     place();
     if (verbose && f % (FPS * 20) === 0) console.log(`  ${name} t=${t.toFixed(0)} viewer on road ${cur} (${viewer.x.toFixed(0)}, ${viewer.z.toFixed(0)})`);
-    life.update(dt, h0 + (h1 - h0) * t / SECONDS, 0, { x: viewer.x, z: viewer.z });
+    const focus = { x: viewer.x, z: viewer.z };
+    sim.update(dt, { hour: h0 + (h1 - h0) * t / SECONDS, focus });
+    life.update(dt, 0, focus);
     const now = new Map();
-    for (const c of life.roadVehicles()) if (c.rp) now.set(c, ['car', c.rp.x, c.rp.z]);
-    for (const p of life.people) if (p.rp) now.set(p, ['person', p.rp.x, p.rp.z]);
-    for (const p of life.riders) if (p.rp) now.set(p, ['rider', p.rp.x, p.rp.z]);
+    for (const c of T.roadVehicles()) if (c.rp) now.set(c, ['car', c.rp.x, c.rp.z]);
+    for (const p of T.people) if (p.rp) now.set(p, ['person', p.rp.x, p.rp.z]);
+    for (const p of T.riders) if (p.rp) now.set(p, ['rider', p.rp.x, p.rp.z]);
     if (last) {
       const near = (k, x, z) => Math.hypot(x - viewer.x, z - viewer.z) < (k === 'car' ? CAR_R : PED_R);
       const front = (x, z) => { const dx = x - viewer.x, dz = z - viewer.z, l = Math.hypot(dx, dz) || 1; return (dx * viewer.hx + dz * viewer.hz) / l > 0.5; };
@@ -120,7 +123,7 @@ function run({ name, at: start, h0, h1 }) {
     }
     last = now;
   }
-  console.log(`  ${name}: ${life.cars.length} cars, ${life.people.length} people, ${life.riders.length} riders at the end (hour ${h0} to ${h1})`);
+  console.log(`  ${name}: ${T.cars.length} cars, ${T.people.length} people, ${T.riders.length} riders at the end (hour ${h0} to ${h1})`);
 }
 
 if (STREET) for (const r of RUNS) run(r);

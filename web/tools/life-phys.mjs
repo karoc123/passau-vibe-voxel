@@ -1,5 +1,5 @@
 // The traffic's bodies near edits (src/physics/rapier/life-phys.ts, docs/plans/life-physics.md): what they cost, and
-// how often a body loses its ghost, headless on the real data (the world sim alone: Traffic + LifePhysics, as
+// how often a body loses its ghost, headless on the real data (the world sim alone: src/sim/world-sim.ts WorldSim, as
 // tools/life-edit.mjs). The traffic runs WARM s round a point, then an edit there (a box marked edited, the voxels
 // unchanged: the busiest case, every car near it a body on intact streets) and RUN s measured, per config:
 //   bodies (avg, max), the bodies' tick (avg, p99, max ms; of which the world's steps and the colliders), the
@@ -17,7 +17,8 @@ const driver = flag('--driver');
 const verbose = flag('-v'), look = !flag('--no-look');
 const [AX, AZ] = opt('--at', '6500,2600').split(',').map(Number);
 const HOUR = +opt('--hour', 17), RUN = +opt('--run', 30), BOX = +opt('--box', 8), WARM = 20;
-const LP = await load('physics/rapier/life-phys.ts'), { Traffic, STEP } = await load('sim/traffic.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
+const LP = await load('physics/rapier/life-phys.ts'), { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts');
+const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const configs = (argv.length ? argv : ['30', '60', '100']).map((a) => a.split(':').map(Number));
 const meta = readMeta(), N = meta.tiles.N;
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
@@ -28,36 +29,36 @@ const f2 = (x) => x.toFixed(2);
 
 for (const [near, max] of configs) {
   const { W } = await nodeWorld();
-  const T = new Traffic(td, 7);
-  T.ground = W;
   const focus = { x: AX, z: AZ };
-  for (let i = 0; i < WARM / STEP; i++) T.update(STEP, HOUR, focus);
-  const phys = await LP.LifePhysics.load(meta, focus, { near, maxBodies: max ?? LP.MAX_BODIES, look }, { load: async (p) => rawTile(p) });
+  const sim = new WorldSim(td, { seed: 7, loadPhysics: () => LP.LifePhysics.load(meta, focus, { near, maxBodies: max ?? LP.MAX_BODIES, look }, { load: async (p) => rawTile(p) }) });
+  const T = sim.traffic;
+  sim.setWorld(W);
+  for (let i = 0; i < WARM / STEP; i++) sim.update(STEP, { hour: HOUR, focus });
+  const phys = await sim.loadPhysics();
   const want = near * 1.2 + 64;
   for (let tz = Math.floor((AZ - want) / N); tz <= Math.floor((AZ + want) / N); tz++) for (let tx = Math.floor((AX - want) / N); tx <= Math.floor((AX + want) / N); tx++) await phys.terrain.prefetch(tx * N + 1, tz * N + 1);
-  T.bodies = phys;
-  T.edited([AX - BOX / 2, AZ - BOX / 2, AX + BOX / 2, AZ + BOX / 2]);
+  sim.edited([AX - BOX / 2, AZ - BOX / 2, AX + BOX / 2, AZ + BOX / 2]);
   if (driver) {
     const nearFocus = (c) => Math.hypot(c.geo.cx - AX, c.geo.cy - AZ);
     const closest = [...T.cars].sort((a, b) => nearFocus(a) - nearFocus(b) || a.id - b.id)[0];
     if (!closest) throw new Error('no traffic car to drive at the benchmark site');
-    phys.takeWheel('benchmark', closest.id);
+    sim.takeWheel('benchmark', closest.id);
   }
   const tick = [], step = [], ter = [], nb = [], all = [];
   for (let i = 0; i < RUN / STEP; i++) {
     if (driver) {
-      const s = phys.driverSnapshot('benchmark');
-      phys.input('benchmark', { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false });
+      const s = sim.driverSnapshot('benchmark');
+      sim.input('benchmark', { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false });
     }
     const t0 = performance.now();
-    T.update(STEP, HOUR, focus);
+    sim.update(STEP, { hour: HOUR, focus });
     all.push(performance.now() - t0);
     const s = phys.stats;
     tick.push(s.tickMs); step.push(s.stepMs); ter.push(s.terrainMs); nb.push(s.bodies);
   }
   const s = phys.stats, ts = phys.terrain.stats;
   const row = {
-    driver: driver ? phys.driverSnapshot('benchmark')?.entityId ?? 'missing' : 'none', near, max: max ?? LP.MAX_BODIES, cars: T.cars.length, bodies: f2(avg(nb)), bodiesMax: Math.max(...nb),
+    driver: driver ? sim.driverSnapshot('benchmark')?.entityId ?? 'missing' : 'none', near, max: max ?? LP.MAX_BODIES, cars: T.cars.length, bodies: f2(avg(nb)), bodiesMax: Math.max(...nb),
     tickAvg: f2(avg(tick)), tickP99: f2(pct(tick, 0.99)), tickMax: f2(Math.max(...tick)), steps: f2(avg(step)), colliders: f2(avg(ter)),
     usPerBodyTick: f2(avg(tick) / Math.max(0.01, avg(nb)) * 1000), trafficTick: f2(avg(all)),
     chunks: ts.chunks, builds: ts.builds, voxels: ts.voxels, tris: ts.tris,
