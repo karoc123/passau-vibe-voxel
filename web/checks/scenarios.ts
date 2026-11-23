@@ -1,61 +1,23 @@
 // Rapier car: reproducible driving scenarios on synthetic voxel terrain, run headless (tools/rapier-car.mjs). Each
-// builds a small map (2 x 2 tiles of 64 m), drops the car, drives it with scripted input at a fixed 1/60 s step and
+// builds a small map (2 x 2 tiles of 64 m, world.ts synthMap), drops the car, drives it with scripted input at a fixed 1/60 s step and
 // judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { MAT } from '../src/core/materials';
 import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from '../src/physics/rapier/car';
-import { RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from '../src/physics/rapier/terrain';
-import { encodeCaps } from '../src/core/surface';
+import { RapierTerrain, WHEEL_GROUPS } from '../src/physics/rapier/terrain';
+import type { Check } from './check';
+import { synthMap, STREET, WALL, WATER, type ScenarioMap } from './world';
 
 // (the ride's numbers, for tools/rapier-car.mjs --set: the same module instance as the scenarios')
 export { RIDE };
+// (the synthetic map, for tools/vehicles.mjs's own scenarios: built by the same module instance as Sim's)
+export { synthMap, STREET, WALL };
 
-const N = 64;
 // a voxel staircase g = b + clamp(floor((z - z0) / p), 0, n) as the road it rounds: through the steps' middles
 export const stairs = (z: number, b: number, z0: number, p: number, n: number) => b + Math.max(0, Math.min(n, (z - z0 - p / 2) / p));
 
 // the tuning the scenarios' cars get (tools/rapier-car.mjs --spike: the spike's car)
 export const scenarioTuning: { tuning: CarTuning } = { tuning: TUNED };
 const STEP = 1 / 60;
-// fixture palette: 0 earth (solid, not paved), 1 street (paved: capped where the scenario gives a surface), 2 wall, 3 water
-const PALETTE: [number, number, number, number][] = [[120, 100, 80, MAT.SOIL], [90, 90, 90, MAT.MARK], [200, 190, 180, MAT.WALL], [40, 80, 120, MAT.WATER]];
-export const EARTH = 0, STREET = 1, WALL = 2, WATER = 3;
-
-// a column: its ground (top, m) and surface material; on it, optional runs [lo, hi, material]
-export interface Col { g: number; mat?: number; runs?: [number, number, number][] }
-
-// a map of `tiles` x `tiles` tiles of N m from a column function of world (x, z)
-export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; palette: [number, number, number, number][] }; tiles: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] };
-
-// surf: the scenario's analytic road surface (m) at grid point (x, z) -- its caps, as scripts/caps.py would write them:
-// on each STREET column's ground run with nothing on it, and on a STREET run topping a column over its ground (a deck),
-// the four corners at surf, held within 60/64 m of the run's top (core/surface.ts). Every tile gets a caps section
-// (empty without surf: a scenario of real steps, which stay voxels).
-export function synthMap(tiles: number, col: (x: number, z: number) => Col, surf?: (x: number, z: number) => number): ScenarioMap {
-  const meta = { W: tiles * N, D: tiles * N, tiles: { N }, palette: PALETTE };
-  const pal = terrainPalette(PALETTE), S = N + 2;
-  const out: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] = [];
-  for (let tz = 0; tz < tiles; tz++) for (let tx = 0; tx < tiles; tx++) {
-    const ground = new Uint8Array(S * S), counts = new Uint16Array(S * S), runs: number[] = [];
-    const frun: number[] = [], fcounts = new Uint16Array(S * S), recs: number[][] = [];
-    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
-      const x = Math.min(meta.W - 1, Math.max(0, tx * N + i - 1)), z = Math.min(meta.D - 1, Math.max(0, tz * N + j - 1));
-      const c = col(x, z), k = i + S * j;
-      ground[k] = c.g;
-      const r: [number, number, number][] = [[c.g - 1, c.g, c.mat ?? EARTH], ...(c.runs ?? [])];
-      for (const [lo, hi, m] of r) runs.push(lo, hi - lo, m);
-      counts[k] = r.length;
-      // (the capped run: the ground's with nothing on it, or the last over the ground, of STREET)
-      const last = r[r.length - 1], zt = r.length === 1 ? c.g : last[0] > c.g ? last[1] : 0;
-      if (!surf || !zt || last[2] !== STREET) continue;
-      const X = tx * N + i - 1, Z = tz * N + j - 1;
-      const q = [[X, Z], [X + 1, Z], [X + 1, Z + 1], [X, Z + 1]].map(([a, b]) => Math.min(zt * 64 + 60, Math.max(zt * 64 - 60, Math.round(surf(a, b) * 64))));
-      if (q.some((v) => v !== zt * 64)) recs.push([k, zt, ...q]);
-    }
-    out.push({ tx, tz, tile: terrainTile(N, { ground, counts, runs: Uint16Array.from(runs), caps: encodeCaps(recs) }, { counts: fcounts, runs: Uint16Array.from(frun) }, pal) });
-  }
-  return { meta, tiles: out };
-}
 
 // pr, rr: the chassis' pitch and roll rate (rad/s, about its own side and forward axes); yr: its yaw rate (rad/s, about
 // the world's up); road: the height of what the wheels drive on under the front and rear axles, their mean (NaN: none
@@ -350,8 +312,6 @@ function settling(v: number[], rest: number, band: number) {
   return { peak: r3(peak), overPct: r2(peak ? 100 * Math.max(0, over) / Math.abs(peak) : 0), settleS: r2((last + 1) * STEP), hz: cross.length >= 2 ? r2(1 / (2 * (cross[1] - cross[0]) * STEP)) : 0 };
 }
 
-export interface Outcome { name: string; pass: boolean; detail: Record<string, number | string | boolean> }
-
 function summary(s: Sim) {
   const L = s.log;
   let maxStep = 0, sumStep = 0, minUp = 1;
@@ -363,7 +323,7 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
 // The scenarios. `ids`: a subset (all by default).
-export const SCENARIOS: Record<string, () => Outcome> = {
+export const SCENARIOS: Record<string, () => Check> = {
   // a 1 m terrace across the way (earth, no ramp), driven up at 30 km/h, square on and at 35°; and down again
   terrace_up_30() { return terrace('terrace_up_30', 30, 0, 1); },
   terrace_up_15() { return terrace('terrace_up_15', 15, 0, 1); },
@@ -559,7 +519,7 @@ export const SCENARIOS: Record<string, () => Outcome> = {
 };
 
 // a paved street on ground g(x, z) (walls 3 m high either side beyond `half` m of x = 64), driven along z from 15
-function slope(name: string, g: (x: number, z: number) => number, kmh: number, half = 10, surf?: (x: number, z: number) => number): Outcome {
+function slope(name: string, g: (x: number, z: number) => number, kmh: number, half = 10, surf?: (x: number, z: number) => number): Check {
   const map = synthMap(2, (x, z) => (Math.abs(x + 0.5 - 64) <= half ? { g: g(x, z), mat: STREET } : { g: g(x, z) + 3 }), surf);
   const s = new Sim(map, { x: 64, z: 15 }, 0, kmh / 3.6);
   s.run(70 / (kmh / 3.6), cruise(kmh));
@@ -569,7 +529,7 @@ function slope(name: string, g: (x: number, z: number) => number, kmh: number, h
   return { name, pass: end.z > 80 && d.minUp > 0.8, detail: d };
 }
 
-function crest(name: string, kmh: number): Outcome {
+function crest(name: string, kmh: number): Check {
   const map = synthMap(2, (x, z) => {
     const g = 10 + Math.max(0, Math.min(8, Math.floor((z - 30) / 5)));
     return x >= 56 && x < 72 ? { g, mat: STREET } : { g: g + 3 };
@@ -589,7 +549,7 @@ function crest(name: string, kmh: number): Outcome {
 }
 
 // on level ground at 30 km/h: the body's velocity (heave) or pitch rate (rad/s, nose up) kicked at 1 s
-function kick(name: string, dv: { x: number; y: number; z: number } | null, pitchRate: number | null): Outcome {
+function kick(name: string, dv: { x: number; y: number; z: number } | null, pitchRate: number | null): Check {
   const map = synthMap(2, () => ({ g: 10, mat: STREET }));
   const s = new Sim(map, { x: 64, z: 10 }, 0, 30 / 3.6);
   s.run(1, cruise(30));
@@ -606,7 +566,7 @@ function kick(name: string, dv: { x: number; y: number; z: number } | null, pitc
   return { name, pass: st.settleS < 1.5 && d.minUp > 0.9, detail: d };
 }
 
-function wallGlance(name: string, deg: number): Outcome {
+function wallGlance(name: string, deg: number): Check {
   const map = synthMap(2, (x) => (x >= 70 && x < 73 ? { g: 10, runs: [[10, 16, WALL]] } : { g: 10 }));
   const a = deg * Math.PI / 180, s = new Sim(map, { x: 70 - 1.5 - 12 * Math.sin(a), z: 10 }, a, 50 / 3.6);
   s.run(4, cruise(50));
@@ -619,7 +579,7 @@ function wallGlance(name: string, deg: number): Outcome {
   return { name, pass: hit >= 0 && after.kmh > 25 && end.x < 70 && d.minUp > 0.8, detail: d };
 }
 
-function river(name: string, map: ScenarioMap, kmh: number): Outcome {
+function river(name: string, map: ScenarioMap, kmh: number): Check {
   const s = new Sim(map, { x: 64, z: 30 }, 0, kmh / 3.6);
   s.run(10, cruise(kmh));
   const d = { ...summary(s), t: r2(s.t), zEnd: r2(s.log[s.log.length - 1].z) };
@@ -643,7 +603,7 @@ function terrace(name: string, kmh: number, angle: number, rise: number, target 
   return { name, pass: climbed && d.minUp > 0.8, detail: d };
 }
 
-function cliff(name: string, drop: number, kmh: number, crash: boolean): Outcome {
+function cliff(name: string, drop: number, kmh: number, crash: boolean): Check {
   const map = synthMap(2, (_x, z) => ({ g: z < 50 ? 10 + drop : 10 }));
   const s = new Sim(map, { x: 64, z: 25 }, 0, kmh / 3.6);
   s.run(5, cruise(kmh));
@@ -657,7 +617,7 @@ function cliff(name: string, drop: number, kmh: number, crash: boolean): Outcome
 // A hall on level earth at 10 m (not paved: no ramps), x 50..78, z 60..110: walls 2 m thick up to 17 m, its floor the
 // ground, its roof 15..17 m (5 m of headroom), a door 4 m wide and 4 m high in the south wall (x 62..66). The car
 // from z 30 heading +z at x, held at 20 km/h for 16 s (through the door the back wall is 78 m off)
-function garage(name: string, x: number): Outcome {
+function garage(name: string, x: number): Check {
   const map = synthMap(2, (cx, cz) => {
     if (cx < 50 || cx >= 78 || cz < 60 || cz >= 110) return { g: 10 };
     const wall = cx < 52 || cx >= 76 || cz < 62 || cz >= 108, door = cz < 62 && cx >= 62 && cx < 66;
@@ -676,7 +636,7 @@ function garage(name: string, x: number): Outcome {
 
 export async function runScenarios(ids?: string[]) {
   await RAPIER.init();
-  const out: Outcome[] = [];
+  const out: Check[] = [];
   for (const [id, f] of Object.entries(SCENARIOS)) if (!ids || ids.includes(id)) out.push(f());
   return out;
 }

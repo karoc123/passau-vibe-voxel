@@ -6,7 +6,8 @@ import type { VehicleId } from '../src/sim/vehicles';
 import type { CarInput } from '../src/physics/rapier/car';
 import { LifePhysics } from '../src/physics/rapier/life-phys';
 import { CRASH_MS, SINK_MS, PARK, type DriveNote } from '../src/physics/rapier/player-car';
-import { synthMap, WATER, type Col, type Outcome } from './scenarios';
+import type { Check } from './check';
+import { synthMap, WATER, type Col } from './world';
 
 const FRAME_MS = 1000 / 60, PLAYER = 'local';
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -117,7 +118,7 @@ function sharedReplay() {
   return { physicalBefore, won, collision, reusedAI, released, droveOn, snapshots };
 }
 
-export const DRIVE_SCENARIOS: Record<string, () => Outcome> = {
+export const DRIVE_SCENARIOS: Record<string, () => Check> = {
   drive_standing_coach() {
     const d = takeOver(street, 64, 25, 50, [], false, 'car', testTrack(-1100, [1134.5]));
     const viewer = { x: 64, z: 50 };
@@ -224,7 +225,7 @@ export const DRIVE_SCENARIOS: Record<string, () => Outcome> = {
 
 export async function runDriveScenarios(ids?: string[]) {
   await RAPIER.init();
-  const out: Outcome[] = [];
+  const out: Check[] = [];
   for (const [id, f] of Object.entries(DRIVE_SCENARIOS)) if (!ids || ids.includes(id)) out.push(f());
   return out;
 }

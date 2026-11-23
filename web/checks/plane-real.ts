@@ -1,7 +1,8 @@
 import { Vector3 } from 'three';
 import type { Meta } from '../src/types';
 import { collisionWorld, PlaneFlight, waterTop, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/nav/plane-flight';
-import { holdPath, type Check } from './plane-checks';
+import type { Check } from './check';
+import { holdPath } from './plane-checks';
 import { jetHold } from './jet-checks';
 import { VoxelCollision } from '../src/nav/voxel-collision';
 import { TileCache } from '../src/core/tile-cache';

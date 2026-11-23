@@ -3,7 +3,7 @@
 import { load } from './real-city.mjs';
 import { imp } from './lib.mjs';
 
-const { makeWorld } = await imp('checks/collision-checks.ts');
+const { makeWorld } = await imp('checks/world.ts');
 const { VoxelCollision } = await load('nav/voxel-collision.ts');
 const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('nav/craft-collision.ts');
 const { CraftMotion } = await load('nav/craft-motion.ts');

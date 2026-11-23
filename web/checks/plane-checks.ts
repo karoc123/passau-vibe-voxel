@@ -1,63 +1,12 @@
-import { component, type Vec3 } from '../src/core/vec';
 import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/nav/plane-flight';
-import type { ImpactKind, Sweep } from '../src/nav/sweep';
+import type { Check } from './check';
+import { BoxWorld } from './world';
 
 // Headless checks of the plane's flight (plane-flight.ts; web/tools/plane.mjs). A synthetic world of boxes (ground,
-// hills, walls, roofs, a river whose water is the ground's top as in the voxels), swept the way VoxelCollision sweeps
-// the fuselage's cube (the box grown by the radius, the first face met, its axis), so the checks cover any map size
-// without node files. The limits come from PLANE, not literals, where PLANE sets them. The real data's flights are in
+// hills, walls, roofs, a river whose water is the ground's top as in the voxels: world.ts BoxWorld), swept as
+// VoxelCollision sweeps the fuselage's cube, so the checks cover any map size without node files. The limits come from PLANE, not literals, where PLANE sets them. The real data's flights are in
 // the tool (they need the node files on disk).
 
-interface Block { x0: number; z0: number; x1: number; z1: number; top: number; kind: ImpactKind; water?: boolean; loading?: boolean }
-
-export class BoxWorld implements PlaneWorld {
-  readonly blocks: Block[] = [];
-  constructor(readonly W: number, readonly D: number, readonly H: number, readonly ground: number, readonly R = PLANE.RADIUS) {}
-
-  add(b: Block) { this.blocks.push(b); return b; }
-
-  private at(x: number, z: number) {
-    let top = this.ground, ground = this.ground, water = -1;
-    for (const b of this.blocks) {
-      if (x < b.x0 || x >= b.x1 || z < b.z0 || z >= b.z1) continue;
-      if (b.water) { ground = b.top; top = b.top; water = b.top; continue; }
-      if (b.kind === 'terrain') ground = Math.max(ground, b.top);
-      top = Math.max(top, b.top);
-    }
-    return { ground, top, water };
-  }
-
-  surface(x: number, z: number) { const s = this.at(x, z); return { ground: s.ground, top: s.top }; }
-  water(x: number, z: number) {
-    if (this.blocks.some((b) => b.loading && x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1)) return null;
-    return this.at(x, z).water;
-  }
-
-  sweep(p: Vec3, d: Vec3): Sweep {
-    const R = this.R;
-    let fraction = 1, hit: ImpactKind | null = null, axis = 0;
-    const all: Block[] = [{ x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9, top: this.ground, kind: 'terrain' }, ...this.blocks];
-    for (const b of all) {
-      const lo = [b.x0 - R, -1e9, b.z0 - R], hi = [b.x1 + R, b.top + R, b.z1 + R];
-      let enter = 0, leave = 1, ax = 0, miss = false;
-      for (let i = 0; i < 3 && !miss; i++) {
-        const s = component(p, i), m = component(d, i);
-        if (Math.abs(m) < 1e-10) { if (s < lo[i] || s > hi[i]) miss = true; continue; }
-        const a = (lo[i] - s) / m, c = (hi[i] - s) / m, e = Math.min(a, c);
-        if (e >= enter) { enter = e; ax = -Math.sign(m) * (i + 1); }
-        leave = Math.min(leave, Math.max(a, c));
-        if (enter > leave) miss = true;
-      }
-      if (miss || enter > fraction) continue;
-      if (b.loading) return 'loading';
-      if (ax === 0) ax = 2;
-      fraction = enter; hit = b.kind; axis = ax;
-    }
-    return hit ? { fraction, hit, axis } : { fraction, hit: null };
-  }
-}
-
-export interface Check { name: string; pass: boolean; detail: Record<string, unknown> }
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const kmh = (v: number) => Math.round(v * 3.6);
 const deg = (v: number) => r1(v * 180 / Math.PI);
