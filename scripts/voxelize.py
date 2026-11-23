@@ -3707,50 +3707,21 @@ def landmarks_tunnels(ctx):
                      bkind=bkind)
 
 
-STAGES = [  # (its name in the build's timing, the stage)
-    ("rasters, cell colours, OSM", rasters),
-    ("ground classes, roads, water", ground_classes),
-    ("buildings", buildings),
-    ("natural ground, cemeteries", natural_ground),
-    ("vegetation", vegetation),
-    ("fountains, beds, furniture", furniture),
-    ("bridge piers, vehicles", piers_vehicles),
-    ("landmark details, underpasses, tunnels", landmarks_tunnels),
-]
-ctx = Ctx()
-for _name, _run in STAGES:
-    _run(ctx)
-    stage(_name)
-# (the stages to come are module code still: what they read of the ones above)
-(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SAG_SRC, SANITY, _best, _bore_ids, _bored, _bores, _rail_bed, _roof_f,
- _walked, bkind, bmask, cellcol, deck, deck_abs, deck_col, deck_h, deck_own, feats, g, gcol, is_road, jets, lamps,
- nd_mean, osm, render, topi, trunk_ok_db, vol, zt) = (
-    ctx.GCTX, ctx.H, ctx.LAMP_KEYS, ctx.OPEN_CUT, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SAG_SRC, ctx.SANITY, ctx._best,
-    ctx._bore_ids, ctx._bored, ctx._bores, ctx._rail_bed, ctx._roof_f, ctx._walked, ctx.bkind, ctx.bmask, ctx.cellcol,
-    ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.feats, ctx.g, ctx.gcol, ctx.is_road, ctx.jets,
-    ctx.lamps, ctx.nd_mean, ctx.osm, ctx.render, ctx.topi, ctx.trunk_ok_db, ctx.vol, ctx.zt)
-# ---------------------------------------------------------------- floating debris
-debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
+def drop_debris(ctx):
+    """Floating debris dropped (debris.py)."""
+    g, vol = ctx.g, ctx.vol
+    # ---------------------------------------------------------------- floating debris
+    debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
 
-stage("drop_debris")
-# ---------------------------------------------------------------- export
-Hm = int(np.nonzero(vol.reshape(H, -1).any(axis=1))[0].max()) + 1
-vol = vol[:Hm]
-note("final height", Hm, "palette", len(pal.entries))
-stage("height crop")
-# the three rivers in their own colours, as the orthophoto shows them: the Danube dark green, the Inn milky grey-green
-# from the glaciers, the Ilz peat-black, and the bands running side by side below the Dreiflüsseeck. Per 8 m block the
-# median of the open water's cells (10 m off the banks, ships, bridges and their shadows' worst), a block with none
-# taking the nearest block's within 32 m (else WATER_RGB, a pond far from the rivers), smoothed over ~50 m and drawn
-# between the blocks' centres (blocks of the project grid: the same colours in every region)
-WATER_RGB = (104, 128, 112)
-_ri, _ci = np.arange(D)[:, None], np.arange(W)[None, :]
-_wm = vol[g - 1, _ri, _ci] == C["water"]
-_cov = vol[np.minimum(g, Hm - 1), _ri, _ci] != 0
-_open = ndimage.binary_erosion(_wm, iterations=10) & ~ndimage.binary_dilation(_cov & _wm, iterations=10)
-_B = 8
-assert R0 % _B == 0 and C0 % _B == 0 and D % _B == 0 and W % _B == 0
-_blk = np.where(_open[..., None], cellcol, np.nan).reshape(D // _B, _B, W // _B, _B, 3)
+
+def height_crop(ctx):
+    """The volume cropped to the height it fills."""
+    H, vol = ctx.H, ctx.vol
+    # ---------------------------------------------------------------- export
+    Hm = int(np.nonzero(vol.reshape(H, -1).any(axis=1))[0].max()) + 1
+    vol = vol[:Hm]
+    note("final height", Hm, "palette", len(pal.entries))
+    vars(ctx).update(Hm=Hm, vol=vol)
 
 
 def _block_median(blk):
@@ -3762,274 +3733,357 @@ def _block_median(blk):
         return np.nanmedian(blk, axis=(1, 3))
 
 
-_bc = _block_median(_blk)
-_has = np.isfinite(_bc[..., 0])
-if _wm.any():
-    _bd, _near = ndimage.distance_transform_edt(~_has, return_indices=True) if _has.any() else \
-        (np.full(_has.shape, np.inf), np.indices(_has.shape))
-    _bc = np.where((_bd <= 4)[..., None], _bc[_near[0], _near[1]], np.array(WATER_RGB, float))
-    _bc = np.stack([ndimage.gaussian_filter(ndimage.median_filter(_bc[..., k], 5), 2.5) for k in range(3)], -1)
+def river_colours(ctx):
+    """The rivers in their own colours, as the ortho shows them."""
+    Hm, cellcol, g, vol = ctx.Hm, ctx.cellcol, ctx.g, ctx.vol
+    # the three rivers in their own colours, as the orthophoto shows them: the Danube dark green, the Inn milky grey-green
+    # from the glaciers, the Ilz peat-black, and the bands running side by side below the Dreiflüsseeck. Per 8 m block the
+    # median of the open water's cells (10 m off the banks, ships, bridges and their shadows' worst), a block with none
+    # taking the nearest block's within 32 m (else WATER_RGB, a pond far from the rivers), smoothed over ~50 m and drawn
+    # between the blocks' centres (blocks of the project grid: the same colours in every region)
+    WATER_RGB = (104, 128, 112)
+    _ri, _ci = np.arange(D)[:, None], np.arange(W)[None, :]
+    _wm = vol[g - 1, _ri, _ci] == C["water"]
+    _cov = vol[np.minimum(g, Hm - 1), _ri, _ci] != 0
+    _open = ndimage.binary_erosion(_wm, iterations=10) & ~ndimage.binary_dilation(_cov & _wm, iterations=10)
+    _B = 8
+    assert R0 % _B == 0 and C0 % _B == 0 and D % _B == 0 and W % _B == 0
+    _blk = np.where(_open[..., None], cellcol, np.nan).reshape(D // _B, _B, W // _B, _B, 3)
 
-    def _lerp(n, nb):  # cell -> the two blocks round it and the weight of the second
-        t = (np.arange(n) + 0.5) / _B - 0.5
-        i0 = np.floor(t).astype(int)
-        return np.clip(i0, 0, nb - 1), np.clip(i0 + 1, 0, nb - 1), (t - i0)
-    _r0, _r1, _fr = _lerp(D, D // _B)
-    _c0, _c1, _fc = _lerp(W, W // _B)
-    _wc = np.zeros((D, W, 3))
-    for k in range(3):
-        _a = _bc[..., k]
-        _row = _a[_r0] * (1 - _fr[:, None]) + _a[_r1] * _fr[:, None]
-        _wc[..., k] = _row[:, _c0] * (1 - _fc[None]) + _row[:, _c1] * _fc[None]
-    # the ortho's water is sunlit and flat: a little darker and richer, as the rivers look from the Oberhaus
-    _wc = np.clip((_wc.mean(-1, keepdims=True) + (_wc - _wc.mean(-1, keepdims=True)) * 1.5) * 0.82, 0, 255)
-    _wc = _wc * np.array([0.80, 1.0, 0.98])  # and the red taken down: the ortho's glare reads the Inn's jade as concrete grey
-    _q = (np.round(_wc[_wm] / 8) * 8).astype(np.int32)
-    _uq, _inv = np.unique(_q, axis=0, return_inverse=True)
-    _wid = np.array([pal(tuple(int(v) for v in u), M_WATER, q=8) for u in _uq], vol.dtype)
-    vol[(g - 1)[_wm], np.nonzero(_wm)[0], np.nonzero(_wm)[1]] = _wid[_inv.ravel()]
-    note(f"river colours from the ortho: {len(_uq)} shades over {int(_wm.sum())} water cells")
-stage("river colours")
-# the ground as the tiles show it before the foliage (grass as bare earth), for terrain.py: the first moment of loading
-_ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
-_lut = np.array([e[:3] for e in pal.entries], np.uint8)
-_lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
-CORE_OUT = dict(g=tunnels.surface(g, _bored.lowered).astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
-# the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
-# building cell belongs to, for zones.py and windows.py
-_fp = np.zeros((D, W), np.int64)
-for f in sorted([f for f in feats if not f["part"]], key=lambda f: -f["area"]) + [f for f in render if f["part"] and f.get("parent")]:
-    k_ = bmask[f["rr"], f["cc"]]
-    _fp[f["rr"][k_], f["cc"][k_]] = (f["parent"] if f["part"] else f)["id"]
-CORE_OUT["oid"] = _fp
-EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
-                         fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | set(WOOD_IDS),
-                         grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
-                         wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
-stage("ground rgb, footprints")
-# nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
-debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db, dbg=RDIR)
-stage("support_floating")
+    _bc = _block_median(_blk)
+    _has = np.isfinite(_bc[..., 0])
+    if _wm.any():
+        _bd, _near = ndimage.distance_transform_edt(~_has, return_indices=True) if _has.any() else \
+            (np.full(_has.shape, np.inf), np.indices(_has.shape))
+        _bc = np.where((_bd <= 4)[..., None], _bc[_near[0], _near[1]], np.array(WATER_RGB, float))
+        _bc = np.stack([ndimage.gaussian_filter(ndimage.median_filter(_bc[..., k], 5), 2.5) for k in range(3)], -1)
+
+        def _lerp(n, nb):  # cell -> the two blocks round it and the weight of the second
+            t = (np.arange(n) + 0.5) / _B - 0.5
+            i0 = np.floor(t).astype(int)
+            return np.clip(i0, 0, nb - 1), np.clip(i0 + 1, 0, nb - 1), (t - i0)
+        _r0, _r1, _fr = _lerp(D, D // _B)
+        _c0, _c1, _fc = _lerp(W, W // _B)
+        _wc = np.zeros((D, W, 3))
+        for k in range(3):
+            _a = _bc[..., k]
+            _row = _a[_r0] * (1 - _fr[:, None]) + _a[_r1] * _fr[:, None]
+            _wc[..., k] = _row[:, _c0] * (1 - _fc[None]) + _row[:, _c1] * _fc[None]
+        # the ortho's water is sunlit and flat: a little darker and richer, as the rivers look from the Oberhaus
+        _wc = np.clip((_wc.mean(-1, keepdims=True) + (_wc - _wc.mean(-1, keepdims=True)) * 1.5) * 0.82, 0, 255)
+        _wc = _wc * np.array([0.80, 1.0, 0.98])  # and the red taken down: the ortho's glare reads the Inn's jade as concrete grey
+        _q = (np.round(_wc[_wm] / 8) * 8).astype(np.int32)
+        _uq, _inv = np.unique(_q, axis=0, return_inverse=True)
+        _wid = np.array([pal(tuple(int(v) for v in u), M_WATER, q=8) for u in _uq], vol.dtype)
+        vol[(g - 1)[_wm], np.nonzero(_wm)[0], np.nonzero(_wm)[1]] = _wid[_inv.ravel()]
+        note(f"river colours from the ortho: {len(_uq)} shades over {int(_wm.sum())} water cells")
+    vars(ctx).update(_wm=_wm)
 
 
-def plane_codes():
-    """Per column, the roof plane its top face lies in (ROOF_GX/GY), coded as mesher.worker.ts lights a roof: 1 + slope
-    (2.5 degree steps, 10 to 75) x 64 + downhill direction (64 steps); 0 where flat, not known, or the column's top is
-    not that roof's voxel any more (a landmark rebuilt over it, a rooftop structure, a canopy). The viewer estimated the
-    plane from the voxel steps, which a slope rounded to whole metres turns into noise."""
-    fol = np.zeros(65536, bool)
-    fol[sorted(EXPORT_IDS["fol_ids"] | EXPORT_IDS["grass_ids"])] = True
-    roofm = np.zeros(65536, bool)
-    roofm[[i for i, e in enumerate(pal.entries) if e[3] == M_ROOF]] = True
-    ztop = np.full((D, W), -1, np.int32)
-    tv = np.zeros((D, W), np.uint16)
-    for z in range(vol.shape[0]):
-        v = vol[z]
-        k = (v != 0) & ~fol[v]
-        ztop[k] = z
-        tv[k] = v[k]
-    ok = bmask & (ztop == zt - 1) & roofm[tv] & np.isfinite(ROOF_GX) & np.isfinite(ROOF_GY)
-    gx_, gy_ = np.nan_to_num(ROOF_GX), np.nan_to_num(ROOF_GY)
-    k = np.minimum(30, np.floor(np.arctan(np.hypot(gx_, gy_)) / (np.pi / 72) + 0.5)).astype(np.int32)
-    az = (np.floor(np.arctan2(-gy_, -gx_) / (np.pi / 32) + 0.5).astype(np.int32) + 64) % 64
-    code = np.where(ok & (k >= 4), 1 + k * 64 + az, 0).astype(np.uint16)
-    note("roof plane codes shipped:", int((code > 0)[CORE_SL].sum()), "columns of", int(bmask[CORE_SL].sum()),
-         "building columns in the core;", "known plane but top changed:", int((bmask & np.isfinite(ROOF_GX) & ~ok)[CORE_SL].sum()))
-    return code
+def ground_rgb(ctx):
+    """The ground as the tiles show it before the foliage, and the buildings' footprints, for the map's rasters."""
+    (_bored, _wm, bmask, feats, g, render, topi, vol) = (
+        ctx._bored, ctx._wm, ctx.bmask, ctx.feats, ctx.g, ctx.render, ctx.topi, ctx.vol)
+    # the ground as the tiles show it before the foliage (grass as bare earth), for terrain.py: the first moment of loading
+    _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
+    _lut = np.array([e[:3] for e in pal.entries], np.uint8)
+    _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
+    CORE_OUT = dict(g=tunnels.surface(g, _bored.lowered).astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
+    # the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
+    # building cell belongs to, for zones.py and windows.py
+    _fp = np.zeros((D, W), np.int64)
+    for f in sorted([f for f in feats if not f["part"]], key=lambda f: -f["area"]) + [f for f in render if f["part"] and f.get("parent")]:
+        k_ = bmask[f["rr"], f["cc"]]
+        _fp[f["rr"][k_], f["cc"][k_]] = (f["parent"] if f["part"] else f)["id"]
+    CORE_OUT["oid"] = _fp
+    EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
+                             fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | set(WOOD_IDS),
+                             grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
+                             wall_ids=[i for i, e in enumerate(pal.entries) if e[3] in tiles.WALL_MATS])
+    vars(ctx).update(CORE_OUT=CORE_OUT, EXPORT_IDS=EXPORT_IDS)
 
 
-PLANES = plane_codes()
-stage("plane codes")
-# the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
-_kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + MR0, CORE_SL[0].stop + MR0, CORE_SL[1].start + MC0, CORE_SL[1].stop + MC0)  # (map cells)
-_win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
-_ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
-_es = (slice(_ea - MR0, _eb - MR0), slice(_ec - MC0, _ed - MC0))
-RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
-                                                            _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
-                                                            rooms=interiors.runs(_es[0].start, _es[0].stop, _es[1].start, _es[1].stop),
-                                                            **EXPORT_IDS).items()}
-stage("tiles.export_window")
-# drivable-surface mask (1 = carriageway/road area, 2 = rails / track bed): regions.py writes it as qa_roadmask.bin.gz
-qa = np.zeros((D, W), np.uint8)
-qa[is_road] = 1
-qa[np.isin(gcol, [C["trambed"], C["rail"]])] = 2
-CORE_OUT["qa"] = qa
-# what traffic.py drives on (regions.py runs it over the map): vehicles on a bridge way take the deck under them, or
-# the nearest deck cell within 2 m (a way's centreline can run just off the deck)
-_dd, (_ir, _ic) = ndimage.distance_transform_edt(~deck, return_indices=True)
-deck_near = np.where(_dd <= 2, deck_h[_ir, _ic], 0).astype(np.float32)
-# off the deck mask, on a bridge way (a viaduct whose arches are OSM buildings, a deck end): the top of what the
-# voxels hold there -- lamps, poles and leaves aside -- within the LiDAR's reach
-_skip = np.zeros(len(pal.entries) + 64, bool)
-_skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] + WOOD_IDS + [C["pole"], C["fence"]]] = True
-_rb, _cb = np.nonzero((deck_col > 0) & (_dd > 2))
-_lim = g[_rb, _cb] + np.clip(np.round(nd_mean[_rb, _cb]), 0, 40).astype(int) + 3
-_top = g[_rb, _cb].copy()
-for _z in range(int(g.min()), int(_lim.max()) + 1 if len(_lim) else 0):
-    _m = (_z >= g[_rb, _cb]) & (_z < _lim) & (_z < vol.shape[0])
-    _v = vol[np.minimum(_z, vol.shape[0] - 1), _rb[_m], _cb[_m]]
-    _top[np.nonzero(_m)[0][(_v != 0) & ~_skip[_v]]] = _z + 1
-deck_near[_rb, _cb] = _top - g[_rb, _cb]
-CORE_OUT["deck_near"] = deck_near
-CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
-CORE_OUT["floor"] = _bored.floor
-CORE_OUT["walk"] = _walked.level
-report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL, _walked.level)
-# the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
-# docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
-# it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
-# NaN elsewhere); roof_z: the roof's height at the cell's middle where its plane is known (the float zt was rounded
-# from), roof_gx / roof_gy: its rise per metre east / south (NaN: unknown)
-CORE_OUT["gt"] = g.astype(np.int16)
-CORE_OUT["deck"] = np.where(deck, deck_abs - BASE, np.nan).astype(np.float32)
-_rk = (PLANES > 0) | np.isfinite(ROOF_GX)
-CORE_OUT["roof_z"] = np.where(_rk, _roof_f, np.nan).astype(np.float32)
-CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.astype(np.float32)
-# gsrc: the ground's surface where it was lifted to the surface model (SAG_SRC: a carriageway on a structure the terrain
-# model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
-CORE_OUT["gsrc"] = SAG_SRC
-CORE_OUT["gpass"] = ground.changed_bits(GCTX)  # (data/debug/ground_passes.npz: which ground pass changed each cell)
-# the ways kept open under bridges (ground.under_bridge), checked on the finished volume (check.py verify): along each
-# corridor's centreline, every metre from UB_PAD m before it to UB_PAD m after it, no step of 2 m or more in the
-# ground, and nothing solid within the vehicle's clearance over the ground (leaves, lamps' light, cars and the deck
-# aside: a deck lower than that is the surface model's, noted as low). Each corridor counted by the region whose core
-# holds its middle
-UB_PAD = 5
-_ub = dict(corridors=0, steps=0, blocked=0, low=0, worst=[])
-_solid = ~_skip
-_solid[[C["pole"], C["fence"]] + WOOD_IDS] = True
-_solid[0] = False
-for _oid, _kind, _l, _s0, _s1 in GCTX.corridors:
-    _mid = _l.interpolate((_s0 + _s1) / 2)
-    if not in_core(int(_mid.y), int(_mid.x)):
-        continue
-    _ss = np.arange(max(_s0 - UB_PAD, 0), min(_s1 + UB_PAD, _l.length) + 0.01, 1.0)
-    _pp = [_l.interpolate(v) for v in _ss]
-    _rc = np.array([(int(q.y), int(q.x)) for q in _pp if 0 <= q.y < D and 0 <= q.x < W])
-    if len(_rc) < 2:
-        continue
-    _gl = g[_rc[:, 0], _rc[:, 1]]
-    _clear = ground.T["ub_clear"][_kind]
-    _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
-    _blk = np.zeros(len(_rc), bool)
-    for _k in range(_clear):
-        _z = _gl + _k
-        _m = (_z < _deck_lo) & (_z < vol.shape[0])
-        _blk[_m] |= _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
-    _step = int(np.abs(np.diff(_gl)).max())
-    _ub["corridors"] += 1
-    _ub["steps"] += int(_step >= 2)
-    _ub["blocked"] += int(_blk.any())
-    _ub["low"] += int((_deck_lo - _gl < _clear).any())
-    if _step >= 2 or _blk.any():
-        _ub["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, _step, int(_blk.sum())])
-report["counters"]["under_bridge"] = _ub
-note("ways under bridges (corridors, ground steps of 2 m or more, blocked within the clearance, decks lower than it):",
-     _ub["corridors"], _ub["steps"], _ub["blocked"], _ub["low"], _ub["worst"][:5])
-# a bridge deck does not sag to the ground beside it (check.py verify): each bridge way's built deck, every metre of its
-# span (its first to last sample DECK_OVER m or more over the terrain) where a deck is built, against the way's own
-# deck level there (the profile's DECK_OVER samples within 15 m): sagging where it lies SAG_M m or more under it. Each
-# way counted by the region whose core holds its middle
-SAG_M = 2.0
-_sg = dict(ways=0, sagging=0, worst=[])
-for _oid, _P, _own in deck_own:
-    _mid = _P[len(_P) // 2]
-    if not np.isfinite(_own).any() or not in_core(int(_mid[1]), int(_mid[0])):
-        continue
-    _r, _c = np.clip(_P[:, 1].astype(int), 0, D - 1), np.clip(_P[:, 0].astype(int), 0, W - 1)
-    _drop = np.where(deck[_r, _c] & np.isfinite(_own), _own - deck_abs[_r, _c], 0)
-    _sg["ways"] += 1
-    if _drop.max() >= SAG_M:
-        _sg["sagging"] += 1
-        _sg["worst"].append([_oid, round(float(_mid[0])) + C0, round(float(_mid[1])) + R0, round(float(_drop.max()), 1),
-                             int((_drop >= SAG_M).sum())])
-report["counters"]["deck_sag"] = _sg
-note("bridge ways (with a span over the terrain, their built deck SAG_M m or more under their own level):",
-     _sg["ways"], _sg["sagging"], _sg["worst"][:5])
-# the same along every tunnel=yes carriageway and railway the ground covers (tunnels.plan: a bore, a covered passage,
-# one left solid; not one open to the sky, under a deck or a building), each metre from its floor (Bored.floor, else
-# the grade between its portals or the ground under it: one left solid is blocked) to the first solid voxel (a deck
-# aside): blocked under tunnels.LOW m, low under the vehicle's clearance; and the street over a bore or a covered
-# passage whole (its surface's voxel there: holes)
-_tu = dict(ways=0, blocked=0, low=0, holes=0, worst=[])
-_planned = {x[0] for x in _bores}
-for _oid, _t, _l in osm.lines:
-    if _oid not in _planned or not ground.bed(_t):
-        continue
-    _mid = _l.interpolate(0.5, normalized=True)
-    if not in_core(int(_mid.y), int(_mid.x)) or not all(2 <= x < W - 2 and 2 <= y < D - 2 for x, y in (_l.coords[0], _l.coords[-1])):
-        continue
-    _pp = [_l.interpolate(v) for v in np.arange(1.0, _l.length - 0.99, 1.0)]
-    _rc = np.array([(int(q.y), int(q.x)) for q in _pp])
-    if not len(_rc):
-        continue
-    _fl = _bored.floor[_rc[:, 0], _rc[:, 1]].astype(int)
-    _gr = g[_rc[:, 0], _rc[:, 1]]
-    _za, _zb = (tunnels._portal_level(g, *p_) for p_ in (_l.coords[0], _l.coords[-1]))
-    _fl = np.where(_fl >= 0, _fl, np.minimum(_gr, tunnels._floor(_za, _zb, np.arange(1.0, _l.length - 0.99, 1.0)[:len(_rc)], _l.length, _gr)))
-    _clear = tunnels.CLEAR[ground.bed(_t)[0]]
-    _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
-    _room = np.full(len(_rc), _clear)
-    for _k in range(_clear - 1, -1, -1):
-        _z = _fl + _k
-        _m = (_z < _deck_lo) & (_z < vol.shape[0])
-        _hit = np.zeros(len(_rc), bool)
-        _hit[_m] = _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
-        _room[_hit] = _k
-    _st = np.array([_bored.lowered.get((r_, c_), 0) for r_, c_ in _rc])
-    _hole = (_st > 0) & (vol[np.clip(_st - 1, 0, vol.shape[0] - 1), _rc[:, 0], _rc[:, 1]] == 0)
-    _tu["ways"] += 1
-    _tu["blocked"] += int((_room < tunnels.LOW).any())
-    _tu["low"] += int((_room < _clear).any())
-    _tu["holes"] += int(_hole.any())
-    if (_room < tunnels.LOW).any() or _hole.any():
-        _tu["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, int(_room.min()), int((_room < tunnels.LOW).sum()), int(_hole.sum())])
-report["counters"]["tunnels"] = _tu
-note("tunnel=yes carriageways and railways (ways, blocked under the least clearance, lower than the vehicle's, a hole in "
-     "the street over them):", _tu["ways"], _tu["blocked"], _tu["low"], _tu["holes"], _tu["worst"][:5])
-note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
-     "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
-_lines = {oid: l_ for oid, _, l_ in osm.lines}
+def support_floating(ctx):
+    """Nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go."""
+    bkind, g, trunk_ok_db, vol = ctx.bkind, ctx.g, ctx.trunk_ok_db, ctx.vol
+    # nothing hangs in the air: crowns get trunks, building pieces walls or posts, specks go (debris.support_floating)
+    debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_ok=trunk_ok_db, dbg=RDIR)
 
 
-def _owned(oid):
-    """a way is the region's whose middle lies in its core (regions.py: each way's decision from one region)"""
-    p_ = _lines[oid].interpolate(0.5, normalized=True)
-    return in_core(int(p_.y), int(p_.x))
+def roof_planes(ctx):
+    """The roof plane of each column's top face, coded for the tiles."""
+    EXPORT_IDS, ROOF_GX, ROOF_GY, bmask, vol, zt = ctx.EXPORT_IDS, ctx.ROOF_GX, ctx.ROOF_GY, ctx.bmask, ctx.vol, ctx.zt
+    def plane_codes():
+        """Per column, the roof plane its top face lies in (ROOF_GX/GY), coded as mesher.worker.ts lights a roof: 1 + slope
+        (2.5 degree steps, 10 to 75) x 64 + downhill direction (64 steps); 0 where flat, not known, or the column's top is
+        not that roof's voxel any more (a landmark rebuilt over it, a rooftop structure, a canopy). The viewer estimated the
+        plane from the voxel steps, which a slope rounded to whole metres turns into noise."""
+        fol = np.zeros(65536, bool)
+        fol[sorted(EXPORT_IDS["fol_ids"] | EXPORT_IDS["grass_ids"])] = True
+        roofm = np.zeros(65536, bool)
+        roofm[[i for i, e in enumerate(pal.entries) if e[3] == M_ROOF]] = True
+        ztop = np.full((D, W), -1, np.int32)
+        tv = np.zeros((D, W), np.uint16)
+        for z in range(vol.shape[0]):
+            v = vol[z]
+            k = (v != 0) & ~fol[v]
+            ztop[k] = z
+            tv[k] = v[k]
+        ok = bmask & (ztop == zt - 1) & roofm[tv] & np.isfinite(ROOF_GX) & np.isfinite(ROOF_GY)
+        gx_, gy_ = np.nan_to_num(ROOF_GX), np.nan_to_num(ROOF_GY)
+        k = np.minimum(30, np.floor(np.arctan(np.hypot(gx_, gy_)) / (np.pi / 72) + 0.5)).astype(np.int32)
+        az = (np.floor(np.arctan2(-gy_, -gx_) / (np.pi / 32) + 0.5).astype(np.int32) + 64) % 64
+        code = np.where(ok & (k >= 4), 1 + k * 64 + az, 0).astype(np.uint16)
+        note("roof plane codes shipped:", int((code > 0)[CORE_SL].sum()), "columns of", int(bmask[CORE_SL].sum()),
+             "building columns in the core;", "known plane but top changed:", int((bmask & np.isfinite(ROOF_GX) & ~ok)[CORE_SL].sum()))
+        return code
+
+    PLANES = plane_codes()
+    vars(ctx).update(PLANES=PLANES)
 
 
-RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in _bore_ids if _owned(o)),
-              walk_ids=sorted(o for o in _walked.ids if _owned(o)), shifted_stairs=sorted(_walked.shifted))
-# debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
-# (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
-topz = np.full(vol.shape[1:], Hm - 1, np.int64)
-for _z in range(Hm):
-    topz[vol[_z] != 0] = _z
-topv = np.take_along_axis(vol, topz[None], 0)[0]
-palarr = np.array([e[:3] for e in pal.entries], np.uint8)
-CORE_OUT["topdown"] = np.clip(palarr[topv] * np.clip(0.55 + topz / 120, 0, 1.2)[..., None], 0, 255).astype(np.uint8)
-CORE_OUT["groundcol"] = palarr[gcol]
-# this region's core: the rasters (crowns' owners on the 2 m grid), the volume (for traffic.py and the labels: regions.py),
-# the lists in the map's order (lamps, jets), the palette's new colours
-_k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
-stage("qa, deck_near, topdown")
-np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
-stage("core.npz")
-mapstore.save_volume(RDIR / "vol.npz", vol[(slice(None),) + CORE_SL])  # (compressed, in 128 m column blocks)
-stage("vol.npz")
-(RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
-# (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
-# this region's to add)
-_used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
-_gc = CORE_OUT["g"][CORE_SL].astype(np.int64)  # (a histogram of the core's ground: the map's median, regions.py)
-RESULT["g_hist"] = [int(_gc.min()), np.bincount((_gc - _gc.min()).ravel()).tolist()]
-RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
-              lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
-              jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], **report,
-              osm_timestamp=osm.timestamp)
-RESULT["deps"] = region_inputs.deps_of_process()
-RESULT["features_used"] = FEATURE_USED  # (the large features' decisions it took: regions.py rebuilds it when one changes)  # (the code this region read: regions.py rebuilds it when that changes)
-stage("palette, lists")
+def export_tiles(ctx):
+    """The core's nodes (tiles.export_window)."""
+    EXPORT_IDS, PLANES, g, vol = ctx.EXPORT_IDS, ctx.PLANES, ctx.g, ctx.vol
+    # the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
+    _kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + MR0, CORE_SL[0].stop + MR0, CORE_SL[1].start + MC0, CORE_SL[1].stop + MC0)  # (map cells)
+    _win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
+    _ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
+    _es = (slice(_ea - MR0, _eb - MR0), slice(_ec - MC0, _ed - MC0))
+    RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
+                                                                _win, OUT / "tiles", levels=[lv["s"] for lv in tiles.manifest(MAP_D, MAP_W)],
+                                                                rooms=interiors.runs(_es[0].start, _es[0].stop, _es[1].start, _es[1].stop),
+                                                                **EXPORT_IDS).items()}
+    vars(ctx).update(aoi_core=aoi_core)
+
+
+def qa_lists(ctx):
+    """The road mask, what traffic.py drives on, the surfaces the caps are drawn from, the ways under bridges and
+    through tunnels checked, the top-down view."""
+    (CORE_OUT, GCTX, Hm, OPEN_CUT, PLANES, ROOF_GX, ROOF_GY, SAG_SRC, _bore_ids, _bored, _bores, _rail_bed,
+     _roof_f, _walked, bmask, deck, deck_abs, deck_col, deck_h, deck_own, g, gcol, is_road, nd_mean, osm, vol, zt) = (
+        ctx.CORE_OUT, ctx.GCTX, ctx.Hm, ctx.OPEN_CUT, ctx.PLANES, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SAG_SRC,
+        ctx._bore_ids, ctx._bored, ctx._bores, ctx._rail_bed, ctx._roof_f, ctx._walked, ctx.bmask, ctx.deck,
+        ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.g, ctx.gcol, ctx.is_road, ctx.nd_mean, ctx.osm,
+        ctx.vol, ctx.zt)
+    # drivable-surface mask (1 = carriageway/road area, 2 = rails / track bed): regions.py writes it as qa_roadmask.bin.gz
+    qa = np.zeros((D, W), np.uint8)
+    qa[is_road] = 1
+    qa[np.isin(gcol, [C["trambed"], C["rail"]])] = 2
+    CORE_OUT["qa"] = qa
+    # what traffic.py drives on (regions.py runs it over the map): vehicles on a bridge way take the deck under them, or
+    # the nearest deck cell within 2 m (a way's centreline can run just off the deck)
+    _dd, (_ir, _ic) = ndimage.distance_transform_edt(~deck, return_indices=True)
+    deck_near = np.where(_dd <= 2, deck_h[_ir, _ic], 0).astype(np.float32)
+    # off the deck mask, on a bridge way (a viaduct whose arches are OSM buildings, a deck end): the top of what the
+    # voxels hold there -- lamps, poles and leaves aside -- within the LiDAR's reach
+    _skip = np.zeros(len(pal.entries) + 64, bool)
+    _skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] + WOOD_IDS + [C["pole"], C["fence"]]] = True
+    _rb, _cb = np.nonzero((deck_col > 0) & (_dd > 2))
+    _lim = g[_rb, _cb] + np.clip(np.round(nd_mean[_rb, _cb]), 0, 40).astype(int) + 3
+    _top = g[_rb, _cb].copy()
+    for _z in range(int(g.min()), int(_lim.max()) + 1 if len(_lim) else 0):
+        _m = (_z >= g[_rb, _cb]) & (_z < _lim) & (_z < vol.shape[0])
+        _v = vol[np.minimum(_z, vol.shape[0] - 1), _rb[_m], _cb[_m]]
+        _top[np.nonzero(_m)[0][(_v != 0) & ~_skip[_v]]] = _z + 1
+    deck_near[_rb, _cb] = _top - g[_rb, _cb]
+    CORE_OUT["deck_near"] = deck_near
+    CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
+    CORE_OUT["floor"] = _bored.floor
+    CORE_OUT["walk"] = _walked.level
+    report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL, _walked.level)
+    # the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
+    # docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
+    # it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
+    # NaN elsewhere); roof_z: the roof's height at the cell's middle where its plane is known (the float zt was rounded
+    # from), roof_gx / roof_gy: its rise per metre east / south (NaN: unknown)
+    CORE_OUT["gt"] = g.astype(np.int16)
+    CORE_OUT["deck"] = np.where(deck, deck_abs - BASE, np.nan).astype(np.float32)
+    _rk = (PLANES > 0) | np.isfinite(ROOF_GX)
+    CORE_OUT["roof_z"] = np.where(_rk, _roof_f, np.nan).astype(np.float32)
+    CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.astype(np.float32)
+    # gsrc: the ground's surface where it was lifted to the surface model (SAG_SRC: a carriageway on a structure the terrain
+    # model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
+    CORE_OUT["gsrc"] = SAG_SRC
+    CORE_OUT["gpass"] = ground.changed_bits(GCTX)  # (data/debug/ground_passes.npz: which ground pass changed each cell)
+    # the ways kept open under bridges (ground.under_bridge), checked on the finished volume (check.py verify): along each
+    # corridor's centreline, every metre from UB_PAD m before it to UB_PAD m after it, no step of 2 m or more in the
+    # ground, and nothing solid within the vehicle's clearance over the ground (leaves, lamps' light, cars and the deck
+    # aside: a deck lower than that is the surface model's, noted as low). Each corridor counted by the region whose core
+    # holds its middle
+    UB_PAD = 5
+    _ub = dict(corridors=0, steps=0, blocked=0, low=0, worst=[])
+    _solid = ~_skip
+    _solid[[C["pole"], C["fence"]] + WOOD_IDS] = True
+    _solid[0] = False
+    for _oid, _kind, _l, _s0, _s1 in GCTX.corridors:
+        _mid = _l.interpolate((_s0 + _s1) / 2)
+        if not in_core(int(_mid.y), int(_mid.x)):
+            continue
+        _ss = np.arange(max(_s0 - UB_PAD, 0), min(_s1 + UB_PAD, _l.length) + 0.01, 1.0)
+        _pp = [_l.interpolate(v) for v in _ss]
+        _rc = np.array([(int(q.y), int(q.x)) for q in _pp if 0 <= q.y < D and 0 <= q.x < W])
+        if len(_rc) < 2:
+            continue
+        _gl = g[_rc[:, 0], _rc[:, 1]]
+        _clear = ground.T["ub_clear"][_kind]
+        _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
+        _blk = np.zeros(len(_rc), bool)
+        for _k in range(_clear):
+            _z = _gl + _k
+            _m = (_z < _deck_lo) & (_z < vol.shape[0])
+            _blk[_m] |= _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
+        _step = int(np.abs(np.diff(_gl)).max())
+        _ub["corridors"] += 1
+        _ub["steps"] += int(_step >= 2)
+        _ub["blocked"] += int(_blk.any())
+        _ub["low"] += int((_deck_lo - _gl < _clear).any())
+        if _step >= 2 or _blk.any():
+            _ub["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, _step, int(_blk.sum())])
+    report["counters"]["under_bridge"] = _ub
+    note("ways under bridges (corridors, ground steps of 2 m or more, blocked within the clearance, decks lower than it):",
+         _ub["corridors"], _ub["steps"], _ub["blocked"], _ub["low"], _ub["worst"][:5])
+    # a bridge deck does not sag to the ground beside it (check.py verify): each bridge way's built deck, every metre of its
+    # span (its first to last sample DECK_OVER m or more over the terrain) where a deck is built, against the way's own
+    # deck level there (the profile's DECK_OVER samples within 15 m): sagging where it lies SAG_M m or more under it. Each
+    # way counted by the region whose core holds its middle
+    SAG_M = 2.0
+    _sg = dict(ways=0, sagging=0, worst=[])
+    for _oid, _P, _own in deck_own:
+        _mid = _P[len(_P) // 2]
+        if not np.isfinite(_own).any() or not in_core(int(_mid[1]), int(_mid[0])):
+            continue
+        _r, _c = np.clip(_P[:, 1].astype(int), 0, D - 1), np.clip(_P[:, 0].astype(int), 0, W - 1)
+        _drop = np.where(deck[_r, _c] & np.isfinite(_own), _own - deck_abs[_r, _c], 0)
+        _sg["ways"] += 1
+        if _drop.max() >= SAG_M:
+            _sg["sagging"] += 1
+            _sg["worst"].append([_oid, round(float(_mid[0])) + C0, round(float(_mid[1])) + R0, round(float(_drop.max()), 1),
+                                 int((_drop >= SAG_M).sum())])
+    report["counters"]["deck_sag"] = _sg
+    note("bridge ways (with a span over the terrain, their built deck SAG_M m or more under their own level):",
+         _sg["ways"], _sg["sagging"], _sg["worst"][:5])
+    # the same along every tunnel=yes carriageway and railway the ground covers (tunnels.plan: a bore, a covered passage,
+    # one left solid; not one open to the sky, under a deck or a building), each metre from its floor (Bored.floor, else
+    # the grade between its portals or the ground under it: one left solid is blocked) to the first solid voxel (a deck
+    # aside): blocked under tunnels.LOW m, low under the vehicle's clearance; and the street over a bore or a covered
+    # passage whole (its surface's voxel there: holes)
+    _tu = dict(ways=0, blocked=0, low=0, holes=0, worst=[])
+    _planned = {x[0] for x in _bores}
+    for _oid, _t, _l in osm.lines:
+        if _oid not in _planned or not ground.bed(_t):
+            continue
+        _mid = _l.interpolate(0.5, normalized=True)
+        if not in_core(int(_mid.y), int(_mid.x)) or not all(2 <= x < W - 2 and 2 <= y < D - 2 for x, y in (_l.coords[0], _l.coords[-1])):
+            continue
+        _pp = [_l.interpolate(v) for v in np.arange(1.0, _l.length - 0.99, 1.0)]
+        _rc = np.array([(int(q.y), int(q.x)) for q in _pp])
+        if not len(_rc):
+            continue
+        _fl = _bored.floor[_rc[:, 0], _rc[:, 1]].astype(int)
+        _gr = g[_rc[:, 0], _rc[:, 1]]
+        _za, _zb = (tunnels._portal_level(g, *p_) for p_ in (_l.coords[0], _l.coords[-1]))
+        _fl = np.where(_fl >= 0, _fl, np.minimum(_gr, tunnels._floor(_za, _zb, np.arange(1.0, _l.length - 0.99, 1.0)[:len(_rc)], _l.length, _gr)))
+        _clear = tunnels.CLEAR[ground.bed(_t)[0]]
+        _deck_lo = np.where(deck[_rc[:, 0], _rc[:, 1]], np.round(deck_abs[_rc[:, 0], _rc[:, 1]] - BASE).astype(int) - 2, 10 ** 6)
+        _room = np.full(len(_rc), _clear)
+        for _k in range(_clear - 1, -1, -1):
+            _z = _fl + _k
+            _m = (_z < _deck_lo) & (_z < vol.shape[0])
+            _hit = np.zeros(len(_rc), bool)
+            _hit[_m] = _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
+            _room[_hit] = _k
+        _st = np.array([_bored.lowered.get((r_, c_), 0) for r_, c_ in _rc])
+        _hole = (_st > 0) & (vol[np.clip(_st - 1, 0, vol.shape[0] - 1), _rc[:, 0], _rc[:, 1]] == 0)
+        _tu["ways"] += 1
+        _tu["blocked"] += int((_room < tunnels.LOW).any())
+        _tu["low"] += int((_room < _clear).any())
+        _tu["holes"] += int(_hole.any())
+        if (_room < tunnels.LOW).any() or _hole.any():
+            _tu["worst"].append([_oid, round(_mid.x) + C0, round(_mid.y) + R0, int(_room.min()), int((_room < tunnels.LOW).sum()), int(_hole.sum())])
+    report["counters"]["tunnels"] = _tu
+    note("tunnel=yes carriageways and railways (ways, blocked under the least clearance, lower than the vehicle's, a hole in "
+         "the street over them):", _tu["ways"], _tu["blocked"], _tu["low"], _tu["holes"], _tu["worst"][:5])
+    note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
+         "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
+    _lines = {oid: l_ for oid, _, l_ in osm.lines}
+
+    def _owned(oid):
+        """a way is the region's whose middle lies in its core (regions.py: each way's decision from one region)"""
+        p_ = _lines[oid].interpolate(0.5, normalized=True)
+        return in_core(int(p_.y), int(p_.x))
+
+    RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in _bore_ids if _owned(o)),
+                  walk_ids=sorted(o for o in _walked.ids if _owned(o)), shifted_stairs=sorted(_walked.shifted))
+    # debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
+    # (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
+    topz = np.full(vol.shape[1:], Hm - 1, np.int64)
+    for _z in range(Hm):
+        topz[vol[_z] != 0] = _z
+    topv = np.take_along_axis(vol, topz[None], 0)[0]
+    palarr = np.array([e[:3] for e in pal.entries], np.uint8)
+    CORE_OUT["topdown"] = np.clip(palarr[topv] * np.clip(0.55 + topz / 120, 0, 1.2)[..., None], 0, 255).astype(np.uint8)
+    CORE_OUT["groundcol"] = palarr[gcol]
+    # this region's core: the rasters (crowns' owners on the 2 m grid), the volume (for traffic.py and the labels: regions.py),
+    # the lists in the map's order (lamps, jets), the palette's new colours
+    _k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
+    vars(ctx).update(_k2=_k2)
+
+
+def save_core(ctx):
+    """The core's rasters (core.npz)."""
+    CORE_OUT, _best, _k2 = ctx.CORE_OUT, ctx._best, ctx._k2
+    np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
+
+
+def save_volume(ctx):
+    """The core's volume (vol.npz)."""
+    vol = ctx.vol
+    mapstore.save_volume(RDIR / "vol.npz", vol[(slice(None),) + CORE_SL])  # (compressed, in 128 m column blocks)
+
+
+def palette_lists(ctx):
+    """What the region hands to regions.py besides its rasters: its new colours, lamps, jets, counts (out.json)."""
+    (CORE_OUT, Hm, LAMP_KEYS, SANITY, aoi_core, jets, lamps, osm, vol) = (
+        ctx.CORE_OUT, ctx.Hm, ctx.LAMP_KEYS, ctx.SANITY, ctx.aoi_core, ctx.jets, ctx.lamps, ctx.osm, ctx.vol)
+    (RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
+    # (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
+    # this region's to add)
+    _used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
+    _gc = CORE_OUT["g"][CORE_SL].astype(np.int64)  # (a histogram of the core's ground: the map's median, regions.py)
+    RESULT["g_hist"] = [int(_gc.min()), np.bincount((_gc - _gc.min()).ravel()).tolist()]
+    RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
+                  lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
+                  jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], **report,
+                  osm_timestamp=osm.timestamp)
+    RESULT["deps"] = region_inputs.deps_of_process()
+    RESULT["features_used"] = FEATURE_USED  # (the large features' decisions it took: regions.py rebuilds it when one changes)  # (the code this region read: regions.py rebuilds it when that changes)
+
+
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+    ("ground classes, roads, water", ground_classes),
+    ("buildings", buildings),
+    ("natural ground, cemeteries", natural_ground),
+    ("vegetation", vegetation),
+    ("fountains, beds, furniture", furniture),
+    ("bridge piers, vehicles", piers_vehicles),
+    ("landmark details, underpasses, tunnels", landmarks_tunnels),
+    ("drop_debris", drop_debris),
+    ("height crop", height_crop),
+    ("river colours", river_colours),
+    ("ground rgb, footprints", ground_rgb),
+    ("support_floating", support_floating),
+    ("plane codes", roof_planes),
+    ("tiles.export_window", export_tiles),
+    ("qa, deck_near, topdown", qa_lists),
+    ("core.npz", save_core),
+    ("vol.npz", save_volume),
+    ("palette, lists", palette_lists),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
 json.dump(RESULT, open(RDIR / "out.json", "w"))
 print("done")
