@@ -50,6 +50,7 @@ from pathlib import Path
 import numpy as np
 
 import aoi
+from constants import M_CAR, M_GRASS, M_LAMP, M_LEAF, M_WATER, M_WOOD
 import mapstore
 import region
 import window
@@ -318,7 +319,7 @@ def driver_stamp(ws):
     code = {f: region_inputs.code_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
                                                          "tunnels.py", "underpass.py", "osm.py", "aoi.py", "tiles.py",
                                                          "window.py", "region.py", "passau.py", "mapstore.py",
-                                                         "overrides.py", "ways.py")}
+                                                         "overrides.py", "ways.py", "constants.py")}
     import overrides
     d = dict(keys=keys, code=code, overrides=overrides.tree_sha(), palette=region_inputs.file_sha(HERE / "palette.json"),
              osm=region_inputs.file_sha(f"{aoi.RAW}/osm.json"), config=region_inputs.config_part(),
@@ -528,27 +529,27 @@ def main(argv):
                                  "(CC BY 4.0)"} if list(Path(aoi.RAW).glob("treespecies_*.tif")) else {})))
     json.dump(meta, open(OUT / "meta.json", "w"))
     # traffic.py over the whole network, on what the regions handed over
-    traffic.OPEN_CUT = {o for r in res.values() for o in r["open_cut"]}
+    open_cut = {o for r in res.values() for o in r["open_cut"]}  # (the layer -1 ways open to the sky)
     underpass.WALK, underpass.IDS = R("walk", np.int16), {o for r in res.values() for o in r["walk_ids"]}
     underpass.SHIFTED = {o for r in res.values() for o in r.get("shifted_stairs", ())}
     tunnels.FLOOR, tunnels.IDS = R("floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
     skip = np.zeros(len(palette) + 64, bool)
     ids = res[ws[0]]["ids"]
-    skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11, 23)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car, wood)
+    skip[[i for i, e in enumerate(palette) if e[3] in (M_LEAF, M_LAMP, M_CAR, M_WOOD)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True
     solid = ~skip
     solid[0] = False
     # what a car hits (web/src/core/semantics.ts solidForCar: all but grass and water; leaves, poles, lamps too):
     # traffic.place_lanes keeps the lanes clear of it
     csolid = np.zeros(len(palette) + 64, bool)
-    csolid[[i for i, e in enumerate(palette) if e[3] not in (4, 8)]] = True
+    csolid[[i for i, e in enumerate(palette) if e[3] not in (M_WATER, M_GRASS)]] = True
     csolid[0] = False
     tin = dict(g=g, nd_mean=R("deck_near", np.float32), surf=qa, water=R("twater", bool), solid=solid, csolid=csolid)
     if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py;
         import pickle                  # the rasters put together: map-sized)
         whole = lambda a: a.box(0, D_, 0, W_) if isinstance(a, mapstore.MapRaster) else a  # noqa: E731
-        pickle.dump(dict({k: whole(v) for k, v in tin.items()}, open_cut=traffic.OPEN_CUT, walk=whole(underpass.WALK),
+        pickle.dump(dict({k: whole(v) for k, v in tin.items()}, open_cut=open_cut, walk=whole(underpass.WALK),
                          ids=underpass.IDS, shifted_stairs=underpass.SHIFTED, bore=whole(tunnels.FLOOR), bore_ids=tunnels.IDS), open("data/cache/traffic_in.pkl", "wb"))
-    json.dump(trafficpack.pack(traffic.build(note=note, vol=vol, **tin)), open(OUT / "traffic.json", "w"), separators=(",", ":"))
+    json.dump(trafficpack.pack(traffic.build(note=note, vol=vol, open_cut=open_cut, **tin)), open(OUT / "traffic.json", "w"), separators=(",", ":"))
     # debug lists of the regions, one after the other
     for name in ("lod2_reverted", "thin_parts", "floating", "floating_left", "supports"):
         items = []

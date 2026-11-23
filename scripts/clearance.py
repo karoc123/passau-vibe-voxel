@@ -17,10 +17,10 @@ import sys
 import numpy as np
 
 import trafficpack
+from constants import M_CAR, M_CLASSIC, M_LAMP, M_LEAF, M_METAL, M_TENEMENT, M_WALL, M_WINDOW, M_WOOD, WALL_MATS
 from ways import underground
 
-M_LEAF, M_WOOD, M_LAMP, M_METAL, M_CAR = 3, 23, 5, 6, 11
-WALLS = {0, 1, 2, 7, 13, 15, 19, 20, 21, 22}  # (web/src/core/materials.ts WALL_MATS)
+WALLS = set(WALL_MATS)
 
 
 def grade(p, x, z):
@@ -56,7 +56,7 @@ def classify(h, road, tags, pal, bld, deck):
         return pre + "leaves"
     if m == M_WOOD:
         return pre + "trunk / branch"
-    if m in (1, 20, 21, 22) or (bld[r, c] > 0 and m in WALLS):
+    if m in (M_WALL, M_CLASSIC, M_WINDOW, M_TENEMENT) or (bld[r, c] > 0 and m in WALLS):
         return pre + "building"
     if m in (M_LAMP, M_METAL):
         return pre + "lamp / pole / fence"

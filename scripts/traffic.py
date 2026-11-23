@@ -30,9 +30,6 @@ WALK = {"footway", "pedestrian", "path", "steps", "living_street", "platform", "
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
 
-OPEN_CUT = set()  # layer -1 ways that are open cuts, not tunnels (voxelize.py)
-
-
 def fit(p, offs, vol, solid, W, D, step=0.5, decks=False, rise_ahead=True):
     """a path's heights onto the voxels as drawn: every 0.5 m, across the offsets the bodies use, the free level over
     the drawn surface nearest the path's own height (a deck, not the street under it); the highest across, then over
@@ -487,12 +484,12 @@ class Osm:
         return out
 
 
-def road_edges(osm, bored):
+def road_edges(osm, bored, open_cut):
     """the directed road edges (one per direction of a way between junctions, with its lanes, speed and the stop line
     of a signal near its end), the signal controllers (signal nodes clustered within 45 m) and the road nodes' index
     (OSM id -> the edges' a, b)"""
     nodes, ntags = osm.nodes, osm.ntags
-    rways = [w for w in osm.ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT
+    rways = [w for w in osm.ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in open_cut
                                                                        or w["id"] in bored)
              and w["tags"].get("access") not in ("no", "private") and w["tags"].get("area") != "yes"]
     sig_nodes = {n for n, t in ntags.items() if t.get("highway") == "traffic_signals" and n in nodes}
@@ -976,18 +973,19 @@ def fit_to_volume(roads, trains, peds, shifted_edges, vol, solid, csolid, surf, 
     return keep
 
 
-def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None):
+def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None, open_cut=frozenset()):
     """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
     vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit).
+    open_cut: the ids of the layer -1 ways open to the sky, not tunnels (voxelize.py: ground.open_cut).
     The steps, in order: the OSM ways on the grid (Osm); roads (road_edges, check_lanes, infer_signals,
     turn_restrictions); footpaths; signal heads; trains; all fitted to the volume (fit_to_volume); bike ways joined."""
     osm = Osm(g, nd_mean, water)
     import tunnels
     bored = tunnels.IDS if tunnels.FLOOR is not None else set()
 
-    roads, ctrls, nid_index = road_edges(osm, bored)
+    roads, ctrls, nid_index = road_edges(osm, bored, open_cut)
     surf = check_lanes(roads, surf, note)  # (from here on with the track bed's margin)
     infer_signals(roads, ctrls, note)
     restr = turn_restrictions(osm.data, nid_index, note)
@@ -1036,10 +1034,10 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     import pickle
     tin = pickle.load(open("data/cache/traffic_in.pkl", "rb"))
     import underpass
-    OPEN_CUT, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
+    open_cut, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
     underpass.SHIFTED = tin.pop("shifted_stairs", set())
     import tunnels
     tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
     import trafficpack
-    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), **tin)),
+    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), open_cut=open_cut, **tin)),
               open("web/public/data/traffic.json", "w"), separators=(",", ":"))

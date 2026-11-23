@@ -19,11 +19,11 @@ from pathlib import Path
 import numpy as np
 
 import tilefile
+from constants import M_CLOCK
 import tiles
 import window
 
 OUT = Path("web/public/data")
-CLOCK = 14  # voxelMaterial.ts MAT.CLOCK (voxelize.py M_CLOCK)
 
 
 def read_node(path, N, planes=False):
@@ -108,7 +108,7 @@ def main():
     meta = json.loads((OUT / "meta.json").read_text())
     N, W, D = meta["tiles"]["N"], meta["W"], meta["D"]
     l1 = next(l for l in meta["tiles"]["levels"] if l["s"] == 1)
-    face = {i for i, p in enumerate(meta["palette"]) if p[3] == CLOCK}
+    face = {i for i, p in enumerate(meta["palette"]) if p[3] == M_CLOCK}
     walls = [i for i, p in enumerate(meta["palette"]) if p[3] in tiles.WALL_MATS]
     check = "--check" in sys.argv
     tmp = Path("data/tiles_lod")

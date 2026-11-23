@@ -34,6 +34,7 @@ Levels 4 and 8 also keep a deck over open air that the level below has (downsamp
 import time
 
 import interiors
+import constants
 import tilefile
 
 import numpy as np
@@ -45,7 +46,7 @@ LOD_LEVELS = (2, 4, 8)  # the distance levels: with roof planes, meshed like lev
 CASCADE = (4, 8)
 # the materials of buildings' walls (voxelMaterial.ts MAT: SOLID, WALL, GLASS, FLOODLIT, CONCRETE, BRONZE, RIBBON, CLASSIC,
 # WINDOW, TENEMENT; as web/src/tile-request.ts WALLS): a distance level's wall blocks wear their own colour (side_walls)
-WALL_MATS = (0, 1, 2, 7, 13, 15, 19, 20, 21, 22)
+WALL_MATS = constants.WALL_MATS
 
 
 def downsample(vol, s, face_ids=(), wall_ids=None, finer=None):

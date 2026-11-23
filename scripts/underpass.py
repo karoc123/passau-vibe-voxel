@@ -1,9 +1,11 @@
 """Pedestrian underpasses: the passages OSM maps one level under the street, carved into the ground as corridors 3 m high under a 1 m slab, and the stairs down to them
 cut as open stairwells with a parapet round them. The LiDAR saw only part way down a stairwell: its ragged pit is filled
 back to the street first. Deeper levels (level -2 and under) are left solid; their stairs from the street are cut
-down to the first level. WALK holds the walking level of every carved cell for traffic.py, IDS the ways walked.
+down to the first level. build() gives a Walked: `level`, the walking level of every carved cell (-1 elsewhere) for
+traffic.py, `ids` the ways walked, `shifted` the staircase and approach ways whose height profile was reshaped.
 """
 import json
+from collections import namedtuple
 
 import numpy as np
 from pyproj import Transformer
@@ -14,10 +16,11 @@ from shapely.strtree import STRtree
 from aoi import CRS, OSM_PATH, to_grid
 from ways import cells, num
 
+# traffic.py's inputs over the whole map, set by regions.py from the regions' Walked (not used here)
 WALK = None
 IDS = set()
-SHIFTED = set()  # staircase and approach ways whose height profile was reshaped
-SKIP = set()  # ways tunnels.py bores through a hill
+SHIFTED = set()
+Walked = namedtuple("Walked", "level ids shifted")
 FOOT = ("footway", "path", "pedestrian", "cycleway", "corridor")
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
@@ -31,9 +34,9 @@ def _levels(t):
     return out
 
 
-def ways(osm):
+def ways(osm, skip=()):
     """(tunnels, stairs): the passages one level down outside buildings, and the steps from the street to them, each
-    (way id, [node ids], LineString in grid metres)"""
+    (way id, [node ids], LineString in grid metres); not the ways in skip (tunnels.py bores them through a hill)"""
     data = json.load(open(OSM_PATH))
     blds = [g for _, _, t, g in osm.areas if "building" in t]
     tree = STRtree(blds)
@@ -43,7 +46,7 @@ def ways(osm):
         t = e.get("tags", {})
         if e["type"] != "way" or t.get("highway") not in FOOT + ("steps",) or not e.get("geometry") or None in e["geometry"]:
             continue
-        if e["id"] in SKIP or t.get("tunnel") == "building_passage" or t.get("indoor") == "yes" or t.get("location") == "indoor":
+        if e["id"] in skip or t.get("tunnel") == "building_passage" or t.get("indoor") == "yes" or t.get("location") == "indoor":
             continue
         lv = _levels(t)
         down = t.get("tunnel") == "yes" or t.get("location") == "underground" or any(v < 0 for v in lv)
@@ -123,13 +126,11 @@ def covered_floor(vol, g, r, c, z, floor):
     return z
 
 
-def build(vol, g, pal, C, osm, note, bed):
-    global WALK
+def build(vol, g, pal, C, osm, note, bed, skip=()):
+    """carve the passages and stairwells of ways(osm, skip) into vol; a Walked"""
     D, W = g.shape
-    WALK = np.full((D, W), -1, np.int16)
-    IDS.clear()
-    SHIFTED.clear()
-    tun, land, steps, other = ways(osm)
+    out = Walked(np.full((D, W), -1, np.int16), set(), set())
+    tun, land, steps, other = ways(osm, skip)
     floor, wall, rail = C["paving2"], pal("#a9a59c"), pal("#c9c6be")
     roads = [C[k] for k in ("asphalt", "asphalt_l", "mark", "parking", "trambed", "sett", "cycle", "hatch", "road_paving")]
     # the street over each passage: the highest ground along it; the corridor's walking level 4 m under it. A landing
@@ -174,9 +175,9 @@ def build(vol, g, pal, C, osm, note, bed):
                 no_exit.append(wid)
             else:
                 relocated += 1
-                SHIFTED.add(wid)
+                out.shifted.add(wid)
                 if continuation is not None:
-                    SHIFTED.add(continuation)
+                    out.shifted.add(continuation)
         rr, cc = cells((opening if opening is not None else ln).buffer(3.0), D, W)
         if not len(rr):  # (a stairwell beyond the region's volume: its passage's end is in it)
             continue
@@ -196,7 +197,7 @@ def build(vol, g, pal, C, osm, note, bed):
             if shifted:
                 d = ln.project(Point(c + 0.5, r + 0.5))
                 if d < start or bed[r, c] or opening is None:
-                    WALK[r, c] = covered_floor(vol, g, r, c, zf, floor)
+                    out.level[r, c] = covered_floor(vol, g, r, c, zf, floor)
                     continue
                 t = np.clip((ln.length - d) / opening.length, 0, 1)
             else:
@@ -204,13 +205,13 @@ def build(vol, g, pal, C, osm, note, bed):
             z = int(round(street + (zf - street) * t))
             vol[z:street + 1, r, c] = 0
             vol[z - 1, r, c] = floor
-            WALK[r, c] = z
+            out.level[r, c] = z
         if opening is not None:
             pr, pc = cells(opening.buffer(2.3, cap_style=2).difference(stair), D, W)
             for r, c in zip(pr, pc):  # the parapet round the opening, where the ground stands at the street
-                if not bed[r, c] and WALK[r, c] < 0 and g[r, c] >= street:
+                if not bed[r, c] and out.level[r, c] < 0 and g[r, c] >= street:
                     vol[street, r, c] = rail
-        IDS.add(wid)
+        out.ids.add(wid)
         n_s += 1
     for k, (wid, ns, ln) in enumerate(land + tun):
         opened = k < len(land)
@@ -219,10 +220,10 @@ def build(vol, g, pal, C, osm, note, bed):
             continue
         rr, cc = cells(ln.buffer(1.5, cap_style=2), D, W)
         for r, c in zip(rr, cc):
-            if WALK[r, c] >= 0:
+            if out.level[r, c] >= 0:
                 continue
             if bed[r, c]:
-                WALK[r, c] = covered_floor(vol, g, r, c, zf, floor)
+                out.level[r, c] = covered_floor(vol, g, r, c, zf, floor)
                 continue
             if g[r, c] >= zf + 4 and not opened:  # under the slab
                 vol[zf:zf + 3, r, c] = 0
@@ -234,25 +235,27 @@ def build(vol, g, pal, C, osm, note, bed):
             else:  # where it opens to a stairwell or a sunken court
                 vol[zf:g[r, c] + 1, r, c] = 0
             vol[zf - 1, r, c] = floor
-            WALK[r, c] = zf
+            out.level[r, c] = zf
         wr, wc = cells(ln.buffer(2.0, cap_style=2).difference(ln.buffer(1.5, cap_style=2)), D, W)
         for r, c in zip(wr, wc):  # the corridor's walls, where the ground's soil would show
-            if WALK[r, c] < 0:
+            if out.level[r, c] < 0:
                 top = zf + 2 if g[r, c] == zf + 3 else min(zf + 3, g[r, c])  # (the street's own surface stays)
                 if bed[r, c]:
                     top = min(top, g[r, c] - 1)
                 vol[zf:top, r, c] = np.where(vol[zf:top, r, c] != 0, wall, 0)
-        IDS.add(wid)
+        out.ids.add(wid)
         n_t += 1
     note(f"underpasses: {n_t} passages, {n_s} stairwells carved, "
          f"{relocated} openings adjusted at a bed, {len(at_grade)} landings at the passage's level left as paths")
     if no_exit:
         note(f"underpasses: no room for an opening along these stairs, left covered: {no_exit}")
+    return out
 
 
-def open_over_bed(vol, ground, road, rail, core):
-    """Count carved walking columns in the core whose carriageway or ballast has lost its surface voxel."""
+def open_over_bed(vol, ground, road, rail, core, level):
+    """Count carved walking columns (level: Walked.level) in the core whose carriageway or ballast has lost its surface
+    voxel."""
     road, rail = road[core], rail[core]
-    rr, cc = np.nonzero((road | rail) & (WALK[core] >= 0))
+    rr, cc = np.nonzero((road | rail) & (level[core] >= 0))
     sky = vol[(slice(None),) + core][ground[core][rr, cc] - 1, rr, cc] == 0
     return dict(road=int((sky & road[rr, cc]).sum()), rail=int((sky & rail[rr, cc]).sum()))
