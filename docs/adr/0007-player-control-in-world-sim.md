@@ -13,7 +13,9 @@ the same interface with one player.
 - A **player id** identifies a participant within a world instance and stays the same across changes of vehicle,
   pedestrian or camera mode. A vehicle or pedestrian has its own entity id, retained when it changes between traffic,
   player control and a parked or wrecked state. A vehicle type such as `bus` describes a model shared by many entities.
-- The sim accepts commands keyed by player id, including `takeWheel(playerId, entityId)`, control input and release.
+- The sim accepts commands keyed by player id, including `takeWheel(playerId, entityId)`, control input and release
+  (`sim/world-sim.ts` `WorldSim`: `takeWheel`, `input`, `releaseWheel`, `resetDriver`, read back with
+  `driverSnapshot` and `driverNotes`; `nav/drive.ts` reaches it through `CraftContext.sim`).
   The sim checks eligibility and availability, transfers control at a tick boundary and reports the outcome. If two
   players request the same car in one tick, the first eligible command in the world's recorded order wins. Following a
   vehicle with the camera uses a pose from the snapshot and carries no driving rights.
