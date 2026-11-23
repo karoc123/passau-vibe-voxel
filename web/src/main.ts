@@ -18,7 +18,8 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
-import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from './sim/sim-client';
+import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './sim/sim-client';
+import type { CraftsView } from './nav/crafts-view';
 import { LOCAL_PLAYER } from './sim/world-sim';
 import { hostSim } from './sim-host';
 import { WorkerLink } from './sim-worker-link';
@@ -40,7 +41,8 @@ import { focusView } from './focus';
 import './style.css';
 
 declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer }
+  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer;
+    __board?: () => boolean }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -84,6 +86,8 @@ const CRAFTS = () => [
   import('./nav/special-craft').then((m) => m.HelicopterMode),
 ];
 let crafts: PlayerCraft[] = [];
+// the world's crafts the local player does not fly (left by their pilots, or other players'): nav/crafts-view.ts
+let craftsView: CraftsView | null = null;
 const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
@@ -179,6 +183,11 @@ addEventListener('keydown', (e) => {
     if (labels) labels.visible = labelsOn;
     try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
     toast(labelsOn ? 'Labels on' : 'Labels off (N shows them)');
+    e.preventDefault();
+  }
+  // F: into the nearest craft no one pilots (left in the world), from the map or a ride
+  if (e.code === 'KeyF' && gameKey(e) && !e.repeat && nav.canStartCraft) {
+    if (!boardNearest()) toast('No empty craft near here');
     e.preventDefault();
   }
   if (e.code === 'KeyM' && gameKey(e) && !e.repeat && minimap) {
@@ -493,7 +502,8 @@ async function boot() {
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
-  const [{ ParagliderMode }, modes] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS())]);
+  const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
+    import('./nav/crafts-view')]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
@@ -502,7 +512,22 @@ async function boot() {
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
+  craftsView = new CraftsView(nav.actors);
 }
+
+// the shell that flies the nearest craft no one pilots within BOARD_R m of the map's focus, put in it; false: none
+const BOARD_R = 150;
+function boardNearest() {
+  const f = controls.target;
+  let best: { c: CraftView; d: number } | null = null;
+  for (const c of sim?.crafts() ?? []) {
+    const p = c.core.pose, d = Math.hypot(p.x - f.x, p.z - f.z);
+    if (c.pilot === null && d < BOARD_R && (!best || d < best.d)) best = { c, d };
+  }
+  const shell = best && crafts.find((s) => s.boards?.includes(best.c.type));
+  return !!(best && shell?.board?.(best.c));
+}
+window.__board = boardNearest;
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
 // ?crop=x0,z0,x1,z1: those meeting that box (metres, the project grid's x and z as ?cam=); with ?focus=, crop=fit: the
@@ -526,6 +551,7 @@ renderer.setAnimationLoop((now) => {
   for (const c of crafts) if (c.view === 'ride') c.update(dt);
   nav.update(dt);
   for (const c of crafts) if (c.view === 'own') c.update(dt);
+  craftsView?.update(sim, dt, daylight.night);
   const bodyMode = nav.craft?.id ?? nav.mode;
   if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
   if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;

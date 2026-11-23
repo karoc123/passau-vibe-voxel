@@ -119,8 +119,9 @@ writes them itself (`put`). So the drawn fields are presentation state that happ
 - **Page → sim: commands** (`sim/sim-client.ts` `SimCommand`), plain JSON, each keyed by player: `follow`, `walkAs`,
   `walkPose`, `release`, `takeWheel`, `drive` (the car input), `releaseWheel`, `resetDriver`, `spawnCraft`
   (`addCraft` + `enterCraft` + `placeCraft` in one: the sim numbers the craft, the client never needs its id),
-  `placeCraft` (the player's craft put down again), `craftInput`, `resetCraft`, `dropCraft` (the player's craft taken
-  away: what the shells do on leave today; E8 changes it), `edit` (a `WorldOp`). They are queued and applied in the
+  `placeCraft` (the player's craft put down again), `enterCraft` (the seat of a craft in the world, one left by its
+  pilot; E8), `craftInput`, `resetCraft`, `leaveCraft` (out of the seat: the craft stays where it is, hands off; E8),
+  `dropCraft` (the player's craft taken away: only the paraglider since E8), `edit` (a `WorldOp`). They are queued and applied in the
   order sent at the start of the sim's next update, before the edit keeper and the ticks (ADR 0007: "commands take
   effect at the start of the tick"). Their outcome, where one can be refused (`walkAs`, `takeWheel` is already
   reported by `driverSnapshot`, `spawnCraft`, `resetCraft`, `edit`), comes back as a `CommandResult { tick, kind, ok }`
@@ -166,9 +167,10 @@ One per sim update, for one client; in the worker a message of plain arrays (str
 - **trains**: the coach poses at the last two ticks; **boats**: `poses`, `previous`, `elapsed`, `day` (already
   plain).
 - `active` (the active circle's middle: which signal heads are drawn).
-- **players** (this client's): `seat`, the driver's snapshot and notes, the craft piloted (`id, type, placed`, its
-  core's state: `save()` per core, loaded into a client-side core of the same class: `drawn(alpha)`, `motion`,
-  `flight` read as now; later the base of prediction), its events, the command outcomes.
+- **crafts** (E8: every craft put down, piloted or left): `id, type, pilot, placed`, its core's state (`save()` per
+  core, loaded into a client-side core of the same class: `drawn(alpha)`, `motion`, `flight` read as now; later the
+  base of prediction). The craft a player pilots is the one their seat names.
+- **players** (this client's): `seat`, the driver's snapshot and notes, the craft's events, the command outcomes.
 - **events** since the client's last tick.
 - **edits**: the nodes changed since the last snapshot.
 
@@ -255,6 +257,6 @@ some 75 KB a snapshot as float64; for a network later, quantised and delta-coded
 - The worker's ground is level 1 only (the streamer's is whatever is loaded). Near the focus that is the same.
 - With the worker the page draws one update behind (the snapshot of the frame before): one frame of input latency
   (measured, section 6), against a main thread freed of the sim (1-4 ms a frame here, more with Rapier bodies).
-- The shells still decide where a craft is put and remove it on leave (`spawnCraft`, `dropCraft`): a mode's job later;
-  E8 keeps a left craft in the world.
+- The shells still decide where a new craft is put (`spawnCraft`): a mode's job later. Since E8 a left craft stays in
+  the world (`leaveCraft`) until the presence rule drops it.
 - `LOCAL_PLAYER` stays in sim/world-sim.ts until E7 moves it to the client.

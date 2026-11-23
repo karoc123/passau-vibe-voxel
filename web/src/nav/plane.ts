@@ -3,6 +3,8 @@ import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
+import type { CraftView } from '../sim/sim-client';
+import type { PlaneCore } from '../sim/craft/plane-core';
 import { JET, PLANE, type PlaneConfig, type PlaneEvent, type PlaneInput } from '../sim/craft/plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
@@ -53,6 +55,7 @@ const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'
 export class PlaneMode implements PlayerCraft {
   readonly id = 'plane';
   readonly view = 'own';
+  readonly boards = ['floatplane', 'jet'] as const;
   private readonly nav: Nav;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly target: THREE.Vector3;
@@ -236,6 +239,25 @@ export class PlaneMode implements PlayerCraft {
     return this.craft?.core.pose ?? null;
   }
 
+  // into a plane left in the world (afloat, landed, or gliding down with its lever back)
+  board(craft: CraftView) {
+    const type = craft.type;
+    if (this.phase !== 'off' || (type !== 'floatplane' && type !== 'jet') || !this.link.sim || !this.nav.enterCraft(this)) return false;
+    this.use(AIRCRAFT[type]);
+    this.link.open(type);
+    this.link.board(craft.id);
+    this.rig.begin(ENTER_MS);
+    // (the lever where the engine is)
+    this.throttle = (craft.core as PlaneCore).flight.engine;
+    this.aim = true;
+    this.phase = 'flying';
+    this.keys.clear();
+    this.touch.setActive(true);
+    this.panel.silence();
+    this.draw();
+    return true;
+  }
+
   // open water within ~100 m of (x, z): the water column with the longest straight water run through it (8
   // directions, up to 300 m); null: tiles not in yet; false: none
   private openWater(x: number, z: number) {
@@ -308,6 +330,7 @@ export class PlaneMode implements PlayerCraft {
   // (the sim steps the plane after this, in the same frame: main.ts; this sends the input and draws the last step)
   private fly(dt: number) {
     const now = performance.now();
+    if (this.link.refused()) { this.panel.say('Someone else took that plane.', 2500); this.nav.flyUp(); return; }
     this.link.input(inFocus() ? this.input(dt) : { turn: 0, pitch: 0, throttle: this.throttle });
     this.link.resets();
     const c = this.link.frame();

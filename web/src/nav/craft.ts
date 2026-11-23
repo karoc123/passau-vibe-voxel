@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import type { CraftView, SimClient } from '../sim/sim-client';
-import { LOCAL_PLAYER, type CraftInput, type CraftWorld } from '../sim/world-sim';
+import { LOCAL_PLAYER, type CraftId, type CraftInput, type CraftWorld } from '../sim/world-sim';
 import type { CraftSpot as SimSpot } from '../sim/craft/craft-core';
 import { CORES, type CoreOf, type CraftType } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
@@ -33,6 +33,10 @@ export interface PlayerCraft {
   readonly mapPose?: Pose | null;
   /** get in: at a spot (tools; later F2, walking up to it) or, without one, where the view is. false: not now */
   enter(at?: CraftSpot): boolean;
+  /** the types of the world's crafts it flies (board) */
+  readonly boards?: readonly CraftType[];
+  /** into the pilot's seat of a craft in the world no one pilots (one of `boards`; SimClient.crafts()). false: not now */
+  board?(craft: CraftView): boolean;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */
   leave(): void;
   /** every frame, on or not (its panel) */
@@ -67,16 +71,17 @@ export interface CraftContext {
 }
 
 /** A shell's hold on its craft in the world sim, the local player its pilot, through the sim's client: the commands
- * (spawn: made and put down at a spot; place: put down again; input; reset; close: taken away), the craft once the sim
- * has made it (its core's state, read only), and a collision of the shell's own over the viewer's tiles (the world's
- * voxels as the page reads them: the spawn search, the camera's sweep, the panel's heights; the sim steps the craft
- * through its own). */
+ * (spawn: made and put down at a spot; board: the seat of one in the world; place: put down again; input; reset; close:
+ * left where it is, or taken away), the craft once the sim has seated the player (its core's state, read only), and a
+ * collision of the shell's own over the viewer's tiles (the world's voxels as the page reads them: the spawn search,
+ * the camera's sweep, the panel's heights; the sim steps the craft through its own). */
 export class CraftLink<K extends CraftType> {
   /** the world sim's client, once loaded */
   sim: SimClient | null = null;
   /** the shell's own collision, while it is in the craft (open .. close) */
   col: VoxelCollision | null = null;
-  private spawned = false;
+  // a craft spawned or boarded, until close
+  private held = false;
 
   constructor(private readonly ctx: CraftContext, public type: K) {
     void ctx.sim.then((s) => { this.sim = s; });
@@ -93,7 +98,7 @@ export class CraftLink<K extends CraftType> {
 
   /** the craft piloted, once the sim has made it (null before, and after close) */
   get craft(): CraftView<CoreOf<K>> | null {
-    const c = this.spawned ? this.sim?.craftOf(LOCAL_PLAYER) : null;
+    const c = this.held ? this.sim?.craftOf(LOCAL_PLAYER) : null;
     return c && c.type === this.type ? c as CraftView<CoreOf<K>> : null;
   }
 
@@ -107,14 +112,23 @@ export class CraftLink<K extends CraftType> {
   /** a craft of the link's type made, the local player its pilot, put down at spot (from the next update) */
   spawn(spot: SimSpot) {
     this.sim!.send({ kind: 'spawnCraft', player: LOCAL_PLAYER, type: this.type, spot });
-    this.spawned = true;
+    this.held = true;
   }
+
+  /** the local player into the pilot's seat of craft id (in the world, of the link's type); refused: refused() */
+  board(id: CraftId) {
+    this.sim!.send({ kind: 'enterCraft', player: LOCAL_PLAYER, craft: id });
+    this.held = true;
+  }
+
+  /** a board refused since the last call (another player took the seat first, or the craft is gone) */
+  refused() { return !!this.sim?.results(LOCAL_PLAYER, 'enterCraft').some((r) => !r.ok); }
 
   /** the craft put down again at spot */
   place(spot: SimSpot) { this.sim?.send({ kind: 'placeCraft', player: LOCAL_PLAYER, spot }); }
 
   /** put down at spot: made the first time (spawn), else again (place) */
-  put(spot: SimSpot) { if (this.spawned) this.place(spot); else this.spawn(spot); }
+  put(spot: SimSpot) { if (this.held) this.place(spot); else this.spawn(spot); }
 
   /** the pilot's hands on the controls, until the next */
   input(input: CraftInput) { this.sim?.send({ kind: 'craftInput', player: LOCAL_PLAYER, input }); }
@@ -128,10 +142,11 @@ export class CraftLink<K extends CraftType> {
   /** the outcomes of the resets asked for since the last call: true where one was done */
   resets() { return this.sim?.results(LOCAL_PLAYER, 'resetCraft').map((r) => r.ok) ?? []; }
 
-  /** out: the craft taken out of the world, the shell's collision let go */
-  close() {
-    if (this.spawned) this.sim?.send({ kind: 'dropCraft', player: LOCAL_PLAYER });
-    this.spawned = false;
+  /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
+   * out of the world; the shell's collision let go */
+  close(drop = false) {
+    if (this.held) this.sim?.send({ kind: drop ? 'dropCraft' : 'leaveCraft', player: LOCAL_PLAYER });
+    this.held = false;
     this.col?.release();
     this.col = null;
   }
