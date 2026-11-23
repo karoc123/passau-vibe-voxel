@@ -82,7 +82,11 @@ export class Traffic {
   ground: Ground | null = null;
   // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
   water: WaterColumns | null = null;
-  keep: Car | Person | null = null;
+  // the entities players follow or control (sim/world-sim.ts WorldSim: follow, walkAs), by id: kept in the sim
+  // wherever they are (not removed out of the circle, trimmed, dropped into a hole or knocked down)
+  readonly held = { car: new Set<number>(), person: new Set<number>() };
+  // the people a player walks as (WorldSim walkAs; among held): where the player puts them, off their way
+  readonly walked = new Set<number>();
   bodies: TrafficBodies | null = null;
   readonly roads: Road[];
   readonly peds: PedEdge[];
@@ -95,8 +99,9 @@ export class Traffic {
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
   riders: Person[] = [];
-  // the people fallen into a hole since the presentation last took them (drawn falling: view/life.ts)
-  dropped: Person[] = [];
+  // the people fallen into a hole and knocked down (by a driven car: life-phys.ts) in the ticks since the world sim
+  // last took them (WorldSim.update: its events)
+  dropped: { tick: number; person: Person }[] = [];
   struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
@@ -133,6 +138,8 @@ export class Traffic {
   private pedKm = 0;
   private carGrid = new Map<number, Car[]>();
   private idSeq = 1;
+  // the people's and riders' ids (apart from the cars', whose ids pick their type: trafficType)
+  private personSeq = 1;
   private readonly tmp = pt();
   private readonly tmp2 = pt();
   // scratch points (carPoint uses tmp itself)
@@ -234,10 +241,10 @@ export class Traffic {
     this.bikeW = this.bikeAct.map((i) => this.peds[i].L * this.peds[i].bk!);
     this.bikeKm = this.bikeW.reduce((a, w) => a + w, 0) / 1000;
     this.riders = this.riders.filter((p) => this.pedOn[p.e]);
-    const out = new Set(this.cars.filter((c) => !this.roadOn[c.e] && c !== this.keep));
+    const out = new Set(this.cars.filter((c) => !this.roadOn[c.e] && !this.held.car.has(c.id)));
     for (const c of out) this.removeCar(c);
     if (out.size) this.cars.splice(0, this.cars.length, ...this.cars.filter((c) => !out.has(c)));
-    this.people = this.people.filter((p) => this.pedOn[p.e] || p === this.keep || p.ctl);
+    this.people = this.people.filter((p) => this.pedOn[p.e] || this.held.person.has(p.id));
     this.active = { x, z };
   }
 
@@ -269,7 +276,7 @@ export class Traffic {
   private spawnPed() {
     const ei = this.pedAct[this.pick(this.pedW)], e = this.peds[ei], s = this.rand() * e.L;
     if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
-    this.people.push({ kind: 'person', e: ei, dir: this.rand() < 0.5 ? 1 : -1, s, v: 1.05 + this.rand() * 0.55,
+    this.people.push({ kind: 'person', id: this.personSeq++, e: ei, dir: this.rand() < 0.5 ? 1 : -1, s, v: 1.05 + this.rand() * 0.55,
       lat: 0.35 + this.rand() * 1.0, ph: this.rand() * 6.28, wait: false, col: this.anyOf(SHIRTS) });
   }
 
@@ -278,7 +285,7 @@ export class Traffic {
     if (!e || !e.bk) return;
     const s = this.rand() * e.L;
     if (!this.warm) { const P = at(e, s, 0, this.tmp); if (!this.far(P.x, P.y, P.z, PED_POP_R)) return; }
-    this.riders.push({ kind: 'person', e: ei, dir: this.rand() < 0.5 ? 1 : -1, s, v: 4 + this.rand() * 1.8,
+    this.riders.push({ kind: 'person', id: this.personSeq++, e: ei, dir: this.rand() < 0.5 ? 1 : -1, s, v: 4 + this.rand() * 1.8,
       lat: 0.45 + this.rand() * 0.3, ph: this.rand() * 6.28, wait: false, bike: true, col: this.anyOf(SHIRTS) });
   }
 
@@ -459,10 +466,10 @@ export class Traffic {
   private dropOverHoles() {
     const P = this.pA;
     const drop = (list: Person[]) => list.filter((p) => {
-      if (p.ctl || p === this.keep) return true;
+      if (this.held.person.has(p.id)) return true;
       this.personPoint(p, 0, P);
       if (!this.hole(P.x, P.y, P.z)) return true;
-      this.dropped.push(p);
+      this.dropped.push({ tick: this.tickNumber, person: p });
       return false;
     });
     this.people = drop(this.people);
@@ -616,7 +623,7 @@ export class Traffic {
     const gone = new Set<Person>(), P = this.pA;
     for (let i = list.length - 1; i >= 0 && over > 0; i--) {
       const p = list[i];
-      if (p.ctl || p === this.keep) continue;
+      if (this.held.person.has(p.id)) continue;
       this.personPoint(p, 0, P);
       if (this.far(P.x, P.y, P.z, PED_POP_R)) { gone.add(p); over--; }
     }
@@ -625,7 +632,7 @@ export class Traffic {
 
   private stepPeople(dt: number) {
     for (const pe of this.people) {
-      if (pe.ctl) continue;
+      if (this.walked.has(pe.id)) continue;
       const e = this.peds[pe.e];
       if (pe.wait) {
         if (!e.x || !pedGreen(this.ctrls[e.x.ctrl], this.t, e.x.axis)) continue;
@@ -736,7 +743,7 @@ export class Traffic {
   // Person p out of the crowd (knocked down: view/life.ts); whether they were in it
   removePerson(p: Person) {
     const list = p.bike ? this.riders : this.people, i = list.indexOf(p);
-    if (i < 0 || p === this.keep) return false;
+    if (i < 0 || this.held.person.has(p.id)) return false;
     list.splice(i, 1);
     return true;
   }
@@ -766,7 +773,7 @@ export class Traffic {
   private trimParked() {
     const D = this.detachedCars;
     if (D.length <= PARKED) return;
-    const canTrim = (c: Car) => c !== this.keep && !this.bodies?.controlled?.(c);
+    const canTrim = (c: Car) => !this.held.car.has(c.id) && !this.bodies?.controlled?.(c);
     let i = D.findIndex((c) => {
       const p = c.detachedPose!;
       return canTrim(c) && this.far(p.x, p.z, p.y, CAR_POP_R);

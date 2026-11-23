@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { Person } from '../sim/types';
+import type { WalkPose } from '../sim/types';
 import { clamp } from '../util';
 import type { World } from '../world';
 import type { Glide } from './glide';
@@ -160,16 +160,16 @@ export class Foot {
     this.feet = p.y; this.vy = 0; this.yaw = p.h;
   }
 
-  // walking as the person followed (o.ctl, theirs while the ride lasts): W/S walk, A/D turn them, Q/E look; the ride
-  // camera at their eyes turns with them
-  walkAs(R: Ride, o: Person, dt: number) {
-    const C = o.ctl!, P = this.pos, K = this.keys, tp = K.axis('tu', 'td'), go = K.axis('f', 'b');
+  // walking as the person followed (the walk is the client's; where it puts them goes to the sim: ride.ts): W/S walk,
+  // A/D turn them, Q/E look; the ride camera at their eyes turns with them
+  walkAs(R: Ride, dt: number): WalkPose {
+    const P = this.pos, K = this.keys, tp = K.axis('tu', 'td'), go = K.axis('f', 'b');
     this.yaw -= K.axis('tr', 'tl') * (K.shift ? 2.6 : 1.8) * dt;
     if (tp) R.dpitch = clamp(R.dpitch + tp * dt, -1.2, 1.2);
     this.yaw += R.dyaw;
     R.dyaw = 0;
-    C.moving = !!go && this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 7 : 2.2) * dt), false);
+    const moving = !!go && this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 7 : 2.2) * dt), false);
     this.stand(dt);
-    Object.assign(C, { x: P.x, y: this.feet, z: P.z, h: this.yaw });
+    return { x: P.x, y: this.feet, z: P.z, h: this.yaw, moving };
   }
 }

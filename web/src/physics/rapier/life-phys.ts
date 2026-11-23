@@ -726,7 +726,7 @@ export class LifePhysics implements TrafficBodies {
     const half = b.build.half, reach = speed * STEP + 0.3, fwd = rotate({ ...v }, inv).z >= 0;
     const zlo = -half.z - (fwd ? 0.3 : reach), zhi = half.z + (fwd ? reach : 0.3);
     const hit = (person: Traffic['people'][number]) => {
-      if (person.ctl || person === T.keep) return;
+      if (T.held.person.has(person.id)) return;
       const q = T.peds[person.e];
       if (!q || (Math.abs(q.p[0][0] - x) > q.L + 15 || Math.abs(q.p[0][1] - z) > q.L + 15)) return;
       const w = T.personPoint(person, 0, this.A);

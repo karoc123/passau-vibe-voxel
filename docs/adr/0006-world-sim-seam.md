@@ -19,8 +19,8 @@ two runs differed.
 - **One host**: `sim/world-sim.ts` `WorldSim` owns the `Traffic` and loads the road physics (`LifePhysics`) through a
   loader it is given (the viewer: a lazy import of Rapier on the first edit or drive; the tools: tiles from disk). The
   viewer (`main.ts`), the tools (`life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs`) and later a server create it and
-  call `update(dt, { hour, day, focus, viewer })` the same way. In the viewer it is ticked only while the street life is
-  drawn (`main.ts`, as before the host existed); ticking it always is a one-line change left to the owner.
+  call `update(dt, { hour, day, focus, viewer })` the same way. In the viewer it is ticked every frame once the traffic is
+  loaded, whether or not the street life is drawn yet (`main.ts`; ADR 0008).
 - **World sim**: `sim/traffic.ts` (cars, people, riders, signals, edits, the people over a hole) and
   `physics/rapier/life-phys.ts` (the cars near edits as Rapier bodies, their colliders: `terrain.ts`, `vehicle.ts`),
   on `core/`. It imports no three.js, no `util.ts`, no DOM and no `fetch`: `tools/core-deps.mjs` scans all of
@@ -39,11 +39,14 @@ two runs differed.
 - **Inputs** (all through `WorldSim`): the hour and day, the focus (what is simulated) and the viewer (where agents may
   come and go unseen), the edited boxes (`WorldSim.edited`, from `core/live-edits.ts` in `main.ts`), the ground and
   water (`WorldSim.setWorld`: `world.ts` World), the tiles (injected loader or cache), and the players' commands keyed
-  by player id (`takeWheel`, `input`, `releaseWheel`, `resetDriver`; still outside it: `Traffic.keep`, `person.ctl`).
+  by player id (`follow`; a seat on an entity: the driver's with `takeWheel`, `input`, `releaseWheel`, `resetDriver`,
+  the walked person's with `walkAs`, `walkPose`, `release`; the viewer's player is `LOCAL_PLAYER`). The traffic keeps
+  what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
-  wrecks with their pose), the players' reads (`driverSnapshot`, `driverNotes`), and the events of the last update
-  (`WorldSim.events`: `struck`, people knocked down by a driven car; `dropped`, people fallen into a hole).
+  wrecks with their pose), the players' reads (`seat`, `walkedPose`, `driverSnapshot`, `driverNotes`), and the events,
+  each with the tick that produced it (`WorldSim.eventsSince(tick)`, kept `EVENT_TICKS`: `struck`, people knocked down
+  by a driven car; `dropped`, people fallen into a hole), so several readers each take theirs.
 - **The player's vehicles' cores** (`sim/craft/boat-motion.ts`, `sim/craft/plane-flight.ts`, `sim/craft/fpv-flight.ts`,
   `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`
   state and maths (`core/vec.ts`, three.js's arithmetic in its order), stepped by one fixed-step runner

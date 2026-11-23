@@ -87,6 +87,8 @@ export interface Car extends Blocked {
 
 export interface Person {
   kind: 'person';
+  /** its entity id, kept while it lives (people and riders are numbered apart from the cars: EntityRef) */
+  id: number;
   e: number;
   dir: number;
   s: number;
@@ -98,12 +100,15 @@ export interface Person {
   bike?: boolean;
   rp?: Vec3; // drawn (view/life.ts)
   rh?: number;
-  ctl?: { x: number; y: number; z: number; h: number; moving: boolean };
 }
 
 export type Agent = Car;
 export type Rideable = Car | Person;
 export type Kind = 'car' | 'person';
 export interface Pose { x: number; y: number; z: number; h: number }
+/** an entity of the world: a car (Car.id) or a person (Person.id); the kinds are numbered apart */
+export interface EntityRef { kind: Kind; id: number }
+/** where a player walking as a person puts them (their feet, their heading), and whether they walk */
+export interface WalkPose extends Pose { moving: boolean }
 
 export interface RoadPose extends Pose { pitch: number; roll: number }

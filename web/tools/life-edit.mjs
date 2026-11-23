@@ -16,8 +16,12 @@
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
 // The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
+//   players  two players by id (WorldSim follow, walkAs, walkPose, release; no physics): the person walked stands
+//          where the walk's poses put them, holds one player, and is kept with the car followed when the focus moves
+//          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
+//          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -202,15 +206,24 @@ async function dig() {
   log(`dig: r ${R} at (${op.x}, ${op.y}, deck ${deck.toFixed(1)}) 6 m ahead of car ${car.id} at ${car.v.toFixed(1)} m/s; ground there now ${below.toFixed(1)}`);
   check(below < deck - 3, `the dig opened the deck: ground ${f2(below)} under it, deck ${f2(deck)}`);
   const w = watcher(ctx);
-  let bodyAt = -1, minY = Infinity, fallers = new Set(), dropped = 0;
+  let bodyAt = -1, minY = Infinity, fallers = new Set(), dropped = 0, seen = ctx.sim.tick;
+  // a second reader of the events, every 5 s (WorldSim.eventsSince): the same ones, each with its tick
+  let late = [], lateSeen = ctx.sim.tick, firstTick = ctx.sim.tick;
   const t0 = ctx.t;
-  run(ctx, 15, () => {
+  run(ctx, 15, (i) => {
     w.tick();
     if (bodyAt < 0 && phys.owns(car)) bodyAt = ctx.t - t0;
     if (car.rp) minY = Math.min(minY, car.rp.y + lowEdge(car));
     for (const c of [...T.cars, ...T.detachedCars]) if (c.rp && c.rp.y < deck - 3 && Math.hypot(c.rp.x - ax, c.rp.z - az) < 8) fallers.add(c.id);
-    dropped += ctx.sim.events.dropped.length;
+    const fresh = ctx.sim.eventsSince(seen);
+    check(fresh.every((e) => e.tick > seen && e.tick <= ctx.sim.tick), 'the events read are those of the ticks since the last read');
+    dropped += fresh.filter((e) => e.kind === 'dropped').length;
+    seen = ctx.sim.tick;
+    if (i % 150 === 149) { late.push(...ctx.sim.eventsSince(lateSeen)); lateSeen = ctx.sim.tick; }
   });
+  check(late.filter((e) => e.kind === 'dropped').length === dropped && late.every((e) => e.tick > firstTick),
+    `a reader every 5 s gets the same events (${late.filter((e) => e.kind === 'dropped').length} / ${dropped} dropped)`);
+  check(ctx.sim.eventsSince(ctx.sim.tick).length === 0, 'nothing since the last tick');
   const lost = phys.log.find((l) => l.kind === 'lost' && l.id === car.id), rest = phys.log.find((l) => l.kind === 'rest' && l.id === car.id);
   const rim = [...phys.bodies.values()].filter((b) => b.state === 'track' && b.held && Math.hypot(b.car.rp.x - ax, b.car.rp.z - az) < 20).length;
   log(`  car ${car.id}: body after ${f2(bodyAt)} s, lowest ${f2(minY)}, lost ${lost ? `at ${f2(lost.t)} (${lost.why})` : 'never'}, rest ${rest ? `at y ${f2(rest.at[1])}` : 'never'}; ${fallers.size} car(s) fell in, ${rim} held near the rim; ${dropped} person(s) fell`);
@@ -366,6 +379,69 @@ function transit() {
   results.transit = { replay: 'same', coaches: a[0].coaches.length, vessels: a[0].vessels.length };
 }
 
+function players() {
+  const sim = new WorldSim(td, { seed: SEED }), T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
+  const tick = (seconds, f = focus, each) => {
+    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i); sim.update(STEP, { hour: HOUR, focus: f }); }
+  };
+  Math.random = noRandom;
+  try {
+    tick(5);
+    const ids = new Set([...T.people, ...T.riders].map((q) => q.id));
+    check(ids.size === T.people.length + T.riders.length, `every person has an id of their own (${ids.size} for ${T.people.length + T.riders.length})`);
+    const p = T.people.find((q) => !q.wait && q.v > 1), c = T.cars.find((q) => q.v > 1);
+    if (!check(p && c, 'a walking person and a moving car near the bridge')) return;
+    const other = T.people.find((q) => q !== p && !q.wait), o0 = other?.s;
+    const P0 = T.personPoint(p, 0, { x: 0, y: 0, z: 0 }), at = { x: P0.x, y: P0.z, z: P0.y, h: 0, moving: false };
+    sim.follow('A', { kind: 'person', id: p.id });
+    sim.follow('B', { kind: 'car', id: c.id });
+    check(sim.walkAs('A', p.id, at) && !sim.walkAs('B', p.id, at), 'the person walked holds one player: another\'s walkAs is refused');
+    check(sim.seat('A')?.role === 'walker' && sim.seat('A').entity.id === p.id && sim.seat('B') === null, 'the walker holds the person\'s seat, the follower none');
+    const s0 = p.s, e0 = p.e;
+    let last = at;
+    tick(3, focus, (i) => { last = { ...at, x: at.x + i * 0.04, h: 0.5, moving: true }; sim.walkPose('A', last); });
+    check(p.s === s0 && p.e === e0 && sim.walkedPose(p.id)?.x === last.x, 'the person walked stands where the walk puts them, off their way');
+    check(other && other.s !== o0, 'the crowd walks on meanwhile');
+    const far = { x: focus.x + 3000, z: focus.z };
+    tick(1, far);
+    const kept = T.people.includes(p) && T.cars.includes(c);
+    check(kept, 'the person walked and the car followed are kept when the focus moves 3 km away');
+    sim.release('A');
+    sim.follow('A', null);
+    sim.follow('B', null);
+    check(sim.walkedPose(p.id) === null && sim.seat('A') === null && !T.held.person.size && !T.held.car.size, 'released and unfollowed: nothing held');
+    tick(1, { x: far.x + 200, z: far.z });
+    const gone = !T.people.includes(p) && !T.cars.includes(c);
+    check(gone, 'let go, they leave with the circle');
+    // a hole (a ground with nothing under the street round a person walked): the others there fall, the one walked
+    // stands; two readers of the events, one every tick, one every 2 s, get the same ones with their ticks
+    const sim2 = new WorldSim(td, { seed: SEED }), T2 = sim2.traffic;
+    const tick2 = (seconds, each) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { sim2.update(STEP, { hour: HOUR, focus }); each?.(i); } };
+    tick2(5);
+    const q = T2.people.find((r) => !r.wait), Q = q && T2.personPoint(q, 0, { x: 0, y: 0, z: 0 });
+    if (!check(q, 'a person near the bridge')) return;
+    sim2.walkAs('A', q.id, { x: Q.x, y: Q.z, z: Q.y, h: 0, moving: false });
+    const near = (x, z) => Math.hypot(x - Q.x, z - Q.y) < 40;
+    sim2.setWorld({ surface: (x, z, y) => y, support: (x, z, top) => (near(x, z) ? -1000 : top) });
+    sim2.edited([Q.x - 40, Q.y - 40, Q.x + 40, Q.y + 40]);
+    const every = [], slow = [];
+    let seen = sim2.tick, slowSeen = sim2.tick;
+    const from = sim2.tick;
+    tick2(4, (i) => {
+      every.push(...sim2.eventsSince(seen)); seen = sim2.tick;
+      if (i % 60 === 59) { slow.push(...sim2.eventsSince(slowSeen)); slowSeen = sim2.tick; }
+    });
+    const drops = every.filter((e) => e.kind === 'dropped');
+    check(drops.length > 0 && drops.every((e) => e.person !== q) && T2.people.includes(q), `the people over the hole fall (${drops.length}), the one walked stands`);
+    check(JSON.stringify(every.map((e) => [e.tick, e.person.id])) === JSON.stringify(slow.map((e) => [e.tick, e.person.id]))
+      && every.every((e, k) => e.tick > from && (k === 0 || e.tick >= every[k - 1].tick)),
+    'two readers of the events at different rates get the same ones, in tick order');
+    results.players = { seat: 'one', kept: kept ? 'yes' : 'no', released: gone ? 'yes' : 'no', dropped: drops.length };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 const want = (k) => !only.length || only.includes(k);
 const costs = [], chunks = [], bodies = [];
 const done = (ctx) => {
@@ -385,6 +461,7 @@ if (want('block')) done(await block());
 if (want('wreck')) done(await wreck());
 if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
+if (want('players')) players();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
 console.log(`PASS life-edit: ${Object.entries(results).map(([k, v]) => `${k} ${typeof v === 'string' ? v : Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`).join('; ')}; ${cost}`);
