@@ -35,8 +35,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E7 | Commands a server can trust | M | **Ready** (best after E4) |
-| E4 | Player crafts on the world clock | L | **Ready** |
+| E7 | Commands a server can trust | M | **Ready** |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -99,6 +98,15 @@ Open from E3: radius and delay are guesses (owner); a placed block leaves trees 
 temporary damage (an op with an expiry) needs the TileCache to expose a node's raw files to rebuild it from its
 remaining ops; `initWorldEdits` is called by `dig.ts` and may move to `main.ts` once something else edits.
 
+E4 landed: `sim/craft/craft-core.ts` `CraftCore` (`clock`, `reach`, `neutral`, `events`, `reset`, `step`, `pose`,
+`velocity`, `drawn`, `unstick?`), cores for boat, hovercraft, helicopter, paraglider, drone, floatplane, jet
+(`sim/craft/cores.ts` `CORES`, built from `WorldSim.tuning`); `WorldSim.crafts` by craft id with a pilot seat
+(`addCraft`, `placeCraft`, `removeCraft`, `enterCraft`, `craftInput`, `resetCraft`, `leaveCraft`, `craftEvents`), stepped
+before the traffic; pilots are foci; `VoxelCollision` in `sim/craft/` with cache and clock injected; the nav files are
+shells. Open from E4: the shell still makes and removes the craft (a mode's job later; does a left craft stay in the
+world?); `drawn(alpha)` ignores alpha (interpolation is smoother, not neutral); the drone has no `Tuning` entry;
+craft commands apply at once (E7).
+
 E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
@@ -108,23 +116,11 @@ with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `Wo
 - **Why:** after E2, `follow`/`walkAs`/`walkPose`/`release` apply at once while `takeWheel` is queued per tick; the
   walker seat lives in `WorldSim.players`, the driver seat in `LifePhysics.drivers`, and nothing in the sim stops a
   player from holding both (only `nav` does); a client's walk pose is taken as given.
-- **Do:** every player command queued and applied at the start of a tick, in order; one seat per player enforced by
+- **Do:** every player command (walker, driver, and E4's `enterCraft`/`craftInput`/`leaveCraft`) queued and applied at the start of a tick, in order; one seat per player enforced by
   the sim, `release`/`releaseWheel` become one `leaveSeat`; the seat table owned by `WorldSim` (the driver's state
   stays in the physics); a walk pose bounded (speed, step height) against the last one. `LOCAL_PLAYER` moves out of
   the sim to the client (`nav/`).
 - **Gates:** tsc, core-deps, life-edit (players scenario), rapier-car, popin-check.
-
-### E4. Player crafts on the world clock (L, about M per craft group)
-
-- **Why:** only the car steps on the world tick. Boat (1/120 s), plane (own clock in the core), drone (1/120 s),
-  special crafts (1/60 s) and the walker (per frame) step in their shells, each with its own `VoxelCollision`.
-- **Do:** crafts are entities with seats like road vehicles (E2), not per-player singletons; one `CraftCore` contract (`reset(spot)`, `step(input, dt, world)`, `pose`, `drawn(alpha)`); WorldSim keeps
-  `crafts: Map<craftId, …>` (an entity with seats; a player's pilot seat goes through E2's seat model, not a
-  map keyed by player) with each craft's own fixed step (neutral); commands `enterCraft`, `craftInput`,
-  `leaveCraft`; `VoxelCollision` to the sim side with cache and clock injected, in the core-deps scan; shells keep
-  panel, camera, model, input mapping; the focus pause becomes neutral input. One craft group per commit: boat,
-  special crafts, drone, plane. The walker later.
-- **Gates:** boat 20, craft-motion 19, plane 32, collision 16, core-deps, tsc. Browser check per craft.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
