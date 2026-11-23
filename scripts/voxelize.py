@@ -1825,389 +1825,397 @@ def buildings(ctx):
                      top=top, topi=topi, vol=vol)
 
 
+def natural_ground(ctx):
+    """The open land OSM says nothing about (the ortho and the cadastre decide), cemeteries, the ground's columns
+    with their retaining walls, and the buildings' voxels: walls, parts, roofs on posts, roof colours."""
+    (CORE, H, TN, _locks, bmask, boti, cell_maxh, cellcol, exg, explicit, g, gcol, lum, nd_max, nd_mean, osm, over,
+     pitched_m, render, tn, top, topi, vol) = (
+        ctx.CORE, ctx.H, ctx.TN, ctx._locks, ctx.bmask, ctx.boti, ctx.cell_maxh, ctx.cellcol, ctx.exg,
+        ctx.explicit, ctx.g, ctx.gcol, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.over, ctx.pitched_m,
+        ctx.render, ctx.tn, ctx.top, ctx.topi, ctx.vol)
+    # ---------------------------------------------------------------- natural ground
+    # open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
+    # when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
+    # on the slopes and the river banks had come out as pale paving terraces. Streets and squares are drawn explicitly
+    # and stay as drawn.
+    _gy, _gx = np.gradient(ndimage.gaussian_filter(g.astype(np.float32), 1.5))
+    slope = np.hypot(_gx, _gy)
+    _water = gcol == C["water"]
+    _open = (gcol == C["paving"]) & (explicit == 0) & ~ndimage.binary_dilation(bmask, iterations=1)
+    _d_drawn = ndimage.distance_transform_edt(~((explicit > 0) | bmask))
+    _ex3, _lum3 = ndimage.median_filter(exg, 3), ndimage.median_filter(lum, 3)
+    _red_b = ndimage.median_filter(cellcol[..., 0] - cellcol[..., 2], 3)
+    _hill = ndimage.binary_closing(slope > 0.3, iterations=2)
+    _bank = (ndimage.distance_transform_edt(~_water) <= 10) & ~_water
+    _green = _ex3 > 0.03
+    _crown = nd_mean > 2.5
+    _brown = (_red_b > 14) & (_lum3 < 150) & ~_green & (_hill | (_d_drawn >= 6))  # (in town brown is a roof's eave or shadow)
+    _nat = np.full((D, W), C["paving"], np.uint16)
+    _nat[_bank & ~_hill] = C["shore"]  # a flat bank by the water the ortho sees grey: rip-rap and gravel
+    _nat[_brown] = C["dirt"]
+    _nat[_hill & (_d_drawn >= 2) & (_lum3 < 145)] = C["grass2"]  # a slope away from paths, not pale: meadow
+    _nat[_hill & (_crown | (_lum3 < 75))] = C["garden"]  # under the crowns or in their shade: the forest floor
+    _nat[_hill & _brown] = C["dirt2"]
+    _nat[_green & ~_crown] = C["grass"]
+    _nat[_green & _crown] = C["garden"]
+    # a mown or harvested field OSM does not map (its farmland stops at the map's edge, or none is drawn): pale and
+    # straw-yellow in the ortho, far from anything drawn, in a patch of 1000 cells or more (a building lot of bare sand or a
+    # cemetery is smaller) -- it was a paved square in the middle of the meadows
+    _straw = _open & ~_green & ~_crown & (_lum3 >= 140) & (_red_b > 18) & (_d_drawn >= 6)
+    _straw &= np.isin(tn, [0, TN["grassland"], TN["arable"]])  # (not on a cadastre's building plot, park or car park)
+    _straw = ndimage.binary_opening(_straw, iterations=2)
+    _straw &= region.windowed_sizes(_straw, 64, 64) >= 1000  # (its patch within 192 m of its block: region.py)
+    _nat[_straw] = C["stubble"]
+    # where the cadastre knows the land's use (ALKIS, above), the class is its, the shade the ortho's: forest and copse are
+    # forest floor under their crowns and meadow in the clearings (they were pale paving, dirt or straw wherever the ortho
+    # saw the ground between crowns pale or brown); grassland is meadow, pale straw where it is mown; a park lawn, its
+    # pale paths gravel; waste land bare earth or a meadow where it is green, the bank's stones by the water; a car park
+    # the car park's asphalt where it isn't green
+    _wood = np.isin(tn, [TN["forest"], TN["copse"]])
+    _nat[_wood] = np.where(_crown | (_lum3 < 75), C["garden"], C["grass2"])[_wood]
+    _k = tn == TN["grassland"]
+    _nat[_k] = np.where(_green, C["grass"], np.where((_lum3 >= 140) & ~_crown, C["stubble"],
+                                                      np.where(_crown, C["garden"], C["grass2"])))[_k]
+    _k = np.isin(tn, [TN["park"], TN["cemetery"]])
+    _nat[_k] = np.where(_green, np.where(_crown, C["garden"], C["grass"]), np.where(
+        (_lum3 >= 150) & (_d_drawn >= 1), C["gravel"], np.where(_crown | (_lum3 < 90), C["garden"], C["grass2"])))[_k]
+    _k = tn == TN["waste"]
+    _nat[_k] = np.where(_green, C["grass2"], np.where(_bank, C["shore"], C["dirt"]))[_k]
+    _k = tn == TN["parking"]
+    _nat[_k] = np.where(_green, C["grass"], C["parking"])[_k]
+    # the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
+    # quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
+    _edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
+    _nat[_edge] = C["shore"]
+    _nat[~_open] = C["paving"]
+    # a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
+    _NAT = ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble", "gravel", "parking")
+    _cls = [C[k] for k in _NAT]
+    _votes = np.stack([region.boxsum((_nat == k) & _open, 3) for k in _cls])  # (whole votes: a tie goes to the first)
+    _maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
+    gcol[_open] = _maj[_open]
+    note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in _NAT})
+    note("  of it by the cadastre's use:", {k: int(((tn == v) & _open).sum()) for k, v in TN.items()})
+
+    # ---------------------------------------------------------------- cemeteries
+    # a cemetery (landuse=cemetery, amenity=grave_yard) OSM gives no surface was the default pale paving: a car park
+    # among the trees. As the ortho shows them: lawn, gravel walks every ~25 m along the plot's long axis and across it,
+    # and between them rows of graves -- a headstone (one grey or dark voxel) and its planted bed in front, rows 3 m
+    # apart. The paths OSM maps and the chapels stay as drawn; the stones are set after the trees (grave_stones)
+    CEM_STONES = [pal(c) for c in ("#9a9790", "#a8a59d", "#b8b3a8", "#c4c0b6", "#8d8b86", "#6c6d6f", "#55575a")]  # granite, limestone, a few dark
+    grave_stones = []  # (row, col, palette id)
+    n_cem = 0
+    for oid, typ, t, geom in osm.areas:
+        if not (t.get("landuse") == "cemetery" or t.get("amenity") == "grave_yard") or underground(t):
+            continue
+        rr_, cc_ = cells_of(geom)
+        if not len(rr_):
+            continue
+        k_ = ~bmask[rr_, cc_] & (explicit[rr_, cc_] == 0) & np.isin(gcol[rr_, cc_], [C[k] for k in (
+            "paving", "paving2", "grass", "grass2", "garden", "shore", "dirt", "dirt2", "stubble")])
+        rr_, cc_ = rr_[k_], cc_[k_]
+        gcol[rr_, cc_] = C["grass2"]
+        if geom.area < 400:
+            continue
+        # the plot's axes: its minimum rotated rectangle's long side
+        # (in the project grid's coordinates: the same rectangle, and the same corner first, in every region)
+        from shapely.affinity import translate as _tr
+        _mr = [(x_ - C0, y_ - R0) for x_, y_ in _tr(geom, C0, R0).minimum_rotated_rectangle.exterior.coords]
+        _e = max(((_mr[i], _mr[i + 1]) for i in range(4)), key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
+        th = math.atan2(_e[1][1] - _e[0][1], _e[1][0] - _e[0][0])
+        _q = round(th / (math.pi / 2)) * (math.pi / 2)
+        if abs(th - _q) < math.radians(12):  # nearly square to the grid: rows on the grid (a diagonal of 1 m dots wobbles)
+            th = _q
+        ox, oy = _e[0]
+        x_, y_ = cc_ + 0.5 - ox, rr_ + 0.5 - oy
+        u_ = x_ * math.cos(th) + y_ * math.sin(th)
+        v_ = -x_ * math.sin(th) + y_ * math.cos(th)
+        v_ = np.abs(v_)
+        inner = geom.buffer(-2.5)
+        m_in = np.zeros((D, W), bool)
+        if not inner.is_empty:
+            _ri, _ci = cells_of(inner)
+            m_in[_ri, _ci] = True
+        walk = (np.mod(v_, 26) < 2) | (np.mod(u_ + 12, 30) < 2)  # gravel walks, 2 m wide
+        gcol[rr_[walk], cc_[walk]] = C["gravel"]
+        vm = np.floor(np.mod(v_ - 2, 26)).astype(int)  # 0..23 inside a block of rows
+        um = np.floor(np.mod(u_ + 10, 30)).astype(int)  # 0..27 along it
+        blk = ~walk & m_in[rr_, cc_] & (vm >= 1) & (vm <= 22) & (um >= 1) & (um <= 26)
+        row = vm % 3
+        # wide plain lawns in the ortho (the war graves' fields, a cemetery's meadow) keep rows; crowned cells keep them
+        # too (graves under the trees)
+        stone = blk & (row == 1) & (um % 2 == 0)
+        bed = blk & (row == 2) & (um % 2 == 0)
+        # between the graves gravel where the ortho sees the plot pale (the old town's churchyards: raked gravel between
+        # dense rows), lawn where it is green
+        aisle = blk & ~stone & ~bed & (_lum3[rr_, cc_] > 135) & (_ex3[rr_, cc_] < 0.03)
+        gcol[rr_[aisle], cc_[aisle]] = C["gravel"]
+        gcol[rr_[bed], cc_[bed]] = C["garden"]
+        for r, c in zip(rr_[stone], cc_[stone]):
+            grave_stones.append((int(r), int(c), CEM_STONES[cell_hash(r, c, "grave") % len(CEM_STONES)]))
+        n_cem += 1
+    note("cemeteries laid out:", n_cem, "grave stones:", len(grave_stones))
+
+    # ground column
+    for zz in range(H):
+        m = zz < g - 1
+        if not m.any():
+            break
+        vol[zz][m] = C["soil"]
+    rr, cc = np.nonzero(np.ones((D, W), bool))
+    vol[g[rr, cc] - 1, rr, cc] = gcol[rr, cc]
+    # a paved cell 2 m or more above a neighbour stands on a retaining wall (a quay, a terrace on the hillside, a ramp's
+    # side): its exposed face masonry, not the brown soil of a garden's bank -- rough stone blocks of a few greys
+    # (Passau's quays and terrace walls are granite and limestone; a flat pale concrete made them giant blank slabs).
+    # On natural ground too where OSM maps a wall (barrier=retaining_wall/wall/city_wall)
+    _nb_lo = ndimage.minimum_filter(g, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
+    _mat = np.array([e[3] for e in pal.entries] + [0] * 256)
+    _natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin(gcol, [C["dirt"], C["dirt2"], C["stubble"], C["stubble2"]])
+    _osm_wall = np.zeros((D, W), np.uint8)
+    burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
+                     if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
+    # a water override's outline is a wall too (a lock chamber's), faced in its own colour (default concrete) within 2 m
+    _lockwall = np.zeros((D, W), np.uint16)
+    if _locks:
+        burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in _locks])
+        burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in _locks])
+    _wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
+    n_rw = n_lw = 0
+    _rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)
+    for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
+        m = _wall & (zz >= _nb_lo) & (zz < g - 1)
+        if not m.any():
+            continue
+        # blocks 2 m long, courses offset course by course
+        k = ((_rr0[m] + _cc0[m] + (zz % 2)) // 2 * 2654435761 + zz * 40503) % 1000003 % len(STONE)
+        vol[zz][m] = np.array(STONE, np.uint16)[k]
+        n_rw += int(m.sum())
+        if _locks:
+            _lw = _lockwall[m]
+            vol[zz][m] = np.where(_lw > 0, _lw, vol[zz][m])
+            n_lw += int((_lw > 0).sum())
+    note("retaining walls (paved ground 2 m+ over a neighbour): masonry voxels", n_rw)
+    if _locks:
+        note("water overrides: wall face voxels", n_lw)
+        overrides.lock_gates(vol, g, gcol == C["water"], osm.lines, pal, landmarks.MAT_IDS, cells_of, BASE, note)
+
+    # buildings: base fill with the tallest covering feature's wall, then parts paint their own [minh, maxh)
+    basewall = np.zeros((D, W), np.uint16)
+    roofcol_fix = np.zeros((D, W), np.uint16)
+    for f in sorted(render, key=lambda f: f["maxh"] or float(np.median(top[f["rr"], f["cc"]]))):
+        basewall[f["rr"], f["cc"]] = f["wall"]
+    # an outline's cell outside all its parts, where the LiDAR stands as tall as a part within 4 m, is that part mapped a
+    # little small (a tower's beige concrete came out in the outline's brown glass): the part's wall
+    _parts = sorted([f for f in render if f["part"] and f["maxh"]], key=lambda f: f["maxh"])
+    _pid = np.zeros((D, W), np.int32)
+    for i_, f in enumerate(_parts, 1):
+        _pid[f["rr"], f["cc"]] = i_
+    n_pw = 0
+    for f in render:
+        if f["part"] or not f.get("has_parts"):
+            continue
+        if f["tags"].get("building:colour"):
+            continue  # the outline has its own facade colour (a glass upper storey round a white part): it stays
+        rr_, cc_ = f["rr"], f["cc"]
+        r0_, c0_ = max(rr_.min() - 5, 0), max(cc_.min() - 5, 0)
+        sub_ = _pid[r0_:rr_.max() + 6, c0_:cc_.max() + 6]
+        if not (sub_ > 0).any():
+            continue
+        d_, (ir_, ic_) = ndimage.distance_transform_edt(sub_ == 0, return_indices=True)
+        k_ = _pid[rr_, cc_] == 0
+        for r_, c_ in zip(rr_[k_], cc_[k_]):
+            i_, j_ = r_ - r0_, c_ - c0_
+            if d_[i_, j_] > 4:
+                continue
+            p_ = _parts[sub_[ir_[i_, j_], ic_[i_, j_]] - 1]
+            # a rim up to 2 m wide round a part (one outline cell per step of its rotated walls, striping its
+            # glass in the outline's dark grey) as soon as it stands 70 % of the part's height; up to 4 m when as tall
+            ok_ = (d_[i_, j_] <= 2 and topi[r_, c_] >= 0.7 * p_["maxh"]) or abs(p_["maxh"] - topi[r_, c_]) <= 6
+            if ok_ and p_["wall"] != basewall[r_, c_]:
+                basewall[r_, c_] = p_["wall"]
+                n_pw += 1
+    note("outline cells given their adjacent part's wall:", n_pw)
+    # LiDAR tower taller than the OSM part covering the cell (footprints misregistered):
+    # take the facade from the nearest OSM part that is tall enough to explain the height
+    tall_id = np.zeros((D, W), np.int32)
+    tall_feats = sorted([f for f in render if (f["maxh"] or 0) >= 30], key=lambda f: f["maxh"])
+    for i, f in enumerate(tall_feats, 1):
+        tall_id[f["rr"], f["cc"]] = i
+    need = bmask & np.isfinite(cell_maxh) & (topi > np.nan_to_num(cell_maxh) + 10) & (topi >= 30)
+    if need.any() and tall_feats:
+        dist, (ir, ic) = ndimage.distance_transform_edt(tall_id == 0, return_indices=True)
+        rr_, cc_ = np.nonzero(need)
+        fid = tall_id[ir[rr_, cc_], ic[rr_, cc_]]
+        ok = (dist[rr_, cc_] < 15) & (fid > 0)
+        n_fix = 0
+        for r_, c_, k_ in zip(rr_[ok], cc_[ok], fid[ok]):
+            f = tall_feats[k_ - 1]
+            if f["maxh"] >= topi[r_, c_] - 12:
+                basewall[r_, c_] = f["wall"]
+                roofcol_fix[r_, c_] = f["roof"]
+                n_fix += 1
+        note("tower cells recoloured from nearest tall OSM part:", n_fix)
+    # a roof on its own (building=roof, carport, canopy: the station's platform roofs, a petrol station's) is a sheet on
+    # posts, not a block: drawn from 2.5 m to the surface model's top it stood as a 3 m box of facade with windows over
+    # the platforms. One voxel of roof where nothing is under it, and posts along its middle (drawn below)
+    ROOF_ONLY = {"roof", "carport", "canopy"}
+    roof_only = [f for f in render if f["tags"].get("building") in ROOF_ONLY or f["tags"].get("building:part") == "roof"]
+    for f in roof_only:
+        k = (boti[f["rr"], f["cc"]] >= 2) & (topi[f["rr"], f["cc"]] >= 3)
+        rr_, cc_ = f["rr"][k], f["cc"][k]
+        boti[rr_, cc_] = np.maximum(boti[rr_, cc_], topi[rr_, cc_] - 1)
+    zb = g + boti
+    zt = g + topi
+    for zz in range(int(g.min()), H):
+        m = bmask & (zz >= zb) & (zz < zt)
+        if not m.any():
+            continue
+        vol[zz][m] = basewall[m]
+    _ro_ids = {id(f) for f in roof_only}
+    for f in sorted([f for f in render if f["part"] and f["maxh"] and id(f) not in _ro_ids], key=lambda f: -f["maxh"]):
+        rr_, cc_ = f["rr"], f["cc"]
+        k = bmask[rr_, cc_]
+        rr_, cc_ = rr_[k], cc_[k]
+        lo = g[rr_, cc_] + int(round(f["minh"]))
+        hi = np.minimum(g[rr_, cc_] + int(round(f["maxh"])), zt[rr_, cc_])
+        for zz in range(int(lo.min()) if len(lo) else 0, int(hi.max()) if len(hi) else 0):
+            m = (zz >= lo) & (zz < hi)
+            vol[zz, rr_[m], cc_[m]] = f["wall"]
+    n_post = 0
+    for f in roof_only:  # posts every 8 m along the roof's middle line (its cells farthest from the edge)
+        rr_, cc_ = f["rr"], f["cc"]
+        k = boti[rr_, cc_] >= 2
+        if k.sum() < 12:
+            continue
+        rr_, cc_ = rr_[k], cc_[k]
+        r0_, c0_ = rr_.min() - 1, cc_.min() - 1
+        m_ = np.zeros((rr_.max() - r0_ + 2, cc_.max() - c0_ + 2), bool)
+        m_[rr_ - r0_, cc_ - c0_] = True
+        dt_ = ndimage.distance_transform_edt(m_)
+        mid = m_ & (dt_ >= ndimage.maximum_filter(dt_, 3) - 0.01) & (dt_ >= min(2, dt_.max()))
+        pr, pc = np.nonzero(mid)
+        if not len(pr):
+            continue
+        pts = np.c_[pc, pr].astype(float)
+        _, _, vt_ = np.linalg.svd(pts - pts.mean(0), full_matrices=False)
+        t_ = (pts - pts.mean(0)) @ vt_[0]
+        last = -1e9
+        for j in np.argsort(t_):
+            if t_[j] - last < 8 and t_[j] < t_.max() - 0.5:
+                continue
+            if t_[j] - last < 3:
+                continue
+            last = t_[j]
+            r, c = pr[j] + r0_, pc[j] + c0_
+            top_ = int(zb[r, c])
+            col_ = vol[int(g[r, c]):top_, r, c]
+            col_[col_ == 0] = C["pole"]
+            n_post += 1
+    note("roofs on their own drawn as sheets on posts:", len(roof_only), "roofs,", n_post, "posts")
+    # roofs: topmost voxel of every building column (+ terraces: voxels with empty above)
+    roofcol = np.zeros((D, W), np.uint16)
+    for f in sorted(render, key=lambda f: f["maxh"] or 0):
+        roofcol[f["rr"], f["cc"]] = f["roof"]
+    roofcol = np.where(roofcol_fix > 0, roofcol_fix, roofcol)
+    # (patina copper is green in the ortho too, but as blue as it is green: churches' and palaces' roofs had grown
+    # lime gardens; planted roofs are yellow-green, blue under 0.85 of green -- a roof garden 0.70, patina 0.98-0.99)
+    green_roof = bmask & (exg > 0.08) & (topi < 40) & ~over & (cellcol[..., 2] < 0.85 * cellcol[..., 1])
+    # a green roof is an area, not a rim: the ortho's green along parapets (crowns hanging over the edge, copper, moss)
+    # put lime garden voxels on cornices and ledges all over the city. Opened by 1 cell, patches of 12+ cells, and not
+    # where the LiDAR stands 2 m above the roof (a crown over it)
+    green_roof &= nd_max < topi + 2
+    green_roof = ndimage.binary_opening(green_roof, iterations=1)
+    _gl, _gn = ndimage.label(green_roof)
+    if _gn:
+        green_roof &= np.r_[False, ndimage.sum(green_roof, _gl, range(1, _gn + 1)) >= 12][_gl]
+    # a small step in a facade (a 1-3 m setback, a stair of a sloping wing, an edge left lower by the LiDAR) is wall, not
+    # roof: the building's roof colour (taken from the ortho over its whole top) put cream blobs and checkerboards on glass
+    # towers. Patches under 25 cells more than 6 m below the highest top within 3 m.
+    _ledge = bmask & ~pitched_m & (topi < ndimage.maximum_filter(np.where(bmask, topi, 0), 7) - 6)  # (not a steep roof's eaves)
+    _lab, _n = ndimage.label(_ledge)
+    if _n:
+        _sz = ndimage.sum(_ledge, _lab, range(1, _n + 1))
+        _ledge &= np.r_[False, _sz < 25][_lab]
+    roofcol = np.where(_ledge & ~green_roof, basewall, roofcol)
+    note("facade steps topped with wall colour:", int(_ledge.sum()))
+    rr, cc = np.nonzero(bmask)
+    vol[zt[rr, cc] - 1, rr, cc] = np.where(green_roof[rr, cc], C["garden"], roofcol[rr, cc])
+    # a steep tiled roof steps 2-3 m from cell to cell: under its top voxel each step's side showed the wall's plaster, so
+    # from the street the old town's roofs read as more storeys of facade. In the historic core, the side of a step down
+    # to a lower cell of the same roof takes the roof's tiles or copper -- a dome's flanks step 3-4 m (a tower's side or a
+    # setback of 5 m or more stays wall). Outside it too on every pitched roof taken from LoD2
+    core_m = np.zeros((D, W), bool)
+    core_m[cells_of(CORE)] = True
+    mats_of_ids = np.array([e[3] for e in pal.entries] + [0] * 256)
+    n_rs = 0
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        nb_t = region.shift2(zt, (dr, dc)); nb_b = region.shift2(bmask, (dr, dc))
+        step = bmask & nb_b & (core_m | pitched_m) & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
+        for k in (2, 3, 4):
+            m = step & (zt - nb_t >= k)
+            rr_, cc_ = np.nonzero(m)
+            z_ = zt[rr_, cc_] - k
+            keep = mats_of_ids[vol[z_, rr_, cc_]] != M_ROOF
+            vol[z_[keep], rr_[keep], cc_[keep]] = roofcol[rr_[keep], cc_[keep]]
+            n_rs += int(keep.sum())
+    note("roof step sides in roof material (historic core, pitched roofs):", n_rs)
+    note("green roof cells:", int(green_roof.sum()))
+    # rooftop plant rooms, lift housings and stair heads (1.5-5 m over a building's main roof, under 80 cells) are roof
+    # material, not facade: they wore the facade's office windows and read as little houses on every roof
+    n_rb = 0
+    for f in render:
+        rr_, cc_ = f["rr"], f["cc"]
+        if len(rr_) < 100 or f["part"]:
+            continue
+        t_ = topi[rr_, cc_]
+        med_ = int(np.median(t_))
+        if med_ < 6:
+            continue
+        up_ = (t_ > med_ + 1.5) & (t_ <= med_ + 5)  # a plant room, lift housing or stair head: one storey
+        if not up_.any():
+            continue
+        m_ = np.zeros((rr_.max() - rr_.min() + 1, cc_.max() - cc_.min() + 1), bool)
+        m_[rr_[up_] - rr_.min(), cc_[up_] - cc_.min()] = True
+        lab_, nl_ = ndimage.label(m_)
+        small_ = np.r_[False, ndimage.sum(m_, lab_, range(1, nl_ + 1)) < 80]
+        # set back from the facade (none of it within 2 m of the outline's edge): a top storey flush with the facade
+        # (a crown storey) is building, not plant room
+        fp_ = np.zeros(m_.shape, bool)
+        fp_[rr_ - rr_.min(), cc_ - cc_.min()] = True
+        near_edge_ = ndimage.distance_transform_edt(np.pad(fp_, 1))[1:-1, 1:-1] <= 2
+        flush_ = np.r_[False, ndimage.maximum(near_edge_ & m_, lab_, range(1, nl_ + 1)) > 0] if nl_ else np.zeros(1, bool)
+        small_ &= ~flush_
+        k_ = up_ & small_[lab_[rr_ - rr_.min(), cc_ - cc_.min()]]
+        for r_, c_ in zip(rr_[k_], cc_[k_]):
+            z0_, z1_ = int(g[r_, c_]) + med_, int(zt[r_, c_]) - 1
+            col_ = vol[z0_:z1_, r_, c_]
+            col_[col_ != 0] = roofcol[r_, c_]
+            n_rb += 1
+    note("rooftop structures in roof material:", n_rb)
+    vars(ctx).update(grave_stones=grave_stones, zt=zt)
+
+
 STAGES = [  # (its name in the build's timing, the stage)
     ("rasters, cell colours, OSM", rasters),
     ("ground classes, roads, water", ground_classes),
     ("buildings", buildings),
+    ("natural ground, cemeteries", natural_ground),
 ]
 ctx = Ctx()
 for _name, _run in STAGES:
     _run(ctx)
     stage(_name)
 # (the stages to come are module code still: what they read of the ones above)
-(CORE, GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, TN, _jm, _locks, _roof_f, bmask, boti,
- bridge_lines, bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cell_maxh, cellcol,
- cycle_shapes, dsm, dsm_mean, dtm, exg, explicit, feats, foot_shapes, g, gcol, is_road, lit_ground_ways, lm, lum,
- nd_max, nd_mean, osm, over, parking_mask, pitched_m, rail_beds, rails, render, rgbsum, road_lines, splash_pads, tn,
- top, topi, vol) = (
-    ctx.CORE, ctx.GCTX, ctx.H, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC,
-    ctx.SANITY, ctx.TN, ctx._jm, ctx._locks, ctx._roof_f, ctx.bmask, ctx.boti, ctx.bridge_lines, ctx.bridge_rails,
-    ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways, ctx.cell_maxh, ctx.cellcol,
-    ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g,
-    ctx.gcol, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.over,
-    ctx.parking_mask, ctx.pitched_m, ctx.rail_beds, ctx.rails, ctx.render, ctx.rgbsum, ctx.road_lines,
-    ctx.splash_pads, ctx.tn, ctx.top, ctx.topi, ctx.vol)
-# ---------------------------------------------------------------- natural ground
-# open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
-# when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
-# on the slopes and the river banks had come out as pale paving terraces. Streets and squares are drawn explicitly
-# and stay as drawn.
-_gy, _gx = np.gradient(ndimage.gaussian_filter(g.astype(np.float32), 1.5))
-slope = np.hypot(_gx, _gy)
-_water = gcol == C["water"]
-_open = (gcol == C["paving"]) & (explicit == 0) & ~ndimage.binary_dilation(bmask, iterations=1)
-_d_drawn = ndimage.distance_transform_edt(~((explicit > 0) | bmask))
-_ex3, _lum3 = ndimage.median_filter(exg, 3), ndimage.median_filter(lum, 3)
-_red_b = ndimage.median_filter(cellcol[..., 0] - cellcol[..., 2], 3)
-_hill = ndimage.binary_closing(slope > 0.3, iterations=2)
-_bank = (ndimage.distance_transform_edt(~_water) <= 10) & ~_water
-_green = _ex3 > 0.03
-_crown = nd_mean > 2.5
-_brown = (_red_b > 14) & (_lum3 < 150) & ~_green & (_hill | (_d_drawn >= 6))  # (in town brown is a roof's eave or shadow)
-_nat = np.full((D, W), C["paving"], np.uint16)
-_nat[_bank & ~_hill] = C["shore"]  # a flat bank by the water the ortho sees grey: rip-rap and gravel
-_nat[_brown] = C["dirt"]
-_nat[_hill & (_d_drawn >= 2) & (_lum3 < 145)] = C["grass2"]  # a slope away from paths, not pale: meadow
-_nat[_hill & (_crown | (_lum3 < 75))] = C["garden"]  # under the crowns or in their shade: the forest floor
-_nat[_hill & _brown] = C["dirt2"]
-_nat[_green & ~_crown] = C["grass"]
-_nat[_green & _crown] = C["garden"]
-# a mown or harvested field OSM does not map (its farmland stops at the map's edge, or none is drawn): pale and
-# straw-yellow in the ortho, far from anything drawn, in a patch of 1000 cells or more (a building lot of bare sand or a
-# cemetery is smaller) -- it was a paved square in the middle of the meadows
-_straw = _open & ~_green & ~_crown & (_lum3 >= 140) & (_red_b > 18) & (_d_drawn >= 6)
-_straw &= np.isin(tn, [0, TN["grassland"], TN["arable"]])  # (not on a cadastre's building plot, park or car park)
-_straw = ndimage.binary_opening(_straw, iterations=2)
-_straw &= region.windowed_sizes(_straw, 64, 64) >= 1000  # (its patch within 192 m of its block: region.py)
-_nat[_straw] = C["stubble"]
-# where the cadastre knows the land's use (ALKIS, above), the class is its, the shade the ortho's: forest and copse are
-# forest floor under their crowns and meadow in the clearings (they were pale paving, dirt or straw wherever the ortho
-# saw the ground between crowns pale or brown); grassland is meadow, pale straw where it is mown; a park lawn, its
-# pale paths gravel; waste land bare earth or a meadow where it is green, the bank's stones by the water; a car park
-# the car park's asphalt where it isn't green
-_wood = np.isin(tn, [TN["forest"], TN["copse"]])
-_nat[_wood] = np.where(_crown | (_lum3 < 75), C["garden"], C["grass2"])[_wood]
-_k = tn == TN["grassland"]
-_nat[_k] = np.where(_green, C["grass"], np.where((_lum3 >= 140) & ~_crown, C["stubble"],
-                                                  np.where(_crown, C["garden"], C["grass2"])))[_k]
-_k = np.isin(tn, [TN["park"], TN["cemetery"]])
-_nat[_k] = np.where(_green, np.where(_crown, C["garden"], C["grass"]), np.where(
-    (_lum3 >= 150) & (_d_drawn >= 1), C["gravel"], np.where(_crown | (_lum3 < 90), C["garden"], C["grass2"])))[_k]
-_k = tn == TN["waste"]
-_nat[_k] = np.where(_green, C["grass2"], np.where(_bank, C["shore"], C["dirt"]))[_k]
-_k = tn == TN["parking"]
-_nat[_k] = np.where(_green, C["grass"], C["parking"])[_k]
-# the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
-# quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
-_edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
-_nat[_edge] = C["shore"]
-_nat[~_open] = C["paving"]
-# a 3 x 3 majority among the open cells: no single pale cell in a meadow, no single green cell on a courtyard
-_NAT = ("paving", "shore", "dirt", "dirt2", "grass", "grass2", "garden", "stubble", "gravel", "parking")
-_cls = [C[k] for k in _NAT]
-_votes = np.stack([region.boxsum((_nat == k) & _open, 3) for k in _cls])  # (whole votes: a tie goes to the first)
-_maj = np.array(_cls, np.uint16)[_votes.argmax(0)]
-gcol[_open] = _maj[_open]
-note("natural ground on open land (OSM silent):", {k: int(((gcol == C[k]) & _open).sum()) for k in _NAT})
-note("  of it by the cadastre's use:", {k: int(((tn == v) & _open).sum()) for k, v in TN.items()})
-
-# ---------------------------------------------------------------- cemeteries
-# a cemetery (landuse=cemetery, amenity=grave_yard) OSM gives no surface was the default pale paving: a car park
-# among the trees. As the ortho shows them: lawn, gravel walks every ~25 m along the plot's long axis and across it,
-# and between them rows of graves -- a headstone (one grey or dark voxel) and its planted bed in front, rows 3 m
-# apart. The paths OSM maps and the chapels stay as drawn; the stones are set after the trees (grave_stones)
-CEM_STONES = [pal(c) for c in ("#9a9790", "#a8a59d", "#b8b3a8", "#c4c0b6", "#8d8b86", "#6c6d6f", "#55575a")]  # granite, limestone, a few dark
-grave_stones = []  # (row, col, palette id)
-n_cem = 0
-for oid, typ, t, geom in osm.areas:
-    if not (t.get("landuse") == "cemetery" or t.get("amenity") == "grave_yard") or underground(t):
-        continue
-    rr_, cc_ = cells_of(geom)
-    if not len(rr_):
-        continue
-    k_ = ~bmask[rr_, cc_] & (explicit[rr_, cc_] == 0) & np.isin(gcol[rr_, cc_], [C[k] for k in (
-        "paving", "paving2", "grass", "grass2", "garden", "shore", "dirt", "dirt2", "stubble")])
-    rr_, cc_ = rr_[k_], cc_[k_]
-    gcol[rr_, cc_] = C["grass2"]
-    if geom.area < 400:
-        continue
-    # the plot's axes: its minimum rotated rectangle's long side
-    # (in the project grid's coordinates: the same rectangle, and the same corner first, in every region)
-    from shapely.affinity import translate as _tr
-    _mr = [(x_ - C0, y_ - R0) for x_, y_ in _tr(geom, C0, R0).minimum_rotated_rectangle.exterior.coords]
-    _e = max(((_mr[i], _mr[i + 1]) for i in range(4)), key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
-    th = math.atan2(_e[1][1] - _e[0][1], _e[1][0] - _e[0][0])
-    _q = round(th / (math.pi / 2)) * (math.pi / 2)
-    if abs(th - _q) < math.radians(12):  # nearly square to the grid: rows on the grid (a diagonal of 1 m dots wobbles)
-        th = _q
-    ox, oy = _e[0]
-    x_, y_ = cc_ + 0.5 - ox, rr_ + 0.5 - oy
-    u_ = x_ * math.cos(th) + y_ * math.sin(th)
-    v_ = -x_ * math.sin(th) + y_ * math.cos(th)
-    v_ = np.abs(v_)
-    inner = geom.buffer(-2.5)
-    m_in = np.zeros((D, W), bool)
-    if not inner.is_empty:
-        _ri, _ci = cells_of(inner)
-        m_in[_ri, _ci] = True
-    walk = (np.mod(v_, 26) < 2) | (np.mod(u_ + 12, 30) < 2)  # gravel walks, 2 m wide
-    gcol[rr_[walk], cc_[walk]] = C["gravel"]
-    vm = np.floor(np.mod(v_ - 2, 26)).astype(int)  # 0..23 inside a block of rows
-    um = np.floor(np.mod(u_ + 10, 30)).astype(int)  # 0..27 along it
-    blk = ~walk & m_in[rr_, cc_] & (vm >= 1) & (vm <= 22) & (um >= 1) & (um <= 26)
-    row = vm % 3
-    # wide plain lawns in the ortho (the war graves' fields, a cemetery's meadow) keep rows; crowned cells keep them
-    # too (graves under the trees)
-    stone = blk & (row == 1) & (um % 2 == 0)
-    bed = blk & (row == 2) & (um % 2 == 0)
-    # between the graves gravel where the ortho sees the plot pale (the old town's churchyards: raked gravel between
-    # dense rows), lawn where it is green
-    aisle = blk & ~stone & ~bed & (_lum3[rr_, cc_] > 135) & (_ex3[rr_, cc_] < 0.03)
-    gcol[rr_[aisle], cc_[aisle]] = C["gravel"]
-    gcol[rr_[bed], cc_[bed]] = C["garden"]
-    for r, c in zip(rr_[stone], cc_[stone]):
-        grave_stones.append((int(r), int(c), CEM_STONES[cell_hash(r, c, "grave") % len(CEM_STONES)]))
-    n_cem += 1
-note("cemeteries laid out:", n_cem, "grave stones:", len(grave_stones))
-
-# ground column
-for zz in range(H):
-    m = zz < g - 1
-    if not m.any():
-        break
-    vol[zz][m] = C["soil"]
-rr, cc = np.nonzero(np.ones((D, W), bool))
-vol[g[rr, cc] - 1, rr, cc] = gcol[rr, cc]
-# a paved cell 2 m or more above a neighbour stands on a retaining wall (a quay, a terrace on the hillside, a ramp's
-# side): its exposed face masonry, not the brown soil of a garden's bank -- rough stone blocks of a few greys
-# (Passau's quays and terrace walls are granite and limestone; a flat pale concrete made them giant blank slabs).
-# On natural ground too where OSM maps a wall (barrier=retaining_wall/wall/city_wall)
-_nb_lo = ndimage.minimum_filter(g, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
-_mat = np.array([e[3] for e in pal.entries] + [0] * 256)
-_natural_top = np.isin(_mat[gcol], [M_GRASS, M_LEAF, M_SOIL, M_WATER]) | np.isin(gcol, [C["dirt"], C["dirt2"], C["stubble"], C["stubble2"]])
-_osm_wall = np.zeros((D, W), np.uint8)
-burn(_osm_wall, [(l_.buffer(1.5), 1) for _, t_, l_ in osm.lines
-                 if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
-# a water override's outline is a wall too (a lock chamber's), faced in its own colour (default concrete) within 2 m
-_lockwall = np.zeros((D, W), np.uint16)
-if _locks:
-    burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in _locks])
-    burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in _locks])
-_wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
-n_rw = n_lw = 0
-_rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)
-for zz in range(int(_nb_lo[_wall].min()) if _wall.any() else 0, int(g.max())):
-    m = _wall & (zz >= _nb_lo) & (zz < g - 1)
-    if not m.any():
-        continue
-    # blocks 2 m long, courses offset course by course
-    k = ((_rr0[m] + _cc0[m] + (zz % 2)) // 2 * 2654435761 + zz * 40503) % 1000003 % len(STONE)
-    vol[zz][m] = np.array(STONE, np.uint16)[k]
-    n_rw += int(m.sum())
-    if _locks:
-        _lw = _lockwall[m]
-        vol[zz][m] = np.where(_lw > 0, _lw, vol[zz][m])
-        n_lw += int((_lw > 0).sum())
-note("retaining walls (paved ground 2 m+ over a neighbour): masonry voxels", n_rw)
-if _locks:
-    note("water overrides: wall face voxels", n_lw)
-    overrides.lock_gates(vol, g, gcol == C["water"], osm.lines, pal, landmarks.MAT_IDS, cells_of, BASE, note)
-
-# buildings: base fill with the tallest covering feature's wall, then parts paint their own [minh, maxh)
-basewall = np.zeros((D, W), np.uint16)
-roofcol_fix = np.zeros((D, W), np.uint16)
-for f in sorted(render, key=lambda f: f["maxh"] or float(np.median(top[f["rr"], f["cc"]]))):
-    basewall[f["rr"], f["cc"]] = f["wall"]
-# an outline's cell outside all its parts, where the LiDAR stands as tall as a part within 4 m, is that part mapped a
-# little small (a tower's beige concrete came out in the outline's brown glass): the part's wall
-_parts = sorted([f for f in render if f["part"] and f["maxh"]], key=lambda f: f["maxh"])
-_pid = np.zeros((D, W), np.int32)
-for i_, f in enumerate(_parts, 1):
-    _pid[f["rr"], f["cc"]] = i_
-n_pw = 0
-for f in render:
-    if f["part"] or not f.get("has_parts"):
-        continue
-    if f["tags"].get("building:colour"):
-        continue  # the outline has its own facade colour (a glass upper storey round a white part): it stays
-    rr_, cc_ = f["rr"], f["cc"]
-    r0_, c0_ = max(rr_.min() - 5, 0), max(cc_.min() - 5, 0)
-    sub_ = _pid[r0_:rr_.max() + 6, c0_:cc_.max() + 6]
-    if not (sub_ > 0).any():
-        continue
-    d_, (ir_, ic_) = ndimage.distance_transform_edt(sub_ == 0, return_indices=True)
-    k_ = _pid[rr_, cc_] == 0
-    for r_, c_ in zip(rr_[k_], cc_[k_]):
-        i_, j_ = r_ - r0_, c_ - c0_
-        if d_[i_, j_] > 4:
-            continue
-        p_ = _parts[sub_[ir_[i_, j_], ic_[i_, j_]] - 1]
-        # a rim up to 2 m wide round a part (one outline cell per step of its rotated walls, striping its
-        # glass in the outline's dark grey) as soon as it stands 70 % of the part's height; up to 4 m when as tall
-        ok_ = (d_[i_, j_] <= 2 and topi[r_, c_] >= 0.7 * p_["maxh"]) or abs(p_["maxh"] - topi[r_, c_]) <= 6
-        if ok_ and p_["wall"] != basewall[r_, c_]:
-            basewall[r_, c_] = p_["wall"]
-            n_pw += 1
-note("outline cells given their adjacent part's wall:", n_pw)
-# LiDAR tower taller than the OSM part covering the cell (footprints misregistered):
-# take the facade from the nearest OSM part that is tall enough to explain the height
-tall_id = np.zeros((D, W), np.int32)
-tall_feats = sorted([f for f in render if (f["maxh"] or 0) >= 30], key=lambda f: f["maxh"])
-for i, f in enumerate(tall_feats, 1):
-    tall_id[f["rr"], f["cc"]] = i
-need = bmask & np.isfinite(cell_maxh) & (topi > np.nan_to_num(cell_maxh) + 10) & (topi >= 30)
-if need.any() and tall_feats:
-    dist, (ir, ic) = ndimage.distance_transform_edt(tall_id == 0, return_indices=True)
-    rr_, cc_ = np.nonzero(need)
-    fid = tall_id[ir[rr_, cc_], ic[rr_, cc_]]
-    ok = (dist[rr_, cc_] < 15) & (fid > 0)
-    n_fix = 0
-    for r_, c_, k_ in zip(rr_[ok], cc_[ok], fid[ok]):
-        f = tall_feats[k_ - 1]
-        if f["maxh"] >= topi[r_, c_] - 12:
-            basewall[r_, c_] = f["wall"]
-            roofcol_fix[r_, c_] = f["roof"]
-            n_fix += 1
-    note("tower cells recoloured from nearest tall OSM part:", n_fix)
-# a roof on its own (building=roof, carport, canopy: the station's platform roofs, a petrol station's) is a sheet on
-# posts, not a block: drawn from 2.5 m to the surface model's top it stood as a 3 m box of facade with windows over
-# the platforms. One voxel of roof where nothing is under it, and posts along its middle (drawn below)
-ROOF_ONLY = {"roof", "carport", "canopy"}
-roof_only = [f for f in render if f["tags"].get("building") in ROOF_ONLY or f["tags"].get("building:part") == "roof"]
-for f in roof_only:
-    k = (boti[f["rr"], f["cc"]] >= 2) & (topi[f["rr"], f["cc"]] >= 3)
-    rr_, cc_ = f["rr"][k], f["cc"][k]
-    boti[rr_, cc_] = np.maximum(boti[rr_, cc_], topi[rr_, cc_] - 1)
-zb = g + boti
-zt = g + topi
-for zz in range(int(g.min()), H):
-    m = bmask & (zz >= zb) & (zz < zt)
-    if not m.any():
-        continue
-    vol[zz][m] = basewall[m]
-_ro_ids = {id(f) for f in roof_only}
-for f in sorted([f for f in render if f["part"] and f["maxh"] and id(f) not in _ro_ids], key=lambda f: -f["maxh"]):
-    rr_, cc_ = f["rr"], f["cc"]
-    k = bmask[rr_, cc_]
-    rr_, cc_ = rr_[k], cc_[k]
-    lo = g[rr_, cc_] + int(round(f["minh"]))
-    hi = np.minimum(g[rr_, cc_] + int(round(f["maxh"])), zt[rr_, cc_])
-    for zz in range(int(lo.min()) if len(lo) else 0, int(hi.max()) if len(hi) else 0):
-        m = (zz >= lo) & (zz < hi)
-        vol[zz, rr_[m], cc_[m]] = f["wall"]
-n_post = 0
-for f in roof_only:  # posts every 8 m along the roof's middle line (its cells farthest from the edge)
-    rr_, cc_ = f["rr"], f["cc"]
-    k = boti[rr_, cc_] >= 2
-    if k.sum() < 12:
-        continue
-    rr_, cc_ = rr_[k], cc_[k]
-    r0_, c0_ = rr_.min() - 1, cc_.min() - 1
-    m_ = np.zeros((rr_.max() - r0_ + 2, cc_.max() - c0_ + 2), bool)
-    m_[rr_ - r0_, cc_ - c0_] = True
-    dt_ = ndimage.distance_transform_edt(m_)
-    mid = m_ & (dt_ >= ndimage.maximum_filter(dt_, 3) - 0.01) & (dt_ >= min(2, dt_.max()))
-    pr, pc = np.nonzero(mid)
-    if not len(pr):
-        continue
-    pts = np.c_[pc, pr].astype(float)
-    _, _, vt_ = np.linalg.svd(pts - pts.mean(0), full_matrices=False)
-    t_ = (pts - pts.mean(0)) @ vt_[0]
-    last = -1e9
-    for j in np.argsort(t_):
-        if t_[j] - last < 8 and t_[j] < t_.max() - 0.5:
-            continue
-        if t_[j] - last < 3:
-            continue
-        last = t_[j]
-        r, c = pr[j] + r0_, pc[j] + c0_
-        top_ = int(zb[r, c])
-        col_ = vol[int(g[r, c]):top_, r, c]
-        col_[col_ == 0] = C["pole"]
-        n_post += 1
-note("roofs on their own drawn as sheets on posts:", len(roof_only), "roofs,", n_post, "posts")
-# roofs: topmost voxel of every building column (+ terraces: voxels with empty above)
-roofcol = np.zeros((D, W), np.uint16)
-for f in sorted(render, key=lambda f: f["maxh"] or 0):
-    roofcol[f["rr"], f["cc"]] = f["roof"]
-roofcol = np.where(roofcol_fix > 0, roofcol_fix, roofcol)
-# (patina copper is green in the ortho too, but as blue as it is green: churches' and palaces' roofs had grown
-# lime gardens; planted roofs are yellow-green, blue under 0.85 of green -- a roof garden 0.70, patina 0.98-0.99)
-green_roof = bmask & (exg > 0.08) & (topi < 40) & ~over & (cellcol[..., 2] < 0.85 * cellcol[..., 1])
-# a green roof is an area, not a rim: the ortho's green along parapets (crowns hanging over the edge, copper, moss)
-# put lime garden voxels on cornices and ledges all over the city. Opened by 1 cell, patches of 12+ cells, and not
-# where the LiDAR stands 2 m above the roof (a crown over it)
-green_roof &= nd_max < topi + 2
-green_roof = ndimage.binary_opening(green_roof, iterations=1)
-_gl, _gn = ndimage.label(green_roof)
-if _gn:
-    green_roof &= np.r_[False, ndimage.sum(green_roof, _gl, range(1, _gn + 1)) >= 12][_gl]
-# a small step in a facade (a 1-3 m setback, a stair of a sloping wing, an edge left lower by the LiDAR) is wall, not
-# roof: the building's roof colour (taken from the ortho over its whole top) put cream blobs and checkerboards on glass
-# towers. Patches under 25 cells more than 6 m below the highest top within 3 m.
-_ledge = bmask & ~pitched_m & (topi < ndimage.maximum_filter(np.where(bmask, topi, 0), 7) - 6)  # (not a steep roof's eaves)
-_lab, _n = ndimage.label(_ledge)
-if _n:
-    _sz = ndimage.sum(_ledge, _lab, range(1, _n + 1))
-    _ledge &= np.r_[False, _sz < 25][_lab]
-roofcol = np.where(_ledge & ~green_roof, basewall, roofcol)
-note("facade steps topped with wall colour:", int(_ledge.sum()))
-rr, cc = np.nonzero(bmask)
-vol[zt[rr, cc] - 1, rr, cc] = np.where(green_roof[rr, cc], C["garden"], roofcol[rr, cc])
-# a steep tiled roof steps 2-3 m from cell to cell: under its top voxel each step's side showed the wall's plaster, so
-# from the street the old town's roofs read as more storeys of facade. In the historic core, the side of a step down
-# to a lower cell of the same roof takes the roof's tiles or copper -- a dome's flanks step 3-4 m (a tower's side or a
-# setback of 5 m or more stays wall). Outside it too on every pitched roof taken from LoD2
-core_m = np.zeros((D, W), bool)
-core_m[cells_of(CORE)] = True
-mats_of_ids = np.array([e[3] for e in pal.entries] + [0] * 256)
-n_rs = 0
-for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-    nb_t = region.shift2(zt, (dr, dc)); nb_b = region.shift2(bmask, (dr, dc))
-    step = bmask & nb_b & (core_m | pitched_m) & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
-    for k in (2, 3, 4):
-        m = step & (zt - nb_t >= k)
-        rr_, cc_ = np.nonzero(m)
-        z_ = zt[rr_, cc_] - k
-        keep = mats_of_ids[vol[z_, rr_, cc_]] != M_ROOF
-        vol[z_[keep], rr_[keep], cc_[keep]] = roofcol[rr_[keep], cc_[keep]]
-        n_rs += int(keep.sum())
-note("roof step sides in roof material (historic core, pitched roofs):", n_rs)
-note("green roof cells:", int(green_roof.sum()))
-# rooftop plant rooms, lift housings and stair heads (1.5-5 m over a building's main roof, under 80 cells) are roof
-# material, not facade: they wore the facade's office windows and read as little houses on every roof
-n_rb = 0
-for f in render:
-    rr_, cc_ = f["rr"], f["cc"]
-    if len(rr_) < 100 or f["part"]:
-        continue
-    t_ = topi[rr_, cc_]
-    med_ = int(np.median(t_))
-    if med_ < 6:
-        continue
-    up_ = (t_ > med_ + 1.5) & (t_ <= med_ + 5)  # a plant room, lift housing or stair head: one storey
-    if not up_.any():
-        continue
-    m_ = np.zeros((rr_.max() - rr_.min() + 1, cc_.max() - cc_.min() + 1), bool)
-    m_[rr_[up_] - rr_.min(), cc_[up_] - cc_.min()] = True
-    lab_, nl_ = ndimage.label(m_)
-    small_ = np.r_[False, ndimage.sum(m_, lab_, range(1, nl_ + 1)) < 80]
-    # set back from the facade (none of it within 2 m of the outline's edge): a top storey flush with the facade
-    # (a crown storey) is building, not plant room
-    fp_ = np.zeros(m_.shape, bool)
-    fp_[rr_ - rr_.min(), cc_ - cc_.min()] = True
-    near_edge_ = ndimage.distance_transform_edt(np.pad(fp_, 1))[1:-1, 1:-1] <= 2
-    flush_ = np.r_[False, ndimage.maximum(near_edge_ & m_, lab_, range(1, nl_ + 1)) > 0] if nl_ else np.zeros(1, bool)
-    small_ &= ~flush_
-    k_ = up_ & small_[lab_[rr_ - rr_.min(), cc_ - cc_.min()]]
-    for r_, c_ in zip(rr_[k_], cc_[k_]):
-        z0_, z1_ = int(g[r_, c_]) + med_, int(zt[r_, c_]) - 1
-        col_ = vol[z0_:z1_, r_, c_]
-        col_[col_ != 0] = roofcol[r_, c_]
-        n_rb += 1
-note("rooftop structures in roof material:", n_rb)
-
-stage("natural ground, cemeteries")
+(GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _jm, _roof_f, bmask, bridge_lines,
+ bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm, dsm_mean, dtm,
+ exg, explicit, feats, foot_shapes, g, gcol, grave_stones, is_road, lit_ground_ways, lm, lum, nd_max, nd_mean, osm,
+ parking_mask, rail_beds, rails, render, rgbsum, road_lines, splash_pads, topi, vol, zt) = (
+    ctx.GCTX, ctx.H, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC, ctx.SANITY,
+    ctx._jm, ctx._roof_f, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_roads,
+    ctx.bridge_shapes, ctx.bridge_ways, ctx.cellcol, ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg,
+    ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g, ctx.gcol, ctx.grave_stones, ctx.is_road, ctx.lit_ground_ways,
+    ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.parking_mask, ctx.rail_beds, ctx.rails, ctx.render,
+    ctx.rgbsum, ctx.road_lines, ctx.splash_pads, ctx.topi, ctx.vol, ctx.zt)
 # ---------------------------------------------------------------- vegetation (LiDAR canopy + OSM trees)
 trees = [(oid, t, p) for oid, t, p in osm.nodes if t.get("natural") == "tree"]
 # every known tree (scripts/trees.py: OSM's tree nodes and the Bavarian single-tree register of the 2024 flight)
