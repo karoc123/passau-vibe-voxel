@@ -20,7 +20,8 @@ import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from './sim/sim-client';
 import { LOCAL_PLAYER } from './sim/world-sim';
-import { hostLocalSim } from './sim-host';
+import { hostSim } from './sim-host';
+import { WorkerLink } from './sim-worker-link';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
@@ -39,7 +40,7 @@ import { focusView } from './focus';
 import './style.css';
 
 declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __streamer?: TileStreamer }
+  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -469,11 +470,19 @@ async function boot() {
     // (the world sim made as a host would, sim-host.ts; its road physics (the shared Rapier world) loaded on the first
     // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
     // loads it), ?lpnear=, ?lpmax=)
-    // ?mirror=1: drawn from its snapshots (sim/snapshot.ts), as from a worker, in this thread
-    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), own = qs.get('mirror') === '1' ? structuredClone(td) : null;
-    const server = hostLocalSim(meta, td, { seed, world, eager: qs.get('dig') === '1',
-      physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax'), at: focus } });
-    const client = own ? new MirrorSimClient(new ThreadLink(server, LOCAL_PLAYER), own, world, LOCAL_PLAYER) : new LocalSimClient(server);
+    // ?worker=1: in a Web Worker (sim.worker.ts), drawn from its snapshots (sim/snapshot.ts); ?mirror=1: in this
+    // thread, drawn from its snapshots all the same
+    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1';
+    const physics = { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') };
+    let client: SimClient;
+    if (qs.get('worker') === '1') {
+      const link = window.__simLink = new WorkerLink({ seed, physics, eager, player: LOCAL_PLAYER });
+      client = new MirrorSimClient(link, td, world, LOCAL_PLAYER, true);
+    } else {
+      const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
+      const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, physics: { ...physics, at: focus } });
+      client = own ? new MirrorSimClient(new ThreadLink(server, LOCAL_PLAYER), own, world, LOCAL_PLAYER) : new LocalSimClient(server);
+    }
     sim = client;
     life = nav.life = new StreetLife(scene, client);
     movingActors.add(life.group);

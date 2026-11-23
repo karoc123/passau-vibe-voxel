@@ -1,9 +1,9 @@
-// The local server's side (docs/plans/local-server.md): the world sim made and wired as a host would, for the viewer.
-// The WorldSim (sim/world-sim.ts) with its road physics' loader (Rapier, the tiles through the viewer's TileCache), its
-// crafts' world (the same TileCache, the page's clock), its ground and water, the river boats' timetable, and the
-// world's edits: set up here (core/world-edits.ts initWorldEdits), each one told to the sim (its box; the road physics
-// loaded on the first unless asked not to). The page holds only the client (sim/sim-client.ts SimClient).
-// No three.js, no DOM but fetch: what a Web Worker could run.
+// The local server's side (docs/plans/local-server.md): the world sim made and wired as a host would, in the page's
+// thread (main.ts) or in a Web Worker (sim.worker.ts). The WorldSim (sim/world-sim.ts) with its road physics' loader
+// (Rapier, the tiles through the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and
+// water, the river boats' timetable, and the world's edits: set up here (core/world-edits.ts initWorldEdits), each one
+// told to the sim (its box; the road physics loaded on the first unless asked not to). The page holds only the client
+// (sim/sim-client.ts SimClient). No three.js, no DOM but fetch.
 import { liveEdits } from './core/live-edits';
 import { frameOf } from './core/layers';
 import { initWorldEdits } from './core/world-edits';
@@ -16,7 +16,7 @@ import type { Tuning } from './sim/tuning';
 import type { TrafficData } from './sim/types';
 import { WorldSim } from './sim/world-sim';
 import type { Meta } from './types';
-import { viewerTileCache } from './viewer-tiles';
+import type { TileCache } from './core/tile-cache';
 
 export interface HostOptions {
   /** the traffic's seed */
@@ -28,12 +28,16 @@ export interface HostOptions {
   physics: { bodies: boolean; near?: number; maxBodies?: number; at: () => { x: number; z: number } };
   /** the road physics loaded at once (?dig=1: edits to come) */
   eager?: boolean;
+  /** the world's node files (the viewer's: viewer-tiles.ts; a worker's own) */
+  cache: TileCache;
+  /** where data/ is (a worker's: the page's base URL) */
+  base?: string;
 }
 
-/** the viewer's world sim, in the page's thread, and its server (sim/sim-server.ts: the commands, the snapshots) */
-export function hostLocalSim(meta: Meta, td: TrafficData, opts: HostOptions) {
-  const N = meta.tiles.N, cache = viewerTileCache(N), level = meta.tiles.levels.find((l) => l.s === 1)!;
-  const sim = new WorldSim(td, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics),
+/** the viewer's world sim and its server (sim/sim-server.ts: the commands, the snapshots) */
+export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
+  const N = meta.tiles.N, cache = opts.cache, level = meta.tiles.levels.find((l) => l.s === 1)!;
+  const sim = new WorldSim(td, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, cache),
     crafts: { meta, cache, now: () => performance.now() } });
   sim.setWorld(opts.world, opts.world);
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;
@@ -44,18 +48,18 @@ export function hostLocalSim(meta: Meta, td: TrafficData, opts: HostOptions) {
     if (node && opts.physics.bodies) sim.loadPhysics().catch(() => {});
   });
   if (opts.eager && opts.physics.bodies) sim.loadPhysics().catch(() => {});
-  fetchJson<BoatData>('data/boats.json').then((bd) => sim.setBoats(bd)).catch((e) => console.warn('boats', e));
+  fetchJson<BoatData>(`${opts.base ?? ''}data/boats.json`).then((bd) => sim.setBoats(bd)).catch((e) => console.warn('boats', e));
   return new SimServer(sim);
 }
 
 // The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode
 // warms up
-async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics']) {
+async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics'], cache: TileCache) {
   try {
     const { LifePhysics, DEFAULTS } = await import('./physics/rapier/life-phys');
     const f = opts.at();
     return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
       near: opts.bodies ? opts.near ?? DEFAULTS.near : 0, maxBodies: opts.maxBodies ?? DEFAULTS.maxBodies,
-    }, { cache: viewerTileCache(meta.tiles.N) }, tuning.ride);
+    }, { cache }, tuning.ride);
   } catch (error) { console.warn('road physics', error); throw error; }
 }
