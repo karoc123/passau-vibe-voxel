@@ -35,9 +35,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E8 | A vehicle stays in the world when left | S–M | **Ready** |
 | E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
-| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Waits** (E8, E7 first; order in the plan) |
+| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Waits** (E7 first; order in the plan) |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
@@ -125,11 +124,13 @@ prediction); no interest filter per client; snapshots are plain objects (no type
 the mirror lerps instead of slerping (no gate); the worker's ground is level-1 nodes only (`tile-world.ts`) and decodes
 nodes the page also decodes; Rapier is bundled twice (page and worker chunk); `window.__sim` is now the client.
 
-### E8. A vehicle stays in the world when left (S–M, owner 2026-11-23)
-
-- **Do:** `leaveCraft`/`releaseWheel` leave the entity where it is (a craft on neutral input, a car parked); another
-  player can enter it; dropped by the presence rule of `sim/edit-keeper.ts` (nobody near, after a delay), the shells
-  no longer remove crafts on leave. Who places new ones stays with the shell until a mode layer exists.
+E8 landed (merge after `9de35751`): a left craft stays (empty-seat input per type: helicopter lets down, drone cuts
+throttle, plane glides and stays down once crashed, boats hands off), a parked car stays; both dropped by the shared
+presence rule (`sim/edit-keeper.ts` `Presence`, `Tuning.edits`). Commands `enterCraft`/`leaveCraft`; `SimClient.crafts()`;
+snapshot `crafts` (all placed, full core state); shells `board(craft)`, F boards the nearest empty craft within 150 m;
+`nav/crafts-view.ts` draws crafts not piloted locally; life-edit scenario `left`. Open from E8: no on-screen hint for F,
+not on foot; 1–2 frames on leave where nobody draws the craft; paraglider still removed on leave; the parked-car cap
+(8/24) kept beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence; no interest filter for crafts.
 
 ### E7. Commands a server can trust (M, from E2's open points)
 
