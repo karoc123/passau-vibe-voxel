@@ -21,6 +21,7 @@ import re
 import sys
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import rasterio.features
@@ -226,30 +227,12 @@ WALL_DEFAULTS = ["#d8cfc0", "#cbbfa8", "#e2d6bf", "#c4bbad", "#d9c7a7", "#cdc6ba
                  "#d3c3b0", "#c9c9c2"]
 
 stage("imports")
-# ---------------------------------------------------------------- rasters
-for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts/lod2.py")):
-    if not Path(_p).exists() and not (_p == "data/lod2.npz" and os.environ.get("NO_LOD2")):
-        raise SystemExit(f"{_p} missing: run {_by} first" + (" (or set NO_LOD2=1 for roofs, outlines and buildings from "
-                                                             "the surface model and OSM alone)" if "lod2" in _p else ""))
-if not os.environ.get("NO_LOD2") and "cen" not in np.load("data/lod2.npz").files:
-    raise SystemExit("data/lod2.npz has no footprints (`cen`): rerun scripts/lod2.py")
-if "cellcol" not in np.load("data/prep.npz").files:
-    raise SystemExit("data/prep.npz has no cell colours (`cellcol`): rerun scripts/prep.py")
-z = region.load_npz("data/prep.npz")  # (the region's rows and columns)
-dsm, dtm = z["dsm"], z["dtm"]
-cellcol = z["cellcol"].astype(np.float32)  # (each cell's colour: the median of its 5 x 5 ortho pixels, prep.py)
-del z
-LOD2 = region.load_npz("data/lod2.npz") if Path("data/lod2.npz").exists() else None
-d4 = dsm.reshape(D, 2, W, 2)
-dsm_max = d4.max((1, 3))
-dsm_mean = d4.mean((1, 3))
-dtm_s = boxmean(dtm, 3)
-SLAB = 3  # (aoi.BASE: the lowest terrain less SLAB)
-assert dtm.min() >= BASE + SLAB - 1, f"terrain {dtm.min():.1f} m under aoi.BASE + {SLAB}: lower aoi.BASE"
 
 
-nd_max = dsm_max - dtm
-nd_mean = dsm_mean - dtm
+class Ctx(SimpleNamespace):
+    """The region's build between its stages (STAGES, at the end): each stage takes what it reads of it and puts back
+    what a later stage reads. The palette (pal, C), the region's frame (aoi) and what goes to regions.py (RESULT,
+    report) are the module's."""
 
 
 def wall_clean(dsm):
@@ -283,32 +266,23 @@ def wall_clean(dsm):
     return out
 
 
-nd_max_b = wall_clean(dsm).reshape(D, 2, W, 2).max((1, 3)) - dtm  # building tops
-rgbsum = cellcol.sum(-1) + 1
-exg = (2 * cellcol[..., 1] - cellcol[..., 0] - cellcol[..., 2]) / rgbsum
-lum = cellcol @ np.array([0.299, 0.587, 0.114], np.float32)
-
-osm = OSM()
-note("OSM timestamp", osm.timestamp, "areas", len(osm.areas), "lines", len(osm.lines), "nodes", len(osm.nodes))
-
-
 def cells_of(geom, all_touched=False, fallback=True):
     """ways.cells on the region's grid; a geometry holding no cell's centre takes the cells it touches"""
     return _way_cells(geom, D, W, all_touched, fallback)
 
 
-def decided(geom, decide, shape_=None, fid=None):
+def decided(ctx, geom, decide, shape_=None, fid=None):
     """[(piece of geom, decide(rows, cols))]: a feature's decision from the cells of its outline (or of shape_), once
     for the whole of it. One spanning region.FMAX metres or more: with its id (fid, "<w|r><OSM id>:<kind of
     features.KINDS>"), from the feature pass's counts over its whole outline (features.py; in the pass itself: its
     counts over the region, nothing drawn); without, or not in the table, block by block (region.feature_parts: each
-    block's piece of it from its cells near the block)"""
+    block's piece of it from its cells near the block; ctx: the stages', its exg, lum, nd_mean what the pass counts)"""
     if fid is not None and region.spans(geom):
         if FEATURES_MODE:
             import features
             r_, c_ = cells_of(geom, fallback=False)
             kind = fid.split(":")[1]
-            FEATURE_STATS[fid] = [kind, features.counts(kind, r_, c_, exg, lum, nd_mean)]
+            FEATURE_STATS[fid] = [kind, features.counts(kind, r_, c_, ctx.exg, ctx.lum, ctx.nd_mean)]
             return []
         if FEATURE_TABLE is not None and fid in FEATURE_TABLE:
             FEATURE_USED[fid] = FEATURE_TABLE[fid]
@@ -334,17 +308,66 @@ def burn(target, shapes, all_touched=False):
     target[m > 0] = m[m > 0]
 
 
-# the ground: the terrain model rounded to whole metres, lifted where it dropped under a structure that carries a road
-# (scripts/ground.py: the passes in their order, GROUND_PASSES; the two of phase "decks" run with the bridges' decks)
-SAG_SRC = np.full((D, W), np.nan, np.float32)  # the surface the sag lift took the ground to (data/surface.npz gsrc)
-OPEN_CUT = set()  # the layer -1 ways open to the sky (ground.open_cut)
-GCTX = ground.Ctx(D=D, W=W, BASE=BASE, dtm=dtm, dtm_s=dtm_s, d4=d4, osm=osm, note=note, cells_of=cells_of, burn=burn,
-                  river_level=river_level, src=SAG_SRC, open_cut=OPEN_CUT, counts={}, changed={},
-                  n_ground=region.load_npz("data/laser.npz", ["n_ground"])["n_ground"]
-                  if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER") else None)
-g = ground.run(GCTX, "terrain")  # ground occupies z in [0, g)
+def rasters(ctx):
+    """The region's rasters (the surface and terrain models, the cells' colours from the ortho), its OSM, and the
+    ground: the terrain model rounded and lifted by ground.py's terrain passes."""
+    # ---------------------------------------------------------------- rasters
+    for _p, _by in (("data/prep.npz", "scripts/prep.py"), ("data/lod2.npz", "scripts/lod2.py")):
+        if not Path(_p).exists() and not (_p == "data/lod2.npz" and os.environ.get("NO_LOD2")):
+            raise SystemExit(f"{_p} missing: run {_by} first" + (" (or set NO_LOD2=1 for roofs, outlines and buildings from "
+                                                                 "the surface model and OSM alone)" if "lod2" in _p else ""))
+    if not os.environ.get("NO_LOD2") and "cen" not in np.load("data/lod2.npz").files:
+        raise SystemExit("data/lod2.npz has no footprints (`cen`): rerun scripts/lod2.py")
+    if "cellcol" not in np.load("data/prep.npz").files:
+        raise SystemExit("data/prep.npz has no cell colours (`cellcol`): rerun scripts/prep.py")
+    z = region.load_npz("data/prep.npz")  # (the region's rows and columns)
+    dsm, dtm = z["dsm"], z["dtm"]
+    cellcol = z["cellcol"].astype(np.float32)  # (each cell's colour: the median of its 5 x 5 ortho pixels, prep.py)
+    del z
+    LOD2 = region.load_npz("data/lod2.npz") if Path("data/lod2.npz").exists() else None
+    d4 = dsm.reshape(D, 2, W, 2)
+    dsm_max = d4.max((1, 3))
+    dsm_mean = d4.mean((1, 3))
+    dtm_s = boxmean(dtm, 3)
+    SLAB = 3  # (aoi.BASE: the lowest terrain less SLAB)
+    assert dtm.min() >= BASE + SLAB - 1, f"terrain {dtm.min():.1f} m under aoi.BASE + {SLAB}: lower aoi.BASE"
 
-stage("rasters, cell colours, OSM")
+    nd_max = dsm_max - dtm
+    nd_mean = dsm_mean - dtm
+
+    nd_max_b = wall_clean(dsm).reshape(D, 2, W, 2).max((1, 3)) - dtm  # building tops
+    rgbsum = cellcol.sum(-1) + 1
+    exg = (2 * cellcol[..., 1] - cellcol[..., 0] - cellcol[..., 2]) / rgbsum
+    lum = cellcol @ np.array([0.299, 0.587, 0.114], np.float32)
+
+    osm = OSM()
+    note("OSM timestamp", osm.timestamp, "areas", len(osm.areas), "lines", len(osm.lines), "nodes", len(osm.nodes))
+
+    # the ground: the terrain model rounded to whole metres, lifted where it dropped under a structure that carries a road
+    # (scripts/ground.py: the passes in their order, GROUND_PASSES; the two of phase "decks" run with the bridges' decks)
+    SAG_SRC = np.full((D, W), np.nan, np.float32)  # the surface the sag lift took the ground to (data/surface.npz gsrc)
+    OPEN_CUT = set()  # the layer -1 ways open to the sky (ground.open_cut)
+    GCTX = ground.Ctx(D=D, W=W, BASE=BASE, dtm=dtm, dtm_s=dtm_s, d4=d4, osm=osm, note=note, cells_of=cells_of, burn=burn,
+                      river_level=river_level, src=SAG_SRC, open_cut=OPEN_CUT, counts={}, changed={},
+                      n_ground=region.load_npz("data/laser.npz", ["n_ground"])["n_ground"]
+                      if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER") else None)
+    g = ground.run(GCTX, "terrain")  # ground occupies z in [0, g)
+    vars(ctx).update(GCTX=GCTX, LOD2=LOD2, OPEN_CUT=OPEN_CUT, SAG_SRC=SAG_SRC, cellcol=cellcol, dsm=dsm,
+                     dsm_mean=dsm_mean, dtm=dtm, exg=exg, g=g, lum=lum, nd_max=nd_max, nd_max_b=nd_max_b,
+                     nd_mean=nd_mean, osm=osm, rgbsum=rgbsum)
+
+
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
+# (the stages to come are module code still: what they read of the ones above)
+(GCTX, LOD2, OPEN_CUT, SAG_SRC, cellcol, dsm, dsm_mean, dtm, exg, g, lum, nd_max, nd_max_b, nd_mean, osm, rgbsum) = (
+    ctx.GCTX, ctx.LOD2, ctx.OPEN_CUT, ctx.SAG_SRC, ctx.cellcol, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.g,
+    ctx.lum, ctx.nd_max, ctx.nd_max_b, ctx.nd_mean, ctx.osm, ctx.rgbsum)
 # ---------------------------------------------------------------- ground classes
 gcol = np.full((D, W), C["paving"], np.uint16)
 is_road = np.zeros((D, W), bool)
@@ -391,7 +414,7 @@ for oid, typ, t, geom in osm.areas:
         key = LANDUSE[t["landuse"]]
         if key == "grass":
             # (sorted by the whole outline's area below, pieces and all)
-            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(geom, _lawn, fid=f"{typ[0]}{oid}:lawn"))
+            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(ctx, geom, _lawn, fid=f"{typ[0]}{oid}:lawn"))
         else:
             soft.append((geom, C[key]))
     if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
@@ -413,7 +436,7 @@ for oid, typ, t, geom in osm.areas:
         soft.append((geom, C["fresh"]))
     if t.get("amenity") == "parking" and t.get("parking") not in ("underground", "multi-storey", "rooftop"):
         if "surface" not in t:
-            hard.extend((p_, C[k_]) for p_, k_ in decided(geom, _car_park, fid=f"{typ[0]}{oid}:car_park"))
+            hard.extend((p_, C[k_]) for p_, k_ in decided(ctx, geom, _car_park, fid=f"{typ[0]}{oid}:car_park"))
         else:
             hard.append((geom, C[SURF.get(t.get("surface"), "parking")]))
 # a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
@@ -632,7 +655,7 @@ for oid, t, line in osm.lines:
             green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
             pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
             return "dirt" if green_ else "paving" if pale_ else "gravel"
-        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(poly, _way, fid=f"w{oid}:way"))
+        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(ctx, poly, _way, fid=f"w{oid}:way"))
     elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
         foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
 note(f"roads taking their square's surface: {n_inherit}")
