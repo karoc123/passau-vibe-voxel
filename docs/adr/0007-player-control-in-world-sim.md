@@ -51,9 +51,15 @@ the same interface with one player.
 - Train coaches publish 2.9 × 4 × 20 m boxes. Near a player driver the shared Rapier world moves kinematic colliders
   to the coach poses over the two physics substeps. Player cars and bikes register impacts and trains keep their
   scheduled movement. Collisions with walkers, boats and aircraft and trains stopping for track obstructions are open.
-- Copy `BOAT`, `PLANE`, `RIDE` and related defaults into read-only tuning for each world instance. Pass that tuning
-  to the cores and physics constructors, with vehicle-specific overrides resolved at creation. Tools that vary tuning
-  create worlds with different settings. A run can be reproduced from its build, seed, tuning and input history.
+- Tuning is read-only and passed in. `Tuning` (`sim/tuning.ts`) is `{ ride, boat, plane, jet, craft }`;
+  `DEFAULT_TUNING` gathers the frozen defaults, which stay next to the code they tune (`RIDE` in `sim/vehicles.ts`,
+  `BOAT`, `PLANE`, `JET`, `CRAFT` in `sim/craft/`). Each part goes to its consumer's constructor, with the default as
+  fallback: `ride` to `createVehicle`/`createWheels`, `RapierCar` and `LifePhysics`; `boat` to `BoatMotion` and
+  `findSpawn`; `plane` or `jet` to `PlaneFlight`; `craft` to `CraftMotion`. Vehicle-specific overrides (`CarBuild.tune`
+  in the catalog) are resolved at creation (`rideOf`). One world per server (ADR 0008), so the point is no mutation
+  and explicit passing, not several instances. Tools that vary tuning build a modified copy and pass it
+  (`rapier-car.mjs --set`, `surface-gap.mjs --set`, `plane.mjs --set`). A run can be reproduced from its build, seed,
+  tuning and input history.
 
 ## Migration and validation
 
