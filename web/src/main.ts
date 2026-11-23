@@ -18,7 +18,8 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
-import type { SimClient } from './sim/sim-client';
+import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from './sim/sim-client';
+import { LOCAL_PLAYER } from './sim/world-sim';
 import { hostLocalSim } from './sim-host';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
@@ -468,9 +469,11 @@ async function boot() {
     // (the world sim made as a host would, sim-host.ts; its road physics (the shared Rapier world) loaded on the first
     // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
     // loads it), ?lpnear=, ?lpmax=)
-    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined);
-    const { client } = hostLocalSim(meta, td, { seed, world, eager: qs.get('dig') === '1',
+    // ?mirror=1: drawn from its snapshots (sim/snapshot.ts), as from a worker, in this thread
+    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), own = qs.get('mirror') === '1' ? structuredClone(td) : null;
+    const server = hostLocalSim(meta, td, { seed, world, eager: qs.get('dig') === '1',
       physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax'), at: focus } });
+    const client = own ? new MirrorSimClient(new ThreadLink(server, LOCAL_PLAYER), own, world, LOCAL_PLAYER) : new LocalSimClient(server);
     sim = client;
     life = nav.life = new StreetLife(scene, client);
     movingActors.add(life.group);

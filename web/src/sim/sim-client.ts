@@ -10,13 +10,19 @@
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { CarInput } from '../physics/rapier/car';
 import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
-import { apply as applyEdit, type WorldOp } from '../core/world-edits';
-import type { Traffic, TrafficBodies } from './traffic';
-import type { EntityRef, WalkPose } from './types';
+import type { WorldOp } from '../core/world-edits';
+import { liveEdits } from '../core/live-edits';
+import type { BoatView } from './boat-traffic';
+import type { Traffic, TrafficBodies, Ground } from './traffic';
+import type { EntityRef, TrafficData, WalkPose } from './types';
 import type { VehicleId } from './vehicles';
 import type { CraftCore, CraftSpot } from './craft/craft-core';
-import type { CraftType } from './craft/cores';
-import type { CraftId, CraftInput, PlayerId, Seat, SimEvent, SimInput, WorldSim } from './world-sim';
+import { CORES, type CraftType } from './craft/cores';
+import { loadState } from './craft/core-state';
+import { DEFAULT_TUNING } from './tuning';
+import { TrafficMirror, type Snapshot } from './snapshot';
+import type { SimServer } from './sim-server';
+import { EVENT_TICKS, type CraftId, type CraftInput, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
 
 /** a player's command (ADR 0007: keyed by player id), applied at the start of the sim's next update, in order:
  *   follow        follow an entity (no rights over it), or none
@@ -47,19 +53,19 @@ export type SimCommand =
   | { kind: 'craftInput'; player: PlayerId; input: CraftInput }
   | { kind: 'resetCraft'; player: PlayerId }
   | { kind: 'dropCraft'; player: PlayerId }
-  | { kind: 'edit'; player: PlayerId; op: WorldOp };
+  | { kind: 'edit'; player: PlayerId; op: WorldOp; ref?: number };
 
 /** what became of a command that can be refused (walkAs, spawnCraft, placeCraft, resetCraft, edit), at the tick it
- * was applied before */
-export interface CommandResult { tick: number; kind: SimCommand['kind']; ok: boolean }
+ * was applied before; an edit's: its ref and the level-1 nodes it changed */
+export interface CommandResult { tick: number; kind: SimCommand['kind']; ok: boolean; ref?: number; nodes?: [number, number][] }
 
 /** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
  * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
  * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
  * snapshots (docs/plans/local-server.md). Read only, except the drawn fields (rp, rh, pitch, roll) on its agents. */
 export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
-  'acc' | 'trains' | 'boats' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
-  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null };
+  'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
+  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
 
 /** a player craft as the page sees it: its id and type, its pilot, whether it is put down, its core's state (read
  * only: pose, drawn(alpha), the motion or flight its shell shows). Its collision is the sim's; a shell queries the
@@ -103,95 +109,151 @@ export interface SimClient {
   edit(player: PlayerId, op: WorldOp): Promise<[number, number][]>;
 }
 
-type Queued = { cmd: SimCommand; done?: (nodes: [number, number][]) => void; fail?: (e: unknown) => void };
-
-/** the sim in the page's thread: a WorldSim made by the page (sim-host.ts) */
+/** the sim in the page's thread, read where it is (the page draws the sim's own objects): a SimServer over the
+ * WorldSim made by the page (sim-host.ts) */
 export class LocalSimClient implements SimClient {
-  private queue: Queued[] = [];
-  private readonly outcomes = new Map<PlayerId, CommandResult[]>();
+  private nextRef = 1;
+  private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
-  constructor(private readonly sim: WorldSim) {}
+  constructor(private readonly server: SimServer) {
+    server.onEdit = (ref, nodes, error) => {
+      const p = this.pending.get(ref);
+      this.pending.delete(ref);
+      if (nodes) p?.done(nodes); else p?.fail(error);
+    };
+  }
 
+  private get sim() { return this.server.sim; }
   get tick() { return this.sim.tick; }
   get traffic(): TrafficView { return this.sim.traffic; }
 
-  send(cmd: SimCommand) { this.queue.push({ cmd }); }
+  send(cmd: SimCommand) { this.server.send(cmd); }
 
   edit(player: PlayerId, op: WorldOp) {
-    return new Promise<[number, number][]>((done, fail) => this.queue.push({ cmd: { kind: 'edit', player, op }, done, fail }));
+    const ref = this.nextRef++;
+    return new Promise<[number, number][]>((done, fail) => {
+      this.pending.set(ref, { done, fail });
+      this.server.send({ kind: 'edit', player, op, ref });
+    });
   }
 
-  update(dt: number, input: SimInput) {
-    this.flush();
-    this.sim.update(dt, input);
-  }
-
-  /** the commands sent so far applied (update does it first) */
-  flush() {
-    const q = this.queue;
-    this.queue = [];
-    for (const item of q) this.apply(item);
-  }
+  update(dt: number, input: SimInput) { this.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-
-  results(player: PlayerId, kind: SimCommand['kind']) {
-    const r = this.outcomes.get(player);
-    if (!r?.some((o) => o.kind === kind)) return [];
-    this.outcomes.set(player, r.filter((o) => o.kind !== kind));
-    return r.filter((o) => o.kind === kind);
-  }
-
+  results(player: PlayerId, kind: SimCommand['kind']) { return this.server.results(player, kind); }
   seat(player: PlayerId) { return this.sim.seat(player); }
   walkedPose(personId: number) { return this.sim.walkedPose(personId); }
   driver(player: PlayerId) { return this.sim.driverSnapshot(player); }
   driverNotes(player: PlayerId) { return this.sim.driverNotes(player); }
   craftOf(player: PlayerId): CraftView | null { return this.sim.craftOf(player); }
   craftEvents(player: PlayerId) { return this.sim.craftEvents(player); }
-
   loadPhysics(warm?: { x: number; z: number }) { return this.sim.loadPhysics(warm).then(() => {}); }
+}
 
-  private result(cmd: SimCommand, ok: boolean, tick = this.sim.tick) {
-    const r = this.outcomes.get(cmd.player), out = { tick, kind: cmd.kind, ok };
-    if (r) r.push(out); else this.outcomes.set(cmd.player, [out]);
+/** how a MirrorSimClient reaches its sim: the frame's commands and input sent, the snapshots back (onSnapshot), the
+ * road physics loaded there */
+export interface SimLink {
+  frame(dt: number, input: SimInput, commands: SimCommand[]): void;
+  loadPhysics(warm?: { x: number; z: number }): Promise<void>;
+  onSnapshot: (s: Snapshot) => void;
+}
+
+/** a SimServer in the page's thread: its snapshot at once after each frame (the snapshot format checked without a
+ * worker: ?mirror=1) */
+export class ThreadLink implements SimLink {
+  onSnapshot: (s: Snapshot) => void = () => {};
+  constructor(private readonly server: SimServer, private readonly player: PlayerId) {}
+  frame(dt: number, input: SimInput, commands: SimCommand[]) {
+    for (const c of commands) this.server.send(c);
+    this.server.update(dt, input);
+    this.onSnapshot(this.server.snapshot(this.player));
+  }
+  loadPhysics(warm?: { x: number; z: number }) { return this.server.sim.loadPhysics(warm).then(() => {}); }
+}
+
+/** the sim reached through snapshots (a worker's, or a ThreadLink's): the page draws a copy of the traffic
+ * (TrafficMirror) and of its player's craft, set from the latest snapshot; it holds one player's reads (player) */
+export class MirrorSimClient implements SimClient {
+  readonly traffic: TrafficMirror;
+  private queue: SimCommand[] = [];
+  private last: Snapshot | null = null;
+  private events: SimEvent[] = [];
+  private notes: Snapshot['player']['notes'] = [];
+  private craftEventList: unknown[] = [];
+  private outcomes: CommandResult[] = [];
+  private craft: (CraftView & { core: CraftCore; pilot: PlayerId | null; placed: boolean }) | null = null;
+  private nextRef = 1;
+  private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
+
+  /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
+   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread) */
+  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly player: PlayerId,
+    private readonly edits = false) {
+    this.traffic = new TrafficMirror(data, ground);
+    link.onSnapshot = (s) => this.take(s);
   }
 
-  private apply({ cmd, done, fail }: Queued) {
-    const S = this.sim, p = cmd.player;
-    switch (cmd.kind) {
-      case 'follow': S.follow(p, cmd.entity); break;
-      case 'walkAs': this.result(cmd, S.walkAs(p, cmd.person, cmd.pose)); break;
-      case 'walkPose': S.walkPose(p, cmd.pose); break;
-      case 'release': S.release(p); break;
-      case 'takeWheel': S.takeWheel(p, cmd.car, cmd.choice); break;
-      case 'drive': S.input(p, cmd.input); break;
-      case 'releaseWheel': S.releaseWheel(p); break;
-      case 'resetDriver': S.resetDriver(p); break;
-      case 'spawnCraft': {
-        let ok = false;
-        try {
-          const c = S.addCraft(cmd.type);
-          ok = S.enterCraft(p, c.id);
-          if (ok) S.placeCraft(c.id, cmd.spot); else S.removeCraft(c.id);
-        } catch (e) { console.warn('spawnCraft', e); }
-        this.result(cmd, ok);
-        break;
-      }
-      case 'placeCraft': {
-        const c = S.craftOf(p);
-        if (c) S.placeCraft(c.id, cmd.spot);
-        this.result(cmd, !!c);
-        break;
-      }
-      case 'craftInput': S.craftInput(p, cmd.input); break;
-      case 'resetCraft': this.result(cmd, S.resetCraft(p)); break;
-      case 'dropCraft': { const c = S.craftOf(p); if (c) S.removeCraft(c.id); break; }
-      case 'edit': {
-        const tick = S.tick;
-        applyEdit(cmd.op).then((nodes) => { this.result(cmd, nodes.length > 0, tick); done?.(nodes); },
-          (e) => { this.result(cmd, false, tick); fail?.(e); });
-        break;
-      }
+  get tick() { return this.last?.tick ?? 0; }
+
+  send(cmd: SimCommand) { this.queue.push(cmd); }
+
+  edit(player: PlayerId, op: WorldOp) {
+    const ref = this.nextRef++;
+    return new Promise<[number, number][]>((done, fail) => {
+      this.pending.set(ref, { done, fail });
+      this.send({ kind: 'edit', player, op, ref });
+    });
+  }
+
+  update(dt: number, input: SimInput) {
+    const q = this.queue;
+    this.queue = [];
+    this.link.frame(dt, input, q);
+  }
+
+  private take(s: Snapshot) {
+    this.last = s;
+    if (this.edits) for (const e of s.edits) liveEdits.set(e.tx, e.ty, e.node, e.region);
+    this.events.push(...this.traffic.apply(s));
+    const old = s.tick - EVENT_TICKS;
+    if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
+    const P = s.player;
+    this.notes.push(...P.notes);
+    this.craftEventList.push(...P.craftEvents);
+    for (const r of P.results) {
+      const p = r.kind === 'edit' && r.ref !== undefined ? this.pending.get(r.ref) : undefined;
+      if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
+      this.outcomes.push(r);
+    }
+    const c = P.craft;
+    if (!c) this.craft = null;
+    else {
+      if (this.craft?.id !== c.id) this.craft = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) };
+      this.craft.pilot = c.pilot;
+      this.craft.placed = c.placed;
+      loadState(this.craft.core, c.core);
     }
   }
+
+  eventsSince(tick: number) {
+    const E = this.events;
+    let i = E.length;
+    while (i > 0 && E[i - 1].tick > tick) i--;
+    return E.slice(i);
+  }
+
+  results(player: PlayerId, kind: SimCommand['kind']) {
+    if (player !== this.player) return [];
+    const mine = this.outcomes.filter((o) => o.kind === kind);
+    if (mine.length) this.outcomes = this.outcomes.filter((o) => o.kind !== kind);
+    return mine;
+  }
+
+  seat(player: PlayerId) { return player === this.player ? this.last?.player.seat ?? null : null; }
+  walkedPose(personId: number) { return this.traffic.walked.get(personId) ?? null; }
+  driver(player: PlayerId) { return player === this.player ? this.last?.player.driver ?? null : null; }
+  driverNotes(player: PlayerId) { return player === this.player ? this.notes.splice(0) : []; }
+  craftOf(player: PlayerId): CraftView | null { return player === this.player ? this.craft : null; }
+  craftEvents(player: PlayerId) { return player === this.player ? this.craftEventList.splice(0) : []; }
+  loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }

@@ -64,6 +64,19 @@ export interface TrafficBodies {
   owns(c: Car): boolean;
   controlled?(c: Car): boolean;
   pose(c: Car, a: number): void;
+  /** what pose(c, a) draws from, for a client's copy of the traffic (sim/snapshot.ts); null: nothing (its path's pose) */
+  drawState?(c: Car): BodyDraw | null;
+}
+
+/** a car's body as drawn (TrafficBodies.drawState): owns (a body, not on its path), body (one at all), its drawn
+ * poses at the last two ticks (p0, p1; null: none moving it), its fade back onto its path (t, dur: s; d*: the offset
+ * blended out) */
+export interface BodyDraw {
+  owns: boolean;
+  body: boolean;
+  p0: RoadPose | null;
+  p1: RoadPose | null;
+  fade: { dx: number; dy: number; dz: number; dh: number; t: number; dur: number } | null;
 }
 
 // a car's kinematic pose: the ground point between its axles on its path, its heading, nose up

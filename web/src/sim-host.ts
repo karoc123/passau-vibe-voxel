@@ -10,7 +10,7 @@ import { initWorldEdits } from './core/world-edits';
 import { fetchJson } from './fetch';
 import type { BoatData } from './sim/boat-traffic';
 import type { WaterColumns } from './sim/river';
-import { LocalSimClient } from './sim/sim-client';
+import { SimServer } from './sim/sim-server';
 import type { Ground } from './sim/traffic';
 import type { Tuning } from './sim/tuning';
 import type { TrafficData } from './sim/types';
@@ -30,7 +30,7 @@ export interface HostOptions {
   eager?: boolean;
 }
 
-/** the viewer's world sim, in the page's thread, and the client the page holds of it */
+/** the viewer's world sim, in the page's thread, and its server (sim/sim-server.ts: the commands, the snapshots) */
 export function hostLocalSim(meta: Meta, td: TrafficData, opts: HostOptions) {
   const N = meta.tiles.N, cache = viewerTileCache(N), level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(td, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics),
@@ -45,7 +45,7 @@ export function hostLocalSim(meta: Meta, td: TrafficData, opts: HostOptions) {
   });
   if (opts.eager && opts.physics.bodies) sim.loadPhysics().catch(() => {});
   fetchJson<BoatData>('data/boats.json').then((bd) => sim.setBoats(bd)).catch((e) => console.warn('boats', e));
-  return { sim, client: new LocalSimClient(sim) };
+  return new SimServer(sim);
 }
 
 // The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode
