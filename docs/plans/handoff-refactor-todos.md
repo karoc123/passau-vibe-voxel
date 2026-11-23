@@ -35,7 +35,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| R6 | Split `voxelize.py` into stages | L | **Ready** |
+| R6 | The rest of `voxelize.py`'s stages (main part on `r6`) | S–M | **Ready to merge** (`r6`); rest **Ready** after it |
 | R7 | Smaller independent items | M each | **Ready** |
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
@@ -55,17 +55,21 @@ gone into "Ready". For a partially completed package, remove the landed item and
 - **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
 - **Update:** `tools/gates.mjs` if paths change. The check counts must stay identical.
 
-### R6. Split `voxelize.py` into stages (code-health 13 = P4, L)
+### R6. The rest of `voxelize.py`'s stages (code-health 13 and 18, S–M each)
 
-- **Waits for:** nothing. The defect assertions in `check.py verify` (`scripts/fixtures/road-defects.json`) are
-  its guard. The ground-height passes are already in `scripts/ground.py` (`GROUND_PASSES`), the
-  way helpers in `scripts/ways.py`.
-- **Do:** one stage per commit, `def stage(ctx)` over an explicit context. Each commit must be byte-exact under
-  `check.py golden --compare` (no data rebuild needed).
-- **Cut:** the proposal is in code-health 13.
-- **Do:** replace the module globals used as an API (`tunnels.FLOOR/IDS`, `underpass.WALK/SKIP`, `traffic.OPEN_CUT`).
-- **Include code-health 18:** a class raster or palette flags instead of finding cells by colour, and one
-  `scripts/constants.py`.
+Landed on branch `r6` (ready to merge): `voxelize.py` runs as `STAGES`, 19 `def stage(ctx)` functions over a `Ctx`
+(SimpleNamespace); `scripts/constants.py` (material ids, the ground colours caps.py reads); `tunnels.plan/build`,
+`underpass.build` return their results; `traffic.build(open_cut=...)`. Left:
+
+- **traffic.py's inputs:** it still reads `tunnels.FLOOR/IDS` and `underpass.WALK/IDS/SHIFTED`, which `regions.py`
+  sets for the whole map. Pass them to `traffic.build` as arguments (after R7's split of `build`).
+- **Class raster (code-health 18):** `caps.py` still finds steps by `ground.npz` rgb and paved ids by colour (the
+  colours now come from `constants.py`, so a colour change follows). A class raster written by `voxelize.py` changes
+  the outputs: golden differs by design, and it needs a data rebuild.
+- **Stage cuts:** the bridges' decks and bridgeheads still sit in `furniture` (stage name "fountains, beds,
+  furniture"); split them into a `bridges` stage. Some context fields keep their old private names (`_best`,
+  `_lift`, `_tr_t`, `_jm`, `_locks`, `_core_s`, `_bored`, `_walked`): give them plain names.
+- Guard: each commit byte-exact under `check.py golden --compare`.
 
 ### R7. Smaller items from code-health 19 (M each, independent)
 
