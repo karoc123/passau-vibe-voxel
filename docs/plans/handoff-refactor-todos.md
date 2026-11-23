@@ -199,6 +199,9 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
     run 0–1 m over the floor. Needs the embankment level corrected.
   - Rail tunnels 24153461 and 101216178 under the ZOB: north portal (1285,993) blocked for 3 m by the walls of
     building 96488064 carried down into the trench.
+  - Passage through a building at voxel 1998,21,681 (owner, 2026-11-23): the house is built solid where a way runs
+    through it. Check first whether OSM maps the way as `tunnel=building_passage` / `covered=yes` and whether
+    `clearance.py` reads it there. `?cam=1938.5,69.3,669.7,1998,21.7,681.7&date=07-16&hour=20.38`.
 - Road spots older than this list are in [road-defects.md](road-defects.md).
 
 ## Feature packages

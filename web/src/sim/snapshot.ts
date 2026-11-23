@@ -122,7 +122,9 @@ export class TrafficMirror implements TrafficView {
   get people() { return this.T.people; }
   get riders() { return this.T.riders; }
   get active() { return this.T.active; }
-  get acc() { return this.T.acc; }
+  /** the time since the last tick the traffic is drawn at: the snapshot's own, unless the client sets one */
+  lead: number | null = null;
+  get acc() { return this.lead ?? this.T.acc; }
   get trains() { return this.T.trains; }
   get ground() { return this.T.ground; }
   carPose: Traffic['carPose'] = (c, s, off, out) => this.T.carPose(c, s, off, out);
@@ -137,6 +139,7 @@ export class TrafficMirror implements TrafficView {
     const T = this.T;
     const events = s.events.map((e) => ({ ...e, person: this.peopleById.get(e.person.id) ?? e.person }));
     T.acc = s.acc; T.t = s.t; T.day = s.day;
+    this.lead = null;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;
     else if (!T.active || T.active.x !== s.active.x || T.active.z !== s.active.z) T.active = s.active;

@@ -486,7 +486,7 @@ async function boot() {
     let client: SimClient;
     if (qs.get('worker') === '1') {
       const link = window.__simLink = new WorkerLink({ seed, physics, eager, player: LOCAL_PLAYER });
-      client = new MirrorSimClient(link, td, world, LOCAL_PLAYER, true);
+      client = new MirrorSimClient(link, td, world, LOCAL_PLAYER, true, true);
     } else {
       const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
       const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, physics: { ...physics, at: focus } });
