@@ -143,7 +143,7 @@ Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils di
   (`terrain | structure | foliage | city edge | ceiling`) and the normal's axis, or `'loading'` (the drone then
   waits). Above `meta.H` (173 m, the map's top) it returns before looking at any tile. `surface(x, z)` gives the
   ground and the highest solid top of a column (trees included). The map's edges and a ceiling at `meta.H + 600`
-  are walls. Headless gate: `web/tools/collision.mjs` (`nav/collision-checks.ts`).
+  are walls. Headless gate: `web/tools/collision.mjs` (`checks/collision-checks.ts`).
 - **Car** (`nav/drive.ts`, `nav/drive-session.ts`, `physics/rapier/*`): a traffic car taken over, Rapier body,
   session without DOM, chase camera through `nav.ride` and `ride.ts`, crash shake (`nav.rideShake`), river: splash,
   then back on the road (a ring of "safe" poses). Touch: `TouchSticks(canvas, { onPinch, camera: 'right' })`, one

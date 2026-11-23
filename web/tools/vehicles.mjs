@@ -1,4 +1,4 @@
-// The vehicle catalog (src/sim/vehicles.ts) driven headless on synthetic terrain (physics/rapier/scenarios.ts Sim),
+// The vehicle catalog (src/sim/vehicles.ts) driven headless on synthetic terrain (checks/scenarios.ts Sim),
 // each type as the player drives it (car.ts RapierCar with the type's CarBuild):
 //   top     -- full throttle from rest on a 1 km flat street: its top speed within the type's range (TOP), 0-50 km/h
 //   curve   -- half lock at 50 km/h (a bus 30) for 4 s: turned, upright

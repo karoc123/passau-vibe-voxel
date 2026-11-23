@@ -1,4 +1,4 @@
-// The FPV drone's collision (src/nav/voxel-collision.ts) headless: src/nav/collision-checks.ts (a synthetic world
+// The FPV drone's collision (src/nav/voxel-collision.ts) headless: checks/collision-checks.ts (a synthetic world
 // served as real node files; sweeps of the drone's cube, surfaces; a hall with a door and its room recorded: the drone
 // and a walker go in and stay in, World.inRoom). Then, on the real data (public/data) if it is
 // there: the drone flown through a tunnel under a hill (scripts/tunnels.py) 2 m over the road along the traffic road

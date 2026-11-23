@@ -1,10 +1,10 @@
-// The plane's flight (src/nav/plane-flight.ts) headless: src/nav/plane-checks.ts on a synthetic world of boxes (level
+// The plane's flight (src/nav/plane-flight.ts) headless: checks/plane-checks.ts on a synthetic world of boxes (level
 // flight, throttle range, stall and recovery, climbing costs speed, turn, the map's wall, the ceiling, water landing,
 // taxi and takeoff, crashes on land and on water, respawn, skim, loading, fuzz, pitch_smooth: no snap on W/S). Then, on the real data (public/data)
 // if it is there, through the real VoxelCollision (node files read from disk) and its water: the Danube flown from
 // the west edge to the Altstadt 60 m over its water by a simple follower (no crash), and a landing on it, a taxi and a
 // takeoff.
-// The jet (PLANE's core with JET's numbers and the aerobatic law: nav/jet-checks.ts): top speed, stall, roll rate, loop,
+// The jet (PLANE's core with JET's numbers and the aerobatic law: checks/jet-checks.ts): top speed, stall, roll rate, loop,
 // inverted, turn, smooth pitch, the map's wall, crash and respawn, fuzz; on the real data a low pass over the Danube
 // and the Altstadt at ~400 km/h, the collision tiles fetched as the viewer fetches them (no wait once under way).
 // usage (in web/): node tools/plane.mjs [--type floatplane|jet] [--json] [--set KEY=VALUE ...] (--set: the types run);

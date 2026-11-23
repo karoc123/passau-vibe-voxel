@@ -274,7 +274,7 @@ Plumbing (`caps` rides exactly where `rooms`/`planes` ride today — grep `rooms
 `tile-data.ts` (`Columns.caps`, `decodeTile` returns `caps: Uint16Array | null`), `types.ts` `ColumnData`,
 `mesher.worker.ts` `copyColumns`/`columnBuffers`/`meshJob`, `stream.ts` (`replaceColumns` keeps the node's L0 `caps`
 with the edited columns), `core/tile-cache.ts`, `core/live-edits.ts` `LiveNode.base`, `world.ts`,
-`nav/collision-checks.ts` (synthetic node files), `tools/tile-roundtrip.mjs` + `scripts/tile_roundtrip.py` (write a
+`checks/world.ts` (synthetic node files), `tools/tile-roundtrip.mjs` + `scripts/tile_roundtrip.py` (write a
 `caps` section with ground, deck and negative deltas; decode and compare).
 
 ### 3.2 Readers

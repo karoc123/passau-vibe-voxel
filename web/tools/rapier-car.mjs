@@ -1,4 +1,4 @@
-// Rapier car scenarios (src/physics/rapier/scenarios.ts) and the drive mode's (drive-scenarios.ts: a traffic car
+// Rapier car scenarios (checks/scenarios.ts) and the drive mode's (drive-scenarios.ts: a traffic car
 // knocked out, a person hit, the river and back, a crash landing, through LifePhysics), headless in node.
 // usage: node tools/rapier-car.mjs [--spike] [--json] [scenario ...]
 //          synthetic voxel terrain; exit code 1 if a scenario fails

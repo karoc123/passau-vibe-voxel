@@ -304,7 +304,10 @@ node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screen
 ```
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
-and the benches; `data-dir.mjs` and `real-city.mjs` are shared helpers, not tools.
+and the benches; `lib.mjs` (`imp`: a web/ module through vite's runner; `serveTiles`: the node files from disk to
+`fetch`), `data-dir.mjs` and `real-city.mjs` are shared helpers, not tools. `web/checks/` holds the check harnesses the
+tools run (synthetic worlds in `world.ts`, results as `check.ts` `Check`); it is type-checked with `src/` but not part of
+the app: nothing in `src/` may import it (`tools/core-deps.mjs`).
 
 No analytics: the page loads nothing beyond its own files and the Google font.
 
@@ -370,22 +373,22 @@ Benches and diagnostics (not gates): `remesh-bench` (meshing an edited node from
 lost ghosts), `life-phys-scan` (where the traffic's paths leave no room for a car), `rapier-car-bench`.
 
 **FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/nav/voxel-collision.ts`)
-over a small synthetic world (`src/nav/collision-checks.ts`: a ground height per column, boxes for walls and decks,
+over a small synthetic world (`checks/collision-checks.ts` on `checks/world.ts`: a ground height per column, boxes for walls and decks,
 written as real node files and served through a stubbed fetch): a sweep before the tiles are in waits, the drone's
 cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
 code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
 
 **Boat: `node tools/boat.mjs`** (~2 s). The player's boat (`src/nav/boat-motion.ts`) on a synthetic channel
-(`src/nav/boat-checks.ts`, served as `collision.mjs`'s world): speed, turning, drifting, the bank, a pier and a low
+(`checks/boat-checks.ts`, served as `collision.mjs`'s world): speed, turning, drifting, the bank, a pier and a low
 footbridge bounced off, under a bridge, put in and unstuck; then on the real data (skipped without it): put in near
 the Altstadt, a lap, under the Schanzlbrücke, into the bank. Exit code 1 on a failure.
 
 **Plane: `node tools/plane.mjs`** (~6 s). The floatplane's flight (`src/nav/plane-flight.ts`) on a synthetic world of
-boxes (`src/nav/plane-checks.ts`): level flight, the throttle's range, stall and recovery, climbing costs speed, the
+boxes (`checks/plane-checks.ts`): level flight, the throttle's range, stall and recovery, climbing costs speed, the
 turn, the map's wall, the ceiling, a water landing with taxi and takeoff, crashes on land and on water and the
-respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`src/nav/plane-real.ts`, skipped
+respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`checks/plane-real.ts`, skipped
 without it): the Danube flown from the west edge to the Altstadt 60 m over its water, and landed on, taxied and taken
-off from. Then the jet (`JET`, `src/nav/jet-checks.ts`): level top speed, stall, roll rate, a loop, inverted flight,
+off from. Then the jet (`JET`, `checks/jet-checks.ts`): level top speed, stall, roll rate, a loop, inverted flight,
 a hard turn, smooth pitch (the floatplane's criteria), the map's wall, crash and respawn, a gentle touch of water (a
 splash), 10 min of random input; on the real data a low pass along the Danube and over the Altstadt at ~410 km/h with
 every collision file 1 s late (no wait for a tile once under way). `--type floatplane|jet` runs one; `--set KEY=VALUE`
@@ -397,7 +400,7 @@ across ids, one id still merges into one top. Ids are 16-bit end to end; the map
 code 1 on a failure; check any change to the mesher's greedy merge with it.
 
 **Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel
-terrain (`src/physics/rapier/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
+terrain (`checks/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
 ramps along, across and diagonal, a bridge. Ground and slope cases print how much the car wobbles (`pitchJit`,
 `rollJit`: RMS of the pitch and roll rate less their 0.5 s mean, rad/s; `liftPct`: share of samples with a wheel
 off the ground; `lifts`: how often one left it) and how floaty it is (`vyErr`: RMS of the body's vertical speed less
@@ -409,7 +412,7 @@ on level ground (overshoot, settle time, frequency), `steer_step` holds half the
 (`car.ts` RIDE). `--real X,Z,HEADING,KMH,SECS` drives
 straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
 ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). The `drive_*` scenarios
-(`src/physics/rapier/drive-scenarios.ts`) run player commands through the shared world on synthetic terrain. They cover
+(`checks/drive-scenarios.ts`) run player commands through the shared world on synthetic terrain. They cover
 competing claims, two drivers and a collision with an AI body (`drive_shared_replay`), a car knocked out of traffic
 (`drive_knock`), a person knocked down
 (`drive_person`), into the river and back on the bank ~12 m before its edge (`drive_river_respawn`), parked in the

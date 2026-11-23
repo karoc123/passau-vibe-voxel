@@ -58,7 +58,7 @@ down reverse, sideways steer on the car's curve), a held **Drift** button where 
 
 ## Checks
 
-`node tools/boat.mjs` (~2 s, `nav/boat-checks.ts`): on a synthetic channel served as real node files: loading holds,
+`node tools/boat.mjs` (~2 s, `checks/boat-checks.ts`): on a synthetic channel served as real node files: loading holds,
 top speed and the time to it, coasting, the turn (direction, radius), drifting (more turn, more slip), turning at
 rest, reverse, the bank and a pier bounced off (the outline never on land), sliding along the bank, under a 6 m bridge,
 stopped by a 1 m footbridge, put in from land, none where there is no water, unstuck after running aground,
