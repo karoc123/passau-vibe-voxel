@@ -215,7 +215,7 @@ another craft, another road-height fix, or any server work.
   `drive-session.ts:22, 121-131, 168-169` (the car's pose and speed), `RapierDrive` holds one car and publishes
   `globalThis.__rapierDrive` (`drive-world.ts:94`), `sim/life.ts:209` `knockDown` decides in the presentation that a
   person leaves the crowd. `sim/boats.ts` and `sim/trains.ts` sit in `sim/` but are three.js (ADR 0006 says so).
-  `BOAT`, `PLANE`, `RIDE` are mutable module-level tuning objects. 83 `addEventListener`, no `removeEventListener` in
+  `BOAT`, `PLANE`, `RIDE` are mutable module-level tuning objects (since E5 read-only and passed in: `sim/tuning.ts`). 83 `addEventListener`, no `removeEventListener` in
   the modes.
 - **Fix:** route through the sim's player API (`takeWheel`, `removePerson`), key player state by a player id. Record
   the target in ADR 0006 now; implement with the server.

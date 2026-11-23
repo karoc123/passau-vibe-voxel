@@ -1,3 +1,4 @@
+import { frozen } from '../../core/frozen';
 import { FixedStep } from '../../core/fixed-step';
 import { SafeTrail } from '../../core/safe-trail';
 import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../../core/vec';
@@ -20,7 +21,8 @@ import { waterTop, type WaterColumns } from '../river';
 // decreases); pitch +1 is nose up (plane.ts maps the flight convention and "Invert pitch" onto it).
 
 const D = Math.PI / 180;
-export const PLANE = {
+// Read-only (DEFAULT_TUNING.plane, sim/tuning.ts); tools/plane.mjs --set flies a copy that differs.
+export const PLANE = frozen({
   STEP: 1 / 60, // s, the fixed step
   MAX_STEPS: 6, // a frame
   G: 9.81,
@@ -96,13 +98,13 @@ export const PLANE = {
   // inverted flight), hands off the path and the bank hold (the wings level themselves only within BANK_TRIM of level)
   AEROBATIC: false,
   BANK_TRIM: 0,
-};
+});
 export type PlaneConfig = typeof PLANE;
 
 // The small aerobatic jet (a two-seat trainer, ~9 m, single engine): the floatplane's core with its own numbers and the
 // aerobatic flight law. Fast (level top ~450 km/h, dives to ~630), it bleeds speed in hard pulls (induced drag at up
 // to 7 g), stalls at ~190 km/h and sharper than the floatplane, rolls at 200 deg/s. No floats: any water is a splash.
-export const JET: PlaneConfig = {
+export const JET: PlaneConfig = frozen({
   ...PLANE,
   THRUST: 5.6, // ~0.57 g at full throttle (the last 15 % drawn as the afterburner)
   SPOOL: 1.2, // a turbine spools up slower than a propeller
@@ -131,7 +133,7 @@ export const JET: PlaneConfig = {
   RESPAWN_SPEED: 100,
   RESPAWN_THROTTLE: 0.8,
   AEROBATIC: true,
-};
+});
 
 export interface PlaneInput {
   turn: number; // -1..1, +1 right

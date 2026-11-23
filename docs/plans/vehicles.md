@@ -9,7 +9,7 @@ Status: built (branch `vehicles`).
 
 `web/src/sim/vehicles.ts`: no three.js, no DOM, no Rapier (the world sim imports it: `tools/core-deps.mjs` scans it).
 A type is its body on Rapier's raycast wheels (`CarBuild`: chassis half extents, mass, wheels, engine force per driven
-wheel, brakes, top speed, ride height, and `tune`: what differs from the car's ride, `vehicle.ts` RIDE, and its
+wheel, brakes, top speed, ride height, and `tune`: what differs from the ride, `RIDE` in the same file, and its
 steering), its length in the traffic, an optional own paint, and its model: boxes `[w, h, l, x, y, z, colour]` (bottom
 centre in the vehicle's frame: x left, y up from the ground, z forward), the colour `paint` (the vehicle's, per
 instance), `head` / `tail` (lamps: lit at night, the tail brighter braking) or a name of the catalog's `PALETTE`.

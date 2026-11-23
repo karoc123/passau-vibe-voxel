@@ -9,6 +9,7 @@
 // Pure: no DOM, no three.js; the world through one query (BoatWorld, which VoxelCollision.waterColumn answers). Runs
 // in node (tools/boat.mjs, checks/boat-checks.ts) as in the viewer.
 
+import { frozen } from '../../core/frozen';
 import { SafeTrail } from '../../core/safe-trail';
 
 export interface BoatInput {
@@ -29,8 +30,8 @@ export interface BoatPose { x: number; y: number; z: number; h: number }
 export interface BoatDrawn extends BoatPose { pitch: number; roll: number }
 export type BoatEvent = { kind: 'bump'; speed: number };
 
-// all the numbers, in one place (a tool may change them)
-export const BOAT = {
+// all the numbers, in one place: read-only (DEFAULT_TUNING.boat, sim/tuning.ts); a boat given others differs
+export const BOAT = frozen({
   length: 6.4, beam: 2.3, // m: the hull's outline (what collides)
   draft: 0.5, freeboard: 2.0, // m under and over the waterline that must be clear (a bridge's deck over it does not count)
   step: 1.2, // m: the most the water's top may differ from where the boat floats (a weir's drop is a wall)
@@ -52,7 +53,8 @@ export const BOAT = {
   coastDrag: 0.5, // m/s² more with the throttle let go (it settles and stops)
   restitution: 0.3, // of the speed into a shore
   wallFriction: 0.8, // of the speed along it kept in a bump
-};
+});
+export type BoatTuning = typeof BOAT;
 
 const SAFE_EVERY = 0.5, SAFE_KEEP = 20;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -67,8 +69,13 @@ export class BoatMotion {
   private bumpT = -1;
   // recent poses on open water (every SAFE_EVERY s of steps, the first at 0.5 s), for unstick()
   private readonly safe = new SafeTrail<BoatPose>(SAFE_EVERY, SAFE_KEEP);
+  private readonly outline: [number, number][];
 
-  constructor() { this.safe.wait(0); }
+  // cfg: its numbers (Tuning.boat)
+  constructor(readonly cfg: BoatTuning = BOAT) {
+    this.outline = outline(cfg);
+    this.safe.wait(0);
+  }
 
   reset(p: BoatPose) {
     this.place(p);
@@ -96,7 +103,7 @@ export class BoatMotion {
 
   // One fixed step of dt s; 'loading': not taken (a column it needs not in yet)
   step(input: BoatInput, dt: number, world: BoatWorld): BoatEvent[] | 'loading' {
-    const B = BOAT, events: BoatEvent[] = [];
+    const B = this.cfg, events: BoatEvent[] = [];
     const sh = Math.sin(this.h), ch = Math.cos(this.h);
     // along the hull and across it (right: -cos h, sin h)
     let u = this.vx * sh + this.vz * ch, s = -this.vx * ch + this.vz * sh;
@@ -178,12 +185,13 @@ export class BoatMotion {
   // level with nothing solid from under the hull to over it. null: a column not loaded
   fits(world: BoatWorld, x: number, z: number, h: number, y = this.y): boolean | null {
     const sh = Math.sin(h), ch = Math.cos(h);
-    for (const [a, b] of OUTLINE) {
+    const B = this.cfg;
+    for (const [a, b] of this.outline) {
       // (a across, +: left; b along, +: forwards)
       const px = x + a * ch + b * sh, pz = z - a * sh + b * ch;
-      const c = world.waterColumn(px, pz, y - BOAT.draft, y + BOAT.freeboard);
+      const c = world.waterColumn(px, pz, y - B.draft, y + B.freeboard);
       if (!c) return null;
-      if (c.blocked || c.water < 0 || Math.abs(c.water - y) > BOAT.step) return false;
+      if (c.blocked || c.water < 0 || Math.abs(c.water - y) > B.step) return false;
     }
     return true;
   }
@@ -192,7 +200,7 @@ export class BoatMotion {
   private normal(world: BoatWorld, x: number, z: number, h: number): [number, number] {
     const sh = Math.sin(h), ch = Math.cos(h);
     let nx = 0, nz = 0;
-    for (const [a, b] of OUTLINE) {
+    for (const [a, b] of this.outline) {
       const px = x + a * ch + b * sh, pz = z - a * sh + b * ch;
       if (this.open(world, px, pz)) continue;
       for (let k = 0; k < 12; k++) {
@@ -207,15 +215,15 @@ export class BoatMotion {
   }
 
   private open(world: BoatWorld, x: number, z: number) {
-    const c = world.waterColumn(x, z, this.y - BOAT.draft, this.y + BOAT.freeboard);
-    return !!c && !c.blocked && c.water >= 0 && Math.abs(c.water - this.y) <= BOAT.step;
+    const B = this.cfg, c = world.waterColumn(x, z, this.y - B.draft, this.y + B.freeboard);
+    return !!c && !c.blocked && c.water >= 0 && Math.abs(c.water - this.y) <= B.step;
   }
 
   // T: back on open water, standing still: where it is if it fits, else the newest recent pose that fits, else the
   // nearest spot found round it. false: nothing loaded there yet
   unstick(world: BoatWorld): boolean {
-    const here = findSpawn(world, this.x, this.z, this.h, 0);
-    const back = here ?? this.safe.get(this.safe.find((p) => !!this.fits(world, p.x, p.z, p.h, p.y))) ?? findSpawn(world, this.x, this.z, this.h, 60);
+    const here = findSpawn(world, this.x, this.z, this.h, 0, this.cfg);
+    const back = here ?? this.safe.get(this.safe.find((p) => !!this.fits(world, p.x, p.z, p.h, p.y))) ?? findSpawn(world, this.x, this.z, this.h, 60, this.cfg);
     if (!back) return false;
     this.place(back);
     return true;
@@ -223,15 +231,15 @@ export class BoatMotion {
 }
 
 // the outline's points (across, along) in metres
-const OUTLINE: [number, number][] = (() => {
-  const a = BOAT.beam / 2, b = BOAT.length / 2;
+const outline = (B: BoatTuning): [number, number][] => {
+  const a = B.beam / 2, b = B.length / 2;
   return [[0, b], [a * 0.75, b * 0.55], [-a * 0.75, b * 0.55], [a, 0], [-a, 0], [a, -b * 0.6], [-a, -b * 0.6], [a * 0.9, -b], [-a * 0.9, -b]];
-})();
+};
 
 // Where the boat can be put down near (x, z): the nearest spot within `radius` m where its outline fits on open water,
-// facing `h` if it can (else turned up to a half turn either way). null: none (or not loaded there)
-export function findSpawn(world: BoatWorld, x: number, z: number, h: number, radius: number): BoatPose | null {
-  const probe = new BoatMotion();
+// facing `h` if it can (else turned up to a half turn either way), for a boat of `cfg`. null: none (or not loaded there)
+export function findSpawn(world: BoatWorld, x: number, z: number, h: number, radius: number, cfg: BoatTuning = BOAT): BoatPose | null {
+  const probe = new BoatMotion(cfg);
   const turns = [0, 0.5, -0.5, 1, -1, 1.57, -1.57, 2.4, -2.4, Math.PI];
   for (let r = 0; r <= radius; r += 2) {
     const n = r === 0 ? 1 : Math.max(8, Math.round(2 * Math.PI * r / 2));

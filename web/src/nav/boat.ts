@@ -153,7 +153,7 @@ export class BoatMode implements PlayerCraft {
       if (now - s.t0 > GIVE_UP_MS) { this.panel.say('No water found near here.', 2500); this.nav.flyUp(); }
       return;
     }
-    const at = findSpawn(this.world, s.x, s.z, s.h, SPAWN_REACH);
+    const at = findSpawn(this.world, s.x, s.z, s.h, SPAWN_REACH, this.motion.cfg);
     if (!at) { this.panel.say('No open water near here.', 2500); this.nav.flyUp(); return; }
     this.motion.reset(at);
     this.clock.acc = 0;

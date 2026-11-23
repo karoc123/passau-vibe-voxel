@@ -21,7 +21,7 @@
 //   out.json: all numbers, to diff or check against later; -v: the drive's gaps split by flat / ramp / deck too
 //   --check: exit code 1 if a gap or the ride got worse than the baseline's by more than the tolerances (TOL below,
 //   times F, default 1), a run the baseline had is missing or no longer gets to its road's end; --set: the ride's
-//   numbers (car.ts RIDE) changed for the run
+//   numbers (sim/vehicles.ts RIDE) changed in a copy for the run
 // Other data (a fixture's build: VOXEL_DATA, tools/data-dir.mjs): the areas moved to its map by the project grid (as
 // the main map's, MAIN_ORIGIN) and clipped to it, the roads found by their OSM way (the longest road of it), those
 // off the map skipped.
@@ -38,11 +38,16 @@ const only = opt('--only'), checkPath = opt('--check'), tolF = +(opt('--tol') ??
 if (!hasData()) { console.error('no public/data (meta.json, traffic.json)'); process.exit(2); }
 
 const sc = await imp('checks/scenarios.ts');
-// --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run (as rapier-car.mjs --set)
-for (const kv of opt('--set')?.split(',') ?? []) {
-  const [k, v] = kv.split('=');
-  if (!(k in sc.RIDE)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)})`);
-  sc.RIDE[k] = +v;
+// --set key=value,...: the cars get a copy of the ride (sim/vehicles.ts RIDE, read-only) with these changed (as
+// rapier-car.mjs --set)
+if (opt('--set')) {
+  const ride = { ...sc.RIDE };
+  for (const kv of opt('--set').split(',')) {
+    const [k, v] = kv.split('=');
+    if (!(k in ride)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(ride)})`);
+    ride[k] = +v;
+  }
+  sc.scenarioTuning.ride = Object.freeze(ride);
 }
 const T = await load('physics/rapier/terrain.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;

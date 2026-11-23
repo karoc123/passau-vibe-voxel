@@ -23,14 +23,16 @@ const sc = await imp('checks/scenarios.ts');
 const ds = await imp('checks/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
-// --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run
+// --set key=value,...: the scenarios' cars get a copy of the ride (sim/vehicles.ts RIDE, read-only) with these changed
 const setAt = args.indexOf('--set');
 if (setAt >= 0) {
+  const ride = { ...sc.RIDE };
   for (const kv of args[setAt + 1].split(',')) {
     const [k, v] = kv.split('=');
-    if (!(k in sc.RIDE)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(sc.RIDE)})`);
-    sc.RIDE[k] = +v;
+    if (!(k in ride)) throw new Error(`--set: no ${k} in RIDE (${Object.keys(ride)})`);
+    ride[k] = +v;
   }
+  sc.scenarioTuning.ride = Object.freeze(ride);
 }
 
 const fmt = (o) => Object.entries(o).map(([k, v]) => `${k}=${v}`).join(' ');

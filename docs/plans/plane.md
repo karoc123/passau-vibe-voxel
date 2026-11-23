@@ -347,7 +347,7 @@ own port, never 5173.
 
 - `sim/craft/plane-flight.ts`: `PlaneFlight` (`reset(pose)`, `step(input, dt, world)`, `pose`, `events`), the three
   assists, bounce / crash / respawn with the safe-pose ring. All numbers in one exported `PLANE` object (as the
-  car's `RIDE`), so a tool can change them (`--set`).
+  car's `RIDE`; read-only, so a tool flies a changed copy: `--set`).
 - `nav/plane-checks.ts` + `web/tools/plane.mjs` (the pattern of `collision-checks.ts` / `collision.mjs`), on a
   synthetic world:
   - `level`: 20 s hands off: height within ±0.5 m, heading within 0.1°.

@@ -1,13 +1,14 @@
 // The vehicle catalog: what can be driven, as data (no three.js, no DOM, no Rapier: the world sim, the player's car and
 // a server share it; tools/core-deps.mjs scans it with the sim). Each type: its body on Rapier's raycast wheels
 // (physics/rapier/vehicle.ts createVehicle: the chassis' box, mass, wheels, engine, brakes, top speed, and what it
-// tunes differently from the car's ride, RIDE), its length in the traffic, and its model (boxes in its own frame:
+// tunes differently from the ride, RIDE), its length in the traffic, and its model (boxes in its own frame:
 // x left, y up from the ground, z forward; drawn by view/meshes.ts). docs/plans/vehicles.md: how to add one.
+import { frozen } from '../core/frozen';
 
 // The chassis and its drive: half extents of the chassis' box (m; its bottom 0.45 m under the body's origin), mass
 // (kg), wheels (chassis space; the front ones steer, the rear ones are driven), the engine's force per driven wheel
 // (N), the brakes (Rapier's brake impulse a wheel), the top speed (m/s, the engine cut off over it), ride: the ground's
-// height under the body's origin at rest. tune: what differs from RIDE (vehicle.ts) and the steering (car.ts: steer,
+// height under the body's origin at rest. tune: what differs from RIDE (below) and the steering (car.ts: steer,
 // the front wheels' most angle, rad; steerFall, m/s: the angle halved at this speed; latG, g: at speed the angle no
 // more than turns it at this sideways acceleration, the whole lock asking that and no more; steerRamp, s: the input
 // turns the bars from straight to full lock over this long, back twice as fast, instead of at once). bike: a
@@ -21,6 +22,27 @@ export interface Tune {
   stiffness?: number; compression?: number; relaxation?: number; downforce?: number; gripFront?: number; gripRear?: number;
   side?: number; com?: number; steer?: number; steerFall?: number; latG?: number; steerRamp?: number;
 }
+
+// The ride (physics/rapier/vehicle.ts, car.ts). Rapier's raycast wheels have no mass of their own: each pushes the chassis with
+// mass * (stiffness * compression - damping * its speed) (damping: `compression` while it is pushed in, `relaxation`
+// while it extends), never pulls, and leaves the ground once its spring is back at its rest length, so it hangs only
+// as far as the car sags on it (g * gravity / (4 stiffness): a stiffer spring loses the ground sooner over a crest).
+// - stiffness, compression, relaxation: per wheel (heave ~sqrt(stiffness) / pi Hz, damping ratio ~damping /
+//   sqrt(stiffness))
+// - gravity: the car's own gravity (a multiple of g): how fast it comes back down over a crest
+// - downforce: pressed onto its wheels' ground (along its own down) by this many g at 50 km/h, with the speed squared
+//   (at most twice that), while a wheel touches: more grip and a body that stays on the road over crests at speed
+// - gripFront, gripRear: the tyres' frictionSlip (the most force per load); side: their lateral stiffness
+// - com: the centre of mass' drop under the body's origin (m)
+// - patch: the dampers take the ground's slope over this many m either side of a wheel's contact (0: the facet's, as
+//   Rapier), kinkMax: ... where it differs from the facet's by less than this (normals' distance; see car.ts dampers())
+// Read-only (DEFAULT_TUNING.ride, sim/tuning.ts); tools/rapier-car.mjs --set key=value,... runs the scenarios with a
+// copy that differs.
+export const RIDE = frozen({
+  stiffness: 34, compression: 4, relaxation: 5.5, gravity: 1.25, downforce: 0.4, gripFront: 1.6, gripRear: 1.5, side: 1, com: 0.45,
+  patch: 0.8, kinkMax: 0.08,
+});
+export type RideTuning = typeof RIDE;
 
 // A model part: a box w x h x l (m), its bottom centre at (x, y, z), and its colour: 'paint' (the vehicle's own,
 // per instance), 'head' or 'tail' (its lamps: lit at night, the tail lamps brighter when braking), or a colour of
