@@ -22,6 +22,8 @@ export class World {
   private cacheVersion = -1;
   // per palette id: 1 where topSolid does not stand on it (leaves; ids past the palette: 0)
   private readonly leaf: Uint8Array;
+  // per palette id: 1 for water (waterColumn)
+  private readonly wet: Uint8Array;
   // per 1 m tile: its caps (core/surface.ts), as the mesher draws them; null: none
   private readonly capFields = new WeakMap<ColumnData, CapField | null>();
 
@@ -30,6 +32,7 @@ export class World {
     this.D = meta.D;
     const t = semanticTable(meta.palette);
     this.leaf = paletteMask(t, (f) => !RULES.standOnForWalker(f), 1, 4096);
+    this.wet = paletteMask(t, RULES.water);
   }
 
   // node n's caps (core/surface.ts: its caps section, live in its columns), null: none (its voxels' tops) or not level 1
@@ -85,6 +88,20 @@ export class World {
     if (!this.inside(x, r)) return null;
     const n = this.node(x, r);
     return n && [n, Math.floor((x - n.x0) / n.s) + 1 + n.S * (Math.floor((r - n.y0) / n.s) + 1)];
+  }
+
+  // the top of the water at (x, r) as nav/river.ts WaterColumns asks it (the river traffic floats on it): the top of a
+  // water run reaching the ground's top (as VoxelCollision.waterColumn), -1 none; null: not loaded (or off the map)
+  waterColumn(x: number, r: number): { water: number } | null {
+    const c = this.column(x, r);
+    if (!c) return null;
+    const [n, i] = c, R = n.runs, g = n.ground[i];
+    let water = -1;
+    for (let k = n.off[i]; k < n.off[i + 1]; k++) {
+      const hi = (R[k * 3] + R[k * 3 + 1]) * n.s;
+      if (this.wet[R[k * 3 + 2]] && hi >= g) water = Math.max(water, hi);
+    }
+    return { water };
   }
 
   groundAt(x: number, r: number) {

@@ -23,7 +23,7 @@ The first draft was found too easy. Changed, in priority over everything below:
    recovers. No spin, no wind. Level top speed at full throttle ~245 km/h (drone: 158 / 197), stall ~86 km/h. All
    numbers in one `PLANE` object.
 4. **Floatplane: water landing and takeoff are in scope** (was phase 5). Touching water (Danube, Inn, Ilz: the voxels'
-   water runs, as `physics/rapier/terrain.ts` reads them, plus the river level slider when raised) slowly, shallowly
+   water runs, as `physics/rapier/terrain.ts` reads them: `nav/river.ts` `waterTop`) slowly, shallowly
    and nearly wings-level floats the plane; it taxis on the water (stick turns, throttle moves) and takes off past
    the takeoff speed with the stick pulled. Too fast or too steep onto water is a crash ("Splash"). Land and roofs:
    a crash, except a shallow skim (a bounce, as below). Crash: tint and shake, then back at a safe pose ~3 s old.
@@ -412,7 +412,7 @@ own port, never 5173.
 `VoxelCollision.waterAt` (the rule of `physics/rapier/terrain.ts`: a water run reaching the ground's top); a state
 `afloat` in `PlaneFlight` (touching water under 4 m/s of sink and 15° of bank: skims, slows, floats and steers at
 up to 15 m/s; fast held: takes off at 30 m/s); floats on the model; "Splash!" instead of a crash on water otherwise;
-the river level slider (`flood.ts`) read for the height. Its own checks in `plane.mjs`.
+the water's top from the voxels (`nav/river.ts` `waterTop`) read for the height. Its own checks in `plane.mjs`.
 
 **Total without phase 5: about 5 days.**
 

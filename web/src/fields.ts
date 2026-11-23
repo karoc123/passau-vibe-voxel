@@ -170,8 +170,8 @@ export const FIELDS_GLSL = `
     ivec2 c = ivec2(floor(p / float(pg.y))) & ${N - 1}, o = ivec2(pg.x & 1, (pg.x >> 1) & 1) * ${N};
     return texelFetch(uPageF, ivec3(o + c, pg.x >> 2), 0);
   }
-  // the river at p (scripts/flood.py): x the level at which it reaches the cell (m over the base, 255 never), y the bed
-  // under the surveyed surface (m), -1 where no node is shown
+  // the river at p (scripts/flood.py): x the level at which it reaches the cell (m over the base, 255 never; no longer
+  // read since the river slider went), y the bed under the surveyed surface (m), -1 where no node is shown
   vec2 riverAt(vec2 p) {
     int a;
     vec2 v = cellAt(p, a).rg * 255.0;

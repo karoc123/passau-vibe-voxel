@@ -4,7 +4,6 @@ import { Bar } from './bar';
 import { Caption } from './caption';
 import { installCity } from './city';
 import { Daylight } from './daylight';
-import { Flood } from './flood';
 import { loadFoliage } from './foliage';
 import { loadWindows } from './windows';
 import { LampHeads } from './lamps';
@@ -25,7 +24,7 @@ import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
 import { liveEdits } from './core/live-edits';
-import type { Facts, Label, Meta, Place, View } from './types';
+import type { Facts, FloodInfo, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
@@ -41,10 +40,6 @@ import './style.css';
 declare global {
   interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __streamer?: TileStreamer }
 }
-
-// river level, cm relative to the survey day's surface. Not calibrated to the Passau gauges: no gauge readings or flood
-// years here; below the surveyed level the bed is schematic (scripts/flood.py)
-const RIVER = { lowest: -300, surveyed: 0, highest: 1000 };
 
 const TODAY = dayOfYear(new Date());
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
@@ -87,15 +82,15 @@ const CRAFTS = () => [
   import('./nav/special-craft').then((m) => m.HelicopterMode),
 ];
 let crafts: PlayerCraft[] = [];
-const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
+const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], onDay: (d) => { setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
   onHour: (h) => { setHour(h); share(); },
-  onWeather: (w) => { setWeather(w); share(); }, onRiver: (cm) => { flood?.setLevel(cm); } });
+  onWeather: (w) => { setWeather(w); share(); } });
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
-let life: StreetLife | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
+let life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
@@ -110,8 +105,6 @@ let setWindows: ((hour: number, day: number) => void) | null = null;
 let lampHeads: LampHeads | null = null;
 
 nav.cancelFly = () => { fly = null; };
-bar.setRiver(RIVER.surveyed);
-bar.showRiver(false);
 const modeTools = el('div', 'mode-tools', '', bar.el);
 const walkButton = el('button', 'mode-button', 'Walk', modeTools);
 walkButton.type = 'button';
@@ -458,14 +451,11 @@ async function boot() {
   fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
-  flood = new Flood(scene, uniforms, meta);
-  flood.load().then(() => {
-    bar.river.input.disabled = false;
-    flood!.setLevel(RIVER.surveyed);
-    riverPoints = flood!.info?.river ?? [];
+  fetchJson<FloodInfo>('data/flood.json').then((info) => {
+    riverPoints = info.river ?? [];
     mapView.setRiver(riverPoints);
   })
-    .catch((e) => { riverPoints = []; console.warn('flood', e); });
+    .catch((e) => { riverPoints = []; console.warn('river points', e); });
   fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
@@ -484,7 +474,7 @@ async function boot() {
     window.__life = life;
     if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
     fetchJson<BoatData>('data/boats.json').then((bd) => {
-      life?.setBoats(bd, flood?.info?.voxel_top ?? 4);
+      life?.setBoats(bd);
     }).catch((e) => console.warn('boats', e));
   });
   $('#loading').classList.add('hidden');
@@ -492,7 +482,7 @@ async function boot() {
   window.__ready = true;
   const [{ ParagliderMode }, modes] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS())]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
-    env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints },
+    env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
     roadPhysics: () => lifePhysics(meta, true)!,
   };
@@ -527,7 +517,7 @@ function cropOf(q: string | null, t: THREE.Vector3, origin: [number, number] = [
   return v.length === 4 ? [v[0] - ox, v[1] - oz, v[2] - ox, v[3] - oz] : null;
 }
 
-let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
+let lastT = performance.now();
 const t0 = lastT;
 renderer.setAnimationLoop((now) => {
   fly?.(now);
@@ -565,7 +555,7 @@ renderer.setAnimationLoop((now) => {
     if (life.group.visible) {
       life.day = daylight.day;
       // (simulated round what is looked at; agents come and go far from the camera, which sees them)
-      life.update(dt, daylight.hour, daylight.night, focus(), camera.position, flood?.level ?? 0);
+      life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
     }
   }
   daylight.sky.mesh.position.copy(camera.position);
@@ -583,11 +573,6 @@ renderer.setAnimationLoop((now) => {
   autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
   busy = false;
   perf.frame(now, document.hidden, renderer.info.render.triangles);
-  if (flood && now - riverT > 250) {
-    riverT = now;
-    if (flood.inView(camera, 2500) || Math.abs(bar.river.value - RIVER.surveyed) > 20) riverSeen = now;
-    bar.showRiver(now - riverSeen < 2000);
-  }
   barRect ??= bar.rect;
   minimap?.update(now, nav.mapPose, barRect.bottom);
   labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);

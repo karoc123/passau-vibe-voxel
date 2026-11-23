@@ -7,7 +7,7 @@ the Danube past Hacklberg, Heining and the Kachlet dam to Schalding, both banks;
 and the Ilz valley up to Hals and its loops. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the
 extent is set in `scripts/map.json`).
 
-The date, the hour, the weather and the rivers' level are sliders; cars, trains, pedestrians and bikes move on the
+The date, the hour and the weather are sliders; cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
 (`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
@@ -475,7 +475,7 @@ option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut thr
 The flight uses independent 1 m collision data for terrain, structures and trees across the whole 9,344 × 3,456 m model.
 A swept drone volume catches thin voxels even at speed. Hard impacts deflect and spin the drone briefly while it
 stays armed. The drone can settle on the ground and take off again with throttle. The flight waits if a collision tile
-is still loading. Moving traffic, seasonal leaf visibility and changes to the river level are visual effects in this spike.
+is still loading. Moving traffic and seasonal leaf visibility are visual effects in this spike.
 Roof and wall collisions follow the source voxels, including where a rendered roof or facade is smoothed.
 
 ## Driving
@@ -557,11 +557,6 @@ collision for kerbs, stairs, walls and bridge decks.
 
 ## Known limits
 
-- **River level.** The slider moves the water in metres relative to the level on the survey day. It is not calibrated
-  to the Passau gauges and shows no historic flood levels; below the surveyed level the river bed is schematic. Above
-  the Kachlet dam and the Ilz's weir at Hals the rivers stand at their own levels (`scripts/map.json`
-  `rivers.stretches`); the slider raises every stretch by the same metres over its own surveyed level (a real flood
-  drains the impounded reach as the weir opens: not modelled), and a cell floods from the river of its own stretch.
 - Windows are procedural, generated in the shader from floor height and material, not real window positions.
 - The surface model is matched from aerial images: it is noisier than LiDAR on roofs and stands a metre or two over
   open water (cleared in `voxelize.py`).

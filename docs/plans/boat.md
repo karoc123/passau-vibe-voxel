@@ -45,8 +45,7 @@ down reverse, sideways steer on the car's curve), a held **Drift** button where 
   quay walls, bridge piers and footbridges lower than 2 m stop it, bridge decks above do not. A step that does not
   fit bounces off the shore's normal (from the open water round the points that met it; restitution 0.3, 80 % of the
   speed along it kept), swings the hull along the shore and slides on; wedged, it is eased out. A column not loaded
-  holds the step (the drone's rule). The waterline follows the water's top; the drawn boat rides the river level
-  slider's rise (`flood.level`) without changing what is water.
+  holds the step (the drone's rule). The waterline follows the water's top.
 - **Mode** (`nav/boat.ts`, `BoatMode`): panel, input (keyboard, touch, gamepad, as `drive.ts`), the spawn, the chase
   camera (9.5 m behind, 3.4 m up, following the heading with a lag; pulled in where `VoxelCollision.sweep` meets
   something; field of view 60..68° with speed; a short shake on a bump), `window.__boat` for tools (`enter()`,

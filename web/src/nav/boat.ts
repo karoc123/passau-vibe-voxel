@@ -126,10 +126,9 @@ export class BoatMode implements PlayerCraft {
           return true;
         });
       }
-      const d = m.drawn(), lift = Math.max(0, this.env.level());
-      d.y += lift;
+      const d = m.drawn();
       this.model.update(d, m.speed, this.env.night(), m.t);
-      this.chase(dt, lift);
+      this.chase(dt);
     }
     this.draw();
   }
@@ -200,11 +199,11 @@ export class BoatMode implements PlayerCraft {
 
   // behind the boat along a heading that follows its own with a lag (a turn shows it a little from the side), over the
   // water; pulled in where the collision meets something between the boat and the camera
-  private chase(dt: number, lift: number) {
+  private chase(dt: number) {
     const m = this.motion, now = performance.now();
     this.camYaw = followAngle(this.camYaw, m.h, 3.2, dt);
     this.camY += (m.y - this.camY) * follow(3, dt);
-    const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY + lift;
+    const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY;
     const eye = new THREE.Vector3(m.x, base + 1.6, m.z);
     const off = new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom);
     const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.collision.sweep(eye, off), off, 0.25, 0.4));

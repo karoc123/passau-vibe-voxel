@@ -22,7 +22,7 @@ async function craft(kind) {
   const col = new VoxelCollision(meta, undefined, { radius: CRAFT_RADIUS[kind] });
   for (let i = 0; i < 1000; i++) {
     col.prefetch({ x: 64, y: 0, z: 64 }, { x: 0, y: 0, z: 0 });
-    if (col.surface(64, 64)) return { motion: new CraftMotion(kind), world: craftWorld(kind, col, () => 0) };
+    if (col.surface(64, 64)) return { motion: new CraftMotion(kind), world: craftWorld(kind, col) };
     await new Promise((done) => setTimeout(done, 5));
   }
   throw new Error('Synthetic craft collision tiles did not load');
