@@ -2848,7 +2848,7 @@ def vegetation(ctx):
                 _crown_ids.append(rec_["id"])
         _best = _map[own2]
     RESULT["crown_ids"] = _crown_ids
-    vars(ctx).update(_best=_best, _lift=_lift, _tr_t=_tr_t, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db, veg=veg)
+    vars(ctx).update(_best=_best, _tr_t=_tr_t, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db, veg=veg)
 
 
 def kerb(near, c, r):
@@ -2888,16 +2888,12 @@ def _knn(pts, q, k):
 
 
 def furniture(ctx):
-    """Fountains, planted beds and street furniture (lamps, benches, shelters, flagpoles); the bridges' decks and
-    the ground at their ends (ground.py's decks passes)."""
-    (GCTX, H, RIVER_LV, _jm, _lift, _tr_t, bmask, bridge_lines, bridge_rails, bridge_road_polys, bridge_shapes,
-     bridge_ways, cycle_shapes, dsm, dsm_mean, dtm, exg, explicit, foot_shapes, g, gcol, grave_stones, is_road,
-     lit_ground_ways, lm, nd_mean, osm, rails, splash_pads, topi, veg, vol) = (
-        ctx.GCTX, ctx.H, ctx.RIVER_LV, ctx._jm, ctx._lift, ctx._tr_t, ctx.bmask, ctx.bridge_lines,
-        ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_shapes, ctx.bridge_ways, ctx.cycle_shapes, ctx.dsm,
-        ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.foot_shapes, ctx.g, ctx.gcol, ctx.grave_stones,
-        ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.nd_mean, ctx.osm, ctx.rails, ctx.splash_pads, ctx.topi,
-        ctx.veg, ctx.vol)
+    """Fountains, planted beds and street furniture (lamps, benches, shelters, flagpoles); the lamps by the bridge
+    ways wait for the decks (bridges, piers_vehicles)."""
+    (bmask, bridge_shapes, cycle_shapes, foot_shapes, g, gcol, grave_stones, is_road, lit_ground_ways, osm, splash_pads,
+     vol) = (
+        ctx.bmask, ctx.bridge_shapes, ctx.cycle_shapes, ctx.foot_shapes, ctx.g, ctx.gcol, ctx.grave_stones, ctx.is_road,
+        ctx.lit_ground_ways, ctx.osm, ctx.splash_pads, ctx.vol)
     # ---------------------------------------------------------------- fountains
     # A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
     # polygons, darker shard inlays, flush with the paving, slot drain round the edge, jets from steel rings ~2 m apart.
@@ -3078,7 +3074,19 @@ def furniture(ctx):
         if 0 <= c < W and 0 <= r < D and not bmask[r, c]:
             hgt = int(parse_len(t.get("height")) or 9)
             vol[g[r, c]:g[r, c] + hgt, r, c] = C["fence"]
+    vars(ctx).update(LAMP_KEYS=LAMP_KEYS, bridge_lamps=bridge_lamps, jets=jets, kerb_near=kerb_near, lamp_xy=lamp_xy,
+                     lamps=lamps)
 
+
+def bridges(ctx):
+    """The bridges' decks and the ground at their ends (ground.py's decks passes): what stands on a lifted bridgehead
+    (the lamps, the trees, the fountain jets) rises with it."""
+    (GCTX, H, RIVER_LV, _jm, _tr_t, bmask, bridge_lines, bridge_rails, bridge_road_polys, bridge_shapes, bridge_ways,
+     dsm, dsm_mean, dtm, exg, explicit, g, gcol, is_road, jets, lamps, lm, nd_mean, osm, rails, topi, veg, vol) = (
+        ctx.GCTX, ctx.H, ctx.RIVER_LV, ctx._jm, ctx._tr_t, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails,
+        ctx.bridge_road_polys, ctx.bridge_shapes, ctx.bridge_ways, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit,
+        ctx.g, ctx.gcol, ctx.is_road, ctx.jets, ctx.lamps, ctx.lm, ctx.nd_mean, ctx.osm, ctx.rails, ctx.topi, ctx.veg,
+        ctx.vol)
     # bridges / decks: over the rail cut (DTM drops below them) and the rivers. The deck follows the bridge ways
     # (bridge=yes roads, paths, tracks buffered to their width; man_made=bridge areas only near them). Its top takes the
     # colour of the way on it (asphalt, pavement, cycle lane, tram bed).
@@ -3384,10 +3392,8 @@ def furniture(ctx):
             vol[zt_ - dz, rr, cc] = C["deck"]
         vol[zt_ - 1, rr, cc] = deck_col[rr, cc]
     note("bridge deck cells:", int(deck.sum()))
-    vars(ctx).update(LAMP_KEYS=LAMP_KEYS, bridge_area=bridge_area, bridge_lamps=bridge_lamps, deck=deck,
-                     deck_abs=deck_abs, deck_col=deck_col, deck_h=deck_h, deck_lay=deck_lay, deck_own=deck_own,
-                     g=g, is_road=is_road, jets=jets, kerb_near=kerb_near, lamp_xy=lamp_xy, lamps=lamps,
-                     water_=water_)
+    vars(ctx).update(bridge_area=bridge_area, deck=deck, deck_abs=deck_abs, deck_col=deck_col, deck_h=deck_h,
+                     deck_lay=deck_lay, deck_own=deck_own, g=g, is_road=is_road, water_=water_)
 
 
 def pier_span(t, struct):
@@ -4067,6 +4073,7 @@ STAGES = [  # (its name in the build's timing, the stage)
     ("natural ground, cemeteries", natural_ground),
     ("vegetation", vegetation),
     ("fountains, beds, furniture", furniture),
+    ("bridge decks, bridgeheads", bridges),
     ("bridge piers, vehicles", piers_vehicles),
     ("landmark details, underpasses, tunnels", landmarks_tunnels),
     ("drop_debris", drop_debris),
