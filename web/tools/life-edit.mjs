@@ -23,7 +23,7 @@
 //          where the walk's poses put them, holds one player, and is kept with the car followed when the focus moves
 //          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
 //          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
-//   crafts two players, each the pilot of a craft of the world sim's (WorldSim addCraft, placeCraft, enterCraft,
+//   crafts two players, each the pilot of a craft of the world sim's (a boat, a helicopter; WorldSim addCraft, placeCraft, enterCraft,
 //          craftInput, leaveCraft; its collision over the node files, on the world's clock): a seat holds one pilot,
 //          each craft takes its own pilot's input, and each moves exactly as it does alone in the world (nothing
 //          assumes one local player); a pilot counts as a focus (the edits near them kept); left, a craft goes on with
@@ -451,18 +451,21 @@ function players() {
 
 // Crafts in the world sim: a world sim with the crafts' collisions over the node files (their own TileCache, the clock
 // the ticks' time); each craft's tiles loaded before it is put down (findSpawn, as the boat's shell does), so no step
-// waits. plan: [type, x, z, h, input(t)] per pilot; returns the sim, the crafts, the pilots' ids
+// waits. plan: [type, x, z, h, input(t), spot(collision)] per pilot; returns the sim, the crafts, its tick
 const BOAT = await load('sim/craft/boat-motion.ts');
+// a spot for a boat: on open water near (x, z) (as the boat's shell finds it); for one in the air: dy m over the ground
+const afloat = (x, z, h) => (col) => BOAT.findSpawn(col, x, z, h, 48);
+const aloft = (x, z, h, dy) => (col) => { const s = col.surface(x, z); return s && { x, y: s.top + dy, z, h }; };
 async function craftWorld(plan) {
   let ms = 0;
   const sim = new WorldSim(td, { seed: SEED, crafts: { meta, cache: new TC.TileCache({ N, load: async (p) => raw(p) }), now: () => ms } });
   const crafts = [];
-  for (const [type, x, z, h] of plan) {
+  for (const [type, x, z, , , spot] of plan) {
     const c = sim.addCraft(type), zero = { x: 0, y: 0, z: 0 };
     const ready = () => [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].every(([i, j]) => c.collision.surface(x + i * N, z + j * N) !== null);
     for (let i = 0; i < 4000 && !ready(); i++) { ms += 200; c.collision.prefetch({ x, y: 0, z }, zero); await new Promise((d) => setTimeout(d, 2)); }
     if (!check(ready(), `crafts: the tiles round ${type} at ${x}, ${z} load`)) return null;
-    const at = BOAT.findSpawn(c.collision, x, z, h, 48);
+    const at = spot(c.collision);
     if (!check(at, `crafts: a spot for the ${type} near ${x}, ${z}`)) return null;
     sim.placeCraft(c.id, at);
     crafts.push(c);
@@ -474,10 +477,10 @@ async function craftWorld(plan) {
 }
 
 async function crafts() {
-  const [ox, oz] = meta.origin ?? [0, 0];
-  // (the boat gate's spots: the Danube by the Altstadt, the Danube west of the Schanzlbrücke)
-  const plan = [['boat', 8160.5, 2880.5, 1.8, (t) => ({ throttle: 1, steer: Math.sin(t * 0.7), drift: false })],
-    ['boat', 1136 - ox, 547 - oz, Math.PI / 2, (t) => ({ throttle: t < 3 ? 1 : -1, steer: -0.5, drift: t > 2 })]];
+  // (a boat on the Danube by the Altstadt, the boat gate's spot; a helicopter 40 m over the street at STREET, climbing
+  // and then flying on)
+  const plan = [['boat', 8160.5, 2880.5, 1.8, (t) => ({ throttle: 1, steer: Math.sin(t * 0.7), drift: false }), afloat(8160.5, 2880.5, 1.8)],
+    ['helicopter', STREET.x, STREET.y, 0, (t) => ({ lift: t < 2 ? 1 : 0, drive: t < 2 ? 0 : 1, turn: t > 4 ? -0.5 : 0, side: 0 }), aloft(STREET.x, STREET.y, 0, 40)]];
   const both = await craftWorld(plan);
   if (!both) return;
   const { sim, crafts: [a, b], tick } = both;
@@ -503,8 +506,8 @@ async function crafts() {
       check(p.x === q.x && p.z === q.z && p.h === q.h, `crafts: pilot ${'AB'[k]}'s craft moves as it does alone (${p.x.toFixed(2)}, ${p.z.toFixed(2)} / ${q.x.toFixed(2)}, ${q.z.toFixed(2)})`);
     }
     const moved = path.map((q, k) => Math.hypot(q.x - plan[k][1], q.z - plan[k][2]));
-    check(moved[0] > 40 && moved[1] > 5, `crafts: both moved under their pilots' input (${moved.map((m) => m.toFixed(1)).join(', ')} m)`);
-    // A leaves: the seat empty, the boat coasts on hands off and slows
+    check(moved[0] > 40 && moved[1] > 20, `crafts: both moved under their pilots' input (${moved.map((m) => m.toFixed(1)).join(', ')} m)`);
+    // A leaves: the seat empty, the boat coasts on hands off and slows (B's helicopter flies on)
     sim.leaveCraft('A');
     const v0 = Math.abs(a.core.motion.speed);
     tick(2);

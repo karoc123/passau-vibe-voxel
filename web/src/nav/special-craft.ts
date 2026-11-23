@@ -1,17 +1,20 @@
 import * as THREE from 'three';
 import { clamp } from '../core/num';
-import { FixedStep } from '../core/fixed-step';
-import { viewerTileCache } from '../viewer-tiles';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
 import { makeCraftModel } from './craft-models';
-import { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
-import { CraftMotion, GLIDER_HEIGHT, type CraftInput, type CraftKind, type CraftStep } from '../sim/craft/craft-motion';
+import { SPAWN_HEIGHT } from '../sim/craft/craft-collision';
+import { GLIDER_HEIGHT, type CraftInput, type CraftKind } from '../sim/craft/craft-motion';
+import { NO_CRAFT_INPUT, type SpecialCore, type SpecialEvent } from '../sim/craft/special-core';
+import { LOCAL_PLAYER, type Craft, type WorldSim } from '../sim/world-sim';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
 import { stickAxis, TouchSticks } from './touch-sticks';
-import { VoxelCollision } from '../sim/craft/voxel-collision';
 import './special-craft.css';
+
+// The helicopter, the hovercraft and the paraglider: crafts of the world sim's (WorldSim addCraft: their core,
+// sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
+// Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts).
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
 // the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
@@ -33,12 +36,11 @@ class SpecialCraft implements PlayerCraft {
   private readonly telemetry: HTMLDivElement;
   private readonly help: HTMLDivElement;
   private readonly model;
-  private readonly motion: CraftMotion;
   private readonly rig: ChaseRig;
   private readonly touch: TouchSticks;
-  private readonly collision: VoxelCollision;
-  private readonly world;
-  private readonly clock = new FixedStep(1 / 60, 6, 0.1);
+  // the world sim, once loaded; the craft in it while the player is in it
+  private sim: WorldSim | null = null;
+  private craft: Craft<SpecialCore> | null = null;
   private readonly keys = new HeldKeys(KEYS);
   private readonly pos = new THREE.Vector3();
   private readonly offset = new THREE.Vector3();
@@ -46,16 +48,13 @@ class SpecialCraft implements PlayerCraft {
   private phase: 'off' | 'finding' | 'on' | 'landing' = 'off';
   private start: (CraftSpot & { deadline: number }) | null = null;
   private camYaw = 0;
-  private result: CraftStep = 'moving';
   private zoom = 1;
 
   constructor(private readonly ctx: CraftContext, readonly id: CraftKind) {
-    const { meta, canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
-    this.motion = new CraftMotion(id);
+    const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
+    void ctx.sim.then((s) => { this.sim = s; });
     this.model = makeCraftModel(id);
     nav.actors.add(this.model.group);
-    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), () => performance.now(), { radius: CRAFT_RADIUS[id] });
-    this.world = craftWorld(id, this.collision);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
       camera: id === 'helicopter' ? undefined : 'right',
@@ -83,7 +82,8 @@ class SpecialCraft implements PlayerCraft {
   }
 
   enter(at?: CraftSpot) {
-    if (this.id === 'paraglider' || this.phase !== 'off' || !this.ctx.nav.enterCraft(this)) return false;
+    if (this.id === 'paraglider' || this.phase !== 'off' || !this.sim || !this.ctx.nav.enterCraft(this)) return false;
+    this.take();
     const { target, camera, meta } = this.ctx, look = camera.getWorldDirection(this.look);
     const spot = at ?? { x: target.x, z: target.z, h: Math.atan2(look.x, look.z) };
     this.start = { ...spot, x: clamp(spot.x, 5, meta.W - 5), z: clamp(spot.z, 5, meta.D - 5), deadline: performance.now() + 6500 };
@@ -94,9 +94,16 @@ class SpecialCraft implements PlayerCraft {
   }
 
   protected deployFrom(source: PlayerCraft, at: CraftSpot) {
-    if (this.phase !== 'off' || at.y === undefined || !this.ctx.nav.enterCraft(this, source)) return false;
+    if (this.phase !== 'off' || at.y === undefined || !this.sim || !this.ctx.nav.enterCraft(this, source)) return false;
+    this.take();
     this.activate(at.x, at.y, at.z, at.h, 16);
     return true;
+  }
+
+  // a craft of the world sim's, the local player its pilot (not yet put down)
+  private take() {
+    this.craft = this.sim!.addCraft(this.id);
+    this.sim!.enterCraft(LOCAL_PLAYER, this.craft.id);
   }
 
   leave() {
@@ -106,26 +113,23 @@ class SpecialCraft implements PlayerCraft {
     this.touch.setActive(false);
     this.keys.clear();
     this.rig.end();
-    this.collision.release();
+    if (this.craft) this.sim?.removeCraft(this.craft.id);
+    this.craft = null;
   }
 
+  // (the sim steps the craft after this, in the same frame: main.ts; this sends the input and draws the last step)
   update(dt: number) {
     if (this.phase === 'finding') this.findStart();
-    if (this.phase === 'on') {
-      const m = this.motion;
-      this.collision.prefetch(m.p, m.velocity);
-      if (inFocus()) {
-        const input = this.input();
-        this.clock.run(dt, (step) => {
-          this.result = m.step(input, step, this.world);
-          if (this.result === 'landed') { this.landOnFoot(); return false; }
-          if (this.result === 'splash') {
-            this.panel.say('Water landing. Choose a dry landing spot next time.', 3500);
-            this.ctx.nav.flyUp();
-            return false;
-          }
-          return this.result !== 'loading';
-        });
+    const sim = this.sim;
+    if (this.phase === 'on' && sim) {
+      sim.craftInput(LOCAL_PLAYER, inFocus() ? this.input() : NO_CRAFT_INPUT);
+      for (const e of sim.craftEvents(LOCAL_PLAYER) as SpecialEvent[]) {
+        if (e === 'landed') this.landOnFoot();
+        else {
+          this.panel.say('Water landing. Choose a dry landing spot next time.', 3500);
+          this.ctx.nav.flyUp();
+        }
+        break;
       }
       if (this.phase === 'on') this.render(dt);
     }
@@ -133,19 +137,19 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private findStart() {
-    const s = this.start!;
-    this.collision.prefetch({ x: s.x, y: 0, z: s.z }, { x: 0, y: 0, z: 0 });
+    const s = this.start!, { core, collision } = this.craft!, world = core.world(collision);
+    collision.prefetch({ x: s.x, y: 0, z: s.z }, { x: 0, y: 0, z: 0 });
     let waiting = false;
     for (const radius of [0, 5, 10, 18, 30, 45, 65]) {
       for (let i = 0; i < (radius ? 12 : 1); i++) {
         const a = i * Math.PI / 6;
         const x = s.x + Math.sin(a) * radius, z = s.z + Math.cos(a) * radius;
-        if (x < 5 || z < 5 || x >= this.collision.width - 5 || z >= this.collision.depth - 5) continue;
-        const surface = this.world.surface(x, z);
+        if (x < 5 || z < 5 || x >= collision.width - 5 || z >= collision.depth - 5) continue;
+        const surface = world.surface(x, z);
         if (!surface) { waiting = true; continue; }
         if (this.id === 'helicopter' && surface.water) continue;
         const y = surface.height + SPAWN_HEIGHT[this.id];
-        const clear = this.world.sweep({ x, y, z }, { x: 0, y: 1, z: 0 }, s.h, s.h);
+        const clear = world.sweep({ x, y, z }, { x: 0, y: 1, z: 0 }, s.h, s.h);
         if (clear === 'loading') { waiting = true; continue; }
         if (!clear.hit) { this.activate(x, y, z, s.h); return; }
       }
@@ -157,16 +161,14 @@ class SpecialCraft implements PlayerCraft {
   }
 
   get mapPose() {
-    if (this.phase !== 'on' && this.phase !== 'landing') return null;
-    return { ...this.motion.p, h: this.motion.heading };
+    if ((this.phase !== 'on' && this.phase !== 'landing') || !this.craft) return null;
+    return this.craft.core.pose;
   }
 
   private activate(x: number, y: number, z: number, heading: number, speed = 0) {
-    this.motion.reset({ x, y, z }, heading, speed);
+    this.sim!.placeCraft(this.craft!.id, { x, y, z, h: heading, speed });
     this.start = null;
     this.phase = 'on';
-    this.result = 'moving';
-    this.clock.acc = 0;
     this.camYaw = heading;
     this.zoom = 1;
     this.panel.silence();
@@ -179,7 +181,7 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private landOnFoot() {
-    const { p, heading } = this.motion;
+    const { p, heading } = this.craft!.core.motion;
     this.phase = 'landing';
     this.touch.setActive(false);
     const at = new THREE.Vector3(p.x, p.y - GLIDER_HEIGHT, p.z);
@@ -205,18 +207,18 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private render(dt: number) {
-    const m = this.motion, { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
-    group.position.set(m.p.x, m.p.y - cfg.drop, m.p.z);
-    group.rotation.set(-m.pitch, m.heading, m.bank, 'YXZ');
+    const { core, collision } = this.craft!, m = core.drawn(core.clock.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
+    group.position.set(m.x, m.y - cfg.drop, m.z);
+    group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');
     // the rotors idle slower on the skids
-    const spin = this.id === 'helicopter' && inFocus() ? (m.grounded ? 9 : 24) * dt : 0;
+    const spin = this.id === 'helicopter' ? (core.motion.grounded ? 9 : 24) * dt : 0;
     if (rotor) rotor.rotation.y = (rotor.rotation.y + spin) % (2 * Math.PI);
     if (tailRotor) tailRotor.rotation.x = (tailRotor.rotation.x + 4 * spin) % (2 * Math.PI);
-    this.camYaw = followAngle(this.camYaw, m.heading, 4, dt);
+    this.camYaw = followAngle(this.camYaw, m.h, 4, dt);
     this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom);
     const eye = this.pos.copy(group.position);
     eye.y += cfg.look;
-    eye.addScaledVector(this.offset, clearShare(this.collision.sweep(eye, this.offset), this.offset, 0.12, 0.25));
+    eye.addScaledVector(this.offset, clearShare(collision.sweep(eye, this.offset), this.offset, 0.12, 0.25));
     this.look.copy(group.position);
     this.look.y += cfg.look;
     const cam = this.rig.place(eye, this.rig.look(eye, this.look), 58, dt);
@@ -228,18 +230,19 @@ class SpecialCraft implements PlayerCraft {
     this.panel.active = active;
     this.panel.el.hidden = this.id === 'paraglider' && !active && !this.panel.saying;
     this.action.hidden = this.id === 'paraglider' && !active;
-    this.action.disabled = !active && !this.ctx.nav.canStartCraft;
+    this.action.disabled = !active && (!this.ctx.nav.canStartCraft || !this.sim);
     ModePanel.text(this.action, active ? `Exit ${CONFIG[this.id].name.toLowerCase()}` : CONFIG[this.id].name);
     this.panel.details.hidden = !active && !this.panel.saying;
     this.help.hidden = this.telemetry.hidden = !on;
+    const core = this.craft?.core, result = core?.result;
     ModePanel.text(this.panel.status, this.phase === 'finding' ? 'Looking for a clear starting spot…' :
       this.phase === 'landing' ? 'Landing…' : on && !inFocus() ? PAUSED :
-      on && this.result === 'loading' ? 'Loading collision tiles…' :
-      on && this.result === 'blocked' ? 'Obstacle ahead' :
-      on && this.id === 'helicopter' && this.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
-    if (!on) return;
-    const { p, speed } = this.motion;
-    const height = this.id === 'hovercraft' ? null : this.collision.surface(p.x, p.z)?.top;
+      on && result === 'loading' ? 'Loading collision tiles…' :
+      on && result === 'blocked' ? 'Obstacle ahead' :
+      on && this.id === 'helicopter' && core?.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
+    if (!on || !core) return;
+    const { p, speed } = core.motion;
+    const height = this.id === 'hovercraft' ? null : this.craft!.collision.surface(p.x, p.z)?.top;
     ModePanel.text(this.telemetry, `${Math.round(speed * 3.6)} km/h` +
       (height == null ? '' : ` · ${Math.max(0, Math.round(p.y - height))} m above surface`));
   }
