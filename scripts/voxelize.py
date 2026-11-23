@@ -3673,6 +3673,40 @@ def piers_vehicles(ctx):
     note("church windows:", n_cw)
 
 
+def landmarks_tunnels(ctx):
+    """The landmarks' curated details, the rooms, the underpasses and the tunnels."""
+    (SANITY, bmask, feats, g, is_road, osm, rail_beds, road_lines, topi, vol) = (
+        ctx.SANITY, ctx.bmask, ctx.feats, ctx.g, ctx.is_road, ctx.osm, ctx.rail_beds, ctx.road_lines, ctx.topi,
+        ctx.vol)
+    # ---------------------------------------------------------------- curated landmark details
+    landmarks.apply_zones(vol, g, feats, pal, bmask, note)
+    overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
+    # rooms: the curated ones (interiors.ROOMS, none yet) carved out of the buildings now standing, and recorded (the tiles'
+    # room sections; the distance levels fill them again)
+    interiors.build(vol, R0, C0, note)
+    # where a hanging building piece may carry its walls down (1: inside a building outline) or needs posts (2: roof-only)
+    bkind = np.zeros((D, W), np.uint8)
+    ROOFY = {"roof", "carport", "canopy", "shelter"}
+    for f in feats:  # walls may come down only inside an outline that itself stands on the ground (not a part on stilts,
+        # not a raised passage: a connector 4-9 m over the street got filled solid to the ground)
+        if not f["part"] and (f["minh"] or 0) < 2.5 and f["tags"].get("building") not in ROOFY:
+            bkind[f["rr"], f["cc"]] = 1
+    for f in feats:
+        if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
+            bkind[f["rr"], f["cc"]] = 2
+    _bores, _bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
+    _rail_bed = np.zeros((D, W), bool)
+    for _shape, _ in rail_beds:
+        _rr, _cc = cells_of(_shape, fallback=False)
+        _rail_bed[_rr, _cc] = True
+    _walked = underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed, skip=_bore_ids)  # (not the bored ways)
+    carriageway_sanity(road_lines, SANITY, lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
+    RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
+    _bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
+    vars(ctx).update(_bore_ids=_bore_ids, _bored=_bored, _bores=_bores, _rail_bed=_rail_bed, _walked=_walked,
+                     bkind=bkind)
+
+
 STAGES = [  # (its name in the build's timing, the stage)
     ("rasters, cell colours, OSM", rasters),
     ("ground classes, roads, water", ground_classes),
@@ -3681,46 +3715,20 @@ STAGES = [  # (its name in the build's timing, the stage)
     ("vegetation", vegetation),
     ("fountains, beds, furniture", furniture),
     ("bridge piers, vehicles", piers_vehicles),
+    ("landmark details, underpasses, tunnels", landmarks_tunnels),
 ]
 ctx = Ctx()
 for _name, _run in STAGES:
     _run(ctx)
     stage(_name)
 # (the stages to come are module code still: what they read of the ones above)
-(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SAG_SRC, SANITY, _best, _roof_f, bmask, cellcol, deck, deck_abs,
- deck_col, deck_h, deck_own, feats, g, gcol, is_road, jets, lamps, nd_mean, osm, rail_beds, render, road_lines, topi,
- trunk_ok_db, vol, zt) = (
+(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SAG_SRC, SANITY, _best, _bore_ids, _bored, _bores, _rail_bed, _roof_f,
+ _walked, bkind, bmask, cellcol, deck, deck_abs, deck_col, deck_h, deck_own, feats, g, gcol, is_road, jets, lamps,
+ nd_mean, osm, render, topi, trunk_ok_db, vol, zt) = (
     ctx.GCTX, ctx.H, ctx.LAMP_KEYS, ctx.OPEN_CUT, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SAG_SRC, ctx.SANITY, ctx._best,
-    ctx._roof_f, ctx.bmask, ctx.cellcol, ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.feats,
-    ctx.g, ctx.gcol, ctx.is_road, ctx.jets, ctx.lamps, ctx.nd_mean, ctx.osm, ctx.rail_beds, ctx.render,
-    ctx.road_lines, ctx.topi, ctx.trunk_ok_db, ctx.vol, ctx.zt)
-# ---------------------------------------------------------------- curated landmark details
-landmarks.apply_zones(vol, g, feats, pal, bmask, note)
-overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
-# rooms: the curated ones (interiors.ROOMS, none yet) carved out of the buildings now standing, and recorded (the tiles'
-# room sections; the distance levels fill them again)
-interiors.build(vol, R0, C0, note)
-# where a hanging building piece may carry its walls down (1: inside a building outline) or needs posts (2: roof-only)
-bkind = np.zeros((D, W), np.uint8)
-ROOFY = {"roof", "carport", "canopy", "shelter"}
-for f in feats:  # walls may come down only inside an outline that itself stands on the ground (not a part on stilts,
-    # not a raised passage: a connector 4-9 m over the street got filled solid to the ground)
-    if not f["part"] and (f["minh"] or 0) < 2.5 and f["tags"].get("building") not in ROOFY:
-        bkind[f["rr"], f["cc"]] = 1
-for f in feats:
-    if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
-        bkind[f["rr"], f["cc"]] = 2
-_bores, _bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
-_rail_bed = np.zeros((D, W), bool)
-for _shape, _ in rail_beds:
-    _rr, _cc = cells_of(_shape, fallback=False)
-    _rail_bed[_rr, _cc] = True
-_walked = underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed, skip=_bore_ids)  # (not the bored ways)
-carriageway_sanity(road_lines, SANITY, lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
-RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
-_bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
-
-stage("landmark details, underpasses, tunnels")
+    ctx._bore_ids, ctx._bored, ctx._bores, ctx._rail_bed, ctx._roof_f, ctx._walked, ctx.bkind, ctx.bmask, ctx.cellcol,
+    ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.feats, ctx.g, ctx.gcol, ctx.is_road, ctx.jets,
+    ctx.lamps, ctx.nd_mean, ctx.osm, ctx.render, ctx.topi, ctx.trunk_ok_db, ctx.vol, ctx.zt)
 # ---------------------------------------------------------------- floating debris
 debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
 
