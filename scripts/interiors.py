@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-M_INTERIOR, M_INTERIOR_GLASS = 24, 25  # web/src/voxelMaterial.ts MAT.INTERIOR, MAT.INTERIOR_GLASS
+from constants import M_INTERIOR, M_INTERIOR_GLASS  # web/src/core/materials.ts MAT.INTERIOR, MAT.INTERIOR_GLASS
 
 
 @dataclass(frozen=True)

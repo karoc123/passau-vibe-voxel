@@ -55,6 +55,8 @@ from pathlib import Path
 
 import numpy as np
 
+from constants import M_CAR, M_LAMP, M_LEAF
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -283,8 +285,6 @@ DECK_SAG_KNOWN = {
     1272598946: "footway (altstadt): crowns over 3 m of it",
 }
 
-
-M_LEAF, M_LAMP, M_CAR = 3, 5, 11
 
 
 def surface(ws, fx):

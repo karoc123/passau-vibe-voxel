@@ -32,6 +32,9 @@ from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, W
+import constants as K  # (the ground colours caps.py reads a meaning from)
+from constants import (M_BRONZE, M_CAR, M_CLASSIC, M_CLOCK, M_CONCRETE, M_FLOODLIT, M_GLASS, M_GRASS, M_JET, M_LAMP,
+                       M_LEAF, M_MARK, M_METAL, M_ROOF, M_SIGN, M_SOIL, M_SOLID, M_TENEMENT, M_WALL, M_WATER, M_WOOD)
 from osm import OSM
 import landmarks
 import overrides
@@ -98,8 +101,6 @@ def stage(name):
 
 
 # ---------------------------------------------------------------- materials / palette
-M_SOLID, M_WALL, M_GLASS, M_LEAF, M_WATER, M_LAMP, M_METAL, M_FLOODLIT, M_GRASS, M_MARK, M_SOIL, M_CAR, M_ROOF, M_CONCRETE, M_CLOCK, M_BRONZE, M_SIGN = range(17)
-M_WOOD = 23  # a tree's trunk and branches
 
 
 class Palette:
@@ -179,23 +180,23 @@ def cell_hash(r, c, *a):
 
 pal = Palette()
 C = {  # ground & misc palette (MagicaVoxel-like pastel)
-    "paving": pal("#c6c2b8"), "paving2": pal("#b5b4af"), "asphalt": pal("#5f636b"), "asphalt_l": pal("#6e7178"),
-    "sett": pal("#8f8981"), "road_paving": pal("#a49f97"), "tartan": pal("#b3604c"), "court": pal("#4f8db3"), "concrete": pal("#bdbab2"), "cycle": pal("#8a5a52"), "gravel": pal("#d8ccb5"),
+    "paving": pal(K.PAVING), "paving2": pal(K.PAVING2), "asphalt": pal(K.ASPHALT), "asphalt_l": pal(K.ASPHALT_L),
+    "sett": pal(K.SETT), "road_paving": pal(K.ROAD_PAVING), "tartan": pal("#b3604c"), "court": pal("#4f8db3"), "concrete": pal(K.CONCRETE), "cycle": pal(K.CYCLE), "gravel": pal(K.GRAVEL),
     "grass": pal("#86b45a", M_GRASS), "grass2": pal("#79a852", M_GRASS), "garden": pal("#73a34e", M_GRASS),
     "scrub": pal("#5f8f45", M_LEAF), "flower": pal("#d98fb3", M_GRASS), "flower2": pal("#e8c25e", M_GRASS),
     "dirt": pal("#a58a66"), "dirt2": pal("#8e7455"), "fresh": pal("#93865a", M_GRASS),
     "stubble": pal("#c4b27e"), "stubble2": pal("#b9a26c"),  # a field mown or harvested: straw, not paving
-    "ballast": pal("#8a8178"), "rail": pal("#55575d", M_METAL), "trambed": pal("#a9a59c"),
-    "platform": pal("#b7b1a6"), "water": pal("#68654f", M_WATER), "mark": pal("#f1efe8", M_MARK),
+    "ballast": pal(K.BALLAST), "rail": pal("#55575d", M_METAL), "trambed": pal("#a9a59c"),
+    "platform": pal(K.PLATFORM), "water": pal("#68654f", M_WATER), "mark": pal("#f1efe8", M_MARK),
     "bare": pal("#a8977c", M_SOIL),  # lawns before their grass arrives (tiles.py: grass is its own file)
     "soil": pal("#7a5c45", M_SOIL), "lamp": pal("#ffe2a8", M_LAMP),
     # wood (voxelMaterial.ts MAT.WOOD): trunks and the limbs in a broadleaf crown, the thinner branches out to its
     # edge a paler grey-brown; drawn through the leaves around them (mesher.worker.ts), bare in winter
     "trunk": pal("#6b4f3a", M_WOOD), "twig": pal("#746860", M_WOOD),
-    "pole": pal("#3a3e42", M_METAL), "steps": pal("#a8a296"), "hatch": pal("#d9c860", M_MARK),
+    "pole": pal("#3a3e42", M_METAL), "steps": pal(K.STEPS), "hatch": pal("#d9c860", M_MARK),
     "fence": pal("#dfe3e6", M_METAL), "crane": pal("#e7b23c", M_METAL), "crane_d": pal("#3d4249", M_METAL),
-    "shelter": pal("#a9c3cf", M_GLASS), "deck": pal("#a7a49d", M_CONCRETE), "pier": pal("#99958d", M_CONCRETE), "parking": pal("#6a6d73"),
-    "track": pal("#b8875a"), "kerb": pal("#cfc7b8"), "granite_d": pal("#55595c"), "woodfloor": pal("#6b5847"), "jet": pal("#dff1f7", 17),
+    "shelter": pal("#a9c3cf", M_GLASS), "deck": pal(K.DECK, M_CONCRETE), "pier": pal("#99958d", M_CONCRETE), "parking": pal(K.PARKING),
+    "track": pal("#b8875a"), "kerb": pal(K.KERB), "granite_d": pal("#55595c"), "woodfloor": pal("#6b5847"), "jet": pal("#dff1f7", M_JET),
     "benchkerb": pal("#dcd9d1", M_CONCRETE), "pline": pal("#eeede6", M_MARK),  # a pitch's white lines
     "shore": pal("#9d9585"),  # a river bank's rip-rap and gravel: grey-brown stones, darker than any paving
 }
@@ -1579,7 +1580,6 @@ del _biw, _l, _n, _sz
 
 # colours/materials per feature
 SACRED = {"church", "cathedral", "chapel", "basilica", "synagogue", "mosque", "temple", "shrine"}
-M_CLASSIC, M_TENEMENT = 20, 22
 CORE = CORE_GEOM
 # a historic core's plasters where OSM gives no colour: ochre, terracotta, salmon, ivory, cream, an odd sage -- warm,
 # rarely cool (the upstream project's palette for a rebuilt old town; Passau's own pastels are not measured yet)

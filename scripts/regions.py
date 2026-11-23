@@ -50,6 +50,7 @@ from pathlib import Path
 import numpy as np
 
 import aoi
+from constants import M_CAR, M_GRASS, M_LAMP, M_LEAF, M_WATER, M_WOOD
 import mapstore
 import region
 import window
@@ -318,7 +319,7 @@ def driver_stamp(ws):
     code = {f: region_inputs.code_sha(HERE / f) for f in ("regions.py", "labels.py", "landmarks.py", "traffic.py",
                                                          "tunnels.py", "underpass.py", "osm.py", "aoi.py", "tiles.py",
                                                          "window.py", "region.py", "passau.py", "mapstore.py",
-                                                         "overrides.py", "ways.py")}
+                                                         "overrides.py", "ways.py", "constants.py")}
     import overrides
     d = dict(keys=keys, code=code, overrides=overrides.tree_sha(), palette=region_inputs.file_sha(HERE / "palette.json"),
              osm=region_inputs.file_sha(f"{aoi.RAW}/osm.json"), config=region_inputs.config_part(),
@@ -534,13 +535,13 @@ def main(argv):
     tunnels.FLOOR, tunnels.IDS = R("floor", np.int16), {o for r in res.values() for o in r["bore_ids"]}
     skip = np.zeros(len(palette) + 64, bool)
     ids = res[ws[0]]["ids"]
-    skip[[i for i, e in enumerate(palette) if e[3] in (3, 5, 11, 23)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True  # (leaf, lamp, car, wood)
+    skip[[i for i, e in enumerate(palette) if e[3] in (M_LEAF, M_LAMP, M_CAR, M_WOOD)] + [ids["trunk"], ids["pole"], ids["fence"]]] = True
     solid = ~skip
     solid[0] = False
     # what a car hits (web/src/core/semantics.ts solidForCar: all but grass and water; leaves, poles, lamps too):
     # traffic.place_lanes keeps the lanes clear of it
     csolid = np.zeros(len(palette) + 64, bool)
-    csolid[[i for i, e in enumerate(palette) if e[3] not in (4, 8)]] = True
+    csolid[[i for i, e in enumerate(palette) if e[3] not in (M_WATER, M_GRASS)]] = True
     csolid[0] = False
     tin = dict(g=g, nd_mean=R("deck_near", np.float32), surf=qa, water=R("twater", bool), solid=solid, csolid=csolid)
     if os.environ.get("TRAFFICDUMP"):  # what traffic.py takes, to rebuild traffic.json alone (uv run python scripts/traffic.py;

@@ -14,6 +14,9 @@ flat cap is no cap); no section at all in a node without caps.
 """
 import numpy as np
 
+# the paved ground's colours (materials.ts GROUND_COLOURS), a kerb's, steps', a bare deck's: voxelize.py paints them
+from constants import BALLAST, DECK, GROUND_HEX, KERB, M_CONCRETE, M_MARK, M_ROOF, M_SOIL, M_SOLID, STEPS
+
 
 def zigzag(v):
     v = np.asarray(v, np.int64)
@@ -104,11 +107,6 @@ assert N_DECK <= N_RELAX  # cells: how far from a column what decides its corner
 # collide as voxels. False: tile_fields.py writes none (the client then draws roofs as voxel staircases)
 ROOFS = True
 
-M_SOLID, M_MARK = 0, 9
-GROUND_HEX = ("#8f8981", "#a49f97", "#c6c2b8", "#b5b4af", "#b7b1a6", "#5f636b", "#6e7178", "#6a6d73", "#8a5a52",
-              "#d8ccb5", "#8a8178", "#bdbab2")  # materials.ts GROUND_COLOURS
-BALLAST, KERB, STEPS, DECK = "#8a8178", "#cfc7b8", "#a8a296", "#a7a49d"
-
 
 def quantised(hex_):
     """a colour as voxelize.py's Palette quantises it (to 4, Python's round)"""
@@ -122,8 +120,6 @@ def paved_ids(palette):
     return np.array([e[3] == M_MARK or (e[3] == M_SOLID and (tuple(e[:3]) == kerb or tuple(e[:3]) in ground))
                      for e in palette], bool)
 
-
-M_SOIL, M_CONCRETE = 10, 13
 
 
 def cap_ids(palette):
@@ -528,7 +524,6 @@ def report(root=".", windows=None, note=print):
 # Levels 2, 4, 8: a block's corners are the level-1 corners of the roof cells at its own four corners, divided by s,
 # where all four are roof cells and lie within the block top's span.
 ROOF_LIM = 448  # 1/64 m: a roof corner within 7 m of its run's top (a 75 degree roof's)
-M_ROOF = 12
 ROOF_SHIFT = 3  # m: a roof's voxels this far off round(roof_z) take its plane moved to them; further, no cap
 
 

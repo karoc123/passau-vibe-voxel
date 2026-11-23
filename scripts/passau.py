@@ -9,6 +9,8 @@ import math
 
 import numpy as np
 
+from constants import M_CLASSIC as CLASSIC, M_METAL as METAL, M_ROOF as ROOF, M_TENEMENT, M_WALL, M_WINDOW as WINDOW
+
 # each set piece's reach, rows r0..r1, columns c0..c1 of the project grid (what it reads and writes, with a margin)
 SET_PIECES = dict(dom=(675, 815, 1880, 2085), niederhaus=(495, 605, 2555, 2695), oberhaus=(195, 430, 2260, 2475),
                   poststeg=(810, 950, 968, 1048))
@@ -47,8 +49,6 @@ class Project:
 
     def __setitem__(self, idx, v):
         self.a[self._ix(idx)] = v
-
-CLASSIC, WINDOW, ROOF, METAL = 20, 21, 12, 6  # landmarks.MAT_IDS
 
 
 def _hex(h):
@@ -595,7 +595,7 @@ def _hip_roofs(vol, g, box, wall_rgb, roof, pal, min_cells=30, join=(), keep=())
         em = e[m].max()
         top = eave + np.round((ridge - eave) * (e - 1) / max(em - 1, 1)).astype(int)
         wall = pal(wall_rgb, 1)
-        soft = [i for i, e_ in enumerate(pal.entries) if e_[3] in (1, 12, 22)]
+        soft = [i for i, e_ in enumerate(pal.entries) if e_[3] in (M_WALL, ROOF, M_TENEMENT)]
         for r, c in zip(*np.nonzero(m)):
             R, Cc = r + r0, c + c0
             col = vol[:, R, Cc]

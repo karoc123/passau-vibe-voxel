@@ -68,7 +68,7 @@ bg phenology $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.
   data/raw/treespecies_2022.tif data/raw/treespecies_2016.tif data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
 join                                     # (the steps above read only what voxelize.py wrote, not each other)
-$S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py data/zones.bin data/flood.bin data/foliage.bin \
+$S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py scripts/constants.py data/zones.bin data/flood.bin data/foliage.bin \
   data/surface.npz data/prep.npz data/ground.npz data/qa_roadmask.bin.gz $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light, sloped caps
                                                  # (from the data/ maps above)

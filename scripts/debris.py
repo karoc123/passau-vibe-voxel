@@ -11,6 +11,7 @@ import numpy as np
 from scipy import ndimage
 
 import aoi
+from constants import M_LEAF
 
 
 def _owned(vol, occ_of, st, B, K, floor=False):
@@ -140,7 +141,7 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
         # first round: leaves hold nothing up -- a roof, a footbridge or a deck end that only touches a tree crown gets
         # its own walls or posts; only building pieces 2 m or more up are handled here, the rest in the second round
         # (a lamp on a hedge voxel or a trunk on scrub ground floats in this view but stands)
-        solid = np.array([e[3] != 3 for e in pal.entries] + [False] * 64)
+        solid = np.array([e[3] != M_LEAF for e in pal.entries] + [False] * 64)
         solid[0] = False
     st = ndimage.generate_binary_structure(3, 1)
 
