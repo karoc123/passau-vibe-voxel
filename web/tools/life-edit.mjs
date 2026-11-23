@@ -1,10 +1,10 @@
 // The street traffic on an edited city, headless on the real data, as a server would run it: the world sim alone
-// (src/sim/traffic.ts Traffic + src/physics/rapier/life-phys.ts LifePhysics, no three.js, no StreetLife), on its
+// (src/sim/world-sim.ts WorldSim: its Traffic and its LifePhysics, no three.js, no StreetLife), on its
 // fixed tick, its random numbers seeded (Math.random throws while it runs). The traffic runs round the bridge nearest
 // BRIDGE (the World over the level-1 node files, read as needed) with the bodies attached from the start; then, each
 // from a fresh start:
 //   dig    a sphere of r 4 dug out of the deck 6 m ahead of a moving car (core/columns.ts EditableNode, as dig.ts
-//          does; told to the World, to core/live-edits.ts (the colliders) and to the traffic, as main.ts does). That car
+//          does; told to the World, to core/live-edits.ts (the colliders) and to the world sim, as main.ts does). That car
 //          gets a body, falls through the deck to the ground under it and is a wreck at rest there; the cars behind
 //          fall in too or stop at the rim; people over the hole fall (option A: dropped).
 //   block  a 7x7x3 m block placed 25 m ahead of a moving car: its body brakes and stops before it (its ghost waits:
@@ -27,7 +27,7 @@ const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, H
 
 const meta = readMeta(), N = meta.tiles.N;
 const TD = await load('tile-data.ts'), CO = await load('core/columns.ts');
-const { Traffic, STEP } = await load('sim/traffic.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
+const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
@@ -42,10 +42,10 @@ const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const realRandom = Math.random;
 const noRandom = () => { throw new Error('Math.random in the world sim (it draws from its seeded rng)'); };
 
-// an edit (as dig.ts and stream.ts do it): the World's source, the live edits (the colliders), the traffic
+// an edit (as dig.ts and stream.ts do it): the World's source, the live edits (the colliders), the world sim
 const touched = new Set();
 function edit(ctx, op, box) {
-  const { src, T, colData } = ctx;
+  const { src, sim, colData } = ctx;
   for (const [tx, ty] of CO.touchedNodes(op, N, meta.tiles.levels[0].nx, meta.tiles.levels[0].ny)) {
     const key = `1/${tx}_${ty}`, d = src.columns(key);
     if (!d) continue;
@@ -59,22 +59,21 @@ function edit(ctx, op, box) {
     touched.add(`${tx}_${ty}`);
   }
   src.version++;
-  T.edited(box);
+  sim.edited(box);
 }
 const clearEdits = () => { for (const k of touched) { const [tx, ty] = k.split('_').map(Number); LP.liveEdits.set(tx, ty, null); } touched.clear(); };
 
 // a fresh world sim round the bridge, WARM s on, bodies attached (nothing edited: they must cost nothing)
 async function setup(at) {
   const { W, src, colData } = await nodeWorld();
-  const T = new Traffic(td, SEED);
-  T.ground = W;
-  const phys = await LP.LifePhysics.load(meta, { x: at.x, z: at.y }, {}, { load: async (p) => raw(p) });
+  const sim = new WorldSim(td, { seed: SEED, loadPhysics: () => LP.LifePhysics.load(meta, { x: at.x, z: at.y }, {}, { load: async (p) => raw(p) }) });
+  sim.setWorld(W);
+  const phys = await sim.loadPhysics(), T = sim.traffic;
   // (the tiles round the bridge decoded up front, as the page's streaming has them: no load lands mid-run)
   const want = 400;
   for (let tz = Math.floor((at.y - want) / N); tz <= Math.floor((at.y + want) / N); tz++)
     for (let tx = Math.floor((at.x - want) / N); tx <= Math.floor((at.x + want) / N); tx++) await phys.terrain.prefetch(tx * N + 1, tz * N + 1);
-  T.bodies = phys;
-  const ctx = { T, phys, W, src, colData, focus: { x: at.x, z: at.y }, costs: [], t: 0 };
+  const ctx = { sim, T, phys, W, src, colData, focus: { x: at.x, z: at.y }, costs: [], t: 0 };
   let worked = 0;
   run(ctx, WARM, () => { if (phys.stats.tickMs || phys.bodies.size || phys.terrain.stats.chunks || phys.t) worked++; });
   check(worked === 0 && phys.t === 0, `nothing edited, nothing done: ${worked} tick(s) with bodies, colliders or a step`);
@@ -86,7 +85,7 @@ function run(ctx, seconds, each) {
   Math.random = noRandom;
   try {
     for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) {
-      ctx.T.update(STEP, HOUR, ctx.focus);
+      ctx.sim.update(STEP, { hour: HOUR, focus: ctx.focus });
       ctx.t += STEP;
       if (ctx.T.edits.length) ctx.costs.push(ctx.phys.stats.tickMs);
       each?.(i);
@@ -210,7 +209,7 @@ async function dig() {
     if (bodyAt < 0 && phys.owns(car)) bodyAt = ctx.t - t0;
     if (car.rp) minY = Math.min(minY, car.rp.y + lowEdge(car));
     for (const c of [...T.cars, ...T.detachedCars]) if (c.rp && c.rp.y < deck - 3 && Math.hypot(c.rp.x - ax, c.rp.z - az) < 8) fallers.add(c.id);
-    dropped += T.dropped.length; T.dropped = [];
+    dropped += ctx.sim.events.dropped.length;
   });
   const lost = phys.log.find((l) => l.kind === 'lost' && l.id === car.id), rest = phys.log.find((l) => l.kind === 'rest' && l.id === car.id);
   const rim = [...phys.bodies.values()].filter((b) => b.state === 'track' && b.held && Math.hypot(b.car.rp.x - ax, b.car.rp.z - az) < 20).length;
@@ -265,7 +264,7 @@ async function wreck() {
   // (an edit that changes nothing, round the focus: the cars near it get bodies; then a moving one with a body and
   // one behind it is wrecked)
   const f = ctx.focus;
-  T.edited([f.x - 40, f.z - 40, f.x + 40, f.z + 40]);
+  ctx.sim.edited([f.x - 40, f.z - 40, f.x + 40, f.z + 40]);
   let car = null;
   for (let k = 0; k < 20 && !car; k++) { run(ctx, 0.5); car = pickCar(ctx, -99, 5, true); if (car && !phys.owns(car)) car = null; }
   if (!check(car, `a moving car with a body and one behind it near (${f.x}, ${f.z})`)) return null;
@@ -302,12 +301,12 @@ async function motorbike() {
   const { x, z } = bike.rp, spec = VH.VEHICLES.moto;
   check(bike.len === spec.len, 'the motorbike uses its catalogue length');
   const box = [x - 30, z - 30, x + 30, z + 30];
-  T.edited(box);
+  ctx.sim.edited(box);
   run(ctx, 3);
   const b = phys.bodies.get(bike.id);
   check(b?.state === 'track' && b.build.bike && b.build.half.x === spec.build.half.x,
     'the motorbike tracks with its narrow Rapier body');
-  T.edited(box, true);
+  ctx.sim.edited(box, true);
   run(ctx, 0.2);
   check(!phys.owns(bike) && T.cars.includes(bike), 'clearing the edit returns the motorbike to lane tracking');
   results.moto = { id: bike.id, tracked: b?.state === 'track', released: !phys.owns(bike) };
@@ -320,9 +319,8 @@ function transit() {
   const boats = JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8'));
   const focus = { x: 7000, z: 2900 };
   function replay(ticksPerFrame, seed) {
-    const world = new Traffic(data, seed);
-    world.day = 200;
-    world.setBoats(boats);
+    const sim = new WorldSim(data, { seed }), world = sim.traffic;
+    sim.setBoats(boats);
     const snapshots = [];
     const snapshot = () => ({
       tick: world.tickNumber,
@@ -331,18 +329,18 @@ function transit() {
     });
     const advance = (ticks, hour) => {
       for (let i = 0; i < ticks; i += ticksPerFrame)
-        world.update(STEP * ticksPerFrame, hour, focus, focus);
+        sim.update(STEP * ticksPerFrame, { hour, day: 200, focus, viewer: focus });
       snapshots.push(snapshot());
     };
     Math.random = noRandom;
     try {
-      world.update(STEP / 4, 10, focus);
+      sim.update(STEP / 4, { hour: 10, day: 200, focus });
       check(world.tickNumber === 0 && !world.boats.poses.length, 'boats wait for the first world tick');
       advance(30, 10);
       advance(60, 10);
-      world.water = { waterColumn: (x) => ({ water: localTop(x) }) }; // (the world's columns, two stretches)
+      sim.setWorld(null, { waterColumn: (x) => ({ water: localTop(x) }) }); // (the world's columns, two stretches)
       advance(2, 10);
-      world.water = null;
+      sim.setWorld(null, null);
       advance(2, 15);
       check(world.boats.previous.every((p) => world.boats.poses.some((q) =>
         p.kind === q.kind && p.id === q.id && Math.hypot(p.x - q.x, p.z - q.z) < 0.2)),
