@@ -1,6 +1,6 @@
 # A local server: the world sim behind a client interface, then in a Web Worker (E9)
 
-Status: plan (branch `e9`, from `main` 86e0ef88). Target: [ADR 0008](../adr/0008-server-vision.md) ("Next proof of the
+Status: steps 1-4 done on branch `e9` (section 6); the worker is behind `?worker=1`, not yet the default. Target: [ADR 0008](../adr/0008-server-vision.md) ("Next proof of the
 seam: a local server in the browser"), on [ADR 0006](../adr/0006-world-sim-seam.md) and
 [ADR 0007](../adr/0007-player-control-in-world-sim.md). The page may only talk to the sim through `SimClient`:
 commands in, snapshots and events out. First in the page's thread (neutral), then in a Web Worker behind `?worker=1`,
@@ -204,11 +204,57 @@ some 75 KB a snapshot as float64; for a network later, quantised and delta-coded
 5. **Measure** frame time and input latency (key down to the first frame drawing its effect) with and without the
    worker; **default** if solid.
 
-## 6. Open, for the owner
+## 6. As built (branch `e9`)
+
+- `sim/sim-client.ts`: `SimClient`, `SimCommand`, `CommandResult`, `TrafficView`, `CraftView`; `LocalSimClient` (the
+  sim's own objects read in place), `MirrorSimClient` over a `SimLink` (`ThreadLink`: the server in the page's
+  thread, `?mirror=1`; `WorkerLink` in `sim-worker-link.ts`: `?worker=1`).
+- `sim/sim-server.ts` `SimServer`: the queue, the outcomes, a snapshot per player, the edits tracked for a client in
+  another thread. `sim/snapshot.ts`: `Snapshot`, `takeSnapshot`, `TrafficMirror`. `sim/craft/core-state.ts`: a craft
+  core's fields saved and loaded into a core of the same class on the client (no per-core code).
+- `sim-host.ts` `hostSim`: the WorldSim wired (physics loader, crafts' world, ground, boats, `initWorldEdits`, the
+  edits told to the sim), for the page's thread and the worker alike. `sim.worker.ts`: its own TileCache
+  (`viewer-tiles.ts` `tileCacheAt`), live edits, ground (`tile-world.ts`), Rapier.
+- The craft shells go through `nav/craft.ts` `CraftLink` (spawn, place, input, events, reset, close; a
+  `VoxelCollision` of their own). `fpv.ts` no longer writes `core.waiting`; `plane.ts` sets its chase camera from the
+  plane the first frame the sim has put it down (one frame later than before).
+- Gates: `tools/mirror-check.mjs` (fast set): two sims from one seed, one drawn directly, one through snapshots,
+  agree bit for bit every frame (agents' poses, instance matrices, seats, a walked person). `popin-check --mirror`
+  passes. Not bit for bit: a Rapier body's drawn pose (the mirror blends its two drawn poses linearly, the sim its
+  quaternions); not covered by a gate.
+- Measured (headless Chrome, software GL, 480 x 300, `seed=7`, Ludwigsplatz; ms per frame):
+
+  | | frame (avg / p95) | sim on the page | sim in the worker | snapshot applied on the page | input latency |
+  |---|---|---|---|---|---|
+  | map view, in the page | 27.8 / 49.9 | 1.05 | – | – | |
+  | map view, worker | 28.0 / 50.0 | 0.04 | 1.51 | 0.22 | |
+  | following a car, in the page | 86.1 / 116.6 | 2.90 | – | – | |
+  | following a car, worker | 86.8 / 116.7 | 0.04 | 3.52 | 0.25 | |
+  | driving, in the page | 66.2 / 83.4 | 3.83 | – | – | 1 frame (~63 ms) |
+  | driving, worker | 65.8 / 83.4 | 0.05 | 4.89 | 0.27 | 2 frames (~123 ms) |
+
+  The frames are the software renderer's; the sim's share of the page's thread drops from 1-4 ms to about 0.3 ms
+  (plus the message's structured clone, not measured). The worker takes 0.5-1 ms more than the update alone (the
+  snapshot). Input latency is one frame more with the worker (the page draws the snapshot of the frame before).
+
+## 7. Left
+
+- **Default**: the worker is solid in the browser checks (follow, walk, drive, every craft, dig) but costs a frame
+  of input latency until the client predicts its own vehicle (ADR 0008). Flip in `main.ts` (`qs.get('worker') !== '0'`).
+- **Interest by focus** (section 4): the snapshot carries the whole active circle; no filter per client yet.
+- **Compact encoding**: the snapshot is plain objects (about 900 agents at the Altstadt); typed arrays and deltas
+  come with a network.
+- The worker fetches and decodes the level-1 nodes the page's streamer and shells also fetch (the browser's cache
+  saves the second download, not the decode); the build has Rapier twice (the page's and the worker's chunk; a page
+  loads one).
+- Tools that reach `window.__sim` get the client (`seat`, `driver`, `craftOf`, `traffic`); `players`, `crafts`,
+  `physics` of the WorldSim are gone from the page.
+
+## 8. Open, for the owner
 
 - The worker's ground is level 1 only (the streamer's is whatever is loaded). Near the focus that is the same.
-- With the worker the page draws one update behind (the snapshot of the frame before): about one frame of input
-  latency, to be measured, against a main thread freed of the sim (about 0.5 ms a frame, more with Rapier bodies).
+- With the worker the page draws one update behind (the snapshot of the frame before): one frame of input latency
+  (measured, section 6), against a main thread freed of the sim (1-4 ms a frame here, more with Rapier bodies).
 - The shells still decide where a craft is put and remove it on leave (`spawnCraft`, `dropCraft`): a mode's job later;
   E8 keeps a left craft in the world.
 - `LOCAL_PLAYER` stays in sim/world-sim.ts until E7 moves it to the client.
