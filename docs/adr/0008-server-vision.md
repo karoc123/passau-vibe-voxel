@@ -47,6 +47,9 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
   health and items as general mechanisms, and runs on its own clock whether or not anything is drawn.
 - **A vehicle stays in the world when its player gets out** (owner, 2026-11-23): parked cars, floating boats, landed
   helicopters can be taken by another player. It is dropped by the same presence rule as edits (nobody near).
+- **The player on foot is always an avatar of its own** (owner, 2026-11-23), in every mode, sandbox included: an
+  entity spawned for the player with health and items, never a person of the crowd. Following a crowd person stays as
+  an observer camera. Entities, seats, health, items and the mode layer: [entities-and-modes](../plans/entities-and-modes.md).
 - **Next proof of the seam: a local server in the browser.** The sim runs in a Web Worker; the page sends commands
   and draws snapshots. No network yet; a Node server comes after it.
 - **Language: TypeScript for now.** The sim is shared by server and client (prediction needs the same code), Rapier

@@ -359,6 +359,14 @@ stated; none waits on E8's internals.
   E8's presence drop becomes the default for every non-ambient, unpinned entity; `despawned` with `why`.
 - **Gates:** life-edit (players), entities, mirror-check, popin-check.
 
+### E21. The player's avatar (S–M, owner decision 1, not neutral)
+
+- **Waits for:** E15, E16.
+- **Do:** a `person` entity spawned for each player outside the crowd (health, items, `walker` seat), in every mode;
+  the sandbox spawns it where the player starts walking; the client walk (bounded pose, E7) moves it; `walkAs` on
+  crowd people goes, following them stays.
+- **Gates:** life-edit (players), entities, mirror-check, popin-check; browser check: walk, enter a car, leave it.
+
 ### E17. Craft prediction (M, not neutral: less latency)
 
 - **Waits for:** E13.
@@ -388,20 +396,13 @@ stated; none waits on E8's internals.
   without code outside `sim/modes/`.
 - **Gates:** entities (probe scenario), core-deps.
 
-## 6. Questions for the owner
+## 6. Decisions (owner, 2026-11-23)
 
-1. **The player on foot in a game: an avatar entity?** A game mode spawns a `person` of its own per player (health,
-   items, `walker` seat), not one of the crowd. Sandbox keeps `walkAs` on crowd people and the free first-person walk
-   as client-only. *Recommendation:* yes; it keeps the crowd ambient and gives health and items a body to live on.
-2. **Who simulates the walk?** Today the client authors the walker's pose (`walkPose`), E7 bounds it. For combat
-   (hits, cover) the sim would step the walk itself (foot.ts' movement into a core) and the client predict it like a
-   craft. *Recommendation:* bounded client pose now; move the walk into a core when the first game mode with damage on
-   foot starts (after E15). It changes whether E17's scheme covers the walker.
-3. **Worker default before car prediction?** Car prediction (E18) is L. *Recommendation:* flip after craft prediction
-   (E17) and accept one frame (about 17 ms at 60 fps) on the car until E18.
-4. **A round: a fresh world or the same one?** Does `end` and a new round make a new `WorldSim` (traffic reseeded,
-   edits gone, replay per round) or reset entities inside the running one? *Recommendation:* a new `WorldSim` and mode
-   per round, the host process kept; simplest and replayable, nothing needs a reset path.
-5. **Entity ids per kind or global?** Global ids are tidier on the wire but change the seeded traffic (the car's id
-   picks its type) and every gate's counts. *Recommendation:* keep `{ kind, id }` per kind; a global id only if a
-   network format later wants one (then decouple `trafficType` from the id first).
+1. **The player on foot is always an avatar of its own**, in every mode, sandbox included: a `person` entity spawned
+   for the player (health, items, `walker` seat), never one of the crowd. `walkAs` on crowd people goes when the
+   avatar exists (E16); following a crowd person stays as an observer camera. Not neutral: sandbox changes there.
+2. **Who simulates the walk:** left to the engine (owner: no preference). Decided: bounded client pose now (E7); the
+   walk moves into a core when the first mode with damage on foot starts (after E15), predicted like a craft.
+3. **Worker by default: no hurry.** E17–E19 are not urgent; they come after the entity and mode packages.
+4. **Rounds:** none exist yet; when they do, a new `WorldSim` and mode per round is fine.
+5. **Entity ids:** per kind (`{ kind, id }`), as recommended; an engine detail.

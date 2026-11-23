@@ -37,6 +37,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | E8 | A vehicle stays in the world when left | S–M | **Ready** |
 | E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
+| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Waits** (E8, E7 first; order in the plan) |
+| E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
