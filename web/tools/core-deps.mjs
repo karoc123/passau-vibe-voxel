@@ -8,13 +8,14 @@
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
 //     sessionStorage, requestAnimationFrame, HTML...Element, ... and no fetch (core takes its loader injected).
+// And for all of src/ (the shipped app): no import from web/checks/ (the check harnesses the tools run).
 // usage (in web/): node tools/core-deps.mjs [-v]; prints PASS and the modules scanned, or each violation and exit 1
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const src = path.join(web, 'src'), core = path.join(src, 'core'), verbose = process.argv.includes('-v');
+const src = path.join(web, 'src'), core = path.join(src, 'core'), checks = path.join(web, 'checks'), verbose = process.argv.includes('-v');
 const rel = (f) => path.relative(web, f);
 
 const BANNED_MODULES = [
@@ -74,10 +75,12 @@ function resolve(from, spec) {
   return base;
 }
 
+// imports and re-exports: static, side-effect, dynamic
+const IMPORT_RE = /\b(?:import|export)\s+(?:type\s+)?(?:[\w$*{},\s]+?\s+from\s+)?(['"])([^'"\n]+)\1|\bimport\s*\(\s*(['"])([^'"\n]+)\3\s*\)/g;
 const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
-const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) queue.push([f, null]); } };
-walk(core);
+const walk = (d, out) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) out.push(f); } return out; };
+for (const f of walk(core, [])) queue.push([f, null]);
 const SEAM = ['sim/traffic.ts', 'sim/train-traffic.ts', 'sim/boat-traffic.ts', 'physics/rapier/life-phys.ts',
   'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts'];
 for (const f of SEAM) queue.push([path.join(src, f), null]);
@@ -88,8 +91,6 @@ while (queue.length) {
   const where = (at) => `${rel(file)}:${at}${via ? ` (imported by ${rel(via)})` : ''}`;
   if (!fs.existsSync(file)) { bad.push(`${where('?')}: unresolved module`); continue; }
   const text = fs.readFileSync(file, 'utf8'), { code, bare } = lex(text);
-  // imports and re-exports: static, side-effect, dynamic
-  const IMPORT_RE = /\b(?:import|export)\s+(?:type\s+)?(?:[\w$*{},\s]+?\s+from\s+)?(['"])([^'"\n]+)\1|\bimport\s*\(\s*(['"])([^'"\n]+)\3\s*\)/g;
   for (const m of code.matchAll(IMPORT_RE)) {
     const spec = m[2] ?? m[4], target = resolve(file, spec);
     for (const [test, what] of BANNED_MODULES) if (test(spec, target)) bad.push(`${where(lineOf(code, m.index))}: imports ${spec}: ${what}`);
@@ -101,7 +102,17 @@ while (queue.length) {
   for (const m of bare.matchAll(DOM_RE)) if (!own.has(m[0])) bad.push(`${where(lineOf(bare, m.index))}: DOM global ${m[0]}`);
 }
 
+// nothing in src/ imports from checks/ (it would ship a test harness)
+const apps = walk(src, []);
+for (const file of apps) {
+  const { code } = lex(fs.readFileSync(file, 'utf8'));
+  for (const m of code.matchAll(IMPORT_RE)) {
+    const target = resolve(file, m[2] ?? m[4]);
+    if (target && !path.relative(checks, target).startsWith('..')) bad.push(`${rel(file)}:${lineOf(code, m.index)}: imports ${m[2] ?? m[4]}: checks/ is not part of the app`);
+  }
+}
+
 const scanned = [...seen].map(rel).sort();
 if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
-console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim, the player's vehicles' cores and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim, the player's vehicles' cores and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);
