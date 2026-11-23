@@ -37,7 +37,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Build time | M | **Ready** |
-| R5 | Check harnesses out of `src/` | M | **In progress** (`r5`) |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike falls (steering landed) | S–M | **Ready** |
@@ -46,14 +45,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
-
-### R5. Check harnesses out of `src/` (code-health 16 = T2, M)
-
-- **Waits for:** nothing (R4 landed: `nav/craft.ts` `PlayerCraft`, `CRAFTS` in `main.ts`, `nav/orbit.ts`, `nav/foot.ts`).
-- **Do:** move `nav/*-checks.ts`, `plane-real.ts` and `physics/rapier/*scenarios.ts` to `web/checks/`, with one
-  synthetic-world fixture and one result type.
-- **Do:** create `tools/lib.mjs` for the copied `runnerImport` loader line and the `fetch` stub.
-- **Update:** `tools/gates.mjs` if paths change. The check counts must stay identical.
 
 ### R6. Split `voxelize.py` into stages (code-health 13 = P4, L)
 
