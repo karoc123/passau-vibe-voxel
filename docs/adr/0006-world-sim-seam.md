@@ -22,8 +22,8 @@ two runs differed.
   `core/`. Positions are plain `{ x, y, z }` (`sim/types.ts` `Vec3`), colours are strings.
 - **Fixed tick**: `Traffic.update(dt)` runs whole ticks of `STEP` (1/30 s); the bodies step inside the tick
   (`TrafficBodies.tick`, 2 Rapier steps of 1/60 s). Trains and river traffic advance in those same ticks. The train
-  sim owns routes, coach spacing and station stops. The boat sim samples the timetable with the tick's hour, day
-  and water level. Both derive their schedules from the world seed.
+  sim owns routes, coach spacing and station stops. The boat sim samples the timetable with the tick's hour and day,
+  and floats each vessel on the world's water top there (`nav/river.ts`). Both derive their schedules from the world seed.
 - **Deterministic budgets**: colliders are built a number of chunks per tick (`terrain.ts` `budgetChunks`), never
   within a number of milliseconds; chunks age by the sim's clock. Wall-clock time is measured for stats only.
 - **Seeded randomness**: road traffic draws from `core/num.ts` `rng(seed)`. Rail and river schedules use seeded
