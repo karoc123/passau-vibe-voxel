@@ -43,6 +43,8 @@ two runs differed.
   the walked person's with `walkAs`, `walkPose`, `release`; the viewer's player is `LOCAL_PLAYER`). The traffic keeps
   what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
+- **The world's edits** (`core/world-edits.ts`, ADR 0001) are kept by the world sim: `update` drops an edited node no
+  player's focus has been near for a while (`sim/edit-keeper.ts`, `Tuning.edits`), before its ticks.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
   wrecks with their pose), the players' reads (`seat`, `walkedPose`, `driverSnapshot`, `driverNotes`), and the events,
   each with the tick that produced it (`WorldSim.eventsSince(tick)`, kept `EVENT_TICKS`: `struck`, people knocked down

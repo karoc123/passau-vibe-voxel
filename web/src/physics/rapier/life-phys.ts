@@ -35,7 +35,9 @@ import { createVehicle, createWheels, REST, RIDE, WHEEL_R, warmUp, type CarBuild
 import { buildOf, VEHICLES, type VehicleId } from '../../sim/vehicles';
 import { RapierCar, type CarInput } from './car';
 import { PlayerCar, FALL_MS, NO_INPUT, PARK, SINK_MS, type DriverSnapshot } from './player-car';
+// (for the node tools, which load each module graph apart: the world's edits of this one, whose colliders hear them)
 export { liveEdits };
+export * as worldEdits from '../../core/world-edits';
 
 export const SUB = 2; // physics steps a traffic tick
 export const STEP = TICK / SUB;

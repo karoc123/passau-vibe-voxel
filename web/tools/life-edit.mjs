@@ -3,8 +3,8 @@
 // fixed tick, its random numbers seeded (Math.random throws while it runs). The traffic runs round the bridge nearest
 // BRIDGE (the World over the level-1 node files, read as needed) with the bodies attached from the start; then, each
 // from a fresh start:
-//   dig    a sphere of r 4 dug out of the deck 6 m ahead of a moving car (core/columns.ts EditableNode, as dig.ts
-//          does; told to the World, to core/live-edits.ts (the colliders) and to the world sim, as main.ts does). That car
+//   dig    a sphere of r 4 dug out of the deck 6 m ahead of a moving car (core/world-edits.ts apply, as dig.ts does:
+//          core/live-edits.ts, the colliders; heard by the World; told to the world sim, as main.ts does). That car
 //          gets a body, falls through the deck to the ground under it and is a wreck at rest there; the cars behind
 //          fall in too or stop at the rim; people over the hole fall (option A: dropped).
 //   block  a 7x7x3 m block placed 25 m ahead of a moving car: its body brakes and stops before it (its ghost waits:
@@ -12,6 +12,9 @@
 //   wreck  a car near an edit wrecked (LifePhysics.wreck): it comes to rest on the road, the cars coming up behind it
 //          stop behind it, none touches it.
 //   moto   a moving motorbike gets its catalogue body near an edit, then returns to lane tracking when it clears.
+//   keep   the world keeps an edit while a player's focus is near it (sim/edit-keeper.ts): a crater over a node's edge
+//          (two nodes) stays while one focus of several is near either node, and both go together once none has been
+//          for the delay.
 // In every one, every tick: nothing drawn in an edited box stands more than 1 m over the ground there without coming
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
@@ -21,7 +24,7 @@
 //          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
 //          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -30,9 +33,9 @@ const only = argv.filter((a) => !a.startsWith('-'));
 const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, HOVER_S = 0.25, HOUR = 17, SEED = 7;
 
 const meta = readMeta(), N = meta.tiles.N;
-const TD = await load('tile-data.ts'), CO = await load('core/columns.ts');
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
+const WE = LP.worldEdits, LY = await load('core/layers.ts'), TC = await load('core/tile-cache.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 await RAPIER.init();
@@ -46,26 +49,25 @@ const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const realRandom = Math.random;
 const noRandom = () => { throw new Error('Math.random in the world sim (it draws from its seeded rng)'); };
 
-// an edit (as dig.ts and stream.ts do it): the World's source, the live edits (the colliders), the world sim
-const touched = new Set();
-function edit(ctx, op, box) {
-  const { src, sim, colData } = ctx;
-  for (const [tx, ty] of CO.touchedNodes(op, N, meta.tiles.levels[0].nx, meta.tiles.levels[0].ny)) {
-    const key = `1/${tx}_${ty}`, d = src.columns(key);
-    if (!d) continue;
-    const e = new CO.EditableNode(N, d, tx, ty);
-    e.apply(op);
-    const enc = e.encode(), base = { ...enc, planes: d.planes, bld: d.bld, rooms: d.rooms, caps: d.caps, roofCaps: d.roofCaps };
-    src.nodes.set(key, colData(tx, ty, base));
-    const fd = TD.decodeTile(raw(`1f/${tx}_${ty}.bin`), N), fe = new CO.EditableNode(N, { ...fd, ground: enc.ground }, tx, ty);
-    if (op.kind === 'sphere') fe.apply(op);
-    LP.liveEdits.set(tx, ty, { base, foliage: { ...fe.encode(), ground: enc.ground } }, box);
-    touched.add(`${tx}_${ty}`);
-  }
-  src.version++;
-  sim.edited(box);
+// an edit (as dig.ts does it): applied to the world (core/world-edits.ts, over a TileCache of the files: the live edits,
+// which the colliders read); the World's source hears of it as the viewer's streamer does (its nodes' columns); the
+// world sim is told the box, as main.ts does
+const frame = LY.frameOf(meta);
+WE.initWorldEdits({ cache: new TC.TileCache({ N, load: async (p) => raw(p), edits: LP.liveEdits }), frame, ...meta.tiles.levels[0] });
+let heard = null;
+LP.liveEdits.listen((tx, ty, node) => { if (heard && node) heard.src.nodes.set(`1/${tx}_${ty}`, heard.colData(tx, ty, node.base)); });
+// op in map cells (as the tools write them) -> in the project grid (core/layers.ts WorldOp)
+const worldOp = ({ x, y, z, id, ...rest }) => {
+  const [col, row] = LY.mapToGrid(frame, x, y);
+  return { ...rest, col, row, z: LY.cellToAbsZ(frame, z), colour: id };
+};
+async function edit(ctx, op, box) {
+  heard = ctx;
+  try { await WE.apply(worldOp(op), box); } finally { heard = null; }
+  ctx.src.version++;
+  ctx.sim.edited(box);
 }
-const clearEdits = () => { for (const k of touched) { const [tx, ty] = k.split('_').map(Number); LP.liveEdits.set(tx, ty, null); } touched.clear(); };
+const clearEdits = () => WE.dropAll();
 
 // a fresh world sim round the bridge, WARM s on, bodies attached (nothing edited: they must cost nothing)
 async function setup(at) {
@@ -201,7 +203,7 @@ async function dig() {
   const ax = p.x + Math.sin(car.rh) * 6, az = p.z + Math.cos(car.rh) * 6;
   const op = { kind: 'sphere', x: Math.floor(ax), y: Math.floor(az), z: Math.floor(deck) - 1, r: R, id: 0 };
   const box = [op.x - R, op.y - R, op.x + R + 1, op.y + R + 1];
-  edit(ctx, op, box);
+  await edit(ctx, op, box);
   const below = W.support(ax, az, deck);
   log(`dig: r ${R} at (${op.x}, ${op.y}, deck ${deck.toFixed(1)}) 6 m ahead of car ${car.id} at ${car.v.toFixed(1)} m/s; ground there now ${below.toFixed(1)}`);
   check(below < deck - 3, `the dig opened the deck: ground ${f2(below)} under it, deck ${f2(deck)}`);
@@ -242,7 +244,7 @@ async function block() {
   const p = drawn(ctx, car), h = car.rh, ax = p.x + Math.sin(h) * 25, az = p.z + Math.cos(h) * 25;
   const op = { kind: 'box', x: Math.floor(ax) - 3, y: Math.floor(az) - 3, z: Math.floor(p.y), w: 7, d: 7, h: 3, id: 30 };
   const box = [op.x, op.y, op.x + op.w, op.y + op.d];
-  edit(ctx, op, box);
+  await edit(ctx, op, box);
   const behind = behindOf(ctx, car);
   log(`block: 7x7x3 m at (${op.x}, ${op.y}, ${op.z}) 25 m ahead of car ${car.id} at ${car.v.toFixed(1)} m/s; car ${behind.id} behind it`);
   const w = watcher(ctx);
@@ -442,6 +444,23 @@ function players() {
   }
 }
 
+// (the keeper's module graph, with its own world edits: tools load each graph apart)
+async function keep() {
+  const EK = await load('sim/edit-keeper.ts'), WE2 = EK.worldEdits, live = WE2.liveEdits;
+  WE2.initWorldEdits({ cache: new TC.TileCache({ N, load: async (p) => raw(p), edits: live }), frame, ...meta.tiles.levels[0] });
+  const tx = Math.floor(BRIDGE.x / N) + 1, [col, row] = LY.mapToGrid(frame, tx * N, BRIDGE.y);
+  await WE2.apply({ kind: 'sphere', col, row, z: LY.cellToAbsZ(frame, 20), r: 3, colour: 0 });
+  const K = new EK.EditKeeper({ radius: 10, after: 10 }, N), far = { x: BRIDGE.x - 1000, z: BRIDGE.y }, inA = { x: (tx - 1) * N + 28, z: BRIDGE.y };
+  const steps = [[0, [far], 0], [30, [far, inA], 0], [39, [far], 0], [40, [far], 2]].map(([t, foci, want]) => {
+    const n = K.update(t, foci);
+    check(n === want, `keep: at ${t} s with foci ${foci.map((f) => `(${f.x}, ${f.z})`).join(' ')}, ${n} node(s) dropped, not ${want}`);
+    return `${n}/${live.size}`;
+  });
+  check(live.size === 0, `keep: every edit dropped in the end (${live.size} left)`);
+  log(`keep: a crater over nodes ${tx - 1}/${tx}_${Math.floor(BRIDGE.y / N)}: dropped/left ${steps.join(' ')}`);
+  results.keep = { steps: steps.join(' ') };
+}
+
 const want = (k) => !only.length || only.includes(k);
 const costs = [], chunks = [], bodies = [];
 const done = (ctx) => {
@@ -462,6 +481,7 @@ if (want('wreck')) done(await wreck());
 if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
 if (want('players')) players();
+if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
 console.log(`PASS life-edit: ${Object.entries(results).map(([k, v]) => `${k} ${typeof v === 'string' ? v : Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`).join('; ')}; ${cost}`);

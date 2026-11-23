@@ -4,7 +4,8 @@ import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.wo
 import { roomOffsets, type Columns, type Fields } from './tile-data';
 import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
-import { liveEdits, type Region } from './core/live-edits';
+import { liveEdits, type LiveNode, type Region } from './core/live-edits';
+import { viewerTileCache } from './viewer-tiles';
 import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {
@@ -26,6 +27,9 @@ export interface TileNode {
   remesh?: boolean;
   // its columns (data) are no longer its file's (replaceColumns): every mesh job of it sends them in its place
   edited?: boolean;
+  // a level-1 tile's: the world's edit of the node (core/live-edits.ts) its columns are (null: its files again,
+  // undefined: never edited here)
+  shows?: LiveNode | null;
   // meshed again in place after an edit (replaceColumns): the mesh shown stays until the new one is in; editKey: the
   // job's key, its reply's (each job's own); again: changed once more while a worker had it
   editJob?: Job;
@@ -180,9 +184,6 @@ export class TileStreamer implements ColumnSource {
   readonly group = new THREE.Group();
   readonly world: World;
   version = 0;
-  // an edit session (?dig=1, dig.ts): the foliage tiles keep their column data too, for edits to carve their trees and
-  // grass (the 1 m tiles keep theirs anyway, city.ts)
-  editing = false;
   private editSeq = 0;
   update: (camera: THREE.Camera) => void = () => {};
   // the jobs waiting, a binary max-heap by prio (pump takes the first; a new priority moves a job in it, or, for many at
@@ -196,7 +197,7 @@ export class TileStreamer implements ColumnSource {
   // what the tiles are meshed with (tile-request.ts)
   private readonly ctx: TileContext;
 
-  constructor(private readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
+  constructor(readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
@@ -204,6 +205,8 @@ export class TileStreamer implements ColumnSource {
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
+    // (the world's edits, wherever they come from: core/world-edits.ts)
+    liveEdits.listen((tx, ty, live, region) => this.onLive(tx, ty, live, region));
   }
 
   columns(key: string) { return this.nodes.get(key)?.data; }
@@ -378,7 +381,8 @@ export class TileStreamer implements ColumnSource {
     const file = (k: string) => new URL(`data/tiles/${k}.bin`, location.href).href;
     const msg = tileRequest(this.ctx, n.s, n.tx, n.ty, n.foliage, file, n.keep, dataOnly);
     const transfer: Transferable[] = [];
-    if (n.foliage && this.editing && !n.data) msg.keep = true;
+    // (a level-1 tile the world has an edit of: its columns, not its file's; a new one's fields from its file still)
+    const fresh = n.s === 1 && !edit && n.state !== 'ready' && this.syncLive(n);
     if (edit) msg.key = n.editKey!;
     // (in sections: those the edits since its last job can have changed)
     if (edit && n.secHot !== undefined) {
@@ -388,7 +392,8 @@ export class TileStreamer implements ColumnSource {
     if (n.edited && n.data) {
       // (its columns, not its file; the data stays as it is here)
       const { c, transfer: t } = sendColumns(n.data);
-      msg.cols = c; msg.url = undefined; msg.keep = false;
+      msg.cols = c; msg.keep = false;
+      if (!fresh || n.foliage) msg.url = undefined;
       transfer.push(...t);
     }
     if (n.foliage) {
@@ -432,10 +437,12 @@ export class TileStreamer implements ColumnSource {
       } else if (m.quads) n.mesh = this.makeMesh(m);
       if (n.cover) disposeGeometry(n.cover);
       n.cover = m.base?.quads ? this.makeGeometry(m.base) : undefined;
-      if (m.data) this.setData(n, m.data);
+      if (m.data && !n.edited) this.setData(n, m.data);
       if (m.fields) n.fields = m.fields;
       n.state = 'ready';
       if (re) this.recover(n);
+      // (the world's edit of it changed while it was on its way: shown now)
+      if (n.s === 1 && (n.shows ?? null) !== (liveEdits.get(n.tx, n.ty) ?? null)) this.onLive(n.tx, n.ty, liveEdits.get(n.tx, n.ty) ?? null, null);
       // (edited while it was being meshed from the columns before: again, in place)
       if (n.again) { n.again = false; this.remeshEdited(n); }
       n.job.resolve();
@@ -443,16 +450,42 @@ export class TileStreamer implements ColumnSource {
     this.pump();
   }
 
+  // The world's edits changed node (tx, ty) (core/live-edits.ts; live: its columns now, null: its files again): its
+  // 1 m tile and its foliage tile, where they are here, show it (replaceColumns; the files read through the world's
+  // TileCache, viewer-tiles.ts). A tile on its way in takes it when it is sent (syncLive) or comes (onReply).
+  private onLive(tx: number, ty: number, live: LiveNode | null, region: Region) {
+    const key = this.key(1, tx, ty);
+    if (live) { this.replaceColumns(key, live.base, live.foliage as Columns | null, region, live); return; }
+    const n = this.nodes.get(key), f = this.nodes.get(`f/${tx}_${ty}`);
+    if (!n?.shows && !f?.shows) return;
+    const cache = viewerTileCache(this.N);
+    cache.acquire(tx, ty).then((v) => {
+      try { if (!liveEdits.get(tx, ty)) this.replaceColumns(key, v.base, v.foliage as Columns, null, null); } finally { cache.release(tx, ty); }
+    }, (e) => console.warn(`${key}: its files again`, e));
+  }
+
+  // a level-1 tile about to be meshed takes the world's edit of it, if it is not what it has (true: it does now)
+  private syncLive(n: TileNode) {
+    const live = liveEdits.get(n.tx, n.ty);
+    if (!live || n.shows === live) return !!live && !!n.edited;
+    const cols = n.foliage ? live.foliage : live.base;
+    if (!cols) return false;
+    this.setData(n, cols as Columns);
+    n.edited = true;
+    n.shows = live;
+    return true;
+  }
+
   // Node `key` (a 1 m tile; not a foliage tile) holds these columns now, foliage its foliage tile's (null: as they
   // are): its column data is replaced at once (world.ts, occlusion and the like see it: version), and its mesh, and its
   // foliage tile's with the base's cover (coverBase), are made again from them in place; the meshes shown stay until
-  // the new ones are in. Whatever reads the node files on its own hears of it (core/live-edits.ts: the physics).
-  // region: the box changed (map metres), for them. Transient: when the node is freed, its file again. Returns when
+  // the new ones are in. region: the box changed (map metres). shows: the world's edit they are (onLive). Returns when
   // the new meshes are in (null: the node is not here with its data).
-  replaceColumns(key: string, base: Columns, foliage: Columns | null = null, region: Region = null): Promise<void> | null {
+  private replaceColumns(key: string, base: Columns, foliage: Columns | null, region: Region, shows: LiveNode | null): Promise<void> | null {
     const n = this.nodes.get(key);
     if (!n || n.foliage || n.s !== 1 || n.state !== 'ready' || !n.data) return null;
     n.edited = true;
+    n.shows = shows;
     // (the columns it changed: what the sectioned jobs mesh again)
     const hot = region ? hotBox(this.N, n.tx, n.ty, region) : null;
     this.setData(n, { ...base, planes: base.planes ?? n.data.planes, bld: base.bld ?? n.data.bld, caps: base.caps ?? n.data.caps, roofCaps: base.roofCaps ?? n.data.roofCaps });
@@ -469,10 +502,9 @@ export class TileStreamer implements ColumnSource {
       wait.push(this.remeshEdited(n));
     }
     if (f) {
-      if (foliage && f.data) { f.edited = true; this.setData(f, foliage); }
+      if (foliage && f.state === 'ready') { f.edited = true; f.shows = shows; this.setData(f, foliage); }
       wait.push(this.remeshEdited(f));
     }
-    liveEdits.set(n.tx, n.ty, { base: n.data!, foliage: f?.data ?? null }, region);
     this.pump();
     return Promise.all(wait).then(() => {});
   }
@@ -701,15 +733,18 @@ export class TileStreamer implements ColumnSource {
     if (b?.stale) { b.stale = false; this.remeshEdited(b); }
     // (an edit waiting is not meshed; one in a worker is not taken back: onReply finds no job for it)
     if (n.editJob) { n.editJob.state = 'loading'; n.editJob.resolve(); n.editJob = undefined; }
-    // (transient edits: the node's file again, when it comes again)
-    if (n.edited && !n.foliage) liveEdits.set(n.tx, n.ty, null);
-    else if (n.foliage && n.data) { const live = liveEdits.get(n.tx, n.ty); if (live?.foliage === n.data) liveEdits.set(n.tx, n.ty, { ...live, foliage: null }); }
     n.dataJob?.resolve();
     n.dataJob = undefined;
     this.unsection(n);
     if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); }
     this.nodes.delete(n.key);
     if (n.data) this.version++;
+    // (the world's edit of it stays: the world decides how long, sim/edit-keeper.ts; it shows when the node comes again)
+  }
+
+  // the edits' new meshes in (those on their way now)
+  editsMeshed(): Promise<void> {
+    return Promise.all([...this.nodes.values()].flatMap((n) => (n.editJob ? [n.editJob.done] : []))).then(() => {});
   }
 
   // full detail around (x, z) with its column data, e.g. before landing there
