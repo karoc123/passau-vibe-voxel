@@ -35,9 +35,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E3 | Edits owned by the world, not the renderer | M | **Ready** |
-| E7 | Commands a server can trust | M | **Ready** (best after E3, E4) |
-| E4 | Player crafts on the world clock | L | **Ready** (best after E3) |
+| E7 | Commands a server can trust | M | **Ready** (best after E4) |
+| E4 | Player crafts on the world clock | L | **Ready** |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -92,23 +91,17 @@ E2 landed: `Person.id` (own numbering per kind; `EntityRef {kind, id}`), `WorldS
 whether or not it is drawn (about 0.5 ms a frame at 60 fps, measured); `eventsSince(tick)` keeps `EVENT_TICKS` = 300.
 Open points went to E7.
 
+E3 landed: `core/world-edits.ts` `apply(op, region)` is the one way to edit (ops are `core/layers.ts` `WorldOp`s, kept
+per node in order); the streamer only draws `liveEdits`; `sim/edit-keeper.ts` (owned by `WorldSim`, run before the
+ticks) keeps an edit while a focus (`WorldSim.foci`: the viewer's focus and every player's entity) is within
+`Tuning.edits.radius` (600 m) and drops it `after` (120 s, world time) once none is; nodes sharing an op go together.
+Open from E3: radius and delay are guesses (owner); a placed block leaves trees poking through (old life-edit rule);
+temporary damage (an op with an expiry) needs the TileCache to expose a node's raw files to rebuild it from its
+remaining ops; `initWorldEdits` is called by `dig.ts` and may move to `main.ts` once something else edits.
+
 E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
-
-### E3. Edits owned by the world, not the renderer (M)
-
-- **Why:** `dig.ts` edits only the streamer's nodes; `stream.ts:475` publishes `liveEdits`, `:705` drops an edit
-  when it frees a node, so what physics sees depends on the camera. "Apply an edit" exists three times (`dig.ts`,
-  `stream.ts` `replaceColumns`, `life-edit.mjs`). `core/layers.ts` (ADR 0001) is used by nothing in `src/`.
-- **Do:** `core/world-edits.ts` `apply(op, region)` over the TileCache (`EditableNode`, encode, `edits.set`), used by
-  `dig.ts` and `life-edit.mjs`; the streamer listens to `liveEdits` and remeshes instead of publishing. One world per
-  process (ADR 0008): keep `liveEdits` and the tile cache as module singletons, no injection.
-- **Do, policy (not neutral, separate commit, decided by the owner):** the renderer freeing a node no longer drops
-  its edit. An edit is kept while a player's focus (in the viewer: the local player's position, through `WorldSim`)
-  is within a radius of it, and dropped some time after none is. Until E2 lands, the focus is `SimInput.focus`. Make the radius and delay one tuning entry.
-- **Gates:** tsc, core-deps, layers, edit-roundtrip, world-smoke, life-edit, collision 16; `--full` with section-check
-  and mesh-golden (record first).
 
 ### E7. Commands a server can trust (M, from E2's open points)
 
