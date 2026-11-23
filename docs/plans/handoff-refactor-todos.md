@@ -119,7 +119,8 @@ with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `Wo
 - **Why:** only the car steps on the world tick. Boat (1/120 s), plane (own clock in the core), drone (1/120 s),
   special crafts (1/60 s) and the walker (per frame) step in their shells, each with its own `VoxelCollision`.
 - **Do:** crafts are entities with seats like road vehicles (E2), not per-player singletons; one `CraftCore` contract (`reset(spot)`, `step(input, dt, world)`, `pose`, `drawn(alpha)`); WorldSim keeps
-  `crafts: Map<playerId, …>` with each craft's own fixed step (neutral); commands `enterCraft`, `craftInput`,
+  `crafts: Map<craftId, …>` (an entity with seats; a player's pilot seat goes through E2's seat model, not a
+  map keyed by player) with each craft's own fixed step (neutral); commands `enterCraft`, `craftInput`,
   `leaveCraft`; `VoxelCollision` to the sim side with cache and clock injected, in the core-deps scan; shells keep
   panel, camera, model, input mapping; the focus pause becomes neutral input. One craft group per commit: boat,
   special crafts, drone, plane. The walker later.
