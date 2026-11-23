@@ -425,7 +425,7 @@ export class LifePhysics implements TrafficBodies {
     st.tickMs = performance.now() - f0;
   }
 
-  // the drawn pose (sim/life.ts drawCars, after the kinematic one is set; a: between the last two ticks): the body's,
+  // the drawn pose (view/life.ts drawCars, after the kinematic one is set; a: between the last two ticks): the body's,
   // and a blend back to the kinematic one after a release (or a body put on its ghost again)
   pose(c: Car, a: number) {
     const b = this.bodies.get(c.id);

@@ -77,7 +77,7 @@ export interface WorldId {
 
 // flood.json (scripts/flood.py): of it the viewer reads only the river's points (its other fields are unread)
 export interface FloodInfo {
-  // the river's points every 24 m, x y pairs (nav/river.ts)
+  // the river's points every 24 m, x y pairs (sim/river.ts)
   river: number[];
 }
 

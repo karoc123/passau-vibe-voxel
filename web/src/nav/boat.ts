@@ -4,7 +4,7 @@ import { clamp } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 import { VoxelCollision } from './voxel-collision';
 import { FixedStep } from '../core/fixed-step';
-import { BoatMotion, findSpawn, type BoatInput, type BoatWorld } from './boat-motion';
+import { BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../sim/craft/boat-motion';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
 import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
@@ -12,7 +12,7 @@ import { stickAxis, TouchSticks } from './touch-sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
-import { downstream, nearestRiver } from './river';
+import { downstream, nearestRiver } from '../sim/river';
 import './boat.css';
 
 // The boat mode: a speedboat of the player's own on the rivers, driven like the car (W/S throttle and reverse, A/D
@@ -63,7 +63,6 @@ export class BoatMode implements PlayerCraft {
 
   constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
     this.nav = nav; this.target = target; this.meta = meta; this.env = env;
-    Object.assign(window, { __boat: this });
     this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
     this.world = this.collision;
     this.model = new BoatModel(nav.actors);

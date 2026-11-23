@@ -1,7 +1,7 @@
 # 0006 The world sim and its presentation
 
 Status: accepted. World sim: `web/src/sim/traffic.ts`, `web/src/sim/train-traffic.ts`,
-`web/src/sim/boat-traffic.ts` and `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). Presentation: `web/src/sim/life.ts` (`StreetLife`). Checks:
+`web/src/sim/boat-traffic.ts` and `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). Presentation: `web/src/view/life.ts` (`StreetLife`). Checks:
 `web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism). Plan and measurements:
 `docs/plans/life-physics.md`.
 
@@ -18,12 +18,13 @@ two runs differed.
 
 - **World sim**: `sim/traffic.ts` (cars, people, riders, signals, edits, the people over a hole) and
   `physics/rapier/life-phys.ts` (the cars near edits as Rapier bodies, their colliders: `terrain.ts`, `vehicle.ts`),
-  on `core/`. It imports no three.js, no `util.ts`, no DOM and no `fetch`: `tools/core-deps.mjs` scans it with
-  `core/`. Positions are plain `{ x, y, z }` (`sim/types.ts` `Vec3`), colours are strings.
+  on `core/`. It imports no three.js, no `util.ts`, no DOM and no `fetch`: `tools/core-deps.mjs` scans all of
+  `core/`, `sim/` and `physics/` (presentation lives in `view/` and `nav/`). Positions are plain `{ x, y, z }`
+  (`sim/types.ts` `Vec3`), colours are strings.
 - **Fixed tick**: `Traffic.update(dt)` runs whole ticks of `STEP` (1/30 s); the bodies step inside the tick
   (`TrafficBodies.tick`, 2 Rapier steps of 1/60 s). Trains and river traffic advance in those same ticks. The train
   sim owns routes, coach spacing and station stops. The boat sim samples the timetable with the tick's hour and day,
-  and floats each vessel on the world's water top there (`nav/river.ts`). Both derive their schedules from the world seed.
+  and floats each vessel on the world's water top there (`sim/river.ts`). Both derive their schedules from the world seed.
 - **Deterministic budgets**: colliders are built a number of chunks per tick (`terrain.ts` `budgetChunks`), never
   within a number of milliseconds; chunks age by the sim's clock. Wall-clock time is measured for stats only.
 - **Seeded randomness**: road traffic draws from `core/num.ts` `rng(seed)`. Rail and river schedules use seeded
@@ -36,12 +37,12 @@ two runs differed.
   "the viewer" becomes the set of players' positions.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
   wrecks with their pose), and events (`Traffic.dropped`: people fallen into a hole).
-- **The player's vehicles' cores** (`nav/boat-motion.ts`, `nav/plane-flight.ts`, `nav/fpv-flight.ts`,
+- **The player's vehicles' cores** (`sim/craft/boat-motion.ts`, `sim/craft/plane-flight.ts`, `sim/craft/fpv-flight.ts`,
   `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`
   state and maths (`core/vec.ts`, three.js's arithmetic in its order), stepped by one fixed-step runner
   (`core/fixed-step.ts`), scanned by `tools/core-deps.mjs`. Their shells (`boat.ts`, `plane.ts`, `fpv.ts`, `drive.ts`)
   read the input and draw them. Road vehicles share the world tick and Rapier terrain, as described in [ADR 0007](0007-player-control-in-world-sim.md).
-- **Presentation** (`sim/life.ts` `StreetLife`, three.js): draws the sim between its last two ticks
+- **Presentation** (`view/life.ts` `StreetLife`, three.js): draws the sim between its last two ticks
   (`Traffic.carPose`, `personPoint`, `TrafficBodies.pose`, train and boat poses), the effects that change nothing in the sim
   (people knocked down or falling: shoved, tipping, no physics), picking on screen. It never decides anything the sim
   depends on.

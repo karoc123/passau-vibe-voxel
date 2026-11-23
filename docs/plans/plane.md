@@ -23,7 +23,7 @@ The first draft was found too easy. Changed, in priority over everything below:
    recovers. No spin, no wind. Level top speed at full throttle ~245 km/h (drone: 158 / 197), stall ~86 km/h. All
    numbers in one `PLANE` object.
 4. **Floatplane: water landing and takeoff are in scope** (was phase 5). Touching water (Danube, Inn, Ilz: the voxels'
-   water runs, as `physics/rapier/terrain.ts` reads them: `nav/river.ts` `waterTop`) slowly, shallowly
+   water runs, as `physics/rapier/terrain.ts` reads them: `sim/river.ts` `waterTop`) slowly, shallowly
    and nearly wings-level floats the plane; it taxis on the water (stick turns, throttle moves) and takes off past
    the takeoff speed with the stick pulled. Too fast or too steep onto water is a crash ("Splash"). Land and roofs:
    a crash, except a shallow skim (a bounce, as below). Crash: tint and shake, then back at a safe pose ~3 s old.
@@ -130,7 +130,7 @@ Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils di
   are not inside `Nav`: each is its own class with its own panel in the bar's `.mode-tools`, loaded lazily at the end
   of `main.ts` `start()` (`FpvMode` in `nav/fpv.ts`, `DriveMode` in `nav/drive.ts`), updated every frame from the
   animation loop (`drive?.update(dt); nav.update(dt); fpv?.update(dt)`).
-- **Drone** (`nav/fpv.ts`, `nav/fpv-flight.ts`): entered only from orbit (`nav.startFpv()`), first person (the camera
+- **Drone** (`nav/fpv.ts`, `sim/craft/fpv-flight.ts`): entered only from orbit (`nav.startFpv()`), first person (the camera
   *is* the drone), physics at a fixed 1/120 s step in `FpvFlight.step(input, dt, move)` with a `move` callback that
   does the collision. `FpvFlight` has no DOM and no scene: the model to copy. Arming step, controller calibration UI
   (`fpv-input.ts`), keyboard W/S pitch, A/D yaw, Q/E roll, R/F throttle, T reset, Esc exit. Leaves by `nav.flyUp()`.
@@ -155,7 +155,7 @@ Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils di
   is ready, so nothing is ever missing; beyond the view distance (600 m–5 km, widened with height) the far ground
   stands. Requests are ordered: in view first, then nearest to `focus()` (the camera, outside orbit). Workers:
   cores − 2, at least 2. Meshing an Altstadt node with foliage: ~75 ms (ADR 0003).
-- **Street life** (`sim/life.ts`): simulated in a 900 m circle round `focus()`, re-centred every 120 m. Agents come
+- **Street life** (`view/life.ts`): simulated in a 900 m circle round `focus()`, re-centred every 120 m. Agents come
   and go only ≥ 300 m (cars) / 150 m (people) from the viewer, measured in 3D from the camera.
 - **No audio** anywhere in the project. No mode in the URL (`?view= ?cam= ?focus= ?crop= ?dig= ?ui=` only).
 - **Map**: 9344 × 3456 m, `meta.H` 173 m. The Altstadt (x ≈ 8000) lies 1.3 km from the east edge, the
@@ -165,7 +165,7 @@ Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils di
 
 1. **Kinematic arcade model, no Rapier.** The plane is a point with heading, pitch, bank and speed, advanced at a
    fixed step; nothing is integrated from forces. Rapier (1.7 MB, loaded for the car) is not needed.
-2. **`PlaneFlight` is pure** (`nav/plane-flight.ts`): no DOM, no three scene, input in, pose out, the world reached
+2. **`PlaneFlight` is pure** (`sim/craft/plane-flight.ts`): no DOM, no three scene, input in, pose out, the world reached
    through two callbacks (`sweep`, `surface`). It runs in node as `FpvFlight` and `DriveSession` do, so it is
    testable headless now and can run on a server later unchanged. `PlaneMode` (`nav/plane.ts`) is the glue:
    panel, input, camera, model.
@@ -283,7 +283,7 @@ LT slow. The drone's RC-radio calibration (`fpv-input.ts`) is not used.
 
 ## Model
 
-Drawn in code from boxes, as the cars (`sim/meshes.ts` `box()`, `mergeGeometries`) and the walker
+Drawn in code from boxes, as the cars (`view/meshes.ts` `box()`, `mergeGeometries`) and the walker
 (`nav/pedestrian.ts`): no asset files, no new dependency. A low-wing two-seater, 7 m long, 9 m span, ~16 boxes
 merged into one geometry with vertex colours (white, a blue stripe, dark canopy glass): fuselage in three tapering
 boxes, cowling, canopy, wing with a slight dihedral in two halves, tailplane, fin, three wheels on legs.
@@ -345,7 +345,7 @@ own port, never 5173.
 
 ### Phase 1: the flight, headless (1.5 days)
 
-- `nav/plane-flight.ts`: `PlaneFlight` (`reset(pose)`, `step(input, dt, world)`, `pose`, `events`), the three
+- `sim/craft/plane-flight.ts`: `PlaneFlight` (`reset(pose)`, `step(input, dt, world)`, `pose`, `events`), the three
   assists, bounce / crash / respawn with the safe-pose ring. All numbers in one exported `PLANE` object (as the
   car's `RIDE`), so a tool can change them (`--set`).
 - `nav/plane-checks.ts` + `web/tools/plane.mjs` (the pattern of `collision-checks.ts` / `collision.mjs`), on a
@@ -375,8 +375,7 @@ own port, never 5173.
 
 - `nav/plane.ts` `PlaneMode` (lazily imported beside the other two in `main.ts`), `nav/plane-model.ts`,
   `nav/plane.css`: panel and button, keyboard, the chase camera, the model with its propeller, telemetry, the crash
-  presentation, pause on blur. `window.__plane` for tools (as `__drive`): `start({ x, y, z, h })`, `pose()`,
-  `script(inputs)`.
+  presentation, pause on blur. (`window.__plane`, the scripting hook of phase 4, has been removed: no tool read it.)
 - `main.ts`: construct it, `plane?.update(dt)` in the loop, `onMode` toggles `body.plane`, the shadow casters'
   condition.
 - Gates: `tools/shoot.mjs` with an ad-hoc shot that starts the plane through `--eval` at a fixed pose over the
@@ -412,7 +411,7 @@ own port, never 5173.
 `VoxelCollision.waterAt` (the rule of `physics/rapier/terrain.ts`: a water run reaching the ground's top); a state
 `afloat` in `PlaneFlight` (touching water under 4 m/s of sink and 15° of bank: skims, slows, floats and steers at
 up to 15 m/s; fast held: takes off at 30 m/s); floats on the model; "Splash!" instead of a crash on water otherwise;
-the water's top from the voxels (`nav/river.ts` `waterTop`) read for the height. Its own checks in `plane.mjs`.
+the water's top from the voxels (`sim/river.ts` `waterTop`) read for the height. Its own checks in `plane.mjs`.
 
 **Total without phase 5: about 5 days.**
 

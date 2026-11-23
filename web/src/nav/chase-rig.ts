@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Sweep } from './sweep';
+import type { Sweep } from '../sim/craft/sweep';
 
 // The chase camera's shared parts (docs/plans/code-health.md item 12): smoothing that is the same at any frame rate,
 // the pull-in where the collision meets something between the craft and the camera, the shake, and the glide in from

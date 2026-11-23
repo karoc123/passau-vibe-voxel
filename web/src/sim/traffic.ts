@@ -1,6 +1,6 @@
 // The street traffic as a world sim: headless (no three.js, no DOM, no camera: tools/core-deps.mjs), on a fixed tick
 // (STEP), drawing from a seeded random number generator, so a server could run it and two runs from one seed are the
-// same. sim/life.ts (StreetLife) is its presentation: it draws what is here, between the last two ticks.
+// same. view/life.ts (StreetLife) is its presentation: it draws what is here, between the last two ticks.
 //
 // Live streets on the real OSM networks (scripts/traffic.py): fixed-time signals; cars with the Intelligent Driver
 // Model per lane, turn lanes, OSM turn restrictions and junction "box" locks; people on footpaths, waiting for green
@@ -8,7 +8,7 @@
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
 import { BoatTraffic, type BoatData } from './boat-traffic';
-import type { WaterColumns } from '../nav/river';
+import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
@@ -40,7 +40,7 @@ const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-
 const PARKED = 8, PARKED_MAX = 24;
 // Player edits (core/live-edits.ts, told by edited()): the paths' heights are baked (scripts/traffic.py), so only
 // where the city was edited is the ground under a person looked at (Ground.support): more than HOLE m under their
-// path's height and they fall (dropped: drawn falling, life.ts). The cars there are bodies (life-phys.ts): theirs fall.
+// path's height and they fall (dropped: drawn falling, view/life.ts). The cars there are bodies (life-phys.ts): theirs fall.
 // Nothing edited: nothing looked at.
 const HOLE = 1;
 
@@ -80,7 +80,7 @@ type Density = { cars: number; peds: number; bikes: number };
 
 export class Traffic {
   ground: Ground | null = null;
-  // the world's water columns the boats float on (nav/river.ts; world.ts World); null: none, at a fixed top
+  // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
   water: WaterColumns | null = null;
   keep: Car | Person | null = null;
   bodies: TrafficBodies | null = null;
@@ -93,7 +93,7 @@ export class Traffic {
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
   riders: Person[] = [];
-  // the people fallen into a hole since the presentation last took them (drawn falling: life.ts)
+  // the people fallen into a hole since the presentation last took them (drawn falling: view/life.ts)
   dropped: Person[] = [];
   struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
   tickNumber = 0;
@@ -730,7 +730,7 @@ export class Traffic {
     return out;
   }
 
-  // Person p out of the crowd (knocked down: life.ts); whether they were in it
+  // Person p out of the crowd (knocked down: view/life.ts); whether they were in it
   removePerson(p: Person) {
     const list = p.bike ? this.riders : this.people, i = list.indexOf(p);
     if (i < 0 || p === this.keep) return false;

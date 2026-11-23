@@ -1,4 +1,4 @@
-// The plane's flight (src/nav/plane-flight.ts) headless: checks/plane-checks.ts on a synthetic world of boxes (level
+// The plane's flight (src/sim/craft/plane-flight.ts) headless: checks/plane-checks.ts on a synthetic world of boxes (level
 // flight, throttle range, stall and recovery, climbing costs speed, turn, the map's wall, the ceiling, water landing,
 // taxi and takeoff, crashes on land and on water, respawn, skim, loading, fuzz, pitch_smooth: no snap on W/S). Then, on the real data (public/data)
 // if it is there, through the real VoxelCollision (node files read from disk) and its water: the Danube flown from
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import { imp, serveTiles } from './lib.mjs';
 import { web } from './data-dir.mjs';
 
-const PF = await imp('src/nav/plane-flight.ts');
+const PF = await imp('src/sim/craft/plane-flight.ts');
 const PC = await imp('checks/plane-checks.ts');
 const JC = await imp('checks/jet-checks.ts');
 const args = process.argv.slice(2);

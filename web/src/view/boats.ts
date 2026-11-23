@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash, lerp, wrapAngle } from '../util';
-import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B, MAX_CRUISE, type BoatTraffic } from './boat-traffic';
+import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B, MAX_CRUISE, type BoatTraffic } from '../sim/boat-traffic';
 
 const MAX_TOUR = 6;
 // cruise lines' accent colours (hull band, funnel, awnings)

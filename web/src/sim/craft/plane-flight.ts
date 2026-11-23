@@ -1,8 +1,8 @@
-import { FixedStep } from '../core/fixed-step';
-import { SafeTrail } from '../core/safe-trail';
-import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../core/vec';
+import { FixedStep } from '../../core/fixed-step';
+import { SafeTrail } from '../../core/safe-trail';
+import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../../core/vec';
 import type { Sweep } from './sweep';
-import { waterTop, type WaterColumns } from './river';
+import { waterTop, type WaterColumns } from '../river';
 
 // The small floatplane's flight (plane.ts draws it and reads the input; web/tools/plane.mjs checks it headless). No DOM,
 // no scene, no three.js (plain { x, y, z }: core/vec.ts; tools/core-deps.mjs): input in, pose out, the world reached through PlaneWorld (the collision's sweep and surface, the rivers'
@@ -486,7 +486,7 @@ export class PlaneFlight {
 }
 
 // The world as the viewer's collision gives it (voxel-collision.ts, structurally, so this file needs no DOM): its sweep
-// and surface, and its water where the voxels have it (nav/river.ts waterTop)
+// and surface, and its water where the voxels have it (sim/river.ts waterTop)
 export interface CollisionLike extends WaterColumns {
   width: number;
   depth: number;

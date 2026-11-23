@@ -6,7 +6,7 @@ import { imp } from './lib.mjs';
 const { makeWorld } = await imp('checks/world.ts');
 const { VoxelCollision } = await load('nav/voxel-collision.ts');
 const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('nav/craft-collision.ts');
-const { CraftMotion } = await load('nav/craft-motion.ts');
+const { CraftMotion } = await load('sim/craft/craft-motion.ts');
 const { meta } = await makeWorld({
   size: [128, 128],
   ground: (_x, z) => z < 40 ? 5 : 6,

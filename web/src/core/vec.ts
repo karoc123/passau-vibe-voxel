@@ -1,5 +1,5 @@
 // Plain 3-vector and quaternion maths on { x, y, z } and { x, y, z, w } (no three.js, no DOM: tools/core-deps.mjs), for
-// the cores that run headless and on a server (the player's vehicles: nav/plane-flight.ts, nav/fpv-flight.ts,
+// the cores that run headless and on a server (the player's vehicles: sim/craft/plane-flight.ts, sim/craft/fpv-flight.ts,
 // physics/rapier/car.ts). Each function does the arithmetic of its three.js namesake in the same order, so a core moved
 // off three.js steps bit for bit as before. The ones taking `o` write into it and return it; a three.js Vector3 or
 // Quaternion passed as `o` or read from works too (structurally the same fields).

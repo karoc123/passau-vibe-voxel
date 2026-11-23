@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CraftKind } from './craft-motion';
+import type { CraftKind } from '../sim/craft/craft-motion';
 
 // The three craft drawn from boxes, at the world's scale (1 unit = 1 m; the walker is 1.78 m, a car 4.6 m):
 // - hovercraft: a six-seat passenger hovercraft, 6.0 x 2.6 m, 1.9 m to the fan ducts' top over the skirt's foot;

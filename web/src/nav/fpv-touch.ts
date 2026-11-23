@@ -1,5 +1,5 @@
 import { clamp } from '../util';
-import { HOVER_THROTTLE, type FlightInput } from './fpv-flight';
+import { HOVER_THROTTLE, type FlightInput } from '../sim/craft/fpv-flight';
 import { DEAD_ZONE, stickAxis, TouchSticks } from './touch-sticks';
 
 const MAX_ROTATION_INPUT = 0.42; // Match the keyboard's gentler rates.

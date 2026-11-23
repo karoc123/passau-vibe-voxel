@@ -3,7 +3,7 @@ import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
 import { viewerTileCache } from '../viewer-tiles';
 import { FixedStep } from '../core/fixed-step';
 import { add, component, copy, length, set, type Vec3 } from '../core/vec';
-import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from './fpv-flight';
+import { FpvFlight, HOVER_THROTTLE, REBOUND_SPEED, type FlightInput } from '../sim/craft/fpv-flight';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';

@@ -20,7 +20,7 @@ export interface Road extends RoadData, Path { i: number; lists: Car[][] }
 export interface PedData extends PathData { a: number; b: number; w: number; x?: SignalRef; side?: number; bk?: number }
 export interface PedEdge extends PedData, Path { i: number }
 
-// a railway track and the routes on it (sim/trains.ts)
+// a railway track and the routes on it (view/trains.ts)
 export interface TrainService { ref: string; op: string; stops: number[] }
 export interface TrainPathData extends PathData { svc: TrainService[] }
 
@@ -40,7 +40,7 @@ interface Blocked {
   by: Agent | null;
   ignore?: Agent | null;
   ignoreT?: number;
-  // its pose: drawn (the presentation's, sim/life.ts), or, out of the traffic (a parked car, a wreck), where it is:
+  // its pose: drawn (the presentation's, view/life.ts), or, out of the traffic (a parked car, a wreck), where it is:
   // the ground point under it and its heading
   rp?: Vec3;
   rh?: number;
@@ -48,7 +48,7 @@ interface Blocked {
 
 export interface Car extends Blocked {
   kind: 'car';
-  pitch?: number; // drawn nose up (radians) on a ramp (life.ts drawCars)
+  pitch?: number; // drawn nose up (radians) on a ramp (view/life.ts drawCars)
   roll?: number; // drawn left side up (radians): the driven car on uneven ground (nav/drive.ts)
   id: number;
   detachedPose?: RoadPose; // authoritative pose out of traffic, independent of drawing
@@ -65,7 +65,7 @@ export interface Car extends Blocked {
   prev: number;
   prevOff: number;
   next: number;
-  // the road before prev and the one after next, with prev's offset there (-1, none: life.ts carPoint blends them in
+  // the road before prev and the one after next, with prev's offset there (-1, none: view/life.ts carPoint blends them in
   // when prev or next is shorter than its blend)
   prev2?: number;
   prev2Off?: number;
@@ -96,7 +96,7 @@ export interface Person {
   wait: boolean;
   col: string; // their shirt ('#rrggbb')
   bike?: boolean;
-  rp?: Vec3; // drawn (sim/life.ts)
+  rp?: Vec3; // drawn (view/life.ts)
   rh?: number;
   ctl?: { x: number; y: number; z: number; h: number; moving: boolean };
 }

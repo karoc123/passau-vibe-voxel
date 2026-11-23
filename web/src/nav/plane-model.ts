@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-// The plane drawn from boxes in code (as the cars, sim/meshes.ts, and the walker): a high-wing two-seater on floats,
+// The plane drawn from boxes in code (as the cars, view/meshes.ts, and the walker): a high-wing two-seater on floats,
 // 7 m long, 9 m span, nose +z, the floats' bottoms at y = -floatH (the flight's point is the fuselage's cube's centre,
 // plane-flight.ts FLOAT_H). One merged body with vertex colours, the propeller with a faint disc, the lights.
 

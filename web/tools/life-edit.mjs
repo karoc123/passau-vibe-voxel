@@ -94,7 +94,7 @@ function run(ctx, seconds, each) {
   } finally { Math.random = realRandom; }
 }
 
-// a car's pose as drawn at the tick (life.ts drawCars at a = 1): kinematic, or its body's
+// a car's pose as drawn at the tick (view/life.ts drawCars at a = 1): kinematic, or its body's
 const pose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
 function drawn(ctx, c) {
   if (ctx.T.cars.includes(c)) {

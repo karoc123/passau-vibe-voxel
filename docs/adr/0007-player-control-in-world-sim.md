@@ -44,7 +44,7 @@ the same interface with one player.
   uses those tick assignments and the same terrain build and readiness schedule, so arrival times and rendering frames
   cannot silently change the result.
 - `sim/train-traffic.ts` owns train routes, dwell times and spacing. `sim/boat-traffic.ts` owns boat routes and
-  timetables, and floats each vessel on the world's water where it is (`nav/river.ts`). Both run in the traffic tick
+  timetables, and floats each vessel on the world's water where it is (`sim/river.ts`). Both run in the traffic tick
   using world time, day and seed.
   They publish plain coach and vessel poses. Meshes, paint, lights and boat bobbing stay in presentation.
   The player boat joins the world clock when its control moves there.

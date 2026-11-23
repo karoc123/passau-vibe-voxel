@@ -332,8 +332,7 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 
 Page globals for the console and agent tools (none needed by the viewer): `window.__ready` (first frame drawn),
 `__three` (camera, scene, renderer, daylight, `city()`, `setGfx` …: `main.ts`), `__streamer`, `__life` (read by
-`tools/shoot.mjs`), and the crafts' scripting hooks `__drive`, `__boat` (docs/plans/boat.md), `__plane` (`start`,
-`pose`, `script`: docs/plans/plane.md).
+`tools/shoot.mjs`).
 
 ## Agent tools (checking a change)
 
@@ -354,7 +353,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 
 | tool | checks | set |
 |---|---|---|
-| `core-deps` | `src/core/`, the world sim and what they import: no three.js, no DOM (ADR 0001) | fast |
+| `core-deps` | `src/core/`, `src/sim/`, `src/physics/` and what they import: no three.js, no DOM (ADR 0001) | fast |
 | `layers` | `core/layers.ts` on a synthetic world: L0 + L1 + L2 edits, two builds, deltas encoded | fast |
 | `edit-roundtrip` | `core/columns.ts` on a real node: thousands of random edits against a dense reference | fast |
 | `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `tile-data.ts` reads (needs `uv`) | fast |
@@ -378,12 +377,12 @@ written as real node files and served through a stubbed fetch): a sweep before t
 cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
 code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
 
-**Boat: `node tools/boat.mjs`** (~2 s). The player's boat (`src/nav/boat-motion.ts`) on a synthetic channel
+**Boat: `node tools/boat.mjs`** (~2 s). The player's boat (`src/sim/craft/boat-motion.ts`) on a synthetic channel
 (`checks/boat-checks.ts`, served as `collision.mjs`'s world): speed, turning, drifting, the bank, a pier and a low
 footbridge bounced off, under a bridge, put in and unstuck; then on the real data (skipped without it): put in near
 the Altstadt, a lap, under the Schanzlbrücke, into the bank. Exit code 1 on a failure.
 
-**Plane: `node tools/plane.mjs`** (~6 s). The floatplane's flight (`src/nav/plane-flight.ts`) on a synthetic world of
+**Plane: `node tools/plane.mjs`** (~6 s). The floatplane's flight (`src/sim/craft/plane-flight.ts`) on a synthetic world of
 boxes (`checks/plane-checks.ts`): level flight, the throttle's range, stall and recovery, climbing costs speed, the
 turn, the map's wall, the ceiling, a water landing with taxi and takeoff, crashes on land and on water and the
 respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`checks/plane-real.ts`, skipped
@@ -497,7 +496,7 @@ capped (terraces, platforms, low walls) get an invisible ramp. Traffic cars and 
 two) and it is knocked out of the traffic, tumbles and stays where it comes to rest. The player and nearby traffic
 bodies use the same Rapier world and voxel colliders. People walking or cycling that
 the car runs into are shoved away along the hit and tip over flat (a short scripted fall of the street life's figure,
-no physics: `sim/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
+no physics: `view/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
@@ -511,7 +510,7 @@ in `tools/rapier-car.mjs` (`drive_*`).
 Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
 downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
 exits; touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
-the bridges. The motion is `web/src/nav/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
+the bridges. The motion is `web/src/sim/craft/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
 the mode is `nav/boat.ts`; design and controls in `docs/plans/boat.md`.
 
 ## Plane
@@ -524,7 +523,7 @@ stick, the throttle a slider on the right, pinch zooms. Gamepad (standard): left
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
 stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings near level) to float and taxi; past
 ~97 km/h with the stick pulled it takes off. Land, roofs and fast or steep water are a crash: back at a safe pose ~3 s
-earlier. The flight is `web/src/nav/plane-flight.ts` (no DOM, fixed step, all numbers in `PLANE`), checked by
+earlier. The flight is `web/src/sim/craft/plane-flight.ts` (no DOM, fixed step, all numbers in `PLANE`), checked by
 `tools/plane.mjs`; the mode is `nav/plane.ts`; design in `docs/plans/plane.md`.
 
 **Jet** in the same panel: a small aerobatic trainer, started in the air only (it needs no runway and cannot land).
@@ -547,7 +546,7 @@ core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
 
 The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch or
 gamepad stick climbs and descends (up/down) and slides sideways; the gamepad triggers climb and descend too.
-Their motion laws and numbers are `CRAFT` in `web/src/nav/craft-motion.ts`, the models (at the walker's and the
+Their motion laws and numbers are `CRAFT` in `web/src/sim/craft/craft-motion.ts`, the models (at the walker's and the
 cars' scale) `web/src/nav/craft-models.ts`. **Esc** returns to the map.
 
 ## Third-person walking
@@ -568,7 +567,7 @@ collision for kerbs, stairs, walls and bridge decks.
 - Lit windows at night follow Warsaw's statistics (`windows.json`, see above), and the night lighting (street lights,
   floodlit landmarks) is placed by rule, not from a lighting survey.
 - Boats are simulated: berths and the excursion loop come from OSM, but the season's ship numbers, the timetable and
-  the high-water stop are rules of thumb (`web/src/sim/boats.ts`), not real schedules.
+  the high-water stop are rules of thumb (`web/src/view/boats.ts`), not real schedules.
 - Trees come from OSM only (no municipal tree register is merged), so most crowns have no species and follow the
   median calendar.
 - Parked cars are frozen from the survey flight; moving traffic is simulated, not real.

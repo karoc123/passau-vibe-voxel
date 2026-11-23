@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { BoatDrawn } from './boat-motion';
+import type { BoatDrawn } from '../sim/craft/boat-motion';
 
 // The player's speedboat drawn (nav/boat.ts): boxes merged into one geometry with vertex colours, as the cars and the
-// river boats (sim/meshes.ts, sim/boats.ts); its nav lights brightened at night (as the cars' lamps: the bloom picks them
-// up); a trail of foam behind it at speed. Local frame as sim/boats.ts: x across (+x the port side, left), y up from the
+// river boats (view/meshes.ts, view/boats.ts); its nav lights brightened at night (as the cars' lamps: the bloom picks them
+// up); a trail of foam behind it at speed. Local frame as view/boats.ts: x across (+x the port side, left), y up from the
 // waterline, z along, +z the bow.
 
 const WHITE = 0xf3f2ee, HULL = 0x1c2a3a, STRIPE = 0xc23a2b, TEAK = 0x9a6b43, SEAT = 0xe7e1d2, DARK = 0x23262b, GLASS = 0x2a3a46;

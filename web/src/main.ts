@@ -18,7 +18,7 @@ import type { LifePhysics } from './physics/rapier/life-phys';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
-import { StreetLife } from './sim/life';
+import { StreetLife } from './view/life';
 import type { BoatData } from './sim/boat-traffic';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
@@ -91,7 +91,7 @@ const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
 let life: StreetLife | null = null, fountains: Fountains | null = null;
-// the rivers' points (flood.json `river`, nav/river.ts) for the boat and the floatplane: null until loaded, [] if none
+// the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};

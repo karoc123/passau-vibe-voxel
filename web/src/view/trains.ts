@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { setCount } from './meshes';
-import { COACH_LENGTH, COACH_WIDTH, type CoachPose } from './train-traffic';
+import { COACH_LENGTH, COACH_WIDTH, type CoachPose } from '../sim/train-traffic';
 
 const MAX_CARS = 240;
 const EXPRESS = [0xdfe2e4, 0x1d3d6e, 0xd8892b];

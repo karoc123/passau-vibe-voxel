@@ -77,7 +77,7 @@ const REST_MS = 400;
 // was three quarters of the map's size.)
 const SHADOW_R = 2400;
 // What moves (traffic, people, boats) is simulated within 900 m of a centre that trails the focus by up to 120 m
-// (sim/life.ts): its map covers no more than that, at no more than 2048² (at the overview finer than the city's).
+// (view/life.ts): its map covers no more than that, at no more than 2048² (at the overview finer than the city's).
 const TWIN_R = 1050, TWIN_MAX = 2048;
 // the fastest of them (m/s: a car at 50 km/h, a train), and its map drawn at least every TWIN_EVERY-th frame
 const MOVER_V = 20, TWIN_EVERY = 4;

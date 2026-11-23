@@ -1,4 +1,4 @@
-// The street life's pop-in gate (src/sim/life.ts), headless on the real traffic data (public/data/traffic.json): a
+// The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
 // viewer drives along the road network (and stands still a while), the life is updated every frame as main.ts does
 // (focus: the viewer), and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
@@ -35,7 +35,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('sim/life.ts');
+const { StreetLife } = await load('view/life.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');

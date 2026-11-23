@@ -4,7 +4,7 @@ import { clamp, el } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 import type { Nav } from './nav';
 import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
-import { collisionWorld, JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
+import { collisionWorld, JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from '../sim/craft/plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -12,7 +12,7 @@ import { VoxelCollision } from './voxel-collision';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
-import { nearestRiver, waterTop } from './river';
+import { nearestRiver, waterTop } from '../sim/river';
 import './plane.css';
 
 // The plane mode: the glue round plane-flight.ts (the flight, pure): the panel, the input (keyboard, touch, gamepad),
@@ -85,7 +85,6 @@ export class PlaneMode implements PlayerCraft {
   private phase: 'off' | 'loading' | 'flying' = 'off';
   private start: { x: number; z: number; y: number; heading: number; water: boolean } | null = null;
   private crashAt = -1e9;
-  private scripted: PlaneInput | null = null;
   private zoom = 1;
   private readonly cam = { yaw: 0, pitch: 0, fwd: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
   private readonly fwd = new THREE.Vector3();
@@ -142,12 +141,6 @@ export class PlaneMode implements PlayerCraft {
       e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
-    Object.assign(window, { __plane: {
-      start: (s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) => this.startAt(s),
-      pose: () => ({ ...this.flight.p, heading: this.flight.heading, gamma: this.flight.gamma, bank: this.flight.bank, kmh: this.flight.v * 3.6, state: this.flight.state, throttle: this.throttle,
-        type: this.type.label, g: this.flight.load }),
-      script: (inp: PlaneInput | null) => { this.scripted = inp; if (inp) this.throttle = inp.throttle; },
-    } });
     this.draw();
   }
 
@@ -227,7 +220,7 @@ export class PlaneMode implements PlayerCraft {
       const c = this.type.cfg;
       const pose: PlanePose = { x: s.x, y: clamp(s.y, top + c.RESPAWN_AGL, top + 300), z: s.z, heading: s.heading, speed: c.RESPAWN_SPEED };
       this.flight.reset(pose);
-      this.throttle = this.scripted?.throttle ?? c.RESPAWN_THROTTLE;
+      this.throttle = c.RESPAWN_THROTTLE;
     }
     this.flight.engine = this.throttle;
     this.flight.events.length = 0;
@@ -294,7 +287,6 @@ export class PlaneMode implements PlayerCraft {
     this.keys.clear();
     this.touch.setActive(false);
     this.model.group.visible = false;
-    this.scripted = null;
     this.rig.end();
   }
 
@@ -332,7 +324,6 @@ export class PlaneMode implements PlayerCraft {
   }
 
   private input(dt: number): PlaneInput {
-    if (this.scripted) return this.scripted;
     const has = (...codes: string[]) => this.keys.any(...codes) > 0;
     const pad = gamepad(), dz = padAxis;
     // the throttle lever: keys and triggers move it, the slider sets it (pointer handlers)

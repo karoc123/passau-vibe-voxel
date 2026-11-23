@@ -31,7 +31,7 @@ options `lpmodel`, `lplost`, `lponly`, ... and `tools/life-phys-browser.mjs` are
 - **Server seam**: `docs/adr/0006-world-sim-seam.md`. The world sim (`sim/traffic.ts`, `physics/rapier/life-phys.ts`
   and `core/`) has no three.js, DOM, camera or fetch (`tools/core-deps.mjs` checks it), runs on a fixed tick (1/30 s,
   two Rapier steps a tick), builds its colliders a fixed number of chunks a tick, draws from a seeded generator; the
-  presentation (`sim/life.ts`) draws it between its last two ticks. Two runs from one seed are bit-identical
+  presentation (`view/life.ts`) draws it between its last two ticks. Two runs from one seed are bit-identical
   (`tools/life-edit.mjs`).
 
 ### Numbers (node 22, WSL2, real data, hour 17)

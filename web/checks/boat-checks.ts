@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import type { Meta } from '../src/types';
-import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../src/nav/boat-motion';
-import { downstream, nearestRiver } from '../src/nav/river';
+import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../src/sim/craft/boat-motion';
+import { downstream, nearestRiver } from '../src/sim/river';
 import type { Check } from './check';
 import { makeWorld } from './world';
 import type { VoxelCollision } from '../src/nav/voxel-collision';

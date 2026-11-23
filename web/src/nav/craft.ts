@@ -3,7 +3,7 @@ import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { Meta } from '../types';
 import type { Pose } from '../sim/types';
 import type { Nav } from './nav';
-import type { RiverPoints } from './river';
+import type { RiverPoints } from '../sim/river';
 
 // A craft the player gets into (docs/plans/code-health.md item 10): the drone (fpv.ts), the car (drive.ts), the boat
 // (boat.ts), the floatplane and the jet (plane.ts). Each is one class made from a CraftContext and listed once in

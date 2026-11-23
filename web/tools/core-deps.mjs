@@ -1,10 +1,9 @@
 // The rule of web/src/core/ (docs/adr/0001-world-layers.md): no three.js, no DOM, so the viewer, the node tools and a
-// Node server share it. The same for the world sim (docs/plans/life-physics.md "The server seam"): the traffic
-// (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts); and for the player's vehicles' cores (what a
-// server would step or check for each player: nav/boat-motion.ts, nav/plane-flight.ts, nav/fpv-flight.ts,
-// physics/rapier/car.ts; their shells draw them); and the rivers' water (nav/river.ts: what the river traffic and the
-// crafts float on). A static scan of every module under src/core/, those, and everything they import, transitively
-// (relative imports, type-only ones included):
+// Node server share it. The same for the world sim (docs/adr/0006-world-sim-seam.md): all of src/sim/ (the traffic,
+// trains and river boats, the rivers' water, and in sim/craft/ the player's vehicles' cores a server would step or
+// check) and src/physics/ (the Rapier bodies: the traffic's, the player's car); their presentation lives in view/ and
+// nav/. A static scan of every module under src/core/, src/sim/ and src/physics/, and everything they import,
+// transitively (relative imports, type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
 //     sessionStorage, requestAnimationFrame, HTML...Element, ... and no fetch (core takes its loader injected).
@@ -15,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const src = path.join(web, 'src'), core = path.join(src, 'core'), checks = path.join(web, 'checks'), verbose = process.argv.includes('-v');
+const src = path.join(web, 'src'), checks = path.join(web, 'checks'), verbose = process.argv.includes('-v');
 const rel = (f) => path.relative(web, f);
 
 const BANNED_MODULES = [
@@ -80,10 +79,8 @@ const IMPORT_RE = /\b(?:import|export)\s+(?:type\s+)?(?:[\w$*{},\s]+?\s+from\s+)
 const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
 const walk = (d, out) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) out.push(f); } return out; };
-for (const f of walk(core, [])) queue.push([f, null]);
-const SEAM = ['sim/traffic.ts', 'sim/train-traffic.ts', 'sim/boat-traffic.ts', 'physics/rapier/life-phys.ts',
-  'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts', 'nav/river.ts'];
-for (const f of SEAM) queue.push([path.join(src, f), null]);
+// the headless directories, whole
+for (const d of ['core', 'sim', 'physics']) for (const f of walk(path.join(src, d), [])) queue.push([f, null]);
 while (queue.length) {
   const [file, via] = queue.shift();
   if (seen.has(file)) continue;
@@ -115,4 +112,4 @@ for (const file of apps) {
 const scanned = [...seen].map(rel).sort();
 if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
-console.log(`PASS core-deps: ${scanned.length} modules (src/core, the world sim, the player's vehicles' cores and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/ and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);

@@ -5,7 +5,7 @@ import type { TrainPathData, TrainService } from './types';
 // Trains on the open-air railway (scripts/traffic.py: the OSM route=train relations, one path per track, each route
 // with the stations it stops at): every route sends a train every half hour, from the map edge or a tunnel portal;
 // it brakes for its stations, waits, and keeps its distance behind the train ahead on the same track.
-// Like the street life (life.ts) a train comes and goes only POP_R from the viewer or further: one due to start
+// Like the street life (view/life.ts) a train comes and goes only POP_R from the viewer or further: one due to start
 // waits until the track's start is that far, one past its track's end (into a tunnel, off the map) runs on along the
 // track's last straight until it is that far. (Twice a car's distance: a train is 4 m tall and 80-170 m long.)
 
