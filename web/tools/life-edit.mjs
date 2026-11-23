@@ -66,7 +66,7 @@ const clearEdits = () => { for (const k of touched) { const [tx, ty] = k.split('
 // a fresh world sim round the bridge, WARM s on, bodies attached (nothing edited: they must cost nothing)
 async function setup(at) {
   const { W, src, colData } = await nodeWorld();
-  const sim = new WorldSim(td, { seed: SEED, loadPhysics: () => LP.LifePhysics.load(meta, { x: at.x, z: at.y }, {}, { load: async (p) => raw(p) }) });
+  const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, { x: at.x, z: at.y }, {}, { load: async (p) => raw(p) }, tuning.ride) });
   sim.setWorld(W);
   const phys = await sim.loadPhysics(), T = sim.traffic;
   // (the tiles round the bridge decoded up front, as the page's streaming has them: no load lands mid-run)

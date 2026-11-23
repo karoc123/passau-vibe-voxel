@@ -35,10 +35,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E1 | `WorldSim`: one headless host for the world sim | M | **In progress** (`e1`) |
-| E2 | Players in the sim: follow and walk-as by player id | M | **Waits** for E1 |
-| E3 | Edits owned by the world, not the renderer | M | **Waits** for E1 |
-| E4 | Player crafts on the world clock | L | **Waits** for E1 (best after E3) |
+| E2 | Players in the sim: follow and walk-as by player id | M | **Ready** |
+| E3 | Edits owned by the world, not the renderer | M | **Ready** |
+| E4 | Player crafts on the world clock | L | **Ready** (best after E3) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -82,23 +81,15 @@ E6 landed (merge `08f44469`): cores in `sim/craft/`, `sim/river.ts`; presentatio
 `core/`, `sim/`, `physics/` whole. `nav/craft-collision.ts` stays in `nav/` (type import of `VoxelCollision`, which
 imports `fetch`; E4 moves `VoxelCollision` to the sim side).
 
+E1 landed (merge after E5): `sim/world-sim.ts` `WorldSim` owns the traffic, the road physics (through an injected
+loader, given `WorldSim.tuning`) and the drive commands by player id; `StreetLife(scene, sim)` only draws; `main.ts`,
+`life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs` create and tick it. Open from E1: the tick still runs only while the
+life is drawn (`main.ts`, `if (life.group.visible)`; owner's call); `WorldSim.events` is one object per update (a server
+with several clients needs tick-numbered event lists, E2); `nav.ts` still writes `life.sim.traffic.keep` and `ctl` (E2).
+
 E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
-
-### E1. `WorldSim`: one headless host for the world sim (M)
-
-- **Why:** `life.ts:55` creates `Traffic`, `life.ts:88` sets its ground every frame, `main.ts:553-559` ticks it only
-  while drawn, physics is attached by setters (`main.ts:466, 503`), the edit listener sits in `main.ts`. The tools copy
-  the wiring (`life-edit.mjs:45-75`, `life-phys.mjs`, `popin-check.mjs` builds a `THREE.Scene` for a `Traffic`).
-  Crafts reach the sim through `nav.life` and `roadPhysics()`.
-- **Do:** `sim/world-sim.ts` (no three.js, no DOM): owns `Traffic`, loads `LifePhysics` through an injected loader,
-  `setBoats`, `edited(box, cleared)`, `update(dt, {hour, day, focus, viewer})`; player commands and reads (`takeWheel`,
-  `releaseWheel`, `input`, `resetDriver`, `driverSnapshot`, `driverNotes`); events (`struck`, `dropped`) drained per
-  tick. `StreetLife(scene, sim)` only draws. `main.ts` creates and ticks it (keep the visibility gating in the first
-  commit; ungating is a one-line decision for the owner). `CraftContext` gets `sim` instead of `roadPhysics`. Port
-  `life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs` to it.
-- **Gates:** tsc, core-deps, life-edit, rapier-car 45, vehicles 35, popin-check (`--full`).
 
 ### E2. Players in the sim (M, ADR 0007 step 1 for people and following)
 

@@ -13,6 +13,7 @@ import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { DEFAULT_SEED, Traffic, type Ground } from './traffic';
+import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { Person, TrafficData } from './types';
 import type { VehicleId } from './vehicles';
 
@@ -40,9 +41,16 @@ export class WorldSim {
   private phys: LifePhysics | null = null;
   private loading: Promise<LifePhysics> | null = null;
 
-  /** loadPhysics: makes the road physics (Rapier initialised, its tiles from a cache or a load) */
-  constructor(data: TrafficData, private readonly opts: { seed?: number; loadPhysics?: () => Promise<LifePhysics> } = {}) {
+  /** the world's tuning (read-only, sim/tuning.ts); the physics loader is given it */
+  readonly tuning: Tuning;
+
+  /** loadPhysics: makes the road physics with the world's tuning (Rapier initialised, its tiles from a cache or a
+   * load) */
+  constructor(data: TrafficData, private readonly opts: {
+    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>;
+  } = {}) {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED);
+    this.tuning = opts.tuning ?? DEFAULT_TUNING;
   }
 
   /** the road physics, once loaded (loadPhysics) */
@@ -67,7 +75,7 @@ export class WorldSim {
   async loadPhysics(warm?: { x: number; z: number }) {
     const load = this.opts.loadPhysics;
     if (!load) throw new Error('WorldSim: no physics loader');
-    this.loading ??= load().then((p) => {
+    this.loading ??= load(this.tuning).then((p) => {
       this.phys = p;
       this.traffic.bodies = p;
       return p;

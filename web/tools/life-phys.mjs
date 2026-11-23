@@ -30,7 +30,7 @@ const f2 = (x) => x.toFixed(2);
 for (const [near, max] of configs) {
   const { W } = await nodeWorld();
   const focus = { x: AX, z: AZ };
-  const sim = new WorldSim(td, { seed: 7, loadPhysics: () => LP.LifePhysics.load(meta, focus, { near, maxBodies: max ?? LP.MAX_BODIES, look }, { load: async (p) => rawTile(p) }) });
+  const sim = new WorldSim(td, { seed: 7, loadPhysics: (tuning) => LP.LifePhysics.load(meta, focus, { near, maxBodies: max ?? LP.MAX_BODIES, look }, { load: async (p) => rawTile(p) }, tuning.ride) });
   const T = sim.traffic;
   sim.setWorld(W);
   for (let i = 0; i < WARM / STEP; i++) sim.update(STEP, { hour: HOUR, focus });
