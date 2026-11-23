@@ -35,9 +35,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E9 | The sim in a Web Worker: a local server | L | **Ready** (plan first) |
-| E8 | A vehicle stays in the world when left | S–M | **Waits** for E9 |
-| E7 | Commands a server can trust | M | **Ready** (partly in E9) |
+| E8 | A vehicle stays in the world when left | S–M | **Ready** |
+| E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -113,19 +112,16 @@ E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a fro
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
 
-### E9. The sim in a Web Worker: a local server (L, ADR 0008)
-
-- **Why:** the seam is only proven when the page cannot reach into the sim. Today `main.ts`, the nav shells and
-  `view/` hold the `WorldSim` object and read `traffic`, `crafts`, `physics` directly.
-- **Do first:** a plan in `docs/plans/local-server.md`: every place the page touches the sim (reads and writes), what
-  crosses the boundary (commands from the page; snapshots and events to it; tiles and edits both ways: the worker
-  owns `liveEdits` and the physics' TileCache, the streamer meshes what the snapshot says is edited), the snapshot
-  format (positions for drawing; interest by focus), and the steps in order.
-- **Do:** in steps, each with gates green: a `SimClient` interface the page uses (commands, snapshots, events since a
-  tick); first an in-thread implementation over `WorldSim` (neutral), then the worker one behind `?worker=1`, then the
-  default. Commands become serialisable and queued per tick (E7's first point). Creative mode stays a client.
-- **Gates:** fast set, popin-check, life-edit; a browser check per mode (follow, walk, drive, each craft, dig) with
-  and without the worker; frame time measured both ways.
+E9 landed (merge after `6ab2e094`, plan and measurements in `docs/plans/local-server.md`): the page holds only a
+`SimClient` (`sim/sim-client.ts`): `SimCommand`s as plain data, queued and applied at the start of the next update,
+`CommandResult`s for refusable commands, `TrafficView`/`CraftView` for drawing. `LocalSimClient` (default, page thread),
+`MirrorSimClient` over snapshots (`sim/snapshot.ts`, `TrafficMirror`) via `ThreadLink` (`?mirror=1`) or `WorkerLink`
+(`?worker=1`, `sim.worker.ts`); `sim-host.ts` wires the WorldSim the same in both; new fast gate `mirror-check` (two
+sims, one through snapshots, bit-equal over 2700 frames). Worker: +1 frame input latency (no prediction yet), sim time
+leaves the page (~0.05 ms/frame + ~0.25 ms snapshot apply). Open from E9: worker not default (waits for client
+prediction); no interest filter per client; snapshots are plain objects (no typed arrays/deltas); a Rapier body through
+the mirror lerps instead of slerping (no gate); the worker's ground is level-1 nodes only (`tile-world.ts`) and decodes
+nodes the page also decodes; Rapier is bundled twice (page and worker chunk); `window.__sim` is now the client.
 
 ### E8. A vehicle stays in the world when left (S–M, owner 2026-11-23)
 
