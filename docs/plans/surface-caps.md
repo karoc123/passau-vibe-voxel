@@ -298,7 +298,7 @@ with the edited columns), `core/tile-cache.ts`, `core/live-edits.ts` `LiveNode.b
   trimesh for everybody (`WORLD_GROUPS | car`, `FIX_INTERNAL_EDGES`, friction 0.9). `groundAt(x, z, top)` =
   highest interval top <= `top`, through `surfaceAt`; the `car` argument goes (`car.ts` callers updated). `solidTop`:
   the open-top-voxel case for capped columns, no `car` flag.
-- **Drone** (`nav/voxel-collision.ts`): keeps sweeping voxel boxes (a cap is within ±0.875 m of its voxel top; the
+- **Drone** (`sim/craft/voxel-collision.ts`): keeps sweeping voxel boxes (a cap is within ±0.875 m of its voxel top; the
   drone is not a ground vehicle). Only `surface(x, z)` (where it settles / what the HUD reads) takes the cap through
   `surfaceAt` for the run it picks. (Decision D5 if exact drone-on-slope contact is wanted later.)
 - **Walkers / people / traffic / camera**: all through `World` — no further change.

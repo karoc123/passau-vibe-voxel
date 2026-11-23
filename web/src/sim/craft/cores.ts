@@ -4,6 +4,7 @@ import type { Tuning } from '../tuning';
 import { BoatCore } from './boat-motion';
 import { SpecialCore } from './special-core';
 import { DroneCore } from './drone-core';
+import { PlaneCore } from './plane-core';
 
 export const CORES = {
   boat: (t: Tuning) => new BoatCore(t.boat),
@@ -12,6 +13,8 @@ export const CORES = {
   paraglider: (t: Tuning) => new SpecialCore('paraglider', t.craft),
   // (the drone has no tuning of its own yet: fpv-flight.ts's constants)
   drone: (_t: Tuning) => new DroneCore(),
+  floatplane: (t: Tuning) => new PlaneCore(t.plane),
+  jet: (t: Tuning) => new PlaneCore(t.jet),
 };
 
 export type CraftType = keyof typeof CORES;
