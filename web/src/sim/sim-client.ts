@@ -22,7 +22,6 @@ import { CORES, type CraftType } from './craft/cores';
 import { loadState } from './craft/core-state';
 import { DEFAULT_TUNING } from './tuning';
 import { TrafficMirror, type Snapshot } from './snapshot';
-import { STEP } from './traffic';
 import type { SimServer } from './sim-server';
 import { EVENT_TICKS, type CraftId, type CraftInput, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
 
@@ -194,16 +193,11 @@ export class MirrorSimClient implements SimClient {
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
-  // smooth: the sim time the traffic is drawn at (null: none yet)
-  private drawn: number | null = null;
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
-   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread);
-   * smooth: snapshots arrive unevenly (a worker's: some frames none, then one covering two), so the drawn time runs
-   * on with the page's frames and is pulled gently towards the last snapshot's (extrapolating past its last tick);
-   * without it, the drawn time stands still and then jumps (a fast car judders against its chase camera) */
+   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread) */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly player: PlayerId,
-    private readonly edits = false, private readonly smooth = false) {
+    private readonly edits = false) {
     this.traffic = new TrafficMirror(data, ground);
     link.onSnapshot = (s) => this.take(s);
   }
@@ -224,19 +218,10 @@ export class MirrorSimClient implements SimClient {
     const q = this.queue;
     this.queue = [];
     this.link.frame(dt, input, q);
-    const s = this.last;
-    if (this.smooth && s) {
-      // (a pause, a hidden tab, a sim clamped: start over from the snapshot's time)
-      const target = s.tick * STEP + s.acc;
-      if (this.drawn === null || Math.abs(target - this.drawn) > 0.25) this.drawn = target;
-      else this.drawn += Math.min(dt, 0.1) + (target - this.drawn - Math.min(dt, 0.1)) * 0.15;
-      this.traffic.lead = Math.min(Math.max(this.drawn - s.tick * STEP, 0), 2 * STEP);
-    }
   }
 
   private take(s: Snapshot) {
     this.last = s;
-
     if (this.edits) for (const e of s.edits) liveEdits.set(e.tx, e.ty, e.node, e.region);
     this.events.push(...this.traffic.apply(s));
     const old = s.tick - EVENT_TICKS;
