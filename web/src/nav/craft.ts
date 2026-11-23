@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { LifePhysics } from '../physics/rapier/life-phys';
+import type { WorldSim } from '../sim/world-sim';
 import type { Meta } from '../types';
 import type { Pose } from '../sim/types';
 import type { Nav } from './nav';
@@ -53,6 +53,7 @@ export interface CraftContext {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   env: CraftEnv;
-  roadPhysics: () => Promise<LifePhysics>;
+  /** the world sim, once the traffic is loaded: the drive's commands go to it, keyed by player id */
+  sim: Promise<WorldSim>;
   deployGlider: (source: PlayerCraft, at: CraftSpot) => boolean;
 }

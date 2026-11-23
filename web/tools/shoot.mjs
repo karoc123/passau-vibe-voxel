@@ -221,6 +221,7 @@ try {
       Object.defineProperty(u, 'value', { get: () => 100, set() {} });
       T.daylight.clouds.tick(100); T.daylight.clouds.tick = () => {};
       if (window.__life) { window.__life.group.visible = false; window.__life.update = () => {}; }
+      if (window.__sim) window.__sim.update = () => {};
       T.daylight.redrawShadow(true);
     });
     const frozen = Date.now() - t0;

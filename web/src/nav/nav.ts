@@ -566,7 +566,7 @@ export class Nav {
     this.landmark = null;
     if (opts.exact) spot = [Math.floor(t.x), Math.floor(t.z)];
     else {
-      if (this.life && !this.net) this.net = walkNet(w, this.life.peds);
+      if (this.life && !this.net) this.net = walkNet(w, this.life.sim.traffic.peds);
       const s = openSpot(w, this.net, t.x, t.z);
       this.landmark = s?.landmark ?? null;
       spot = s?.at ?? findStreet(w, this.camera.position.x, this.camera.position.z);
@@ -601,7 +601,7 @@ export class Nav {
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
     this.glide.start(1100);
     this.mode = 'ride';
-    if (this.life) this.life.keep = ag.obj;
+    if (this.life) this.life.sim.traffic.keep = ag.obj;
     this.controls.enabled = false;
     this.foot.stop();
     this.dom.style.cursor = 'default';
@@ -614,7 +614,7 @@ export class Nav {
     this.rideCamera.reset();
     this.jumpAsked = false;
     this.release();
-    if (this.life) this.life.keep = null;
+    if (this.life) this.life.sim.traffic.keep = null;
   }
 
   // off the person walked: back to the crowd's own walk (sim/traffic.ts no longer keeps them), and following them

@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import type { CarInput } from '../physics/rapier/car';
-import type { LifePhysics } from '../physics/rapier/life-phys';
+import type { WorldSim } from '../sim/world-sim';
 import { CRASH_MS, PARK, SINK_MS, type DriverSnapshot } from '../physics/rapier/player-car';
 import type { Nav, Ride } from './nav';
 import type { CraftContext, PlayerCraft } from './craft';
@@ -12,7 +12,7 @@ import { shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
 import './drive.css';
 
-// The drive mode submits the local player’s commands to the shared road physics. Here: the panel, the input, the
+// The drive mode submits the local player’s commands to the world sim (sim/world-sim.ts: its road physics). Here: the panel, the input, the
 // camera's shake. A craft on the ride's camera (craft.ts): Nav follows the car taken and tells it when it is left (the
 // car parks). Out of focus it holds still (input.ts).
 const LOCAL_PLAYER = 'local';
@@ -34,7 +34,7 @@ export class DriveMode implements PlayerCraft {
   readonly view = 'ride';
   private readonly nav: Nav;
   private readonly focus: Vector3;
-  private readonly roadPhysics: CraftContext['roadPhysics'];
+  private readonly sim: CraftContext['sim'];
   private readonly touch: TouchSticks;
   // on a touch screen: one stick on the left (up gas, down brake then reverse, sideways steer), the handbrake under the
   // right thumb (held), and the right side's fingers pinch the camera (style.css #handbrake-button)
@@ -50,11 +50,12 @@ export class DriveMode implements PlayerCraft {
   private driving: Ride | null = null;
   private claimTick: number | null = null;
   private snapshot: DriverSnapshot | null = null;
-  private rapier: LifePhysics | null = null;
+  // the world sim, once its road physics is loaded
+  private world: WorldSim | null = null;
   private rapierLoad: Promise<void> | null = null;
 
-  constructor({ nav, target, roadPhysics, host, canvas }: CraftContext) {
-    this.nav = nav; this.focus = target; this.roadPhysics = roadPhysics;
+  constructor({ nav, target, sim, host, canvas }: CraftContext) {
+    this.nav = nav; this.focus = target; this.sim = sim;
     setTimeout(() => {
       const idle = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
       if (idle) idle(() => this.loadRapier(), { timeout: 3000 }); else this.loadRapier();
@@ -73,7 +74,7 @@ export class DriveMode implements PlayerCraft {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.rapier?.resetDriver(LOCAL_PLAYER); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.world?.resetDriver(LOCAL_PLAYER); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
@@ -82,13 +83,13 @@ export class DriveMode implements PlayerCraft {
 
   update() {
     if (this.pending) this.prepare(this.pending);
-    if (this.driving && this.rapier) {
-      this.snapshot = this.rapier.driverSnapshot(LOCAL_PLAYER);
-      if (!this.snapshot && this.claimTick !== null && this.rapier.lastTick > this.claimTick) this.nav.leaveCraft();
+    if (this.driving && this.world) {
+      this.snapshot = this.world.driverSnapshot(LOCAL_PLAYER);
+      if (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick) this.nav.leaveCraft();
       else {
         const focused = inFocus(), now = performance.now();
-        this.rapier.input(LOCAL_PLAYER, focused ? this.input() : PARK);
-        for (const note of this.rapier.driverNotes(LOCAL_PLAYER)) this.panel.say(note.text, note.ms);
+        this.world.input(LOCAL_PLAYER, focused ? this.input() : PARK);
+        for (const note of this.world.driverNotes(LOCAL_PLAYER)) this.panel.say(note.text, note.ms);
         if (this.snapshot) {
           this.shakeCamera(this.snapshot, now);
           const p = this.snapshot.pose;
@@ -123,7 +124,7 @@ export class DriveMode implements PlayerCraft {
       const choice = life.nearest('car', this.focus, null);
       if (choice) this.nav.startRide(choice);
       else {
-        const car = life.roadVehicles().find(c => c.rp);
+        const car = life.sim.traffic.roadVehicles().find(c => c.rp);
         if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
       }
     }
@@ -136,12 +137,12 @@ export class DriveMode implements PlayerCraft {
   private prepare(ride: Ride) {
     const life = this.nav.life, car = ride.obj;
     if (!life || ride !== this.nav.ride || car.kind !== 'car') { this.pending = null; return; }
-    const rap = this.rapier;
-    if (!rap) { this.loadRapier(); return; }
+    const world = this.world;
+    if (!world) { this.loadRapier(); return; }
     if (!life.pose('car', car)) { this.pending = null; return; }
     this.pending = null;
-    rap.takeWheel(LOCAL_PLAYER, car.id, this.choice === 'any' ? undefined : this.choice);
-    this.claimTick = rap.lastTick;
+    world.takeWheel(LOCAL_PLAYER, car.id, this.choice === 'any' ? undefined : this.choice);
+    this.claimTick = world.tick;
     this.driving = ride;
     this.nav.enterCraft(this);
     this.touch.setActive(true);
@@ -152,7 +153,7 @@ export class DriveMode implements PlayerCraft {
   // left (Park, the map, a walk, another ride or craft): the car parks where it is
   leave() {
     if (!this.driving) return;
-    this.rapier?.releaseWheel(LOCAL_PLAYER);
+    this.world?.releaseWheel(LOCAL_PLAYER);
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.claimTick = null;
@@ -164,8 +165,9 @@ export class DriveMode implements PlayerCraft {
 
   private loadRapier() {
     if (this.rapierLoad) return;
-    this.rapierLoad = this.roadPhysics().then((world) => {
-      this.rapier = world;
+    this.rapierLoad = this.sim.then(async (sim) => {
+      await sim.loadPhysics({ x: this.focus.x, z: this.focus.z });
+      this.world = sim;
     }).catch(() => {
       this.rapierLoad = null;
       this.pending = null;
@@ -204,11 +206,11 @@ export class DriveMode implements PlayerCraft {
     ModePanel.text(this.typeButton, `Vehicle: ${this.choice === 'any' ? 'any' : VEHICLES[this.choice].name}`);
     const life = this.nav.life;
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
-      (!following && !life.roadVehicles().some(c => c.rp))));
+      (!following && !life.sim.traffic.roadVehicles().some(c => c.rp))));
     P.details.hidden = !active && !this.pending;
     this.speed.hidden = this.help.hidden = !active;
     P.status.hidden = !this.pending && !active;
-    ModePanel.text(P.status, this.pending && !this.rapier ? 'Loading physics…' :
+    ModePanel.text(P.status, this.pending && !this.world ? 'Loading physics…' :
       this.pending || (active && (!this.snapshot || this.snapshot.waiting)) ? 'Loading road collision tiles…' :
       active && !inFocus() ? PAUSED : P.saying);
     if (active) ModePanel.text(this.speed, Math.round(Math.abs(this.snapshot?.kmh ?? 0)) + ' km/h');

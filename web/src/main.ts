@@ -14,11 +14,11 @@ import { Minimap } from './minimap';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
-import type { LifePhysics } from './physics/rapier/life-phys';
 import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
+import { WorldSim } from './sim/world-sim';
 import type { BoatData } from './sim/boat-traffic';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
@@ -38,7 +38,7 @@ import { focusView } from './focus';
 import './style.css';
 
 declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __streamer?: TileStreamer }
+  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: WorldSim; __streamer?: TileStreamer }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -90,9 +90,12 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
-let life: StreetLife | null = null, fountains: Fountains | null = null;
+// the world sim (sim/world-sim.ts) and its presentation, once the traffic is loaded (the crafts wait for it: simReady)
+let sim: WorldSim | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
+let simLoaded: (sim: WorldSim) => void = () => {};
+const simReady = new Promise<WorldSim>((resolve) => { simLoaded = resolve; });
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
@@ -460,22 +463,23 @@ async function boot() {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
-    life = nav.life = new StreetLife(scene, td, qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0);
+    const seed = qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0;
+    const ws = sim = new WorldSim(td, { seed, loadPhysics: () => loadLifePhysics(meta) });
+    ws.setWorld(world, world);
+    life = nav.life = new StreetLife(scene, ws);
     movingActors.add(life.group);
-    life.world = world;
-    lifePhysLoading?.then((physics) => { if (life) life.bodies = physics; }).catch(() => {});
-    // (player edits, ?dig=1: the people over a hole in them fall, the cars near them are bodies (lifePhysics); a node
-    // freed is its file again)
-    const N = meta.tiles.N;
+    // (player edits, ?dig=1: the people over a hole in them fall, the cars near them are bodies (the road physics,
+    // loaded then unless ?lifephys=0); a node freed is its file again)
+    const N = meta.tiles.N, physicsOnEdit = qs.get('lifephys') !== '0';
     liveEdits.listen((tx, ty, node, region) => {
-      life?.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
-      if (node) lifePhysics(meta)?.catch(() => {});
+      ws.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
+      if (node && physicsOnEdit) ws.loadPhysics().catch(() => {});
     });
     window.__life = life;
-    if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
-    fetchJson<BoatData>('data/boats.json').then((bd) => {
-      life?.setBoats(bd);
-    }).catch((e) => console.warn('boats', e));
+    window.__sim = ws;
+    if (qs.get('dig') === '1' && physicsOnEdit) ws.loadPhysics().catch(() => {});
+    fetchJson<BoatData>('data/boats.json').then((bd) => ws.setBoats(bd)).catch((e) => console.warn('boats', e));
+    simLoaded(ws);
   });
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
@@ -484,26 +488,22 @@ async function boot() {
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
-    roadPhysics: () => lifePhysics(meta, true)!,
+    sim: simReady,
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
 }
 
-// The shared Rapier world loads on the first edit or when the drive mode warms up.
-let lifePhysLoading: Promise<LifePhysics> | null = null;
-function lifePhysics(meta: Meta, drive = false) {
-  if (!drive && qs.get('lifephys') === '0') return null;
-  return lifePhysLoading ??= (async () => {
+// The world sim's road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when
+// the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still loads it), ?lpnear=, ?lpmax=
+async function loadLifePhysics(meta: Meta) {
+  try {
     const [{ LifePhysics, DEFAULTS }, { viewerTileCache }] = await Promise.all([import('./physics/rapier/life-phys'), import('./viewer-tiles')]);
     const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
-    const p = await LifePhysics.load(meta, { x: f.x, z: f.z }, {
+    return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
       near: qs.get('lifephys') === '0' ? 0 : n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies),
     }, { cache: viewerTileCache(meta.tiles.N) });
-    if (life) life.bodies = p;
-    if (drive) await p.warmTerrain(f);
-    return p;
-  })().catch((error) => { lifePhysLoading = null; console.warn('road physics', error); throw error; });
+  } catch (error) { console.warn('road physics', error); throw error; }
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
@@ -550,12 +550,13 @@ renderer.setAnimationLoop((now) => {
   const cp = camera.position;
   precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
   if (city?.complete) document.body.classList.remove('loading');
-  if (life) {
+  if (sim && life) {
     life.group.visible = !city || city.complete;
+    // (the world sim ticks only while it is drawn: ungating it is the owner's decision, docs/adr/0006)
     if (life.group.visible) {
-      life.day = daylight.day;
       // (simulated round what is looked at; agents come and go far from the camera, which sees them)
-      life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
+      sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
+      life.update(dt, daylight.night, camera.position);
     }
   }
   daylight.sky.mesh.position.copy(camera.position);

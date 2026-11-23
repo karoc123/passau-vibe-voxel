@@ -1,18 +1,17 @@
 import * as THREE from 'three';
-import type { World } from '../world';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, DEFAULT_SEED, PED_POP_R, STEP, Traffic, type CarPose, type TrafficBodies } from '../sim/traffic';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/traffic';
+import type { WorldSim } from '../sim/world-sim';
 import { Trains } from './trains';
 import { Boats } from './boats';
-import type { BoatData } from '../sim/boat-traffic';
-import type { Car, Kind, Person, Pose, Rideable, TrafficData, Vec3 } from '../sim/types';
+import type { Car, Kind, Person, Pose, Rideable, Vec3 } from '../sim/types';
 import { VEHICLE_IDS, vehicleOf, type VehicleId } from '../sim/vehicles';
 
-// The street life's presentation: the traffic (sim/traffic.ts: the world sim, headless, on its fixed tick) drawn
-// between its last two ticks with instanced meshes, the trains, the people knocked down or fallen into a hole (an
-// effect: shoved, tipping over, no physics), picking an agent on screen. Nothing here feeds back into the sim but the
-// player's focus and the road world's player commands.
+// The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; created and
+// ticked by main.ts) drawn between its last two ticks with instanced meshes, the trains and the boats, the people
+// knocked down or fallen into a hole (its events, drawn as an effect: shoved, tipping over, no physics), picking an
+// agent on screen. It only draws: nothing here feeds back into the sim.
 
 export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
@@ -36,8 +35,6 @@ export interface Picked { kind: Kind; obj: Rideable; label: string }
 const setRp = (o: { rp?: Vec3 }, x: number, y: number, z: number) => { const p = (o.rp ??= { x, y, z }); p.x = x; p.y = y; p.z = z; return p; };
 
 export class StreetLife {
-  world: World | null = null;
-  readonly traffic: Traffic;
   private readonly trains = new Trains();
   private boats: Boats | null = null;
   private fallen: Fallen[] = [];
@@ -51,51 +48,32 @@ export class StreetLife {
   private readonly cols = new Map<string, THREE.Color>();
   private readonly bikeLeans = new WeakMap<Car, number>();
 
-  constructor(scene: THREE.Scene, data: TrafficData, seed = DEFAULT_SEED) {
-    this.traffic = new Traffic(data, seed);
-    this.heads = data.heads ?? [];
+  constructor(scene: THREE.Scene, readonly sim: WorldSim) {
+    this.heads = sim.traffic.heads;
     this.M = new LifeMeshes(scene, this.heads);
     this.M.group.add(this.trains.group);
   }
 
-  setBoats(data: BoatData) {
-    this.traffic.setBoats(data);
-    if (!this.boats) {
+  get group() { return this.M.group; }
+  private get traffic() { return this.sim.traffic; }
+  private get people() { return this.traffic.people; }
+  private get riders() { return this.traffic.riders; }
+
+  // the sim as it is after its update this frame (WorldSim.update: its events too), drawn; viewer: where it is seen
+  // from (the camera), what the people knocked down are gone far from
+  update(dt: number, night: number, viewer: { x: number; z: number; y?: number }) {
+    const T = this.traffic, { dropped, struck } = this.sim.events;
+    if (T.boats && !this.boats) {
       this.boats = new Boats();
       this.group.add(this.boats.group);
     }
-  }
-
-  get group() { return this.M.group; }
-  // (the sim's, as the drive and the walk see them)
-  get cars() { return this.traffic.cars; }
-  get people() { return this.traffic.people; }
-  get riders() { return this.traffic.riders; }
-  get peds() { return this.traffic.peds; }
-  get keep() { return this.traffic.keep; }
-  set keep(k: Rideable | null) { this.traffic.keep = k; }
-  get bodies() { return this.traffic.bodies; }
-  set bodies(b: TrafficBodies | null) { this.traffic.bodies = b; }
-  get day() { return this.traffic.day; }
-  set day(d: number) { this.traffic.day = d; }
-  roadVehicles() { return this.traffic.roadVehicles(); }
-  edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
-
-  // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
-  // camera; by default the focus, on the ground), what agents come and go far from
-  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus) {
-    const T = this.traffic;
-    T.ground = T.water = this.world;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    T.update(dt, hour, focus, viewer);
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
-    for (const p of T.dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
-    T.dropped = [];
-    for (const { person, pose, vx, vz } of T.struck) {
+    for (const p of dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
+    for (const { person, pose, vx, vz } of struck) {
       const v = Math.hypot(vx, vz) || 1;
       this.addFallen({ ...person, rp: pose, rh: pose.h }, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
     }
-    T.struck = [];
     this.render(Math.min(dt, 0.1), night, T.acc);
   }
 
@@ -263,7 +241,7 @@ export class StreetLife {
   // where it was hit, sliding half as far
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
-    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3(), ground = this.sim.ground;
     this.fallen = this.fallen.filter((f) => (f.land === undefined || f.t - f.land <= LANDED_S) && (f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R)));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;
@@ -275,14 +253,14 @@ export class StreetLife {
       if (f.bikeAt) { f.bikeAt.x += f.dx * step * 0.5; f.bikeAt.z += f.dz * step * 0.5; }
       f.v *= Math.exp(-FALL_DRAG * dt);
       if (f.vy !== undefined) { // (into a hole: down until the ground)
-        if (f.land === undefined && this.world) {
-          const g = this.world.support(f.at.x, f.at.z, f.at.y);
+        if (f.land === undefined && ground) {
+          const g = ground.support(f.at.x, f.at.z, f.at.y);
           f.vy -= G * dt;
           f.at.y += f.vy * dt;
           if (f.at.y <= g) { f.at.y = g; f.land = f.t; }
           if (f.bikeAt) f.bikeAt.y = f.at.y;
         }
-      } else if (this.world) f.at.y = this.world.surface(f.at.x, f.at.z, f.at.y);
+      } else if (ground) f.at.y = ground.surface(f.at.x, f.at.z, f.at.y);
       const k = Math.min(1, f.t / FALL_S), a = k * k * Math.PI / 2;
       // (up turned towards the shove: about up x shove)
       tip.setFromAxisAngle(axis.set(f.dz, 0, -f.dx), a);
@@ -316,7 +294,7 @@ export class StreetLife {
     setCount(this.headAct.length, M.lamp);
   }
 
-  private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.roadVehicles() : kind === 'person' ? this.people : []; }
+  private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.traffic.roadVehicles() : kind === 'person' ? this.people : []; }
 
   // the agent nearest to screen point (cx, cy) within px, at least minPx tall on screen, and visible
   pick(camera: THREE.PerspectiveCamera, cx: number, cy: number, px: number, minPx: number, visible: (to: THREE.Vector3) => boolean, skip: Rideable | null): Picked | null {
@@ -341,7 +319,7 @@ export class StreetLife {
       const r = Math.max(px, onScreen * 0.55);
       if (d < r) cand.push({ kind, obj, label, score: d / r + dist / 3000, at: new THREE.Vector3(x, y + size * 0.3, z) });
     };
-    for (const c of this.roadVehicles()) if (c.rp) test('car', c, c.rp.x, c.rp.y + 0.8, c.rp.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', c.rh, c.len);
+    for (const c of this.traffic.roadVehicles()) if (c.rp) test('car', c, c.rp.x, c.rp.y + 0.8, c.rp.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', c.rh, c.len);
     for (const p of this.people) if (p.rp) test('person', p, p.rp.x, p.rp.y + 0.9, p.rp.z, 1.6, 'person');
     cand.sort((a, b) => a.score - b.score);
     return cand.slice(0, 6).find((c) => visible(c.at.clone().sub(camera.position))) ?? null;
