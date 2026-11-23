@@ -35,7 +35,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E7 | Commands a server can trust | M | **Ready** |
+| E9 | The sim in a Web Worker: a local server | L | **Ready** (plan first) |
+| E8 | A vehicle stays in the world when left | S–M | **Waits** for E9 |
+| E7 | Commands a server can trust | M | **Ready** (partly in E9) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -110,6 +112,26 @@ craft commands apply at once (E7).
 E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
+
+### E9. The sim in a Web Worker: a local server (L, ADR 0008)
+
+- **Why:** the seam is only proven when the page cannot reach into the sim. Today `main.ts`, the nav shells and
+  `view/` hold the `WorldSim` object and read `traffic`, `crafts`, `physics` directly.
+- **Do first:** a plan in `docs/plans/local-server.md`: every place the page touches the sim (reads and writes), what
+  crosses the boundary (commands from the page; snapshots and events to it; tiles and edits both ways: the worker
+  owns `liveEdits` and the physics' TileCache, the streamer meshes what the snapshot says is edited), the snapshot
+  format (positions for drawing; interest by focus), and the steps in order.
+- **Do:** in steps, each with gates green: a `SimClient` interface the page uses (commands, snapshots, events since a
+  tick); first an in-thread implementation over `WorldSim` (neutral), then the worker one behind `?worker=1`, then the
+  default. Commands become serialisable and queued per tick (E7's first point). Creative mode stays a client.
+- **Gates:** fast set, popin-check, life-edit; a browser check per mode (follow, walk, drive, each craft, dig) with
+  and without the worker; frame time measured both ways.
+
+### E8. A vehicle stays in the world when left (S–M, owner 2026-11-23)
+
+- **Do:** `leaveCraft`/`releaseWheel` leave the entity where it is (a craft on neutral input, a car parked); another
+  player can enter it; dropped by the presence rule of `sim/edit-keeper.ts` (nobody near, after a delay), the shells
+  no longer remove crafts on leave. Who places new ones stays with the shell until a mode layer exists.
 
 ### E7. Commands a server can trust (M, from E2's open points)
 

@@ -45,6 +45,10 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
   is to carry many game variants: the rules of a game (who spawns where, what the city's population is, objectives,
   what ends a round) are a mode layered on the world sim, not woven into it; the sim offers entities with ids, seats,
   health and items as general mechanisms, and runs on its own clock whether or not anything is drawn.
+- **A vehicle stays in the world when its player gets out** (owner, 2026-11-23): parked cars, floating boats, landed
+  helicopters can be taken by another player. It is dropped by the same presence rule as edits (nobody near).
+- **Next proof of the seam: a local server in the browser.** The sim runs in a Web Worker; the page sends commands
+  and draws snapshots. No network yet; a Node server comes after it.
 - **Language: TypeScript for now.** The sim is shared by server and client (prediction needs the same code), Rapier
   already runs as WebAssembly, and 10–50 players are within reach of one Node process. The sim stays free of three.js
   and the DOM (`core-deps`) so a hot part can later be measured and, only if needed, moved to Rust behind the same
