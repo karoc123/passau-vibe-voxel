@@ -19,6 +19,7 @@ import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import { WorldSim } from './sim/world-sim';
+import { viewerTileCache } from './viewer-tiles';
 import type { BoatData } from './sim/boat-traffic';
 import type { Tuning } from './sim/tuning';
 import type { Kind, TrafficData } from './sim/types';
@@ -465,7 +466,9 @@ async function boot() {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
     const seed = qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0;
-    const ws = sim = new WorldSim(td, { seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning) });
+    // (the player crafts' collisions read the viewer's shared node files, on the page's clock)
+    const ws = sim = new WorldSim(td, { seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning),
+      crafts: { meta, cache: viewerTileCache(meta.tiles.N), now: () => performance.now() } });
     ws.setWorld(world, world);
     life = nav.life = new StreetLife(scene, ws);
     movingActors.add(life.group);
@@ -499,7 +502,7 @@ async function boot() {
 // the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still loads it), ?lpnear=, ?lpmax=
 async function loadLifePhysics(meta: Meta, tuning: Tuning) {
   try {
-    const [{ LifePhysics, DEFAULTS }, { viewerTileCache }] = await Promise.all([import('./physics/rapier/life-phys'), import('./viewer-tiles')]);
+    const { LifePhysics, DEFAULTS } = await import('./physics/rapier/life-phys');
     const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
     return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
       near: qs.get('lifephys') === '0' ? 0 : n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies),

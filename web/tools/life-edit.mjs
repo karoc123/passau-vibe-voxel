@@ -23,8 +23,13 @@
 //          where the walk's poses put them, holds one player, and is kept with the car followed when the focus moves
 //          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
 //          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
+//   crafts two players, each the pilot of a craft of the world sim's (WorldSim addCraft, placeCraft, enterCraft,
+//          craftInput, leaveCraft; its collision over the node files, on the world's clock): a seat holds one pilot,
+//          each craft takes its own pilot's input, and each moves exactly as it does alone in the world (nothing
+//          assumes one local player); a pilot counts as a focus (the edits near them kept); left, a craft goes on with
+//          hands off.
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|keep ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -444,6 +449,75 @@ function players() {
   }
 }
 
+// Crafts in the world sim: a world sim with the crafts' collisions over the node files (their own TileCache, the clock
+// the ticks' time); each craft's tiles loaded before it is put down (findSpawn, as the boat's shell does), so no step
+// waits. plan: [type, x, z, h, input(t)] per pilot; returns the sim, the crafts, the pilots' ids
+const BOAT = await load('sim/craft/boat-motion.ts');
+async function craftWorld(plan) {
+  let ms = 0;
+  const sim = new WorldSim(td, { seed: SEED, crafts: { meta, cache: new TC.TileCache({ N, load: async (p) => raw(p) }), now: () => ms } });
+  const crafts = [];
+  for (const [type, x, z, h] of plan) {
+    const c = sim.addCraft(type), zero = { x: 0, y: 0, z: 0 };
+    const ready = () => [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].every(([i, j]) => c.collision.surface(x + i * N, z + j * N) !== null);
+    for (let i = 0; i < 4000 && !ready(); i++) { ms += 200; c.collision.prefetch({ x, y: 0, z }, zero); await new Promise((d) => setTimeout(d, 2)); }
+    if (!check(ready(), `crafts: the tiles round ${type} at ${x}, ${z} load`)) return null;
+    const at = BOAT.findSpawn(c.collision, x, z, h, 48);
+    if (!check(at, `crafts: a spot for the ${type} near ${x}, ${z}`)) return null;
+    sim.placeCraft(c.id, at);
+    crafts.push(c);
+  }
+  const tick = (seconds, each) => {
+    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i * STEP); ms += STEP * 1000; sim.update(STEP, { hour: HOUR, focus: { x: BRIDGE.x, z: BRIDGE.y } }); }
+  };
+  return { sim, crafts, tick };
+}
+
+async function crafts() {
+  const [ox, oz] = meta.origin ?? [0, 0];
+  // (the boat gate's spots: the Danube by the Altstadt, the Danube west of the Schanzlbrücke)
+  const plan = [['boat', 8160.5, 2880.5, 1.8, (t) => ({ throttle: 1, steer: Math.sin(t * 0.7), drift: false })],
+    ['boat', 1136 - ox, 547 - oz, Math.PI / 2, (t) => ({ throttle: t < 3 ? 1 : -1, steer: -0.5, drift: t > 2 })]];
+  const both = await craftWorld(plan);
+  if (!both) return;
+  const { sim, crafts: [a, b], tick } = both;
+  check(sim.enterCraft('A', a.id) && sim.enterCraft('B', b.id) && !sim.enterCraft('B', a.id),
+    'crafts: each player takes a pilot\'s seat; the other\'s is refused');
+  check(sim.seat('A')?.role === 'pilot' && sim.seat('A').entity.id === a.id && sim.seat('B')?.entity.id === b.id && sim.craftOf('B') === b,
+    'crafts: each pilot holds their own craft\'s seat');
+  const foci = (sim2) => sim2.foci({ x: BRIDGE.x, z: BRIDGE.y }).length;
+  const f0 = foci(sim);
+  Math.random = noRandom;
+  let path;
+  try {
+    tick(6, (t) => { sim.craftInput('A', plan[0][4](t)); sim.craftInput('B', plan[1][4](t)); });
+    path = [a, b].map((c) => c.core.pose);
+    check(foci(sim) === f0 && f0 === 3, `crafts: both pilots count as foci (${f0} with the viewer's)`);
+    // each alone in the world: the same steps to the bit
+    for (const k of [0, 1]) {
+      const solo = await craftWorld([plan[k]]);
+      if (!solo) return;
+      solo.sim.enterCraft('A', solo.crafts[0].id);
+      solo.tick(6, (t) => solo.sim.craftInput('A', plan[k][4](t)));
+      const p = solo.crafts[0].core.pose, q = path[k];
+      check(p.x === q.x && p.z === q.z && p.h === q.h, `crafts: pilot ${'AB'[k]}'s craft moves as it does alone (${p.x.toFixed(2)}, ${p.z.toFixed(2)} / ${q.x.toFixed(2)}, ${q.z.toFixed(2)})`);
+    }
+    const moved = path.map((q, k) => Math.hypot(q.x - plan[k][1], q.z - plan[k][2]));
+    check(moved[0] > 40 && moved[1] > 5, `crafts: both moved under their pilots' input (${moved.map((m) => m.toFixed(1)).join(', ')} m)`);
+    // A leaves: the seat empty, the boat coasts on hands off and slows
+    sim.leaveCraft('A');
+    const v0 = Math.abs(a.core.motion.speed);
+    tick(2);
+    check(sim.seat('A') === null && a.pilot === null && Math.abs(a.core.motion.speed) < v0 && sim.seat('B')?.entity.id === b.id,
+      'crafts: left, the craft goes on hands off; the other pilot keeps theirs');
+    sim.removeCraft(b.id);
+    check(sim.seat('B') === null && !sim.crafts.has(b.id), 'crafts: a craft taken away leaves its pilot seatless');
+    results.crafts = { pilots: 2, alone: 'same', moved: moved.map((m) => m.toFixed(1)).join('/') };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 // (the keeper's module graph, with its own world edits: tools load each graph apart)
 async function keep() {
   const EK = await load('sim/edit-keeper.ts'), WE2 = EK.worldEdits, live = WE2.liveEdits;
@@ -481,6 +555,7 @@ if (want('wreck')) done(await wreck());
 if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
 if (want('players')) players();
+if (want('crafts')) await crafts();
 if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
