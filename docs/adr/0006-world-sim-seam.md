@@ -39,10 +39,12 @@ two runs differed.
 - **Inputs** (all through `WorldSim`): the hour and day, the focus (what is simulated) and the viewer (where agents may
   come and go unseen), the edited boxes (`WorldSim.edited`, from `core/live-edits.ts` in `main.ts`), the ground and
   water (`WorldSim.setWorld`: `world.ts` World), the tiles (injected loader or cache), and the players' commands keyed
-  by player id (`takeWheel`, `input`, `releaseWheel`, `resetDriver`; still outside it: `Traffic.keep`, `person.ctl`).
+  by player id (`follow`; a seat on an entity: the driver's with `takeWheel`, `input`, `releaseWheel`, `resetDriver`,
+  the walked person's with `walkAs`, `walkPose`, `release`; the viewer's player is `LOCAL_PLAYER`). The traffic keeps
+  what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
-  wrecks with their pose), the players' reads (`driverSnapshot`, `driverNotes`), and the events of the last update
+  wrecks with their pose), the players' reads (`seat`, `walkedPose`, `driverSnapshot`, `driverNotes`), and the events of the last update
   (`WorldSim.events`: `struck`, people knocked down by a driven car; `dropped`, people fallen into a hole).
 - **The player's vehicles' cores** (`sim/craft/boat-motion.ts`, `sim/craft/plane-flight.ts`, `sim/craft/fpv-flight.ts`,
   `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`

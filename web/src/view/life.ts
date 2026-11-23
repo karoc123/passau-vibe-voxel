@@ -47,6 +47,8 @@ export class StreetLife {
   private viewer: { x: number; z: number; y?: number } = { x: 0, z: 0 };
   private readonly cols = new Map<string, THREE.Color>();
   private readonly bikeLeans = new WeakMap<Car, number>();
+  // the step's phase of a person walked by a player (the sim's ph stands while they are walked)
+  private readonly walkPh = new WeakMap<Person, number>();
 
   constructor(scene: THREE.Scene, readonly sim: WorldSim) {
     this.heads = sim.traffic.heads;
@@ -171,10 +173,10 @@ export class StreetLife {
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), T = this.traffic;
     this.people.forEach((p, i) => {
       let bob = 0;
-      if (p.ctl) { // walked by the player (nav): where they put them
-        const C = p.ctl;
+      const C = this.sim.walkedPose(p.id);
+      if (C) { // walked by a player (WorldSim walkAs): where they put them, their step's phase this side's
         setRp(p, C.x, C.y, C.z); p.rh = C.h;
-        if (C.moving) { p.ph += dt * 9; bob = Math.sin(p.ph); }
+        if (C.moving) { const ph = (this.walkPh.get(p) ?? p.ph) + dt * 9; this.walkPh.set(p, ph); bob = Math.sin(ph); }
       } else {
         const ds = p.wait ? 0 : p.v * lead;
         T.personPoint(p, ds, A);

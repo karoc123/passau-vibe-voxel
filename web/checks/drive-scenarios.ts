@@ -2,6 +2,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../src/sim/traffic';
 import type { Car, TrainPathData } from '../src/sim/types';
+import { LOCAL_PLAYER as PLAYER } from '../src/sim/world-sim';
 import type { VehicleId } from '../src/sim/vehicles';
 import type { CarInput } from '../src/physics/rapier/car';
 import { LifePhysics } from '../src/physics/rapier/life-phys';
@@ -9,7 +10,7 @@ import { CRASH_MS, SINK_MS, PARK, type DriveNote } from '../src/physics/rapier/p
 import type { Check } from './check';
 import { synthMap, WATER, type Col } from './world';
 
-const FRAME_MS = 1000 / 60, PLAYER = 'local';
+const FRAME_MS = 1000 / 60;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 let id = 1;
 const carAt = (x: number, y: number, z: number): Car => ({
@@ -48,7 +49,7 @@ export function takeOver(col: (x: number, z: number) => Col, x: number, z: numbe
   const traffic = new Traffic({ roads: [], peds: withPedestrian ? [{ p: [[x - 2, 50, y], [x + 2, 50, y]], a: 0, b: 1, w: 1 }] : [], ctrls: [], trains });
   traffic.bodies = physics;
   traffic.detachedCars.push(car, ...others);
-  if (withPedestrian) traffic.people.push({ kind: 'person', e: 0, dir: 1, s: 2, v: 0, lat: 0, ph: 0, wait: false, col: '#fff' });
+  if (withPedestrian) traffic.people.push({ kind: 'person', id: 1, e: 0, dir: 1, s: 2, v: 0, lat: 0, ph: 0, wait: false, col: '#fff' });
   physics.takeWheel(PLAYER, car.id, choice);
   return new Drive(traffic, physics, car);
 }

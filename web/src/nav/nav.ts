@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../view/life';
-import type { Person, Pose } from '../sim/types';
+import type { Pose } from '../sim/types';
 import type { TileStreamer } from '../stream';
 import type { View } from '../types';
 import { clamp, coarsePointer } from '../util';
@@ -12,7 +12,7 @@ import { Glide } from './glide';
 import { gameKey, onFocusLoss } from './input';
 import { MoveKeys } from './move-keys';
 import { OrbitInput } from './orbit';
-import { RideCamera } from './ride';
+import { Rider } from './ride';
 import { EYE, findStreet, openSpot, walkNet } from './spots';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { HEAD } from './walk';
@@ -29,7 +29,7 @@ import { HEAD } from './walk';
 //          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
 //
 // Nav is the mode machine and routes the input to the mode on: the map's own input is orbit.ts, on foot foot.ts, the
-// ride's camera ride.ts; the crafts are their own (craft.ts).
+// ride and its camera ride.ts (following, walking as the person followed); the crafts are their own (craft.ts).
 export type Mode = 'orbit' | 'walk' | 'ride' | 'pedestrian' | 'craft';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
@@ -50,12 +50,9 @@ const WALK_NEAR = 0.2;
 
 export class Nav {
   mode: Mode = 'orbit';
-  ride: Ride | null = null;
   /** the craft the player is in (craft.ts): in mode craft, or the car driven in mode ride */
   craft: PlayerCraft | null = null;
   readonly actors = new THREE.Group();
-  /** the ride's camera; its shake is the driven car's (drive.ts) */
-  readonly rideCamera = new RideCamera();
   world: World | null = null;
   streamer: TileStreamer | null = null;
   // the map's corner in the project grid (meta.origin): ?cam= links are in the project grid's coordinates
@@ -71,8 +68,7 @@ export class Nav {
   private landmark: THREE.Vector3 | null = null;
   private skyView: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private orbitFov = 0;
-  private possessed: Person | null = null; // the person walked by the player (their ctl set) while riding them
-  private jumpAsked = false;
+  private readonly rider: Rider;
   private walkPending = false;
   private hoverT = 0;
   private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
@@ -94,6 +90,10 @@ export class Nav {
     });
     dom.style.cursor = 'grab';
     this.foot = new Foot(scene, this.actors, camera, controls, this.keys, this.glide, () => this.world);
+    this.rider = new Rider({
+      camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, world: () => this.world,
+      changed: (R) => this.onMode(this.mode, R),
+    });
     this.bindKeys();
     this.bindPointer();
     this.footSticks = new TouchSticks(dom, {
@@ -146,6 +146,11 @@ export class Nav {
     return { x, y, z, h: Math.atan2(f.x, f.z) };
   };
 
+  /** what is followed (mode ride) */
+  get ride() { return this.rider.ride; }
+  /** the ride's camera; its shake is the driven car's (drive.ts) */
+  get rideCamera() { return this.rider.camera; }
+
   get life() { return this.lifeRef; }
   set life(l: StreetLife | null) { this.lifeRef = l; this.net = null; }
   // turning in place with the keys: the focus is off on its own, put back on release
@@ -179,7 +184,7 @@ export class Nav {
       if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
         if (this.onFoot) {
           if (!this.third || !e.repeat) this.foot.jump(this.third);
-        } else this.jumpAsked = true;
+        } else this.rider.jumpAsked = true;
         e.preventDefault(); return;
       }
       const k = MoveKeys.of(e.code);
@@ -596,12 +601,10 @@ export class Nav {
     this.rememberSky();
     this.releasePedestrianMouse();
     this.foot.hide();
-    this.release();
     this.dropCraft();
-    this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
+    this.rider.start(ag);
     this.glide.start(1100);
     this.mode = 'ride';
-    if (this.life) this.life.sim.traffic.keep = ag.obj;
     this.controls.enabled = false;
     this.foot.stop();
     this.dom.style.cursor = 'default';
@@ -610,28 +613,11 @@ export class Nav {
 
   private leaveRide() {
     this.dropCraft();
-    this.ride = null;
-    this.rideCamera.reset();
-    this.jumpAsked = false;
-    this.release();
-    if (this.life) this.life.sim.traffic.keep = null;
+    this.rider.leave();
   }
 
-  // off the person walked: back to the crowd's own walk (sim/traffic.ts no longer keeps them), and following them
-  // again starts afresh from where they are (possess' init) instead of moving them to the foot's position
-  private release() {
-    if (this.possessed) delete this.possessed.ctl;
-    this.possessed = null;
-  }
-
-  // out of the vehicle (a step to its side) or off the person, onto the street
-  private hopOff() {
-    const R = this.ride, pose = R && this.life?.pose(R.kind, R.obj);
-    const f = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-    const p = pose ? new THREE.Vector3(pose.x, pose.y, pose.z) : this.camera.position.clone();
-    if (R && pose && R.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), 2.0);
-    this.setWalk({ at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.kind === 'person' });
-  }
+  // out of the vehicle or off the person, onto the street
+  private hopOff() { this.setWalk(this.rider.exit()); }
 
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
@@ -657,36 +643,8 @@ export class Nav {
   }
 
   private updateRide(dt: number) {
-    const R = this.ride!, life = this.life;
-    if (R.kind === 'person' && (this.keys.size || this.jumpAsked || this.possessed === R.obj)) this.possess(dt);
-    const pose = life?.pose(R.kind, R.obj);
-    if (!pose) { // it left the map: the nearest one of the same kind, else on foot
-      const next = life?.nearest(R.kind, { x: this.camera.position.x, z: this.camera.position.z }, R.obj);
-      if (next) { const { view, zoom } = R; this.startRide(next); Object.assign(this.ride!, { view, zoom }); } else this.hopOff();
-      return;
-    }
-    const { pos, q, look, fov } = this.rideCamera.frame(R, pose, this.world, this.driving, dt);
-    this.glide.place(pos, q, fov, true, dt);
-    this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
-  }
-
-  // walking as the person followed (foot.ts walkAs), through their eyes; they stay where left while the ride lasts
-  // (release(): back to their own walk after)
-  private possess(dt: number) {
-    const R = this.ride!, o = R.obj, life = this.life;
-    if (o.kind !== 'person' || !life) return;
-    if (this.possessed !== o) {
-      const p: Pose | null = life.pose('person', o);
-      if (!p) return;
-      this.release();
-      this.possessed = o;
-      o.ctl = { x: p.x, y: p.y, z: p.z, h: p.h, moving: false };
-      Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
-      this.glide.start(1100);
-      this.onMode(this.mode, R);
-      this.foot.startAs(p);
-    }
-    if (this.jumpAsked) { this.foot.jump(false); this.jumpAsked = false; }
-    this.foot.walkAs(R, o, dt);
+    const next = this.rider.update(dt, this.driving);
+    if (next === 'off') this.hopOff();
+    else if (next) { const { view, zoom } = this.ride!; this.startRide(next); Object.assign(this.ride!, { view, zoom }); }
   }
 }
