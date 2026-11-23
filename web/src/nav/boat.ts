@@ -6,6 +6,7 @@ import { DEFAULT_TUNING } from '../sim/tuning';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
+import type { CraftView } from '../sim/sim-client';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
@@ -18,7 +19,7 @@ import './boat.css';
 // down on the water nearest the map's focus, facing downstream. The boat is a craft of the world sim's (CraftLink: its
 // core, sim/craft/boat-motion.ts BoatCore, stepped on the world's clock with its collision), the local player in its
 // pilot's seat; the model in boat-model.ts. Here: the panel, the input, the chase camera. Out of
-// focus its input is hands off (input.ts), as the car's.
+// focus its input is hands off (input.ts), as the car's. Left, the boat stays afloat where it is (board: back in).
 
 const KEYS: ReadonlySet<string> = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
 const STEER_CURVE = 1.7; // the touch stick's steering: |x|^STEER_CURVE (as the car's)
@@ -32,6 +33,7 @@ type Phase = 'off' | 'finding' | 'on';
 export class BoatMode implements PlayerCraft {
   readonly id = 'boat';
   readonly view = 'own';
+  readonly boards = ['boat'] as const;
   private readonly nav: Nav;
   private readonly target: THREE.Vector3;
   private readonly meta: Meta;
@@ -105,10 +107,21 @@ export class BoatMode implements PlayerCraft {
     return true;
   }
 
+  // into a boat left in the world
+  board(craft: CraftView) {
+    if (this.phase !== 'off' || !this.link.sim || !this.nav.enterCraft(this)) return false;
+    this.link.open();
+    this.link.board(craft.id);
+    this.panel.silence();
+    this.go(craft.core.pose.h, craft.core.pose.y);
+    return true;
+  }
+
   // (the sim steps the boat after this, in the same frame: main.ts; this sends the input and draws the last step; the
   // frame it is put down it is not in yet)
   update(dt: number) {
     if (this.phase === 'finding') this.find();
+    if (this.phase === 'on' && this.link.refused()) { this.panel.say('Someone else took that boat.', 2500); this.nav.flyUp(); }
     if (this.phase === 'on') {
       for (const ok of this.link.resets()) if (ok) this.panel.say('Back on open water', 900);
       this.link.input(inFocus() ? this.input() : NO_BOAT_INPUT);
@@ -121,6 +134,7 @@ export class BoatMode implements PlayerCraft {
         this.shakeA = clamp(e.speed / 20, 0.08, 0.5);
       }
       const m = c.core.motion;
+      this.model.visible = true;
       this.model.update(c.core.drawn(c.core.clock.alpha), m.speed, this.env.night(), m.t);
       this.chase(dt);
     }
@@ -151,11 +165,15 @@ export class BoatMode implements PlayerCraft {
     const at = findSpawn(col, s.x, s.z, s.h, SPAWN_REACH, DEFAULT_TUNING.boat);
     if (!at) { this.panel.say('No open water near here.', 2500); this.nav.flyUp(); return; }
     this.link.spawn(at);
+    this.go(at.h, at.y);
+  }
+
+  // on board, heading h, the water at y
+  private go(h: number, y: number) {
     this.zoom = 1;
-    this.camYaw = at.h;
-    this.camY = at.y;
+    this.camYaw = h;
+    this.camY = y;
     this.phase = 'on';
-    this.model.visible = true;
     this.touch.setActive(true);
     this.keys.clear();
     this.rig.begin(INTRO_MS);

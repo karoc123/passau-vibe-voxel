@@ -1,19 +1,21 @@
 import * as THREE from 'three';
 import type { CraftKind } from '../sim/craft/craft-motion';
 
-// The three craft drawn from boxes, at the world's scale (1 unit = 1 m; the walker is 1.78 m, a car 4.6 m):
+// The crafts drawn from boxes, at the world's scale (1 unit = 1 m; the walker is 1.78 m, a car 4.6 m):
 // - hovercraft: a six-seat passenger hovercraft, 6.0 x 2.6 m, 1.9 m to the fan ducts' top over the skirt's foot;
 //   the origin 0.68 m over the surface it rides on (HOVER_HEIGHT), nose +z
 // - helicopter: a light four-seater (as an R44 / EC120): 10 m rotor, 8.4 m fuselage with the tail, 3.1 m to the
 //   rotor hub; the origin over the skids, their feet 1.1 m under it (SPAWN_HEIGHT)
 // - paraglider: a pilot seated in the harness under a 10 m arc of wing, its lines 6-7 m long; the origin at the feet
 //   (the motion's point is GLIDER_HEIGHT over them: special-craft.ts draws the model that much lower)
+// - drone: a 5-inch FPV quad, 0.25 m motor to motor; the origin its middle, nose -z (as its camera looks); drawn only
+//   when someone else flies it, or no one (crafts-view.ts: its pilot sees through its camera)
 
 const box = new THREE.BoxGeometry();
 
 export interface CraftModel { group: THREE.Group; rotor?: THREE.Group; tailRotor?: THREE.Group }
 
-export function makeCraftModel(kind: CraftKind): CraftModel {
+export function makeCraftModel(kind: CraftKind | 'drone'): CraftModel {
   const group = new THREE.Group();
   const materials = new Map<number, THREE.MeshStandardMaterial>();
   const part = (parent: THREE.Object3D, color: number, size: [number, number, number], x: number, y: number, z: number) => {
@@ -37,6 +39,7 @@ export function makeCraftModel(kind: CraftKind): CraftModel {
 
   if (kind === 'hovercraft') return { group: hovercraft(group, part) };
   if (kind === 'helicopter') return helicopter(group, part);
+  if (kind === 'drone') return { group: drone(group, part) };
   return { group: paraglider(group, part, bar) };
 }
 
@@ -133,6 +136,18 @@ function paraglider(group: THREE.Group, part: Part, bar: Bar) {
       bar(group, 0x4d5e63, riser, under(0.35));
       bar(group, 0x4d5e63, riser, under(-0.35));
     }
+  }
+  return group;
+}
+
+function drone(group: THREE.Group, part: Part) {
+  const FRAME = 0x26292b, PROP = 0x9aa3a8, NOSE = 0xd4562c;
+  part(group, FRAME, [0.06, 0.035, 0.12], 0, 0, 0);
+  part(group, NOSE, [0.03, 0.03, 0.03], 0, 0.02, -0.06);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const arm = part(group, FRAME, [0.012, 0.012, 0.125], x * 0.044, 0, z * 0.044);
+    arm.rotation.y = Math.atan2(x, z);
+    part(group, z < 0 ? NOSE : PROP, [0.12, 0.004, 0.012], x * 0.088, 0.022, z * 0.088);
   }
   return group;
 }

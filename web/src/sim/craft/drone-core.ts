@@ -1,7 +1,8 @@
 // The FPV drone as WorldSim steps it (craft-core.ts): its flight (fpv-flight.ts FpvFlight) at 1/120 s (a frame counts
 // for at most 0.1 s), moved through its collision's cube: stopped a hair short of what it meets, sliding along it when
 // it comes in slowly, bounced (and its pilot told: events, 'impact') when fast. Disarmed (input null: before arming,
-// out of focus) it holds still where it is. No three.js, no DOM (tools/core-deps.mjs).
+// out of focus) it holds still where it is; an empty seat cuts the throttle (it falls and comes to rest). No three.js,
+// no DOM (tools/core-deps.mjs).
 import { FixedStep } from '../../core/fixed-step';
 import { add, addScaled, component, copy, length, lengthSq, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
@@ -21,7 +22,7 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn> 
   readonly flight = new FpvFlight();
   readonly clock = new FixedStep(1 / 120, Infinity, 0.1);
   readonly reach = {};
-  readonly neutral: DroneInput = null;
+  readonly neutral: DroneInput = Object.freeze({ roll: 0, pitch: 0, yaw: 0, throttle: 0 });
   readonly events: DroneEvent[] = [];
   /** the last step waited for a tile */
   waiting = false;

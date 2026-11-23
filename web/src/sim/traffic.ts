@@ -781,6 +781,12 @@ export class Traffic {
     return true;
   }
 
+  /** a parked car (or a wreck) taken out of the world (WorldSim: no player near it) */
+  dropParked(car: Car) {
+    const i = this.detachedCars.indexOf(car);
+    if (i >= 0) this.detachedCars.splice(i, 1);
+  }
+
   // Keep recent player-parked cars around and leave ample room for the traffic fleet: of more than PARKED the oldest
   // out of sight goes (never the one driven or followed); more than PARKED_MAX, the oldest anyway.
   private trimParked() {

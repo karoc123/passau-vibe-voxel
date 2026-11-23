@@ -9,7 +9,9 @@
 //             enterCraft, craftInput, resetCraft, leaveCraft); the crafts made, put down and taken away (addCraft,
 //             placeCraft, removeCraft: what a game mode, today the craft's shell, decides)
 //   owns:     which of the world's edits are kept (sim/edit-keeper.ts: while a player is near them); the player
-//             crafts (sim/craft/craft-core.ts), each stepped at its own fixed step through its own collision
+//             crafts (sim/craft/craft-core.ts), each stepped at its own fixed step through its own collision, piloted
+//             or not; the vehicles players left (a craft no one pilots, a parked car), kept by the edits' rule
+//             (edit-keeper.ts Presence: dropped once no player has been near them for a while)
 //   outputs:  the traffic's state (drawn by view/life.ts StreetLife between its last two ticks), the crafts' (crafts:
 //             their cores, read by their shells in nav/), the players' reads (seat, walkedPose, driverSnapshot,
 //             driverNotes, craftOf, craftEvents), and the events, each with the tick that produced it
@@ -19,7 +21,7 @@ import type { CarInput } from '../physics/rapier/car';
 import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
-import { EditKeeper } from './edit-keeper';
+import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { EntityRef, Person, RoadPose, TrafficData, WalkPose } from './types';
@@ -96,6 +98,8 @@ export class WorldSim {
   private phys: LifePhysics | null = null;
   private loading: Promise<LifePhysics> | null = null;
   private readonly keeper: EditKeeper;
+  // the vehicles left ("craft:id", "car:id"): when a player was last near them
+  private readonly left: Presence<string>;
   /** the player crafts, by craft id */
   readonly crafts: ReadonlyMap<CraftId, Craft> = new Map<CraftId, CraftState>();
   private nextCraft = 1;
@@ -111,6 +115,7 @@ export class WorldSim {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED);
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
     this.keeper = new EditKeeper(this.tuning.edits);
+    this.left = new Presence(this.tuning.edits);
   }
 
   /** the road physics, once loaded (loadPhysics) */
@@ -149,8 +154,10 @@ export class WorldSim {
   update(dt: number, { hour, day, focus, viewer }: SimInput) {
     const T = this.traffic;
     if (day !== undefined) T.day = day;
-    // (the edits no player is near any more dropped before the ticks, which see it)
-    this.keeper.update(this.tick * STEP, this.foci(focus));
+    // (the edits and the vehicles left no player is near any more dropped before the ticks, which see it)
+    const now = this.tick * STEP, foci = this.foci(focus);
+    this.keeper.update(now, foci);
+    this.dropLeft(now, foci);
     this.stepCrafts(dt);
     T.update(dt, hour, focus, viewer);
     if (T.dropped.length || T.struck.length) {
@@ -260,6 +267,25 @@ export class WorldSim {
     return out;
   }
 
+  // the crafts no one pilots and the cars parked (or wrecked) no one drives or follows, dropped once no focus has been
+  // near them for the edits' keeping (ADR 0008: a vehicle stays in the world when left, while players are near)
+  private dropLeft(now: number, foci: { x: number; z: number }[]) {
+    const L = this.left, T = this.traffic, live = new Set<string>();
+    for (const c of [...this.crafts.values()]) {
+      if (c.pilot !== null) continue;
+      const k = `craft:${c.id}`, p = c.core.pose;
+      live.add(k);
+      if (L.due(k, now, c.placed && L.near(foci, p.x, p.z))) { this.removeCraft(c.id); L.forget(k); }
+    }
+    for (const c of [...T.detachedCars]) {
+      if (T.held.car.has(c.id) || T.bodies?.controlled?.(c)) continue;
+      const k = `car:${c.id}`, p = c.detachedPose!;
+      live.add(k);
+      if (L.due(k, now, L.near(foci, p.x, p.z))) { T.dropParked(c); L.forget(k); }
+    }
+    L.retain(live);
+  }
+
   private held() {
     const { held, walked } = this.traffic;
     held.car.clear(); held.person.clear(); walked.clear();
@@ -282,9 +308,9 @@ export class WorldSim {
 
   // ------------------------------------------------------------------ the player crafts (sim/craft/craft-core.ts)
   // A craft is an entity with one seat, its pilot's (ADR 0008: per seat; a gunner's would be another). It is made
-  // (addCraft), put down (placeCraft: stepped from then on, whether or not anyone pilots it: an empty seat is neutral
-  // input) and taken away (removeCraft). The pilot's commands apply at once; the steps read the input in the next
-  // update.
+  // (addCraft), put down (placeCraft: stepped from then on, whether or not anyone pilots it: an empty seat is its core's
+  // neutral input) and taken away (removeCraft; or, left empty, by the presence rule: dropLeft). Left, it stays where
+  // it is for any player to enter. The pilot's commands apply at once; the steps read the input in the next update.
 
   /** a new craft of type (its core given its part of the world's tuning), not yet put down: what its shell searches a
    * spot with (craft.collision) before placeCraft */

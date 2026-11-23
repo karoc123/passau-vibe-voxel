@@ -1,8 +1,9 @@
 // The floatplane and the jet as WorldSim steps them (craft-core.ts): their flight (plane-flight.ts PlaneFlight) at its
 // own STEP, at most MAX_STEPS a frame, through their collision (the fuselage's cube, RADIUS; fetched HORIZON s ahead).
 // Put down in the air (at spot.speed, else RESPAWN_SPEED; the engine at RESPAWN_THROTTLE) or afloat (spot.water: still,
-// the engine idle). Its pilot hears what happened (PlaneEvent: crash, respawn, ...). Hands off: the stick let go, the
-// throttle lever where it is. No three.js, no DOM (tools/core-deps.mjs).
+// the engine idle). Its pilot hears what happened (PlaneEvent: crash, respawn, ...). An empty seat: the stick let go,
+// the lever back (it glides down, or floats), and crashed it stays down (no one flies it back to a safe point). No
+// three.js, no DOM (tools/core-deps.mjs).
 import { FixedStep } from '../../core/fixed-step';
 import { vec3, type Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
@@ -28,8 +29,8 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
     this.events = this.flight.events;
   }
 
-  /** hands off: the stick let go, the lever where the engine is */
-  get neutral(): PlaneInput { return { turn: 0, pitch: 0, throttle: this.flight.engine }; }
+  /** an empty seat: the stick let go, the lever back */
+  readonly neutral: PlaneInput = Object.freeze({ turn: 0, pitch: 0, throttle: 0 });
 
   /** the plane's view of the collision (its sweep, the surface, the water) */
   world(col: VoxelCollision) {
@@ -45,7 +46,10 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
     f.events.length = 0;
   }
 
-  step(input: PlaneInput, dt: number, col: VoxelCollision) { return this.flight.step(input, dt, this.world(col)); }
+  step(input: PlaneInput, dt: number, col: VoxelCollision) {
+    if (input === this.neutral && this.flight.state === 'crashed') return false;
+    return this.flight.step(input, dt, this.world(col));
+  }
 
   get pose() { const { p, heading } = this.flight; return { x: p.x, y: p.y, z: p.z, h: heading }; }
   get velocity() { return this.flight.velocity(this.v); }

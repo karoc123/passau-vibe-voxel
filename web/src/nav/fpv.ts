@@ -6,6 +6,7 @@ import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
+import type { CraftView } from '../sim/sim-client';
 import { clamp, el } from '../util';
 import { gameKey, HeldKeys, inFocus, onFocusLoss } from './input';
 import { modeButton, ModePanel } from './mode-panel';
@@ -22,10 +23,12 @@ type InputSource = 'controller' | 'keyboard' | 'touch';
 // The viewer owns the camera and render loop; this mode supplies the flight pose. The drone is a craft of the world
 // sim's (CraftLink: its core, sim/craft/drone-core.ts, stepped on the world's clock with its collision), the local
 // player its pilot. Disarmed (before arming, paused) its input is null: it holds still. Out of focus it is
-// disarmed and wants arming again (input.ts: the radio's throttle may have moved meanwhile).
+// disarmed and wants arming again (input.ts: the radio's throttle may have moved meanwhile). Left, the drone stays in
+// the world, its throttle cut (it falls and comes to rest); board: back in, disarmed.
 export class FpvMode implements PlayerCraft {
   readonly id = 'fpv';
   readonly view = 'own';
+  readonly boards = ['drone'] as const;
   private readonly nav: Nav;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly target: THREE.Vector3;
@@ -114,6 +117,7 @@ export class FpvMode implements PlayerCraft {
         col.prefetch(this.spawn, STILL);
         this.prepare();
       }
+      if (this.link.refused()) { this.toggle(); return; }
       this.link.input(this.phase === 'flying' ? this.flightInput() : null);
       this.link.frame();
       for (const e of this.link.events() as DroneEvent[]) {
@@ -143,19 +147,39 @@ export class FpvMode implements PlayerCraft {
   // into the drone at a spot (heading h: the way it faces), else where the camera is, facing the way it looks
   enter(at?: CraftSpot) {
     if (this.on || !this.link.sim || !this.nav.enterCraft(this)) return false;
-    this.on = true;
-    const col = this.link.open();
+    const col = this.open();
     const position = this.camera.position, offset = this.target.clone().sub(position);
     const x = at?.x ?? position.x, z = at?.z ?? position.z;
     this.spawn.set(clamp(x, 16, col.width - 16), at?.y ?? position.y, clamp(z, 16, col.depth - 16));
     // (the drone's yaw: its camera looks along -z)
     this.spawnYaw = at ? at.h + Math.PI : Math.atan2(-offset.x, -offset.z);
+    this.restart();
+    return true;
+  }
+
+  // into a drone left in the world: disarmed where it is ("Reset flight": put down again over where it was)
+  board(craft: CraftView) {
+    if (this.on || !this.link.sim || !this.nav.enterCraft(this)) return false;
+    this.open();
+    this.link.board(craft.id);
+    const p = craft.core.pose;
+    this.spawn.set(p.x, p.y, p.z);
+    this.spawnYaw = p.h + Math.PI;
+    this.keys.clear();
+    this.touch.reset();
+    this.phase = 'ready';
+    this.renderPanel();
+    return true;
+  }
+
+  private open() {
+    this.on = true;
+    const col = this.link.open();
     this.savedNear = this.camera.near;
     this.camera.near = 0.15;
     this.camera.fov = 74;
     this.camera.updateProjectionMatrix();
-    this.restart();
-    return true;
+    return col;
   }
 
   leave() {

@@ -28,8 +28,15 @@
 //          each craft takes its own pilot's input, and each moves exactly as it does alone in the world (nothing
 //          assumes one local player); a pilot counts as a focus (the edits near them kept); left, a craft goes on with
 //          hands off.
+//   left   a vehicle stays in the world when left (ADR 0008), through a SimServer and a client of its snapshots
+//          (MirrorSimClient): two pilots get out of a helicopter in the air and a boat under way (leaveCraft); both
+//          stay and are stepped hands off (the helicopter lets down onto its skids, the boat coasts), listed empty by
+//          the client (crafts()); a third player enters the helicopter (enterCraft; the first is refused it then) and
+//          flies it, the client's copy where the sim's is; by the edits' presence rule (a short keeping here) the empty
+//          boat goes once no focus has been near it for the delay; a parked car stays while B flies by it, and both go
+//          once B has left the helicopter too.
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|keep ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|left|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -456,9 +463,9 @@ const BOAT = await load('sim/craft/boat-motion.ts');
 // a spot for a boat: on open water near (x, z) (as the boat's shell finds it); for one in the air: dy m over the ground
 const afloat = (x, z, h) => (col) => BOAT.findSpawn(col, x, z, h, 48);
 const aloft = (x, z, h, dy) => (col) => { const s = col.surface(x, z); return s && { x, y: s.top + dy, z, h }; };
-async function craftWorld(plan) {
+async function craftWorld(plan, tuning) {
   let ms = 0;
-  const sim = new WorldSim(td, { seed: SEED, crafts: { meta, cache: new TC.TileCache({ N, load: async (p) => raw(p) }), now: () => ms } });
+  const sim = new WorldSim(td, { seed: SEED, tuning, crafts: { meta, cache: new TC.TileCache({ N, load: async (p) => raw(p) }), now: () => ms } });
   const crafts = [];
   for (const [type, x, z, , , spot] of plan) {
     const c = sim.addCraft(type), zero = { x: 0, y: 0, z: 0 };
@@ -470,8 +477,9 @@ async function craftWorld(plan) {
     sim.placeCraft(c.id, at);
     crafts.push(c);
   }
-  const tick = (seconds, each) => {
-    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i * STEP); ms += STEP * 1000; sim.update(STEP, { hour: HOUR, focus: { x: BRIDGE.x, z: BRIDGE.y } }); }
+  // (run: the frame, by default the sim's update; focus: the viewer's)
+  const tick = (seconds, each, { focus = { x: BRIDGE.x, z: BRIDGE.y }, run = (dt, input) => sim.update(dt, input) } = {}) => {
+    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i * STEP); ms += STEP * 1000; run(STEP, { hour: HOUR, focus }); }
   };
   return { sim, crafts, tick };
 }
@@ -521,6 +529,75 @@ async function crafts() {
   }
 }
 
+async function left() {
+  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts');
+  const { DEFAULT_TUNING } = await load('sim/tuning.ts');
+  const keeping = { radius: 300, after: 10 };
+  const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
+  const w = await craftWorld(plan, { ...DEFAULT_TUNING, edits: keeping });
+  if (!w) return;
+  const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim);
+  const client = new MirrorSimClient(new ThreadLink(server, 'B'), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
+  // (every frame through the client: player B's commands with it, the others' straight to the server)
+  const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
+  const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
+  Math.random = noRandom;
+  try {
+    const hy = heli.core.pose.y;
+    server.send({ kind: 'enterCraft', player: 'C', craft: boat.id });
+    server.send({ kind: 'enterCraft', player: 'A', craft: heli.id });
+    tick(3, () => {
+      server.send({ kind: 'craftInput', player: 'C', input: { throttle: 1, steer: 0, drift: false } });
+      server.send({ kind: 'craftInput', player: 'A', input: { lift: 1, drive: 0, turn: 0, side: 0 } });
+    }, near);
+    // a parked car by the street (as the road physics leaves one: out of the traffic, where it stands)
+    const T = sim.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+    const car = T.cars.map((c) => { T.carPose(c, c.s, c.off, at); return { c, pose: { ...at, roll: 0 }, d: Math.hypot(at.x - STREET.x, at.z - STREET.y) }; })
+      .sort((a, b) => a.d - b.d)[0];
+    check(car && car.d < keeping.radius && T.detachCar(car.c, car.pose), `left: a car parked near the street (${car?.d.toFixed(0)} m)`);
+    const y0 = heli.core.pose.y, b0 = { ...boat.core.pose }, v0 = Math.abs(boat.core.motion.speed);
+    check(y0 > hy + 10 && v0 > 3, `left: the helicopter climbed (${y0.toFixed(1)} m), the boat under way (${v0.toFixed(1)} m/s)`);
+    server.send({ kind: 'leaveCraft', player: 'A' });
+    server.send({ kind: 'leaveCraft', player: 'C' });
+    tick(6, null, near);
+    const listed = client.crafts();
+    check(sim.crafts.has(boat.id) && sim.crafts.has(heli.id) && boat.pilot === null && heli.pilot === null && sim.seat('A') === null &&
+      listed.length === 2 && listed.every((c) => c.pilot === null), `left: both crafts stay in the world, empty (the client lists ${listed.length})`);
+    const moved = Math.hypot(boat.core.pose.x - b0.x, boat.core.pose.z - b0.z);
+    check(moved > 3 && Math.abs(boat.core.motion.speed) < v0 && heli.core.pose.y < y0 - 10,
+      `left: stepped hands off: the boat coasts on (${moved.toFixed(1)} m, ${Math.abs(boat.core.motion.speed).toFixed(1)} m/s), the helicopter lets down (${(y0 - heli.core.pose.y).toFixed(1)} m)`);
+    // the boat is 1.7 km from the focus, the helicopter and the car by it: past the delay the boat goes
+    tick(keeping.after, null, near);
+    check(!sim.crafts.has(boat.id) && sim.crafts.has(heli.id) && client.crafts().length === 1 && T.detachedCars.includes(car.c) && heli.core.motion.grounded,
+      `left: with no focus near it, the empty boat goes; the helicopter (on its skids: ${heli.core.motion.grounded}) and the car by the focus stay`);
+    // B takes the helicopter's seat through the client, A asks for it after; B flies it up
+    client.send({ kind: 'enterCraft', player: 'B', craft: heli.id });
+    server.results('A');
+    tick(STEP, null, near);
+    tick(STEP, () => server.send({ kind: 'enterCraft', player: 'A', craft: heli.id }), near);
+    const mine = client.craftOf('B'), refused = server.results('A', 'enterCraft');
+    check(client.seat('B')?.role === 'pilot' && mine?.id === heli.id && client.results('B', 'enterCraft')[0]?.ok === true &&
+      refused.length === 1 && !refused[0].ok && heli.pilot === 'B', 'left: another player enters the empty helicopter (the client sees its seat); the first is refused it');
+    const g = heli.core.pose.y;
+    tick(2, () => client.send({ kind: 'craftInput', player: 'B', input: { lift: 1, drive: 0, turn: 0, side: 0 } }), near);
+    const p = heli.core.pose, q = client.craftOf('B').core.pose;
+    check(p.y > g + 5 && p.x === q.x && p.y === q.y && p.z === q.z && p.h === q.h,
+      `left: B flies it up (${(p.y - g).toFixed(1)} m); the client's copy is where the sim's is`);
+    // the viewer's focus away: B in the helicopter keeps the car by it; once B has left it too, both go after the delay
+    tick(keeping.after + 1, () => client.send({ kind: 'craftInput', player: 'B', input: { lift: 0, drive: 0, turn: 0, side: 0 } }), away);
+    const kept = T.detachedCars.includes(car.c) && sim.crafts.has(heli.id);
+    client.send({ kind: 'leaveCraft', player: 'B' });
+    tick(keeping.after - 1, null, away);
+    const stays = T.detachedCars.includes(car.c) && sim.crafts.has(heli.id);
+    tick(2, null, away);
+    check(kept && stays && !T.detachedCars.includes(car.c) && !sim.crafts.has(heli.id) && client.crafts().length === 0 && client.seat('B') === null,
+      `left: the focus away, B in the helicopter keeps the car by it (${kept}); B out, both stay the delay (${stays}), then go`);
+    results.left = { stays: 'boat,helicopter,car', entered: 'B', dropped: 'boat,car,helicopter' };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 // (the keeper's module graph, with its own world edits: tools load each graph apart)
 async function keep() {
   const EK = await load('sim/edit-keeper.ts'), WE2 = EK.worldEdits, live = WE2.liveEdits;
@@ -559,6 +636,7 @@ if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
 if (want('players')) players();
 if (want('crafts')) await crafts();
+if (want('left')) await left();
 if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }

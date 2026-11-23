@@ -4,7 +4,9 @@
 // over a node's edge) go together, once all of them may: no half crater is left. The renderer decides nothing here:
 // freeing a node it no longer draws keeps the edit (stream.ts).
 // Owned and ticked by the world sim (sim/world-sim.ts update, the foci its players' positions), on its clock: the
-// same ticks and foci drop the same edits. No three.js, no DOM (tools/core-deps.mjs).
+// same ticks and foci drop the same edits. The rule itself (Presence) is the world sim's for the vehicles players left
+// as well (ADR 0008: a parked car, a craft no one pilots), with the same keeping. No three.js, no DOM
+// (tools/core-deps.mjs).
 import { frozen } from '../core/frozen';
 import type { WorldOp } from '../core/layers';
 import { liveEdits } from '../core/live-edits';
@@ -13,26 +15,50 @@ import { TILE_N } from '../tile-data';
 // (for the node tools, which load each module graph apart: this graph's world edits)
 export * as worldEdits from '../core/world-edits';
 
-// radius: m from a focus to the node's square (map metres) within which it is kept; after: s of world time with no
-// focus that near before it is dropped
+// radius: m from a focus to the node's square (map metres; a vehicle's place) within which it is kept; after: s of
+// world time with no focus that near before it is dropped
 export interface EditKeeping { readonly radius: number; readonly after: number }
 export const EDIT_KEEPING: EditKeeping = frozen({ radius: 600, after: 120 });
 
-export class EditKeeper {
-  // per edited node ("tx_ty"): the world time a focus was last near it (or it was first seen)
-  private readonly seen = new Map<string, number>();
+type Foci = readonly { x: number; z: number }[];
 
-  constructor(private readonly keeping: EditKeeping = EDIT_KEEPING, private readonly N = TILE_N) {}
+/** the presence rule by key: the world time a focus was last near each thing (or it was first seen); its time is up
+ * once none has been for `after` s */
+export class Presence<K> {
+  private readonly seen = new Map<K, number>();
+
+  constructor(readonly keeping: EditKeeping = EDIT_KEEPING) {}
+
+  /** a focus within radius of point (x, z) */
+  near(foci: Foci, x: number, z: number) { return foci.some((f) => Math.hypot(f.x - x, f.z - z) <= this.keeping.radius); }
+
+  /** key seen at world time now (s), near or not; true: its time is up (dropped, it is to be forgotten) */
+  due(key: K, now: number, near: boolean) {
+    const t = this.seen.get(key);
+    if (near || t === undefined) { this.seen.set(key, now); return false; }
+    return now - t >= this.keeping.after;
+  }
+
+  forget(key: K) { this.seen.delete(key); }
+
+  /** the keys not in live forgotten */
+  retain(live: ReadonlySet<K>) { for (const k of [...this.seen.keys()]) if (!live.has(k)) this.seen.delete(k); }
+}
+
+export class EditKeeper {
+  // per edited node ("tx_ty")
+  private readonly presence: Presence<string>;
+
+  constructor(keeping: EditKeeping = EDIT_KEEPING, private readonly N = TILE_N) { this.presence = new Presence(keeping); }
 
   // at world time `now` (s), the players' foci (map metres: x east, z south); returns the nodes dropped
-  update(now: number, foci: readonly { x: number; z: number }[]): number {
-    if (!liveEdits.size) { this.seen.clear(); return 0; }
-    const { radius, after } = this.keeping, N = this.N, nodes = [...liveEdits.entries()];
+  update(now: number, foci: Foci): number {
+    const P = this.presence, nodes = [...liveEdits.entries()], keys = nodes.map(([tx, ty]) => `${tx}_${ty}`);
+    P.retain(new Set(keys));
+    if (!keys.length) return 0;
+    const { radius } = P.keeping, N = this.N;
     const near = (tx: number, ty: number) => foci.some(({ x, z }) =>
       Math.hypot(Math.max(tx * N - x, 0, x - (tx + 1) * N), Math.max(ty * N - z, 0, z - (ty + 1) * N)) <= radius);
-    const keys = nodes.map(([tx, ty]) => `${tx}_${ty}`);
-    for (const k of [...this.seen.keys()]) if (!keys.includes(k)) this.seen.delete(k);
-    nodes.forEach(([tx, ty], i) => { if (near(tx, ty) || !this.seen.has(keys[i])) this.seen.set(keys[i], now); });
     // the nodes in groups that share ops (union-find over the ops' objects: an op routed to several nodes is one)
     const up = keys.map((_, i) => i), root = (i: number): number => (up[i] === i ? i : (up[i] = root(up[i])));
     const byOp = new Map<WorldOp, number>();
@@ -43,9 +69,9 @@ export class EditKeeper {
       }
     });
     const keep = new Set<number>();
-    keys.forEach((k, i) => { if (now - this.seen.get(k)! < after) keep.add(root(i)); });
+    nodes.forEach(([tx, ty], i) => { if (!P.due(keys[i], now, near(tx, ty))) keep.add(root(i)); });
     let dropped = 0;
-    nodes.forEach(([tx, ty], i) => { if (!keep.has(root(i))) { drop(tx, ty); this.seen.delete(keys[i]); dropped++; } });
+    nodes.forEach(([tx, ty], i) => { if (!keep.has(root(i))) { drop(tx, ty); P.forget(keys[i]); dropped++; } });
     return dropped;
   }
 }

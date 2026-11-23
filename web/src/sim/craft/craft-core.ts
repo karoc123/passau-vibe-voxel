@@ -23,7 +23,8 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   readonly clock: FixedStep;
   /** its collision's cube and look-ahead (VoxelCollision, made by WorldSim) */
   readonly reach: CollisionOptions;
-  /** the input of hands off the controls: an empty seat, a pilot out of focus */
+  /** the input of an empty seat (WorldSim: a craft left, or not yet given its pilot's): hands off, and what would keep
+   * it going let go (a plane's lever back, a drone's throttle cut, a helicopter let down onto its skids) */
   readonly neutral: I;
   /** what happened since they were last read (WorldSim.craftEvents, by its pilot) */
   readonly events: E[];

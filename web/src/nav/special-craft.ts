@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
+import type { CraftView } from '../sim/sim-client';
 import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { GLIDER_HEIGHT, type CraftInput, type CraftKind } from '../sim/craft/craft-motion';
@@ -13,7 +14,8 @@ import './special-craft.css';
 
 // The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
-// Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts).
+// Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts). Left, the
+// helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes.
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
 // the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
@@ -30,6 +32,7 @@ const CONFIG = {
 
 class SpecialCraft implements PlayerCraft {
   readonly view = 'own';
+  readonly boards: readonly CraftKind[];
   private readonly panel: ModePanel;
   private readonly action: HTMLButtonElement;
   private readonly telemetry: HTMLDivElement;
@@ -51,6 +54,7 @@ class SpecialCraft implements PlayerCraft {
   constructor(private readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
     this.link = new CraftLink(ctx, id);
+    this.boards = id === 'paraglider' ? [] : [id];
     this.model = makeCraftModel(id);
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
@@ -94,7 +98,8 @@ class SpecialCraft implements PlayerCraft {
   protected deployFrom(source: PlayerCraft, at: CraftSpot) {
     if (this.phase !== 'off' || at.y === undefined || !this.link.sim || !this.ctx.nav.enterCraft(this, source)) return false;
     this.link.open();
-    this.activate(at.x, at.y, at.z, at.h, 16);
+    this.link.spawn({ x: at.x, y: at.y, z: at.z, h: at.h, speed: 16 });
+    this.activate(at.h);
     return true;
   }
 
@@ -105,7 +110,16 @@ class SpecialCraft implements PlayerCraft {
     this.touch.setActive(false);
     this.keys.clear();
     this.rig.end();
-    this.link.close();
+    this.link.close(this.id === 'paraglider');
+  }
+
+  // into one left in the world
+  board(craft: CraftView) {
+    if (!this.boards.includes(craft.type as CraftKind) || this.phase !== 'off' || !this.link.sim || !this.ctx.nav.enterCraft(this)) return false;
+    this.link.open();
+    this.link.board(craft.id);
+    this.activate(craft.core.pose.h);
+    return true;
   }
 
   private get craft() { return this.phase === 'on' || this.phase === 'landing' ? this.link.craft : null; }
@@ -114,6 +128,10 @@ class SpecialCraft implements PlayerCraft {
   // frame it is put down it is not in yet)
   update(dt: number) {
     if (this.phase === 'finding') this.findStart();
+    if (this.phase === 'on' && this.link.refused()) {
+      this.panel.say(`Someone else took that ${CONFIG[this.id].name.toLowerCase()}.`, 2500);
+      this.ctx.nav.flyUp();
+    }
     if (this.phase === 'on') {
       this.link.input(inFocus() ? this.input() : NO_CRAFT_INPUT);
       this.link.frame();
@@ -145,7 +163,7 @@ class SpecialCraft implements PlayerCraft {
         const y = surface.height + SPAWN_HEIGHT[this.id];
         const clear = world.sweep({ x, y, z }, { x: 0, y: 1, z: 0 }, s.h, s.h);
         if (clear === 'loading') { waiting = true; continue; }
-        if (!clear.hit) { this.activate(x, y, z, s.h); return; }
+        if (!clear.hit) { this.link.spawn({ x, y, z, h: s.h, speed: 0 }); this.activate(s.h); return; }
       }
     }
     if (!waiting || performance.now() >= s.deadline) {
@@ -158,15 +176,14 @@ class SpecialCraft implements PlayerCraft {
     return this.craft?.core.pose ?? null;
   }
 
-  private activate(x: number, y: number, z: number, heading: number, speed = 0) {
-    this.link.spawn({ x, y, z, h: heading, speed });
+  // in (its craft spawned or boarded), heading h
+  private activate(heading: number) {
     this.start = null;
     this.phase = 'on';
     this.camYaw = heading;
     this.zoom = 1;
     this.panel.silence();
     this.rig.begin(450);
-    this.model.group.visible = true;
     this.keys.clear();
     this.touch.setActive(true);
     this.draw();
@@ -200,6 +217,7 @@ class SpecialCraft implements PlayerCraft {
 
   private render(dt: number) {
     const core = this.craft!.core, collision = this.link.col!, m = core.drawn(core.clock.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
+    group.visible = true;
     group.position.set(m.x, m.y - cfg.drop, m.z);
     group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');
     // the rotors idle slower on the skids

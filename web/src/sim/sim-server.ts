@@ -90,6 +90,8 @@ export class SimServer {
         this.result(cmd, !!c);
         break;
       }
+      case 'enterCraft': this.result(cmd, S.enterCraft(p, cmd.craft)); break;
+      case 'leaveCraft': S.leaveCraft(p); break;
       case 'craftInput': S.craftInput(p, cmd.input); break;
       case 'resetCraft': this.result(cmd, S.resetCraft(p)); break;
       case 'dropCraft': { const c = S.craftOf(p); if (c) S.removeCraft(c.id); break; }
