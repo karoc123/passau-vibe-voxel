@@ -357,347 +357,8 @@ def rasters(ctx):
                      nd_mean=nd_mean, osm=osm, rgbsum=rgbsum)
 
 
-STAGES = [  # (its name in the build's timing, the stage)
-    ("rasters, cell colours, OSM", rasters),
-]
-ctx = Ctx()
-for _name, _run in STAGES:
-    _run(ctx)
-    stage(_name)
-# (the stages to come are module code still: what they read of the ones above)
-(GCTX, LOD2, OPEN_CUT, SAG_SRC, cellcol, dsm, dsm_mean, dtm, exg, g, lum, nd_max, nd_max_b, nd_mean, osm, rgbsum) = (
-    ctx.GCTX, ctx.LOD2, ctx.OPEN_CUT, ctx.SAG_SRC, ctx.cellcol, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.g,
-    ctx.lum, ctx.nd_max, ctx.nd_max_b, ctx.nd_mean, ctx.osm, ctx.rgbsum)
-# ---------------------------------------------------------------- ground classes
-gcol = np.full((D, W), C["paving"], np.uint16)
-is_road = np.zeros((D, W), bool)
-LANDUSE = {"grass": "grass", "meadow": "grass", "village_green": "grass", "flowerbed": "flower", "construction": "dirt",
-           "railway": "ballast", "brownfield": "dirt", "greenfield": "grass", "orchard": "grass", "vineyard": "grass",
-           "allotments": "garden"}
-LEISURE = {"park": "grass2", "garden": "garden", "pitch": "grass", "playground": "gravel", "dog_park": "gravel"}
-SURF = {"asphalt": "asphalt", "paving_stones": "paving", "sett": "sett", "cobblestone": "sett", "concrete": "concrete",
-        "concrete:plates": "concrete", "gravel": "gravel", "fine_gravel": "gravel", "compacted": "gravel",
-        "grass": "grass", "ground": "dirt", "dirt": "dirt", "unhewn_cobblestone": "sett", "paved": "paving",
-        "wood": "track", "metal": "rail", "rubber": "cycle", "tartan": "cycle", "artificial_turf": "grass"}
-
-
-def _pitch_key(shape):
-    """a pitch's or a track's colour as the ortho sees it: red tartan, a blue court, green turf, white (an air hall) or
-    a grey or black hard court"""
-    rr_, cc_ = cells_of(shape)
-    if len(rr_) < 10:
-        return None
-    r_, g_, b_ = np.median(cellcol[rr_, cc_], axis=0)
-    return "tartan" if r_ > g_ + 18 and r_ > b_ + 25 else "court" if b_ > r_ + 25 else \
-        "grass" if (2 * g_ - r_ - b_) / (r_ + g_ + b_ + 1) > 0.03 else "paving" if r_ + g_ + b_ > 560 else "asphalt_l"
-
-
-containers, soft, hard = [], [], []
-pitch_lines = []
-
-
-def _lawn(rr_, cc_):  # a lawn the ortho sees paved over (a pavement widened since) is paving
-    return "paving2" if len(rr_) >= 30 and np.median(exg[rr_, cc_]) < 0 and np.median(lum[rr_, cc_]) > 120 else "grass"
-
-
-def _car_park(rr_, cc_):  # an untagged car park the ortho sees pale is paved (a new square's end, mapped as 9000 m2 of
-    # parking, is the new square's paving with a few cars)
-    return "paving2" if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150 else "parking"
-
-
-for oid, typ, t, geom in osm.areas:
-    if underground(t) or "building" in t or "building:part" in t:
-        continue
-    if t.get("place") == "square" or t.get("highway") == "pedestrian" or t.get("landuse") in ("commercial", "retail", "residential"):
-        containers.append((geom, C[SURF.get(t.get("surface"), "paving")]))
-    if t.get("landuse") in LANDUSE:
-        key = LANDUSE[t["landuse"]]
-        if key == "grass":
-            # (sorted by the whole outline's area below, pieces and all)
-            soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(ctx, geom, _lawn, fid=f"{typ[0]}{oid}:lawn"))
-        else:
-            soft.append((geom, C[key]))
-    if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
-        # surface tags disagree with it (a green turf pitch tagged tartan, red courts untagged)
-        inner = geom.buffer(-1) if geom.area > 60 else geom
-        key = _pitch_key(geom if inner.is_empty else inner)
-        if key:
-            soft.append((geom, C[key]))
-            if t.get("leisure") == "pitch" and geom.area >= 150 and key != "paving":
-                pitch_lines.append(geom.difference(geom.buffer(-1)))  # its white outline
-            continue
-    if t.get("leisure") in LEISURE:
-        soft.append((geom, C[SURF.get(t.get("surface"), LEISURE[t["leisure"]])]))
-    if t.get("natural") in ("scrub", "heath", "grassland"):
-        soft.append((geom, C["scrub" if t["natural"] == "scrub" else "grass"]))
-    if t.get("natural") in ("wood",) or t.get("landuse") == "forest":
-        soft.append((geom, C["garden"]))
-    if "construction:leisure" in t or "construction:landuse" in t:
-        soft.append((geom, C["fresh"]))
-    if t.get("amenity") == "parking" and t.get("parking") not in ("underground", "multi-storey", "rooftop"):
-        if "surface" not in t:
-            hard.extend((p_, C[k_]) for p_, k_ in decided(ctx, geom, _car_park, fid=f"{typ[0]}{oid}:car_park"))
-        else:
-            hard.append((geom, C[SURF.get(t.get("surface"), "parking")]))
-# a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
-# in the colour the ortho sees along it -- the stadium's black lanes were lost in the oval's lawn
-for oid, t, line in osm.lines:
-    if t.get("leisure") == "track" and not underground(t) and line.length >= 40:
-        band = line.buffer(3, cap_style="flat")
-        key = _pitch_key(band.buffer(-1))
-        if key:
-            soft.append((band, C["asphalt" if key == "asphalt_l" else key]))
-# cells some map feature paints on purpose (a square, a car park, a path, a carriageway, a platform): what is left in
-# the default paving is open land OSM says nothing about (see "natural ground" below)
-explicit = np.zeros((D, W), np.uint8)
-burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not underground(t_) and "building" not in t_ and (
-    t_.get("place") == "square" or t_.get("highway") == "pedestrian" or "surface" in t_ or t_.get("amenity") == "parking")])
-containers.sort(key=lambda s: -s[0].area)
-soft.sort(key=lambda s: -(s[2] if len(s) > 2 else s[0].area))
-soft = [s[:2] for s in soft]
-burn(gcol, containers)
-burn(gcol, soft)
-burn(gcol, hard)
-burn(gcol, [(l_, C["pline"]) for l_ in pitch_lines if not l_.is_empty])
-# a lawn island inside a car park (the stadium's) is drawn over it, not under
-_hard_u = _uu([h_ for h_, _ in hard]) if hard else None
-burn(gcol, [(g_, c_) for g_, c_ in soft if c_ in (C["grass"], C["grass2"]) and _hard_u is not None and g_.area < 20000
-            and _hard_u.contains(g_.representative_point())])
-# a construction site is bare earth only where the ortho sees it so (plots fenced for a building site that
-# fenced plots were lawn and trees then)
-_con = np.zeros((D, W), np.uint16)
-burn(_con, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" and not underground(t_)])
-_cm = (_con > 0) & (gcol == C["dirt"])
-_cg = ndimage.median_filter(((exg > 0.04) | (lum < 70)).astype(np.uint8), 9) > 0  # (a crown's shadow on the lawn is lawn)
-_cp = ndimage.median_filter(((exg <= 0.04) & (lum >= 70) & (cellcol[..., 0] < cellcol[..., 2] + 12)).astype(np.uint8), 9) > 0
-gcol[_cm & _cg] = C["grass"]
-gcol[_cm & ~_cg & _cp] = C["paving2"]  # grey hardstanding, not earth
-# ALKIS Tatsächliche Nutzung (scripts/alkis_tn.py): the cadastre's land use, parcel by parcel over the whole map. Where
-# OSM says nothing it chooses the class of the open land below ("natural ground"), in place of guessing it from the
-# ortho's colour alone: forest, grassland, arable land, park, copse, waste land, car park, cemetery. It doesn't draw
-# anything: its parcel lines are the cadastre's, not the river bank's or the lawn's edge
-TN = dict(forest=1, copse=2, grassland=3, arable=4, park=5, waste=6, parking=7, cemetery=8)
-TN_KEY = {("Wald", ""): "forest", ("Gehölz", ""): "copse", ("Landwirtschaft", "Grünland"): "grassland",
-          ("Landwirtschaft", "Ackerland"): "arable", ("Landwirtschaft", "Obst- und Nussplantage"): "arable",
-          ("Sport-, Freizeit- und Erholungsfläche", "Park"): "park",
-          ("Sport-, Freizeit- und Erholungsfläche", "Grünanlage"): "park",
-          ("Sport-, Freizeit- und Erholungsfläche", "Garten"): "park",
-          ("Sport-, Freizeit- und Erholungsfläche", "Kleingarten"): "park",
-          ("Sport-, Freizeit- und Erholungsfläche", "Erholungsfläche"): "park",
-          ("Unland/Vegetationslose Fläche", ""): "waste", ("Platz", "Parkplatz"): "parking", ("Friedhof", ""): "cemetery"}
-# Its water parcels gate the rivers taken from the terrain model (# water below): where they are, not their shape. The
-# parcels are not drawn as water. Of the ~200 000 parcel cells the build of 2026-11 left land (whole map): flowing water
-# 176 000 -- 63 000 the strip within 3 m of the drawn water (the parcel line is not the bank), 2 300 under decks and
-# buildings, 110 000 the streams (parcels 3-10 m wide falling 6-80 m along their course: no flat body at one level,
-# drawn as water they would stand in steps; right as land); standing water 23 000, ponds of 30-60 m OSM does not map
-# (each would need a level of its own: not done); harbour basins 3 400, nearly all the bank strip
-TN_WATER = ("Fließgewässer", "Stehendes Gewässer", "Hafenbecken")
-tn = np.zeros((D, W), np.uint16)
-tn_water = None  # (None: no cadastre, no gate)
-try:
-    import alkis_tn
-    from shapely.affinity import affine_transform
-    from aoi import EU, EV, I0, J0, world_bounds
-    _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1] - C0, J0 - CX * EV[0] - CY * EV[1] - R0]  # (to the region's cells)
-    _tnr = alkis_tn.read(world_bounds(5))
-    _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in _tnr if (n_, b_) in TN_KEY]
-    burn(tn, _tn)
-    note("ALKIS land use cells:", {k: int((tn == v).sum()) for k, v in TN.items()})
-    tn_water = np.zeros((D, W), np.uint16)
-    burn(tn_water, [(affine_transform(g_, _tm), 1) for n_, _, g_ in _tnr if n_ in TN_WATER])
-    tn_water = tn_water > 0
-    note("ALKIS water cells:", int(tn_water.sum()))
-    del _tnr
-except FileNotFoundError:
-    note("no ALKIS land use (data/raw/tn_09262.zip, tn_09275.zip): open land by the ortho alone")
-# farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
-# harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
-# hay field) wherever the stubble was pale. Arable land and orchards in the cadastre that OSM leaves out too
-_fm = (tn == TN["arable"]).astype(np.uint8)
-burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not underground(t_)])
-_fm = (_fm > 0) & (gcol == C["paving"])
-if _fm.any():
-    _fex, _flum = ndimage.median_filter(exg, 5), ndimage.median_filter(lum, 5)
-    _frb = ndimage.median_filter(cellcol[..., 0].astype(np.float32) - cellcol[..., 2], 5)
-    _fk = np.where(_fex > 0.03, C["grass"], np.where((_frb > 14) & (_flum < 150), C["dirt"],
-                   np.where(_flum < 165, C["stubble2"], C["stubble"])))
-    gcol[_fm] = _fk[_fm]
-    note("farmland cells by the ortho (crop / ploughed / straw):",
-         [int((_fm & (_fk == C[k])).sum()) for k in ("grass", "dirt")], int((_fm & np.isin(_fk, [C["stubble"], C["stubble2"]])).sum()))
-parking_mask = np.zeros((D, W), np.uint16)
-burn(parking_mask, [(geom, 1) for geom, _ in hard])
-
-# ortho says grass where OSM is silent (cross-check, only on default paving cells, low & green)
-ortho_grass = (gcol == C["paving"]) & (exg > 0.09) & (nd_mean < 0.8)
-ortho_grass = ndimage.binary_opening(ortho_grass, iterations=1)
-gcol[ortho_grass] = C["grass"]
-note("ortho-detected grass cells (OSM silent):", int(ortho_grass.sum()))
-# under a crown the ortho sees only the crown: ground OSM says nothing about (default paving) under green canopy, away
-# from streets, is soil and leaf litter, not pale paving (the wooded slopes under Oberhaus and Mariahilf)
-_canopy = ndimage.median_filter(((exg > 0.02) & (nd_mean > 2.5)).astype(np.uint8), 5) > 0
-_floor = (gcol == C["paving"]) & ndimage.binary_erosion(_canopy, iterations=2)
-_floor = ndimage.binary_opening(_floor, iterations=2)
-gcol[_floor] = C["garden"]
-note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
-
-
 def on_bridge(t):
     return t.get("bridge") not in (None, "no") or t.get("man_made") == "bridge"
-
-
-foot_shapes, road_shapes, bridge_shapes, cycle_shapes, road_lines = [], [], [], [], []  # bridge ways are painted on the deck, not on the river below
-bridge_rails = []  # (line, colour) the rails of tracks on bridges, drawn on the deck like those on the ground
-bridge_lines = []  # (line, half width, layer) of every way on a bridge: the deck's height profile is taken along them
-bridge_roads = []  # (line, width) of carriageways on bridges, for the inferred deck lamps
-bridge_road_polys = []  # the carriageways on bridges, where one is drawn on the ground (a ramp's embankment)
-lit_ground_ways = []  # the ways on the ground but those lit=no: a street lamp by one may stand under a bridge
-# ways unlit unless tagged lit=yes: a field track under the Alte Poststraße's bridge over the A 3 (no lit tag) ran
-# 4 m from one of its lamps, nearer than the bridge way, and the lamp stood on the ground under the deck
-UNLIT = ("track",)
-bridge_ways = []  # (OSM id, tags, line, half width) of every way on a bridge: where its piers stand (bridge_piers)
-_paved = [(g_, t_["surface"]) for _, _, t_, g_ in osm.areas
-          if t_.get("surface") in SURF and ("area:highway" in t_ or (t_.get("highway") and t_.get("area") == "yes"))]
-_ptree = STRtree([g_ for g_, _ in _paved])
-n_inherit = 0
-
-
-def area_surface(line):
-    """the surface of the paved square or courtyard a road without its own runs through (a palace's driveway)"""
-    for i in _ptree.query(line):
-        g_, s_ = _paved[i]
-        if line.intersection(g_).length > 0.6 * line.length:
-            return s_
-    return None
-
-
-# where a building stands (OSM's outlines): the surface model over it is a roof, never a deck. Not LoD2's footprints
-# (LoD2 models the Poststeg and other footbridges as buildings), nor roofs on posts or a footbridge's own stair tower
-_bld0 = np.zeros((D, W), np.uint8)
-burn(_bld0, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("building") not in (None, "no", "roof", "carport", "canopy",
-                                                                                   "staircase", "bridge")
-             and not underground(t_)])
-_bld0 = _bld0 > 0
-
-
-def snap_footbridge(line):
-    """A footbridge is 2-3 m wide, and its OSM way can lie a few metres beside it (the Poststeg over the station's
-    tracks: 3-4 m west): the deck test then finds open air under most of the way and no bridge is built. The way moves
-    sideways, by the least of up to 6 m, to where the surface model stands 2 m or more over the ground along 85% of
-    it; a way with half of it over a deck already, or one that finds no such place, stays. A building's roof is no deck:
-    the sidewalk of the ramp up to the Schanzlbrücke (its deck an embankment in the terrain model, so open air by this
-    test) was moved 2.5 m onto the Schanzlturm's wall and its deck climbed the facade."""
-    def cover(l_):
-        P_ = np.array([l_.interpolate(v_).coords[0] for v_ in np.linspace(0, l_.length, max(2, int(l_.length) + 1))])
-        r_, c_ = P_[:, 1].astype(int), P_[:, 0].astype(int)
-        ok_ = (r_ >= 0) & (r_ < D) & (c_ >= 0) & (c_ < W)
-        r_, c_ = r_[ok_], c_[ok_]
-        return float(((nd_mean[r_, c_] > 2) & (exg[r_, c_] < 0.05) & ~_bld0[r_, c_]).mean()) if ok_.sum() >= 2 else 1.0
-    if cover(line) >= 0.5:  # only a way clearly off its deck (and never onto a tree's crown: green in the ortho)
-        return line, 0.0
-    for off in sorted(np.arange(-6, 6.1, 0.5), key=abs):
-        if off == 0:
-            continue
-        l_ = line.offset_curve(off)
-        if l_.geom_type == "LineString" and not l_.is_empty and cover(l_) >= 0.85:
-            return l_, float(off)
-    return line, 0.0
-
-
-for oid, t, line in osm.lines:
-    hw = t.get("highway")
-    if hw == "construction":
-        hw = t.get("construction")
-    if not hw or underground(t) or hw in ("corridor", "elevator", "proposed"):
-        continue
-    base = hw.replace("_link", "")
-    w = way_width(t)
-    if w <= 0:
-        continue
-    poly = line.buffer(w / 2, cap_style="flat" if base in ROADS else "round")
-    if on_bridge(t) and not (hw in ROADS or base in ROADS) and line.length >= 15 and not region.spans(line):
-        line, _off = snap_footbridge(line)
-        if _off:
-            poly = line.buffer(w / 2, cap_style="round")
-            note(f"footbridge {t.get('name') or oid} moved {_off:+.1f} m onto its deck in the surface model")
-    if on_bridge(t):
-        key = SURF.get(t.get("surface"), "asphalt") if (hw in ROADS or base in ROADS) else ("cycle" if hw == "cycleway" else SURF.get(t.get("surface"), "paving"))
-        bridge_shapes.append((poly, C[key], int(layer_of(t) or 1)))
-        bridge_lines.append((line, w / 2, int(layer_of(t) or 1), C[key]))
-        bridge_ways.append((oid, t, line, w / 2))
-        if hw in ROADS or base in ROADS:
-            bridge_road_polys.append(poly)
-        # (not a footbridge tagged living_street for service vans only; nor a bridge whose road is dark, ways.unlit,
-        # as traffic.py leaves it no street lamps: the A 3's Donaubrücke Schalding, lit=no, had one every 32 m)
-        if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private") \
-                and not unlit(t):
-            bridge_roads.append((line, w, oid))
-        continue
-    if t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT):
-        lit_ground_ways.append(poly)
-    if hw in ROADS or base in ROADS:
-        _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
-        n_inherit += _s is not None and "surface" not in t
-        # a carriageway of paving stones in the sidewalks' colour vanished into them:
-        # granite carriageways a darker grey
-        _k = "road_paving" if SURF.get(_s) == "paving" else SURF.get(_s, "asphalt")
-        if base in ("trunk", "primary", "secondary", "tertiary", "unclassified", "residential"):
-            road_lines.append((oid, line, C[_k]))
-        road_shapes.append((poly, C[_k]))
-    elif hw == "cycleway":  # one red the whole way, whatever its stretches are tagged (asphalt, paving stones): drawn last
-        cycle_shapes.append((poly, C["cycle"]))
-    elif hw == "steps":
-        foot_shapes.append((poly, C["steps"]))
-    elif hw in ("path", "track", "bridleway") and t.get("surface") is None:
-        # an untagged path or track is no paved walk: through the woods and meadows (under Oberhaus) it was a pale
-        # paving ribbon zigzagging up the hill. Earth where the ortho sees green (crowns over it, a meadow's track)
-        # or brown along it, gravel where it is pale
-        def _way(rr_, cc_):
-            green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
-            pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
-            return "dirt" if green_ else "paving" if pale_ else "gravel"
-        foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(ctx, poly, _way, fid=f"w{oid}:way"))
-    elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
-        foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
-note(f"roads taking their square's surface: {n_inherit}")
-if FEATURES_MODE:  # the feature pass: the large features' counts over the core, and done (regions.feature_pass)
-    json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process(), peak_mb=round(own_peak_mb())),
-              open(RDIR / "fstats.json", "w"))
-    print("done")
-    raise SystemExit(0)
-burn(gcol, foot_shapes + cycle_shapes)
-burn(explicit, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes + road_shapes])
-road_mask = np.zeros((D, W), np.uint16)
-burn(road_mask, [(s, 1) for s, _ in road_shapes])
-burn(gcol, road_shapes)
-_sw = [(s_, C["kerb"] if k_ == "kerb" else C[SURF.get(k_, "paving")]) for s_, k_ in overrides.sidewalks(osm.lines, note)]
-burn(gcol, _sw)  # (the street overrides' sidewalks and kerbs, scripts/overrides/street)
-burn(explicit, [(s_, 1) for s_, _ in _sw])
-
-AH = {"footway": "paving", "pedestrian": "paving", "cycleway": "cycle", "traffic_island": "kerb", "steps": "steps",
-      "emergency": "asphalt_l", "yes": "paving", "platform": "platform", "busway": "asphalt", "parking": "parking",
-      "junction": "asphalt", "bus_bay": "asphalt", "bus": "asphalt", "crossing": "asphalt", "tram": "asphalt", "taxi_stop": "asphalt",
-      "passing_place": "asphalt", "shoulder": "asphalt", "prohibited": "asphalt_l", "parking_lane": "parking"}
-area_hw = []
-for oid, typ, t, geom in osm.areas_with("area:highway"):
-    if underground(t) or t.get("landuse") == "grass":  # (a lawn mapped as a pedestrian area: the castle gardens')
-        continue
-    v = t["area:highway"]
-    if v == "yes" and t.get("junction"):  # a junction's square of carriageway (a roundabout's)
-        v = "junction"
-    key = SURF.get(t.get("surface")) if v in ("footway", "pedestrian", "yes") else None
-    key = key or AH.get(v) or ("asphalt" if v in HW or v.replace("_link", "") in ROADS else "paving")
-    area_hw.append((geom, C[key]))
-    if key in ("asphalt", "asphalt_l"):
-        burn(road_mask, [(geom, 1)])
-area_hw.sort(key=lambda s: -s[0].area)
-burn(gcol, area_hw)
-burn(explicit, [(s_, 1) for s_, _ in area_hw])
-burn(gcol, [(line.buffer(1.0, cap_style="flat"), own) for _, line, own in road_lines])  # no area drawn over a carriageway cuts it
-_cyc = np.zeros((D, W), np.uint16)  # a footway area drawn over a cycleway beside it does not cut it
-burn(_cyc, [(sh, 1) for sh, _ in cycle_shapes])
-gcol[(_cyc > 0) & (road_mask == 0)] = C["cycle"]
-is_road = road_mask > 0
-SANITY = {}  # per stage, per road: metres of its centreline in the core painted as pavement (regions.py adds them up)
 
 
 def carriageway_sanity(road_lines, sanity, surface, stage):
@@ -723,115 +384,6 @@ def carriageway_sanity(road_lines, sanity, surface, stage):
         raise SystemExit("carriageways painted as pavement; see the sanity line above")
 
 
-carriageway_sanity(road_lines, SANITY, lambda r, c: gcol[r, c], "ground colours")
-
-# rails & trams (only open-air)
-rail_beds, rails = [], []
-for oid, t, line in osm.lines_with("railway"):
-    if underground(t) or t["railway"] not in ("rail", "tram", "light_rail", "subway"):
-        continue
-    if t["railway"] == "subway":
-        continue
-    tram = t["railway"] == "tram"
-    if on_bridge(t):
-        bridge_shapes.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"], int(layer_of(t) or 1)))
-        bridge_lines.append((line, 1.4 if tram else 1.9, int(layer_of(t) or 1), C["trambed" if tram else "ballast"]))
-        bridge_ways.append((oid, t, line, 1.4 if tram else 1.9))
-        for off in (-0.72, 0.72):
-            try:
-                bridge_rails.append((line.offset_curve(off), C["rail"]))
-            except Exception as exc:
-                note(f"skipped bridge rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
-        continue
-    rail_beds.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"]))
-    for off in (-0.72, 0.72):
-        try:
-            rails.append((line.offset_curve(off), C["rail"]))
-        except Exception as exc:
-            note(f"skipped rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
-burn(gcol, rail_beds)
-burn(explicit, [(s_, 1) for s_, _ in rail_beds])
-_pf = np.zeros((D, W), np.uint16)  # a platform mapped over the carriageway beside it stops at the road
-burn(_pf, [(geom, 1) for oid, typ, t, geom in osm.areas_with("railway", ("platform",)) if not underground(t)])
-gcol[(_pf > 0) & (road_mask == 0)] = C["platform"]
-explicit[_pf > 0] = 1
-burn(gcol, rails, all_touched=True)
-
-# water
-water = [(geom, C["granite_d"] if t.get("fountain") == "splash_pad" else C["water"]) for oid, typ, t, geom in osm.areas
-         if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not underground(t)]
-_gcol_dry = gcol.copy()  # (the ways' colours under the water: culvert.carry gives them back)
-burn(gcol, water)
-# Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
-# terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
-# the median of the terrain under the water OSM does give, the Inn's), in bodies of 2000 cells or more.
-# Then the rivers (and ponds): one flat surface per water body -- the DTM over water steps in 1 m terraces that show as
-# lines across the river; it drops ~0.3 m across the map, so one level per stretch is truthful: a body's median
-# ground. Both per block of 64 m, from the window of 192 m round it (region.py: the same in every region): a body is
-# its cells within the window, its size and its level are counted there
-# (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
-# everywhere subtracts exactly as the scalar did)
-RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
-_lv64 = np.broadcast_to(RIVER_LV, (D, W))
-RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
-_w0 = gcol == C["water"]
-_near_lv = np.abs(dtm - RIVER_LV) < 0.8
-# the gate: a river from the terrain model lies in or within WATER_GATE of mapped water (an ALKIS water parcel or OSM's
-# water). Nothing else ties a flat body at the river's level to a river: above the Kachlet dam the villages behind
-# the dikes (Heining, Schalding) lie at the pool's 299.75 m, and their streets and gardens became river with the houses
-# standing in it. The cadastre decides where, the terrain still draws the bank
-WATER_GATE = 8  # m
-_wgate = (ndimage.distance_transform_edt(~(_w0 | tn_water)) <= WATER_GATE) if tn_water is not None else np.ones((D, W), bool)
-_flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
-# the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
-# one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
-# took a median between the two reaches: 64 m blocks of water at 295 and 299 m standing over the tailwater (292 m).
-# Stretches of one river's fall (under WEIR_STEP apart) stay one body, as before. The boxes step along a weir 20 m at
-# a time, across it: within POOL_EDGE of a pool's water (OSM's, or flat terrain at its stretch's level) a cell of
-# another pool takes that pool if its terrain is nearer that pool's level (the nearest such water cell's) than its
-# own stretch's -- the DGM over the water is the surface on either side and ramps across the weir, so the cut runs
-# along the weir's middle, not the boxes' staircase. Only the pool's water counts, not its box: a box's edge along a
-# bank (no water of that pool beyond it) cuts nothing, and the bank's cells, nearer the upper level by their DGM,
-# stay their river's (the loop below the Hals weir: terraces at 298-301 m up the bank over the 296 m river)
-WEIR_STEP, POOL_EDGE = 2.0, 32  # m
-_lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
-_pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[np.searchsorted(_lvs, _lv64)]
-if _pool.min() < _pool.max():
-    _best, _bestd = _pool.copy(), np.abs(dtm - _lv64).astype(np.float32)
-    _pw = _w0 | _flat
-    _pm = _d = _i = _j = _dl = _take = None  # (a region with no pool's water in it)
-    for p_ in np.unique(_pool):
-        _pm = (_pool == p_) & _pw
-        if not _pm.any():
-            continue
-        _d, (_i, _j) = ndimage.distance_transform_edt(~_pm, return_indices=True)
-        _dl = np.abs(dtm - _lv64[_i, _j]).astype(np.float32)
-        _take = (_d <= POOL_EDGE) & (_dl < _bestd)
-        _best[_take], _bestd[_take] = p_, _dl[_take]
-    _pool = _best
-    del _best, _bestd, _pw, _pm, _d, _i, _j, _dl, _take
-_wat = np.zeros((D, W), bool)
-_wgated = np.zeros((D, W), bool)  # (terrain water the gate dropped, for the report)
-_wlev = np.full((D, W), -1, np.int32)
-# water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
-# the bodies' medians are taken without it, and its own level after
-_locks = overrides.water_levels(osm.areas, cells_of, BASE)
-_lockm = np.zeros((D, W), bool)
-_locklev = np.zeros((D, W), np.int32)
-for _, _lr, _lc, _lg, _, _ in _locks:
-    _lockm[_lr, _lc] = True
-    _locklev[_lr, _lc] = _lg
-# and the river water by a lock gate's outer side (the approaches) stands at its stretch's level: the DGM over an
-# approach is interpolated from the walls round it (no ground returns in the water), and the upper approach's median
-# came out a metre over the reach in front of the Kachlet's north chamber. A body that reaches within 3.5 m of a gate
-# takes the stretch level there (the top water voxel as the overrides' levels: floor(level - base + 0.5) - 1)
-_gatelv = np.full((D, W), -1, np.int32)
-for _, _gl in overrides.gate_lines(osm.lines):
-    _gr, _gc = cells_of(_gl.buffer(3.5), all_touched=True)
-    _gatelv[_gr, _gc] = np.floor(np.broadcast_to(RIVER_LV, (D, W))[_gr, _gc] - BASE + 0.5).astype(np.int32)
-_gatelv[_lockm] = -1
-
-
 def _bodies(ww, pool, pool0):
     """the water bodies of a window (ndimage.label), cut where the pools meet. Water that took another pool than its
     stretch's (pool vs pool0) keeps it only where it joins that pool's own water in the window: else it would stand
@@ -855,141 +407,596 @@ def _bodies(ww, pool, pool0):
     return bl, bn
 
 
-for _b in region.blocks(64):
-    _w = region._grow(_b, 64)
-    _ws = (slice(_w[0], _w[1]), slice(_w[2], _w[3]))
-    _bs = (slice(_b[0] - _w[0], _b[1] - _w[0]), slice(_b[2] - _w[2], _b[3] - _w[2]))
-    _fl, _fn = ndimage.label(_flat[_ws])
-    _big = (np.bincount(_fl.ravel()) >= 2000)[_fl] & (_fl > 0)
-    _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
-    _wgated[_b[0]:_b[1], _b[2]:_b[3]] = (_big & ~_wgate[_ws] & ~_w0[_ws] & ~_lockm[_ws])[_bs]
-    _ww = (_w0[_ws] | (_big & _wgate[_ws])) & ~_lockm[_ws]
-    _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
-    _bl, _bn = _bodies(_ww, _pool[_ws], _pool0[_ws])
-    _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
-    _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
-    if len(_ids):
-        _lut = np.full(_bn + 1, -1, np.int32)
-        _gw, _glw = g[_ws], _gatelv[_ws]
-        for i_ in _ids:
-            _m = _bl == i_
-            _gt = _glw[_m & (_glw >= 0)]
-            _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
-        _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
-note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
-_core_s = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
-report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gated=tn_water is not None)
-note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
-del _wgated
-gcol[_wat | _lockm] = C["water"]
-# a way over water with no bridge tag, where the surface model holds its banks' level across: carried over on ground
-# (a culvert; scripts/culvert.py, handoff Q2)
-_ww0, _ = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
-_cv, _cvl, _cvd = culvert.carry(osm, (gcol == C["water"]) & ~_lockm, g, GCTX.dsm_low(), np.where(_wlev >= 0, _wlev, g),
-                                cells_of)
-gcol[_cv], g[_cv], SAG_SRC[_cv] = _gcol_dry[_cv], _cvl[_cv], _cvl[_cv]
-_ww, _ww_hard = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
-# (per way, metres of its centreline in the core: on water before the rule, carried over by it, left on water; the
-# carriageways and railways of those left: check.py verify)
-report["counters"]["way_water"] = dict(carried={k_: m_ - _ww.get(k_, 0) for k_, m_ in _ww0.items() if m_ > _ww.get(k_, 0)},
-                                       left=_ww, hard=_ww_hard)
-note("ways over water with no bridge tag carried over (way, metres):", _cvd, "; cells", int(_cv.sum()),
-     "; ways left on water (way: metres in the core):", _ww)
-del _gcol_dry, _cv, _cvl, _ww0
-# the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
-# it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay) -- but under a bridge way, a low
-# deck stays too: the Gaißabrücke (OSM way 24857080, project col -4741, row -1612) stands 3.2 m over the Gaißa, and
-# its 25 m over the water had been calmed away (no deck: the road broke off at both banks)
-_calm_keep = np.zeros((D, W), np.uint8)
-burn(_calm_keep, [(p_, 1) for p_, _, _ in bridge_shapes])
-_calm = (gcol == C["water"]) & (nd_max < 4) & (_calm_keep == 0)
-for _a in (nd_max, nd_mean, nd_max_b):
-    _a[_calm] = 0
-exg[_calm] = -1
-_fw = (_wlev >= 0) & (gcol == C["water"])
-g[_fw] = _wlev[_fw]
-note("water cells flattened to their body's level:", int(_fw.sum()))
-if _locks:
-    g[_lockm] = _locklev[_lockm]
-    note("water overrides (own level): (way, cells, water top m a.s.l.)",
-         [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in _locks])
-splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not underground(t)]
+def ground_classes(ctx):
+    """The ground's colours (gcol): land use, pitches, squares, car parks, ways and their areas, rails, water and
+    the rivers' levels, culverts; the bridge ways and their shapes for the decks."""
+    (GCTX, SAG_SRC, cellcol, dtm, exg, g, lum, nd_max, nd_max_b, nd_mean, osm) = (
+        ctx.GCTX, ctx.SAG_SRC, ctx.cellcol, ctx.dtm, ctx.exg, ctx.g, ctx.lum, ctx.nd_max, ctx.nd_max_b,
+        ctx.nd_mean, ctx.osm)
+    # ---------------------------------------------------------------- ground classes
+    gcol = np.full((D, W), C["paving"], np.uint16)
+    is_road = np.zeros((D, W), bool)
+    LANDUSE = {"grass": "grass", "meadow": "grass", "village_green": "grass", "flowerbed": "flower", "construction": "dirt",
+               "railway": "ballast", "brownfield": "dirt", "greenfield": "grass", "orchard": "grass", "vineyard": "grass",
+               "allotments": "garden"}
+    LEISURE = {"park": "grass2", "garden": "garden", "pitch": "grass", "playground": "gravel", "dog_park": "gravel"}
+    SURF = {"asphalt": "asphalt", "paving_stones": "paving", "sett": "sett", "cobblestone": "sett", "concrete": "concrete",
+            "concrete:plates": "concrete", "gravel": "gravel", "fine_gravel": "gravel", "compacted": "gravel",
+            "grass": "grass", "ground": "dirt", "dirt": "dirt", "unhewn_cobblestone": "sett", "paved": "paving",
+            "wood": "track", "metal": "rail", "rubber": "cycle", "tartan": "cycle", "artificial_turf": "grass"}
 
-# zebra crossings + lane markings on asphalt
-asph = np.isin(gcol, [C["asphalt"], C["asphalt_l"], C["parking"], C["road_paving"]])
-n_cross = 0
-for oid, t, line in osm.lines:
-    if not (t.get("footway") == "crossing" or t.get("cycleway") == "crossing" or
-            (t.get("highway") in ("footway", "cycleway", "path") and "crossing" in t)):
-        continue
-    if t.get("crossing") in ("unmarked", "no") or underground(t):
-        continue
-    cyc = t.get("highway") == "cycleway" or t.get("cycleway") == "crossing"
-    rr, cc = cells_of(line.buffer(1.5 if cyc else 2.2, cap_style="flat"))
-    if len(rr) == 0:
-        continue
-    n_cross += 1
-    for r, c in zip(rr, cc):
-        if not asph[r, c] and gcol[r, c] not in (C["asphalt"], C["trambed"]):
-            continue
-        tpos = line.project(Point(c + 0.5, r + 0.5))
-        if cyc:
-            gcol[r, c] = C["cycle"]
-        elif int(tpos) % 2 == 0:
-            gcol[r, c] = C["mark"]
-note("zebra crossings:", n_cross)
+    def _pitch_key(shape):
+        """a pitch's or a track's colour as the ortho sees it: red tartan, a blue court, green turf, white (an air hall) or
+        a grey or black hard court"""
+        rr_, cc_ = cells_of(shape)
+        if len(rr_) < 10:
+            return None
+        r_, g_, b_ = np.median(cellcol[rr_, cc_], axis=0)
+        return "tartan" if r_ > g_ + 18 and r_ > b_ + 25 else "court" if b_ > r_ + 25 else \
+            "grass" if (2 * g_ - r_ - b_) / (r_ + g_ + b_ + 1) > 0.03 else "paving" if r_ + g_ + b_ > 560 else "asphalt_l"
 
-lane_lines = []
-for oid, t, line in osm.lines:
-    hw = t.get("highway")
-    if hw not in ("primary", "secondary", "trunk", "primary_link", "secondary_link") or underground(t):
-        continue
-    lanes = int(parse_len(t.get("lanes")) or (2 if hw in ("primary", "secondary", "tertiary") else 1))
-    if lanes < 2:
-        continue
-    width = parse_len(t.get("width")) or lanes * 3.1
-    lw = width / lanes
-    oneway = t.get("oneway") in ("yes", "-1")
-    for k in range(1, lanes):
-        off = -width / 2 + k * lw
-        try:
-            ln = line.offset_curve(off) if abs(off) > 0.2 else line
-        except Exception as exc:
-            note(f"skipped lane marking on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
-            continue
-        if ln.is_empty or ln.length < 4:
-            continue
-        solid = (not oneway) and abs(off) < 0.6
-        if solid:
-            lane_lines.append(ln)
-            continue
-        # (an offset of a line that folds back on itself comes out in pieces: a MultiLineString)
-        for part in getattr(ln, "geoms", [ln]):
-            L = part.length
-            for s in np.arange(1.0, L - 1, 9.0):
-                lane_lines.append(substring(part, s, min(s + 3, L)))
-_deg, _hw = {}, {}
-for oid, t, line in osm.lines:
-    b = (t.get("highway") or "").replace("_link", "")
-    if b not in HW or b not in ROADS or underground(t) or on_bridge(t):
-        continue
-    xy = [tuple(np.round(p, 1)) for p in line.coords]
-    for k, p in enumerate(xy):
-        _deg[p] = _deg.get(p, 0) + (k > 0) + (k < len(xy) - 1)
-        # (the carriageway's own width: an 8-lane approach is 25 m wide, and lane dashes ran on into its junction)
-        _wd = parse_len(t.get("width")) or (parse_len(t.get("lanes")) or 0) * 3.1
-        _hw[p] = max(_hw.get(p, 0), HW[b] / 2, _wd / 2)
-_junc = [Point(p).buffer(_hw[p] + 4) for p, d in _deg.items() if d >= 3]
-_junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not underground(t)]
-lm = np.zeros((D, W), np.uint16)
-burn(lm, [(l, 1) for l in lane_lines], all_touched=False)
-_jm = np.zeros((D, W), np.uint16)
-burn(_jm, [(j, 1) for j in _junc])
-lm_mask = (lm > 0) & (_jm == 0) & np.isin(gcol, [C["asphalt"]])
-gcol[lm_mask] = C["mark"]
-note("lane marking cells:", int(lm_mask.sum()))
+    containers, soft, hard = [], [], []
+    pitch_lines = []
 
-stage("ground classes, roads, water")
+    def _lawn(rr_, cc_):  # a lawn the ortho sees paved over (a pavement widened since) is paving
+        return "paving2" if len(rr_) >= 30 and np.median(exg[rr_, cc_]) < 0 and np.median(lum[rr_, cc_]) > 120 else "grass"
+
+    def _car_park(rr_, cc_):  # an untagged car park the ortho sees pale is paved (a new square's end, mapped as 9000 m2 of
+        # parking, is the new square's paving with a few cars)
+        return "paving2" if len(rr_) >= 20 and np.percentile(lum[rr_, cc_], 60) > 150 else "parking"
+
+    for oid, typ, t, geom in osm.areas:
+        if underground(t) or "building" in t or "building:part" in t:
+            continue
+        if t.get("place") == "square" or t.get("highway") == "pedestrian" or t.get("landuse") in ("commercial", "retail", "residential"):
+            containers.append((geom, C[SURF.get(t.get("surface"), "paving")]))
+        if t.get("landuse") in LANDUSE:
+            key = LANDUSE[t["landuse"]]
+            if key == "grass":
+                # (sorted by the whole outline's area below, pieces and all)
+                soft.extend((p_, C[k_], geom.area) for p_, k_ in decided(ctx, geom, _lawn, fid=f"{typ[0]}{oid}:lawn"))
+            else:
+                soft.append((geom, C[key]))
+        if t.get("leisure") in ("pitch", "track"):  # its colour as the ortho sees it: red tartan, green turf or a grey court; the
+            # surface tags disagree with it (a green turf pitch tagged tartan, red courts untagged)
+            inner = geom.buffer(-1) if geom.area > 60 else geom
+            key = _pitch_key(geom if inner.is_empty else inner)
+            if key:
+                soft.append((geom, C[key]))
+                if t.get("leisure") == "pitch" and geom.area >= 150 and key != "paving":
+                    pitch_lines.append(geom.difference(geom.buffer(-1)))  # its white outline
+                continue
+        if t.get("leisure") in LEISURE:
+            soft.append((geom, C[SURF.get(t.get("surface"), LEISURE[t["leisure"]])]))
+        if t.get("natural") in ("scrub", "heath", "grassland"):
+            soft.append((geom, C["scrub" if t["natural"] == "scrub" else "grass"]))
+        if t.get("natural") in ("wood",) or t.get("landuse") == "forest":
+            soft.append((geom, C["garden"]))
+        if "construction:leisure" in t or "construction:landuse" in t:
+            soft.append((geom, C["fresh"]))
+        if t.get("amenity") == "parking" and t.get("parking") not in ("underground", "multi-storey", "rooftop"):
+            if "surface" not in t:
+                hard.extend((p_, C[k_]) for p_, k_ in decided(ctx, geom, _car_park, fid=f"{typ[0]}{oid}:car_park"))
+            else:
+                hard.append((geom, C[SURF.get(t.get("surface"), "parking")]))
+    # a running track mapped as a line (its lanes; the area round it is the whole oval, the infield's turf): a band 6 m wide
+    # in the colour the ortho sees along it -- the stadium's black lanes were lost in the oval's lawn
+    for oid, t, line in osm.lines:
+        if t.get("leisure") == "track" and not underground(t) and line.length >= 40:
+            band = line.buffer(3, cap_style="flat")
+            key = _pitch_key(band.buffer(-1))
+            if key:
+                soft.append((band, C["asphalt" if key == "asphalt_l" else key]))
+    # cells some map feature paints on purpose (a square, a car park, a path, a carriageway, a platform): what is left in
+    # the default paving is open land OSM says nothing about (see "natural ground" below)
+    explicit = np.zeros((D, W), np.uint8)
+    burn(explicit, [(g_, 1) for _, _, t_, g_ in osm.areas if not underground(t_) and "building" not in t_ and (
+        t_.get("place") == "square" or t_.get("highway") == "pedestrian" or "surface" in t_ or t_.get("amenity") == "parking")])
+    containers.sort(key=lambda s: -s[0].area)
+    soft.sort(key=lambda s: -(s[2] if len(s) > 2 else s[0].area))
+    soft = [s[:2] for s in soft]
+    burn(gcol, containers)
+    burn(gcol, soft)
+    burn(gcol, hard)
+    burn(gcol, [(l_, C["pline"]) for l_ in pitch_lines if not l_.is_empty])
+    # a lawn island inside a car park (the stadium's) is drawn over it, not under
+    _hard_u = _uu([h_ for h_, _ in hard]) if hard else None
+    burn(gcol, [(g_, c_) for g_, c_ in soft if c_ in (C["grass"], C["grass2"]) and _hard_u is not None and g_.area < 20000
+                and _hard_u.contains(g_.representative_point())])
+    # a construction site is bare earth only where the ortho sees it so (plots fenced for a building site that
+    # fenced plots were lawn and trees then)
+    _con = np.zeros((D, W), np.uint16)
+    burn(_con, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "construction" and not underground(t_)])
+    _cm = (_con > 0) & (gcol == C["dirt"])
+    _cg = ndimage.median_filter(((exg > 0.04) | (lum < 70)).astype(np.uint8), 9) > 0  # (a crown's shadow on the lawn is lawn)
+    _cp = ndimage.median_filter(((exg <= 0.04) & (lum >= 70) & (cellcol[..., 0] < cellcol[..., 2] + 12)).astype(np.uint8), 9) > 0
+    gcol[_cm & _cg] = C["grass"]
+    gcol[_cm & ~_cg & _cp] = C["paving2"]  # grey hardstanding, not earth
+    # ALKIS Tatsächliche Nutzung (scripts/alkis_tn.py): the cadastre's land use, parcel by parcel over the whole map. Where
+    # OSM says nothing it chooses the class of the open land below ("natural ground"), in place of guessing it from the
+    # ortho's colour alone: forest, grassland, arable land, park, copse, waste land, car park, cemetery. It doesn't draw
+    # anything: its parcel lines are the cadastre's, not the river bank's or the lawn's edge
+    TN = dict(forest=1, copse=2, grassland=3, arable=4, park=5, waste=6, parking=7, cemetery=8)
+    TN_KEY = {("Wald", ""): "forest", ("Gehölz", ""): "copse", ("Landwirtschaft", "Grünland"): "grassland",
+              ("Landwirtschaft", "Ackerland"): "arable", ("Landwirtschaft", "Obst- und Nussplantage"): "arable",
+              ("Sport-, Freizeit- und Erholungsfläche", "Park"): "park",
+              ("Sport-, Freizeit- und Erholungsfläche", "Grünanlage"): "park",
+              ("Sport-, Freizeit- und Erholungsfläche", "Garten"): "park",
+              ("Sport-, Freizeit- und Erholungsfläche", "Kleingarten"): "park",
+              ("Sport-, Freizeit- und Erholungsfläche", "Erholungsfläche"): "park",
+              ("Unland/Vegetationslose Fläche", ""): "waste", ("Platz", "Parkplatz"): "parking", ("Friedhof", ""): "cemetery"}
+    # Its water parcels gate the rivers taken from the terrain model (# water below): where they are, not their shape. The
+    # parcels are not drawn as water. Of the ~200 000 parcel cells the build of 2026-11 left land (whole map): flowing water
+    # 176 000 -- 63 000 the strip within 3 m of the drawn water (the parcel line is not the bank), 2 300 under decks and
+    # buildings, 110 000 the streams (parcels 3-10 m wide falling 6-80 m along their course: no flat body at one level,
+    # drawn as water they would stand in steps; right as land); standing water 23 000, ponds of 30-60 m OSM does not map
+    # (each would need a level of its own: not done); harbour basins 3 400, nearly all the bank strip
+    TN_WATER = ("Fließgewässer", "Stehendes Gewässer", "Hafenbecken")
+    tn = np.zeros((D, W), np.uint16)
+    tn_water = None  # (None: no cadastre, no gate)
+    try:
+        import alkis_tn
+        from shapely.affinity import affine_transform
+        from aoi import EU, EV, I0, J0, world_bounds
+        _tm = [EU[0], EU[1], EV[0], EV[1], I0 - CX * EU[0] - CY * EU[1] - C0, J0 - CX * EV[0] - CY * EV[1] - R0]  # (to the region's cells)
+        _tnr = alkis_tn.read(world_bounds(5))
+        _tn = [(affine_transform(g_, _tm), TN[TN_KEY[(n_, b_)]]) for n_, b_, g_ in _tnr if (n_, b_) in TN_KEY]
+        burn(tn, _tn)
+        note("ALKIS land use cells:", {k: int((tn == v).sum()) for k, v in TN.items()})
+        tn_water = np.zeros((D, W), np.uint16)
+        burn(tn_water, [(affine_transform(g_, _tm), 1) for n_, _, g_ in _tnr if n_ in TN_WATER])
+        tn_water = tn_water > 0
+        note("ALKIS water cells:", int(tn_water.sum()))
+        del _tnr
+    except FileNotFoundError:
+        note("no ALKIS land use (data/raw/tn_09262.zip, tn_09275.zip): open land by the ortho alone")
+    # farmland as the ortho sees it in July: green crops and leys, brown ploughland, pale straw where it is mown or
+    # harvested. Left to the open-land rules it came out as lawn with pale paving blobs (a car park in the middle of a
+    # hay field) wherever the stubble was pale. Arable land and orchards in the cadastre that OSM leaves out too
+    _fm = (tn == TN["arable"]).astype(np.uint8)
+    burn(_fm, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("landuse") == "farmland" and not underground(t_)])
+    _fm = (_fm > 0) & (gcol == C["paving"])
+    if _fm.any():
+        _fex, _flum = ndimage.median_filter(exg, 5), ndimage.median_filter(lum, 5)
+        _frb = ndimage.median_filter(cellcol[..., 0].astype(np.float32) - cellcol[..., 2], 5)
+        _fk = np.where(_fex > 0.03, C["grass"], np.where((_frb > 14) & (_flum < 150), C["dirt"],
+                       np.where(_flum < 165, C["stubble2"], C["stubble"])))
+        gcol[_fm] = _fk[_fm]
+        note("farmland cells by the ortho (crop / ploughed / straw):",
+             [int((_fm & (_fk == C[k])).sum()) for k in ("grass", "dirt")], int((_fm & np.isin(_fk, [C["stubble"], C["stubble2"]])).sum()))
+    parking_mask = np.zeros((D, W), np.uint16)
+    burn(parking_mask, [(geom, 1) for geom, _ in hard])
+
+    # ortho says grass where OSM is silent (cross-check, only on default paving cells, low & green)
+    ortho_grass = (gcol == C["paving"]) & (exg > 0.09) & (nd_mean < 0.8)
+    ortho_grass = ndimage.binary_opening(ortho_grass, iterations=1)
+    gcol[ortho_grass] = C["grass"]
+    note("ortho-detected grass cells (OSM silent):", int(ortho_grass.sum()))
+    # under a crown the ortho sees only the crown: ground OSM says nothing about (default paving) under green canopy, away
+    # from streets, is soil and leaf litter, not pale paving (the wooded slopes under Oberhaus and Mariahilf)
+    _canopy = ndimage.median_filter(((exg > 0.02) & (nd_mean > 2.5)).astype(np.uint8), 5) > 0
+    _floor = (gcol == C["paving"]) & ndimage.binary_erosion(_canopy, iterations=2)
+    _floor = ndimage.binary_opening(_floor, iterations=2)
+    gcol[_floor] = C["garden"]
+    note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
+
+    foot_shapes, road_shapes, bridge_shapes, cycle_shapes, road_lines = [], [], [], [], []  # bridge ways are painted on the deck, not on the river below
+    bridge_rails = []  # (line, colour) the rails of tracks on bridges, drawn on the deck like those on the ground
+    bridge_lines = []  # (line, half width, layer) of every way on a bridge: the deck's height profile is taken along them
+    bridge_roads = []  # (line, width) of carriageways on bridges, for the inferred deck lamps
+    bridge_road_polys = []  # the carriageways on bridges, where one is drawn on the ground (a ramp's embankment)
+    lit_ground_ways = []  # the ways on the ground but those lit=no: a street lamp by one may stand under a bridge
+    # ways unlit unless tagged lit=yes: a field track under the Alte Poststraße's bridge over the A 3 (no lit tag) ran
+    # 4 m from one of its lamps, nearer than the bridge way, and the lamp stood on the ground under the deck
+    UNLIT = ("track",)
+    bridge_ways = []  # (OSM id, tags, line, half width) of every way on a bridge: where its piers stand (bridge_piers)
+    _paved = [(g_, t_["surface"]) for _, _, t_, g_ in osm.areas
+              if t_.get("surface") in SURF and ("area:highway" in t_ or (t_.get("highway") and t_.get("area") == "yes"))]
+    _ptree = STRtree([g_ for g_, _ in _paved])
+    n_inherit = 0
+
+    def area_surface(line):
+        """the surface of the paved square or courtyard a road without its own runs through (a palace's driveway)"""
+        for i in _ptree.query(line):
+            g_, s_ = _paved[i]
+            if line.intersection(g_).length > 0.6 * line.length:
+                return s_
+        return None
+
+    # where a building stands (OSM's outlines): the surface model over it is a roof, never a deck. Not LoD2's footprints
+    # (LoD2 models the Poststeg and other footbridges as buildings), nor roofs on posts or a footbridge's own stair tower
+    _bld0 = np.zeros((D, W), np.uint8)
+    burn(_bld0, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("building") not in (None, "no", "roof", "carport", "canopy",
+                                                                                       "staircase", "bridge")
+                 and not underground(t_)])
+    _bld0 = _bld0 > 0
+
+    def snap_footbridge(line):
+        """A footbridge is 2-3 m wide, and its OSM way can lie a few metres beside it (the Poststeg over the station's
+        tracks: 3-4 m west): the deck test then finds open air under most of the way and no bridge is built. The way moves
+        sideways, by the least of up to 6 m, to where the surface model stands 2 m or more over the ground along 85% of
+        it; a way with half of it over a deck already, or one that finds no such place, stays. A building's roof is no deck:
+        the sidewalk of the ramp up to the Schanzlbrücke (its deck an embankment in the terrain model, so open air by this
+        test) was moved 2.5 m onto the Schanzlturm's wall and its deck climbed the facade."""
+        def cover(l_):
+            P_ = np.array([l_.interpolate(v_).coords[0] for v_ in np.linspace(0, l_.length, max(2, int(l_.length) + 1))])
+            r_, c_ = P_[:, 1].astype(int), P_[:, 0].astype(int)
+            ok_ = (r_ >= 0) & (r_ < D) & (c_ >= 0) & (c_ < W)
+            r_, c_ = r_[ok_], c_[ok_]
+            return float(((nd_mean[r_, c_] > 2) & (exg[r_, c_] < 0.05) & ~_bld0[r_, c_]).mean()) if ok_.sum() >= 2 else 1.0
+        if cover(line) >= 0.5:  # only a way clearly off its deck (and never onto a tree's crown: green in the ortho)
+            return line, 0.0
+        for off in sorted(np.arange(-6, 6.1, 0.5), key=abs):
+            if off == 0:
+                continue
+            l_ = line.offset_curve(off)
+            if l_.geom_type == "LineString" and not l_.is_empty and cover(l_) >= 0.85:
+                return l_, float(off)
+        return line, 0.0
+
+    for oid, t, line in osm.lines:
+        hw = t.get("highway")
+        if hw == "construction":
+            hw = t.get("construction")
+        if not hw or underground(t) or hw in ("corridor", "elevator", "proposed"):
+            continue
+        base = hw.replace("_link", "")
+        w = way_width(t)
+        if w <= 0:
+            continue
+        poly = line.buffer(w / 2, cap_style="flat" if base in ROADS else "round")
+        if on_bridge(t) and not (hw in ROADS or base in ROADS) and line.length >= 15 and not region.spans(line):
+            line, _off = snap_footbridge(line)
+            if _off:
+                poly = line.buffer(w / 2, cap_style="round")
+                note(f"footbridge {t.get('name') or oid} moved {_off:+.1f} m onto its deck in the surface model")
+        if on_bridge(t):
+            key = SURF.get(t.get("surface"), "asphalt") if (hw in ROADS or base in ROADS) else ("cycle" if hw == "cycleway" else SURF.get(t.get("surface"), "paving"))
+            bridge_shapes.append((poly, C[key], int(layer_of(t) or 1)))
+            bridge_lines.append((line, w / 2, int(layer_of(t) or 1), C[key]))
+            bridge_ways.append((oid, t, line, w / 2))
+            if hw in ROADS or base in ROADS:
+                bridge_road_polys.append(poly)
+            # (not a footbridge tagged living_street for service vans only; nor a bridge whose road is dark, ways.unlit,
+            # as traffic.py leaves it no street lamps: the A 3's Donaubrücke Schalding, lit=no, had one every 32 m)
+            if (hw in ROADS or base in ROADS) and line.length > 60 and t.get("motor_vehicle") not in ("no", "private") \
+                    and not unlit(t):
+                bridge_roads.append((line, w, oid))
+            continue
+        if t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT):
+            lit_ground_ways.append(poly)
+        if hw in ROADS or base in ROADS:
+            _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
+            n_inherit += _s is not None and "surface" not in t
+            # a carriageway of paving stones in the sidewalks' colour vanished into them:
+            # granite carriageways a darker grey
+            _k = "road_paving" if SURF.get(_s) == "paving" else SURF.get(_s, "asphalt")
+            if base in ("trunk", "primary", "secondary", "tertiary", "unclassified", "residential"):
+                road_lines.append((oid, line, C[_k]))
+            road_shapes.append((poly, C[_k]))
+        elif hw == "cycleway":  # one red the whole way, whatever its stretches are tagged (asphalt, paving stones): drawn last
+            cycle_shapes.append((poly, C["cycle"]))
+        elif hw == "steps":
+            foot_shapes.append((poly, C["steps"]))
+        elif hw in ("path", "track", "bridleway") and t.get("surface") is None:
+            # an untagged path or track is no paved walk: through the woods and meadows (under Oberhaus) it was a pale
+            # paving ribbon zigzagging up the hill. Earth where the ortho sees green (crowns over it, a meadow's track)
+            # or brown along it, gravel where it is pale
+            def _way(rr_, cc_):
+                green_ = len(rr_) and (np.median(exg[rr_, cc_]) > 0.03 or np.median(nd_mean[rr_, cc_]) > 2.5)
+                pale_ = len(rr_) and np.median(lum[rr_, cc_]) > 150
+                return "dirt" if green_ else "paving" if pale_ else "gravel"
+            foot_shapes.extend((p_, C[k_]) for p_, k_ in decided(ctx, poly, _way, fid=f"w{oid}:way"))
+        elif hw in ("footway", "path", "pedestrian", "platform", "track", "bridleway"):
+            foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
+    note(f"roads taking their square's surface: {n_inherit}")
+    if FEATURES_MODE:  # the feature pass: the large features' counts over the core, and done (regions.feature_pass)
+        json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process(), peak_mb=round(own_peak_mb())),
+                  open(RDIR / "fstats.json", "w"))
+        print("done")
+        raise SystemExit(0)
+    burn(gcol, foot_shapes + cycle_shapes)
+    burn(explicit, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes + road_shapes])
+    road_mask = np.zeros((D, W), np.uint16)
+    burn(road_mask, [(s, 1) for s, _ in road_shapes])
+    burn(gcol, road_shapes)
+    _sw = [(s_, C["kerb"] if k_ == "kerb" else C[SURF.get(k_, "paving")]) for s_, k_ in overrides.sidewalks(osm.lines, note)]
+    burn(gcol, _sw)  # (the street overrides' sidewalks and kerbs, scripts/overrides/street)
+    burn(explicit, [(s_, 1) for s_, _ in _sw])
+
+    AH = {"footway": "paving", "pedestrian": "paving", "cycleway": "cycle", "traffic_island": "kerb", "steps": "steps",
+          "emergency": "asphalt_l", "yes": "paving", "platform": "platform", "busway": "asphalt", "parking": "parking",
+          "junction": "asphalt", "bus_bay": "asphalt", "bus": "asphalt", "crossing": "asphalt", "tram": "asphalt", "taxi_stop": "asphalt",
+          "passing_place": "asphalt", "shoulder": "asphalt", "prohibited": "asphalt_l", "parking_lane": "parking"}
+    area_hw = []
+    for oid, typ, t, geom in osm.areas_with("area:highway"):
+        if underground(t) or t.get("landuse") == "grass":  # (a lawn mapped as a pedestrian area: the castle gardens')
+            continue
+        v = t["area:highway"]
+        if v == "yes" and t.get("junction"):  # a junction's square of carriageway (a roundabout's)
+            v = "junction"
+        key = SURF.get(t.get("surface")) if v in ("footway", "pedestrian", "yes") else None
+        key = key or AH.get(v) or ("asphalt" if v in HW or v.replace("_link", "") in ROADS else "paving")
+        area_hw.append((geom, C[key]))
+        if key in ("asphalt", "asphalt_l"):
+            burn(road_mask, [(geom, 1)])
+    area_hw.sort(key=lambda s: -s[0].area)
+    burn(gcol, area_hw)
+    burn(explicit, [(s_, 1) for s_, _ in area_hw])
+    burn(gcol, [(line.buffer(1.0, cap_style="flat"), own) for _, line, own in road_lines])  # no area drawn over a carriageway cuts it
+    _cyc = np.zeros((D, W), np.uint16)  # a footway area drawn over a cycleway beside it does not cut it
+    burn(_cyc, [(sh, 1) for sh, _ in cycle_shapes])
+    gcol[(_cyc > 0) & (road_mask == 0)] = C["cycle"]
+    is_road = road_mask > 0
+    SANITY = {}  # per stage, per road: metres of its centreline in the core painted as pavement (regions.py adds them up)
+
+    carriageway_sanity(road_lines, SANITY, lambda r, c: gcol[r, c], "ground colours")
+
+    # rails & trams (only open-air)
+    rail_beds, rails = [], []
+    for oid, t, line in osm.lines_with("railway"):
+        if underground(t) or t["railway"] not in ("rail", "tram", "light_rail", "subway"):
+            continue
+        if t["railway"] == "subway":
+            continue
+        tram = t["railway"] == "tram"
+        if on_bridge(t):
+            bridge_shapes.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"], int(layer_of(t) or 1)))
+            bridge_lines.append((line, 1.4 if tram else 1.9, int(layer_of(t) or 1), C["trambed" if tram else "ballast"]))
+            bridge_ways.append((oid, t, line, 1.4 if tram else 1.9))
+            for off in (-0.72, 0.72):
+                try:
+                    bridge_rails.append((line.offset_curve(off), C["rail"]))
+                except Exception as exc:
+                    note(f"skipped bridge rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
+            continue
+        rail_beds.append((line.buffer(1.4 if tram else 1.9, cap_style="flat"), C["trambed" if tram else "ballast"]))
+        for off in (-0.72, 0.72):
+            try:
+                rails.append((line.offset_curve(off), C["rail"]))
+            except Exception as exc:
+                note(f"skipped rail on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
+    burn(gcol, rail_beds)
+    burn(explicit, [(s_, 1) for s_, _ in rail_beds])
+    _pf = np.zeros((D, W), np.uint16)  # a platform mapped over the carriageway beside it stops at the road
+    burn(_pf, [(geom, 1) for oid, typ, t, geom in osm.areas_with("railway", ("platform",)) if not underground(t)])
+    gcol[(_pf > 0) & (road_mask == 0)] = C["platform"]
+    explicit[_pf > 0] = 1
+    burn(gcol, rails, all_touched=True)
+
+    # water
+    water = [(geom, C["granite_d"] if t.get("fountain") == "splash_pad" else C["water"]) for oid, typ, t, geom in osm.areas
+             if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not underground(t)]
+    _gcol_dry = gcol.copy()  # (the ways' colours under the water: culvert.carry gives them back)
+    burn(gcol, water)
+    # Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
+    # terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
+    # the median of the terrain under the water OSM does give, the Inn's), in bodies of 2000 cells or more.
+    # Then the rivers (and ponds): one flat surface per water body -- the DTM over water steps in 1 m terraces that show as
+    # lines across the river; it drops ~0.3 m across the map, so one level per stretch is truthful: a body's median
+    # ground. Both per block of 64 m, from the window of 192 m round it (region.py: the same in every region): a body is
+    # its cells within the window, its size and its level are counted there
+    # (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
+    # everywhere subtracts exactly as the scalar did)
+    RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
+    _lv64 = np.broadcast_to(RIVER_LV, (D, W))
+    RIVER_LV = np.asarray(RIVER_LV, np.float32) if RIVER_STRETCHES else RIVER_LV
+    _w0 = gcol == C["water"]
+    _near_lv = np.abs(dtm - RIVER_LV) < 0.8
+    # the gate: a river from the terrain model lies in or within WATER_GATE of mapped water (an ALKIS water parcel or OSM's
+    # water). Nothing else ties a flat body at the river's level to a river: above the Kachlet dam the villages behind
+    # the dikes (Heining, Schalding) lie at the pool's 299.75 m, and their streets and gardens became river with the houses
+    # standing in it. The cadastre decides where, the terrain still draws the bank
+    WATER_GATE = 8  # m
+    _wgate = (ndimage.distance_transform_edt(~(_w0 | tn_water)) <= WATER_GATE) if tn_water is not None else np.ones((D, W), bool)
+    _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
+    # the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
+    # one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them
+    # took a median between the two reaches: 64 m blocks of water at 295 and 299 m standing over the tailwater (292 m).
+    # Stretches of one river's fall (under WEIR_STEP apart) stay one body, as before. The boxes step along a weir 20 m at
+    # a time, across it: within POOL_EDGE of a pool's water (OSM's, or flat terrain at its stretch's level) a cell of
+    # another pool takes that pool if its terrain is nearer that pool's level (the nearest such water cell's) than its
+    # own stretch's -- the DGM over the water is the surface on either side and ramps across the weir, so the cut runs
+    # along the weir's middle, not the boxes' staircase. Only the pool's water counts, not its box: a box's edge along a
+    # bank (no water of that pool beyond it) cuts nothing, and the bank's cells, nearer the upper level by their DGM,
+    # stay their river's (the loop below the Hals weir: terraces at 298-301 m up the bank over the 296 m river)
+    WEIR_STEP, POOL_EDGE = 2.0, 32  # m
+    _lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
+    _pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[np.searchsorted(_lvs, _lv64)]
+    if _pool.min() < _pool.max():
+        _best, _bestd = _pool.copy(), np.abs(dtm - _lv64).astype(np.float32)
+        _pw = _w0 | _flat
+        _pm = _d = _i = _j = _dl = _take = None  # (a region with no pool's water in it)
+        for p_ in np.unique(_pool):
+            _pm = (_pool == p_) & _pw
+            if not _pm.any():
+                continue
+            _d, (_i, _j) = ndimage.distance_transform_edt(~_pm, return_indices=True)
+            _dl = np.abs(dtm - _lv64[_i, _j]).astype(np.float32)
+            _take = (_d <= POOL_EDGE) & (_dl < _bestd)
+            _best[_take], _bestd[_take] = p_, _dl[_take]
+        _pool = _best
+        del _best, _bestd, _pw, _pm, _d, _i, _j, _dl, _take
+    _wat = np.zeros((D, W), bool)
+    _wgated = np.zeros((D, W), bool)  # (terrain water the gate dropped, for the report)
+    _wlev = np.full((D, W), -1, np.int32)
+    # water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
+    # the bodies' medians are taken without it, and its own level after
+    _locks = overrides.water_levels(osm.areas, cells_of, BASE)
+    _lockm = np.zeros((D, W), bool)
+    _locklev = np.zeros((D, W), np.int32)
+    for _, _lr, _lc, _lg, _, _ in _locks:
+        _lockm[_lr, _lc] = True
+        _locklev[_lr, _lc] = _lg
+    # and the river water by a lock gate's outer side (the approaches) stands at its stretch's level: the DGM over an
+    # approach is interpolated from the walls round it (no ground returns in the water), and the upper approach's median
+    # came out a metre over the reach in front of the Kachlet's north chamber. A body that reaches within 3.5 m of a gate
+    # takes the stretch level there (the top water voxel as the overrides' levels: floor(level - base + 0.5) - 1)
+    _gatelv = np.full((D, W), -1, np.int32)
+    for _, _gl in overrides.gate_lines(osm.lines):
+        _gr, _gc = cells_of(_gl.buffer(3.5), all_touched=True)
+        _gatelv[_gr, _gc] = np.floor(np.broadcast_to(RIVER_LV, (D, W))[_gr, _gc] - BASE + 0.5).astype(np.int32)
+    _gatelv[_lockm] = -1
+
+    for _b in region.blocks(64):
+        _w = region._grow(_b, 64)
+        _ws = (slice(_w[0], _w[1]), slice(_w[2], _w[3]))
+        _bs = (slice(_b[0] - _w[0], _b[1] - _w[0]), slice(_b[2] - _w[2], _b[3] - _w[2]))
+        _fl, _fn = ndimage.label(_flat[_ws])
+        _big = (np.bincount(_fl.ravel()) >= 2000)[_fl] & (_fl > 0)
+        _big = ndimage.binary_dilation(_big, iterations=3) & _near_lv[_ws]
+        _wgated[_b[0]:_b[1], _b[2]:_b[3]] = (_big & ~_wgate[_ws] & ~_w0[_ws] & ~_lockm[_ws])[_bs]
+        _ww = (_w0[_ws] | (_big & _wgate[_ws])) & ~_lockm[_ws]
+        _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
+        _bl, _bn = _bodies(_ww, _pool[_ws], _pool0[_ws])
+        _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
+        _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
+        if len(_ids):
+            _lut = np.full(_bn + 1, -1, np.int32)
+            _gw, _glw = g[_ws], _gatelv[_ws]
+            for i_ in _ids:
+                _m = _bl == i_
+                _gt = _glw[_m & (_glw >= 0)]
+                _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
+            _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
+    note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
+    _core_s = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
+    report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gated=tn_water is not None)
+    note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
+    del _wgated
+    gcol[_wat | _lockm] = C["water"]
+    # a way over water with no bridge tag, where the surface model holds its banks' level across: carried over on ground
+    # (a culvert; scripts/culvert.py, handoff Q2)
+    _ww0, _ = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
+    _cv, _cvl, _cvd = culvert.carry(osm, (gcol == C["water"]) & ~_lockm, g, GCTX.dsm_low(), np.where(_wlev >= 0, _wlev, g),
+                                    cells_of)
+    gcol[_cv], g[_cv], SAG_SRC[_cv] = _gcol_dry[_cv], _cvl[_cv], _cvl[_cv]
+    _ww, _ww_hard = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
+    # (per way, metres of its centreline in the core: on water before the rule, carried over by it, left on water; the
+    # carriageways and railways of those left: check.py verify)
+    report["counters"]["way_water"] = dict(carried={k_: m_ - _ww.get(k_, 0) for k_, m_ in _ww0.items() if m_ > _ww.get(k_, 0)},
+                                           left=_ww, hard=_ww_hard)
+    note("ways over water with no bridge tag carried over (way, metres):", _cvd, "; cells", int(_cv.sum()),
+         "; ways left on water (way: metres in the core):", _ww)
+    del _gcol_dry, _cv, _cvl, _ww0
+    # the image-matched DOM20 stands a metre or two of noise over open water, and the Danube is green in the ortho:
+    # it grew a lawn. No surface under 4 m over the water (bridge decks and ships stay) -- but under a bridge way, a low
+    # deck stays too: the Gaißabrücke (OSM way 24857080, project col -4741, row -1612) stands 3.2 m over the Gaißa, and
+    # its 25 m over the water had been calmed away (no deck: the road broke off at both banks)
+    _calm_keep = np.zeros((D, W), np.uint8)
+    burn(_calm_keep, [(p_, 1) for p_, _, _ in bridge_shapes])
+    _calm = (gcol == C["water"]) & (nd_max < 4) & (_calm_keep == 0)
+    for _a in (nd_max, nd_mean, nd_max_b):
+        _a[_calm] = 0
+    exg[_calm] = -1
+    _fw = (_wlev >= 0) & (gcol == C["water"])
+    g[_fw] = _wlev[_fw]
+    note("water cells flattened to their body's level:", int(_fw.sum()))
+    if _locks:
+        g[_lockm] = _locklev[_lockm]
+        note("water overrides (own level): (way, cells, water top m a.s.l.)",
+             [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in _locks])
+    splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not underground(t)]
+
+    # zebra crossings + lane markings on asphalt
+    asph = np.isin(gcol, [C["asphalt"], C["asphalt_l"], C["parking"], C["road_paving"]])
+    n_cross = 0
+    for oid, t, line in osm.lines:
+        if not (t.get("footway") == "crossing" or t.get("cycleway") == "crossing" or
+                (t.get("highway") in ("footway", "cycleway", "path") and "crossing" in t)):
+            continue
+        if t.get("crossing") in ("unmarked", "no") or underground(t):
+            continue
+        cyc = t.get("highway") == "cycleway" or t.get("cycleway") == "crossing"
+        rr, cc = cells_of(line.buffer(1.5 if cyc else 2.2, cap_style="flat"))
+        if len(rr) == 0:
+            continue
+        n_cross += 1
+        for r, c in zip(rr, cc):
+            if not asph[r, c] and gcol[r, c] not in (C["asphalt"], C["trambed"]):
+                continue
+            tpos = line.project(Point(c + 0.5, r + 0.5))
+            if cyc:
+                gcol[r, c] = C["cycle"]
+            elif int(tpos) % 2 == 0:
+                gcol[r, c] = C["mark"]
+    note("zebra crossings:", n_cross)
+
+    lane_lines = []
+    for oid, t, line in osm.lines:
+        hw = t.get("highway")
+        if hw not in ("primary", "secondary", "trunk", "primary_link", "secondary_link") or underground(t):
+            continue
+        lanes = int(parse_len(t.get("lanes")) or (2 if hw in ("primary", "secondary", "tertiary") else 1))
+        if lanes < 2:
+            continue
+        width = parse_len(t.get("width")) or lanes * 3.1
+        lw = width / lanes
+        oneway = t.get("oneway") in ("yes", "-1")
+        for k in range(1, lanes):
+            off = -width / 2 + k * lw
+            try:
+                ln = line.offset_curve(off) if abs(off) > 0.2 else line
+            except Exception as exc:
+                note(f"skipped lane marking on OSM way {oid} at offset {off:+.2f} m: {exc!r}")
+                continue
+            if ln.is_empty or ln.length < 4:
+                continue
+            solid = (not oneway) and abs(off) < 0.6
+            if solid:
+                lane_lines.append(ln)
+                continue
+            # (an offset of a line that folds back on itself comes out in pieces: a MultiLineString)
+            for part in getattr(ln, "geoms", [ln]):
+                L = part.length
+                for s in np.arange(1.0, L - 1, 9.0):
+                    lane_lines.append(substring(part, s, min(s + 3, L)))
+    _deg, _hw = {}, {}
+    for oid, t, line in osm.lines:
+        b = (t.get("highway") or "").replace("_link", "")
+        if b not in HW or b not in ROADS or underground(t) or on_bridge(t):
+            continue
+        xy = [tuple(np.round(p, 1)) for p in line.coords]
+        for k, p in enumerate(xy):
+            _deg[p] = _deg.get(p, 0) + (k > 0) + (k < len(xy) - 1)
+            # (the carriageway's own width: an 8-lane approach is 25 m wide, and lane dashes ran on into its junction)
+            _wd = parse_len(t.get("width")) or (parse_len(t.get("lanes")) or 0) * 3.1
+            _hw[p] = max(_hw.get(p, 0), HW[b] / 2, _wd / 2)
+    _junc = [Point(p).buffer(_hw[p] + 4) for p, d in _deg.items() if d >= 3]
+    _junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not underground(t)]
+    lm = np.zeros((D, W), np.uint16)
+    burn(lm, [(l, 1) for l in lane_lines], all_touched=False)
+    _jm = np.zeros((D, W), np.uint16)
+    burn(_jm, [(j, 1) for j in _junc])
+    lm_mask = (lm > 0) & (_jm == 0) & np.isin(gcol, [C["asphalt"]])
+    gcol[lm_mask] = C["mark"]
+    note("lane marking cells:", int(lm_mask.sum()))
+    vars(ctx).update(RIVER_LV=RIVER_LV, SANITY=SANITY, TN=TN, _core_s=_core_s, _jm=_jm, _locks=_locks,
+                     bridge_lines=bridge_lines, bridge_rails=bridge_rails, bridge_road_polys=bridge_road_polys,
+                     bridge_roads=bridge_roads, bridge_shapes=bridge_shapes, bridge_ways=bridge_ways,
+                     cycle_shapes=cycle_shapes, explicit=explicit, foot_shapes=foot_shapes, gcol=gcol,
+                     is_road=is_road, lit_ground_ways=lit_ground_ways, lm=lm, parking_mask=parking_mask,
+                     rail_beds=rail_beds, rails=rails, road_lines=road_lines, splash_pads=splash_pads, tn=tn)
+
+
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+    ("ground classes, roads, water", ground_classes),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
+# (the stages to come are module code still: what they read of the ones above)
+(GCTX, LOD2, OPEN_CUT, RIVER_LV, SAG_SRC, SANITY, TN, _core_s, _jm, _locks, bridge_lines, bridge_rails,
+ bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm, dsm_mean, dtm, exg, explicit,
+ foot_shapes, g, gcol, is_road, lit_ground_ways, lm, lum, nd_max, nd_max_b, nd_mean, osm, parking_mask, rail_beds,
+ rails, rgbsum, road_lines, splash_pads, tn) = (
+    ctx.GCTX, ctx.LOD2, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.SAG_SRC, ctx.SANITY, ctx.TN, ctx._core_s, ctx._jm, ctx._locks,
+    ctx.bridge_lines, ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways,
+    ctx.cellcol, ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.foot_shapes, ctx.g,
+    ctx.gcol, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_max_b, ctx.nd_mean, ctx.osm,
+    ctx.parking_mask, ctx.rail_beds, ctx.rails, ctx.rgbsum, ctx.road_lines, ctx.splash_pads, ctx.tn)
 # ---------------------------------------------------------------- buildings
 feats = []
 for oid, typ, t, geom in osm.areas:
