@@ -1,7 +1,8 @@
 // The helicopter, the hovercraft and the paraglider as WorldSim steps them (craft-core.ts): their motion
 // (craft-motion.ts CraftMotion) at 1/60 s, at most 6 steps (0.1 s) a frame, through their probes (craft-collision.ts
 // craftWorld). A landing on foot or on the water (the paraglider's) ends it: it steps no more, and its pilot hears of it
-// (events: 'landed', 'splash'). No three.js, no DOM (tools/core-deps.mjs).
+// (events: 'landed', 'splash'). An empty seat: hands off (the helicopter let down onto its skids). No three.js, no DOM
+// (tools/core-deps.mjs).
 import { FixedStep } from '../../core/fixed-step';
 import type { Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
@@ -10,6 +11,7 @@ import { CRAFT, CraftMotion, type CraftInput, type CraftKind, type CraftMotionWo
 import type { VoxelCollision } from './voxel-collision';
 
 export const NO_CRAFT_INPUT: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: 0, side: 0 });
+const LET_DOWN: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: -1, side: 0 });
 export type SpecialEvent = 'landed' | 'splash';
 /** as drawn: the motion's point (the paraglider's: the pilot's middle), its heading, pitch (+: nose up), bank (+: the
  * right side down) */
@@ -19,7 +21,7 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
   readonly motion: CraftMotion;
   readonly clock = new FixedStep(1 / 60, 6, 0.1);
   readonly reach: { radius: number };
-  readonly neutral = NO_CRAFT_INPUT;
+  readonly neutral: CraftInput;
   readonly events: SpecialEvent[] = [];
   /** what the last step did ('blocked': met a wall; 'loading': waited for a tile) */
   result: CraftStep = 'moving';
@@ -28,6 +30,7 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
   constructor(readonly kind: CraftKind, cfg: CraftTuning = CRAFT) {
     this.motion = new CraftMotion(kind, cfg);
     this.reach = { radius: CRAFT_RADIUS[kind] };
+    this.neutral = kind === 'helicopter' ? LET_DOWN : NO_CRAFT_INPUT;
   }
 
   /** the craft's view of the collision (its probes, the surface under it) */

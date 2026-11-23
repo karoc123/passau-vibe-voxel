@@ -1,8 +1,9 @@
 // What the page holds of the world sim (docs/plans/local-server.md, ADR 0008: "the page sends commands and draws
 // snapshots"): a SimClient. The page never reaches into the WorldSim; it sends its players' commands (SimCommand:
 // plain data, so they can cross to a Web Worker or a server), runs the frame (update: the frame's input; in the page's
-// thread the sim's update itself) and reads what the sim publishes: the traffic as drawn (TrafficView), the players'
-// seats, cars and crafts, the outcomes of their commands, the events since a tick.
+// thread the sim's update itself) and reads what the sim publishes: the traffic as drawn (TrafficView), the crafts in
+// the world (piloted or left), the players' seats, cars and crafts, the outcomes of their commands, the events since a
+// tick.
 // LocalSimClient: the sim in the page's thread (the one implementation so far). Commands are queued and applied in the
 // order sent at the start of the next update, before its ticks (ADR 0007: commands take effect at the start of a
 // tick); every craft shell and the nav run before the update in main.ts's frame, so they reach the tick they reached
@@ -35,9 +36,11 @@ import { EVENT_TICKS, type CraftId, type CraftInput, type PlayerId, type Seat, t
  *   spawnCraft    a craft of type made, the player its pilot, put down at spot (what a game mode decides; today the
  *                 craft's shell)
  *   placeCraft    the player's craft put down again at spot
+ *   enterCraft    the pilot's seat of a craft in the world (one left by its pilot); refused: gone, or piloted
  *   craftInput    the player's craft's controls (its type's input), until the next
  *   resetCraft    the player's craft back to a safe spot nearby; refused: not now
- *   dropCraft     the player's craft taken out of the world
+ *   leaveCraft    out of the pilot's seat: the craft stays where it is, hands off (its core's neutral)
+ *   dropCraft     the player's craft taken out of the world (one that does not stay: the paraglider)
  *   edit          a change to the world's voxels (core/world-edits.ts) */
 export type SimCommand =
   | { kind: 'follow'; player: PlayerId; entity: EntityRef | null }
@@ -50,12 +53,14 @@ export type SimCommand =
   | { kind: 'resetDriver'; player: PlayerId }
   | { kind: 'spawnCraft'; player: PlayerId; type: CraftType; spot: CraftSpot }
   | { kind: 'placeCraft'; player: PlayerId; spot: CraftSpot }
+  | { kind: 'enterCraft'; player: PlayerId; craft: CraftId }
+  | { kind: 'leaveCraft'; player: PlayerId }
   | { kind: 'craftInput'; player: PlayerId; input: CraftInput }
   | { kind: 'resetCraft'; player: PlayerId }
   | { kind: 'dropCraft'; player: PlayerId }
   | { kind: 'edit'; player: PlayerId; op: WorldOp; ref?: number };
 
-/** what became of a command that can be refused (walkAs, spawnCraft, placeCraft, resetCraft, edit), at the tick it
+/** what became of a command that can be refused (walkAs, spawnCraft, placeCraft, enterCraft, resetCraft, edit), at the tick it
  * was applied before; an edit's: its ref and the level-1 nodes it changed */
 export interface CommandResult { tick: number; kind: SimCommand['kind']; ok: boolean; ref?: number; nodes?: [number, number][] }
 
@@ -101,6 +106,8 @@ export interface SimClient {
   driverNotes(player: PlayerId): DriveNote[];
   /** the craft the player pilots, or null */
   craftOf(player: PlayerId): CraftView | null;
+  /** the crafts put down in the world, piloted or left (any player may enter one left: enterCraft) */
+  crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first */
   craftEvents(player: PlayerId): unknown[];
   /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
@@ -146,6 +153,7 @@ export class LocalSimClient implements SimClient {
   driver(player: PlayerId) { return this.sim.driverSnapshot(player); }
   driverNotes(player: PlayerId) { return this.sim.driverNotes(player); }
   craftOf(player: PlayerId): CraftView | null { return this.sim.craftOf(player); }
+  crafts(): readonly CraftView[] { return [...this.sim.crafts.values()].filter((c) => c.placed); }
   craftEvents(player: PlayerId) { return this.sim.craftEvents(player); }
   loadPhysics(warm?: { x: number; z: number }) { return this.sim.loadPhysics(warm).then(() => {}); }
 }
@@ -172,7 +180,7 @@ export class ThreadLink implements SimLink {
 }
 
 /** the sim reached through snapshots (a worker's, or a ThreadLink's): the page draws a copy of the traffic
- * (TrafficMirror) and of its player's craft, set from the latest snapshot; it holds one player's reads (player) */
+ * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds one player's reads (player) */
 export class MirrorSimClient implements SimClient {
   readonly traffic: TrafficMirror;
   private queue: SimCommand[] = [];
@@ -181,7 +189,8 @@ export class MirrorSimClient implements SimClient {
   private notes: Snapshot['player']['notes'] = [];
   private craftEventList: unknown[] = [];
   private outcomes: CommandResult[] = [];
-  private craft: (CraftView & { core: CraftCore; pilot: PlayerId | null; placed: boolean }) | null = null;
+  // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
+  private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
@@ -225,14 +234,16 @@ export class MirrorSimClient implements SimClient {
       if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
       this.outcomes.push(r);
     }
-    const c = P.craft;
-    if (!c) this.craft = null;
-    else {
-      if (this.craft?.id !== c.id) this.craft = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) };
-      this.craft.pilot = c.pilot;
-      this.craft.placed = c.placed;
-      loadState(this.craft.core, c.core);
+    const L = this.craftList, seen = new Set<CraftId>();
+    for (const c of s.crafts) {
+      let m = L.get(c.id);
+      if (!m) L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) });
+      m.pilot = c.pilot;
+      m.placed = c.placed;
+      loadState(m.core, c.core);
+      seen.add(c.id);
     }
+    for (const id of L.keys()) if (!seen.has(id)) L.delete(id);
   }
 
   eventsSince(tick: number) {
@@ -253,7 +264,11 @@ export class MirrorSimClient implements SimClient {
   walkedPose(personId: number) { return this.traffic.walked.get(personId) ?? null; }
   driver(player: PlayerId) { return player === this.player ? this.last?.player.driver ?? null : null; }
   driverNotes(player: PlayerId) { return player === this.player ? this.notes.splice(0) : []; }
-  craftOf(player: PlayerId): CraftView | null { return player === this.player ? this.craft : null; }
+  craftOf(player: PlayerId): CraftView | null {
+    const seat = this.seat(player);
+    return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
+  }
+  crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
   craftEvents(player: PlayerId) { return player === this.player ? this.craftEventList.splice(0) : []; }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }

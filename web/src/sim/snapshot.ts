@@ -3,8 +3,9 @@
 // page from a Web Worker as it is (later, quantised, to a network client).
 //   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts): the traffic's agents as they are after the
 //                                      update (enough for the client's own path maths: Traffic.carPose, personPoint),
-//                                      the bodies' drawn poses, trains, boats, the walked people, the events since,
-//                                      the player's reads (seat, car, craft and its core's state, notes and events)
+//                                      the bodies' drawn poses, trains, boats, the walked people, the crafts (their
+//                                      cores' state), the events since, the player's reads (seat, car, notes, the
+//                                      craft's events)
 //   TrafficMirror                      the client side: a Traffic of its own over the same TrafficData, never ticked,
 //                                      its agents set from each snapshot, one object per id (the drawn fields, the
 //                                      nav's ride carry over); what view/life.ts draws (TrafficView)
@@ -27,7 +28,7 @@ const PERSON_KEYS = ['id', 'e', 'dir', 's', 'v', 'lat', 'ph', 'wait', 'col', 'bi
 export type CarState = Pick<Car, (typeof CAR_KEYS)[number]>;
 export type PersonState = Pick<Person, (typeof PERSON_KEYS)[number]>;
 
-/** the player's craft: what its shell reads (its core's state: core-state.ts) */
+/** a craft put down: what its shell or the page's drawing reads (its core's state: core-state.ts) */
 export interface CraftState { id: CraftId; type: CraftType; pilot: PlayerId | null; placed: boolean; core: Record<string, unknown> }
 
 /** a level-1 node edited (its columns now) or given its files again (null) since the last snapshot (a worker's: the
@@ -52,10 +53,12 @@ export interface Snapshot {
   boats: BoatView | null;
   /** the people walked by players: their pose, by person id */
   walked: [number, WalkPose][];
+  /** the crafts put down, piloted or left */
+  crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
   /** the player's reads; notes, craftEvents and results since the last snapshot */
-  player: { seat: Seat | null; driver: DriverSnapshot | null; notes: DriveNote[]; craft: CraftState | null; craftEvents: unknown[]; results: CommandResult[] };
+  player: { seat: Seat | null; driver: DriverSnapshot | null; notes: DriveNote[]; craftEvents: unknown[]; results: CommandResult[] };
   edits: EditNote[];
 }
 
@@ -72,17 +75,17 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   if (B?.drawState) for (const c of T.roadVehicles()) { const d = B.drawState(c); if (d) bodies.push([c.id, d]); }
   const walked: [number, WalkPose][] = [];
   for (const p of T.people) { const w = sim.walkedPose(p.id); if (w) walked.push([p.id, { ...w }]); }
-  const craft = sim.craftOf(player), boats = T.boats;
+  const boats = T.boats, crafts: CraftState[] = [];
+  for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: saveState(c.core) });
   return {
     tick: sim.tick, acc: T.acc, t: T.t, day: T.day, active: T.active && { x: T.active.x, z: T.active.z },
     cars: T.cars.map((c) => pick(c, CAR_KEYS)), detached: T.detachedCars.map((c) => pick(c, CAR_KEYS)),
     people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
-    walked, events: sim.eventsSince(since).map((e) => ({ ...e, person: pick(e.person, PERSON_KEYS) as Person })),
+    walked, crafts, events: sim.eventsSince(since).map((e) => ({ ...e, person: pick(e.person, PERSON_KEYS) as Person })),
     player: {
       seat: sim.seat(player), driver: sim.driverSnapshot(player), notes: sim.driverNotes(player),
-      craft: craft && { id: craft.id, type: craft.type, pilot: craft.pilot, placed: craft.placed, core: saveState(craft.core) },
       craftEvents: sim.craftEvents(player), results,
     },
     edits,
