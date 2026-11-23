@@ -1,3 +1,4 @@
+import { frozen } from '../../core/frozen';
 import { set, vec3, type Vec3 } from '../../core/vec';
 import type { Sweep } from './sweep';
 
@@ -19,8 +20,9 @@ const G = 9.81;
 
 // All the numbers, in one place. Arcade laws, not simulators: each craft has momentum, and what it does when the
 // controls are let go is the calm thing (the helicopter hovers, the hovercraft glides on, the glider flies straight).
-export const CRAFT = {
-  helicopter: {
+// Read-only (DEFAULT_TUNING.craft, sim/tuning.ts); a craft given others differs.
+export const CRAFT = frozen({
+  helicopter: frozen({
     yaw: 1.2, yawResponse: 3, // rad/s at full pedal, /s the yaw rate follows it
     accel: 8, backAccel: 4, sideAccel: 6, // m/s² from the stick (forward, back, sideways)
     drag: 0.18, // /s: top speed accel / drag = 44 m/s (160 km/h)
@@ -28,20 +30,21 @@ export const CRAFT = {
     sideDamp: 0.6, // /s: speed across the nose decays (the tail fin), so turns at speed follow the nose
     climb: 8, sink: 6, liftResponse: 1.6, // m/s, /s
     tilt: 0.5, maxTilt: 0.45, // drawn: the disc tilts with the stick's thrust (share of atan(a/g)), at most rad
-  },
-  hovercraft: {
+  }),
+  hovercraft: frozen({
     yaw: 1.1, yawResponse: 2.5,
     thrust: 5.5, reverse: 4, // m/s² (the fans' louvres turned back)
     drag: 0.22, landDrag: 0.3, // /s: 25 m/s (90 km/h) on water, 18 m/s on land
     grip: 0.8, // /s: the skirt barely holds sideways, it drifts through turns
-  },
-  paraglider: {
+  }),
+  paraglider: frozen({
     yaw: 0.7, yawResponse: 2, // rad/s
     trim: 11, bar: 4.5, brake: 4, // m/s: hands up, on the speed bar (W) adds, braked (S) takes off
     sink: 1.4, barSink: 1.3, brakeSink: -0.3, turnSink: 1.0, // m/s: trim glide about 8:1
     response: 1.5, // /s: the speed follows
-  },
-} as const;
+  }),
+});
+export type CraftTuning = typeof CRAFT;
 
 const follow = (current: number, target: number, rate: number, dt: number) =>
   current + (target - current) * (1 - Math.exp(-rate * dt));
@@ -59,7 +62,8 @@ export class CraftMotion {
   private readonly delta = vec3();
   private readonly raised = vec3();
 
-  constructor(readonly kind: CraftKind) {}
+  // cfg: the crafts' numbers (Tuning.craft)
+  constructor(readonly kind: CraftKind, readonly cfg: CraftTuning = CRAFT) {}
 
   get speed() { return Math.hypot(this.velocity.x, this.velocity.z); }
 
@@ -109,7 +113,7 @@ export class CraftMotion {
   }
 
   private helicopter(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    const H = CRAFT.helicopter, v = this.velocity;
+    const H = this.cfg.helicopter, v = this.velocity;
     const onSkids = this.grounded && input.lift <= 0;
     if (this.turn(onSkids ? 0 : input.turn * H.yaw, H.yawResponse, dt, world) === 'loading') return 'loading';
     const s = Math.sin(this.heading), c = Math.cos(this.heading);
@@ -140,7 +144,7 @@ export class CraftMotion {
   }
 
   private hovercraft(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    const V = CRAFT.hovercraft, v = this.velocity;
+    const V = this.cfg.hovercraft, v = this.velocity;
     if (this.turn(input.turn * V.yaw, V.yawResponse, dt, world) === 'loading') return 'loading';
     const s = Math.sin(this.heading), c = Math.cos(this.heading);
     const under = world.surface(this.p.x, this.p.z);
@@ -183,7 +187,7 @@ export class CraftMotion {
   }
 
   private paraglider(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    const P = CRAFT.paraglider, v = this.velocity;
+    const P = this.cfg.paraglider, v = this.velocity;
     if (this.turn(input.turn * P.yaw, P.yawResponse, dt, world) === 'loading') return 'loading';
     const bar = Math.max(0, input.drive), brake = Math.max(0, -input.drive);
     const speed = P.trim + P.bar * bar - P.brake * brake;
