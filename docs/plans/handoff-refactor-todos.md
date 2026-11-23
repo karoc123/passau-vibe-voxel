@@ -40,7 +40,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
-| F7 | Motorbike handling | M | **Ready** |
+| F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Water surface from the world, river slider removed | M–L | **Ready** |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
@@ -144,34 +144,21 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Do:** go through the sim (a "take the wheel" call) rather than the presentation writing into traffic objects; see
   [ADR 0007](../adr/0007-player-control-in-world-sim.md).
 
-### F7. Motorbike handling (M)
+### F7. Motorbike falls (S–M)
 
-- **Waits for:** nothing. It is in `physics/rapier/car.ts` and `sim/vehicles.ts`, not in the input shells.
-- **Today, steering:** the keyboard gives `steer` -1 or 1 at once (`nav/drive.ts`). `car.ts` `step` eases the wheel
-  angle with `dt * 8`, a time constant of 0.125 s, so A or D is full lock at once. The lock falls with speed
-  (`steer / (1 + v / steerFall)`, moto 0.42 rad and 9 m/s).
-- **Today, falling:** on flat ground the bike does not tip. Measured with `scenarios.ts` `Sim`: 20–130 km/h at
-  full lock, `up` stays 1 and all four hidden wheels stay down (at 130 km/h full lock it scrubs down to 18 km/h).
-  The rider comes off by the rules in `physics/rapier/player-car.ts`: an `impact` or a `knock` of 7 m/s (25 km/h) or more
-  (`FALL_IMPACT`), which includes touching any traffic car and any wall or kerb that costs that speed in one step; a
-  crash landing; or lying on its side. The righting in `car.ts` `bike()` works only with two or more wheels on the
-  ground. `tools/vehicles.mjs` tests the bike at `steer` 0.33 and 0.5 only, never at keyboard lock, and has no test
-  for a glancing hit.
+- **Waits for:** nothing. Steering landed in `80b7f7aa`: `Tune` `steerRamp` (0.3 s) and `latG` (0.8) in
+  `physics/rapier/car.ts`, check `bike_keys`. What is left is when the rider comes off.
+- **Today:** the rider comes off by the rules in `physics/rapier/player-car.ts`: an `impact` or a `knock` of 7 m/s
+  (25 km/h) or more (`FALL_IMPACT`), which includes touching any traffic car and any wall or kerb that costs that
+  speed in one step; a crash landing; or lying on its side. The righting in `car.ts` `bike()` works only with two
+  or more wheels on the ground. No test for a glancing hit.
 - **Do first:** show the cause of each fall in the note for a while ("came off: wall 9 m/s", "knock", "on its
   side") and ride the real map, so the tuning is aimed at what happens in play.
-- **Do, steering:** a steering ramp in `car.ts` (sim side, so it is the same for every input and for a server): the
-  input builds up over about 0.3–0.5 s of holding and returns faster than it builds, as the plane's roll and pitch
-  do since `c99a3a08` (a rate that follows the wish, limited by an acceleration). Per vehicle in `Tune`; cars may
-  keep a short ramp. The touch stick and gamepad are analogue already: ramp only the rate, do not add lag to them.
-- **Do, speed:** make the lock depend on speed so that the sideways acceleration at full lock stays under the grip
-  (a bike leans, it does not skid at 60 km/h).
-- **Do, stability:** falls only when it makes sense: a head-on hit (the speed lost along the heading), not a
-  glancing scrape or a nudge on a car's corner; raise or split `FALL_IMPACT`. Righting also with one wheel down and
-  for a short time in the air. Keep the wheelie.
-- **Feel:** "it should be fun". Judge it in the browser on a real street with traffic.
-- **Gates:** `vehicles` 34/34 plus new checks in `tools/vehicles.mjs`: `bike_keys` (steer 1 held from 0 at 30, 60
-  and 100 km/h: upright, turns, the wheel angle takes 0.3 s or more to reach its lock), `bike_scrape` (a wall at
-  10° at 50 km/h: stays on), `bike_wall` unchanged (head-on: comes off). `rapier-car` 45/45.
+- **Do:** falls only when it makes sense: a head-on hit (the speed lost along the heading), not a glancing scrape
+  or a nudge on a car's corner; raise or split `FALL_IMPACT`. Righting also with one wheel down and for a short
+  time in the air. Keep the wheelie.
+- **Gates:** `vehicles` 35/35 plus `bike_scrape` (a wall at 10° at 50 km/h: stays on), `bike_wall` unchanged
+  (head-on: comes off). `rapier-car` 45/45.
 
 ### F8. Water surface from the world, river slider removed (M–L)
 
