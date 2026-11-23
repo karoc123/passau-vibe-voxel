@@ -8,6 +8,7 @@ Output traffic.json (its polylines packed: trafficpack.py), coordinates in grid 
 Axis 0/1 = travel roughly along grid x / grid y (the grid of scripts/aoi.py).
 """
 import json
+import sys
 from collections import Counter
 import math
 from collections import defaultdict
@@ -359,50 +360,78 @@ def off_surface(surf, r, c, reach):
     return None
 
 
-def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None):
-    """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
-    nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
-    deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
-    vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit)."""
-    data = json.load(open(f"{RAW}/osm.json"))
-    import overrides
-    overrides.patch_elements(data["elements"])  # (the street overrides: osm.OSM reads them so too)
-    # nodes of any bridge way (road, path, rail): drawn on the deck, so agents there move at deck height
-    # (ways that carry traffic only: a bridge's outline, man_made=bridge, shares nodes with the street passing under
-    # it -- cars there jumped up onto the viaduct and back down)
-    bridge_nodes = {n for e in data["elements"] if e["type"] == "way" and e.get("tags", {}).get("bridge") not in (None, "no")
-                    and ("highway" in e["tags"] or "railway" in e["tags"]) for n in e.get("nodes", [])}
-    nodes = {}  # id -> (x, y) grid
-    ntags = {}
-    ways = []
-    for e in data["elements"]:
-        if e["type"] == "node" and e.get("tags"):
-            ntags[e["id"]] = e["tags"]
-        if e["type"] != "way" or "highway" not in e.get("tags", {}):
-            continue
-        geo = e.get("geometry") or []
-        if len(geo) != len(e["nodes"]):
-            continue
-        for nid, p in zip(e["nodes"], geo):
-            if p and nid not in nodes:
-                x, y = _T.transform(p["lon"], p["lat"])
-                i, j = to_grid(x, y)
-                nodes[nid] = (float(i), float(j))
-        if all(n in nodes for n in e["nodes"]):
-            ways.append(e)
+# metres between the centres of two lanes of a road: web/src/sim/traffic.ts LANE_W must say the same (lane_check, run
+# by scripts/check.sh), the cars drive the lanes the pipeline checks and places here
+LANE = 3.0
 
-    def inside(nid, m=3):
-        x, y = nodes[nid]
+
+def length(p):
+    return float(sum(math.dist(a[:2], b[:2]) for a, b in zip(p, p[1:])))
+
+
+def bore_z(p):
+    """a way through a hill (tunnels.py): its points at the bored floor, not on the hill over it"""
+    import tunnels
+    zs = [int(tunnels.FLOOR[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
+    return [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
+
+
+def node_list(index, nodes):
+    """the graph's node points, by their index"""
+    out = [None] * len(index)
+    for n, i in index.items():
+        x, y = nodes[n]
+        out[i] = [round(x, 1), round(y, 1)]
+    return out
+
+
+class Osm:
+    """data/raw/osm.json with the street overrides, and the points of its ways on the grid: the highways' nodes
+    (nodes, id -> (x, y) grid; the rail steps add theirs), the ways whose nodes all have one (ways), the tagged nodes
+    (ntags) and the nodes of any bridge way (bridge_nodes). g, nd_mean, water: the heights a point is given (z_at)."""
+
+    def __init__(self, g, nd_mean, water):
+        self.g, self.nd_mean, self.water = g, nd_mean, water
+        self.data = data = json.load(open(f"{RAW}/osm.json"))
+        import overrides
+        overrides.patch_elements(data["elements"])  # (the street overrides: osm.OSM reads them so too)
+        # nodes of any bridge way (road, path, rail): drawn on the deck, so agents there move at deck height
+        # (ways that carry traffic only: a bridge's outline, man_made=bridge, shares nodes with the street passing under
+        # it -- cars there jumped up onto the viaduct and back down)
+        self.bridge_nodes = {n for e in data["elements"] if e["type"] == "way" and e.get("tags", {}).get("bridge") not in (None, "no")
+                             and ("highway" in e["tags"] or "railway" in e["tags"]) for n in e.get("nodes", [])}
+        self.nodes = nodes = {}  # id -> (x, y) grid
+        self.ntags = {}
+        self.ways = []
+        for e in data["elements"]:
+            if e["type"] == "node" and e.get("tags"):
+                self.ntags[e["id"]] = e["tags"]
+            if e["type"] != "way" or "highway" not in e.get("tags", {}):
+                continue
+            geo = e.get("geometry") or []
+            if len(geo) != len(e["nodes"]):
+                continue
+            for nid, p in zip(e["nodes"], geo):
+                if p and nid not in nodes:
+                    x, y = _T.transform(p["lon"], p["lat"])
+                    i, j = to_grid(x, y)
+                    nodes[nid] = (float(i), float(j))
+            if all(n in nodes for n in e["nodes"]):
+                self.ways.append(e)
+
+    def inside(self, nid, m=3):
+        x, y = self.nodes[nid]
         return m <= x < W - m and m <= y < D - m
 
-    def z_at(x, y, bridge):
+    def z_at(self, x, y, bridge):
+        g, nd_mean, water = self.g, self.nd_mean, self.water
         c, r = min(max(int(x), 0), W - 1), min(max(int(y), 0), D - 1)
         # on a deck: tagged bridge ways, and anything over water that has a deck above it (untagged bridge sidewalks)
         if (bridge or (water is not None and water[r, c])) and nd_mean[r, c] >= 1.5:  # decks stand >= 2 m
             return int(g[r, c] + round(nd_mean[r, c]))
         return int(g[r, c])
 
-    def split(ws):
+    def split(self, ws):
         """split ways at nodes used by >1 way of the same network (junctions); keep only inside-AOI runs"""
         use = defaultdict(int)
         for w in ws:
@@ -421,7 +450,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         for w, seg in out:  # clip to AOI: keep maximal inside runs
             run = []
             for n in seg:
-                if inside(n):
+                if self.inside(n):
                     run.append(n)
                 else:
                     if len(run) >= 2:
@@ -431,9 +460,10 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 res.append((w, run))
         return res
 
-    def pts_of(seq, bridge, spacing=3):
+    def pts_of(self, seq, bridge, spacing=3):
         """points of a node chain; long segments get a point every 3 m with its own height, so a vehicle follows a
         bridge deck (or a ramp) instead of the straight line between two far-apart OSM nodes"""
+        nodes, bridge_nodes, z_at = self.nodes, self.bridge_nodes, self.z_at
         out = []
         for a, b in zip(seq, seq[1:] + [None]):
             xa, ya = nodes[a]
@@ -456,20 +486,14 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 out[i][2] = int(round((za + zc) / 2))
         return out
 
-    def length(p):
-        return float(sum(math.dist(a[:2], b[:2]) for a, b in zip(p, p[1:])))
 
-    # ---------------- roads
-    import tunnels
-    bored = tunnels.IDS if tunnels.FLOOR is not None else set()
-
-    def bore_z(p):
-        """a way through a hill (tunnels.py): its points at the bored floor, not on the hill over it"""
-        zs = [int(tunnels.FLOOR[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
-        return [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
-
-    rways = [w for w in ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT
-                                                                   or w["id"] in bored)
+def road_edges(osm, bored):
+    """the directed road edges (one per direction of a way between junctions, with its lanes, speed and the stop line
+    of a signal near its end), the signal controllers (signal nodes clustered within 45 m) and the road nodes' index
+    (OSM id -> the edges' a, b)"""
+    nodes, ntags = osm.nodes, osm.ntags
+    rways = [w for w in osm.ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT
+                                                                       or w["id"] in bored)
              and w["tags"].get("access") not in ("no", "private") and w["tags"].get("area") != "yes"]
     sig_nodes = {n for n, t in ntags.items() if t.get("highway") == "traffic_signals" and n in nodes}
     # controllers: cluster signal nodes
@@ -494,7 +518,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             nid_index[n] = len(nid_index)
         return nid_index[n]
 
-    for w, seg in split(rways):
+    for w, seg in osm.split(rways):
         t = w["tags"]
         hw = t["highway"]
         ow = t.get("oneway") in ("yes", "true", "1") or t.get("junction") in ("roundabout", "circular") \
@@ -514,7 +538,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         if not ow and not rev:
             dirs.append((seg[::-1], int(lb), "backward"))
         for s, nl, dname in dirs:
-            p = pts_of(s, bridge)
+            p = osm.pts_of(s, bridge)
             if w["id"] in bored:
                 p = bore_z(p)
             L = length(p)
@@ -542,6 +566,13 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
                 dx, dy = p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]
                 e["sig"] = dict(s=round(best[0], 1), ctrl=best[1], axis=0 if abs(dx) >= abs(dy) else 1)
             roads.append(e)
+    return roads, ctrls, nid_index
+
+
+def check_lanes(roads, surf, note):
+    """each road's lanes (e["lanes"]) and the first one's offset right of its line (e["o0"], LANE apart): validated
+    against the actual paved surface where there is one. Returns surf with the track bed's margin (track_clearance),
+    the mask the later steps read (None without one)."""
     # validate lanes against the actual paved surface: a lane centre must run mostly on carriageway and not on
     # the track bed (OSM lanes= can count space rails take, or a wider road than the mapped centreline allows)
     n_drop = 0
@@ -559,7 +590,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             xy = p[idx - 1, :2] + (p[idx, :2] - p[idx - 1, :2]) * f[:, None]
             d = (p[idx, :2] - p[idx - 1, :2]) / np.maximum(np.hypot(*(p[idx, :2] - p[idx - 1, :2]).T), 1e-6)[:, None]
             n = e["lanes"]
-            offs = [(l + 0.5) * 3.0 if e["two"] else (l + 0.5 - n / 2) * 3.0 for l in range(n)]
+            offs = [(l + 0.5) * LANE if e["two"] else (l + 0.5 - n / 2) * LANE for l in range(n)]
             ok = []
             for o in offs:
                 q = xy + np.stack([-d[:, 1], d[:, 0]], 1) * o
@@ -584,10 +615,13 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             e["o0"] = round(offs[best[0]], 2)
     else:
         for e in roads:
-            e["o0"] = 1.5 if e["two"] else round((0.5 - e["lanes"] / 2) * 3.0, 2)
+            e["o0"] = LANE / 2 if e["two"] else round((0.5 - e["lanes"] / 2) * LANE, 2)
     note(f"traffic: {n_drop} OSM lanes dropped where the lane centre is not on carriageway or runs on the track bed")
+    return surf
 
-    # approaches into a signalled junction without their own signal node (side streets) obey the same controller
+
+def infer_signals(roads, ctrls, note):
+    """approaches into a signalled junction without their own signal node (side streets) obey the same controller"""
     n_inf = 0
     for e in roads:
         if "sig" in e or not ctrls:
@@ -600,7 +634,10 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         e["sig"] = dict(s=round(max(0.5, e["L"] - 5.5), 1), ctrl=k, axis=0 if abs(dx) >= abs(dy) else 1, inferred=1)
         n_inf += 1
     note(f"traffic: {n_inf} side-street approaches inferred onto nearby signal controllers")
-    # OSM turn restrictions (from way, via node, to way)
+
+
+def turn_restrictions(data, nid_index, note):
+    """OSM turn restrictions (from way, via node, to way) on the road graph: [from, via node index, to, kind]"""
     restr = []
     for rel in data["elements"]:
         t = rel.get("tags", {})
@@ -612,14 +649,32 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         if fr and to and via and via[0] in nid_index:
             restr.append([fr[0], nid_index[via[0]], to[0], t["restriction"]])
     note(f"traffic: {len(restr)} turn restrictions on the road graph")
-    rnodes = [None] * len(nid_index)
-    for n, i in nid_index.items():
-        x, y = nodes[n]
-        rnodes[i] = [round(x, 1), round(y, 1)]
+    return restr
 
-    # ---------------- pedestrians
+
+PED_WEIGHT = {"pedestrian": 6.0, "living_street": 5.0, "footway": 1.0, "path": 0.6, "steps": 0.5,
+              "platform": 0.8, "cycleway": 0.15}
+
+
+def roof_z(x, y, g, vol, solid):
+    """the surface of a roof under a point: the top of the solid voxels, where all around it stands 2.5 m up"""
+    zs = []
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            c, r = min(max(int(x) + dc, 0), W - 1), min(max(int(y) + dr, 0), D - 1)
+            nz = np.nonzero(solid[vol[:, r, c]])[0]
+            zs.append(int(nz[-1]) + 1 if len(nz) else int(g[r, c]))
+    z = int(np.median(zs))
+    return z if min(zs) >= g[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)] + 2.5 else None
+
+
+def footpaths(osm, bored, ctrls, vol, solid, note):
+    """the undirected footpath edges (walking weight, bike ways, signalled crossings on a controller, heights through
+    stairwells, passages and up onto roofs), the path nodes' index (OSM id -> the edges' a, b) and the edges down a
+    shifted stair (underpass.SHIFTED)"""
     import underpass
-    pways = [w for w in ways if (w["tags"]["highway"] in WALK or w["tags"].get("footway") == "sidewalk")
+    nodes, ntags, g = osm.nodes, osm.ntags, osm.g
+    pways = [w for w in osm.ways if (w["tags"]["highway"] in WALK or w["tags"].get("footway") == "sidewalk")
              and (not underground(w["tags"]) or w["id"] in underpass.IDS or w["id"] in bored) and w["tags"].get("access") not in ("no", "private")]
     ped_sig = {n for n, t in ntags.items() if t.get("crossing") == "traffic_signals" or t.get("crossing:signals") == "yes"}
     peds, pidx, shifted_edges = [], {}, set()
@@ -629,25 +684,12 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             pidx[n] = len(pidx)
         return pidx[n]
 
-    WEIGHT = {"pedestrian": 6.0, "living_street": 5.0, "footway": 1.0, "path": 0.6, "steps": 0.5,
-              "platform": 0.8, "cycleway": 0.15}
-    def roof_z(x, y):
-        """the surface of a roof under a point: the top of the solid voxels, where all around it stands 2.5 m up"""
-        zs = []
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                c, r = min(max(int(x) + dc, 0), W - 1), min(max(int(y) + dr, 0), D - 1)
-                nz = np.nonzero(solid[vol[:, r, c]])[0]
-                zs.append(int(nz[-1]) + 1 if len(nz) else int(g[r, c]))
-        z = int(np.median(zs))
-        return z if min(zs) >= g[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)] + 2.5 else None
-
     on_roof = {}  # pnode -> the roof's height there, for the steps that lead up
-    for w, seg in split(pways):
+    for w, seg in osm.split(pways):
         t = w["tags"]
         bridge = t.get("bridge") not in (None, "no")
         shifted = w["id"] in underpass.SHIFTED
-        p = pts_of(seg, bridge, spacing=0.5 if shifted else 3)
+        p = osm.pts_of(seg, bridge, spacing=0.5 if shifted else 3)
         L = length(p)
         if L < 0.8:
             continue
@@ -658,14 +700,14 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             zs = [int(underpass.WALK[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
             p = [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
         elif vol is not None and not bridge and up:
-            zs = [roof_z(x, y) for x, y, _ in p]  # a path mapped one level up: on a roof garden or a terrace
+            zs = [roof_z(x, y, g, vol, solid) for x, y, _ in p]  # a path mapped one level up: on a roof garden or a terrace
             if len(zs) > 2 and all(z is not None for z in zs[1:-1]):  # an end at the roof's edge (a ramp's top)
                 zs[0], zs[-1] = zs[0] or zs[1], zs[-1] or zs[-2]
             if all(z is not None for z in zs):
                 p = [[x, y, z] for (x, y, _), z in zip(p, zs)]
                 on_roof[pnode(seg[0])], on_roof[pnode(seg[-1])] = zs[0], zs[-1]
         e = dict(a=pnode(seg[0]), b=pnode(seg[-1]), p=p, L=round(L, 1),
-                 w=WEIGHT.get(t["highway"], 1.0) * (1.5 if t.get("footway") == "sidewalk" else 1.0))
+                 w=PED_WEIGHT.get(t["highway"], 1.0) * (1.5 if t.get("footway") == "sidewalk" else 1.0))
         if shifted:
             shifted_edges.add(len(peds))
         bk = bike_weight(t)
@@ -693,7 +735,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         e["p"] = [[x, y, int(round(z0 + (z1 - z0) * k / max(cum[-1], 1e-6)))] for (x, y, _), k in zip(e["p"], cum)]
     # a bike way rides with the road beside it: along a main road twice a side street's
     from shapely.strtree import STRtree
-    rl = [(w["tags"], LineString([nodes[n] for n in w["nodes"]])) for w in ways
+    rl = [(w["tags"], LineString([nodes[n] for n in w["nodes"]])) for w in osm.ways
           if w["tags"]["highway"] in DRIVE and len(w["nodes"]) > 1]
     rtree = STRtree([l for _, l in rl])
     main = {"primary", "trunk", "secondary", "primary_link", "trunk_link"}
@@ -707,11 +749,11 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
     bks = [e["bk"] for e in peds if "bk" in e]
     note(f"traffic: {len(bks)} bike way edges ({round(sum(e['L'] for e in peds if 'bk' in e) / 1000, 1)} km), "
          f"{sum(b >= 2.5 for b in bks)} on bridges or boulevards, {sum(b == 2 for b in bks)} along main roads")
-    pn = [None] * len(pidx)
-    for n, i in pidx.items():
-        pn[i] = [round(nodes[n][0], 1), round(nodes[n][1], 1)]
+    return peds, pidx, shifted_edges
 
-    # signal heads: one per signalled approach, at the stop line on the right-hand kerb
+
+def signal_heads(roads, surf, osm):
+    """signal heads: one per signalled approach, at the stop line on the right-hand kerb"""
     heads = []
     # (a signal stands off the carriageway and the tracks: the nearest such cell within 8 m, off_surface; 95 of 708
     # stood in a lane of a wider road, a turn lane or the road across)
@@ -732,78 +774,89 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         if off_ is not None:
             r_, c_ = off_
             hx, hy = c_ + 0.5, r_ + 0.5
-        heads.append([round(hx, 1), round(hy, 1), z_at(hx, hy, True), round(math.atan2(dx, dy), 2), sg["ctrl"], sg["axis"]])
+        heads.append([round(hx, 1), round(hy, 1), osm.z_at(hx, hy, True), round(math.atan2(dx, dy), 2), sg["ctrl"], sg["axis"]])
+    return heads
 
-    # ---------------- rail routes: real route relations (PTv2, one relation per direction), chained and clipped
-    way_by_id = {e["id"]: e for e in data["elements"] if e["type"] == "way"}
-    def chain(ws):
-        """a route's member ways (node lists) as one node chain, None at its gaps: from the first way on, each time
-        the unused way that starts where the chain ends, the next one in the relation's order if there are several.
-        The first of a run is turned to lead into another. (Each way used to be taken as listed and in its own node
-        order: a first way drawn against the direction of travel joined nothing, and so on down the route -- 11 of
-        the 15 train tracks were single ways of 160-550 m, trains running off their ends into the air; and a
-        relation listed out of order broke where it was)"""
-        ends = defaultdict(list)
-        for k, ns in enumerate(ws):
-            ends[ns[0]].append(k); ends[ns[-1]].append(k)
-        used, seq = [False] * len(ws), []
-        for k0 in range(len(ws)):
-            if used[k0]:
-                continue
-            ns, k = ws[k0], k0
-            if not any(not used[j] and j != k for j in ends[ns[-1]]) and any(not used[j] and j != k for j in ends[ns[0]]):
-                ns = ns[::-1]
-            if seq:
-                seq.append(None)
-            seq.extend(ns)
+
+def chain(ws):
+    """a route's member ways (node lists) as one node chain, None at its gaps: from the first way on, each time
+    the unused way that starts where the chain ends, the next one in the relation's order if there are several.
+    The first of a run is turned to lead into another. (Each way used to be taken as listed and in its own node
+    order: a first way drawn against the direction of travel joined nothing, and so on down the route -- 11 of
+    the 15 train tracks were single ways of 160-550 m, trains running off their ends into the air; and a
+    relation listed out of order broke where it was)"""
+    ends = defaultdict(list)
+    for k, ns in enumerate(ws):
+        ends[ns[0]].append(k); ends[ns[-1]].append(k)
+    used, seq = [False] * len(ws), []
+    for k0 in range(len(ws)):
+        if used[k0]:
+            continue
+        ns, k = ws[k0], k0
+        if not any(not used[j] and j != k for j in ends[ns[-1]]) and any(not used[j] and j != k for j in ends[ns[0]]):
+            ns = ns[::-1]
+        if seq:
+            seq.append(None)
+        seq.extend(ns)
+        used[k] = True
+        while True:
+            nxt = [j for j in ends[seq[-1]] if not used[j]]
+            if not nxt:
+                break
+            k = min(nxt, key=lambda j: (j < k, j))
+            ns = ws[k]
+            seq.extend(ns[-2::-1] if seq[-1] == ns[-1] else ns[1:])
             used[k] = True
-            while True:
-                nxt = [j for j in ends[seq[-1]] if not used[j]]
-                if not nxt:
-                    break
-                k = min(nxt, key=lambda j: (j < k, j))
-                ns = ws[k]
-                seq.extend(ns[-2::-1] if seq[-1] == ns[-1] else ns[1:])
-                used[k] = True
-        return seq
+    return seq
 
-    def runs(seq, stop=()):
-        """the pieces of a chain inside the map and off the `stop` nodes; one that leaves the map ends on its edge (it
-        ended on its last node inside, up to 60 m short: vehicles appeared out of nowhere)"""
-        def edge(i, o):
-            (xi, yi), (xo, yo) = nodes[i], nodes[o]
-            f = min([(b - a) / (c - a) for a, c, b in ((xi, xo, 3), (xi, xo, W - 3.01), (yi, yo, 3), (yi, yo, D - 3.01))
-                     if (c - b) * (a - b) < 0] or [0])
-            n = -10 ** 9 - len(nodes)
-            nodes[n] = (xi + (xo - xi) * f, yi + (yo - yi) * f)
-            return n
-        piece, prev, out = [], None, []
-        for n in list(seq) + [None]:
-            if n is not None and n not in stop and inside(n):
-                if not piece and prev is not None and prev not in stop and not inside(prev):
-                    piece.append(edge(n, prev))
-                if not piece or piece[-1] != n:
-                    piece.append(n)
-            else:
-                if piece and n is not None and n not in stop:
-                    piece.append(edge(piece[-1], n))
-                if len(piece) >= 2:
-                    out.append(piece)
-                piece = []
-            prev = n
-        return out
 
-    def members(rel):
-        """the ways a route runs on (its members without a stop or platform role), whatever state the way is tagged
-        in (a few metres of a route can be railway=disused while the track is relaid)"""
-        ws = []
-        for m in rel.get("members", []):
-            w = way_by_id.get(m["ref"]) if m["type"] == "way" and m.get("role") in ("", "forward", "backward") else None
-            ns = [n for n in w["nodes"] if n in nodes] if w and w.get("tags", {}).get("railway", "platform") != "platform" else []
-            if len(ns) >= 2:
-                ws.append(ns)
-        return ws
+def runs(osm, seq, stop=()):
+    """the pieces of a chain inside the map and off the `stop` nodes; one that leaves the map ends on its edge (it
+    ended on its last node inside, up to 60 m short: vehicles appeared out of nowhere). The edge points are added to
+    osm.nodes."""
+    nodes, inside = osm.nodes, osm.inside
 
+    def edge(i, o):
+        (xi, yi), (xo, yo) = nodes[i], nodes[o]
+        f = min([(b - a) / (c - a) for a, c, b in ((xi, xo, 3), (xi, xo, W - 3.01), (yi, yo, 3), (yi, yo, D - 3.01))
+                 if (c - b) * (a - b) < 0] or [0])
+        n = -10 ** 9 - len(nodes)
+        nodes[n] = (xi + (xo - xi) * f, yi + (yo - yi) * f)
+        return n
+    piece, prev, out = [], None, []
+    for n in list(seq) + [None]:
+        if n is not None and n not in stop and inside(n):
+            if not piece and prev is not None and prev not in stop and not inside(prev):
+                piece.append(edge(n, prev))
+            if not piece or piece[-1] != n:
+                piece.append(n)
+        else:
+            if piece and n is not None and n not in stop:
+                piece.append(edge(piece[-1], n))
+            if len(piece) >= 2:
+                out.append(piece)
+            piece = []
+        prev = n
+    return out
+
+
+def members(rel, way_by_id, nodes):
+    """the ways a route runs on (its members without a stop or platform role), whatever state the way is tagged
+    in (a few metres of a route can be railway=disused while the track is relaid)"""
+    ws = []
+    for m in rel.get("members", []):
+        w = way_by_id.get(m["ref"]) if m["type"] == "way" and m.get("role") in ("", "forward", "backward") else None
+        ns = [n for n in w["nodes"] if n in nodes] if w and w.get("tags", {}).get("railway", "platform") != "platform" else []
+        if len(ns) >= 2:
+            ws.append(ns)
+    return ws
+
+
+def train_tracks(osm, note):
+    """rail routes: real route relations (PTv2, one relation per direction), chained and clipped; one path per track
+    with the services on it and the arc lengths of their stops. Adds the railways' nodes to osm.nodes."""
+    data, nodes = osm.data, osm.nodes
+    way_by_id = {e["id"]: e for e in data["elements"] if e["type"] == "way"}
     # under the ground a piece ends: a train goes into a tunnel at its portal
     tunnel_nodes = set()
     for e in data["elements"]:
@@ -825,7 +878,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         if rel["type"] != "relation" or t.get("route") != "train":
             continue
         stops = {m["ref"] for m in rel.get("members", []) if m["type"] == "node" and str(m.get("role", "")).startswith("stop")}
-        for piece in runs(chain(members(rel)), tunnel_nodes):
+        for piece in runs(osm, chain(members(rel, way_by_id, nodes)), tunnel_nodes):
             tr = by_track.setdefault(tuple(piece), dict(nodes=piece, svc=[]))
             tr["svc"].append(dict(ref=t.get("ref") or t.get("name", "?"), op=t.get("operator", ""),
                                   stops=[k for k, n_ in enumerate(piece) if n_ in stops]))
@@ -846,7 +899,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
             tracks.append(dict(tr, es=es))
     trains = []
     for tr in tracks:
-        pp = pts_of(tr["nodes"], False)
+        pp = osm.pts_of(tr["nodes"], False)
         if length(pp) < 150:
             continue
         # a stop's arc length along the path (the node's own point: pts_of keeps every node, in order)
@@ -862,61 +915,93 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         trains.append(dict(p=pp, L=round(length(pp), 1), svc=svc))
     note(f"traffic: {len(trains)} train tracks inside the AOI ({sum(len(t['svc']) for t in trains)} route pieces, "
          f"{round(sum(t['L'] for t in trains) / 1000, 1)} km), operators {sorted({v['op'] for t in trains for v in t['svc']})}")
+    return trains
+
+
+def fit_to_volume(roads, trains, peds, shifted_edges, vol, solid, csolid, surf, note):
+    """every path onto the finished volume: the lanes moved sideways onto the carriageway as drawn (place_lanes, with
+    csolid), then roads, trains and footpaths fitted to the surface (fit); a road's dead end at a tunnel portal
+    trimmed. Returns the footpath edges kept (one mapped through a wall is dropped)."""
+    n_lift = 0
+    deg = Counter([e["a"] for e in roads] + [e["b"] for e in roads])
+    n_moved = n_room = 0
+    for e in roads:
+        if csolid is not None:  # (the lanes onto the carriageway as drawn first, then their heights)
+            offs = [e["o0"] + k * LANE for k in range(e["lanes"])]
+            e["p"], mv, nr = place_lanes(e["p"], offs, vol, solid, csolid, W, D, surf)
+            if mv:
+                e["L"] = round(length(e["p"]), 1)
+            n_moved += mv
+            n_room += nr
+        lo, hi = e["o0"] - 0.8, e["o0"] + (e["lanes"] - 1) * LANE + 0.8
+        e["p"], lift, _ = fit(e["p"], np.linspace(lo, hi, max(2, int(hi - lo) + 1)), vol, solid, W, D, decks=True)
+        n_lift += lift
+        if deg[e["a"]] == 1 or deg[e["b"]] == 1:  # a dead end at a tunnel's portal (a link road
+            # under a viaduct): its last node on the deck over the portal, the car climbed the wall
+            p_ = trim_portal(e["p"])
+            if len(p_) >= 2 and length(p_) > 3:
+                e["p"], e["L"] = p_, round(length(p_), 1)
+    for tr in trains:
+        p_, lift, _ = fit(tr["p"], (-1.2, 0.0, 1.2), vol, solid, W, D, decks=True)
+        if len(p_) != len(tr["p"]):  # the stops are arc lengths: they hold as long as the path's corners do
+            L_ = length(p_)
+            for v in tr["svc"]:
+                v["stops"] = [round(s_ * L_ / tr["L"], 1) for s_ in v["stops"]]
+            tr["L"] = round(L_, 1)
+        tr["p"] = p_
+        n_lift += lift
+    keep = []
+    sides = ((None, (-1.35, -0.35, 0.35, 1.35)), (1, (0.35, 1.35)), (-1, (-1.35, -0.35)), (0, (0.0,)))
+    for i, e in enumerate(peds):  # keep 0.35-1.35 m to the right, or try the free side
+        shifted = i in shifted_edges
+        # Walk down the middle of a narrow, adjusted stair. An early rise here would hit the approach's roof.
+        choices = ((0, (0.0,)),) if shifted else sides
+        for side, offs, p0 in [(sd, of, p0) for p0 in filter(None, (e["p"], e.pop("flat", None)))
+                               for sd, of in choices]:
+            p, lift, blocked = fit(p0, offs, vol, solid, W, D, rise_ahead=not shifted)
+            if blocked <= 2:
+                break
+        else:  # mapped through a wall: nobody walks there
+            continue
+        e["p"] = p
+        if side is not None:
+            e["side"] = side
+        n_lift += lift
+        keep.append(e)
+    if csolid is not None:
+        note(f"traffic: lanes moved sideways onto the carriageway as drawn over {n_moved} m (place_lanes), "
+             f"{n_room} m with no room for a car found within {SHIFT} m")
+    note(f"traffic: paths fitted to the voxels ({n_lift} m lifted onto the drawn surface), "
+         f"{len(peds) - len(keep)} footpath edges through walls dropped")
+    return keep
+
+
+def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None):
+    """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
+    nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
+    deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
+    vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit).
+    The steps, in order: the OSM ways on the grid (Osm); roads (road_edges, check_lanes, infer_signals,
+    turn_restrictions); footpaths; signal heads; trains; all fitted to the volume (fit_to_volume); bike ways joined."""
+    osm = Osm(g, nd_mean, water)
+    import tunnels
+    bored = tunnels.IDS if tunnels.FLOOR is not None else set()
+
+    roads, ctrls, nid_index = road_edges(osm, bored)
+    surf = check_lanes(roads, surf, note)  # (from here on with the track bed's margin)
+    infer_signals(roads, ctrls, note)
+    restr = turn_restrictions(osm.data, nid_index, note)
+    rnodes = node_list(nid_index, osm.nodes)
+
+    peds, pidx, shifted_edges = footpaths(osm, bored, ctrls, vol, solid, note)
+    pn = node_list(pidx, osm.nodes)
+
+    heads = signal_heads(roads, surf, osm)
+    trains = train_tracks(osm, note)
 
     if vol is not None:
-        n_lift = 0
-        deg = Counter([e["a"] for e in roads] + [e["b"] for e in roads])
-        n_moved = n_room = 0
-        for e in roads:
-            if csolid is not None:  # (the lanes onto the carriageway as drawn first, then their heights)
-                offs = [e["o0"] + k * 3.0 for k in range(e["lanes"])]
-                e["p"], mv, nr = place_lanes(e["p"], offs, vol, solid, csolid, W, D, surf)
-                if mv:
-                    e["L"] = round(length(e["p"]), 1)
-                n_moved += mv
-                n_room += nr
-            lo, hi = e["o0"] - 0.8, e["o0"] + (e["lanes"] - 1) * 3.0 + 0.8
-            e["p"], lift, _ = fit(e["p"], np.linspace(lo, hi, max(2, int(hi - lo) + 1)), vol, solid, W, D, decks=True)
-            n_lift += lift
-            if deg[e["a"]] == 1 or deg[e["b"]] == 1:  # a dead end at a tunnel's portal (a link road
-                # under a viaduct): its last node on the deck over the portal, the car climbed the wall
-                p_ = trim_portal(e["p"])
-                if len(p_) >= 2 and length(p_) > 3:
-                    e["p"], e["L"] = p_, round(length(p_), 1)
-        for tr in trains:
-            p_, lift, _ = fit(tr["p"], (-1.2, 0.0, 1.2), vol, solid, W, D, decks=True)
-            if len(p_) != len(tr["p"]):  # the stops are arc lengths: they hold as long as the path's corners do
-                L_ = length(p_)
-                for v in tr["svc"]:
-                    v["stops"] = [round(s_ * L_ / tr["L"], 1) for s_ in v["stops"]]
-                tr["L"] = round(L_, 1)
-            tr["p"] = p_
-            n_lift += lift
-        keep = []
-        sides = ((None, (-1.35, -0.35, 0.35, 1.35)), (1, (0.35, 1.35)), (-1, (-1.35, -0.35)), (0, (0.0,)))
-        for i, e in enumerate(peds):  # keep 0.35-1.35 m to the right, or try the free side
-            shifted = i in shifted_edges
-            # Walk down the middle of a narrow, adjusted stair. An early rise here would hit the approach's roof.
-            choices = ((0, (0.0,)),) if shifted else sides
-            for side, offs, p0 in [(sd, of, p0) for p0 in filter(None, (e["p"], e.pop("flat", None)))
-                                   for sd, of in choices]:
-                p, lift, blocked = fit(p0, offs, vol, solid, W, D, rise_ahead=not shifted)
-                if blocked <= 2:
-                    break
-            else:  # mapped through a wall: nobody walks there
-                continue
-            e["p"] = p
-            if side is not None:
-                e["side"] = side
-            n_lift += lift
-            keep.append(e)
-        if csolid is not None:
-            note(f"traffic: lanes moved sideways onto the carriageway as drawn over {n_moved} m (place_lanes), "
-                 f"{n_room} m with no room for a car found within {SHIFT} m")
-        note(f"traffic: paths fitted to the voxels ({n_lift} m lifted onto the drawn surface), "
-             f"{len(peds) - len(keep)} footpath edges through walls dropped")
-        peds = keep
-    pxy = {i: nodes[n] for n, i in pidx.items()}
+        peds = fit_to_volume(roads, trains, peds, shifted_edges, vol, solid, csolid, surf, note)
+    pxy = {i: osm.nodes[n] for n, i in pidx.items()}
     join_bike_ways(peds, pn, note, pxy, (lambda p: fit(p, (0.0,), vol, solid, W, D)[2] <= 2) if vol is not None else None)
 
     for c in ctrls:
@@ -928,6 +1013,23 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
          f"{len(ctrls)} signal controllers, {nsig} signalled approaches; {len(peds)} footpath edges "
          f"({round(sum(e['L'] for e in peds) / 1000, 1)} km), {ncross} signalled crossings")
     return dict(roads=roads, rnodes=rnodes, ctrls=ctrls, heads=heads, peds=peds, pnodes=pn, trains=trains, restr=restr)
+
+
+def lane_check():
+    """LANE against web/src/sim/traffic.ts LANE_W (the lanes the cars drive); 1 if they differ"""
+    import re
+    from pathlib import Path
+    ts = Path(__file__).resolve().parent.parent / "web/src/sim/traffic.ts"
+    m = re.search(r"^const LANE_W = ([0-9.]+);", ts.read_text(), re.M)
+    if not m or float(m.group(1)) != LANE:
+        print(f"lane spacing: scripts/traffic.py LANE = {LANE}, {ts.name} LANE_W = {m.group(1) if m else 'not found'}")
+        return 1
+    print(f"lane spacing: {LANE} m in scripts/traffic.py and web/src/sim/traffic.ts")
+    return 0
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["--lane-check"]:
+    sys.exit(lane_check())
 
 
 if __name__ == "__main__":  # traffic.json alone, from the last full build's volume (TRAFFICDUMP=1 FINALDUMP=1 voxelize.py)

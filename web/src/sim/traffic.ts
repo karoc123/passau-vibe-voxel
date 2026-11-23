@@ -15,7 +15,7 @@ import type { Agent, Car, Controller, PedEdge, Person, Road, RoadPose, TrafficDa
 
 export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
 const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
-const LANE_W = 3.0;
+const LANE_W = 3.0; // m between lane centres: scripts/traffic.py LANE, the lanes it checks and places (scripts/check.sh lanes)
 const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
 const BLEND = 7;
 const BOX_IN = 7, BOX_OUT = 9;
