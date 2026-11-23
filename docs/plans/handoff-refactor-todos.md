@@ -114,6 +114,8 @@ imports `fetch`; E4 moves `VoxelCollision` to the sim side).
 - **Why:** the viewer writes `person.ctl` (`nav.ts:683`, `foot.ts:173` every frame); `Traffic.keep` is one field set by
   the camera follow; `Person` has no id (hits by object identity, `life-phys.ts:728-739`); the player id is the
   constant `'local'` in `drive.ts`; `life.ts:199` writes `p.ph`.
+- **Do:** model control as a seat on an entity (ADR 0008, co-op later): a player occupies a seat (today the
+  driver's; walking as a person is the person's one seat), so more seats and roles are an addition later.
 - **Do:** `Person` gets an id; `WorldSim.players: Map<playerId, {follow?, walkingAs?, pose?}>`; commands `follow`,
   `walkAs`, `walkPose`, `release` (the walker's motion stays client-side and is sent as a pose); Traffic keeps the
   set of followed or controlled ids instead of `keep`/`ctl`; one exported `LOCAL_PLAYER`; ride and possession out of
@@ -138,7 +140,7 @@ imports `fetch`; E4 moves `VoxelCollision` to the sim side).
 
 - **Why:** only the car steps on the world tick. Boat (1/120 s), plane (own clock in the core), drone (1/120 s),
   special crafts (1/60 s) and the walker (per frame) step in their shells, each with its own `VoxelCollision`.
-- **Do:** one `CraftCore` contract (`reset(spot)`, `step(input, dt, world)`, `pose`, `drawn(alpha)`); WorldSim keeps
+- **Do:** crafts are entities with seats like road vehicles (E2), not per-player singletons; one `CraftCore` contract (`reset(spot)`, `step(input, dt, world)`, `pose`, `drawn(alpha)`); WorldSim keeps
   `crafts: Map<playerId, …>` with each craft's own fixed step (neutral); commands `enterCraft`, `craftInput`,
   `leaveCraft`; `VoxelCollision` to the sim side with cache and clock injected, in the core-deps scan; shells keep
   panel, camera, model, input mapping; the focus pause becomes neutral input. One craft group per commit: boat,

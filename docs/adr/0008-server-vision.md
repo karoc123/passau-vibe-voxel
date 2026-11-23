@@ -22,11 +22,20 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
 - **Edits live on the server, by presence.** A changed tile is the server's. It is kept while a player is near it
   and may be discarded when none is. The renderer never decides whether an edit exists; it draws what the world holds.
 - **Edits are bounded.** Not a block-building game: players may damage things (a rocket hits a wall, which is broken
-  for a while) and may build a house. Damage is temporary by default; whether a built house outlives its owner's
-  presence is open.
+  for a while) and may build a house. Damage is temporary by default; a built house outliving its owner is likely
+  later (out of scope now).
 - **Gameplay state on the server:** collisions between players' vehicles, health and damage, weapons, police and
   wanted level, missions. These are per-player and per-entity sim state, keyed by player and entity ids (ADR 0007),
   never fields the presentation writes.
+- **Co-op in vehicles is the long-term focus.** Several players share one vehicle, each in a seat with a role
+  (driver, gunner, navigator, ...). So control is per seat, not per vehicle: a vehicle entity has seats, a seat holds
+  at most one player and takes that role's input; `takeWheel` is the driver's seat of that model. On foot the game is
+  first-person.
+- **Creative mode stays** for checking and developing the world (orbit camera, free flight, teleport, debug views). In
+  the server model it is a client without authority over others (an observer or a local-only session). It must not
+  leak into the sim; if keeping it turns into a code smell, it is negotiable. Game clients are consistently the game.
+- **Out of scope for now:** persistence across sessions (built houses that outlive their builder, money, owned
+  vehicles, mission progress) and player accounts. Likely later; do not design them in yet.
 - **Language: TypeScript for now.** The sim is shared by server and client (prediction needs the same code), Rapier
   already runs as WebAssembly, and 10–50 players are within reach of one Node process. The sim stays free of three.js
   and the DOM (`core-deps`) so a hot part can later be measured and, only if needed, moved to Rust behind the same
@@ -38,3 +47,5 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
   not optional. E3 drops instance injection (one world) and gains the presence rule. F2 (walk to a vehicle) is set
   aside.
 - New gameplay (damage, weapons, police, missions) goes into the sim with ids, not into `nav/` or `view/`.
+- E2 and E4 model control as seats on an entity (one seat per vehicle for now, the driver's), so co-op roles are an
+  addition later, not a rewrite.
