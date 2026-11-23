@@ -3390,49 +3390,6 @@ def furniture(ctx):
                      water_=water_)
 
 
-STAGES = [  # (its name in the build's timing, the stage)
-    ("rasters, cell colours, OSM", rasters),
-    ("ground classes, roads, water", ground_classes),
-    ("buildings", buildings),
-    ("natural ground, cemeteries", natural_ground),
-    ("vegetation", vegetation),
-    ("fountains, beds, furniture", furniture),
-]
-ctx = Ctx()
-for _name, _run in STAGES:
-    _run(ctx)
-    stage(_name)
-# (the stages to come are module code still: what they read of the ones above)
-(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _best, _roof_f, bmask, bridge_area,
- bridge_lamps, bridge_roads, bridge_ways, cellcol, deck, deck_abs, deck_col, deck_h, deck_lay, deck_own, feats, g,
- gcol, is_road, jets, kerb_near, lamp_xy, lamps, nd_max, nd_mean, osm, parking_mask, rail_beds, render, road_lines,
- topi, trunk_ok_db, veg, vol, water_, zt) = (
-    ctx.GCTX, ctx.H, ctx.LAMP_KEYS, ctx.OPEN_CUT, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC, ctx.SANITY,
-    ctx._best, ctx._roof_f, ctx.bmask, ctx.bridge_area, ctx.bridge_lamps, ctx.bridge_roads, ctx.bridge_ways,
-    ctx.cellcol, ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_lay, ctx.deck_own, ctx.feats, ctx.g,
-    ctx.gcol, ctx.is_road, ctx.jets, ctx.kerb_near, ctx.lamp_xy, ctx.lamps, ctx.nd_max, ctx.nd_mean, ctx.osm,
-    ctx.parking_mask, ctx.rail_beds, ctx.render, ctx.road_lines, ctx.topi, ctx.trunk_ok_db, ctx.veg, ctx.vol,
-    ctx.water_, ctx.zt)
-# ---------------------------------------------------------------- bridge piers
-# The decks stood on nothing between their abutments: the A 3's kilometre over the Danube at Schalding, the rail and
-# road bridges, the footbridges over the Ilz floated over the water and the valleys. A pier is a wall across the deck
-# (as wide as the deck less PIER_INSET at each edge, PIER_T metres thick along the way) from the deck's underside down
-# to the ground, or through the river to its bed. Where OSM maps them (bridge:support=pier nodes: the Marienbrücke),
-# or a street override lists the way's spans (overrides.py `piers`, as such nodes: the A 3's Donaubrücke Schalding),
-# they stand there (in the river too), and the ways near them get no others. Elsewhere every span metres along each bridge way (by
-# bridge:structure -- of the way, or of the man_made=bridge outline it lies in -- and the way's kind; a suspension or
-# cable-stayed bridge none, a way shorter than 1.5 spans none: one span), evenly over its length. A pier is left out
-# where it would stand in the river more than PIER_WATER metres from the bank (the fairway: the cruise ships, the
-# boats, boats.py, keep further out than that), where a pier already stands within a third of a span (twin decks,
-# the sidewalks beside a carriageway: one pier under all of them), and cell by cell on a building, on a road, path or
-# track under the bridge (with PIER_CLEAR metres beside it: the traffic, the trains and the car pass), under a lower
-# bridge's way, and where the deck stands less than PIER_MIN metres over the ground or the water. (The surface models
-# do not show piers under the decks: the laser and the DOM see the deck.) Region-local: a way's stations come from its
-# whole OSM line, a pier from the cells within PIER_REACH of its station.
-PIER_INSET, PIER_WATER, PIER_CLEAR, PIER_MIN, PIER_REACH = 0.75, 25.0, 1.0, 2, 30.0
-_rail_kinds = ("rail", "tram", "light_rail", "narrow_gauge", "subway")
-
-
 def pier_span(t, struct):
     """metres between the piers of a bridge way (tags t, its bridge:structure), or None: no piers"""
     if struct in ("suspension", "cable-stayed", "cable_stayed", "arch", "simple-suspension", "floating"):
@@ -3449,246 +3406,294 @@ def pier_span(t, struct):
     return 35.0
 
 
-def bridge_piers():
-    deck_top = np.where(deck, np.round(g + deck_h), 0).astype(np.int32)  # the first free voxel over the deck
-    wd = ndimage.distance_transform_edt(water_)  # metres from the bank (0 on land)
-    clr = np.zeros((D, W), np.uint8)  # ways on the ground (and their margins)
-    burn(clr, [(l_.buffer(max(way_width(t_) if t_.get("highway") else 3.8, 2.0) / 2 + PIER_CLEAR), 1)
-               for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in _rail_kinds)
-               and not on_bridge(t_) and not underground(t_)])
-    burn(clr, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("railway") == "platform"])
-    blay = np.zeros((D, W), np.uint16)  # the lowest layer of a bridge way over the cell (+1)
-    for oid_, t_, l_, hw_ in sorted(bridge_ways, key=lambda x: -int(layer_of(x[1]) or 1)):
-        burn(blay, [(l_.buffer(hw_ + PIER_CLEAR), int(layer_of(t_) or 1) + 1)])
-    outlines = [(g_, t_.get("bridge:structure")) for _, _, t_, g_ in osm.areas_with("man_made", ("bridge",))]
-    pier = np.zeros((D, W), bool)
+def piers_vehicles(ctx):
+    """The bridges' piers and the lamps by their ways; the cars frozen from the surface model and the ortho."""
+    (LAMP_KEYS, SACRED, bmask, bridge_area, bridge_lamps, bridge_roads, bridge_ways, cellcol, deck, deck_col,
+     deck_h, deck_lay, g, is_road, kerb_near, lamp_xy, lamps, nd_max, nd_mean, osm, parking_mask, render, topi,
+     veg, vol, water_) = (
+        ctx.LAMP_KEYS, ctx.SACRED, ctx.bmask, ctx.bridge_area, ctx.bridge_lamps, ctx.bridge_roads,
+        ctx.bridge_ways, ctx.cellcol, ctx.deck, ctx.deck_col, ctx.deck_h, ctx.deck_lay, ctx.g, ctx.is_road,
+        ctx.kerb_near, ctx.lamp_xy, ctx.lamps, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.parking_mask, ctx.render,
+        ctx.topi, ctx.veg, ctx.vol, ctx.water_)
+    # ---------------------------------------------------------------- bridge piers
+    # The decks stood on nothing between their abutments: the A 3's kilometre over the Danube at Schalding, the rail and
+    # road bridges, the footbridges over the Ilz floated over the water and the valleys. A pier is a wall across the deck
+    # (as wide as the deck less PIER_INSET at each edge, PIER_T metres thick along the way) from the deck's underside down
+    # to the ground, or through the river to its bed. Where OSM maps them (bridge:support=pier nodes: the Marienbrücke),
+    # or a street override lists the way's spans (overrides.py `piers`, as such nodes: the A 3's Donaubrücke Schalding),
+    # they stand there (in the river too), and the ways near them get no others. Elsewhere every span metres along each bridge way (by
+    # bridge:structure -- of the way, or of the man_made=bridge outline it lies in -- and the way's kind; a suspension or
+    # cable-stayed bridge none, a way shorter than 1.5 spans none: one span), evenly over its length. A pier is left out
+    # where it would stand in the river more than PIER_WATER metres from the bank (the fairway: the cruise ships, the
+    # boats, boats.py, keep further out than that), where a pier already stands within a third of a span (twin decks,
+    # the sidewalks beside a carriageway: one pier under all of them), and cell by cell on a building, on a road, path or
+    # track under the bridge (with PIER_CLEAR metres beside it: the traffic, the trains and the car pass), under a lower
+    # bridge's way, and where the deck stands less than PIER_MIN metres over the ground or the water. (The surface models
+    # do not show piers under the decks: the laser and the DOM see the deck.) Region-local: a way's stations come from its
+    # whole OSM line, a pier from the cells within PIER_REACH of its station.
+    PIER_INSET, PIER_WATER, PIER_CLEAR, PIER_MIN, PIER_REACH = 0.75, 25.0, 1.0, 2, 30.0
+    _rail_kinds = ("rail", "tram", "light_rail", "narrow_gauge", "subway")
 
-    def at(x, y):
-        c, r = int(math.floor(x)), int(math.floor(y))
-        return (r, c) if 0 <= r < D and 0 <= c < W else None
+    def bridge_piers():
+        deck_top = np.where(deck, np.round(g + deck_h), 0).astype(np.int32)  # the first free voxel over the deck
+        wd = ndimage.distance_transform_edt(water_)  # metres from the bank (0 on land)
+        clr = np.zeros((D, W), np.uint8)  # ways on the ground (and their margins)
+        burn(clr, [(l_.buffer(max(way_width(t_) if t_.get("highway") else 3.8, 2.0) / 2 + PIER_CLEAR), 1)
+                   for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in _rail_kinds)
+                   and not on_bridge(t_) and not underground(t_)])
+        burn(clr, [(g_, 1) for _, _, t_, g_ in osm.areas if t_.get("railway") == "platform"])
+        blay = np.zeros((D, W), np.uint16)  # the lowest layer of a bridge way over the cell (+1)
+        for oid_, t_, l_, hw_ in sorted(bridge_ways, key=lambda x: -int(layer_of(x[1]) or 1)):
+            burn(blay, [(l_.buffer(hw_ + PIER_CLEAR), int(layer_of(t_) or 1) + 1)])
+        outlines = [(g_, t_.get("bridge:structure")) for _, _, t_, g_ in osm.areas_with("man_made", ("bridge",))]
+        pier = np.zeros((D, W), bool)
 
-    def place(line, dist, layer, span, thick, mapped=False):
-        """a pier across the deck at dist along line (mapped: OSM's, wherever it stands); False where none stands"""
-        p, q = line.interpolate(max(dist - 1, 0)), line.interpolate(min(dist + 1, line.length))
-        P = line.interpolate(dist)
-        tx, ty = q.x - p.x, q.y - p.y
-        tl = math.hypot(tx, ty)
-        if tl < 1e-6:
-            return False
-        tx, ty = tx / tl, ty / tl
-        nx, ny = -ty, tx
-        ref = None
-        for a in (0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2):
-            rc = at(P.x + nx * a, P.y + ny * a)
-            if rc and deck[rc] and deck_lay[rc] == layer + 1:
-                ref = int(deck_top[rc]); break
-        rc = at(P.x, P.y)
-        if ref is None:
-            return False
-        if rc is None or (water_[rc] and wd[rc] > PIER_WATER and not mapped):
-            return False
-        # across the deck: as far as deck of this level goes, over gaps of up to 6 m (between twin carriageways)
-        ext = [0.0, 0.0]
-        for k, sgn in enumerate((-1, 1)):
-            gap = 0.0
-            for a in np.arange(0.5, PIER_REACH, 0.5):
-                rc = at(P.x + nx * a * sgn, P.y + ny * a * sgn)
-                if rc and deck[rc] and abs(int(deck_top[rc]) - ref) <= 2:
-                    ext[k], gap = a, 0.0
-                else:
-                    gap += 0.5
-                    if gap > 6:
-                        break
-        a0, a1 = -ext[0] + PIER_INSET, ext[1] - PIER_INSET
-        if a1 - a0 < 1:
-            a0, a1 = (a0 + a1) / 2 - 0.5, (a0 + a1) / 2 + 0.5
-        # a pier within a third of a span already (another way on the same deck)
-        for b in np.arange(-span / 3, span / 3 + 0.01, 1.0):
-            for a in np.arange(a0, a1 + 0.01, 1.0):
-                rc = at(P.x + nx * a + tx * b, P.y + ny * a + ty * b)
-                if rc and pier[rc]:
-                    return False
-        cells = set()
-        for a in np.arange(a0, a1 + 0.01, 0.5):
-            for b in np.arange(-thick / 2 + 0.25, thick / 2, 0.5):
-                rc = at(P.x + nx * a + tx * b, P.y + ny * a + ty * b)
-                if rc and deck[rc] and abs(int(deck_top[rc]) - ref) <= 2:
-                    cells.add(rc)
-        cells = [rc for rc in sorted(cells) if not bmask[rc] and not clr[rc] and not (0 < blay[rc] < layer + 1)
-                 and deck_top[rc] - 2 - g[rc] >= PIER_MIN]
-        if not cells:
-            return False
-        for rc in cells:
-            pier[rc] = True
-        return True
+        def at(x, y):
+            c, r = int(math.floor(x)), int(math.floor(y))
+            return (r, c) if 0 <= r < D and 0 <= c < W else None
 
-    n_osm = n_der = 0
-    supports = [p_ for _, t_, p_ in osm.nodes if t_.get("bridge:support") == "pier"]
-    mapped = set()
-    for p_ in supports:
-        near = [(l_.distance(p_), i, oid_, t_, l_, hw_) for i, (oid_, t_, l_, hw_) in enumerate(bridge_ways)
-                if l_.distance(p_) <= hw_ + 10]
-        for _, i, *_ in near:
-            mapped.add(i)
-        if near:
-            _, i, oid_, t_, l_, hw_ = min(near, key=lambda x: (x[0], x[2]))
-            n_osm += place(l_, l_.project(p_), int(layer_of(t_) or 1), 20.0, 2.0, True)
-    order = sorted(range(len(bridge_ways)), key=lambda i: (-bridge_ways[i][2].length, bridge_ways[i][0]))
-    for i in order:
-        if i in mapped:
+        def place(line, dist, layer, span, thick, mapped=False):
+            """a pier across the deck at dist along line (mapped: OSM's, wherever it stands); False where none stands"""
+            p, q = line.interpolate(max(dist - 1, 0)), line.interpolate(min(dist + 1, line.length))
+            P = line.interpolate(dist)
+            tx, ty = q.x - p.x, q.y - p.y
+            tl = math.hypot(tx, ty)
+            if tl < 1e-6:
+                return False
+            tx, ty = tx / tl, ty / tl
+            nx, ny = -ty, tx
+            ref = None
+            for a in (0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2):
+                rc = at(P.x + nx * a, P.y + ny * a)
+                if rc and deck[rc] and deck_lay[rc] == layer + 1:
+                    ref = int(deck_top[rc]); break
+            rc = at(P.x, P.y)
+            if ref is None:
+                return False
+            if rc is None or (water_[rc] and wd[rc] > PIER_WATER and not mapped):
+                return False
+            # across the deck: as far as deck of this level goes, over gaps of up to 6 m (between twin carriageways)
+            ext = [0.0, 0.0]
+            for k, sgn in enumerate((-1, 1)):
+                gap = 0.0
+                for a in np.arange(0.5, PIER_REACH, 0.5):
+                    rc = at(P.x + nx * a * sgn, P.y + ny * a * sgn)
+                    if rc and deck[rc] and abs(int(deck_top[rc]) - ref) <= 2:
+                        ext[k], gap = a, 0.0
+                    else:
+                        gap += 0.5
+                        if gap > 6:
+                            break
+            a0, a1 = -ext[0] + PIER_INSET, ext[1] - PIER_INSET
+            if a1 - a0 < 1:
+                a0, a1 = (a0 + a1) / 2 - 0.5, (a0 + a1) / 2 + 0.5
+            # a pier within a third of a span already (another way on the same deck)
+            for b in np.arange(-span / 3, span / 3 + 0.01, 1.0):
+                for a in np.arange(a0, a1 + 0.01, 1.0):
+                    rc = at(P.x + nx * a + tx * b, P.y + ny * a + ty * b)
+                    if rc and pier[rc]:
+                        return False
+            cells = set()
+            for a in np.arange(a0, a1 + 0.01, 0.5):
+                for b in np.arange(-thick / 2 + 0.25, thick / 2, 0.5):
+                    rc = at(P.x + nx * a + tx * b, P.y + ny * a + ty * b)
+                    if rc and deck[rc] and abs(int(deck_top[rc]) - ref) <= 2:
+                        cells.add(rc)
+            cells = [rc for rc in sorted(cells) if not bmask[rc] and not clr[rc] and not (0 < blay[rc] < layer + 1)
+                     and deck_top[rc] - 2 - g[rc] >= PIER_MIN]
+            if not cells:
+                return False
+            for rc in cells:
+                pier[rc] = True
+            return True
+
+        n_osm = n_der = 0
+        supports = [p_ for _, t_, p_ in osm.nodes if t_.get("bridge:support") == "pier"]
+        mapped = set()
+        for p_ in supports:
+            near = [(l_.distance(p_), i, oid_, t_, l_, hw_) for i, (oid_, t_, l_, hw_) in enumerate(bridge_ways)
+                    if l_.distance(p_) <= hw_ + 10]
+            for _, i, *_ in near:
+                mapped.add(i)
+            if near:
+                _, i, oid_, t_, l_, hw_ = min(near, key=lambda x: (x[0], x[2]))
+                n_osm += place(l_, l_.project(p_), int(layer_of(t_) or 1), 20.0, 2.0, True)
+        order = sorted(range(len(bridge_ways)), key=lambda i: (-bridge_ways[i][2].length, bridge_ways[i][0]))
+        for i in order:
+            if i in mapped:
+                continue
+            oid_, t_, l_, hw_ = bridge_ways[i]
+            struct = t_.get("bridge:structure")
+            if struct is None:
+                mid = l_.interpolate(0.5, normalized=True)
+                struct = next((s_ for o_, s_ in outlines if s_ and o_.contains(mid)), None)
+            span = pier_span(t_, struct)
+            if span is None or l_.length < 1.5 * span:
+                continue
+            n = int(round(l_.length / span))
+            thick = 2.0 if span >= 30 else 1.0
+            for k in range(1, n):
+                n_der += place(l_, l_.length * k / n, int(layer_of(t_) or 1), span, thick)
+        # down from the deck's underside through the air and the river to the ground or the bed
+        rr, cc = np.nonzero(pier)
+        top = deck_top[rr, cc] - 2
+        z = top - 1
+        act = z >= 0
+        n_vox = 0
+        while act.any():
+            v = vol[np.maximum(z, 0), rr, cc]
+            ok = act & ((v == 0) & (z >= g[rr, cc]) | (v == C["water"]))
+            vol[z[ok], rr[ok], cc[ok]] = C["pier"]
+            n_vox += int(ok.sum())
+            act = ok & (z > 0)
+            z = z - 1
+        note(f"bridge piers: {n_osm} from OSM, {n_der} derived; {len(rr)} cells, {n_vox} voxels")
+        return pier
+
+    bridge_piers()
+    # bridge pylons (a cable-stayed bridge's mast): compact LiDAR blobs far above the deck inside a bridge
+    pyl = (bridge_area > 0) & (nd_max > np.where(deck_h > 0, deck_h, nd_mean) + 45) & ~bmask  # the stays fan out low; only the mast stands this high
+    pyl = ndimage.binary_opening(pyl, iterations=2)  # the cable-stay fan is a thin sheet in the LiDAR; the mast is thick
+    lab_, n_ = ndimage.label(pyl)
+    n_pyl = 0
+    for i_, sl in enumerate(ndimage.find_objects(lab_), 1):
+        m_ = lab_[sl] == i_
+        if m_.sum() < 6 or max(m_.shape) > 25:  # a mast is compact; a long sheet is the cable fan
             continue
-        oid_, t_, l_, hw_ = bridge_ways[i]
-        struct = t_.get("bridge:structure")
-        if struct is None:
-            mid = l_.interpolate(0.5, normalized=True)
-            struct = next((s_ for o_, s_ in outlines if s_ and o_.contains(mid)), None)
-        span = pier_span(t_, struct)
-        if span is None or l_.length < 1.5 * span:
+        for r_, c_ in zip(*np.nonzero(m_)):
+            r_, c_ = r_ + sl[0].start, c_ + sl[1].start
+            z0_, z1_ = int(g[r_, c_]), int(g[r_, c_] + round(float(nd_max[r_, c_])))
+            vol[z0_:z1_, r_, c_] = np.where(vol[z0_:z1_, r_, c_] == 0, C["fence"], vol[z0_:z1_, r_, c_])
+        n_pyl += 1
+    note("bridge pylons from LiDAR:", n_pyl)
+    # lamps on the bridges: OSM often maps none on the river bridges, but they
+    # are lit -- put one every 32 m on each kerb of the deck, unless OSM has a lamp within 12 m (none on a dark road's
+    # bridge: ways.unlit, as the streets' lamps). A kerb is
+    # deck that carries no way of its own, with no carriageway or track within 4 m beyond it: the inner side of a
+    # carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
+    _bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])
+    # OSM's lamps by the bridge ways (street furniture above) stand on the deck's top: on the nearest deck cell off the
+    # carriageway and the tracks within 4 m of the node, else on the deck cell nearest the kerb (the edge of a deck that
+    # is carriageway from edge to edge). One as near a way on the ground as the bridge way (by a street under the bridge)
+    # stands on the ground, where no deck over it or right beside it is lower than its head; and one with no deck within
+    # 4 m too
+    _od, (_oi, _oj) = ndimage.distance_transform_edt(~deck, return_indices=True)
+    _of, (_fi, _fj) = ndimage.distance_transform_edt(~(deck & ~_bed), return_indices=True)
+    n_ol = 0
+    for oid, t, p, d_br, d_gr in bridge_lamps:
+        c0, r0 = int(p.x), int(p.y)
+        kc, kr = kerb(kerb_near, c0, r0) or (c0, r0)
+        hgt = lamp_height(is_road, t, kc, kr)
+        room = _od[kr, kc] > 1.5 or deck_h[_oi[kr, kc], _oj[kr, kc]] >= hgt + 1  # (no deck over or beside the post under its head)
+        if _od[r0, c0] <= 4 and not (room and d_gr <= d_br + 1.5):
+            r, c = (int(_fi[r0, c0]), int(_fj[r0, c0])) if _of[r0, c0] <= 4 else (int(_oi[kr, kc]), int(_oj[kr, kc]))
+            if not bmask[r, c]:
+                stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c] + round(float(deck_h[r, c]))), hgt, [0, oid])
+                n_ol += 1
+        elif kerb(kerb_near, c0, r0) and not bmask[kr, kc]:
+            stand_lamp(vol, lamps, LAMP_KEYS, kc, kr, int(g[kr, kc]), hgt, [0, oid])
+    note("OSM's lamps by the bridge ways:", n_ol, "on the decks,", len(bridge_lamps) - n_ol, "on the ground or none")
+    n_bl = 0
+    for line, w, i_br in bridge_roads:
+        for k_, dist in enumerate(np.arange(10, line.length - 6, 32.0)):
+            p = line.interpolate(dist)
+            q_ = line.interpolate(min(dist + 1, line.length))
+            tx, ty = q_.x - p.x, q_.y - p.y
+            tl = max(np.hypot(tx, ty), 1e-6)
+            for side in (-1, 1):
+                off = side * (w / 2 + 0.4)
+                c, r = int(p.x - ty / tl * off), int(p.y + tx / tl * off)
+                if not (0 <= c < W and 0 <= r < D) or not deck[r, c] or _bed[r, c]:
+                    continue
+                if any(_bed[min(max(int(p.y + tx / tl * (off + side * d_)), 0), D - 1), min(max(int(p.x - ty / tl * (off + side * d_)), 0), W - 1)]
+                       for d_ in (1, 2, 3, 4)):
+                    continue
+                if len(lamp_xy) and np.min(np.hypot(lamp_xy[:, 0] - c, lamp_xy[:, 1] - r)) < 12:
+                    continue
+                z0 = int(g[r, c] + round(float(deck_h[r, c])))
+                vol[z0:z0 + 8, r, c] = np.where(vol[z0:z0 + 8, r, c] == 0, C["pole"], vol[z0:z0 + 8, r, c])
+                vol[z0 + 8, r, c] = C["lamp"]
+                lamps.append((c, r, int(z0 + 8)))
+                LAMP_KEYS.append([2, i_br, k_, side])
+                lamp_xy = np.vstack([lamp_xy, [c, r]])
+                n_bl += 1
+    note("inferred lamps on bridge decks (OSM has almost none):", n_bl)
+
+    # ---------------------------------------------------------------- vehicles frozen from the surface model + ortho
+    # only parked cars stay frozen; cars caught mid-carriageway by the survey flight are replaced by the live simulation
+    veh = (~bmask) & (~veg) & (parking_mask > 0) & (nd_mean > 1.1) & (nd_mean < 4.2)
+    lab, n = ndimage.label(veh)
+    objs = ndimage.find_objects(lab)
+    n_cars = n_bus = 0
+    for i, sl in enumerate(objs, 1):
+        m = lab[sl] == i
+        area = int(m.sum())
+        if area < 4 or area > 70:
             continue
-        n = int(round(l_.length / span))
-        thick = 2.0 if span >= 30 else 1.0
-        for k in range(1, n):
-            n_der += place(l_, l_.length * k / n, int(layer_of(t_) or 1), span, thick)
-    # down from the deck's underside through the air and the river to the ground or the bed
-    rr, cc = np.nonzero(pier)
-    top = deck_top[rr, cc] - 2
-    z = top - 1
-    act = z >= 0
-    n_vox = 0
-    while act.any():
-        v = vol[np.maximum(z, 0), rr, cc]
-        ok = act & ((v == 0) & (z >= g[rr, cc]) | (v == C["water"]))
-        vol[z[ok], rr[ok], cc[ok]] = C["pier"]
-        n_vox += int(ok.sum())
-        act = ok & (z > 0)
-        z = z - 1
-    note(f"bridge piers: {n_osm} from OSM, {n_der} derived; {len(rr)} cells, {n_vox} voxels")
-    return pier
+        rr, cc = np.nonzero(m)
+        rr, cc = rr + sl[0].start, cc + sl[1].start
+        hmean = float(nd_mean[rr, cc].mean())
+        col = np.median(cellcol[rr, cc], axis=0)
+        hsv = list(colorsys.rgb_to_hsv(*(col / 255)))
+        hsv[1] = min(1, hsv[1] * 1.4)
+        hsv[2] = min(1, hsv[2] * 1.1)
+        col = tuple(int(v * 255) for v in colorsys.hsv_to_rgb(*hsv))
+        idx = pal(col, M_CAR, q=16)
+        big = area > 22 and hmean > 2.4
+        z0 = g[rr, cc]
+        vol[z0, rr, cc] = idx
+        if big:
+            vol[z0 + 1, rr, cc] = idx
+            vol[z0 + 2, rr, cc] = pal((235, 235, 235), M_CAR)
+            n_bus += 1
+        else:
+            # cabin: inner cells only
+            er = ndimage.binary_erosion(m)
+            r2, c2 = np.nonzero(er)
+            if len(r2):
+                vol[g[r2 + sl[0].start, c2 + sl[1].start] + 1, r2 + sl[0].start, c2 + sl[1].start] = pal((60, 72, 86), M_GLASS)
+            n_cars += 1
+    note("vehicles from LiDAR:", n_cars, "cars,", n_bus, "buses/trams/trucks")
+
+    # churches' walls are the plain classic material (no grid of office storeys): without windows of their own they read
+    # as blank blocks. Tall windows on every straight outer edge, a second
+    # row under the eaves of the tall ones; curated churches (passau.py) redraw theirs later
+    _win = pal((58, 70, 68), 21)
+    n_cw = 0
+    for f in render:
+        t_ = f["tags"]
+        if f["part"] or f["geom"].geom_type != "Polygon" or len(f["rr"]) < 150 or \
+                not (t_.get("building") in SACRED or t_.get("amenity") == "place_of_worship"):
+            continue
+        h30 = float(np.percentile(topi[f["rr"], f["cc"]], 30))
+        if h30 < 9:
+            continue
+        rows = [(3, int(min(7, h30 - 5)))] + ([(int(h30) - 7, 4)] if h30 >= 20 else [])
+        n_cw += landmarks.edge_windows(vol, g, f["geom"], _win, rows, 4.5)
+    note("church windows:", n_cw)
 
 
-bridge_piers()
-# bridge pylons (a cable-stayed bridge's mast): compact LiDAR blobs far above the deck inside a bridge
-pyl = (bridge_area > 0) & (nd_max > np.where(deck_h > 0, deck_h, nd_mean) + 45) & ~bmask  # the stays fan out low; only the mast stands this high
-pyl = ndimage.binary_opening(pyl, iterations=2)  # the cable-stay fan is a thin sheet in the LiDAR; the mast is thick
-lab_, n_ = ndimage.label(pyl)
-n_pyl = 0
-for i_, sl in enumerate(ndimage.find_objects(lab_), 1):
-    m_ = lab_[sl] == i_
-    if m_.sum() < 6 or max(m_.shape) > 25:  # a mast is compact; a long sheet is the cable fan
-        continue
-    for r_, c_ in zip(*np.nonzero(m_)):
-        r_, c_ = r_ + sl[0].start, c_ + sl[1].start
-        z0_, z1_ = int(g[r_, c_]), int(g[r_, c_] + round(float(nd_max[r_, c_])))
-        vol[z0_:z1_, r_, c_] = np.where(vol[z0_:z1_, r_, c_] == 0, C["fence"], vol[z0_:z1_, r_, c_])
-    n_pyl += 1
-note("bridge pylons from LiDAR:", n_pyl)
-# lamps on the bridges: OSM often maps none on the river bridges, but they
-# are lit -- put one every 32 m on each kerb of the deck, unless OSM has a lamp within 12 m (none on a dark road's
-# bridge: ways.unlit, as the streets' lamps). A kerb is
-# deck that carries no way of its own, with no carriageway or track within 4 m beyond it: the inner side of a
-# carriageway with tram tracks beside it has none, and its lamps stood in the trams' way
-_bed = np.isin(deck_col, [C["asphalt"], C["mark"], C["trambed"], C["ballast"], C["rail"]])
-# OSM's lamps by the bridge ways (street furniture above) stand on the deck's top: on the nearest deck cell off the
-# carriageway and the tracks within 4 m of the node, else on the deck cell nearest the kerb (the edge of a deck that
-# is carriageway from edge to edge). One as near a way on the ground as the bridge way (by a street under the bridge)
-# stands on the ground, where no deck over it or right beside it is lower than its head; and one with no deck within
-# 4 m too
-_od, (_oi, _oj) = ndimage.distance_transform_edt(~deck, return_indices=True)
-_of, (_fi, _fj) = ndimage.distance_transform_edt(~(deck & ~_bed), return_indices=True)
-n_ol = 0
-for oid, t, p, d_br, d_gr in bridge_lamps:
-    c0, r0 = int(p.x), int(p.y)
-    kc, kr = kerb(kerb_near, c0, r0) or (c0, r0)
-    hgt = lamp_height(is_road, t, kc, kr)
-    room = _od[kr, kc] > 1.5 or deck_h[_oi[kr, kc], _oj[kr, kc]] >= hgt + 1  # (no deck over or beside the post under its head)
-    if _od[r0, c0] <= 4 and not (room and d_gr <= d_br + 1.5):
-        r, c = (int(_fi[r0, c0]), int(_fj[r0, c0])) if _of[r0, c0] <= 4 else (int(_oi[kr, kc]), int(_oj[kr, kc]))
-        if not bmask[r, c]:
-            stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c] + round(float(deck_h[r, c]))), hgt, [0, oid])
-            n_ol += 1
-    elif kerb(kerb_near, c0, r0) and not bmask[kr, kc]:
-        stand_lamp(vol, lamps, LAMP_KEYS, kc, kr, int(g[kr, kc]), hgt, [0, oid])
-note("OSM's lamps by the bridge ways:", n_ol, "on the decks,", len(bridge_lamps) - n_ol, "on the ground or none")
-n_bl = 0
-for line, w, i_br in bridge_roads:
-    for k_, dist in enumerate(np.arange(10, line.length - 6, 32.0)):
-        p = line.interpolate(dist)
-        q_ = line.interpolate(min(dist + 1, line.length))
-        tx, ty = q_.x - p.x, q_.y - p.y
-        tl = max(np.hypot(tx, ty), 1e-6)
-        for side in (-1, 1):
-            off = side * (w / 2 + 0.4)
-            c, r = int(p.x - ty / tl * off), int(p.y + tx / tl * off)
-            if not (0 <= c < W and 0 <= r < D) or not deck[r, c] or _bed[r, c]:
-                continue
-            if any(_bed[min(max(int(p.y + tx / tl * (off + side * d_)), 0), D - 1), min(max(int(p.x - ty / tl * (off + side * d_)), 0), W - 1)]
-                   for d_ in (1, 2, 3, 4)):
-                continue
-            if len(lamp_xy) and np.min(np.hypot(lamp_xy[:, 0] - c, lamp_xy[:, 1] - r)) < 12:
-                continue
-            z0 = int(g[r, c] + round(float(deck_h[r, c])))
-            vol[z0:z0 + 8, r, c] = np.where(vol[z0:z0 + 8, r, c] == 0, C["pole"], vol[z0:z0 + 8, r, c])
-            vol[z0 + 8, r, c] = C["lamp"]
-            lamps.append((c, r, int(z0 + 8)))
-            LAMP_KEYS.append([2, i_br, k_, side])
-            lamp_xy = np.vstack([lamp_xy, [c, r]])
-            n_bl += 1
-note("inferred lamps on bridge decks (OSM has almost none):", n_bl)
-
-# ---------------------------------------------------------------- vehicles frozen from the surface model + ortho
-# only parked cars stay frozen; cars caught mid-carriageway by the survey flight are replaced by the live simulation
-veh = (~bmask) & (~veg) & (parking_mask > 0) & (nd_mean > 1.1) & (nd_mean < 4.2)
-lab, n = ndimage.label(veh)
-objs = ndimage.find_objects(lab)
-n_cars = n_bus = 0
-for i, sl in enumerate(objs, 1):
-    m = lab[sl] == i
-    area = int(m.sum())
-    if area < 4 or area > 70:
-        continue
-    rr, cc = np.nonzero(m)
-    rr, cc = rr + sl[0].start, cc + sl[1].start
-    hmean = float(nd_mean[rr, cc].mean())
-    col = np.median(cellcol[rr, cc], axis=0)
-    hsv = list(colorsys.rgb_to_hsv(*(col / 255)))
-    hsv[1] = min(1, hsv[1] * 1.4)
-    hsv[2] = min(1, hsv[2] * 1.1)
-    col = tuple(int(v * 255) for v in colorsys.hsv_to_rgb(*hsv))
-    idx = pal(col, M_CAR, q=16)
-    big = area > 22 and hmean > 2.4
-    z0 = g[rr, cc]
-    vol[z0, rr, cc] = idx
-    if big:
-        vol[z0 + 1, rr, cc] = idx
-        vol[z0 + 2, rr, cc] = pal((235, 235, 235), M_CAR)
-        n_bus += 1
-    else:
-        # cabin: inner cells only
-        er = ndimage.binary_erosion(m)
-        r2, c2 = np.nonzero(er)
-        if len(r2):
-            vol[g[r2 + sl[0].start, c2 + sl[1].start] + 1, r2 + sl[0].start, c2 + sl[1].start] = pal((60, 72, 86), M_GLASS)
-        n_cars += 1
-note("vehicles from LiDAR:", n_cars, "cars,", n_bus, "buses/trams/trucks")
-
-# churches' walls are the plain classic material (no grid of office storeys): without windows of their own they read
-# as blank blocks. Tall windows on every straight outer edge, a second
-# row under the eaves of the tall ones; curated churches (passau.py) redraw theirs later
-_win = pal((58, 70, 68), 21)
-n_cw = 0
-for f in render:
-    t_ = f["tags"]
-    if f["part"] or f["geom"].geom_type != "Polygon" or len(f["rr"]) < 150 or \
-            not (t_.get("building") in SACRED or t_.get("amenity") == "place_of_worship"):
-        continue
-    h30 = float(np.percentile(topi[f["rr"], f["cc"]], 30))
-    if h30 < 9:
-        continue
-    rows = [(3, int(min(7, h30 - 5)))] + ([(int(h30) - 7, 4)] if h30 >= 20 else [])
-    n_cw += landmarks.edge_windows(vol, g, f["geom"], _win, rows, 4.5)
-note("church windows:", n_cw)
-
-stage("bridge piers, vehicles")
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+    ("ground classes, roads, water", ground_classes),
+    ("buildings", buildings),
+    ("natural ground, cemeteries", natural_ground),
+    ("vegetation", vegetation),
+    ("fountains, beds, furniture", furniture),
+    ("bridge piers, vehicles", piers_vehicles),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
+# (the stages to come are module code still: what they read of the ones above)
+(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SAG_SRC, SANITY, _best, _roof_f, bmask, cellcol, deck, deck_abs,
+ deck_col, deck_h, deck_own, feats, g, gcol, is_road, jets, lamps, nd_mean, osm, rail_beds, render, road_lines, topi,
+ trunk_ok_db, vol, zt) = (
+    ctx.GCTX, ctx.H, ctx.LAMP_KEYS, ctx.OPEN_CUT, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SAG_SRC, ctx.SANITY, ctx._best,
+    ctx._roof_f, ctx.bmask, ctx.cellcol, ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.feats,
+    ctx.g, ctx.gcol, ctx.is_road, ctx.jets, ctx.lamps, ctx.nd_mean, ctx.osm, ctx.rail_beds, ctx.render,
+    ctx.road_lines, ctx.topi, ctx.trunk_ok_db, ctx.vol, ctx.zt)
 # ---------------------------------------------------------------- curated landmark details
 landmarks.apply_zones(vol, g, feats, pal, bmask, note)
 overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
