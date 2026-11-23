@@ -8,8 +8,8 @@ import { TILE_MAGIC as MAGIC, TILE_N } from '../src/tile-data';
 import { encodeCaps } from '../src/core/surface';
 import { terrainTile, terrainPalette } from '../src/physics/rapier/terrain';
 import { component, type Vec3 } from '../src/core/vec';
-import { PLANE, type PlaneWorld } from '../src/nav/plane-flight';
-import type { ImpactKind, Sweep } from '../src/nav/sweep';
+import { PLANE, type PlaneWorld } from '../src/sim/craft/plane-flight';
+import type { ImpactKind, Sweep } from '../src/sim/craft/sweep';
 
 // a column's run: [bottom, length, material], bottom up
 export type Run = [number, number, number];

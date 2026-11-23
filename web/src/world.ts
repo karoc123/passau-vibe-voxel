@@ -90,7 +90,7 @@ export class World {
     return n && [n, Math.floor((x - n.x0) / n.s) + 1 + n.S * (Math.floor((r - n.y0) / n.s) + 1)];
   }
 
-  // the top of the water at (x, r) as nav/river.ts WaterColumns asks it (the river traffic floats on it): the top of a
+  // the top of the water at (x, r) as sim/river.ts WaterColumns asks it (the river traffic floats on it): the top of a
   // water run reaching the ground's top (as VoxelCollision.waterColumn), -1 none; null: not loaded (or off the map)
   waterColumn(x: number, r: number): { water: number } | null {
     const c = this.column(x, r);

@@ -6,7 +6,7 @@ import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
 import { makeCraftModel } from './craft-models';
 import { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } from './craft-collision';
-import { CraftMotion, GLIDER_HEIGHT, type CraftInput, type CraftKind, type CraftStep } from './craft-motion';
+import { CraftMotion, GLIDER_HEIGHT, type CraftInput, type CraftKind, type CraftStep } from '../sim/craft/craft-motion';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
 import { stickAxis, TouchSticks } from './touch-sticks';

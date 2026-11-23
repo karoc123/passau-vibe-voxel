@@ -1,4 +1,4 @@
-// The player's boat (src/nav/boat-motion.ts) headless: checks/boat-checks.ts. On a synthetic world served as real node
+// The player's boat (src/sim/craft/boat-motion.ts) headless: checks/boat-checks.ts. On a synthetic world served as real node
 // files (a channel, a bridge, a footbridge too low, a pier): top speed, coasting, turning and drifting, reverse, the
 // bank and the pier bounced off, under the bridge, put in from the land, unstuck. Then, on the real data (public/data)
 // if it is there: put in near the Altstadt facing downstream and a minute's lap there, east under the Schanzlbrücke,

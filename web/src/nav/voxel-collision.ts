@@ -1,5 +1,5 @@
 import { component, type Vec3 } from '../core/vec';
-import type { ImpactKind, Sweep } from './sweep';
+import type { ImpactKind, Sweep } from '../sim/craft/sweep';
 import type { Meta } from '../types';
 import type { RawColumns } from '../tile-data';
 import { liveEdits } from '../core/live-edits';
@@ -18,7 +18,7 @@ type Runs = { offsets: Uint32Array; data: Uint16Array };
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
 const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
   ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: capField(N, v.base) });
-export type { ImpactKind, Sweep } from './sweep';
+export type { ImpactKind, Sweep } from '../sim/craft/sweep';
 
 function runsOf(columns: RawColumns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
@@ -224,7 +224,7 @@ export class VoxelCollision {
     return result();
   }
 
-  // The boat's view of column (x, z) (nav/boat-motion.ts): the top of its water (the river is the ground's top
+  // The boat's view of column (x, z) (sim/craft/boat-motion.ts): the top of its water (the river is the ground's top
   // voxel(s), physics/rapier/terrain.ts) or -1 where the ground's top is no water, and whether anything solid is in it
   // between y0 and y1 (the ground: up to the water's bottom; the runs over it, foliage that is no grass; the water not).
   // null: not loaded.

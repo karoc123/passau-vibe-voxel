@@ -8,7 +8,7 @@
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
 import { BoatTraffic, type BoatData } from './boat-traffic';
-import type { WaterColumns } from '../nav/river';
+import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
@@ -80,7 +80,7 @@ type Density = { cars: number; peds: number; bikes: number };
 
 export class Traffic {
   ground: Ground | null = null;
-  // the world's water columns the boats float on (nav/river.ts; world.ts World); null: none, at a fixed top
+  // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
   water: WaterColumns | null = null;
   keep: Car | Person | null = null;
   bodies: TrafficBodies | null = null;

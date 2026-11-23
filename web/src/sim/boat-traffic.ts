@@ -1,6 +1,6 @@
 import { hash, smooth, wrapAngle } from '../core/num';
 import { at, prepPath, pt, type Path } from './path';
-import { waterTop, type WaterColumns } from '../nav/river';
+import { waterTop, type WaterColumns } from './river';
 
 // Boats on the rivers (scripts/boats.py -> data/boats.json):
 // - river-cruise ships moored along the old town's Danube quay (the OSM berths: Zollände, A14, Liegestelle 3..8), bow
@@ -15,7 +15,7 @@ import { waterTop, type WaterColumns } from '../nav/river';
 //   the rest lie rafted alongside the pier; a boat back from a trip ties up behind the ones waiting, and when the one at
 //   the pier casts off the next slides in.
 // The routes and timetables are sampled on the world tick, from its day and hour. Each vessel floats on the water's top
-// where it is (nav/river.ts waterTop: the voxels' water, as the world's columns have it); where that is not known (no
+// where it is (sim/river.ts waterTop: the voxels' water, as the world's columns have it); where that is not known (no
 // columns given, its tile not in, off the map) at the last top it had, else the last any vessel had, else WATER.
 // On a partial map (the check fixtures) any part may be missing: no berths (no cruise ships), an empty tour (no
 // excursion boats) or no fairway (the cruise ships stay moored all day).

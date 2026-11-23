@@ -9,7 +9,7 @@
 // Pure: no DOM, no three.js; the world through one query (BoatWorld, which VoxelCollision.waterColumn answers). Runs
 // in node (tools/boat.mjs, checks/boat-checks.ts) as in the viewer.
 
-import { SafeTrail } from '../core/safe-trail';
+import { SafeTrail } from '../../core/safe-trail';
 
 export interface BoatInput {
   throttle: number; // -1..1: forwards, backwards (braking first while still going forwards)

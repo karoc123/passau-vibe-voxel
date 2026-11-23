@@ -1,6 +1,6 @@
-import { GLIDER_HEIGHT, HOVER_HEIGHT, type CraftKind, type CraftMotionWorld } from './craft-motion';
-import { waterTop } from './river';
-import type { Sweep } from './sweep';
+import { GLIDER_HEIGHT, HOVER_HEIGHT, type CraftKind, type CraftMotionWorld } from '../sim/craft/craft-motion';
+import { waterTop } from '../sim/river';
+import type { Sweep } from '../sim/craft/sweep';
 import type { VoxelCollision } from './voxel-collision';
 
 export const CRAFT_RADIUS = { hovercraft: 0.53, helicopter: 0.59, paraglider: 0.45 };

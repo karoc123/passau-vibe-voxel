@@ -1,4 +1,4 @@
-import { set, vec3, type Vec3 } from '../core/vec';
+import { set, vec3, type Vec3 } from '../../core/vec';
 import type { Sweep } from './sweep';
 
 export type CraftKind = 'hovercraft' | 'helicopter' | 'paraglider';

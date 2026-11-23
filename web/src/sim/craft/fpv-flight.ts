@@ -1,8 +1,8 @@
-import { clamp } from '../core/num';
+import { clamp } from '../../core/num';
 import {
   add, addScaled, axisAngle, clampLength, copy, copyQuat, cross, divide, dot, length, quat, quatMul, quatNormalize, rotate,
   scale, set, setComponent, setQuat, vec3, type Vec3,
-} from '../core/vec';
+} from '../../core/vec';
 
 // The FPV drone's flight (fpv.ts reads the input, moves it through the collision and draws it). No DOM, no scene, no
 // three.js (plain { x, y, z } and { x, y, z, w }: core/vec.ts; tools/core-deps.mjs).

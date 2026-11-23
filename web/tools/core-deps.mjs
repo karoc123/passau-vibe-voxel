@@ -1,8 +1,8 @@
 // The rule of web/src/core/ (docs/adr/0001-world-layers.md): no three.js, no DOM, so the viewer, the node tools and a
 // Node server share it. The same for the world sim (docs/plans/life-physics.md "The server seam"): the traffic
 // (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts); and for the player's vehicles' cores (what a
-// server would step or check for each player: nav/boat-motion.ts, nav/plane-flight.ts, nav/fpv-flight.ts,
-// physics/rapier/car.ts; their shells draw them); and the rivers' water (nav/river.ts: what the river traffic and the
+// server would step or check for each player: sim/craft/boat-motion.ts, sim/craft/plane-flight.ts, sim/craft/fpv-flight.ts,
+// physics/rapier/car.ts; their shells draw them); and the rivers' water (sim/river.ts: what the river traffic and the
 // crafts float on). A static scan of every module under src/core/, those, and everything they import, transitively
 // (relative imports, type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
@@ -82,7 +82,7 @@ const bad = [], seen = new Set(), queue = [];
 const walk = (d, out) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) out.push(f); } return out; };
 for (const f of walk(core, [])) queue.push([f, null]);
 const SEAM = ['sim/traffic.ts', 'sim/train-traffic.ts', 'sim/boat-traffic.ts', 'physics/rapier/life-phys.ts',
-  'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts', 'nav/river.ts'];
+  'sim/craft/boat-motion.ts', 'sim/craft/craft-motion.ts', 'sim/craft/plane-flight.ts', 'sim/craft/fpv-flight.ts', 'physics/rapier/car.ts', 'sim/river.ts'];
 for (const f of SEAM) queue.push([path.join(src, f), null]);
 while (queue.length) {
   const [file, via] = queue.shift();
