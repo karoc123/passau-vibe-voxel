@@ -1,5 +1,6 @@
 import { hash, smooth, wrapAngle } from '../core/num';
 import { at, prepPath, pt, type Path } from './path';
+import { waterTop, type WaterColumns } from '../nav/river';
 
 // Boats on the rivers (scripts/boats.py -> data/boats.json):
 // - river-cruise ships moored along the old town's Danube quay (the OSM berths: Zollände, A14, Liegestelle 3..8), bow
@@ -10,10 +11,12 @@ import { at, prepPath, pt, type Path } from './path';
 //   basin and come in bow upstream; bound downstream, they turn in the wide reach above the old town.
 // - the excursion boats of the Dreiflüsse-Stadtrundfahrt (the OSM ferry route) from the pier below the Rathaus: up
 //   the Danube, back past the old town, round the Dreiflüsseeck, up the Inn and back, departures on the half hour in
-//   summer, hourly in spring and autumn, none in high water. A fleet of three: as many as the timetable needs take turns,
+//   summer, hourly in spring and autumn. A fleet of three: as many as the timetable needs take turns,
 //   the rest lie rafted alongside the pier; a boat back from a trip ties up behind the ones waiting, and when the one at
 //   the pier casts off the next slides in.
-// The routes and timetables are sampled on the world tick, from its day, hour and water level.
+// The routes and timetables are sampled on the world tick, from its day and hour. Each vessel floats on the water's top
+// where it is (nav/river.ts waterTop: the voxels' water, as the world's columns have it); where that is not known (no
+// columns given, its tile not in, off the map) at the last top it had, else the last any vessel had, else WATER.
 // On a partial map (the check fixtures) any part may be missing: no berths (no cruise ships), an empty tour (no
 // excursion boats) or no fairway (the cruise ships stay moored all day).
 
@@ -37,7 +40,7 @@ const VC = 3.6, ACC_C = 0.015; // cruise ships under way: 13 km/h, m/s²
 // appear or vanish there (tools/popin-check.mjs)
 const RUN_OUT = 1000;
 const MORNING = 6 * 3600, LATEST_IN = 9.25 * 3600, EVENING = 18 * 3600, LATEST_OUT = 23.75 * 3600; // s after midnight
-const NO_TOURS_ABOVE = 3.5; // m above the survey day: the excursion boats stay in (Hochwassermarke)
+const WATER = 4; // m: the water's top before any is known (no columns given: the node checks)
 
 export interface BoatPose {
   // IDs are stable by berth slot for cruise ships and by fleet slot for excursion boats.
@@ -86,9 +89,12 @@ export class BoatTraffic {
   private ships: Ship[] = [];
   private departures: number[] = [];
   private currentPoses: readonly BoatPose[] = [];
+  // the last water top known under each vessel (ships: their slot, boats: -1 - fleet slot), and under any
+  private readonly tops = new Map<number, number>();
+  private lastTop = WATER;
   private previousPoses: readonly BoatPose[] = [];
 
-  constructor(data: BoatData, private readonly waterTop = 4, private readonly seed = 0) {
+  constructor(data: BoatData, private readonly seed = 0) {
     const fin = (...v: number[]) => v.every(Number.isFinite);
     const pts = (p: unknown): p is XY[] => Array.isArray(p) && p.every((q) => Array.isArray(q) && fin(q[0], q[1]));
     this.berths = (Array.isArray(data.berths) ? data.berths : []).filter((b) => fin(b.x, b.y, b.dx, b.dy, b.nx, b.ny));
@@ -227,14 +233,14 @@ export class BoatTraffic {
   }
 
   // where a ship under way is: on its path, heading along it, but kept parallel to the quay over the slip in or out
-  private movingPose(s: Ship, mv: Move, clock: number, height: number) {
+  private movingPose(s: Ship, mv: Move, clock: number, water: WaterColumns | null) {
     const sv = BoatTraffic.sMove(mv, clock - mv.t0), P = mv.path, A = this.a, B = this.b;
     at(P, sv + 30, 0, A); at(P, sv - 30, 0, B);
     let ang = Math.atan2(A.x - B.x, A.y - B.y);
     const w = mv.arrive ? smooth(P.L - mv.crab - 50, P.L - mv.crab + 5, sv) : 1 - smooth(mv.crab - 5, mv.crab + 50, sv);
     ang += wrapAngle(Math.atan2(mv.hx, mv.hy) - ang) * w;
     at(P, sv, 0, A);
-    return this.shipPose(s, A.x, height, A.y, ang, true);
+    return this.shipPose(s, A.x, A.y, ang, true, water);
   }
 
   // ---- excursion boats
@@ -274,18 +280,27 @@ export class BoatTraffic {
     return s;
   }
 
-  private shipPose(s: Ship, x: number, y: number, z: number, heading: number, underway: boolean): BoatPose {
-    return { id: s.k, kind: 'ship', x, y, z, heading, len: s.len * CRUISE_L, lit: s.lit, underway };
+  private shipPose(s: Ship, x: number, z: number, heading: number, underway: boolean, water: WaterColumns | null): BoatPose {
+    return { id: s.k, kind: 'ship', x, y: this.top(s.k, x, z, water), z, heading, len: s.len * CRUISE_L, lit: s.lit, underway };
   }
 
-  tick(time: number, hour: number, day: number, level: number) {
+  // the water's top under vessel `key` at (x, z), else the last known (see the head of the file)
+  private top(key: number, x: number, z: number, water: WaterColumns | null) {
+    const w = water ? waterTop(water, x, z) : null;
+    if (w === null || w < 0) return this.tops.get(key) ?? this.lastTop;
+    this.tops.set(key, w);
+    return this.lastTop = w;
+  }
+
+  // water: the world's columns the vessels float on (null: none, all at WATER)
+  tick(time: number, hour: number, day: number, water: WaterColumns | null = null) {
     const reset = Number.isNaN(this.lastHour) || Math.abs(hour - this.lastHour) > 1e-6;
     if (reset) {
       this.clockSetAt = time;
       this.lastHour = hour;
     }
     this.elapsedSinceSet = time - this.clockSetAt;
-    const clock = hour * 3600 + this.elapsedSinceSet, height = this.waterTop + Math.max(0, level);
+    const clock = hour * 3600 + this.elapsedSinceSet;
     const d = Math.round(day);
     const newDay = d !== this.currentDay;
     if (newDay) {
@@ -300,11 +315,11 @@ export class BoatTraffic {
       if (s.arr && clock < s.arr.t0) continue; // not here yet
       if (s.dep && clock > s.dep.t0 + s.dep.dur) continue; // gone
       const mv = s.arr && clock < s.arr.t0 + s.arr.dur ? s.arr : s.dep && clock > s.dep.t0 ? s.dep : null;
-      poses.push(mv ? this.movingPose(s, mv, clock, height) : this.shipPose(s, s.x, height, s.y, Math.atan2(s.dx, s.dy), false));
+      poses.push(mv ? this.movingPose(s, mv, clock, water) : this.shipPose(s, s.x, s.y, Math.atan2(s.dx, s.dy), false, water));
     }
 
     // excursion boats
-    if (this.tour && level < NO_TOURS_ABOVE) {
+    if (this.tour) {
       const deps = this.departures, at0 = this.a, at1 = this.b, P = this.tour, half = TOUR_L / 2, [rx, ry] = this.raft;
       const every = deps.length > 1 ? deps[1] - deps[0] : 3600;
       const n = Math.min(FLEET, deps.length, Math.ceil((this.T + TURN) / every)); // the boats the timetable needs
@@ -324,12 +339,13 @@ export class BoatTraffic {
         const heading = Math.atan2(at0.x - at1.x, at0.y - at1.y);
         at(P, s, 0, at0);
         const lit = tr.on >= 0 || tr.next - clock < BOARD || clock - tr.back < AFTER;
+        const x = at0.x + rx * lat, z = at0.y + ry * lat;
         poses.push({
           id: b,
           kind: 'boat',
-          x: at0.x + rx * lat,
-          y: height,
-          z: at0.y + ry * lat,
+          x,
+          y: this.top(-1 - b, x, z, water),
+          z,
           heading,
           len: TOUR_L,
           lit,

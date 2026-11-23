@@ -2,8 +2,8 @@
 // Node server share it. The same for the world sim (docs/plans/life-physics.md "The server seam"): the traffic
 // (src/sim/traffic.ts) and its bodies (src/physics/rapier/life-phys.ts); and for the player's vehicles' cores (what a
 // server would step or check for each player: nav/boat-motion.ts, nav/plane-flight.ts, nav/fpv-flight.ts,
-// physics/rapier/car.ts; their shells draw them). A static scan of every module under src/core/, those, and everything
-// they import, transitively
+// physics/rapier/car.ts; their shells draw them); and the rivers' water (nav/river.ts: what the river traffic and the
+// crafts float on). A static scan of every module under src/core/, those, and everything they import, transitively
 // (relative imports, type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
@@ -79,7 +79,7 @@ const bad = [], seen = new Set(), queue = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) queue.push([f, null]); } };
 walk(core);
 const SEAM = ['sim/traffic.ts', 'sim/train-traffic.ts', 'sim/boat-traffic.ts', 'physics/rapier/life-phys.ts',
-  'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts'];
+  'nav/boat-motion.ts', 'nav/craft-motion.ts', 'nav/plane-flight.ts', 'nav/fpv-flight.ts', 'physics/rapier/car.ts', 'nav/river.ts'];
 for (const f of SEAM) queue.push([path.join(src, f), null]);
 while (queue.length) {
   const [file, via] = queue.shift();

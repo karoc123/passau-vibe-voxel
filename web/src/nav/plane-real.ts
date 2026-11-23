@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { Meta } from '../types';
-import { collisionWorld, PlaneFlight, waterTop, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
+import { collisionWorld, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
+import { waterTop } from './river';
 import { holdPath, type Check } from './plane-checks';
 import { jetHold } from './jet-checks';
 import { VoxelCollision } from './voxel-collision';

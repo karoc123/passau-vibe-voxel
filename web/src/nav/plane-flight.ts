@@ -2,6 +2,7 @@ import { FixedStep } from '../core/fixed-step';
 import { SafeTrail } from '../core/safe-trail';
 import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../core/vec';
 import type { Sweep } from './sweep';
+import { waterTop, type WaterColumns } from './river';
 
 // The small floatplane's flight (plane.ts draws it and reads the input; web/tools/plane.mjs checks it headless). No DOM,
 // no scene, no three.js (plain { x, y, z }: core/vec.ts; tools/core-deps.mjs): input in, pose out, the world reached through PlaneWorld (the collision's sweep and surface, the rivers'
@@ -485,23 +486,18 @@ export class PlaneFlight {
 }
 
 // The world as the viewer's collision gives it (voxel-collision.ts, structurally, so this file needs no DOM): its sweep
-// and surface, its water (a water run reaching the ground's top) raised with the river level slider (flood.ts, m over the
-// survey day; lowered, the voxels' water stays where it is)
-export interface CollisionLike {
+// and surface, and its water where the voxels have it (nav/river.ts waterTop)
+export interface CollisionLike extends WaterColumns {
   width: number;
   depth: number;
   sweep(p: Vec3, d: Vec3): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
-  waterColumn(x: number, z: number, y0: number, y1: number): { water: number } | null;
 }
-/** the top of the water in column (x, z) (VoxelCollision.waterColumn: the river's top voxels are the ground's); -1: none;
- *  null: its tile not in */
-export const waterTop = (c: Pick<CollisionLike, 'waterColumn'>, x: number, z: number) => c.waterColumn(x, z, 0, 0)?.water ?? null;
-export function collisionWorld(c: CollisionLike, H: number, level: () => number = () => 0): PlaneWorld {
+export function collisionWorld(c: CollisionLike, H: number): PlaneWorld {
   return {
     W: c.width, D: c.depth, H,
     sweep: (p, d) => c.sweep(p, d),
     surface: (x, z) => c.surface(x, z),
-    water: (x, z) => { const w = waterTop(c, x, z); return w === null || w < 0 ? w : w + Math.max(0, level()); },
+    water: (x, z) => waterTop(c, x, z),
   };
 }

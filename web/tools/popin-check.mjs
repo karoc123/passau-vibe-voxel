@@ -183,9 +183,9 @@ function transit() {
   if (bd.tour?.length) bv.push({ name: 'pier', x: bd.tour[0][0], z: bd.tour[0][1] });
   const bdt = 0.5;
   for (const day of DAYS) {
-    const boats = new BoatTraffic(bd, 4), check = follow(uniq(bv), { ship: SHIP_R, boat: SHIP_R }, { ship: JUMP + 4 * bdt, boat: JUMP + 4 * bdt });
+    const boats = new BoatTraffic(bd), check = follow(uniq(bv), { ship: SHIP_R, boat: SHIP_R }, { ship: JUMP + 4 * bdt, boat: JUMP + 4 * bdt });
     for (let f = 0, F = Math.round(24 * 3600 / bdt); f < F; f++) {
-      boats.tick(f * bdt, 0, day, 0);
+      boats.tick(f * bdt, 0, day);
       check(new Map(boats.poses.map(({ id, kind, x, z }) => [`${kind}:${id}`, [kind, x, z]])), f * bdt);
     }
   }

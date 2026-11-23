@@ -1,4 +1,5 @@
 import { GLIDER_HEIGHT, HOVER_HEIGHT, type CraftKind, type CraftMotionWorld } from './craft-motion';
+import { waterTop } from './river';
 import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
@@ -19,14 +20,14 @@ const PROBES: Record<CraftKind, readonly [number, number, number][]> = {
   paraglider: [[0, 0, 0], [0, 0.95, 0], [0, 7.1, 0.15], [-2.7, 6.4, 0.15], [2.7, 6.4, 0.15], [-4.6, 4.6, 0.15], [4.6, 4.6, 0.15]],
 };
 
-export function craftWorld(kind: CraftKind, col: VoxelCollision, level: () => number): CraftMotionWorld {
+export function craftWorld(kind: CraftKind, col: VoxelCollision): CraftMotionWorld {
   return {
     surface(x, z) {
       if (x < 0 || z < 0 || x >= col.width || z >= col.depth) return { height: 0, water: false };
-      const ground = col.voxelGround(x, z), wet = col.waterColumn(x, z, 0, 0);
-      if (ground === null || !wet) return null;
-      const water = wet.water >= 0;
-      return { height: water ? Math.max(ground, wet.water + Math.max(0, level())) : ground, water };
+      const ground = col.voxelGround(x, z), wet = waterTop(col, x, z);
+      if (ground === null || wet === null) return null;
+      const water = wet >= 0;
+      return { height: water ? Math.max(ground, wet) : ground, water };
     },
     landing: (p) => col.sweep(p, { x: 0, y: -0.25, z: 0 }),
     sweep(p, d, h0, h) {

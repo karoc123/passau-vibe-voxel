@@ -4,7 +4,7 @@ import { clamp, el } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 import type { Nav } from './nav';
 import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
-import { collisionWorld, JET, PLANE, PlaneFlight, waterTop, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
+import { collisionWorld, JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput, type PlanePose, type PlaneWorld } from './plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -12,7 +12,7 @@ import { VoxelCollision } from './voxel-collision';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
-import { nearestRiver } from './river';
+import { nearestRiver, waterTop } from './river';
 import './plane.css';
 
 // The plane mode: the glue round plane-flight.ts (the flight, pure): the panel, the input (keyboard, touch, gamepad),
@@ -156,7 +156,7 @@ export class PlaneMode implements PlayerCraft {
     let m = this.made.get(type);
     if (!m) {
       const collision = new VoxelCollision(this.meta, viewerTileCache(this.meta.tiles.N), { radius: type.cfg.RADIUS, horizon: type.cfg.HORIZON });
-      m = { flight: new PlaneFlight(type.cfg), model: type.model(), collision, world: collisionWorld(collision, this.meta.H, this.env.level) };
+      m = { flight: new PlaneFlight(type.cfg), model: type.model(), collision, world: collisionWorld(collision, this.meta.H) };
       this.nav.actors.add(m.model.group);
       this.made.set(type, m);
     }

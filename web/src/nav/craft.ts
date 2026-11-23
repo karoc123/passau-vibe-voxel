@@ -34,12 +34,10 @@ export interface PlayerCraft {
   update(dt: number): void;
 }
 
-/** what the river and the light say, for the crafts on the water */
+/** the light and the rivers' points, for the crafts on the water */
 export interface CraftEnv {
   /** 0 by day .. 1 by night (daylight.ts) */
   night: () => number;
-  /** the river level slider, m over the survey day (flood.ts) */
-  level: () => number;
   /** the river's points (river.ts); null while not loaded */
   river: () => RiverPoints | null;
 }

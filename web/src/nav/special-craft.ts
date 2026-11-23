@@ -55,7 +55,7 @@ class SpecialCraft implements PlayerCraft {
     this.model = makeCraftModel(id);
     nav.actors.add(this.model.group);
     this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), { radius: CRAFT_RADIUS[id] });
-    this.world = craftWorld(id, this.collision, ctx.env.level);
+    this.world = craftWorld(id, this.collision);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
       camera: id === 'helicopter' ? undefined : 'right',

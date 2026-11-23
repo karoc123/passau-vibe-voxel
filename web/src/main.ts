@@ -484,7 +484,7 @@ async function boot() {
     window.__life = life;
     if (qs.get('dig') === '1') lifePhysics(meta)?.catch(() => {});
     fetchJson<BoatData>('data/boats.json').then((bd) => {
-      life?.setBoats(bd, flood?.info?.voxel_top ?? 4);
+      life?.setBoats(bd);
     }).catch((e) => console.warn('boats', e));
   });
   $('#loading').classList.add('hidden');
@@ -492,7 +492,7 @@ async function boot() {
   window.__ready = true;
   const [{ ParagliderMode }, modes] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS())]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
-    env: { level: () => flood?.level ?? 0, night: () => daylight.night, river: () => riverPoints },
+    env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
     roadPhysics: () => lifePhysics(meta, true)!,
   };
@@ -565,7 +565,7 @@ renderer.setAnimationLoop((now) => {
     if (life.group.visible) {
       life.day = daylight.day;
       // (simulated round what is looked at; agents come and go far from the camera, which sees them)
-      life.update(dt, daylight.hour, daylight.night, focus(), camera.position, flood?.level ?? 0);
+      life.update(dt, daylight.hour, daylight.night, focus(), camera.position);
     }
   }
   daylight.sky.mesh.position.copy(camera.position);

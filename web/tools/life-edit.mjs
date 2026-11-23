@@ -315,32 +315,35 @@ async function motorbike() {
 }
 
 function transit() {
+  const localTop = (x) => (x < 7000 ? 9 : 8);
   const data = { roads: [], peds: [], ctrls: [], trains: td.trains };
   const boats = JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8'));
   const focus = { x: 7000, z: 2900 };
   function replay(ticksPerFrame, seed) {
     const world = new Traffic(data, seed);
     world.day = 200;
-    world.setBoats(boats, 4);
+    world.setBoats(boats);
     const snapshots = [];
     const snapshot = () => ({
       tick: world.tickNumber,
       coaches: [...world.trains.coaches()],
       vessels: world.boats.poses,
     });
-    const advance = (ticks, hour, level) => {
+    const advance = (ticks, hour) => {
       for (let i = 0; i < ticks; i += ticksPerFrame)
-        world.update(STEP * ticksPerFrame, hour, focus, focus, level);
+        world.update(STEP * ticksPerFrame, hour, focus, focus);
       snapshots.push(snapshot());
     };
     Math.random = noRandom;
     try {
       world.update(STEP / 4, 10, focus);
       check(world.tickNumber === 0 && !world.boats.poses.length, 'boats wait for the first world tick');
-      advance(30, 10, 0);
-      advance(60, 10, 0);
-      advance(2, 10, 4);
-      advance(2, 15, 0);
+      advance(30, 10);
+      advance(60, 10);
+      world.water = { waterColumn: (x) => ({ water: localTop(x) }) }; // (the world's columns, two stretches)
+      advance(2, 10);
+      world.water = null;
+      advance(2, 15);
       check(world.boats.previous.every((p) => world.boats.poses.some((q) =>
         p.kind === q.kind && p.id === q.id && Math.hypot(p.x - q.x, p.z - q.z) < 0.2)),
       'clock resets avoid interpolating between distant poses');
@@ -358,9 +361,10 @@ function transit() {
   const tour = a[0].vessels.find((p) => p.kind === 'boat' && p.underway);
   check(tour && a[1].vessels.some((p) => p.kind === 'boat' && p.id === tour.id && Math.hypot(p.x - tour.x, p.z - tour.z) > 1),
     'a boat on the timetable moves on the world tick');
-  check(a[2].vessels.length && a[2].vessels.every((p) => p.kind === 'ship' && p.y === 8),
-    'the same tick raises ships with the flood and suspends tours');
-  check(a[3].vessels.some((p) => p.kind === 'boat' && p.y === 4), 'clock and flood changes restore scheduled tours');
+  check(a[2].vessels.length && a[2].vessels.every((p) => p.y === localTop(p.x)),
+    'each vessel floats on the water top under it');
+  check(a[3].vessels.some((p) => p.kind === 'boat') && a[3].vessels.every((p) => p.y === 8 || p.y === 9),
+    'without the columns a vessel keeps the last water top known');
   results.transit = { replay: 'same', coaches: a[0].coaches.length, vessels: a[0].vessels.length };
 }
 

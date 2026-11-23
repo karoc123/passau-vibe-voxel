@@ -8,6 +8,7 @@
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { hash, pushTo, rng, smooth, type Rng } from '../core/num';
 import { BoatTraffic, type BoatData } from './boat-traffic';
+import type { WaterColumns } from '../nav/river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
@@ -79,6 +80,8 @@ type Density = { cars: number; peds: number; bikes: number };
 
 export class Traffic {
   ground: Ground | null = null;
+  // the world's water columns the boats float on (nav/river.ts; world.ts World); null: none, at a fixed top
+  water: WaterColumns | null = null;
   keep: Car | Person | null = null;
   bodies: TrafficBodies | null = null;
   readonly roads: Road[];
@@ -151,8 +154,8 @@ export class Traffic {
 
   get boats() { return this.boatTraffic; }
 
-  setBoats(data: BoatData, waterTop: number) {
-    this.boatTraffic = new BoatTraffic(data, waterTop, (this.seed >>> 0) - DEFAULT_SEED);
+  setBoats(data: BoatData) {
+    this.boatTraffic = new BoatTraffic(data, (this.seed >>> 0) - DEFAULT_SEED);
   }
 
   private pick(w: number[], sum = w.reduce((a, b) => a + b, 0)) {
@@ -165,7 +168,7 @@ export class Traffic {
   // The ticks due after dt s (at most 0.1 s of them). focus: the middle of what is simulated (the active circle: what
   // is looked at); viewer: where it is seen from (the camera; by default the focus, on the ground), what agents come
   // and go far from.
-  update(dt: number, hour: number, focus: { x: number; z: number }, viewer: Viewer = focus, riverLevel = 0) {
+  update(dt: number, hour: number, focus: { x: number; z: number }, viewer: Viewer = focus) {
     dt = Math.min(dt, 0.1);
     const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
@@ -182,7 +185,7 @@ export class Traffic {
     };
     if (this.warm) this.populate(density); // (drawn this frame)
     this.acc += dt;
-    while (this.acc >= STEP) { this.step(STEP, density, hour, riverLevel); this.acc -= STEP; }
+    while (this.acc >= STEP) { this.step(STEP, density, hour); this.acc -= STEP; }
   }
 
   // a signal's state now: green, amber, red
@@ -418,7 +421,7 @@ export class Traffic {
   }
 
   // ------------------------------------------------------------------ one tick
-  private step(dt: number, density: Density, hour: number, riverLevel: number) {
+  private step(dt: number, density: Density, hour: number) {
     this.t += dt;
     this.tickNumber++;
     this.bodies?.beforeTick?.(this);
@@ -431,7 +434,7 @@ export class Traffic {
     this.stepRiders(dt);
     this.trains.tick(this.t, dt, hour, this.viewer);
     this.bodies?.tick(dt, this);
-    this.boatTraffic?.tick(this.t, hour, this.day, riverLevel);
+    this.boatTraffic?.tick(this.t, hour, this.day, this.water);
   }
 
   // ------------------------------------------------------------------ player edits

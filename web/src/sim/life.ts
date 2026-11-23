@@ -58,8 +58,8 @@ export class StreetLife {
     this.M.group.add(this.trains.group);
   }
 
-  setBoats(data: BoatData, waterTop: number) {
-    this.traffic.setBoats(data, waterTop);
+  setBoats(data: BoatData) {
+    this.traffic.setBoats(data);
     if (!this.boats) {
       this.boats = new Boats();
       this.group.add(this.boats.group);
@@ -83,11 +83,11 @@ export class StreetLife {
 
   // focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
   // camera; by default the focus, on the ground), what agents come and go far from
-  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus, riverLevel = 0) {
+  update(dt: number, hour: number, night: number, focus: { x: number; z: number }, viewer: { x: number; z: number; y?: number } = focus) {
     const T = this.traffic;
-    T.ground = this.world;
+    T.ground = T.water = this.world;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    T.update(dt, hour, focus, viewer, riverLevel);
+    T.update(dt, hour, focus, viewer);
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
     for (const p of T.dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
     T.dropped = [];
