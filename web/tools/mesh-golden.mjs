@@ -14,16 +14,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 import { dataDir } from './data-dir.mjs';
 
 const [mode, out] = process.argv.slice(2);
 if (!['write', 'check'].includes(mode) || !out) { console.log('usage: node tools/mesh-golden.mjs write|check <file>'); process.exit(2); }
-const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = dataDir;
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
-const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
 const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts');
 

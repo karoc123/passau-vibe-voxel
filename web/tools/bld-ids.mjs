@@ -5,12 +5,10 @@
 // top, whatever the id.
 // Stripes along x and along y (both merge directions).
 // usage (in web/): node tools/bld-ids.mjs; exit code 1 on a failure
-import { runnerImport } from 'vite';
-import { fileURLToPath } from 'node:url';
+import { imp } from './lib.mjs';
 
-const root = fileURLToPath(new URL('..', import.meta.url));
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
-const { module: M } = await runnerImport(`${root}src/mesher.worker.ts`, { root, logLevel: 'error' });
+const M = await imp('src/mesher.worker.ts');
 
 const N = 18, S = N + 2, H = 4, GROUND = 3, K = 5;
 const IDS = [K, K + 16384, 65535];

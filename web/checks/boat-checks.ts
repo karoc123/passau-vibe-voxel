@@ -1,12 +1,13 @@
 import { Vector3 } from 'three';
-import type { Meta } from '../types';
-import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from './boat-motion';
-import { downstream, nearestRiver } from './river';
-import { makeWorld, type CheckOutcome } from './collision-checks';
-import type { VoxelCollision } from './voxel-collision';
+import type { Meta } from '../src/types';
+import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../src/nav/boat-motion';
+import { downstream, nearestRiver } from '../src/nav/river';
+import type { Check } from './check';
+import { makeWorld } from './world';
+import type { VoxelCollision } from '../src/nav/voxel-collision';
 
 // Headless checks of the player's boat (boat-motion.ts; web/tools/boat.mjs). On a synthetic world written as real node
-// files (collision-checks.ts makeWorld) and read by the real VoxelCollision: a channel of water at 4 m (x 16..240,
+// files (world.ts makeWorld) and read by the real VoxelCollision: a channel of water at 4 m (x 16..240,
 // z 40..216) in land at 8 m, a bridge with its deck 6 m over the water (x 170..180) and one only 1 m over it (x 60..64,
 // z 40..80, a footbridge too low), a pier in the water (x 120..124, z 150..156). Then on the real data (runRealChecks,
 // tools/boat.mjs gives it the tiles): put in near the Altstadt, under the Schanzlbrücke, into the Danube's north bank.
@@ -44,7 +45,7 @@ async function loadAll(c: VoxelCollision, meta: Meta) {
   throw new Error('collision tiles never loaded');
 }
 
-export async function runBoatChecks(): Promise<CheckOutcome[]> {
+export async function runBoatChecks(): Promise<Check[]> {
   const inChannel = (x: number, z: number) => x >= 16 && x < 240 && z >= 40 && z < 216;
   const w = await makeWorld({
     size: [256, 256], ground: (x, z) => (inChannel(x, z) ? 4 : 8), surface: (x, z) => (inChannel(x, z) ? 'water' : 'road'),
@@ -55,7 +56,7 @@ export async function runBoatChecks(): Promise<CheckOutcome[]> {
     ],
   });
   try {
-    const out: CheckOutcome[] = [];
+    const out: Check[] = [];
     const c = w.collision;
     // (before its tiles are in, the boat waits)
     const fresh = new BoatMotion();
@@ -184,8 +185,8 @@ export async function runBoatChecks(): Promise<CheckOutcome[]> {
 }
 
 // On the real data (a VoxelCollision over the tiles on disk, all of the run's nodes loaded): river = flood.json's
-export async function runRealChecks(c: VoxelCollision, meta: Meta, river: number[], need: (x: number, z: number) => Promise<void>): Promise<CheckOutcome[]> {
-  const out: CheckOutcome[] = [];
+export async function runRealChecks(c: VoxelCollision, meta: Meta, river: number[], need: (x: number, z: number) => Promise<void>): Promise<Check[]> {
+  const out: Check[] = [];
   const ov = meta.views?.overview?.target, eckT = meta.views?.eck?.target;
   // put in from the overview's focus (over the Altstadt): on the Danube or the Inn, facing roughly downstream (east)
   if (ov) {

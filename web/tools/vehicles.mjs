@@ -1,4 +1,4 @@
-// The vehicle catalog (src/sim/vehicles.ts) driven headless on synthetic terrain (physics/rapier/scenarios.ts Sim),
+// The vehicle catalog (src/sim/vehicles.ts) driven headless on synthetic terrain (checks/scenarios.ts Sim),
 // each type as the player drives it (car.ts RapierCar with the type's CarBuild):
 //   top     -- full throttle from rest on a 1 km flat street: its top speed within the type's range (TOP), 0-50 km/h
 //   curve   -- half lock at 50 km/h (a bus 30) for 4 s: turned, upright
@@ -19,10 +19,11 @@
 // The default car's own scenarios stay tools/rapier-car.mjs's.
 // usage (in web/): node tools/vehicles.mjs [-v] [type ...]; one line a check, exit code 1 if one fails
 import { load } from './real-city.mjs';
+import { imp } from './lib.mjs';
 
 const args = process.argv.slice(2), verbose = args.includes('-v');
-const sc = await load('physics/rapier/scenarios.ts');
-const ds = await load('physics/rapier/drive-scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
+const ds = await imp('checks/drive-scenarios.ts');
 const { VEHICLES } = await load('sim/vehicles.ts');
 const { FALL_MS } = await load('physics/rapier/player-car.ts');
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;

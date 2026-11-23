@@ -18,12 +18,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data'), verbose = process.argv.includes('-v');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
-const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const TC = await imp('src/core/tile-cache.ts'), CO = await imp('src/core/columns.ts'), LA = await imp('src/core/layers.ts');
 
 const bad = [];
@@ -165,7 +164,7 @@ for (const k of touched) {
 }
 
 // --- 4. the car on the edited world ---
-const sc = await imp('src/physics/rapier/scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
 const physMap = (w) => ({ meta, tiles: [...area.values()].map((n) => {

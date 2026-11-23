@@ -1,5 +1,5 @@
 // Rapier car: a drivable car on Rapier's DynamicRayCastVehicleController (raycast wheels on a chassis), with what the
-// voxel city needs on top of it (each switchable in CarTuning, for the scenarios in scenarios.ts):
+// voxel city needs on top of it (each switchable in CarTuning, for the scenarios in checks/scenarios.ts):
 // - ground: the car drives on the surface drawn, as every body does (terrain.ts: the voxels, and the caps of sloped
 //   streets and bridge decks, core/surface.ts); its wheels' rays see the caps, not their voxels' tops; its dampers
 //   the drawn surface's slope, not its facets' 1/64 m kinks (dampers()).

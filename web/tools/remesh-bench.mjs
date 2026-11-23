@@ -11,12 +11,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
-const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
 const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts');
 

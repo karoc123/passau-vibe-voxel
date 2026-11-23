@@ -6,7 +6,7 @@
 // (tilefile.SECTIONS, core/tile-sections.ts TILE_SECTIONS) list the same tags in the same order, the same reserved.
 // Files in a temp dir, removed unless a check fails.
 // usage: node tools/tile-roundtrip.mjs [SEED]; exit code 1 on a mismatch
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -15,10 +15,10 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url)), repo = path.resolve(root, '..');
-const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
-const { module: TS } = await runnerImport(`${root}src/core/tile-sections.ts`, { root, logLevel: 'error' });
-const { module: SF } = await runnerImport(`${root}src/core/surface.ts`, { root, logLevel: 'error' });
-const { module: RF } = await runnerImport(`${root}src/roofs.ts`, { root, logLevel: 'error' });
+const TD = await imp('src/tile-data.ts');
+const TS = await imp('src/core/tile-sections.ts');
+const SF = await imp('src/core/surface.ts');
+const RF = await imp('src/roofs.ts');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tile-roundtrip-'));
 execFileSync('uv', ['run', '--quiet', 'python', 'scripts/tile_roundtrip.py', dir, process.argv[2] ?? '1'], { cwd: repo, stdio: 'inherit' });
 
@@ -115,7 +115,7 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
 
 // the paved ground in two languages: the ids scripts/caps.py caps (paved_ids) are those core/semantics.ts calls PAVED
 {
-  const { module: SE } = await runnerImport(`${root}src/core/semantics.ts`, { root, logLevel: 'error' });
+  const SE = await imp('src/core/semantics.ts');
   const pal = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/palette.json'), 'utf8')).palette;
   const py = JSON.parse(execFileSync('uv', ['run', '--quiet', 'python', 'scripts/caps.py', '--paved-ids'], { cwd: repo }).toString());
   const ts = [...SE.semanticTable(pal)].flatMap((f, i) => (f & SE.SEM.PAVED ? [i] : []));

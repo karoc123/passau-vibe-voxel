@@ -13,11 +13,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { runnerImport } from 'vite';
-import { dataDir as dir, web } from './data-dir.mjs';
+import { imp } from './lib.mjs';
+import { dataDir as dir } from './data-dir.mjs';
 
 globalThis.self ??= globalThis;
-const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
 const TD = await imp('src/tile-data.ts'), SF = await imp('src/core/surface.ts'), RF = await imp('src/roofs.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));

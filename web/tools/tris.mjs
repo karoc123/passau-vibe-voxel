@@ -36,9 +36,9 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 async function worker() {
   globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
-  const { runnerImport } = await import('vite');
-  const { module: mesher } = await runnerImport(path.join(web, 'src/mesher.worker.ts'), { root: web, logLevel: 'error' });
-  const { module: req } = await runnerImport(path.join(web, 'src/tile-request.ts'), { root: web, logLevel: 'error' });
+  const { imp } = await import('./lib.mjs');
+  const mesher = await imp('src/mesher.worker.ts');
+  const req = await imp('src/tile-request.ts');
   const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
   const ctx = { N: meta.tiles.N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };
   process.on('message', async (jobs) => {

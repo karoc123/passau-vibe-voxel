@@ -1,4 +1,4 @@
-// Rapier car scenarios (src/physics/rapier/scenarios.ts) and the drive mode's (drive-scenarios.ts: a traffic car
+// Rapier car scenarios (checks/scenarios.ts) and the drive mode's (drive-scenarios.ts: a traffic car
 // knocked out, a person hit, the river and back, a crash landing, through LifePhysics), headless in node.
 // usage: node tools/rapier-car.mjs [--spike] [--json] [scenario ...]
 //          synthetic voxel terrain; exit code 1 if a scenario fails
@@ -16,10 +16,11 @@
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { root, load, realMap, roadPath, SCHANZL } from './real-city.mjs';
+import { imp } from './lib.mjs';
 
 const args = process.argv.slice(2);
-const sc = await load('physics/rapier/scenarios.ts');
-const ds = await load('physics/rapier/drive-scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
+const ds = await imp('checks/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
 // --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run

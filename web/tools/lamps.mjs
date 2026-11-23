@@ -7,16 +7,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.resolve(process.argv[2] ?? path.join(web, 'public/data'));
 const tmp = path.resolve(process.argv[3] ?? path.join(web, '../data'));
-const { module: lamps } = await runnerImport(path.join(web, 'src/streetlamps.ts'), { root: web, logLevel: 'error' });
+const lamps = await imp('src/streetlamps.ts');
 
 const json = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
 const gz = (f) => { const b = zlib.gunzipSync(fs.readFileSync(f)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
-const { module: TP } = await runnerImport(path.join(web, 'src/sim/traffic-pack.ts'), { root: web, logLevel: 'error' });
+const TP = await imp('src/sim/traffic-pack.ts');
 const meta = json('meta.json'), traffic = TP.unpackTraffic(json('traffic.json'));
 const buildings = new Uint16Array(gz(path.join(tmp, 'zones.bin')), 0, meta.W * meta.D);
 const trees = new Uint8Array(gz(path.join(tmp, 'foliage.bin')), 0, (meta.W >> 1) * (meta.D >> 1));
