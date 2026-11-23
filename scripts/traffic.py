@@ -29,9 +29,6 @@ WALK = {"footway", "pedestrian", "path", "steps", "living_street", "platform", "
 _T = Transformer.from_crs(4326, CRS, always_xy=True)
 
 
-OPEN_CUT = set()  # layer -1 ways that are open cuts, not tunnels (voxelize.py)
-
-
 def fit(p, offs, vol, solid, W, D, step=0.5, decks=False, rise_ahead=True):
     """a path's heights onto the voxels as drawn: every 0.5 m, across the offsets the bodies use, the free level over
     the drawn surface nearest the path's own height (a deck, not the street under it); the highest across, then over
@@ -359,11 +356,12 @@ def off_surface(surf, r, c, reach):
     return None
 
 
-def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None):
+def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None, open_cut=frozenset()):
     """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
-    vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit)."""
+    vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit).
+    open_cut: the ids of the layer -1 ways open to the sky, not tunnels (voxelize.py: ground.open_cut)."""
     data = json.load(open(f"{RAW}/osm.json"))
     import overrides
     overrides.patch_elements(data["elements"])  # (the street overrides: osm.OSM reads them so too)
@@ -468,7 +466,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
         zs = [int(tunnels.FLOOR[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
         return [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
 
-    rways = [w for w in ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in OPEN_CUT
+    rways = [w for w in ways if w["tags"]["highway"] in DRIVE and (not underground(w["tags"]) or w["id"] in open_cut
                                                                    or w["id"] in bored)
              and w["tags"].get("access") not in ("no", "private") and w["tags"].get("area") != "yes"]
     sig_nodes = {n for n, t in ntags.items() if t.get("highway") == "traffic_signals" and n in nodes}
@@ -934,10 +932,10 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     import pickle
     tin = pickle.load(open("data/cache/traffic_in.pkl", "rb"))
     import underpass
-    OPEN_CUT, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
+    open_cut, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
     underpass.SHIFTED = tin.pop("shifted_stairs", set())
     import tunnels
     tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
     import trafficpack
-    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), **tin)),
+    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), open_cut=open_cut, **tin)),
               open("web/public/data/traffic.json", "w"), separators=(",", ":"))
