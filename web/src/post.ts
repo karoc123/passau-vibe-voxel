@@ -45,7 +45,7 @@ class DepthBlur extends Effect {
 }
 
 // Reflections in the rivers and, in the rain, in the puddles: screen-space, so what is mirrored is what is on the
-// screen. The surfaces that mirror mark themselves in the scene's alpha (voxelMaterial.ts, flood.ts): a <=
+// screen. The surfaces that mirror mark themselves in the scene's alpha (voxelMaterial.ts): a <=
 // REFL_MAX, how much they mirror (1 the open river, less a puddle or a wet street); the stairs' 0.5 and everything
 // else's 1 are left alone, and a marked pixel leaves here with alpha 1 again (n8ao reads 0.5 as a staircase). Each
 // such pixel is horizontal (an up face), so the mirror is the plane through it: the ray from the eye is mirrored
@@ -223,7 +223,7 @@ class FilmGrade extends Effect {
 // scene's alpha (voxelMaterial.ts) and keep only a little of it; the alpha is reset to 1 after.
 const STAIR_AO = 0.3;
 //
-// n8ao also keeps the AO off transparent things (the fountains' jets, the flood's water, rain, the lamps' glow): once
+// n8ao also keeps the AO off transparent things (the fountains' jets, rain, the lamps' glow): once
 // the scene holds any, it renders the scene twice more each frame for them, with two full-screen clears and depth
 // copies (~0.9-1 ms on an Iris Xe) -- even when none of them is shown or in view, as by day nearly always. Skipped
 // then, and the composite told so (uTransp: its transparency targets are left as they were, unread).

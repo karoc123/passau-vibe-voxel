@@ -26,7 +26,6 @@ export interface VoxelUniforms {
   uNight: U<number>;
   uTime: U<number>;
   uHorizon: U<THREE.Color>;
-  uDrop: U<number>;
   uWet: U<number>;
   uSnow: U<number>;
   uDay: U<number>;
@@ -73,7 +72,6 @@ export function makeUniforms(meta: Meta): VoxelUniforms {
     uNight: { value: 0 },
     uTime: { value: 0 },
     uHorizon: { value: new THREE.Color(0.7, 0.75, 0.8) },
-    uDrop: { value: 0 },
     uWet: { value: 0 },
     uSnow: { value: 0 },
     uDay: { value: 200 },
@@ -246,7 +244,7 @@ const FACE_PARS = `
 const FRAG_PARS = `
   uniform sampler2D uPalette; uniform vec2 uSpill; uniform float uShop; uniform float uIndoorAmb;
   uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
-  uniform float uDrop; uniform float uWet; uniform float uSnow; uniform float uAlbedo;
+  uniform float uWet; uniform float uSnow; uniform float uAlbedo;
   ${FACE_PARS}
   // (AO and the wall's top do vary over a face)
   varying vec2 vShade;
@@ -598,13 +596,6 @@ const SURFACE = `
     col = mix(col, uHorizon * 0.8, clamp(0.08 + 0.55 * fres, 0.0, 0.55));
     if (vN.y > 0.5 && hash12(cell.xz * 0.37 + floor(uTime * 1.7 + h * 9.0)) < 0.006) col += vec3(0.35, 0.4, 0.38) * (1.0 - uNight) * (1.0 - uNight);
     if (vN.y > 0.5) gRefl = 1.0; // the open river mirrors (post.ts Reflections)
-    if (uDrop > 0.0) { // low water: where the estimated bed is shallower than the drop, a sandbank
-      float bed = max(riverAt(cell.xz - uOrg.xz + 0.5).y, 0.0);
-      if (bed < uDrop) {
-        col = mix(vec3(0.3, 0.24, 0.15), vec3(0.62, 0.52, 0.36), smoothstep(0.05, 0.35, uDrop - bed)) * (0.92 + 0.12 * h);
-        gRough = 0.95; gMetal = 0.0; gRefl = 0.0;
-      }
-    }
   } else if (m == ${MAT.LAMP}) {
     col = base; gEmissive = vec3(1.0, 0.82, 0.55) * (0.15 + 3.2 * uNight);
   } else if (m == ${MAT.METAL}) {

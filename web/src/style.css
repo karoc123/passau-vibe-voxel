@@ -34,7 +34,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar input[type=range]::-moz-range-thumb { width: 3px; height: 14px; border: 0; border-radius: 1px; background: #fff; }
 #bar input[type=range]:disabled { opacity: .35; cursor: default; }
 #bar .choices { column-gap: 9px; }
-#bar .row.off { display: none; }
 #bar .choices button { white-space: nowrap; padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
 #bar .choices button:hover, #bar .choices button.on { color: #fff; }
 #bar .sky button:disabled { display: none; }

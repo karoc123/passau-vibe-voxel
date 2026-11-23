@@ -75,16 +75,9 @@ export interface WorldId {
   voxel: number;
 }
 
+// flood.json (scripts/flood.py): of it the viewer reads only the river's points (its other fields are unread)
 export interface FloodInfo {
-  base: number;
-  surface0: number;
-  fall: number;
-  voxel_top?: number;
-  // m: the spill bytes are decimetres from -spill0 (scripts/flood.py)
-  spill0?: number;
-  // where the map spans a weir: per stretch its box (map cells x0, z0, x1, z1; the first that holds a cell) and level
-  stretches?: { box: [number, number, number, number]; level: number }[];
-  // the river's points every 24 m, x y pairs (scripts/flood.py)
+  // the river's points every 24 m, x y pairs (nav/river.ts)
   river: number[];
 }
 

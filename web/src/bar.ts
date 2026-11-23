@@ -147,7 +147,6 @@ const FOLD_KEY = 'passau.barFolded';
 export class Bar {
   readonly el = el('div', '');
   readonly search: PlaceSearch;
-  readonly river: Slider;
   private readonly time: Slider;
   private readonly date: Slider;
   private readonly sky: HTMLElement;
@@ -156,15 +155,13 @@ export class Bar {
   // (localStorage, FOLD_KEY).
   private readonly foldButton = el('button', 'bar-fold', '<span aria-hidden="true"></span>', this.el);
 
-  constructor({ days, weathers, river, onDay, onDayEnd, onHour, onWeather, onRiver }: {
+  constructor({ days, weathers, onDay, onDayEnd, onHour, onWeather }: {
     days: Record<string, number>;
     weathers: string[];
-    river: Record<string, number>;
     onDay: (d: number) => void;
     onDayEnd: (d: number) => void;
     onHour: (h: number) => void;
     onWeather: (w: string) => void;
-    onRiver: (cm: number) => void;
   }) {
     this.el.id = 'bar';
     this.foldButton.type = 'button';
@@ -181,9 +178,6 @@ export class Bar {
     this.time = new Slider(this.el, { min: 4, max: 23.5, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });
     this.sky = choices('sky', 'Weather', weathers, this.el);
     this.sky.addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('button'); if (b) onWeather(b.dataset.v!); });
-    this.river = new Slider(this.el, { min: Math.min(...Object.values(river)), max: Math.max(...Object.values(river)), step: 10, marks: river, near: 20, log: false,
-      show: (cm) => `Rivers ${cm > 0 ? '+' : cm < 0 ? '−' : ''}${(Math.abs(cm) / 100).toFixed(1)} m`, onInput: onRiver });
-    this.river.input.disabled = true;
   }
 
   setDay(d: number, times: Record<string, number>) { this.date.set(d); this.time.setMarks(times); }
@@ -194,10 +188,8 @@ export class Bar {
     $('.val', this.sky).innerHTML = `Weather${mark ? ` <span class="mark">${mark}</span>` : ''}`;
   }
   offer(w: string, possible: boolean) { $<HTMLButtonElement>(`button[data-v="${w}"]`, this.sky).disabled = !possible; }
-  setRiver(cm: number) { this.river.set(cm); }
   // the ⚙ panel at the bar's foot (settings.ts)
   graphics(s: Settings, onChange: (c: Partial<Gfx>) => void, maxShadow: number) { return new Graphics(this.el, s, onChange, maxShadow); }
-  showRiver(on: boolean) { this.river.input.closest('.row')!.classList.toggle('off', !on); }
   get folded() { return this.el.classList.contains('folded'); }
   fold(on: boolean) {
     this.el.classList.toggle('folded', on);
