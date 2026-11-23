@@ -1,10 +1,10 @@
 import { Vector3 } from 'three';
-import type { ColumnData, Meta } from '../types';
-import { VoxelCollision } from './voxel-collision';
-import { MAT } from '../core/materials';
-import { decodeTile, roomOffsets, TILE_MAGIC as MAGIC, TILE_N as N } from '../tile-data';
-import { World } from '../world';
-import { STEP, walkStep } from './walk';
+import type { ColumnData, Meta } from '../src/types';
+import { VoxelCollision } from '../src/nav/voxel-collision';
+import { MAT } from '../src/core/materials';
+import { decodeTile, roomOffsets, TILE_MAGIC as MAGIC, TILE_N as N } from '../src/tile-data';
+import { World } from '../src/world';
+import { STEP, walkStep } from '../src/nav/walk';
 
 // Headless checks of the FPV drone's collision (voxel-collision.ts; web/tools/collision.mjs): a synthetic voxel world
 // (a ground height per column and boxes on it: walls, decks, water) written as real 1 m node files (VXT2, as

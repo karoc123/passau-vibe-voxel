@@ -1,6 +1,6 @@
-import { component, type Vec3 } from '../core/vec';
-import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
-import type { ImpactKind, Sweep } from './sweep';
+import { component, type Vec3 } from '../src/core/vec';
+import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/nav/plane-flight';
+import type { ImpactKind, Sweep } from '../src/nav/sweep';
 
 // Headless checks of the plane's flight (plane-flight.ts; web/tools/plane.mjs). A synthetic world of boxes (ground,
 // hills, walls, roofs, a river whose water is the ground's top as in the voxels), swept the way VoxelCollision sweeps

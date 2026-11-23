@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { load, DATA, hasData, readMeta } from './real-city.mjs';
 
-const m = await load('nav/boat-checks.ts');
+const m = await load('../checks/boat-checks.ts');
 const out = await m.runBoatChecks();
 
 if (hasData() && fs.existsSync(`${DATA}flood.json`)) {

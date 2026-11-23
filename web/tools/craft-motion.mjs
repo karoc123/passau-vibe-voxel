@@ -2,7 +2,7 @@
 // Run from web/ with node tools/craft-motion.mjs.
 import { load } from './real-city.mjs';
 
-const { makeWorld } = await load('nav/collision-checks.ts');
+const { makeWorld } = await load('../checks/collision-checks.ts');
 const { VoxelCollision } = await load('nav/voxel-collision.ts');
 const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('nav/craft-collision.ts');
 const { CraftMotion } = await load('nav/craft-motion.ts');

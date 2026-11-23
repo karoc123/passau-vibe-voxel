@@ -16,8 +16,8 @@ import fs from 'node:fs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const load = async (p) => (await runnerImport(`${root}src/${p}`, { root, logLevel: 'error' })).module;
 const PF = await load('nav/plane-flight.ts');
-const PC = await load('nav/plane-checks.ts');
-const JC = await load('nav/jet-checks.ts');
+const PC = await load('../checks/plane-checks.ts');
+const JC = await load('../checks/jet-checks.ts');
 const args = process.argv.slice(2);
 const type = args.includes('--type') ? args[args.indexOf('--type') + 1] : 'all';
 if (!['all', 'floatplane', 'jet'].includes(type)) throw new Error(`--type floatplane | jet, not ${type}`);
@@ -32,7 +32,7 @@ const t0 = performance.now();
 const out = [...(type !== 'jet' ? PC.runPlaneChecks(cfg) : []), ...(type !== 'floatplane' ? JC.runJetChecks(jet) : [])];
 const D = `${root}public/data/`;
 if (fs.existsSync(`${D}meta.json`) && fs.existsSync(`${D}tiles/1`)) {
-  const RC = await load('nav/plane-real.ts');
+  const RC = await load('../checks/plane-real.ts');
   // the node files from disk at the paths VoxelCollision fetches
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {

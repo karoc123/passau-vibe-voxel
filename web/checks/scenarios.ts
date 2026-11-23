@@ -2,10 +2,10 @@
 // builds a small map (2 x 2 tiles of 64 m), drops the car, drives it with scripted input at a fixed 1/60 s step and
 // judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { MAT } from '../../core/materials';
-import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from './car';
-import { RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from './terrain';
-import { encodeCaps } from '../../core/surface';
+import { MAT } from '../src/core/materials';
+import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from '../src/physics/rapier/car';
+import { RapierTerrain, terrainTile, terrainPalette, WHEEL_GROUPS } from '../src/physics/rapier/terrain';
+import { encodeCaps } from '../src/core/surface';
 
 // (the ride's numbers, for tools/rapier-car.mjs --set: the same module instance as the scenarios')
 export { RIDE };

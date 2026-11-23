@@ -1,9 +1,9 @@
 import { Vector3 } from 'three';
-import type { Meta } from '../types';
-import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from './boat-motion';
-import { downstream, nearestRiver } from './river';
+import type { Meta } from '../src/types';
+import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../src/nav/boat-motion';
+import { downstream, nearestRiver } from '../src/nav/river';
 import { makeWorld, type CheckOutcome } from './collision-checks';
-import type { VoxelCollision } from './voxel-collision';
+import type { VoxelCollision } from '../src/nav/voxel-collision';
 
 // Headless checks of the player's boat (boat-motion.ts; web/tools/boat.mjs). On a synthetic world written as real node
 // files (collision-checks.ts makeWorld) and read by the real VoxelCollision: a channel of water at 4 m (x 16..240,

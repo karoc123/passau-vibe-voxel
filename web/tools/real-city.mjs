@@ -52,7 +52,7 @@ export async function trafficRoads() {
 // Road i of traffic.json as a path to follow: points every metre (x, z, y), from its far end if rev
 // (lane: on its first lane's path as the traffic drives it, o0 m to the right of the road's line: sim/path.ts at)
 export async function roadPath(i, rev = false, lane = false) {
-  const sc = await load('physics/rapier/scenarios.ts'), r = (await trafficRoads())[i];
+  const sc = await load('../checks/scenarios.ts'), r = (await trafficRoads())[i];
   let p = r.p.map((q) => [q[0], q[1], q[2]]);
   if (lane) {
     const { prepPath, at } = await load('sim/path.ts'), e = prepPath({ p }), P = { x: 0, y: 0, z: 0 }, q = [];
@@ -70,7 +70,7 @@ export async function roadPath(i, rev = false, lane = false) {
 export const SCHANZL = [[1202, 459], [1205, 471], [1211, 489], [1215, 503], [1218, 515], [1223, 535], [1226, 549], [1229, 561], [1232, 576],
   [1235, 590], [1238, 602], [1242, 620], [1246, 634], [1247, 642], [1249, 651], [1252, 666], [1254, 678], [1257, 692], [1259, 702]];
 export async function schanzlPath() {
-  const sc = await load('physics/rapier/scenarios.ts');
+  const sc = await load('../checks/scenarios.ts');
   const [ox, oz] = readMeta().origin ?? [0, 0];
   return sc.densify(SCHANZL.map(([x, z]) => [x - ox, z - oz]));
 }

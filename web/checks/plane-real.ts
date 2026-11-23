@@ -1,12 +1,12 @@
 import { Vector3 } from 'three';
-import type { Meta } from '../types';
-import { collisionWorld, PlaneFlight, waterTop, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
+import type { Meta } from '../src/types';
+import { collisionWorld, PlaneFlight, waterTop, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/nav/plane-flight';
 import { holdPath, type Check } from './plane-checks';
 import { jetHold } from './jet-checks';
-import { VoxelCollision } from './voxel-collision';
-import { TileCache } from '../core/tile-cache';
-import { liveEdits } from '../core/live-edits';
-import { fetchGzip } from '../fetch';
+import { VoxelCollision } from '../src/nav/voxel-collision';
+import { TileCache } from '../src/core/tile-cache';
+import { liveEdits } from '../src/core/live-edits';
+import { fetchGzip } from '../src/fetch';
 
 // The plane on the real data (web/tools/plane.mjs, which serves the node files from public/data/tiles to fetch): the
 // real VoxelCollision with the plane's radius and horizon, its water (waterColumn) as the viewer reads it. The Danube's line is

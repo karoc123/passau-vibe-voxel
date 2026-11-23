@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const { module: m } = await runnerImport(`${root}src/nav/collision-checks.ts`, { root, logLevel: 'error' });
+const { module: m } = await runnerImport(`${root}checks/collision-checks.ts`, { root, logLevel: 'error' });
 const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
 const out = [...await m.runCollisionChecks(), ...await m.runRoomChecks()];
 

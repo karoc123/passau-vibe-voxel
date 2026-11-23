@@ -1,11 +1,11 @@
 // Exercise the same player commands and shared tick that the viewer uses on synthetic terrain.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { STEP, Traffic } from '../../sim/traffic';
-import type { Car, TrainPathData } from '../../sim/types';
-import type { VehicleId } from '../../sim/vehicles';
-import type { CarInput } from './car';
-import { LifePhysics } from './life-phys';
-import { CRASH_MS, SINK_MS, PARK, type DriveNote } from './player-car';
+import { STEP, Traffic } from '../src/sim/traffic';
+import type { Car, TrainPathData } from '../src/sim/types';
+import type { VehicleId } from '../src/sim/vehicles';
+import type { CarInput } from '../src/physics/rapier/car';
+import { LifePhysics } from '../src/physics/rapier/life-phys';
+import { CRASH_MS, SINK_MS, PARK, type DriveNote } from '../src/physics/rapier/player-car';
 import { synthMap, WATER, type Col, type Outcome } from './scenarios';
 
 const FRAME_MS = 1000 / 60, PLAYER = 'local';

@@ -36,7 +36,7 @@ const outPath = args.find((a, i) => !a.startsWith('-') && !['--only', '--check',
 const only = opt('--only'), checkPath = opt('--check'), tolF = +(opt('--tol') ?? 1), verbose = args.includes('-v');
 if (!hasData()) { console.error('no public/data (meta.json, traffic.json)'); process.exit(2); }
 
-const sc = await load('physics/rapier/scenarios.ts');
+const sc = await load('../checks/scenarios.ts');
 // --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run (as rapier-car.mjs --set)
 for (const kv of opt('--set')?.split(',') ?? []) {
   const [k, v] = kv.split('=');

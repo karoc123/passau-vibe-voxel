@@ -165,7 +165,7 @@ for (const k of touched) {
 }
 
 // --- 4. the car on the edited world ---
-const sc = await imp('src/physics/rapier/scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
 const physMap = (w) => ({ meta, tiles: [...area.values()].map((n) => {

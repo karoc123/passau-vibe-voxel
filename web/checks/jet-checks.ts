@@ -1,6 +1,6 @@
-import { JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput } from './plane-flight';
+import { JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneInput } from '../src/nav/plane-flight';
 import { BoxWorld, fly, levelSpeed, type Check } from './plane-checks';
-import { dot, length, vec3 } from '../core/vec';
+import { dot, length, vec3 } from '../src/core/vec';
 
 // Headless checks of the jet (plane-flight.ts JET: the floatplane's core with the aerobatic law; web/tools/plane.mjs
 // --type jet). The synthetic world of plane-checks.ts. Limits from JET where it sets them.
