@@ -17,11 +17,11 @@ export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;
-// people knocked down by a driven car (Traffic.struck): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
+// people knocked down by a driven car (WorldSim's events: struck): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
 // per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
 // PED_POP_R from the viewer
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
-// fallen into a hole (the traffic's dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
+// fallen into a hole (WorldSim's events: dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
 const G = 9.81, LANDED_S = 2;
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
@@ -49,9 +49,12 @@ export class StreetLife {
   private readonly bikeLeans = new WeakMap<Car, number>();
   // the step's phase of a person walked by a player (the sim's ph stands while they are walked)
   private readonly walkPh = new WeakMap<Person, number>();
+  // the world tick whose events were drawn last (WorldSim.eventsSince)
+  private seen: number;
 
   constructor(scene: THREE.Scene, readonly sim: WorldSim) {
     this.heads = sim.traffic.heads;
+    this.seen = sim.tick;
     this.M = new LifeMeshes(scene, this.heads);
     this.M.group.add(this.trains.group);
   }
@@ -61,19 +64,21 @@ export class StreetLife {
   private get people() { return this.traffic.people; }
   private get riders() { return this.traffic.riders; }
 
-  // the sim as it is after its update this frame (WorldSim.update: its events too), drawn; viewer: where it is seen
-  // from (the camera), what the people knocked down are gone far from
+  // the sim as it is after its update this frame (WorldSim.update; its events since the last drawn), drawn; viewer:
+  // where it is seen from (the camera), what the people knocked down are gone far from
   update(dt: number, night: number, viewer: { x: number; z: number; y?: number }) {
-    const T = this.traffic, { dropped, struck } = this.sim.events;
+    const T = this.traffic, events = this.sim.eventsSince(this.seen);
+    this.seen = this.sim.tick;
     if (T.boats && !this.boats) {
       this.boats = new Boats();
       this.group.add(this.boats.group);
     }
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
-    for (const p of dropped) if (p.rp) this.addFallen(p, 0, 1, 0, 0);
-    for (const { person, pose, vx, vz } of struck) {
-      const v = Math.hypot(vx, vz) || 1;
+    for (const e of events) if (e.kind === 'dropped' && e.person.rp) this.addFallen(e.person, 0, 1, 0, 0);
+    for (const e of events) {
+      if (e.kind !== 'struck') continue;
+      const { person, pose, vx, vz } = e, v = Math.hypot(vx, vz) || 1;
       this.addFallen({ ...person, rp: pose, rh: pose.h }, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
     }
     this.render(Math.min(dt, 0.1), night, T.acc);

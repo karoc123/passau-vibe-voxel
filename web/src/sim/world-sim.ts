@@ -7,8 +7,8 @@
 //             the players' commands, keyed by player id: follow; a seat taken and left (the driver's: takeWheel,
 //             input, releaseWheel, resetDriver; the walked person's: walkAs, walkPose, release)
 //   outputs:  the traffic's state (drawn by view/life.ts StreetLife between its last two ticks), the players' reads
-//             (seat, walkedPose, driverSnapshot, driverNotes), and the events of the last update (events: struck,
-//             dropped)
+//             (seat, walkedPose, driverSnapshot, driverNotes), and the events, each with the tick that produced it
+//             (eventsSince: struck, dropped), so several readers can each take theirs
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { CarInput } from '../physics/rapier/car';
 import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
@@ -16,7 +16,7 @@ import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { DEFAULT_SEED, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
-import type { EntityRef, Person, TrafficData, WalkPose } from './types';
+import type { EntityRef, Person, RoadPose, TrafficData, WalkPose } from './types';
 import type { VehicleId } from './vehicles';
 
 export type PlayerId = string;
@@ -40,16 +40,19 @@ export interface SimInput {
   viewer?: { x: number; z: number; y?: number };
 }
 
-/** what happened in the ticks of the last update: people knocked down by a driven car, people fallen into a hole */
-export interface SimEvents {
-  struck: Traffic['struck'];
-  dropped: Person[];
-}
+/** what happened in a tick: a person knocked down by a driven car (where, how fast it went), a person fallen into a
+ * hole; tick: the tick that produced it (WorldSim.tick after it) */
+export type SimEvent =
+  | { tick: number; kind: 'struck'; person: Person; pose: RoadPose; vx: number; vz: number }
+  | { tick: number; kind: 'dropped'; person: Person };
+
+/** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */
+export const EVENT_TICKS = 300;
 
 export class WorldSim {
   readonly traffic: Traffic;
-  /** the events of the last update (a new object each update) */
-  events: SimEvents = { struck: [], dropped: [] };
+  // the events of the last EVENT_TICKS ticks, by tick
+  private events: SimEvent[] = [];
   /** the players, by id (follow, walkAs; the drivers are the road physics': driverSnapshot) */
   readonly players = new Map<PlayerId, PlayerState>();
   // the person walked, by person id: by whom
@@ -101,14 +104,27 @@ export class WorldSim {
     return p;
   }
 
-  /** the ticks due after dt s (Traffic.update); events: what they did */
+  /** the ticks due after dt s (Traffic.update); what they did: eventsSince */
   update(dt: number, { hour, day, focus, viewer }: SimInput) {
     const T = this.traffic;
     if (day !== undefined) T.day = day;
     T.update(dt, hour, focus, viewer);
-    this.events = { struck: T.struck, dropped: T.dropped };
-    T.struck = [];
-    T.dropped = [];
+    if (T.dropped.length || T.struck.length) {
+      const fresh: SimEvent[] = [...T.dropped.map((d) => ({ kind: 'dropped' as const, ...d })), ...T.struck.map((s) => ({ kind: 'struck' as const, ...s }))];
+      this.events.push(...fresh.sort((a, b) => a.tick - b.tick));
+      T.struck = [];
+      T.dropped = [];
+    }
+    const old = this.tick - EVENT_TICKS;
+    if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
+  }
+
+  /** the events of the ticks after tick (a reader keeps the tick it read up to: WorldSim.tick), oldest first */
+  eventsSince(tick: number): SimEvent[] {
+    const E = this.events;
+    let i = E.length;
+    while (i > 0 && E[i - 1].tick > tick) i--;
+    return E.slice(i);
   }
 
   // ------------------------------------------------------------------ the players (ADR 0007), keyed by player id

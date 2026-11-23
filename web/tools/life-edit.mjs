@@ -18,7 +18,8 @@
 // The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
 //   players  two players by id (WorldSim follow, walkAs, walkPose, release; no physics): the person walked stands
 //          where the walk's poses put them, holds one player, and is kept with the car followed when the focus moves
-//          away; let go, both leave with the circle.
+//          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
+//          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
 // Prints the costs (the bodies' tick, the colliders).
 // usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
@@ -205,15 +206,24 @@ async function dig() {
   log(`dig: r ${R} at (${op.x}, ${op.y}, deck ${deck.toFixed(1)}) 6 m ahead of car ${car.id} at ${car.v.toFixed(1)} m/s; ground there now ${below.toFixed(1)}`);
   check(below < deck - 3, `the dig opened the deck: ground ${f2(below)} under it, deck ${f2(deck)}`);
   const w = watcher(ctx);
-  let bodyAt = -1, minY = Infinity, fallers = new Set(), dropped = 0;
+  let bodyAt = -1, minY = Infinity, fallers = new Set(), dropped = 0, seen = ctx.sim.tick;
+  // a second reader of the events, every 5 s (WorldSim.eventsSince): the same ones, each with its tick
+  let late = [], lateSeen = ctx.sim.tick, firstTick = ctx.sim.tick;
   const t0 = ctx.t;
-  run(ctx, 15, () => {
+  run(ctx, 15, (i) => {
     w.tick();
     if (bodyAt < 0 && phys.owns(car)) bodyAt = ctx.t - t0;
     if (car.rp) minY = Math.min(minY, car.rp.y + lowEdge(car));
     for (const c of [...T.cars, ...T.detachedCars]) if (c.rp && c.rp.y < deck - 3 && Math.hypot(c.rp.x - ax, c.rp.z - az) < 8) fallers.add(c.id);
-    dropped += ctx.sim.events.dropped.length;
+    const fresh = ctx.sim.eventsSince(seen);
+    check(fresh.every((e) => e.tick > seen && e.tick <= ctx.sim.tick), 'the events read are those of the ticks since the last read');
+    dropped += fresh.filter((e) => e.kind === 'dropped').length;
+    seen = ctx.sim.tick;
+    if (i % 150 === 149) { late.push(...ctx.sim.eventsSince(lateSeen)); lateSeen = ctx.sim.tick; }
   });
+  check(late.filter((e) => e.kind === 'dropped').length === dropped && late.every((e) => e.tick > firstTick),
+    `a reader every 5 s gets the same events (${late.filter((e) => e.kind === 'dropped').length} / ${dropped} dropped)`);
+  check(ctx.sim.eventsSince(ctx.sim.tick).length === 0, 'nothing since the last tick');
   const lost = phys.log.find((l) => l.kind === 'lost' && l.id === car.id), rest = phys.log.find((l) => l.kind === 'rest' && l.id === car.id);
   const rim = [...phys.bodies.values()].filter((b) => b.state === 'track' && b.held && Math.hypot(b.car.rp.x - ax, b.car.rp.z - az) < 20).length;
   log(`  car ${car.id}: body after ${f2(bodyAt)} s, lowest ${f2(minY)}, lost ${lost ? `at ${f2(lost.t)} (${lost.why})` : 'never'}, rest ${rest ? `at y ${f2(rest.at[1])}` : 'never'}; ${fallers.size} car(s) fell in, ${rim} held near the rim; ${dropped} person(s) fell`);
@@ -403,7 +413,30 @@ function players() {
     tick(1, { x: far.x + 200, z: far.z });
     const gone = !T.people.includes(p) && !T.cars.includes(c);
     check(gone, 'let go, they leave with the circle');
-    results.players = { seat: 'one', kept: kept ? 'yes' : 'no', released: gone ? 'yes' : 'no' };
+    // a hole (a ground with nothing under the street round a person walked): the others there fall, the one walked
+    // stands; two readers of the events, one every tick, one every 2 s, get the same ones with their ticks
+    const sim2 = new WorldSim(td, { seed: SEED }), T2 = sim2.traffic;
+    const tick2 = (seconds, each) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { sim2.update(STEP, { hour: HOUR, focus }); each?.(i); } };
+    tick2(5);
+    const q = T2.people.find((r) => !r.wait), Q = q && T2.personPoint(q, 0, { x: 0, y: 0, z: 0 });
+    if (!check(q, 'a person near the bridge')) return;
+    sim2.walkAs('A', q.id, { x: Q.x, y: Q.z, z: Q.y, h: 0, moving: false });
+    const near = (x, z) => Math.hypot(x - Q.x, z - Q.y) < 40;
+    sim2.setWorld({ surface: (x, z, y) => y, support: (x, z, top) => (near(x, z) ? -1000 : top) });
+    sim2.edited([Q.x - 40, Q.y - 40, Q.x + 40, Q.y + 40]);
+    const every = [], slow = [];
+    let seen = sim2.tick, slowSeen = sim2.tick;
+    const from = sim2.tick;
+    tick2(4, (i) => {
+      every.push(...sim2.eventsSince(seen)); seen = sim2.tick;
+      if (i % 60 === 59) { slow.push(...sim2.eventsSince(slowSeen)); slowSeen = sim2.tick; }
+    });
+    const drops = every.filter((e) => e.kind === 'dropped');
+    check(drops.length > 0 && drops.every((e) => e.person !== q) && T2.people.includes(q), `the people over the hole fall (${drops.length}), the one walked stands`);
+    check(JSON.stringify(every.map((e) => [e.tick, e.person.id])) === JSON.stringify(slow.map((e) => [e.tick, e.person.id]))
+      && every.every((e, k) => e.tick > from && (k === 0 || e.tick >= every[k - 1].tick)),
+    'two readers of the events at different rates get the same ones, in tick order');
+    results.players = { seat: 'one', kept: kept ? 'yes' : 'no', released: gone ? 'yes' : 'no', dropped: drops.length };
   } finally {
     Math.random = realRandom;
   }

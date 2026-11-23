@@ -99,8 +99,9 @@ export class Traffic {
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
   riders: Person[] = [];
-  // the people fallen into a hole since the presentation last took them (drawn falling: view/life.ts)
-  dropped: Person[] = [];
+  // the people fallen into a hole and knocked down (by a driven car: life-phys.ts) in the ticks since the world sim
+  // last took them (WorldSim.update: its events)
+  dropped: { tick: number; person: Person }[] = [];
   struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
@@ -468,7 +469,7 @@ export class Traffic {
       if (this.held.person.has(p.id)) return true;
       this.personPoint(p, 0, P);
       if (!this.hole(P.x, P.y, P.z)) return true;
-      this.dropped.push(p);
+      this.dropped.push({ tick: this.tickNumber, person: p });
       return false;
     });
     this.people = drop(this.people);

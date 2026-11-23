@@ -44,8 +44,9 @@ two runs differed.
   what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
 - **Outputs**: the agents' state per tick (cars on their paths, bodies' poses at the last two ticks, parked cars and
-  wrecks with their pose), the players' reads (`seat`, `walkedPose`, `driverSnapshot`, `driverNotes`), and the events of the last update
-  (`WorldSim.events`: `struck`, people knocked down by a driven car; `dropped`, people fallen into a hole).
+  wrecks with their pose), the players' reads (`seat`, `walkedPose`, `driverSnapshot`, `driverNotes`), and the events,
+  each with the tick that produced it (`WorldSim.eventsSince(tick)`, kept `EVENT_TICKS`: `struck`, people knocked down
+  by a driven car; `dropped`, people fallen into a hole), so several readers each take theirs.
 - **The player's vehicles' cores** (`sim/craft/boat-motion.ts`, `sim/craft/plane-flight.ts`, `sim/craft/fpv-flight.ts`,
   `physics/rapier/car.ts`) keep the same rule, so a server can step or check each player's vehicle: plain `{ x, y, z }`
   state and maths (`core/vec.ts`, three.js's arithmetic in its order), stepped by one fixed-step runner
