@@ -5,7 +5,8 @@ import { waterTop } from '../src/sim/river';
 import type { Check } from './check';
 import { holdPath } from './plane-checks';
 import { jetHold } from './jet-checks';
-import { VoxelCollision } from '../src/nav/voxel-collision';
+import { VoxelCollision } from '../src/sim/craft/voxel-collision';
+import { fetchedCollision } from './world';
 import { TileCache } from '../src/core/tile-cache';
 import { liveEdits } from '../src/core/live-edits';
 import { fetchGzip } from '../src/fetch';
@@ -94,7 +95,7 @@ function danube(col: VoxelCollision) {
 
 export async function runRealChecks(meta: Meta, c: PlaneConfig): Promise<Check[]> {
   const out: Check[] = [];
-  const col = new VoxelCollision(meta, undefined, { radius: c.RADIUS, horizon: c.HORIZON });
+  const col = fetchedCollision(meta, { radius: c.RADIUS, horizon: c.HORIZON });
   try {
     const w = collisionWorld(col, meta.H);
     const line = await danube(col);
@@ -182,10 +183,10 @@ export async function runJetRealChecks(meta: Meta, c: PlaneConfig): Promise<Chec
     due.push(d);
     fetchGzip(`data/tiles/${path}`).then((b) => { d.file = b; });
   }) });
-  const col = new VoxelCollision(meta, slow, { radius: c.RADIUS, horizon: c.HORIZON });
+  const col = new VoxelCollision(meta, slow, () => performance.now(), { radius: c.RADIUS, horizon: c.HORIZON });
   try {
     const w = collisionWorld(col, meta.H);
-    const riverCollision = new VoxelCollision(meta, undefined, { radius: c.RADIUS });
+    const riverCollision = fetchedCollision(meta, { radius: c.RADIUS });
     const line = await danube(riverCollision).finally(() => riverCollision.release());
     if (line.length < 40) return [{ name: 'jet_city', pass: false, detail: { points: line.length } }];
     // the route: the river's line, then on east over the Altstadt (x 7900..8700, its middle z ~ the Ort's)

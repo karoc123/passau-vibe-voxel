@@ -5,10 +5,14 @@
 // DOM, no fetch (tools/core-deps.mjs).
 //   inputs:   update(dt, { hour, day, focus, viewer }), edited(box, cleared), setBoats, setWorld (ground and water);
 //             the players' commands, keyed by player id: follow; a seat taken and left (the driver's: takeWheel,
-//             input, releaseWheel, resetDriver; the walked person's: walkAs, walkPose, release)
-//   owns:     which of the world's edits are kept (sim/edit-keeper.ts: while a player is near them)
-//   outputs:  the traffic's state (drawn by view/life.ts StreetLife between its last two ticks), the players' reads
-//             (seat, walkedPose, driverSnapshot, driverNotes), and the events, each with the tick that produced it
+//             input, releaseWheel, resetDriver; the walked person's: walkAs, walkPose, release; a craft's pilot's:
+//             enterCraft, craftInput, resetCraft, leaveCraft); the crafts made, put down and taken away (addCraft,
+//             placeCraft, removeCraft: what a game mode, today the craft's shell, decides)
+//   owns:     which of the world's edits are kept (sim/edit-keeper.ts: while a player is near them); the player
+//             crafts (sim/craft/craft-core.ts), each stepped at its own fixed step through its own collision
+//   outputs:  the traffic's state (drawn by view/life.ts StreetLife between its last two ticks), the crafts' (crafts:
+//             their cores, read by their shells in nav/), the players' reads (seat, walkedPose, driverSnapshot,
+//             driverNotes, craftOf, craftEvents), and the events, each with the tick that produced it
 //             (eventsSince: struck, dropped), so several readers can each take theirs
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { CarInput } from '../physics/rapier/car';
@@ -20,18 +24,48 @@ import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { EntityRef, Person, RoadPose, TrafficData, WalkPose } from './types';
 import type { VehicleId } from './vehicles';
+import type { Meta } from '../types';
+import type { TileCache } from '../core/tile-cache';
+import type { CraftCore, CraftSpot } from './craft/craft-core';
+import { CORES, type CoreOf, type CraftType } from './craft/cores';
+import { VoxelCollision } from './craft/voxel-collision';
 
 export type PlayerId = string;
 /** the viewer's own player (a solo viewer has one; a server would number its clients' players) */
 export const LOCAL_PLAYER: PlayerId = 'local';
 
-/** a player's place on an entity (ADR 0008: control per seat): the driver's seat of a car (takeWheel), or the one seat
- * of a person walked (walkAs). A seat holds at most one player; other seats and roles would be added here. */
-export type Seat = { entity: EntityRef & { kind: 'car' }; role: 'driver' } | { entity: EntityRef & { kind: 'person' }; role: 'walker' };
+export type CraftId = number;
+
+/** a player's place on an entity (ADR 0008: control per seat): the driver's seat of a car (takeWheel), the one seat
+ * of a person walked (walkAs), or the pilot's seat of a craft (enterCraft). A seat holds at most one player; other
+ * seats and roles would be added here. */
+export type Seat = { entity: EntityRef & { kind: 'car' }; role: 'driver' } | { entity: EntityRef & { kind: 'person' }; role: 'walker' } |
+  { entity: { kind: 'craft'; id: CraftId }; role: 'pilot' };
 
 /** what the sim keeps of a player: the entity followed (kept in the sim wherever it goes, no rights over it), the
- * person walked as and where the player put them (the walk itself is the client's, sent as a pose) */
-export interface PlayerState { follow?: EntityRef; walkingAs?: number; pose?: WalkPose }
+ * person walked as and where the player put them (the walk itself is the client's, sent as a pose), the craft piloted */
+export interface PlayerState { follow?: EntityRef; walkingAs?: number; pose?: WalkPose; craft?: CraftId }
+
+/** a player craft (sim/craft/craft-core.ts): an entity with one seat, its pilot's; stepped once put down */
+export interface Craft<C extends CraftCore = CraftCore> {
+  readonly id: CraftId;
+  readonly type: CraftType;
+  readonly core: C;
+  /** its own: the tiles round it (the shell reads it too: its camera's sweep, its panel) */
+  readonly collision: VoxelCollision;
+  /** the player in the pilot's seat */
+  readonly pilot: PlayerId | null;
+  /** put down (placeCraft): stepped from then on */
+  readonly placed: boolean;
+}
+type InputOf<C> = C extends CraftCore<infer I> ? I : never;
+/** what a pilot sends (craftInput): the input of their craft's type */
+export type CraftInput = InputOf<CoreOf<CraftType>>;
+type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
+
+/** what the crafts' collisions read: the map, the node files (the viewer's shared TileCache) and the clock (ms) their
+ * fetch pacing reads */
+export interface CraftWorld { meta: Meta; cache: TileCache; now: () => number }
 
 /** what one update is given: the world's hour and day of the year, the focus (the middle of what is simulated) and
  * the viewer (where agents may come and go unseen far from; by default the focus) */
@@ -62,14 +96,17 @@ export class WorldSim {
   private phys: LifePhysics | null = null;
   private loading: Promise<LifePhysics> | null = null;
   private readonly keeper: EditKeeper;
+  /** the player crafts, by craft id */
+  readonly crafts: ReadonlyMap<CraftId, Craft> = new Map<CraftId, CraftState>();
+  private nextCraft = 1;
 
   /** the world's tuning (read-only, sim/tuning.ts); the physics loader is given it */
   readonly tuning: Tuning;
 
   /** loadPhysics: makes the road physics with the world's tuning (Rapier initialised, its tiles from a cache or a
-   * load) */
+   * load); crafts: what the crafts' collisions read (without it, addCraft throws) */
   constructor(data: TrafficData, private readonly opts: {
-    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>;
+    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld;
   } = {}) {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED);
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
@@ -114,6 +151,7 @@ export class WorldSim {
     if (day !== undefined) T.day = day;
     // (the edits no player is near any more dropped before the ticks, which see it)
     this.keeper.update(this.tick * STEP, this.foci(focus));
+    this.stepCrafts(dt);
     T.update(dt, hour, focus, viewer);
     if (T.dropped.length || T.struck.length) {
       const fresh: SimEvent[] = [...T.dropped.map((d) => ({ kind: 'dropped' as const, ...d })), ...T.struck.map((s) => ({ kind: 'struck' as const, ...s }))];
@@ -185,10 +223,12 @@ export class WorldSim {
     return by === undefined ? null : this.players.get(by)?.pose ?? null;
   }
 
-  /** the seat the player holds: the walked person's, else the driver's of the car they drive, else null */
+  /** the seat the player holds: the walked person's, else the pilot's of their craft, else the driver's of the car they
+   * drive, else null */
   seat(player: PlayerId): Seat | null {
     const P = this.players.get(player);
     if (P?.walkingAs !== undefined) return { entity: { kind: 'person', id: P.walkingAs }, role: 'walker' };
+    if (P?.craft !== undefined) return { entity: { kind: 'craft', id: P.craft }, role: 'pilot' };
     const car = this.driverSnapshot(player);
     return car ? { entity: { kind: 'car', id: car.entityId }, role: 'driver' } : null;
   }
@@ -201,9 +241,10 @@ export class WorldSim {
 
   // the traffic's held and walked ids, from the players
   // Where the players are (map metres), for the edits kept (sim/edit-keeper.ts): the focus given, and each player's
-  // walked person (their pose), car driven, or entity followed
+  // walked person (their pose), car driven, craft piloted, or entity followed
   private foci(focus: { x: number; z: number }) {
     const out = [focus], T = this.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+    for (const c of this.crafts.values()) if (c.pilot !== null && c.placed) out.push({ x: c.core.pose.x, z: c.core.pose.z });
     for (const [id, P] of this.players) {
       if (P.pose) out.push({ x: P.pose.x, z: P.pose.z });
       const car = this.driverSnapshot(id);
@@ -238,4 +279,101 @@ export class WorldSim {
   driverSnapshot(player: PlayerId): DriverSnapshot | null { return this.phys?.driverSnapshot(player) ?? null; }
   /** what the player is to be told since the last call */
   driverNotes(player: PlayerId): DriveNote[] { return this.phys?.driverNotes(player) ?? []; }
+
+  // ------------------------------------------------------------------ the player crafts (sim/craft/craft-core.ts)
+  // A craft is an entity with one seat, its pilot's (ADR 0008: per seat; a gunner's would be another). It is made
+  // (addCraft), put down (placeCraft: stepped from then on, whether or not anyone pilots it: an empty seat is neutral
+  // input) and taken away (removeCraft). The pilot's commands apply at once; the steps read the input in the next
+  // update.
+
+  /** a new craft of type (its core given its part of the world's tuning), not yet put down: what its shell searches a
+   * spot with (craft.collision) before placeCraft */
+  addCraft<K extends CraftType>(type: K): Craft<CoreOf<K>> {
+    const env = this.opts.crafts;
+    if (!env) throw new Error('WorldSim: no craft world');
+    const core = CORES[type](this.tuning) as CoreOf<K>;
+    const c: CraftState = { id: this.nextCraft++, type, core, collision: new VoxelCollision(env.meta, env.cache, env.now, core.reach),
+      pilot: null, placed: false, input: core.neutral };
+    (this.crafts as Map<CraftId, CraftState>).set(c.id, c);
+    return c as unknown as Craft<CoreOf<K>>;
+  }
+
+  /** craft id put down at spot, standing still (or at spot.speed): stepped from the next update */
+  placeCraft(id: CraftId, spot: CraftSpot) {
+    const c = this.craft(id);
+    if (!c) return;
+    c.core.reset(spot);
+    c.core.clock.acc = 0;
+    c.placed = true;
+  }
+
+  /** craft id taken out of the world (its pilot leaves it first) */
+  removeCraft(id: CraftId) {
+    const c = this.craft(id);
+    if (!c) return;
+    if (c.pilot !== null) this.leaveCraft(c.pilot);
+    c.collision.release();
+    (this.crafts as Map<CraftId, CraftState>).delete(id);
+  }
+
+  /** the player takes the pilot's seat of craft id (leaving another craft's); false: no such craft, or another
+   * player pilots it */
+  enterCraft(player: PlayerId, id: CraftId) {
+    const c = this.craft(id);
+    if (!c || (c.pilot !== null && c.pilot !== player)) return false;
+    const P = this.player(player);
+    if (P.craft !== undefined && P.craft !== id) this.leaveCraft(player);
+    P.craft = id;
+    c.pilot = player;
+    return true;
+  }
+
+  /** what the player's hands do on their craft's controls (its type's input), until the next; ignored while they pilot
+   * none */
+  craftInput(player: PlayerId, input: CraftInput) {
+    const c = this.craftOf(player) as CraftState | null;
+    if (c) c.input = input;
+  }
+
+  /** the player's craft back to a safe spot nearby (T); false: none, or not now */
+  resetCraft(player: PlayerId) {
+    const c = this.craftOf(player);
+    return !!c?.placed && !!c.core.unstick?.(c.collision);
+  }
+
+  /** the player leaves the pilot's seat: the craft goes on with hands off (its neutral input) */
+  leaveCraft(player: PlayerId) {
+    const P = this.players.get(player), c = P?.craft !== undefined ? this.craft(P.craft) : null;
+    if (P) delete P.craft;
+    if (!c) return;
+    c.pilot = null;
+    c.input = c.core.neutral;
+    c.core.events.length = 0;
+  }
+
+  /** the craft the player pilots, or null */
+  craftOf(player: PlayerId): Craft | null {
+    const id = this.players.get(player)?.craft;
+    return id === undefined ? null : this.crafts.get(id) ?? null;
+  }
+
+  /** what happened to the player's craft since the last call (its core's events), oldest first */
+  craftEvents(player: PlayerId): unknown[] {
+    const c = this.craftOf(player);
+    return c ? c.core.events.splice(0) : [];
+  }
+
+  private craft(id: CraftId) { return (this.crafts as Map<CraftId, CraftState>).get(id); }
+
+  // each craft put down: its collision's tiles fetched round it and ahead, then the frame's steps at its own fixed
+  // step with its pilot's input (or the neutral); a step not taken (a tile not in) drops the rest of the frame
+  private stepCrafts(dt: number) {
+    for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
+      if (!c.placed) continue;
+      const core = c.core;
+      c.collision.prefetch(core.pose, core.velocity);
+      core.clock.run(dt, (step) => core.step(c.input, step, c.collision));
+      if (c.pilot === null) core.events.length = 0;
+    }
+  }
 }

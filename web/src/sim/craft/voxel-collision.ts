@@ -1,12 +1,10 @@
-import { component, type Vec3 } from '../core/vec';
-import type { ImpactKind, Sweep } from '../sim/craft/sweep';
-import type { Meta } from '../types';
-import type { RawColumns } from '../tile-data';
-import { liveEdits } from '../core/live-edits';
-import { paletteMask, RULES, semanticTable } from '../core/semantics';
-import { TileCache } from '../core/tile-cache';
-import { fetchGzip } from '../fetch';
-import { capField, surfaceAt, type CapField } from '../core/surface';
+import { component, type Vec3 } from '../../core/vec';
+import type { ImpactKind, Sweep } from './sweep';
+import type { Meta } from '../../types';
+import type { RawColumns } from '../../tile-data';
+import { paletteMask, RULES, semanticTable } from '../../core/semantics';
+import type { TileCache } from '../../core/tile-cache';
+import { capField, surfaceAt, type CapField } from '../../core/surface';
 
 // the drone's cube's half side and how far ahead (s) its tiles are fetched; the plane passes its own (plane.ts)
 const RADIUS = 0.35, HORIZON = 2.2;
@@ -18,7 +16,7 @@ type Runs = { offsets: Uint32Array; data: Uint16Array };
 type CollisionTile = { ground: Uint8Array; base: Runs; foliage: Runs; caps: CapField | null };
 const collisionTile = (N: number, v: { base: RawColumns & { ground: Uint8Array; caps?: Uint16Array | null }; foliage: RawColumns }): CollisionTile =>
   ({ ground: v.base.ground, base: runsOf(v.base), foliage: runsOf(v.foliage), caps: capField(N, v.base) });
-export type { ImpactKind, Sweep } from '../sim/craft/sweep';
+export type { ImpactKind, Sweep } from './sweep';
 
 function runsOf(columns: RawColumns): Runs {
   const offsets = new Uint32Array(columns.counts.length + 1);
@@ -54,14 +52,17 @@ function contact(p: Vec3, d: Vec3, x: number, lo: number, hi: number, z: number,
   return { fraction: enter, axis };
 }
 
-// A craft's collision (one each: the FPV drone, fpv.ts; the boat, boat.ts; the floatplane and the jet, plane.ts, with
-// their own radius and horizon): a small cache of the 1 m tiles near it, independent of visibility,
-// render budget and the mesh-worker queue. The nodes' files come through a TileCache (core/tile-cache.ts: given, e.g.
-// the viewer's shared one, or its own fetching data/tiles/), held while near.
+// A craft's collision (one each: the FPV drone, the boat, the special crafts, the floatplane and the jet, with their
+// own radius and horizon): a small cache of the 1 m tiles near it, independent of visibility, render budget and the
+// mesh-worker queue. Sim side (no three.js, no DOM, no fetch: tools/core-deps.mjs): the nodes' files come through the
+// TileCache given (core/tile-cache.ts: the viewer's shared one, viewer-tiles.ts, or a tool's reading the disk), held
+// while near; `now` is the clock (ms) its fetch pacing and retries read (the viewer's: performance.now).
 export class VoxelCollision {
   readonly width: number;
   readonly depth: number;
   readonly ceiling: number;
+  /** the map's height (meta.H) */
+  readonly height: number;
   readonly radius: number;
   private readonly horizon: number;
   private readonly tileSide: number;
@@ -83,19 +84,20 @@ export class VoxelCollision {
   private nextPrefetch = 0;
   private unlisten: (() => void) | undefined;
 
-  constructor(meta: Meta, cache?: TileCache, { radius = RADIUS, horizon = HORIZON }: CollisionOptions = {}) {
+  constructor(meta: Meta, cache: TileCache, private readonly now: () => number, { radius = RADIUS, horizon = HORIZON }: CollisionOptions = {}) {
     this.radius = radius;
     this.horizon = horizon;
     this.width = meta.W;
     this.depth = meta.D;
     this.ceiling = meta.H + 600;
+    this.height = meta.H;
     this.tileSide = meta.tiles.N;
     this.row = this.tileSide + 2;
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
     this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
     this.wet = paletteMask(semanticTable(meta.palette), RULES.water);
-    this.cache = cache ?? new TileCache({ N: this.tileSide, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits });
+    this.cache = cache;
   }
 
   // A craft has left. Drop its local tiles and holds, and resume on its next prefetch.
@@ -123,7 +125,7 @@ export class VoxelCollision {
   // A check stepping faster than wall time can ask for a fresh neighbourhood on demand.
   prefetch(p: Vec3, v: Vec3, refresh = false) {
     this.unlisten ??= this.cache.edits?.listen((tx, tz) => this.invalidate(tx, tz));
-    const now = performance.now();
+    const now = this.now();
     if (refresh || now >= this.nextPrefetch) {
       this.nextPrefetch = now + 160;
       // round the craft and round points along its path out to the horizon, no more than two nodes apart (so that
@@ -284,7 +286,7 @@ export class VoxelCollision {
         this.retryAt.delete(key);
       })
       .catch(() => {
-        if (this.wanted.includes(key)) this.retryAt.set(key, performance.now() + 1500);
+        if (this.wanted.includes(key)) this.retryAt.set(key, this.now() + 1500);
       })
       .finally(() => this.inFlight.delete(key));
   }

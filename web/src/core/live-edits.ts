@@ -1,6 +1,6 @@
 // The world's edited level-1 nodes: those whose columns differ from their files now (core/world-edits.ts writes them:
 // apply, drop), for whatever draws or collides with the world: the viewer's streamer (stream.ts onLive) and whatever
-// reads the node files on its own (physics/rapier/terrain.ts, nav/voxel-collision.ts) read a node's columns here
+// reads the node files on its own (physics/rapier/terrain.ts, sim/craft/voxel-collision.ts) read a node's columns here
 // before its file, and drop what they built of it when it changes. Transient (docs/adr/0001-world-layers.md L2):
 // nothing is kept beyond the process. Empty unless something edits, so nothing changes by default. One world per
 // process (docs/adr/0008-server-vision.md): the module's liveEdits.

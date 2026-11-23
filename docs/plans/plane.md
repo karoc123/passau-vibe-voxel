@@ -137,7 +137,7 @@ Der Plan funktioniert mit den Empfehlungen; bis zu einer Antwort wird jeweils di
 - **Drone speed, from the code** (`thrust = g (throttle / 0.39)^1.35`, `drag = 0.12 + 0.009 v`): level top speed
   43.8 m/s = **158 km/h** on the keyboard (throttle 0.77), 54.8 m/s = **197 km/h** at full throttle (touch,
   controller); more in a dive.
-- **Collision** (`nav/voxel-collision.ts`): `VoxelCollision` keeps the 1 m node files of the 3 × 3 nodes round the
+- **Collision** (`sim/craft/voxel-collision.ts`): `VoxelCollision` keeps the 1 m node files of the 3 × 3 nodes round the
   craft and round the point 2.2 s ahead, through the viewer's shared `TileCache`, independent of what is drawn.
   `sweep(p, d)` moves a 0.7 m cube (`RADIUS = 0.35`, a module constant) and returns the fraction, what it hit
   (`terrain | structure | foliage | city edge | ceiling`) and the normal's axis, or `'loading'` (the drone then

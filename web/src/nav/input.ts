@@ -7,12 +7,13 @@
 //   addEventListener('keydown', (e) => { if (gameKey(e) && !e.repeat && e.code === 'KeyM') { minimap.toggle(); e.preventDefault(); } });
 //
 // Focus: when the window loses the focus (another window, a tab switch) the held keys, touches and hold buttons are
-// let go (onFocusLoss) and a craft's simulation holds still (inFocus false: not stepped) until it is back; the panel
-// says PAUSED. The drone also wants arming again (fpv.ts: a radio's throttle may have moved meanwhile).
+// let go (onFocusLoss) and a craft's input is hands off (inFocus false: its neutral input, the car's PARK; the world
+// sim goes on, ADR 0008) until it is back; the panel says PAUSED. The drone is disarmed and wants arming again
+// (fpv.ts: a radio's throttle may have moved meanwhile).
 
 /** a gamepad's stick inside this is at rest */
 export const DEADZONE = 0.12;
-export const PAUSED = 'Paused (window not in focus)';
+export const PAUSED = 'Hands off (window not in focus)';
 
 /** the key is meant for a page control: typed into a text field or a list, or Space and Enter on a focused button,
  *  checkbox or summary (they press it). A range slider is no text field: the walk keys walk after one was dragged. */
@@ -45,7 +46,7 @@ let blurred = false;
 addEventListener('blur', () => { blurred = true; });
 addEventListener('focus', () => { blurred = false; });
 
-/** the window has the focus and is shown: a craft steps its simulation only then */
+/** the window has the focus and is shown: a craft takes the player's input only then */
 export const inFocus = () => !blurred && !document.hidden;
 
 /** run when the window loses the focus or is hidden: let go of what is held */

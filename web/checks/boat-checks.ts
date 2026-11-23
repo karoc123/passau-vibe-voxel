@@ -4,7 +4,7 @@ import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../
 import { downstream, nearestRiver } from '../src/sim/river';
 import type { Check } from './check';
 import { makeWorld } from './world';
-import type { VoxelCollision } from '../src/nav/voxel-collision';
+import type { VoxelCollision } from '../src/sim/craft/voxel-collision';
 
 // Headless checks of the player's boat (boat-motion.ts; web/tools/boat.mjs). On a synthetic world written as real node
 // files (world.ts makeWorld) and read by the real VoxelCollision: a channel of water at 4 m (x 16..240,

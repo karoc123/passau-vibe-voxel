@@ -1,11 +1,10 @@
 import { Vector3 } from 'three';
 import type { ColumnData, Meta } from '../src/types';
-import { VoxelCollision } from '../src/nav/voxel-collision';
 import { decodeTile, roomOffsets, TILE_N as N } from '../src/tile-data';
 import { World } from '../src/world';
 import { STEP, walkStep } from '../src/nav/walk';
 import type { Check } from './check';
-import { makeWorld, serve, type TestWorld, type WorldSpec } from './world';
+import { fetchedCollision, makeWorld, serve, type TestWorld, type WorldSpec } from './world';
 
 // Headless checks of the FPV drone's collision (voxel-collision.ts; web/tools/collision.mjs): a synthetic voxel world
 // (a ground height per column and boxes on it: walls, decks, water) written as real 1 m node files and served to the
@@ -75,7 +74,7 @@ export async function runCollisionChecks(): Promise<Check[]> {
 // Returns the first hit (the segment, what it hit) or null for a clear flight.
 export async function sweepPath(meta: Meta, files: Map<string, Uint8Array>, path: [number, number, number][], lift: number) {
   serve(files);
-  const c = new VoxelCollision(meta);
+  const c = fetchedCollision(meta);
   try {
     for (let k = 0; k < path.length - 1; k++) {
       const p = new Vector3(path[k][0], path[k][2] + lift, path[k][1]);

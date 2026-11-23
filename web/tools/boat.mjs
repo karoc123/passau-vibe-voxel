@@ -13,12 +13,12 @@ const m = await imp('checks/boat-checks.ts');
 const out = await m.runBoatChecks();
 
 if (hasData() && fs.existsSync(`${DATA}flood.json`)) {
-  const { VoxelCollision } = await load('nav/voxel-collision.ts');
+  const { VoxelCollision } = await load('sim/craft/voxel-collision.ts');
   const { TileCache } = await load('core/tile-cache.ts');
   const { Vector3 } = await import('three');
   const meta = readMeta(), N = meta.tiles.N;
   const cache = new TileCache({ N, load: async (p) => { const b = zlib.gunzipSync(fs.readFileSync(`${DATA}tiles/${p}`)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); } });
-  const c = new VoxelCollision(meta, cache);
+  const c = new VoxelCollision(meta, cache, () => performance.now());
   // the 3 x 3 nodes round (x, z) in
   const need = async (x, z) => {
     const p = new Vector3(x, 0, z), zero = new Vector3();

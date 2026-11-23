@@ -9,8 +9,10 @@
 // Pure: no DOM, no three.js; the world through one query (BoatWorld, which VoxelCollision.waterColumn answers). Runs
 // in node (tools/boat.mjs, checks/boat-checks.ts) as in the viewer.
 
+import { FixedStep } from '../../core/fixed-step';
 import { frozen } from '../../core/frozen';
 import { SafeTrail } from '../../core/safe-trail';
+import type { CraftCore, CraftSpot } from './craft-core';
 
 export interface BoatInput {
   throttle: number; // -1..1: forwards, backwards (braking first while still going forwards)
@@ -253,4 +255,31 @@ export function findSpawn(world: BoatWorld, x: number, z: number, h: number, rad
     }
   }
   return null;
+}
+
+// The boat as WorldSim steps it (craft-core.ts): its motion at 1/120 s, at most 12 steps (0.1 s) a frame; the bumps
+// of the steps since its pilot last read them. Its collision: the drone's cube and look-ahead (VoxelCollision's).
+export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
+  readonly motion: BoatMotion;
+  readonly clock = new FixedStep(1 / 120, 12, 0.1);
+  readonly reach = {};
+  readonly neutral = NO_BOAT_INPUT;
+  readonly events: BoatEvent[] = [];
+
+  constructor(cfg: BoatTuning = BOAT) { this.motion = new BoatMotion(cfg); }
+
+  reset(spot: CraftSpot) { this.motion.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z, h: spot.h }); }
+
+  step(input: BoatInput, dt: number, world: BoatWorld) {
+    const ev = this.motion.step(input, dt, world);
+    if (ev === 'loading') return false;
+    this.events.push(...ev);
+    return true;
+  }
+
+  get pose() { return this.motion.pose; }
+  get velocity() { return { x: this.motion.vx, y: 0, z: this.motion.vz }; }
+  // (as drawn at the last step)
+  drawn(_alpha: number) { return this.motion.drawn(); }
+  unstick(world: BoatWorld) { return this.motion.unstick(world); }
 }

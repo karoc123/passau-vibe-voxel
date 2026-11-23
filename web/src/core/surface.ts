@@ -1,7 +1,7 @@
 // The surface of the ground as it is drawn and stood on: a 1 m column's top run whose top face is a quad with four
 // corner heights (a "cap") instead of the flat top of its voxel. One field per level-1 node (CapField), read by the
 // mesher (mesher.worker.ts), the walkers' World (world.ts), the car's terrain (physics/rapier/terrain.ts) and the
-// drone's surface (nav/voxel-collision.ts) through the accessors below -- nobody else reads the corners -- so what is
+// drone's surface (sim/craft/voxel-collision.ts) through the accessors below -- nobody else reads the corners -- so what is
 // drawn is what is stood and driven on. docs/plans/surface-caps.md.
 //
 // The node's `caps` section (scripts/caps.py, written by tile_fields.py) fills it: capField below decodes it and keeps
