@@ -35,6 +35,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
+| M1 | Chase camera placed after this frame's poses (the car judder), with a judder gate ([plan](smooth-motion-and-lag.md)) | S | **Ready** |
+| M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
+| M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
 | E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
 | E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Waits** (E7 first; order in the plan) |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
