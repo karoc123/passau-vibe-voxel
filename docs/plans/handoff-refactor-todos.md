@@ -35,15 +35,14 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E6 | Folders follow the seam (cores to `sim/`, views out of `sim/`) | S–M | **In progress** (`e6`) |
-| E1 | `WorldSim`: one headless host for the world sim | M | **Waits** for E6 |
-| E5 | Read-only tuning per world | S–M | **Waits** for E6 (after F7 if F7 runs) |
+| E1 | `WorldSim`: one headless host for the world sim | M | **In progress** (`e1`) |
+| E5 | Read-only tuning, passed in | S–M | **In progress** (`e5`) |
 | E2 | Players in the sim: follow and walk-as by player id | M | **Waits** for E1 |
 | E3 | Edits owned by the world, not the renderer | M | **Waits** for E1 |
 | E4 | Player crafts on the world clock | L | **Waits** for E1, E5 (best after E3) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
-| F2 | Walk to a vehicle and get in | M | **Waits** for E2 (F2b, crafts: E4) |
+| F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
@@ -73,22 +72,16 @@ Left:
 
 ## Engine packages (audit of main 21d7830e, 2026-11-23)
 
-The owner's direction: the engine's architecture first, so the vision can change cheaply. Target: ADR 0006 and 0007.
+The owner's direction: the engine's architecture first, so the vision can change cheaply. Target: ADR 0006, 0007 and
+[ADR 0008](../adr/0008-server-vision.md) (one world per server, server authoritative, 10–50 players, edits kept by presence).
 Only the car is decided in the world sim today; the sim is built and ticked by the presentation (`sim/life.ts`
 creates `Traffic`, `main.ts` ticks it only while it is drawn); edits belong to the renderer (`dig.ts` edits streamed
-nodes, `stream.ts` publishes and drops them); one world per process (`liveEdits`, `viewerTileCache` singletons).
+nodes, `stream.ts` publishes and drops them).
 Every package is behaviour-neutral unless it says otherwise: same gate counts.
 
-### E6. Folders follow the seam (S–M, mechanical, run alone)
-
-- **Do:** the headless cores out of `nav/` into `sim/` (`sim/craft/`: `boat-motion`, `craft-motion`,
-  `craft-collision`, `plane-flight`, `fpv-flight`, `sweep`; `river.ts` to `sim/`), the three.js presentation out of
-  `sim/` (`life.ts`, `meshes.ts`, `boats.ts`, `trains.ts`) into `view/`. Check each file's imports before moving it:
-  a core that imports three.js or the DOM stays where it is and is named in the report.
-- **Do:** `tools/core-deps.mjs` scans whole directories (`core/`, `sim/`, `physics/`) instead of a hand-kept list.
-- **Do:** delete the unread globals `__boat`, `__drive`, `__plane` (keep `__three`, `__life`, `__streamer`,
-  `__ready`, read by `shoot.mjs`).
-- **Gates:** the whole fast set; core-deps' module count goes up.
+E6 landed (merge `08f44469`): cores in `sim/craft/`, `sim/river.ts`; presentation in `view/`; core-deps scans
+`core/`, `sim/`, `physics/` whole. `nav/craft-collision.ts` stays in `nav/` (type import of `VoxelCollision`, which
+imports `fetch`; E4 moves `VoxelCollision` to the sim side).
 
 ### E1. `WorldSim`: one headless host for the world sim (M)
 
@@ -104,12 +97,13 @@ Every package is behaviour-neutral unless it says otherwise: same gate counts.
   `life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs` to it.
 - **Gates:** tsc, core-deps, life-edit, rapier-car 45, vehicles 35, popin-check (`--full`).
 
-### E5. Read-only tuning per world (S–M)
+### E5. Read-only tuning, passed in (S–M)
 
 - **Why:** `RIDE` (`physics/rapier/vehicle.ts:29`) is read in `car.ts` and mutated by `tools/rapier-car.mjs:32`,
   `surface-gap.mjs:45`; `BOAT` is a mutable module object; `CRAFT` is global. ADR 0007 asks for read-only tuning per
   world instance.
-- **Do:** one `Tuning` `{ride, boat, plane, jet, craft}` and a frozen `DEFAULT_TUNING`; pass it into
+- **Do:** one `Tuning` `{ride, boat, plane, jet, craft}` and a frozen `DEFAULT_TUNING` (one world per server, so the
+  point is no mutation and explicit passing, not several instances); pass it into
   `createVehicle`/`RapierCar`, `BoatMotion`, `CraftMotion`, `LifePhysics`, `WorldSim`. Tools build a copy instead of
   mutating.
 - **Gates:** rapier-car 45, vehicles 35, boat 20, plane 32, craft-motion 19, surface-gap (`--full`).
@@ -132,9 +126,11 @@ Every package is behaviour-neutral unless it says otherwise: same gate counts.
   when it frees a node, so what physics sees depends on the camera. "Apply an edit" exists three times (`dig.ts`,
   `stream.ts` `replaceColumns`, `life-edit.mjs`). `core/layers.ts` (ADR 0001) is used by nothing in `src/`.
 - **Do:** `core/world-edits.ts` `apply(op, region)` over the TileCache (`EditableNode`, encode, `edits.set`), used by
-  `dig.ts` and `life-edit.mjs`; the streamer listens to `liveEdits` and remeshes instead of publishing; `LiveEdits`
-  and `TileCache` injected into `LifePhysics`, `RapierTerrain`, `VoxelCollision` (singletons as default).
-  Not neutral, separate commit, owner's decision: edits are no longer dropped when the renderer frees a node.
+  `dig.ts` and `life-edit.mjs`; the streamer listens to `liveEdits` and remeshes instead of publishing. One world per
+  process (ADR 0008): keep `liveEdits` and the tile cache as module singletons, no injection.
+- **Do, policy (not neutral, separate commit, decided by the owner):** the renderer freeing a node no longer drops
+  its edit. An edit is kept while a player's focus (in the viewer: the local player's position, through `WorldSim`)
+  is within a radius of it, and dropped some time after none is. Make the radius and delay one tuning entry.
 - **Gates:** tsc, core-deps, layers, edit-roundtrip, world-smoke, life-edit, collision 16; `--full` with section-check
   and mesh-golden (record first).
 
@@ -212,13 +208,9 @@ green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a
 These add behaviour, so they are judged in the browser as well as by the gates. Each comes with a short plan in
 `docs/plans/` if it is bigger than S.
 
-### F2. Walk to a specific vehicle and get in (M)
+### F2. Walk to a specific vehicle and get in (set aside)
 
-- **Waits for:** E2 (the sim needs the walker's pose and ids to judge who may get in).
-- **F2a, road vehicles:** a key or tap near a parked or moving car, bus or motorbike calls
-  `takeWheel(player, id)`; leaving puts the walker beside it. Release already parks the car (`life-phys.ts:216-221`).
-- **F2b, boat at the bank, plane on the water:** needs E4 (crafts as entities in the world, not per-viewer singletons).
-- See [ADR 0007](../adr/0007-player-control-in-world-sim.md).
+- Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
 
 ### F7. Motorbike falls (S–M)
 
