@@ -37,12 +37,12 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
 | R7 | Build time | M | **Ready** |
-| R5 | Check harnesses out of `src/` | M | **Ready** |
+| R5 | Check harnesses out of `src/` | M | **In progress** (`r5`) |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| F8 | Water surface from the world, river slider removed | M–L | **Ready** |
+| F8 | Step 3: drop unread flood data | S–M | **Ready** (data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
@@ -161,47 +161,20 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Gates:** `vehicles` 35/35 plus `bike_scrape` (a wall at 10° at 50 km/h: stays on), `bike_wall` unchanged
   (head-on: comes off). `rapier-car` 45/45.
 
-### F8. Water surface from the world, river slider removed (M–L)
+### F8. Step 3: drop the flood data nobody reads (S–M, data)
 
-- **Waits for:** nothing. R3 landed the shared `nav/river.ts` this builds on; `main.ts` passes the river points to boat and plane.
-- **Decision:** the owner wants the river-level slider gone, and sees it as a smell that boat and plane read the
-  flood level at all. It is more than a few lines (below), so it is a package.
-- **Why boat and plane read it today:** the voxels hold the rivers as surveyed. The slider does not change the
-  world, it draws a sheet of water over it (`flood.ts`) and sets a shader uniform. So everything that floats has to
-  add the slider's rise by hand to stay on the drawn water:
-  - `nav/boat.ts`: `lift = Math.max(0, this.level())`, the drawn hull raised (the physics stays on the voxels'
-    water, `VoxelCollision.waterColumn`).
-  - `nav/plane-flight.ts` `collisionWorld(c, H, level)`: `water()` returns the voxels' water top plus the rise.
-  - `sim/boat-traffic.ts` `BoatTraffic.tick(..., level)`: the ships float at `waterTop + level`, and no tours above 3.5 m.
-    `waterTop` is one number for the whole map (`flood.json` `voxel_top`), which is wrong wherever a ship is not on
-    that stretch.
-  - Boat and plane also read `flood.json` `river` (points every 24 m) to find water to start on. That is world
-    data that happens to live in the slider's file.
-- **Goal:** no craft and no sim reads a level from the presentation. The water surface at a place comes from the
-  world data through one module.
-- **Do, step 1 (code only, no data change):** one water module (`nav/river.ts`, plain, no three.js): the
-  water top at (x, z) from `VoxelCollision.waterColumn`, and the nearest water to a point. Boat, plane and
-  `sim/boat-traffic.ts` use it. Remove the `level` parameters from `BoatMode`, `PlaneMode` `env`, `collisionWorld`
-  and `BoatTraffic.tick` (including the forwarding from `Traffic.update`), and remove `NO_TOURS_ABOVE`.
-  `BoatTraffic` uses the local water top at each ship position.
-- **Do, step 2 (code only):** remove the slider (`bar.ts` `river`, `onRiver`, `showRiver`; `main.ts` `RIVER`,
-  `flood.setLevel`, `riverSeen`), `flood.ts` (the sheets, `uLevel`, `uBoxes`, `uSpill0`), `uDrop` and the sandbank
-  branch in `voxelMaterial.ts`, `FloodInfo` fields nobody reads, the README's and `docs/plans/boat.md`,
-  `plane.md` mentions, and the "water level" sentence in ADR 0007.
-- **Must stay:** the rivers in the voxels and their look, `VoxelCollision.waterColumn`, the river points for a
-  start on the water, and the "is this cell river" test the reflections use (`voxelMaterial.ts`, the floodlit
-  fronts' mirror: `riverAt(...).y`, the bed from the tiles' `flod` section).
-- **Do, step 3 (data, separate commit, needs a full rebuild):** `scripts/flood.py` shrinks to what is still read:
-  the river points (a small `river.json`, or into `meta.json`) and one byte or bit per cell "river" for the
-  reflections. Drop the spill grid, the bed estimate, `flood.json`'s surface and stretches, and the `flod`
-  section's first plane (`tilefile.py`, `tile_fields.py`, `core/tile-sections.ts`, `fields.ts`,
-  `tile_roundtrip.py`). This changes the tile format: follow ADR 0004. If that is not wanted now, stop after step 2
-  and leave the bytes unread; say so in the report.
-- **Gates:** `boat` and `plane` gates green with the same counts (their checks pass `level` 0 today, so the numbers
-  must not move); `core-deps` with the new module; `shoot.mjs --compare` on `eck` and `kachlet` (the rivers look
-  the same at the surveyed level).
-- **Check by hand:** the boat above and below the Kachlet dam, the floatplane landing on the Danube and the Inn,
-  the cruise ships at the quay.
+- **Landed (merge `063026e0`):** steps 1–2. `nav/river.ts` `waterTop` is the water surface for boat, plane,
+  hovercraft and `BoatTraffic` (per ship, via `Traffic.water` / `World.waterColumn`); the slider, `flood.ts`,
+  `uDrop` and the sandbank branch are gone. `main.ts` still fetches `flood.json`, only for `river`.
+- **Do (needs a full rebuild, tile format change: follow ADR 0004):** `scripts/flood.py` shrinks to the river points
+  (a small `river.json` or into `meta.json`) and one bit per cell "river" for the reflections. Drop the spill grid
+  (`flood.bin`), the bed estimate, `flood.json`'s `base`, `surface0`, `fall`, `voxel_top`, `spill0`, `stretches`,
+  and the `flod` section's first plane (`tilefile.py`, `tile_fields.py`, `core/tile-sections.ts`, `fields.ts`
+  `riverAt().x`, `tile_roundtrip.py`).
+- **Also:** stale text left by steps 1–2: `scripts/flood.py`'s docstring (points to the deleted `flood.ts`), the
+  `flod` layout in `core/tile-sections.ts`, README lines on flood data.
+- **Watch:** a ship can jump in height when its tile loads (fallback: own last value, any ship's, then 4 m).
+- **Gates:** fast set; `tile-roundtrip`; `shoot.mjs --compare` on `eck` and `kachlet` with `--q seed=1` on both.
 
 ### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
 
