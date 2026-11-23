@@ -19,10 +19,11 @@
 // The default car's own scenarios stay tools/rapier-car.mjs's.
 // usage (in web/): node tools/vehicles.mjs [-v] [type ...]; one line a check, exit code 1 if one fails
 import { load } from './real-city.mjs';
+import { imp } from './lib.mjs';
 
 const args = process.argv.slice(2), verbose = args.includes('-v');
-const sc = await load('../checks/scenarios.ts');
-const ds = await load('../checks/drive-scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
+const ds = await imp('checks/drive-scenarios.ts');
 const { VEHICLES } = await load('sim/vehicles.ts');
 const { FALL_MS } = await load('physics/rapier/player-car.ts');
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;

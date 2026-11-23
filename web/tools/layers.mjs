@@ -7,12 +7,9 @@
 //   - the ops and every node delta survive encode/decode, and the decoded deltas build the same nodes
 //   - a distance-level node shows no transient edits
 // usage: node tools/layers.mjs [SEED]; exit code 1 on a mismatch
-import { runnerImport } from 'vite';
-import { fileURLToPath } from 'node:url';
+import { imp } from './lib.mjs';
 import { isDeepStrictEqual } from 'node:util';
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-const imp = async (p) => (await runnerImport(`${root}${p}`, { root, logLevel: 'error' })).module;
 const L = await imp('src/core/layers.ts'), CO = await imp('src/core/columns.ts');
 let seed = Number(process.argv[2] ?? 1) >>> 0 || 1;
 const rnd = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };

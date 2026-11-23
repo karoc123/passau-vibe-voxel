@@ -5,14 +5,14 @@
 // with the most points 5 m or more under the voxels over them; skipped without such a road or where the tiles' ground
 // still stands over the bore (data from before the bores' floors became the ground).
 // usage: node tools/collision.mjs [--json]; exit code 1 if a check fails
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const { module: m } = await runnerImport(`${root}checks/collision-checks.ts`, { root, logLevel: 'error' });
-const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
+const m = await imp('checks/collision-checks.ts');
+const TD = await imp('src/tile-data.ts');
 const out = [...await m.runCollisionChecks(), ...await m.runRoomChecks()];
 
 async function tunnelFlight() {
@@ -43,7 +43,7 @@ async function tunnelFlight() {
     return { ground: t.ground[c], top };
   };
   const under = (q) => { const c = col(q[0], q[1]); return c && c.top - q[2] >= 5; };
-  const { module: TP } = await runnerImport(`${root}src/sim/traffic-pack.ts`, { root, logLevel: 'error' });
+  const TP = await imp('src/sim/traffic-pack.ts');
   const traffic = TP.unpackTraffic(JSON.parse(fs.readFileSync(`${D}traffic.json`, 'utf8')));
   let best = null;
   for (const r of traffic.roads) {

@@ -12,12 +12,11 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import inspector from 'node:inspector/promises';
 import { fileURLToPath } from 'node:url';
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data');
 globalThis.self ??= globalThis;
-const imp = async (p) => (await runnerImport(path.join(web, p), { root: web, logLevel: 'error' })).module;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts'), TD = await imp('src/tile-data.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };

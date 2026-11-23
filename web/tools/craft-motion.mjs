@@ -1,8 +1,9 @@
 // The player craft motion laws against the same swept voxel probes as the viewer.
 // Run from web/ with node tools/craft-motion.mjs.
 import { load } from './real-city.mjs';
+import { imp } from './lib.mjs';
 
-const { makeWorld } = await load('../checks/collision-checks.ts');
+const { makeWorld } = await imp('checks/collision-checks.ts');
 const { VoxelCollision } = await load('nav/voxel-collision.ts');
 const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('nav/craft-collision.ts');
 const { CraftMotion } = await load('nav/craft-motion.ts');

@@ -16,10 +16,11 @@
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { root, load, realMap, roadPath, SCHANZL } from './real-city.mjs';
+import { imp } from './lib.mjs';
 
 const args = process.argv.slice(2);
-const sc = await load('../checks/scenarios.ts');
-const ds = await load('../checks/drive-scenarios.ts');
+const sc = await imp('checks/scenarios.ts');
+const ds = await imp('checks/drive-scenarios.ts');
 const car = await load('physics/rapier/car.ts');
 if (args.includes('--spike')) sc.scenarioTuning.tuning = car.SPIKE;
 // --set key=value,...: the ride's numbers (car.ts RIDE) changed for this run

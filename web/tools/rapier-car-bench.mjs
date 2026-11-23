@@ -3,21 +3,19 @@
 // the terrain is updated (builds within its budget) and the world stepped. Prints per-frame build and step times.
 // usage: node tools/rapier-car-bench.mjs [--budget MS] [--speed KMH] [--chunk-lead] [--no-couple] [x0 z0 x1 z1]
 // (VOXEL_DATA: other data, tools/data-dir.mjs)
-import { runnerImport } from 'vite';
-import { fileURLToPath } from 'node:url';
+import { imp } from './lib.mjs';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { dataDir } from './data-dir.mjs';
 
-const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); if (i < 0) return d; const v = argv[i + 1]; argv.splice(i, 2); return +v; };
 const flag = (k) => { const i = argv.indexOf(k); if (i < 0) return false; argv.splice(i, 1); return true; };
 const budget = opt('--budget', 2), kmh = opt('--speed', 80), noCouple = flag('--no-couple');
 const [x0, z0, x1, z1] = argv.length >= 4 ? argv.map(Number) : [1500, 700, 2300, 760];
 
-const { module: T } = await runnerImport(`${root}src/physics/rapier/terrain.ts`, { root, logLevel: 'error' });
-const { module: TD } = await runnerImport(`${root}src/tile-data.ts`, { root, logLevel: 'error' });
+const T = await imp('src/physics/rapier/terrain.ts');
+const TD = await imp('src/tile-data.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
 const meta = JSON.parse(fs.readFileSync(`${dataDir}/meta.json`, 'utf8'));

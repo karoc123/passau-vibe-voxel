@@ -5,13 +5,12 @@
 // of scripts/tiles.py column_runs) and ground (min of the base's and the stack from z = 0), re-encoding the encoded node
 // changes nothing, and the two nodes' shared margin columns agree. The edits are synthetic; nothing is written.
 // usage: node tools/edit-roundtrip.mjs [SEED] [OPS]; exit code 1 on a mismatch
-import { runnerImport } from 'vite';
+import { imp } from './lib.mjs';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const imp = async (p) => (await runnerImport(`${root}${p}`, { root, logLevel: 'error' })).module;
 const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts');
 const D = `${root}public/data/`;
 const meta = JSON.parse(fs.readFileSync(`${D}meta.json`, 'utf8')), N = meta.tiles.N, S = N + 2;
