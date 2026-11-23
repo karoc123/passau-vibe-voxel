@@ -30,16 +30,32 @@ from scipy import ndimage
 from shapely.geometry import LineString, Point, shape
 from shapely.ops import substring
 from shapely.strtree import STRtree
+from shapely.ops import unary_union as _uu
+from scipy.spatial import cKDTree
 
-from aoi import BASE, C0, CX, CY, D, MC0, MR0, R0, W
+from aoi import BASE, C0, CX, CY, D, MAP_D, MAP_W, MC0, MR0, R0, RIVER_LEVEL, RIVER_STRETCHES, W, river_level
+from aoi import CORE as _RCORE
 import constants as K  # (the ground colours caps.py reads a meaning from)
 from constants import (M_BRONZE, M_CAR, M_CLASSIC, M_CLOCK, M_CONCRETE, M_FLOODLIT, M_GLASS, M_GRASS, M_JET, M_LAMP,
                        M_LEAF, M_MARK, M_METAL, M_ROOF, M_SIGN, M_SOIL, M_SOLID, M_TENEMENT, M_WALL, M_WATER, M_WOOD)
-from osm import OSM
+import culvert
+import debris
+import ground
+import interiors
 import landmarks
+import mapstore
+from osm import OSM
 import overrides
 import region
 from region import boxmean, in_core
+import region_inputs
+import species_map
+import tiles
+import trees as treedb
+import tunnels
+import underpass
+import window
+from ways import HW, ROADS, unlit, way_width  # (the widths ways are drawn at: shared with overrides.py)
 from ways import cells as _way_cells, layer_of, parse_len, underground
 
 if __name__ == "__main__" and not os.environ.get("VOXEL_REGION"):  # the driver: region by region (scripts/regions.py)
@@ -320,13 +336,10 @@ def burn(target, shapes, all_touched=False):
 
 # the ground: the terrain model rounded to whole metres, lifted where it dropped under a structure that carries a road
 # (scripts/ground.py: the passes in their order, GROUND_PASSES; the two of phase "decks" run with the bridges' decks)
-import ground  # noqa: E402
-from aoi import river_level as _river_level  # noqa: E402
-from shapely.ops import unary_union as _uu  # noqa: E402
 SAG_SRC = np.full((D, W), np.nan, np.float32)  # the surface the sag lift took the ground to (data/surface.npz gsrc)
 OPEN_CUT = set()  # the layer -1 ways open to the sky (ground.open_cut)
 GCTX = ground.Ctx(D=D, W=W, BASE=BASE, dtm=dtm, dtm_s=dtm_s, d4=d4, osm=osm, note=note, cells_of=cells_of, burn=burn,
-                  river_level=_river_level, src=SAG_SRC, open_cut=OPEN_CUT, counts={}, changed={},
+                  river_level=river_level, src=SAG_SRC, open_cut=OPEN_CUT, counts={}, changed={},
                   n_ground=region.load_npz("data/laser.npz", ["n_ground"])["n_ground"]
                   if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER") else None)
 g = ground.run(GCTX, "terrain")  # ground occupies z in [0, g)
@@ -504,7 +517,6 @@ _floor = ndimage.binary_opening(_floor, iterations=2)
 gcol[_floor] = C["garden"]
 note("ground under canopy drawn as soil (OSM silent):", int(_floor.sum()))
 
-from ways import HW, ROADS, unlit, way_width  # noqa: E402  (the widths ways are drawn at: shared with overrides.py)
 
 def on_bridge(t):
     return t.get("bridge") not in (None, "no") or t.get("man_made") == "bridge"
@@ -625,7 +637,6 @@ for oid, t, line in osm.lines:
         foot_shapes.append((poly, C[SURF.get(t.get("surface"), "paving")]))
 note(f"roads taking their square's surface: {n_inherit}")
 if FEATURES_MODE:  # the feature pass: the large features' counts over the core, and done (regions.feature_pass)
-    import region_inputs
     json.dump(dict(stats=FEATURE_STATS, deps=region_inputs.deps_of_process(), peak_mb=round(own_peak_mb())),
               open(RDIR / "fstats.json", "w"))
     print("done")
@@ -736,7 +747,6 @@ burn(gcol, water)
 # lines across the river; it drops ~0.3 m across the map, so one level per stretch is truthful: a body's median
 # ground. Both per block of 64 m, from the window of 192 m round it (region.py: the same in every region): a body is
 # its cells within the window, its size and its level are counted there
-from aoi import RIVER_LEVEL, RIVER_STRETCHES, river_level
 # (per stretch where scripts/map.json gives them: a 30 km map spans the rivers' fall; float32 as dtm, so one level
 # everywhere subtracts exactly as the scalar did)
 RIVER_LV = river_level(np.arange(D)[:, None], np.arange(W)[None, :])
@@ -845,7 +855,6 @@ for _b in region.blocks(64):
             _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
         _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
 note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
-from aoi import CORE as _RCORE  # noqa: E402
 _core_s = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
 report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gated=tn_water is not None)
 note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
@@ -853,7 +862,6 @@ del _wgated
 gcol[_wat | _lockm] = C["water"]
 # a way over water with no bridge tag, where the surface model holds its banks' level across: carried over on ground
 # (a culvert; scripts/culvert.py, handoff Q2)
-import culvert  # noqa: E402
 _ww0, _ = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
 _cv, _cvl, _cvd = culvert.carry(osm, (gcol == C["water"]) & ~_lockm, g, GCTX.dsm_low(), np.where(_wlev >= 0, _wlev, g),
                                 cells_of)
@@ -2194,7 +2202,6 @@ stage("natural ground, cemeteries")
 # ---------------------------------------------------------------- vegetation (LiDAR canopy + OSM trees)
 trees = [(oid, t, p) for oid, t, p in osm.nodes if t.get("natural") == "tree"]
 # every known tree (scripts/trees.py: OSM's tree nodes and the Bavarian single-tree register of the 2024 flight)
-import trees as treedb
 all_trees = treedb.load(trees, buildings=bmask)
 note("known trees: OSM natural=tree", sum(t["src"] == "osm" for t in all_trees), "+ Einzelbäume register",
      sum(t["src"] == "bv" for t in all_trees))
@@ -2208,7 +2215,6 @@ else:
 # the forests' dominant species from remote sensing (scripts/species_map.py: DLR Tree Species Germany 2022, 2016 where
 # 2022 has lost the canopy; 10 m). Optional: without data/raw/treespecies_*.tif (or with NO_SPECIES_MAP) the trees'
 # kinds come from OSM and the laser alone
-import species_map
 SPM = None if os.environ.get("NO_SPECIES_MAP") else species_map.grid()
 if SPM is None:
     note("no tree species map (data/raw/treespecies_*.tif): conifers by OSM and the laser only")
@@ -3081,7 +3087,6 @@ deck_col = np.where(deck & (deck_col == 0), C["deck"], deck_col)
 # -2087, row -1658; road-defects #11) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
 # it, and the 10th percentile within 10 m below took the whole 23 m deck down to it
 DECK_OVER, DECK_DIP = 3.0, 1.5
-from scipy.spatial import cKDTree
 water_ = gcol == C["water"]
 prof = []  # per way: (x, y, h, layer) every metre
 deck_own = []  # per way: (OSM id, points, the way's own deck level per point: NaN off the span) for the sag counter
@@ -3653,7 +3658,6 @@ landmarks.apply_zones(vol, g, feats, pal, bmask, note)
 overrides.apply_details(vol, g, feats, pal, note)  # the building overrides' windows and parts (parts.py)
 # rooms: the curated ones (interiors.ROOMS, none yet) carved out of the buildings now standing, and recorded (the tiles'
 # room sections; the distance levels fill them again)
-import interiors
 interiors.build(vol, R0, C0, note)
 # where a hanging building piece may carry its walls down (1: inside a building outline) or needs posts (2: roof-only)
 bkind = np.zeros((D, W), np.uint8)
@@ -3665,9 +3669,7 @@ for f in feats:  # walls may come down only inside an outline that itself stands
 for f in feats:
     if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
         bkind[f["rr"], f["cc"]] = 2
-import tunnels
 _bores, _bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
-import underpass
 _rail_bed = np.zeros((D, W), bool)
 for _shape, _ in rail_beds:
     _rr, _cc = cells_of(_shape, fallback=False)
@@ -3679,7 +3681,6 @@ _bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pi
 
 stage("landmark details, underpasses, tunnels")
 # ---------------------------------------------------------------- floating debris
-import debris
 debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS, dtype=vol.dtype), note, dbg=RDIR)
 
 stage("drop_debris")
@@ -3752,7 +3753,6 @@ for f in sorted([f for f in feats if not f["part"]], key=lambda f: -f["area"]) +
     k_ = bmask[f["rr"], f["cc"]]
     _fp[f["rr"][k_], f["cc"][k_]] = (f["parent"] if f["part"] else f)["id"]
 CORE_OUT["oid"] = _fp
-import tiles
 EXPORT_IDS = dict(face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
                          fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | set(WOOD_IDS),
                          grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"],
@@ -3792,8 +3792,6 @@ def plane_codes():
 PLANES = plane_codes()
 stage("plane codes")
 # the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
-import window
-from aoi import MAP_D, MAP_W
 _kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + MR0, CORE_SL[0].stop + MR0, CORE_SL[1].start + MC0, CORE_SL[1].stop + MC0)  # (map cells)
 _win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
 _ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
@@ -3969,7 +3967,6 @@ _k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
 stage("qa, deck_near, topdown")
 np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
 stage("core.npz")
-import mapstore
 mapstore.save_volume(RDIR / "vol.npz", vol[(slice(None),) + CORE_SL])  # (compressed, in 128 m column blocks)
 stage("vol.npz")
 (RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
@@ -3982,7 +3979,6 @@ RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new 
               lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],
               jets=[[k_, j_] for k_, j_ in jets if in_core(k_[1] - R0, k_[2] - C0)], **report,
               osm_timestamp=osm.timestamp)
-import region_inputs
 RESULT["deps"] = region_inputs.deps_of_process()
 RESULT["features_used"] = FEATURE_USED  # (the large features' decisions it took: regions.py rebuilds it when one changes)  # (the code this region read: regions.py rebuilds it when that changes)
 stage("palette, lists")
