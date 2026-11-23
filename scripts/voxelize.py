@@ -674,16 +674,15 @@ _cyc = np.zeros((D, W), np.uint16)  # a footway area drawn over a cycleway besid
 burn(_cyc, [(sh, 1) for sh, _ in cycle_shapes])
 gcol[(_cyc > 0) & (road_mask == 0)] = C["cycle"]
 is_road = road_mask > 0
-_ped = [C[k] for k in ("paving", "paving2", "kerb", "steps", "platform", "gravel", "grass", "dirt")]  # (a cycle crossing's red is road)
-
-
 SANITY = {}  # per stage, per road: metres of its centreline in the core painted as pavement (regions.py adds them up)
 
 
-def carriageway_sanity(surface, stage):
-    """every carriageway's centreline in its own colour: the build stops if a road has 6 m or more of it painted as
-    pavement (a junction square, an area drawn over it, a pit filled over a road ramp). Counted in the core: over
-    several regions regions.py adds up each road's metres"""
+def carriageway_sanity(road_lines, sanity, surface, stage):
+    """every carriageway's centreline (road_lines: (way id, line, its colour)) in its own colour: the build stops if a
+    road has 6 m or more of it painted as pavement (a junction square, an area drawn over it, a pit filled over a road
+    ramp). Counted in the core (into sanity[stage]): over several regions regions.py adds up each road's metres"""
+    # (a cycle crossing's red is road)
+    _ped = [C[k] for k in ("paving", "paving2", "kerb", "steps", "platform", "gravel", "grass", "dirt")]
     bad, cnt = [], {}
     for oid, line, own in road_lines:
         pts = [line.interpolate(d) for d in np.arange(0, line.length, 1.0)]
@@ -693,7 +692,7 @@ def carriageway_sanity(surface, stage):
             cnt[str(oid)] = cnt.get(str(oid), 0) + int(off)
         if off >= 6:
             bad.append((int(off), oid, (rc[0][0] + R0, rc[0][1] + C0)))
-    SANITY[stage] = cnt
+    sanity[stage] = cnt
     report["counters"]["carriageways"][stage] = len(bad)
     bad.sort(reverse=True)
     note(f"carriageway sanity ({stage}): {len(bad)} roads with 6+ m of their centreline painted as pavement: {bad[:8]}")
@@ -701,7 +700,7 @@ def carriageway_sanity(surface, stage):
         raise SystemExit("carriageways painted as pavement; see the sanity line above")
 
 
-carriageway_sanity(lambda r, c: gcol[r, c], "ground colours")
+carriageway_sanity(road_lines, SANITY, lambda r, c: gcol[r, c], "ground colours")
 
 # rails & trams (only open-air)
 rail_beds, rails = [], []
@@ -2918,24 +2917,27 @@ note("raised planting beds:", n_beds)
 # them fell a metre or two inside the road as drawn (cars drove through the poles); such a post takes the nearest
 # cell off the road within 4 m, and one deeper in (a lamp hung over the street) gets no pole
 _driven = is_road | np.isin(gcol, [C["trambed"], C["rail"], C["ballast"]])
-_kd, (_kr, _kc) = ndimage.distance_transform_edt(_driven, return_indices=True)
+kerb_near = ndimage.distance_transform_edt(_driven, return_indices=True)
 
 
-def kerb(c, r):
+def kerb(near, c, r):
+    """the nearest cell off the driven ground (near: its distance transform with indices) to (c, r) within 4 m"""
+    kd, (kr, kc) = near
     if not (0 <= c < W and 0 <= r < D):
         return None
-    return (int(_kc[r, c]), int(_kr[r, c])) if _kd[r, c] <= 4 else None
+    return (int(kc[r, c]), int(kr[r, c])) if kd[r, c] <= 4 else None
 
 
-def lamp_height(t, c, r):
+def lamp_height(is_road, t, c, r):
     return int(parse_len(t.get("height")) or (10 if is_road[max(r - 6, 0):r + 7, max(c - 6, 0):c + 7].any() else 6))
 
 
-def stand_lamp(c, r, z0, hgt, key):
+def stand_lamp(vol, lamps, keys, c, r, z0, hgt, key):
+    """a pole and a lamp at (c, r) from z0, hgt high; the lamp in lamps, its key in keys"""
     vol[z0:z0 + hgt - 1, r, c] = np.where(vol[z0:z0 + hgt - 1, r, c] == 0, C["pole"], vol[z0:z0 + hgt - 1, r, c])
     vol[z0 + hgt - 1, r, c] = C["lamp"]
     lamps.append((c, r, int(z0 + hgt - 1)))
-    LAMP_KEYS.append(key)
+    keys.append(key)
 
 
 # a lamp node by a bridge way (within 3 m: OSM's lamp nodes sit on the kerb line) waits for the deck (below): it
@@ -2962,10 +2964,10 @@ for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids,
     if d_br <= 3 and (layer is None or layer >= 1) and 0 <= p.x < W and 0 <= p.y < D:
         bridge_lamps.append((oid, t, p, d_br, math.inf if layer else _way_dist(_ground_ways, p)))
         continue
-    c, r = kerb(int(p.x), int(p.y)) or (-1, -1)
+    c, r = kerb(kerb_near, int(p.x), int(p.y)) or (-1, -1)
     if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
         continue
-    stand_lamp(c, r, int(g[r, c]), lamp_height(t, c, r), [0, oid])
+    stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c]), lamp_height(is_road, t, c, r), [0, oid])
 note("street lamps:", len(lamps), "(and", len(bridge_lamps), "by bridge ways, placed with the decks)")
 # (the bridges' lamps where their nodes are: the park and the inferred deck lamps keep 12 m from them)
 lamp_xy = np.array([(c, r) for c, r, _ in lamps] + [(int(p.x), int(p.y)) for _, _, p, _, _ in bridge_lamps], float).reshape(-1, 2)
@@ -3562,16 +3564,16 @@ _of, (_fi, _fj) = ndimage.distance_transform_edt(~(deck & ~_bed), return_indices
 n_ol = 0
 for oid, t, p, d_br, d_gr in bridge_lamps:
     c0, r0 = int(p.x), int(p.y)
-    kc, kr = kerb(c0, r0) or (c0, r0)
-    hgt = lamp_height(t, kc, kr)
+    kc, kr = kerb(kerb_near, c0, r0) or (c0, r0)
+    hgt = lamp_height(is_road, t, kc, kr)
     room = _od[kr, kc] > 1.5 or deck_h[_oi[kr, kc], _oj[kr, kc]] >= hgt + 1  # (no deck over or beside the post under its head)
     if _od[r0, c0] <= 4 and not (room and d_gr <= d_br + 1.5):
         r, c = (int(_fi[r0, c0]), int(_fj[r0, c0])) if _of[r0, c0] <= 4 else (int(_oi[kr, kc]), int(_oj[kr, kc]))
         if not bmask[r, c]:
-            stand_lamp(c, r, int(g[r, c] + round(float(deck_h[r, c]))), hgt, [0, oid])
+            stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c] + round(float(deck_h[r, c]))), hgt, [0, oid])
             n_ol += 1
-    elif kerb(c0, r0) and not bmask[kr, kc]:
-        stand_lamp(kc, kr, int(g[kr, kc]), hgt, [0, oid])
+    elif kerb(kerb_near, c0, r0) and not bmask[kr, kc]:
+        stand_lamp(vol, lamps, LAMP_KEYS, kc, kr, int(g[kr, kc]), hgt, [0, oid])
 note("OSM's lamps by the bridge ways:", n_ol, "on the decks,", len(bridge_lamps) - n_ol, "on the ground or none")
 n_bl = 0
 for line, w, i_br in bridge_roads:
@@ -3675,7 +3677,7 @@ for _shape, _ in rail_beds:
     _rr, _cc = cells_of(_shape, fallback=False)
     _rail_bed[_rr, _cc] = True
 _walked = underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed, skip=_bore_ids)  # (not the bored ways)
-carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
+carriageway_sanity(road_lines, SANITY, lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
 RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
 _bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
 
