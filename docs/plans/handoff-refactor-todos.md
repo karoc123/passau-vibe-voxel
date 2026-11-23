@@ -35,8 +35,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| E2 | Players in the sim: follow and walk-as by player id | M | **Ready** |
 | E3 | Edits owned by the world, not the renderer | M | **Ready** |
+| E7 | Commands a server can trust | M | **Ready** (best after E3, E4) |
 | E4 | Player crafts on the world clock | L | **Ready** (best after E3) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
@@ -87,25 +87,14 @@ loader, given `WorldSim.tuning`) and the drive commands by player id; `StreetLif
 life is drawn (`main.ts`, `if (life.group.visible)`; owner's call); `WorldSim.events` is one object per update (a server
 with several clients needs tick-numbered event lists, E2); `nav.ts` still writes `life.sim.traffic.keep` and `ctl` (E2).
 
+E2 landed: `Person.id` (own numbering per kind; `EntityRef {kind, id}`), `WorldSim.players` with `follow`, `walkAs`,
+`walkPose`, `release`, `seat`; `Traffic.held` replaces `keep`/`ctl`; ride and possession in `nav/ride.ts`; the sim ticks
+whether or not it is drawn (about 0.5 ms a frame at 60 fps, measured); `eventsSince(tick)` keeps `EVENT_TICKS` = 300.
+Open points went to E7.
+
 E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
-
-### E2. Players in the sim (M, ADR 0007 step 1 for people and following)
-
-- **Why:** the viewer writes `person.ctl` (`nav.ts:683`, `foot.ts:173` every frame); `Traffic.keep` is one field set by
-  the camera follow; `Person` has no id (hits by object identity, `life-phys.ts:728-739`); the player id is the
-  constant `'local'` in `drive.ts`; `life.ts:199` writes `p.ph`.
-- **Do:** model control as a seat on an entity (ADR 0008, co-op later): a player occupies a seat (today the
-  driver's; walking as a person is the person's one seat), so more seats and roles are an addition later.
-- **Do:** `Person` gets an id; `WorldSim.players: Map<playerId, {follow?, walkingAs?, pose?}>`; commands `follow`,
-  `walkAs`, `walkPose`, `release` (the walker's motion stays client-side and is sent as a pose); Traffic keeps the
-  set of followed or controlled ids instead of `keep`/`ctl`; one exported `LOCAL_PLAYER`; ride and possession out of
-  `nav.ts` (`:595-692`) into `nav/ride.ts`.
-- **Do, separate commits (owner's direction, ADR 0008):** `main.ts` ticks the `WorldSim` whether or not the life is
-  drawn (not neutral for the viewer's frame cost: measure it); `WorldSim.events` become tick-numbered (each event
-  carries its tick, a reader asks for events since a tick), so several clients can read them.
-- **Gates:** tsc, core-deps, life-edit, rapier-car, popin-check. Browser: follow, walk as a person, release.
 
 ### E3. Edits owned by the world, not the renderer (M)
 
@@ -120,6 +109,17 @@ with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `Wo
   is within a radius of it, and dropped some time after none is. Until E2 lands, the focus is `SimInput.focus`. Make the radius and delay one tuning entry.
 - **Gates:** tsc, core-deps, layers, edit-roundtrip, world-smoke, life-edit, collision 16; `--full` with section-check
   and mesh-golden (record first).
+
+### E7. Commands a server can trust (M, from E2's open points)
+
+- **Why:** after E2, `follow`/`walkAs`/`walkPose`/`release` apply at once while `takeWheel` is queued per tick; the
+  walker seat lives in `WorldSim.players`, the driver seat in `LifePhysics.drivers`, and nothing in the sim stops a
+  player from holding both (only `nav` does); a client's walk pose is taken as given.
+- **Do:** every player command queued and applied at the start of a tick, in order; one seat per player enforced by
+  the sim, `release`/`releaseWheel` become one `leaveSeat`; the seat table owned by `WorldSim` (the driver's state
+  stays in the physics); a walk pose bounded (speed, step height) against the last one. `LOCAL_PLAYER` moves out of
+  the sim to the client (`nav/`).
+- **Gates:** tsc, core-deps, life-edit (players scenario), rapier-car, popin-check.
 
 ### E4. Player crafts on the world clock (L, about M per craft group)
 
