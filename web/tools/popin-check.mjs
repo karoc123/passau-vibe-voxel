@@ -1,6 +1,6 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
-// viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked and
-// the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked
+// through its client (src/sim/sim-client.ts, in this thread) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
 // and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
@@ -13,7 +13,7 @@
 // over TRAIN_S s at 30 ticks/s (one run per viewer: their coming and going depends on where the viewer is), the boats over
 // a spring and a summer day at 2 fps (theirs does not: one run a day, all the viewers). R: TRAIN_R, SHIP_R; a jump is more than JUMP m
 // beyond what they may move in the frame.
-// usage (in web/): node tools/popin-check.mjs [-v] [--street | --transit] [--seconds S] [--seed N] [--jump M]; both
+// usage (in web/): node tools/popin-check.mjs [-v] [--street | --transit] [--mirror] [--seconds S] [--seed N] [--jump M]; both
 // parts unless one is named; prints one PASS line, or the counts and exit code 1
 import fs from 'node:fs';
 import * as THREE from 'three';
@@ -22,6 +22,7 @@ import { DATA, load } from './real-city.mjs';
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[i + 1]) : d; };
 const SECONDS = arg('--seconds', 180), SEED = arg('--seed', 7);
+const MIRROR = args.includes('--mirror');
 const STREET = !args.includes('--transit') || args.includes('--street'), TRANSIT = !args.includes('--street') || args.includes('--transit');
 const TRAIN_R = 400, SHIP_R = 800, TRAIN_S = 7200, DAYS = [100, 200];
 const CAR_R = 200, PED_R = 100, JUMP = arg('--jump', 1.5), FPS = 60, KMH = 45, STAND = 30;
@@ -36,11 +37,11 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient, MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
-const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
+const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), pristine = MIRROR ? structuredClone(td) : null;
 const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
 const label = (kind, x, y) => meta.labels.find((l) => l.kind === kind) ?? { x, y };
 // where the viewer starts, and the hours the run goes through (the density falling: agents to remove; rising: to add)
@@ -77,7 +78,10 @@ function run({ name, at: start, h0, h1 }) {
     visited.set(cur, (visited.get(cur) ?? 0) + 1);
   }
 
-  const sim = new WorldSim(td), T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
+  // (--mirror: drawn from the sim's snapshots, sim/snapshot.ts, as the page does from a worker)
+  const server = new SimServer(new WorldSim(td));
+  const sim = MIRROR ? new MirrorSimClient(new ThreadLink(server, 'local'), structuredClone(pristine), null, 'local') : new LocalSimClient(server);
+  const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;
   const viewer = { x: 0, z: 0, hx: 0, hz: 1 };

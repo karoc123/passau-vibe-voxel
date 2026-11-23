@@ -26,7 +26,7 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
-import { STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import { STEP as TICK, type BodyDraw, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
 import type { CoachBox } from '../../sim/train-traffic';
 import type { Car, RoadPose } from '../../sim/types';
 import type { Meta } from '../../types';
@@ -441,6 +441,14 @@ export class LifePhysics implements TrafficBodies {
       c.rh = (c.rh ?? 0) + f.dh * k;
       if (!b) c.roll = (c.roll ?? 0) * (1 - k);
     }
+  }
+
+  drawState(c: Car): BodyDraw | null {
+    const b = this.bodies.get(c.id), f = this.fades.get(c);
+    if (!b && !f) return null;
+    const moving = !!b && b.state !== 'rest' && b.state !== 'path';
+    return { owns: !!b && b.state !== 'path', body: !!b, p0: moving ? this.poseAt(b, 0, true) : null, p1: moving ? this.poseAt(b, 1, true) : null,
+      fade: f ? { ...f } : null };
   }
 
   dispose() {

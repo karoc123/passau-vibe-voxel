@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp } from '../util';
-import { findSpawn, NO_BOAT_INPUT, type BoatCore, type BoatEvent, type BoatInput } from '../sim/craft/boat-motion';
-import { LOCAL_PLAYER, type Craft, type WorldSim } from '../sim/world-sim';
+import { findSpawn, NO_BOAT_INPUT, type BoatEvent, type BoatInput } from '../sim/craft/boat-motion';
+import { DEFAULT_TUNING } from '../sim/tuning';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
-import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
+import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
@@ -15,9 +15,9 @@ import './boat.css';
 
 // The boat mode: a speedboat of the player's own on the rivers, driven like the car (W/S throttle and reverse, A/D
 // steer, Space drift, T unstick, Esc exit; the same touch stick and handbrake button; the gamepad as the car's). Put
-// down on the water nearest the map's focus, facing downstream. The boat is a craft of the world sim's (WorldSim
-// addCraft('boat'): its core, sim/craft/boat-motion.ts BoatCore, stepped on the world's clock with its collision), the
-// local player in its pilot's seat; the model in boat-model.ts. Here: the panel, the input, the chase camera. Out of
+// down on the water nearest the map's focus, facing downstream. The boat is a craft of the world sim's (CraftLink: its
+// core, sim/craft/boat-motion.ts BoatCore, stepped on the world's clock with its collision), the local player in its
+// pilot's seat; the model in boat-model.ts. Here: the panel, the input, the chase camera. Out of
 // focus its input is hands off (input.ts), as the car's.
 
 const KEYS: ReadonlySet<string> = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
@@ -36,9 +36,8 @@ export class BoatMode implements PlayerCraft {
   private readonly target: THREE.Vector3;
   private readonly meta: Meta;
   private readonly env: CraftEnv;
-  // the world sim, once loaded; the boat in it while the player is in it
-  private sim: WorldSim | null = null;
-  private craft: Craft<BoatCore> | null = null;
+  // the boat in the world sim while the player is in it (its client, its own collision)
+  private readonly link: CraftLink<'boat'>;
   private readonly model: BoatModel;
   private readonly touch: TouchSticks;
   private readonly drift = new HoldButton('boat-drift-button', 'Drift', 'Drift (hold)');
@@ -58,9 +57,10 @@ export class BoatMode implements PlayerCraft {
   private readonly look = new THREE.Vector3();
   private readonly pos = new THREE.Vector3();
 
-  constructor({ nav, camera, target, meta, host, canvas, env, sim }: CraftContext) {
+  constructor(ctx: CraftContext) {
+    const { nav, camera, target, meta, host, canvas, env } = ctx;
     this.nav = nav; this.target = target; this.meta = meta; this.env = env;
-    void sim.then((s) => { this.sim = s; });
+    this.link = new CraftLink(ctx, 'boat');
     this.model = new BoatModel(nav.actors);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, { onPinch: (r) => { this.zoom = clamp(this.zoom * r, 0.5, 2.2); }, camera: 'right' });
@@ -84,7 +84,8 @@ export class BoatMode implements PlayerCraft {
     this.draw();
   }
 
-  get pose() { return this.phase === 'on' && this.craft ? this.craft.core.pose : null; }
+  private get craft() { return this.phase === 'on' ? this.link.craft : null; }
+  get pose() { return this.craft?.core.pose ?? null; }
   get mapPose() { return this.pose; }
 
   // the panel's button: into the boat (from the map or a ride), or out of it
@@ -95,9 +96,8 @@ export class BoatMode implements PlayerCraft {
 
   // into the boat at (x, z) heading h (tools), else on the water nearest the map's focus, facing downstream
   enter(at?: CraftSpot) {
-    if (this.phase !== 'off' || !this.sim || !this.nav.enterCraft(this)) return false;
-    this.craft = this.sim.addCraft('boat');
-    this.sim.enterCraft(LOCAL_PLAYER, this.craft.id);
+    if (this.phase !== 'off' || !this.link.sim || !this.nav.enterCraft(this)) return false;
+    this.link.open();
     this.start = at ? { x: at.x, z: at.z, h: at.h, t0: performance.now() } : null;
     this.phase = 'finding';
     this.panel.silence();
@@ -105,13 +105,17 @@ export class BoatMode implements PlayerCraft {
     return true;
   }
 
-  // (the sim steps the boat after this, in the same frame: main.ts; this sends the input and draws the last step)
+  // (the sim steps the boat after this, in the same frame: main.ts; this sends the input and draws the last step; the
+  // frame it is put down it is not in yet)
   update(dt: number) {
     if (this.phase === 'finding') this.find();
-    const sim = this.sim, c = this.craft;
-    if (this.phase === 'on' && sim && c) {
-      sim.craftInput(LOCAL_PLAYER, inFocus() ? this.input() : NO_BOAT_INPUT);
-      for (const e of sim.craftEvents(LOCAL_PLAYER) as BoatEvent[]) {
+    if (this.phase === 'on') {
+      for (const ok of this.link.resets()) if (ok) this.panel.say('Back on open water', 900);
+      this.link.input(inFocus() ? this.input() : NO_BOAT_INPUT);
+    }
+    const c = this.phase === 'on' ? this.link.frame() : null;
+    if (c) {
+      for (const e of this.link.events() as BoatEvent[]) {
         this.panel.say(e.speed > 5 ? 'Crash!' : 'Bump!', 600);
         this.shakeUntil = performance.now() + 450;
         this.shakeA = clamp(e.speed / 20, 0.08, 0.5);
@@ -124,7 +128,7 @@ export class BoatMode implements PlayerCraft {
   }
 
   private find() {
-    const now = performance.now(), c = this.craft!, col = c.collision;
+    const now = performance.now(), col = this.link.col!;
     if (!this.start) {
       const river = this.env.river();
       if (!river) return;
@@ -144,9 +148,9 @@ export class BoatMode implements PlayerCraft {
       if (now - s.t0 > GIVE_UP_MS) { this.panel.say('No water found near here.', 2500); this.nav.flyUp(); }
       return;
     }
-    const at = findSpawn(col, s.x, s.z, s.h, SPAWN_REACH, c.core.motion.cfg);
+    const at = findSpawn(col, s.x, s.z, s.h, SPAWN_REACH, DEFAULT_TUNING.boat);
     if (!at) { this.panel.say('No open water near here.', 2500); this.nav.flyUp(); return; }
-    this.sim!.placeCraft(c.id, at);
+    this.link.spawn(at);
     this.zoom = 1;
     this.camYaw = at.h;
     this.camY = at.y;
@@ -158,8 +162,7 @@ export class BoatMode implements PlayerCraft {
   }
 
   leave() {
-    if (this.craft) this.sim?.removeCraft(this.craft.id);
-    this.craft = null;
+    this.link.close();
     this.phase = 'off';
     this.model.visible = false;
     this.touch.setActive(false);
@@ -169,7 +172,7 @@ export class BoatMode implements PlayerCraft {
   }
 
   private unstick() {
-    if (this.phase === 'on' && this.sim?.resetCraft(LOCAL_PLAYER)) this.panel.say('Back on open water', 900);
+    if (this.phase === 'on') this.link.reset();
   }
 
   private input(): BoatInput {
@@ -196,7 +199,7 @@ export class BoatMode implements PlayerCraft {
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY;
     const eye = new THREE.Vector3(m.x, base + 1.6, m.z);
     const off = new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom);
-    const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.craft!.collision.sweep(eye, off), off, 0.25, 0.4));
+    const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.link.col!.sweep(eye, off), off, 0.25, 0.4));
     if (now < this.shakeUntil) shake(pos, this.shakeA * (this.shakeUntil - now) / 450, now);
     const at = new THREE.Vector3(m.x + Math.sin(m.h) * AHEAD, base + 1.2, m.z + Math.cos(m.h) * AHEAD);
     const cam = this.rig.place(pos, this.rig.look(pos, at), 60 + 8 * clamp(Math.abs(m.speed) / 18.5, 0, 1), dt);
@@ -208,7 +211,7 @@ export class BoatMode implements PlayerCraft {
     const on = this.phase === 'on', active = this.phase !== 'off', P = this.panel, note = P.saying;
     P.active = active;
     ModePanel.text(this.action, active ? 'Exit boat' : 'Boat');
-    this.action.disabled = !active && (!this.nav.canStartCraft || !this.sim);
+    this.action.disabled = !active && (!this.nav.canStartCraft || !this.link.sim);
     P.details.hidden = !active && !note;
     this.speed.hidden = this.help.hidden = !on;
     ModePanel.text(P.status, this.phase === 'finding' ? 'Looking for water…' : on && !inFocus() ? PAUSED :

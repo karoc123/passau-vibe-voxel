@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash, lerp, wrapAngle } from '../util';
-import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B, MAX_CRUISE, type BoatTraffic } from '../sim/boat-traffic';
+import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B, MAX_CRUISE, type BoatView } from '../sim/boat-traffic';
 
 const MAX_TOUR = 6;
 // cruise lines' accent colours (hull band, funnel, awnings)
@@ -158,7 +158,7 @@ export class Boats {
     s.radius += CRUISE_L * 0.55;
   }
 
-  render(boats: BoatTraffic, back: number, night: number) {
+  render(boats: BoatView, back: number, night: number) {
     for (const k of [this.cruise, this.boat]) k.n = k.lit = k.dark_ = 0;
     for (const pose of boats.poses) {
       const { id, kind, underway, len, lit } = pose;

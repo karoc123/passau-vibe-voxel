@@ -30,6 +30,9 @@ export interface CoachPose {
   readonly express: boolean;
 }
 
+/** a train as a snapshot carries it (sim/snapshot.ts): what its coaches' poses are drawn from */
+export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
+
 export interface CoachBox extends CoachPose {
   readonly size: typeof COACH_SIZE;
 }
@@ -137,6 +140,15 @@ export class TrainTraffic {
         };
       }
     }
+  }
+
+  /** the trains as a snapshot carries them */
+  save(): TrainState[] { return this.list.map(({ id, p, s, ds, n, express }) => ({ id, p, s, ds, n, express })); }
+
+  /** a client's copy (never ticked) set to a snapshot's trains: what coaches() reads */
+  load(trains: readonly TrainState[]) {
+    this.list.length = 0;
+    for (const t of trains) this.list.push({ ...t, svc: { ref: '', op: '', stops: [] }, v: 0, wait: 0, done: new Set() });
   }
 
   // Boxes use the same base and heading as the rendered coaches, at the latest simulation tick.

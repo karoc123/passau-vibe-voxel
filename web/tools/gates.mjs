@@ -45,6 +45,7 @@ const GATES = [
   { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 35, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },
   { name: 'caps-check', cmd: ['tools/caps-check.mjs'], set: 'fast', data: true, secs: 6, guards: 'core/surface.ts, mesher caps, roofs.ts (20 nodes)' },
   { name: 'plane', cmd: ['tools/plane.mjs'], set: 'fast', expect: 32, secs: 12.5, guards: 'sim/craft/plane-flight.ts, core/safe-trail.ts; checks/plane-checks.ts, jet-checks.ts, plane-real.ts, world.ts' },
+  { name: 'mirror-check', cmd: ['tools/mirror-check.mjs', '--seconds', '60'], set: 'fast', data: true, secs: 21, guards: 'sim/snapshot.ts, sim/sim-client.ts, sim/sim-server.ts (what the page draws from snapshots is what it draws from the sim), view/life.ts' },
   { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/world-sim.ts (with its crafts: sim/craft/cores.ts), traffic.ts, train-traffic.ts, boat-traffic.ts, edit-keeper.ts, physics/rapier/life-phys.ts, core/live-edits.ts, core/world-edits.ts, car.ts' },
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections' },
   { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/train-traffic.ts, sim/boat-traffic.ts' },

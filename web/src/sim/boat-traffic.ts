@@ -74,6 +74,9 @@ function bezier(a: XY, c: XY, b: XY, n = 12): XY[] {
 const beyond = (a: XY, b: XY): XY => { const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [a[0] + (a[0] - b[0]) / l * RUN_OUT, a[1] + (a[1] - b[1]) / l * RUN_OUT]; };
 const arcLen = (p: XY[]) => p.reduce((l, q, k) => (k ? l + Math.hypot(q[0] - p[k - 1][0], q[1] - p[k - 1][1]) : 0), 0);
 
+/** what the presentation draws of the boats (view/boats.ts): their poses at the last two ticks, the time and day */
+export type BoatView = Pick<BoatTraffic, 'poses' | 'previous' | 'elapsed' | 'day'>;
+
 export class BoatTraffic {
   private readonly tour: Path | null; // no tour on this map, no excursion boats
   private readonly T: number = 0; // a round trip, s

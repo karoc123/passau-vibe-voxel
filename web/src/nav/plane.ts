@@ -2,10 +2,8 @@ import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp, el } from '../util';
 import type { Nav } from './nav';
-import type { CraftContext, CraftEnv, CraftSpot, PlayerCraft } from './craft';
+import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import { JET, PLANE, type PlaneConfig, type PlaneEvent, type PlaneInput } from '../sim/craft/plane-flight';
-import type { PlaneCore } from '../sim/craft/plane-core';
-import { LOCAL_PLAYER, type Craft, type WorldSim } from '../sim/world-sim';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -15,7 +13,7 @@ import { ModePanel } from './mode-panel';
 import { nearestRiver, waterTop } from '../sim/river';
 import './plane.css';
 
-// The plane mode: the glue round the world sim's plane (WorldSim addCraft('floatplane' | 'jet'): its core,
+// The plane mode: the glue round the world sim's plane (CraftLink 'floatplane' | 'jet': its core,
 // sim/craft/plane-core.ts round plane-flight.ts, stepped on the world's clock with its collision; the local player its
 // pilot): the panel, the input (keyboard, touch, gamepad), the chase camera, the model, the crash's tint and shake. Two aircraft, picked by the panel's buttons: the floatplane
 // (PLANE: in the air where the camera is, or afloat on the river nearest the view) and the aerobatic jet (JET: in the
@@ -64,9 +62,10 @@ export class PlaneMode implements PlayerCraft {
   // per aircraft (made when first flown): its model
   private readonly made = new Map<Aircraft, PlaneModel | JetModel>();
   private model!: PlaneModel | JetModel;
-  // the world sim, once loaded; the plane in it while the player flies it
-  private sim: WorldSim | null = null;
-  private craft: Craft<PlaneCore> | null = null;
+  // the plane in the world sim while the player flies it (its client, its own collision)
+  private readonly link: CraftLink<'floatplane' | 'jet'>;
+  // the chase camera to be set from the plane once the sim has put it down
+  private aim = false;
   private readonly touch: TouchSticks;
   private readonly keys = new HeldKeys(KEYS);
   private readonly panel: ModePanel;
@@ -95,9 +94,10 @@ export class PlaneMode implements PlayerCraft {
   private readonly bank = new THREE.Quaternion();
   private nextPanel = 0;
 
-  constructor({ nav, camera, target, meta, host, canvas, env, deployGlider, sim }: CraftContext) {
+  constructor(ctx: CraftContext) {
+    const { nav, camera, target, meta, host, canvas, env, deployGlider } = ctx;
     this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
-    void sim.then((s) => { this.sim = s; });
+    this.link = new CraftLink<'floatplane' | 'jet'>(ctx, 'floatplane');
     this.deployGlider = deployGlider;
     const P = this.panel = new ModePanel(host, 'plane', 'Plane');
     this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
@@ -183,11 +183,10 @@ export class PlaneMode implements PlayerCraft {
 
   private startAt(s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) {
     if (this.phase === 'off') {
-      if (!this.sim || !this.nav.enterCraft(this)) return false;
+      if (!this.link.sim || !this.nav.enterCraft(this)) return false;
       const id = s.type ?? 'floatplane';
       this.use(AIRCRAFT[id]);
-      this.craft = this.sim.addCraft(id);
-      this.sim.enterCraft(LOCAL_PLAYER, this.craft.id);
+      this.link.open(id);
       this.rig.begin(ENTER_MS);
     }
     // (clear of the map's wall: ~5 s of flight at the start's speed)
@@ -205,13 +204,13 @@ export class PlaneMode implements PlayerCraft {
   // once the start's collision tiles are in: in the air, clear over the highest column round it; on the water, at the
   // open water nearest the river cell, facing along the longest open stretch
   private prepare() {
-    const s = this.start!, { id, core, collision: col } = this.craft!, sim = this.sim!;
+    const s = this.start!, col = this.link.col!;
     col.prefetch(this.v3.set(s.x, 0, s.z), this.v4.set(0, 0, 0));
     if (s.water) {
       const found = this.openWater(s.x, s.z);
       if (found === null) return;
       if (!found) { this.panel.say('No open water here: starting in the air', 3000); s.water = false; return; }
-      sim.placeCraft(id, { x: found.x, y: found.water + this.type.cfg.FLOAT_H, z: found.z, h: found.heading, water: true });
+      this.link.put({ x: found.x, y: found.water + this.type.cfg.FLOAT_H, z: found.z, h: found.heading, water: true });
       this.throttle = 0;
     } else {
       let top = 0;
@@ -221,25 +220,26 @@ export class PlaneMode implements PlayerCraft {
         top = Math.max(top, su.top);
       }
       const c = this.type.cfg;
-      sim.placeCraft(id, { x: s.x, y: clamp(s.y, top + c.RESPAWN_AGL, top + 300), z: s.z, h: s.heading, speed: c.RESPAWN_SPEED });
+      this.link.put({ x: s.x, y: clamp(s.y, top + c.RESPAWN_AGL, top + 300), z: s.z, h: s.heading, speed: c.RESPAWN_SPEED });
       this.throttle = c.RESPAWN_THROTTLE;
     }
-    // (the engine put at the lever by the core: idle afloat, RESPAWN_THROTTLE in the air)
-    this.cam.yaw = core.flight.heading;
-    this.cam.pitch = 0;
-    core.flight.attitude(this.cam.fwd, this.cam.up);
+    // (the engine put at the lever by the core: idle afloat, RESPAWN_THROTTLE in the air; the camera set from the plane
+    // the first frame it is in: fly)
+    this.aim = true;
     this.phase = 'flying';
+  }
+
+  // the plane, once the sim has put it down
+  private get craft() { return this.phase === 'flying' ? this.link.craft : null; }
+
+  get mapPose() {
+    return this.craft?.core.pose ?? null;
   }
 
   // open water within ~100 m of (x, z): the water column with the longest straight water run through it (8
   // directions, up to 300 m); null: tiles not in yet; false: none
-  get mapPose() {
-    if (this.phase !== 'flying' || !this.craft) return null;
-    return this.craft.core.pose;
-  }
-
   private openWater(x: number, z: number) {
-    const col = this.craft!.collision;
+    const col = this.link.col!;
     let best: { x: number; z: number; water: number; heading: number; run: number } | null = null;
     for (let r = 0; r <= 100; r += 20) for (let a = 0; a < (r ? 12 : 1); a++) {
       const px = x + r * Math.cos(a * Math.PI / 6), pz = z + r * Math.sin(a * Math.PI / 6);
@@ -264,8 +264,8 @@ export class PlaneMode implements PlayerCraft {
     const c = this.craft;
     if (this.phase !== 'flying' || !c || c.core.flight.state !== 'air') return;
     const { p, heading } = c.core.flight;
-    const surface = c.collision.surface(p.x, p.z);
-    const water = c.core.world(c.collision).water(p.x, p.z);
+    const col = this.link.col!, surface = col.surface(p.x, p.z);
+    const water = c.core.world(col).water(p.x, p.z);
     if (!surface || water === null) {
       this.panel.say('Wait for the collision tiles to load.', 2500);
       return;
@@ -279,12 +279,11 @@ export class PlaneMode implements PlayerCraft {
 
   private backToSafe() {
     if (this.phase !== 'flying') return;
-    this.sim?.resetCraft(LOCAL_PLAYER);
+    this.link.reset();
   }
 
   leave() {
-    if (this.craft) this.sim?.removeCraft(this.craft.id);
-    this.craft = null;
+    this.link.close();
     this.phase = 'off';
     this.start = null;
     this.keys.clear();
@@ -308,9 +307,19 @@ export class PlaneMode implements PlayerCraft {
 
   // (the sim steps the plane after this, in the same frame: main.ts; this sends the input and draws the last step)
   private fly(dt: number) {
-    const sim = this.sim!, { core } = this.craft!, f = core.flight, now = performance.now();
-    sim.craftInput(LOCAL_PLAYER, inFocus() ? this.input(dt) : { turn: 0, pitch: 0, throttle: this.throttle });
-    for (const e of sim.craftEvents(LOCAL_PLAYER) as PlaneEvent[]) {
+    const now = performance.now();
+    this.link.input(inFocus() ? this.input(dt) : { turn: 0, pitch: 0, throttle: this.throttle });
+    this.link.resets();
+    const c = this.link.frame();
+    if (!c) return;
+    const core = c.core, f = core.flight;
+    if (this.aim) {
+      this.aim = false;
+      this.cam.yaw = f.heading;
+      this.cam.pitch = 0;
+      f.attitude(this.cam.fwd, this.cam.up);
+    }
+    for (const e of this.link.events() as PlaneEvent[]) {
       if (e.type === 'crash') {
         this.crashAt = now;
         this.panel.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back at a safe point…` : `Crash! (${e.what}, ${e.kmh} km/h) Back at a safe point…`, 0);
@@ -352,7 +361,7 @@ export class PlaneMode implements PlayerCraft {
   // lag, rolled by a quarter of its bank; the jet's along its nose and its up, both lagged (it rolls with the jet,
   // through loops and inverted). Kept clear of what the collision holds; the field of view by speed; shaken by a crash
   private chase(dt: number, now: number) {
-    const { core, collision } = this.craft!, f = core.flight, c = this.cam, ch = this.type.chase, aero = this.type.cfg.AEROBATIC;
+    const core = this.craft!.core, collision = this.link.col!, f = core.flight, c = this.cam, ch = this.type.chase, aero = this.type.cfg.AEROBATIC;
     let fwd: THREE.Vector3, off: THREE.Vector3;
     if (aero) {
       c.fwd.lerp(this.fwd, follow(ch.lag, dt)).normalize();
@@ -389,7 +398,7 @@ export class PlaneMode implements PlayerCraft {
     P.details.hidden = !active;
     this.help.hidden = this.phase !== 'flying';
     this.enterButton.textContent = active ? `Exit ${this.type.label}` : 'Plane';
-    const canStart = this.nav.canStartCraft && !!this.sim;
+    const canStart = this.nav.canStartCraft && !!this.link.sim;
     this.enterButton.disabled = !active && !canStart;
     this.enterWater.hidden = this.enterJet.hidden = active;
     this.enterJet.disabled = !canStart;
@@ -409,7 +418,7 @@ export class PlaneMode implements PlayerCraft {
       f.atEdge ? 'Map edge: turn back' : '');
     ModePanel.text(P.status, msg);
     if (!on || !f || !c) { this.telemetry.textContent = ''; return; }
-    const su = c.collision.surface(f.p.x, f.p.z);
+    const su = this.link.col?.surface(f.p.x, f.p.z);
     const where = f.state === 'water' ? 'on the water' : su ? `${Math.round(f.p.y - f.cfg.RADIUS - su.ground)} m AGL` : `${Math.round(f.p.y)} m`;
     const g = f.cfg.AEROBATIC && f.state === 'air' ? ` · ${f.load.toFixed(1)} g` : '';
     ModePanel.text(this.telemetry, `${Math.round(f.v * 3.6)} km/h · ${where}${g} · throttle ${pct}%`);

@@ -1,12 +1,11 @@
 import * as THREE from 'three';
 import { length } from '../core/vec';
 import { HOVER_THROTTLE, type FlightInput } from '../sim/craft/fpv-flight';
-import type { DroneCore, DroneEvent } from '../sim/craft/drone-core';
-import { LOCAL_PLAYER, type Craft, type WorldSim } from '../sim/world-sim';
+import type { DroneEvent } from '../sim/craft/drone-core';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
-import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
+import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import { clamp, el } from '../util';
 import { gameKey, HeldKeys, inFocus, onFocusLoss } from './input';
 import { modeButton, ModePanel } from './mode-panel';
@@ -14,14 +13,15 @@ import './fpv.css';
 
 const ARM_THROTTLE = 0.06;
 const IMPACT_MESSAGE_MS = 950;
+const STILL = { x: 0, y: 0, z: 0 };
 const CAMERA_PITCH_AXIS = new THREE.Vector3(1, 0, 0);
 const FLIGHT_KEYS: ReadonlySet<string> = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
 type Phase = 'loading' | 'ready' | 'flying' | 'paused';
 type InputSource = 'controller' | 'keyboard' | 'touch';
 
 // The viewer owns the camera and render loop; this mode supplies the flight pose. The drone is a craft of the world
-// sim's (WorldSim addCraft('drone'): its core, sim/craft/drone-core.ts, stepped on the world's clock with its collision),
-// the local player its pilot. Disarmed (before arming, paused) its input is null: it holds still. Out of focus it is
+// sim's (CraftLink: its core, sim/craft/drone-core.ts, stepped on the world's clock with its collision), the local
+// player its pilot. Disarmed (before arming, paused) its input is null: it holds still. Out of focus it is
 // disarmed and wants arming again (input.ts: the radio's throttle may have moved meanwhile).
 export class FpvMode implements PlayerCraft {
   readonly id = 'fpv';
@@ -33,9 +33,8 @@ export class FpvMode implements PlayerCraft {
   private readonly radio = new FpvInput();
   private readonly touch: FpvTouch;
   private readonly hasTouch = navigator.maxTouchPoints > 0;
-  // the world sim, once loaded; the drone in it while the player is in it
-  private sim: WorldSim | null = null;
-  private craft: Craft<DroneCore> | null = null;
+  // the drone in the world sim while the player is in it (its client, its own collision)
+  private readonly link: CraftLink<'drone'>;
   private readonly keys = new HeldKeys(FLIGHT_KEYS);
   private readonly spawn = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
@@ -60,9 +59,10 @@ export class FpvMode implements PlayerCraft {
   private impact: { at: number; strength: number; message: string } | null = null;
   private notice = '';
 
-  constructor({ nav, camera, target, host, canvas, sim }: CraftContext) {
+  constructor(ctx: CraftContext) {
+    const { nav, camera, target, host, canvas } = ctx;
     this.nav = nav; this.camera = camera; this.target = target;
-    void sim.then((s) => { this.sim = s; });
+    this.link = new CraftLink(ctx, 'drone');
     // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
       this.camera.fov = clamp(this.camera.fov * ratio, 45, 100);
@@ -100,19 +100,23 @@ export class FpvMode implements PlayerCraft {
     this.renderPanel();
   }
 
-  // (the sim steps the drone after this, in the same frame: main.ts; this sends the input and draws the last step)
+  private get craft() { return this.on ? this.link.craft : null; }
+
+  // (the sim steps the drone after this, in the same frame: main.ts; this sends the input and draws the last step; the
+  // frame it is put down it is not in yet)
   update() {
-    const active = this.on, sim = this.sim, c = this.craft;
+    const active = this.on, col = this.link.col;
     const now = performance.now();
     // (the radio read, and its setup drawn, only while the drone is on)
     this.controller = active ? this.radio.update() : null;
-    if (active && sim && c) {
+    if (active && col) {
       if (this.phase === 'loading') {
-        c.collision.prefetch(this.spawn, c.core.velocity);
+        col.prefetch(this.spawn, STILL);
         this.prepare();
       }
-      sim.craftInput(LOCAL_PLAYER, this.phase === 'flying' ? this.flightInput() : null);
-      for (const e of sim.craftEvents(LOCAL_PLAYER) as DroneEvent[]) {
+      this.link.input(this.phase === 'flying' ? this.flightInput() : null);
+      this.link.frame();
+      for (const e of this.link.events() as DroneEvent[]) {
         this.impact = { at: now, strength: clamp(e.speed / 26, 0.22, 0.75), message: `Impact with ${e.hit} at ${Math.round(e.speed * 3.6)} km/h · Armed` };
       }
       this.applyCamera();
@@ -138,13 +142,12 @@ export class FpvMode implements PlayerCraft {
 
   // into the drone at a spot (heading h: the way it faces), else where the camera is, facing the way it looks
   enter(at?: CraftSpot) {
-    if (this.on || !this.sim || !this.nav.enterCraft(this)) return false;
+    if (this.on || !this.link.sim || !this.nav.enterCraft(this)) return false;
     this.on = true;
-    const c = this.craft = this.sim.addCraft('drone');
-    this.sim.enterCraft(LOCAL_PLAYER, c.id);
+    const col = this.link.open();
     const position = this.camera.position, offset = this.target.clone().sub(position);
     const x = at?.x ?? position.x, z = at?.z ?? position.z;
-    this.spawn.set(clamp(x, 16, c.collision.width - 16), at?.y ?? position.y, clamp(z, 16, c.collision.depth - 16));
+    this.spawn.set(clamp(x, 16, col.width - 16), at?.y ?? position.y, clamp(z, 16, col.depth - 16));
     // (the drone's yaw: its camera looks along -z)
     this.spawnYaw = at ? at.h + Math.PI : Math.atan2(-offset.x, -offset.z);
     this.savedNear = this.camera.near;
@@ -157,8 +160,7 @@ export class FpvMode implements PlayerCraft {
 
   leave() {
     this.on = false;
-    if (this.craft) this.sim?.removeCraft(this.craft.id);
-    this.craft = null;
+    this.link.close();
     if (this.savedNear !== null) {
       this.camera.near = this.savedNear;
       this.camera.updateProjectionMatrix();
@@ -183,15 +185,15 @@ export class FpvMode implements PlayerCraft {
 
   // put down once the tiles round the start are in: 12..35 m over the highest column round it
   private prepare() {
-    const { x, z } = this.spawn, c = this.craft;
-    if (!c) return;
+    const { x, z } = this.spawn, col = this.link.col;
+    if (!col) return;
     let top = 0;
     for (const dx of [-1, 0, 1]) for (const dz of [-1, 0, 1]) {
-      const surface = c.collision.surface(x + dx, z + dz);
+      const surface = col.surface(x + dx, z + dz);
       if (!surface) return;
       top = Math.max(top, surface.top);
     }
-    this.sim!.placeCraft(c.id, { x, y: clamp(this.spawn.y, top + 12, top + 35), z, h: this.spawnYaw - Math.PI });
+    this.link.put({ x, y: clamp(this.spawn.y, top + 12, top + 35), z, h: this.spawnYaw - Math.PI });
     this.phase = 'ready';
   }
 
@@ -213,13 +215,12 @@ export class FpvMode implements PlayerCraft {
     if (!this.on || this.phase !== 'flying') return;
     this.phase = 'paused';
     this.notice = reason;
-    if (this.craft) this.craft.core.waiting = false;
     this.renderPanel();
   }
 
   get mapPose() {
-    if (!this.on || this.phase === 'loading' || !this.craft) return null;
-    return this.craft.core.pose;
+    if (this.phase === 'loading') return null;
+    return this.craft?.core.pose ?? null;
   }
 
   private flightInput(): FlightInput | null {
@@ -270,7 +271,7 @@ export class FpvMode implements PlayerCraft {
     P.el.classList.toggle('flying', flying); // (style.css: the compact strip while it flies)
     P.details.hidden = !active;
     this.enterExit.textContent = active ? 'Exit FPV' : 'FPV Acro';
-    this.enterExit.disabled = !active && (!this.nav.canStartCraft || !this.sim);
+    this.enterExit.disabled = !active && (!this.nav.canStartCraft || !this.link.sim);
     this.armRadio.hidden = !canArm;
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
@@ -284,14 +285,14 @@ export class FpvMode implements PlayerCraft {
     const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll, pinch to zoom.' :
       'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
-      this.craft?.core.waiting ? 'Waiting for the next collision tile…' :
+      flying && this.craft?.core.waiting ? 'Waiting for the next collision tile…' :
       flying ? (this.impact?.message ?? '') :
       this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : controls);
     ModePanel.text(P.status, content);
 
-    if (!this.craft) return;
-    const { core, collision } = this.craft, p = core.flight.position;
-    const terrain = collision.surface(p.x, p.z);
+    const core = this.craft?.core, p = core?.flight.position;
+    if (!core || !p) return;
+    const terrain = this.link.col?.surface(p.x, p.z);
     const altitude = terrain ? `${Math.round(p.y - terrain.ground)} m AGL` : `${Math.round(p.y)} m`;
     const throttle = flyingWithTouch ? ` · ${this.touch.throttlePercent}% throttle` : '';
     this.telemetry.textContent = `${altitude} · ${Math.round(length(core.flight.velocity) * 3.6)} km/h${throttle}`;

@@ -2,16 +2,16 @@ import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/traffic';
-import type { WorldSim } from '../sim/world-sim';
+import type { SimClient } from '../sim/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import type { Car, Kind, Person, Pose, Rideable, Vec3 } from '../sim/types';
 import { VEHICLE_IDS, vehicleOf, type VehicleId } from '../sim/vehicles';
 
-// The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; created and
-// ticked by main.ts) drawn between its last two ticks with instanced meshes, the trains and the boats, the people
-// knocked down or fallen into a hole (its events, drawn as an effect: shoved, tipping over, no physics), picking an
-// agent on screen. It only draws: nothing here feeds back into the sim.
+// The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
+// its client, sim/sim-client.ts TrafficView, ticked by main.ts) drawn between its last two ticks with instanced
+// meshes, the trains and the boats, the people knocked down or fallen into a hole (its events, drawn as an effect:
+// shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim.
 
 export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
@@ -52,23 +52,23 @@ export class StreetLife {
   // the world tick whose events were drawn last (WorldSim.eventsSince)
   private seen: number;
 
-  constructor(scene: THREE.Scene, readonly sim: WorldSim) {
-    this.heads = sim.traffic.heads;
-    this.seen = sim.tick;
+  constructor(scene: THREE.Scene, readonly client: SimClient) {
+    this.heads = client.traffic.heads;
+    this.seen = client.tick;
     this.M = new LifeMeshes(scene, this.heads);
     this.M.group.add(this.trains.group);
   }
 
   get group() { return this.M.group; }
-  private get traffic() { return this.sim.traffic; }
+  private get traffic() { return this.client.traffic; }
   private get people() { return this.traffic.people; }
   private get riders() { return this.traffic.riders; }
 
   // the sim as it is after its update this frame (WorldSim.update; its events since the last drawn), drawn; viewer:
   // where it is seen from (the camera), what the people knocked down are gone far from
   update(dt: number, night: number, viewer: { x: number; z: number; y?: number }) {
-    const T = this.traffic, events = this.sim.eventsSince(this.seen);
-    this.seen = this.sim.tick;
+    const T = this.traffic, events = this.client.eventsSince(this.seen);
+    this.seen = this.client.tick;
     if (T.boats && !this.boats) {
       this.boats = new Boats();
       this.group.add(this.boats.group);
@@ -178,7 +178,7 @@ export class StreetLife {
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), T = this.traffic;
     this.people.forEach((p, i) => {
       let bob = 0;
-      const C = this.sim.walkedPose(p.id);
+      const C = this.client.walkedPose(p.id);
       if (C) { // walked by a player (WorldSim walkAs): where they put them, their step's phase this side's
         setRp(p, C.x, C.y, C.z); p.rh = C.h;
         if (C.moving) { const ph = (this.walkPh.get(p) ?? p.ph) + dt * 9; this.walkPh.set(p, ph); bob = Math.sin(ph); }
@@ -248,7 +248,7 @@ export class StreetLife {
   // where it was hit, sliding half as far
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
-    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3(), ground = this.sim.ground;
+    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3(), ground = this.traffic.ground;
     this.fallen = this.fallen.filter((f) => (f.land === undefined || f.t - f.land <= LANDED_S) && (f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R)));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;

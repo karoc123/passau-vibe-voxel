@@ -1,18 +1,17 @@
 import * as THREE from 'three';
 import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
-import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
+import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import { makeCraftModel } from './craft-models';
-import { SPAWN_HEIGHT } from '../sim/craft/craft-collision';
+import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { GLIDER_HEIGHT, type CraftInput, type CraftKind } from '../sim/craft/craft-motion';
-import { NO_CRAFT_INPUT, type SpecialCore, type SpecialEvent } from '../sim/craft/special-core';
-import { LOCAL_PLAYER, type Craft, type WorldSim } from '../sim/world-sim';
+import { NO_CRAFT_INPUT, type SpecialEvent } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import './special-craft.css';
 
-// The helicopter, the hovercraft and the paraglider: crafts of the world sim's (WorldSim addCraft: their core,
+// The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
 // Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts).
 
@@ -38,9 +37,8 @@ class SpecialCraft implements PlayerCraft {
   private readonly model;
   private readonly rig: ChaseRig;
   private readonly touch: TouchSticks;
-  // the world sim, once loaded; the craft in it while the player is in it
-  private sim: WorldSim | null = null;
-  private craft: Craft<SpecialCore> | null = null;
+  // the craft in the world sim while the player is in it (its client, its own collision)
+  private readonly link: CraftLink<CraftKind>;
   private readonly keys = new HeldKeys(KEYS);
   private readonly pos = new THREE.Vector3();
   private readonly offset = new THREE.Vector3();
@@ -52,7 +50,7 @@ class SpecialCraft implements PlayerCraft {
 
   constructor(private readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
-    void ctx.sim.then((s) => { this.sim = s; });
+    this.link = new CraftLink(ctx, id);
     this.model = makeCraftModel(id);
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
@@ -82,8 +80,8 @@ class SpecialCraft implements PlayerCraft {
   }
 
   enter(at?: CraftSpot) {
-    if (this.id === 'paraglider' || this.phase !== 'off' || !this.sim || !this.ctx.nav.enterCraft(this)) return false;
-    this.take();
+    if (this.id === 'paraglider' || this.phase !== 'off' || !this.link.sim || !this.ctx.nav.enterCraft(this)) return false;
+    this.link.open();
     const { target, camera, meta } = this.ctx, look = camera.getWorldDirection(this.look);
     const spot = at ?? { x: target.x, z: target.z, h: Math.atan2(look.x, look.z) };
     this.start = { ...spot, x: clamp(spot.x, 5, meta.W - 5), z: clamp(spot.z, 5, meta.D - 5), deadline: performance.now() + 6500 };
@@ -94,16 +92,10 @@ class SpecialCraft implements PlayerCraft {
   }
 
   protected deployFrom(source: PlayerCraft, at: CraftSpot) {
-    if (this.phase !== 'off' || at.y === undefined || !this.sim || !this.ctx.nav.enterCraft(this, source)) return false;
-    this.take();
+    if (this.phase !== 'off' || at.y === undefined || !this.link.sim || !this.ctx.nav.enterCraft(this, source)) return false;
+    this.link.open();
     this.activate(at.x, at.y, at.z, at.h, 16);
     return true;
-  }
-
-  // a craft of the world sim's, the local player its pilot (not yet put down)
-  private take() {
-    this.craft = this.sim!.addCraft(this.id);
-    this.sim!.enterCraft(LOCAL_PLAYER, this.craft.id);
   }
 
   leave() {
@@ -113,17 +105,19 @@ class SpecialCraft implements PlayerCraft {
     this.touch.setActive(false);
     this.keys.clear();
     this.rig.end();
-    if (this.craft) this.sim?.removeCraft(this.craft.id);
-    this.craft = null;
+    this.link.close();
   }
 
-  // (the sim steps the craft after this, in the same frame: main.ts; this sends the input and draws the last step)
+  private get craft() { return this.phase === 'on' || this.phase === 'landing' ? this.link.craft : null; }
+
+  // (the sim steps the craft after this, in the same frame: main.ts; this sends the input and draws the last step; the
+  // frame it is put down it is not in yet)
   update(dt: number) {
     if (this.phase === 'finding') this.findStart();
-    const sim = this.sim;
-    if (this.phase === 'on' && sim) {
-      sim.craftInput(LOCAL_PLAYER, inFocus() ? this.input() : NO_CRAFT_INPUT);
-      for (const e of sim.craftEvents(LOCAL_PLAYER) as SpecialEvent[]) {
+    if (this.phase === 'on') {
+      this.link.input(inFocus() ? this.input() : NO_CRAFT_INPUT);
+      this.link.frame();
+      for (const e of this.link.events() as SpecialEvent[]) {
         if (e === 'landed') this.landOnFoot();
         else {
           this.panel.say('Water landing. Choose a dry landing spot next time.', 3500);
@@ -131,13 +125,13 @@ class SpecialCraft implements PlayerCraft {
         }
         break;
       }
-      if (this.phase === 'on') this.render(dt);
+      if (this.phase === 'on' && this.craft) this.render(dt);
     }
     this.draw();
   }
 
   private findStart() {
-    const s = this.start!, { core, collision } = this.craft!, world = core.world(collision);
+    const s = this.start!, collision = this.link.col!, world = craftWorld(this.id, collision);
     collision.prefetch({ x: s.x, y: 0, z: s.z }, { x: 0, y: 0, z: 0 });
     let waiting = false;
     for (const radius of [0, 5, 10, 18, 30, 45, 65]) {
@@ -161,12 +155,11 @@ class SpecialCraft implements PlayerCraft {
   }
 
   get mapPose() {
-    if ((this.phase !== 'on' && this.phase !== 'landing') || !this.craft) return null;
-    return this.craft.core.pose;
+    return this.craft?.core.pose ?? null;
   }
 
   private activate(x: number, y: number, z: number, heading: number, speed = 0) {
-    this.sim!.placeCraft(this.craft!.id, { x, y, z, h: heading, speed });
+    this.link.spawn({ x, y, z, h: heading, speed });
     this.start = null;
     this.phase = 'on';
     this.camYaw = heading;
@@ -176,7 +169,6 @@ class SpecialCraft implements PlayerCraft {
     this.model.group.visible = true;
     this.keys.clear();
     this.touch.setActive(true);
-    this.render(0);
     this.draw();
   }
 
@@ -207,7 +199,7 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private render(dt: number) {
-    const { core, collision } = this.craft!, m = core.drawn(core.clock.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
+    const core = this.craft!.core, collision = this.link.col!, m = core.drawn(core.clock.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
     group.position.set(m.x, m.y - cfg.drop, m.z);
     group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');
     // the rotors idle slower on the skids
@@ -230,7 +222,7 @@ class SpecialCraft implements PlayerCraft {
     this.panel.active = active;
     this.panel.el.hidden = this.id === 'paraglider' && !active && !this.panel.saying;
     this.action.hidden = this.id === 'paraglider' && !active;
-    this.action.disabled = !active && (!this.ctx.nav.canStartCraft || !this.sim);
+    this.action.disabled = !active && (!this.ctx.nav.canStartCraft || !this.link.sim);
     ModePanel.text(this.action, active ? `Exit ${CONFIG[this.id].name.toLowerCase()}` : CONFIG[this.id].name);
     this.panel.details.hidden = !active && !this.panel.saying;
     this.help.hidden = this.telemetry.hidden = !on;
@@ -242,7 +234,7 @@ class SpecialCraft implements PlayerCraft {
       on && this.id === 'helicopter' && core?.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
     if (!on || !core) return;
     const { p, speed } = core.motion;
-    const height = this.id === 'hovercraft' ? null : this.craft!.collision.surface(p.x, p.z)?.top;
+    const height = this.id === 'hovercraft' ? null : this.link.col?.surface(p.x, p.z)?.top;
     ModePanel.text(this.telemetry, `${Math.round(speed * 3.6)} km/h` +
       (height == null ? '' : ` · ${Math.max(0, Math.round(p.y - height))} m above surface`));
   }
