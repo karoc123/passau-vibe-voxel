@@ -822,10 +822,10 @@ def ground_classes(ctx):
     _wlev = np.full((D, W), -1, np.int32)
     # water at a level of its own (scripts/overrides/water: a lock chamber full or empty): no part of any river body, so
     # the bodies' medians are taken without it, and its own level after
-    _locks = overrides.water_levels(osm.areas, cells_of, BASE)
+    water_overrides = overrides.water_levels(osm.areas, cells_of, BASE)
     _lockm = np.zeros((D, W), bool)
     _locklev = np.zeros((D, W), np.int32)
-    for _, _lr, _lc, _lg, _, _ in _locks:
+    for _, _lr, _lc, _lg, _, _ in water_overrides:
         _lockm[_lr, _lc] = True
         _locklev[_lr, _lc] = _lg
     # and the river water by a lock gate's outer side (the approaches) stands at its stretch's level: the DGM over an
@@ -860,8 +860,8 @@ def ground_classes(ctx):
                 _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
             _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
     note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
-    _core_s = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
-    report["counters"]["water_gate"] = dict(dropped=int(_wgated[_core_s].sum()), gated=tn_water is not None)
+    core_slice = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
+    report["counters"]["water_gate"] = dict(dropped=int(_wgated[core_slice].sum()), gated=tn_water is not None)
     note(f"rivers from the terrain model: {int(_wgated.sum())} cells dropped, more than {WATER_GATE} m from mapped water")
     del _wgated
     gcol[_wat | _lockm] = C["water"]
@@ -892,10 +892,10 @@ def ground_classes(ctx):
     _fw = (_wlev >= 0) & (gcol == C["water"])
     g[_fw] = _wlev[_fw]
     note("water cells flattened to their body's level:", int(_fw.sum()))
-    if _locks:
+    if water_overrides:
         g[_lockm] = _locklev[_lockm]
         note("water overrides (own level): (way, cells, water top m a.s.l.)",
-             [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in _locks])
+             [(o_, len(r_), g_ + BASE) for o_, r_, _, g_, _, _ in water_overrides])
     splash_pads = [(int(typ == "relation"), oid, geom) for oid, typ, t, geom in osm.areas if t.get("fountain") == "splash_pad" and not underground(t)]
 
     # zebra crossings + lane markings on asphalt
@@ -966,12 +966,13 @@ def ground_classes(ctx):
     _junc += [geom for oid, typ, t, geom in osm.areas_with("area:highway") if t.get("junction") and not underground(t)]
     lm = np.zeros((D, W), np.uint16)
     burn(lm, [(l, 1) for l in lane_lines], all_touched=False)
-    _jm = np.zeros((D, W), np.uint16)
-    burn(_jm, [(j, 1) for j in _junc])
-    lm_mask = (lm > 0) & (_jm == 0) & np.isin(gcol, [C["asphalt"]])
+    junction_mask = np.zeros((D, W), np.uint16)
+    burn(junction_mask, [(j, 1) for j in _junc])
+    lm_mask = (lm > 0) & (junction_mask == 0) & np.isin(gcol, [C["asphalt"]])
     gcol[lm_mask] = C["mark"]
     note("lane marking cells:", int(lm_mask.sum()))
-    vars(ctx).update(RIVER_LV=RIVER_LV, SANITY=SANITY, TN=TN, _core_s=_core_s, _jm=_jm, _locks=_locks,
+    vars(ctx).update(RIVER_LV=RIVER_LV, SANITY=SANITY, TN=TN, core_slice=core_slice, junction_mask=junction_mask,
+                     water_overrides=water_overrides,
                      bridge_lines=bridge_lines, bridge_rails=bridge_rails, bridge_road_polys=bridge_road_polys,
                      bridge_roads=bridge_roads, bridge_shapes=bridge_shapes, bridge_ways=bridge_ways,
                      cycle_shapes=cycle_shapes, explicit=explicit, foot_shapes=foot_shapes, gcol=gcol,
@@ -989,8 +990,8 @@ def tag(f, k):
 def buildings(ctx):
     """The buildings as features: OSM's outlines and parts with LoD2's, their heights, their roofs (LoD2's, fitted,
     flattened) and their wall and roof styles; the volume (vol)."""
-    (LOD2, _core_s, cellcol, dsm, dtm, exg, g, gcol, nd_max, nd_max_b, osm) = (
-        ctx.LOD2, ctx._core_s, ctx.cellcol, ctx.dsm, ctx.dtm, ctx.exg, ctx.g, ctx.gcol, ctx.nd_max, ctx.nd_max_b,
+    (LOD2, core_slice, cellcol, dsm, dtm, exg, g, gcol, nd_max, nd_max_b, osm) = (
+        ctx.LOD2, ctx.core_slice, ctx.cellcol, ctx.dsm, ctx.dtm, ctx.exg, ctx.g, ctx.gcol, ctx.nd_max, ctx.nd_max_b,
         ctx.osm)
     # ---------------------------------------------------------------- buildings
     feats = []
@@ -1560,7 +1561,7 @@ def buildings(ctx):
     # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
     # contour lines of the street below across every flat roof and plane of LoD2
     topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
-    _roof_f = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
+    roof_exact = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
     # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
     # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
     _cl = ndimage.grey_closing(topi, size=(3, 3))
@@ -1576,7 +1577,7 @@ def buildings(ctx):
     bmask &= topi >= 2
     # buildings standing in water: near none but the Kachlet plant's and the locks' (Q1's gate, # water)
     _biw = np.zeros((D, W), bool)
-    _biw[_core_s] = (bmask & (gcol == C["water"]))[_core_s]
+    _biw[core_slice] = (bmask & (gcol == C["water"]))[core_slice]
     report["counters"]["water_gate"]["buildings_in_water"] = int(_biw.sum())
     _l, _n = ndimage.label(_biw)
     _sz = np.bincount(_l.ravel())[1:]
@@ -1820,7 +1821,7 @@ def buildings(ctx):
     H = int(g.max() + max(topi.max(), nd_max.max(), 41) + 24)
     note("volume height", H)
     vol = np.zeros((H, D, W), np.uint16)
-    vars(ctx).update(CORE=CORE, H=H, ROOF_GX=ROOF_GX, ROOF_GY=ROOF_GY, SACRED=SACRED, _roof_f=_roof_f, bmask=bmask,
+    vars(ctx).update(CORE=CORE, H=H, ROOF_GX=ROOF_GX, ROOF_GY=ROOF_GY, SACRED=SACRED, roof_exact=roof_exact, bmask=bmask,
                      boti=boti, cell_maxh=cell_maxh, feats=feats, over=over, pitched_m=pitched_m, render=render,
                      top=top, topi=topi, vol=vol)
 
@@ -1828,9 +1829,9 @@ def buildings(ctx):
 def natural_ground(ctx):
     """The open land OSM says nothing about (the ortho and the cadastre decide), cemeteries, the ground's columns
     with their retaining walls, and the buildings' voxels: walls, parts, roofs on posts, roof colours."""
-    (CORE, H, TN, _locks, bmask, boti, cell_maxh, cellcol, exg, explicit, g, gcol, lum, nd_max, nd_mean, osm, over,
-     pitched_m, render, tn, top, topi, vol) = (
-        ctx.CORE, ctx.H, ctx.TN, ctx._locks, ctx.bmask, ctx.boti, ctx.cell_maxh, ctx.cellcol, ctx.exg,
+    (CORE, H, TN, water_overrides, bmask, boti, cell_maxh, cellcol, exg, explicit, g, gcol, lum, nd_max, nd_mean, osm,
+     over, pitched_m, render, tn, top, topi, vol) = (
+        ctx.CORE, ctx.H, ctx.TN, ctx.water_overrides, ctx.bmask, ctx.boti, ctx.cell_maxh, ctx.cellcol, ctx.exg,
         ctx.explicit, ctx.g, ctx.gcol, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.over, ctx.pitched_m,
         ctx.render, ctx.tn, ctx.top, ctx.topi, ctx.vol)
     # ---------------------------------------------------------------- natural ground
@@ -1976,9 +1977,9 @@ def natural_ground(ctx):
                      if t_.get("barrier") in ("retaining_wall", "wall", "city_wall") or t_.get("man_made") in ("quay", "embankment")])
     # a water override's outline is a wall too (a lock chamber's), faced in its own colour (default concrete) within 2 m
     _lockwall = np.zeros((D, W), np.uint16)
-    if _locks:
-        burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in _locks])
-        burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in _locks])
+    if water_overrides:
+        burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in water_overrides])
+        burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in water_overrides])
     _wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
     n_rw = n_lw = 0
     _rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)
@@ -1990,12 +1991,12 @@ def natural_ground(ctx):
         k = ((_rr0[m] + _cc0[m] + (zz % 2)) // 2 * 2654435761 + zz * 40503) % 1000003 % len(STONE)
         vol[zz][m] = np.array(STONE, np.uint16)[k]
         n_rw += int(m.sum())
-        if _locks:
+        if water_overrides:
             _lw = _lockwall[m]
             vol[zz][m] = np.where(_lw > 0, _lw, vol[zz][m])
             n_lw += int((_lw > 0).sum())
     note("retaining walls (paved ground 2 m+ over a neighbour): masonry voxels", n_rw)
-    if _locks:
+    if water_overrides:
         note("water overrides: wall face voxels", n_lw)
         overrides.lock_gates(vol, g, gcol == C["water"], osm.lines, pal, landmarks.MAT_IDS, cells_of, BASE, note)
 
@@ -2818,11 +2819,11 @@ def vegetation(ctx):
         if t is not None and t["src"] == "lidar":
             t["h"] = int(crown_top[int(t["y"]), int(t["x"])])
             all_trees.append(t)
-    _tr, _tr_t = [], []  # (_tr_t: each record's tree, for the bridgeheads' lift below)
+    _tr, tree_of_record = [], []  # (tree_of_record: each record's tree, for the bridgeheads' lift below)
     for t in all_trees:
         if not in_core(int(t["y"]), int(t["x"])):
             continue
-        _tr_t.append(t)
+        tree_of_record.append(t)
         rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
         for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
                             ("bv_height", "h_bv"), ("con", "con"), ("sp_rs", "sp_rs")):
@@ -2839,16 +2840,17 @@ def vegetation(ctx):
     # crown's own: a broadleaf crown's side beside a conifer took the conifer's evergreen class and stood green through the
     # winter, a pillar)
     _crown_ids = []
-    _best = np.full((D // 2, W // 2), -1, np.int32)
+    crown_owner = np.full((D // 2, W // 2), -1, np.int32)
     if trunks:
         _map = np.full(len(trunks) + 1, -1, np.int32)
         for i_, rec_ in enumerate(trunk_rec):
             if rec_ is not None:
                 _map[i_ + 1] = len(_crown_ids)
                 _crown_ids.append(rec_["id"])
-        _best = _map[own2]
+        crown_owner = _map[own2]
     RESULT["crown_ids"] = _crown_ids
-    vars(ctx).update(_best=_best, _tr_t=_tr_t, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db, veg=veg)
+    vars(ctx).update(crown_owner=crown_owner, tree_of_record=tree_of_record, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db,
+                     veg=veg)
 
 
 def kerb(near, c, r):
@@ -3081,12 +3083,13 @@ def furniture(ctx):
 def bridges(ctx):
     """The bridges' decks and the ground at their ends (ground.py's decks passes): what stands on a lifted bridgehead
     (the lamps, the trees, the fountain jets) rises with it."""
-    (GCTX, H, RIVER_LV, _jm, _tr_t, bmask, bridge_lines, bridge_rails, bridge_road_polys, bridge_shapes, bridge_ways,
-     dsm, dsm_mean, dtm, exg, explicit, g, gcol, is_road, jets, lamps, lm, nd_mean, osm, rails, topi, veg, vol) = (
-        ctx.GCTX, ctx.H, ctx.RIVER_LV, ctx._jm, ctx._tr_t, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails,
-        ctx.bridge_road_polys, ctx.bridge_shapes, ctx.bridge_ways, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit,
-        ctx.g, ctx.gcol, ctx.is_road, ctx.jets, ctx.lamps, ctx.lm, ctx.nd_mean, ctx.osm, ctx.rails, ctx.topi, ctx.veg,
-        ctx.vol)
+    (GCTX, H, RIVER_LV, bmask, bridge_lines, bridge_rails, bridge_road_polys, bridge_shapes, bridge_ways, dsm,
+     dsm_mean, dtm, exg, explicit, g, gcol, is_road, jets, junction_mask, lamps, lm, nd_mean, osm, rails, topi,
+     tree_of_record, veg, vol) = (
+        ctx.GCTX, ctx.H, ctx.RIVER_LV, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails, ctx.bridge_road_polys,
+        ctx.bridge_shapes, ctx.bridge_ways, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.g, ctx.gcol,
+        ctx.is_road, ctx.jets, ctx.junction_mask, ctx.lamps, ctx.lm, ctx.nd_mean, ctx.osm, ctx.rails, ctx.topi,
+        ctx.tree_of_record, ctx.veg, ctx.vol)
     # bridges / decks: over the rail cut (DTM drops below them) and the rivers. The deck follows the bridge ways
     # (bridge=yes roads, paths, tracks buffered to their width; man_made=bridge areas only near them). Its top takes the
     # colour of the way on it (asphalt, pavement, cycle lane, tram bed).
@@ -3269,7 +3272,7 @@ def bridges(ctx):
     _bwr = np.zeros((D, W), np.uint8)
     burn(_bwr, [(p_, 1) for p_ in bridge_road_polys])
     _bwc = deck_col.copy()
-    _bwc[_bw & (lm > 0) & (_jm == 0) & (deck_col == C["asphalt"])] = C["mark"]
+    _bwc[_bw & (lm > 0) & (junction_mask == 0) & (deck_col == C["asphalt"])] = C["mark"]
     gcol[_bw] = _bwc[_bw]
     _rb, _cb = np.nonzero(_bw)
     vol[g[_rb, _cb] - 1, _rb, _cb] = _bwc[_rb, _cb]
@@ -3329,7 +3332,7 @@ def bridges(ctx):
         _L[_rh, _ch] = _lift
         lamps[:] = [(c_, r_, z_ + int(_L[r_, c_])) for c_, r_, z_ in lamps]
         jets[:] = [(k_, [j_[0], j_[1] + int(_L[k_[2] - R0, k_[3] - C0]), j_[2]]) for k_, j_ in jets]
-        for t_, e_ in zip(_tr_t, RESULT["trees"]):
+        for t_, e_ in zip(tree_of_record, RESULT["trees"]):
             if t_.get("z") is not None and _L[int(t_["y"]), int(t_["x"])]:
                 t_["z"] += int(_L[int(t_["y"]), int(t_["x"])])
                 e_["rec"]["z"] = t_["z"]
@@ -3700,16 +3703,16 @@ def landmarks_tunnels(ctx):
     for f in feats:
         if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
             bkind[f["rr"], f["cc"]] = 2
-    _bores, _bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
-    _rail_bed = np.zeros((D, W), bool)
+    bore_plan, bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
+    rail_bed = np.zeros((D, W), bool)
     for _shape, _ in rail_beds:
         _rr, _cc = cells_of(_shape, fallback=False)
-        _rail_bed[_rr, _cc] = True
-    _walked = underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed, skip=_bore_ids)  # (not the bored ways)
+        rail_bed[_rr, _cc] = True
+    walked = underpass.build(vol, g, pal, C, osm, note, is_road | rail_bed, skip=bore_ids)  # (not the bored ways)
     carriageway_sanity(road_lines, SANITY, lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
     RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
-    _bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
-    vars(ctx).update(_bore_ids=_bore_ids, _bored=_bored, _bores=_bores, _rail_bed=_rail_bed, _walked=_walked,
+    bored = tunnels.build(vol, g, pal, C, STONE, note, bore_plan)  # (after the set pieces: the curtain wall stands over the bore)
+    vars(ctx).update(bore_ids=bore_ids, bored=bored, bore_plan=bore_plan, rail_bed=rail_bed, walked=walked,
                      bkind=bkind)
 
 
@@ -3749,16 +3752,16 @@ def river_colours(ctx):
     # between the blocks' centres (blocks of the project grid: the same colours in every region)
     WATER_RGB = (104, 128, 112)
     _ri, _ci = np.arange(D)[:, None], np.arange(W)[None, :]
-    _wm = vol[g - 1, _ri, _ci] == C["water"]
+    water_mask = vol[g - 1, _ri, _ci] == C["water"]
     _cov = vol[np.minimum(g, Hm - 1), _ri, _ci] != 0
-    _open = ndimage.binary_erosion(_wm, iterations=10) & ~ndimage.binary_dilation(_cov & _wm, iterations=10)
+    _open = ndimage.binary_erosion(water_mask, iterations=10) & ~ndimage.binary_dilation(_cov & water_mask, iterations=10)
     _B = 8
     assert R0 % _B == 0 and C0 % _B == 0 and D % _B == 0 and W % _B == 0
     _blk = np.where(_open[..., None], cellcol, np.nan).reshape(D // _B, _B, W // _B, _B, 3)
 
     _bc = _block_median(_blk)
     _has = np.isfinite(_bc[..., 0])
-    if _wm.any():
+    if water_mask.any():
         _bd, _near = ndimage.distance_transform_edt(~_has, return_indices=True) if _has.any() else \
             (np.full(_has.shape, np.inf), np.indices(_has.shape))
         _bc = np.where((_bd <= 4)[..., None], _bc[_near[0], _near[1]], np.array(WATER_RGB, float))
@@ -3778,23 +3781,23 @@ def river_colours(ctx):
         # the ortho's water is sunlit and flat: a little darker and richer, as the rivers look from the Oberhaus
         _wc = np.clip((_wc.mean(-1, keepdims=True) + (_wc - _wc.mean(-1, keepdims=True)) * 1.5) * 0.82, 0, 255)
         _wc = _wc * np.array([0.80, 1.0, 0.98])  # and the red taken down: the ortho's glare reads the Inn's jade as concrete grey
-        _q = (np.round(_wc[_wm] / 8) * 8).astype(np.int32)
+        _q = (np.round(_wc[water_mask] / 8) * 8).astype(np.int32)
         _uq, _inv = np.unique(_q, axis=0, return_inverse=True)
         _wid = np.array([pal(tuple(int(v) for v in u), M_WATER, q=8) for u in _uq], vol.dtype)
-        vol[(g - 1)[_wm], np.nonzero(_wm)[0], np.nonzero(_wm)[1]] = _wid[_inv.ravel()]
-        note(f"river colours from the ortho: {len(_uq)} shades over {int(_wm.sum())} water cells")
-    vars(ctx).update(_wm=_wm)
+        vol[(g - 1)[water_mask], np.nonzero(water_mask)[0], np.nonzero(water_mask)[1]] = _wid[_inv.ravel()]
+        note(f"river colours from the ortho: {len(_uq)} shades over {int(water_mask.sum())} water cells")
+    vars(ctx).update(water_mask=water_mask)
 
 
 def ground_rgb(ctx):
     """The ground as the tiles show it before the foliage, and the buildings' footprints, for the map's rasters."""
-    (_bored, _wm, bmask, feats, g, render, topi, vol) = (
-        ctx._bored, ctx._wm, ctx.bmask, ctx.feats, ctx.g, ctx.render, ctx.topi, ctx.vol)
+    (bored, water_mask, bmask, feats, g, render, topi, vol) = (
+        ctx.bored, ctx.water_mask, ctx.bmask, ctx.feats, ctx.g, ctx.render, ctx.topi, ctx.vol)
     # the ground as the tiles show it before the foliage (grass as bare earth), for terrain.py: the first moment of loading
     _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
     _lut = np.array([e[:3] for e in pal.entries], np.uint8)
     _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
-    CORE_OUT = dict(g=tunnels.surface(g, _bored.lowered).astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
+    CORE_OUT = dict(g=tunnels.surface(g, bored.lowered).astype(np.int16), rgb=_lut[_ids], water=water_mask, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
     # the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
     # building cell belongs to, for zones.py and windows.py
     _fp = np.zeros((D, W), np.int64)
@@ -3866,10 +3869,10 @@ def export_tiles(ctx):
 def qa_lists(ctx):
     """The road mask, what traffic.py drives on, the surfaces the caps are drawn from, the ways under bridges and
     through tunnels checked, the top-down view."""
-    (CORE_OUT, GCTX, Hm, OPEN_CUT, PLANES, ROOF_GX, ROOF_GY, SAG_SRC, _bore_ids, _bored, _bores, _rail_bed,
-     _roof_f, _walked, bmask, deck, deck_abs, deck_col, deck_h, deck_own, g, gcol, is_road, nd_mean, osm, vol, zt) = (
+    (CORE_OUT, GCTX, Hm, OPEN_CUT, PLANES, ROOF_GX, ROOF_GY, SAG_SRC, bore_ids, bored, bore_plan, rail_bed,
+     roof_exact, walked, bmask, deck, deck_abs, deck_col, deck_h, deck_own, g, gcol, is_road, nd_mean, osm, vol, zt) = (
         ctx.CORE_OUT, ctx.GCTX, ctx.Hm, ctx.OPEN_CUT, ctx.PLANES, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SAG_SRC,
-        ctx._bore_ids, ctx._bored, ctx._bores, ctx._rail_bed, ctx._roof_f, ctx._walked, ctx.bmask, ctx.deck,
+        ctx.bore_ids, ctx.bored, ctx.bore_plan, ctx.rail_bed, ctx.roof_exact, ctx.walked, ctx.bmask, ctx.deck,
         ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_own, ctx.g, ctx.gcol, ctx.is_road, ctx.nd_mean, ctx.osm,
         ctx.vol, ctx.zt)
     # drivable-surface mask (1 = carriageway/road area, 2 = rails / track bed): regions.py writes it as qa_roadmask.bin.gz
@@ -3895,9 +3898,9 @@ def qa_lists(ctx):
     deck_near[_rb, _cb] = _top - g[_rb, _cb]
     CORE_OUT["deck_near"] = deck_near
     CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
-    CORE_OUT["floor"] = _bored.floor
-    CORE_OUT["walk"] = _walked.level
-    report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL, _walked.level)
+    CORE_OUT["floor"] = bored.floor
+    CORE_OUT["walk"] = walked.level
+    report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, rail_bed, CORE_SL, walked.level)
     # the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
     # docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
     # it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
@@ -3906,7 +3909,7 @@ def qa_lists(ctx):
     CORE_OUT["gt"] = g.astype(np.int16)
     CORE_OUT["deck"] = np.where(deck, deck_abs - BASE, np.nan).astype(np.float32)
     _rk = (PLANES > 0) | np.isfinite(ROOF_GX)
-    CORE_OUT["roof_z"] = np.where(_rk, _roof_f, np.nan).astype(np.float32)
+    CORE_OUT["roof_z"] = np.where(_rk, roof_exact, np.nan).astype(np.float32)
     CORE_OUT["roof_gx"], CORE_OUT["roof_gy"] = ROOF_GX.astype(np.float32), ROOF_GY.astype(np.float32)
     # gsrc: the ground's surface where it was lifted to the surface model (SAG_SRC: a carriageway on a structure the terrain
     # model left out; m over BASE, NaN elsewhere): the caps take it there instead of the terrain model
@@ -3975,7 +3978,7 @@ def qa_lists(ctx):
     # aside): blocked under tunnels.LOW m, low under the vehicle's clearance; and the street over a bore or a covered
     # passage whole (its surface's voxel there: holes)
     _tu = dict(ways=0, blocked=0, low=0, holes=0, worst=[])
-    _planned = {x[0] for x in _bores}
+    _planned = {x[0] for x in bore_plan}
     for _oid, _t, _l in osm.lines:
         if _oid not in _planned or not ground.bed(_t):
             continue
@@ -3986,7 +3989,7 @@ def qa_lists(ctx):
         _rc = np.array([(int(q.y), int(q.x)) for q in _pp])
         if not len(_rc):
             continue
-        _fl = _bored.floor[_rc[:, 0], _rc[:, 1]].astype(int)
+        _fl = bored.floor[_rc[:, 0], _rc[:, 1]].astype(int)
         _gr = g[_rc[:, 0], _rc[:, 1]]
         _za, _zb = (tunnels._portal_level(g, *p_) for p_ in (_l.coords[0], _l.coords[-1]))
         _fl = np.where(_fl >= 0, _fl, np.minimum(_gr, tunnels._floor(_za, _zb, np.arange(1.0, _l.length - 0.99, 1.0)[:len(_rc)], _l.length, _gr)))
@@ -3999,7 +4002,7 @@ def qa_lists(ctx):
             _hit = np.zeros(len(_rc), bool)
             _hit[_m] = _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
             _room[_hit] = _k
-        _st = np.array([_bored.lowered.get((r_, c_), 0) for r_, c_ in _rc])
+        _st = np.array([bored.lowered.get((r_, c_), 0) for r_, c_ in _rc])
         _hole = (_st > 0) & (vol[np.clip(_st - 1, 0, vol.shape[0] - 1), _rc[:, 0], _rc[:, 1]] == 0)
         _tu["ways"] += 1
         _tu["blocked"] += int((_room < tunnels.LOW).any())
@@ -4011,7 +4014,7 @@ def qa_lists(ctx):
     note("tunnel=yes carriageways and railways (ways, blocked under the least clearance, lower than the vehicle's, a hole in "
          "the street over them):", _tu["ways"], _tu["blocked"], _tu["low"], _tu["holes"], _tu["worst"][:5])
     note("surface exports: deck cells", int(deck[CORE_SL].sum()), "roof cells with a plane", int(_rk[CORE_SL].sum()),
-         "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(_roof_f)) != zt))[CORE_SL].sum()))
+         "of them rounded off their top:", int((_rk & bmask & (np.round(np.nan_to_num(roof_exact)) != zt))[CORE_SL].sum()))
     _lines = {oid: l_ for oid, _, l_ in osm.lines}
 
     def _owned(oid):
@@ -4019,8 +4022,8 @@ def qa_lists(ctx):
         p_ = _lines[oid].interpolate(0.5, normalized=True)
         return in_core(int(p_.y), int(p_.x))
 
-    RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in _bore_ids if _owned(o)),
-                  walk_ids=sorted(o for o in _walked.ids if _owned(o)), shifted_stairs=sorted(_walked.shifted))
+    RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in bore_ids if _owned(o)),
+                  walk_ids=sorted(o for o in walked.ids if _owned(o)), shifted_stairs=sorted(walked.shifted))
     # debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
     # (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
     topz = np.full(vol.shape[1:], Hm - 1, np.int64)
@@ -4032,14 +4035,14 @@ def qa_lists(ctx):
     CORE_OUT["groundcol"] = palarr[gcol]
     # this region's core: the rasters (crowns' owners on the 2 m grid), the volume (for traffic.py and the labels: regions.py),
     # the lists in the map's order (lamps, jets), the palette's new colours
-    _k2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
-    vars(ctx).update(_k2=_k2)
+    core_sl2 = tuple(slice(sl.start // 2, sl.stop // 2) for sl in CORE_SL)
+    vars(ctx).update(core_sl2=core_sl2)
 
 
 def save_core(ctx):
     """The core's rasters (core.npz)."""
-    CORE_OUT, _best, _k2 = ctx.CORE_OUT, ctx._best, ctx._k2
-    np.savez(RDIR / "core.npz", crowns=_best[_k2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
+    CORE_OUT, crown_owner, core_sl2 = ctx.CORE_OUT, ctx.crown_owner, ctx.core_sl2
+    np.savez(RDIR / "core.npz", crowns=crown_owner[core_sl2], **{k: v[CORE_SL] for k, v in CORE_OUT.items()})
 
 
 def save_volume(ctx):
