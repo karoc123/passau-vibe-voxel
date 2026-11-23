@@ -1,6 +1,6 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
-// viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked and
-// the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked
+// through its client (src/sim/sim-client.ts, in this thread) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
 // and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
@@ -36,7 +36,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient } = await load('sim/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
@@ -77,7 +77,7 @@ function run({ name, at: start, h0, h1 }) {
     visited.set(cur, (visited.get(cur) ?? 0) + 1);
   }
 
-  const sim = new WorldSim(td), T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
+  const sim = new LocalSimClient(new WorldSim(td)), T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;
   const viewer = { x: 0, z: 0, hx: 0, hz: 1 };

@@ -571,7 +571,7 @@ export class Nav {
     this.landmark = null;
     if (opts.exact) spot = [Math.floor(t.x), Math.floor(t.z)];
     else {
-      if (this.life && !this.net) this.net = walkNet(w, this.life.sim.traffic.peds);
+      if (this.life && !this.net) this.net = walkNet(w, this.life.client.traffic.peds);
       const s = openSpot(w, this.net, t.x, t.z);
       this.landmark = s?.landmark ?? null;
       spot = s?.at ?? findStreet(w, this.camera.position.x, this.camera.position.z);

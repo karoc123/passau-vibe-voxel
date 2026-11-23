@@ -1,7 +1,8 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import type { CarInput } from '../physics/rapier/car';
-import { LOCAL_PLAYER, type WorldSim } from '../sim/world-sim';
+import { LOCAL_PLAYER } from '../sim/world-sim';
+import type { SimClient } from '../sim/sim-client';
 import { CRASH_MS, PARK, SINK_MS, type DriverSnapshot } from '../physics/rapier/player-car';
 import type { Nav, Ride } from './nav';
 import type { CraftContext, PlayerCraft } from './craft';
@@ -12,7 +13,7 @@ import { shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
 import './drive.css';
 
-// The drive mode submits the local player’s commands to the world sim (sim/world-sim.ts: its road physics). Here: the panel, the input, the
+// The drive mode sends the local player’s commands to the world sim's client (sim/sim-client.ts; the sim's road physics). Here: the panel, the input, the
 // camera's shake. A craft on the ride's camera (craft.ts): Nav follows the car taken and tells it when it is left (the
 // car parks). Out of focus it holds still (input.ts).
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle
@@ -49,8 +50,8 @@ export class DriveMode implements PlayerCraft {
   private driving: Ride | null = null;
   private claimTick: number | null = null;
   private snapshot: DriverSnapshot | null = null;
-  // the world sim, once its road physics is loaded
-  private world: WorldSim | null = null;
+  // the world sim's client, once its road physics is loaded
+  private world: SimClient | null = null;
   private rapierLoad: Promise<void> | null = null;
 
   constructor({ nav, target, sim, host, canvas }: CraftContext) {
@@ -73,7 +74,7 @@ export class DriveMode implements PlayerCraft {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.world?.resetDriver(LOCAL_PLAYER); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'resetDriver', player: LOCAL_PLAYER }); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
@@ -83,11 +84,11 @@ export class DriveMode implements PlayerCraft {
   update() {
     if (this.pending) this.prepare(this.pending);
     if (this.driving && this.world) {
-      this.snapshot = this.world.driverSnapshot(LOCAL_PLAYER);
+      this.snapshot = this.world.driver(LOCAL_PLAYER);
       if (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick) this.nav.leaveCraft();
       else {
         const focused = inFocus(), now = performance.now();
-        this.world.input(LOCAL_PLAYER, focused ? this.input() : PARK);
+        this.world.send({ kind: 'drive', player: LOCAL_PLAYER, input: focused ? this.input() : PARK });
         for (const note of this.world.driverNotes(LOCAL_PLAYER)) this.panel.say(note.text, note.ms);
         if (this.snapshot) {
           this.shakeCamera(this.snapshot, now);
@@ -123,7 +124,7 @@ export class DriveMode implements PlayerCraft {
       const choice = life.nearest('car', this.focus, null);
       if (choice) this.nav.startRide(choice);
       else {
-        const car = life.sim.traffic.roadVehicles().find(c => c.rp);
+        const car = life.client.traffic.roadVehicles().find(c => c.rp);
         if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
       }
     }
@@ -140,7 +141,7 @@ export class DriveMode implements PlayerCraft {
     if (!world) { this.loadRapier(); return; }
     if (!life.pose('car', car)) { this.pending = null; return; }
     this.pending = null;
-    world.takeWheel(LOCAL_PLAYER, car.id, this.choice === 'any' ? undefined : this.choice);
+    world.send({ kind: 'takeWheel', player: LOCAL_PLAYER, car: car.id, choice: this.choice === 'any' ? undefined : this.choice });
     this.claimTick = world.tick;
     this.driving = ride;
     this.nav.enterCraft(this);
@@ -152,7 +153,7 @@ export class DriveMode implements PlayerCraft {
   // left (Park, the map, a walk, another ride or craft): the car parks where it is
   leave() {
     if (!this.driving) return;
-    this.world?.releaseWheel(LOCAL_PLAYER);
+    this.world?.send({ kind: 'releaseWheel', player: LOCAL_PLAYER });
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.claimTick = null;
@@ -205,7 +206,7 @@ export class DriveMode implements PlayerCraft {
     ModePanel.text(this.typeButton, `Vehicle: ${this.choice === 'any' ? 'any' : VEHICLES[this.choice].name}`);
     const life = this.nav.life;
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
-      (!following && !life.sim.traffic.roadVehicles().some(c => c.rp))));
+      (!following && !life.client.traffic.roadVehicles().some(c => c.rp))));
     P.details.hidden = !active && !this.pending;
     this.speed.hidden = this.help.hidden = !active;
     P.status.hidden = !this.pending && !active;

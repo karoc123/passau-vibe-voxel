@@ -11,9 +11,10 @@ import type { MoveKeys } from './move-keys';
 import type { Ride, WalkOpts } from './nav';
 
 // The ride (nav.ts mode ride): following a pedestrian or a vehicle, and walking as the person followed. The local
-// player's commands go to the world sim (sim/world-sim.ts): follow (the sim keeps what is followed wherever it goes),
-// walkAs (the person's one seat), walkPose (where the walk, which is the client's, puts them), release. Nav switches
-// the modes; the car driven is drive.ts's (the driver's seat), on this ride's camera.
+// player's commands go to the world sim through its client (sim/sim-client.ts): follow (the sim keeps what is followed
+// wherever it goes), walkAs (the person's one seat; refused, the ride goes on following), walkPose (where the walk,
+// which is the client's, puts them), release. Nav switches the modes; the car driven is drive.ts's (the driver's
+// seat), on this ride's camera.
 
 /** what the ride needs of Nav */
 export interface RideHost {
@@ -39,13 +40,13 @@ export class Rider {
 
   constructor(private readonly host: RideHost) {}
 
-  private get sim() { return this.host.life()?.sim ?? null; }
+  private get sim() { return this.host.life()?.client ?? null; }
 
   /** follow ag (what was walked let go) */
   start(ag: Picked) {
     this.release();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
-    this.sim?.follow(LOCAL_PLAYER, { kind: ag.kind, id: ag.obj.id });
+    this.sim?.send({ kind: 'follow', player: LOCAL_PLAYER, entity: { kind: ag.kind, id: ag.obj.id } });
   }
 
   /** the ride is over: nothing followed, nothing walked */
@@ -54,13 +55,13 @@ export class Rider {
     this.camera.reset();
     this.jumpAsked = false;
     this.release();
-    this.sim?.follow(LOCAL_PLAYER, null);
+    this.sim?.send({ kind: 'follow', player: LOCAL_PLAYER, entity: null });
   }
 
   // off the person walked: back to the crowd's own walk (the sim no longer keeps them where put), and following them
   // again starts afresh from where they are (walkAs' start) instead of moving them to the foot's position
   release() {
-    if (this.walking) this.sim?.release(LOCAL_PLAYER);
+    if (this.walking) this.sim?.send({ kind: 'release', player: LOCAL_PLAYER });
     this.walking = null;
   }
 
@@ -77,6 +78,8 @@ export class Rider {
    * of its kind to follow instead, or 'off' (none: onto the street) */
   update(dt: number, driving: boolean): Picked | 'off' | null {
     const R = this.ride!, H = this.host, life = H.life();
+    // (the seat refused: walked by another, or gone from the crowd)
+    if (life?.client.results(LOCAL_PLAYER, 'walkAs').some((r) => !r.ok)) this.walking = null;
     if (R.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.obj)) this.walkAs(dt);
     const pose = life?.pose(R.kind, R.obj);
     if (!pose) return life?.nearest(R.kind, { x: H.camera.position.x, z: H.camera.position.z }, R.obj) ?? 'off';
@@ -95,7 +98,7 @@ export class Rider {
       const p: Pose | null = H.life()!.pose('person', o);
       if (!p) return;
       this.release();
-      if (!sim.walkAs(LOCAL_PLAYER, o.id, { ...p, moving: false })) return;
+      sim.send({ kind: 'walkAs', player: LOCAL_PLAYER, person: o.id, pose: { ...p, moving: false } });
       this.walking = o;
       Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
       H.glide.start(1100);
@@ -103,7 +106,7 @@ export class Rider {
       H.foot.startAs(p);
     }
     if (this.jumpAsked) { H.foot.jump(false); this.jumpAsked = false; }
-    sim.walkPose(LOCAL_PLAYER, H.foot.walkAs(R, dt));
+    sim.send({ kind: 'walkPose', player: LOCAL_PLAYER, pose: H.foot.walkAs(R, dt) });
   }
 }
 

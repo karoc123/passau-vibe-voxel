@@ -18,14 +18,12 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
-import { WorldSim } from './sim/world-sim';
+import type { SimClient } from './sim/sim-client';
+import { hostLocalSim } from './sim-host';
 import { viewerTileCache } from './viewer-tiles';
-import type { BoatData } from './sim/boat-traffic';
-import type { Tuning } from './sim/tuning';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
-import { liveEdits } from './core/live-edits';
 import type { Facts, FloodInfo, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
@@ -40,7 +38,7 @@ import { focusView } from './focus';
 import './style.css';
 
 declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: WorldSim; __streamer?: TileStreamer }
+  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __streamer?: TileStreamer }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -92,12 +90,13 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
-// the world sim (sim/world-sim.ts) and its presentation, once the traffic is loaded (the crafts wait for it: simReady)
-let sim: WorldSim | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
+// the world sim's client (sim/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
+// traffic is loaded (the crafts wait for it: simReady)
+let sim: SimClient | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
-let simLoaded: (sim: WorldSim) => void = () => {};
-const simReady = new Promise<WorldSim>((resolve) => { simLoaded = resolve; });
+let simLoaded: (sim: SimClient) => void = () => {};
+const simReady = new Promise<SimClient>((resolve) => { simLoaded = resolve; });
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
@@ -415,7 +414,7 @@ async function boot() {
   const tileMat = makeVoxelMaterial(uniforms);
   streamer = new TileStreamer(meta, tileMat, scene);
   // ?dig=1: a click carves a hole in the city, until the page is loaded again (dig.ts; a developer's switch)
-  if (qs.get('dig') === '1') { const S = streamer; import('./dig').then(({ installDig }) => installDig(S, camera, renderer.domElement)); }
+  if (qs.get('dig') === '1') { const S = streamer; import('./dig').then(({ installDig }) => installDig(S, camera, renderer.domElement, simReady)); }
   prepass = new DepthPrepass(streamer.group, scene);
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
@@ -466,24 +465,18 @@ async function boot() {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
     const seed = qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0;
-    // (the player crafts' collisions read the viewer's shared node files, on the page's clock)
-    const ws = sim = new WorldSim(td, { seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning),
-      crafts: { meta, cache: viewerTileCache(meta.tiles.N), now: () => performance.now() } });
-    ws.setWorld(world, world);
-    life = nav.life = new StreetLife(scene, ws);
+    // (the world sim made as a host would, sim-host.ts; its road physics (the shared Rapier world) loaded on the first
+    // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
+    // loads it), ?lpnear=, ?lpmax=)
+    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined);
+    const { client } = hostLocalSim(meta, td, { seed, world, eager: qs.get('dig') === '1',
+      physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax'), at: focus } });
+    sim = client;
+    life = nav.life = new StreetLife(scene, client);
     movingActors.add(life.group);
-    // (player edits, ?dig=1: the people over a hole in them fall, the cars near them are bodies (the road physics,
-    // loaded then unless ?lifephys=0); a node freed is its file again)
-    const N = meta.tiles.N, physicsOnEdit = qs.get('lifephys') !== '0';
-    liveEdits.listen((tx, ty, node, region) => {
-      ws.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
-      if (node && physicsOnEdit) ws.loadPhysics().catch(() => {});
-    });
     window.__life = life;
-    window.__sim = ws;
-    if (qs.get('dig') === '1' && physicsOnEdit) ws.loadPhysics().catch(() => {});
-    fetchJson<BoatData>('data/boats.json').then((bd) => ws.setBoats(bd)).catch((e) => console.warn('boats', e));
-    simLoaded(ws);
+    window.__sim = client;
+    simLoaded(client);
   });
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
@@ -493,21 +486,10 @@ async function boot() {
     env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
     sim: simReady,
+    tiles: { meta, cache: viewerTileCache(meta.tiles.N), now: () => performance.now() },
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
-}
-
-// The world sim's road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when
-// the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still loads it), ?lpnear=, ?lpmax=
-async function loadLifePhysics(meta: Meta, tuning: Tuning) {
-  try {
-    const { LifePhysics, DEFAULTS } = await import('./physics/rapier/life-phys');
-    const n = (k: string, d: number) => (qs.get(k) !== null ? +qs.get(k)! : d), f = focus();
-    return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
-      near: qs.get('lifephys') === '0' ? 0 : n('lpnear', DEFAULTS.near), maxBodies: n('lpmax', DEFAULTS.maxBodies),
-    }, { cache: viewerTileCache(meta.tiles.N) }, tuning.ride);
-  } catch (error) { console.warn('road physics', error); throw error; }
 }
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
