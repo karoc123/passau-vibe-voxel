@@ -6,7 +6,6 @@ import { World, type ColumnSource } from './world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type LiveNode, type Region } from './core/live-edits';
 import { viewerTileCache } from './viewer-tiles';
-import * as worldEdits from './core/world-edits';
 import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {
@@ -740,8 +739,7 @@ export class TileStreamer implements ColumnSource {
     if (n.mesh) { disposeGeometry(n.mesh.geometry); this.group.remove(n.mesh); }
     this.nodes.delete(n.key);
     if (n.data) this.version++;
-    // (transient edits: the node's files again, when it comes again)
-    if (n.s === 1 && !n.foliage && n.shows) worldEdits.drop(n.tx, n.ty);
+    // (the world's edit of it stays: the world decides how long, sim/edit-keeper.ts; it shows when the node comes again)
   }
 
   // the edits' new meshes in (those on their way now)

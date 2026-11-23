@@ -18,6 +18,7 @@ import { liveEdits, type LiveNode, type Region } from './live-edits';
 import type { TileCache } from './tile-cache';
 
 export type { WorldOp };
+export { liveEdits };
 
 // the world's tiles: its level-1 nodes' files (seen through liveEdits), its frame (core/layers.ts frameOf: what turns
 // an op into map cells), and its nodes (meta.json tiles.levels[0] nx, ny)

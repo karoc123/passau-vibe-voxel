@@ -12,6 +12,9 @@
 //   wreck  a car near an edit wrecked (LifePhysics.wreck): it comes to rest on the road, the cars coming up behind it
 //          stop behind it, none touches it.
 //   moto   a moving motorbike gets its catalogue body near an edit, then returns to lane tracking when it clears.
+//   keep   the world keeps an edit while a player's focus is near it (sim/edit-keeper.ts): a crater over a node's edge
+//          (two nodes) stays while one focus of several is near either node, and both go together once none has been
+//          for the delay.
 // In every one, every tick: nothing drawn in an edited box stands more than 1 m over the ground there without coming
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
@@ -21,7 +24,7 @@
 //          away; let go, both leave with the circle. Over a hole the others fall and the one walked stands; two readers
 //          of the events (WorldSim.eventsSince) at different rates get the same ones, each with its tick.
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -441,6 +444,23 @@ function players() {
   }
 }
 
+// (the keeper's module graph, with its own world edits: tools load each graph apart)
+async function keep() {
+  const EK = await load('sim/edit-keeper.ts'), WE2 = EK.worldEdits, live = WE2.liveEdits;
+  WE2.initWorldEdits({ cache: new TC.TileCache({ N, load: async (p) => raw(p), edits: live }), frame, ...meta.tiles.levels[0] });
+  const tx = Math.floor(BRIDGE.x / N) + 1, [col, row] = LY.mapToGrid(frame, tx * N, BRIDGE.y);
+  await WE2.apply({ kind: 'sphere', col, row, z: LY.cellToAbsZ(frame, 20), r: 3, colour: 0 });
+  const K = new EK.EditKeeper({ radius: 10, after: 10 }, N), far = { x: BRIDGE.x - 1000, z: BRIDGE.y }, inA = { x: (tx - 1) * N + 28, z: BRIDGE.y };
+  const steps = [[0, [far], 0], [30, [far, inA], 0], [39, [far], 0], [40, [far], 2]].map(([t, foci, want]) => {
+    const n = K.update(t, foci);
+    check(n === want, `keep: at ${t} s with foci ${foci.map((f) => `(${f.x}, ${f.z})`).join(' ')}, ${n} node(s) dropped, not ${want}`);
+    return `${n}/${live.size}`;
+  });
+  check(live.size === 0, `keep: every edit dropped in the end (${live.size} left)`);
+  log(`keep: a crater over nodes ${tx - 1}/${tx}_${Math.floor(BRIDGE.y / N)}: dropped/left ${steps.join(' ')}`);
+  results.keep = { steps: steps.join(' ') };
+}
+
 const want = (k) => !only.length || only.includes(k);
 const costs = [], chunks = [], bodies = [];
 const done = (ctx) => {
@@ -461,6 +481,7 @@ if (want('wreck')) done(await wreck());
 if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
 if (want('players')) players();
+if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }
 console.log(`PASS life-edit: ${Object.entries(results).map(([k, v]) => `${k} ${typeof v === 'string' ? v : Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`).join('; ')}; ${cost}`);
