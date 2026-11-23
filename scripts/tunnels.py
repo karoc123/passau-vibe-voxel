@@ -34,9 +34,6 @@ import numpy as np
 
 from ways import cells, num
 
-# traffic.py's inputs over the whole map, set by regions.py from the regions' Bored.floor and plan() ids (not used here)
-FLOOR = None
-IDS = set()
 CARRIAGE = ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service",
             "living_street")
 FOOT = ("footway", "path", "cycleway", "pedestrian", "bridleway")
