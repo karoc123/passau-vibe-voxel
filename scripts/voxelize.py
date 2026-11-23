@@ -2851,98 +2851,6 @@ def vegetation(ctx):
     vars(ctx).update(_best=_best, _lift=_lift, _tr_t=_tr_t, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db, veg=veg)
 
 
-STAGES = [  # (its name in the build's timing, the stage)
-    ("rasters, cell colours, OSM", rasters),
-    ("ground classes, roads, water", ground_classes),
-    ("buildings", buildings),
-    ("natural ground, cemeteries", natural_ground),
-    ("vegetation", vegetation),
-]
-ctx = Ctx()
-for _name, _run in STAGES:
-    _run(ctx)
-    stage(_name)
-# (the stages to come are module code still: what they read of the ones above)
-(GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _best, _jm, _lift, _roof_f, _tr_t, bmask,
- bridge_lines, bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm,
- dsm_mean, dtm, exg, explicit, feats, foot_shapes, g, gcol, grave_stones, is_road, lit_ground_ways, lm, nd_max,
- nd_mean, osm, parking_mask, rail_beds, rails, render, road_lines, splash_pads, topi, trunk_ok_db, veg, vol, zt) = (
-    ctx.GCTX, ctx.H, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC, ctx.SANITY,
-    ctx._best, ctx._jm, ctx._lift, ctx._roof_f, ctx._tr_t, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails,
-    ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways, ctx.cellcol, ctx.cycle_shapes,
-    ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g, ctx.gcol,
-    ctx.grave_stones, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.parking_mask,
-    ctx.rail_beds, ctx.rails, ctx.render, ctx.road_lines, ctx.splash_pads, ctx.topi, ctx.trunk_ok_db, ctx.veg,
-    ctx.vol, ctx.zt)
-# ---------------------------------------------------------------- fountains
-# A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
-# polygons, darker shard inlays, flush with the paving, slot drain round the edge, jets from steel rings ~2 m apart.
-GRAN = [pal("#6a6e71"), pal("#62666a"), pal("#72767a")]
-SHARD, DRAIN, RING = pal("#4a4d50"), pal("#3a3c3f", M_METAL), pal("#b9bdc0", M_METAL)
-n_jets = 0
-jets = []  # (key in the map's order, jet): regions.py keeps a region's in its core
-for rel_pad, oid_pad, geom in splash_pads:  # (keyed by OSM type and id: the file's order, in any region's cut of it)
-    rr, cc = cells_of(geom)
-    if len(rr) == 0:
-        continue
-    m = np.zeros((D, W), bool)
-    m[rr, cc] = True
-    edge = m & ~ndimage.binary_erosion(m)
-    # polygon slabs: Voronoi cells around a few random seeds
-    rng = np.random.default_rng(stable_hash(int((rr + R0).mean()), int((cc + C0).mean())))
-    seeds = np.stack([rng.uniform(rr.min(), rr.max() + 1, 14), rng.uniform(cc.min(), cc.max() + 1, 14)], 1)
-    for r, c in zip(rr, cc):
-        z0 = g[r, c] - 1
-        d2 = ((seeds - (r + 0.5, c + 0.5)) ** 2).sum(1)
-        o2 = np.sort(d2)
-        k = int(np.argmin(d2))
-        if edge[r, c]:
-            v = DRAIN
-        elif o2[1] - o2[0] < 1.6:  # seam between slabs
-            v = SHARD
-        elif r % 2 == 0 and c % 2 == 0:
-            v = RING
-            jets.append(([rel_pad, oid_pad, int(r) + R0, int(c) + C0], [c + MC0 + 0.5, int(z0 + 1), r + MR0 + 0.5]))  # rendered as animated water columns in the viewer
-            n_jets += 1
-        else:
-            v = SHARD if cell_hash(r, c, 7) % 23 == 0 else GRAN[k % 3]
-        vol[z0, r, c] = v
-note("splash-pad fountain jets:", n_jets)
-
-
-# ---------------------------------------------------------------- planted beds
-# small leisure=garden / flowerbed islands are raised perennial beds edged with concrete bench-kerbs
-n_beds = 0
-for oid, typ, t, geom in osm.areas:
-    if not (t.get("leisure") == "garden" or t.get("landuse") == "flowerbed") or underground(t) or not (4 <= geom.area <= 400):
-        continue
-    rr, cc = cells_of(geom)
-    k = ~bmask[rr, cc]
-    rr, cc = rr[k], cc[k]
-    if len(rr) == 0:
-        continue
-    m = np.zeros((D, W), bool)
-    m[rr, cc] = True
-    edge = m & ~ndimage.binary_erosion(m)
-    for r, c in zip(rr, cc):
-        z0 = g[r, c]
-        if vol[z0, r, c] != 0:
-            continue
-        if edge[r, c] and geom.area > 12:
-            vol[z0, r, c] = C["benchkerb"]
-        elif stable_hash(oid, r + R0, c + C0) % 5:
-            vol[z0, r, c] = PERENNIALS[cell_hash(r, c, oid) % len(PERENNIALS)]
-    n_beds += 1
-note("raised planting beds:", n_beds)
-
-# ---------------------------------------------------------------- street furniture
-# a post stands beside the carriageway and the tracks, not in them: OSM's lamp nodes sit on the kerb line, and 89 of
-# them fell a metre or two inside the road as drawn (cars drove through the poles); such a post takes the nearest
-# cell off the road within 4 m, and one deeper in (a lamp hung over the street) gets no pole
-_driven = is_road | np.isin(gcol, [C["trambed"], C["rail"], C["ballast"]])
-kerb_near = ndimage.distance_transform_edt(_driven, return_indices=True)
-
-
 def kerb(near, c, r):
     """the nearest cell off the driven ground (near: its distance transform with indices) to (c, r) within 4 m"""
     kd, (kr, kc) = near
@@ -2963,204 +2871,9 @@ def stand_lamp(vol, lamps, keys, c, r, z0, hgt, key):
     keys.append(key)
 
 
-# a lamp node by a bridge way (within 3 m: OSM's lamp nodes sit on the kerb line) waits for the deck (below): it
-# stands on the deck's top, not on the ground or the river under it -- kerb() put the Marienbrücke's lamps (a deck of
-# carriageway from edge to edge) beside the deck, poles from the Inn up to its edge, and the Alte Poststraße's over the
-# A 3 stood on the motorway, up to under the deck. d_br, d_gr: the node's distance from the nearest bridge way and
-# from the nearest way on the ground that may be lit (one under the bridge, the street the bridge lands on; not the
-# unlit A 3 under the Alte Poststraße, nor a field track: UNLIT). A node's layer tag decides: 0 or less on the
-# ground, 1 or more on the deck
-_bridge_ways = STRtree([p_ for p_, _, _ in bridge_shapes])
-_ground_ways = STRtree(lit_ground_ways)
-
-
 def _way_dist(tree, p):
     _, d_ = tree.query_nearest(p, max_distance=8, return_distance=True)
     return float(d_.min()) if len(d_) else math.inf
-
-
-lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
-LAMP_KEYS = []
-bridge_lamps = []  # (oid, tags, node, d_br, d_gr): placed with the deck
-for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids, the file's order in any cut of it)
-    d_br, layer = _way_dist(_bridge_ways, p), parse_len(t.get("layer"))
-    if d_br <= 3 and (layer is None or layer >= 1) and 0 <= p.x < W and 0 <= p.y < D:
-        bridge_lamps.append((oid, t, p, d_br, math.inf if layer else _way_dist(_ground_ways, p)))
-        continue
-    c, r = kerb(kerb_near, int(p.x), int(p.y)) or (-1, -1)
-    if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
-        continue
-    stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c]), lamp_height(is_road, t, c, r), [0, oid])
-note("street lamps:", len(lamps), "(and", len(bridge_lamps), "by bridge ways, placed with the decks)")
-# (the bridges' lamps where their nodes are: the park and the inferred deck lamps keep 12 m from them)
-lamp_xy = np.array([(c, r) for c, r, _ in lamps] + [(int(p.x), int(p.y)) for _, _, p, _, _ in bridge_lamps], float).reshape(-1, 2)
-# park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
-# which stood dark at night. Along their walks a 4 m lamp every ~25 m, a metre and a half beside the way on soft
-# ground or paving (never on the way itself, a carriageway or in a building), none within 12 m of another lamp
-_parks = [g_ for _, _, t_, g_ in osm.areas if t_.get("leisure") == "park" and not underground(t_)]
-_park_u = _uu(_parks).buffer(0) if _parks else None
-_pwalk = np.zeros((D, W), np.uint8)
-burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
-n_pl = 0
-for oid, t, line in osm.lines:
-    if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or underground(t) or on_bridge(t):
-        continue
-    name = (t.get("name") or "").lower()
-    seg = line if ("promenade" in name or name == "ortspitze") else (line.intersection(_park_u) if _park_u is not None else None)
-    for i_part, part in enumerate(getattr(seg, "geoms", [seg]) if seg is not None and not seg.is_empty else []):
-        if part.geom_type != "LineString" or part.length < 20:
-            continue
-        for k, s_ in enumerate(np.arange(10, part.length - 5, 25)):
-            p0, p1 = part.interpolate(max(s_ - 1, 0)), part.interpolate(min(s_ + 1, part.length))
-            L_ = math.hypot(p1.x - p0.x, p1.y - p0.y) or 1
-            side = 1 if k % 2 == 0 else -1
-            for off in (1.8, 2.6):
-                x_ = part.interpolate(s_).x - (p1.y - p0.y) / L_ * off * side
-                y_ = part.interpolate(s_).y + (p1.x - p0.x) / L_ * off * side
-                c, r = int(x_), int(y_)
-                if 0 <= c < W and 0 <= r < D and not bmask[r, c] and not _driven[r, c] and not _pwalk[r, c] \
-                        and gcol[r, c] != C["water"] and vol[g[r, c], r, c] == 0:
-                    break
-            else:
-                continue
-            if len(lamp_xy) and np.min(np.hypot(lamp_xy[:, 0] - c, lamp_xy[:, 1] - r)) < 12:
-                continue
-            z0 = int(g[r, c])
-            vol[z0:z0 + 3, r, c] = C["pole"]
-            vol[z0 + 3, r, c] = C["lamp"]
-            lamps.append((c, r, z0 + 3))
-            LAMP_KEYS.append([1, oid, i_part, k])
-            lamp_xy = np.vstack([lamp_xy, [c, r]])
-            n_pl += 1
-note("park and promenade lamps:", n_pl)
-
-n_gs = 0
-for r, c, v in grave_stones:  # the headstones (cemeteries above): not where a trunk or a bed already stands
-    if vol[g[r, c], r, c] == 0 and not bmask[r, c]:
-        vol[g[r, c], r, c] = v
-        n_gs += 1
-note("grave stones set:", n_gs)
-# benches (OSM amenity=bench, ~280 in the promenades, parks and squares): a wooden seat two voxels long beside the
-# walk, along the nearest path; on the ground, never on a carriageway or in a building
-BENCH = pal("#7a5a3e")
-_walks = [l_ for _, t_, l_ in osm.lines if t_.get("highway") in ("footway", "path", "pedestrian", "cycleway", "living_street",
-                                                                  "service", "residential", "track")]
-_wtree = STRtree(_walks) if _walks else None
-n_bench = 0
-for oid, t, p in osm.nodes_with("amenity", ("bench",)):
-    c, r = int(p.x), int(p.y)
-    if not (1 <= c < W - 1 and 1 <= r < D - 1) or bmask[r, c] or _driven[r, c]:
-        continue
-    dc, dr = 1, 0
-    if _wtree is not None:
-        l_ = _walks[_wtree.nearest(p)]
-        if l_.distance(p) < 8:
-            s_ = l_.project(p)
-            a_, b_ = l_.interpolate(max(s_ - 1, 0)), l_.interpolate(min(s_ + 1, l_.length))
-            dc, dr = (1, 0) if abs(b_.x - a_.x) >= abs(b_.y - a_.y) else (0, 1)
-    cells = [(r, c), (r + dr, c + dc)]
-    if any(bmask[r_, c_] or _driven[r_, c_] or vol[g[r_, c_], r_, c_] != 0 or abs(int(g[r_, c_]) - int(g[r, c])) > 0
-           for r_, c_ in cells):
-        cells = cells[:1]
-        if vol[g[r, c], r, c] != 0:
-            continue
-    for r_, c_ in cells:
-        vol[g[r_, c_], r_, c_] = BENCH
-    n_bench += 1
-note("benches:", n_bench)
-
-for oid, typ, t, geom in osm.areas_with("amenity", ("shelter",)):
-    if t.get("shelter_type") not in (None, "public_transport", "basic_hut") or bmask[cells_of(geom)].any():
-        continue
-    rr, cc = cells_of(geom)
-    zz = g[rr, cc] + 2
-    vol[zz, rr, cc] = C["shelter"]
-    vol[g[rr, cc], rr, cc] = np.where((rr + R0 + cc + C0) % 3 == 0, C["pole"], 0)
-
-for oid, t, p in osm.nodes_with("man_made", ("flagpole",)):
-    c, r = int(p.x), int(p.y)
-    if 0 <= c < W and 0 <= r < D and not bmask[r, c]:
-        hgt = int(parse_len(t.get("height")) or 9)
-        vol[g[r, c]:g[r, c] + hgt, r, c] = C["fence"]
-
-# bridges / decks: over the rail cut (DTM drops below them) and the rivers. The deck follows the bridge ways
-# (bridge=yes roads, paths, tracks buffered to their width; man_made=bridge areas only near them). Its top takes the
-# colour of the way on it (asphalt, pavement, cycle lane, tram bed).
-deck_col = np.zeros((D, W), np.uint16)
-deck_lay = np.zeros((D, W), np.uint16)  # the layer of the way that owns the cell
-bridge_area = np.zeros((D, W), np.uint16)
-burn(bridge_area, [(geom, 1) for oid, typ, t, geom in osm.areas_with("man_made", ("bridge",))])
-for layer in sorted({l for _, _, l in bridge_shapes}):  # upper decks win
-    burn(deck_col, [(p_, c_) for p_, c_, l in sorted(bridge_shapes, key=lambda x: -x[0].area) if l == layer])
-    burn(deck_lay, [(p_, l + 1) for p_, c_, l in bridge_shapes if l == layer])
-near_way = ndimage.binary_dilation(deck_col > 0, iterations=3)
-deck_col = np.where((deck_col == 0) & (bridge_area > 0) & near_way, C["deck"], deck_col)
-deck = (deck_col > 0) & (nd_mean > 2)
-deck = ndimage.binary_closing(deck, iterations=2)  # no slits of sky between the carriageways
-deck_col = np.where(deck & (deck_col == 0), C["deck"], deck_col)
-# the deck's height: a profile along each bridge way -- the DSM (0.5 m) sampled across the way every metre, its 30th
-# percentile (the road surface, not the cars, railings or stays), samples dropped where a higher deck hides the way or
-# nothing stands above the river, then a 25 m running median and a 15 m mean. Every deck cell takes the height of the
-# nearest profile point of its own layer: one smooth level, so cars drive on it. (The cell-by-cell lowest return
-# picked up cells half over the water at the deck edges and broke the decks into steps metres apart.)
-# A deck is the level the surface model holds over the gap, never the ground seen beside it: where the samples on one
-# side of the way see the ground (within DECK_DIP m of the terrain model) and those on the other side the deck
-# (DECK_OVER m or more over it), the profile is the deck's side (a way drawn along its deck's edge); and between a
-# way's first and last sample DECK_OVER m or more over the terrain, a sample within DECK_DIP m of it is dropped, as over
-# water: only the ends come down to the ground (abutments, ramps). A way's point under a crown counts for neither (a
-# footbridge under trees stood in their tops). The Dietzing bridge over the B 85 cutting (way 106617552, project col
-# -2087, row -1658; road-defects #11) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
-# it, and the 10th percentile within 10 m below took the whole 23 m deck down to it
-DECK_OVER, DECK_DIP = 3.0, 1.5
-water_ = gcol == C["water"]
-prof = []  # per way: (x, y, h, layer) every metre
-deck_own = []  # per way: (OSM id, points, the way's own deck level per point: NaN off the span) for the sag counter
-for (line, hw, layer, _), oid_ in zip(bridge_lines, [b_[0] for b_ in bridge_ways]):
-    n_ = max(2, int(line.length) + 1)
-    P_ = np.array([line.interpolate(v_).coords[0] for v_ in np.linspace(0, line.length, n_)])
-    T_ = np.gradient(P_, axis=0)
-    T_ /= np.maximum(np.linalg.norm(T_, axis=1, keepdims=True), 1e-6)
-    a_, b_ = np.meshgrid(np.arange(-1.5, 1.6, 0.5), np.arange(-max(0.7 * hw, 0.5), max(0.7 * hw, 0.5) + 0.01, 0.5))
-    a_, b_ = a_.ravel(), b_.ravel()
-    X_ = P_[:, :1] + T_[:, :1] * a_ - T_[:, 1:] * b_
-    Y_ = P_[:, 1:] + T_[:, 1:] * a_ + T_[:, :1] * b_
-    S_ = dsm[np.clip((Y_ * 2).astype(int), 0, 2 * D - 1), np.clip((X_ * 2).astype(int), 0, 2 * W - 1)]
-    pr_, pc_ = np.clip(P_[:, 1].astype(int), 0, D - 1), np.clip(P_[:, 0].astype(int), 0, W - 1)
-    # samples on a building beside the way are its roof, not the deck (a sidewalk along a tower: its deck climbed the
-    # facade); a way over buildings (a viaduct's arches) keeps them
-    Sb_ = bmask[np.clip(Y_.astype(int), 0, D - 1), np.clip(X_.astype(int), 0, W - 1)] & ~bmask[pr_, pc_][:, None]
-    with np.errstate(all="ignore"), warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        S_ = np.where(Sb_, np.nan, S_)
-        h_ = np.nanpercentile(S_, 30, axis=1)
-        hl_, hr_ = (np.nanpercentile(S_[:, s_], 30, axis=1) for s_ in (b_ < 0, b_ > 0))
-    gd_ = dtm[pr_, pc_]
-    lo_, hi_ = np.fmin(hl_, hr_), np.fmax(hl_, hr_)
-    crown_ = veg[pr_, pc_]
-    h_ = np.where(~crown_ & (lo_ < gd_ + DECK_DIP) & (hi_ >= gd_ + DECK_OVER), hi_, h_)  # (the deck's side of the way)
-    span_ = np.zeros(n_, bool)
-    over_ = np.nonzero(~crown_ & (h_ >= gd_ + DECK_OVER) & (deck_lay[pr_, pc_] <= layer + 1))[0]  # (NaN: False)
-    if len(over_):
-        span_[over_[0]:over_[-1] + 1] = True
-    ok_ = np.isfinite(h_) & (deck_lay[pr_, pc_] <= layer + 1) \
-        & ((h_ > gd_ + DECK_DIP) | (~water_[pr_, pc_] & ~span_ & (h_ > gd_ - DECK_DIP)))
-    # the way's own deck level: the median of its samples DECK_OVER m or more over the terrain within 15 m (a long
-    # bridge climbs), on its span
-    own_ = np.full(n_, np.nan)
-    for i_ in np.nonzero(span_)[0]:
-        near_ = over_[np.abs(over_ - i_) <= 15]
-        if len(near_):
-            own_[i_] = np.median(h_[near_])
-    deck_own.append((oid_, P_, own_))
-    if ok_.sum() >= 2:
-        h_ = np.interp(np.arange(n_), np.nonzero(ok_)[0], h_[ok_])
-    else:  # hidden all along (a walkway slung under a higher deck): straight between its ends' ground
-        h_ = np.linspace(gd_[0], gd_[-1], n_)
-    for win in (61, 31, 15):  # the deck is the lowest surface: knock down what stands on it (a pylon's legs, cables)
-        hs_ = ndimage.median_filter(h_, min(win, n_), mode="nearest")
-        h_ = np.where(h_ > hs_ + 0.6, hs_, h_)
-    prof.append(np.column_stack([P_, h_, np.full(n_, layer + 1)]))
-deck_abs = np.zeros((D, W), np.float32)
 
 
 def _knn(pts, q, k):
@@ -3172,236 +2885,534 @@ def _knn(pts, q, k):
     d_, k_ = d_.reshape(len(q), n), k_.reshape(len(q), n)
     o = np.lexsort((k_, np.round(d_, 6)), axis=-1)[:, :min(k, n)]
     return np.take_along_axis(d_, o, -1), np.take_along_axis(k_, o, -1)
-if prof:
-    # across the deck the ways agree: one surface per layer, each point the low end (10th percentile) of its layer
-    # within 10 m. Each way on its own rounded to a different metre from its neighbour (steps along the deck between
-    # the lanes); and where they disagree, the higher ones stand under something -- a cable-stayed bridge's stays lean
-    # over the outer lanes for 150 m each side of the pylon, so their profile climbed smoothly to the pylon (no spike
-    # for the running median to knock down), and with the median of the lanes the deck rose 23 m in mounds round it
-    allp = np.vstack(prof)
-    for L_ in np.unique(allp[:, 3]):
-        sel_ = allp[:, 3] == L_
-        sub_ = allp[sel_]
-        nb_ = cKDTree(sub_[:, :2]).query_ball_point(sub_[:, :2], 10.0)
-        allp[sel_, 2] = [np.percentile(sub_[i_, 2], 10) for i_ in nb_]
-    k0 = 0
-    for i_, pw_ in enumerate(prof):
-        h_ = allp[k0:k0 + len(pw_), 2]
-        n_ = len(h_)
-        pw_[:, 2] = region.movmean(ndimage.median_filter(h_, min(25, n_), mode="nearest"), min(15, n_))
-        k0 += n_
-    # a bridge way often ends (in OSM) metres before the ground climbs back to the deck: the deck carries on along the
-    # way's direction, level, until the ground is within 1.5 m of it (up to 15 m) -- no hole for the cars to drop into
-    ext_shapes = []
-    for (line, hw, layer, col_), pw_ in zip(bridge_lines, list(prof)):
-        if len(pw_) < 3:
+
+
+def furniture(ctx):
+    """Fountains, planted beds and street furniture (lamps, benches, shelters, flagpoles); the bridges' decks and
+    the ground at their ends (ground.py's decks passes)."""
+    (GCTX, H, RIVER_LV, _jm, _lift, _tr_t, bmask, bridge_lines, bridge_rails, bridge_road_polys, bridge_shapes,
+     bridge_ways, cycle_shapes, dsm, dsm_mean, dtm, exg, explicit, foot_shapes, g, gcol, grave_stones, is_road,
+     lit_ground_ways, lm, nd_mean, osm, rails, splash_pads, topi, veg, vol) = (
+        ctx.GCTX, ctx.H, ctx.RIVER_LV, ctx._jm, ctx._lift, ctx._tr_t, ctx.bmask, ctx.bridge_lines,
+        ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_shapes, ctx.bridge_ways, ctx.cycle_shapes, ctx.dsm,
+        ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.foot_shapes, ctx.g, ctx.gcol, ctx.grave_stones,
+        ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.nd_mean, ctx.osm, ctx.rails, ctx.splash_pads, ctx.topi,
+        ctx.veg, ctx.vol)
+    # ---------------------------------------------------------------- fountains
+    # A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
+    # polygons, darker shard inlays, flush with the paving, slot drain round the edge, jets from steel rings ~2 m apart.
+    GRAN = [pal("#6a6e71"), pal("#62666a"), pal("#72767a")]
+    SHARD, DRAIN, RING = pal("#4a4d50"), pal("#3a3c3f", M_METAL), pal("#b9bdc0", M_METAL)
+    n_jets = 0
+    jets = []  # (key in the map's order, jet): regions.py keeps a region's in its core
+    for rel_pad, oid_pad, geom in splash_pads:  # (keyed by OSM type and id: the file's order, in any region's cut of it)
+        rr, cc = cells_of(geom)
+        if len(rr) == 0:
             continue
-        for e0, e1 in ((0, 2), (-1, -3)):
-            P0, h0 = pw_[e0, :2], pw_[e0, 2]
-            u_ = P0 - pw_[e1, :2]
-            u_ = u_ / max(np.linalg.norm(u_), 1e-6)
-            ext = []
-            for d_ in range(1, 16):
-                q = P0 + u_ * d_
-                r_, c_ = int(q[1]), int(q[0])
-                if not (0 <= r_ < D and 0 <= c_ < W) or dtm[r_, c_] >= h0 - 1.5 or bmask[r_, c_]:
-                    break
-                ext.append(q)
-            if not ext:
+        m = np.zeros((D, W), bool)
+        m[rr, cc] = True
+        edge = m & ~ndimage.binary_erosion(m)
+        # polygon slabs: Voronoi cells around a few random seeds
+        rng = np.random.default_rng(stable_hash(int((rr + R0).mean()), int((cc + C0).mean())))
+        seeds = np.stack([rng.uniform(rr.min(), rr.max() + 1, 14), rng.uniform(cc.min(), cc.max() + 1, 14)], 1)
+        for r, c in zip(rr, cc):
+            z0 = g[r, c] - 1
+            d2 = ((seeds - (r + 0.5, c + 0.5)) ** 2).sum(1)
+            o2 = np.sort(d2)
+            k = int(np.argmin(d2))
+            if edge[r, c]:
+                v = DRAIN
+            elif o2[1] - o2[0] < 1.6:  # seam between slabs
+                v = SHARD
+            elif r % 2 == 0 and c % 2 == 0:
+                v = RING
+                jets.append(([rel_pad, oid_pad, int(r) + R0, int(c) + C0], [c + MC0 + 0.5, int(z0 + 1), r + MR0 + 0.5]))  # rendered as animated water columns in the viewer
+                n_jets += 1
+            else:
+                v = SHARD if cell_hash(r, c, 7) % 23 == 0 else GRAN[k % 3]
+            vol[z0, r, c] = v
+    note("splash-pad fountain jets:", n_jets)
+
+    # ---------------------------------------------------------------- planted beds
+    # small leisure=garden / flowerbed islands are raised perennial beds edged with concrete bench-kerbs
+    n_beds = 0
+    for oid, typ, t, geom in osm.areas:
+        if not (t.get("leisure") == "garden" or t.get("landuse") == "flowerbed") or underground(t) or not (4 <= geom.area <= 400):
+            continue
+        rr, cc = cells_of(geom)
+        k = ~bmask[rr, cc]
+        rr, cc = rr[k], cc[k]
+        if len(rr) == 0:
+            continue
+        m = np.zeros((D, W), bool)
+        m[rr, cc] = True
+        edge = m & ~ndimage.binary_erosion(m)
+        for r, c in zip(rr, cc):
+            z0 = g[r, c]
+            if vol[z0, r, c] != 0:
                 continue
-            ext_shapes.append((LineString([P0, ext[-1]]).buffer(max(hw, 1.5), cap_style="flat"), col_, layer + 1))
-            prof.append(np.column_stack([np.array(ext), np.full(len(ext), h0), np.full(len(ext), layer + 1)]))
-    for L_ in sorted({l for _, _, l in ext_shapes}):
-        m_ = np.zeros((D, W), np.uint16)
-        burn(m_, [(p_, c_) for p_, c_, l in ext_shapes if l == L_])
-        m_ = np.where((m_ > 0) & ~bmask & (deck_lay <= L_) & ~deck, m_, 0)
-        deck_col[m_ > 0] = m_[m_ > 0]
-        deck_lay[m_ > 0] = L_
-        deck |= m_ > 0
-    note("bridge ends carried on to meet the ground:", len(ext_shapes))
-    prof = np.vstack(prof)
-    # where the ground climbs to the deck (an abutment, an embankment the DTM runs up under the deck) the LiDAR stands
-    # less than 2 m over it: still the deck, if the surface is at the deck's level (else pits down to the ground)
-    abut = (deck_col > 0) & ~bmask & ~deck & ndimage.binary_dilation(deck, iterations=15)
-    rr, cc = np.nonzero(deck | abut)
-    for L_ in np.unique(deck_lay[rr, cc]):
-        sel = deck_lay[rr, cc] == L_
-        pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
-        d_, k_ = _knn(pts[:, :2], np.column_stack([cc[sel] + 0.5, rr[sel] + 0.5]), 12)
-        w_ = 1 / np.maximum(d_, 0.5) ** 2  # a smooth surface between the ways: any step is a contour across the deck
-        deck_abs[rr[sel], cc[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
-zt_ = np.round(deck_abs - BASE).astype(np.int32)
-if prof is not None and len(prof):
-    deck |= abut & (np.abs(dsm_mean - deck_abs) < 1.0)
-deck &= zt_ >= g + 1
-# a building and a deck in one cell: the LiDAR says which is on top. A building whose roof is at the deck or under it
-# stands under the bridge (shops in a viaduct's arcades, a station's halls under an
-# avenue: there the carriageway and tram track were drawn as bare roofs); it keeps its walls up to the
-# deck. A building rising over the deck stands beside it or on it (the viaduct's towers), and there is no deck in it
-_btop = g + topi
-_under = deck & bmask & (_btop <= zt_ + 2)
-deck &= ~bmask | _under
-_ru, _cu = np.nonzero(_under)
-for _z in range(int(zt_[_ru, _cu].min()) if len(_ru) else 0, int(_btop[_ru, _cu].max()) + 4 if len(_ru) else 0):
-    _m = _z >= zt_[_ru, _cu]
-    vol[_z, _ru[_m], _cu[_m]] = 0
-note("deck cells over buildings under a bridge:", int(_under.sum()), "building cells that keep the deck out:", int(((deck_col > 0) & bmask & ~_under).sum()))
-# a scrap of deck lying on the ground (under 60 cells, no metre of air under any of it: where the ground of a ramp
-# dips a metre under its way) is no bridge: it stood as grey slabs and steps on the carriageway
-_lab, _n = ndimage.label(deck, np.ones((3, 3), bool))
-_scrap = np.zeros((D, W), bool)
-if _n:
-    _sz = ndimage.sum(deck, _lab, np.arange(1, _n + 1))
-    _air = ndimage.maximum(zt_ - 2 - g, _lab, np.arange(1, _n + 1))
-    _scrap = np.isin(_lab, 1 + np.nonzero((_sz < 60) & (_air <= 0))[0]) & ~bmask
-    deck &= ~_scrap
-# a bridge way where no deck is built because the ground comes up to it (the ramp up to the Schanzlbrücke: an
-# embankment the terrain model counts as ground, over the passages under it) is drawn on the ground: its carriageway
-# and sidewalks had been left out of the ground's colours (bridge ways go on the deck), a pale plaza of default paving.
-# Where its level is within 3 m of the ground, on open ground no other way or area is drawn on. (Its level away from
-# any deck: the ways' profiles as on the deck)
-_bwh = deck_abs.copy()
-_rn, _cn = np.nonzero((deck_col > 0) & (deck_abs == 0) & ~bmask)
-if len(_rn) and len(prof):
-    for L_ in np.unique(deck_lay[_rn, _cn]):
-        sel = deck_lay[_rn, _cn] == L_
-        pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
-        d_, k_ = _knn(pts[:, :2], np.column_stack([_cn[sel] + 0.5, _rn[sel] + 0.5]), 12)
-        w_ = 1 / np.maximum(d_, 0.5) ** 2
-        _bwh[_rn[sel], _cn[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
-zt_ = np.where(deck_abs > 0, zt_, np.round(_bwh - BASE).astype(np.int32))
-_bw = (deck_col > 0) & ~deck & ~bmask & (_bwh > 0) & (zt_ <= g + 2) & (zt_ >= g - 3) \
-    & (explicit == 0) & (gcol != C["water"])
-_bw |= _scrap & (deck_col > 0)
-_bwr = np.zeros((D, W), np.uint8)
-burn(_bwr, [(p_, 1) for p_ in bridge_road_polys])
-_bwc = deck_col.copy()
-_bwc[_bw & (lm > 0) & (_jm == 0) & (deck_col == C["asphalt"])] = C["mark"]
-gcol[_bw] = _bwc[_bw]
-_rb, _cb = np.nonzero(_bw)
-vol[g[_rb, _cb] - 1, _rb, _cb] = _bwc[_rb, _cb]
-is_road |= _bw & (_bwr > 0)
-note("deck scraps on the ground dropped:", int(_scrap.sum()), "cells; bridge ways drawn on the ground where it reaches "
-     "their level:", int(_bw.sum()), "cells")
+            if edge[r, c] and geom.area > 12:
+                vol[z0, r, c] = C["benchkerb"]
+            elif stable_hash(oid, r + R0, c + C0) % 5:
+                vol[z0, r, c] = PERENNIALS[cell_hash(r, c, oid) % len(PERENNIALS)]
+        n_beds += 1
+    note("raised planting beds:", n_beds)
 
-# the deck as wide as the surface model shows it: OSM draws a deck narrower than it stands (the B 12 over the
-# Rottalbahn, project col -2004, row 1076: drawn 9.3 m wide, 25 m along the track in the surface model), and its edges
-# beside the drawn way had been left to the ground passes, which took them for an embankment and stood a strip of
-# ground at the deck's level across the track. Grown out from the deck a cell at a time, up to DECK_GROW m: an open
-# cell (no building, water, crown, bridge way drawn on the ground) whose surface model's lowest return lies within
-# DECK_TOL m of the deck's level beside it, over ground DECK_AIR m or more lower, is deck at that level (the highest
-# beside it: the same in every region)
-DECK_GROW, DECK_TOL, DECK_AIR = 6, 1.0, 2
-_dlo = GCTX.dsm_low() + BASE
-_open = ~deck & ~bmask & ~veg & (gcol != C["water"]) & ~_bw & (deck_col == 0)
-_n_wide = 0
-for _ in range(DECK_GROW):
-    _lv = ndimage.grey_dilation(np.where(deck, deck_abs, -np.inf), size=(3, 3), mode="constant", cval=-np.inf)
-    _new = _open & np.isfinite(_lv) & (np.abs(_dlo - _lv) <= DECK_TOL) & (_lv - BASE - g >= DECK_AIR)
-    if not _new.any():
-        break
-    deck_lay[_new] = ndimage.grey_dilation(np.where(deck, deck_lay, 0), size=(3, 3))[_new]
-    deck_abs[_new] = _lv[_new]
-    deck |= _new
-    _open &= ~_new
-    _n_wide += int(_new.sum())
-deck_col[deck & (deck_col == 0)] = C["deck"]
-zt_ = np.where(deck, np.round(deck_abs - BASE).astype(np.int32), zt_)
-note("deck cells added beside the drawn ways where the surface model holds the deck:", _n_wide)
+    # ---------------------------------------------------------------- street furniture
+    # a post stands beside the carriageway and the tracks, not in them: OSM's lamp nodes sit on the kerb line, and 89 of
+    # them fell a metre or two inside the road as drawn (cars drove through the poles); such a post takes the nearest
+    # cell off the road within 4 m, and one deeper in (a lamp hung over the street) gets no pole
+    _driven = is_road | np.isin(gcol, [C["trambed"], C["rail"], C["ballast"]])
+    kerb_near = ndimage.distance_transform_edt(_driven, return_indices=True)
 
-# the ground at the bridgeheads and under the bridge ways drawn on it (ground.py, phase "decks")
-GCTX.__dict__.update(g=g, deck=deck, zt=zt_, bw=_bw, bmask=bmask, veg=veg, water=gcol == C["water"], river_lv=RIVER_LV,
-                     on_bridge=on_bridge)
-_gn = ground.run(GCTX, "decks")
-_bwl = GCTX.changed["bridge_way"]
-_rh, _ch = np.nonzero(_gn > g)
-if len(_rh):
-    # what stood on the old ground (a kerb, a post, a car) rises with it; under it soil, the top keeps its colour, and
-    # a side 2 m or more over its neighbour is masonry, as the retaining walls above
-    _g0, _g1 = g[_rh, _ch], _gn[_rh, _ch]
-    _lift = _g1 - _g0
-    # open land no way or area is drawn on had been read as the slope of a pit (a meadow on the hillside): paved, as
-    # the bridgehead round it, unless the ortho sees it green
-    _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03) & ~_bwl[_rh, _ch]  # (a bridge way keeps its colours)
-    gcol[_rh[_pv], _ch[_pv]] = C["paving"]
-    vol[_g0[_pv] - 1, _rh[_pv], _ch[_pv]] = C["paving"]
-    # the whole column from its top ground voxel up moves by the lift (a lamp's 10 m pole and head, a flagpole, a
-    # tree; 7 voxels had moved, which cut a lamp and left its light at the old height), and what was recorded of it
-    # (the lamps' heads, the trees' and the fountain jets' bases) with it
-    for _z in range(H - 1, int(_g1.min()) - 2, -1):
-        _s = _z - _lift
-        _ok = _s >= _g0 - 1
-        vol[_z, _rh[_ok], _ch[_ok]] = vol[_s[_ok], _rh[_ok], _ch[_ok]]
-    _L = np.zeros((D, W), np.int32)
-    _L[_rh, _ch] = _lift
-    lamps[:] = [(c_, r_, z_ + int(_L[r_, c_])) for c_, r_, z_ in lamps]
-    jets[:] = [(k_, [j_[0], j_[1] + int(_L[k_[2] - R0, k_[3] - C0]), j_[2]]) for k_, j_ in jets]
-    for t_, e_ in zip(_tr_t, RESULT["trees"]):
-        if t_.get("z") is not None and _L[int(t_["y"]), int(t_["x"])]:
-            t_["z"] += int(_L[int(t_["y"]), int(t_["x"])])
-            e_["rec"]["z"] = t_["z"]
-    for k in range(int(_lift.max())):
-        _m = k < _lift
-        vol[_g0[_m] - 1 + k, _rh[_m], _ch[_m]] = C["soil"]
-    _nb = ndimage.minimum_filter(_gn, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))[_rh, _ch]
-    _rp, _cp = _rh + R0, _ch + C0
-    for k in range(int((_g1 - _nb).max())):
-        _z = _nb + k
-        _m = (_z < _g1 - 1) & (_g1 - _nb >= 2)
-        _s = ((_rp[_m] + _cp[_m] + (_z[_m] % 2)) // 2 * 2654435761 + _z[_m] * 40503) % 1000003 % len(STONE)
-        vol[_z[_m], _rh[_m], _ch[_m]] = np.array(STONE, np.uint16)[_s]
-    g = _gn
-note("bridgeheads: ground lifted to the dropped surface:", len(_rh), "cells, by", int(_lift.sum()) if len(_rh) else 0,
-     "m in all, up to", int(_lift.max()) if len(_rh) else 0, "m")
-deck_h = np.where(deck, zt_ - g, 0).astype(np.float32)
-# under a deck over the river nothing hangs but the bridge's own structure (landmarks.py): LiDAR columns caught at the
-# deck edge (catenary masts, railings, green from the ortho) were extruded into dangling bits; and no tree crown grows
-# into the underside of a deck anywhere
-_leafy = np.zeros(len(pal.entries) + 64, bool)
-_leafy[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS] = True
-_rw, _cw = np.nonzero(deck)
-_wet = water_[_rw, _cw]
-for _z in range(int(g.min()), int(zt_.max()) + 6):
-    _m = (_z >= g[_rw, _cw]) & (_z < zt_[_rw, _cw] + 6)
-    _v = vol[_z, _rw[_m], _cw[_m]]
-    _under = _z < zt_[_rw[_m], _cw[_m]] - 2
-    vol[_z, _rw[_m], _cw[_m]] = np.where((_under & _wet[_m]) | _leafy[_v], 0, _v)  # (a crown poking through the deck too)
-# and beside a deck over the water (3 m): the LiDAR's returns off the deck's edge, green in the ortho, stood as crowns
-# hanging from the edge down to the river; no tree grows in the river there
-_rim = ndimage.binary_dilation(deck, iterations=3) & ~deck & water_
-_rr, _cr = np.nonzero(_rim)
-n_rim = 0
-for _z in range(int(g.min()), int(zt_.max()) + 6):
-    _v = vol[_z, _rr, _cr]
-    _k = _leafy[_v]
-    vol[_z, _rr[_k], _cr[_k]] = 0
-    n_rim += int(_k.sum())
-note("leaves off the water beside the decks:", n_rim)
-# a railway bridge carries its track across: the rails on the ballast, and ballast (not the grey road deck) between
-# tracks and to the deck edges -- the rail bridge read as a road with a step where the track left the embankment
-_way = (deck_col > 0) & (deck_col != C["deck"])
-_dw, (_iw, _jw) = ndimage.distance_transform_edt(~_way, return_indices=True)
-_fill = deck & (deck_col == C["deck"]) & (deck_col[_iw, _jw] == C["ballast"]) & (_dw <= 4)
-deck_col[_fill] = C["ballast"]
-# the lane markings of the roads on the bridges (they were painted on the ground under the deck)
-_lm_deck = deck & (lm > 0) & (deck_col == C["asphalt"])
-deck_col[_lm_deck] = C["mark"]
-note("lane marking cells on decks:", int(_lm_deck.sum()))
-_rl = np.zeros((D, W), np.uint16)
-burn(_rl, bridge_rails + rails, all_touched=True)  # (the ground track's too: the deck runs on over the abutments)
-_on = deck & (_rl > 0) & np.isin(deck_col, [C["ballast"], C["trambed"]])  # rails lie on a track bed, a tram's too
-deck_col[_on] = _rl[_on]
-note("rail decks: ballast fill", int(_fill.sum()), "rail cells", int(_on.sum()))
-rr, cc = np.nonzero(deck)
-if len(rr):
-    zt_ = zt_[rr, cc]
-    for dz in (1, 2):
-        vol[zt_ - dz, rr, cc] = C["deck"]
-    vol[zt_ - 1, rr, cc] = deck_col[rr, cc]
-note("bridge deck cells:", int(deck.sum()))
+    # a lamp node by a bridge way (within 3 m: OSM's lamp nodes sit on the kerb line) waits for the deck (below): it
+    # stands on the deck's top, not on the ground or the river under it -- kerb() put the Marienbrücke's lamps (a deck of
+    # carriageway from edge to edge) beside the deck, poles from the Inn up to its edge, and the Alte Poststraße's over the
+    # A 3 stood on the motorway, up to under the deck. d_br, d_gr: the node's distance from the nearest bridge way and
+    # from the nearest way on the ground that may be lit (one under the bridge, the street the bridge lands on; not the
+    # unlit A 3 under the Alte Poststraße, nor a field track: UNLIT). A node's layer tag decides: 0 or less on the
+    # ground, 1 or more on the deck
+    _bridge_ways = STRtree([p_ for p_, _, _ in bridge_shapes])
+    _ground_ways = STRtree(lit_ground_ways)
+
+    lamps = []  # (c, r, z) here; LAMP_KEYS: each one's place in the map's order (regions.py)
+    LAMP_KEYS = []
+    bridge_lamps = []  # (oid, tags, node, d_br, d_gr): placed with the deck
+    for oid, t, p in osm.nodes_with("highway", ("street_lamp",)):  # (keys: OSM ids, the file's order in any cut of it)
+        d_br, layer = _way_dist(_bridge_ways, p), parse_len(t.get("layer"))
+        if d_br <= 3 and (layer is None or layer >= 1) and 0 <= p.x < W and 0 <= p.y < D:
+            bridge_lamps.append((oid, t, p, d_br, math.inf if layer else _way_dist(_ground_ways, p)))
+            continue
+        c, r = kerb(kerb_near, int(p.x), int(p.y)) or (-1, -1)
+        if not (0 <= c < W and 0 <= r < D) or bmask[r, c]:
+            continue
+        stand_lamp(vol, lamps, LAMP_KEYS, c, r, int(g[r, c]), lamp_height(is_road, t, c, r), [0, oid])
+    note("street lamps:", len(lamps), "(and", len(bridge_lamps), "by bridge ways, placed with the decks)")
+    # (the bridges' lamps where their nodes are: the park and the inferred deck lamps keep 12 m from them)
+    lamp_xy = np.array([(c, r) for c, r, _ in lamps] + [(int(p.x), int(p.y)) for _, _, p, _, _ in bridge_lamps], float).reshape(-1, 2)
+    # park lamps: OSM maps almost none in the parks and along the river promenades (the Innpromenade, the Ortspitze),
+    # which stood dark at night. Along their walks a 4 m lamp every ~25 m, a metre and a half beside the way on soft
+    # ground or paving (never on the way itself, a carriageway or in a building), none within 12 m of another lamp
+    _parks = [g_ for _, _, t_, g_ in osm.areas if t_.get("leisure") == "park" and not underground(t_)]
+    _park_u = _uu(_parks).buffer(0) if _parks else None
+    _pwalk = np.zeros((D, W), np.uint8)
+    burn(_pwalk, [(s_, 1) for s_, _ in foot_shapes + cycle_shapes])
+    n_pl = 0
+    for oid, t, line in osm.lines:
+        if t.get("highway") not in ("footway", "path", "pedestrian", "cycleway") or underground(t) or on_bridge(t):
+            continue
+        name = (t.get("name") or "").lower()
+        seg = line if ("promenade" in name or name == "ortspitze") else (line.intersection(_park_u) if _park_u is not None else None)
+        for i_part, part in enumerate(getattr(seg, "geoms", [seg]) if seg is not None and not seg.is_empty else []):
+            if part.geom_type != "LineString" or part.length < 20:
+                continue
+            for k, s_ in enumerate(np.arange(10, part.length - 5, 25)):
+                p0, p1 = part.interpolate(max(s_ - 1, 0)), part.interpolate(min(s_ + 1, part.length))
+                L_ = math.hypot(p1.x - p0.x, p1.y - p0.y) or 1
+                side = 1 if k % 2 == 0 else -1
+                for off in (1.8, 2.6):
+                    x_ = part.interpolate(s_).x - (p1.y - p0.y) / L_ * off * side
+                    y_ = part.interpolate(s_).y + (p1.x - p0.x) / L_ * off * side
+                    c, r = int(x_), int(y_)
+                    if 0 <= c < W and 0 <= r < D and not bmask[r, c] and not _driven[r, c] and not _pwalk[r, c] \
+                            and gcol[r, c] != C["water"] and vol[g[r, c], r, c] == 0:
+                        break
+                else:
+                    continue
+                if len(lamp_xy) and np.min(np.hypot(lamp_xy[:, 0] - c, lamp_xy[:, 1] - r)) < 12:
+                    continue
+                z0 = int(g[r, c])
+                vol[z0:z0 + 3, r, c] = C["pole"]
+                vol[z0 + 3, r, c] = C["lamp"]
+                lamps.append((c, r, z0 + 3))
+                LAMP_KEYS.append([1, oid, i_part, k])
+                lamp_xy = np.vstack([lamp_xy, [c, r]])
+                n_pl += 1
+    note("park and promenade lamps:", n_pl)
+
+    n_gs = 0
+    for r, c, v in grave_stones:  # the headstones (cemeteries above): not where a trunk or a bed already stands
+        if vol[g[r, c], r, c] == 0 and not bmask[r, c]:
+            vol[g[r, c], r, c] = v
+            n_gs += 1
+    note("grave stones set:", n_gs)
+    # benches (OSM amenity=bench, ~280 in the promenades, parks and squares): a wooden seat two voxels long beside the
+    # walk, along the nearest path; on the ground, never on a carriageway or in a building
+    BENCH = pal("#7a5a3e")
+    _walks = [l_ for _, t_, l_ in osm.lines if t_.get("highway") in ("footway", "path", "pedestrian", "cycleway", "living_street",
+                                                                      "service", "residential", "track")]
+    _wtree = STRtree(_walks) if _walks else None
+    n_bench = 0
+    for oid, t, p in osm.nodes_with("amenity", ("bench",)):
+        c, r = int(p.x), int(p.y)
+        if not (1 <= c < W - 1 and 1 <= r < D - 1) or bmask[r, c] or _driven[r, c]:
+            continue
+        dc, dr = 1, 0
+        if _wtree is not None:
+            l_ = _walks[_wtree.nearest(p)]
+            if l_.distance(p) < 8:
+                s_ = l_.project(p)
+                a_, b_ = l_.interpolate(max(s_ - 1, 0)), l_.interpolate(min(s_ + 1, l_.length))
+                dc, dr = (1, 0) if abs(b_.x - a_.x) >= abs(b_.y - a_.y) else (0, 1)
+        cells = [(r, c), (r + dr, c + dc)]
+        if any(bmask[r_, c_] or _driven[r_, c_] or vol[g[r_, c_], r_, c_] != 0 or abs(int(g[r_, c_]) - int(g[r, c])) > 0
+               for r_, c_ in cells):
+            cells = cells[:1]
+            if vol[g[r, c], r, c] != 0:
+                continue
+        for r_, c_ in cells:
+            vol[g[r_, c_], r_, c_] = BENCH
+        n_bench += 1
+    note("benches:", n_bench)
+
+    for oid, typ, t, geom in osm.areas_with("amenity", ("shelter",)):
+        if t.get("shelter_type") not in (None, "public_transport", "basic_hut") or bmask[cells_of(geom)].any():
+            continue
+        rr, cc = cells_of(geom)
+        zz = g[rr, cc] + 2
+        vol[zz, rr, cc] = C["shelter"]
+        vol[g[rr, cc], rr, cc] = np.where((rr + R0 + cc + C0) % 3 == 0, C["pole"], 0)
+
+    for oid, t, p in osm.nodes_with("man_made", ("flagpole",)):
+        c, r = int(p.x), int(p.y)
+        if 0 <= c < W and 0 <= r < D and not bmask[r, c]:
+            hgt = int(parse_len(t.get("height")) or 9)
+            vol[g[r, c]:g[r, c] + hgt, r, c] = C["fence"]
+
+    # bridges / decks: over the rail cut (DTM drops below them) and the rivers. The deck follows the bridge ways
+    # (bridge=yes roads, paths, tracks buffered to their width; man_made=bridge areas only near them). Its top takes the
+    # colour of the way on it (asphalt, pavement, cycle lane, tram bed).
+    deck_col = np.zeros((D, W), np.uint16)
+    deck_lay = np.zeros((D, W), np.uint16)  # the layer of the way that owns the cell
+    bridge_area = np.zeros((D, W), np.uint16)
+    burn(bridge_area, [(geom, 1) for oid, typ, t, geom in osm.areas_with("man_made", ("bridge",))])
+    for layer in sorted({l for _, _, l in bridge_shapes}):  # upper decks win
+        burn(deck_col, [(p_, c_) for p_, c_, l in sorted(bridge_shapes, key=lambda x: -x[0].area) if l == layer])
+        burn(deck_lay, [(p_, l + 1) for p_, c_, l in bridge_shapes if l == layer])
+    near_way = ndimage.binary_dilation(deck_col > 0, iterations=3)
+    deck_col = np.where((deck_col == 0) & (bridge_area > 0) & near_way, C["deck"], deck_col)
+    deck = (deck_col > 0) & (nd_mean > 2)
+    deck = ndimage.binary_closing(deck, iterations=2)  # no slits of sky between the carriageways
+    deck_col = np.where(deck & (deck_col == 0), C["deck"], deck_col)
+    # the deck's height: a profile along each bridge way -- the DSM (0.5 m) sampled across the way every metre, its 30th
+    # percentile (the road surface, not the cars, railings or stays), samples dropped where a higher deck hides the way or
+    # nothing stands above the river, then a 25 m running median and a 15 m mean. Every deck cell takes the height of the
+    # nearest profile point of its own layer: one smooth level, so cars drive on it. (The cell-by-cell lowest return
+    # picked up cells half over the water at the deck edges and broke the decks into steps metres apart.)
+    # A deck is the level the surface model holds over the gap, never the ground seen beside it: where the samples on one
+    # side of the way see the ground (within DECK_DIP m of the terrain model) and those on the other side the deck
+    # (DECK_OVER m or more over it), the profile is the deck's side (a way drawn along its deck's edge); and between a
+    # way's first and last sample DECK_OVER m or more over the terrain, a sample within DECK_DIP m of it is dropped, as over
+    # water: only the ends come down to the ground (abutments, ramps). A way's point under a crown counts for neither (a
+    # footbridge under trees stood in their tops). The Dietzing bridge over the B 85 cutting (way 106617552, project col
+    # -2087, row -1658; road-defects #11) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
+    # it, and the 10th percentile within 10 m below took the whole 23 m deck down to it
+    DECK_OVER, DECK_DIP = 3.0, 1.5
+    water_ = gcol == C["water"]
+    prof = []  # per way: (x, y, h, layer) every metre
+    deck_own = []  # per way: (OSM id, points, the way's own deck level per point: NaN off the span) for the sag counter
+    for (line, hw, layer, _), oid_ in zip(bridge_lines, [b_[0] for b_ in bridge_ways]):
+        n_ = max(2, int(line.length) + 1)
+        P_ = np.array([line.interpolate(v_).coords[0] for v_ in np.linspace(0, line.length, n_)])
+        T_ = np.gradient(P_, axis=0)
+        T_ /= np.maximum(np.linalg.norm(T_, axis=1, keepdims=True), 1e-6)
+        a_, b_ = np.meshgrid(np.arange(-1.5, 1.6, 0.5), np.arange(-max(0.7 * hw, 0.5), max(0.7 * hw, 0.5) + 0.01, 0.5))
+        a_, b_ = a_.ravel(), b_.ravel()
+        X_ = P_[:, :1] + T_[:, :1] * a_ - T_[:, 1:] * b_
+        Y_ = P_[:, 1:] + T_[:, 1:] * a_ + T_[:, :1] * b_
+        S_ = dsm[np.clip((Y_ * 2).astype(int), 0, 2 * D - 1), np.clip((X_ * 2).astype(int), 0, 2 * W - 1)]
+        pr_, pc_ = np.clip(P_[:, 1].astype(int), 0, D - 1), np.clip(P_[:, 0].astype(int), 0, W - 1)
+        # samples on a building beside the way are its roof, not the deck (a sidewalk along a tower: its deck climbed the
+        # facade); a way over buildings (a viaduct's arches) keeps them
+        Sb_ = bmask[np.clip(Y_.astype(int), 0, D - 1), np.clip(X_.astype(int), 0, W - 1)] & ~bmask[pr_, pc_][:, None]
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            S_ = np.where(Sb_, np.nan, S_)
+            h_ = np.nanpercentile(S_, 30, axis=1)
+            hl_, hr_ = (np.nanpercentile(S_[:, s_], 30, axis=1) for s_ in (b_ < 0, b_ > 0))
+        gd_ = dtm[pr_, pc_]
+        lo_, hi_ = np.fmin(hl_, hr_), np.fmax(hl_, hr_)
+        crown_ = veg[pr_, pc_]
+        h_ = np.where(~crown_ & (lo_ < gd_ + DECK_DIP) & (hi_ >= gd_ + DECK_OVER), hi_, h_)  # (the deck's side of the way)
+        span_ = np.zeros(n_, bool)
+        over_ = np.nonzero(~crown_ & (h_ >= gd_ + DECK_OVER) & (deck_lay[pr_, pc_] <= layer + 1))[0]  # (NaN: False)
+        if len(over_):
+            span_[over_[0]:over_[-1] + 1] = True
+        ok_ = np.isfinite(h_) & (deck_lay[pr_, pc_] <= layer + 1) \
+            & ((h_ > gd_ + DECK_DIP) | (~water_[pr_, pc_] & ~span_ & (h_ > gd_ - DECK_DIP)))
+        # the way's own deck level: the median of its samples DECK_OVER m or more over the terrain within 15 m (a long
+        # bridge climbs), on its span
+        own_ = np.full(n_, np.nan)
+        for i_ in np.nonzero(span_)[0]:
+            near_ = over_[np.abs(over_ - i_) <= 15]
+            if len(near_):
+                own_[i_] = np.median(h_[near_])
+        deck_own.append((oid_, P_, own_))
+        if ok_.sum() >= 2:
+            h_ = np.interp(np.arange(n_), np.nonzero(ok_)[0], h_[ok_])
+        else:  # hidden all along (a walkway slung under a higher deck): straight between its ends' ground
+            h_ = np.linspace(gd_[0], gd_[-1], n_)
+        for win in (61, 31, 15):  # the deck is the lowest surface: knock down what stands on it (a pylon's legs, cables)
+            hs_ = ndimage.median_filter(h_, min(win, n_), mode="nearest")
+            h_ = np.where(h_ > hs_ + 0.6, hs_, h_)
+        prof.append(np.column_stack([P_, h_, np.full(n_, layer + 1)]))
+    deck_abs = np.zeros((D, W), np.float32)
+    if prof:
+        # across the deck the ways agree: one surface per layer, each point the low end (10th percentile) of its layer
+        # within 10 m. Each way on its own rounded to a different metre from its neighbour (steps along the deck between
+        # the lanes); and where they disagree, the higher ones stand under something -- a cable-stayed bridge's stays lean
+        # over the outer lanes for 150 m each side of the pylon, so their profile climbed smoothly to the pylon (no spike
+        # for the running median to knock down), and with the median of the lanes the deck rose 23 m in mounds round it
+        allp = np.vstack(prof)
+        for L_ in np.unique(allp[:, 3]):
+            sel_ = allp[:, 3] == L_
+            sub_ = allp[sel_]
+            nb_ = cKDTree(sub_[:, :2]).query_ball_point(sub_[:, :2], 10.0)
+            allp[sel_, 2] = [np.percentile(sub_[i_, 2], 10) for i_ in nb_]
+        k0 = 0
+        for i_, pw_ in enumerate(prof):
+            h_ = allp[k0:k0 + len(pw_), 2]
+            n_ = len(h_)
+            pw_[:, 2] = region.movmean(ndimage.median_filter(h_, min(25, n_), mode="nearest"), min(15, n_))
+            k0 += n_
+        # a bridge way often ends (in OSM) metres before the ground climbs back to the deck: the deck carries on along the
+        # way's direction, level, until the ground is within 1.5 m of it (up to 15 m) -- no hole for the cars to drop into
+        ext_shapes = []
+        for (line, hw, layer, col_), pw_ in zip(bridge_lines, list(prof)):
+            if len(pw_) < 3:
+                continue
+            for e0, e1 in ((0, 2), (-1, -3)):
+                P0, h0 = pw_[e0, :2], pw_[e0, 2]
+                u_ = P0 - pw_[e1, :2]
+                u_ = u_ / max(np.linalg.norm(u_), 1e-6)
+                ext = []
+                for d_ in range(1, 16):
+                    q = P0 + u_ * d_
+                    r_, c_ = int(q[1]), int(q[0])
+                    if not (0 <= r_ < D and 0 <= c_ < W) or dtm[r_, c_] >= h0 - 1.5 or bmask[r_, c_]:
+                        break
+                    ext.append(q)
+                if not ext:
+                    continue
+                ext_shapes.append((LineString([P0, ext[-1]]).buffer(max(hw, 1.5), cap_style="flat"), col_, layer + 1))
+                prof.append(np.column_stack([np.array(ext), np.full(len(ext), h0), np.full(len(ext), layer + 1)]))
+        for L_ in sorted({l for _, _, l in ext_shapes}):
+            m_ = np.zeros((D, W), np.uint16)
+            burn(m_, [(p_, c_) for p_, c_, l in ext_shapes if l == L_])
+            m_ = np.where((m_ > 0) & ~bmask & (deck_lay <= L_) & ~deck, m_, 0)
+            deck_col[m_ > 0] = m_[m_ > 0]
+            deck_lay[m_ > 0] = L_
+            deck |= m_ > 0
+        note("bridge ends carried on to meet the ground:", len(ext_shapes))
+        prof = np.vstack(prof)
+        # where the ground climbs to the deck (an abutment, an embankment the DTM runs up under the deck) the LiDAR stands
+        # less than 2 m over it: still the deck, if the surface is at the deck's level (else pits down to the ground)
+        abut = (deck_col > 0) & ~bmask & ~deck & ndimage.binary_dilation(deck, iterations=15)
+        rr, cc = np.nonzero(deck | abut)
+        for L_ in np.unique(deck_lay[rr, cc]):
+            sel = deck_lay[rr, cc] == L_
+            pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
+            d_, k_ = _knn(pts[:, :2], np.column_stack([cc[sel] + 0.5, rr[sel] + 0.5]), 12)
+            w_ = 1 / np.maximum(d_, 0.5) ** 2  # a smooth surface between the ways: any step is a contour across the deck
+            deck_abs[rr[sel], cc[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
+    zt_ = np.round(deck_abs - BASE).astype(np.int32)
+    if prof is not None and len(prof):
+        deck |= abut & (np.abs(dsm_mean - deck_abs) < 1.0)
+    deck &= zt_ >= g + 1
+    # a building and a deck in one cell: the LiDAR says which is on top. A building whose roof is at the deck or under it
+    # stands under the bridge (shops in a viaduct's arcades, a station's halls under an
+    # avenue: there the carriageway and tram track were drawn as bare roofs); it keeps its walls up to the
+    # deck. A building rising over the deck stands beside it or on it (the viaduct's towers), and there is no deck in it
+    _btop = g + topi
+    _under = deck & bmask & (_btop <= zt_ + 2)
+    deck &= ~bmask | _under
+    _ru, _cu = np.nonzero(_under)
+    for _z in range(int(zt_[_ru, _cu].min()) if len(_ru) else 0, int(_btop[_ru, _cu].max()) + 4 if len(_ru) else 0):
+        _m = _z >= zt_[_ru, _cu]
+        vol[_z, _ru[_m], _cu[_m]] = 0
+    note("deck cells over buildings under a bridge:", int(_under.sum()), "building cells that keep the deck out:", int(((deck_col > 0) & bmask & ~_under).sum()))
+    # a scrap of deck lying on the ground (under 60 cells, no metre of air under any of it: where the ground of a ramp
+    # dips a metre under its way) is no bridge: it stood as grey slabs and steps on the carriageway
+    _lab, _n = ndimage.label(deck, np.ones((3, 3), bool))
+    _scrap = np.zeros((D, W), bool)
+    if _n:
+        _sz = ndimage.sum(deck, _lab, np.arange(1, _n + 1))
+        _air = ndimage.maximum(zt_ - 2 - g, _lab, np.arange(1, _n + 1))
+        _scrap = np.isin(_lab, 1 + np.nonzero((_sz < 60) & (_air <= 0))[0]) & ~bmask
+        deck &= ~_scrap
+    # a bridge way where no deck is built because the ground comes up to it (the ramp up to the Schanzlbrücke: an
+    # embankment the terrain model counts as ground, over the passages under it) is drawn on the ground: its carriageway
+    # and sidewalks had been left out of the ground's colours (bridge ways go on the deck), a pale plaza of default paving.
+    # Where its level is within 3 m of the ground, on open ground no other way or area is drawn on. (Its level away from
+    # any deck: the ways' profiles as on the deck)
+    _bwh = deck_abs.copy()
+    _rn, _cn = np.nonzero((deck_col > 0) & (deck_abs == 0) & ~bmask)
+    if len(_rn) and len(prof):
+        for L_ in np.unique(deck_lay[_rn, _cn]):
+            sel = deck_lay[_rn, _cn] == L_
+            pts = prof if L_ == 0 or not (prof[:, 3] == L_).any() else prof[prof[:, 3] == L_]
+            d_, k_ = _knn(pts[:, :2], np.column_stack([_cn[sel] + 0.5, _rn[sel] + 0.5]), 12)
+            w_ = 1 / np.maximum(d_, 0.5) ** 2
+            _bwh[_rn[sel], _cn[sel]] = (pts[k_, 2] * w_).sum(1) / w_.sum(1)
+    zt_ = np.where(deck_abs > 0, zt_, np.round(_bwh - BASE).astype(np.int32))
+    _bw = (deck_col > 0) & ~deck & ~bmask & (_bwh > 0) & (zt_ <= g + 2) & (zt_ >= g - 3) \
+        & (explicit == 0) & (gcol != C["water"])
+    _bw |= _scrap & (deck_col > 0)
+    _bwr = np.zeros((D, W), np.uint8)
+    burn(_bwr, [(p_, 1) for p_ in bridge_road_polys])
+    _bwc = deck_col.copy()
+    _bwc[_bw & (lm > 0) & (_jm == 0) & (deck_col == C["asphalt"])] = C["mark"]
+    gcol[_bw] = _bwc[_bw]
+    _rb, _cb = np.nonzero(_bw)
+    vol[g[_rb, _cb] - 1, _rb, _cb] = _bwc[_rb, _cb]
+    is_road |= _bw & (_bwr > 0)
+    note("deck scraps on the ground dropped:", int(_scrap.sum()), "cells; bridge ways drawn on the ground where it reaches "
+         "their level:", int(_bw.sum()), "cells")
+
+    # the deck as wide as the surface model shows it: OSM draws a deck narrower than it stands (the B 12 over the
+    # Rottalbahn, project col -2004, row 1076: drawn 9.3 m wide, 25 m along the track in the surface model), and its edges
+    # beside the drawn way had been left to the ground passes, which took them for an embankment and stood a strip of
+    # ground at the deck's level across the track. Grown out from the deck a cell at a time, up to DECK_GROW m: an open
+    # cell (no building, water, crown, bridge way drawn on the ground) whose surface model's lowest return lies within
+    # DECK_TOL m of the deck's level beside it, over ground DECK_AIR m or more lower, is deck at that level (the highest
+    # beside it: the same in every region)
+    DECK_GROW, DECK_TOL, DECK_AIR = 6, 1.0, 2
+    _dlo = GCTX.dsm_low() + BASE
+    _open = ~deck & ~bmask & ~veg & (gcol != C["water"]) & ~_bw & (deck_col == 0)
+    _n_wide = 0
+    for _ in range(DECK_GROW):
+        _lv = ndimage.grey_dilation(np.where(deck, deck_abs, -np.inf), size=(3, 3), mode="constant", cval=-np.inf)
+        _new = _open & np.isfinite(_lv) & (np.abs(_dlo - _lv) <= DECK_TOL) & (_lv - BASE - g >= DECK_AIR)
+        if not _new.any():
+            break
+        deck_lay[_new] = ndimage.grey_dilation(np.where(deck, deck_lay, 0), size=(3, 3))[_new]
+        deck_abs[_new] = _lv[_new]
+        deck |= _new
+        _open &= ~_new
+        _n_wide += int(_new.sum())
+    deck_col[deck & (deck_col == 0)] = C["deck"]
+    zt_ = np.where(deck, np.round(deck_abs - BASE).astype(np.int32), zt_)
+    note("deck cells added beside the drawn ways where the surface model holds the deck:", _n_wide)
+
+    # the ground at the bridgeheads and under the bridge ways drawn on it (ground.py, phase "decks")
+    GCTX.__dict__.update(g=g, deck=deck, zt=zt_, bw=_bw, bmask=bmask, veg=veg, water=gcol == C["water"], river_lv=RIVER_LV,
+                         on_bridge=on_bridge)
+    _gn = ground.run(GCTX, "decks")
+    _bwl = GCTX.changed["bridge_way"]
+    _rh, _ch = np.nonzero(_gn > g)
+    if len(_rh):
+        # what stood on the old ground (a kerb, a post, a car) rises with it; under it soil, the top keeps its colour, and
+        # a side 2 m or more over its neighbour is masonry, as the retaining walls above
+        _g0, _g1 = g[_rh, _ch], _gn[_rh, _ch]
+        _lift = _g1 - _g0
+        # open land no way or area is drawn on had been read as the slope of a pit (a meadow on the hillside): paved, as
+        # the bridgehead round it, unless the ortho sees it green
+        _pv = (explicit[_rh, _ch] == 0) & (exg[_rh, _ch] <= 0.03) & ~_bwl[_rh, _ch]  # (a bridge way keeps its colours)
+        gcol[_rh[_pv], _ch[_pv]] = C["paving"]
+        vol[_g0[_pv] - 1, _rh[_pv], _ch[_pv]] = C["paving"]
+        # the whole column from its top ground voxel up moves by the lift (a lamp's 10 m pole and head, a flagpole, a
+        # tree; 7 voxels had moved, which cut a lamp and left its light at the old height), and what was recorded of it
+        # (the lamps' heads, the trees' and the fountain jets' bases) with it
+        for _z in range(H - 1, int(_g1.min()) - 2, -1):
+            _s = _z - _lift
+            _ok = _s >= _g0 - 1
+            vol[_z, _rh[_ok], _ch[_ok]] = vol[_s[_ok], _rh[_ok], _ch[_ok]]
+        _L = np.zeros((D, W), np.int32)
+        _L[_rh, _ch] = _lift
+        lamps[:] = [(c_, r_, z_ + int(_L[r_, c_])) for c_, r_, z_ in lamps]
+        jets[:] = [(k_, [j_[0], j_[1] + int(_L[k_[2] - R0, k_[3] - C0]), j_[2]]) for k_, j_ in jets]
+        for t_, e_ in zip(_tr_t, RESULT["trees"]):
+            if t_.get("z") is not None and _L[int(t_["y"]), int(t_["x"])]:
+                t_["z"] += int(_L[int(t_["y"]), int(t_["x"])])
+                e_["rec"]["z"] = t_["z"]
+        for k in range(int(_lift.max())):
+            _m = k < _lift
+            vol[_g0[_m] - 1 + k, _rh[_m], _ch[_m]] = C["soil"]
+        _nb = ndimage.minimum_filter(_gn, footprint=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))[_rh, _ch]
+        _rp, _cp = _rh + R0, _ch + C0
+        for k in range(int((_g1 - _nb).max())):
+            _z = _nb + k
+            _m = (_z < _g1 - 1) & (_g1 - _nb >= 2)
+            _s = ((_rp[_m] + _cp[_m] + (_z[_m] % 2)) // 2 * 2654435761 + _z[_m] * 40503) % 1000003 % len(STONE)
+            vol[_z[_m], _rh[_m], _ch[_m]] = np.array(STONE, np.uint16)[_s]
+        g = _gn
+    note("bridgeheads: ground lifted to the dropped surface:", len(_rh), "cells, by", int(_lift.sum()) if len(_rh) else 0,
+         "m in all, up to", int(_lift.max()) if len(_rh) else 0, "m")
+    deck_h = np.where(deck, zt_ - g, 0).astype(np.float32)
+    # under a deck over the river nothing hangs but the bridge's own structure (landmarks.py): LiDAR columns caught at the
+    # deck edge (catenary masts, railings, green from the ortho) were extruded into dangling bits; and no tree crown grows
+    # into the underside of a deck anywhere
+    _leafy = np.zeros(len(pal.entries) + 64, bool)
+    _leafy[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + WOOD_IDS] = True
+    _rw, _cw = np.nonzero(deck)
+    _wet = water_[_rw, _cw]
+    for _z in range(int(g.min()), int(zt_.max()) + 6):
+        _m = (_z >= g[_rw, _cw]) & (_z < zt_[_rw, _cw] + 6)
+        _v = vol[_z, _rw[_m], _cw[_m]]
+        _under = _z < zt_[_rw[_m], _cw[_m]] - 2
+        vol[_z, _rw[_m], _cw[_m]] = np.where((_under & _wet[_m]) | _leafy[_v], 0, _v)  # (a crown poking through the deck too)
+    # and beside a deck over the water (3 m): the LiDAR's returns off the deck's edge, green in the ortho, stood as crowns
+    # hanging from the edge down to the river; no tree grows in the river there
+    _rim = ndimage.binary_dilation(deck, iterations=3) & ~deck & water_
+    _rr, _cr = np.nonzero(_rim)
+    n_rim = 0
+    for _z in range(int(g.min()), int(zt_.max()) + 6):
+        _v = vol[_z, _rr, _cr]
+        _k = _leafy[_v]
+        vol[_z, _rr[_k], _cr[_k]] = 0
+        n_rim += int(_k.sum())
+    note("leaves off the water beside the decks:", n_rim)
+    # a railway bridge carries its track across: the rails on the ballast, and ballast (not the grey road deck) between
+    # tracks and to the deck edges -- the rail bridge read as a road with a step where the track left the embankment
+    _way = (deck_col > 0) & (deck_col != C["deck"])
+    _dw, (_iw, _jw) = ndimage.distance_transform_edt(~_way, return_indices=True)
+    _fill = deck & (deck_col == C["deck"]) & (deck_col[_iw, _jw] == C["ballast"]) & (_dw <= 4)
+    deck_col[_fill] = C["ballast"]
+    # the lane markings of the roads on the bridges (they were painted on the ground under the deck)
+    _lm_deck = deck & (lm > 0) & (deck_col == C["asphalt"])
+    deck_col[_lm_deck] = C["mark"]
+    note("lane marking cells on decks:", int(_lm_deck.sum()))
+    _rl = np.zeros((D, W), np.uint16)
+    burn(_rl, bridge_rails + rails, all_touched=True)  # (the ground track's too: the deck runs on over the abutments)
+    _on = deck & (_rl > 0) & np.isin(deck_col, [C["ballast"], C["trambed"]])  # rails lie on a track bed, a tram's too
+    deck_col[_on] = _rl[_on]
+    note("rail decks: ballast fill", int(_fill.sum()), "rail cells", int(_on.sum()))
+    rr, cc = np.nonzero(deck)
+    if len(rr):
+        zt_ = zt_[rr, cc]
+        for dz in (1, 2):
+            vol[zt_ - dz, rr, cc] = C["deck"]
+        vol[zt_ - 1, rr, cc] = deck_col[rr, cc]
+    note("bridge deck cells:", int(deck.sum()))
+    vars(ctx).update(LAMP_KEYS=LAMP_KEYS, bridge_area=bridge_area, bridge_lamps=bridge_lamps, deck=deck,
+                     deck_abs=deck_abs, deck_col=deck_col, deck_h=deck_h, deck_lay=deck_lay, deck_own=deck_own,
+                     g=g, is_road=is_road, jets=jets, kerb_near=kerb_near, lamp_xy=lamp_xy, lamps=lamps,
+                     water_=water_)
 
 
-stage("fountains, beds, furniture")
+STAGES = [  # (its name in the build's timing, the stage)
+    ("rasters, cell colours, OSM", rasters),
+    ("ground classes, roads, water", ground_classes),
+    ("buildings", buildings),
+    ("natural ground, cemeteries", natural_ground),
+    ("vegetation", vegetation),
+    ("fountains, beds, furniture", furniture),
+]
+ctx = Ctx()
+for _name, _run in STAGES:
+    _run(ctx)
+    stage(_name)
+# (the stages to come are module code still: what they read of the ones above)
+(GCTX, H, LAMP_KEYS, OPEN_CUT, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _best, _roof_f, bmask, bridge_area,
+ bridge_lamps, bridge_roads, bridge_ways, cellcol, deck, deck_abs, deck_col, deck_h, deck_lay, deck_own, feats, g,
+ gcol, is_road, jets, kerb_near, lamp_xy, lamps, nd_max, nd_mean, osm, parking_mask, rail_beds, render, road_lines,
+ topi, trunk_ok_db, veg, vol, water_, zt) = (
+    ctx.GCTX, ctx.H, ctx.LAMP_KEYS, ctx.OPEN_CUT, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC, ctx.SANITY,
+    ctx._best, ctx._roof_f, ctx.bmask, ctx.bridge_area, ctx.bridge_lamps, ctx.bridge_roads, ctx.bridge_ways,
+    ctx.cellcol, ctx.deck, ctx.deck_abs, ctx.deck_col, ctx.deck_h, ctx.deck_lay, ctx.deck_own, ctx.feats, ctx.g,
+    ctx.gcol, ctx.is_road, ctx.jets, ctx.kerb_near, ctx.lamp_xy, ctx.lamps, ctx.nd_max, ctx.nd_mean, ctx.osm,
+    ctx.parking_mask, ctx.rail_beds, ctx.render, ctx.road_lines, ctx.topi, ctx.trunk_ok_db, ctx.veg, ctx.vol,
+    ctx.water_, ctx.zt)
 # ---------------------------------------------------------------- bridge piers
 # The decks stood on nothing between their abutments: the A 3's kilometre over the Danube at Schalding, the rail and
 # road bridges, the footbridges over the Ilz floated over the water and the valleys. A pier is a wall across the deck
