@@ -102,6 +102,9 @@ with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `Wo
   `walkAs`, `walkPose`, `release` (the walker's motion stays client-side and is sent as a pose); Traffic keeps the
   set of followed or controlled ids instead of `keep`/`ctl`; one exported `LOCAL_PLAYER`; ride and possession out of
   `nav.ts` (`:595-692`) into `nav/ride.ts`.
+- **Do, separate commits (owner's direction, ADR 0008):** `main.ts` ticks the `WorldSim` whether or not the life is
+  drawn (not neutral for the viewer's frame cost: measure it); `WorldSim.events` become tick-numbered (each event
+  carries its tick, a reader asks for events since a tick), so several clients can read them.
 - **Gates:** tsc, core-deps, life-edit, rapier-car, popin-check. Browser: follow, walk as a person, release.
 
 ### E3. Edits owned by the world, not the renderer (M)
@@ -114,7 +117,7 @@ with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `Wo
   process (ADR 0008): keep `liveEdits` and the tile cache as module singletons, no injection.
 - **Do, policy (not neutral, separate commit, decided by the owner):** the renderer freeing a node no longer drops
   its edit. An edit is kept while a player's focus (in the viewer: the local player's position, through `WorldSim`)
-  is within a radius of it, and dropped some time after none is. Make the radius and delay one tuning entry.
+  is within a radius of it, and dropped some time after none is. Until E2 lands, the focus is `SimInput.focus`. Make the radius and delay one tuning entry.
 - **Gates:** tsc, core-deps, layers, edit-roundtrip, world-smoke, life-edit, collision 16; `--full` with section-check
   and mesh-golden (record first).
 
