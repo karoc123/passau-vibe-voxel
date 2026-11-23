@@ -36,10 +36,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Package | What | Size | Status |
 |---|---|---|---|
 | E1 | `WorldSim`: one headless host for the world sim | M | **In progress** (`e1`) |
-| E5 | Read-only tuning, passed in | S–M | **In progress** (`e5`) |
 | E2 | Players in the sim: follow and walk-as by player id | M | **Waits** for E1 |
 | E3 | Edits owned by the world, not the renderer | M | **Waits** for E1 |
-| E4 | Player crafts on the world clock | L | **Waits** for E1, E5 (best after E3) |
+| E4 | Player crafts on the world clock | L | **Waits** for E1 (best after E3) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
@@ -83,6 +82,10 @@ E6 landed (merge `08f44469`): cores in `sim/craft/`, `sim/river.ts`; presentatio
 `core/`, `sim/`, `physics/` whole. `nav/craft-collision.ts` stays in `nav/` (type import of `VoxelCollision`, which
 imports `fetch`; E4 moves `VoxelCollision` to the sim side).
 
+E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
+`sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
+with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
+
 ### E1. `WorldSim`: one headless host for the world sim (M)
 
 - **Why:** `life.ts:55` creates `Traffic`, `life.ts:88` sets its ground every frame, `main.ts:553-559` ticks it only
@@ -96,18 +99,6 @@ imports `fetch`; E4 moves `VoxelCollision` to the sim side).
   commit; ungating is a one-line decision for the owner). `CraftContext` gets `sim` instead of `roadPhysics`. Port
   `life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs` to it.
 - **Gates:** tsc, core-deps, life-edit, rapier-car 45, vehicles 35, popin-check (`--full`).
-
-### E5. Read-only tuning, passed in (S–M)
-
-- **Why:** `RIDE` (`physics/rapier/vehicle.ts:29`) is read in `car.ts` and mutated by `tools/rapier-car.mjs:32`,
-  `surface-gap.mjs:45`; `BOAT` is a mutable module object; `CRAFT` is global. ADR 0007 asks for read-only tuning per
-  world instance.
-- **Do:** one `Tuning` `{ride, boat, plane, jet, craft}` and a frozen `DEFAULT_TUNING` (one world per server, so the
-  point is no mutation and explicit passing, not several instances); pass it into
-  `createVehicle`/`RapierCar`, `BoatMotion`, `CraftMotion`, `LifePhysics`, `WorldSim`. Tools build a copy instead of
-  mutating.
-- **Gates:** rapier-car 45, vehicles 35, boat 20, plane 32, craft-motion 19, surface-gap (`--full`).
-- **Files:** shares `car.ts` with F7 and one constructor line of `life-phys.ts` with E1.
 
 ### E2. Players in the sim (M, ADR 0007 step 1 for people and following)
 
