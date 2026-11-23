@@ -26,8 +26,8 @@ instance), `head` / `tail` (lamps: lit at night, the tail brighter braking) or a
 
 `vehicleOf(car)` gives a traffic or player car's type (`Car.vt`, else bus or car), `buildOf(car)` what drives it.
 
-**Drawn** (`sim/meshes.ts`): each type's model as four instanced meshes (paint, fixed colours, head and tail lamps:
-the car's own set as before, the same geometry), `sim/life.ts` drawCars puts each car on its type's. The traffic's
+**Drawn** (`view/meshes.ts`): each type's model as four instanced meshes (paint, fixed colours, head and tail lamps:
+the car's own set as before, the same geometry), `view/life.ts` drawCars puts each car on its type's. The traffic's
 buses are now drawn with the bus model (before: the car's boxes stretched).
 
 **The traffic** draws some of its cars from the catalog (`trafficType(id)`: from the car's id, no random number drawn,

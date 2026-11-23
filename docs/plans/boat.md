@@ -32,7 +32,7 @@ down reverse, sideways steer on the car's curve), a held **Drift** button where 
 - **Mode plumbing**: `Mode` has `'boat'`; `flying(mode)` (`fpv` or `boat`) is "a craft owns the camera and the input"
   (Nav leaves keys, pointer, wheel alone; the car's panel and the HUD hide); `nav.startCraft(mode)` replaces
   `startFpv()`. As `docs/plans/plane.md` phase 0, which adds `'plane'` the same way.
-- **Motion** (`web/src/nav/boat-motion.ts`, `BoatMotion`): pure (no DOM, no three.js), fixed step 1/120 s. State:
+- **Motion** (`web/src/sim/craft/boat-motion.ts`, `BoatMotion`): pure (no DOM, no three.js), fixed step 1/120 s. State:
   position, waterline, heading, velocity on the water, yaw rate. Thrust settles at **18.5 m/s (67 km/h)** (95 % in
   ~5.5 s), quadratic and linear drag, a little more coasting so it stops by itself; the yaw rate follows the wheel,
   scaled by speed (30 % at rest, full from 6 m/s, a bit less at top speed); the velocity stays where it pointed as
@@ -48,8 +48,7 @@ down reverse, sideways steer on the car's curve), a held **Drift** button where 
   holds the step (the drone's rule). The waterline follows the water's top.
 - **Mode** (`nav/boat.ts`, `BoatMode`): panel, input (keyboard, touch, gamepad, as `drive.ts`), the spawn, the chase
   camera (9.5 m behind, 3.4 m up, following the heading with a lag; pulled in where `VoxelCollision.sweep` meets
-  something; field of view 60..68° with speed; a short shake on a bump), `window.__boat` for tools (`enter()`,
-  `pose`). Lazily loaded beside the drone and the car in `main.ts`.
+  something; field of view 60..68° with speed; a short shake on a bump). Lazily loaded beside the drone and the car in `main.ts`.
 - **Model** (`nav/boat-model.ts`): ~30 boxes merged with vertex colours (white hull, red stripe, teak deck, seats,
   console, windscreen, outboard), the river boats' stepped bow; red / green / white nav lights brightened by
   `daylight.night` as the cars' lamps; a foam trail: flat additive quads laid every 0.6 m off the stern's corners,
@@ -66,6 +65,6 @@ swinging (never off the water), east under the Schanzlbrücke untouched, north i
 
 ## Left out
 
-The river boats (`sim/boats.ts`) do not collide with or avoid the player's boat (they run on the clock along fixed
+The river boats (`view/boats.ts`) do not collide with or avoid the player's boat (they run on the clock along fixed
 paths; it passes through them). No damage, no fuel, no sound, no boat parked in the world to walk up to, no `?boat=`
 URL parameter, no water landing for the plane.
