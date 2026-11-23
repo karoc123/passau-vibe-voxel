@@ -19,7 +19,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
-import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild } from './vehicle';
+import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild, type RideTuning } from './vehicle';
 
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
 export type CarStatus = 'ok' | 'water';
@@ -35,9 +35,9 @@ export interface CarTuning {
 export const TUNED: CarTuning = { steps: true, walls: true, air: true };
 export const SPIKE: CarTuning = { steps: false, walls: false, air: false };
 
-export { CAR, bus, RIDE, type CarBuild } from './vehicle';
+export { CAR, bus, RIDE, type CarBuild, type RideTuning } from './vehicle';
 // m/s into the ground: a fall of ~8 m (under the car's gravity)
-export const crashSpeed = () => Math.sqrt(2 * 9.81 * RIDE.gravity * 8);
+export const crashSpeed = (ride: RideTuning = RIDE) => Math.sqrt(2 * 9.81 * ride.gravity * 8);
 const MAX_STEER = 0.55, STEER_FALL = 14; // rad, m/s (CarBuild tune: steer, steerFall)
 // a bike (CarBuild bike): drawn leaning into its turns, at most LEAN_MAX (rad), eased over LEAN_S; a wheelie of up to
 // WHEELIE (rad) under full throttle from low speed; kept upright on its wheels (bike())
@@ -74,11 +74,13 @@ export class RapierCar {
   lean = 0;
   wheelie = 0;
 
-  // heading: radians about y (0: +z), or a whole rotation
+  // heading: radians about y (0: +z), or a whole rotation; tuning: the assists; rideTuning: the ride's numbers (read-only,
+  // Tuning.ride: sim/tuning.ts), what `existing` was built with
   constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, at: { x: number; y: number; z: number }, heading: number | RAPIER.Rotation,
-    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR, existing?: ReturnType<typeof createVehicle>) {
+    private readonly terrain: RapierTerrain | null = null, readonly tuning: CarTuning = TUNED, readonly build: CarBuild = CAR, existing?: ReturnType<typeof createVehicle>,
+    readonly rideTuning: RideTuning = RIDE) {
     const q = typeof heading === 'number' ? axisAngle(quat(), vec3(0, 1, 0), heading) : heading;
-    const v = existing ?? createVehicle(R, world, at, q, build, tuning.walls);
+    const v = existing ?? createVehicle(R, world, at, q, build, tuning.walls, rideTuning);
     this.body = v.body; this.chassis = v.chassis; this.controller = v.controller;
     this.half = build.half;
     this.ride = build.ride;
@@ -127,8 +129,8 @@ export class RapierCar {
     const lv = this.body.linvel(), av = this.body.angvel(), com = this.body.worldCom();
     this.prevV = { x: lv.x, y: lv.y, z: lv.z };
     c.updateVehicle(dt, undefined, WHEEL_GROUPS);
-    if (RIDE.patch > 0 && this.terrain) this.dampers(lv, av, com, dt);
-    const downforce = rideOf(B, 'downforce');
+    if (this.rideTuning.patch > 0 && this.terrain) this.dampers(lv, av, com, dt);
+    const downforce = rideOf(B, 'downforce', this.rideTuning);
     if (downforce && this.wheelsInContact()) {
       const up = rotate(vec3(0, 1, 0), this.body.rotation());
       const f = -downforce * this.body.mass() * 9.81 * Math.min(2, (v / 13.9) ** 2) * dt;
@@ -165,17 +167,17 @@ export class RapierCar {
   // 1/64 m, core/surface.ts), so on a gentle grade the normal under a wheel steps by up to 1/64 per metre at a column's
   // edge (the grade rounded column by column: flat, flat, 1/64, flat ...), and at speed the damper takes each step whole
   // (at 70 km/h 0.3 m/s, a fifth of an axle's load: the body pitches on every 1.6 mm). So the damper here takes the
-  // slope of the drawn surface over RIDE.patch m either side of the contact (central differences of its heights,
+  // slope of the drawn surface over the ride's patch m either side of the contact (central differences of its heights,
   // terrain.groundAt; one-sided at a riser, the facet's normal where neither side is the same surface or the wheel is
   // on something else, a wedge): Rapier's damping force replaced by the same along that normal. Only for the small
-  // kinks: where the two normals differ by more than half of RIDE.kinkMax the facet's takes over (fully at kinkMax), so
+  // kinks: where the two normals differ by more than half of the ride's kinkMax the facet's takes over (fully at kinkMax), so
   // a real edge -- a hole, a deck's end, a wedge's foot -- is damped as it comes. The contact (on the
   // drawn surface), the springs and the friction are Rapier's, the force along the facet's normal at the contact point
   // as Rapier applies it. lv, av, com: the body's velocities and centre of mass before updateVehicle (what it used).
   private dampers(lv: RAPIER.Vector, av: RAPIER.Vector, com: RAPIER.Vector, dt: number) {
-    const c = this.controller, b = this.body, m = b.mass(), t = this.terrain!, o = t.origin, H = RIDE.patch;
+    const c = this.controller, b = this.body, m = b.mass(), t = this.terrain!, o = t.origin, ride = this.rideTuning, H = ride.patch;
     const down = rotate(vec3(0, -1, 0), b.rotation());
-    const compression = rideOf(this.build, 'compression'), relaxation = rideOf(this.build, 'relaxation'), stiffness = rideOf(this.build, 'stiffness');
+    const compression = rideOf(this.build, 'compression', ride), relaxation = rideOf(this.build, 'relaxation', ride), stiffness = rideOf(this.build, 'stiffness', ride);
     for (let i = 0; i < this.build.wheels.length; i++) {
       if (!c.wheelIsInContact(i)) continue;
       const n = c.wheelContactNormal(i)!, p = c.wheelContactPoint(i)!;
@@ -199,7 +201,7 @@ export class RapierCar {
       const vx = lv.x + av.y * rz - av.z * ry, vy = lv.y + av.z * rx - av.x * rz, vz = lv.z + av.x * ry - av.y * rx;
       const raw = (n.x * vx + n.y * vy + n.z * vz) / -den;
       const dn = Math.hypot(n.x - ex, n.y - ey, n.z - ez);
-      const w = Math.max(0, Math.min(1, (RIDE.kinkMax - dn) / (RIDE.kinkMax * 0.5)));
+      const w = Math.max(0, Math.min(1, (ride.kinkMax - dn) / (ride.kinkMax * 0.5)));
       const soft = raw + w * ((ex * vx + ey * vy + ez * vz) / -deS - raw);
       const damp = (v: number) => (v < 0 ? compression : relaxation) * v;
       const spring = stiffness * (REST - (c.wheelSuspensionLength(i) ?? REST)) / -den;
@@ -220,7 +222,7 @@ export class RapierCar {
     if (!touching) this.airTime += dt;
     else {
       // (the speed just before the first touch: the springs take the rest over a few steps)
-      if (this.airTime > 0.25 && pv.y < -2) this.event = { kind: 'landing', speed: -pv.y, crash: -pv.y >= crashSpeed() };
+      if (this.airTime > 0.25 && pv.y < -2) this.event = { kind: 'landing', speed: -pv.y, crash: -pv.y >= crashSpeed(this.rideTuning) };
       this.airTime = 0;
     }
     // a wall: horizontal speed lost in one step (more than the brakes could)

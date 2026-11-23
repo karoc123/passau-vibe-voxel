@@ -2,12 +2,12 @@
 // builds a small map (2 x 2 tiles of 64 m, world.ts synthMap), drops the car, drives it with scripted input at a fixed 1/60 s step and
 // judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning } from '../src/physics/rapier/car';
+import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning, type RideTuning } from '../src/physics/rapier/car';
 import { RapierTerrain, WHEEL_GROUPS } from '../src/physics/rapier/terrain';
 import type { Check } from './check';
 import { synthMap, STREET, WALL, WATER, type ScenarioMap } from './world';
 
-// (the ride's numbers, for tools/rapier-car.mjs --set: the same module instance as the scenarios')
+// (the default ride, read-only: tools/rapier-car.mjs --set builds a copy for scenarioTuning.ride)
 export { RIDE };
 // (the synthetic map, for tools/vehicles.mjs's own scenarios: built by the same module instance as Sim's)
 export { synthMap, STREET, WALL };
@@ -15,8 +15,9 @@ export { synthMap, STREET, WALL };
 // a voxel staircase g = b + clamp(floor((z - z0) / p), 0, n) as the road it rounds: through the steps' middles
 export const stairs = (z: number, b: number, z0: number, p: number, n: number) => b + Math.max(0, Math.min(n, (z - z0 - p / 2) / p));
 
-// the tuning the scenarios' cars get (tools/rapier-car.mjs --spike: the spike's car)
-export const scenarioTuning: { tuning: CarTuning } = { tuning: TUNED };
+// what the scenarios' cars get: the assists (tools/rapier-car.mjs --spike: the spike's car) and the ride's numbers
+// (--set: a copy of RIDE with some changed; surface-gap.mjs too)
+export const scenarioTuning: { tuning: CarTuning; ride: RideTuning } = { tuning: TUNED, ride: RIDE };
 const STEP = 1 / 60;
 
 // pr, rr: the chassis' pitch and roll rate (rad/s, about its own side and forward axes); yr: its yaw rate (rad/s, about
@@ -47,7 +48,7 @@ export class Sim {
     for (const t of map.tiles) this.terrain.setTile(t.tx, t.tz, t.tile);
     this.terrain.update([{ x: at.x, z: at.z }]);
     const g = this.terrain.groundAt(at.x, at.z, at.y ?? 1e4) ?? 0;
-    this.car = new RapierCar(R, this.world, { x: at.x, y: g + build.ride + 0.15, z: at.z }, heading, this.terrain, scenarioTuning.tuning, build);
+    this.car = new RapierCar(R, this.world, { x: at.x, y: g + build.ride + 0.15, z: at.z }, heading, this.terrain, scenarioTuning.tuning, build, undefined, scenarioTuning.ride);
     this.car.body.setLinvel({ x: Math.sin(heading) * speed, y: 0, z: Math.cos(heading) * speed }, true);
     // settle on its wheels
     for (let i = 0; i < 30; i++) this.step({ gas: 0, brake: 0, steer: 0, handbrake: false }, false);
@@ -91,7 +92,7 @@ export class Sim {
       t: this.t, x: pp.x, y: pp.y, z: pp.z, vx: vv.x, vy: vv.y, vz: vv.z, kmh: this.car.kmh, up, heading: Math.atan2(fx, fz),
       pitch: Math.asin(Math.max(-1, Math.min(1, 2 * (q.y * q.z - q.w * q.x)))), roll: Math.asin(Math.max(-1, Math.min(1, 2 * (q.x * q.y + q.w * q.z)))),
       wheels: this.car.wheelsInContact(), pr: lx, rr: lz, yr: w.y, road: (road(B.wheels[0].z) + road(B.wheels[2].z)) / 2,
-      load: load / (b.mass() * 9.81 * RIDE.gravity), steer: c.wheelSteering(0) ?? 0, stepMs: ms,
+      load: load / (b.mass() * 9.81 * this.car.rideTuning.gravity), steer: c.wheelSteering(0) ?? 0, stepMs: ms,
     });
   }
 

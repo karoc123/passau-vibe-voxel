@@ -31,7 +31,7 @@ import type { CoachBox } from '../../sim/train-traffic';
 import type { Car, RoadPose } from '../../sim/types';
 import type { Meta } from '../../types';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
-import { createVehicle, createWheels, REST, WHEEL_R, warmUp, type CarBuild } from './vehicle';
+import { createVehicle, createWheels, REST, RIDE, WHEEL_R, warmUp, type CarBuild, type RideTuning } from './vehicle';
 import { buildOf, VEHICLES, type VehicleId } from '../../sim/vehicles';
 import { RapierCar, type CarInput } from './car';
 import { PlayerCar, FALL_MS, NO_INPUT, PARK, SINK_MS, type DriverSnapshot } from './player-car';
@@ -124,8 +124,9 @@ export class LifePhysics implements TrafficBodies {
   private readonly pose0: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
 
   // Rapier initialised (load()). focus: where the action is (the physics' origin, for f32 precision); terrain: where
-  // the tiles come from (a cache or a load)
-  constructor(meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] }, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {}) {
+  // the tiles come from (a cache or a load); rideTuning: the cars' ride (read-only, Tuning.ride: sim/tuning.ts)
+  constructor(meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] }, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {},
+    readonly rideTuning: RideTuning = RIDE) {
     this.opts = { ...DEFAULTS, ...opts };
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
@@ -133,10 +134,10 @@ export class LifePhysics implements TrafficBodies {
     this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, { reach: REACH, needNow: NEED_NOW, budgetChunks: this.opts.chunksPerTick, ...terrain });
   }
 
-  static async load(meta: Meta, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {}) {
+  static async load(meta: Meta, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {}, rideTuning: RideTuning = RIDE) {
     await RAPIER.init();
     warmUp();
-    return new LifePhysics(meta, focus, opts, terrain);
+    return new LifePhysics(meta, focus, opts, terrain, rideTuning);
   }
 
   owns(c: Car) { const b = this.bodies.get(c.id); return !!b && b.state !== 'path'; }
@@ -250,10 +251,10 @@ export class LifePhysics implements TrafficBodies {
     body.driver = driver;
     if (!body.ctl) {
       body.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-      body.ctl = createWheels(this.world, body.body, body.build);
+      body.ctl = createWheels(this.world, body.body, body.build, this.rideTuning);
     }
     body.drive ??= new RapierCar(RAPIER, this.world, body.body.translation(), body.body.rotation(), this.terrain,
-      undefined, body.build, { body: body.body, chassis: body.chassis, controller: body.ctl! });
+      undefined, body.build, { body: body.body, chassis: body.chassis, controller: body.ctl! }, this.rideTuning);
     body.chassis.setCollisionGroups(CAR_GROUPS);
     body.chassis.setFriction(0);
     body.chassis.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min);
@@ -523,7 +524,7 @@ export class LifePhysics implements TrafficBodies {
     const ride = build.ride + (state === 'player' ? 0.1 : 0.05);
     const up = upOf(q.x, q.y, q.z, q.w);
     const at = { x: pose.x - this.origin.x + up.x * ride, y: pose.y + up.y * ride, z: pose.z - this.origin.z + up.z * ride };
-    const v = createVehicle(RAPIER, this.world, at, q, build, false);
+    const v = createVehicle(RAPIER, this.world, at, q, build, false, this.rideTuning);
     if (state !== 'player') v.chassis.setCollisionGroups(WORLD_GROUPS);
     const f = fwdOf(q.x, q.y, q.z, q.w);
     v.body.setLinvel({ x: f.x * speed, y: 0, z: f.z * speed }, true);
