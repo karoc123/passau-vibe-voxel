@@ -35,7 +35,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| R6 | The rest of `voxelize.py`'s stages | S–M | **Ready** |
+| R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
@@ -46,21 +46,17 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 ## Packages
 
-### R6. The rest of `voxelize.py`'s stages (code-health 13 and 18, S–M each)
+### R6. The rest of `voxelize.py`'s stages (code-health 18, S–M)
 
-Landed (merge of `r6`): `voxelize.py` runs as `STAGES`, 19 `def stage(ctx)` functions over a `Ctx`
-(SimpleNamespace); `scripts/constants.py` (material ids, the ground colours caps.py reads); `tunnels.plan/build`,
-`underpass.build` return their results; `traffic.build(open_cut=...)`. Left:
+Landed (merges of `r6`, `r6b`): `voxelize.py` runs as `STAGES`, 20 `def stage(ctx)` functions over a `Ctx`
+(SimpleNamespace) with plain field names, the bridges' decks and bridgeheads a `bridges` stage of their own (timed as
+"bridge decks, bridgeheads"); `scripts/constants.py`; `tunnels.plan/build`, `underpass.build` return their results;
+`traffic.build(open_cut=..., bored=(floor, ids), walked=underpass.Walked)`, no module globals in tunnels/underpass.
+Left:
 
-- **traffic.py's inputs:** it still reads `tunnels.FLOOR/IDS` and `underpass.WALK/IDS/SHIFTED`, which `regions.py`
-  sets for the whole map. Pass them to `traffic.build` as arguments (R7's split of `build` has landed).
 - **Class raster (code-health 18):** `caps.py` still finds steps by `ground.npz` rgb and paved ids by colour (the
   colours now come from `constants.py`, so a colour change follows). A class raster written by `voxelize.py` changes
   the outputs: golden differs by design, and it needs a data rebuild.
-- **Stage cuts:** the bridges' decks and bridgeheads still sit in `furniture` (stage name "fountains, beds,
-  furniture"); split them into a `bridges` stage. Some context fields keep their old private names (`_best`,
-  `_lift`, `_tr_t`, `_jm`, `_locks`, `_core_s`, `_bored`, `_walked`): give them plain names.
-- Guard: each commit byte-exact under `check.py golden --compare`.
 
 ### R7. Build time (code-health 19, M)
 
