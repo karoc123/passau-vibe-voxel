@@ -3666,17 +3666,16 @@ for f in feats:
     if f["tags"].get("building") in ROOFY or f["tags"].get("building:part") == "roof":
         bkind[f["rr"], f["cc"]] = 2
 import tunnels
-_bores = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
+_bores, _bore_ids = tunnels.plan(osm, g)  # roads and paths through the hills (the B 12 under the Georgsberg): bored below
 import underpass
-underpass.SKIP = set(tunnels.IDS)
 _rail_bed = np.zeros((D, W), bool)
 for _shape, _ in rail_beds:
     _rr, _cc = cells_of(_shape, fallback=False)
     _rail_bed[_rr, _cc] = True
-underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed)
+_walked = underpass.build(vol, g, pal, C, osm, note, is_road | _rail_bed, skip=_bore_ids)  # (not the bored ways)
 carriageway_sanity(lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
 RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
-tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
+_bored = tunnels.build(vol, g, pal, C, STONE, note, _bores)  # (after the set pieces: the curtain wall stands over the bore)
 
 stage("landmark details, underpasses, tunnels")
 # ---------------------------------------------------------------- floating debris
@@ -3745,7 +3744,7 @@ stage("river colours")
 _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
 _lut = np.array([e[:3] for e in pal.entries], np.uint8)
 _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
-CORE_OUT = dict(g=tunnels.surface(g).astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
+CORE_OUT = dict(g=tunnels.surface(g, _bored.lowered).astype(np.int16), rgb=_lut[_ids], water=_wm, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
 # the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
 # building cell belongs to, for zones.py and windows.py
 _fp = np.zeros((D, W), np.int64)
@@ -3827,9 +3826,9 @@ for _z in range(int(g.min()), int(_lim.max()) + 1 if len(_lim) else 0):
 deck_near[_rb, _cb] = _top - g[_rb, _cb]
 CORE_OUT["deck_near"] = deck_near
 CORE_OUT["twater"] = (gcol == C["water"]) & (_dd <= 2)
-CORE_OUT["floor"] = tunnels.FLOOR if tunnels.FLOOR is not None else np.full((D, W), -1, np.int16)
-CORE_OUT["walk"] = underpass.WALK
-report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL)
+CORE_OUT["floor"] = _bored.floor
+CORE_OUT["walk"] = _walked.level
+report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, _rail_bed, CORE_SL, _walked.level)
 # the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
 # docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
 # it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
@@ -3902,7 +3901,7 @@ report["counters"]["deck_sag"] = _sg
 note("bridge ways (with a span over the terrain, their built deck SAG_M m or more under their own level):",
      _sg["ways"], _sg["sagging"], _sg["worst"][:5])
 # the same along every tunnel=yes carriageway and railway the ground covers (tunnels.plan: a bore, a covered passage,
-# one left solid; not one open to the sky, under a deck or a building), each metre from its floor (tunnels.FLOOR, else
+# one left solid; not one open to the sky, under a deck or a building), each metre from its floor (Bored.floor, else
 # the grade between its portals or the ground under it: one left solid is blocked) to the first solid voxel (a deck
 # aside): blocked under tunnels.LOW m, low under the vehicle's clearance; and the street over a bore or a covered
 # passage whole (its surface's voxel there: holes)
@@ -3918,7 +3917,7 @@ for _oid, _t, _l in osm.lines:
     _rc = np.array([(int(q.y), int(q.x)) for q in _pp])
     if not len(_rc):
         continue
-    _fl = tunnels.FLOOR[_rc[:, 0], _rc[:, 1]].astype(int)
+    _fl = _bored.floor[_rc[:, 0], _rc[:, 1]].astype(int)
     _gr = g[_rc[:, 0], _rc[:, 1]]
     _za, _zb = (tunnels._portal_level(g, *p_) for p_ in (_l.coords[0], _l.coords[-1]))
     _fl = np.where(_fl >= 0, _fl, np.minimum(_gr, tunnels._floor(_za, _zb, np.arange(1.0, _l.length - 0.99, 1.0)[:len(_rc)], _l.length, _gr)))
@@ -3931,7 +3930,7 @@ for _oid, _t, _l in osm.lines:
         _hit = np.zeros(len(_rc), bool)
         _hit[_m] = _solid[vol[_z[_m], _rc[_m, 0], _rc[_m, 1]]]
         _room[_hit] = _k
-    _st = np.array([tunnels.LOWERED.get((r_, c_), 0) for r_, c_ in _rc])
+    _st = np.array([_bored.lowered.get((r_, c_), 0) for r_, c_ in _rc])
     _hole = (_st > 0) & (vol[np.clip(_st - 1, 0, vol.shape[0] - 1), _rc[:, 0], _rc[:, 1]] == 0)
     _tu["ways"] += 1
     _tu["blocked"] += int((_room < tunnels.LOW).any())
@@ -3953,8 +3952,8 @@ def _owned(oid):
     return in_core(int(p_.y), int(p_.x))
 
 
-RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in tunnels.IDS if _owned(o)),
-              walk_ids=sorted(o for o in underpass.IDS if _owned(o)), shifted_stairs=sorted(underpass.SHIFTED))
+RESULT.update(open_cut=sorted(o for o in OPEN_CUT if _owned(o)), bore_ids=sorted(o for o in _bore_ids if _owned(o)),
+              walk_ids=sorted(o for o in _walked.ids if _owned(o)), shifted_stairs=sorted(_walked.shifted))
 # debug: top-down colour of the highest voxel, the ground's classes (regions.py: data/debug/topdown.png, ground.png)
 # (layer by layer: a bool copy of the whole volume was the region's peak, ~0.6 GB; an empty column gets Hm - 1 as before)
 topz = np.full(vol.shape[1:], Hm - 1, np.int64)
