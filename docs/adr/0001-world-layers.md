@@ -36,10 +36,13 @@ meshed, collided and written like a pipeline node, and an unedited node re-encod
   stand in one stack with it. Edits lower it where they dig below it and never raise it (`recomputeGround`, capped by
   L0's ground). Water counts as in the files (its top is the ground; `physics/rapier/terrain.ts` lowers the solid
   ground to the water's bottom).
-- **The viewer's edited nodes.** `stream.ts replaceColumns` swaps a loaded 1 m node's columns and re-meshes it (and
-  its foliage tile) in place from them (`mesher.worker.ts` MeshRequest `cols`: the same meshes as from the file,
-  `tools/remesh-bench.mjs`); `core/live-edits.ts` tells the physics, which read node files through `core/tile-cache.ts` (one fetch and decode per
-  node, shared by the drone's collision and the car's terrain, seen through the live edits). Freeing the
+- **Edits are the world's.** `core/world-edits.ts` `apply(op)` is the one way to edit: it reads each node an op
+  (a `WorldOp`) touches through the world's `core/tile-cache.ts` (one fetch and decode per node, shared by the drone's
+  collision and the car's terrain, seen through the live edits), applies it to the base and, where it carves, the
+  foliage, and puts the result into `core/live-edits.ts` (`LiveNode`: the columns and the node's ops in order). The
+  physics read node files through the cache; the viewer's streamer listens and re-meshes a loaded 1 m node and its
+  foliage tile in place (`stream.ts` `onLive`, `replaceColumns`; `mesher.worker.ts` MeshRequest `cols`: the same
+  meshes as from the file, `tools/remesh-bench.mjs`), and a node loaded later is meshed from the edit's columns. Freeing the
   node drops the edit (L2). `?dig=1` (`dig.ts`) carves spheres by click to try it.
 - **Distance levels (2, 4, 8 m) never show L2.** They show L0; L1 there needs a downsampled L1 from the server
   (not built; `effectiveColumns` refuses persistent edits on them for now).

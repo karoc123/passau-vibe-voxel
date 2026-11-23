@@ -448,8 +448,8 @@ export class Traffic {
   }
 
   // ------------------------------------------------------------------ player edits
-  // Box (map metres [x0, z0, x1, z1)) was edited (stream.ts replaceColumns, through core/live-edits.ts), or, cleared,
-  // is its files' again (the node freed): the edits meeting it are forgotten.
+  // Box (map metres [x0, z0, x1, z1)) was edited (core/world-edits.ts, through core/live-edits.ts), or, cleared,
+  // is its files' again (the edit dropped): the edits meeting it are forgotten.
   edited(box: [number, number, number, number], cleared = false) {
     if (cleared) this.edits = this.edits.filter((b) => !(b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3]));
     else this.edits.push([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
