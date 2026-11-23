@@ -2195,680 +2195,685 @@ def natural_ground(ctx):
     vars(ctx).update(grave_stones=grave_stones, zt=zt)
 
 
+def vegetation(ctx):
+    """The trees (the laser's canopy, OSM's and the register's trees): trunks, crowns, branches; trees.json's
+    records."""
+    (H, bmask, cellcol, exg, feats, g, gcol, is_road, lum, nd_mean, osm, rgbsum, topi, vol) = (
+        ctx.H, ctx.bmask, ctx.cellcol, ctx.exg, ctx.feats, ctx.g, ctx.gcol, ctx.is_road, ctx.lum, ctx.nd_mean,
+        ctx.osm, ctx.rgbsum, ctx.topi, ctx.vol)
+    # ---------------------------------------------------------------- vegetation (LiDAR canopy + OSM trees)
+    trees = [(oid, t, p) for oid, t, p in osm.nodes if t.get("natural") == "tree"]
+    # every known tree (scripts/trees.py: OSM's tree nodes and the Bavarian single-tree register of the 2024 flight)
+    all_trees = treedb.load(trees, buildings=bmask)
+    note("known trees: OSM natural=tree", sum(t["src"] == "osm" for t in all_trees), "+ Einzelbäume register",
+         sum(t["src"] == "bv" for t in all_trees))
+    # the LiDAR point clouds (scripts/laser.py; Feb 2021, leaf-off): the canopy's measured height, the crowns' undersides,
+    # conifers by their winter density. Optional: without data/laser.npz the trees come from the surface model alone
+    LZ = None
+    if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
+        LZ = region.load_npz("data/laser.npz")
+    else:
+        note("no data/laser.npz (scripts/laser.py): trees from the surface model only")
+    # the forests' dominant species from remote sensing (scripts/species_map.py: DLR Tree Species Germany 2022, 2016 where
+    # 2022 has lost the canopy; 10 m). Optional: without data/raw/treespecies_*.tif (or with NO_SPECIES_MAP) the trees'
+    # kinds come from OSM and the laser alone
+    SPM = None if os.environ.get("NO_SPECIES_MAP") else species_map.grid()
+    if SPM is None:
+        note("no tree species map (data/raw/treespecies_*.tif): conifers by OSM and the laser only")
+    # the OSM trees widen the ortho's green test and pardon wall edges (as before); the register's points do not
+    tree_rc = np.array([(int(t["y"]), int(t["x"])) for t in all_trees if t["src"] == "osm"])
+    near_tree = np.zeros((D, W), bool)
+    if len(tree_rc):
+        near_tree[tree_rc[:, 0], tree_rc[:, 1]] = True
+        near_tree = ndimage.binary_dilation(near_tree, iterations=3)
+    veg = (~bmask) & (nd_mean > 2.2) & ((exg > 0.025) | (near_tree & (exg > -0.03)))
+    # nor inside any building's outline: one drawn only through its parts (a church) left the cells between its
+    # parts out of bmask, and its green copper roof grew 1 800 leaf voxels, pillars up its front
+    _allb = np.zeros((D, W), bool)
+    for f in feats:
+        if not f["part"] and f["tags"].get("building") not in ("roof", "carport", "canopy"):
+            _allb[f["rr"], f["cc"]] = True
+    note("vegetation cells inside building outlines dropped:", int((veg & _allb).sum()))
+    veg &= ~_allb
+    # LiDAR wall edges outside OSM footprints look like tall "trees": reject cells next to a building
+    # whose height is close to that building's roof
+    btop_near = ndimage.maximum_filter(np.where(bmask, topi, 0), size=7)
+    wall_edge = (btop_near > 0) & (nd_mean > 0.6 * btop_near) & (nd_mean > 6)
+    veg &= ~wall_edge | (near_tree & (nd_mean < 25))
+    step = ndimage.maximum_filter(nd_mean, 3) - ndimage.minimum_filter(nd_mean, 3)
+    veg &= ~((btop_near > 0) & (step > 7) & (nd_mean > 0.5 * btop_near))
+    veg &= nd_mean < 32  # no trees taller than ~30 m in town
+    # no trees growing out of a stadium shell (its fins and roof edge are LiDAR-high and greenish in the ortho)
+    stad = np.zeros((D, W), np.uint16)
+    burn(stad, [(geom, 1) for oid, typ, t, geom in osm.areas_with("leisure", ("stadium",))])
+    veg &= ~((stad > 0) & ~near_tree)
+    veg = ndimage.binary_opening(veg, iterations=1)
+    note("wall-edge cells rejected as vegetation:", int(wall_edge.sum()))
+    lab, n = ndimage.label(veg)
+    sizes = ndimage.sum(veg, lab, range(1, n + 1))
+    veg &= np.isin(lab, np.nonzero(sizes >= 4)[0] + 1)
+    # image-matched surface (DOM20) leaves pinholes and frayed rims in crowns: close them, fill holes up to 30 m2
+    _vc = ndimage.binary_closing(veg, iterations=1) & ~bmask & (nd_mean > 1.5)
+    _holes = ndimage.binary_fill_holes(_vc) & ~_vc
+    _hl, _hn = ndimage.label(_holes)
+    if _hn:
+        _hs = ndimage.sum(_holes, _hl, range(1, _hn + 1))
+        _vc |= np.isin(_hl, np.nonzero(_hs <= 30)[0] + 1) & ~bmask & ~(gcol == C["water"])
+    note("canopy cells added by closing / hole filling:", int((_vc & ~veg).sum()))
+    veg = _vc
+    veg_laser = np.zeros((D, W), bool)  # canopy cells whose height the laser measured
+    if LZ is not None:
+        # the image-matched surface smears crowns into the gaps between them and over the lawn at their rims (a third of
+        # its canopy cells are off by more than 2 m). Where the laser saw the ground there, well sampled and with no
+        # vegetation over 2 m, beside canopy it did see (3 m or less), the cell is open: the rim and the gaps go. A crown
+        # the laser did not see at all (planted or grown since 2021) stays, and so does the rim of any tree of the 2024
+        # register (within 2 m of its point): the surface model has the last word on whether a tree stands
+        _lcan = LZ["veg_top"] >= 30
+        _bvpt = np.zeros((D, W), bool)
+        for t in all_trees:
+            if t["src"] != "osm" or t.get("bv_height"):
+                _bvpt[int(t["y"]), int(t["x"])] = True
+        _open = (LZ["n_pulse"] >= 6) & (LZ["veg_top"] < 20) & (LZ["n_ground"] >= 3)
+        _trim = veg & _open & (ndimage.distance_transform_edt(~_lcan) <= 3) & (ndimage.distance_transform_edt(~_bvpt) > 2)
+        veg &= ~_trim
+        lab, n = ndimage.label(veg)
+        sizes = ndimage.sum(veg, lab, range(1, n + 1))
+        veg &= np.isin(lab, np.nonzero(sizes >= 4)[0] + 1)
+        note("canopy cells the laser saw open (rims, gaps between crowns) dropped:", int(_trim.sum()))
+        # the canopy's height: the laser's highest vegetation return (leaf-off twigs, within a few dm of the summer top),
+        # grown by what the 2024 surface adds, up to 1.5 m in three years; where the surface model is far lower (under
+        # 60 %) the tree was cut back or felled since, and the surface model's height stands
+        _lt = LZ["veg_top"].astype(np.float32) / 10
+        _lt = np.where(_lt >= 2, _lt, ndimage.median_filter(_lt, 3))
+        _use = veg & (_lt >= 2) & (nd_mean >= 0.6 * _lt)
+        _nv = _lt + np.clip(nd_mean - _lt, 0, 1.5)
+        used, total = int(_use.sum()), int(veg.sum())
+        report["counters"]["laser_canopy"] = dict(used=used, total=total)
+        note("canopy heights from the laser:", used, "of", total, "cells; surface model minus laser, median",
+             round(float(np.median((nd_mean - _lt)[_use])), 2) if _use.any() else None, "m, |diff| > 2 m:",
+             round(float((np.abs(nd_mean - _lt)[_use] > 2).mean()), 3) if _use.any() else None)
+        nd_mean = np.where(_use, _nv, nd_mean)
+        veg_laser = _use
+    nd_mean = np.where(veg & (nd_mean < 2.2), np.maximum(nd_mean, ndimage.median_filter(np.where(veg, nd_mean, 0), 5)), nd_mean)
+    hs = ndimage.gaussian_filter(np.where(veg, nd_mean, 0), 2) / np.maximum(ndimage.gaussian_filter(veg.astype(float), 2), 1e-3)
+    crown_top = np.round(np.minimum(nd_mean, 40)).astype(np.int32)
+    # against a wall the DSM is the wall's (1 m green pillars 20-30 m up the facades): within 2 m
+    # of a building a crown is no taller than its canopy away from the walls (gaussian mean x 1.25 + 2 m), 12 m with none
+    _nearb = ndimage.binary_dilation(bmask, iterations=2) & veg
+    _far = veg & ~ndimage.binary_dilation(bmask, iterations=2)
+    _wf = ndimage.gaussian_filter(_far.astype(np.float32), 3)
+    _hf = ndimage.gaussian_filter(np.where(_far, nd_mean, 0).astype(np.float32), 3) / np.maximum(_wf, 1e-3)
+    _cap = np.where(_wf > 0.05, _hf * 1.25 + 2, 12)
+    _clip = _nearb & (crown_top > _cap)
+    crown_top = np.where(_clip, np.round(_cap), crown_top).astype(np.int32)
+    note("crowns against walls clipped to their canopy:", int(_clip.sum()))
+    crown_bot = np.clip(np.round(hs * 0.38), 2, None).astype(np.int32)
+    crown_bot = np.minimum(crown_bot, crown_top - 1)
+    # leaf colour from ortho: luminance x hue bins
+    hue = np.zeros((D, W), np.float32)
+    r_, g_, b_ = cellcol[..., 0], cellcol[..., 1], cellcol[..., 2]
+    yellowish = (r_ - b_) / rgbsum > 0.05
+    lbin = np.clip(((lum - 40) / 110 * 5).astype(int), 0, 4)
+    leafidx = np.array(LEAVES, np.uint16)[(4 - lbin) + 5 * (~yellowish)]
+
+    # trunks: every known tree standing under a LiDAR crown gets one, from the ground up into its crown (the crown's leaf
+    # columns start at crown_bot, so the trunk's top voxel touches them face to face: the crown stands, it does not float);
+    # a known tree with no crown in the surface model (planted since) is drawn procedurally. Crowns that no database tree
+    # stands under get trunks at their tops (local maxima of the canopy height, >= 5 m apart).
+    n_new = n_trunk = 0
+    canopy_near = ndimage.binary_dilation(veg, iterations=2)
+    _vd, (_vr, _vc) = ndimage.distance_transform_edt(~veg, return_indices=True)
+    trunk_at = np.zeros((D, W), bool)
+    # where a trunk may stand: never on a carriageway, rails, tram bed or in the water; a trunk placed only from the canopy
+    # (no tree known there) also not on paths and squares -- it would stand in the walkers' way -- but on soft ground
+    _hard = np.isin(gcol, [C[k] for k in ("water", "asphalt", "asphalt_l", "rail", "trambed", "ballast", "cycle", "parking")]) | is_road
+    trunk_ok_db = ~_hard
+    trunk_ok_peak = np.isin(gcol, [C[k] for k in ("grass", "grass2", "garden", "scrub", "dirt", "dirt2", "fresh", "bare", "soil",
+                                                   "flower", "flower2", "gravel")]) & ~is_road
+    _okd, (_okr, _okc) = ndimage.distance_transform_edt(~(trunk_ok_peak & veg), return_indices=True)
+    _dbd, (_dbr, _dbc) = ndimage.distance_transform_edt(~(trunk_ok_db & veg), return_indices=True)
+
+    trunks = []  # (row, col, thick): drawn once the crowns are shaped around them
+
+    trunk_conifer = []  # per trunk: a conifer by the database's species (or OSM leaf_type)
+    trunk_rec = []  # per trunk: its record in the tree register (trees.json), None for the canopy tops' (added below)
+    trunk_broad = []  # per trunk: known to be broadleaved (species, leaf_type): never a conifer by the laser
+
+    def put_trunk(r, c, thick=False, conifer=False, rec=None):
+        trunks.append((r, c, thick))
+        trunk_conifer.append(conifer)
+        trunk_rec.append(rec)
+        trunk_broad.append(rec is not None and treedb.is_broadleaf(rec))
+        trunk_at[r, c] = True
+
+    for t in all_trees:
+        c, r = int(t["x"]), int(t["y"])
+        if not (2 <= c < W - 2 and 2 <= r < D - 2) or bmask[r, c]:
+            t["drawn"] = "none"
+            continue
+        if canopy_near[r, c]:
+            if not veg[r, c] and _vd[r, c] <= 2.5:  # the point just off its crown's LiDAR cells: under the nearest one
+                r, c = int(_vr[r, c]), int(_vc[r, c])
+            if veg[r, c] and not trunk_ok_db[r, c]:  # mapped onto the road edge: to the kerb side (more than 3 m into
+                if _dbd[r, c] > 3:                     # the carriageway: not drawn, the cars drive there --
+                    t["drawn"] = "none"                # docs/plans/road-clearance.md)
+                    continue
+                r, c = int(_dbr[r, c]), int(_dbc[r, c])
+            if veg[r, c] and trunk_at[max(0, r - 1):r + 2, max(0, c - 1):c + 2].any():  # a trunk beside it already
+                t["drawn"] = "none"
+                continue
+            if veg[r, c]:
+                # a big tree (circumference 2.5 m and up, or 24 m tall in the register) on a trunk of 2 x 2
+                put_trunk(r, c, thick=(t.get("trunk_cm") or 0) >= 250 or (t.get("bv_height") or 0) >= 24,
+                          conifer=treedb.is_conifer(t), rec=t)
+                t["drawn"] = "lidar"
+                # where the trunk stands (moved under its crown or to the kerb): phenology.py finds each crown's tree by
+                # its nearest trunk, so a broadleaf crown beside a conifer must not take the conifer's evergreen class
+                t["x"], t["y"] = float(c) + 0.5, float(r) + 0.5
+                t["z"] = int(g[r, c])
+                t["h"] = int(crown_top[r, c])
+                n_trunk += 1
+                continue
+            t["drawn"] = "none"  # under another tree's crown edge: its own crown is not resolved
+            continue
+        if t["src"] == "bv":  # the register's crowns are in the surface model: none there now, none drawn
+            t["drawn"] = "none"
+            continue
+        if is_road[r, c]:  # (a tree planted since, mapped on the carriageway: none -- the cars drive there)
+            t["drawn"] = "none"
+            continue
+        n_new += 1
+        landmarks.small_tree(vol, g, r, c, stable_hash(t["id"]), LEAVES, C["trunk"], height=t.get("height"))
+        t["drawn"] = "procedural"
+        t["z"] = int(g[r, c])
+    note("trunks under LiDAR crowns at known trees:", n_trunk)
+    note("known trees without a crown in the surface model -> procedural:", n_new)
+    # crowns no database tree stands under: a trunk at each canopy top >= 5 m from any trunk
+    peak = veg & (nd_mean >= ndimage.maximum_filter(np.where(veg, nd_mean, 0), size=7)) & (nd_mean >= 4)
+    _td = ndimage.distance_transform_edt(~trunk_at)
+    pr_, pc_ = np.nonzero(peak & (_td >= 5))
+    order = np.argsort(-nd_mean[pr_, pc_], kind="stable")  # (equal heights: row by row, as in every region)
+    taken = np.zeros((D, W), bool)
+    n_peak = 0
+    for k in order:
+        r, c = int(pr_[k]), int(pc_[k])
+        if taken[max(0, r - 4):r + 5, max(0, c - 4):c + 5].any():
+            continue
+        if not trunk_ok_peak[r, c]:  # the crown's top over a path or a road: the trunk on the nearest soft ground under it,
+            if _okd[r, c] <= 4:      # else on the pavement (a street tree), never on the carriageway
+                r, c = int(_okr[r, c]), int(_okc[r, c])
+            elif not trunk_ok_db[r, c]:
+                if _dbd[r, c] > 3:
+                    continue
+                r, c = int(_dbr[r, c]), int(_dbc[r, c])
+        put_trunk(r, c, rec=dict(id=f"lidar:{r + R0}_{c + C0}", src="lidar", x=float(c) + 0.5, y=float(r) + 0.5, drawn="lidar",
+                                 z=int(g[r, c]), peak=float(nd_mean[int(pr_[k]), int(pc_[k])])))
+        taken[r, c] = True
+        n_peak += 1
+    note("trunks at canopy tops with no known tree under them:", n_peak)
+    # crowns, one per trunk: every canopy cell belongs to its nearest trunk (Voronoi). The LiDAR gives only a noisy top
+    # surface, so each crown is drawn as one rounded solid standing on its trunk, the way a voxel diorama draws a tree:
+    #  - its radial coordinate u runs from 0 at the trunk to 1 at the edge of its own cell -- the canopy's rim or the
+    #    line where it meets its neighbour's crown (distance to the trunk / (that + distance to the cell's edge)), so a
+    #    crown tapers towards each neighbour too and packed crowns read as separate domes with a notch between them,
+    #    not as one Voronoi column each with straight sides and a flat top;
+    #  - a broadleaf crown is a squashed superellipsoid over u (its depth from its footprint's radius: no tall narrow
+    #    green pillars), a conifer a cone; height, depth and fullness vary a little per tree;
+    #  - a metre or so of smooth noise on its top and underside, so the leaf surface is lumpy rather than turned;
+    #  - one base leaf tone per tree (its mean ortho colour), lighter clumps on top and darker ones underneath, instead of
+    #    each column taking its own ortho pixel (stripes).
+    if trunks:
+        nT = len(trunks)
+        tidx = np.zeros((D, W), np.int32)
+        for i_, (r_, c_, _) in enumerate(trunks, 1):
+            tidx[r_, c_] = i_
+        _dt, (_tr_, _tc_) = ndimage.distance_transform_edt(tidx == 0, return_indices=True)
+        # (a canopy cell further than region.CROWN_R from every trunk -- low scrub, no peak in it -- is no crown's: drawn
+        # as the canopy's own column below)
+        own = np.where(veg & (_dt <= region.CROWN_R), tidx[_tr_, _tc_], 0)
+        note("canopy cells further than", region.CROWN_R, "m from every trunk (no crown's):", int((veg & (_dt > region.CROWN_R)).sum()))
+        idx_ = np.arange(1, nT + 1)
+        # the distance to the edge of the own cell: to the nearest cell with another owner or no canopy
+        _same = own > 0
+        for _ax, _sh in ((0, 1), (0, -1), (1, 1), (1, -1)):
+            _same &= region.shift(own, _sh, _ax) == own
+        _db = ndimage.distance_transform_edt(_same)
+        # a crown is one solid per tree, not a column per cell: its height is the crown's robust top (the 5x5 median of the
+        # noisy image-matched surface, then the crown's 90th percentile), measured from the ground at its trunk -- on a slope
+        # the crown sits on its trunk instead of hanging down the hill as a curtain
+        _sm = ndimage.median_filter(np.where(veg, crown_top, 0), 5)
+        vr_, vc_ = np.nonzero(veg)
+        k_ = own[vr_, vc_] - 1
+        ok_ = k_ >= 0
+        kk = np.maximum(k_, 0)
+        _hv = np.maximum(_sm[vr_, vc_], 3).astype(np.float32)
+        _kx = np.where(ok_, k_, nT)  # (a cell no crown owns counts for none: after them all)
+        _ord = np.lexsort((_hv, _kx))
+        _cnt = np.bincount(_kx, minlength=nT + 1)[:nT]
+        _start = np.concatenate([[0], np.cumsum(_cnt)[:-1]])
+        Ht = np.where(_cnt > 0, _hv[_ord][np.clip(_start + (0.9 * np.maximum(_cnt - 1, 0)).astype(int), 0, len(_hv) - 1)], 3)
+        Ht = Ht.astype(np.float32)
+        Re = np.sqrt(np.maximum(_cnt, 1) / np.pi).astype(np.float32)  # the radius of a disc of the crown's footprint
+        G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
+        con = np.array(trunk_conifer, bool)
+        hsh = np.array([cell_hash(r_, c_, "crown") for r_, c_, _ in trunks], np.int64)
+        v1, v2, v3, v4 = ((hsh >> s) % 1000 / 1000.0 for s in (0, 8, 16, 24))  # per-tree variation in [0, 1)
+        _sumc = lambda a: np.bincount(kk[ok_], weights=np.asarray(a, np.float64)[vr_[ok_], vc_[ok_]], minlength=nT)
+        measured = _sumc(veg_laser) > 0.5 * np.maximum(_cnt, 1)  # the crown's height from the laser
+        have_base = np.zeros(nT, bool)
+        # a crown whose species OSM or the register knows keeps it; the others take the species map's class where half
+        # of the crown's cells or more have it (species_map.per_crown), else the laser's
+        _unk = ~con & ~np.array(trunk_broad, bool)
+        cls_rs, share_rs = np.full(nT, species_map.NONE, np.uint8), np.zeros(nT)
+        if SPM is not None:
+            cls_rs, share_rs = species_map.per_crown(SPM[vr_[ok_], vc_[ok_]], kk[ok_], nT)
+        _mapped = share_rs >= 0.5
+        cls_rs = np.where(_mapped, cls_rs, species_map.NONE)
+        everg_rs = np.isin(cls_rs, species_map.EVERGREEN)
+        larch_rs = cls_rs == species_map.LARCH
+        broad_rs = np.isin(cls_rs, species_map.BROADLEAF)
+        lcon = np.zeros(nT, bool)
+        if LZ is not None:
+            # conifers by the winter scan: a spruce, fir, pine, yew or thuja keeps its needles and stops the pulse in the
+            # crown (one return, nothing behind it); a bare broadleaf crown lets it on through its twigs to the ground
+            # (more returns), and the needles reflect brighter: the canopy first returns' mean intensity is ~960 over
+            # evergreen conifers, ~560 over bare broadleaf crowns (~690 over leafless larch). A quarter of the crown's
+            # canopy pulses single or a mean intensity of 780 and up makes it a conifer (against the DLR map's forest
+            # blocks: recall 0.82 at precision 0.72; single >= 0.2 alone found half the conifers)
+            _can, _sgl = _sumc(LZ["n_canopy"]), _sumc(LZ["n_single"])
+            _int = _sumc(LZ["int_canopy"]) * 16 / np.maximum(_can, 1)
+            # (a crown of 10 m2 or more: a narrow dense column is an ivy-clad trunk or a pole as often, a green pillar)
+            lcon = ((_sgl >= 0.25 * _can) | (_int >= 780)) & (_can >= 15) & (_cnt >= 10)
+            # needles in February, single and bright: no larch (the map's larch is then a spruce or Douglas fir beside it),
+            # and in a broadleaf pixel a conifer among the broadleaves
+            _dense = (_sgl >= 0.25 * _can) & (_int >= 800) & (_can >= 15)
+            larch_rs &= ~_dense
+            lcon = (everg_rs | (cls_rs == species_map.LARCH) & _dense | broad_rs & _dense
+                    | (cls_rs == species_map.NONE) & lcon)
+        lcon = _unk & (lcon | everg_rs | larch_rs)
+        note("crowns of unknown species on the species map:", int((_unk & _mapped).sum()), "of", int(_unk.sum()),
+             "(evergreen conifer", int((_unk & everg_rs).sum()), "larch", int((_unk & larch_rs).sum()), "broadleaved",
+             int((_unk & broad_rs).sum()), ")")
+        note("conifers by the species map and the laser:", int(lcon.sum()), "(by species:", int(con.sum()), ")")
+        con |= lcon
+        # the map's genus where the crown is drawn as the map says (trees.json "sp_rs", for phenology.py; "species"/"sp"
+        # stay the register's and OSM's): not where the laser overruled it (needles in a broadleaf or larch pixel)
+        _say = _unk & ((everg_rs | larch_rs) & con | broad_rs & ~con)
+        for i_ in np.nonzero(_say)[0]:
+            if trunk_rec[i_] is not None:
+                trunk_rec[i_]["sp_rs"] = species_map.GENUS[int(cls_rs[i_])] or species_map.OTHER_BROADLEAF
+        if LZ is not None:
+            # the crown's underside from the laser: the median over its cells (8+ vegetation returns) of their lowest
+            # tenth -- the lowest branches, and on a tree in the open, its skirt
+            _cb = (LZ["veg_n"] >= 8) & veg
+            _m = ok_ & _cb[vr_, vc_]
+            _kb, _vb = kk[_m], LZ["veg_p10"][vr_[_m], vc_[_m]].astype(np.float32) / 10
+            _o = np.lexsort((_vb, _kb))
+            _nb = np.bincount(_kb, minlength=nT)
+            _sb = np.concatenate([[0], np.cumsum(_nb)[:-1]])
+            base_l = np.where(_nb > 0, _vb[_o][np.clip(_sb + _nb // 2, 0, max(len(_vb) - 1, 0))] if len(_vb) else 0, np.nan)
+            have_base = (_nb >= 4) & measured
+            _rl = base_l / np.maximum(Ht, 1)
+            if have_base.any():
+                note("crown base / height from the laser, quartiles (broadleaf, conifer):",
+                     np.round(np.percentile(_rl[have_base & ~con], [25, 50, 75]), 2).tolist(),
+                     np.round(np.percentile(_rl[have_base & con], [25, 50, 75]), 2).tolist() if (have_base & con).any() else None)
+        # no tall narrow crowns: a broadleaf tree is at most ~3.4 crown radii + 5 m tall (a conifer 5 radii). A crown the
+        # laser measured is as tall as it is (in the forests the crowns are narrow and tall, packed): up to 6 radii + 5 m
+        Ht = np.minimum(Ht, np.where(con, 5 + np.where(measured, 7.0, 5.0) * Re, 5 + np.where(measured, 6.0, 3.2) * Re)) * (0.95 + 0.06 * v1)
+        # a crown squeezed against a facade (a third of it within 2 m of a building) is the wall's LiDAR as much as a tree:
+        # lower still (2.4 radii + 3 m), no green pillar up the front
+        _atwall = np.bincount(_kx, weights=_nearb[vr_, vc_].astype(np.float64), minlength=nT + 1)[:nT] / np.maximum(_cnt, 1)
+        Ht = np.where(_atwall > 0.33, np.minimum(Ht, 3 + 2.4 * Re), Ht)
+        Ht = np.maximum(Ht, 3)
+        # crown depth (top to underside over the trunk): about the crown's width, never more than 2/3 of the tree
+        dep = np.minimum(0.62 * Ht, (1.5 + 0.5 * v2) * Re + 2)
+        dep = np.where(con, np.minimum(0.82 * Ht, 4.5 * Re + 2), dep)
+        if have_base.any():
+            # from the laser's crown base: in leaf-off it is biased low (bare twigs, the trunk, undergrowth reflect where
+            # leaves would hide them in summer: the lowest tenth of the returns sits at ~0.17 of the height under a bare
+            # broadleaf's crown), so a broadleaf takes it halfway towards the 0.38 drawn without it. A conifer's needles
+            # are there in winter too, but its dense crown shadows its own underside from the pulses (its lowest tenth
+            # reads ~0.5 of the height, a spruce's skirt hangs lower): three quarters of it. Never deeper than a crown's width allows
+            # (2.4-3 radii + 3 m broadleaf, 5 radii + 3 m conifer), no pillars of leaves
+            _rb = np.clip(0.5 * _rl + 0.5 * 0.38, 0.15, 0.65)
+            _rc = np.clip(0.75 * _rl, 0.1, 0.5)
+            _dl = Ht * (1 - np.where(con, _rc, _rb))
+            _dl = np.minimum(_dl, np.where(con, 5 * Re + 3, (2.4 + 0.6 * v2) * Re + 3))
+            dep = np.where(have_base & np.isfinite(_dl), _dl, dep)
+            note("crowns shaped on the laser's crown base:", int(have_base.sum()), "of", nT)
+        dep = np.maximum(dep, np.minimum(2.0, Ht - 1))
+        pw = 1.7 + 0.9 * v3  # superellipse exponent: a round ball (1.7) to a fuller, flatter-topped lime (2.6)
+        u = np.clip(_dt[vr_, vc_] / (_dt[vr_, vc_] + _db[vr_, vc_] + 0.8), 0, 1)
+        H_, dp_, pw_ = Ht[kk], dep[kk], pw[kk]
+        con_ = con[kk]
+        # smooth noise, ~1 m amplitude, 2-3 m patches
+        # (hashed from the project grid's coordinates, region.noise: the same crowns in every region)
+        nz_ = region.noise(7, 1.3)[vr_, vc_]
+        nz2_ = region.noise(8, 1.0)[vr_, vc_]
+        zc = H_ - 0.5 * dp_  # broadleaf: a superellipsoid, its waist a little below the middle (u = 1)
+        s_ = np.clip(1 - u ** pw_, 0, 1) ** (1 / pw_)
+        top_b = zc + 0.5 * dp_ * s_
+        bot_b = zc - 0.5 * dp_ * s_ * 1.1
+        top_c = H_ - (dp_ - 0.5) * u ** 0.9            # conifer: a cone to the top, the skirt flaring out a little
+        bot_c = H_ - dp_ + 0.25 * dp_ * u
+        top_rel = np.where(con_, top_c, top_b) + np.clip(nz_ * 1.0, -1.5, 1.5) * np.minimum(1, dp_ / 4)
+        bot_rel = np.where(con_, bot_c, bot_b) + np.clip(nz2_ * 0.7, -1.0, 1.0) * np.minimum(1, dp_ / 4)
+        top_abs = np.round(G0[kk] + top_rel).astype(np.int32)
+        bot_abs = np.round(G0[kk] + bot_rel).astype(np.int32)
+        bot_abs = np.maximum(bot_abs, g[vr_, vc_] + 2)  # uphill the crown keeps clear of the ground
+        # gaps: the thin rim where two crowns meet (and the outermost fringe) is left out
+        keep = ok_ & (top_abs > bot_abs) & ~((s_ < 0.32) & ~con_ & (dp_ >= 4))
+        crown_top[vr_[ok_], vc_[ok_]] = (top_abs - g[vr_, vc_])[ok_]
+        crown_bot[vr_[ok_], vc_[ok_]] = (bot_abs - g[vr_, vc_])[ok_]
+        veg[vr_[ok_ & ~keep], vc_[ok_ & ~keep]] = False
+        # the trunk always reaches its crown: over the trunk the crown's underside is the crown's own (no noise)
+        for i_, (r_, c_, _) in enumerate(trunks):
+            if veg[r_, c_]:
+                crown_bot[r_, c_] = max(2, int(round(G0[i_] + Ht[i_] - (dep[i_] if con[i_] else 1.05 * dep[i_])) - g[r_, c_]))
+                crown_top[r_, c_] = max(int(crown_top[r_, c_]), int(crown_bot[r_, c_]) + 1)
+        for i_, rec_ in enumerate(trunk_rec):  # conifers stay green through the winter (phenology.py)
+            if rec_ is not None and con[i_]:
+                rec_["con"] = 1
+        note("crowns as solids at their trunks:", nT, "conifers:", int(con.sum()), "rim cells left out:", int((ok_ & ~keep).sum()))
+        # one leaf tone per tree: its crown's mean ortho brightness and hue
+        _lt = np.asarray(ndimage.mean(lum, labels=own, index=idx_), np.float32)
+        _yt = np.asarray(ndimage.mean(yellowish.astype(np.float32), labels=own, index=idx_), np.float32) + (v3 - 0.5) * 0.5 > 0.5
+        _lb = np.clip(((np.nan_to_num(_lt, nan=90) - 40) / 110 * 5 + (v4 - 0.5) * 1.6).astype(int), 0, 4)
+        tone_t = (4 - _lb) + 5 * (~_yt)  # index into LEAVES
+        tone = np.full((D, W), -1, np.int16)
+        tone[vr_[ok_], vc_[ok_]] = np.where(con_, -2 - (hsh[kk] % 5), tone_t[kk])[ok_]
+        czc = np.zeros((D, W), np.int32)  # the crown's waist (absolute), to tell its upper half from its underside
+        czc[vr_[ok_], vc_[ok_]] = np.round(G0[kk] + np.where(con_, H_ - 0.6 * dp_, zc))[ok_].astype(np.int32)
+        # conifers (thuja, pine, spruce, yew...: the city database's species) in dark blue-green needles, not leaf green
+        NEEDLES = np.array([pal(c_, M_LEAF) for c_ in ("#37553f", "#3f5f48", "#456a4f", "#4d7356", "#52785a")], np.uint16)  # dark to light
+        note("conifer crowns (database species):", int(con.sum()), "cells", int((ok_ & con_).sum()))
+        # which tree each 2 m cell's leaves belong to (data/crowns.npz, for phenology.py's foliage.bin): the tree owning
+        # most of the cell's canopy, the trunk's own cell counting for four (a crown keeps the cell over its trunk). The
+        # viewer turns a leaf by its 2 m cell, so a cell is evergreen or deciduous as a whole: where a broadleaf crown's
+        # edge shares a cell with a conifer, its leaf voxels there stayed in leaf through the winter (thin bright-green
+        # columns beside the conifers among the bare trees), and the conifer's needles in a broadleaf's cell went bare.
+        # Those voxels (the other kind than the cell's owner) are left out: the boundary between the two snaps to 2 m
+        # (a larch, by its species or the species map, is a cone but bare in winter)
+        evg = con & ~np.array([((r_ or {}).get("species") or (r_ or {}).get("sp_rs") or "").split(" ")[0] in ("Larix", "Metasequoia")
+                               for r_ in trunk_rec])
+        _wt = np.where(veg, 1, 0).astype(np.int8)
+        _wt[tidx > 0] *= 4
+        _o4 = np.where(veg, own, 0).reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
+        _w4 = _wt.reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
+        own2 = np.zeros((D // 2, W // 2), np.int32)  # (trunk index + 1, 0 where no canopy)
+        _bn = np.zeros((D // 2, W // 2), np.int16)
+        for k_ in range(4):
+            _cand = _o4[..., k_]
+            _n = ((_o4 == _cand[..., None]) * _w4).sum(-1)
+            _up = (_cand > 0) & (_n > _bn)
+            own2[_up], _bn[_up] = _cand[_up], _n[_up]
+        _evg0 = np.concatenate([[False], evg])
+        _odd = veg & (own > 0) & (_evg0[own] != np.repeat(np.repeat(_evg0[own2], 2, 0), 2, 1))
+        note("crown cells of the other kind than their 2 m cell's owner (evergreen / deciduous) left out:", int(_odd.sum()),
+             "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
+        veg &= ~_odd
+    # a crown over a carriageway keeps ROAD_CLEAR m clear of its ground (a street tree is pruned for the traffic; the
+    # sloped caps lift the drawn street up to caps.CLAMP = 60/64 m over its voxel, and a car's body reaches 1.8 m over it:
+    # docs/plans/road-clearance.md); over the trunk's own cell too (none stands on a carriageway)
+    ROAD_CLEAR = 3
+    _lift = veg & is_road & (crown_bot < ROAD_CLEAR)
+    crown_bot[_lift] = ROAD_CLEAR
+    note("crown cells over carriageways lifted to", ROAD_CLEAR, "m:", int(_lift.sum()))
+    LEAVES_ = np.array(LEAVES, np.uint16)
+    rr, cc = np.nonzero(veg)
+    if trunks:
+        tn_ = tone[rr, cc].astype(np.int32)
+        cz_ = czc[rr, cc]
+    for zz in range(int(g.min()) + 1, int((g + crown_top).max()) + 1):
+        m = (zz >= g[rr, cc] + crown_bot[rr, cc]) & (zz < g[rr, cc] + crown_top[rr, cc])
+        if not m.any():
+            continue
+        sel = (rr[m], cc[m])
+        col_ = leafidx[sel]
+        if trunks:
+            t_ = tn_[m]
+            # clumps of 3 x 3 x 3 voxels (fewer colour seams for the mesher than single voxels): a fifth of those in the
+            # upper half one tone lighter, a tenth underneath one darker
+            hz = (((rr[m] + R0) // 3) * 73856093 ^ ((cc[m] + C0) // 3) * 19349663 ^ (zz // 3) * 83492791) % 10  # (the project grid's)
+            up_ = zz >= cz_[m]
+            sh_ = np.where(up_ & (hz < 2), -1, np.where(~up_ & (hz < 1), 1, 0))
+            b_ = t_ % 5  # broadleaf: lightness step within the hue family
+            leaf_ = LEAVES_[np.clip(t_ - b_ + np.clip(b_ + sh_, 0, 4), 0, 9)]
+            n_ = NEEDLES[np.clip((-2 - t_) + sh_, 0, 4)]
+            col_ = np.where(t_ >= 0, leaf_, np.where(t_ <= -2, n_, col_))
+        cur = vol[zz][sel]
+        vol[zz][sel] = np.where(cur == 0, col_, cur)
+    note("canopy cells:", int(veg.sum()), "crowns:", len(trunks))
+    for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowest point, over the trunk
+        hb = int(crown_bot[r_, c_]) + 1
+        for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick else ((0, 0),):
+            rr_, cc_ = r_ + dr, c_ + dc
+            if 0 <= rr_ < D and 0 <= cc_ < W and not bmask[rr_, cc_]:
+                vol[g[rr_, cc_]:g[rr_, cc_] + hb, rr_, cc_] = C["trunk"]
+    # branches: a broadleaf crown's bare wood, inside its leaves -- what the viewer shows of it in winter, when the leaves
+    # are gone (voxelMaterial.ts; mesher.worker.ts draws wood through the leaves around it). Per tree, from its own cells
+    # and a generator seeded by its trunk's project grid cell (the same tree in every region): the trunk on up to a fork at
+    # a quarter to two fifths of the crown's depth, a leader on towards the top, 3-5 limbs (more in a wider crown) out to
+    # half the crown's reach in their direction and up, each forking into 1-3 branches (by the crown's width) that end a
+    # metre or two inside the leaf surface near its rim; in wide crowns more off the leader and the limbs' middles. One
+    # voxel thick, the branches paler (twig), never on the leaf surface (no brown specks in summer). Voxels only within
+    # the tree's own crown cells, into its leaves or the air under its top; none in an evergreen conifer. A larch (bare in
+    # winter as well, phenology.py) gets a conifer's skeleton instead: its trunk on up as a straight leader, inside the
+    # needles, to near the top, whorls of 4-5 thin branches round it every 1.2-1.7 m, near level, the lower ones longer
+    # (out to most of the crown's reach, drooping a little), the upper ones short and rising: a bare cone. (A packed
+    # forest's narrow crowns get few branches: each wood voxel costs ~6 triangles, drawn all year.)
+    n_wood = n_wtree = n_ltree = 0
+    if trunks:
+        _isleaf = np.zeros(len(pal.entries) + 64, bool)
+        _isleaf[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF]] = True
+        _AZ = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+        _ST = np.arange(1, 2 * region.CROWN_R + 1) * 0.5
+        for i_, (r0_, c0_, thick_) in enumerate(trunks):
+            if evg[i_] or not veg[r0_, c0_]:
+                continue
+            zb_ = int(g[r0_, c0_] + crown_bot[r0_, c0_])
+            zt_ = int(g[r0_, c0_] + crown_top[r0_, c0_])
+            if zt_ - zb_ < 4:
+                continue
+            own_id = i_ + 1
+            # the crown's reach along 16 directions from the trunk's centre: to the last of its own cells before a gap
+            _y = r0_ + 0.5 + np.outer(np.sin(_AZ), _ST)
+            _x = c0_ + 0.5 + np.outer(np.cos(_AZ), _ST)
+            _ri, _ci = np.floor(_y).astype(np.int64), np.floor(_x).astype(np.int64)
+            _in = (_ri >= 0) & (_ri < D) & (_ci >= 0) & (_ci < W)
+            _ri, _ci = np.clip(_ri, 0, D - 1), np.clip(_ci, 0, W - 1)
+            _in &= veg[_ri, _ci] & (own[_ri, _ci] == own_id)
+            _fo = np.argmin(_in, 1)
+            reach_ = np.where(_in.all(1), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
+            if reach_.max() < (1 if con[i_] else 2):  # (a larch's narrow cone: its leader and what branches fit)
+                continue
+            rng_ = np.random.default_rng(cell_hash(r0_, c0_, "limbs"))
+
+            def reach_at(a):
+                f = (a % (2 * np.pi)) / (2 * np.pi) * 16
+                k = int(f) % 16
+                return reach_[k] + (reach_[(k + 1) % 16] - reach_[k]) * (f - int(f))
+
+            def crown_z(r, c):
+                """the crown's underside and top (absolute) at (r, c) if it is this tree's, else None"""
+                if 0 <= r < D and 0 <= c < W and veg[r, c] and own[r, c] == own_id:
+                    return int(g[r, c] + crown_bot[r, c]), int(g[r, c] + crown_top[r, c])
+                return None
+
+            def hidden(z, r, c):
+                """under the leaf surface: inside a crown on all four sides and above (from the crowns' rasters, not the
+                volume: the same whatever order the trees are drawn in)"""
+                for rn, cn, zn in ((r - 1, c, z), (r + 1, c, z), (r, c - 1, z), (r, c + 1, z), (r, c, z + 1)):
+                    if not (0 <= rn < D and 0 <= cn < W and veg[rn, cn]
+                            and g[rn, cn] + crown_bot[rn, cn] <= zn < g[rn, cn] + crown_top[rn, cn]):
+                        return False
+                return True
+
+            def put(z, r, c, col):
+                nonlocal n_wood
+                if not (0 <= r < D and 0 <= c < W and 0 <= z < H) or own[r, c] != own_id or z <= g[r, c]:
+                    return
+                v = vol[z, r, c]
+                if col == C["twig"] and not hidden(z, r, c):  # a branch stays under the leaf surface
+                    return
+                if (v == 0 and z < g[r, c] + crown_top[r, c]) or _isleaf[v]:
+                    vol[z, r, c] = col
+                    n_wood += 1
+
+            def seg(p, q, col):
+                d = np.subtract(q, p, dtype=np.float64)
+                n = int(np.ceil(np.abs(d).max()))
+                for t in range(n + 1):
+                    x, y, z = (p + d * (t / max(n, 1)))
+                    put(int(np.floor(z)), int(np.floor(y)), int(np.floor(x)), col)
+
+            def tip(a, frac, lo, hi, base):
+                """a point frac of the reach out along azimuth a (from the trunk), its height lo..hi of the way from the
+                crown's underside to a metre and a half under its top there (pulled in until it is in the crown)"""
+                for k in range(6):
+                    d = frac * reach_at(a) * (1 - 0.15 * k)
+                    x, y = c0_ + 0.5 + d * np.cos(a), r0_ + 0.5 + d * np.sin(a)
+                    cz = crown_z(int(np.floor(y)), int(np.floor(x)))
+                    if cz is not None and cz[1] - 1.5 > cz[0] + 0.5:
+                        b_, t_ = cz[0] + 0.5, cz[1] - 1.5
+                        z = b_ + (lo + (hi - lo) * rng_.random()) * (t_ - b_)
+                        return np.array([x, y, max(z, base)])
+                return None
+
+            if con[i_]:  # a larch (a conifer, not evergreen)
+                n_ltree += 1
+                cx, cy, dz = c0_ + 0.5, r0_ + 0.5, zt_ - zb_
+                # the leader: bark, under the needles' surface (a cone's top metres are the trunk's column alone: there
+                # it stops, or it would stand out of the crown in summer), its upper third in twig
+                for z in range(zb_ + 1, zt_):
+                    if not hidden(z, r0_, c0_):
+                        if z > zb_ + dz // 2:
+                            break
+                        continue
+                    col = C["trunk"] if z < zb_ + 2 * dz // 3 else C["twig"]
+                    for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ and z < zb_ + dz // 2 else ((0, 0),):
+                        if hidden(z, r0_ + dr, c0_ + dc):
+                            put(z, r0_ + dr, c0_ + dc, col)
+                z = zb_ + 1 + rng_.random() * 1.5
+                while z < zt_ - 2:
+                    f = (zt_ - z) / dz  # 1 at the crown's foot .. 0 at its top
+                    nb = 4 + int(rng_.random() < 0.4)
+                    a0 = rng_.random() * 2 * np.pi
+                    for k in range(nb):
+                        a = a0 + k * 2 * np.pi / nb + rng_.uniform(-0.4, 0.4)
+                        # out to the cone's rim at this height (put() stops it a voxel under the needles' surface)
+                        L = reach_at(a) * (0.4 + 0.6 * f) * rng_.uniform(0.9, 1.0) + 0.5
+                        if L < 1:
+                            continue
+                        seg(np.array([cx, cy, z]), np.array([cx + L * np.cos(a), cy + L * np.sin(a), z + L * (0.35 - 0.5 * f)]),
+                            C["twig"])
+                    z += 1.2 + 0.5 * rng_.random()
+                continue
+            n_wtree += 1
+            dz = zt_ - zb_
+            zf = zb_ + max(1, int(round((0.25 + 0.15 * rng_.random()) * dz)))
+            cx, cy = c0_ + 0.5, r0_ + 0.5
+            for z in range(zb_ + 1, zf + 1):  # the trunk on up to the fork
+                for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ else ((0, 0),):
+                    put(z, r0_ + dr, c0_ + dc, C["trunk"])
+            fork = np.array([cx, cy, zf + 0.5])
+            rbar = float(np.mean(reach_))
+            nl = 3 + (rbar >= 4.5) + (rbar >= 6.5) + int(rng_.random() < 0.2)
+            a0 = rng_.random() * 2 * np.pi
+            # the leader: on up from the fork, leaning a little, two branches off its top
+            lean = rng_.random() * 2 * np.pi
+            top = np.array([cx + 0.6 * np.cos(lean), cy + 0.6 * np.sin(lean), zt_ - 1.5])
+            if top[2] > fork[2] + 1:
+                mid = fork + (top - fork) * 0.6
+                seg(fork, mid, C["trunk"])
+                seg(mid, top, C["twig"])
+                for k in range(2 if rbar >= 4 else 0):
+                    t2 = tip(a0 + (k + 0.5) * 2 * np.pi / 2 + rng_.uniform(-0.4, 0.4), 0.45, 0.75, 1.0, top[2] - 1)
+                    if t2 is not None:
+                        seg(mid, t2, C["twig"])
+            for k in range(nl):
+                a = a0 + (k + 0.5) * 2 * np.pi / nl + rng_.uniform(-0.3, 0.3)
+                e = tip(a, 0.45 + 0.15 * rng_.random(), 0.35, 0.7, fork[2] + 1)
+                if e is None:
+                    continue
+                seg(fork, e, C["trunk"])
+                # branches off the limb's end: out to the rim, one up and one or two to the sides
+                for da, lo, hi in ((rng_.uniform(-0.25, 0.25), 0.7, 1.0), (rng_.uniform(0.45, 0.75), 0.4, 0.8),
+                                   (-rng_.uniform(0.45, 0.75), 0.4, 0.8))[:1 + (rbar >= 4) + (rbar >= 6)]:
+                    t2 = tip(a + da, 0.85 + 0.1 * rng_.random(), lo, hi, e[2] - 2)
+                    if t2 is not None:
+                        seg(e, t2, C["twig"])
+                # and one off its middle, outwards and lower: the crown's waist
+                if rbar >= 5.5 and k % 2 == 0:
+                    m2 = fork + (e - fork) * 0.5
+                    t2 = tip(a + rng_.uniform(-0.5, 0.5), 0.8, 0.1, 0.4, m2[2] - 2)
+                    if t2 is not None:
+                        seg(m2, t2, C["twig"])
+    note("broadleaf crowns given branches:", n_wtree, "larches:", n_ltree, "wood voxels:", n_wood)
+    # the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
+    # place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
+    # the trunks at canopy tops tallest first, then row by row)
+    for t in trunk_rec:  # the trunks placed at canopy tops: no database tree, an id from the cell
+        if t is not None and t["src"] == "lidar":
+            t["h"] = int(crown_top[int(t["y"]), int(t["x"])])
+            all_trees.append(t)
+    _tr, _tr_t = [], []  # (_tr_t: each record's tree, for the bridgeheads' lift below)
+    for t in all_trees:
+        if not in_core(int(t["y"]), int(t["x"])):
+            continue
+        _tr_t.append(t)
+        rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
+        for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
+                            ("bv_height", "h_bv"), ("con", "con"), ("sp_rs", "sp_rs")):
+            if t.get(k_src) is not None:
+                rec[k_out] = t[k_src]
+        if t["src"] == "lidar":
+            key = [2, -t["peak"], int(t["y"]) + R0, int(t["x"]) + C0]
+        else:
+            key = [0, t["osm"]] if t["src"] == "osm" else [1, t["k"]]  # (OSM's: its id, the file's order in any cut of it)
+        _tr.append(dict(key=key, rec=rec))
+    RESULT["trees"] = _tr
+    # which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as a tree's id here
+    # (regions.py: an index into trees.json). (phenology.py took the nearest trunk on the 2 m grid, which is not always the
+    # crown's own: a broadleaf crown's side beside a conifer took the conifer's evergreen class and stood green through the
+    # winter, a pillar)
+    _crown_ids = []
+    _best = np.full((D // 2, W // 2), -1, np.int32)
+    if trunks:
+        _map = np.full(len(trunks) + 1, -1, np.int32)
+        for i_, rec_ in enumerate(trunk_rec):
+            if rec_ is not None:
+                _map[i_ + 1] = len(_crown_ids)
+                _crown_ids.append(rec_["id"])
+        _best = _map[own2]
+    RESULT["crown_ids"] = _crown_ids
+    vars(ctx).update(_best=_best, _lift=_lift, _tr_t=_tr_t, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db, veg=veg)
+
+
 STAGES = [  # (its name in the build's timing, the stage)
     ("rasters, cell colours, OSM", rasters),
     ("ground classes, roads, water", ground_classes),
     ("buildings", buildings),
     ("natural ground, cemeteries", natural_ground),
+    ("vegetation", vegetation),
 ]
 ctx = Ctx()
 for _name, _run in STAGES:
     _run(ctx)
     stage(_name)
 # (the stages to come are module code still: what they read of the ones above)
-(GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _jm, _roof_f, bmask, bridge_lines,
- bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm, dsm_mean, dtm,
- exg, explicit, feats, foot_shapes, g, gcol, grave_stones, is_road, lit_ground_ways, lm, lum, nd_max, nd_mean, osm,
- parking_mask, rail_beds, rails, render, rgbsum, road_lines, splash_pads, topi, vol, zt) = (
+(GCTX, H, OPEN_CUT, RIVER_LV, ROOF_GX, ROOF_GY, SACRED, SAG_SRC, SANITY, _best, _jm, _lift, _roof_f, _tr_t, bmask,
+ bridge_lines, bridge_rails, bridge_road_polys, bridge_roads, bridge_shapes, bridge_ways, cellcol, cycle_shapes, dsm,
+ dsm_mean, dtm, exg, explicit, feats, foot_shapes, g, gcol, grave_stones, is_road, lit_ground_ways, lm, nd_max,
+ nd_mean, osm, parking_mask, rail_beds, rails, render, road_lines, splash_pads, topi, trunk_ok_db, veg, vol, zt) = (
     ctx.GCTX, ctx.H, ctx.OPEN_CUT, ctx.RIVER_LV, ctx.ROOF_GX, ctx.ROOF_GY, ctx.SACRED, ctx.SAG_SRC, ctx.SANITY,
-    ctx._jm, ctx._roof_f, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails, ctx.bridge_road_polys, ctx.bridge_roads,
-    ctx.bridge_shapes, ctx.bridge_ways, ctx.cellcol, ctx.cycle_shapes, ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg,
-    ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g, ctx.gcol, ctx.grave_stones, ctx.is_road, ctx.lit_ground_ways,
-    ctx.lm, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.parking_mask, ctx.rail_beds, ctx.rails, ctx.render,
-    ctx.rgbsum, ctx.road_lines, ctx.splash_pads, ctx.topi, ctx.vol, ctx.zt)
-# ---------------------------------------------------------------- vegetation (LiDAR canopy + OSM trees)
-trees = [(oid, t, p) for oid, t, p in osm.nodes if t.get("natural") == "tree"]
-# every known tree (scripts/trees.py: OSM's tree nodes and the Bavarian single-tree register of the 2024 flight)
-all_trees = treedb.load(trees, buildings=bmask)
-note("known trees: OSM natural=tree", sum(t["src"] == "osm" for t in all_trees), "+ Einzelbäume register",
-     sum(t["src"] == "bv" for t in all_trees))
-# the LiDAR point clouds (scripts/laser.py; Feb 2021, leaf-off): the canopy's measured height, the crowns' undersides,
-# conifers by their winter density. Optional: without data/laser.npz the trees come from the surface model alone
-LZ = None
-if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
-    LZ = region.load_npz("data/laser.npz")
-else:
-    note("no data/laser.npz (scripts/laser.py): trees from the surface model only")
-# the forests' dominant species from remote sensing (scripts/species_map.py: DLR Tree Species Germany 2022, 2016 where
-# 2022 has lost the canopy; 10 m). Optional: without data/raw/treespecies_*.tif (or with NO_SPECIES_MAP) the trees'
-# kinds come from OSM and the laser alone
-SPM = None if os.environ.get("NO_SPECIES_MAP") else species_map.grid()
-if SPM is None:
-    note("no tree species map (data/raw/treespecies_*.tif): conifers by OSM and the laser only")
-# the OSM trees widen the ortho's green test and pardon wall edges (as before); the register's points do not
-tree_rc = np.array([(int(t["y"]), int(t["x"])) for t in all_trees if t["src"] == "osm"])
-near_tree = np.zeros((D, W), bool)
-if len(tree_rc):
-    near_tree[tree_rc[:, 0], tree_rc[:, 1]] = True
-    near_tree = ndimage.binary_dilation(near_tree, iterations=3)
-veg = (~bmask) & (nd_mean > 2.2) & ((exg > 0.025) | (near_tree & (exg > -0.03)))
-# nor inside any building's outline: one drawn only through its parts (a church) left the cells between its
-# parts out of bmask, and its green copper roof grew 1 800 leaf voxels, pillars up its front
-_allb = np.zeros((D, W), bool)
-for f in feats:
-    if not f["part"] and f["tags"].get("building") not in ("roof", "carport", "canopy"):
-        _allb[f["rr"], f["cc"]] = True
-note("vegetation cells inside building outlines dropped:", int((veg & _allb).sum()))
-veg &= ~_allb
-# LiDAR wall edges outside OSM footprints look like tall "trees": reject cells next to a building
-# whose height is close to that building's roof
-btop_near = ndimage.maximum_filter(np.where(bmask, topi, 0), size=7)
-wall_edge = (btop_near > 0) & (nd_mean > 0.6 * btop_near) & (nd_mean > 6)
-veg &= ~wall_edge | (near_tree & (nd_mean < 25))
-step = ndimage.maximum_filter(nd_mean, 3) - ndimage.minimum_filter(nd_mean, 3)
-veg &= ~((btop_near > 0) & (step > 7) & (nd_mean > 0.5 * btop_near))
-veg &= nd_mean < 32  # no trees taller than ~30 m in town
-# no trees growing out of a stadium shell (its fins and roof edge are LiDAR-high and greenish in the ortho)
-stad = np.zeros((D, W), np.uint16)
-burn(stad, [(geom, 1) for oid, typ, t, geom in osm.areas_with("leisure", ("stadium",))])
-veg &= ~((stad > 0) & ~near_tree)
-veg = ndimage.binary_opening(veg, iterations=1)
-note("wall-edge cells rejected as vegetation:", int(wall_edge.sum()))
-lab, n = ndimage.label(veg)
-sizes = ndimage.sum(veg, lab, range(1, n + 1))
-veg &= np.isin(lab, np.nonzero(sizes >= 4)[0] + 1)
-# image-matched surface (DOM20) leaves pinholes and frayed rims in crowns: close them, fill holes up to 30 m2
-_vc = ndimage.binary_closing(veg, iterations=1) & ~bmask & (nd_mean > 1.5)
-_holes = ndimage.binary_fill_holes(_vc) & ~_vc
-_hl, _hn = ndimage.label(_holes)
-if _hn:
-    _hs = ndimage.sum(_holes, _hl, range(1, _hn + 1))
-    _vc |= np.isin(_hl, np.nonzero(_hs <= 30)[0] + 1) & ~bmask & ~(gcol == C["water"])
-note("canopy cells added by closing / hole filling:", int((_vc & ~veg).sum()))
-veg = _vc
-veg_laser = np.zeros((D, W), bool)  # canopy cells whose height the laser measured
-if LZ is not None:
-    # the image-matched surface smears crowns into the gaps between them and over the lawn at their rims (a third of
-    # its canopy cells are off by more than 2 m). Where the laser saw the ground there, well sampled and with no
-    # vegetation over 2 m, beside canopy it did see (3 m or less), the cell is open: the rim and the gaps go. A crown
-    # the laser did not see at all (planted or grown since 2021) stays, and so does the rim of any tree of the 2024
-    # register (within 2 m of its point): the surface model has the last word on whether a tree stands
-    _lcan = LZ["veg_top"] >= 30
-    _bvpt = np.zeros((D, W), bool)
-    for t in all_trees:
-        if t["src"] != "osm" or t.get("bv_height"):
-            _bvpt[int(t["y"]), int(t["x"])] = True
-    _open = (LZ["n_pulse"] >= 6) & (LZ["veg_top"] < 20) & (LZ["n_ground"] >= 3)
-    _trim = veg & _open & (ndimage.distance_transform_edt(~_lcan) <= 3) & (ndimage.distance_transform_edt(~_bvpt) > 2)
-    veg &= ~_trim
-    lab, n = ndimage.label(veg)
-    sizes = ndimage.sum(veg, lab, range(1, n + 1))
-    veg &= np.isin(lab, np.nonzero(sizes >= 4)[0] + 1)
-    note("canopy cells the laser saw open (rims, gaps between crowns) dropped:", int(_trim.sum()))
-    # the canopy's height: the laser's highest vegetation return (leaf-off twigs, within a few dm of the summer top),
-    # grown by what the 2024 surface adds, up to 1.5 m in three years; where the surface model is far lower (under
-    # 60 %) the tree was cut back or felled since, and the surface model's height stands
-    _lt = LZ["veg_top"].astype(np.float32) / 10
-    _lt = np.where(_lt >= 2, _lt, ndimage.median_filter(_lt, 3))
-    _use = veg & (_lt >= 2) & (nd_mean >= 0.6 * _lt)
-    _nv = _lt + np.clip(nd_mean - _lt, 0, 1.5)
-    used, total = int(_use.sum()), int(veg.sum())
-    report["counters"]["laser_canopy"] = dict(used=used, total=total)
-    note("canopy heights from the laser:", used, "of", total, "cells; surface model minus laser, median",
-         round(float(np.median((nd_mean - _lt)[_use])), 2) if _use.any() else None, "m, |diff| > 2 m:",
-         round(float((np.abs(nd_mean - _lt)[_use] > 2).mean()), 3) if _use.any() else None)
-    nd_mean = np.where(_use, _nv, nd_mean)
-    veg_laser = _use
-nd_mean = np.where(veg & (nd_mean < 2.2), np.maximum(nd_mean, ndimage.median_filter(np.where(veg, nd_mean, 0), 5)), nd_mean)
-hs = ndimage.gaussian_filter(np.where(veg, nd_mean, 0), 2) / np.maximum(ndimage.gaussian_filter(veg.astype(float), 2), 1e-3)
-crown_top = np.round(np.minimum(nd_mean, 40)).astype(np.int32)
-# against a wall the DSM is the wall's (1 m green pillars 20-30 m up the facades): within 2 m
-# of a building a crown is no taller than its canopy away from the walls (gaussian mean x 1.25 + 2 m), 12 m with none
-_nearb = ndimage.binary_dilation(bmask, iterations=2) & veg
-_far = veg & ~ndimage.binary_dilation(bmask, iterations=2)
-_wf = ndimage.gaussian_filter(_far.astype(np.float32), 3)
-_hf = ndimage.gaussian_filter(np.where(_far, nd_mean, 0).astype(np.float32), 3) / np.maximum(_wf, 1e-3)
-_cap = np.where(_wf > 0.05, _hf * 1.25 + 2, 12)
-_clip = _nearb & (crown_top > _cap)
-crown_top = np.where(_clip, np.round(_cap), crown_top).astype(np.int32)
-note("crowns against walls clipped to their canopy:", int(_clip.sum()))
-crown_bot = np.clip(np.round(hs * 0.38), 2, None).astype(np.int32)
-crown_bot = np.minimum(crown_bot, crown_top - 1)
-# leaf colour from ortho: luminance x hue bins
-hue = np.zeros((D, W), np.float32)
-r_, g_, b_ = cellcol[..., 0], cellcol[..., 1], cellcol[..., 2]
-yellowish = (r_ - b_) / rgbsum > 0.05
-lbin = np.clip(((lum - 40) / 110 * 5).astype(int), 0, 4)
-leafidx = np.array(LEAVES, np.uint16)[(4 - lbin) + 5 * (~yellowish)]
-
-# trunks: every known tree standing under a LiDAR crown gets one, from the ground up into its crown (the crown's leaf
-# columns start at crown_bot, so the trunk's top voxel touches them face to face: the crown stands, it does not float);
-# a known tree with no crown in the surface model (planted since) is drawn procedurally. Crowns that no database tree
-# stands under get trunks at their tops (local maxima of the canopy height, >= 5 m apart).
-n_new = n_trunk = 0
-canopy_near = ndimage.binary_dilation(veg, iterations=2)
-_vd, (_vr, _vc) = ndimage.distance_transform_edt(~veg, return_indices=True)
-trunk_at = np.zeros((D, W), bool)
-# where a trunk may stand: never on a carriageway, rails, tram bed or in the water; a trunk placed only from the canopy
-# (no tree known there) also not on paths and squares -- it would stand in the walkers' way -- but on soft ground
-_hard = np.isin(gcol, [C[k] for k in ("water", "asphalt", "asphalt_l", "rail", "trambed", "ballast", "cycle", "parking")]) | is_road
-trunk_ok_db = ~_hard
-trunk_ok_peak = np.isin(gcol, [C[k] for k in ("grass", "grass2", "garden", "scrub", "dirt", "dirt2", "fresh", "bare", "soil",
-                                               "flower", "flower2", "gravel")]) & ~is_road
-_okd, (_okr, _okc) = ndimage.distance_transform_edt(~(trunk_ok_peak & veg), return_indices=True)
-_dbd, (_dbr, _dbc) = ndimage.distance_transform_edt(~(trunk_ok_db & veg), return_indices=True)
-
-
-trunks = []  # (row, col, thick): drawn once the crowns are shaped around them
-
-
-trunk_conifer = []  # per trunk: a conifer by the database's species (or OSM leaf_type)
-trunk_rec = []  # per trunk: its record in the tree register (trees.json), None for the canopy tops' (added below)
-trunk_broad = []  # per trunk: known to be broadleaved (species, leaf_type): never a conifer by the laser
-
-
-def put_trunk(r, c, thick=False, conifer=False, rec=None):
-    trunks.append((r, c, thick))
-    trunk_conifer.append(conifer)
-    trunk_rec.append(rec)
-    trunk_broad.append(rec is not None and treedb.is_broadleaf(rec))
-    trunk_at[r, c] = True
-
-
-for t in all_trees:
-    c, r = int(t["x"]), int(t["y"])
-    if not (2 <= c < W - 2 and 2 <= r < D - 2) or bmask[r, c]:
-        t["drawn"] = "none"
-        continue
-    if canopy_near[r, c]:
-        if not veg[r, c] and _vd[r, c] <= 2.5:  # the point just off its crown's LiDAR cells: under the nearest one
-            r, c = int(_vr[r, c]), int(_vc[r, c])
-        if veg[r, c] and not trunk_ok_db[r, c]:  # mapped onto the road edge: to the kerb side (more than 3 m into
-            if _dbd[r, c] > 3:                     # the carriageway: not drawn, the cars drive there --
-                t["drawn"] = "none"                # docs/plans/road-clearance.md)
-                continue
-            r, c = int(_dbr[r, c]), int(_dbc[r, c])
-        if veg[r, c] and trunk_at[max(0, r - 1):r + 2, max(0, c - 1):c + 2].any():  # a trunk beside it already
-            t["drawn"] = "none"
-            continue
-        if veg[r, c]:
-            # a big tree (circumference 2.5 m and up, or 24 m tall in the register) on a trunk of 2 x 2
-            put_trunk(r, c, thick=(t.get("trunk_cm") or 0) >= 250 or (t.get("bv_height") or 0) >= 24,
-                      conifer=treedb.is_conifer(t), rec=t)
-            t["drawn"] = "lidar"
-            # where the trunk stands (moved under its crown or to the kerb): phenology.py finds each crown's tree by
-            # its nearest trunk, so a broadleaf crown beside a conifer must not take the conifer's evergreen class
-            t["x"], t["y"] = float(c) + 0.5, float(r) + 0.5
-            t["z"] = int(g[r, c])
-            t["h"] = int(crown_top[r, c])
-            n_trunk += 1
-            continue
-        t["drawn"] = "none"  # under another tree's crown edge: its own crown is not resolved
-        continue
-    if t["src"] == "bv":  # the register's crowns are in the surface model: none there now, none drawn
-        t["drawn"] = "none"
-        continue
-    if is_road[r, c]:  # (a tree planted since, mapped on the carriageway: none -- the cars drive there)
-        t["drawn"] = "none"
-        continue
-    n_new += 1
-    landmarks.small_tree(vol, g, r, c, stable_hash(t["id"]), LEAVES, C["trunk"], height=t.get("height"))
-    t["drawn"] = "procedural"
-    t["z"] = int(g[r, c])
-note("trunks under LiDAR crowns at known trees:", n_trunk)
-note("known trees without a crown in the surface model -> procedural:", n_new)
-# crowns no database tree stands under: a trunk at each canopy top >= 5 m from any trunk
-peak = veg & (nd_mean >= ndimage.maximum_filter(np.where(veg, nd_mean, 0), size=7)) & (nd_mean >= 4)
-_td = ndimage.distance_transform_edt(~trunk_at)
-pr_, pc_ = np.nonzero(peak & (_td >= 5))
-order = np.argsort(-nd_mean[pr_, pc_], kind="stable")  # (equal heights: row by row, as in every region)
-taken = np.zeros((D, W), bool)
-n_peak = 0
-for k in order:
-    r, c = int(pr_[k]), int(pc_[k])
-    if taken[max(0, r - 4):r + 5, max(0, c - 4):c + 5].any():
-        continue
-    if not trunk_ok_peak[r, c]:  # the crown's top over a path or a road: the trunk on the nearest soft ground under it,
-        if _okd[r, c] <= 4:      # else on the pavement (a street tree), never on the carriageway
-            r, c = int(_okr[r, c]), int(_okc[r, c])
-        elif not trunk_ok_db[r, c]:
-            if _dbd[r, c] > 3:
-                continue
-            r, c = int(_dbr[r, c]), int(_dbc[r, c])
-    put_trunk(r, c, rec=dict(id=f"lidar:{r + R0}_{c + C0}", src="lidar", x=float(c) + 0.5, y=float(r) + 0.5, drawn="lidar",
-                             z=int(g[r, c]), peak=float(nd_mean[int(pr_[k]), int(pc_[k])])))
-    taken[r, c] = True
-    n_peak += 1
-note("trunks at canopy tops with no known tree under them:", n_peak)
-# crowns, one per trunk: every canopy cell belongs to its nearest trunk (Voronoi). The LiDAR gives only a noisy top
-# surface, so each crown is drawn as one rounded solid standing on its trunk, the way a voxel diorama draws a tree:
-#  - its radial coordinate u runs from 0 at the trunk to 1 at the edge of its own cell -- the canopy's rim or the
-#    line where it meets its neighbour's crown (distance to the trunk / (that + distance to the cell's edge)), so a
-#    crown tapers towards each neighbour too and packed crowns read as separate domes with a notch between them,
-#    not as one Voronoi column each with straight sides and a flat top;
-#  - a broadleaf crown is a squashed superellipsoid over u (its depth from its footprint's radius: no tall narrow
-#    green pillars), a conifer a cone; height, depth and fullness vary a little per tree;
-#  - a metre or so of smooth noise on its top and underside, so the leaf surface is lumpy rather than turned;
-#  - one base leaf tone per tree (its mean ortho colour), lighter clumps on top and darker ones underneath, instead of
-#    each column taking its own ortho pixel (stripes).
-if trunks:
-    nT = len(trunks)
-    tidx = np.zeros((D, W), np.int32)
-    for i_, (r_, c_, _) in enumerate(trunks, 1):
-        tidx[r_, c_] = i_
-    _dt, (_tr_, _tc_) = ndimage.distance_transform_edt(tidx == 0, return_indices=True)
-    # (a canopy cell further than region.CROWN_R from every trunk -- low scrub, no peak in it -- is no crown's: drawn
-    # as the canopy's own column below)
-    own = np.where(veg & (_dt <= region.CROWN_R), tidx[_tr_, _tc_], 0)
-    note("canopy cells further than", region.CROWN_R, "m from every trunk (no crown's):", int((veg & (_dt > region.CROWN_R)).sum()))
-    idx_ = np.arange(1, nT + 1)
-    # the distance to the edge of the own cell: to the nearest cell with another owner or no canopy
-    _same = own > 0
-    for _ax, _sh in ((0, 1), (0, -1), (1, 1), (1, -1)):
-        _same &= region.shift(own, _sh, _ax) == own
-    _db = ndimage.distance_transform_edt(_same)
-    # a crown is one solid per tree, not a column per cell: its height is the crown's robust top (the 5x5 median of the
-    # noisy image-matched surface, then the crown's 90th percentile), measured from the ground at its trunk -- on a slope
-    # the crown sits on its trunk instead of hanging down the hill as a curtain
-    _sm = ndimage.median_filter(np.where(veg, crown_top, 0), 5)
-    vr_, vc_ = np.nonzero(veg)
-    k_ = own[vr_, vc_] - 1
-    ok_ = k_ >= 0
-    kk = np.maximum(k_, 0)
-    _hv = np.maximum(_sm[vr_, vc_], 3).astype(np.float32)
-    _kx = np.where(ok_, k_, nT)  # (a cell no crown owns counts for none: after them all)
-    _ord = np.lexsort((_hv, _kx))
-    _cnt = np.bincount(_kx, minlength=nT + 1)[:nT]
-    _start = np.concatenate([[0], np.cumsum(_cnt)[:-1]])
-    Ht = np.where(_cnt > 0, _hv[_ord][np.clip(_start + (0.9 * np.maximum(_cnt - 1, 0)).astype(int), 0, len(_hv) - 1)], 3)
-    Ht = Ht.astype(np.float32)
-    Re = np.sqrt(np.maximum(_cnt, 1) / np.pi).astype(np.float32)  # the radius of a disc of the crown's footprint
-    G0 = np.array([g[r_, c_] for r_, c_, _ in trunks], np.float32)
-    con = np.array(trunk_conifer, bool)
-    hsh = np.array([cell_hash(r_, c_, "crown") for r_, c_, _ in trunks], np.int64)
-    v1, v2, v3, v4 = ((hsh >> s) % 1000 / 1000.0 for s in (0, 8, 16, 24))  # per-tree variation in [0, 1)
-    _sumc = lambda a: np.bincount(kk[ok_], weights=np.asarray(a, np.float64)[vr_[ok_], vc_[ok_]], minlength=nT)
-    measured = _sumc(veg_laser) > 0.5 * np.maximum(_cnt, 1)  # the crown's height from the laser
-    have_base = np.zeros(nT, bool)
-    # a crown whose species OSM or the register knows keeps it; the others take the species map's class where half
-    # of the crown's cells or more have it (species_map.per_crown), else the laser's
-    _unk = ~con & ~np.array(trunk_broad, bool)
-    cls_rs, share_rs = np.full(nT, species_map.NONE, np.uint8), np.zeros(nT)
-    if SPM is not None:
-        cls_rs, share_rs = species_map.per_crown(SPM[vr_[ok_], vc_[ok_]], kk[ok_], nT)
-    _mapped = share_rs >= 0.5
-    cls_rs = np.where(_mapped, cls_rs, species_map.NONE)
-    everg_rs = np.isin(cls_rs, species_map.EVERGREEN)
-    larch_rs = cls_rs == species_map.LARCH
-    broad_rs = np.isin(cls_rs, species_map.BROADLEAF)
-    lcon = np.zeros(nT, bool)
-    if LZ is not None:
-        # conifers by the winter scan: a spruce, fir, pine, yew or thuja keeps its needles and stops the pulse in the
-        # crown (one return, nothing behind it); a bare broadleaf crown lets it on through its twigs to the ground
-        # (more returns), and the needles reflect brighter: the canopy first returns' mean intensity is ~960 over
-        # evergreen conifers, ~560 over bare broadleaf crowns (~690 over leafless larch). A quarter of the crown's
-        # canopy pulses single or a mean intensity of 780 and up makes it a conifer (against the DLR map's forest
-        # blocks: recall 0.82 at precision 0.72; single >= 0.2 alone found half the conifers)
-        _can, _sgl = _sumc(LZ["n_canopy"]), _sumc(LZ["n_single"])
-        _int = _sumc(LZ["int_canopy"]) * 16 / np.maximum(_can, 1)
-        # (a crown of 10 m2 or more: a narrow dense column is an ivy-clad trunk or a pole as often, a green pillar)
-        lcon = ((_sgl >= 0.25 * _can) | (_int >= 780)) & (_can >= 15) & (_cnt >= 10)
-        # needles in February, single and bright: no larch (the map's larch is then a spruce or Douglas fir beside it),
-        # and in a broadleaf pixel a conifer among the broadleaves
-        _dense = (_sgl >= 0.25 * _can) & (_int >= 800) & (_can >= 15)
-        larch_rs &= ~_dense
-        lcon = (everg_rs | (cls_rs == species_map.LARCH) & _dense | broad_rs & _dense
-                | (cls_rs == species_map.NONE) & lcon)
-    lcon = _unk & (lcon | everg_rs | larch_rs)
-    note("crowns of unknown species on the species map:", int((_unk & _mapped).sum()), "of", int(_unk.sum()),
-         "(evergreen conifer", int((_unk & everg_rs).sum()), "larch", int((_unk & larch_rs).sum()), "broadleaved",
-         int((_unk & broad_rs).sum()), ")")
-    note("conifers by the species map and the laser:", int(lcon.sum()), "(by species:", int(con.sum()), ")")
-    con |= lcon
-    # the map's genus where the crown is drawn as the map says (trees.json "sp_rs", for phenology.py; "species"/"sp"
-    # stay the register's and OSM's): not where the laser overruled it (needles in a broadleaf or larch pixel)
-    _say = _unk & ((everg_rs | larch_rs) & con | broad_rs & ~con)
-    for i_ in np.nonzero(_say)[0]:
-        if trunk_rec[i_] is not None:
-            trunk_rec[i_]["sp_rs"] = species_map.GENUS[int(cls_rs[i_])] or species_map.OTHER_BROADLEAF
-    if LZ is not None:
-        # the crown's underside from the laser: the median over its cells (8+ vegetation returns) of their lowest
-        # tenth -- the lowest branches, and on a tree in the open, its skirt
-        _cb = (LZ["veg_n"] >= 8) & veg
-        _m = ok_ & _cb[vr_, vc_]
-        _kb, _vb = kk[_m], LZ["veg_p10"][vr_[_m], vc_[_m]].astype(np.float32) / 10
-        _o = np.lexsort((_vb, _kb))
-        _nb = np.bincount(_kb, minlength=nT)
-        _sb = np.concatenate([[0], np.cumsum(_nb)[:-1]])
-        base_l = np.where(_nb > 0, _vb[_o][np.clip(_sb + _nb // 2, 0, max(len(_vb) - 1, 0))] if len(_vb) else 0, np.nan)
-        have_base = (_nb >= 4) & measured
-        _rl = base_l / np.maximum(Ht, 1)
-        if have_base.any():
-            note("crown base / height from the laser, quartiles (broadleaf, conifer):",
-                 np.round(np.percentile(_rl[have_base & ~con], [25, 50, 75]), 2).tolist(),
-                 np.round(np.percentile(_rl[have_base & con], [25, 50, 75]), 2).tolist() if (have_base & con).any() else None)
-    # no tall narrow crowns: a broadleaf tree is at most ~3.4 crown radii + 5 m tall (a conifer 5 radii). A crown the
-    # laser measured is as tall as it is (in the forests the crowns are narrow and tall, packed): up to 6 radii + 5 m
-    Ht = np.minimum(Ht, np.where(con, 5 + np.where(measured, 7.0, 5.0) * Re, 5 + np.where(measured, 6.0, 3.2) * Re)) * (0.95 + 0.06 * v1)
-    # a crown squeezed against a facade (a third of it within 2 m of a building) is the wall's LiDAR as much as a tree:
-    # lower still (2.4 radii + 3 m), no green pillar up the front
-    _atwall = np.bincount(_kx, weights=_nearb[vr_, vc_].astype(np.float64), minlength=nT + 1)[:nT] / np.maximum(_cnt, 1)
-    Ht = np.where(_atwall > 0.33, np.minimum(Ht, 3 + 2.4 * Re), Ht)
-    Ht = np.maximum(Ht, 3)
-    # crown depth (top to underside over the trunk): about the crown's width, never more than 2/3 of the tree
-    dep = np.minimum(0.62 * Ht, (1.5 + 0.5 * v2) * Re + 2)
-    dep = np.where(con, np.minimum(0.82 * Ht, 4.5 * Re + 2), dep)
-    if have_base.any():
-        # from the laser's crown base: in leaf-off it is biased low (bare twigs, the trunk, undergrowth reflect where
-        # leaves would hide them in summer: the lowest tenth of the returns sits at ~0.17 of the height under a bare
-        # broadleaf's crown), so a broadleaf takes it halfway towards the 0.38 drawn without it. A conifer's needles
-        # are there in winter too, but its dense crown shadows its own underside from the pulses (its lowest tenth
-        # reads ~0.5 of the height, a spruce's skirt hangs lower): three quarters of it. Never deeper than a crown's width allows
-        # (2.4-3 radii + 3 m broadleaf, 5 radii + 3 m conifer), no pillars of leaves
-        _rb = np.clip(0.5 * _rl + 0.5 * 0.38, 0.15, 0.65)
-        _rc = np.clip(0.75 * _rl, 0.1, 0.5)
-        _dl = Ht * (1 - np.where(con, _rc, _rb))
-        _dl = np.minimum(_dl, np.where(con, 5 * Re + 3, (2.4 + 0.6 * v2) * Re + 3))
-        dep = np.where(have_base & np.isfinite(_dl), _dl, dep)
-        note("crowns shaped on the laser's crown base:", int(have_base.sum()), "of", nT)
-    dep = np.maximum(dep, np.minimum(2.0, Ht - 1))
-    pw = 1.7 + 0.9 * v3  # superellipse exponent: a round ball (1.7) to a fuller, flatter-topped lime (2.6)
-    u = np.clip(_dt[vr_, vc_] / (_dt[vr_, vc_] + _db[vr_, vc_] + 0.8), 0, 1)
-    H_, dp_, pw_ = Ht[kk], dep[kk], pw[kk]
-    con_ = con[kk]
-    # smooth noise, ~1 m amplitude, 2-3 m patches
-    # (hashed from the project grid's coordinates, region.noise: the same crowns in every region)
-    nz_ = region.noise(7, 1.3)[vr_, vc_]
-    nz2_ = region.noise(8, 1.0)[vr_, vc_]
-    zc = H_ - 0.5 * dp_  # broadleaf: a superellipsoid, its waist a little below the middle (u = 1)
-    s_ = np.clip(1 - u ** pw_, 0, 1) ** (1 / pw_)
-    top_b = zc + 0.5 * dp_ * s_
-    bot_b = zc - 0.5 * dp_ * s_ * 1.1
-    top_c = H_ - (dp_ - 0.5) * u ** 0.9            # conifer: a cone to the top, the skirt flaring out a little
-    bot_c = H_ - dp_ + 0.25 * dp_ * u
-    top_rel = np.where(con_, top_c, top_b) + np.clip(nz_ * 1.0, -1.5, 1.5) * np.minimum(1, dp_ / 4)
-    bot_rel = np.where(con_, bot_c, bot_b) + np.clip(nz2_ * 0.7, -1.0, 1.0) * np.minimum(1, dp_ / 4)
-    top_abs = np.round(G0[kk] + top_rel).astype(np.int32)
-    bot_abs = np.round(G0[kk] + bot_rel).astype(np.int32)
-    bot_abs = np.maximum(bot_abs, g[vr_, vc_] + 2)  # uphill the crown keeps clear of the ground
-    # gaps: the thin rim where two crowns meet (and the outermost fringe) is left out
-    keep = ok_ & (top_abs > bot_abs) & ~((s_ < 0.32) & ~con_ & (dp_ >= 4))
-    crown_top[vr_[ok_], vc_[ok_]] = (top_abs - g[vr_, vc_])[ok_]
-    crown_bot[vr_[ok_], vc_[ok_]] = (bot_abs - g[vr_, vc_])[ok_]
-    veg[vr_[ok_ & ~keep], vc_[ok_ & ~keep]] = False
-    # the trunk always reaches its crown: over the trunk the crown's underside is the crown's own (no noise)
-    for i_, (r_, c_, _) in enumerate(trunks):
-        if veg[r_, c_]:
-            crown_bot[r_, c_] = max(2, int(round(G0[i_] + Ht[i_] - (dep[i_] if con[i_] else 1.05 * dep[i_])) - g[r_, c_]))
-            crown_top[r_, c_] = max(int(crown_top[r_, c_]), int(crown_bot[r_, c_]) + 1)
-    for i_, rec_ in enumerate(trunk_rec):  # conifers stay green through the winter (phenology.py)
-        if rec_ is not None and con[i_]:
-            rec_["con"] = 1
-    note("crowns as solids at their trunks:", nT, "conifers:", int(con.sum()), "rim cells left out:", int((ok_ & ~keep).sum()))
-    # one leaf tone per tree: its crown's mean ortho brightness and hue
-    _lt = np.asarray(ndimage.mean(lum, labels=own, index=idx_), np.float32)
-    _yt = np.asarray(ndimage.mean(yellowish.astype(np.float32), labels=own, index=idx_), np.float32) + (v3 - 0.5) * 0.5 > 0.5
-    _lb = np.clip(((np.nan_to_num(_lt, nan=90) - 40) / 110 * 5 + (v4 - 0.5) * 1.6).astype(int), 0, 4)
-    tone_t = (4 - _lb) + 5 * (~_yt)  # index into LEAVES
-    tone = np.full((D, W), -1, np.int16)
-    tone[vr_[ok_], vc_[ok_]] = np.where(con_, -2 - (hsh[kk] % 5), tone_t[kk])[ok_]
-    czc = np.zeros((D, W), np.int32)  # the crown's waist (absolute), to tell its upper half from its underside
-    czc[vr_[ok_], vc_[ok_]] = np.round(G0[kk] + np.where(con_, H_ - 0.6 * dp_, zc))[ok_].astype(np.int32)
-    # conifers (thuja, pine, spruce, yew...: the city database's species) in dark blue-green needles, not leaf green
-    NEEDLES = np.array([pal(c_, M_LEAF) for c_ in ("#37553f", "#3f5f48", "#456a4f", "#4d7356", "#52785a")], np.uint16)  # dark to light
-    note("conifer crowns (database species):", int(con.sum()), "cells", int((ok_ & con_).sum()))
-    # which tree each 2 m cell's leaves belong to (data/crowns.npz, for phenology.py's foliage.bin): the tree owning
-    # most of the cell's canopy, the trunk's own cell counting for four (a crown keeps the cell over its trunk). The
-    # viewer turns a leaf by its 2 m cell, so a cell is evergreen or deciduous as a whole: where a broadleaf crown's
-    # edge shares a cell with a conifer, its leaf voxels there stayed in leaf through the winter (thin bright-green
-    # columns beside the conifers among the bare trees), and the conifer's needles in a broadleaf's cell went bare.
-    # Those voxels (the other kind than the cell's owner) are left out: the boundary between the two snaps to 2 m
-    # (a larch, by its species or the species map, is a cone but bare in winter)
-    evg = con & ~np.array([((r_ or {}).get("species") or (r_ or {}).get("sp_rs") or "").split(" ")[0] in ("Larix", "Metasequoia")
-                           for r_ in trunk_rec])
-    _wt = np.where(veg, 1, 0).astype(np.int8)
-    _wt[tidx > 0] *= 4
-    _o4 = np.where(veg, own, 0).reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
-    _w4 = _wt.reshape(D // 2, 2, W // 2, 2).transpose(0, 2, 1, 3).reshape(D // 2, W // 2, 4)
-    own2 = np.zeros((D // 2, W // 2), np.int32)  # (trunk index + 1, 0 where no canopy)
-    _bn = np.zeros((D // 2, W // 2), np.int16)
-    for k_ in range(4):
-        _cand = _o4[..., k_]
-        _n = ((_o4 == _cand[..., None]) * _w4).sum(-1)
-        _up = (_cand > 0) & (_n > _bn)
-        own2[_up], _bn[_up] = _cand[_up], _n[_up]
-    _evg0 = np.concatenate([[False], evg])
-    _odd = veg & (own > 0) & (_evg0[own] != np.repeat(np.repeat(_evg0[own2], 2, 0), 2, 1))
-    note("crown cells of the other kind than their 2 m cell's owner (evergreen / deciduous) left out:", int(_odd.sum()),
-         "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
-    veg &= ~_odd
-# a crown over a carriageway keeps ROAD_CLEAR m clear of its ground (a street tree is pruned for the traffic; the
-# sloped caps lift the drawn street up to caps.CLAMP = 60/64 m over its voxel, and a car's body reaches 1.8 m over it:
-# docs/plans/road-clearance.md); over the trunk's own cell too (none stands on a carriageway)
-ROAD_CLEAR = 3
-_lift = veg & is_road & (crown_bot < ROAD_CLEAR)
-crown_bot[_lift] = ROAD_CLEAR
-note("crown cells over carriageways lifted to", ROAD_CLEAR, "m:", int(_lift.sum()))
-LEAVES_ = np.array(LEAVES, np.uint16)
-rr, cc = np.nonzero(veg)
-if trunks:
-    tn_ = tone[rr, cc].astype(np.int32)
-    cz_ = czc[rr, cc]
-for zz in range(int(g.min()) + 1, int((g + crown_top).max()) + 1):
-    m = (zz >= g[rr, cc] + crown_bot[rr, cc]) & (zz < g[rr, cc] + crown_top[rr, cc])
-    if not m.any():
-        continue
-    sel = (rr[m], cc[m])
-    col_ = leafidx[sel]
-    if trunks:
-        t_ = tn_[m]
-        # clumps of 3 x 3 x 3 voxels (fewer colour seams for the mesher than single voxels): a fifth of those in the
-        # upper half one tone lighter, a tenth underneath one darker
-        hz = (((rr[m] + R0) // 3) * 73856093 ^ ((cc[m] + C0) // 3) * 19349663 ^ (zz // 3) * 83492791) % 10  # (the project grid's)
-        up_ = zz >= cz_[m]
-        sh_ = np.where(up_ & (hz < 2), -1, np.where(~up_ & (hz < 1), 1, 0))
-        b_ = t_ % 5  # broadleaf: lightness step within the hue family
-        leaf_ = LEAVES_[np.clip(t_ - b_ + np.clip(b_ + sh_, 0, 4), 0, 9)]
-        n_ = NEEDLES[np.clip((-2 - t_) + sh_, 0, 4)]
-        col_ = np.where(t_ >= 0, leaf_, np.where(t_ <= -2, n_, col_))
-    cur = vol[zz][sel]
-    vol[zz][sel] = np.where(cur == 0, col_, cur)
-note("canopy cells:", int(veg.sum()), "crowns:", len(trunks))
-for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowest point, over the trunk
-    hb = int(crown_bot[r_, c_]) + 1
-    for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick else ((0, 0),):
-        rr_, cc_ = r_ + dr, c_ + dc
-        if 0 <= rr_ < D and 0 <= cc_ < W and not bmask[rr_, cc_]:
-            vol[g[rr_, cc_]:g[rr_, cc_] + hb, rr_, cc_] = C["trunk"]
-# branches: a broadleaf crown's bare wood, inside its leaves -- what the viewer shows of it in winter, when the leaves
-# are gone (voxelMaterial.ts; mesher.worker.ts draws wood through the leaves around it). Per tree, from its own cells
-# and a generator seeded by its trunk's project grid cell (the same tree in every region): the trunk on up to a fork at
-# a quarter to two fifths of the crown's depth, a leader on towards the top, 3-5 limbs (more in a wider crown) out to
-# half the crown's reach in their direction and up, each forking into 1-3 branches (by the crown's width) that end a
-# metre or two inside the leaf surface near its rim; in wide crowns more off the leader and the limbs' middles. One
-# voxel thick, the branches paler (twig), never on the leaf surface (no brown specks in summer). Voxels only within
-# the tree's own crown cells, into its leaves or the air under its top; none in an evergreen conifer. A larch (bare in
-# winter as well, phenology.py) gets a conifer's skeleton instead: its trunk on up as a straight leader, inside the
-# needles, to near the top, whorls of 4-5 thin branches round it every 1.2-1.7 m, near level, the lower ones longer
-# (out to most of the crown's reach, drooping a little), the upper ones short and rising: a bare cone. (A packed
-# forest's narrow crowns get few branches: each wood voxel costs ~6 triangles, drawn all year.)
-n_wood = n_wtree = n_ltree = 0
-if trunks:
-    _isleaf = np.zeros(len(pal.entries) + 64, bool)
-    _isleaf[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF]] = True
-    _AZ = np.linspace(0, 2 * np.pi, 16, endpoint=False)
-    _ST = np.arange(1, 2 * region.CROWN_R + 1) * 0.5
-    for i_, (r0_, c0_, thick_) in enumerate(trunks):
-        if evg[i_] or not veg[r0_, c0_]:
-            continue
-        zb_ = int(g[r0_, c0_] + crown_bot[r0_, c0_])
-        zt_ = int(g[r0_, c0_] + crown_top[r0_, c0_])
-        if zt_ - zb_ < 4:
-            continue
-        own_id = i_ + 1
-        # the crown's reach along 16 directions from the trunk's centre: to the last of its own cells before a gap
-        _y = r0_ + 0.5 + np.outer(np.sin(_AZ), _ST)
-        _x = c0_ + 0.5 + np.outer(np.cos(_AZ), _ST)
-        _ri, _ci = np.floor(_y).astype(np.int64), np.floor(_x).astype(np.int64)
-        _in = (_ri >= 0) & (_ri < D) & (_ci >= 0) & (_ci < W)
-        _ri, _ci = np.clip(_ri, 0, D - 1), np.clip(_ci, 0, W - 1)
-        _in &= veg[_ri, _ci] & (own[_ri, _ci] == own_id)
-        _fo = np.argmin(_in, 1)
-        reach_ = np.where(_in.all(1), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
-        if reach_.max() < (1 if con[i_] else 2):  # (a larch's narrow cone: its leader and what branches fit)
-            continue
-        rng_ = np.random.default_rng(cell_hash(r0_, c0_, "limbs"))
-
-        def reach_at(a):
-            f = (a % (2 * np.pi)) / (2 * np.pi) * 16
-            k = int(f) % 16
-            return reach_[k] + (reach_[(k + 1) % 16] - reach_[k]) * (f - int(f))
-
-        def crown_z(r, c):
-            """the crown's underside and top (absolute) at (r, c) if it is this tree's, else None"""
-            if 0 <= r < D and 0 <= c < W and veg[r, c] and own[r, c] == own_id:
-                return int(g[r, c] + crown_bot[r, c]), int(g[r, c] + crown_top[r, c])
-            return None
-
-        def hidden(z, r, c):
-            """under the leaf surface: inside a crown on all four sides and above (from the crowns' rasters, not the
-            volume: the same whatever order the trees are drawn in)"""
-            for rn, cn, zn in ((r - 1, c, z), (r + 1, c, z), (r, c - 1, z), (r, c + 1, z), (r, c, z + 1)):
-                if not (0 <= rn < D and 0 <= cn < W and veg[rn, cn]
-                        and g[rn, cn] + crown_bot[rn, cn] <= zn < g[rn, cn] + crown_top[rn, cn]):
-                    return False
-            return True
-
-        def put(z, r, c, col):
-            global n_wood
-            if not (0 <= r < D and 0 <= c < W and 0 <= z < H) or own[r, c] != own_id or z <= g[r, c]:
-                return
-            v = vol[z, r, c]
-            if col == C["twig"] and not hidden(z, r, c):  # a branch stays under the leaf surface
-                return
-            if (v == 0 and z < g[r, c] + crown_top[r, c]) or _isleaf[v]:
-                vol[z, r, c] = col
-                n_wood += 1
-
-        def seg(p, q, col):
-            d = np.subtract(q, p, dtype=np.float64)
-            n = int(np.ceil(np.abs(d).max()))
-            for t in range(n + 1):
-                x, y, z = (p + d * (t / max(n, 1)))
-                put(int(np.floor(z)), int(np.floor(y)), int(np.floor(x)), col)
-
-        def tip(a, frac, lo, hi, base):
-            """a point frac of the reach out along azimuth a (from the trunk), its height lo..hi of the way from the
-            crown's underside to a metre and a half under its top there (pulled in until it is in the crown)"""
-            for k in range(6):
-                d = frac * reach_at(a) * (1 - 0.15 * k)
-                x, y = c0_ + 0.5 + d * np.cos(a), r0_ + 0.5 + d * np.sin(a)
-                cz = crown_z(int(np.floor(y)), int(np.floor(x)))
-                if cz is not None and cz[1] - 1.5 > cz[0] + 0.5:
-                    b_, t_ = cz[0] + 0.5, cz[1] - 1.5
-                    z = b_ + (lo + (hi - lo) * rng_.random()) * (t_ - b_)
-                    return np.array([x, y, max(z, base)])
-            return None
-
-        if con[i_]:  # a larch (a conifer, not evergreen)
-            n_ltree += 1
-            cx, cy, dz = c0_ + 0.5, r0_ + 0.5, zt_ - zb_
-            # the leader: bark, under the needles' surface (a cone's top metres are the trunk's column alone: there
-            # it stops, or it would stand out of the crown in summer), its upper third in twig
-            for z in range(zb_ + 1, zt_):
-                if not hidden(z, r0_, c0_):
-                    if z > zb_ + dz // 2:
-                        break
-                    continue
-                col = C["trunk"] if z < zb_ + 2 * dz // 3 else C["twig"]
-                for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ and z < zb_ + dz // 2 else ((0, 0),):
-                    if hidden(z, r0_ + dr, c0_ + dc):
-                        put(z, r0_ + dr, c0_ + dc, col)
-            z = zb_ + 1 + rng_.random() * 1.5
-            while z < zt_ - 2:
-                f = (zt_ - z) / dz  # 1 at the crown's foot .. 0 at its top
-                nb = 4 + int(rng_.random() < 0.4)
-                a0 = rng_.random() * 2 * np.pi
-                for k in range(nb):
-                    a = a0 + k * 2 * np.pi / nb + rng_.uniform(-0.4, 0.4)
-                    # out to the cone's rim at this height (put() stops it a voxel under the needles' surface)
-                    L = reach_at(a) * (0.4 + 0.6 * f) * rng_.uniform(0.9, 1.0) + 0.5
-                    if L < 1:
-                        continue
-                    seg(np.array([cx, cy, z]), np.array([cx + L * np.cos(a), cy + L * np.sin(a), z + L * (0.35 - 0.5 * f)]),
-                        C["twig"])
-                z += 1.2 + 0.5 * rng_.random()
-            continue
-        n_wtree += 1
-        dz = zt_ - zb_
-        zf = zb_ + max(1, int(round((0.25 + 0.15 * rng_.random()) * dz)))
-        cx, cy = c0_ + 0.5, r0_ + 0.5
-        for z in range(zb_ + 1, zf + 1):  # the trunk on up to the fork
-            for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)) if thick_ else ((0, 0),):
-                put(z, r0_ + dr, c0_ + dc, C["trunk"])
-        fork = np.array([cx, cy, zf + 0.5])
-        rbar = float(np.mean(reach_))
-        nl = 3 + (rbar >= 4.5) + (rbar >= 6.5) + int(rng_.random() < 0.2)
-        a0 = rng_.random() * 2 * np.pi
-        # the leader: on up from the fork, leaning a little, two branches off its top
-        lean = rng_.random() * 2 * np.pi
-        top = np.array([cx + 0.6 * np.cos(lean), cy + 0.6 * np.sin(lean), zt_ - 1.5])
-        if top[2] > fork[2] + 1:
-            mid = fork + (top - fork) * 0.6
-            seg(fork, mid, C["trunk"])
-            seg(mid, top, C["twig"])
-            for k in range(2 if rbar >= 4 else 0):
-                t2 = tip(a0 + (k + 0.5) * 2 * np.pi / 2 + rng_.uniform(-0.4, 0.4), 0.45, 0.75, 1.0, top[2] - 1)
-                if t2 is not None:
-                    seg(mid, t2, C["twig"])
-        for k in range(nl):
-            a = a0 + (k + 0.5) * 2 * np.pi / nl + rng_.uniform(-0.3, 0.3)
-            e = tip(a, 0.45 + 0.15 * rng_.random(), 0.35, 0.7, fork[2] + 1)
-            if e is None:
-                continue
-            seg(fork, e, C["trunk"])
-            # branches off the limb's end: out to the rim, one up and one or two to the sides
-            for da, lo, hi in ((rng_.uniform(-0.25, 0.25), 0.7, 1.0), (rng_.uniform(0.45, 0.75), 0.4, 0.8),
-                               (-rng_.uniform(0.45, 0.75), 0.4, 0.8))[:1 + (rbar >= 4) + (rbar >= 6)]:
-                t2 = tip(a + da, 0.85 + 0.1 * rng_.random(), lo, hi, e[2] - 2)
-                if t2 is not None:
-                    seg(e, t2, C["twig"])
-            # and one off its middle, outwards and lower: the crown's waist
-            if rbar >= 5.5 and k % 2 == 0:
-                m2 = fork + (e - fork) * 0.5
-                t2 = tip(a + rng_.uniform(-0.5, 0.5), 0.8, 0.1, 0.4, m2[2] - 2)
-                if t2 is not None:
-                    seg(m2, t2, C["twig"])
-note("broadleaf crowns given branches:", n_wtree, "larches:", n_ltree, "wood voxels:", n_wood)
-# the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
-# place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
-# the trunks at canopy tops tallest first, then row by row)
-for t in trunk_rec:  # the trunks placed at canopy tops: no database tree, an id from the cell
-    if t is not None and t["src"] == "lidar":
-        t["h"] = int(crown_top[int(t["y"]), int(t["x"])])
-        all_trees.append(t)
-_tr, _tr_t = [], []  # (_tr_t: each record's tree, for the bridgeheads' lift below)
-for t in all_trees:
-    if not in_core(int(t["y"]), int(t["x"])):
-        continue
-    _tr_t.append(t)
-    rec = dict(id=t["id"], x=round(t["x"] + MC0, 1), y=round(t["y"] + MR0, 1), src=t["src"], drawn=t.get("drawn"))
-    for k_src, k_out in (("z", "z"), ("h", "h"), ("species", "sp"), ("trunk_cm", "cm"), ("osm", "osm"), ("height", "h_inv"),
-                        ("bv_height", "h_bv"), ("con", "con"), ("sp_rs", "sp_rs")):
-        if t.get(k_src) is not None:
-            rec[k_out] = t[k_src]
-    if t["src"] == "lidar":
-        key = [2, -t["peak"], int(t["y"]) + R0, int(t["x"]) + C0]
-    else:
-        key = [0, t["osm"]] if t["src"] == "osm" else [1, t["k"]]  # (OSM's: its id, the file's order in any cut of it)
-    _tr.append(dict(key=key, rec=rec))
-RESULT["trees"] = _tr
-# which tree each 2 m cell's leaves belong to, for phenology.py (foliage.bin): own2 above, as a tree's id here
-# (regions.py: an index into trees.json). (phenology.py took the nearest trunk on the 2 m grid, which is not always the
-# crown's own: a broadleaf crown's side beside a conifer took the conifer's evergreen class and stood green through the
-# winter, a pillar)
-_crown_ids = []
-_best = np.full((D // 2, W // 2), -1, np.int32)
-if trunks:
-    _map = np.full(len(trunks) + 1, -1, np.int32)
-    for i_, rec_ in enumerate(trunk_rec):
-        if rec_ is not None:
-            _map[i_ + 1] = len(_crown_ids)
-            _crown_ids.append(rec_["id"])
-    _best = _map[own2]
-RESULT["crown_ids"] = _crown_ids
-
-stage("vegetation")
+    ctx._best, ctx._jm, ctx._lift, ctx._roof_f, ctx._tr_t, ctx.bmask, ctx.bridge_lines, ctx.bridge_rails,
+    ctx.bridge_road_polys, ctx.bridge_roads, ctx.bridge_shapes, ctx.bridge_ways, ctx.cellcol, ctx.cycle_shapes,
+    ctx.dsm, ctx.dsm_mean, ctx.dtm, ctx.exg, ctx.explicit, ctx.feats, ctx.foot_shapes, ctx.g, ctx.gcol,
+    ctx.grave_stones, ctx.is_road, ctx.lit_ground_ways, ctx.lm, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.parking_mask,
+    ctx.rail_beds, ctx.rails, ctx.render, ctx.road_lines, ctx.splash_pads, ctx.topi, ctx.trunk_ok_db, ctx.veg,
+    ctx.vol, ctx.zt)
 # ---------------------------------------------------------------- fountains
 # A flat walk-on fountain (OSM fountain=splash_pad): dark speckled granite cut into irregular
 # polygons, darker shard inlays, flush with the paving, slot drain round the edge, jets from steel rings ~2 m apart.
