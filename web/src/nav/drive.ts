@@ -55,7 +55,6 @@ export class DriveMode implements PlayerCraft {
 
   constructor({ nav, target, roadPhysics, host, canvas }: CraftContext) {
     this.nav = nav; this.focus = target; this.roadPhysics = roadPhysics;
-    Object.assign(window, { __drive: this });
     setTimeout(() => {
       const idle = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
       if (idle) idle(() => this.loadRapier(), { timeout: 3000 }); else this.loadRapier();

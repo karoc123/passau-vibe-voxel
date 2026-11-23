@@ -63,7 +63,6 @@ export class BoatMode implements PlayerCraft {
 
   constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
     this.nav = nav; this.target = target; this.meta = meta; this.env = env;
-    Object.assign(window, { __boat: this });
     this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
     this.world = this.collision;
     this.model = new BoatModel(nav.actors);
