@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
-import { VoxelCollision } from './voxel-collision';
+import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { FixedStep } from '../core/fixed-step';
 import { BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../sim/craft/boat-motion';
 import { BoatModel } from './boat-model';
@@ -63,7 +63,7 @@ export class BoatMode implements PlayerCraft {
 
   constructor({ nav, camera, target, meta, host, canvas, env }: CraftContext) {
     this.nav = nav; this.target = target; this.meta = meta; this.env = env;
-    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
+    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), () => performance.now());
     this.world = this.collision;
     this.model = new BoatModel(nav.actors);
     this.rig = new ChaseRig(camera);

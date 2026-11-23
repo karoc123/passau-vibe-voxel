@@ -5,12 +5,12 @@ import { viewerTileCache } from '../viewer-tiles';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import type { CraftContext, CraftSpot, PlayerCraft } from './craft';
 import { makeCraftModel } from './craft-models';
-import { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } from './craft-collision';
+import { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { CraftMotion, GLIDER_HEIGHT, type CraftInput, type CraftKind, type CraftStep } from '../sim/craft/craft-motion';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
 import { stickAxis, TouchSticks } from './touch-sticks';
-import { VoxelCollision } from './voxel-collision';
+import { VoxelCollision } from '../sim/craft/voxel-collision';
 import './special-craft.css';
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
@@ -54,7 +54,7 @@ class SpecialCraft implements PlayerCraft {
     this.motion = new CraftMotion(id);
     this.model = makeCraftModel(id);
     nav.actors.add(this.model.group);
-    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), { radius: CRAFT_RADIUS[id] });
+    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), () => performance.now(), { radius: CRAFT_RADIUS[id] });
     this.world = craftWorld(id, this.collision);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {

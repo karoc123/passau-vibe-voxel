@@ -1,6 +1,6 @@
 // Rapier (approach B): the city's voxels as Rapier colliders, only near the bodies that move.
 //
-// The same per-tile data the collision code reads (nav/voxel-collision.ts: data/tiles/1 and 1f, 128 m tiles with a
+// The same per-tile data the collision code reads (sim/craft/voxel-collision.ts: data/tiles/1 and 1f, 128 m tiles with a
 // 1-column apron): per column the ground (solid from 0 up to it) and runs of voxels (base and foliage). Grass is not
 // solid, as there. Water is not solid either (the river's top voxel is the ground's: the ground ends under it); its
 // top per column is kept for waterAt (the car sinks).

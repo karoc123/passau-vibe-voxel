@@ -48,7 +48,7 @@ export type Rule = (flags: number) => boolean;
 export const RULES = {
   // the car and Rapier's bodies (physics/rapier/terrain.ts): grass and water are not solid
   solidForCar: (f: number) => (f & SEM.SOLID) !== 0,
-  // the FPV drone (nav/voxel-collision.ts): the foliage tile's voxels but grass, and the top it settles on (base and
+  // the FPV drone (sim/craft/voxel-collision.ts): the foliage tile's voxels but grass, and the top it settles on (base and
   // foliage) the highest voxel not grass; water is solid to it (the base tile's voxels all are, its sweep tests none)
   solidForDrone: (f: number) => (f & SEM.GRASS) === 0,
   // the walkers' World (world.ts solid, raycast): every voxel

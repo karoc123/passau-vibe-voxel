@@ -2,7 +2,10 @@
 // them through a stubbed fetch), as the Rapier car's map (synthMap) -- both laid out by columnTile from a column
 // function -- and the plane's world of boxes (BoxWorld, swept analytically, no node files).
 import type { Meta } from '../src/types';
-import { VoxelCollision } from '../src/nav/voxel-collision';
+import { VoxelCollision, type CollisionOptions } from '../src/sim/craft/voxel-collision';
+import { TileCache } from '../src/core/tile-cache';
+import { liveEdits } from '../src/core/live-edits';
+import { fetchGzip } from '../src/fetch';
 import { MAT } from '../src/core/materials';
 import { TILE_MAGIC as MAGIC, TILE_N } from '../src/tile-data';
 import { encodeCaps } from '../src/core/surface';
@@ -97,6 +100,11 @@ function tile(spec: WorldSpec, tx: number, ty: number, foliage: boolean) {
   return encode([['cnts', counts], ['grnd', ground], ['runs', runs], ...(rooms.length ? [['room', new Uint16Array(rooms)] as [string, Uint16Array]] : [])]);
 }
 
+// a VoxelCollision as the viewer's crafts had theirs: its own TileCache of the node files fetched (data/tiles/: the stub
+// below, or tools/lib.mjs serveTiles) with the live edits, on the wall clock
+export const fetchedCollision = (meta: Meta, opts?: CollisionOptions) =>
+  new VoxelCollision(meta, new TileCache({ N: meta.tiles.N, load: (p) => fetchGzip(`data/tiles/${p}`), edits: liveEdits }), () => performance.now(), opts);
+
 export interface TestWorld { meta: Meta; collision: VoxelCollision; files: Map<string, Uint8Array> }
 
 // The world's tiles, gzipped, at the paths VoxelCollision fetches (data/tiles/{1,1f}/x_y.bin)
@@ -110,7 +118,7 @@ export async function makeWorld(spec: WorldSpec): Promise<TestWorld> {
   const meta = { W, D, H, base: 0, theta_deg: 0, tiles: { N: TILE_N, levels: [], tris: { 1: [], '1f': [], '1c': [] } },
     palette: Object.values(PAL).map((p) => [...p]), lamps: [], labels: [], views: {}, sources: { osm: '' } } as unknown as Meta;
   serve(files);
-  return { meta, collision: new VoxelCollision(meta), files };
+  return { meta, collision: fetchedCollision(meta), files };
 }
 
 // fetch() answers the test world's files (the last world made), anything else as before

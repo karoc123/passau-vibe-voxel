@@ -1,4 +1,4 @@
-// The level-1 nodes' files for whatever reads voxels outside the mesher (nav/voxel-collision.ts, physics/rapier/
+// The level-1 nodes' files for whatever reads voxels outside the mesher (sim/craft/voxel-collision.ts, physics/rapier/
 // terrain.ts, node tools): each node's tiles/1 and tiles/1f fetched and decoded once while anyone holds it, and seen
 // through the live edits (core/live-edits.ts: an edited node's columns in place of its files'). Pure: the bytes come
 // from an injected `load` (the viewer: fetch + gunzip; a Node tool: a file reader).

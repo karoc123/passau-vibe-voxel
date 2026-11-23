@@ -8,7 +8,7 @@ import { collisionWorld, JET, PLANE, PlaneFlight, type PlaneConfig, type PlaneIn
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
 import { stickAxis, TouchSticks } from './touch-sticks';
-import { VoxelCollision } from './voxel-collision';
+import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
@@ -148,7 +148,7 @@ export class PlaneMode implements PlayerCraft {
   private use(type: Aircraft) {
     let m = this.made.get(type);
     if (!m) {
-      const collision = new VoxelCollision(this.meta, viewerTileCache(this.meta.tiles.N), { radius: type.cfg.RADIUS, horizon: type.cfg.HORIZON });
+      const collision = new VoxelCollision(this.meta, viewerTileCache(this.meta.tiles.N), () => performance.now(), { radius: type.cfg.RADIUS, horizon: type.cfg.HORIZON });
       m = { flight: new PlaneFlight(type.cfg), model: type.model(), collision, world: collisionWorld(collision, this.meta.H) };
       this.nav.actors.add(m.model.group);
       this.made.set(type, m);

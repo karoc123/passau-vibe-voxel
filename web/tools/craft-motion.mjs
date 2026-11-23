@@ -3,9 +3,8 @@
 import { load } from './real-city.mjs';
 import { imp } from './lib.mjs';
 
-const { makeWorld } = await imp('checks/world.ts');
-const { VoxelCollision } = await load('nav/voxel-collision.ts');
-const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('nav/craft-collision.ts');
+const { makeWorld, fetchedCollision } = await imp('checks/world.ts');
+const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('sim/craft/craft-collision.ts');
 const { CraftMotion } = await load('sim/craft/craft-motion.ts');
 const { meta } = await makeWorld({
   size: [128, 128],
@@ -20,7 +19,7 @@ const dt = 1 / 60;
 const neutral = { drive: 0, lift: 0, turn: 0, side: 0 };
 
 async function craft(kind) {
-  const col = new VoxelCollision(meta, undefined, { radius: CRAFT_RADIUS[kind] });
+  const col = fetchedCollision(meta, { radius: CRAFT_RADIUS[kind] });
   for (let i = 0; i < 1000; i++) {
     col.prefetch({ x: 64, y: 0, z: 64 }, { x: 0, y: 0, z: 0 });
     if (col.surface(64, 64)) return { motion: new CraftMotion(kind), world: craftWorld(kind, col) };

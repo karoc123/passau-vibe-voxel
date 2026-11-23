@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelCollision, type ImpactKind, type Sweep } from './voxel-collision';
+import { VoxelCollision, type ImpactKind, type Sweep } from '../sim/craft/voxel-collision';
 import { viewerTileCache } from '../viewer-tiles';
 import { FixedStep } from '../core/fixed-step';
 import { add, component, copy, length, set, type Vec3 } from '../core/vec';
@@ -66,7 +66,7 @@ export class FpvMode implements PlayerCraft {
 
   constructor({ nav, camera, target, meta, host, canvas }: CraftContext) {
     this.nav = nav; this.camera = camera; this.target = target;
-    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N));
+    this.collision = new VoxelCollision(meta, viewerTileCache(meta.tiles.N), () => performance.now());
     // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
       this.camera.fov = clamp(this.camera.fov * ratio, 45, 100);
