@@ -36,7 +36,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Package | What | Size | Status |
 |---|---|---|---|
 | R6 | Split `voxelize.py` into stages | L | **Ready** |
-| R7 | Smaller independent items | M each | **Ready** |
+| R7 | Build time | M | **Ready** |
 | R5 | Check harnesses out of `src/` | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Ready** |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
@@ -67,9 +67,10 @@ gone into "Ready". For a partially completed package, remove the landed item and
 - **Include code-health 18:** a class raster or palette flags instead of finding cells by colour, and one
   `scripts/constants.py`.
 
-### R7. Smaller items from code-health 19 (M each, independent)
+### R7. Build time (code-health 19, M)
 
-- **`traffic.build`:** split it, and tie the 3.0 m lane spacing to `sim/path.ts` with a check.
+- **Landed:** `traffic.build` split into steps, `traffic.LANE` checked against `LANE_W` by the `lanes` gate in `scripts/check.sh` (merge `e106f98b`).
+
 - **Build time:** vegetation 21 %, `debris.support_floating` 17 %. See `data/debug/timings.json` and
   [build-speed-2.md](build-speed-2.md).
 
