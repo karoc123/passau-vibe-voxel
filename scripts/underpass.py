@@ -16,10 +16,6 @@ from shapely.strtree import STRtree
 from aoi import CRS, OSM_PATH, to_grid
 from ways import cells, num
 
-# traffic.py's inputs over the whole map, set by regions.py from the regions' Walked (not used here)
-WALK = None
-IDS = set()
-SHIFTED = set()
 Walked = namedtuple("Walked", "level ids shifted")
 FOOT = ("footway", "path", "pedestrian", "cycleway", "corridor")
 _T = Transformer.from_crs(4326, CRS, always_xy=True)

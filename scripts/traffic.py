@@ -366,10 +366,9 @@ def length(p):
     return float(sum(math.dist(a[:2], b[:2]) for a, b in zip(p, p[1:])))
 
 
-def bore_z(p):
-    """a way through a hill (tunnels.py): its points at the bored floor, not on the hill over it"""
-    import tunnels
-    zs = [int(tunnels.FLOOR[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
+def bore_z(p, floor):
+    """a way through a hill (tunnels.py): its points at the bored floor (Bored.floor), not on the hill over it"""
+    zs = [int(floor[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
     return [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
 
 
@@ -484,8 +483,8 @@ class Osm:
         return out
 
 
-def road_edges(osm, bored, open_cut):
-    """the directed road edges (one per direction of a way between junctions, with its lanes, speed and the stop line
+def road_edges(osm, bored, floor, open_cut):
+    """bored: the ids of the ways bored through a hill, floor: their bored floor (bore_z). The directed road edges (one per direction of a way between junctions, with its lanes, speed and the stop line
     of a signal near its end), the signal controllers (signal nodes clustered within 45 m) and the road nodes' index
     (OSM id -> the edges' a, b)"""
     nodes, ntags = osm.nodes, osm.ntags
@@ -537,7 +536,7 @@ def road_edges(osm, bored, open_cut):
         for s, nl, dname in dirs:
             p = osm.pts_of(s, bridge)
             if w["id"] in bored:
-                p = bore_z(p)
+                p = bore_z(p, floor)
             L = length(p)
             if L < 1:
                 continue
@@ -665,14 +664,13 @@ def roof_z(x, y, g, vol, solid):
     return z if min(zs) >= g[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)] + 2.5 else None
 
 
-def footpaths(osm, bored, ctrls, vol, solid, note):
+def footpaths(osm, bored, floor, walked, ctrls, vol, solid, note):
     """the undirected footpath edges (walking weight, bike ways, signalled crossings on a controller, heights through
     stairwells, passages and up onto roofs), the path nodes' index (OSM id -> the edges' a, b) and the edges down a
-    shifted stair (underpass.SHIFTED)"""
-    import underpass
+    shifted stair (walked.shifted). bored, floor: as road_edges; walked: underpass.Walked over the whole map"""
     nodes, ntags, g = osm.nodes, osm.ntags, osm.g
     pways = [w for w in osm.ways if (w["tags"]["highway"] in WALK or w["tags"].get("footway") == "sidewalk")
-             and (not underground(w["tags"]) or w["id"] in underpass.IDS or w["id"] in bored) and w["tags"].get("access") not in ("no", "private")]
+             and (not underground(w["tags"]) or w["id"] in walked.ids or w["id"] in bored) and w["tags"].get("access") not in ("no", "private")]
     ped_sig = {n for n, t in ntags.items() if t.get("crossing") == "traffic_signals" or t.get("crossing:signals") == "yes"}
     peds, pidx, shifted_edges = [], {}, set()
 
@@ -685,16 +683,16 @@ def footpaths(osm, bored, ctrls, vol, solid, note):
     for w, seg in osm.split(pways):
         t = w["tags"]
         bridge = t.get("bridge") not in (None, "no")
-        shifted = w["id"] in underpass.SHIFTED
+        shifted = w["id"] in walked.shifted
         p = osm.pts_of(seg, bridge, spacing=0.5 if shifted else 3)
         L = length(p)
         if L < 0.8:
             continue
         up = max(level_of(t), layer_of(t)) >= 1
         if w["id"] in bored:
-            p = bore_z(p)
-        elif shifted or w["id"] in underpass.IDS:  # down a stairwell or through a passage: its carved walking levels
-            zs = [int(underpass.WALK[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
+            p = bore_z(p, floor)
+        elif shifted or w["id"] in walked.ids:  # down a stairwell or through a passage: its carved walking levels
+            zs = [int(walked.level[min(max(int(y), 0), D - 1), min(max(int(x), 0), W - 1)]) for x, y, _ in p]
             p = [[x, y, z if z >= 0 else z0] for (x, y, z0), z in zip(p, zs)]
         elif vol is not None and not bridge and up:
             zs = [roof_z(x, y, g, vol, solid) for x, y, _ in p]  # a path mapped one level up: on a roof garden or a terrace
@@ -973,25 +971,31 @@ def fit_to_volume(roads, trains, peds, shifted_edges, vol, solid, csolid, surf, 
     return keep
 
 
-def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None, open_cut=frozenset()):
+def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=None, open_cut=frozenset(), bored=None,
+          walked=None):
     """surf: (D, W) uint8, 1 = carriageway, 2 = track bed (rails); used to validate OSM lane counts against the paving.
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest surface around, not the cars or cable stays the survey flight caught on it).
     vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit).
     open_cut: the ids of the layer -1 ways open to the sky, not tunnels (voxelize.py: ground.open_cut).
+    bored: (floor, ids) over the whole map: the bored floor (tunnels.Bored.floor, -1 elsewhere) and the ids of the ways
+    bored (tunnels.plan); walked: underpass.Walked over the whole map (the carved walking levels, the ways walked, the
+    stairs shifted). None: no bores, no underpasses.
     The steps, in order: the OSM ways on the grid (Osm); roads (road_edges, check_lanes, infer_signals,
     turn_restrictions); footpaths; signal heads; trains; all fitted to the volume (fit_to_volume); bike ways joined."""
     osm = Osm(g, nd_mean, water)
-    import tunnels
-    bored = tunnels.IDS if tunnels.FLOOR is not None else set()
+    floor, bore_ids = bored if bored is not None and bored[0] is not None else (None, set())
+    if walked is None:
+        import underpass
+        walked = underpass.Walked(None, set(), set())
 
-    roads, ctrls, nid_index = road_edges(osm, bored, open_cut)
+    roads, ctrls, nid_index = road_edges(osm, bore_ids, floor, open_cut)
     surf = check_lanes(roads, surf, note)  # (from here on with the track bed's margin)
     infer_signals(roads, ctrls, note)
     restr = turn_restrictions(osm.data, nid_index, note)
     rnodes = node_list(nid_index, osm.nodes)
 
-    peds, pidx, shifted_edges = footpaths(osm, bored, ctrls, vol, solid, note)
+    peds, pidx, shifted_edges = footpaths(osm, bore_ids, floor, walked, ctrls, vol, solid, note)
     pn = node_list(pidx, osm.nodes)
 
     heads = signal_heads(roads, surf, osm)
@@ -1034,10 +1038,9 @@ if __name__ == "__main__":  # traffic.json alone, from the last full build's vol
     import pickle
     tin = pickle.load(open("data/cache/traffic_in.pkl", "rb"))
     import underpass
-    open_cut, underpass.WALK, underpass.IDS = tin.pop("open_cut"), tin.pop("walk"), tin.pop("ids")
-    underpass.SHIFTED = tin.pop("shifted_stairs", set())
-    import tunnels
-    tunnels.FLOOR, tunnels.IDS = tin.pop("bore", None), tin.pop("bore_ids", set())
+    walked = underpass.Walked(tin.pop("walk"), tin.pop("ids"), tin.pop("shifted_stairs", set()))
+    bored = (tin.pop("bore", None), tin.pop("bore_ids", set()))
     import trafficpack
-    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), open_cut=open_cut, **tin)),
+    json.dump(trafficpack.pack(build(note=print, vol=np.load("data/cache/final_vol.npy", mmap_mode="r"), bored=bored,
+                                     walked=walked, **tin)),
               open("web/public/data/traffic.json", "w"), separators=(",", ":"))
