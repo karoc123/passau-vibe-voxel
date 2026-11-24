@@ -1,11 +1,11 @@
 // What the world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; its types, plain
 // data: sim/contract/snapshot.ts), and the client's copy of the traffic it is drawn from (TrafficMirror). It crosses to
 // the page from a Web Worker as it is (later, quantised, to a network client); the gates check that (CloneLink).
-//   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts): the traffic's agents as they are after the
+//   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts Session): the traffic's agents as they are after the
 //                                      update (enough for the client's own path maths: Traffic.carPose, personPoint),
 //                                      the bodies' drawn poses, trains, boats, the walked people, the crafts (their
 //                                      cores' state), the events since (the crafts' and the drivers' among them), the
-//                                      player's reads (seat, car)
+//                                      session's player's reads (id, seat, car, results, ack)
 //   TrafficMirror                      the client side: a Traffic of its own over the same TrafficData, never ticked,
 //                                      its agents set from each snapshot, one object per id (the drawn fields, the
 //                                      nav's ride carry over); what view/life.ts draws (TrafficView)
@@ -18,7 +18,7 @@ import type { CommandResult } from './contract/commands';
 import type { SimEvent } from './contract/events';
 import type { PlayerId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { CraftState, EditNote, Snapshot } from './contract/snapshot';
+import type { Ack, CraftState, EditNote, Snapshot } from './contract/snapshot';
 import type { WorldSim } from './world-sim';
 
 // what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState: these keys,
@@ -48,9 +48,10 @@ const pick = <T extends object, K extends keyof T>(o: T, keys: readonly K[]) => 
   return out;
 };
 
-/** the sim's state after its update for player; since: the tick of the player's last snapshot (its events after it);
- * results: the player's command outcomes since; edits: the nodes changed since */
-export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, results: CommandResult[], edits: EditNote[] = []): Snapshot {
+/** the sim's state after its update for a session of player; since: the tick of the session's last snapshot (its events
+ * after it); results: the player's command outcomes since; edits: the nodes changed since; ack: the session's last seat
+ * input taken */
+export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, results: CommandResult[], edits: EditNote[] = [], ack: Ack | null = null): Snapshot {
   const T = sim.traffic, B = T.bodies, bodies: [number, BodyDraw][] = [];
   if (B?.drawState) for (const c of T.roadVehicles()) { const d = B.drawState(c); if (d) bodies.push([c.id, d]); }
   const walked: [number, WalkPose][] = [];
@@ -64,7 +65,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
     walked, crafts, events: sim.eventsSince(since).map((e) => ('person' in e ? { ...e, person: pick(e.person, PERSON_KEYS) as Person } : e)),
-    player: { seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: sim.ack(player) },
+    player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
     edits,
   };
 }

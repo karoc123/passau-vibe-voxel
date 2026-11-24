@@ -80,7 +80,8 @@ function run({ name, at: start, h0, h1 }) {
 
   // (--mirror: drawn from the sim's snapshots, sim/snapshot.ts, as the page does from a worker)
   const server = new SimServer(new WorldSim(td));
-  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(server, 'local')), structuredClone(pristine), null, 'local') : new LocalSimClient(server);
+  const session = server.connect('p1');
+  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null) : new LocalSimClient(session);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;

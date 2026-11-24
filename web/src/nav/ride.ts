@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { LOCAL_PLAYER } from './player';
 import type { Pose } from '../sim/contract/pose';
 import type { Person } from '../sim/contract/agents';
 import { vehicleOf } from '../sim/vehicles';
@@ -48,7 +47,7 @@ export class Rider {
   start(ag: Picked) {
     this.release();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
-    this.sim?.send({ kind: 'follow', player: LOCAL_PLAYER, entity: { kind: ag.kind, id: ag.obj.id } });
+    this.sim?.send({ kind: 'follow', entity: { kind: ag.kind, id: ag.obj.id } });
   }
 
   /** the ride is over: nothing followed, nothing walked */
@@ -57,13 +56,13 @@ export class Rider {
     this.camera.reset();
     this.jumpAsked = false;
     this.release();
-    this.sim?.send({ kind: 'follow', player: LOCAL_PLAYER, entity: null });
+    this.sim?.send({ kind: 'follow', entity: null });
   }
 
   // off the person walked: back to the crowd's own walk (the sim no longer keeps them where put), and following them
   // again starts afresh from where they are (walkAs' start) instead of moving them to the foot's position
   release() {
-    if (this.walking) this.sim?.send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
+    if (this.walking) this.sim?.send({ kind: 'leaveSeat' });
     this.walking = null;
   }
 
@@ -81,8 +80,8 @@ export class Rider {
     const R = this.ride!, H = this.host, life = H.life();
     // (the seat refused: walked by another, or gone from the crowd; a pose out of reach: the walk back where the sim
     // took it)
-    if (life?.client.results(LOCAL_PLAYER, 'enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
-    if (life?.client.results(LOCAL_PLAYER, 'seatInput', 'walker').some((r) => !r.ok) && this.walking) {
+    if (life?.client.results('enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
+    if (life?.client.results('seatInput', 'walker').some((r) => !r.ok) && this.walking) {
       const w = life.client.walkedPose(this.walking.id);
       if (w) H.foot.correct(w);
     }
@@ -112,7 +111,7 @@ export class Rider {
       const p: Pose | null = H.life()!.pose('person', o);
       if (!p) return;
       this.release();
-      sim.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'person', id: o.id }, role: 'walker', pose: { ...p, moving: false } });
+      sim.send({ kind: 'enterSeat', entity: { kind: 'person', id: o.id }, role: 'walker', pose: { ...p, moving: false } });
       this.walking = o;
       Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
       H.glide.start(1100);
@@ -120,7 +119,7 @@ export class Rider {
       H.foot.startAs(p);
     }
     if (this.jumpAsked) { H.foot.jump(false); this.jumpAsked = false; }
-    sim.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'walker', input: H.foot.walkAs(R, dt) });
+    sim.send({ kind: 'seatInput', role: 'walker', input: H.foot.walkAs(R, dt) });
   }
 }
 

@@ -47,7 +47,7 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   /** the input of an empty seat (WorldSim: a craft left, or not yet given its pilot's): hands off, and what would keep
    * it going let go (a plane's lever back, a drone's throttle cut, a helicopter let down onto its skids) */
   readonly neutral: I;
-  /** what happened since they were last read (WorldSim: the world's craft events, read by its pilot: craftEvents) */
+  /** what happened since they were last read (WorldSim: the world's craft events, read by its pilot's session: Session.craftEvents) */
   readonly events: E[];
   reset(spot: CraftSpot): void;
   /** a world tick starts: what drawn(alpha) blends from (alpha 0) is its drawn state now */

@@ -1,7 +1,6 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import { type CarInput, PARK } from '../sim/contract/inputs';
-import { LOCAL_PLAYER } from './player';
 import type { SimClient } from '../sim/sim-client';
 import { CRASH_MS, SINK_MS, type DriverSnapshot } from '../sim/contract/snapshot';
 import type { Nav, Ride } from './nav';
@@ -75,7 +74,7 @@ export class DriveMode implements PlayerCraft {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'resetDriver' } }); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
@@ -86,13 +85,13 @@ export class DriveMode implements PlayerCraft {
     if (this.pending) this.prepare(this.pending);
     if (this.driving && this.world) {
       // (the wheel refused: the car gone, or another player's; or the car lost after it was taken)
-      const refused = this.world.results(LOCAL_PLAYER, 'enterSeat', 'driver').some((r) => !r.ok);
-      this.snapshot = this.world.driver(LOCAL_PLAYER);
+      const refused = this.world.results('enterSeat', 'driver').some((r) => !r.ok);
+      this.snapshot = this.world.driver();
       if (refused || (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick)) this.nav.leaveCraft();
       else {
         const focused = inFocus(), now = performance.now();
-        this.world.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'driver', input: focused ? this.input() : PARK });
-        for (const note of this.world.driverNotes(LOCAL_PLAYER)) this.panel.say(note.text, note.ms);
+        this.world.send({ kind: 'seatInput', role: 'driver', input: focused ? this.input() : PARK });
+        for (const note of this.world.driverNotes()) this.panel.say(note.text, note.ms);
         if (this.snapshot) {
           this.shakeCamera(this.snapshot, now);
           const p = this.snapshot.pose;
@@ -146,8 +145,8 @@ export class DriveMode implements PlayerCraft {
     this.pending = null;
     // (Nav first: whatever it leaves for this sends its leaveSeat before the takeWheel; an old answer dropped)
     this.nav.enterCraft(this);
-    world.results(LOCAL_PLAYER, 'enterSeat', 'driver');
-    world.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'car', id: car.id }, role: 'driver',
+    world.results('enterSeat', 'driver');
+    world.send({ kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver',
       choice: this.choice === 'any' ? undefined : this.choice });
     this.claimTick = world.tick;
     this.driving = ride;
@@ -159,7 +158,7 @@ export class DriveMode implements PlayerCraft {
   // left (Park, the map, a walk, another ride or craft): the car parks where it is
   leave() {
     if (!this.driving) return;
-    this.world?.send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
+    this.world?.send({ kind: 'leaveSeat' });
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.claimTick = null;

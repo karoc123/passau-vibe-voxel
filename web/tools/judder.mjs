@@ -47,7 +47,7 @@ await page.evaluate(() => document.activeElement?.blur?.());
 await page.waitForTimeout(2000);
 await page.waitForFunction(() => !document.querySelector('.drive-mode button')?.disabled, null, { timeout: 60000 }).catch(() => {});
 await page.locator('.drive-mode button').first().click();
-await page.waitForFunction(() => window.__sim.seat('local')?.role === 'driver' && window.__sim.driver('local') && !window.__sim.driver('local').waiting, null, { timeout: 90000 }).catch(() => {});
+await page.waitForFunction(() => window.__sim.seat()?.role === 'driver' && window.__sim.driver() && !window.__sim.driver().waiting, null, { timeout: 90000 }).catch(() => {});
 await page.evaluate(() => document.activeElement?.blur?.());
 
 // the sampler
@@ -58,18 +58,18 @@ await page.evaluate(() => {
   nav.place = (dt) => {
     orig(dt);
     if (!M.log) return;
-    const id = S.driver('local')?.entityId, T = S.traffic;
+    const id = S.driver()?.entityId, T = S.traffic;
     const c = [...T.cars, ...T.detachedCars].find((q) => q.id === id);
     if (!c?.rp) return;
     const d = c.detachedPose;
-    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, c.rp.x, c.rp.y, c.rp.z, c.rh, cam.position.x, cam.position.y, cam.position.z, S.driver('local').kmh, d.x, d.z]);
+    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, c.rp.x, c.rp.y, c.rp.z, c.rh, cam.position.x, cam.position.y, cam.position.z, S.driver().kmh, d.x, d.z]);
   };
 });
 } else {
   // in at the spot (the shell's own search for a start), then (the drone) armed; the sampler just before the render: the
   // craft as drawn (its model: the boat's hull; the drone's camera: it is the drone) and the camera, final for the frame
   await page.evaluate(([shell, at]) => window.__crafts.find((c) => c.id === shell).enter(at), [craft.shell, craft.at]);
-  await page.waitForFunction(() => window.__sim.craftOf('local')?.placed, null, { timeout: 90000 });
+  await page.waitForFunction(() => window.__sim.craftOf()?.placed, null, { timeout: 90000 });
   await page.waitForTimeout(500);
   // (the drone armed on the keyboard, as its panel's button does)
   if (craft.arm) await page.evaluate(([shell, how]) => window.__crafts.find((c) => c.id === shell).arm(how), [craft.shell, craft.arm]);

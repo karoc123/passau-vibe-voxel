@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { CraftView, SimClient } from '../sim/sim-client';
 import type { CraftId, CraftType } from '../sim/contract/ids';
-import { LOCAL_PLAYER } from './player';
 import type { CoreOf } from '../sim/craft/cores';
 import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { PLANE } from '../sim/craft/plane-flight';
@@ -31,7 +30,7 @@ export class CraftsView {
   update(sim: SimClient | null, dt: number, night: number) {
     const seen = new Set<CraftId>(), now = performance.now(), alpha = sim?.time.alpha ?? 1;
     for (const c of sim?.crafts() ?? []) {
-      if (c.pilot === LOCAL_PLAYER) continue;
+      if (c.pilot !== null && c.pilot === sim?.player) continue;
       let s = this.shown.get(c.id);
       if (!s) {
         const i = this.free.findIndex((f) => f.type === c.type);

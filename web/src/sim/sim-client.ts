@@ -1,13 +1,14 @@
 // What the page holds of the world sim (docs/plans/local-server.md, ADR 0008: "the page sends commands and draws
-// snapshots"): a SimClient. The page never reaches into the WorldSim; it sends its players' commands (SimCommand:
-// plain data, so they can cross to a Web Worker or a server), runs the frame (update: the frame's input; in the page's
-// thread the sim's update itself) and reads what the sim publishes: the traffic as drawn (TrafficView), the crafts in
-// the world (piloted or left), the players' seats, cars and crafts, the outcomes of their commands, the events since a
-// tick.
+// snapshots"): a SimClient. The page never reaches into the WorldSim; it holds one session of the server
+// (sim/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands (SimCommand:
+// plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped on them),
+// runs the frame (update: the frame's input; in the page's thread the sim's update itself) and reads what the sim
+// publishes: the traffic as drawn (TrafficView), the crafts in the world (piloted or left), its player's seat, car and
+// craft, the outcomes of its commands, the events since a tick.
 // LocalSimClient: the sim in the page's thread. Commands are queued and applied in the order sent at the start of the
 // next tick (ADR 0007); every craft shell and the nav send theirs before the update in main.ts's frame. A seat input
-// sent through a client gets the client's seq (per player) and the tick it is meant for (the tick seen + 1); the sim
-// answers with ack (the last one taken). The frame's time (time: FrameTime) is fixed by the update: what is drawn
+// sent through a client gets the client's seq and the tick it is meant for (the tick seen + 1); the session answers
+// with ack (the last one taken). The frame's time (time: FrameTime) is fixed by the update: what is drawn
 // between the last two ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { WorldOp } from '../core/world-edits';
@@ -19,7 +20,7 @@ import { CORES } from './craft/cores';
 import { loadState } from './craft/core-state';
 import { DEFAULT_TUNING } from './tuning';
 import { TrafficMirror, type TrafficView } from './snapshot';
-import type { SimServer } from './sim-server';
+import type { Session } from './sim-server';
 import type { CommandResult, SimCommand } from './contract/commands';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from './contract/ids';
 import type { FrameTime, SimInput } from './contract/inputs';
@@ -27,7 +28,7 @@ import { EVENT_TICKS, type DriveNote, type SimEvent } from './contract/events';
 import type { Ack, DriverSnapshot, Snapshot } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
 import { STEP } from './traffic';
-import { SeatReads } from './world-sim';
+import { SeatReads } from './seat-reads';
 
 // (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView: sim/snapshot.ts)
 
@@ -43,13 +44,16 @@ export interface CraftView<C extends CraftCore = CraftCore> {
 }
 
 export interface SimClient {
+  /** the player whose commands this client sends and whose reads it holds: its session's (the host names it; null
+   * until the first snapshot of a session in another thread) */
+  readonly player: PlayerId | null;
   /** the world's tick as last seen: the number of ticks run */
   readonly tick: number;
   /** the frame's time after the last update (its dt, the tick, alpha: how far between the last two ticks to draw) */
   readonly time: FrameTime;
   /** the traffic as drawn */
   readonly traffic: TrafficView;
-  /** a player's command, applied at the start of the next tick (a seat input given its seq and tick) */
+  /** a command of the client's player, applied at the start of the next tick (a seat input given its seq and tick) */
   send(cmd: SimCommand): void;
   /** the frame: the commands sent applied, then the ticks due after dt s (SimInput: the hour, the focus, the viewer) */
   update(dt: number, input: SimInput): void;
@@ -57,82 +61,81 @@ export interface SimClient {
   eventsSince(tick: number): SimEvent[];
   /** the outcomes of the player's commands of kind (a request's: its kind; and of a seat's role) since the last call
    * for it, oldest first */
-  results(player: PlayerId, kind: CommandResult['kind'], role?: Role): CommandResult[];
+  results(kind: CommandResult['kind'], role?: Role): CommandResult[];
   /** the seat the player holds, or null */
-  seat(player: PlayerId): Seat | null;
-  /** the last seat input of the player's the sim took (seq, the tick it was applied in), or null */
-  ack(player: PlayerId): Ack | null;
+  seat(): Seat | null;
+  /** the last seat input of this client's the sim took (seq, the tick it was applied in), or null */
+  ack(): Ack | null;
   /** where person personId is put by the player walking as them, or null while none does */
   walkedPose(personId: number): WalkPose | null;
   /** the player's car, or null while they drive none */
-  driver(player: PlayerId): DriverSnapshot | null;
+  driver(): DriverSnapshot | null;
   /** what the driver is to be told since the last call (the drive events of their car) */
-  driverNotes(player: PlayerId): DriveNote[];
+  driverNotes(): DriveNote[];
   /** the craft the player pilots, or null */
-  craftOf(player: PlayerId): CraftView | null;
+  craftOf(): CraftView | null;
   /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first (the craft events of it) */
-  craftEvents(player: PlayerId): unknown[];
+  craftEvents(): unknown[];
   /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
-  /** an edit command whose answer is the level-1 nodes it changed, once applied */
-  edit(player: PlayerId, op: WorldOp): Promise<[number, number][]>;
+  /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied */
+  edit(op: WorldOp): Promise<[number, number][]>;
 }
 
-/** the sim in the page's thread, read where it is (the page draws the sim's own objects): a SimServer over the
- * WorldSim made by the page (sim-host.ts) */
+/** the sim in the page's thread, read where it is (the page draws the sim's own objects): a session of the SimServer
+ * over the WorldSim made by the page (sim-host.ts; the app connects it) */
 export class LocalSimClient implements SimClient {
   private nextRef = 1;
   private readonly seqs = new Seqs();
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
-  constructor(private readonly server: SimServer) {
-    server.onEdit = (ref, nodes, error) => {
+  constructor(private readonly session: Session) {
+    session.onEdit = (ref, nodes, error) => {
       const p = this.pending.get(ref);
       this.pending.delete(ref);
       if (nodes) p?.done(nodes); else p?.fail(error);
     };
   }
 
-  private get sim() { return this.server.sim; }
+  private get sim() { return this.session.sim; }
+  get player() { return this.session.player; }
   get tick() { return this.sim.tick; }
   get time() { return this.sim.time; }
   get traffic(): TrafficView { return this.sim.traffic; }
 
-  send(cmd: SimCommand) { this.server.send(this.seqs.stamp(cmd, this.tick)); }
+  send(cmd: SimCommand) { this.session.send(this.seqs.stamp(cmd, this.tick)); }
 
-  edit(player: PlayerId, op: WorldOp) {
+  edit(op: WorldOp) {
     const ref = this.nextRef++;
     return new Promise<[number, number][]>((done, fail) => {
       this.pending.set(ref, { done, fail });
-      this.server.send({ kind: 'edit', player, op, ref });
+      this.session.send({ kind: 'edit', op, ref });
     });
   }
 
-  update(dt: number, input: SimInput) { this.server.update(dt, input); }
+  update(dt: number, input: SimInput) { this.session.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-  results(player: PlayerId, kind: CommandResult['kind'], role?: Role) { return this.server.results(player, kind, role); }
-  seat(player: PlayerId) { return this.sim.seat(player); }
-  ack(player: PlayerId) { return this.sim.ack(player); }
+  results(kind: CommandResult['kind'], role?: Role) { return this.session.results(kind, role); }
+  seat() { return this.session.seat(); }
+  ack() { return this.session.ack(); }
   walkedPose(personId: number) { return this.sim.walkedPose(personId); }
-  driver(player: PlayerId) { return this.sim.driverSnapshot(player); }
-  driverNotes(player: PlayerId) { return this.sim.driverNotes(player); }
-  craftOf(player: PlayerId): CraftView | null { return this.sim.craftOf(player); }
+  driver() { return this.session.driver(); }
+  driverNotes() { return this.session.driverNotes(); }
+  craftOf(): CraftView | null { return this.sim.craftOf(this.session.player); }
   crafts(): readonly CraftView[] { return [...this.sim.crafts.values()].filter((c) => c.placed); }
-  craftEvents(player: PlayerId) { return this.sim.craftEvents(player); }
+  craftEvents() { return this.session.craftEvents(); }
   loadPhysics(warm?: { x: number; z: number }) { return this.sim.loadPhysics(warm).then(() => {}); }
 }
 
-/** the seat inputs' numbers, per player: each one sent gets the next seq and the tick it is meant for */
+/** a client's seat inputs' numbers: each one sent gets the next seq and the tick it is meant for */
 class Seqs {
-  private readonly last = new Map<PlayerId, number>();
+  private last = 0;
   stamp(cmd: SimCommand, tick: number): SimCommand {
     if (cmd.kind !== 'seatInput') return cmd;
-    const seq = (this.last.get(cmd.player) ?? 0) + 1;
-    this.last.set(cmd.player, seq);
-    return { ...cmd, seq, tick: tick + 1 };
+    return { ...cmd, seq: ++this.last, tick: tick + 1 };
   }
 }
 
@@ -144,17 +147,17 @@ export interface SimLink {
   onSnapshot: (s: Snapshot) => void;
 }
 
-/** a SimServer in the page's thread: its snapshot at once after each frame (the snapshot format checked without a
- * worker: ?mirror=1) */
+/** a session of a SimServer in the page's thread: the frame's commands sent through it, the server's update, the
+ * session's snapshot at once after it (the snapshot format checked without a worker: ?mirror=1) */
 export class ThreadLink implements SimLink {
   onSnapshot: (s: Snapshot) => void = () => {};
-  constructor(private readonly server: SimServer, private readonly player: PlayerId) {}
+  constructor(private readonly session: Session) {}
   frame(dt: number, input: SimInput, commands: SimCommand[]) {
-    for (const c of commands) this.server.send(c);
-    this.server.update(dt, input);
-    this.onSnapshot(this.server.snapshot(this.player));
+    for (const c of commands) this.session.send(c);
+    this.session.server.update(dt, input);
+    this.onSnapshot(this.session.snapshot());
   }
-  loadPhysics(warm?: { x: number; z: number }) { return this.server.sim.loadPhysics(warm).then(() => {}); }
+  loadPhysics(warm?: { x: number; z: number }) { return this.session.sim.loadPhysics(warm).then(() => {}); }
 }
 
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
@@ -216,7 +219,8 @@ export function plainData(v: unknown, at: string, typed: boolean, path = new Set
 }
 
 /** the sim reached through snapshots (a worker's, or a ThreadLink's): the page draws a copy of the traffic
- * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds one player's reads (player) */
+ * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds its session's player's reads (player: the
+ * snapshots name it) */
 export class MirrorSimClient implements SimClient {
   readonly traffic: TrafficMirror;
   private queue: SimCommand[] = [];
@@ -233,23 +237,23 @@ export class MirrorSimClient implements SimClient {
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
    * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread) */
-  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly player: PlayerId,
-    private readonly edits = false) {
+  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly edits = false) {
     this.traffic = new TrafficMirror(data, ground);
     link.onSnapshot = (s) => this.take(s);
   }
 
+  get player(): PlayerId | null { return this.last?.player.id ?? null; }
   get tick() { return this.last?.tick ?? 0; }
   /** (the latest snapshot's tick and alpha: one update behind the frame with a worker, M4) */
   get time(): FrameTime { return { dt: this.dt, tick: this.tick, alpha: (this.last?.acc ?? 0) / STEP }; }
 
   send(cmd: SimCommand) { this.queue.push(this.seqs.stamp(cmd, this.tick)); }
 
-  edit(player: PlayerId, op: WorldOp) {
+  edit(op: WorldOp) {
     const ref = this.nextRef++;
     return new Promise<[number, number][]>((done, fail) => {
       this.pending.set(ref, { done, fail });
-      this.send({ kind: 'edit', player, op, ref });
+      this.send({ kind: 'edit', op, ref });
     });
   }
 
@@ -291,24 +295,23 @@ export class MirrorSimClient implements SimClient {
     return E.slice(i);
   }
 
-  results(player: PlayerId, kind: CommandResult['kind'], role?: Role) {
-    if (player !== this.player) return [];
+  results(kind: CommandResult['kind'], role?: Role) {
     const of = (o: CommandResult) => o.kind === kind && (!role || o.role === role);
     const mine = this.outcomes.filter(of);
     if (mine.length) this.outcomes = this.outcomes.filter((o) => !of(o));
     return mine;
   }
 
-  seat(player: PlayerId) { return player === this.player ? this.last?.player.seat ?? null : null; }
-  ack(player: PlayerId) { return player === this.player ? this.last?.player.ack ?? null : null; }
+  seat() { return this.last?.player.seat ?? null; }
+  ack() { return this.last?.player.ack ?? null; }
   walkedPose(personId: number) { return this.traffic.walked.get(personId) ?? null; }
-  driver(player: PlayerId) { return player === this.player ? this.last?.player.driver ?? null : null; }
-  driverNotes(player: PlayerId) { return this.reads.take(this.events, player, this.seat(player), 'drive', this.tick).map((e) => e.note); }
-  craftOf(player: PlayerId): CraftView | null {
-    const seat = this.seat(player);
+  driver() { return this.last?.player.driver ?? null; }
+  driverNotes() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'drive', this.tick).map((e) => e.note) : []; }
+  craftOf(): CraftView | null {
+    const seat = this.seat();
     return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
-  craftEvents(player: PlayerId) { return this.reads.take(this.events, player, this.seat(player), 'craft', this.tick).map((e) => e.e); }
+  craftEvents() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'craft', this.tick).map((e) => e.e) : []; }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }

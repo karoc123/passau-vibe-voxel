@@ -20,8 +20,7 @@ import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './sim/sim-client';
 import type { CraftsView } from './nav/crafts-view';
-import { LOCAL_PLAYER } from './nav/player';
-import { hostSim } from './sim-host';
+import { hostSim, PAGE_PLAYER } from './sim-host';
 import { WorkerLink } from './sim-worker-link';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
@@ -488,12 +487,14 @@ async function boot() {
     const physics = { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') };
     let client: SimClient;
     if (qs.get('worker') === '1') {
-      const link = window.__simLink = new WorkerLink({ seed, physics, eager, mode, edits, player: LOCAL_PLAYER });
-      client = new MirrorSimClient(link, td, world, LOCAL_PLAYER, true);
+      const link = window.__simLink = new WorkerLink({ seed, physics, eager, mode, edits });
+      client = new MirrorSimClient(link, td, world, true);
     } else {
       const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
       const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, mode, edits, physics: { ...physics, at: focus } });
-      client = own ? new MirrorSimClient(new ThreadLink(server, LOCAL_PLAYER), own, world, LOCAL_PLAYER) : new LocalSimClient(server);
+      // (one session, the page's player: the host names it, the page's commands name none)
+      const session = server.connect(PAGE_PLAYER);
+      client = own ? new MirrorSimClient(new ThreadLink(session), own, world) : new LocalSimClient(session);
     }
     sim = client;
     life = nav.life = new StreetLife(scene, client);
