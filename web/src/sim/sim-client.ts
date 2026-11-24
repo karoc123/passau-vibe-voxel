@@ -166,6 +166,64 @@ export class ThreadLink implements SimLink {
   loadPhysics(warm?: { x: number; z: number }) { return this.server.sim.loadPhysics(warm).then(() => {}); }
 }
 
+/** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
+ * life-edit's left and events; docs/plans/architecture-review.md F4, A5): each snapshot checked to be plain data and
+ * structured-cloned (what postMessage does), the frame's commands and input and loadPhysics' warm checked and sent
+ * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
+ * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */
+export class CloneLink implements SimLink {
+  onSnapshot: (s: Snapshot) => void = () => {};
+  /** the messages that crossed (snapshots, frames) */
+  crossed = 0;
+  constructor(private readonly link: SimLink) {
+    link.onSnapshot = (s) => { this.crossed++; this.onSnapshot(cloned(s, 'snapshot')); };
+  }
+  frame(dt: number, input: SimInput, commands: SimCommand[]) {
+    const m = jsonTrip({ dt, input, commands }, 'frame');
+    this.crossed++;
+    this.link.frame(m.dt, m.input, m.commands);
+  }
+  loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm && jsonTrip(warm, 'loadPhysics')); }
+}
+
+/** v as structuredClone gives it (a worker's postMessage), once it is checked to be plain data (plainData) */
+function cloned<T>(v: T, what: string): T {
+  plainData(v, what, true);
+  return structuredClone(v);
+}
+
+/** v sent through JSON (a socket's text), once it is checked to be plain data JSON keeps as it is */
+function jsonTrip<T>(v: T, what: string): T {
+  plainData(v, what, false);
+  return JSON.parse(JSON.stringify(v)) as T;
+}
+
+/** throws unless v is plain data: null, booleans, numbers, strings, arrays and objects whose prototype is Object's
+ * (or none), no cycle; with typed: typed arrays too (structured clone keeps them), and NaN, Infinity, undefined in an
+ * array (only JSON loses those). No function, class instance, Map, Set, Date, symbol or bigint. */
+export function plainData(v: unknown, at: string, typed: boolean, path = new Set<object>()): void {
+  const t = typeof v;
+  if (v === null || t === 'boolean' || t === 'string') return;
+  if (t === 'number') { if (!typed && !Number.isFinite(v)) throw new Error(`not plain data: ${at} is ${v}`); return; }
+  if (t === 'undefined') return; // (an object's field: left out by JSON, kept by clone; in an array: below)
+  if (t !== 'object') throw new Error(`not plain data: ${at} is a ${t}`);
+  const o = v as object;
+  if (ArrayBuffer.isView(o)) { if (typed) return; throw new Error(`not plain data for JSON: ${at} is a ${o.constructor.name}`); }
+  if (path.has(o)) throw new Error(`not plain data: ${at} is a cycle`);
+  path.add(o);
+  if (Array.isArray(o)) {
+    for (let i = 0; i < o.length; i++) {
+      if (!typed && o[i] === undefined) throw new Error(`not plain data for JSON: ${at}[${i}] is undefined`);
+      plainData(o[i], `${at}[${i}]`, typed, path);
+    }
+  } else {
+    const proto = Object.getPrototypeOf(o);
+    if (proto !== Object.prototype && proto !== null) throw new Error(`not plain data: ${at} is a ${proto?.constructor?.name ?? 'class instance'}`);
+    for (const k in o) plainData((o as Record<string, unknown>)[k], `${at}.${k}`, typed, path);
+  }
+  path.delete(o);
+}
+
 /** the sim reached through snapshots (a worker's, or a ThreadLink's): the page draws a copy of the traffic
  * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds one player's reads (player) */
 export class MirrorSimClient implements SimClient {

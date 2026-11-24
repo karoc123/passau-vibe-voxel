@@ -1,7 +1,8 @@
 // The snapshot gate (docs/plans/local-server.md, src/sim/snapshot.ts): what the page draws from the sim's snapshots is
 // what it draws from the sim itself. Two world sims from one seed on the real traffic data, ticked alike at a viewer
 // that stands, then drives along a road: one drawn by StreetLife through LocalSimClient (the sim's own objects), the
-// other through MirrorSimClient over a ThreadLink (a TrafficMirror set from each snapshot, as from a Web Worker). Every
+// other through MirrorSimClient over a CloneLink of a ThreadLink (a TrafficMirror set from each snapshot, the snapshots
+// structured-cloned and the commands sent through JSON as to a Web Worker or a socket: the protocol gate). Every
 // frame the drawn poses of every car, person and rider (by id), the signal heads, the trains' coaches, the boats and
 // the walked person must agree bit for bit; a player follows a car, walks as a person and lets go on the way (the
 // commands through both clients; the walk's seat inputs acked alike).
@@ -14,7 +15,7 @@ const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30;
 const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LOCAL_PLAYER } = await load('nav/player.ts');
-const { LocalSimClient, MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
+const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
 const data = () => unpackTraffic(structuredClone(raw));
@@ -24,7 +25,8 @@ const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771
 
 const a = new SimServer(new WorldSim(data(), { seed: 5 })), b = new SimServer(new WorldSim(data(), { seed: 5 }));
 if (boats) { a.sim.setBoats(boats); b.sim.setBoats(boats); }
-const direct = new LocalSimClient(a), mirror = new MirrorSimClient(new ThreadLink(b, LOCAL_PLAYER), data(), null, LOCAL_PLAYER);
+const direct = new LocalSimClient(a), link = new CloneLink(new ThreadLink(b, LOCAL_PLAYER));
+const mirror = new MirrorSimClient(link, data(), null, LOCAL_PLAYER);
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
@@ -80,4 +82,4 @@ for (let f = 0; f < SECONDS * FPS; f++) {
 }
 if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }
-console.log(`PASS mirror-check: ${frames} frames, ${compared} agent poses, the instance matrices, seats, walked poses, seat input acks and frame times alike (direct and from snapshots)`);
+console.log(`PASS mirror-check: ${frames} frames, ${compared} agent poses, the instance matrices, seats, walked poses, seat input acks and frame times alike (direct and from snapshots; ${link.crossed} messages cloned)`);

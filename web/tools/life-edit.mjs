@@ -694,14 +694,14 @@ async function craftRates() {
 }
 
 async function left() {
-  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts');
+  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
   const keeping = { radius: 300, after: 10 };
   const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
   const w = await craftWorld(plan, { ...DEFAULT_TUNING, edits: keeping });
   if (!w) return;
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim);
-  const client = new MirrorSimClient(new ThreadLink(server, 'B'), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server, 'B')), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
   // (every frame through the client: player B's commands with it, the others' straight to the server)
   const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
@@ -766,11 +766,11 @@ async function left() {
 // 30 m over the street, its pilot B (through the client) cutting the throttle, falls and hits the ground (DroneEvent
 // impact); B reads them once (craftEvents) from the client as from the sim; C, entering it after B leaves, none of B's
 async function craftEvents() {
-  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts');
+  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
   if (!w) return;
   const { sim, crafts: [drone], tick } = w, server = new SimServer(sim);
-  const client = new MirrorSimClient(new ThreadLink(server, 'B'), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server, 'B')), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
   const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;

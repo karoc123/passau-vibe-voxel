@@ -1,6 +1,6 @@
 // What the world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot), and the
 // client's copy of the traffic it is drawn from (TrafficMirror). Plain data, structured-cloneable: it crosses to the
-// page from a Web Worker as it is (later, quantised, to a network client).
+// page from a Web Worker as it is (later, quantised, to a network client); the gates check that (CloneLink).
 //   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts): the traffic's agents as they are after the
 //                                      update (enough for the client's own path maths: Traffic.carPose, personPoint),
 //                                      the bodies' drawn poses, trains, boats, the walked people, the crafts (their
