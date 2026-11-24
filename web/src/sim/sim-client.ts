@@ -22,6 +22,7 @@ import { DEFAULT_TUNING } from './tuning';
 import { TrafficMirror, type Snapshot } from './snapshot';
 import type { SimServer } from './sim-server';
 import type { CommandResult, PlayerCommand } from './commands';
+import type { Role } from './entities';
 import { EVENT_TICKS, type CraftId, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
 
 /** what the page sends: a player's command to the world sim (sim/commands.ts PlayerCommand: applied at the start of
@@ -59,8 +60,8 @@ export interface SimClient {
   update(dt: number, input: SimInput): void;
   /** the sim's events of the ticks after tick, oldest first */
   eventsSince(tick: number): SimEvent[];
-  /** the outcomes of the player's commands of kind since the last call for it, oldest first */
-  results(player: PlayerId, kind: SimCommand['kind']): CommandResult[];
+  /** the outcomes of the player's commands of kind (and of a seat's role) since the last call for it, oldest first */
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role): CommandResult[];
   /** the seat the player holds, or null */
   seat(player: PlayerId): Seat | null;
   /** where person personId is put by the player walking as them, or null while none does */
@@ -71,7 +72,7 @@ export interface SimClient {
   driverNotes(player: PlayerId): DriveNote[];
   /** the craft the player pilots, or null */
   craftOf(player: PlayerId): CraftView | null;
-  /** the crafts put down in the world, piloted or left (any player may enter one left: enterCraft) */
+  /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first */
   craftEvents(player: PlayerId): unknown[];
@@ -112,7 +113,7 @@ export class LocalSimClient implements SimClient {
   update(dt: number, input: SimInput) { this.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-  results(player: PlayerId, kind: SimCommand['kind']) { return this.server.results(player, kind); }
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) { return this.server.results(player, kind, role); }
   seat(player: PlayerId) { return this.sim.seat(player); }
   walkedPose(personId: number) { return this.sim.walkedPose(personId); }
   driver(player: PlayerId) { return this.sim.driverSnapshot(player); }
@@ -218,10 +219,11 @@ export class MirrorSimClient implements SimClient {
     return E.slice(i);
   }
 
-  results(player: PlayerId, kind: SimCommand['kind']) {
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) {
     if (player !== this.player) return [];
-    const mine = this.outcomes.filter((o) => o.kind === kind);
-    if (mine.length) this.outcomes = this.outcomes.filter((o) => o.kind !== kind);
+    const of = (o: CommandResult) => o.kind === kind && (!role || o.role === role);
+    const mine = this.outcomes.filter(of);
+    if (mine.length) this.outcomes = this.outcomes.filter((o) => !of(o));
     return mine;
   }
 

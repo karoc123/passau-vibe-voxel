@@ -4,8 +4,10 @@
 // reads them through one adapter per kind. Read only. No three.js, no DOM (tools/core-deps.mjs).
 //   exists(ref)   the entity is in the world
 //   pose(ref)     where it is (map metres, heading h: 0 +z, pi/2 +x), or null: gone, or not put down
-//   seats(ref)    the seats its model has (the seat table, WorldSim, says who holds them)
+//   seats(ref)    the seats its model has, by its kind and type (SEATS; the seat table, WorldSim, says who holds them)
 import type { Pose } from './types';
+import type { VehicleId } from './vehicles';
+import type { CraftType } from './craft/cores';
 
 /** what an entity is; numbered per kind */
 export type EntityKind = 'car' | 'person' | 'craft';
@@ -21,6 +23,24 @@ export type Role = 'driver' | 'pilot' | 'walker';
 /** a seat of an entity's model: its role and which of that role's seats (0: the first) */
 export interface SeatSpec { readonly role: Role; readonly index: number }
 
+/** a player's place on an entity (ADR 0008: control per seat): one of the seats of its model (SEATS). A seat holds at
+ * most one player, a player at most one seat (the seat table: WorldSim seat) */
+export interface Seat { entity: EntityRef; role: Role; index: number }
+
+const one = (role: Role): readonly SeatSpec[] => Object.freeze([Object.freeze({ role, index: 0 })]);
+const DRIVER = one('driver'), PILOT = one('pilot'), WALKER = one('walker'), NONE: readonly SeatSpec[] = Object.freeze([]);
+/** the seats of each kind's model, by type: one a vehicle for now (the driver's, the pilot's; passengers and gunners
+ * would be listed here), a walker's on a person on foot (none on a bike) */
+export const SEATS: {
+  readonly car: Readonly<Record<VehicleId, readonly SeatSpec[]>>;
+  readonly craft: Readonly<Record<CraftType, readonly SeatSpec[]>>;
+  readonly person: { readonly foot: readonly SeatSpec[]; readonly bike: readonly SeatSpec[] };
+} = {
+  car: { car: DRIVER, coupe: DRIVER, van: DRIVER, pickup: DRIVER, bus: DRIVER, moto: DRIVER, camper: DRIVER },
+  craft: { boat: PILOT, hovercraft: PILOT, helicopter: PILOT, paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
+  person: { foot: WALKER, bike: NONE },
+};
+
 /** a kind's store, read: what Entities asks of it */
 export interface KindCore {
   exists(id: number): boolean;
@@ -34,5 +54,10 @@ export class Entities {
   exists(ref: EntityRef) { return this.kinds[ref.kind].exists(ref.id); }
   pose(ref: EntityRef): Pose | null { return this.kinds[ref.kind].pose(ref.id); }
   /** its seats ([] once gone) */
-  seats(ref: EntityRef): readonly SeatSpec[] { return this.exists(ref) ? this.kinds[ref.kind].seats(ref.id) : []; }
+  seats(ref: EntityRef): readonly SeatSpec[] { return this.exists(ref) ? this.kinds[ref.kind].seats(ref.id) : NONE; }
+  /** the seat of entity ref with role (any: its first) and index (any: the first of the role), or null: none such */
+  seat(ref: EntityRef, role?: Role, index?: number): Seat | null {
+    const s = this.seats(ref).find((q) => (role === undefined || q.role === role) && (index === undefined || q.index === index));
+    return s ? { entity: { kind: ref.kind, id: ref.id }, role: s.role, index: s.index } : null;
+  }
 }

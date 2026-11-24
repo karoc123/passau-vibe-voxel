@@ -48,12 +48,12 @@ for (let f = 0; f < SECONDS * FPS; f++) {
     if (p) {
       walked = p.id;
       send({ kind: 'follow', player: LOCAL_PLAYER, entity: { kind: 'person', id: walked } });
-      send({ kind: 'walkAs', player: LOCAL_PLAYER, person: walked, pose: { x: p.rp.x, y: p.rp.y, z: p.rp.z, h: p.rh ?? 0, moving: false } });
+      send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: p.rp.x, y: p.rp.y, z: p.rp.z, h: p.rh ?? 0, moving: false } });
     }
   }
   if (walked !== null && f > 30 * FPS && f < 50 * FPS) {
     const w = direct.walkedPose(walked);
-    if (w) send({ kind: 'walkPose', player: LOCAL_PLAYER, pose: { ...w, x: w.x + 1.2 / FPS, moving: true } });
+    if (w) send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'walker', input: { ...w, x: w.x + 1.2 / FPS, moving: true } });
   }
   if (f === 50 * FPS) send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
   if (f === 60 * FPS) send({ kind: 'follow', player: LOCAL_PLAYER, entity: null });

@@ -118,12 +118,12 @@ export class CraftLink<K extends CraftType> {
 
   /** the local player into the pilot's seat of craft id (in the world, of the link's type); refused: refused() */
   board(id: CraftId) {
-    this.sim!.send({ kind: 'enterCraft', player: LOCAL_PLAYER, craft: id });
+    this.sim!.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'craft', id }, role: 'pilot' });
     this.held = true;
   }
 
   /** a board refused since the last call (another player took the seat first, or the craft is gone) */
-  refused() { return !!this.sim?.results(LOCAL_PLAYER, 'enterCraft').some((r) => !r.ok); }
+  refused() { return !!this.sim?.results(LOCAL_PLAYER, 'enterSeat', 'pilot').some((r) => !r.ok); }
 
   /** the craft put down again at spot */
   place(spot: SimSpot) { this.sim?.send({ kind: 'placeCraft', player: LOCAL_PLAYER, spot }); }
@@ -132,7 +132,7 @@ export class CraftLink<K extends CraftType> {
   put(spot: SimSpot) { if (this.held) this.place(spot); else this.spawn(spot); }
 
   /** the pilot's hands on the controls, until the next */
-  input(input: CraftInput) { this.sim?.send({ kind: 'craftInput', player: LOCAL_PLAYER, input }); }
+  input(input: CraftInput) { this.sim?.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'pilot', input }); }
 
   /** what happened to the craft since the last call */
   events(): unknown[] { return this.craft ? this.sim!.craftEvents(LOCAL_PLAYER) : []; }

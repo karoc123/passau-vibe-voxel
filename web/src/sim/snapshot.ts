@@ -84,7 +84,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
-    walked, crafts, events: sim.eventsSince(since).map((e) => ({ ...e, person: pick(e.person, PERSON_KEYS) as Person })),
+    walked, crafts, events: sim.eventsSince(since).map((e) => ('person' in e ? { ...e, person: pick(e.person, PERSON_KEYS) as Person } : e)),
     player: {
       seat: sim.seat(player), driver: sim.driverSnapshot(player), notes: sim.driverNotes(player),
       craftEvents: sim.craftEvents(player), results,
@@ -136,7 +136,7 @@ export class TrafficMirror implements TrafficView {
    * here (a person fallen is gone from the snapshot's crowd, not yet from this) */
   apply(s: Snapshot): SimEvent[] {
     const T = this.T;
-    const events = s.events.map((e) => ({ ...e, person: this.peopleById.get(e.person.id) ?? e.person }));
+    const events = s.events.map((e) => ('person' in e ? { ...e, person: this.peopleById.get(e.person.id) ?? e.person } : e));
     T.acc = s.acc; T.t = s.t; T.day = s.day;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;

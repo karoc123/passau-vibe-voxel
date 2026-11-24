@@ -7,6 +7,7 @@ import { liveEdits } from '../core/live-edits';
 import { apply as applyEdit } from '../core/world-edits';
 import { takeSnapshot, type EditNote, type Snapshot } from './snapshot';
 import type { CommandResult } from './commands';
+import type { Role } from './entities';
 import type { SimCommand } from './sim-client';
 import type { PlayerId, SimInput, WorldSim } from './world-sim';
 
@@ -43,12 +44,12 @@ export class SimServer {
     this.sim.update(dt, input);
   }
 
-  /** the player's command outcomes since the last call (of kind; all without), oldest first: the sim's, then the
-   * edits' */
-  results(player: PlayerId, kind?: SimCommand['kind']) {
-    const mine = this.sim.results(player, kind), r = this.outcomes.get(player);
+  /** the player's command outcomes since the last call (of kind, and of a seat's role; all without), oldest first:
+   * the sim's, then the edits' */
+  results(player: PlayerId, kind?: SimCommand['kind'], role?: Role) {
+    const mine = this.sim.results(player, kind, role), r = this.outcomes.get(player);
     if (!r?.length) return mine;
-    const edits = kind && kind !== 'edit' ? [] : r;
+    const edits = (kind && kind !== 'edit') || role ? [] : r;
     if (edits.length) this.outcomes.set(player, []);
     return mine.concat(edits);
   }

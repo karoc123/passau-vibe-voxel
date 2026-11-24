@@ -95,10 +95,10 @@ export class Traffic {
   ground: Ground | null = null;
   // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
   water: WaterColumns | null = null;
-  // the entities players follow or control (sim/world-sim.ts WorldSim: follow, walkAs), by id: kept in the sim
+  // the entities players follow or control (sim/world-sim.ts WorldSim: follow, enterSeat), by id: kept in the sim
   // wherever they are (not removed out of the circle, trimmed, dropped into a hole or knocked down)
   readonly held = { car: new Set<number>(), person: new Set<number>() };
-  // the people a player walks as (WorldSim walkAs; among held): where the player puts them, off their way
+  // the people a player walks as (WorldSim enterSeat, a walker's; among held): where the player puts them, off their way
   readonly walked = new Set<number>();
   bodies: TrafficBodies | null = null;
   readonly roads: Road[];
