@@ -342,6 +342,16 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `tools/life-edit.mjs` run through it; `gates.mjs` counts.
 - **Expect:** it may fail first (typed arrays in `EditNote` are fine for clone; anything aliasing sim objects shows
   as a mutation difference). Fix what it finds by copying in `takeSnapshot`; no format change here.
+- **Landed:** `CloneLink` in `sim/sim-client.ts` wraps any `SimLink`: each snapshot is checked to be plain data
+  (`plainData`: no function, class instance, Map/Set, cycle; typed arrays allowed) and `structuredClone`d; each
+  frame (`dt`, `input`, commands) and `loadPhysics`' `warm` is checked stricter (also no typed array, NaN/Infinity,
+  `undefined` in an array) and sent through JSON. `mirror-check`, `life-edit` `left`/`events` and
+  `popin-check --mirror` run through it; the page's `?mirror=1` keeps `ThreadLink` (behaviour unchanged). It
+  passed at once: no copy needed in `takeSnapshot`. A function or a class instance put into the snapshot fails
+  `mirror-check` and `life-edit` (`not plain data: snapshot.probe is a …`). Not yet covered: none of these runs
+  loads the road physics, so `BodyDraw` and `DriverSnapshot` never cross, and none tracks edits
+  (`SimServer.trackEdits`: the worker only), so no `EditNote` does; no separate `protocol` gate name (the gates
+  above are it).
 
 ### A6. Typed wire data (M)
 
