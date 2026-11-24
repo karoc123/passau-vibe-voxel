@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { LOCAL_PLAYER } from '../sim/world-sim';
+import { LOCAL_PLAYER } from './player';
 import type { Person, Pose } from '../sim/types';
 import { vehicleOf } from '../sim/vehicles';
 import type { Picked, StreetLife } from '../view/life';
@@ -13,7 +13,8 @@ import type { Ride, WalkOpts } from './nav';
 // The ride (nav.ts mode ride): following a pedestrian or a vehicle, and walking as the person followed. The local
 // player's commands go to the world sim through its client (sim/sim-client.ts): follow (the sim keeps what is followed
 // wherever it goes), walkAs (the person's one seat; refused, the ride goes on following), walkPose (where the walk,
-// which is the client's, puts them), release. Nav switches the modes; the car driven is drive.ts's (the driver's
+// which is the client's, puts them; the sim bounds it, and a pose it clamped puts the walk back where the sim has
+// them), leaveSeat. Nav switches the modes; the car driven is drive.ts's (the driver's
 // seat), on this ride's camera.
 
 /** what the ride needs of Nav */
@@ -61,7 +62,7 @@ export class Rider {
   // off the person walked: back to the crowd's own walk (the sim no longer keeps them where put), and following them
   // again starts afresh from where they are (walkAs' start) instead of moving them to the foot's position
   release() {
-    if (this.walking) this.sim?.send({ kind: 'release', player: LOCAL_PLAYER });
+    if (this.walking) this.sim?.send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
     this.walking = null;
   }
 
@@ -77,8 +78,13 @@ export class Rider {
   /** a frame of the ride before the sim's update: the walk's commands sent (walking as the person followed) */
   control(dt: number) {
     const R = this.ride!, H = this.host, life = H.life();
-    // (the seat refused: walked by another, or gone from the crowd)
+    // (the seat refused: walked by another, or gone from the crowd; a pose out of reach: the walk back where the sim
+    // took it)
     if (life?.client.results(LOCAL_PLAYER, 'walkAs').some((r) => !r.ok)) this.walking = null;
+    if (life?.client.results(LOCAL_PLAYER, 'walkPose').some((r) => !r.ok) && this.walking) {
+      const w = life.client.walkedPose(this.walking.id);
+      if (w) H.foot.correct(w);
+    }
     if (R.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.obj)) this.walkAs(dt);
   }
 

@@ -17,7 +17,8 @@ import type { CraftType } from './craft/cores';
 import { STEP, Traffic, type BodyDraw, type Ground } from './traffic';
 import type { TrainState } from './train-traffic';
 import type { Car, Person, RoadPose, TrafficData, WalkPose } from './types';
-import type { CommandResult, TrafficView } from './sim-client';
+import type { CommandResult } from './commands';
+import type { TrafficView } from './sim-client';
 import type { CraftId, PlayerId, Seat, SimEvent, WorldSim } from './world-sim';
 import type { Region, LiveNode } from '../core/live-edits';
 

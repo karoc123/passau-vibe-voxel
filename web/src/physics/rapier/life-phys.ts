@@ -86,9 +86,6 @@ interface CoachBody {
   from: CoachBox;
   to: CoachBox;
 }
-type PlayerCommand =
-  | { kind: 'claim'; player: string; entityId: number; choice?: VehicleId }
-  | { kind: 'release' | 'reset'; player: string };
 interface Fade { dx: number; dy: number; dz: number; dh: number; t: number; dur: number }
 interface Cmd { want: number; vb: number; ang: number; stopped: boolean }
 
@@ -109,7 +106,6 @@ export class LifePhysics implements TrafficBodies {
   private readonly players = new Map<string, PlayerCar>();
   private readonly drivers = new Map<number, PlayerCar>();
   private readonly inputs = new Map<string, CarInput>();
-  private commands: PlayerCommand[] = [];
   private readonly fades = new Map<Car, Fade>();
   private readonly byCollider = new Map<number, Body>();
   private readonly coachBodies = new Map<string, CoachBody>();
@@ -150,16 +146,63 @@ export class LifePhysics implements TrafficBodies {
     if (tile) chunkShapes(tile, this.terrain.N, Math.floor(focus.x / CHUNK), Math.floor(focus.z / CHUNK));
   }
 
-  takeWheel(player: string, entityId: number, choice?: VehicleId) {
-    this.commands.push({ kind: 'claim', player, entityId, choice });
+  // The drivers' seats (the world sim's seat table decides who may take one: sim/world-sim.ts): these apply at once,
+  // between ticks (WorldSim applies its commands at the start of an update); the car is controlled from the next tick.
+
+  /** player takes the wheel of car entityId (as type choice); false: no such car in T, or another driver has it */
+  takeWheel(T: Traffic, player: string, entityId: number, choiceId?: VehicleId) {
+    if (this.players.has(player) || this.drivers.has(entityId)) return false;
+    const c = T.roadVehicles().find((c) => c.id === entityId);
+    if (!c) return false;
+    // (the next tick's time: when the driver's clocks start)
+    const now = (T.tickNumber + 1) * TICK * 1000;
+    const body = this.bodies.get(c.id);
+    const pose = body && body.state !== 'path' ? this.poseAt(body, 1) : c.detachedPose ?? this.pathPose(c, T);
+    const driver = new PlayerCar(c, pose, now);
+    if (!T.detachCar(c, pose)) return false;
+    this.drivers.set(c.id, driver);
+    this.players.set(player, driver);
+    const choice = choiceId && VEHICLES[choiceId];
+    const same = !choice || choice.id === (c.vt ?? (c.bus ? 'bus' : 'car'));
+    if (!same && choice) {
+      c.vt = choice.id === 'car' || choice.id === 'bus' ? undefined : choice.id;
+      c.bus = choice.id === 'bus';
+      c.len = choice.len;
+      if (choice.paint) c.col = choice.paint;
+    }
+    this.fades.delete(c);
+    if (body && (body.state === 'path' || !same)) this.remove(body);
+    else if (body) this.control(body, driver);
+    return true;
   }
 
   input(player: string, input: CarInput) {
     this.inputs.set(player, { ...input });
   }
 
-  releaseWheel(player: string) { this.commands.push({ kind: 'release', player }); }
-  resetDriver(player: string) { this.commands.push({ kind: 'reset', player }); }
+  /** the player's car parks where it is (back on the road first if sunk or fallen) */
+  releaseWheel(player: string) {
+    const driver = this.players.get(player);
+    if (!driver) return;
+    const body = this.bodies.get(driver.car.id);
+    if (driver.sinkUntil || driver.fallUntil || body?.drive?.status === 'water') this.recover(driver);
+    else if (body) {
+      body.state = 'park';
+      body.driver = undefined;
+      body.age = body.still = 0;
+    }
+    driver.car.brake = 1;
+    driver.car.v = 0;
+    this.players.delete(player);
+    this.drivers.delete(driver.car.id);
+    this.inputs.delete(player);
+  }
+
+  /** the player's car back on the road */
+  resetDriver(player: string) {
+    const driver = this.players.get(player);
+    if (driver) this.recover(driver);
+  }
 
   driverSnapshot(player: string): DriverSnapshot | null {
     const driver = this.players.get(player);
@@ -184,51 +227,6 @@ export class LifePhysics implements TrafficBodies {
   beforeTick(T: Traffic) {
     this.tickNumber = T.tickNumber;
     const now = T.tickNumber * TICK * 1000;
-    const commands = this.commands;
-    this.commands = [];
-    for (const command of commands) {
-      const { player } = command;
-      if (command.kind === 'claim') {
-        if (this.players.has(player) || this.drivers.has(command.entityId)) continue;
-        const c = T.roadVehicles().find((c) => c.id === command.entityId);
-        if (!c) continue;
-        const body = this.bodies.get(c.id);
-        const pose = body && body.state !== 'path' ? this.poseAt(body, 1) : c.detachedPose ?? this.pathPose(c, T);
-        const driver = new PlayerCar(c, pose, now);
-        this.drivers.set(c.id, driver);
-        if (!T.detachCar(c, pose)) { this.drivers.delete(c.id); continue; }
-        this.players.set(player, driver);
-        const choice = command.choice && VEHICLES[command.choice];
-        const same = !choice || choice.id === (c.vt ?? (c.bus ? 'bus' : 'car'));
-        if (!same && choice) {
-          c.vt = choice.id === 'car' || choice.id === 'bus' ? undefined : choice.id;
-          c.bus = choice.id === 'bus';
-          c.len = choice.len;
-          if (choice.paint) c.col = choice.paint;
-        }
-        this.fades.delete(c);
-        if (body && (body.state === 'path' || !same)) this.remove(body);
-        else if (body) this.control(body, driver);
-      } else {
-        const driver = this.players.get(player);
-        if (!driver) continue;
-        if (command.kind === 'reset') this.recover(driver);
-        else {
-          const body = this.bodies.get(driver.car.id);
-          if (driver.sinkUntil || driver.fallUntil || body?.drive?.status === 'water') this.recover(driver);
-          else if (body) {
-            body.state = 'park';
-            body.driver = undefined;
-            body.age = body.still = 0;
-          }
-          driver.car.brake = 1;
-          driver.car.v = 0;
-          this.players.delete(player);
-          this.drivers.delete(driver.car.id);
-          this.inputs.delete(player);
-        }
-      }
-    }
     for (const player of this.inputs.keys()) if (!this.players.has(player)) this.inputs.delete(player);
     for (const [player, driver] of this.players) {
       if (driver.recoveryDue(now)) this.recover(driver);

@@ -9,60 +9,25 @@
 // tick); every craft shell and the nav run before the update in main.ts's frame, so they reach the tick they reached
 // when they called the WorldSim at once.
 // No three.js, no DOM (tools/core-deps.mjs).
-import type { CarInput } from '../physics/rapier/car';
 import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { WorldOp } from '../core/world-edits';
 import { liveEdits } from '../core/live-edits';
 import type { BoatView } from './boat-traffic';
 import type { Traffic, TrafficBodies, Ground } from './traffic';
-import type { EntityRef, TrafficData, WalkPose } from './types';
-import type { VehicleId } from './vehicles';
-import type { CraftCore, CraftSpot } from './craft/craft-core';
+import type { TrafficData, WalkPose } from './types';
+import type { CraftCore } from './craft/craft-core';
 import { CORES, type CraftType } from './craft/cores';
 import { loadState } from './craft/core-state';
 import { DEFAULT_TUNING } from './tuning';
 import { TrafficMirror, type Snapshot } from './snapshot';
 import type { SimServer } from './sim-server';
-import { EVENT_TICKS, type CraftId, type CraftInput, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
+import type { CommandResult, PlayerCommand } from './commands';
+import { EVENT_TICKS, type CraftId, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
 
-/** a player's command (ADR 0007: keyed by player id), applied at the start of the sim's next update, in order:
- *   follow        follow an entity (no rights over it), or none
- *   walkAs        take the seat of a person (from pose: where they are drawn); refused: another walks as them, or gone
- *   walkPose      where the walk (the client's) puts the person walked
- *   release       leave the person walked
- *   takeWheel     the driver's seat of a car (as type choice); the car taken shows in driver()
- *   drive         the car's controls, until the next
- *   releaseWheel, resetDriver
- *   spawnCraft    a craft of type made, the player its pilot, put down at spot (what a game mode decides; today the
- *                 craft's shell)
- *   placeCraft    the player's craft put down again at spot
- *   enterCraft    the pilot's seat of a craft in the world (one left by its pilot); refused: gone, or piloted
- *   craftInput    the player's craft's controls (its type's input), until the next
- *   resetCraft    the player's craft back to a safe spot nearby; refused: not now
- *   leaveCraft    out of the pilot's seat: the craft stays where it is, hands off (its core's neutral)
- *   dropCraft     the player's craft taken out of the world (one that does not stay: the paraglider)
- *   edit          a change to the world's voxels (core/world-edits.ts) */
-export type SimCommand =
-  | { kind: 'follow'; player: PlayerId; entity: EntityRef | null }
-  | { kind: 'walkAs'; player: PlayerId; person: number; pose: WalkPose }
-  | { kind: 'walkPose'; player: PlayerId; pose: WalkPose }
-  | { kind: 'release'; player: PlayerId }
-  | { kind: 'takeWheel'; player: PlayerId; car: number; choice?: VehicleId }
-  | { kind: 'drive'; player: PlayerId; input: CarInput }
-  | { kind: 'releaseWheel'; player: PlayerId }
-  | { kind: 'resetDriver'; player: PlayerId }
-  | { kind: 'spawnCraft'; player: PlayerId; type: CraftType; spot: CraftSpot }
-  | { kind: 'placeCraft'; player: PlayerId; spot: CraftSpot }
-  | { kind: 'enterCraft'; player: PlayerId; craft: CraftId }
-  | { kind: 'leaveCraft'; player: PlayerId }
-  | { kind: 'craftInput'; player: PlayerId; input: CraftInput }
-  | { kind: 'resetCraft'; player: PlayerId }
-  | { kind: 'dropCraft'; player: PlayerId }
-  | { kind: 'edit'; player: PlayerId; op: WorldOp; ref?: number };
-
-/** what became of a command that can be refused (walkAs, spawnCraft, placeCraft, enterCraft, resetCraft, edit), at the tick it
- * was applied before; an edit's: its ref and the level-1 nodes it changed */
-export interface CommandResult { tick: number; kind: SimCommand['kind']; ok: boolean; ref?: number; nodes?: [number, number][] }
+/** what the page sends: a player's command to the world sim (sim/commands.ts PlayerCommand: applied at the start of
+ * the sim's next update, in order), or an edit, a change to the world's voxels (core/world-edits.ts) */
+export type SimCommand = PlayerCommand | { kind: 'edit'; player: PlayerId; op: WorldOp; ref?: number };
+export type { CommandResult, PlayerCommand };
 
 /** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
  * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the

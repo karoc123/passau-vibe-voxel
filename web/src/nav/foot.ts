@@ -160,6 +160,12 @@ export class Foot {
     this.feet = p.y; this.vy = 0; this.yaw = p.h;
   }
 
+  /** the walk put back where the sim took it (a pose it clamped: sim/walk-bounds.ts) */
+  correct(p: { x: number; y: number; z: number }) {
+    this.pos.set(p.x, p.y + EYE, p.z);
+    this.feet = p.y;
+  }
+
   // walking as the person followed (the walk is the client's; where it puts them goes to the sim: ride.ts): W/S walk,
   // A/D turn them, Q/E look; the ride camera at their eyes turns with them
   walkAs(R: Ride, dt: number): WalkPose {

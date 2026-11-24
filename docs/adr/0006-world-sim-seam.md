@@ -39,8 +39,9 @@ two runs differed.
 - **Inputs** (all through `WorldSim`): the hour and day, the focus (what is simulated) and the viewer (where agents may
   come and go unseen), the edited boxes (`WorldSim.edited`, from `core/live-edits.ts` in `main.ts`), the ground and
   water (`WorldSim.setWorld`: `world.ts` World), the tiles (injected loader or cache), and the players' commands keyed
-  by player id (`follow`; a seat on an entity: the driver's with `takeWheel`, `input`, `releaseWheel`, `resetDriver`,
-  the walked person's with `walkAs`, `walkPose`, `release`; the viewer's player is `LOCAL_PLAYER`). The traffic keeps
+  by player id (`WorldSim.send`, `sim/commands.ts`: `follow`; a seat on an entity, one a player: the driver's with
+  `takeWheel`, `drive`, `resetDriver`, the walked person's with `walkAs`, `walkPose`, a craft's with `enterCraft`,
+  `craftInput`; `leaveSeat`; the viewer's player is the client's `LOCAL_PLAYER`, nav/player.ts). The traffic keeps
   what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
 - **The world's edits** (`core/world-edits.ts`, ADR 0001) are kept by the world sim: `update` drops an edited node no

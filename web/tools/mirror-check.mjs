@@ -13,7 +13,7 @@ import { DATA, load } from './real-city.mjs';
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30;
-const { StreetLife } = await load('view/life.ts'), { WorldSim, LOCAL_PLAYER } = await load('sim/world-sim.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LOCAL_PLAYER } = await load('nav/player.ts');
 const { LocalSimClient, MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
@@ -55,7 +55,7 @@ for (let f = 0; f < SECONDS * FPS; f++) {
     const w = direct.walkedPose(walked);
     if (w) send({ kind: 'walkPose', player: LOCAL_PLAYER, pose: { ...w, x: w.x + 1.2 / FPS, moving: true } });
   }
-  if (f === 50 * FPS) send({ kind: 'release', player: LOCAL_PLAYER });
+  if (f === 50 * FPS) send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
   if (f === 60 * FPS) send({ kind: 'follow', player: LOCAL_PLAYER, entity: null });
   const input = { hour: 17 + t / 600, day: 180, focus, viewer: focus };
   direct.update(1 / FPS, input);
