@@ -206,6 +206,11 @@ results are a tick log kept `EVENT_TICKS`; `life-edit sessions` checks two clien
 Open: `Session` moves to `sim/server/` with A4; edit outcomes only to the sending session; an empty player entry stays
 in `WorldSim.players` after leaving.
 
+A10 landed: `Car` and `Person` carry no drawn fields (`rp`, `rh`, `pitch`, `roll`); `StreetLife` keeps a `Drawn` per
+car and person id; `TrafficBodies.pose` returns a `RoadPose`; `detachCar` no longer seeds a pose; `Picked`/`Ride` hold
+an `AgentRef`, the nav reads `life.agent(ref)`/`life.pose(ref)` and has `nav.sim`. Outputs byte-identical to main
+(mirror-check, popin-check, life-edit, rapier-car); baseline unchanged at 17. Open: older plan docs still name `c.rp`.
+
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
 The owner reported spots in play. The instruction: make the pipeline better as a whole, no single fixes now. Each
