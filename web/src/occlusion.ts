@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ColumnData } from './types';
+import type { ColumnData } from './core/meta';
 import { TILE_N } from './tile-data';
 
 // Occlusion culling of the city's tile meshes against the city itself, on the CPU, each frame, for the main camera

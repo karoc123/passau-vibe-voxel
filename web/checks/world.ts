@@ -1,7 +1,7 @@
 // The checks' synthetic worlds, one module: the voxel world as node files (makeWorld: the real VoxelCollision reads
 // them through a stubbed fetch), as the Rapier car's map (synthMap) -- both laid out by columnTile from a column
 // function -- and the plane's world of boxes (BoxWorld, swept analytically, no node files).
-import type { Meta } from '../src/types';
+import type { Meta } from '../src/core/meta';
 import { VoxelCollision, type CollisionOptions } from '../src/sim/craft/voxel-collision';
 import { TileCache } from '../src/core/tile-cache';
 import { liveEdits } from '../src/core/live-edits';

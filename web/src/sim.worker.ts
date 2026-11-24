@@ -13,7 +13,7 @@ import { unpackTraffic } from './sim/traffic-pack';
 import type { TrafficData } from './sim/types';
 import type { PlayerId, SimInput } from './sim/world-sim';
 import { tileWorld } from './tile-world';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { tileCacheAt } from './viewer-tiles';
 
 export type ToWorker =

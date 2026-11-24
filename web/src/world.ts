@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import { capField, surfaceAt, type CapField } from './core/surface';
-import type { ColumnData, Meta } from './types';
+import type { ColumnData, Meta } from './core/meta';
 import { paletteMask, RULES, semanticTable } from './core/semantics';
 
 export interface ColumnSource {

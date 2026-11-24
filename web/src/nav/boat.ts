@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Meta } from '../types';
+import type { Meta } from '../core/meta';
 import { clamp } from '../util';
 import { findSpawn, NO_BOAT_INPUT, type BoatDrawn, type BoatEvent, type BoatInput } from '../sim/craft/boat-motion';
 import { DEFAULT_TUNING } from '../sim/tuning';

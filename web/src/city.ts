@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Caption } from './caption';
 import type { TileNode, TileStreamer } from './stream';
-import type { ColumnData, Meta, Zones } from './types';
+import type { ColumnData, Meta } from './core/meta';
+import type { Zones } from './types';
 import { dataTexture, fetchJson, pushTo } from './util';
 import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';

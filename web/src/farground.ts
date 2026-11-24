@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { CUT_T } from './daylight';
 import { CHUNK, chunkTexture, fetchChunk, type TerrainChunk } from './terrain';
 import { TILE_N as T } from './tile-data';

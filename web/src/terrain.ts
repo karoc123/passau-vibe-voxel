@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { dataTexture, fetchGzip } from './util';
 import { TILE_N as T } from './tile-data';
 

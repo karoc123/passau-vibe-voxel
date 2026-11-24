@@ -4,7 +4,7 @@
 // HOLD nodes asked for. No three.js, no DOM.
 import type { TileCache } from './core/tile-cache';
 import { roomOffsets, type Columns } from './tile-data';
-import type { ColumnData, Meta } from './types';
+import type { ColumnData, Meta } from './core/meta';
 import { World, type ColumnSource } from './world';
 
 const HOLD = 96;

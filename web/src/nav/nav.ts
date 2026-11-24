@@ -3,7 +3,7 @@ import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js
 import type { Picked, StreetLife } from '../view/life';
 import type { Pose } from '../sim/types';
 import type { TileStreamer } from '../stream';
-import type { View } from '../types';
+import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
 import type { World } from '../world';
 import type { PlayerCraft } from './craft';

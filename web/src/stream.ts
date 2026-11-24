@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ColumnData, Meta, TileLevel } from './types';
+import type { ColumnData, Meta, TileLevel } from './core/meta';
 import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.worker';
 import { roomOffsets, type Columns, type Fields } from './tile-data';
 import { World, type ColumnSource } from './world';

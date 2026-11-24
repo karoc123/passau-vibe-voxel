@@ -1,4 +1,4 @@
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { hash } from './util';
 import { TILE_N as T } from './tile-data';
 

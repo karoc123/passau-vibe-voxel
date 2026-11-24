@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { View } from '../types';
+import type { View } from '../core/meta';
 import { clamp } from '../util';
 import type { World } from '../world';
 import type { MoveKeys } from './move-keys';

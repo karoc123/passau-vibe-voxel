@@ -6,7 +6,7 @@ import type { CraftSpot as SimSpot } from '../sim/craft/craft-core';
 import { CORES, type CoreOf, type CraftType } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
-import type { Meta } from '../types';
+import type { Meta } from '../core/meta';
 import type { Pose } from '../sim/types';
 import type { Nav } from './nav';
 import type { RiverPoints } from '../sim/river';

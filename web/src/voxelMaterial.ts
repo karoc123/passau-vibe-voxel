@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { FOLIAGE_CLASSES } from './foliage';
 import { dataTexture } from './util';
 import { CLOUD_GLSL, cloudUniforms } from './clouds';
