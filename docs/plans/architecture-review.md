@@ -493,6 +493,16 @@ Non-goals of this review and of the packages above:
 - No pipeline restructuring beyond A14 (code-health.md 13, 14, 18 cover it).
 - `nav/` internals (the 655-line `Nav`, input and camera duplication) stay with code-health.md 19 and N2/N3.
 
+Answers (2026-11-24):
+1. The host owns the time of day, the same for everyone (A8: `hour` is world state in the snapshot; the hour slider
+   only in the sandbox or for the host).
+2. Open; the owner can't judge it yet. Until then keep today's behaviour (an observer's camera is a focus); keep it
+   one switch so either answer stays cheap.
+3. Lead's call: yes, flip to one read path after A10 and the quaternion fix.
+4. Lead's call: columns for now (no client determinism needed); revisit with A6's `hello`.
+5. No: the gates stay local, `.github/` is not touched.
+6. Yes: split the folders, one package at a time (A2, A4).
+
 Open questions for the owner (only where the structure depends on the answer):
 
 1. **Who owns the time of day in a shared world?** A8 makes it world state the host sets. If each player may keep
