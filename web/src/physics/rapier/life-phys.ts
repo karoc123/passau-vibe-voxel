@@ -745,7 +745,7 @@ export class LifePhysics implements TrafficBodies {
       const pose = { x: w.x, y: w.z, z: w.y, h: Math.atan2(ahead.x - w.x, ahead.y - w.y), pitch: 0, roll: 0 };
       if (!T.removePerson(person)) return;
       b.body.setLinvel({ x: v.x * 0.95, y: v.y, z: v.z * 0.95 }, true);
-      T.struck.push({ tick: T.tickNumber, person, pose, vx: v.x, vz: v.z });
+      T.struck.push({ tick: T.tickNumber, person, pose, vx: v.x, vz: v.z, by: b.car.id });
       b.driver!.note(T.tickNumber, 'Ouch!', 600);
     };
     // A hit removes an agent from the lists.

@@ -41,8 +41,12 @@
 //          flies it, the client's copy where the sim's is; by the edits' presence rule (a short keeping here) the empty
 //          boat goes once no focus has been near it for the delay; a parked car stays while B flies by it, and both go
 //          once B has left the helicopter too.
+//   events a craft's core events are the world's (craft: tick, entity), through a SimServer and a client of its
+//          snapshots: a drone falling under its pilot's cut throttle hits the ground; its pilot reads the impacts once
+//          (craftEvents), the client's as the sim's; a pilot entering after reads none of them. The driver's notes as
+//          drive events of the car: in players (driverNotes).
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|left|keep ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|left|events|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -506,6 +510,14 @@ async function driverSeat() {
     const a = sim.results('A', 'enterSeat', 'driver'), b = sim.results('B', 'enterSeat', 'driver');
     check(a[0]?.ok && b.length === 1 && !b[0].ok && sim.seat('A')?.role === 'driver' && sim.seat('A').entity.id === c.id &&
       sim.driverSnapshot('A')?.entityId === c.id && sim.seat('B') === null, 'seats: the car holds one driver; another\'s enterSeat is refused');
+    // the driver's note (as a tick of the road physics makes one: PlayerCar.note) is a drive event of the car, read
+    // once by its driver (driverNotes)
+    phys.players.get('A').note(sim.tick + 1, 'test', 100);
+    tick(STEP);
+    const notes = sim.driverNotes('A'), drives = sim.eventsSince(-1).filter((e) => e.kind === 'drive');
+    check(notes.length === 1 && notes[0].text === 'test' && !sim.driverNotes('A').length && !sim.driverNotes('B').length &&
+      drives.length === 1 && drives[0].entity.kind === 'car' && drives[0].entity.id === c.id && drives[0].tick === notes[0].tick,
+    `seats: the driver's note a drive event of the car, read once by its driver (${notes.length})`);
     const P = T.personPoint(p, 0, { x: 0, y: 0, z: 0 });
     sim.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
     tick(STEP);
@@ -699,6 +711,45 @@ async function left() {
   }
 }
 
+// A craft's events as the world's (craft: tick and entity), through a SimServer and a client of its snapshots: a drone
+// 30 m over the street, its pilot B (through the client) cutting the throttle, falls and hits the ground (DroneEvent
+// impact); B reads them once (craftEvents) from the client as from the sim; C, entering it after B leaves, none of B's
+async function craftEvents() {
+  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts');
+  const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
+  if (!w) return;
+  const { sim, crafts: [drone], tick } = w, server = new SimServer(sim);
+  const client = new MirrorSimClient(new ThreadLink(server, 'B'), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
+  const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
+  const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
+  Math.random = noRandom;
+  try {
+    client.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    const mine = [], direct = [];
+    tick(5, () => {
+      client.send({ kind: 'seatInput', player: 'B', role: 'pilot', input: cut });
+      mine.push(...client.craftEvents('B'));
+      direct.push(...sim.craftEvents('B'));
+    }, via);
+    mine.push(...client.craftEvents('B'));
+    direct.push(...sim.craftEvents('B'));
+    const logged = sim.eventsSince(-1).filter((e) => e.kind === 'craft'), mirrored = client.eventsSince(-1).filter((e) => e.kind === 'craft');
+    check(mine.length > 0 && mine.every((e) => e.kind === 'impact') && JSON.stringify(mine) === JSON.stringify(direct) &&
+      JSON.stringify(logged) === JSON.stringify(mirrored) && logged.every((e) => e.entity.kind === 'craft' && e.entity.id === drone.id) &&
+      JSON.stringify(logged.map((e) => e.e)) === JSON.stringify(mine) && !client.craftEvents('B').length,
+    `events: the drone's impacts the world's craft events, read once by its pilot, the client's as the sim's (${mine.length})`);
+    client.send({ kind: 'leaveSeat', player: 'B' });
+    tick(STEP, null, via);
+    server.send({ kind: 'enterSeat', player: 'C', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    tick(STEP, null, via);
+    check(sim.seat('C')?.entity.id === drone.id && !sim.craftEvents('C').length && sim.eventsSince(-1).some((e) => e.kind === 'craft'),
+      'events: another pilot after it reads none of the first\'s');
+    results.events = { impacts: mine.length, read: 'once' };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 // (the keeper's module graph, with its own world edits: tools load each graph apart)
 async function keep() {
   const EK = await load('sim/edit-keeper.ts'), WE2 = EK.worldEdits, live = WE2.liveEdits;
@@ -738,6 +789,7 @@ if (want('transit')) transit();
 if (want('players')) await players();
 if (want('crafts')) await crafts();
 if (want('left')) await left();
+if (want('events')) await craftEvents();
 if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }

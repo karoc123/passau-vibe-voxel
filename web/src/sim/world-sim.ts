@@ -17,9 +17,10 @@
 //             (edit-keeper.ts Presence: dropped once no player has been near them for a while)
 //   outputs:  the traffic's state (drawn by view/life.ts StreetLife between its last two ticks), the crafts' (crafts:
 //             their cores, read by their shells in nav/), the players' reads (seat, walkedPose, driverSnapshot,
-//             driverNotes, craftOf, craftEvents, results: the outcomes of their commands), and the events, each with
-//             the tick that produced it (eventsSince: struck, dropped, seated, unseated), so several readers can each
-//             take theirs; the entities (sim/entities.ts: cars, people, crafts read through their own stores)
+//             craftOf, results: the outcomes of their commands), and the events, each with the tick that produced it
+//             (eventsSince: struck, impact, dropped, seated, unseated, craft, drive), so several readers can each take
+//             theirs (a player's seat's: craftEvents, driverNotes); the entities (sim/entities.ts: cars, people, crafts
+//             read through their own stores)
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { BoatData } from './boat-traffic';
@@ -27,8 +28,8 @@ import type { WaterColumns } from './river';
 import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
-import type { Person, RoadPose, TrafficData, WalkPose } from './types';
-import { Entities, SEATS, type EntityRef, type Role, type Seat } from './entities';
+import type { Person, RoadPose, TrafficData, Vec3, WalkPose } from './types';
+import { Entities, SEATS, sameEntity, type EntityRef, type Role, type Seat } from './entities';
 import { vehicleOf } from './vehicles';
 import type { VehicleId } from './vehicles';
 import type { Meta } from '../types';
@@ -88,13 +89,23 @@ export interface SimInput {
   viewer?: { x: number; z: number; y?: number };
 }
 
-/** what happened in a tick: a person knocked down by a driven car (where, how fast it went), a person fallen into a
- * hole, a player seated or out of their seat (at the first tick run after the command); tick: the tick that produced
- * it (WorldSim.tick after it) */
+/** what happened in a tick, to an entity or a player; tick: the tick that produced it (WorldSim.tick after it):
+ *   struck            a person knocked down by a driven car (where, how fast it went: drawn falling, view/life.ts)
+ *   impact            the same contact as a fact about the entity hit: by whom, how fast (m/s), where
+ *   dropped           a person fallen into a hole
+ *   seated, unseated  a player into a seat or out of it (at the first tick run after the command)
+ *   craft             what happened to a craft (its core's event, e: its type's, as the shell reads it; the crafts
+ *                     are stepped per update, so: the first tick run after the update's steps)
+ *   drive             what the driver of a car is to be told (life-phys.ts PlayerCar's note) */
 export type SimEvent =
   | { tick: number; kind: 'struck'; person: Person; pose: RoadPose; vx: number; vz: number }
+  | { tick: number; kind: 'impact'; entity: EntityRef; by?: EntityRef; speed: number; at: Vec3 }
   | { tick: number; kind: 'dropped'; person: Person }
-  | { tick: number; kind: 'seated' | 'unseated'; player: PlayerId; seat: Seat };
+  | { tick: number; kind: 'seated' | 'unseated'; player: PlayerId; seat: Seat }
+  | { tick: number; kind: 'craft'; entity: EntityRef; e: unknown }
+  | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote };
+// an event yet to be given its tick
+type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> : never) : never;
 
 /** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */
 export const EVENT_TICKS = 300;
@@ -103,7 +114,9 @@ export class WorldSim {
   readonly traffic: Traffic;
   // the events of the last EVENT_TICKS ticks, by tick; those of an update's commands, given the next tick run
   private events: SimEvent[] = [];
-  private due: Omit<Extract<SimEvent, { kind: 'seated' | 'unseated' }>, 'tick'>[] = [];
+  private due: Untimed[] = [];
+  // the players' reads of their seat's events (craftEvents, driverNotes)
+  private readonly reads = new SeatReads();
   /** the players, by id (what is followed, the seat held, the walk; a driver's car is the road physics': driverSnapshot) */
   readonly players: ReadonlyMap<PlayerId, Readonly<PlayerState>> = new Map<PlayerId, PlayerState>();
   // the seat table's other side: who holds each seat taken, by seatKey
@@ -230,11 +243,19 @@ export class WorldSim {
     const fresh: SimEvent[] = [];
     if (this.tick > t0 && this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
     if (T.dropped.length || T.struck.length) {
-      fresh.push(...T.dropped.map((d) => ({ kind: 'dropped' as const, ...d })), ...T.struck.map((s) => ({ kind: 'struck' as const, ...s })));
+      fresh.push(...T.dropped.map((d) => ({ kind: 'dropped' as const, ...d })));
+      for (const { by, ...s } of T.struck) {
+        fresh.push({ kind: 'struck', ...s }, { tick: s.tick, kind: 'impact', entity: { kind: 'person', id: s.person.id },
+          by: { kind: 'car', id: by }, speed: Math.hypot(s.vx, s.vz), at: { x: s.pose.x, y: s.pose.y, z: s.pose.z } });
+      }
       T.struck = [];
       T.dropped = [];
     }
-    // (a stable sort: the seats before the tick's own)
+    for (const [player, P] of this.players) {
+      if (P.seat?.role !== 'driver') continue;
+      for (const note of this.phys?.driverNotes(player) ?? []) fresh.push({ tick: note.tick, kind: 'drive', entity: P.seat.entity, note });
+    }
+    // (a stable sort: the seats and crafts before the tick's own)
     if (fresh.length) this.events.push(...fresh.sort((a, b) => a.tick - b.tick));
     const old = this.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
@@ -361,7 +382,6 @@ export class WorldSim {
       if (!c) return;
       c.pilot = null;
       c.input = c.core.neutral;
-      c.core.events.length = 0;
     }
   }
 
@@ -464,8 +484,10 @@ export class WorldSim {
   // The driver's car: the road physics' (loadPhysics)
   /** the player's car now, or null while they drive none */
   driverSnapshot(player: PlayerId): DriverSnapshot | null { return this.phys?.driverSnapshot(player) ?? null; }
-  /** what the player is to be told since the last call */
-  driverNotes(player: PlayerId): DriveNote[] { return this.phys?.driverNotes(player) ?? []; }
+  /** what the player driving is to be told since the last call (the drive events of their car since they took it) */
+  driverNotes(player: PlayerId): DriveNote[] {
+    return this.reads.take(this.events, player, this.seat(player), 'drive', this.tick).map((e) => e.note);
+  }
 
   // ------------------------------------------------------------------ the player crafts (sim/craft/craft-core.ts)
   // A craft is an entity with one seat, its pilot's (ADR 0008: per seat; a gunner's would be another). It is made
@@ -510,23 +532,50 @@ export class WorldSim {
     return s?.role === 'pilot' ? this.crafts.get(s.entity.id) ?? null : null;
   }
 
-  /** what happened to the player's craft since the last call (its core's events), oldest first */
+  /** what happened to the player's craft since the last call (the craft events of it since they took it), oldest
+   * first */
   craftEvents(player: PlayerId): unknown[] {
-    const c = this.craftOf(player);
-    return c ? c.core.events.splice(0) : [];
+    return this.reads.take(this.events, player, this.seat(player), 'craft', this.tick).map((e) => e.e);
   }
 
   private craft(id: CraftId) { return (this.crafts as Map<CraftId, CraftState>).get(id); }
 
   // each craft put down: its collision's tiles fetched round it and ahead, then the frame's steps at its own fixed
-  // step with its pilot's input (or the neutral); a step not taken (a tile not in) drops the rest of the frame
+  // step with its pilot's input (or the neutral); a step not taken (a tile not in) drops the rest of the frame. Its
+  // core's events become the world's (craft), at the next tick run
   private stepCrafts(dt: number) {
     for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
       if (!c.placed) continue;
       const core = c.core;
       c.collision.prefetch(core.pose, core.velocity);
       core.clock.run(dt, (step) => core.step(c.input, step, c.collision));
-      if (c.pilot === null) core.events.length = 0;
+      if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, e });
     }
+  }
+}
+
+/** a player's reads of the events of the seat they hold (craftEvents, driverNotes), each since the last call: from
+ * the tick they took it (its seated event; not yet in the log: from now), the entity's events of a kind. The world
+ * sim's own log, or a client's copy of it (sim-client.ts MirrorSimClient) */
+export class SeatReads {
+  // by player and kind: the seat read and the tick read up to
+  private readonly read = new Map<string, { seat: string; tick: number }>();
+
+  take<K extends 'craft' | 'drive'>(log: readonly SimEvent[], player: PlayerId, seat: Seat | null, kind: K, now: number) {
+    const k = `${player}\n${kind}`, out: Extract<SimEvent, { kind: K }>[] = [];
+    if (!seat) { this.read.delete(k); return out; }
+    const key = seatKey(seat);
+    let r = this.read.get(k);
+    if (!r || r.seat !== key) {
+      let from = now;
+      for (let i = log.length - 1; i >= 0; i--) {
+        const e = log[i];
+        if (e.kind === 'seated' && e.player === player && seatKey(e.seat) === key) { from = e.tick - 1; break; }
+      }
+      this.read.set(k, r = { seat: key, tick: from });
+    }
+    for (const e of log) if (e.tick > r.tick && e.kind === kind && sameEntity((e as { entity: EntityRef }).entity, seat.entity)) out.push(e as Extract<SimEvent, { kind: K }>);
+    r.tick = now;
+    return out;
   }
 }

@@ -115,7 +115,7 @@ export class Traffic {
   // the people fallen into a hole and knocked down (by a driven car: life-phys.ts) in the ticks since the world sim
   // last took them (WorldSim.update: its events)
   dropped: { tick: number; person: Person }[] = [];
-  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
+  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number; by: number }[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
   edits: [number, number, number, number][] = [];
