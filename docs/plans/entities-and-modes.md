@@ -1,6 +1,6 @@
 # Entities, seats, health, items and game modes in the world sim
 
-Status: E10, E11, E12, E13 landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
+Status: E10, E11, E12, E13, E14 (lean) landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
 rules of a game are a mode layered on the world sim; the sim offers entities with ids, seats, health and items), on
 [ADR 0006](../adr/0006-world-sim-seam.md), [ADR 0007](../adr/0007-player-control-in-world-sim.md) and
 [local-server.md](local-server.md) (E9). Assumes E7 (commands queued per tick, one seat per player, `leaveSeat`, seat
@@ -372,6 +372,23 @@ stated; none waits on E8's internals.
 
 ### E14. Mode layer and sandbox (M)
 
+- **Landed (lean, owner: only what the sandbox needs today):** `sim/mode.ts` `GameMode { id, request, mayEnter?,
+  mayEdit? }`, `ModeRequest` (`craft { type, spot }`, `placeCraft { spot }`, `resetCraft`, `resetDriver`, `dropCraft`),
+  `ModeWorld` (a narrow face of `WorldSim`: `seat`, `craftOf`, `addCraft`, `placeCraft`, `removeCraft`, `sit`: a seat
+  taken without asking `mayEnter`, `resetDriver`); `sim/modes/sandbox.ts` `sandbox({ edits })` (every request granted
+  as before, every seat, edits only with `edits`). `WorldSim.mode` (set by `SimServer`'s constructor, default sandbox;
+  null: every seat, no request) replaces `WorldSim.mayEnter`; the command `request { request }` replaces `spawnCraft`,
+  `placeCraft`, `resetCraft`, `resetDriver`, `dropCraft` (no aliases), applied per tick with the other commands; its
+  outcome is a `CommandResult` of the request's kind (`results(player, 'resetCraft')` as before; `resetDriver` and
+  `dropCraft` now have one too). `SimServer` asks `mayEdit` before an edit (refused: result not ok, the client's
+  `edit` rejects). `hostSim` options `mode` (`?mode=`, `MODES` in sim-host.ts; unknown: a warning and the sandbox) and
+  `edits` (`?dig=1`), passed to the worker. Shells: nav/craft.ts, nav/drive.ts send requests. Checks: life-edit
+  `players` (a test mode's `mayEnter` refuses a seat), `events` (through the mirror client: the sandbox grants
+  `dropCraft`, refuses an edit; a test mode refuses `craft`, nothing made). **Left out** (owner: no speculative design):
+  `start`/`join`/`leave`/`tick`/`event` hooks, `mayTransfer`, `ModeWorld` spawn/despawn/pin/place/clock/health/items/
+  end/random, `Traffic.population` multipliers (no mode sets them; trains and boats run from timetables, a "no new
+  departures" flag is not a pass-through). **Behaviour change:** an edit without `?dig=1` (only reachable through
+  `SimClient.edit` by hand) is now refused.
 - **Waits for:** E11 (E13 for a per-tick `tick`; before it, once per update).
 - **Do:** `sim/mode.ts` (`GameMode`, `ModeWorld`, `ModeRequest`), `sim/modes/sandbox.ts`; `SimServer` makes the mode
   (`hostSim` option, `?mode=`, default sandbox) and calls it as in section 3; `spawnCraft`, `placeCraft`,

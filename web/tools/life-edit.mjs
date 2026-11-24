@@ -26,7 +26,7 @@
 //          both leave with the circle. Over a hole the others fall and the one walked stands; two readers of the events
 //          (WorldSim.eventsSince) at different rates get the same ones, each with its tick. With the road physics: a car holds one driver (another's enterSeat refused);
 //          the driver walking as a person leaves the wheel first, back at the wheel leaves the person; leaveSeat; a seat
-//          the mode does not allow (WorldSim.mayEnter) refused.
+//          the game mode does not allow (WorldSim.mode: a test mode's mayEnter) refused.
 //   crafts two players, each the pilot of a craft of the world sim's (a boat, a helicopter; WorldSim addCraft,
 //          placeCraft; enterSeat, seatInput, leaveSeat; its collision over the node files, on the world's clock): a
 //          seat holds one pilot (another's enterSeat refused, the refused keeps their own), each craft takes its own
@@ -46,7 +46,9 @@
 //   events a craft's core events are the world's (craft: tick, entity), through a SimServer and a client of its
 //          snapshots: a drone falling under its pilot's cut throttle hits the ground; its pilot reads the impacts once
 //          (craftEvents), the client's as the sim's; a pilot entering after reads none of them. The driver's notes as
-//          drive events of the car: in players (driverNotes).
+//          drive events of the car: in players (driverNotes). The game mode (sim/mode.ts) through the client: the
+//          sandbox grants a request (dropCraft: the drone gone) and refuses an edit (edits off); a test mode refuses a
+//          request (craft: none made).
 // Prints the costs (the bodies' tick, the colliders).
 // usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|rates|left|events|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
@@ -529,14 +531,14 @@ async function driverSeat() {
     const back = sim.results('A', 'enterSeat', 'driver')[0]?.ok && sim.seat('A')?.role === 'driver' && sim.walkedPose(p.id) === null && !T.walked.size;
     sim.send({ kind: 'leaveSeat', player: 'A' });
     tick(STEP);
-    // a seat the mode does not allow (WorldSim.mayEnter): refused, nothing held
-    sim.mayEnter = (player, seat) => !(player === 'B' && seat.entity.kind === 'car');
+    // a seat the game mode does not allow (its mayEnter): refused, nothing held
+    sim.mode = { id: 'test', request: () => false, mayEnter: (w, player, seat) => !(player === 'B' && seat.entity.kind === 'car') };
     sim.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'car', id: c.id } });
     tick(STEP);
     const barred = sim.results('B', 'enterSeat', 'driver');
     check(barred.length === 1 && !barred[0].ok && sim.seat('B') === null && sim.driverSnapshot('B') === null,
       'seats: a seat the mode does not allow (mayEnter) is refused');
-    sim.mayEnter = () => true;
+    sim.mode = null;
     check(switched && back && sim.seat('A') === null && sim.driverSnapshot('A') === null && !phys.controlled(c),
       `seats: a driver walking as a person leaves the wheel first (${switched}), back at the wheel leaves the person (${back}); leaveSeat leaves the car`);
     results.players.seats = 'one';
@@ -797,6 +799,27 @@ async function craftEvents() {
     tick(STEP, null, via);
     check(sim.seat('C')?.entity.id === drone.id && !sim.craftEvents('C').length && sim.eventsSince(-1).some((e) => e.kind === 'craft'),
       'events: another pilot after it reads none of the first\'s');
+    // the game mode, asked through the client: the sandbox (SimServer's default) grants B's request for the drone to
+    // go (B its pilot again first) and refuses an edit (no edits: ?dig=1 off); a test mode refuses B's request for a
+    // craft, asking nothing else of the sim
+    server.send({ kind: 'leaveSeat', player: 'C' });
+    client.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    client.send({ kind: 'request', player: 'B', request: { kind: 'dropCraft' } });
+    let edit = 'pending';
+    client.edit('B', { kind: 'sphere', col: 0, row: 0, z: 0, r: 1, colour: 0 }).then(() => { edit = 'made'; }, () => { edit = 'refused'; });
+    tick(STEP, null, via);
+    await new Promise((d) => setTimeout(d, 0));
+    const dropped = client.results('B', 'dropCraft'), edits = client.results('B', 'edit');
+    check(sim.mode.id === 'sandbox' && dropped.length === 1 && dropped[0].ok && !sim.crafts.has(drone.id) && client.crafts().length === 0 &&
+      client.seat('B') === null && edit === 'refused' && edits.length === 1 && !edits[0].ok,
+    `events: the sandbox grants a request through the client (the drone dropped: ${!sim.crafts.has(drone.id)}), refuses an edit (${edit})`);
+    const asked = [];
+    sim.mode = { id: 'test', request: (w, player, r) => { asked.push(`${player}:${r.kind}`); return false; } };
+    client.send({ kind: 'request', player: 'B', request: { kind: 'craft', type: 'drone', spot: { x: STREET.x, y: 100, z: STREET.y, h: 0 } } });
+    tick(STEP, null, via);
+    const made = client.results('B', 'craft');
+    check(asked.join() === 'B:craft' && made.length === 1 && !made[0].ok && sim.crafts.size === 0 && client.seat('B') === null,
+      `events: a test mode refuses a request for a craft (asked ${asked.join()}; none made)`);
     results.events = { impacts: mine.length, read: 'once' };
   } finally {
     Math.random = realRandom;

@@ -2,8 +2,9 @@
 // thread (main.ts) or in a Web Worker (sim.worker.ts). The WorldSim (sim/world-sim.ts) with its road physics' loader
 // (Rapier, the tiles through the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and
 // water, the river boats' timetable, and the world's edits: set up here (core/world-edits.ts initWorldEdits), each one
-// told to the sim (its box; the road physics loaded on the first unless asked not to). The page holds only the client
-// (sim/sim-client.ts SimClient). No three.js, no DOM but fetch.
+// told to the sim (its box; the road physics loaded on the first unless asked not to), and the game mode (sim/mode.ts:
+// ?mode=, by default the sandbox). The page holds only the client (sim/sim-client.ts SimClient). No three.js, no DOM
+// but fetch.
 import { liveEdits } from './core/live-edits';
 import { frameOf } from './core/layers';
 import { initWorldEdits } from './core/world-edits';
@@ -11,6 +12,8 @@ import { fetchJson } from './fetch';
 import type { BoatData } from './sim/boat-traffic';
 import type { WaterColumns } from './sim/river';
 import { SimServer } from './sim/sim-server';
+import type { GameMode } from './sim/mode';
+import { sandbox } from './sim/modes/sandbox';
 import type { Ground } from './sim/traffic';
 import type { Tuning } from './sim/tuning';
 import type { TrafficData } from './sim/types';
@@ -32,7 +35,14 @@ export interface HostOptions {
   cache: TileCache;
   /** where data/ is (a worker's: the page's base URL) */
   base?: string;
+  /** the game mode, by id (?mode=; MODES; without, or unknown: the sandbox) */
+  mode?: string;
+  /** the sandbox's edits to the world's voxels allowed (?dig=1) */
+  edits?: boolean;
 }
+
+/** the game modes a host can make, by id */
+export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
 
 /** the viewer's world sim and its server (sim/sim-server.ts: the commands, the snapshots) */
 export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
@@ -49,7 +59,9 @@ export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
   });
   if (opts.eager && opts.physics.bodies) sim.loadPhysics().catch(() => {});
   fetchJson<BoatData>(`${opts.base ?? ''}data/boats.json`).then((bd) => sim.setBoats(bd)).catch((e) => console.warn('boats', e));
-  return new SimServer(sim);
+  let make = MODES[opts.mode ?? 'sandbox'];
+  if (!make) { console.warn(`no game mode ${opts.mode}; the sandbox`); make = MODES.sandbox; }
+  return new SimServer(sim, make({ edits: !!opts.edits }));
 }
 
 // The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode
