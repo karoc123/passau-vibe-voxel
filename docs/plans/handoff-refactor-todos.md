@@ -48,7 +48,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A4, A6, A8–A14 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
+| A6, A8, A9, A11–A14 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -210,6 +210,13 @@ A10 landed: `Car` and `Person` carry no drawn fields (`rp`, `rh`, `pitch`, `roll
 car and person id; `TrafficBodies.pose` returns a `RoadPose`; `detachCar` no longer seeds a pose; `Picked`/`Ride` hold
 an `AgentRef`, the nav reads `life.agent(ref)`/`life.pose(ref)` and has `nav.sim`. Outputs byte-identical to main
 (mirror-check, popin-check, life-edit, rapier-car); baseline unchanged at 17. Open: older plan docs still name `c.rp`.
+
+A4 landed: `sim/server/` (`SimServer`, `Session`, `takeSnapshot`), `client/` (`SimClient` and kin, `TrafficMirror`,
+`TrafficView`, `sim-worker-link.ts`), `host/` (`sim-host`, `sim.worker`, `viewer-tiles`, `fetch`); worker messages in
+`sim/contract/worker.ts`; the client takes an `InThreadSession` port, no client → server imports; baseline 17 → 13.
+Open (lead's call, for A12): `host/fetch.ts` and `host/viewer-tiles.ts` stay presentation in LAYERS because the
+page's mesher loads through them too: split page vs host loaders or inject them as ports in A12. `client/` still
+imports `sim/traffic.ts` (A11).
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
