@@ -14,7 +14,7 @@ import { DATA, load } from './real-city.mjs';
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30;
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LOCAL_PLAYER } = await load('nav/player.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
 const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
@@ -25,8 +25,8 @@ const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771
 
 const a = new SimServer(new WorldSim(data(), { seed: 5 })), b = new SimServer(new WorldSim(data(), { seed: 5 }));
 if (boats) { a.sim.setBoats(boats); b.sim.setBoats(boats); }
-const direct = new LocalSimClient(a), link = new CloneLink(new ThreadLink(b, LOCAL_PLAYER));
-const mirror = new MirrorSimClient(link, data(), null, LOCAL_PLAYER);
+const P = 'p1', direct = new LocalSimClient(a.connect(P)), link = new CloneLink(new ThreadLink(b.connect(P)));
+const mirror = new MirrorSimClient(link, data(), null);
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
@@ -44,21 +44,21 @@ let followed = null, walked = null;
 for (let f = 0; f < SECONDS * FPS; f++) {
   const t = f / FPS, focus = { x: at.x + Math.max(0, t - 20) * 8, z: at.y };
   // (a player follows a car at 10 s, walks as a person from 30 s to 50 s, lets go at 60 s)
-  if (f === 10 * FPS && direct.traffic.cars.length) { followed = direct.traffic.cars[0].id; send({ kind: 'follow', player: LOCAL_PLAYER, entity: { kind: 'car', id: followed } }); }
+  if (f === 10 * FPS && direct.traffic.cars.length) { followed = direct.traffic.cars[0].id; send({ kind: 'follow', entity: { kind: 'car', id: followed } }); }
   if (f === 30 * FPS) {
     const p = direct.traffic.people.find((q) => q.rp);
     if (p) {
       walked = p.id;
-      send({ kind: 'follow', player: LOCAL_PLAYER, entity: { kind: 'person', id: walked } });
-      send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: p.rp.x, y: p.rp.y, z: p.rp.z, h: p.rh ?? 0, moving: false } });
+      send({ kind: 'follow', entity: { kind: 'person', id: walked } });
+      send({ kind: 'enterSeat', entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: p.rp.x, y: p.rp.y, z: p.rp.z, h: p.rh ?? 0, moving: false } });
     }
   }
   if (walked !== null && f > 30 * FPS && f < 50 * FPS) {
     const w = direct.walkedPose(walked);
-    if (w) send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'walker', input: { ...w, x: w.x + 1.2 / FPS, moving: true } });
+    if (w) send({ kind: 'seatInput', role: 'walker', input: { ...w, x: w.x + 1.2 / FPS, moving: true } });
   }
-  if (f === 50 * FPS) send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
-  if (f === 60 * FPS) send({ kind: 'follow', player: LOCAL_PLAYER, entity: null });
+  if (f === 50 * FPS) send({ kind: 'leaveSeat' });
+  if (f === 60 * FPS) send({ kind: 'follow', entity: null });
   const input = { hour: 17 + t / 600, day: 180, focus, viewer: focus };
   direct.update(1 / FPS, input);
   mirror.update(1 / FPS, input);
@@ -74,11 +74,11 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   }
   const ma = matrices(lifeA), mb = matrices(lifeB);
   if (JSON.stringify(ma) !== JSON.stringify(mb) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: instance matrices differ`);
-  if (JSON.stringify(direct.seat(LOCAL_PLAYER)) !== JSON.stringify(mirror.seat(LOCAL_PLAYER)) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: seats differ`);
+  if (JSON.stringify(direct.seat()) !== JSON.stringify(mirror.seat()) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: seats differ`);
   // (the seat inputs' acks and the frame's time: seq, tick, alpha)
-  if (JSON.stringify([direct.ack(LOCAL_PLAYER), direct.time]) !== JSON.stringify([mirror.ack(LOCAL_PLAYER), mirror.time]) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: ack or frame time differ`);
-  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(direct.ack(LOCAL_PLAYER)?.seq > 0)) acked = false;
-  if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} ${A.size} agents, seat ${JSON.stringify(mirror.seat(LOCAL_PLAYER))}`);
+  if (JSON.stringify([direct.ack(), direct.time]) !== JSON.stringify([mirror.ack(), mirror.time]) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: ack or frame time differ`);
+  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(direct.ack()?.seq > 0)) acked = false;
+  if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} ${A.size} agents, seat ${JSON.stringify(mirror.seat())}`);
 }
 if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }

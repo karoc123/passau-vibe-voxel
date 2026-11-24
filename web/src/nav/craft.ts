@@ -3,7 +3,6 @@ import type { CraftView, SimClient } from '../sim/sim-client';
 import type { CraftSpot as SimSpot } from '../sim/contract/commands';
 import type { CraftId, CraftType } from '../sim/contract/ids';
 import type { PilotInput } from '../sim/contract/inputs';
-import { LOCAL_PLAYER } from './player';
 import type { CraftWorld } from '../sim/craft/craft-core';
 import { CORES, type CoreOf } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
@@ -68,7 +67,8 @@ export interface CraftContext {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   env: CraftEnv;
-  /** the world sim's client, once the traffic is loaded: the crafts' commands go to it, keyed by player id */
+  /** the world sim's client, once the traffic is loaded: the crafts' commands go to it (its session's player's: the
+   * host stamps the player) */
   sim: Promise<SimClient>;
   /** what a shell's own collision reads (sim/craft/voxel-collision.ts: its spawn search, its camera, its panel): the
    * map, the viewer's TileCache, the page's clock */
@@ -104,7 +104,7 @@ export class CraftLink<K extends CraftType> {
 
   /** the craft piloted, once the sim has made it (null before, and after close) */
   get craft(): CraftView<CoreOf<K>> | null {
-    const c = this.held ? this.sim?.craftOf(LOCAL_PLAYER) : null;
+    const c = this.held ? this.sim?.craftOf() : null;
     return c && c.type === this.type ? c as CraftView<CoreOf<K>> : null;
   }
 
@@ -120,41 +120,41 @@ export class CraftLink<K extends CraftType> {
 
   /** a craft of the link's type made, the local player its pilot, put down at spot (from the next tick) */
   spawn(spot: SimSpot) {
-    this.sim!.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'craft', type: this.type, spot } });
+    this.sim!.send({ kind: 'request', request: { kind: 'craft', type: this.type, spot } });
     this.held = true;
   }
 
   /** the local player into the pilot's seat of craft id (in the world, of the link's type); refused: refused() */
   board(id: CraftId) {
-    this.sim!.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'craft', id }, role: 'pilot' });
+    this.sim!.send({ kind: 'enterSeat', entity: { kind: 'craft', id }, role: 'pilot' });
     this.held = true;
   }
 
   /** a board refused since the last call (another player took the seat first, or the craft is gone) */
-  refused() { return !!this.sim?.results(LOCAL_PLAYER, 'enterSeat', 'pilot').some((r) => !r.ok); }
+  refused() { return !!this.sim?.results('enterSeat', 'pilot').some((r) => !r.ok); }
 
   /** the craft put down again at spot */
-  place(spot: SimSpot) { this.sim?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'placeCraft', spot } }); }
+  place(spot: SimSpot) { this.sim?.send({ kind: 'request', request: { kind: 'placeCraft', spot } }); }
 
   /** put down at spot: made the first time (spawn), else again (place) */
   put(spot: SimSpot) { if (this.held) this.place(spot); else this.spawn(spot); }
 
   /** the pilot's hands on the controls, until the next */
-  input(input: PilotInput) { this.sim?.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'pilot', input }); }
+  input(input: PilotInput) { this.sim?.send({ kind: 'seatInput', role: 'pilot', input }); }
 
   /** what happened to the craft since the last call */
-  events(): unknown[] { return this.craft ? this.sim!.craftEvents(LOCAL_PLAYER) : []; }
+  events(): unknown[] { return this.craft ? this.sim!.craftEvents() : []; }
 
   /** back to a safe spot nearby (T); whether it was, in results('resetCraft') */
-  reset() { this.sim?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'resetCraft' } }); }
+  reset() { this.sim?.send({ kind: 'request', request: { kind: 'resetCraft' } }); }
 
   /** the outcomes of the resets asked for since the last call: true where one was done */
-  resets() { return this.sim?.results(LOCAL_PLAYER, 'resetCraft').map((r) => r.ok) ?? []; }
+  resets() { return this.sim?.results('resetCraft').map((r) => r.ok) ?? []; }
 
   /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
    * out of the world; the shell's collision let go */
   close(drop = false) {
-    if (this.held) this.sim?.send(drop ? { kind: 'request', player: LOCAL_PLAYER, request: { kind: 'dropCraft' } } : { kind: 'leaveSeat', player: LOCAL_PLAYER });
+    if (this.held) this.sim?.send(drop ? { kind: 'request', request: { kind: 'dropCraft' } } : { kind: 'leaveSeat' });
     this.held = false;
     this.col?.release();
     this.col = null;

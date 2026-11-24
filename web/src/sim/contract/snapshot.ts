@@ -17,7 +17,8 @@ export interface CraftState { id: CraftId; type: CraftType; pilot: PlayerId | nu
  * page's live edits follow the world's) */
 export interface EditNote { tx: number; ty: number; node: LiveNode | null; region: Region }
 
-/** the last seat input a player's seat took: its seq (the client's number), the tick it was first applied in */
+/** the last seat input a session sent that its player's seat took: its seq (the client's number), the tick it was
+ * first applied in */
 export interface Ack { seq: number; tick: number }
 
 /** how long (ms) a driver's car sinks, is shaken by a crash, falls before it is reset (physics/rapier/player-car.ts) */
@@ -59,8 +60,9 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
-  /** the player's reads; results since the last snapshot (what their seat's entity did: events); ack: their last
-   * seat input taken (its seq, the tick it was applied in: the state here is that of tick, after it) */
-  player: { seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };
+  /** the session's player (id: the host names it, sim/sim-server.ts SimServer.connect) and its reads; results since
+   * the last snapshot (what their seat's entity did: events); ack: the session's last seat input taken (its seq, the
+   * tick it was applied in: the state here is that of tick, after it) */
+  player: { id: PlayerId; seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };
   edits: EditNote[];
 }

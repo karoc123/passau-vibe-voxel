@@ -8,7 +8,6 @@
 import * as THREE from 'three';
 import { cellToAbsZ, frameOf, mapToGrid, type WorldOp } from './core/layers';
 import type { SimClient } from './sim/sim-client';
-import { LOCAL_PLAYER } from './nav/player';
 import type { TileStreamer } from './stream';
 
 const DIG_R = 3;
@@ -35,7 +34,7 @@ export function installDig(S: TileStreamer, camera: THREE.Camera, dom: HTMLEleme
 
   function dig(op: Extract<WorldOp, { kind: 'sphere' }>) {
     const t0 = performance.now();
-    client!.edit(LOCAL_PLAYER, op).then((nodes) => {
+    client!.edit(op).then((nodes) => {
       const t1 = performance.now();
       return S.editsMeshed().then(() => {
         console.log(`dig (${op.col}, ${op.row}, ${op.z}): ${nodes.length} node(s), edit ${(t1 - t0).toFixed(1)} ms, meshed in ${(performance.now() - t0).toFixed(1)} ms`);

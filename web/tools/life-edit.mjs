@@ -19,7 +19,8 @@
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
 // The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
-//   players  two players by id (WorldSim.send: follow, enterSeat, seatInput, leaveSeat; no physics): the commands wait for
+//   players  two players by id, each through a session (sim/sim-server.ts SimServer.connect: the host stamps the player
+//          on its commands; follow, enterSeat, seatInput, leaveSeat; no physics): the commands wait for
 //          the next update; the person walked stands where the walk's poses put them, holds one player, and is kept
 //          with the car followed when the focus moves away; a walk pose 100 m off is taken clamped (Tuning.walk) and
 //          the walk told, a run's step from there is not; the seat taken and left as events (seated, unseated); let go,
@@ -45,12 +46,19 @@
 //          once B has left the helicopter too.
 //   events a craft's core events are the world's (craft: tick, entity), through a SimServer and a client of its
 //          snapshots: a drone falling under its pilot's cut throttle hits the ground; its pilot reads the impacts once
-//          (craftEvents), the client's as the sim's; a pilot entering after reads none of them. The driver's notes as
+//          (craftEvents), the client's as a second session's of the same player (which sent no input: no ack); a pilot
+//          entering after reads none of them. The driver's notes as
 //          drive events of the car: in players (driverNotes). The game mode (sim/mode.ts) through the client: the
 //          sandbox grants a request (dropCraft: the drone gone) and refuses an edit (edits off); a test mode refuses a
 //          request (craft: none made).
+//   sessions two players, each through a client of its own session (snapshots through a CloneLink) on one SimServer,
+//          and a second session of one of them (docs/plans/architecture-review.md A7): each client is named its player
+//          by its snapshots, sees only its own results, seat events (craftEvents) and ack; the second session of a
+//          player reads the same results and seat events and no ack of the other's inputs; a command claiming another
+//          player acts as the session's (the claim ignored); leaving a session frees its player's seat once no other
+//          session of the player is left (another player then takes it).
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|rates|left|events|keep ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|rates|left|events|sessions|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -60,6 +68,9 @@ const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, H
 
 const meta = readMeta(), N = meta.tiles.N;
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
+// (a world sim's sessions: a host's, SimServer.connect, with no game mode unless asked; sessions('A', 'B') -> { A, B })
+const { SimServer } = await load('sim/sim-server.ts');
+const sessionsOf = (sim, ...players) => { const server = new SimServer(sim, null); return Object.fromEntries(players.map((p) => [p, server.connect(p)])); };
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const WE = LP.worldEdits, LY = await load('core/layers.ts'), TC = await load('core/tile-cache.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
@@ -412,7 +423,8 @@ async function players() {
   const tick = (seconds, f = focus, each) => {
     for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i); sim.update(STEP, { hour: HOUR, focus: f }); }
   };
-  const send = (kind, player, more = {}) => sim.send({ kind, player, ...more });
+  const S = sessionsOf(sim, 'A', 'B');
+  const send = (kind, player, more = {}) => S[player].send({ kind, ...more });
   Math.random = noRandom;
   try {
     tick(5);
@@ -428,26 +440,26 @@ async function players() {
     send('enterSeat', 'B', { entity: { kind: 'person', id: p.id }, role: 'walker', pose: at });
     const before = sim.seat('A') === null && !T.held.person.size;
     tick(STEP);
-    const okA = sim.results('A', 'enterSeat', 'walker'), okB = sim.results('B', 'enterSeat', 'walker');
+    const okA = S.A.results('enterSeat', 'walker'), okB = S.B.results('enterSeat', 'walker');
     check(before && okA.length === 1 && okA[0].ok && okB.length === 1 && !okB[0].ok,
       'the commands wait for the next update; the person walked holds one player: another\'s enterSeat is refused');
     check(sim.seat('A')?.role === 'walker' && sim.seat('A').entity.id === p.id && sim.seat('B') === null, 'the walker holds the person\'s seat, the follower none');
     const s0 = p.s, e0 = p.e;
     let last = at;
     tick(3, focus, (i) => { last = { ...at, x: at.x + (i + 1) * 0.04, h: 0.5, moving: true }; send('seatInput', 'A', { role: 'walker', input: last }); });
-    check(p.s === s0 && p.e === e0 && sim.walkedPose(p.id)?.x === last.x && !sim.results('A', 'seatInput', 'walker').length,
+    check(p.s === s0 && p.e === e0 && sim.walkedPose(p.id)?.x === last.x && !S.A.results('seatInput', 'walker').length,
       'the person walked stands where the walk puts them, off their way');
     check(other && other.s !== o0, 'the crowd walks on meanwhile');
     // a walk pose out of reach (100 m across, 50 m up in a frame) is taken clamped, and the walk is told; a run's
     // step (7 m/s) from there is taken as it is
     send('seatInput', 'A', { role: 'walker', input: { ...last, x: last.x + 100, y: last.y + 50 } });
     tick(STEP);
-    const w = sim.walkedPose(p.id), B = sim.tuning.walk, clamped = sim.results('A', 'seatInput', 'walker');
+    const w = sim.walkedPose(p.id), B = sim.tuning.walk, clamped = S.A.results('seatInput', 'walker');
     const across = w.x - last.x, up = w.y - last.y;
     send('seatInput', 'A', { role: 'walker', input: { ...w, x: w.x + 7 * STEP } });
     tick(STEP);
     check(clamped.length === 1 && !clamped[0].ok && across > 0 && across <= B.speed * STEP + B.slack + 1e-9 && up > 0 && up <= B.climb * STEP + B.slack + 1e-9 &&
-      sim.walkedPose(p.id).x === w.x + 7 * STEP && !sim.results('A', 'seatInput', 'walker').length,
+      sim.walkedPose(p.id).x === w.x + 7 * STEP && !S.A.results('seatInput', 'walker').length,
       `a teleporting walk pose is clamped (${across.toFixed(2)} m across, ${up.toFixed(2)} m up), a run from there is not`);
     const far = { x: focus.x + 3000, z: focus.z };
     tick(1, far);
@@ -473,7 +485,7 @@ async function players() {
     tick2(5);
     const q = T2.people.find((r) => !r.wait), Q = q && T2.personPoint(q, 0, { x: 0, y: 0, z: 0 });
     if (!check(q, 'a person near the bridge')) return;
-    sim2.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'person', id: q.id }, role: 'walker', pose: { x: Q.x, y: Q.z, z: Q.y, h: 0, moving: false } });
+    sim2.send('A', { kind: 'enterSeat', entity: { kind: 'person', id: q.id }, role: 'walker', pose: { x: Q.x, y: Q.z, z: Q.y, h: 0, moving: false } });
     const near = (x, z) => Math.hypot(x - Q.x, z - Q.y) < 40;
     sim2.setWorld({ surface: (x, z, y) => y, support: (x, z, top) => (near(x, z) ? -1000 : top) });
     sim2.edited([Q.x - 40, Q.y - 40, Q.x + 40, Q.y + 40]);
@@ -503,39 +515,40 @@ async function driverSeat() {
   const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, { x: BRIDGE.x, z: BRIDGE.y }, {}, { load: async (p) => raw(p) }, tuning.ride) });
   const phys = await sim.loadPhysics(), T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
   const tick = (seconds) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) sim.update(STEP, { hour: HOUR, focus }); };
+  const S = sessionsOf(sim, 'A', 'B');
   Math.random = noRandom;
   try {
     tick(5);
     const c = T.cars.find((q) => q.v > 1 && !q.bus), p = T.people.find((q) => !q.wait);
     if (!check(c && p, 'seats: a moving car and a person near the bridge')) return;
-    sim.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'car', id: c.id }, role: 'driver' });
-    sim.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'car', id: c.id }, role: 'driver' });
+    S.A.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
+    S.B.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
     tick(STEP);
-    const a = sim.results('A', 'enterSeat', 'driver'), b = sim.results('B', 'enterSeat', 'driver');
+    const a = S.A.results('enterSeat', 'driver'), b = S.B.results('enterSeat', 'driver');
     check(a[0]?.ok && b.length === 1 && !b[0].ok && sim.seat('A')?.role === 'driver' && sim.seat('A').entity.id === c.id &&
       sim.driverSnapshot('A')?.entityId === c.id && sim.seat('B') === null, 'seats: the car holds one driver; another\'s enterSeat is refused');
     // the driver's note (as a tick of the road physics makes one: PlayerCar.note) is a drive event of the car, read
-    // once by its driver (driverNotes)
+    // once by its driver's session (driverNotes)
     phys.players.get('A').note(sim.tick + 1, 'test', 100);
     tick(STEP);
-    const notes = sim.driverNotes('A'), drives = sim.eventsSince(-1).filter((e) => e.kind === 'drive');
-    check(notes.length === 1 && notes[0].text === 'test' && !sim.driverNotes('A').length && !sim.driverNotes('B').length &&
+    const notes = S.A.driverNotes(), drives = sim.eventsSince(-1).filter((e) => e.kind === 'drive');
+    check(notes.length === 1 && notes[0].text === 'test' && !S.A.driverNotes().length && !S.B.driverNotes().length &&
       drives.length === 1 && drives[0].entity.kind === 'car' && drives[0].entity.id === c.id && drives[0].tick === notes[0].tick,
     `seats: the driver's note a drive event of the car, read once by its driver (${notes.length})`);
     const P = T.personPoint(p, 0, { x: 0, y: 0, z: 0 });
-    sim.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
+    S.A.send({ kind: 'enterSeat', entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
     tick(STEP);
     const switched = sim.seat('A')?.role === 'walker' && sim.driverSnapshot('A') === null && T.detachedCars.includes(c) && !phys.controlled(c);
-    sim.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'car', id: c.id }, role: 'driver' });
+    S.A.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
     tick(STEP);
-    const back = sim.results('A', 'enterSeat', 'driver')[0]?.ok && sim.seat('A')?.role === 'driver' && sim.walkedPose(p.id) === null && !T.walked.size;
-    sim.send({ kind: 'leaveSeat', player: 'A' });
+    const back = S.A.results('enterSeat', 'driver')[0]?.ok && sim.seat('A')?.role === 'driver' && sim.walkedPose(p.id) === null && !T.walked.size;
+    S.A.send({ kind: 'leaveSeat' });
     tick(STEP);
     // a seat the game mode does not allow (its mayEnter): refused, nothing held
     sim.mode = { id: 'test', request: () => false, mayEnter: (w, player, seat) => !(player === 'B' && seat.entity.kind === 'car') };
-    sim.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'car', id: c.id } });
+    S.B.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id } });
     tick(STEP);
-    const barred = sim.results('B', 'enterSeat', 'driver');
+    const barred = S.B.results('enterSeat', 'driver');
     check(barred.length === 1 && !barred[0].ok && sim.seat('B') === null && sim.driverSnapshot('B') === null,
       'seats: a seat the mode does not allow (mayEnter) is refused');
     sim.mode = null;
@@ -584,7 +597,8 @@ async function crafts() {
   const both = await craftWorld(plan);
   if (!both) return;
   const { sim, crafts: [a, b], tick } = both;
-  const send = (kind, player, more = {}) => sim.send({ kind, player, ...more });
+  const S = sessionsOf(sim, 'A', 'B', 'F');
+  const send = (kind, player, more = {}) => S[player].send({ kind, ...more });
   // (B asks for A's craft after taking its own: refused, B keeps its own)
   send('enterSeat', 'A', { entity: { kind: 'craft', id: a.id }, role: 'pilot' });
   send('enterSeat', 'B', { entity: { kind: 'craft', id: b.id }, role: 'pilot' });
@@ -594,7 +608,7 @@ async function crafts() {
   let path;
   try {
     tick(6, (t) => { send('seatInput', 'A', { role: 'pilot', input: plan[0][4](t) }); send('seatInput', 'B', { role: 'pilot', input: plan[1][4](t) }); });
-    const ra = sim.results('A', 'enterSeat', 'pilot'), rb = sim.results('B', 'enterSeat', 'pilot');
+    const ra = S.A.results('enterSeat', 'pilot'), rb = S.B.results('enterSeat', 'pilot');
     check(ra.length === 1 && ra[0].ok && rb.length === 2 && rb[0].ok && !rb[1].ok,
       'crafts: each player takes a pilot\'s seat; the other\'s is refused');
     check(sim.seat('A')?.role === 'pilot' && sim.seat('A').entity.id === a.id && sim.seat('B')?.entity.id === b.id && sim.craftOf('B') === b &&
@@ -606,8 +620,8 @@ async function crafts() {
     for (const k of [0, 1]) {
       const solo = await craftWorld([plan[k]]);
       if (!solo) return;
-      solo.sim.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'craft', id: solo.crafts[0].id }, role: 'pilot' });
-      solo.tick(6, (t) => solo.sim.send({ kind: 'seatInput', player: 'A', role: 'pilot', input: plan[k][4](t) }));
+      solo.sim.send('A', { kind: 'enterSeat', entity: { kind: 'craft', id: solo.crafts[0].id }, role: 'pilot' });
+      solo.tick(6, (t) => solo.sim.send('A', { kind: 'seatInput', role: 'pilot', input: plan[k][4](t) }));
       const p = solo.crafts[0].core.pose, q = path[k];
       check(p.x === q.x && p.z === q.z && p.h === q.h, `crafts: pilot ${'AB'[k]}'s craft moves as it does alone (${p.x.toFixed(2)}, ${p.z.toFixed(2)} / ${q.x.toFixed(2)}, ${q.z.toFixed(2)})`);
     }
@@ -662,10 +676,10 @@ async function craftRates() {
     const w = await craftWorld(plan);
     if (!w) return null;
     const { sim, crafts: cs } = w, states = new Map();
-    cs.forEach((c, k) => sim.send({ kind: 'enterSeat', player: pilots[k], entity: { kind: 'craft', id: c.id }, role: 'pilot' }));
+    cs.forEach((c, k) => sim.send(pilots[k], { kind: 'enterSeat', entity: { kind: 'craft', id: c.id }, role: 'pilot' }));
     for (let i = 0; sim.tick < END; i++) {
       const at = tq(sim.tick);
-      cs.forEach((c, k) => sim.send({ kind: 'seatInput', player: pilots[k], role: 'pilot', input: plan[k][4](at) }));
+      cs.forEach((c, k) => sim.send(pilots[k], { kind: 'seatInput', role: 'pilot', input: plan[k][4](at) }));
       const t0 = sim.tick;
       sim.update(frames[i % frames.length], { hour: HOUR, focus });
       if (sim.tick > t0) states.set(sim.tick, JSON.stringify(cs.map((c) => [c.core.pose, c.core.drawn(0), c.core.drawn(1)])));
@@ -694,25 +708,25 @@ async function craftRates() {
 }
 
 async function left() {
-  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
+  const { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
   const keeping = { radius: 300, after: 10 };
   const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
   const w = await craftWorld(plan, { ...DEFAULT_TUNING, edits: keeping });
   if (!w) return;
-  const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim);
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server, 'B')), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
-  // (every frame through the client: player B's commands with it, the others' straight to the server)
+  const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null);
+  // (every frame through the client: player B's commands with it, the others' through their sessions on the server)
   const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
   Math.random = noRandom;
   try {
     const hy = heli.core.pose.y;
-    server.send({ kind: 'enterSeat', player: 'C', entity: { kind: 'craft', id: boat.id }, role: 'pilot' });
-    server.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'craft', id: heli.id }, role: 'pilot' });
+    C.send({ kind: 'enterSeat', entity: { kind: 'craft', id: boat.id }, role: 'pilot' });
+    A.send({ kind: 'enterSeat', entity: { kind: 'craft', id: heli.id }, role: 'pilot' });
     tick(3, () => {
-      server.send({ kind: 'seatInput', player: 'C', role: 'pilot', input: { throttle: 1, steer: 0, drift: false } });
-      server.send({ kind: 'seatInput', player: 'A', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } });
+      C.send({ kind: 'seatInput', role: 'pilot', input: { throttle: 1, steer: 0, drift: false } });
+      A.send({ kind: 'seatInput', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } });
     }, near);
     // a parked car by the street (as the road physics leaves one: out of the traffic, where it stands)
     const T = sim.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
@@ -721,8 +735,8 @@ async function left() {
     check(car && car.d < keeping.radius && T.detachCar(car.c, car.pose), `left: a car parked near the street (${car?.d.toFixed(0)} m)`);
     const y0 = heli.core.pose.y, b0 = { ...boat.core.pose }, v0 = Math.abs(boat.core.motion.speed);
     check(y0 > hy + 10 && v0 > 3, `left: the helicopter climbed (${y0.toFixed(1)} m), the boat under way (${v0.toFixed(1)} m/s)`);
-    server.send({ kind: 'leaveSeat', player: 'A' });
-    server.send({ kind: 'leaveSeat', player: 'C' });
+    A.send({ kind: 'leaveSeat' });
+    C.send({ kind: 'leaveSeat' });
     tick(6, null, near);
     const listed = client.crafts();
     check(sim.crafts.has(boat.id) && sim.crafts.has(heli.id) && boat.pilot === null && heli.pilot === null && sim.seat('A') === null &&
@@ -735,26 +749,26 @@ async function left() {
     check(!sim.crafts.has(boat.id) && sim.crafts.has(heli.id) && client.crafts().length === 1 && T.detachedCars.includes(car.c) && heli.core.motion.grounded,
       `left: with no focus near it, the empty boat goes; the helicopter (on its skids: ${heli.core.motion.grounded}) and the car by the focus stay`);
     // B takes the helicopter's seat through the client, A asks for it after; B flies it up
-    client.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'craft', id: heli.id }, role: 'pilot' });
-    server.results('A');
+    client.send({ kind: 'enterSeat', entity: { kind: 'craft', id: heli.id }, role: 'pilot' });
+    A.results();
     tick(STEP, null, near);
-    tick(STEP, () => server.send({ kind: 'enterSeat', player: 'A', entity: { kind: 'craft', id: heli.id }, role: 'pilot' }), near);
-    const mine = client.craftOf('B'), refused = server.results('A', 'enterSeat', 'pilot');
-    check(client.seat('B')?.role === 'pilot' && mine?.id === heli.id && client.results('B', 'enterSeat', 'pilot')[0]?.ok === true &&
+    tick(STEP, () => A.send({ kind: 'enterSeat', entity: { kind: 'craft', id: heli.id }, role: 'pilot' }), near);
+    const mine = client.craftOf(), refused = A.results('enterSeat', 'pilot');
+    check(client.seat()?.role === 'pilot' && mine?.id === heli.id && client.results('enterSeat', 'pilot')[0]?.ok === true &&
       refused.length === 1 && !refused[0].ok && heli.pilot === 'B', 'left: another player enters the empty helicopter (the client sees its seat); the first is refused it');
     const g = heli.core.pose.y;
-    tick(2, () => client.send({ kind: 'seatInput', player: 'B', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } }), near);
-    const p = heli.core.pose, q = client.craftOf('B').core.pose;
+    tick(2, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } }), near);
+    const p = heli.core.pose, q = client.craftOf().core.pose;
     check(p.y > g + 5 && p.x === q.x && p.y === q.y && p.z === q.z && p.h === q.h,
       `left: B flies it up (${(p.y - g).toFixed(1)} m); the client's copy is where the sim's is`);
     // the viewer's focus away: B in the helicopter keeps the car by it; once B has left it too, both go after the delay
-    tick(keeping.after + 1, () => client.send({ kind: 'seatInput', player: 'B', role: 'pilot', input: { lift: 0, drive: 0, turn: 0, side: 0 } }), away);
+    tick(keeping.after + 1, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 0, drive: 0, turn: 0, side: 0 } }), away);
     const kept = T.detachedCars.includes(car.c) && sim.crafts.has(heli.id);
-    client.send({ kind: 'leaveSeat', player: 'B' });
+    client.send({ kind: 'leaveSeat' });
     tick(keeping.after - 1, null, away);
     const stays = T.detachedCars.includes(car.c) && sim.crafts.has(heli.id);
     tick(2, null, away);
-    check(kept && stays && !T.detachedCars.includes(car.c) && !sim.crafts.has(heli.id) && client.crafts().length === 0 && client.seat('B') === null,
+    check(kept && stays && !T.detachedCars.includes(car.c) && !sim.crafts.has(heli.id) && client.crafts().length === 0 && client.seat() === null,
       `left: the focus away, B in the helicopter keeps the car by it (${kept}); B out, both stay the delay (${stays}), then go`);
     results.left = { stays: 'boat,helicopter,car', entered: 'B', dropped: 'boat,car,helicopter' };
   } finally {
@@ -766,61 +780,135 @@ async function left() {
 // 30 m over the street, its pilot B (through the client) cutting the throttle, falls and hits the ground (DroneEvent
 // impact); B reads them once (craftEvents) from the client as from the sim; C, entering it after B leaves, none of B's
 async function craftEvents() {
-  const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
+  const { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
   if (!w) return;
-  const { sim, crafts: [drone], tick } = w, server = new SimServer(sim);
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server, 'B')), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, 'B');
+  // (B's client over its session; B2 a second session of B's, read here; C another player's)
+  const { sim, crafts: [drone], tick } = w, server = new SimServer(sim), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null);
   const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;
   try {
-    client.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    client.send({ kind: 'enterSeat', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
     const mine = [], direct = [];
     tick(5, () => {
-      client.send({ kind: 'seatInput', player: 'B', role: 'pilot', input: cut });
-      mine.push(...client.craftEvents('B'));
-      direct.push(...sim.craftEvents('B'));
+      client.send({ kind: 'seatInput', role: 'pilot', input: cut });
+      mine.push(...client.craftEvents());
+      direct.push(...B2.craftEvents());
     }, via);
-    mine.push(...client.craftEvents('B'));
-    direct.push(...sim.craftEvents('B'));
+    mine.push(...client.craftEvents());
+    direct.push(...B2.craftEvents());
     const logged = sim.eventsSince(-1).filter((e) => e.kind === 'craft'), mirrored = client.eventsSince(-1).filter((e) => e.kind === 'craft');
     check(mine.length > 0 && mine.every((e) => e.kind === 'impact') && JSON.stringify(mine) === JSON.stringify(direct) &&
       JSON.stringify(logged) === JSON.stringify(mirrored) && logged.every((e) => e.entity.kind === 'craft' && e.entity.id === drone.id) &&
-      JSON.stringify(logged.map((e) => e.e)) === JSON.stringify(mine) && !client.craftEvents('B').length,
+      JSON.stringify(logged.map((e) => e.e)) === JSON.stringify(mine) && !client.craftEvents().length,
     `events: the drone's impacts the world's craft events, read once by its pilot, the client's as the sim's (${mine.length})`);
     // (each seat input numbered by the client; the snapshot acks the last one taken, the tick it was applied in)
-    const ack = client.ack('B'), n = Math.round(5 / STEP);
-    check(ack?.seq === n && ack.tick === sim.tick && JSON.stringify(ack) === JSON.stringify(sim.ack('B')),
-      `events: the pilot's seat inputs acked: seq ${ack?.seq} of ${n}, tick ${ack?.tick} of ${sim.tick}, the client's as the sim's`);
-    client.send({ kind: 'leaveSeat', player: 'B' });
+    const ack = client.ack(), n = Math.round(5 / STEP);
+    check(ack?.seq === n && ack.tick === sim.tick && JSON.stringify(ack) === JSON.stringify(B.ack()) && B2.ack() === null,
+      `events: the pilot's seat inputs acked: seq ${ack?.seq} of ${n}, tick ${ack?.tick} of ${sim.tick}, the client's as its session's (the other session of B: ${JSON.stringify(B2.ack())})`);
+    client.send({ kind: 'leaveSeat' });
     tick(STEP, null, via);
-    server.send({ kind: 'enterSeat', player: 'C', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    C.send({ kind: 'enterSeat', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
     tick(STEP, null, via);
-    check(sim.seat('C')?.entity.id === drone.id && !sim.craftEvents('C').length && sim.eventsSince(-1).some((e) => e.kind === 'craft'),
+    check(sim.seat('C')?.entity.id === drone.id && !C.craftEvents().length && sim.eventsSince(-1).some((e) => e.kind === 'craft'),
       'events: another pilot after it reads none of the first\'s');
     // the game mode, asked through the client: the sandbox (SimServer's default) grants B's request for the drone to
     // go (B its pilot again first) and refuses an edit (no edits: ?dig=1 off); a test mode refuses B's request for a
     // craft, asking nothing else of the sim
-    server.send({ kind: 'leaveSeat', player: 'C' });
-    client.send({ kind: 'enterSeat', player: 'B', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
-    client.send({ kind: 'request', player: 'B', request: { kind: 'dropCraft' } });
+    C.send({ kind: 'leaveSeat' });
+    client.send({ kind: 'enterSeat', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
+    client.send({ kind: 'request', request: { kind: 'dropCraft' } });
     let edit = 'pending';
-    client.edit('B', { kind: 'sphere', col: 0, row: 0, z: 0, r: 1, colour: 0 }).then(() => { edit = 'made'; }, () => { edit = 'refused'; });
+    client.edit({ kind: 'sphere', col: 0, row: 0, z: 0, r: 1, colour: 0 }).then(() => { edit = 'made'; }, () => { edit = 'refused'; });
     tick(STEP, null, via);
     await new Promise((d) => setTimeout(d, 0));
-    const dropped = client.results('B', 'dropCraft'), edits = client.results('B', 'edit');
+    const dropped = client.results('dropCraft'), edits = client.results('edit');
     check(sim.mode.id === 'sandbox' && dropped.length === 1 && dropped[0].ok && !sim.crafts.has(drone.id) && client.crafts().length === 0 &&
-      client.seat('B') === null && edit === 'refused' && edits.length === 1 && !edits[0].ok,
+      client.seat() === null && edit === 'refused' && edits.length === 1 && !edits[0].ok,
     `events: the sandbox grants a request through the client (the drone dropped: ${!sim.crafts.has(drone.id)}), refuses an edit (${edit})`);
     const asked = [];
     sim.mode = { id: 'test', request: (w, player, r) => { asked.push(`${player}:${r.kind}`); return false; } };
-    client.send({ kind: 'request', player: 'B', request: { kind: 'craft', type: 'drone', spot: { x: STREET.x, y: 100, z: STREET.y, h: 0 } } });
+    client.send({ kind: 'request', request: { kind: 'craft', type: 'drone', spot: { x: STREET.x, y: 100, z: STREET.y, h: 0 } } });
     tick(STEP, null, via);
-    const made = client.results('B', 'craft');
-    check(asked.join() === 'B:craft' && made.length === 1 && !made[0].ok && sim.crafts.size === 0 && client.seat('B') === null,
+    const made = client.results('craft');
+    check(asked.join() === 'B:craft' && made.length === 1 && !made[0].ok && sim.crafts.size === 0 && client.seat() === null,
       `events: a test mode refuses a request for a craft (asked ${asked.join()}; none made)`);
     results.events = { impacts: mine.length, read: 'once' };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
+// Two players through sessions of one SimServer (docs/plans/architecture-review.md A7): A and B each through a client of
+// its own session, its snapshots through a CloneLink (a link that sends the frame's commands and takes the session's
+// snapshot, the world ticked once a frame by the host: two clients on one world); A2 a second session of A's, read here.
+// Two drones over the street, one each; the pilots cut the throttle (A every tick, B every other) and their drones fall.
+async function sessions() {
+  const { MirrorSimClient, CloneLink } = await load('sim/sim-client.ts');
+  const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)],
+    ['drone', STREET.x + 60, STREET.y, 0, null, aloft(STREET.x + 60, STREET.y, 0, 45)]]);
+  if (!w) return;
+  const { sim, crafts: [da, db], tick } = w, server = new SimServer(sim);
+  const sA = server.connect('A'), sB = server.connect('B'), A2 = server.connect('A');
+  // (a session's link that does not advance the world: the host does, once a frame, before the clients)
+  const follow = (session) => ({ onSnapshot: () => {}, frame(dt, input, commands) { for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
+    loadPhysics: () => Promise.resolve() });
+  const traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
+  const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null);
+  let clients = [ca, cb];
+  const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { server.update(dt, input); for (const c of clients) c.update(dt, input); } };
+  const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }, of = (d) => (e) => e.kind === 'craft' && e.entity.id === d.id;
+  Math.random = noRandom;
+  try {
+    // each into their drone; B also asks for A's (refused: B keeps its own); the results each client's own
+    ca.send({ kind: 'enterSeat', entity: { kind: 'craft', id: da.id }, role: 'pilot' });
+    cb.send({ kind: 'enterSeat', entity: { kind: 'craft', id: db.id }, role: 'pilot' });
+    cb.send({ kind: 'enterSeat', entity: { kind: 'craft', id: da.id }, role: 'pilot' });
+    tick(2 * STEP, null, frame);
+    const ra = ca.results('enterSeat', 'pilot'), rb = cb.results('enterSeat', 'pilot'), r2 = A2.results('enterSeat', 'pilot');
+    check(ca.player === 'A' && cb.player === 'B' && ra.length === 1 && ra[0].ok && rb.length === 2 && rb[0].ok && !rb[1].ok &&
+      JSON.stringify(r2) === JSON.stringify(ra) && da.pilot === 'A' && db.pilot === 'B' && ca.seat()?.entity.id === da.id && cb.seat()?.entity.id === db.id,
+    `sessions: each client named its player by its snapshots (${ca.player}, ${cb.player}), its own results (A ${ra.length}, B ${rb.length}); A's second session reads A's`);
+    // the throttle cut: the drones fall; each reads its own drone's events, the second session of A the same as A's client
+    const mine = { A: [], B: [], A2: [] };
+    let nb = 0;
+    tick(5, (t) => {
+      ca.send({ kind: 'seatInput', role: 'pilot', input: cut });
+      if (Math.round(t / STEP) % 2 === 0) { cb.send({ kind: 'seatInput', role: 'pilot', input: cut }); nb++; }
+      mine.A.push(...ca.craftEvents()); mine.B.push(...cb.craftEvents()); mine.A2.push(...A2.craftEvents());
+    }, frame);
+    tick(STEP, null, frame);
+    mine.A.push(...ca.craftEvents()); mine.B.push(...cb.craftEvents()); mine.A2.push(...A2.craftEvents());
+    const logA = sim.eventLog.filter(of(da)).map((e) => e.e), logB = sim.eventLog.filter(of(db)).map((e) => e.e), n = Math.round(5 / STEP);
+    check(mine.A.length > 0 && mine.B.length > 0 && JSON.stringify(mine.A) === JSON.stringify(logA) && JSON.stringify(mine.B) === JSON.stringify(logB) &&
+      JSON.stringify(mine.A2) === JSON.stringify(logA) && JSON.stringify(logA) !== JSON.stringify(logB),
+    `sessions: each reads its own drone's events (A ${mine.A.length}, B ${mine.B.length}; A's second session ${mine.A2.length})`);
+    const ackA = ca.ack(), ackB = cb.ack();
+    check(ackA?.seq === n && ackB?.seq === nb && ackA.tick > ackB.tick && A2.ack() === null &&
+      JSON.stringify(ackA) === JSON.stringify(sA.ack()) && JSON.stringify(ackB) === JSON.stringify(sB.ack()),
+    `sessions: each its own ack (A seq ${ackA?.seq} of ${n}, B seq ${ackB?.seq} of ${nb}; A's second session, no input sent: ${JSON.stringify(A2.ack())})`);
+    // a command claiming another player (a field the contract does not have: through JSON it arrives) acts as the
+    // session's: B's leaveSeat "as A" leaves B's seat, A keeps theirs
+    cb.send({ kind: 'leaveSeat', player: 'A' });
+    tick(2 * STEP, null, frame);
+    check(sim.seat('A')?.entity.id === da.id && da.pilot === 'A' && sim.seat('B') === null && db.pilot === null && cb.seat() === null && ca.seat()?.entity.id === da.id,
+      'sessions: a command claiming another player acts as its session\'s (B left its own seat, A keeps theirs)');
+    // leaving: A's second session first (A keeps the seat: a session of A's is left), then A's client's (the seat freed);
+    // B takes the drone A left
+    A2.leave();
+    tick(2 * STEP, null, frame);
+    const kept = sim.seat('A')?.entity.id === da.id;
+    sA.leave();
+    clients = [cb];
+    tick(2 * STEP, null, frame);
+    const freed = sim.seat('A') === null && da.pilot === null && sim.crafts.has(da.id);
+    cb.send({ kind: 'enterSeat', entity: { kind: 'craft', id: da.id }, role: 'pilot' });
+    tick(2 * STEP, null, frame);
+    check(kept && freed && cb.results('enterSeat', 'pilot')[0]?.ok === true && da.pilot === 'B' && cb.craftOf()?.id === da.id,
+      `sessions: leaving a session frees its player's seat once none of the player's is left (kept: ${kept}, freed: ${freed}); another takes it`);
+    results.sessions = { clients: 2, of: 'A,B', second: 'A', left: 'freed' };
   } finally {
     Math.random = realRandom;
   }
@@ -867,6 +955,7 @@ if (want('crafts')) await crafts();
 if (want('rates')) await craftRates();
 if (want('left')) await left();
 if (want('events')) await craftEvents();
+if (want('sessions')) await sessions();
 if (want('keep')) await keep();
 const cost = `bodies' tick with edits: avg ${f2(avg(costs))} p99 ${f2(pct(costs, 0.99))} max ${f2(Math.max(0, ...costs))} ms; ${bodies.join('/')} bodies, ${chunks.join('/')} chunks built per run; 0 ms before any edit`;
 if (bad.length) { console.log(`FAIL life-edit: ${bad.length} check(s) failed; ${cost}`); process.exit(1); }

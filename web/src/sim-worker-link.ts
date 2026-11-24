@@ -6,7 +6,6 @@ import type { SimLink } from './sim/sim-client';
 import type { SimCommand } from './sim/contract/commands';
 import type { Snapshot } from './sim/contract/snapshot';
 import type { SimInput } from './sim/contract/inputs';
-import type { PlayerId } from './sim/contract/ids';
 import type { FromWorker, ToWorker } from './sim.worker';
 import type { HostOptions } from './sim-host';
 
@@ -22,7 +21,7 @@ export class WorkerLink implements SimLink {
   /** the worker's time for the last frames (update and snapshot, ms), for the tools */
   readonly times: number[] = [];
 
-  constructor(opts: { seed: number; physics: Omit<HostOptions['physics'], 'at'>; eager: boolean; mode?: string; edits: boolean; player: PlayerId }) {
+  constructor(opts: { seed: number; physics: Omit<HostOptions['physics'], 'at'>; eager: boolean; mode?: string; edits: boolean }) {
     this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.worker.onerror = (e) => console.error('sim worker', e.message);

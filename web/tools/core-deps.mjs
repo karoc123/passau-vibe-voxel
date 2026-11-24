@@ -131,6 +131,7 @@ const LAYERS = [
   ['sim/contract/', 'contract'],
   ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'], ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
+  ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
   // (snapshot.ts: takeSnapshot, TrafficMirror; A3 took its types to the contract, A4 takes TrafficMirror to the client)
   ['sim/sim-server.ts', 'server'], ['sim/snapshot.ts', 'server'],
   ['sim/sim-client.ts', 'client'],
@@ -182,7 +183,8 @@ function codeOf(bare) {
 }
 
 // Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 took the headless -> root ones,
-// A3 the contract's, nav's and the sim's two type cycles, A4 the client <-> server ones.
+// A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
+// module), A4 the client <-> server ones.
 const BASELINE = [
   "R1 sim-host.ts (server) -> fetch.ts (presentation)",
   "R1 sim-worker-link.ts (client) -> sim-host.ts (server) type",
@@ -193,7 +195,6 @@ const BASELINE = [
   "R1 sim/sim-client.ts (client) -> sim/snapshot.ts (server)",
   "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain)",
   "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain) type",
-  "R1 sim/sim-client.ts (client) -> sim/world-sim.ts (domain)",
   "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",

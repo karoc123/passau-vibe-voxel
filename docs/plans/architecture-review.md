@@ -418,6 +418,35 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `nav/ride.ts`, `nav/crafts-view.ts`, `dig.ts`, `main.ts`, `host/sim.worker.ts`; the tools that send commands.
 - **Gates:** `life-edit` (`players`, `events`, `left`), `mirror-check`, `protocol`; a new scenario: two sessions
   for one player read the same results.
+- **Landed** (2026-11-24): `SimServer.connect(player): Session` in `sim/sim-server.ts` (not yet `sim/server/`: A4;
+  in the same module so the client's one type import of the server stays the baseline's one entry). A `Session` stamps
+  its player on every command (`WorldSim.send(player, cmd, taken?)`; `PlayerCommand` and the `edit` command lost
+  `player`; a `player` field a client puts in anyway is ignored) and owns the connection's state: the snapshot's event
+  cursor, the result cursor and the results not yet taken (`results(kind?, role?)`), its edits' outcomes and
+  `onEdit` (the refs are the client's), the seat reads (`craftEvents()`, `driverNotes()`), the ack (the world tells the
+  sender through `taken`; `WorldSim.ack` gone) and the world's edits not yet sent (`trackEdits` now feeds every
+  session). `WorldSim` lost `results()`, `ack()`, `craftEvents()`, `driverNotes()` and `SeatReads`; it publishes
+  results as a log by tick like the events (`resultsSince(player, tick)`, kept `EVENT_TICKS`) and the log itself
+  (`eventLog`). `SeatReads` moved to `sim/seat-reads.ts` (shared layer, with `seatKey`), so the client no longer imports
+  `world-sim.ts`. `session.leave()`: the last session of a player leaves the seat and the follow (next tick). The
+  snapshot's `player` carries `id`; `SimClient.player` (a `LocalSimClient`'s session's, a `MirrorSimClient`'s from its
+  snapshots, null before the first) and every own-player read lost its `player` argument (`results`, `seat`, `ack`,
+  `driver`, `driverNotes`, `craftOf`, `craftEvents`, `edit(op)`). `LOCAL_PLAYER` and `nav/player.ts` are gone: the host
+  names the page's player (`sim-host.ts PAGE_PLAYER`, `'local'`), `main.ts` connects it in-thread, the worker
+  connects one session per `init` (`init` lost `player`); `ThreadLink(session)`. `crafts-view` compares with
+  `sim.player`. Behaviour changes: unread results older than `EVENT_TICKS` (10 s) are dropped instead of piling up
+  (E7/E14's open point; the nav reads its kinds every frame); a session's first snapshot carries the world's event log
+  as before. Gates: `life-edit sessions` (new): two clients on one `SimServer`, each over its own session through a
+  `CloneLink`, plus a second session of one player read directly: each client named by its snapshots, its own
+  results, seat events and ack, the second session of a player the same results and seat events and no ack; a
+  command claiming another player acts as the session's (planted: trusting the claim fails two checks); leaving the
+  player's last session frees the seat and another player takes it. `life-edit events` reads the direct side through
+  a second session of the pilot (no ack: it sent none). Baseline 18 → 17 (only the removal of
+  `sim-client → world-sim`). Fast set 16/16, `popin-check` (and `--mirror`), `tsc`, `life-phys --driver`, `judder`
+  28/28; the page plain, `?mirror=1`, `?worker=1` (each also with `?dig=1`): follow, walk as a person, the walk,
+  drive, every craft, dig, `client.player` `'local'`, no command naming a player, 0 page errors.
+  Not done: `Session` has no input seq of its own (the client numbers its seat inputs, the session acks them);
+  edit outcomes go to the sending session only (their refs are its client's), not to every session of the player.
 
 ### A8. Views per player; world time owned by the host (M)
 

@@ -5,8 +5,9 @@
 // DOM, no fetch (tools/core-deps.mjs).
 //   inputs:   update(dt, { hour, day, focus, viewer }): the frame's time, run as whole world ticks (STEP; the rest
 //             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
-//             water); the players' commands (sim/contract/commands.ts PlayerCommand, keyed by player id: send), queued and
-//             applied in order at the start of the next tick (apply: the one place a seat is taken or left);
+//             water); the players' commands (sim/contract/commands.ts PlayerCommand, sent for a player id: send; the
+//             host stamps the id, sim/sim-server.ts Session), queued and applied in order at the start of the next tick
+//             (apply: the one place a seat is taken or left);
 //             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
 //             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
 //             commands; without one, every seat may be taken and every request is refused)
@@ -19,11 +20,12 @@
 //             has been near them for a while)
 //   outputs:  the frame's time (time: FrameTime), the traffic's state (drawn by view/life.ts StreetLife between its
 //             last two ticks), the crafts' (crafts: their cores, drawn between their last two ticks by their shells in
-//             nav/), the players' last seat input taken (ack), the players' reads (seat, walkedPose, driverSnapshot,
-//             craftOf, results: the outcomes of their commands), and the events, each with the tick that produced it
-//             (eventsSince: struck, impact, dropped, seated, unseated, craft, drive), so several readers can each take
-//             theirs (a player's seat's: craftEvents, driverNotes); the entities (sim/entities.ts: cars, people, crafts
-//             read through their own stores)
+//             nav/), the players' state (seat, walkedPose, driverSnapshot, craftOf), the outcomes of their commands
+//             (resultsSince: by player, each with the tick that produced it) and the events, each with the tick that
+//             produced it (eventsSince: struck, impact, dropped, seated, unseated, craft, drive), so several readers can
+//             each take theirs; the entities (sim/entities.ts: cars, people, crafts read through their own stores).
+//             The world keeps no reader's state (docs/plans/architecture-review.md F2, A7): what a reader has read,
+//             the seat events it has taken, its last seat input taken are its session's (sim/sim-server.ts Session)
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
@@ -31,7 +33,7 @@ import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
-import { Entities, SEATS, sameEntity } from './entities';
+import { Entities, SEATS } from './entities';
 import { vehicleOf } from './vehicles';
 import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
@@ -39,10 +41,11 @@ import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand } from './contract/commands';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
 import { MAX_DT, type FrameTime, type SimInput } from './contract/inputs';
-import { EVENT_TICKS, type DriveNote, type SimEvent } from './contract/events';
-import type { Ack, DriverSnapshot } from './contract/snapshot';
+import { EVENT_TICKS, type SimEvent } from './contract/events';
+import type { DriverSnapshot } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
 import { boundWalk } from './walk-bounds';
+import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 
 /** what the sim keeps of a player: the entity followed (kept in the sim wherever it goes, no rights over it), the seat
@@ -53,33 +56,32 @@ export interface PlayerState { follow?: EntityRef; seat?: Seat; walk?: Walk }
  * last of an earlier update: from, fromAt) */
 export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number }
 
-// a seat's key in the seat table
-const seatKey = (s: Seat) => `${s.entity.kind}:${s.entity.id}:${s.role}:${s.index}`;
-
 // (a player craft, Craft: sim/craft/craft-core.ts)
 type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
 
-// (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, SimInput, FrameTime, MAX_DT, Ack, SimEvent,
+// (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, SimInput, FrameTime, MAX_DT, SimEvent,
 // EVENT_TICKS: sim/contract/; CraftWorld: sim/craft/craft-core.ts)
 
 // an event yet to be given its tick
 type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> : never) : never;
+
+// a command queued: for whom (the host's stamp), and what its sender is told when a seat input of it is taken (the
+// tick it is applied in: a session's ack)
+interface Queued { player: PlayerId; cmd: PlayerCommand; taken?: (tick: number) => void }
 
 export class WorldSim {
   readonly traffic: Traffic;
   // the events of the last EVENT_TICKS ticks, by tick; those of the tick being run (its commands', its crafts')
   private events: SimEvent[] = [];
   private due: Untimed[] = [];
-  // the players' reads of their seat's events (craftEvents, driverNotes)
-  private readonly reads = new SeatReads();
   /** the players, by id (what is followed, the seat held, the walk; a driver's car is the road physics': driverSnapshot) */
   readonly players: ReadonlyMap<PlayerId, Readonly<PlayerState>> = new Map<PlayerId, PlayerState>();
   // the seat table's other side: who holds each seat taken, by seatKey
   private readonly occupants = new Map<string, PlayerId>();
-  // the commands sent, applied at the start of the next tick; their outcomes, by player; the last seat input taken
-  private queue: PlayerCommand[] = [];
-  private readonly outcomes = new Map<PlayerId, CommandResult[]>();
-  private readonly acks = new Map<PlayerId, Ack>();
+  // the commands sent, applied at the start of the next tick; their outcomes of the last EVENT_TICKS ticks (at: the
+  // tick that produced it, as an event's tick)
+  private queue: Queued[] = [];
+  private outcomes: { at: number; player: PlayerId; r: CommandResult }[] = [];
   // the sim's clock (s: the end of the tick being run), what the walks are bounded on; the last update's dt
   private clock = 0;
   private frameDt = 0;
@@ -249,6 +251,7 @@ export class WorldSim {
     if (fresh.length) this.events.push(...fresh.sort((a, b) => a.tick - b.tick));
     const old = this.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
+    if (this.outcomes.length && this.outcomes[0].at <= old) this.outcomes = this.outcomes.filter((o) => o.at > old);
   }
 
   /** the events of the ticks after tick (a reader keeps the tick it read up to: WorldSim.tick), oldest first */
@@ -257,6 +260,19 @@ export class WorldSim {
     let i = E.length;
     while (i > 0 && E[i - 1].tick > tick) i--;
     return E.slice(i);
+  }
+
+  /** the events of the last EVENT_TICKS ticks, oldest first (read only; a reader keeps its own place in it) */
+  get eventLog(): readonly SimEvent[] { return this.events; }
+
+  /** the outcomes of the player's commands applied in the ticks after tick (a reader keeps the tick it read up to:
+   * WorldSim.tick), oldest first; kept EVENT_TICKS ticks, as the events */
+  resultsSince(player: PlayerId, tick: number): CommandResult[] {
+    const O = this.outcomes, out: CommandResult[] = [];
+    let i = O.length;
+    while (i > 0 && O[i - 1].at > tick) i--;
+    for (; i < O.length; i++) if (O[i].player === player) out.push(O[i].r);
+    return out;
   }
 
   // ------------------------------------------------------------------ the players (ADR 0007), keyed by player id
@@ -271,21 +287,10 @@ export class WorldSim {
   /** what the game mode acts through (SimServer asks it about edits with it) */
   get modeWorld() { return this.face; }
 
-  /** a player's command, applied at the start of the next tick (after those sent before it) */
-  send(cmd: PlayerCommand) { this.queue.push(cmd); }
-
-  /** the player's command outcomes since the last call (of kind, and of a seat's role; all without), oldest first */
-  results(player: PlayerId, kind?: CommandResult['kind'], role?: Role) {
-    const r = this.outcomes.get(player);
-    if (!r?.length) return [];
-    const of = (o: CommandResult) => (!kind || o.kind === kind) && (!role || o.role === role);
-    const mine = r.filter(of);
-    if (mine.length) this.outcomes.set(player, r.filter((o) => !of(o)));
-    return mine;
-  }
-
-  /** the last seat input the player's seat took (of those sent with a seq), or null */
-  ack(player: PlayerId): Ack | null { return this.acks.get(player) ?? null; }
+  /** player's command (player: the host's stamp, never a client's word), applied at the start of the next tick
+   * (after those sent before it); taken: told the tick a seat input with a seq is applied in, if the seat held takes
+   * it (its sender's ack) */
+  send(player: PlayerId, cmd: PlayerCommand, taken?: (tick: number) => void) { this.queue.push({ player, cmd, taken }); }
 
   /** the seat the player holds (its entity in the world), or null */
   seat(player: PlayerId): Seat | null {
@@ -300,28 +305,28 @@ export class WorldSim {
   }
 
   // the one place a command takes effect
-  private apply(cmd: PlayerCommand) {
-    const p = cmd.player;
+  private apply({ player: p, cmd, taken }: Queued) {
     switch (cmd.kind) {
       case 'follow': this.follow(p, cmd.entity); break;
-      case 'enterSeat': this.result(cmd, this.enterSeat(p, cmd), cmd.role ?? this.entities.seat(cmd.entity)?.role); break;
+      case 'enterSeat': this.result(p, cmd.kind, this.enterSeat(p, cmd), cmd.role ?? this.entities.seat(cmd.entity)?.role); break;
       case 'seatInput': {
         if (this.seat(p)?.role !== cmd.role) break;
-        if (cmd.seq !== undefined) this.acks.set(p, { seq: cmd.seq, tick: this.tick + 1 });
+        if (cmd.seq !== undefined) taken?.(this.tick + 1);
         if (cmd.role === 'driver') this.phys?.input(p, cmd.input);
         else if (cmd.role === 'pilot') (this.craftOf(p) as CraftState).input = cmd.input;
-        else if (!this.walkPose(p, cmd.input)) this.result(cmd, false, 'walker');
+        else if (!this.walkPose(p, cmd.input)) this.result(p, cmd.kind, false, 'walker');
         break;
       }
-      case 'request': this.result({ player: p, kind: cmd.request.kind }, !!this.mode?.request(this.face, p, cmd.request)); break;
+      case 'request': this.result(p, cmd.request.kind, !!this.mode?.request(this.face, p, cmd.request)); break;
       case 'leaveSeat': this.leaveSeat(p); break;
     }
   }
 
-  private result(cmd: { player: PlayerId; kind: CommandResult['kind'] }, ok: boolean, role?: Role) {
-    const r = this.outcomes.get(cmd.player), out: CommandResult = { tick: this.tick, kind: cmd.kind, ok };
-    if (role) out.role = role;
-    if (r) r.push(out); else this.outcomes.set(cmd.player, [out]);
+  // (produced by the tick being run, as its events)
+  private result(player: PlayerId, kind: CommandResult['kind'], ok: boolean, role?: Role) {
+    const r: CommandResult = { tick: this.tick, kind, ok };
+    if (role) r.role = role;
+    this.outcomes.push({ at: this.tick + 1, player, r });
   }
 
   // the player follows entity (a car or a person kept in the traffic wherever it goes, a craft kept by the presence
@@ -459,12 +464,8 @@ export class WorldSim {
   }
 
   // The driver's car: the road physics' (loadPhysics)
-  /** the player's car now, or null while they drive none */
+  /** the player's car now, or null while they drive none (what its driver is to be told: the car's drive events) */
   driverSnapshot(player: PlayerId): DriverSnapshot | null { return this.phys?.driverSnapshot(player) ?? null; }
-  /** what the player driving is to be told since the last call (the drive events of their car since they took it) */
-  driverNotes(player: PlayerId): DriveNote[] {
-    return this.reads.take(this.events, player, this.seat(player), 'drive', this.tick).map((e) => e.note);
-  }
 
   // ------------------------------------------------------------------ the player crafts (sim/craft/craft-core.ts)
   // A craft is an entity with one seat, its pilot's (ADR 0008: per seat; a gunner's would be another). It is made
@@ -509,12 +510,6 @@ export class WorldSim {
     return s?.role === 'pilot' ? this.crafts.get(s.entity.id) ?? null : null;
   }
 
-  /** what happened to the player's craft since the last call (the craft events of it since they took it), oldest
-   * first */
-  craftEvents(player: PlayerId): unknown[] {
-    return this.reads.take(this.events, player, this.seat(player), 'craft', this.tick).map((e) => e.e);
-  }
-
   private craft(id: CraftId) { return (this.crafts as Map<CraftId, CraftState>).get(id); }
 
   // each craft put down: drawn from where it is now (keep), its collision's tiles fetched round it and ahead, then the
@@ -529,31 +524,5 @@ export class WorldSim {
       core.clock.run(STEP, (step) => core.step(c.input, step, c.collision));
       if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, e });
     }
-  }
-}
-
-/** a player's reads of the events of the seat they hold (craftEvents, driverNotes), each since the last call: from
- * the tick they took it (its seated event; not yet in the log: from now), the entity's events of a kind. The world
- * sim's own log, or a client's copy of it (sim-client.ts MirrorSimClient) */
-export class SeatReads {
-  // by player and kind: the seat read and the tick read up to
-  private readonly read = new Map<string, { seat: string; tick: number }>();
-
-  take<K extends 'craft' | 'drive'>(log: readonly SimEvent[], player: PlayerId, seat: Seat | null, kind: K, now: number) {
-    const k = `${player}\n${kind}`, out: Extract<SimEvent, { kind: K }>[] = [];
-    if (!seat) { this.read.delete(k); return out; }
-    const key = seatKey(seat);
-    let r = this.read.get(k);
-    if (!r || r.seat !== key) {
-      let from = now;
-      for (let i = log.length - 1; i >= 0; i--) {
-        const e = log[i];
-        if (e.kind === 'seated' && e.player === player && seatKey(e.seat) === key) { from = e.tick - 1; break; }
-      }
-      this.read.set(k, r = { seat: key, tick: from });
-    }
-    for (const e of log) if (e.tick > r.tick && e.kind === kind && sameEntity((e as { entity: EntityRef }).entity, seat.entity)) out.push(e as Extract<SimEvent, { kind: K }>);
-    r.tick = now;
-    return out;
   }
 }

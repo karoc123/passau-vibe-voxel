@@ -2,8 +2,8 @@
 // a command, an event or a snapshot names. Types and constants only (tools/core-deps.mjs R5); imports core/ and the
 // contract, nothing else (R1).
 
-/** a participant in the world (ADR 0007); the sim numbers none of its own, a host names them (the viewer's own:
- * nav/player.ts LOCAL_PLAYER) */
+/** a participant in the world (ADR 0007); the sim numbers none of its own, a host names them (a session's: SimServer
+ * connect; the page's own: sim-host.ts PAGE_PLAYER) and stamps it on the commands sent through the session */
 export type PlayerId = string;
 
 export type CraftId = number;
