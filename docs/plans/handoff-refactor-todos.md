@@ -37,7 +37,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Ready** from E10 (order in the plan) |
+| E13–E16, E21 | One tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md); E10–E12 landed) | S–M each | **Ready** from E13 (order in the plan) |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
@@ -148,6 +148,14 @@ a boolean, always reported); walk poses bounded (`sim/walk-bounds.ts`, `Tuning.w
 `nav/player.ts`. Open from E7: commands apply at the update's start, not per tick (E13); results nobody reads
 (`spawnCraft`, `placeCraft`) pile up; a fall over 80 m/s is slowed by the clamp; `walkAs` start height not bounded;
 no seq/tick (M5).
+
+E10–E12 landed (merge `ce55404f`): `sim/entities.ts` (EntityKind car/person/craft, `Entities` exists/pose/seats over
+per-kind adapters, `SEATS` per type); `Seat {entity, role, index}`, seat key `kind:id:role:index`; `enterSeat`,
+`seatInput`, `leaveSeat` replace `takeWheel`/`drive`/`walkAs`/`walkPose`/`enterCraft`/`craftInput` (no aliases);
+`seated`/`unseated`, `craft`, `drive`, `impact` events with tick and entity; `craftEvents`/`driverNotes` read the log
+(`SeatReads`), the snapshot drops `player.notes`/`craftEvents`; `WorldSim.mayEnter` (always true). Open: events land on
+the next running tick (one frame late at 60 fps, gone with E13); empty crafts' events are published; no gate for
+`impact` (browser only); no interest filter; `mayEnter` may move to `GameMode` (E14).
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
