@@ -19,7 +19,7 @@
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
 // The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
-//   players  two players by id, each through a session (sim/sim-server.ts SimServer.connect: the host stamps the player
+//   players  two players by id, each through a session (sim/server/sim-server.ts SimServer.connect: the host stamps the player
 //          on its commands; follow, enterSeat, seatInput, leaveSeat; no physics): the commands wait for
 //          the next update; the person walked stands where the walk's poses put them, holds one player, and is kept
 //          with the car followed when the focus moves away; a walk pose 100 m off is taken clamped (Tuning.walk) and

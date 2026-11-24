@@ -1,6 +1,6 @@
 // The game mode (docs/plans/entities-and-modes.md section 3, ADR 0008: the rules of a game are a mode layered on the
 // world sim): what a player may do that the sim itself does not decide. One mode per world sim, made by its host
-// (SimServer; sim-host.ts: ?mode=, default sandbox) and kept on the WorldSim (WorldSim.mode), which asks it while it
+// (SimServer; host/sim-host.ts: ?mode=, default sandbox) and kept on the WorldSim (WorldSim.mode), which asks it while it
 // applies the players' commands (each tick, in order). Today's only mode is the sandbox (sim/modes/sandbox.ts:
 // everything granted as asked). Kept to what that needs: whether a seat may be taken (mayEnter), whether an edit to
 // the world's voxels may be made (mayEdit), and the players' requests (request). No three.js, no DOM

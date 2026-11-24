@@ -11,7 +11,7 @@ import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
-// its client, sim/sim-client.ts TrafficView, ticked by main.ts) drawn between its last two ticks with instanced
+// its client, client/sim-client.ts TrafficView, ticked by main.ts) drawn between its last two ticks with instanced
 // meshes, the trains and the boats, the people knocked down or fallen into a hole (its events, drawn as an effect:
 // shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
 // and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).

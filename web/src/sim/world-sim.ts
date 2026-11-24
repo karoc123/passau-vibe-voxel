@@ -6,7 +6,7 @@
 //   inputs:   update(dt, { hour, day, focus, viewer }): the frame's time, run as whole world ticks (STEP; the rest
 //             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
 //             water); the players' commands (sim/contract/commands.ts PlayerCommand, sent for a player id: send; the
-//             host stamps the id, sim/sim-server.ts Session), queued and applied in order at the start of the next tick
+//             host stamps the id, sim/server/sim-server.ts Session), queued and applied in order at the start of the next tick
 //             (apply: the one place a seat is taken or left);
 //             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
 //             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
@@ -25,7 +25,7 @@
 //             produced it (eventsSince: struck, impact, dropped, seated, unseated, craft, drive), so several readers can
 //             each take theirs; the entities (sim/entities.ts: cars, people, crafts read through their own stores).
 //             The world keeps no reader's state (docs/plans/architecture-review.md F2, A7): what a reader has read,
-//             the seat events it has taken, its last seat input taken are its session's (sim/sim-server.ts Session)
+//             the seat events it has taken, its last seat input taken are its session's (sim/server/sim-server.ts Session)
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';

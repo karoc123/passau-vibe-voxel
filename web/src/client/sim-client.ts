@@ -1,8 +1,8 @@
 // What the page holds of the world sim (docs/plans/local-server.md, ADR 0008: "the page sends commands and draws
 // snapshots"): a SimClient. The page never reaches into the WorldSim; it holds one session of the server
-// (sim/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands (SimCommand:
-// plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped on them),
-// runs the frame (update: the frame's input; in the page's thread the sim's update itself) and reads what the sim
+// (sim/server/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands
+// (SimCommand: plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped
+// on them), runs the frame (update: the frame's input; in the page's thread the sim's update itself) and reads what the sim
 // publishes: the traffic as drawn (TrafficView), the crafts in the world (piloted or left), its player's seat, car and
 // craft, the outcomes of its commands, the events since a tick.
 // LocalSimClient: the sim in the page's thread. Commands are queued and applied in the order sent at the start of the
@@ -10,27 +10,29 @@
 // sent through a client gets the client's seq and the tick it is meant for (the tick seen + 1); the session answers
 // with ack (the last one taken). The frame's time (time: FrameTime) is fixed by the update: what is drawn
 // between the last two ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
-// No three.js, no DOM (tools/core-deps.mjs).
+// MirrorSimClient: the sim reached through snapshots over a SimLink (ThreadLink, CloneLink here; WorkerLink:
+// client/sim-worker-link.ts), drawn from TrafficMirror (below).
+// No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/plans/architecture-review.md
+// section 3, layer 4b): the in-thread client and link are given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
 import { liveEdits } from '../core/live-edits';
 import type { Ground } from '../sim/traffic';
-import type { TrafficData } from '../sim/types';
+import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
 import { CORES } from '../sim/craft/cores';
 import { loadState } from '../sim/craft/core-state';
 import { DEFAULT_TUNING } from '../sim/tuning';
-import { TrafficMirror, type TrafficView } from '../sim/server/snapshot';
-import type { Session } from '../sim/server/sim-server';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime, SimInput } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
 import type { Ack, DriverSnapshot, Snapshot } from '../sim/contract/snapshot';
-import type { WalkPose } from '../sim/contract/pose';
-import { STEP } from '../sim/traffic';
+import type { RoadPose, WalkPose } from '../sim/contract/pose';
+import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
+import { fadeOut, STEP, Traffic, type TrafficBodies } from '../sim/traffic';
 import { SeatReads } from '../sim/seat-reads';
 
-// (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView: sim/snapshot.ts)
+// (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView, TrafficMirror: below)
 
 /** a player craft as the page sees it: its id and type, its pilot, whether it is put down, its core's state (read
  * only: pose, drawn(alpha) at the frame's alpha (SimClient.time), the motion or flight its shell shows). Its
@@ -84,14 +86,40 @@ export interface SimClient {
   edit(op: WorldOp): Promise<[number, number][]>;
 }
 
+/** what the in-thread client and link use of a session of the server in the page's thread (sim/server/sim-server.ts
+ * Session, given by the app: the client names the server only through this) */
+export interface InThreadSession {
+  readonly player: PlayerId;
+  readonly sim: {
+    readonly tick: number;
+    readonly time: FrameTime;
+    readonly traffic: TrafficView;
+    readonly crafts: ReadonlyMap<CraftId, CraftView>;
+    eventsSince(tick: number): SimEvent[];
+    walkedPose(personId: number): WalkPose | null;
+    craftOf(player: PlayerId): CraftView | null;
+    loadPhysics(warm?: { x: number; z: number }): Promise<unknown>;
+  };
+  readonly server: { update(dt: number, input: SimInput): void };
+  onEdit: ((ref: number, nodes: [number, number][] | null, error?: unknown) => void) | null;
+  send(cmd: SimCommand): void;
+  results(kind?: CommandResult['kind'], role?: Role): CommandResult[];
+  ack(): Ack | null;
+  seat(): Seat | null;
+  driver(): DriverSnapshot | null;
+  driverNotes(): DriveNote[];
+  craftEvents(): unknown[];
+  snapshot(): Snapshot;
+}
+
 /** the sim in the page's thread, read where it is (the page draws the sim's own objects): a session of the SimServer
- * over the WorldSim made by the page (sim-host.ts; the app connects it) */
+ * over the WorldSim made by the page (host/sim-host.ts; the app connects it) */
 export class LocalSimClient implements SimClient {
   private nextRef = 1;
   private readonly seqs = new Seqs();
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
-  constructor(private readonly session: Session) {
+  constructor(private readonly session: InThreadSession) {
     session.onEdit = (ref, nodes, error) => {
       const p = this.pending.get(ref);
       this.pending.delete(ref);
@@ -151,7 +179,7 @@ export interface SimLink {
  * session's snapshot at once after it (the snapshot format checked without a worker: ?mirror=1) */
 export class ThreadLink implements SimLink {
   onSnapshot: (s: Snapshot) => void = () => {};
-  constructor(private readonly session: Session) {}
+  constructor(private readonly session: InThreadSession) {}
   frame(dt: number, input: SimInput, commands: SimCommand[]) {
     for (const c of commands) this.session.send(c);
     this.session.server.update(dt, input);
@@ -314,4 +342,109 @@ export class MirrorSimClient implements SimClient {
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
   craftEvents() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'craft', this.tick).map((e) => e.e) : []; }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
+}
+
+/** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
+ * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
+ * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
+ * snapshots (docs/plans/local-server.md: TrafficMirror). Read only: what is drawn where is the view's (view/life.ts). */
+export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
+  'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
+  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
+
+const smooth01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+const lerpAngle = (a: number, b: number, k: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
+
+/** the client's copy of the traffic, set from snapshots: what view/life.ts and the nav read (TrafficView) */
+export class TrafficMirror implements TrafficView {
+  private readonly T: Traffic;
+  private readonly carsById = new Map<number, Car>();
+  private readonly peopleById = new Map<number, Person>();
+  private readonly draws = new Map<number, BodyDraw>();
+  boats: BoatView | null = null;
+  /** the people walked by players, by person id */
+  readonly walked = new Map<number, WalkPose>();
+  readonly bodies = {
+    owns: (c: Car) => !!this.draws.get(c.id)?.owns,
+    pose: (c: Car, a: number, under: RoadPose) => this.bodyPose(c, a, under),
+  };
+
+  /** data: a TrafficData of its own (its paths are prepared in place: never the sim's); ground: the page's */
+  constructor(data: TrafficData, ground: Ground | null) {
+    this.T = new Traffic(data);
+    this.T.ground = ground;
+  }
+
+  get heads() { return this.T.heads; }
+  get peds() { return this.T.peds; }
+  get cars() { return this.T.cars; }
+  get detachedCars() { return this.T.detachedCars; }
+  get people() { return this.T.people; }
+  get riders() { return this.T.riders; }
+  get active() { return this.T.active; }
+  get acc() { return this.T.acc; }
+  get trains() { return this.T.trains; }
+  get ground() { return this.T.ground; }
+  carPose: Traffic['carPose'] = (c, s, off, out) => this.T.carPose(c, s, off, out);
+  pathPoint: Traffic['pathPoint'] = (c, s, out, off) => this.T.pathPoint(c, s, out, off);
+  personPoint: Traffic['personPoint'] = (p, ds, out) => this.T.personPoint(p, ds, out);
+  signal: Traffic['signal'] = (ctrl, axis) => this.T.signal(ctrl, axis);
+  roadVehicles = () => this.T.roadVehicles();
+
+  /** the snapshot's agents in place of the last (one object per id); its events with the people they name as drawn
+   * here (a person fallen is gone from the snapshot's crowd, not yet from this) */
+  apply(s: Snapshot): SimEvent[] {
+    const T = this.T;
+    const events = s.events.map((e) => ('person' in e ? { ...e, person: this.peopleById.get(e.person.id) ?? e.person } : e));
+    T.acc = s.acc; T.t = s.t; T.day = s.day;
+    // (a new object only when it moves: the signal heads are placed again then)
+    if (!s.active) T.active = null;
+    else if (!T.active || T.active.x !== s.active.x || T.active.z !== s.active.z) T.active = s.active;
+    const cars = (list: CarState[], into: Car[], seen: Set<number>) => {
+      into.length = 0;
+      for (const st of list) {
+        let c = this.carsById.get(st.id);
+        if (!c) this.carsById.set(st.id, c = { kind: 'car' } as Car);
+        Object.assign(c, st);
+        into.push(c);
+        seen.add(st.id);
+      }
+    };
+    const seenCars = new Set<number>();
+    cars(s.cars, T.cars, seenCars);
+    cars(s.detached, T.detachedCars, seenCars);
+    for (const id of this.carsById.keys()) if (!seenCars.has(id)) this.carsById.delete(id);
+    const seenPeople = new Set<number>();
+    const people = (list: PersonState[]) => list.map((st) => {
+      let p = this.peopleById.get(st.id);
+      if (!p) this.peopleById.set(st.id, p = { kind: 'person' } as Person);
+      Object.assign(p, st);
+      seenPeople.add(st.id);
+      return p;
+    });
+    T.people = people(s.people);
+    T.riders = people(s.riders);
+    for (const id of this.peopleById.keys()) if (!seenPeople.has(id)) this.peopleById.delete(id);
+    this.draws.clear();
+    for (const [id, d] of s.bodies) this.draws.set(id, d);
+    T.trains.load(s.trains);
+    this.boats = s.boats;
+    this.walked.clear();
+    for (const [id, w] of s.walked) this.walked.set(id, w);
+    return events;
+  }
+
+  // as LifePhysics.pose: a parked car or a wreck where it is, a body between its last two drawn poses, the fade back
+  // onto its path blended out
+  private bodyPose(c: Car, a: number, under: RoadPose): RoadPose {
+    const d = this.draws.get(c.id);
+    let p = c.detachedPose ?? under;
+    if (!d) return p;
+    if (d.p0 && d.p1) {
+      const p0 = d.p0, q = d.p1, l = (u: number, v: number) => u + (v - u) * a;
+      p = { x: l(p0.x, q.x), y: l(p0.y, q.y), z: l(p0.z, q.z), h: lerpAngle(p0.h, q.h, a), pitch: lerpAngle(p0.pitch, q.pitch, a), roll: lerpAngle(p0.roll, q.roll, a) };
+    }
+    const f = d.fade;
+    return f ? fadeOut(p, f, 1 - smooth01((f.t + (a - 1) * STEP) / f.dur), d.body) : p;
+  }
 }

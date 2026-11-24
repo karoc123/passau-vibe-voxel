@@ -13,7 +13,7 @@ import { shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
 import './drive.css';
 
-// The drive mode sends the local player’s commands to the world sim's client (sim/sim-client.ts; the sim's road physics). Here: the panel, the input, the
+// The drive mode sends the local player’s commands to the world sim's client (client/sim-client.ts; the sim's road physics). Here: the panel, the input, the
 // camera's shake. A craft on the ride's camera (craft.ts): Nav follows the car taken and tells it when it is left (the
 // car parks). Out of focus it holds still (input.ts).
 const RAPIER_AFTER_MS = 1500; // after the city is shown, Rapier is loaded (~1.7 MB gzip) when the page is idle

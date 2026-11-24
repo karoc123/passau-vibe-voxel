@@ -3,7 +3,7 @@
 // order sent at the start of its next tick, in one place (WorldSim.apply); a client never reaches a seat otherwise.
 // A player holds at most one seat (WorldSim.seat): taking another leaves the one held first, in the same command;
 // refused, the player keeps it. A command names no player: the session it is sent through is one player's, and the host
-// stamps that player on it (sim/sim-server.ts Session; docs/plans/architecture-review.md F2, A7), so a client cannot
+// stamps that player on it (sim/server/sim-server.ts Session; docs/plans/architecture-review.md F2, A7), so a client cannot
 // act as another. Part of the contract between the world sim and its clients
 // (docs/plans/architecture-review.md section 3, layer 1): types and constants only (tools/core-deps.mjs R5).
 import type { WorldOp } from '../../core/layers';

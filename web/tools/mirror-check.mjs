@@ -1,4 +1,4 @@
-// The snapshot gate (docs/plans/local-server.md, src/sim/snapshot.ts): what the page draws from the sim's snapshots is
+// The snapshot gate (docs/plans/local-server.md, src/sim/server/snapshot.ts): what the page draws from the sim's snapshots is
 // what it draws from the sim itself. Two world sims from one seed on the real traffic data, ticked alike at a viewer
 // that stands, then drives along a road: one drawn by StreetLife through LocalSimClient (the sim's own objects), the
 // other through MirrorSimClient over a CloneLink of a ThreadLink (a TrafficMirror set from each snapshot, the snapshots

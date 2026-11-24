@@ -31,7 +31,7 @@ export interface CoachPose {
   readonly express: boolean;
 }
 
-/** a train as a snapshot carries it (sim/snapshot.ts): what its coaches' poses are drawn from */
+/** a train as a snapshot carries it (sim/server/snapshot.ts): what its coaches' poses are drawn from */
 // (a train as saved, TrainState: contract/agents.ts)
 
 export interface CoachBox extends CoachPose {

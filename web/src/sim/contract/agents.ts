@@ -21,10 +21,10 @@ export interface Person {
   bike?: boolean;
 }
 
-/** what a client's path maths and drawing read of a person (sim/snapshot.ts PERSON_KEYS) */
+/** what a client's path maths and drawing read of a person (sim/server/snapshot.ts PERSON_KEYS) */
 export type PersonState = Pick<Person, 'id' | 'e' | 'dir' | 's' | 'v' | 'lat' | 'ph' | 'wait' | 'col' | 'bike'>;
 
-/** what a client's path maths and drawing read of a car (sim/types.ts Car; sim/snapshot.ts CAR_KEYS) */
+/** what a client's path maths and drawing read of a car (sim/types.ts Car; sim/server/snapshot.ts CAR_KEYS) */
 export interface CarState {
   id: number;
   e: number;

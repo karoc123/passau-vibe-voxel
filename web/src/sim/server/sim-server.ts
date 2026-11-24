@@ -1,8 +1,8 @@
-// The server side of a SimClient (sim/sim-client.ts; docs/plans/local-server.md): the world sim, the game mode made
+// The server side of a SimClient (client/sim-client.ts; docs/plans/local-server.md): the world sim, the game mode made
 // (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, the world's edits applied at the start of
 // the next update if the mode allows them (mayEdit), and the connections to it: one Session each
 // (docs/plans/architecture-review.md F2, A7). Run in the page's thread (LocalSimClient, MirrorSimClient over a
-// ThreadLink) or in a Web Worker (sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
+// ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
 //   SimServer  the world's: connect(player) a session for a player the host names; update (the edits sent, then the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names

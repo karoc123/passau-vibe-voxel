@@ -1,4 +1,4 @@
-// The world's ground and water where no streamer is (sim.worker.ts: the sim in a Web Worker): a World (world.ts) over
+// The world's ground and water where no streamer is (host/sim.worker.ts: the sim in a Web Worker): a World (world.ts) over
 // the level-1 nodes of a TileCache (with its live edits), each asked for when first wanted and in from then on (the
 // streamer's World answers with the finest tile it has loaded: near the focus that is level 1 too). Holds the last
 // HOLD nodes asked for. No three.js, no DOM.

@@ -1,13 +1,13 @@
-// The page's end of the local server (sim.worker.ts; docs/plans/local-server.md): a SimLink (sim/sim-client.ts) over
-// a Web Worker. One frame in flight at a time: while the worker works on one, the page's frames add their time and
-// commands to the next, sent when its snapshot is back (so a slow sim slows the sim, never the page). The page draws
-// the latest snapshot: one update behind the frame that sent the input.
+// The page's end of the local server (host/sim.worker.ts; docs/plans/local-server.md): a SimLink
+// (client/sim-client.ts) over a Web Worker; the messages: sim/contract/worker.ts. One frame in flight at a time: while
+// the worker works on one, the page's frames add their time and commands to the next, sent when its snapshot is back
+// (so a slow sim slows the sim, never the page). The page draws the latest snapshot: one update behind the frame that
+// sent the input.
 import type { SimLink } from './sim-client';
 import type { SimCommand } from '../sim/contract/commands';
 import type { Snapshot } from '../sim/contract/snapshot';
 import type { SimInput } from '../sim/contract/inputs';
-import type { FromWorker, ToWorker } from '../host/sim.worker';
-import type { HostOptions } from '../host/sim-host';
+import type { FromWorker, PhysicsOptions, ToWorker } from '../sim/contract/worker';
 
 export class WorkerLink implements SimLink {
   onSnapshot: (s: Snapshot) => void = () => {};
@@ -21,7 +21,7 @@ export class WorkerLink implements SimLink {
   /** the worker's time for the last frames (update and snapshot, ms), for the tools */
   readonly times: number[] = [];
 
-  constructor(opts: { seed: number; physics: Omit<HostOptions['physics'], 'at'>; eager: boolean; mode?: string; edits: boolean }) {
+  constructor(opts: { seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean }) {
     this.worker = new Worker(new URL('../host/sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.worker.onerror = (e) => console.error('sim worker', e.message);
