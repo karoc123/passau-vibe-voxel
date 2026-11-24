@@ -20,7 +20,7 @@ import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './sim/sim-client';
 import type { CraftsView } from './nav/crafts-view';
-import { LOCAL_PLAYER } from './sim/world-sim';
+import { LOCAL_PLAYER } from './nav/player';
 import { hostSim } from './sim-host';
 import { WorkerLink } from './sim-worker-link';
 import { viewerTileCache } from './viewer-tiles';

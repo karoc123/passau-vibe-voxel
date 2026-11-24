@@ -8,6 +8,7 @@
 // - plane, jet: the floatplane and the jet (sim/craft/plane-flight.ts PLANE, JET): PlaneFlight
 // - craft: the helicopter, hovercraft and paraglider (sim/craft/craft-motion.ts CRAFT): CraftMotion
 // - edits: how long the world keeps an edit no player is near (sim/edit-keeper.ts EDIT_KEEPING): WorldSim
+// - walk: how far a client's walk may move the person it walks as (sim/walk-bounds.ts WALK_BOUNDS): WorldSim
 // A tool that varies tuning builds a copy ({ ...RIDE, stiffness: 40 }) and passes it, as tools/rapier-car.mjs --set
 // and tools/plane.mjs --set do.
 import { frozen } from '../core/frozen';
@@ -16,6 +17,7 @@ import { BOAT, type BoatTuning } from './craft/boat-motion';
 import { JET, PLANE, type PlaneConfig } from './craft/plane-flight';
 import { CRAFT, type CraftTuning } from './craft/craft-motion';
 import { EDIT_KEEPING, type EditKeeping } from './edit-keeper';
+import { WALK_BOUNDS, type WalkBounds } from './walk-bounds';
 
 export interface Tuning {
   readonly ride: RideTuning;
@@ -24,7 +26,8 @@ export interface Tuning {
   readonly jet: PlaneConfig;
   readonly craft: CraftTuning;
   readonly edits: EditKeeping;
+  readonly walk: WalkBounds;
 }
 
-export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, edits: EDIT_KEEPING });
+export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, edits: EDIT_KEEPING, walk: WALK_BOUNDS });
 

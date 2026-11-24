@@ -116,16 +116,19 @@ writes them itself (`put`). So the drawn fields are presentation state that happ
 
 ## 2. What crosses the boundary
 
-- **Page → sim: commands** (`sim/sim-client.ts` `SimCommand`), plain JSON, each keyed by player: `follow`, `walkAs`,
-  `walkPose`, `release`, `takeWheel`, `drive` (the car input), `releaseWheel`, `resetDriver`, `spawnCraft`
+- **Page → sim: commands** (`sim/sim-client.ts` `SimCommand`: `sim/commands.ts` `PlayerCommand` or an `edit`), plain
+  JSON, each keyed by player: `follow`, `walkAs`, `walkPose`, `takeWheel`, `drive` (the car input), `resetDriver`,
+  `spawnCraft`
   (`addCraft` + `enterCraft` + `placeCraft` in one: the sim numbers the craft, the client never needs its id),
   `placeCraft` (the player's craft put down again), `enterCraft` (the seat of a craft in the world, one left by its
-  pilot; E8), `craftInput`, `resetCraft`, `leaveCraft` (out of the seat: the craft stays where it is, hands off; E8),
+  pilot; E8), `craftInput`, `resetCraft`, `leaveSeat` (E7: out of whatever seat is held; a craft stays where it is,
+  hands off: E8),
   `dropCraft` (the player's craft taken away: only the paraglider since E8), `edit` (a `WorldOp`). They are queued and applied in the
   order sent at the start of the sim's next update, before the edit keeper and the ticks (ADR 0007: "commands take
-  effect at the start of the tick"). Their outcome, where one can be refused (`walkAs`, `takeWheel` is already
-  reported by `driverSnapshot`, `spawnCraft`, `resetCraft`, `edit`), comes back as a `CommandResult { tick, kind, ok }`
-  per player.
+  effect at the start of the tick"); since E7 the queue is the WorldSim's own (`WorldSim.send`, applied in
+  `WorldSim.apply`), `SimServer` keeps only the edits'. Their outcome, where one can be refused (`walkAs`, a
+  `walkPose` clamped, `takeWheel`, `spawnCraft`, `enterCraft`, `resetCraft`, `edit`), comes back as a
+  `CommandResult { tick, kind, ok }` per player.
 - **Page → sim: the frame's input**: `{ hour, day, focus, viewer }` (`SimInput`) and `dt`. On a server this becomes
   each player's focus and viewer; the hour is the world's.
 - **Page → sim: requests with a reply**: `loadPhysics(warm)` (Rapier loaded where the sim runs), `edit(op)` (the nodes
@@ -258,5 +261,5 @@ some 75 KB a snapshot as float64; for a network later, quantised and delta-coded
 - With the worker the page draws one update behind (the snapshot of the frame before): one frame of input latency
   (measured, section 6), against a main thread freed of the sim (1-4 ms a frame here, more with Rapier bodies).
 - The shells still decide where a new craft is put (`spawnCraft`): a mode's job later. Since E8 a left craft stays in
-  the world (`leaveCraft`) until the presence rule drops it.
-- `LOCAL_PLAYER` stays in sim/world-sim.ts until E7 moves it to the client.
+  the world (`leaveSeat`) until the presence rule drops it.
+- `LOCAL_PLAYER` is the client's (nav/player.ts) since E7.

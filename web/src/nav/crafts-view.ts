@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CraftView, SimClient } from '../sim/sim-client';
-import { LOCAL_PLAYER, type CraftId } from '../sim/world-sim';
+import type { CraftId } from '../sim/world-sim';
+import { LOCAL_PLAYER } from './player';
 import type { CoreOf, CraftType } from '../sim/craft/cores';
 import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { PLANE } from '../sim/craft/plane-flight';

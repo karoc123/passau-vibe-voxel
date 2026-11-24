@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type { CraftView, SimClient } from '../sim/sim-client';
-import { LOCAL_PLAYER, type CraftId, type CraftInput, type CraftWorld } from '../sim/world-sim';
+import type { CraftId, CraftInput, CraftWorld } from '../sim/world-sim';
+import { LOCAL_PLAYER } from './player';
 import type { CraftSpot as SimSpot } from '../sim/craft/craft-core';
 import { CORES, type CoreOf, type CraftType } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
@@ -145,7 +146,7 @@ export class CraftLink<K extends CraftType> {
   /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
    * out of the world; the shell's collision let go */
   close(drop = false) {
-    if (this.held) this.sim?.send({ kind: drop ? 'dropCraft' : 'leaveCraft', player: LOCAL_PLAYER });
+    if (this.held) this.sim?.send({ kind: drop ? 'dropCraft' : 'leaveSeat', player: LOCAL_PLAYER });
     this.held = false;
     this.col?.release();
     this.col = null;

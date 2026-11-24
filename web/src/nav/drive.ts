@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import type { CarInput } from '../physics/rapier/car';
-import { LOCAL_PLAYER } from '../sim/world-sim';
+import { LOCAL_PLAYER } from './player';
 import type { SimClient } from '../sim/sim-client';
 import { CRASH_MS, PARK, SINK_MS, type DriverSnapshot } from '../physics/rapier/player-car';
 import type { Nav, Ride } from './nav';
@@ -84,8 +84,10 @@ export class DriveMode implements PlayerCraft {
   update() {
     if (this.pending) this.prepare(this.pending);
     if (this.driving && this.world) {
+      // (the wheel refused: the car gone, or another player's; or the car lost after it was taken)
+      const refused = this.world.results(LOCAL_PLAYER, 'takeWheel').some((r) => !r.ok);
       this.snapshot = this.world.driver(LOCAL_PLAYER);
-      if (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick) this.nav.leaveCraft();
+      if (refused || (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick)) this.nav.leaveCraft();
       else {
         const focused = inFocus(), now = performance.now();
         this.world.send({ kind: 'drive', player: LOCAL_PLAYER, input: focused ? this.input() : PARK });
@@ -141,10 +143,12 @@ export class DriveMode implements PlayerCraft {
     if (!world) { this.loadRapier(); return; }
     if (!life.pose('car', car)) { this.pending = null; return; }
     this.pending = null;
+    // (Nav first: whatever it leaves for this sends its leaveSeat before the takeWheel; an old answer dropped)
+    this.nav.enterCraft(this);
+    world.results(LOCAL_PLAYER, 'takeWheel');
     world.send({ kind: 'takeWheel', player: LOCAL_PLAYER, car: car.id, choice: this.choice === 'any' ? undefined : this.choice });
     this.claimTick = world.tick;
     this.driving = ride;
-    this.nav.enterCraft(this);
     this.touch.setActive(true);
     this.keys.clear();
     this.panel.silence();
@@ -153,7 +157,7 @@ export class DriveMode implements PlayerCraft {
   // left (Park, the map, a walk, another ride or craft): the car parks where it is
   leave() {
     if (!this.driving) return;
-    this.world?.send({ kind: 'releaseWheel', player: LOCAL_PLAYER });
+    this.world?.send({ kind: 'leaveSeat', player: LOCAL_PLAYER });
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.claimTick = null;

@@ -2,7 +2,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../src/sim/traffic';
 import type { Car, TrainPathData } from '../src/sim/types';
-import { LOCAL_PLAYER as PLAYER } from '../src/sim/world-sim';
 import type { VehicleId } from '../src/sim/vehicles';
 import type { CarInput } from '../src/physics/rapier/car';
 import { LifePhysics } from '../src/physics/rapier/life-phys';
@@ -10,7 +9,7 @@ import { CRASH_MS, SINK_MS, PARK, type DriveNote } from '../src/physics/rapier/p
 import type { Check } from './check';
 import { synthMap, WATER, type Col } from './world';
 
-const FRAME_MS = 1000 / 60;
+const FRAME_MS = 1000 / 60, PLAYER = 'driver';
 const r2 = (x: number) => Math.round(x * 100) / 100;
 let id = 1;
 const carAt = (x: number, y: number, z: number): Car => ({
@@ -50,7 +49,7 @@ export function takeOver(col: (x: number, z: number) => Col, x: number, z: numbe
   traffic.bodies = physics;
   traffic.detachedCars.push(car, ...others);
   if (withPedestrian) traffic.people.push({ kind: 'person', id: 1, e: 0, dir: 1, s: 2, v: 0, lat: 0, ph: 0, wait: false, col: '#fff' });
-  physics.takeWheel(PLAYER, car.id, choice);
+  physics.takeWheel(traffic, PLAYER, car.id, choice);
   return new Drive(traffic, physics, car);
 }
 
@@ -93,12 +92,10 @@ function sharedReplay() {
   const tick = () => traffic.update(STEP, 12, { x: 64, z: 50 });
   for (let i = 0; i < 10; i++) tick();
   const existing = physics.bodies.get(ai.id), physicalBefore = existing?.state === 'track';
-  physics.takeWheel('first', a.id);
-  physics.takeWheel('second', a.id);
-  if (physics.driverSnapshot('first')) throw new Error('claim applied outside a tick');
+  const claimed = physics.takeWheel(traffic, 'first', a.id), refused = !physics.takeWheel(traffic, 'second', a.id);
   tick();
-  const won = physics.driverSnapshot('first')?.entityId === a.id && !physics.driverSnapshot('second');
-  physics.takeWheel('second', b.id);
+  const won = claimed && refused && physics.driverSnapshot('first')?.entityId === a.id && !physics.driverSnapshot('second');
+  physics.takeWheel(traffic, 'second', b.id);
   const input = { gas: 1, brake: 0, steer: 0, handbrake: false };
   const snapshots = [];
   const sample = () => [physics.driverSnapshot('first'), physics.driverSnapshot('second'), { ...ai.detachedPose }];

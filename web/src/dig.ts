@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { cellToAbsZ, frameOf, mapToGrid, type WorldOp } from './core/layers';
 import type { SimClient } from './sim/sim-client';
-import { LOCAL_PLAYER } from './sim/world-sim';
+import { LOCAL_PLAYER } from './nav/player';
 import type { TileStreamer } from './stream';
 
 const DIG_R = 3;

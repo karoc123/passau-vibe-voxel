@@ -42,13 +42,13 @@ for (const [near, max] of configs) {
     const nearFocus = (c) => Math.hypot(c.geo.cx - AX, c.geo.cy - AZ);
     const closest = [...T.cars].sort((a, b) => nearFocus(a) - nearFocus(b) || a.id - b.id)[0];
     if (!closest) throw new Error('no traffic car to drive at the benchmark site');
-    sim.takeWheel('benchmark', closest.id);
+    sim.send({ kind: 'takeWheel', player: 'benchmark', car: closest.id });
   }
   const tick = [], step = [], ter = [], nb = [], all = [];
   for (let i = 0; i < RUN / STEP; i++) {
     if (driver) {
       const s = sim.driverSnapshot('benchmark');
-      sim.input('benchmark', { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false });
+      sim.send({ kind: 'drive', player: 'benchmark', input: { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false } });
     }
     const t0 = performance.now();
     sim.update(STEP, { hour: HOUR, focus });
