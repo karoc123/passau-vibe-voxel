@@ -7,6 +7,7 @@ import { cutFogGlsl, FOG_CUT } from './daylight';
 import { SKY_GLSL, type Sky } from './sky';
 import { REFL_MAX } from './voxelMaterial';
 import { Sharpen, TaaPass } from './taa';
+import { Outline, TOON } from './toon';
 
 // The miniature look by depth, not by screen band: each pixel blurs by how far its distance is from the focus (what
 // the camera looks at), in ratio, so the whole plane of the subject stays sharp -- a tower's clock as much as its base.
@@ -384,6 +385,9 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
   const n8render = n8.render.bind(n8);
   n8.render = (...a) => { reflections.update(); n8render(...a); }; // (its view matrix: the AO's fog too)
   composer.addPass(n8);
+  // the toon look's ink lines (toon.ts, ?look=toon): after the AO, before the depth blur and the TAA
+  const outline = TOON ? new Outline() : null;
+  if (outline) composer.addPass(new EffectPass(camera, outline));
   // the bloom in the last pass (not one of its own, ~0.4 ms): it reads that pass's input, after the depth blur
   const bloom = new BloomEffect({ intensity: 0.2, luminanceThreshold: 0.92, luminanceSmoothing: 0.15, mipmapBlur: true, radius: 0.55 });
   let bloomOn = true;
@@ -442,6 +446,7 @@ export function makePost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, came
       else p.setSize(low.x, low.y);
     }
     taa.setLow(low.x, low.y);
+    outline?.setHeight(low.y);
   };
   composer.setSize = (...a) => { setSize(...a); fit(); };
   // the camera jittered for the composer's frame only
