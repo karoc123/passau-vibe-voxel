@@ -26,6 +26,17 @@ it on its own branch, and report.
   (minutes). Some verify failures already exist on main, so compare against main and do not expect all-green.
 - `node tools/gates.mjs --list` shows which gate guards which files.
 
+## Owner direction (2026-11-24)
+
+- No fine-tuning of game rules, UI or lag mitigation while it is unclear what the game will be: E15, E16, E21, M2,
+  M4–M10 and UI work wait for the vision. E14 is built lean (sandbox only).
+- First aim: an architecture that stays stable and separated for future extension and gets more multiplayer-ready
+  (classic clean-architecture work: clear layers, dependencies pointing inward, sim free of render/DOM).
+- Experiments are welcome, e.g. a cel-shading look.
+- City and data packages are an option, but not urgent.
+- The paraglider is only the transition after jumping out of a plane; it is removed when left (as today) and needs no
+  hint.
+
 ## Overview
 
 "Ready" means it can start now. "In progress" names the working branch. "Ready to merge" means the verified
@@ -35,9 +46,10 @@ gone into "Ready". For a partially completed package, remove the landed item and
 
 | Package | What | Size | Status |
 |---|---|---|---|
-| M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
+| M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| E14–E16, E21 | Mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md); E10–E13 landed) | S–M each | **Ready** from E14 (order in the plan) |
+| E14 | Mode layer, lean: sandbox only, a thin `GameMode` seam ([plan](entities-and-modes.md); E10–E13 landed) | M | In progress |
+| E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
