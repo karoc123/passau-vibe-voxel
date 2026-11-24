@@ -7,7 +7,7 @@ import { TileCache } from '../src/core/tile-cache';
 import { liveEdits } from '../src/core/live-edits';
 import { fetchGzip } from '../src/fetch';
 import { MAT } from '../src/core/materials';
-import { TILE_MAGIC as MAGIC, TILE_N } from '../src/tile-data';
+import { TILE_MAGIC as MAGIC, TILE_N } from '../src/core/tile-data';
 import { encodeCaps } from '../src/core/surface';
 import { terrainTile, terrainPalette } from '../src/physics/rapier/terrain';
 import { component, type Vec3 } from '../src/core/vec';

@@ -134,7 +134,7 @@ async function schanzlBridge() {
 // still stands over the bore (data from before the bores' floors became the ground: solid for the car).
 async function tunnelRoad() {
   if (!fs.existsSync(`${root}public/data/traffic.json`)) return null;
-  const TD = await load('tile-data.ts');
+  const TD = await load('core/tile-data.ts');
   const meta = JSON.parse(fs.readFileSync(`${root}public/data/meta.json`, 'utf8')), N = meta.tiles.N, S = N + 2;
   const cache = new Map();
   const col = (x, z) => {

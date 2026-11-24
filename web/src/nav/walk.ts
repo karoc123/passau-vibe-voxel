@@ -1,4 +1,4 @@
-import type { World } from '../world';
+import type { World } from '../core/world';
 
 // On foot (nav.ts: the walk and the third-person pedestrian): what is climbed in a stride (a kerb, a stair) and the
 // headroom kept over the soles

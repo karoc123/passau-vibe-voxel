@@ -5,7 +5,7 @@ import type { Pose } from '../sim/types';
 import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
-import type { World } from '../world';
+import type { World } from '../core/world';
 import type { PlayerCraft } from './craft';
 import { Foot, type Stick } from './foot';
 import { Glide } from './glide';

@@ -1,7 +1,6 @@
-import type * as THREE from 'three';
-import { capField, surfaceAt, type CapField } from './core/surface';
-import type { ColumnData, Meta } from './core/meta';
-import { paletteMask, RULES, semanticTable } from './core/semantics';
+import { capField, surfaceAt, type CapField } from './surface';
+import type { ColumnData, Meta } from './meta';
+import { paletteMask, RULES, semanticTable } from './semantics';
 
 export interface ColumnSource {
   N: number;
@@ -198,7 +197,7 @@ export class World {
   }
 
   // distance along d (unit, three.js axes) to the first solid voxel; sets hitAxis
-  raycast(o: Point | THREE.Vector3, d: Point | THREE.Vector3, maxDist = 4000) {
+  raycast(o: Point, d: Point, maxDist = 4000) {
     let x = Math.floor(o.x), y = Math.floor(o.y), z = Math.floor(o.z);
     const sx = Math.sign(d.x), sy = Math.sign(d.y), sz = Math.sign(d.z);
     const tdx = sx ? Math.abs(1 / d.x) : Infinity, tdy = sy ? Math.abs(1 / d.y) : Infinity, tdz = sz ? Math.abs(1 / d.z) : Infinity;

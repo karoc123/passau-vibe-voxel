@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './core/meta';
 import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.worker';
-import { roomOffsets, type Columns, type Fields } from './tile-data';
-import { World, type ColumnSource } from './world';
+import { roomOffsets, type Columns, type Fields } from './core/tile-data';
+import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type LiveNode, type Region } from './core/live-edits';
 import { viewerTileCache } from './viewer-tiles';

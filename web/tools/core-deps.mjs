@@ -139,7 +139,7 @@ const LAYERS = [
   ['sim-worker-link.ts', 'client'],
   ['view/', 'presentation'], ['nav/', 'presentation'],
   ['main.ts', 'app'],
-  ['*', 'presentation'], // the rest of the root: render modules, UI, and the headless data modules A2 moves to core/
+  ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
 ];
 const ALLOWED = {
   data: ['data'],
@@ -155,12 +155,9 @@ const HEADLESS = new Set(['data', 'contract', 'shared', 'domain']); // R3
 const PERF_NOW_OK = new Set(['physics/rapier/life-phys.ts', 'physics/rapier/terrain.ts']);
 const HOOKS_OWNER = 'main.ts';
 
-// Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 takes the headless -> root ones,
+// Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 took the headless -> root ones,
 // A3 the contract's and nav's, A4 the client <-> server ones.
 const BASELINE = [
-  "R1 core/columns.ts (data) -> tile-data.ts (presentation) type",
-  "R1 core/live-edits.ts (data) -> tile-data.ts (presentation) type",
-  "R1 core/tile-cache.ts (data) -> tile-data.ts (presentation)",
   "R1 nav/craft.ts (presentation) -> sim/world-sim.ts (domain) type",
   "R1 nav/crafts-view.ts (presentation) -> sim/world-sim.ts (domain) type",
   "R1 nav/drive.ts (presentation) -> physics/rapier/car.ts (domain) type",
@@ -173,7 +170,6 @@ const BASELINE = [
   "R1 sim-worker-link.ts (client) -> sim/world-sim.ts (domain) type",
   "R1 sim.worker.ts (server) -> fetch.ts (presentation)",
   "R1 sim.worker.ts (server) -> sim/sim-client.ts (client) type",
-  "R1 sim.worker.ts (server) -> tile-world.ts (presentation)",
   "R1 sim.worker.ts (server) -> viewer-tiles.ts (presentation)",
   "R1 sim/commands.ts (contract) -> physics/rapier/car.ts (domain) type",
   "R1 sim/commands.ts (contract) -> sim/entities.ts (domain) type",
@@ -181,8 +177,6 @@ const BASELINE = [
   "R1 sim/commands.ts (contract) -> sim/types.ts (shared) type",
   "R1 sim/commands.ts (contract) -> sim/vehicles.ts (shared) type",
   "R1 sim/commands.ts (contract) -> sim/world-sim.ts (domain) type",
-  "R1 sim/craft/voxel-collision.ts (shared) -> tile-data.ts (presentation) type",
-  "R1 sim/edit-keeper.ts (domain) -> tile-data.ts (presentation)",
   "R1 sim/sim-client.ts (client) -> physics/rapier/player-car.ts (domain) type",
   "R1 sim/sim-client.ts (client) -> sim/boat-traffic.ts (domain) type",
   "R1 sim/sim-client.ts (client) -> sim/entities.ts (domain) type",

@@ -20,7 +20,7 @@ export async function realTile(tx, tz) {
   const k = `${tx}_${tz}`;
   if (!tiles.has(k)) {
     if (!fs.existsSync(`${DATA}tiles/1/${k}.bin`)) { tiles.set(k, null); return null; }
-    const T = await load('physics/rapier/terrain.ts'), TD = await load('tile-data.ts');
+    const T = await load('physics/rapier/terrain.ts'), TD = await load('core/tile-data.ts');
     const N = readMeta().tiles.N, pal = T.terrainPalette(readMeta().palette);
     const read = (p) => zlib.gunzipSync(fs.readFileSync(`${DATA}tiles/${p}`)).buffer;
     tiles.set(k, T.terrainTile(N, TD.decodeTile(read(`1/${k}.bin`), N), TD.decodeTile(read(`1f/${k}.bin`), N), pal));
@@ -78,11 +78,11 @@ export async function schanzlPath() {
 // a tile's bytes (ungzipped) by its path under data/ tiles ('1/3_4.bin')
 export const rawTile = (p) => { const b = zlib.gunzipSync(fs.readFileSync(`${DATA}tiles/${p}`)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 
-// The World (src/world.ts) over the level-1 node files, read when first asked for, as the streamer holds them
+// The World (src/core/world.ts) over the level-1 node files, read when first asked for, as the streamer holds them
 // (stream.ts setData): W; its source (src.nodes: the nodes by '1/tx_ty', to put edited ones in, then src.version++);
 // colData(tx, ty, columns): a node's columns as the source holds them (tools/life-edit.mjs, life-phys.mjs)
 export async function nodeWorld() {
-  const { World } = await load('world.ts'), TD = await load('tile-data.ts'), meta = readMeta(), N = meta.tiles.N, S = N + 2;
+  const { World } = await load('core/world.ts'), TD = await load('core/tile-data.ts'), meta = readMeta(), N = meta.tiles.N, S = N + 2;
   const colData = (tx, ty, c) => {
     const off = new Uint32Array(S * S + 1);
     for (let i = 0; i < S * S; i++) off[i + 1] = off[i] + c.counts[i];

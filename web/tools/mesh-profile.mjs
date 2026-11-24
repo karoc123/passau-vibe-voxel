@@ -17,7 +17,7 @@ import { imp } from './lib.mjs';
 const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data');
 globalThis.self ??= globalThis;
-const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts'), TD = await imp('src/tile-data.ts');
+const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts'), TD = await imp('src/core/tile-data.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };
 const raw = (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };

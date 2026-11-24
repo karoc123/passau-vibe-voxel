@@ -19,7 +19,7 @@ import { DATA, realTile, readMeta, trafficRoads, load } from './real-city.mjs';
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const LANES = process.argv.includes('--lanes'), DUMP = arg('--dump'), NEAR = arg('--near')?.split(',').map(Number);
 const N = readMeta().tiles.N, roads = await trafficRoads(), { prepPath, at } = await load('sim/path.ts');
-const TD = await load('tile-data.ts'), { semanticTable, RULES } = await load('core/semantics.ts'), { surfaceAt } = await load('core/surface.ts');
+const TD = await load('core/tile-data.ts'), { semanticTable, RULES } = await load('core/semantics.ts'), { surfaceAt } = await load('core/surface.ts');
 const sem = semanticTable(readMeta().palette), solid = (m) => RULES.solidForCar(sem[m] ?? 1);
 // the tiles' own columns (materials), beside terrainTile's merged intervals
 const raw = new Map();

@@ -11,7 +11,7 @@ import { frozen } from '../core/frozen';
 import type { WorldOp } from '../core/layers';
 import { liveEdits } from '../core/live-edits';
 import { drop } from '../core/world-edits';
-import { TILE_N } from '../tile-data';
+import { TILE_N } from '../core/tile-data';
 // (for the node tools, which load each module graph apart: this graph's world edits)
 export * as worldEdits from '../core/world-edits';
 

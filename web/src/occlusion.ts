@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ColumnData } from './core/meta';
-import { TILE_N } from './tile-data';
+import { TILE_N } from './core/tile-data';
 
 // Occlusion culling of the city's tile meshes against the city itself, on the CPU, each frame, for the main camera
 // only (the sun's shadow map draws every caster, as before).

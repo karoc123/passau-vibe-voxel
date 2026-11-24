@@ -7,7 +7,7 @@ import { chamferWalls, PAL_ROOF, PAL_WATER, SLANT, type ChamferMemo, type Prism,
 import { grow, meets, perSide, SEC, sectionBox, sectionOf, sectionsMeeting, union, type Box } from './sections';
 import { capField, capRamped, capSlot, cornerQ, diagonal02, edgeCorners, NONE, type CapField } from './core/surface';
 import { roofField, slopeRoofs, wallTopCode, type RoofField, type SlopeParts } from './roofs';
-import { decodeTile, type Columns, type Fields, type RawColumns } from './tile-data';
+import { decodeTile, type Columns, type Fields, type RawColumns } from './core/tile-data';
 import { fetchGzip } from './fetch';
 
 export interface MeshRequest {

@@ -15,7 +15,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url)), repo = path.resolve(root, '..');
-const TD = await imp('src/tile-data.ts');
+const TD = await imp('src/core/tile-data.ts');
 const TS = await imp('src/core/tile-sections.ts');
 const SF = await imp('src/core/surface.ts');
 const RF = await imp('src/roofs.ts');

@@ -32,7 +32,7 @@ import type { FloodInfo, Place } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
-import type { World } from './world';
+import type { World } from './core/world';
 import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';

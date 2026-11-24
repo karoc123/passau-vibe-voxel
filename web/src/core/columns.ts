@@ -10,7 +10,7 @@
 // Canonical runs (scripts/tiles.py column_runs): per column, bottom to top, the maximal runs of one palette id, air (id
 // 0) left out: no empty runs, no air runs, no two touching runs of the same id. encode() writes that form, so a node
 // rebuilt from its edits holds the same bytes the pipeline would write for the same voxels.
-import type { RawColumns } from '../tile-data';
+import type { RawColumns } from './tile-data';
 
 // What an edit replaces: every cell in its shape, only the air in it (build without overwriting), only the voxels in
 // it (repaint, or carve without touching the air)

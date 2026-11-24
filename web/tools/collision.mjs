@@ -12,7 +12,7 @@ import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const m = await imp('checks/collision-checks.ts');
-const TD = await imp('src/tile-data.ts');
+const TD = await imp('src/core/tile-data.ts');
 const out = [...await m.runCollisionChecks(), ...await m.runRoomChecks()];
 
 async function tunnelFlight() {

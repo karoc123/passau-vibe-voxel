@@ -25,7 +25,7 @@ import { dataDir } from './data-dir.mjs';
 const dir = dataDir, verbose = process.argv.includes('-v');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
-const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts'), SE = await imp('src/sections.ts');
+const TD = await imp('src/core/tile-data.ts'), CO = await imp('src/core/columns.ts'), SE = await imp('src/sections.ts');
 
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };

@@ -2,9 +2,9 @@
 // the level-1 nodes of a TileCache (with its live edits), each asked for when first wanted and in from then on (the
 // streamer's World answers with the finest tile it has loaded: near the focus that is level 1 too). Holds the last
 // HOLD nodes asked for. No three.js, no DOM.
-import type { TileCache } from './core/tile-cache';
+import type { TileCache } from './tile-cache';
 import { roomOffsets, type Columns } from './tile-data';
-import type { ColumnData, Meta } from './core/meta';
+import type { ColumnData, Meta } from './meta';
 import { World, type ColumnSource } from './world';
 
 const HOLD = 96;

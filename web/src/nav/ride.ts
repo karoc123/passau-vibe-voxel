@@ -4,7 +4,7 @@ import { LOCAL_PLAYER } from './player';
 import type { Person, Pose } from '../sim/types';
 import { vehicleOf } from '../sim/vehicles';
 import type { Picked, StreetLife } from '../view/life';
-import type { World } from '../world';
+import type { World } from '../core/world';
 import type { Foot } from './foot';
 import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';

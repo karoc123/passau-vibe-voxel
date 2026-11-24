@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Rect } from './hud';
 import type { Facts, Label } from './core/meta';
 import { $, el } from './util';
-import type { World } from './world';
+import type { World } from './core/world';
 import { FOG_CUT } from './daylight';
 
 interface Pin {

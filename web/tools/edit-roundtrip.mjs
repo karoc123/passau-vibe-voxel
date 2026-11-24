@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts');
+const TD = await imp('src/core/tile-data.ts'), CO = await imp('src/core/columns.ts');
 const D = `${root}public/data/`;
 const meta = JSON.parse(fs.readFileSync(`${D}meta.json`, 'utf8')), N = meta.tiles.N, S = N + 2;
 let seed = Number(process.argv[2] ?? 1) >>> 0 || 1;
