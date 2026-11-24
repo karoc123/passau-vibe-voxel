@@ -83,9 +83,9 @@ wheels).
 
 ## How to add a type
 
-1. An entry in `VEHICLES` (and its id in `VehicleId`): `build` (start from the nearest type; `tune` only what
-   differs), `len`, `chase` (the camera's distance behind and above the vehicle, in metres at normal zoom), and
-   `model` (boxes; the wheels at the build's wheel positions, their bottom on the ground; lamps).
+1. An entry in `VEHICLES` (and its id in `VehicleId`, `sim/contract/ids.ts`): `build` (start from the nearest type;
+   `tune` only what differs), `len`, `chase` (the camera's distance behind and above the vehicle, in metres at normal
+   zoom), and `model` (boxes; the wheels at the build's wheel positions, their bottom on the ground; lamps).
 2. A top-speed range in `tools/vehicles.mjs` TOP; run it.
 3. Optionally in the traffic's mix: `trafficType`.
 

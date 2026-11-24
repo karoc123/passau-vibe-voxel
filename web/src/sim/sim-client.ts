@@ -10,35 +10,26 @@
 // answers with ack (the last one taken). The frame's time (time: FrameTime) is fixed by the update: what is drawn
 // between the last two ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
 // No three.js, no DOM (tools/core-deps.mjs).
-import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { WorldOp } from '../core/world-edits';
 import { liveEdits } from '../core/live-edits';
-import type { BoatView } from './boat-traffic';
-import type { Traffic, TrafficBodies, Ground } from './traffic';
-import type { TrafficData, WalkPose } from './types';
+import type { Ground } from './traffic';
+import type { TrafficData } from './types';
 import type { CraftCore } from './craft/craft-core';
-import { CORES, type CraftType } from './craft/cores';
+import { CORES } from './craft/cores';
 import { loadState } from './craft/core-state';
 import { DEFAULT_TUNING } from './tuning';
-import { TrafficMirror, type Snapshot } from './snapshot';
+import { TrafficMirror, type TrafficView } from './snapshot';
 import type { SimServer } from './sim-server';
-import type { CommandResult, PlayerCommand } from './commands';
-import type { Role } from './entities';
+import type { CommandResult, SimCommand } from './contract/commands';
+import type { CraftId, CraftType, PlayerId, Role, Seat } from './contract/ids';
+import type { FrameTime, SimInput } from './contract/inputs';
+import { EVENT_TICKS, type DriveNote, type SimEvent } from './contract/events';
+import type { Ack, DriverSnapshot, Snapshot } from './contract/snapshot';
+import type { WalkPose } from './contract/pose';
 import { STEP } from './traffic';
-import { EVENT_TICKS, SeatReads, type Ack, type CraftId, type FrameTime, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
+import { SeatReads } from './world-sim';
 
-/** what the page sends: a player's command to the world sim (sim/commands.ts PlayerCommand: applied at the start of
- * the sim's next tick, in order), or an edit, a change to the world's voxels (core/world-edits.ts) */
-export type SimCommand = PlayerCommand | { kind: 'edit'; player: PlayerId; op: WorldOp; ref?: number };
-export type { CommandResult, PlayerCommand };
-
-/** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
- * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
- * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
- * snapshots (docs/plans/local-server.md). Read only, except the drawn fields (rp, rh, pitch, roll) on its agents. */
-export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
-  'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
-  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
+// (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView: sim/snapshot.ts)
 
 /** a player craft as the page sees it: its id and type, its pilot, whether it is put down, its core's state (read
  * only: pose, drawn(alpha) at the frame's alpha (SimClient.time), the motion or flight its shell shows). Its

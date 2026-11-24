@@ -7,8 +7,10 @@
 // attitude by quaternion (nlerp: it rolls over), heading, path angle and bank (the chase camera's) the shorter way.
 import { FixedStep } from '../../core/fixed-step';
 import { copy, lerp, lerpAngle, nlerpQuat, quat, quatFromBasis, rotate, set, vec3, type Vec3 } from '../../core/vec';
-import type { CraftCore, CraftSpot } from './craft-core';
-import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
+import type { CraftSpot } from '../contract/commands';
+import type { PlaneInput } from '../contract/inputs';
+import type { CraftCore } from './craft-core';
+import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneWorld } from './plane-flight';
 import type { VoxelCollision } from './voxel-collision';
 
 /** as drawn: where it is, where its nose points and the cockpit's up; its heading, flight-path angle and bank */

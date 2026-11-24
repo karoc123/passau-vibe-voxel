@@ -345,6 +345,26 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   (`CraftSpot`). The old modules import from it; importers in `nav/`, `view/`, root switched.
 - **Result:** both sim type cycles gone; `nav/` no longer names `world-sim.ts` or `physics/`.
 - **Gates:** fast set, `popin-check`; A1's baseline shrinks (sim→physics 5, nav→server 4).
+- **Landed** (2026-11-24): `sim/contract/` holds the wire types; it imports only `core/` types and itself.
+  `ids.ts`: `PlayerId`, `CraftId`, `EntityKind`, `EntityRef`, `Role`, `Seat`, `VehicleId`, `CraftType` (now explicit
+  unions; `VEHICLES` and `CORES` are checked against them, `CORES satisfies Record<CraftType, …>`). `pose.ts`: `Pose`,
+  `WalkPose`, `RoadPose` (out of `sim/types.ts`). `inputs.ts`: `CarInput`, `NO_INPUT`, `PARK`, each craft's input
+  (`BoatInput`, `CraftInput`, `FlightInput`, `DroneInput`, `PlaneInput`), their union `PilotInput` (was world-sim's
+  derived `CraftInput`; `cores.ts` asserts it equals the cores' inputs), `SimInput`, `FrameTime`, `MAX_DT`.
+  `commands.ts` (git mv): `PlayerCommand`, `SeatInput`, `CommandResult`, `SimCommand`, `ModeRequest`, `CraftSpot`.
+  `events.ts`: `SimEvent`, `DriveNote`, `EVENT_TICKS`. `agents.ts` (new beside the five named): `Person` (whole,
+  as events still carry it until A6), `PersonState`, `CarState` (explicit; `sim/snapshot.ts` asserts both equal the
+  `Pick`s of `CAR_KEYS`/`PERSON_KEYS`), `BodyDraw`, `TrainState`, `BoatPose`, `BoatView` (`BoatTraffic implements`
+  it). `snapshot.ts`: `Snapshot`, `CraftState`, `EditNote`, `Ack`, `DriverSnapshot`, `SINK_MS`/`CRASH_MS`/`FALL_MS`.
+  No re-exports from the old places: every importer switched (src, checks, `tools/vehicles.mjs`). Moved to make the
+  cycles go, not to the contract: `CraftWorld` and `Craft` to `sim/craft/craft-core.ts` (nav named world-sim for
+  `CraftWorld`; mode ↔ world-sim for `Craft`), `TrafficView` to `sim/snapshot.ts` beside `TrafficMirror` (A4 takes
+  both to the client). R5 in `core-deps`: a `sim/contract/` module has no `class`, no function or arrow body but a
+  type guard's (type and interface declarations skipped); planted class, function and arrow failed, a guard, a
+  function type and `Object.freeze` passed. Baseline 39 → 18, only removals: R1 35 → 16 (the 6 of
+  `commands.ts`, nav → world-sim/physics 5, `sim-worker-link`/`sim.worker` → snapshot/world-sim/sim-client 3,
+  sim-client → player-car/boat-traffic/entities 3, sim-server/snapshot → sim-client 2), R2 4 → 2 (both sim type
+  cycles gone). Fast set 16/16, `popin-check` (and `--mirror`), `tsc`, the page plain and `?worker=1` without errors.
 
 ### A4. `sim/` split by role (S–M, moves only)
 

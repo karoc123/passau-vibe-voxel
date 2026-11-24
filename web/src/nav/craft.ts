@@ -1,13 +1,15 @@
 import type * as THREE from 'three';
 import type { CraftView, SimClient } from '../sim/sim-client';
-import type { CraftId, CraftInput, CraftWorld } from '../sim/world-sim';
+import type { CraftSpot as SimSpot } from '../sim/contract/commands';
+import type { CraftId, CraftType } from '../sim/contract/ids';
+import type { PilotInput } from '../sim/contract/inputs';
 import { LOCAL_PLAYER } from './player';
-import type { CraftSpot as SimSpot } from '../sim/craft/craft-core';
-import { CORES, type CoreOf, type CraftType } from '../sim/craft/cores';
+import type { CraftWorld } from '../sim/craft/craft-core';
+import { CORES, type CoreOf } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import type { Meta } from '../core/meta';
-import type { Pose } from '../sim/types';
+import type { Pose } from '../sim/contract/pose';
 import type { Nav } from './nav';
 import type { RiverPoints } from '../sim/river';
 
@@ -138,7 +140,7 @@ export class CraftLink<K extends CraftType> {
   put(spot: SimSpot) { if (this.held) this.place(spot); else this.spawn(spot); }
 
   /** the pilot's hands on the controls, until the next */
-  input(input: CraftInput) { this.sim?.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'pilot', input }); }
+  input(input: PilotInput) { this.sim?.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'pilot', input }); }
 
   /** what happened to the craft since the last call */
   events(): unknown[] { return this.craft ? this.sim!.craftEvents(LOCAL_PLAYER) : []; }

@@ -13,13 +13,11 @@ import { FixedStep } from '../../core/fixed-step';
 import { frozen } from '../../core/frozen';
 import { SafeTrail } from '../../core/safe-trail';
 import { lerpAngle } from '../../core/vec';
-import type { CraftCore, CraftSpot } from './craft-core';
+import type { BoatInput } from '../contract/inputs';
+import type { CraftSpot } from '../contract/commands';
+import type { CraftCore } from './craft-core';
 
-export interface BoatInput {
-  throttle: number; // -1..1: forwards, backwards (braking first while still going forwards)
-  steer: number; // -1..1: +1 right
-  drift: boolean; // the handbrake's key: less grip across, a tighter turn, more drag
-}
+// (its input, BoatInput: contract/inputs.ts)
 export const NO_BOAT_INPUT: BoatInput = { throttle: 0, steer: 0, drift: false };
 
 // a column of the world as the boat sees it: the top of its water (-1: none) and whether anything solid is in it

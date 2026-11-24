@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { length } from '../core/vec';
-import { HOVER_THROTTLE, type FlightInput } from '../sim/craft/fpv-flight';
+import { HOVER_THROTTLE } from '../sim/craft/fpv-flight';
+import type { FlightInput } from '../sim/contract/inputs';
 import type { DroneEvent } from '../sim/craft/drone-core';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';

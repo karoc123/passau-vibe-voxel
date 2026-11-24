@@ -1,13 +1,14 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
-import type { CarInput } from '../physics/rapier/car';
+import { type CarInput, PARK } from '../sim/contract/inputs';
 import { LOCAL_PLAYER } from './player';
 import type { SimClient } from '../sim/sim-client';
-import { CRASH_MS, PARK, SINK_MS, type DriverSnapshot } from '../physics/rapier/player-car';
+import { CRASH_MS, SINK_MS, type DriverSnapshot } from '../sim/contract/snapshot';
 import type { Nav, Ride } from './nav';
 import type { CraftContext, PlayerCraft } from './craft';
 import { stickAxis, TouchSticks } from './touch-sticks';
-import { VEHICLE_IDS, VEHICLES, vehicleOf, type VehicleId } from '../sim/vehicles';
+import { VEHICLE_IDS, VEHICLES, vehicleOf } from '../sim/vehicles';
+import type { VehicleId } from '../sim/contract/ids';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';

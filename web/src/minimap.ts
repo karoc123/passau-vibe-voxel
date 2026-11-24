@@ -1,5 +1,6 @@
 import type { Rect } from './hud';
-import type { RoadData, Pose } from './sim/types';
+import type { RoadData } from './sim/types';
+import type { Pose } from './sim/contract/pose';
 import type { Label, Meta } from './core/meta';
 import { el } from './util';
 import './minimap.css';

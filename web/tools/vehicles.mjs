@@ -25,7 +25,7 @@ const args = process.argv.slice(2), verbose = args.includes('-v');
 const sc = await imp('checks/scenarios.ts');
 const ds = await imp('checks/drive-scenarios.ts');
 const { VEHICLES } = await load('sim/vehicles.ts');
-const { FALL_MS } = await load('physics/rapier/player-car.ts');
+const { FALL_MS } = await load('sim/contract/snapshot.ts');
 const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
 await RAPIER.init();
 

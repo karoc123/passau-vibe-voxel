@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from '../sim/traffic';
-import { PALETTE, VEHICLE_IDS, VEHICLES, type VehicleId, type VehicleType } from '../sim/vehicles';
+import { PALETTE, VEHICLE_IDS, VEHICLES, type VehicleType } from '../sim/vehicles';
+import type { VehicleId } from '../sim/contract/ids';
 export { MAX_BIKES, MAX_CARS, MAX_PEOPLE };
 
 function box(w: number, h: number, l: number, x: number, y: number, z: number, hex?: number) {

@@ -12,7 +12,9 @@ import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import type { Agent, Car, Controller, PedEdge, Person, Road, RoadPose, TrafficData } from './types';
+import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
+import type { BodyDraw, Person } from './contract/agents';
+import type { RoadPose } from './contract/pose';
 
 export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
 const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
@@ -68,16 +70,7 @@ export interface TrafficBodies {
   drawState?(c: Car): BodyDraw | null;
 }
 
-/** a car's body as drawn (TrafficBodies.drawState): owns (a body, not on its path), body (one at all), its drawn
- * poses at the last two ticks (p0, p1; null: none moving it), its fade back onto its path (t, dur: s; d*: the offset
- * blended out) */
-export interface BodyDraw {
-  owns: boolean;
-  body: boolean;
-  p0: RoadPose | null;
-  p1: RoadPose | null;
-  fade: { dx: number; dy: number; dz: number; dh: number; t: number; dur: number } | null;
-}
+// (a car's body as drawn, BodyDraw: contract/agents.ts)
 
 // a car's kinematic pose: the ground point between its axles on its path, its heading, nose up
 export interface CarPose { x: number; y: number; z: number; h: number; pitch: number }

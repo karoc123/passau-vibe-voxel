@@ -2,10 +2,11 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../src/sim/traffic';
 import type { Car, TrainPathData } from '../src/sim/types';
-import type { VehicleId } from '../src/sim/vehicles';
-import type { CarInput } from '../src/physics/rapier/car';
+import type { VehicleId } from '../src/sim/contract/ids';
+import { type CarInput, PARK } from '../src/sim/contract/inputs';
 import { LifePhysics } from '../src/physics/rapier/life-phys';
-import { CRASH_MS, SINK_MS, PARK, type DriveNote } from '../src/physics/rapier/player-car';
+import type { DriveNote } from '../src/sim/contract/events';
+import { CRASH_MS, SINK_MS } from '../src/sim/contract/snapshot';
 import type { Check } from './check';
 import { synthMap, WATER, type Col } from './world';
 

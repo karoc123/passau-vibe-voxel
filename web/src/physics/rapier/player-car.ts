@@ -1,26 +1,15 @@
 // Driving state advanced by the world tick, including crashes and the trail used by resets.
 import { SafeTrail } from '../../core/safe-trail';
-import type { Car, RoadPose } from '../../sim/types';
-import type { CarEvent, CarInput } from './car';
+import type { Car } from '../../sim/types';
+import { NO_INPUT, type CarInput } from '../../sim/contract/inputs';
+import type { RoadPose } from '../../sim/contract/pose';
+import { CRASH_MS, FALL_MS } from '../../sim/contract/snapshot';
+import type { DriveNote } from '../../sim/contract/events';
+import type { CarEvent } from './car';
 
-export const SINK_MS = 2000, CRASH_MS = 1100, FALL_MS = 1600;
-export const NO_INPUT: Readonly<CarInput> = { gas: 0, brake: 0, steer: 0, handbrake: false };
-export const PARK: Readonly<CarInput> = { ...NO_INPUT, handbrake: true };
 const FALL_IMPACT = 7, BACK_M = 12;
 
-export interface DriveNote { tick: number; text: string; ms: number }
-export interface DriverSnapshot {
-  tick: number;
-  entityId: number;
-  pose: RoadPose;
-  kmh: number;
-  waiting: boolean;
-  onWheels: boolean;
-  status: 'ok' | 'water';
-  sinkMs: number;
-  crashMs: number;
-  fallMs: number;
-}
+// (what it publishes, DriverSnapshot, DriveNote, and its timers: sim/contract/)
 
 export class PlayerCar {
   readonly safe = new SafeTrail<RoadPose>(400, 16);

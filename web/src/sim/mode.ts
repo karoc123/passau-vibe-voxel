@@ -6,23 +6,11 @@
 // the world's voxels may be made (mayEdit), and the players' requests (request). No three.js, no DOM
 // (tools/core-deps.mjs).
 import type { WorldOp } from '../core/layers';
-import type { CraftSpot } from './craft/craft-core';
-import type { CraftType } from './craft/cores';
-import type { Seat } from './entities';
-import type { Craft, CraftId, PlayerId } from './world-sim';
+import type { CraftSpot, ModeRequest } from './contract/commands';
+import type { CraftId, CraftType, PlayerId, Seat } from './contract/ids';
+import type { Craft } from './craft/craft-core';
 
-/** what a player asks of the rules (a request command; its outcome is a result of the request's kind):
- *   craft        a craft of type made, the player its pilot, put down at spot (the spot the client's shell found)
- *   placeCraft   the player's craft put down again at spot
- *   resetCraft   the player's craft back to a safe spot nearby
- *   resetDriver  the player's car back on the road
- *   dropCraft    the player's craft taken out of the world (one that does not stay: the paraglider) */
-export type ModeRequest =
-  | { kind: 'craft'; type: CraftType; spot: CraftSpot }
-  | { kind: 'placeCraft'; spot: CraftSpot }
-  | { kind: 'resetCraft' }
-  | { kind: 'resetDriver' }
-  | { kind: 'dropCraft' };
+// (what a player asks of the rules, ModeRequest: contract/commands.ts)
 
 /** the face of the world sim a mode acts through (WorldSim's) */
 export interface ModeWorld {

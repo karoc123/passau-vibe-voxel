@@ -1,4 +1,5 @@
 import { clamp } from '../../core/num';
+import type { FlightInput } from '../contract/inputs';
 import {
   add, addScaled, axisAngle, clampLength, copy, copyQuat, cross, divide, dot, length, quat, quatMul, quatNormalize, rotate,
   scale, set, setComponent, setQuat, vec3, type Vec3,
@@ -7,12 +8,7 @@ import {
 // The FPV drone's flight (fpv.ts reads the input, moves it through the collision and draws it). No DOM, no scene, no
 // three.js (plain { x, y, z } and { x, y, z, w }: core/vec.ts; tools/core-deps.mjs).
 
-export interface FlightInput {
-  roll: number;
-  pitch: number;
-  yaw: number;
-  throttle: number;
-}
+// (its input, FlightInput: contract/inputs.ts)
 
 const GRAVITY = 9.81;
 export const HOVER_THROTTLE = 0.39;

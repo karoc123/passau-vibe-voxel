@@ -1,6 +1,7 @@
 import { hash, smooth, wrapAngle } from '../core/num';
 import { at, prepPath, pt, type Path } from './path';
 import { waterTop, type WaterColumns } from './river';
+import type { BoatPose, BoatView } from './contract/agents';
 
 // Boats on the rivers (scripts/boats.py -> data/boats.json):
 // - river-cruise ships moored along the old town's Danube quay (the OSM berths: Zollände, A14, Liegestelle 3..8), bow
@@ -42,18 +43,7 @@ const RUN_OUT = 1000;
 const MORNING = 6 * 3600, LATEST_IN = 9.25 * 3600, EVENING = 18 * 3600, LATEST_OUT = 23.75 * 3600; // s after midnight
 const WATER = 4; // m: the water's top before any is known (no columns given: the node checks)
 
-export interface BoatPose {
-  // IDs are stable by berth slot for cruise ships and by fleet slot for excursion boats.
-  readonly id: number;
-  readonly kind: 'ship' | 'boat';
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly heading: number;
-  readonly len: number;
-  readonly lit: boolean;
-  readonly underway: boolean;
-}
+// (a vessel's pose, BoatPose, and what is drawn of them, BoatView: contract/agents.ts)
 
 // a cruise ship coming in or leaving: along `path` from t0 for dur seconds; `crab` metres at the berth end are the
 // sideways slip to or from the quay, the hull kept parallel to it (hx, hy)
@@ -74,10 +64,7 @@ function bezier(a: XY, c: XY, b: XY, n = 12): XY[] {
 const beyond = (a: XY, b: XY): XY => { const l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; return [a[0] + (a[0] - b[0]) / l * RUN_OUT, a[1] + (a[1] - b[1]) / l * RUN_OUT]; };
 const arcLen = (p: XY[]) => p.reduce((l, q, k) => (k ? l + Math.hypot(q[0] - p[k - 1][0], q[1] - p[k - 1][1]) : 0), 0);
 
-/** what the presentation draws of the boats (view/boats.ts): their poses at the last two ticks, the time and day */
-export type BoatView = Pick<BoatTraffic, 'poses' | 'previous' | 'elapsed' | 'day'>;
-
-export class BoatTraffic {
+export class BoatTraffic implements BoatView {
   private readonly tour: Path | null; // no tour on this map, no excursion boats
   private readonly T: number = 0; // a round trip, s
   private readonly raft: XY = [0, 0]; // from the pier out into the river

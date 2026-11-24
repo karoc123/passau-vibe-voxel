@@ -14,8 +14,10 @@
 //   R2 no value-import cycle (hard), and the type cycles (cycles through type-only imports) are the baseline's;
 //   R3 determinism words in layers 0-3 (data, contract, shared, domain): no Math.random, Date.now, new Date,
 //      setTimeout, setInterval; performance.now only in PERF_NOW_OK (stats) until a stats clock is injected;
-//   R4 window.__ assigned only in HOOKS_OWNER.
-// R1-R4 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
+//   R4 window.__ assigned only in HOOKS_OWNER;
+//   R5 the contract is types: a module of the contract layer (sim/contract/) declares no class and no function body
+//      (function or arrow) but a type guard's (its return type `x is T`); its constants are data.
+// R1-R5 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
 // longer occurs fails too (delete it, so the list stays true). After a fix or a move, `node tools/core-deps.mjs
 // --baseline` prints the list as it is now, to paste over BASELINE; it may only get shorter (review the diff).
 // usage (in web/): node tools/core-deps.mjs [-v] [--baseline]; prints PASS and the modules scanned (-v: and the
@@ -120,16 +122,16 @@ for (const file of apps) {
   }
 }
 
-// ---- the layer rules (R1-R4) ----
+// ---- the layer rules (R1-R5) ----
 
-// Layer of a module (path relative to src/), first match wins: 'dir/' a folder, else one file. Today's layout, no moves
-// yet (A2-A4 move files; this table follows them). A mixed module is placed where its main code goes in section 3.
+// Layer of a module (path relative to src/), first match wins: 'dir/' a folder, else one file. Today's layout (A2-A4
+// move files; this table follows them). A mixed module is placed where its main code goes in section 3.
 const LAYERS = [
   ['core/', 'data'],
-  ['sim/commands.ts', 'contract'],
+  ['sim/contract/', 'contract'],
   ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'], ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
-  // (snapshot.ts: takeSnapshot; A3 takes its types to the contract, A4 TrafficMirror to the client)
+  // (snapshot.ts: takeSnapshot, TrafficMirror; A3 took its types to the contract, A4 takes TrafficMirror to the client)
   ['sim/sim-server.ts', 'server'], ['sim/snapshot.ts', 'server'],
   ['sim/sim-client.ts', 'client'],
   ['sim/', 'domain'], ['physics/', 'domain'],
@@ -154,39 +156,44 @@ const ALLOWED = {
 const HEADLESS = new Set(['data', 'contract', 'shared', 'domain']); // R3
 const PERF_NOW_OK = new Set(['physics/rapier/life-phys.ts', 'physics/rapier/terrain.ts']);
 const HOOKS_OWNER = 'main.ts';
+const TYPES_ONLY = 'contract'; // R5
+
+// R5: where a module (bare: comments and strings blanked) has code rather than types and data: a class, a function
+// body (function or arrow) that is not a type guard's (its return type `x is T`). Type and interface declarations are
+// blanked first (to their `;` or closing brace at bracket depth 0), so a function type in them is no body.
+function codeOf(bare) {
+  let code = bare;
+  for (const m of bare.matchAll(/\b(type\s+[\w$]+\b[^=;{]*=|interface\s+[\w$]+[^{]*\{)/g)) {
+    let i = m.index + m[0].length, d = m[1].startsWith('interface') ? 1 : 0;
+    for (; i < bare.length && d >= 0; i++) {
+      const c = bare[i];
+      if ('{(['.includes(c)) d++;
+      else if ('})]'.includes(c)) { d--; if (d === 0 && m[1].startsWith('interface')) { i++; break; } }
+      else if (c === ';' && d === 0) break;
+    }
+    code = code.slice(0, m.index) + code.slice(m.index, i).replace(/[^\n]/g, ' ') + code.slice(i);
+  }
+  const out = [];
+  for (const m of code.matchAll(/\bclass\b/g)) out.push(['class', m.index]);
+  const GUARD = /\)\s*:\s*[\w$]+\s+is\s+[^{=;]+$/;
+  for (const m of code.matchAll(/\bfunction\b[^{;]*\{/g)) if (!GUARD.test(m[0].slice(0, -1).trimEnd())) out.push(['function body', m.index]);
+  for (const m of code.matchAll(/=>/g)) if (!GUARD.test(code.slice(Math.max(0, m.index - 200), m.index).trimEnd())) out.push(['arrow function', m.index]);
+  return out;
+}
 
 // Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 took the headless -> root ones,
-// A3 the contract's and nav's, A4 the client <-> server ones.
+// A3 the contract's, nav's and the sim's two type cycles, A4 the client <-> server ones.
 const BASELINE = [
-  "R1 nav/craft.ts (presentation) -> sim/world-sim.ts (domain) type",
-  "R1 nav/crafts-view.ts (presentation) -> sim/world-sim.ts (domain) type",
-  "R1 nav/drive.ts (presentation) -> physics/rapier/car.ts (domain) type",
-  "R1 nav/drive.ts (presentation) -> physics/rapier/player-car.ts (domain)",
-  "R1 nav/player.ts (presentation) -> sim/world-sim.ts (domain) type",
   "R1 sim-host.ts (server) -> fetch.ts (presentation)",
   "R1 sim-worker-link.ts (client) -> sim-host.ts (server) type",
   "R1 sim-worker-link.ts (client) -> sim.worker.ts (server) type",
-  "R1 sim-worker-link.ts (client) -> sim/snapshot.ts (server) type",
-  "R1 sim-worker-link.ts (client) -> sim/world-sim.ts (domain) type",
   "R1 sim.worker.ts (server) -> fetch.ts (presentation)",
-  "R1 sim.worker.ts (server) -> sim/sim-client.ts (client) type",
   "R1 sim.worker.ts (server) -> viewer-tiles.ts (presentation)",
-  "R1 sim/commands.ts (contract) -> physics/rapier/car.ts (domain) type",
-  "R1 sim/commands.ts (contract) -> sim/entities.ts (domain) type",
-  "R1 sim/commands.ts (contract) -> sim/mode.ts (domain) type",
-  "R1 sim/commands.ts (contract) -> sim/types.ts (shared) type",
-  "R1 sim/commands.ts (contract) -> sim/vehicles.ts (shared) type",
-  "R1 sim/commands.ts (contract) -> sim/world-sim.ts (domain) type",
-  "R1 sim/sim-client.ts (client) -> physics/rapier/player-car.ts (domain) type",
-  "R1 sim/sim-client.ts (client) -> sim/boat-traffic.ts (domain) type",
-  "R1 sim/sim-client.ts (client) -> sim/entities.ts (domain) type",
   "R1 sim/sim-client.ts (client) -> sim/sim-server.ts (server) type",
   "R1 sim/sim-client.ts (client) -> sim/snapshot.ts (server)",
   "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain)",
   "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain) type",
   "R1 sim/sim-client.ts (client) -> sim/world-sim.ts (domain)",
-  "R1 sim/sim-server.ts (server) -> sim/sim-client.ts (client) type",
-  "R1 sim/snapshot.ts (server) -> sim/sim-client.ts (client) type",
   "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
@@ -195,8 +202,6 @@ const BASELINE = [
   "R1 view/trains.ts (presentation) -> sim/train-traffic.ts (domain)",
   "R2 type cycle: foliage.ts, voxelMaterial.ts",
   "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
-  "R2 type cycle: sim/commands.ts, sim/mode.ts, sim/world-sim.ts",
-  "R2 type cycle: sim/sim-client.ts, sim/sim-server.ts, sim/snapshot.ts",
 ];
 
 const srcRel = (f) => path.relative(src, f).split(path.sep).join('/');
@@ -233,6 +238,7 @@ for (const file of apps) {
       found.push([`R3 ${r}: ${word}`, lineOf(bare, m.index)]);
     }
   }
+  if (layer === TYPES_ONLY) for (const [what, at] of codeOf(bare)) found.push([`R5 ${r}: ${what}`, lineOf(bare, at)]);
   if (r !== HOOKS_OWNER) for (const m of code.matchAll(/\bwindow(?:\s+as\s+[^)]*\))?\s*\.\s*(__[\w$]+)\s*=(?![=>])/g)) found.push([`R4 ${r}: window.${m[1]}`, lineOf(code, m.index)]);
 }
 
@@ -280,4 +286,4 @@ if (verbose) { console.log(`baseline (${BASELINE.length}):`); for (const k of BA
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
 const of = (r) => BASELINE.filter((k) => k.startsWith(r)).length;
 console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/ and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);
-console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}; none new, none gone`);
+console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only); none new, none gone`);

@@ -7,11 +7,12 @@
 //   out: ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
 import { fetchJson } from './fetch';
 import { hostSim, type HostOptions } from './sim-host';
-import type { SimCommand } from './sim/sim-client';
+import type { SimCommand } from './sim/contract/commands';
 import type { SimServer } from './sim/sim-server';
 import { unpackTraffic } from './sim/traffic-pack';
 import type { TrafficData } from './sim/types';
-import type { PlayerId, SimInput } from './sim/world-sim';
+import type { SimInput } from './sim/contract/inputs';
+import type { PlayerId } from './sim/contract/ids';
 import { tileWorld } from './core/tile-world';
 import type { Meta } from './core/meta';
 import { tileCacheAt } from './viewer-tiles';

@@ -5,7 +5,8 @@ import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from '
 import type { CraftView } from '../sim/sim-client';
 import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
-import { GLIDER_HEIGHT, type CraftInput, type CraftKind } from '../sim/craft/craft-motion';
+import { GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
+import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT, type SpecialEvent } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
