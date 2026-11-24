@@ -42,7 +42,7 @@ import './style.css';
 
 declare global {
   interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer;
-    __board?: () => boolean }
+    __board?: () => boolean; __crafts?: PlayerCraft[] }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -512,6 +512,7 @@ async function boot() {
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
+  window.__crafts = crafts; // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
 }
 
