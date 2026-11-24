@@ -48,7 +48,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| E14 | Mode layer, lean: sandbox only, a thin `GameMode` seam ([plan](entities-and-modes.md); E10–E13 landed) | M | In progress |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -176,6 +175,12 @@ crafts' `drawn(alpha)` blends (plane/drone nlerp, others shortest-angle); `Frame
 plane/boat/drone (`--what`): 28/28 ≤ 0.5 cm (before: E up to 88.7 cm). `window.__crafts` tool hook. Open: no teleport
 counter for remote interpolation, worker alpha one update behind (M4); turning flight not measured; inputs not
 buffered by tick (M5); `life.update` viewer is last frame's camera.
+
+E14 landed lean (merge `92bef3f5`): `sim/mode.ts` (`GameMode {id, request, mayEnter?, mayEdit?}`, five `ModeRequest`s,
+narrow `ModeWorld`), `sim/modes/sandbox.ts` (today's logic, edits only with `?dig=1`); `WorldSim.mode` replaces
+`mayEnter`; `spawnCraft`/`placeCraft`/`resetCraft`/`resetDriver`/`dropCraft` are `{kind: 'request'}` commands; SimServer
+asks `mayEdit`; `?mode=` (MODES in sim-host.ts). Left out on purpose: lifecycle hooks, `mayTransfer`, `Traffic.population`.
+Open: unread results pile up; unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
