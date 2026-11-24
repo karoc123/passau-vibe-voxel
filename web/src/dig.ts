@@ -1,5 +1,5 @@
 // ?dig=1 (a developer's switch, off by default): a click on the city carves a sphere of DIG_R m out of it where the
-// view's ray meets the voxels. The edit is the world's: a command to the world sim's client (sim/sim-client.ts edit;
+// view's ray meets the voxels. The edit is the world's: a command to the world sim's client (client/sim-client.ts edit;
 // core/world-edits.ts apply: every 1 m node it touches, their foliage with them); whatever draws or collides with the
 // world hears of it (core/live-edits.ts: the streamer meshes the nodes again in place, stream.ts onLive; the physics;
 // the world sim).
@@ -7,7 +7,7 @@
 // Each edit's time goes to the console: the carving and encoding, then until the new meshes are in.
 import * as THREE from 'three';
 import { cellToAbsZ, frameOf, mapToGrid, type WorldOp } from './core/layers';
-import type { SimClient } from './sim/sim-client';
+import type { SimClient } from './client/sim-client';
 import type { TileStreamer } from './stream';
 
 const DIG_R = 3;

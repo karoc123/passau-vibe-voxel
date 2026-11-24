@@ -1,39 +1,39 @@
 // The local server's side (docs/plans/local-server.md): the world sim made and wired as a host would, in the page's
-// thread (main.ts) or in a Web Worker (sim.worker.ts). The WorldSim (sim/world-sim.ts) with its road physics' loader
-// (Rapier, the tiles through the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and
+// thread (main.ts) or in a Web Worker (host/sim.worker.ts). The WorldSim (sim/world-sim.ts) with its road physics'
+// loader (Rapier, the tiles through the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and
 // water, the river boats' timetable, and the world's edits: set up here (core/world-edits.ts initWorldEdits), each one
 // told to the sim (its box; the road physics loaded on the first unless asked not to), and the game mode (sim/mode.ts:
 // ?mode=, by default the sandbox). The host names the page's player (PAGE_PLAYER) and connects its session; the page
-// holds only the client (sim/sim-client.ts SimClient). No three.js, no DOM
+// holds only the client (client/sim-client.ts SimClient). No three.js, no DOM
 // but fetch.
-import { liveEdits } from './core/live-edits';
-import { frameOf } from './core/layers';
-import { initWorldEdits } from './core/world-edits';
+import { liveEdits } from '../core/live-edits';
+import { frameOf } from '../core/layers';
+import { initWorldEdits } from '../core/world-edits';
 import { fetchJson } from './fetch';
-import type { BoatData } from './sim/boat-traffic';
-import type { WaterColumns } from './sim/river';
-import { SimServer } from './sim/sim-server';
-import type { GameMode } from './sim/mode';
-import { sandbox } from './sim/modes/sandbox';
-import type { Ground } from './sim/traffic';
-import type { Tuning } from './sim/tuning';
-import type { TrafficData } from './sim/types';
-import { WorldSim } from './sim/world-sim';
-import type { Meta } from './core/meta';
-import type { TileCache } from './core/tile-cache';
-import type { PlayerId } from './sim/contract/ids';
+import type { BoatData } from '../sim/boat-traffic';
+import type { WaterColumns } from '../sim/river';
+import { SimServer } from '../sim/server/sim-server';
+import type { GameMode } from '../sim/mode';
+import { sandbox } from '../sim/modes/sandbox';
+import type { Ground } from '../sim/traffic';
+import type { Tuning } from '../sim/tuning';
+import type { TrafficData } from '../sim/types';
+import { WorldSim } from '../sim/world-sim';
+import type { Meta } from '../core/meta';
+import type { TileCache } from '../core/tile-cache';
+import type { PlayerId } from '../sim/contract/ids';
+import type { PhysicsOptions } from '../sim/contract/worker';
 
 export interface HostOptions {
   /** the traffic's seed */
   seed: number;
   /** what the agents stand on and the boats float on (the viewer: the streamer's World) */
   world: (Ground & WaterColumns) | null;
-  /** the road physics: bodies: traffic cars near edits become bodies (?lifephys=0: none; the drive still loads it);
-   * near, maxBodies: their reach and number (?lpnear=, ?lpmax=); at: where its terrain starts (the focus) */
-  physics: { bodies: boolean; near?: number; maxBodies?: number; at: () => { x: number; z: number } };
+  /** the road physics (sim/contract/worker.ts PhysicsOptions); at: where its terrain starts (the focus) */
+  physics: PhysicsOptions & { at: () => { x: number; z: number } };
   /** the road physics loaded at once (?dig=1: edits to come) */
   eager?: boolean;
-  /** the world's node files (the viewer's: viewer-tiles.ts; a worker's own) */
+  /** the world's node files (the viewer's: host/viewer-tiles.ts; a worker's own) */
   cache: TileCache;
   /** where data/ is (a worker's: the page's base URL) */
   base?: string;
@@ -50,7 +50,7 @@ export const PAGE_PLAYER: PlayerId = 'local';
 /** the game modes a host can make, by id */
 export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
 
-/** the viewer's world sim and its server (sim/sim-server.ts: the commands, the snapshots) */
+/** the viewer's world sim and its server (sim/server/sim-server.ts: the commands, the snapshots) */
 export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
   const N = meta.tiles.N, cache = opts.cache, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(td, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, cache),
@@ -74,7 +74,7 @@ export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
 // warms up
 async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics'], cache: TileCache) {
   try {
-    const { LifePhysics, DEFAULTS } = await import('./physics/rapier/life-phys');
+    const { LifePhysics, DEFAULTS } = await import('../physics/rapier/life-phys');
     const f = opts.at();
     return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
       near: opts.bodies ? opts.near ?? DEFAULTS.near : 0, maxBodies: opts.maxBodies ?? DEFAULTS.maxBodies,

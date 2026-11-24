@@ -1,4 +1,4 @@
-// A craft core's state as a snapshot carries it (sim/snapshot.ts): saveState copies what its fields hold (numbers,
+// A craft core's state as a snapshot carries it (sim/server/snapshot.ts): saveState copies what its fields hold (numbers,
 // strings, vectors, its motion's or flight's fields, its clock), loadState writes that into a core of the same class
 // on the client, which is never stepped: its pose, drawn(alpha), motion and flight read as on the sim's. Left out:
 // functions, frozen objects (its tuning, the same on both sides), maps and sets (caches), the collision it steps

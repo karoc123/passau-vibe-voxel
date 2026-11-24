@@ -7,7 +7,7 @@ import { DEFAULT_TUNING } from '../sim/tuning';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
-import type { CraftView } from '../sim/sim-client';
+import type { CraftView } from '../client/sim-client';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';

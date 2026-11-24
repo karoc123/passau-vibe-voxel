@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Pose } from '../sim/contract/pose';
 import { vehicleOf } from '../sim/vehicles';
-import type { SimClient } from '../sim/sim-client';
+import type { SimClient } from '../client/sim-client';
 import type { Rideable } from '../sim/types';
 import type { Picked, StreetLife } from '../view/life';
 import type { World } from '../core/world';
@@ -12,7 +12,7 @@ import type { MoveKeys } from './move-keys';
 import type { Ride, WalkOpts } from './nav';
 
 // The ride (nav.ts mode ride): following a pedestrian or a vehicle, and walking as the person followed. The local
-// player's commands go to the world sim through its client (sim/sim-client.ts): follow (the sim keeps what is followed
+// player's commands go to the world sim through its client (client/sim-client.ts): follow (the sim keeps what is followed
 // wherever it goes), enterSeat (the person's walker's seat; refused, the ride goes on following), seatInput (where the
 // walk, which is the client's, puts them; the sim bounds it, and a pose it clamped puts the walk back where the sim has
 // them), leaveSeat. Nav switches the modes; the car driven is drive.ts's (the driver's

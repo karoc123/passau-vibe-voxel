@@ -373,6 +373,24 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `sim.worker.ts`, `viewer-tiles.ts`, `fetch.ts` → `host/`. `tools/*.mjs` load paths updated (`mirror-check`,
   `life-edit`, `popin-check`).
 - **Gates:** fast set, `popin-check`; a browser check with `?worker=1` (the worker URL in `WorkerLink` moves).
+- **Landed** (2026-11-24): `git mv` to `sim/server/` (`sim-server.ts`, `snapshot.ts`: `takeSnapshot`), `client/`
+  (`sim-client.ts`, `sim-worker-link.ts`), `host/` (`sim-host.ts`, `sim.worker.ts`, `viewer-tiles.ts`, `fetch.ts`);
+  `client/` and `host/` beside `sim/` in `src/`, as the layer table names them. `TrafficMirror` and `TrafficView` moved
+  out of `snapshot.ts` into `client/sim-client.ts` (one module with `MirrorSimClient`: a file of their own would have
+  added a client -> `sim/traffic.ts` entry). The client imports no server any more: `LocalSimClient` and `ThreadLink`
+  take an `InThreadSession` (the `Session` shape they use, declared in the client; the app passes the `Session`), and
+  the worker's messages (`ToWorker`, `FromWorker`) and the road physics' options (`PhysicsOptions`;
+  `HostOptions.physics` is it plus `at`) are in `sim/contract/worker.ts` (types only, R5). Types only, no behaviour
+  change. `core-deps` `LAYERS` by folder; `host/fetch.ts` and `host/viewer-tiles.ts` are kept presentation there (the
+  mesher, `util.ts`, `stream.ts` load through them, so as server they would add three entries for the three they
+  remove), and `client/sim-client.ts` is scanned for three.js and DOM globals as it was under `sim/`. The worker URL in
+  `WorkerLink` is `../host/sim.worker.ts`; the tools' load paths (`mirror-check`, `life-edit`, `popin-check`) and
+  `checks/world.ts`, `checks/plane-real.ts` follow; comments naming the old paths and the gates' guard texts updated.
+  Baseline 17 -> 13, only removals: the four client -> server entries (`sim-client` -> `sim-server` type, ->
+  `snapshot`; `sim-worker-link` -> `sim-host` type, -> `sim.worker` type); the rest renamed (same violations). Fast set
+  16/16, `popin-check`, `tsc`; the page plain and `?worker=1`: traffic moves, follow a car, 0 page errors.
+  Open: `client/` still imports `sim/traffic.ts` (`TrafficMirror` over a whole `Traffic`: A11's later step);
+  `host/fetch.ts`/`host/viewer-tiles.ts` are the page's loaders too (split, or ports in A12).
 
 ### A5. The protocol gate (S)
 

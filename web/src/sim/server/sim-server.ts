@@ -1,8 +1,8 @@
-// The server side of a SimClient (sim/sim-client.ts; docs/plans/local-server.md): the world sim, the game mode made
+// The server side of a SimClient (client/sim-client.ts; docs/plans/local-server.md): the world sim, the game mode made
 // (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, the world's edits applied at the start of
 // the next update if the mode allows them (mayEdit), and the connections to it: one Session each
 // (docs/plans/architecture-review.md F2, A7). Run in the page's thread (LocalSimClient, MirrorSimClient over a
-// ThreadLink) or in a Web Worker (sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
+// ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
 //   SimServer  the world's: connect(player) a session for a player the host names; update (the edits sent, then the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
@@ -10,18 +10,18 @@
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
 //              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
-import { liveEdits } from '../core/live-edits';
-import { apply as applyEdit } from '../core/world-edits';
+import { liveEdits } from '../../core/live-edits';
+import { apply as applyEdit } from '../../core/world-edits';
 import { takeSnapshot } from './snapshot';
-import { SeatReads } from './seat-reads';
-import type { CommandResult, SimCommand } from './contract/commands';
-import { EVENT_TICKS, type DriveNote } from './contract/events';
-import type { PlayerId, Role, Seat } from './contract/ids';
-import type { SimInput } from './contract/inputs';
-import type { Ack, DriverSnapshot, EditNote, Snapshot } from './contract/snapshot';
-import type { GameMode } from './mode';
-import { sandbox } from './modes/sandbox';
-import type { WorldSim } from './world-sim';
+import { SeatReads } from '../seat-reads';
+import type { CommandResult, SimCommand } from '../contract/commands';
+import { EVENT_TICKS, type DriveNote } from '../contract/events';
+import type { PlayerId, Role, Seat } from '../contract/ids';
+import type { SimInput } from '../contract/inputs';
+import type { Ack, DriverSnapshot, EditNote, Snapshot } from '../contract/snapshot';
+import type { GameMode } from '../mode';
+import { sandbox } from '../modes/sandbox';
+import type { WorldSim } from '../world-sim';
 
 type Edit = Extract<SimCommand, { kind: 'edit' }>;
 

@@ -5,7 +5,7 @@ import { roomOffsets, type Columns, type Fields } from './core/tile-data';
 import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type LiveNode, type Region } from './core/live-edits';
-import { viewerTileCache } from './viewer-tiles';
+import { viewerTileCache } from './host/viewer-tiles';
 import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {
@@ -452,7 +452,7 @@ export class TileStreamer implements ColumnSource {
 
   // The world's edits changed node (tx, ty) (core/live-edits.ts; live: its columns now, null: its files again): its
   // 1 m tile and its foliage tile, where they are here, show it (replaceColumns; the files read through the world's
-  // TileCache, viewer-tiles.ts). A tile on its way in takes it when it is sent (syncLive) or comes (onReply).
+  // TileCache, host/viewer-tiles.ts). A tile on its way in takes it when it is sent (syncLive) or comes (onReply).
   private onLive(tx: number, ty: number, live: LiveNode | null, region: Region) {
     const key = this.key(1, tx, ty);
     if (live) { this.replaceColumns(key, live.base, live.foliage as Columns | null, region, live); return; }

@@ -18,11 +18,11 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
-import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './sim/sim-client';
+import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './client/sim-client';
 import type { CraftsView } from './nav/crafts-view';
-import { hostSim, PAGE_PLAYER } from './sim-host';
-import { WorkerLink } from './sim-worker-link';
-import { viewerTileCache } from './viewer-tiles';
+import { hostSim, PAGE_PLAYER } from './host/sim-host';
+import { WorkerLink } from './client/sim-worker-link';
+import { viewerTileCache } from './host/viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
@@ -96,7 +96,7 @@ const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let minimap: Minimap | null = null;
-// the world sim's client (sim/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
+// the world sim's client (client/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
 // traffic is loaded (the crafts wait for it: simReady)
 let sim: SimClient | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
@@ -476,11 +476,11 @@ async function boot() {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
     const seed = qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0;
-    // (the world sim made as a host would, sim-host.ts; its road physics (the shared Rapier world) loaded on the first
+    // (the world sim made as a host would, host/sim-host.ts; its road physics (the shared Rapier world) loaded on the first
     // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
     // loads it), ?lpnear=, ?lpmax=)
-    // ?worker=1: in a Web Worker (sim.worker.ts), drawn from its snapshots (sim/snapshot.ts); ?mirror=1: in this
-    // thread, drawn from its snapshots all the same. ?mode=: the game mode the host makes (sim-host.ts MODES; by
+    // ?worker=1: in a Web Worker (host/sim.worker.ts), drawn from its snapshots (sim/server/snapshot.ts); ?mirror=1: in this
+    // thread, drawn from its snapshots all the same. ?mode=: the game mode the host makes (host/sim-host.ts MODES; by
     // default the sandbox, its edits allowed with ?dig=1)
     const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1', edits = eager;
     const mode = qs.get('mode') ?? undefined;

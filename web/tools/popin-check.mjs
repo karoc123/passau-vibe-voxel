@@ -1,6 +1,6 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
 // viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts) is ticked
-// through its client (src/sim/sim-client.ts, in this thread) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// through its client (src/client/sim-client.ts, in this thread) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
 // and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
@@ -37,7 +37,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts'), { SimServer } = await load('sim/server/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
@@ -78,7 +78,7 @@ function run({ name, at: start, h0, h1 }) {
     visited.set(cur, (visited.get(cur) ?? 0) + 1);
   }
 
-  // (--mirror: drawn from the sim's snapshots, sim/snapshot.ts, as the page does from a worker)
+  // (--mirror: drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does from a worker)
   const server = new SimServer(new WorldSim(td));
   const session = server.connect('p1');
   const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null) : new LocalSimClient(session);

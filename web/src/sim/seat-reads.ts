@@ -1,6 +1,6 @@
 // A reader's reads of the events of the seat its player holds (docs/plans/architecture-review.md A7: connection state,
-// not the world's): a session's on the world sim's event log (sim/sim-server.ts Session), a client's on its copy of
-// it (sim/sim-client.ts MirrorSimClient). Each reader keeps its own, so two readers of one player each get every
+// not the world's): a session's on the world sim's event log (sim/server/sim-server.ts Session), a client's on its copy of
+// it (client/sim-client.ts MirrorSimClient). Each reader keeps its own, so two readers of one player each get every
 // event. No three.js, no DOM (tools/core-deps.mjs).
 import type { SimEvent } from './contract/events';
 import type { EntityRef, PlayerId, Seat } from './contract/ids';

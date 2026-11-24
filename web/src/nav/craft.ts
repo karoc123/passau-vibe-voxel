@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { CraftView, SimClient } from '../sim/sim-client';
+import type { CraftView, SimClient } from '../client/sim-client';
 import type { CraftSpot as SimSpot } from '../sim/contract/commands';
 import type { CraftId, CraftType } from '../sim/contract/ids';
 import type { PilotInput } from '../sim/contract/inputs';

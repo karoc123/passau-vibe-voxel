@@ -1,5 +1,5 @@
 // The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): what the
-// world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; made by sim/snapshot.ts
+// world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; made by sim/server/snapshot.ts
 // takeSnapshot, read by its TrafficMirror). Plain data, structured-cloneable: it crosses to the page from a Web Worker
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).
@@ -60,7 +60,7 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
-  /** the session's player (id: the host names it, sim/sim-server.ts SimServer.connect) and its reads; results since
+  /** the session's player (id: the host names it, sim/server/sim-server.ts SimServer.connect) and its reads; results since
    * the last snapshot (what their seat's entity did: events); ack: the session's last seat input taken (its seq, the
    * tick it was applied in: the state here is that of tick, after it) */
   player: { id: PlayerId; seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };

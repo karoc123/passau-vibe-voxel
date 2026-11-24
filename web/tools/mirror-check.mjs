@@ -1,4 +1,4 @@
-// The snapshot gate (docs/plans/local-server.md, src/sim/snapshot.ts): what the page draws from the sim's snapshots is
+// The snapshot gate (docs/plans/local-server.md, src/sim/server/snapshot.ts): what the page draws from the sim's snapshots is
 // what it draws from the sim itself. Two world sims from one seed on the real traffic data, ticked alike at a viewer
 // that stands, then drives along a road: one drawn by StreetLife through LocalSimClient (the sim's own objects), the
 // other through MirrorSimClient over a CloneLink of a ThreadLink (a TrafficMirror set from each snapshot, the snapshots
@@ -15,7 +15,7 @@ const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30;
 const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
-const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
+const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts'), { SimServer } = await load('sim/server/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
 const data = () => unpackTraffic(structuredClone(raw));

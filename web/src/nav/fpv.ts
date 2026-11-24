@@ -7,7 +7,7 @@ import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
-import type { CraftView } from '../sim/sim-client';
+import type { CraftView } from '../client/sim-client';
 import { clamp, el } from '../util';
 import { gameKey, HeldKeys, inFocus, onFocusLoss } from './input';
 import { modeButton, ModePanel } from './mode-panel';
