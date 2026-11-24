@@ -42,16 +42,10 @@ interface Blocked {
   by: Agent | null;
   ignore?: Agent | null;
   ignoreT?: number;
-  // its pose: drawn (the presentation's, view/life.ts), or, out of the traffic (a parked car, a wreck), where it is:
-  // the ground point under it and its heading
-  rp?: Vec3;
-  rh?: number;
 }
 
 export interface Car extends Blocked {
   kind: 'car';
-  pitch?: number; // drawn nose up (radians) on a ramp (view/life.ts drawCars)
-  roll?: number; // drawn left side up (radians): the driven car on uneven ground (nav/drive.ts)
   id: number;
   detachedPose?: RoadPose; // authoritative pose out of traffic, independent of drawing
   e: number;

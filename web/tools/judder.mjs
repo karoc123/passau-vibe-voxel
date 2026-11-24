@@ -59,10 +59,10 @@ await page.evaluate(() => {
     orig(dt);
     if (!M.log) return;
     const id = S.driver()?.entityId, T = S.traffic;
-    const c = [...T.cars, ...T.detachedCars].find((q) => q.id === id);
-    if (!c?.rp) return;
+    const c = [...T.cars, ...T.detachedCars].find((q) => q.id === id), r = c && window.__life.drawn('car', id);
+    if (!r) return;
     const d = c.detachedPose;
-    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, c.rp.x, c.rp.y, c.rp.z, c.rh, cam.position.x, cam.position.y, cam.position.z, S.driver().kmh, d.x, d.z]);
+    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, r.x, r.y, r.z, r.h, cam.position.x, cam.position.y, cam.position.z, S.driver().kmh, d.x, d.z]);
   };
 });
 } else {

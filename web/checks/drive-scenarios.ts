@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../src/sim/traffic';
 import type { Car, TrainPathData } from '../src/sim/types';
 import type { VehicleId } from '../src/sim/contract/ids';
+import type { RoadPose } from '../src/sim/contract/pose';
 import { type CarInput, PARK } from '../src/sim/contract/inputs';
 import { LifePhysics } from '../src/physics/rapier/life-phys';
 import type { DriveNote } from '../src/sim/contract/events';
@@ -14,15 +15,22 @@ const FRAME_MS = 1000 / 60, PLAYER = 'driver';
 const r2 = (x: number) => Math.round(x * 100) / 100;
 let id = 1;
 const carAt = (x: number, y: number, z: number): Car => ({
-  id: id++, kind: 'car', rp: { x, y, z }, rh: 0, pitch: 0, roll: 0, v: 0, brake: 0, len: 4.4, bus: false, col: '#fff',
+  id: id++, kind: 'car', v: 0, brake: 0, len: 4.4, bus: false, col: '#fff',
   detachedPose: { x, y, z, h: 0, pitch: 0, roll: 0 },
   geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 1 },
 } as Car);
 
 export class Drive {
   readonly notes: DriveNote[] = [];
+  // the parked cars as drawn (view/life.ts drawCars: LifePhysics.pose), by id; first where they were placed
+  private readonly drawn = new Map<number, RoadPose>();
 
-  constructor(readonly traffic: Traffic, readonly physics: LifePhysics, readonly car: Car) {}
+  constructor(readonly traffic: Traffic, readonly physics: LifePhysics, readonly car: Car) {
+    for (const c of traffic.detachedCars) this.drawn.set(c.id, { ...c.detachedPose! });
+  }
+
+  /** car c as drawn after the last step */
+  pose(c: Car) { return this.drawn.get(c.id)!; }
 
   get snapshot() { return this.physics.driverSnapshot(PLAYER); }
   get kmh() { return this.snapshot?.kmh ?? 0; }
@@ -31,7 +39,7 @@ export class Drive {
     this.physics.input(PLAYER, input);
     this.traffic.update(dt, 10, this.car.detachedPose!);
     this.notes.push(...this.physics.driverNotes(PLAYER));
-    for (const c of this.traffic.detachedCars) this.physics.pose(c, this.traffic.acc / STEP);
+    for (const c of this.traffic.detachedCars) this.drawn.set(c.id, { ...this.physics.pose(c, this.traffic.acc / STEP, this.drawn.get(c.id) ?? { ...c.detachedPose! }) });
   }
 
   park() {
@@ -167,8 +175,8 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
     const other = carAt(64, 10, 60);
     const d = takeOver(street, 64, 30, 40, [other]);
     run(d, 4, cruise(40));
-    const moved = Math.hypot(other.rp!.x - 64, other.rp!.z - 60);
-    const detail = { taken: d.physics.bodies.get(other.id)?.state === 'wreck' || d.physics.bodies.get(other.id)?.state === 'rest', crashNote: said(d, 'Crash!'), movedM: r2(moved), carZ: r2(d.car.rp!.z) };
+    const moved = Math.hypot(d.pose(other).x - 64, d.pose(other).z - 60);
+    const detail = { taken: d.physics.bodies.get(other.id)?.state === 'wreck' || d.physics.bodies.get(other.id)?.state === 'rest', crashNote: said(d, 'Crash!'), movedM: r2(moved), carZ: r2(d.pose(d.car).z) };
     d.park();
     d.physics.dispose();
     return { name: 'drive_knock', pass: detail.taken && detail.crashNote && moved > 1, detail };
@@ -193,7 +201,7 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
     run(d, (SINK_MS + 200) / 1000, cruise(40));
     // (back: placed once its ground is built, then settled for a second, no input)
     run(d, 1, () => ({ gas: 0, brake: 0, steer: 0, handbrake: true }));
-    const snap = d.snapshot!, p = d.car.rp!;
+    const snap = d.snapshot!, p = d.pose(d.car);
     const detail = { splash, held, backAfterS: r2((d.traffic.t * 1000 - splashAt) / 1000), status: snap.status, onWheels: snap.onWheels, zBack: r2(p.z), yBack: r2(p.y), kmh: r2(d.kmh) };
     d.park();
     d.physics.dispose();
@@ -204,7 +212,7 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
     const d = takeOver((_x, z) => (z >= 60 ? { g: 4, mat: WATER } : { g: 7 }), 64, 20, 40);
     run(d, 8, cruise(40), (x) => !!x.snapshot?.sinkMs);
     d.park();
-    const p = d.car.rp!;
+    const p = d.pose(d.car);
     const detail = { zParked: r2(p.z), yParked: r2(p.y), carGone: !d.snapshot };
     return { name: 'drive_park_in_river', pass: p.z < 50 && Math.abs(p.y - 7) < 0.5 && detail.carGone, detail };
   },

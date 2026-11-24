@@ -26,7 +26,7 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
-import { STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import { fadeOut, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
 import type { BodyDraw } from '../../sim/contract/agents';
 import type { CoachBox } from '../../sim/train-traffic';
 import type { Car } from '../../sim/types';
@@ -431,19 +431,16 @@ export class LifePhysics implements TrafficBodies {
     st.tickMs = performance.now() - f0;
   }
 
-  // the drawn pose (view/life.ts drawCars, after the kinematic one is set; a: between the last two ticks): the body's,
-  // and a blend back to the kinematic one after a release (or a body put on its ghost again)
-  pose(c: Car, a: number) {
+  // the drawn pose (view/life.ts drawCars; a: between the last two ticks; under: the kinematic one for a car in the
+  // traffic, the last drawn otherwise): a parked car or a wreck where it is, the body's, and a blend back to the
+  // kinematic one after a release (or a body put on its ghost again)
+  pose(c: Car, a: number, under: RoadPose): RoadPose {
     const b = this.bodies.get(c.id);
-    if (c.detachedPose) this.put(c, c.detachedPose);
-    if (b && b.state !== 'rest' && b.state !== 'path') this.put(c, this.poseAt(b, a, true));
+    let p = under;
+    if (c.detachedPose) p = c.detachedPose;
+    if (b && b.state !== 'rest' && b.state !== 'path') p = this.poseAt(b, a, true);
     const f = this.fades.get(c);
-    if (f && c.rp) {
-      const k = 1 - smooth01((f.t + (a - 1) * TICK) / f.dur);
-      c.rp.x += f.dx * k; c.rp.y += f.dy * k; c.rp.z += f.dz * k;
-      c.rh = (c.rh ?? 0) + f.dh * k;
-      if (!b) c.roll = (c.roll ?? 0) * (1 - k);
-    }
+    return f ? fadeOut(p, f, 1 - smooth01((f.t + (a - 1) * TICK) / f.dur), !!b) : p;
   }
 
   drawState(c: Car): BodyDraw | null {
@@ -580,13 +577,11 @@ export class LifePhysics implements TrafficBodies {
 
   // the body goes, the car drawn from its ghost again: the difference blended out (longer the further)
   private release(b: Body, T: Traffic, why: LogKind = 'release') {
-    const c = b.car, K = T.carPose(c, c.s, c.off, this.pose0);
-    this.put(c, this.poseAt(b, 1));
+    const c = b.car, K = T.carPose(c, c.s, c.off, this.pose0), r = this.poseAt(b, 1);
     this.remove(b);
     if (why === 'release') this.stats.released++;
     this.log.push({ t: this.t, kind: why, id: c.id });
-    const r = c.rp!;
-    let dh = (c.rh ?? K.h) - K.h;
+    let dh = r.h - K.h;
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     const old = this.fades.get(c), dist = Math.hypot(r.x - K.x, r.y - K.y, r.z - K.z);
     const f: Fade = { dx: r.x - K.x, dy: r.y - K.y, dz: r.z - K.z, dh, t: 0, dur: Math.min(FADE_MAX, Math.max(FADE_MIN, dist / FADE_V, old ? old.dur - old.t : 0)) };
@@ -681,7 +676,7 @@ export class LifePhysics implements TrafficBodies {
     return (v.x * f.x + v.z * f.z) / (Math.hypot(f.x, f.z) || 1);
   }
 
-  // car c's pose (rp: the ground under the body's origin; rh, pitch, roll) between two body poses
+  // car c's pose (the ground under the body's origin; its heading, pitch, roll) between two body poses
   private poseAt(b: Body, a: number, drawn = false): RoadPose {
     const p0 = b.prev, p1 = b.cur;
     const l = (u: number, v: number) => u + (v - u) * a;
@@ -706,12 +701,6 @@ export class LifePhysics implements TrafficBodies {
       tilt += (b.driver.fallSide * 1.45 - tilt) * k * k;
     }
     return { x, y: y + Math.sin(wheelie) * -b.build.wheels[2].z, z, h, pitch: pitch + wheelie, roll: tilt };
-  }
-
-  private put(c: Car, p: RoadPose) {
-    const rp = (c.rp ??= { x: p.x, y: p.y, z: p.z });
-    rp.x = p.x; rp.y = p.y; rp.z = p.z;
-    c.rh = p.h; c.pitch = p.pitch; c.roll = p.roll;
   }
 
   private publish(b: Body, now: number) {

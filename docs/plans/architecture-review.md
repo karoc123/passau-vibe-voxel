@@ -491,6 +491,29 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `view/meshes.ts`, `nav/nav.ts`, `nav/ride.ts`, `nav/drive.ts`.
 - **Gates:** `mirror-check` (instance matrices bit-equal as now), `popin-check`, `life-edit`, `rapier-car`;
   `judder` by hand (the ride camera reads the drawn pose).
+- **Landed** (2026-11-24): `Car` lost `rp`, `rh`, `pitch`, `roll`; `Person` (`sim/contract/agents.ts`, `Blocked` in
+  `sim/types.ts`) lost `rp`, `rh`, so the contract's `Person` carries no drawn fields (A3's open point; events still
+  carry it whole until A6). `StreetLife` keeps a `Drawn` entry per car id and per person id (the pose, and what was in
+  WeakMaps by object: a motorbike's lean, a walked person's step phase), marked each frame and dropped when not drawn
+  (ids are never reused, so this is the old per-object lifetime). `TrafficBodies.pose(c, a, under): RoadPose` returns
+  the drawn pose (`under`: the path's pose for a car in the traffic, the last drawn otherwise); `LifePhysics` and
+  `TrafficMirror` share `fadeOut` (`sim/traffic.ts`); `LifePhysics.release` computes its fade from `poseAt` instead of
+  writing and reading `c.rp`. `Traffic.detachCar` seeds nothing: a parked car never drawn starts from its
+  `detachedPose` in the view (position only, heading 0, as the old seed; overwritten at once when bodies exist).
+  `Picked` is `{ ref: AgentRef, label }` (`AgentRef`: an `EntityRef` of kind car or person); `Ride` extends it.
+  `StreetLife.pose(ref)`, `agent(ref)` (what it is now: a car's type, length, bus; the ride camera, the drive panel's
+  label and the hud read it per frame instead of holding the object), `first(kind)`, `nearest(kind, from, skip)`,
+  `pick(..., skip: AgentRef)`, `drawn(kind, id)` (tools). `StreetLife.client` is private; `Nav.sim` holds the client
+  (set by `main.ts` beside `nav.life`), `RideHost.sim()`; the walked person is kept by id. Tools: `mirror-check`,
+  `popin-check`, `judder` read `life.drawn`; `life-edit` and `checks/drive-scenarios.ts` (`Drive.pose(c)`) keep their
+  own pose maps. Measured against main: `mirror-check` (2 239 722 poses), `life-edit`, `popin-check` and its
+  `--mirror` print the same lines (only timings differ), `rapier-car` the same details apart from `stepMs`; fast set
+  16/16, `tsc`, `core-deps` (baseline 17, unchanged: no entry concerned the drawn fields); `judder` 28/28 (J and E
+  at most 0.10 cm); the page plain, `?mirror=1`, `?worker=1`: follow a car, tap a car and a person, walk as them, drive
+  and park, 0 page errors. One edge differs in
+  principle: the hud's "moto" comes from the agent looked up at the mode change, so for an agent already gone it falls
+  back to the ride's label (before: the held object's type; the hud is hidden while driving). Kept as it was: a parked
+  car never drawn and without bodies is drawn heading 0 (the old seed's quirk).
 
 ### A11. One read path (S, plus measuring; owner's call)
 

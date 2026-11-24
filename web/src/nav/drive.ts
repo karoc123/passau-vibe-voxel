@@ -120,28 +120,24 @@ export class DriveMode implements PlayerCraft {
   // take the wheel of the car followed, else of the one nearest the focus (once Rapier is loaded: prepare)
   enter() {
     if (this.driving || this.nav.craftView) return false;
-    if (this.nav.ride?.obj.kind !== 'car') {
+    if (this.nav.ride?.ref.kind !== 'car') {
       const life = this.nav.life;
       if (!life?.group.visible) return false;
-      const choice = life.nearest('car', this.focus, null);
+      const choice = life.nearest('car', this.focus, null) ?? life.first('car');
       if (choice) this.nav.startRide(choice);
-      else {
-        const car = life.client.traffic.roadVehicles().find(c => c.rp);
-        if (car) this.nav.startRide({ kind: 'car', obj: car, label: car.bus ? 'bus' : 'car' });
-      }
     }
-    if (this.nav.ride?.obj.kind !== 'car') return false;
+    if (this.nav.ride?.ref.kind !== 'car') return false;
     this.pending = this.nav.ride;
     return true;
   }
 
   // takes the wheel once Rapier is loaded
   private prepare(ride: Ride) {
-    const life = this.nav.life, car = ride.obj;
+    const life = this.nav.life, car = ride.ref;
     if (!life || ride !== this.nav.ride || car.kind !== 'car') { this.pending = null; return; }
     const world = this.world;
     if (!world) { this.loadRapier(); return; }
-    if (!life.pose('car', car)) { this.pending = null; return; }
+    if (!life.pose(car)) { this.pending = null; return; }
     this.pending = null;
     // (Nav first: whatever it leaves for this sends its leaveSeat before the takeWheel; an old answer dropped)
     this.nav.enterCraft(this);
@@ -204,14 +200,14 @@ export class DriveMode implements PlayerCraft {
   }
 
   private draw() {
-    const active = this.driving, following = this.nav.ride?.obj.kind === 'car', P = this.panel;
+    const active = this.driving, following = this.nav.ride?.ref.kind === 'car', P = this.panel;
+    const life = this.nav.life, driven = active && life?.agent(active.ref);
     P.active = !!(active || this.pending);
-    ModePanel.text(this.action, active ? `Park ${active.obj.kind === 'car' ? vehicleOf(active.obj).name.toLowerCase() : 'car'}` : 'Take the wheel');
+    ModePanel.text(this.action, active ? `Park ${driven && driven.kind === 'car' ? vehicleOf(driven).name.toLowerCase() : 'car'}` : 'Take the wheel');
     this.typeButton.hidden = !!active || !!this.pending;
     ModePanel.text(this.typeButton, `Vehicle: ${this.choice === 'any' ? 'any' : VEHICLES[this.choice].name}`);
-    const life = this.nav.life;
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
-      (!following && !life.client.traffic.roadVehicles().some(c => c.rp))));
+      (!following && !life.first('car'))));
     P.details.hidden = !active && !this.pending;
     this.speed.hidden = this.help.hidden = !active;
     P.status.hidden = !this.pending && !active;

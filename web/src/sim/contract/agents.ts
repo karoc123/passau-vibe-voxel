@@ -1,7 +1,6 @@
 // The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): the
 // traffic's agents as a snapshot carries them (enough for the client's own path maths: Traffic.carPose, personPoint),
 // the cars' bodies as drawn, the trains, the boats. Types only (tools/core-deps.mjs R5).
-import type { Vec3 } from '../../core/vec';
 import type { VehicleId } from './ids';
 import type { RoadPose } from './pose';
 
@@ -20,8 +19,6 @@ export interface Person {
   wait: boolean;
   col: string; // their shirt ('#rrggbb')
   bike?: boolean;
-  rp?: Vec3; // drawn (view/life.ts)
-  rh?: number;
 }
 
 /** what a client's path maths and drawing read of a person (sim/snapshot.ts PERSON_KEYS) */

@@ -280,7 +280,7 @@ function applyGfx(c: Partial<Gfx>) {
 
 function onMode(m: Mode, ride: Ride | null) {
   post.taa.restart(); // (the camera jumps)
-  hud?.set(m, ride);
+  hud?.set(m, ride, ride ? life?.agent(ride.ref) ?? null : null);
 }
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
@@ -498,6 +498,7 @@ async function boot() {
     }
     sim = client;
     life = nav.life = new StreetLife(scene, client);
+    nav.sim = client;
     movingActors.add(life.group);
     window.__life = life;
     window.__sim = client;
