@@ -31,7 +31,8 @@
 //          seat holds one pilot (another's enterCraft refused, the refused keeps their own), each craft takes its own
 //          pilot's input, and each moves exactly as it does alone in the world (nothing assumes one local player); a
 //          pilot counts as a focus (the edits near them kept); left, a craft goes on with hands off; a pilot walking as
-//          a person leaves the craft first, back in it leaves the person.
+//          a person leaves the craft first, back in it leaves the person; a craft followed is an entity (sim/entities.ts)
+//          where its core is, and a focus.
 //   left   a vehicle stays in the world when left (ADR 0008), through a SimServer and a client of its snapshots
 //          (MirrorSimClient): two pilots get out of a helicopter in the air and a boat under way (leaveSeat); both
 //          stay and are stepped hands off (the helicopter lets down onto its skids, the boat coasts), listed empty by
@@ -582,6 +583,14 @@ async function crafts() {
     }
     const moved = path.map((q, k) => Math.hypot(q.x - plan[k][1], q.z - plan[k][2]));
     check(moved[0] > 40 && moved[1] > 20, `crafts: both moved under their pilots' input (${moved.map((m) => m.toFixed(1)).join(', ')} m)`);
+    // a craft followed (sim/entities.ts: an entity like a car or a person): where it is, a focus of its own
+    send('follow', 'F', { entity: { kind: 'craft', id: b.id } });
+    tick(STEP);
+    const E = sim.entities.pose({ kind: 'craft', id: b.id }), there = E && E.x === b.core.pose.x && E.z === b.core.pose.z, fF = foci(sim);
+    send('follow', 'F', { entity: null });
+    tick(STEP);
+    check(there && fF === 4 && foci(sim) === 3 && !sim.traffic.held.car.size && !sim.traffic.held.person.size,
+      `crafts: a craft followed is an entity where its core is, a focus while followed (${fF})`);
     // A leaves: the seat empty, the boat coasts on hands off and slows (B's helicopter flies on)
     send('leaveSeat', 'A');
     const v0 = Math.abs(a.core.motion.speed);

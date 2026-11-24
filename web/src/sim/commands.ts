@@ -6,12 +6,13 @@
 import type { CarInput } from '../physics/rapier/car';
 import type { CraftSpot } from './craft/craft-core';
 import type { CraftType } from './craft/cores';
-import type { EntityRef, WalkPose } from './types';
+import type { WalkPose } from './types';
+import type { EntityRef } from './entities';
 import type { VehicleId } from './vehicles';
 import type { CraftId, CraftInput, PlayerId } from './world-sim';
 
 /** a player's command, applied at the start of the sim's next update, in order:
- *   follow        follow an entity (no rights over it), or none
+ *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
  *   walkAs        take the walker's seat of a person (from pose: where they are drawn, kept within Tuning.walk.take of
  *                 where the sim has them); refused: another walks as them, or gone
  *   walkPose      where the walk (the client's) puts the person walked, bounded against the last one taken
