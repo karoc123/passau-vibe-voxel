@@ -302,6 +302,15 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `sim/sim-server.ts` → server, `sim-host.ts` → host); the baseline printed with `-v`; a removed baseline entry
   that no longer occurs is an error too (so the list stays true).
 - **Gates:** `core-deps` passes on main unchanged; a planted violation in a scratch copy fails.
+- **Landed** (2026-11-24): `core-deps` checks R1–R4 over all 131 modules of `src/` (559 imports, ~0.2 s). `LAYERS`
+  in the tool maps today's files (snapshot.ts → server; commands.ts → contract; sim/craft, path, vehicles, river,
+  tuning, types, traffic-pack, walk-bounds → shared; `sim-host.ts`, `sim.worker.ts` → server; `sim-worker-link.ts`
+  → client; `fetch.ts`, `viewer-tiles.ts` and the headless root modules stay presentation for now, as the
+  mesher, `util.ts` and `stream.ts` load through them). Value-import cycles fail outright (0). Baseline: R1 47
+  imports, R2 4 type cycles (those of section 1), R3 0, R4 0 (`main.ts` owns `window.__`). A new violation fails,
+  and so does a baseline entry no longer found; `node tools/core-deps.mjs --baseline` prints the current list to
+  paste over `BASELINE`, `-v` prints it. Planted violations of each rule failed (R1 import, R2 value cycle,
+  R3 `Math.random`, R4 hook, a stale entry). R5 waits for `sim/contract/` (A3).
 
 ### A2. Headless modules out of the root (S–M)
 
