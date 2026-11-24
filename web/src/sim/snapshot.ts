@@ -4,13 +4,13 @@
 //   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts): the traffic's agents as they are after the
 //                                      update (enough for the client's own path maths: Traffic.carPose, personPoint),
 //                                      the bodies' drawn poses, trains, boats, the walked people, the crafts (their
-//                                      cores' state), the events since, the player's reads (seat, car, notes, the
-//                                      craft's events)
+//                                      cores' state), the events since (the crafts' and the drivers' among them), the
+//                                      player's reads (seat, car)
 //   TrafficMirror                      the client side: a Traffic of its own over the same TrafficData, never ticked,
 //                                      its agents set from each snapshot, one object per id (the drawn fields, the
 //                                      nav's ride carry over); what view/life.ts draws (TrafficView)
 // No three.js, no DOM (tools/core-deps.mjs).
-import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
+import type { DriverSnapshot } from '../physics/rapier/player-car';
 import type { BoatView } from './boat-traffic';
 import { saveState } from './craft/core-state';
 import type { CraftType } from './craft/cores';
@@ -58,8 +58,8 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
-  /** the player's reads; notes, craftEvents and results since the last snapshot */
-  player: { seat: Seat | null; driver: DriverSnapshot | null; notes: DriveNote[]; craftEvents: unknown[]; results: CommandResult[] };
+  /** the player's reads; results since the last snapshot (what their seat's entity did: events) */
+  player: { seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[] };
   edits: EditNote[];
 }
 
@@ -84,11 +84,8 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
-    walked, crafts, events: sim.eventsSince(since).map((e) => ({ ...e, person: pick(e.person, PERSON_KEYS) as Person })),
-    player: {
-      seat: sim.seat(player), driver: sim.driverSnapshot(player), notes: sim.driverNotes(player),
-      craftEvents: sim.craftEvents(player), results,
-    },
+    walked, crafts, events: sim.eventsSince(since).map((e) => ('person' in e ? { ...e, person: pick(e.person, PERSON_KEYS) as Person } : e)),
+    player: { seat: sim.seat(player), driver: sim.driverSnapshot(player), results },
     edits,
   };
 }
@@ -136,7 +133,7 @@ export class TrafficMirror implements TrafficView {
    * here (a person fallen is gone from the snapshot's crowd, not yet from this) */
   apply(s: Snapshot): SimEvent[] {
     const T = this.T;
-    const events = s.events.map((e) => ({ ...e, person: this.peopleById.get(e.person.id) ?? e.person }));
+    const events = s.events.map((e) => ('person' in e ? { ...e, person: this.peopleById.get(e.person.id) ?? e.person } : e));
     T.acc = s.acc; T.t = s.t; T.day = s.day;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;

@@ -6,44 +6,44 @@
 import type { CarInput } from '../physics/rapier/car';
 import type { CraftSpot } from './craft/craft-core';
 import type { CraftType } from './craft/cores';
-import type { EntityRef, WalkPose } from './types';
+import type { WalkPose } from './types';
+import type { EntityRef, Role } from './entities';
 import type { VehicleId } from './vehicles';
-import type { CraftId, CraftInput, PlayerId } from './world-sim';
+import type { CraftInput, PlayerId } from './world-sim';
 
 /** a player's command, applied at the start of the sim's next update, in order:
- *   follow        follow an entity (no rights over it), or none
- *   walkAs        take the walker's seat of a person (from pose: where they are drawn, kept within Tuning.walk.take of
- *                 where the sim has them); refused: another walks as them, or gone
- *   walkPose      where the walk (the client's) puts the person walked, bounded against the last one taken
- *                 (Tuning.walk); clamped: refused (ok false), walkedPose has the pose taken
- *   takeWheel     the driver's seat of a car (as type choice); refused: no road physics, no such car, or driven
- *   drive         the car's controls, until the next
+ *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
+ *   enterSeat     a seat of an entity (sim/entities.ts SEATS: role, index; without, its first): the driver's of a car (as
+ *                 type choice), the walker's of a person on foot (from pose: where they are drawn, kept within
+ *                 Tuning.walk.take of where the sim has them), the pilot's of a craft; refused: gone, no such seat, held
+ *                 by another, not allowed (WorldSim.mayEnter), or (a car) no road physics. The one held is left first
+ *   seatInput     the controls of the seat held, until the next: a driver's CarInput, a pilot's their craft's type's
+ *                 input, a walker's pose (the walk is the client's), bounded against the last one taken (Tuning.walk:
+ *                 clamped, refused, walkedPose has the pose taken); ignored for a role not held
+ *   leaveSeat     out of the seat held: the person walked back to the crowd's walk, the car parked where it is, the
+ *                 craft left where it is, hands off (its core's neutral)
  *   resetDriver   the player's car back on the road
  *   spawnCraft    a craft of type made, the player its pilot, put down at spot (what a game mode decides; today the
  *                 craft's shell)
  *   placeCraft    the player's craft put down again at spot
- *   enterCraft    the pilot's seat of a craft in the world (one left by its pilot); refused: gone, or piloted
- *   craftInput    the player's craft's controls (its type's input), until the next
  *   resetCraft    the player's craft back to a safe spot nearby; refused: not now
- *   dropCraft     the player's craft taken out of the world (one that does not stay: the paraglider)
- *   leaveSeat     out of the seat held: the person walked back to the crowd's walk, the car parked where it is, the
- *                 craft left where it is, hands off (its core's neutral) */
+ *   dropCraft     the player's craft taken out of the world (one that does not stay: the paraglider) */
 export type PlayerCommand =
   | { kind: 'follow'; player: PlayerId; entity: EntityRef | null }
-  | { kind: 'walkAs'; player: PlayerId; person: number; pose: WalkPose }
-  | { kind: 'walkPose'; player: PlayerId; pose: WalkPose }
-  | { kind: 'takeWheel'; player: PlayerId; car: number; choice?: VehicleId }
-  | { kind: 'drive'; player: PlayerId; input: CarInput }
+  | { kind: 'enterSeat'; player: PlayerId; entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }
+  | ({ kind: 'seatInput'; player: PlayerId } & SeatInput)
+  | { kind: 'leaveSeat'; player: PlayerId }
   | { kind: 'resetDriver'; player: PlayerId }
   | { kind: 'spawnCraft'; player: PlayerId; type: CraftType; spot: CraftSpot }
   | { kind: 'placeCraft'; player: PlayerId; spot: CraftSpot }
-  | { kind: 'enterCraft'; player: PlayerId; craft: CraftId }
-  | { kind: 'craftInput'; player: PlayerId; input: CraftInput }
   | { kind: 'resetCraft'; player: PlayerId }
-  | { kind: 'dropCraft'; player: PlayerId }
-  | { kind: 'leaveSeat'; player: PlayerId };
+  | { kind: 'dropCraft'; player: PlayerId };
 
-/** what became of a command that can be refused (walkAs, walkPose clamped, takeWheel, spawnCraft, placeCraft,
- * enterCraft, resetCraft, edit), at the tick it was applied before; an edit's: its ref and the level-1 nodes it
- * changed */
-export interface CommandResult { tick: number; kind: PlayerCommand['kind'] | 'edit'; ok: boolean; ref?: number; nodes?: [number, number][] }
+/** a seat's input, by its role */
+export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: CraftInput } | { role: 'walker'; input: WalkPose };
+
+/** what became of a command that can be refused (enterSeat, seatInput clamped, spawnCraft, placeCraft, resetCraft,
+ * edit), at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed */
+export interface CommandResult {
+  tick: number; kind: PlayerCommand['kind'] | 'edit'; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
+}

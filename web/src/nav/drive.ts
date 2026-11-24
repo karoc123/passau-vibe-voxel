@@ -85,12 +85,12 @@ export class DriveMode implements PlayerCraft {
     if (this.pending) this.prepare(this.pending);
     if (this.driving && this.world) {
       // (the wheel refused: the car gone, or another player's; or the car lost after it was taken)
-      const refused = this.world.results(LOCAL_PLAYER, 'takeWheel').some((r) => !r.ok);
+      const refused = this.world.results(LOCAL_PLAYER, 'enterSeat', 'driver').some((r) => !r.ok);
       this.snapshot = this.world.driver(LOCAL_PLAYER);
       if (refused || (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick)) this.nav.leaveCraft();
       else {
         const focused = inFocus(), now = performance.now();
-        this.world.send({ kind: 'drive', player: LOCAL_PLAYER, input: focused ? this.input() : PARK });
+        this.world.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'driver', input: focused ? this.input() : PARK });
         for (const note of this.world.driverNotes(LOCAL_PLAYER)) this.panel.say(note.text, note.ms);
         if (this.snapshot) {
           this.shakeCamera(this.snapshot, now);
@@ -145,8 +145,9 @@ export class DriveMode implements PlayerCraft {
     this.pending = null;
     // (Nav first: whatever it leaves for this sends its leaveSeat before the takeWheel; an old answer dropped)
     this.nav.enterCraft(this);
-    world.results(LOCAL_PLAYER, 'takeWheel');
-    world.send({ kind: 'takeWheel', player: LOCAL_PLAYER, car: car.id, choice: this.choice === 'any' ? undefined : this.choice });
+    world.results(LOCAL_PLAYER, 'enterSeat', 'driver');
+    world.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'car', id: car.id }, role: 'driver',
+      choice: this.choice === 'any' ? undefined : this.choice });
     this.claimTick = world.tick;
     this.driving = ride;
     this.touch.setActive(true);

@@ -26,7 +26,7 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   /** the input of an empty seat (WorldSim: a craft left, or not yet given its pilot's): hands off, and what would keep
    * it going let go (a plane's lever back, a drone's throttle cut, a helicopter let down onto its skids) */
   readonly neutral: I;
-  /** what happened since they were last read (WorldSim.craftEvents, by its pilot) */
+  /** what happened since they were last read (WorldSim: the world's craft events, read by its pilot: craftEvents) */
   readonly events: E[];
   reset(spot: CraftSpot): void;
   step(input: I, dt: number, world: VoxelCollision): boolean;

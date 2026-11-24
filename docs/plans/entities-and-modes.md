@@ -1,12 +1,13 @@
 # Entities, seats, health, items and game modes in the world sim
 
-Status: design, nothing built. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
+Status: E10, E11, E12 landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
 rules of a game are a mode layered on the world sim; the sim offers entities with ids, seats, health and items), on
 [ADR 0006](../adr/0006-world-sim-seam.md), [ADR 0007](../adr/0007-player-control-in-world-sim.md) and
 [local-server.md](local-server.md) (E9). Assumes E7 (commands queued per tick, one seat per player, `leaveSeat`, seat
 table in `WorldSim`) lands first and E8 (a left vehicle stays in the world, can be entered) in whatever shape it takes:
 nothing below depends on E8's internals, only on "an entity with no occupied seat stays until the presence rule drops
-it". File:line of `web/src/` at main `69d7ad6e`.
+it". File:line of `web/src/` at main `69d7ad6e` in sections 0-3 (the state before E7-E12: kept as the design's
+starting point); sections 4-5 re-grounded after E12.
 
 ## 0. Today, in one table
 
@@ -269,7 +270,7 @@ now.
 
 | What | Predictable | How |
 |---|---|---|
-| craft cores | yes | pure, fixed step, `{x,y,z}` state (ADR 0006). The client already holds a core of the same class loaded from each snapshot (`MirrorSimClient`, sim-client.ts:231; `loadState`, core-state.ts:350) and a collision of its own over the page's tiles (`CraftLink.col`, nav/craft.ts:77) |
+| craft cores | yes | pure, fixed step, `{x,y,z}` state (ADR 0006). The client already holds a core of the same class loaded from each snapshot (`MirrorSimClient`, sim-client.ts:150; `loadState`, core-state.ts:33) and a collision of its own over the page's tiles (`CraftLink.col`, nav/craft.ts:83) |
 | Rapier car | partly | a one-car Rapier world on the page (Rapier is already bundled there), terrain from the page's tiles, traffic and other players as kinematic proxies from the snapshot. Contacts with them mispredict and are corrected |
 | walker | already | the client authors the pose (`walkPose`); E7 bounds it on the sim |
 | traffic, other players | no | interpolated between snapshots |
@@ -283,8 +284,8 @@ Reconcile, per seat input:
   each (STEP worth of the core's own fixed steps). Drawn pose = predicted pose + a correction offset that decays over
   ~100 ms (the offset is presentation, never fed back into the core).
 - Requires the craft step to follow the world tick (E13): today `stepCrafts(dt)` runs each core's `FixedStep` on the
-  frame's `dt` (world-sim.ts:370-378; clocks 1/60 to 1/120 s: special-core.ts:20, drone-core.ts:22, boat-motion.ts:264,
-  plane-flight.ts:26), so the number of steps between two inputs depends on the frame rate and cannot be replayed from
+  frame's `dt` (world-sim.ts:546-555; clocks 1/60 to 1/120 s: special-core.ts:20, drone-core.ts:22,
+  boat-motion.ts:264, plane-flight.ts:26), so the number of steps between two inputs depends on the frame rate and cannot be replayed from
   tick numbers. With E13 each world tick (1/30 s) runs its craft steps with that tick's input.
 - Collision differences (the worker's ground is level-1 nodes, `tile-world.ts`; the page's collision what the page
   loaded) show as corrections, not errors. Edits are mirrored (E9 step 3), so a crater is in both.
@@ -299,6 +300,12 @@ stated; none waits on E8's internals.
 
 ### E10. Entity index (S)
 
+- **Landed:** `sim/entities.ts` (`EntityKind`, `EntityRef`, `entityKey`, `sameEntity`, `Entities` over one `KindCore`
+  adapter per kind, made in `WorldSim`'s constructor: `WorldSim.entities`); `foci()` is each player's seat entity and
+  followed entity through `Entities.pose`; `seat()` returns a seat only while its entity exists; `follow` takes a
+  craft (a focus while followed; not in `Traffic.held`). A car's pose is its `detachedPose` when out of the traffic
+  (before: a followed parked car was placed on its old path). `EntityRef` moved out of `sim/types.ts`. Check: life-edit
+  crafts, a craft followed.
 - **Waits for:** nothing (E7 for the seat part only: do it after if E7 is in flight).
 - **Do:** `sim/entities.ts`: `EntityKind` with `'craft'`, `EntityRef` for crafts, `entityKey`, `Entities` with the
   kind adapters (`exists`, `pose`, `seats`); `foci()` (world-sim.ts:245-261) and `seat()` (228-234) through it;
@@ -307,6 +314,14 @@ stated; none waits on E8's internals.
 
 ### E11. Seats from the model (S–M)
 
+- **Landed:** `SEATS` in `sim/entities.ts` (car by `VehicleId`, craft by `CraftType`: one seat each, the driver's,
+  the pilot's; person: a walker's on foot, none on a bike), `Entities.seat(ref, role?, index?)`, `Seat { entity, role,
+  index }` (the seat table's key `kind:id:role:index`). Commands `enterSeat { entity, role?, index?, choice?, pose? }`,
+  `seatInput { role, input }` (ignored for a role not held), `leaveSeat`; `takeWheel`, `drive`, `walkAs`, `walkPose`,
+  `enterCraft`, `craftInput` are gone, their callers migrated (nav/ride.ts, drive.ts, craft.ts, life-edit, life-phys,
+  mirror-check); no aliases. `CommandResult.role`, `results(player, kind, role?)`. `seated`/`unseated` events, given
+  the first tick run after the command. `WorldSim.mayEnter` (a settable rule, always true). Checks: life-edit players
+  (the events), driver's seat (`mayEnter` refused).
 - **Waits for:** E7, E10.
 - **Do:** seat specs per kind and type; `Seat = { entity, role, index }`; `enterSeat`, `seatInput`, `leaveSeat` in
   `SimCommand` with the old commands as aliases in `SimServer.apply`; `seated`/`unseated` events; `mayEnter` hook
@@ -315,6 +330,15 @@ stated; none waits on E8's internals.
 
 ### E12. Tick-numbered entity events (S)
 
+- **Landed:** `SimEvent` `craft { entity, e }` (every craft put down, piloted or not: drained after its steps, given
+  the first tick run after them), `drive { entity, note }` (the drivers' `PlayerCar` notes, drained after the ticks,
+  with the tick they carry), `impact { entity, by, speed, at }` beside each `struck` (`Traffic.struck` carries the car's
+  id: `by`). `craftEvents`/`driverNotes` read the log through `SeatReads` (world-sim.ts; the same in
+  `MirrorSimClient`): the seat's entity's events of that kind since the last call, from the player's `seated` event
+  (not yet in the log: from now). The snapshot's `player.notes`/`craftEvents` are gone. Check: life-edit `events`
+  (a drone falls, its impacts read once by its pilot, the client's as the sim's; a later pilot reads none of them) and
+  a driver's note in the driver's-seat scenario. Open: events of every craft and driver go to every client (no
+  interest filter); `impact` only for car-person contacts (car-car, craft crashes later).
 - **Waits for:** E10.
 - **Do:** crafts' core events and the driver's notes as `SimEvent`s with tick and entity (`craft`, `drive`);
   `craftEvents`/`driverNotes` filter `eventsSince` for the player's seat; `impact` beside `struck`. The snapshot drops

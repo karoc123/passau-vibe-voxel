@@ -12,8 +12,8 @@ import type { Ride, WalkOpts } from './nav';
 
 // The ride (nav.ts mode ride): following a pedestrian or a vehicle, and walking as the person followed. The local
 // player's commands go to the world sim through its client (sim/sim-client.ts): follow (the sim keeps what is followed
-// wherever it goes), walkAs (the person's one seat; refused, the ride goes on following), walkPose (where the walk,
-// which is the client's, puts them; the sim bounds it, and a pose it clamped puts the walk back where the sim has
+// wherever it goes), enterSeat (the person's walker's seat; refused, the ride goes on following), seatInput (where the
+// walk, which is the client's, puts them; the sim bounds it, and a pose it clamped puts the walk back where the sim has
 // them), leaveSeat. Nav switches the modes; the car driven is drive.ts's (the driver's
 // seat), on this ride's camera.
 
@@ -80,8 +80,8 @@ export class Rider {
     const R = this.ride!, H = this.host, life = H.life();
     // (the seat refused: walked by another, or gone from the crowd; a pose out of reach: the walk back where the sim
     // took it)
-    if (life?.client.results(LOCAL_PLAYER, 'walkAs').some((r) => !r.ok)) this.walking = null;
-    if (life?.client.results(LOCAL_PLAYER, 'walkPose').some((r) => !r.ok) && this.walking) {
+    if (life?.client.results(LOCAL_PLAYER, 'enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
+    if (life?.client.results(LOCAL_PLAYER, 'seatInput', 'walker').some((r) => !r.ok) && this.walking) {
       const w = life.client.walkedPose(this.walking.id);
       if (w) H.foot.correct(w);
     }
@@ -111,7 +111,7 @@ export class Rider {
       const p: Pose | null = H.life()!.pose('person', o);
       if (!p) return;
       this.release();
-      sim.send({ kind: 'walkAs', player: LOCAL_PLAYER, person: o.id, pose: { ...p, moving: false } });
+      sim.send({ kind: 'enterSeat', player: LOCAL_PLAYER, entity: { kind: 'person', id: o.id }, role: 'walker', pose: { ...p, moving: false } });
       this.walking = o;
       Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
       H.glide.start(1100);
@@ -119,7 +119,7 @@ export class Rider {
       H.foot.startAs(p);
     }
     if (this.jumpAsked) { H.foot.jump(false); this.jumpAsked = false; }
-    sim.send({ kind: 'walkPose', player: LOCAL_PLAYER, pose: H.foot.walkAs(R, dt) });
+    sim.send({ kind: 'seatInput', player: LOCAL_PLAYER, role: 'walker', input: H.foot.walkAs(R, dt) });
   }
 }
 

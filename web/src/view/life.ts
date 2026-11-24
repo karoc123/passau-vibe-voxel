@@ -179,7 +179,7 @@ export class StreetLife {
     this.people.forEach((p, i) => {
       let bob = 0;
       const C = this.client.walkedPose(p.id);
-      if (C) { // walked by a player (WorldSim walkAs): where they put them, their step's phase this side's
+      if (C) { // walked by a player (WorldSim enterSeat, a walker's): where they put them, their step's phase this side's
         setRp(p, C.x, C.y, C.z); p.rh = C.h;
         if (C.moving) { const ph = (this.walkPh.get(p) ?? p.ph) + dt * 9; this.walkPh.set(p, ph); bob = Math.sin(ph); }
       } else {

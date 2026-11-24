@@ -22,7 +22,8 @@ import { DEFAULT_TUNING } from './tuning';
 import { TrafficMirror, type Snapshot } from './snapshot';
 import type { SimServer } from './sim-server';
 import type { CommandResult, PlayerCommand } from './commands';
-import { EVENT_TICKS, type CraftId, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
+import type { Role } from './entities';
+import { EVENT_TICKS, SeatReads, type CraftId, type PlayerId, type Seat, type SimEvent, type SimInput } from './world-sim';
 
 /** what the page sends: a player's command to the world sim (sim/commands.ts PlayerCommand: applied at the start of
  * the sim's next update, in order), or an edit, a change to the world's voxels (core/world-edits.ts) */
@@ -59,21 +60,21 @@ export interface SimClient {
   update(dt: number, input: SimInput): void;
   /** the sim's events of the ticks after tick, oldest first */
   eventsSince(tick: number): SimEvent[];
-  /** the outcomes of the player's commands of kind since the last call for it, oldest first */
-  results(player: PlayerId, kind: SimCommand['kind']): CommandResult[];
+  /** the outcomes of the player's commands of kind (and of a seat's role) since the last call for it, oldest first */
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role): CommandResult[];
   /** the seat the player holds, or null */
   seat(player: PlayerId): Seat | null;
   /** where person personId is put by the player walking as them, or null while none does */
   walkedPose(personId: number): WalkPose | null;
   /** the player's car, or null while they drive none */
   driver(player: PlayerId): DriverSnapshot | null;
-  /** what the driver is to be told since the last call */
+  /** what the driver is to be told since the last call (the drive events of their car) */
   driverNotes(player: PlayerId): DriveNote[];
   /** the craft the player pilots, or null */
   craftOf(player: PlayerId): CraftView | null;
-  /** the crafts put down in the world, piloted or left (any player may enter one left: enterCraft) */
+  /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
-  /** what happened to the player's craft since the last call, oldest first */
+  /** what happened to the player's craft since the last call, oldest first (the craft events of it) */
   craftEvents(player: PlayerId): unknown[];
   /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
@@ -112,7 +113,7 @@ export class LocalSimClient implements SimClient {
   update(dt: number, input: SimInput) { this.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-  results(player: PlayerId, kind: SimCommand['kind']) { return this.server.results(player, kind); }
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) { return this.server.results(player, kind, role); }
   seat(player: PlayerId) { return this.sim.seat(player); }
   walkedPose(personId: number) { return this.sim.walkedPose(personId); }
   driver(player: PlayerId) { return this.sim.driverSnapshot(player); }
@@ -151,8 +152,7 @@ export class MirrorSimClient implements SimClient {
   private queue: SimCommand[] = [];
   private last: Snapshot | null = null;
   private events: SimEvent[] = [];
-  private notes: Snapshot['player']['notes'] = [];
-  private craftEventList: unknown[] = [];
+  private readonly reads = new SeatReads();
   private outcomes: CommandResult[] = [];
   // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
@@ -192,8 +192,6 @@ export class MirrorSimClient implements SimClient {
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
     const P = s.player;
-    this.notes.push(...P.notes);
-    this.craftEventList.push(...P.craftEvents);
     for (const r of P.results) {
       const p = r.kind === 'edit' && r.ref !== undefined ? this.pending.get(r.ref) : undefined;
       if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
@@ -218,22 +216,23 @@ export class MirrorSimClient implements SimClient {
     return E.slice(i);
   }
 
-  results(player: PlayerId, kind: SimCommand['kind']) {
+  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) {
     if (player !== this.player) return [];
-    const mine = this.outcomes.filter((o) => o.kind === kind);
-    if (mine.length) this.outcomes = this.outcomes.filter((o) => o.kind !== kind);
+    const of = (o: CommandResult) => o.kind === kind && (!role || o.role === role);
+    const mine = this.outcomes.filter(of);
+    if (mine.length) this.outcomes = this.outcomes.filter((o) => !of(o));
     return mine;
   }
 
   seat(player: PlayerId) { return player === this.player ? this.last?.player.seat ?? null : null; }
   walkedPose(personId: number) { return this.traffic.walked.get(personId) ?? null; }
   driver(player: PlayerId) { return player === this.player ? this.last?.player.driver ?? null : null; }
-  driverNotes(player: PlayerId) { return player === this.player ? this.notes.splice(0) : []; }
+  driverNotes(player: PlayerId) { return this.reads.take(this.events, player, this.seat(player), 'drive', this.tick).map((e) => e.note); }
   craftOf(player: PlayerId): CraftView | null {
     const seat = this.seat(player);
     return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
-  craftEvents(player: PlayerId) { return player === this.player ? this.craftEventList.splice(0) : []; }
+  craftEvents(player: PlayerId) { return this.reads.take(this.events, player, this.seat(player), 'craft', this.tick).map((e) => e.e); }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }

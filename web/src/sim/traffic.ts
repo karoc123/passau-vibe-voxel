@@ -95,10 +95,10 @@ export class Traffic {
   ground: Ground | null = null;
   // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
   water: WaterColumns | null = null;
-  // the entities players follow or control (sim/world-sim.ts WorldSim: follow, walkAs), by id: kept in the sim
+  // the entities players follow or control (sim/world-sim.ts WorldSim: follow, enterSeat), by id: kept in the sim
   // wherever they are (not removed out of the circle, trimmed, dropped into a hole or knocked down)
   readonly held = { car: new Set<number>(), person: new Set<number>() };
-  // the people a player walks as (WorldSim walkAs; among held): where the player puts them, off their way
+  // the people a player walks as (WorldSim enterSeat, a walker's; among held): where the player puts them, off their way
   readonly walked = new Set<number>();
   bodies: TrafficBodies | null = null;
   readonly roads: Road[];
@@ -115,7 +115,7 @@ export class Traffic {
   // the people fallen into a hole and knocked down (by a driven car: life-phys.ts) in the ticks since the world sim
   // last took them (WorldSim.update: its events)
   dropped: { tick: number; person: Person }[] = [];
-  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number }[] = [];
+  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number; by: number }[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
   edits: [number, number, number, number][] = [];
