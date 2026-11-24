@@ -48,8 +48,8 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A2 | Headless modules out of the root into `core/` ([review](architecture-review.md)) | S–M | In progress |
-| A3–A4, A6–A14 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | A3 next (one move package at a time); rest waits as listed |
+| A3 | Contract module `sim/contract/` ([review](architecture-review.md)) | M | In progress |
+| A4, A6–A14 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -189,6 +189,11 @@ A1 landed (merge `1977e553`): `core-deps` checks a layer table (R1), value cycle
 prints it, the diff may only remove lines). A5 landed (merge `2d37a14e`): `CloneLink` (structuredClone + `plainData`
 for snapshots, JSON for frames/commands) in mirror-check, life-edit `left`/`events`, popin-check `--mirror`; no bugs
 found. Open: no gated run carries body poses, the driver snapshot or edit notes over the clone link.
+
+A2 landed: `core/meta.ts` (Meta, ColumnData, …; `types.ts` re-exports them for one step), `core/tile-data.ts`,
+`core/world.ts` (raycast takes `Point`), `core/tile-world.ts`; R1 baseline 47 → 35; mesh-golden identical. Open: prose
+references to the old paths (ADR 0001/0004, README, `scripts/tilefile.py`, comments, gates.mjs guards text); the
+`types.ts` re-export can go.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
