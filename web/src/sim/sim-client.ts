@@ -64,8 +64,9 @@ export interface SimClient {
   update(dt: number, input: SimInput): void;
   /** the sim's events of the ticks after tick, oldest first */
   eventsSince(tick: number): SimEvent[];
-  /** the outcomes of the player's commands of kind (and of a seat's role) since the last call for it, oldest first */
-  results(player: PlayerId, kind: SimCommand['kind'], role?: Role): CommandResult[];
+  /** the outcomes of the player's commands of kind (a request's: its kind; and of a seat's role) since the last call
+   * for it, oldest first */
+  results(player: PlayerId, kind: CommandResult['kind'], role?: Role): CommandResult[];
   /** the seat the player holds, or null */
   seat(player: PlayerId): Seat | null;
   /** the last seat input of the player's the sim took (seq, the tick it was applied in), or null */
@@ -121,7 +122,7 @@ export class LocalSimClient implements SimClient {
   update(dt: number, input: SimInput) { this.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) { return this.server.results(player, kind, role); }
+  results(player: PlayerId, kind: CommandResult['kind'], role?: Role) { return this.server.results(player, kind, role); }
   seat(player: PlayerId) { return this.sim.seat(player); }
   ack(player: PlayerId) { return this.sim.ack(player); }
   walkedPose(personId: number) { return this.sim.walkedPose(personId); }
@@ -241,7 +242,7 @@ export class MirrorSimClient implements SimClient {
     return E.slice(i);
   }
 
-  results(player: PlayerId, kind: SimCommand['kind'], role?: Role) {
+  results(player: PlayerId, kind: CommandResult['kind'], role?: Role) {
     if (player !== this.player) return [];
     const of = (o: CommandResult) => o.kind === kind && (!role || o.role === role);
     const mine = this.outcomes.filter(of);

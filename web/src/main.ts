@@ -480,16 +480,18 @@ async function boot() {
     // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
     // loads it), ?lpnear=, ?lpmax=)
     // ?worker=1: in a Web Worker (sim.worker.ts), drawn from its snapshots (sim/snapshot.ts); ?mirror=1: in this
-    // thread, drawn from its snapshots all the same
-    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1';
+    // thread, drawn from its snapshots all the same. ?mode=: the game mode the host makes (sim-host.ts MODES; by
+    // default the sandbox, its edits allowed with ?dig=1)
+    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1', edits = eager;
+    const mode = qs.get('mode') ?? undefined;
     const physics = { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') };
     let client: SimClient;
     if (qs.get('worker') === '1') {
-      const link = window.__simLink = new WorkerLink({ seed, physics, eager, player: LOCAL_PLAYER });
+      const link = window.__simLink = new WorkerLink({ seed, physics, eager, mode, edits, player: LOCAL_PLAYER });
       client = new MirrorSimClient(link, td, world, LOCAL_PLAYER, true);
     } else {
       const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
-      const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, physics: { ...physics, at: focus } });
+      const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, mode, edits, physics: { ...physics, at: focus } });
       client = own ? new MirrorSimClient(new ThreadLink(server, LOCAL_PLAYER), own, world, LOCAL_PLAYER) : new LocalSimClient(server);
     }
     sim = client;

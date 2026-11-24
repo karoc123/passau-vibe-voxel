@@ -74,7 +74,7 @@ export class DriveMode implements PlayerCraft {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'resetDriver', player: LOCAL_PLAYER }); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'resetDriver' } }); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());

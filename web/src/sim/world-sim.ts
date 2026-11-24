@@ -7,9 +7,9 @@
 //             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
 //             water); the players' commands (sim/commands.ts PlayerCommand, keyed by player id: send), queued and
 //             applied in order at the start of the next tick (apply: the one place a seat is taken or left);
-//             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft: what a game mode, today the
-//             craft's shell, decides); whether a player may take a seat (mayEnter: a game mode's rule; until then
-//             always)
+//             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
+//             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
+//             commands; without one, every seat may be taken and every request is refused)
 //   owns:     the seat table (seat: one seat a player, one player a seat; the driver's car's state is the road
 //             physics', a craft's pilot field follows the table); the walks' last poses (bounded: Tuning.walk);
 //             which of the world's edits are kept (sim/edit-keeper.ts: while a player is near them); the player
@@ -42,6 +42,7 @@ import { CORES, type CoreOf, type CraftType } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, PlayerCommand } from './commands';
 import { boundWalk } from './walk-bounds';
+import type { GameMode, ModeWorld } from './mode';
 
 /** a participant in the world (ADR 0007); the sim numbers none of its own, a host names them (the viewer's own:
  * nav/player.ts LOCAL_PLAYER) */
@@ -151,6 +152,24 @@ export class WorldSim {
   private nextCraft = 1;
   /** the entities (sim/entities.ts): the cars, people and crafts read through their own stores */
   readonly entities: Entities;
+
+  /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
+   * seat may be taken, every request refused) */
+  mode: GameMode | null = null;
+  // what the mode acts through
+  private readonly face: ModeWorld = {
+    seat: (player) => this.seat(player),
+    craftOf: (player) => this.craftOf(player),
+    addCraft: (type) => this.addCraft(type),
+    placeCraft: (id, spot) => this.placeCraft(id, spot),
+    removeCraft: (id) => this.removeCraft(id),
+    sit: (player, seat) => this.enterSeat(player, seat, false),
+    resetDriver: (player) => {
+      if (this.seat(player)?.role !== 'driver' || !this.phys) return false;
+      this.phys.resetDriver(player);
+      return true;
+    },
+  };
 
   /** the world's tuning (read-only, sim/tuning.ts); the physics loader is given it */
   readonly tuning: Tuning;
@@ -308,8 +327,8 @@ export class WorldSim {
   // players with sim authority come here: a creative camera (orbit, free flight) is the client's and only moves the
   // focus and the viewer.
 
-  /** whether player may take seat, asked once it is found free (a game mode's rule; until then always) */
-  mayEnter: (player: PlayerId, seat: Seat) => boolean = () => true;
+  /** what the game mode acts through (SimServer asks it about edits with it) */
+  get modeWorld() { return this.face; }
 
   /** a player's command, applied at the start of the next tick (after those sent before it) */
   send(cmd: PlayerCommand) { this.queue.push(cmd); }
@@ -353,30 +372,12 @@ export class WorldSim {
         else if (!this.walkPose(p, cmd.input)) this.result(cmd, false, 'walker');
         break;
       }
-      case 'resetDriver': if (this.seat(p)?.role === 'driver') this.phys?.resetDriver(p); break;
-      case 'spawnCraft': {
-        let ok = false;
-        try {
-          const c = this.addCraft(cmd.type);
-          ok = this.enterSeat(p, { entity: { kind: 'craft', id: c.id }, role: 'pilot' });
-          if (ok) this.placeCraft(c.id, cmd.spot); else this.removeCraft(c.id);
-        } catch (e) { console.warn('spawnCraft', e); }
-        this.result(cmd, ok);
-        break;
-      }
-      case 'placeCraft': {
-        const c = this.craftOf(p);
-        if (c) this.placeCraft(c.id, cmd.spot);
-        this.result(cmd, !!c);
-        break;
-      }
-      case 'resetCraft': { const c = this.craftOf(p); this.result(cmd, !!c?.placed && !!c.core.unstick?.(c.collision)); break; }
-      case 'dropCraft': { const c = this.craftOf(p); if (c) this.removeCraft(c.id); break; }
+      case 'request': this.result({ player: p, kind: cmd.request.kind }, !!this.mode?.request(this.face, p, cmd.request)); break;
       case 'leaveSeat': this.leaveSeat(p); break;
     }
   }
 
-  private result(cmd: PlayerCommand, ok: boolean, role?: Role) {
+  private result(cmd: { player: PlayerId; kind: CommandResult['kind'] }, ok: boolean, role?: Role) {
     const r = this.outcomes.get(cmd.player), out: CommandResult = { tick: this.tick, kind: cmd.kind, ok };
     if (role) out.role = role;
     if (r) r.push(out); else this.outcomes.set(cmd.player, [out]);
@@ -420,15 +421,16 @@ export class WorldSim {
   }
 
   // a seat of entity (role, index: without, its first) taken, the one held left first; true: held now (also when it
-  // was already); false: gone, no such seat, another's, not allowed (mayEnter), or the role's own refusal (a car: no
-  // road physics; a person: not in the crowd on foot). The walker's from pose (where they are drawn: kept within
-  // Tuning.walk.take of where the sim has them), the driver's as type choice (the car taken shows in driverSnapshot)
-  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }) {
+  // was already); false: gone, no such seat, another's, not allowed (the mode's mayEnter; not asked with ask false: the
+  // mode seating the player itself), or the role's own refusal (a car: no road physics; a person: not in the crowd on
+  // foot). The walker's from pose (where they are drawn: kept within Tuning.walk.take of where the sim has them), the
+  // driver's as type choice (the car taken shows in driverSnapshot)
+  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }, ask = true) {
     const seat = this.entities.seat(cmd.entity, cmd.role, cmd.index);
     if (!seat) return false;
     const by = this.occupants.get(seatKey(seat));
     if (by === player) return true;
-    if (by !== undefined || !this.mayEnter(player, seat)) return false;
+    if (by !== undefined || (ask && this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat))) return false;
     const id = seat.entity.id;
     if (seat.role === 'walker') {
       const person = this.traffic.people.find((p) => p.id === id);

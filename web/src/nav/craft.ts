@@ -118,7 +118,7 @@ export class CraftLink<K extends CraftType> {
 
   /** a craft of the link's type made, the local player its pilot, put down at spot (from the next tick) */
   spawn(spot: SimSpot) {
-    this.sim!.send({ kind: 'spawnCraft', player: LOCAL_PLAYER, type: this.type, spot });
+    this.sim!.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'craft', type: this.type, spot } });
     this.held = true;
   }
 
@@ -132,7 +132,7 @@ export class CraftLink<K extends CraftType> {
   refused() { return !!this.sim?.results(LOCAL_PLAYER, 'enterSeat', 'pilot').some((r) => !r.ok); }
 
   /** the craft put down again at spot */
-  place(spot: SimSpot) { this.sim?.send({ kind: 'placeCraft', player: LOCAL_PLAYER, spot }); }
+  place(spot: SimSpot) { this.sim?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'placeCraft', spot } }); }
 
   /** put down at spot: made the first time (spawn), else again (place) */
   put(spot: SimSpot) { if (this.held) this.place(spot); else this.spawn(spot); }
@@ -144,7 +144,7 @@ export class CraftLink<K extends CraftType> {
   events(): unknown[] { return this.craft ? this.sim!.craftEvents(LOCAL_PLAYER) : []; }
 
   /** back to a safe spot nearby (T); whether it was, in results('resetCraft') */
-  reset() { this.sim?.send({ kind: 'resetCraft', player: LOCAL_PLAYER }); }
+  reset() { this.sim?.send({ kind: 'request', player: LOCAL_PLAYER, request: { kind: 'resetCraft' } }); }
 
   /** the outcomes of the resets asked for since the last call: true where one was done */
   resets() { return this.sim?.results(LOCAL_PLAYER, 'resetCraft').map((r) => r.ok) ?? []; }
@@ -152,7 +152,7 @@ export class CraftLink<K extends CraftType> {
   /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
    * out of the world; the shell's collision let go */
   close(drop = false) {
-    if (this.held) this.sim?.send({ kind: drop ? 'dropCraft' : 'leaveSeat', player: LOCAL_PLAYER });
+    if (this.held) this.sim?.send(drop ? { kind: 'request', player: LOCAL_PLAYER, request: { kind: 'dropCraft' } } : { kind: 'leaveSeat', player: LOCAL_PLAYER });
     this.held = false;
     this.col?.release();
     this.col = null;
