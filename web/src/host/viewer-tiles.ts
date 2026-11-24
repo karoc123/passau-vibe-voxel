@@ -2,8 +2,8 @@
 // collisions (nav/, sim/craft/), the car's Rapier terrain (physics/rapier/life-phys.ts), the world's edits and the
 // streamer's files again share each node's fetch and decode. A Web Worker running the sim (sim.worker.ts) makes its
 // own (tileCacheAt: the data's base URL, its own live edits).
-import { liveEdits } from './core/live-edits';
-import { TileCache } from './core/tile-cache';
+import { liveEdits } from '../core/live-edits';
+import { TileCache } from '../core/tile-cache';
 import { fetchGzip } from './fetch';
 
 let shared: TileCache | null = null;

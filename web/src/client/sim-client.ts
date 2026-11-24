@@ -13,22 +13,22 @@
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { WorldOp } from '../core/world-edits';
 import { liveEdits } from '../core/live-edits';
-import type { Ground } from './traffic';
-import type { TrafficData } from './types';
-import type { CraftCore } from './craft/craft-core';
-import { CORES } from './craft/cores';
-import { loadState } from './craft/core-state';
-import { DEFAULT_TUNING } from './tuning';
-import { TrafficMirror, type TrafficView } from './snapshot';
-import type { Session } from './sim-server';
-import type { CommandResult, SimCommand } from './contract/commands';
-import type { CraftId, CraftType, PlayerId, Role, Seat } from './contract/ids';
-import type { FrameTime, SimInput } from './contract/inputs';
-import { EVENT_TICKS, type DriveNote, type SimEvent } from './contract/events';
-import type { Ack, DriverSnapshot, Snapshot } from './contract/snapshot';
-import type { WalkPose } from './contract/pose';
-import { STEP } from './traffic';
-import { SeatReads } from './seat-reads';
+import type { Ground } from '../sim/traffic';
+import type { TrafficData } from '../sim/types';
+import type { CraftCore } from '../sim/craft/craft-core';
+import { CORES } from '../sim/craft/cores';
+import { loadState } from '../sim/craft/core-state';
+import { DEFAULT_TUNING } from '../sim/tuning';
+import { TrafficMirror, type TrafficView } from '../sim/server/snapshot';
+import type { Session } from '../sim/server/sim-server';
+import type { CommandResult, SimCommand } from '../sim/contract/commands';
+import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
+import type { FrameTime, SimInput } from '../sim/contract/inputs';
+import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
+import type { Ack, DriverSnapshot, Snapshot } from '../sim/contract/snapshot';
+import type { WalkPose } from '../sim/contract/pose';
+import { STEP } from '../sim/traffic';
+import { SeatReads } from '../sim/seat-reads';
 
 // (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView: sim/snapshot.ts)
 

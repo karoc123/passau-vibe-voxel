@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
-import type { CraftView } from '../sim/sim-client';
+import type { CraftView } from '../client/sim-client';
 import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';

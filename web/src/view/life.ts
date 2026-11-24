@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/traffic';
-import type { SimClient } from '../sim/sim-client';
+import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import type { Car, Kind, Rideable } from '../sim/types';

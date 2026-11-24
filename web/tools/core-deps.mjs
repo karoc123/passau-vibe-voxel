@@ -132,14 +132,14 @@ const LAYERS = [
   ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'], ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
   ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
-  // (snapshot.ts: takeSnapshot, TrafficMirror; A3 took its types to the contract, A4 takes TrafficMirror to the client)
-  ['sim/sim-server.ts', 'server'], ['sim/snapshot.ts', 'server'],
-  ['sim/sim-client.ts', 'client'],
+  ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
-  // (host/; fetch.ts and viewer-tiles.ts, which A4 also names, stay with the root: the mesher, util.ts and stream.ts
-  // load through them, and presentation may not import the server)
-  ['sim-host.ts', 'server'], ['sim.worker.ts', 'server'],
-  ['sim-worker-link.ts', 'client'],
+  ['client/', 'client'], // (SimClient, LocalSimClient, MirrorSimClient, TrafficMirror, the links)
+  // (host/fetch.ts and host/viewer-tiles.ts: the page's loaders as much as the host's (the mesher, util.ts and stream.ts
+  // load through them, and presentation may not import the server), so placed with the root until they are split or
+  // injected (A12: the host's loaders as ports))
+  ['host/fetch.ts', 'presentation'], ['host/viewer-tiles.ts', 'presentation'],
+  ['host/', 'server'], // (sim-host.ts, sim.worker.ts: the wiring of a world, the worker's entry)
   ['view/', 'presentation'], ['nav/', 'presentation'],
   ['main.ts', 'app'],
   ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
@@ -186,15 +186,15 @@ function codeOf(bare) {
 // A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
 // module), A4 the client <-> server ones.
 const BASELINE = [
-  "R1 sim-host.ts (server) -> fetch.ts (presentation)",
-  "R1 sim-worker-link.ts (client) -> sim-host.ts (server) type",
-  "R1 sim-worker-link.ts (client) -> sim.worker.ts (server) type",
-  "R1 sim.worker.ts (server) -> fetch.ts (presentation)",
-  "R1 sim.worker.ts (server) -> viewer-tiles.ts (presentation)",
-  "R1 sim/sim-client.ts (client) -> sim/sim-server.ts (server) type",
-  "R1 sim/sim-client.ts (client) -> sim/snapshot.ts (server)",
-  "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain)",
-  "R1 sim/sim-client.ts (client) -> sim/traffic.ts (domain) type",
+  "R1 client/sim-client.ts (client) -> sim/server/sim-server.ts (server) type",
+  "R1 client/sim-client.ts (client) -> sim/server/snapshot.ts (server)",
+  "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain)",
+  "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain) type",
+  "R1 client/sim-worker-link.ts (client) -> host/sim-host.ts (server) type",
+  "R1 client/sim-worker-link.ts (client) -> host/sim.worker.ts (server) type",
+  "R1 host/sim-host.ts (server) -> host/fetch.ts (presentation)",
+  "R1 host/sim.worker.ts (server) -> host/fetch.ts (presentation)",
+  "R1 host/sim.worker.ts (server) -> host/viewer-tiles.ts (presentation)",
   "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",

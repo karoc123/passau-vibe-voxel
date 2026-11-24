@@ -10,18 +10,18 @@
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
 //              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
-import { liveEdits } from '../core/live-edits';
-import { apply as applyEdit } from '../core/world-edits';
+import { liveEdits } from '../../core/live-edits';
+import { apply as applyEdit } from '../../core/world-edits';
 import { takeSnapshot } from './snapshot';
-import { SeatReads } from './seat-reads';
-import type { CommandResult, SimCommand } from './contract/commands';
-import { EVENT_TICKS, type DriveNote } from './contract/events';
-import type { PlayerId, Role, Seat } from './contract/ids';
-import type { SimInput } from './contract/inputs';
-import type { Ack, DriverSnapshot, EditNote, Snapshot } from './contract/snapshot';
-import type { GameMode } from './mode';
-import { sandbox } from './modes/sandbox';
-import type { WorldSim } from './world-sim';
+import { SeatReads } from '../seat-reads';
+import type { CommandResult, SimCommand } from '../contract/commands';
+import { EVENT_TICKS, type DriveNote } from '../contract/events';
+import type { PlayerId, Role, Seat } from '../contract/ids';
+import type { SimInput } from '../contract/inputs';
+import type { Ack, DriverSnapshot, EditNote, Snapshot } from '../contract/snapshot';
+import type { GameMode } from '../mode';
+import { sandbox } from '../modes/sandbox';
+import type { WorldSim } from '../world-sim';
 
 type Edit = Extract<SimCommand, { kind: 'edit' }>;
 

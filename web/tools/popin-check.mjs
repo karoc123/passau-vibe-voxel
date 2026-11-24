@@ -37,7 +37,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts'), { SimServer } = await load('sim/sim-server.ts');
+const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts'), { SimServer } = await load('sim/server/sim-server.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');

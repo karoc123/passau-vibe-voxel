@@ -3,7 +3,7 @@ import type { Meta } from '../core/meta';
 import { clamp, el } from '../util';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
-import type { CraftView } from '../sim/sim-client';
+import type { CraftView } from '../client/sim-client';
 import type { PlaneCore, PlaneDrawn } from '../sim/craft/plane-core';
 import { JET, PLANE, type PlaneConfig, type PlaneEvent } from '../sim/craft/plane-flight';
 import type { PlaneInput } from '../sim/contract/inputs';

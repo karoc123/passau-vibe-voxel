@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import { type CarInput, PARK } from '../sim/contract/inputs';
-import type { SimClient } from '../sim/sim-client';
+import type { SimClient } from '../client/sim-client';
 import { CRASH_MS, SINK_MS, type DriverSnapshot } from '../sim/contract/snapshot';
 import type { Nav, Ride } from './nav';
 import type { CraftContext, PlayerCraft } from './craft';

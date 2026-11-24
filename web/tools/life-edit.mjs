@@ -69,7 +69,7 @@ const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, H
 const meta = readMeta(), N = meta.tiles.N;
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 // (a world sim's sessions: a host's, SimServer.connect, with no game mode unless asked; sessions('A', 'B') -> { A, B })
-const { SimServer } = await load('sim/sim-server.ts');
+const { SimServer } = await load('sim/server/sim-server.ts');
 const sessionsOf = (sim, ...players) => { const server = new SimServer(sim, null); return Object.fromEntries(players.map((p) => [p, server.connect(p)])); };
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const WE = LP.worldEdits, LY = await load('core/layers.ts'), TC = await load('core/tile-cache.ts');
@@ -715,7 +715,7 @@ async function craftRates() {
 }
 
 async function left() {
-  const { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
+  const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
   const keeping = { radius: 300, after: 10 };
   const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
@@ -787,7 +787,7 @@ async function left() {
 // 30 m over the street, its pilot B (through the client) cutting the throttle, falls and hits the ground (DroneEvent
 // impact); B reads them once (craftEvents) from the client as from the sim; C, entering it after B leaves, none of B's
 async function craftEvents() {
-  const { MirrorSimClient, ThreadLink, CloneLink } = await load('sim/sim-client.ts');
+  const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
   if (!w) return;
   // (B's client over its session; B2 a second session of B's, read here; C another player's)
@@ -853,7 +853,7 @@ async function craftEvents() {
 // snapshot, the world ticked once a frame by the host: two clients on one world); A2 a second session of A's, read here.
 // Two drones over the street, one each; the pilots cut the throttle (A every tick, B every other) and their drones fall.
 async function sessions() {
-  const { MirrorSimClient, CloneLink } = await load('sim/sim-client.ts');
+  const { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)],
     ['drone', STREET.x + 60, STREET.y, 0, null, aloft(STREET.x + 60, STREET.y, 0, 45)]]);
   if (!w) return;

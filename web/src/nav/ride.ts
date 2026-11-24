@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Pose } from '../sim/contract/pose';
 import { vehicleOf } from '../sim/vehicles';
-import type { SimClient } from '../sim/sim-client';
+import type { SimClient } from '../client/sim-client';
 import type { Rideable } from '../sim/types';
 import type { Picked, StreetLife } from '../view/life';
 import type { World } from '../core/world';

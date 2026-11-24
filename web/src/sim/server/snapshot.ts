@@ -10,16 +10,16 @@
 //                                      its agents set from each snapshot, one object per id; what view/life.ts draws
 //                                      (TrafficView)
 // No three.js, no DOM (tools/core-deps.mjs).
-import { saveState } from './craft/core-state';
-import { fadeOut, STEP, Traffic, type Ground, type TrafficBodies } from './traffic';
-import type { Car, TrafficData } from './types';
-import type { BodyDraw, BoatView, CarState, Person, PersonState } from './contract/agents';
-import type { CommandResult } from './contract/commands';
-import type { SimEvent } from './contract/events';
-import type { PlayerId } from './contract/ids';
-import type { RoadPose, WalkPose } from './contract/pose';
-import type { Ack, CraftState, EditNote, Snapshot } from './contract/snapshot';
-import type { WorldSim } from './world-sim';
+import { saveState } from '../craft/core-state';
+import { fadeOut, STEP, Traffic, type Ground, type TrafficBodies } from '../traffic';
+import type { Car, TrafficData } from '../types';
+import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../contract/agents';
+import type { CommandResult } from '../contract/commands';
+import type { SimEvent } from '../contract/events';
+import type { PlayerId } from '../contract/ids';
+import type { RoadPose, WalkPose } from '../contract/pose';
+import type { Ack, CraftState, EditNote, Snapshot } from '../contract/snapshot';
+import type { WorldSim } from '../world-sim';
 
 // what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState: these keys,
 // all of them, with the types Car and Person have)

@@ -7,7 +7,7 @@
 // Each edit's time goes to the console: the carving and encoding, then until the new meshes are in.
 import * as THREE from 'three';
 import { cellToAbsZ, frameOf, mapToGrid, type WorldOp } from './core/layers';
-import type { SimClient } from './sim/sim-client';
+import type { SimClient } from './client/sim-client';
 import type { TileStreamer } from './stream';
 
 const DIG_R = 3;

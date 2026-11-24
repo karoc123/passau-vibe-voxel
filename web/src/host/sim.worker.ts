@@ -9,14 +9,14 @@
 //   out: ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
 import { fetchJson } from './fetch';
 import { hostSim, PAGE_PLAYER, type HostOptions } from './sim-host';
-import type { SimCommand } from './sim/contract/commands';
-import type { Session } from './sim/sim-server';
-import { unpackTraffic } from './sim/traffic-pack';
-import type { TrafficData } from './sim/types';
-import type { SimInput } from './sim/contract/inputs';
-import type { Snapshot } from './sim/contract/snapshot';
-import { tileWorld } from './core/tile-world';
-import type { Meta } from './core/meta';
+import type { SimCommand } from '../sim/contract/commands';
+import type { Session } from '../sim/server/sim-server';
+import { unpackTraffic } from '../sim/traffic-pack';
+import type { TrafficData } from '../sim/types';
+import type { SimInput } from '../sim/contract/inputs';
+import type { Snapshot } from '../sim/contract/snapshot';
+import { tileWorld } from '../core/tile-world';
+import type { Meta } from '../core/meta';
 import { tileCacheAt } from './viewer-tiles';
 
 export type ToWorker =

@@ -8,7 +8,7 @@ import { grow, meets, perSide, SEC, sectionBox, sectionOf, sectionsMeeting, unio
 import { capField, capRamped, capSlot, cornerQ, diagonal02, edgeCorners, NONE, type CapField } from './core/surface';
 import { roofField, slopeRoofs, wallTopCode, type RoofField, type SlopeParts } from './roofs';
 import { decodeTile, type Columns, type Fields, type RawColumns } from './core/tile-data';
-import { fetchGzip } from './fetch';
+import { fetchGzip } from './host/fetch';
 
 export interface MeshRequest {
   key: string;

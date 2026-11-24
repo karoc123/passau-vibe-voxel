@@ -5,7 +5,7 @@ import { roomOffsets, type Columns, type Fields } from './core/tile-data';
 import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import { liveEdits, type LiveNode, type Region } from './core/live-edits';
-import { viewerTileCache } from './viewer-tiles';
+import { viewerTileCache } from './host/viewer-tiles';
 import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {

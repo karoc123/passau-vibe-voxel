@@ -6,22 +6,22 @@
 // ?mode=, by default the sandbox). The host names the page's player (PAGE_PLAYER) and connects its session; the page
 // holds only the client (sim/sim-client.ts SimClient). No three.js, no DOM
 // but fetch.
-import { liveEdits } from './core/live-edits';
-import { frameOf } from './core/layers';
-import { initWorldEdits } from './core/world-edits';
+import { liveEdits } from '../core/live-edits';
+import { frameOf } from '../core/layers';
+import { initWorldEdits } from '../core/world-edits';
 import { fetchJson } from './fetch';
-import type { BoatData } from './sim/boat-traffic';
-import type { WaterColumns } from './sim/river';
-import { SimServer } from './sim/sim-server';
-import type { GameMode } from './sim/mode';
-import { sandbox } from './sim/modes/sandbox';
-import type { Ground } from './sim/traffic';
-import type { Tuning } from './sim/tuning';
-import type { TrafficData } from './sim/types';
-import { WorldSim } from './sim/world-sim';
-import type { Meta } from './core/meta';
-import type { TileCache } from './core/tile-cache';
-import type { PlayerId } from './sim/contract/ids';
+import type { BoatData } from '../sim/boat-traffic';
+import type { WaterColumns } from '../sim/river';
+import { SimServer } from '../sim/server/sim-server';
+import type { GameMode } from '../sim/mode';
+import { sandbox } from '../sim/modes/sandbox';
+import type { Ground } from '../sim/traffic';
+import type { Tuning } from '../sim/tuning';
+import type { TrafficData } from '../sim/types';
+import { WorldSim } from '../sim/world-sim';
+import type { Meta } from '../core/meta';
+import type { TileCache } from '../core/tile-cache';
+import type { PlayerId } from '../sim/contract/ids';
 
 export interface HostOptions {
   /** the traffic's seed */
@@ -74,7 +74,7 @@ export function hostSim(meta: Meta, td: TrafficData, opts: HostOptions) {
 // warms up
 async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics'], cache: TileCache) {
   try {
-    const { LifePhysics, DEFAULTS } = await import('./physics/rapier/life-phys');
+    const { LifePhysics, DEFAULTS } = await import('../physics/rapier/life-phys');
     const f = opts.at();
     return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
       near: opts.bodies ? opts.near ?? DEFAULTS.near : 0, maxBodies: opts.maxBodies ?? DEFAULTS.maxBodies,

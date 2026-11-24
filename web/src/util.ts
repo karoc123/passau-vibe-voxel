@@ -3,7 +3,7 @@ import * as THREE from 'three';
 export { lerp, clamp, ease, smooth, hash, wrapAngle, pushTo } from './core/num';
 export const coarsePointer = () => matchMedia('(pointer: coarse)').matches;
 
-export { fetchGzip, fetchJson } from './fetch';
+export { fetchGzip, fetchJson } from './host/fetch';
 
 export function dataTexture(data: Uint8Array | Uint16Array, w: number, h: number, format: THREE.PixelFormat,
   type: THREE.TextureDataType = THREE.UnsignedByteType) {

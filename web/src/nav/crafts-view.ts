@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CraftView, SimClient } from '../sim/sim-client';
+import type { CraftView, SimClient } from '../client/sim-client';
 import type { CraftId, CraftType } from '../sim/contract/ids';
 import type { CoreOf } from '../sim/craft/cores';
 import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
