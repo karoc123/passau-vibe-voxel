@@ -132,10 +132,10 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   ds.run(d, 4, ds.cruise(50), (x) => !!x.snapshot?.fallMs);
   const fell = !!d.snapshot?.fallMs, note = ds.said(d, 'Crash!'), at = d.traffic.t, held = (d.snapshot?.fallMs ?? 0) > FALL_MS - 1;
   ds.run(d, 0.6, ds.cruise(50));
-  const side = Math.abs(d.car.roll ?? 0);
+  const side = Math.abs(d.pose(d.car).roll ?? 0);
   ds.run(d, (FALL_MS + 200) / 1000, ds.cruise(50));
   ds.run(d, 1, () => ({ gas: 0, brake: 0, steer: 0, handbrake: true }));
-  const p = d.car.rp, snapshot = d.snapshot;
+  const p = d.pose(d.car), snapshot = d.snapshot;
   const det = { fell, note, held, sideRoll: r2(side), backAfterS: r2(d.traffic.t - at), zBack: r2(p.z), onWheels: snapshot.onWheels, kmh: r2(d.kmh) };
   d.park();
   d.physics.dispose();

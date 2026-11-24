@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Pose } from '../sim/contract/pose';
-import type { Person } from '../sim/contract/agents';
 import { vehicleOf } from '../sim/vehicles';
+import type { SimClient } from '../sim/sim-client';
+import type { Rideable } from '../sim/types';
 import type { Picked, StreetLife } from '../view/life';
 import type { World } from '../core/world';
 import type { Foot } from './foot';
@@ -25,6 +26,8 @@ export interface RideHost {
   readonly glide: Glide;
   readonly keys: MoveKeys;
   life(): StreetLife | null;
+  /** the world sim's client (the local player's commands, reads) */
+  sim(): SimClient | null;
   world(): World | null;
   /** the ride changed (walking as the person began): Nav tells its listener */
   changed(R: Ride): void;
@@ -36,18 +39,18 @@ export class Rider {
   readonly camera = new RideCamera();
   /** Space while following a person: become them, then jump */
   jumpAsked = false;
-  // the person walked as (the local player's seat on them), while the ride lasts
-  private walking: Person | null = null;
+  // the person walked as (their id: the local player's seat on them), while the ride lasts
+  private walking: number | null = null;
 
   constructor(private readonly host: RideHost) {}
 
-  private get sim() { return this.host.life()?.client ?? null; }
+  private get sim() { return this.host.sim(); }
 
   /** follow ag (what was walked let go) */
   start(ag: Picked) {
     this.release();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
-    this.sim?.send({ kind: 'follow', entity: { kind: ag.kind, id: ag.obj.id } });
+    this.sim?.send({ kind: 'follow', entity: { kind: ag.ref.kind, id: ag.ref.id } });
   }
 
   /** the ride is over: nothing followed, nothing walked */
@@ -68,24 +71,24 @@ export class Rider {
 
   /** out of the vehicle (a step to its side) or off the person, onto the street: where Nav walks to */
   exit(): WalkOpts {
-    const R = this.ride, H = this.host, pose = R && H.life()?.pose(R.kind, R.obj);
+    const R = this.ride, H = this.host, pose = R && H.life()?.pose(R.ref);
     const f = H.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
     const p = pose ? new THREE.Vector3(pose.x, pose.y, pose.z) : H.camera.position.clone();
-    if (R && pose && R.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), 2.0);
-    return { at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.kind === 'person' };
+    if (R && pose && R.ref.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), 2.0);
+    return { at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.ref.kind === 'person' };
   }
 
   /** a frame of the ride before the sim's update: the walk's commands sent (walking as the person followed) */
   control(dt: number) {
-    const R = this.ride!, H = this.host, life = H.life();
+    const R = this.ride!, H = this.host, sim = this.sim;
     // (the seat refused: walked by another, or gone from the crowd; a pose out of reach: the walk back where the sim
     // took it)
-    if (life?.client.results('enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
-    if (life?.client.results('seatInput', 'walker').some((r) => !r.ok) && this.walking) {
-      const w = life.client.walkedPose(this.walking.id);
+    if (sim?.results('enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
+    if (sim?.results('seatInput', 'walker').some((r) => !r.ok) && this.walking !== null) {
+      const w = sim.walkedPose(this.walking);
       if (w) H.foot.correct(w);
     }
-    if (R.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.obj)) this.walkAs(dt);
+    if (R.ref.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.ref.id)) this.walkAs(dt);
   }
 
   /** a frame of the ride after the sim's update and the street's drawing (driving: the car driven): the camera placed
@@ -94,9 +97,9 @@ export class Rider {
    * its kind to follow instead, or 'off' (none: onto the street) */
   place(dt: number, driving: boolean): Picked | 'off' | null {
     const R = this.ride!, H = this.host, life = H.life();
-    const pose = life?.pose(R.kind, R.obj);
-    if (!pose) return life?.nearest(R.kind, { x: H.camera.position.x, z: H.camera.position.z }, R.obj) ?? 'off';
-    const { pos, q, look, fov } = this.camera.frame(R, pose, H.world(), driving, dt);
+    const pose = life?.pose(R.ref);
+    if (!pose) return life?.nearest(R.ref.kind, { x: H.camera.position.x, z: H.camera.position.z }, R.ref) ?? 'off';
+    const { pos, q, look, fov } = this.camera.frame(R, life!.agent(R.ref)!, pose, H.world(), driving, dt);
     H.glide.place(pos, q, fov, true, dt);
     H.controls.target.copy(H.camera.position).addScaledVector(look, 10);
     return null;
@@ -105,14 +108,14 @@ export class Rider {
   // walking as the person followed (foot.ts walkAs), through their eyes; they stay where left while the ride lasts
   // (release(): back to their own walk after)
   private walkAs(dt: number) {
-    const R = this.ride!, o = R.obj, H = this.host, sim = this.sim;
+    const R = this.ride!, o = R.ref, H = this.host, sim = this.sim;
     if (o.kind !== 'person' || !sim) return;
-    if (this.walking !== o) {
-      const p: Pose | null = H.life()!.pose('person', o);
+    if (this.walking !== o.id) {
+      const p: Pose | null = H.life()!.pose(o);
       if (!p) return;
       this.release();
       sim.send({ kind: 'enterSeat', entity: { kind: 'person', id: o.id }, role: 'walker', pose: { ...p, moving: false } });
-      this.walking = o;
+      this.walking = o.id;
       Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
       H.glide.start(1100);
       H.changed(R);
@@ -134,15 +137,15 @@ export class RideCamera {
   /** the ride is over: the next starts afresh */
   reset() { this.y = null; }
 
-  /** where the camera goes following R at pose (driving: the car driven) */
-  frame(R: Ride, pose: Pose, world: World | null, driving: boolean, dt: number) {
+  /** where the camera goes following R (agent: what it is now) at pose (driving: the car driven) */
+  frame(R: Ride, agent: Readonly<Rideable>, pose: Pose, world: World | null, driving: boolean, dt: number) {
     if (driving && R.view === 'behind') {
       // through jumps, drops and landings the chase camera's height follows the car with a short lag
       const y = this.y;
       this.y = y == null || Math.abs(pose.y - y) > 40 ? pose.y : y + (pose.y - y) * (1 - Math.exp(-9 * dt));
       pose.y = this.y;
     } else this.y = null;
-    const { pos, look, fov } = rideCamera(R, pose, world, dt);
+    const { pos, look, fov } = rideCamera(R, agent, pose, world, dt);
     if (driving) pos.add(this.shake);
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, pos.clone().add(look), new THREE.Vector3(0, 1, 0)));
     return { pos, q, look, fov };
@@ -155,25 +158,25 @@ const RIG = {
   car: { eye: [1.3, 2.45], fov: 62 }, // dashcam just past the bonnet
 };
 
-function rideCamera(R: Ride, pose: Pose, world: World | null, dt: number) {
-  const rig = RIG[R.kind], h = pose.h;
+function rideCamera(R: Ride, agent: Readonly<Rideable>, pose: Pose, world: World | null, dt: number) {
+  const rig = RIG[R.ref.kind], h = pose.h;
   const fw = new THREE.Vector3(Math.sin(h), 0, Math.cos(h)), base = new THREE.Vector3(pose.x, pose.y, pose.z);
   // looking around springs back to straight ahead a few seconds after letting go (vehicles turn under you): at
   // 1.2 /s, as 2 % a frame at 60 fps
-  if (R.kind !== 'person' && performance.now() - R.idle > 5000) { const k = Math.exp(-1.2 * dt); R.dyaw *= k; R.dpitch *= k; }
+  if (R.ref.kind !== 'person' && performance.now() - R.idle > 5000) { const k = Math.exp(-1.2 * dt); R.dyaw *= k; R.dpitch *= k; }
   const yaw = h + R.dyaw, pitch = (R.view === 'eyes' ? -0.04 : -0.22) + R.dpitch;
   const look = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
   if (R.view === 'eyes') {
-    const bus = R.obj.kind === 'car' && R.obj.bus ? R.obj : null;
+    const bus = agent.kind === 'car' && agent.bus ? agent : null;
     const ahead = bus ? bus.len / 2 + 0.25 : rig.eye[1], up = bus ? 2.3 : rig.eye[0];
     return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: THREE.MathUtils.clamp(rig.fov * R.zoom, 25, 80) };
   }
   // (zoomed: further back and higher up alike, the same angle down)
-  const chase = R.obj.kind === 'car' ? vehicleOf(R.obj).chase : RIG.person;
+  const chase = agent.kind === 'car' ? vehicleOf(agent).chase : RIG.person;
   const back = chase.back * R.zoom, high = chase.up * R.zoom;
   const pos = base.clone().addScaledVector(new THREE.Vector3(look.x, 0, look.z).normalize(), -back);
   pos.y = base.y + high;
-  return { pos: world ? clearOf(world, base, pos, high, R.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };
+  return { pos: world ? clearOf(world, base, pos, high, R.ref.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };
 }
 
 // keep the chase camera clear: under a deck or a tree drop lower first, only then pull in towards the agent

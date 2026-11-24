@@ -5,16 +5,16 @@ import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from 
 import type { SimClient } from '../sim/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
-import type { Car, Kind, Rideable, Vec3 } from '../sim/types';
-import type { Pose } from '../sim/contract/pose';
-import type { Person } from '../sim/contract/agents';
+import type { Car, Kind, Rideable } from '../sim/types';
+import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
-import type { VehicleId } from '../sim/contract/ids';
+import type { EntityRef, VehicleId } from '../sim/contract/ids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, sim/sim-client.ts TrafficView, ticked by main.ts) drawn between its last two ticks with instanced
 // meshes, the trains and the boats, the people knocked down or fallen into a hole (its events, drawn as an effect:
-// shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim.
+// shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
+// and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).
 
 export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
@@ -33,9 +33,16 @@ const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
 // (vy: falling into an edited hole, its vertical speed; land: when it met the ground)
 interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null; vy?: number; land?: number }
 
-export interface Picked { kind: Kind; obj: Rideable; label: string }
+/** an agent of the street life: a car (Car.id) or a person (Person.id) */
+export interface AgentRef extends EntityRef { kind: Kind }
+/** an agent picked on screen (or the nearest of a kind): which one, and what it is called */
+export interface Picked { ref: AgentRef; label: string }
 
-const setRp = (o: { rp?: Vec3 }, x: number, y: number, z: number) => { const p = (o.rp ??= { x, y, z }); p.x = x; p.y = y; p.z = z; return p; };
+// where an agent was drawn last (a car's ground point between its axles, a person's feet; heading, nose up, left side
+// up), and what its drawing carries from frame to frame: a motorbike's lean (tracking its lane), a walked person's step
+// phase (the sim's ph stands while they are walked); frame: the frame it was drawn in (one not drawn in the last frame
+// has left the traffic: its entry goes)
+interface Drawn extends RoadPose { lean?: number; ph?: number; frame: number }
 
 export class StreetLife {
   private readonly trains = new Trains();
@@ -49,13 +56,14 @@ export class StreetLife {
   private headAct: number[] = [];
   private viewer: { x: number; z: number; y?: number } = { x: 0, z: 0 };
   private readonly cols = new Map<string, THREE.Color>();
-  private readonly bikeLeans = new WeakMap<Car, number>();
-  // the step's phase of a person walked by a player (the sim's ph stands while they are walked)
-  private readonly walkPh = new WeakMap<Person, number>();
+  // the agents as drawn, by id: the cars (in the traffic and out of it), the people (on foot and riders)
+  private readonly drawnCars = new Map<number, Drawn>();
+  private readonly drawnPeople = new Map<number, Drawn>();
+  private frame = 0;
   // the world tick whose events were drawn last (WorldSim.eventsSince)
   private seen: number;
 
-  constructor(scene: THREE.Scene, readonly client: SimClient) {
+  constructor(scene: THREE.Scene, private readonly client: SimClient) {
     this.heads = client.traffic.heads;
     this.seen = client.tick;
     this.M = new LifeMeshes(scene, this.heads);
@@ -78,11 +86,14 @@ export class StreetLife {
     }
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
-    for (const e of events) if (e.kind === 'dropped' && e.person.rp) this.addFallen(e.person, 0, 1, 0, 0);
+    for (const e of events) {
+      const d = e.kind === 'dropped' && this.drawnPeople.get(e.person.id);
+      if (d) this.addFallen(e.person.col, !!e.person.bike, d, d.h, 0, 1, 0, 0);
+    }
     for (const e of events) {
       if (e.kind !== 'struck') continue;
       const { person, pose, vx, vz } = e, v = Math.hypot(vx, vz) || 1;
-      this.addFallen({ ...person, rp: pose, rh: pose.h }, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
+      this.addFallen(person.col, !!person.bike, pose, pose.h, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
     }
     this.render(Math.min(dt, 0.1), night, T.acc);
   }
@@ -114,6 +125,7 @@ export class StreetLife {
   // ------------------------------------------------------------------ drawing
   // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
+    this.frame++;
     this.drawCars(lead / STEP, night, dt);
     const back = 1 - lead / STEP;
     this.trains.render(this.traffic.trains.coaches(back), night);
@@ -121,6 +133,15 @@ export class StreetLife {
     const n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
+    for (const m of [this.drawnCars, this.drawnPeople]) for (const [id, d] of m) if (d.frame !== this.frame) m.delete(id);
+  }
+
+  // agent id's entry in m, marked drawn this frame (a new one at x, y, z if it has none)
+  private entry(m: Map<number, Drawn>, id: number, x: number, y: number, z: number) {
+    let d = m.get(id);
+    if (!d) m.set(id, d = { x, y, z, h: 0, pitch: 0, roll: 0, frame: this.frame });
+    d.frame = this.frame;
+    return d;
   }
 
   // a: how far from the last but one tick to the last (0..1)
@@ -146,10 +167,11 @@ export class StreetLife {
     // (each type its own meshes, its instances counted)
     const n = {} as Record<VehicleId, number>;
     for (const id of VEHICLE_IDS) n[id] = 0;
-    const draw = (c: Car, lean = 0) => {
-      B?.pose(c, a);
+    const draw = (c: Car, d: Drawn, lean = 0) => {
+      const p = B?.pose(c, a, d);
+      if (p && p !== d) { d.x = p.x; d.y = p.y; d.z = p.z; d.h = p.h; d.pitch = p.pitch; d.roll = p.roll; }
       const t = vehicleOf(c), V = M.vehicles[t.id], i = n[t.id]++;
-      m.compose(pos.set(c.rp!.x, c.rp!.y, c.rp!.z), q.setFromEuler(eu.set(-(c.pitch ?? 0), c.rh ?? 0, (c.roll ?? 0) + lean)), sc.set(1, 1, c.len / t.len));
+      m.compose(pos.set(d.x, d.y, d.z), q.setFromEuler(eu.set(-(d.pitch ?? 0), d.h ?? 0, (d.roll ?? 0) + lean)), sc.set(1, 1, c.len / t.len));
       V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
       V.body.setColorAt(i, this.col(c.col));
       V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
@@ -157,17 +179,23 @@ export class StreetLife {
     for (const c of T.cars) {
       const s = c.s - c.ds * back, off = c.off - c.dOff * back;
       T.carPose(c, s, off, pose);
-      setRp(c, pose.x, pose.y, pose.z);
-      c.rh = pose.h; c.pitch = pose.pitch; c.roll = 0;
+      const d = this.entry(this.drawnCars, c.id, pose.x, pose.y, pose.z);
+      d.x = pose.x; d.y = pose.y; d.z = pose.z;
+      d.h = pose.h; d.pitch = pose.pitch; d.roll = 0;
       let lean = 0;
       if (c.vt === 'moto') {
-        const previous = this.bikeLeans.get(c) ?? 0;
+        const previous = d.lean ?? 0;
         lean = previous + (laneLean(c, s, off) - previous) * ease;
-        this.bikeLeans.set(c, lean);
+        d.lean = lean;
       }
-      draw(c, lean);
+      draw(c, d, lean);
     }
-    for (const c of T.detachedCars) draw(c);
+    // (out of the traffic: from where it was drawn last; never drawn, from where it was parked, heading 0 until its
+    // bodies' pose says otherwise)
+    for (const c of T.detachedCars) {
+      const at = c.detachedPose ?? { x: 0, y: 0, z: 0 };
+      draw(c, this.entry(this.drawnCars, c.id, at.x, at.y, at.z));
+    }
     for (const id of VEHICLE_IDS) {
       const V = M.vehicles[id];
       setCount(n[id], V.body, V.dark, V.head, V.tail);
@@ -182,23 +210,21 @@ export class StreetLife {
     this.people.forEach((p, i) => {
       let bob = 0;
       const C = this.client.walkedPose(p.id);
+      let r: Drawn;
       if (C) { // walked by a player (WorldSim enterSeat, a walker's): where they put them, their step's phase this side's
-        setRp(p, C.x, C.y, C.z); p.rh = C.h;
-        if (C.moving) { const ph = (this.walkPh.get(p) ?? p.ph) + dt * 9; this.walkPh.set(p, ph); bob = Math.sin(ph); }
+        r = this.entry(this.drawnPeople, p.id, C.x, C.y, C.z);
+        r.x = C.x; r.y = C.y; r.z = C.z; r.h = C.h;
+        if (C.moving) { const ph = (r.ph ?? p.ph) + dt * 9; r.ph = ph; bob = Math.sin(ph); }
       } else {
         const ds = p.wait ? 0 : p.v * lead;
         T.personPoint(p, ds, A);
         T.personPoint(p, ds + 0.5, B);
-        const h = Math.atan2(B.x - A.x, B.y - A.y);
-        if (!p.rp || Math.hypot(p.rp.x - A.x, p.rp.z - A.y) > 6) { setRp(p, A.x, A.z, A.y); p.rh = h; }
-        const r = p.rp!;
-        r.x += (A.x - r.x) * k; r.y += (A.z - r.y) * k; r.z += (A.y - r.z) * k;
-        p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
+        r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 6, k);
         if (!p.wait) bob = Math.sin(p.ph + ds * 4.2);
       }
-      pos.set(p.rp!.x, p.rp!.y, p.rp!.z);
+      pos.set(r.x, r.y, r.z);
       pos.y += 0.05 * Math.abs(bob);
-      m.compose(pos, q.setFromAxisAngle(up, p.rh!), one);
+      m.compose(pos, q.setFromAxisAngle(up, r.h), one);
       M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
       M.torso.setColorAt(i, this.col(p.col));
     });
@@ -214,12 +240,8 @@ export class StreetLife {
       const ds = p.wait ? 0 : p.v * lead;
       T.personPoint(p, ds, A);
       T.personPoint(p, ds + 1, B);
-      const h = Math.atan2(B.x - A.x, B.y - A.y);
-      if (!p.rp || Math.hypot(p.rp.x - A.x, p.rp.z - A.y) > 8) { setRp(p, A.x, A.z, A.y); p.rh = h; }
-      const r = p.rp!;
-      r.x += (A.x - r.x) * k; r.y += (A.z - r.y) * k; r.z += (A.y - r.z) * k;
-      p.rh = (p.rh ?? h) + Math.atan2(Math.sin(h - (p.rh ?? h)), Math.cos(h - (p.rh ?? h))) * k;
-      q.setFromAxisAngle(up, p.rh!);
+      const r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 8, k);
+      q.setFromAxisAngle(up, r.h);
       pos.set(r.x, r.y, r.z);
       M.bike.setMatrixAt(i, m.compose(pos, q, one));
       pos.y += 0.45;
@@ -231,14 +253,26 @@ export class StreetLife {
     return this.riders.length;
   }
 
-  // a person (drawn: rp) falls over, shoved along (dx, dz) at v m/s; vy: falling into a hole too, at vy m/s
-  private addFallen(p: Person, dx: number, dz: number, v: number, vy?: number) {
+  // person id drawn on their way's point A (x, z across, ground y: sim/path.ts pt), heading h, eased in by k this
+  // frame; put on it when further than jump m (or not drawn before)
+  private follow(id: number, A: { x: number; y: number; z: number }, h: number, jump: number, k: number) {
+    let r = this.drawnPeople.get(id);
+    if (!r || Math.hypot(r.x - A.x, r.z - A.y) > jump) { r = this.entry(this.drawnPeople, id, A.x, A.z, A.y); r.x = A.x; r.y = A.z; r.z = A.y; r.h = h; }
+    r.frame = this.frame;
+    r.x += (A.x - r.x) * k; r.y += (A.z - r.y) * k; r.z += (A.y - r.z) * k;
+    r.h = r.h + Math.atan2(Math.sin(h - r.h), Math.cos(h - r.h)) * k;
+    return r;
+  }
+
+  // a person (shirt col; bike: on one) drawn at p heading h falls over, shoved along (dx, dz) at v m/s; vy: falling
+  // into a hole too, at vy m/s
+  private addFallen(col: string, bike: boolean, p: { x: number; y: number; z: number }, h: number | undefined, dx: number, dz: number, v: number, vy?: number) {
     if (this.fallen.length >= MAX_FALLEN) { // the oldest out of sight (else the oldest)
       const i = this.fallen.findIndex((f) => this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
       this.fallen.splice(Math.max(0, i), 1);
     }
-    const at = new THREE.Vector3(p.rp!.x, p.rp!.y, p.rp!.z);
-    this.fallen.push({ col: this.col(p.col), bike: !!p.bike, at, h: p.rh ?? 0, dx, dz, v, t: 0, bikeAt: p.bike ? at.clone() : null, vy });
+    const at = new THREE.Vector3(p.x, p.y, p.z);
+    this.fallen.push({ col: this.col(col), bike, at, h: h ?? 0, dx, dz, v, t: 0, bikeAt: bike ? at.clone() : null, vy });
   }
 
   // the people knocked down further than r m from (x, z) gone (left behind; never in sight of the viewer)
@@ -305,14 +339,22 @@ export class StreetLife {
   }
 
   private listOf(kind: Kind): Rideable[] { return kind === 'car' ? this.traffic.roadVehicles() : kind === 'person' ? this.people : []; }
+  private drawnOf(kind: Kind) { return kind === 'car' ? this.drawnCars : this.drawnPeople; }
+  private static label(o: Rideable) { return o.kind === 'car' ? (o.bus ? 'bus' : 'car') : 'person'; }
+
+  /** where agent id of kind was drawn last (its pose, heading, pitch, roll; tools/), or undefined if it was not */
+  drawn(kind: Kind, id: number): Readonly<RoadPose> | undefined { return this.drawnOf(kind).get(id); }
+
+  /** agent ref as the sim has it now (read only: what it is, a car's type, length), or null once it has left */
+  agent(ref: AgentRef): Readonly<Rideable> | null { return this.listOf(ref.kind).find((o) => o.id === ref.id) ?? null; }
 
   // the agent nearest to screen point (cx, cy) within px, at least minPx tall on screen, and visible
-  pick(camera: THREE.PerspectiveCamera, cx: number, cy: number, px: number, minPx: number, visible: (to: THREE.Vector3) => boolean, skip: Rideable | null): Picked | null {
+  pick(camera: THREE.PerspectiveCamera, cx: number, cy: number, px: number, minPx: number, visible: (to: THREE.Vector3) => boolean, skip: AgentRef | null): Picked | null {
     const v = new THREE.Vector3(), cand: (Picked & { score: number; at: THREE.Vector3 })[] = [];
     const f = (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360);
     const scr = (x: number, y: number, z: number) => { v.set(x, y, z).project(camera); return v.z > 1 || v.z < -1 ? null : [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; };
     const test = (kind: Kind, obj: Rideable, x: number, y: number, z: number, size: number, label: string, h = 0, len = 0) => {
-      if (obj === skip) return;
+      if (skip && skip.kind === kind && skip.id === obj.id) return;
       const c = scr(x, y, z);
       if (!c) return;
       const dist = camera.position.distanceTo(v.set(x, y, z)), onScreen = size * f / dist;
@@ -327,30 +369,45 @@ export class StreetLife {
         }
       }
       const r = Math.max(px, onScreen * 0.55);
-      if (d < r) cand.push({ kind, obj, label, score: d / r + dist / 3000, at: new THREE.Vector3(x, y + size * 0.3, z) });
+      if (d < r) cand.push({ ref: { kind, id: obj.id }, label, score: d / r + dist / 3000, at: new THREE.Vector3(x, y + size * 0.3, z) });
     };
-    for (const c of this.traffic.roadVehicles()) if (c.rp) test('car', c, c.rp.x, c.rp.y + 0.8, c.rp.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', c.rh, c.len);
-    for (const p of this.people) if (p.rp) test('person', p, p.rp.x, p.rp.y + 0.9, p.rp.z, 1.6, 'person');
+    for (const c of this.traffic.roadVehicles()) {
+      const d = this.drawnCars.get(c.id);
+      if (d) test('car', c, d.x, d.y + 0.8, d.z, c.bus ? 6 : 3.5, c.bus ? 'bus' : 'car', d.h, c.len);
+    }
+    for (const p of this.people) {
+      const d = this.drawnPeople.get(p.id);
+      if (d) test('person', p, d.x, d.y + 0.9, d.z, 1.6, 'person');
+    }
     cand.sort((a, b) => a.score - b.score);
-    return cand.slice(0, 6).find((c) => visible(c.at.clone().sub(camera.position))) ?? null;
+    const best = cand.slice(0, 6).find((c) => visible(c.at.clone().sub(camera.position)));
+    return best ? { ref: best.ref, label: best.label } : null;
   }
 
-  // where an agent is now, or null once it has left
-  pose(kind: Kind, obj: Rideable): Pose | null {
-    if (!obj.rp || !this.listOf(kind).includes(obj)) return null;
-    return { x: obj.rp.x, y: obj.rp.y, z: obj.rp.z, h: obj.rh ?? 0 };
+  /** where agent ref is drawn now (a pose of its own), or null once it has left */
+  pose(ref: AgentRef): Pose | null {
+    const d = this.drawnOf(ref.kind).get(ref.id);
+    if (!d || !this.agent(ref)) return null;
+    return { x: d.x, y: d.y, z: d.z, h: d.h ?? 0 };
   }
 
-  // the nearest one of a kind, preferring one that moves
-  nearest(kind: Kind, from: { x: number; z: number }, skip: Rideable | null): Picked | null {
+  /** the first one of a kind drawn, or null */
+  first(kind: Kind): Picked | null {
+    const D = this.drawnOf(kind), o = this.listOf(kind).find((q) => D.has(q.id));
+    return o ? { ref: { kind, id: o.id }, label: StreetLife.label(o) } : null;
+  }
+
+  /** the nearest one of a kind, preferring one that moves */
+  nearest(kind: Kind, from: { x: number; z: number }, skip: AgentRef | null): Picked | null {
     let best: Rideable | null = null, bd = Infinity;
+    const D = this.drawnOf(kind);
     for (const o of this.listOf(kind)) {
-      if (o === skip || !o.rp) continue;
-      const d = Math.hypot(o.rp.x - from.x, o.rp.z - from.z), dd = d + (kind === 'person' || o.v > 1.5 ? 0 : 400);
+      const p = D.get(o.id);
+      if ((skip && skip.kind === kind && skip.id === o.id) || !p) continue;
+      const d = Math.hypot(p.x - from.x, p.z - from.z), dd = d + (kind === 'person' || o.v > 1.5 ? 0 : 400);
       if (dd < bd && d > (kind === 'person' ? 3 : 8)) { bd = dd; best = o; }
     }
     if (!best) return null;
-    const label = best.kind === 'car' ? (best.bus ? 'bus' : 'car') : 'person';
-    return { kind, obj: best, label };
+    return { ref: { kind, id: best.id }, label: StreetLife.label(best) };
   }
 }

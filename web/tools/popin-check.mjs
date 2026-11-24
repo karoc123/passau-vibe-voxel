@@ -107,9 +107,9 @@ function run({ name, at: start, h0, h1 }) {
     sim.update(dt, { hour: h0 + (h1 - h0) * t / SECONDS, focus });
     life.update(dt, 0, focus);
     const now = new Map();
-    for (const c of T.roadVehicles()) if (c.rp) now.set(c, ['car', c.rp.x, c.rp.z]);
-    for (const p of T.people) if (p.rp) now.set(p, ['person', p.rp.x, p.rp.z]);
-    for (const p of T.riders) if (p.rp) now.set(p, ['rider', p.rp.x, p.rp.z]);
+    for (const c of T.roadVehicles()) { const d = life.drawn('car', c.id); if (d) now.set(c, ['car', d.x, d.z]); }
+    for (const p of T.people) { const d = life.drawn('person', p.id); if (d) now.set(p, ['person', d.x, d.z]); }
+    for (const p of T.riders) { const d = life.drawn('person', p.id); if (d) now.set(p, ['rider', d.x, d.z]); }
     if (last) {
       const near = (k, x, z) => Math.hypot(x - viewer.x, z - viewer.z) < (k === 'car' ? CAR_R : PED_R);
       const front = (x, z) => { const dx = x - viewer.x, dz = z - viewer.z, l = Math.hypot(dx, dz) || 1; return (dx * viewer.hx + dz * viewer.hz) / l > 0.5; };

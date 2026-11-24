@@ -7,11 +7,11 @@
 //                                      cores' state), the events since (the crafts' and the drivers' among them), the
 //                                      session's player's reads (id, seat, car, results, ack)
 //   TrafficMirror                      the client side: a Traffic of its own over the same TrafficData, never ticked,
-//                                      its agents set from each snapshot, one object per id (the drawn fields, the
-//                                      nav's ride carry over); what view/life.ts draws (TrafficView)
+//                                      its agents set from each snapshot, one object per id; what view/life.ts draws
+//                                      (TrafficView)
 // No three.js, no DOM (tools/core-deps.mjs).
 import { saveState } from './craft/core-state';
-import { STEP, Traffic, type Ground, type TrafficBodies } from './traffic';
+import { fadeOut, STEP, Traffic, type Ground, type TrafficBodies } from './traffic';
 import type { Car, TrafficData } from './types';
 import type { BodyDraw, BoatView, CarState, Person, PersonState } from './contract/agents';
 import type { CommandResult } from './contract/commands';
@@ -36,8 +36,7 @@ export type StatesAreTheContracts = [
 /** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
  * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
  * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
- * snapshots (docs/plans/local-server.md: TrafficMirror). Read only, except the drawn fields (rp, rh, pitch, roll) on
- * its agents. */
+ * snapshots (docs/plans/local-server.md: TrafficMirror). Read only: what is drawn where is the view's (view/life.ts). */
 export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
   'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
   { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
@@ -84,7 +83,7 @@ export class TrafficMirror implements TrafficView {
   readonly walked = new Map<number, WalkPose>();
   readonly bodies = {
     owns: (c: Car) => !!this.draws.get(c.id)?.owns,
-    pose: (c: Car, a: number) => this.bodyPose(c, a),
+    pose: (c: Car, a: number, under: RoadPose) => this.bodyPose(c, a, under),
   };
 
   /** data: a TrafficData of its own (its paths are prepared in place: never the sim's); ground: the page's */
@@ -154,26 +153,15 @@ export class TrafficMirror implements TrafficView {
 
   // as LifePhysics.pose: a parked car or a wreck where it is, a body between its last two drawn poses, the fade back
   // onto its path blended out
-  private bodyPose(c: Car, a: number) {
+  private bodyPose(c: Car, a: number, under: RoadPose): RoadPose {
     const d = this.draws.get(c.id);
-    if (c.detachedPose) put(c, c.detachedPose);
-    if (!d) return;
+    let p = c.detachedPose ?? under;
+    if (!d) return p;
     if (d.p0 && d.p1) {
-      const p = d.p0, q = d.p1, l = (u: number, v: number) => u + (v - u) * a;
-      put(c, { x: l(p.x, q.x), y: l(p.y, q.y), z: l(p.z, q.z), h: lerpAngle(p.h, q.h, a), pitch: lerpAngle(p.pitch, q.pitch, a), roll: lerpAngle(p.roll, q.roll, a) });
+      const p0 = d.p0, q = d.p1, l = (u: number, v: number) => u + (v - u) * a;
+      p = { x: l(p0.x, q.x), y: l(p0.y, q.y), z: l(p0.z, q.z), h: lerpAngle(p0.h, q.h, a), pitch: lerpAngle(p0.pitch, q.pitch, a), roll: lerpAngle(p0.roll, q.roll, a) };
     }
     const f = d.fade;
-    if (f && c.rp) {
-      const k = 1 - smooth01((f.t + (a - 1) * STEP) / f.dur);
-      c.rp.x += f.dx * k; c.rp.y += f.dy * k; c.rp.z += f.dz * k;
-      c.rh = (c.rh ?? 0) + f.dh * k;
-      if (!d.body) c.roll = (c.roll ?? 0) * (1 - k);
-    }
+    return f ? fadeOut(p, f, 1 - smooth01((f.t + (a - 1) * STEP) / f.dur), d.body) : p;
   }
-}
-
-function put(c: Car, p: RoadPose) {
-  const rp = (c.rp ??= { x: p.x, y: p.y, z: p.z });
-  rp.x = p.x; rp.y = p.y; rp.z = p.z;
-  c.rh = p.h; c.pitch = p.pitch; c.roll = p.roll;
 }

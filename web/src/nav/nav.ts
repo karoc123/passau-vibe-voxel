@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../view/life';
+import type { SimClient } from '../sim/sim-client';
 import type { Pose } from '../sim/contract/pose';
 import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
@@ -59,6 +60,7 @@ export class Nav {
   origin: [number, number] = [0, 0];
   cancelFly: () => void = () => {};
   private lifeRef: StreetLife | null = null;
+  private simRef: SimClient | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
   private readonly keys = new MoveKeys();
   private readonly glide: Glide;
@@ -91,7 +93,7 @@ export class Nav {
     dom.style.cursor = 'grab';
     this.foot = new Foot(scene, this.actors, camera, controls, this.keys, this.glide, () => this.world);
     this.rider = new Rider({
-      camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, world: () => this.world,
+      camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
       changed: (R) => this.onMode(this.mode, R),
     });
     this.bindKeys();
@@ -139,7 +141,7 @@ export class Nav {
       return { x, y: foot.feet, z, h: this.third ? foot.pedestrian?.facing ?? foot.yaw : foot.yaw };
     }
     const ride = this.ride;
-    const followed = ride && this.life?.pose(ride.kind, ride.obj);
+    const followed = ride && this.life?.pose(ride.ref);
     if (followed) return followed;
     const { x, y, z } = this.onMap ? this.controls.target : this.camera.position;
     const f = this.camera.getWorldDirection(this.mapDirection);
@@ -153,6 +155,9 @@ export class Nav {
 
   get life() { return this.lifeRef; }
   set life(l: StreetLife | null) { this.lifeRef = l; this.net = null; }
+  /** the world sim's client (main.ts: set with the street life) */
+  get sim() { return this.simRef; }
+  set sim(s: SimClient | null) { this.simRef = s; this.net = null; }
   // turning in place with the keys: the focus is off on its own, put back on release
   get turning() { return this.orbit.turned; }
 
@@ -181,7 +186,7 @@ export class Nav {
         return;
       }
       if (this.craftView || this.driving) return;
-      if (e.code === 'Space' && (this.onFoot || this.ride?.kind === 'person')) { // following someone: become them, then jump
+      if (e.code === 'Space' && (this.onFoot || this.ride?.ref.kind === 'person')) { // following someone: become them, then jump
         if (this.onFoot) {
           if (!this.third || !e.repeat) this.foot.jump(this.third);
         } else this.rider.jumpAsked = true;
@@ -190,7 +195,7 @@ export class Nav {
       const k = MoveKeys.of(e.code);
       if (!k) return;
       K.add(k);
-      if (this.ride && this.ride.kind !== 'person') this.hopOff();
+      if (this.ride && this.ride.ref.kind !== 'person') this.hopOff();
       this.foot.goal = null;
       this.cancelFly();
       e.preventDefault();
@@ -357,7 +362,7 @@ export class Nav {
   private pickAgent(cx: number, cy: number, px: number, minPx: number) {
     const life = this.life, world = this.world;
     if (!life?.group.visible || !world) return null;
-    return life.pick(this.camera, cx, cy, px, minPx, (to) => { const L = to.length(); return world.raycast(this.camera.position, to.divideScalar(L), L) >= L - 2.5; }, this.ride?.obj ?? null);
+    return life.pick(this.camera, cx, cy, px, minPx, (to) => { const L = to.length(); return world.raycast(this.camera.position, to.divideScalar(L), L) >= L - 2.5; }, this.ride?.ref ?? null);
   }
 
   // what a click would do here: a hand over people and vehicles, a ring on the street where you would walk
@@ -525,13 +530,13 @@ export class Nav {
       return;
     }
 
-    const ride = this.ride, pose = ride && this.life?.pose(ride.kind, ride.obj);
+    const ride = this.ride, pose = ride && this.life?.pose(ride.ref);
     if (pose) {
       const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
       const at = new THREE.Vector3(pose.x, pose.y, pose.z);
       const side = new THREE.Vector3(-facing.z, 0, facing.x);
       const room = world;
-      const exits = ride.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
+      const exits = ride.ref.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
       const clear = exits.find(p => {
         const y = room.support(p.x, p.z, p.y + 1.02);
         return room.inside(p.x, p.z) && p.y - y < 1.7 && !room.blocked(p.x, p.z, y, y + HEAD);
@@ -571,7 +576,7 @@ export class Nav {
     this.landmark = null;
     if (opts.exact) spot = [Math.floor(t.x), Math.floor(t.z)];
     else {
-      if (this.life && !this.net) this.net = walkNet(w, this.life.client.traffic.peds);
+      if (this.sim && !this.net) this.net = walkNet(w, this.sim.traffic.peds);
       const s = openSpot(w, this.net, t.x, t.z);
       this.landmark = s?.landmark ?? null;
       spot = s?.at ?? findStreet(w, this.camera.position.x, this.camera.position.z);

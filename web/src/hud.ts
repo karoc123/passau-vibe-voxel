@@ -1,4 +1,5 @@
 import type { Mode, Ride } from './nav/nav';
+import type { Rideable } from './sim/types';
 import { typing } from './nav/input';
 import { $, coarsePointer, el } from './util';
 
@@ -53,18 +54,19 @@ export class Hud {
     this.set(mode, null);
   }
 
-  set(mode: Mode, ride: Ride | null) {
+  /** agent: what the ride follows, as the sim has it now (view/life.ts StreetLife.agent) */
+  set(mode: Mode, ride: Ride | null, agent: Readonly<Rideable> | null = null) {
     // (hidden in a craft and while driving: style.css, body[data-mode])
     this.box.classList.toggle('pedestrian', mode === 'pedestrian');
-    const label = ride?.obj.kind === 'car' && ride.obj.vt === 'moto' ? 'moto' : ride?.label;
-    $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.kind] : '';
+    const label = agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label;
+    $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.ref.kind] : '';
     if (this.touch) {
       $('.hint', this.box).textContent = mode === 'walk' || mode === 'pedestrian'
         ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there · Pinch: zoom' : '';
       return;
     }
     const items = [...MOUSE[mode], LABELS];
-    if (mode === 'walk' || ride?.kind === 'person') items.splice(items.length - 2, 0, ['Space', SPACE, 'jump']);
+    if (mode === 'walk' || ride?.ref.kind === 'person') items.splice(items.length - 2, 0, ['Space', SPACE, 'jump']);
     $('.mouse', this.box).innerHTML = items.map(([k, icon, word]) => `<figure data-k="${k}">${icon}<figcaption>${word}</figcaption></figure>`).join('');
   }
 }

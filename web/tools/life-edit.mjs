@@ -136,21 +136,26 @@ function run(ctx, seconds, each) {
   } finally { Math.random = realRandom; }
 }
 
-// a car's pose as drawn at the tick (view/life.ts drawCars at a = 1): kinematic, or its body's
+// a car's pose as drawn at the tick (view/life.ts drawCars at a = 1): kinematic, or its body's; kept by car id in
+// ctx.poses (rp: the last drawn, undefined if never)
 const pose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+const rp = (ctx, c) => ctx.poses?.get(c.id);
 function drawn(ctx, c) {
+  const P = (ctx.poses ??= new Map());
+  let under = P.get(c.id);
   if (ctx.T.cars.includes(c)) {
     ctx.T.carPose(c, c.s, c.off, pose);
-    c.rp = { x: pose.x, y: pose.y, z: pose.z }; c.rh = pose.h; c.pitch = pose.pitch; c.roll = 0;
+    under = { x: pose.x, y: pose.y, z: pose.z, h: pose.h, pitch: pose.pitch, roll: 0 };
   }
-  ctx.phys.pose(c, 1);
-  return c.rp;
+  under ??= c.detachedPose;
+  if (under) P.set(c.id, { ...ctx.phys.pose(c, 1, under) });
+  return P.get(c.id);
 }
 
 // how far a car's lowest edge is under its drawn ground point (m, <= 0): 0 on its wheels; lying on its side (a van
 // fallen into a hole) its flank is the bottom, half its width under the point (its model's box, sim/vehicles.ts)
-function lowEdge(c) {
-  const m = VH.modelHalf(VH.vehicleOf(c)), r = c.roll ?? 0, k = Math.cos(c.pitch ?? 0);
+function lowEdge(ctx, c) {
+  const d = rp(ctx, c), m = VH.modelHalf(VH.vehicleOf(c)), r = d.roll ?? 0, k = Math.cos(d.pitch ?? 0);
   let low = 0;
   for (const x of [-m.x, m.x]) for (const y of [0, 2 * m.y]) low = Math.min(low, (x * Math.sin(r) + y * Math.cos(r)) * k);
   return low;
@@ -174,7 +179,7 @@ function watcher(ctx) {
   };
   return {
     tick() {
-      for (const c of [...T.cars, ...T.detachedCars]) { const p = drawn(ctx, c); look(`car ${c.id}${phys.owns(c) ? ' (body)' : ''}`, c, p.x, p.y + lowEdge(c), p.z); }
+      for (const c of [...T.cars, ...T.detachedCars]) { const p = drawn(ctx, c); look(`car ${c.id}${phys.owns(c) ? ' (body)' : ''}`, c, p.x, p.y + lowEdge(ctx, c), p.z); }
       for (const p of [...T.people, ...T.riders]) { T.personPoint(p, 0, P); look('person', p, P.x, P.z, P.y); }
       for (const b of phys.bodies.values()) {
         if (b.state !== 'track') continue;
@@ -207,7 +212,7 @@ function pickCar(ctx, deck, minV, follower = false, near = { ...ctx.focus, radiu
 
 // the car behind c in its lane (within 30 m: its kinematic pose behind c's, less than 1.5 m across)
 function behindOf(ctx, c) {
-  const p = drawn(ctx, c), fx = Math.sin(c.rh), fz = Math.cos(c.rh);
+  const p = drawn(ctx, c), fx = Math.sin(p.h), fz = Math.cos(p.h);
   let best = null, bd = 30;
   for (const o of ctx.T.cars) {
     if (o === c || o.bus) continue;
@@ -237,7 +242,7 @@ async function dig() {
   for (let k = 0; k < 40 && !(car = pickCar(ctx, 8, MIN_V, false, near)); k++) run(ctx, 0.5);
   if (!check(car, `a car at ${MIN_V} m/s or more on the bridge deck within ${near.radius} m of (${near.x}, ${near.z})`)) return ctx;
   const p = drawn(ctx, car), deck = p.y, R = 4;
-  const ax = p.x + Math.sin(car.rh) * 6, az = p.z + Math.cos(car.rh) * 6;
+  const ax = p.x + Math.sin(p.h) * 6, az = p.z + Math.cos(p.h) * 6;
   const op = { kind: 'sphere', x: Math.floor(ax), y: Math.floor(az), z: Math.floor(deck) - 1, r: R, id: 0 };
   const box = [op.x - R, op.y - R, op.x + R + 1, op.y + R + 1];
   await edit(ctx, op, box);
@@ -252,8 +257,9 @@ async function dig() {
   run(ctx, 15, (i) => {
     w.tick();
     if (bodyAt < 0 && phys.owns(car)) bodyAt = ctx.t - t0;
-    if (car.rp) minY = Math.min(minY, car.rp.y + lowEdge(car));
-    for (const c of [...T.cars, ...T.detachedCars]) if (c.rp && c.rp.y < deck - 3 && Math.hypot(c.rp.x - ax, c.rp.z - az) < 8) fallers.add(c.id);
+    const q = rp(ctx, car);
+    if (q) minY = Math.min(minY, q.y + lowEdge(ctx, car));
+    for (const c of [...T.cars, ...T.detachedCars]) { const r = rp(ctx, c); if (r && r.y < deck - 3 && Math.hypot(r.x - ax, r.z - az) < 8) fallers.add(c.id); }
     const fresh = ctx.sim.eventsSince(seen);
     check(fresh.every((e) => e.tick > seen && e.tick <= ctx.sim.tick), 'the events read are those of the ticks since the last read');
     dropped += fresh.filter((e) => e.kind === 'dropped').length;
@@ -264,7 +270,7 @@ async function dig() {
     `a reader every 5 s gets the same events (${late.filter((e) => e.kind === 'dropped').length} / ${dropped} dropped)`);
   check(ctx.sim.eventsSince(ctx.sim.tick).length === 0, 'nothing since the last tick');
   const lost = phys.log.find((l) => l.kind === 'lost' && l.id === car.id), rest = phys.log.find((l) => l.kind === 'rest' && l.id === car.id);
-  const rim = [...phys.bodies.values()].filter((b) => b.state === 'track' && b.held && Math.hypot(b.car.rp.x - ax, b.car.rp.z - az) < 20).length;
+  const rim = [...phys.bodies.values()].filter((b) => b.state === 'track' && b.held && Math.hypot(rp(ctx, b.car).x - ax, rp(ctx, b.car).z - az) < 20).length;
   log(`  car ${car.id}: body after ${f2(bodyAt)} s, lowest ${f2(minY)}, lost ${lost ? `at ${f2(lost.t)} (${lost.why})` : 'never'}, rest ${rest ? `at y ${f2(rest.at[1])}` : 'never'}; ${fallers.size} car(s) fell in, ${rim} held near the rim; ${dropped} person(s) fell`);
   check(bodyAt >= 0 && bodyAt < 0.3, `the car gets a body as the edit lands (${f2(bodyAt)} s)`);
   check(Math.abs(minY - below) < 1, `it falls through the deck to the ground under it (lowest ${f2(minY)}, ground ${f2(below)})`);
@@ -278,7 +284,7 @@ async function block() {
   const ctx = await setup(STREET), { T, phys } = ctx;
   const car = pickCar(ctx, -99, 6, true);
   if (!check(car, `a moving car with one behind it near (${ctx.focus.x}, ${ctx.focus.z})`)) return null;
-  const p = drawn(ctx, car), h = car.rh, ax = p.x + Math.sin(h) * 25, az = p.z + Math.cos(h) * 25;
+  const p = drawn(ctx, car), h = p.h, ax = p.x + Math.sin(h) * 25, az = p.z + Math.cos(h) * 25;
   const op = { kind: 'box', x: Math.floor(ax) - 3, y: Math.floor(az) - 3, z: Math.floor(p.y), w: 7, d: 7, h: 3, id: 30 };
   const box = [op.x, op.y, op.x + op.w, op.y + op.d];
   await edit(ctx, op, box);
@@ -289,7 +295,7 @@ async function block() {
   let inside = 0, touch = 0, maxAlong = 0;
   run(ctx, 15, () => {
     w.tick();
-    for (const c of [...T.cars, ...T.detachedCars]) if (inBlock(c.rp)) inside++;
+    for (const c of [...T.cars, ...T.detachedCars]) if (inBlock(rp(ctx, c))) inside++;
     for (const id of [car, behind]) {
       const b = phys.bodies.get(id.id);
       if (!b) continue;
@@ -299,15 +305,16 @@ async function block() {
   });
   const b = phys.bodies.get(car.id), bb = phys.bodies.get(behind.id);
   const face = (q) => { const dx = Math.max(op.x - q.x, 0, q.x - (op.x + op.w)), dz = Math.max(op.y - q.z, 0, q.z - (op.y + op.d)); return Math.hypot(dx, dz); };
-  const gap = car.rp && behind.rp ? Math.hypot(car.rp.x - behind.rp.x, car.rp.z - behind.rp.z) - (car.len + behind.len) / 2 : NaN;
-  log(`  car ${car.id}: ${b ? b.state : 'no body'} v ${b ? f2(b.vb) : '-'} ${f2(face(car.rp))} m from the block, in traffic ${T.cars.includes(car)}, along max ${f2(maxAlong)}; car ${behind.id}: ${bb ? bb.state : 'no body'} gap ${f2(gap)} m`);
+  const cp = rp(ctx, car), bp = rp(ctx, behind);
+  const gap = cp && bp ? Math.hypot(cp.x - bp.x, cp.z - bp.z) - (car.len + behind.len) / 2 : NaN;
+  log(`  car ${car.id}: ${b ? b.state : 'no body'} v ${b ? f2(b.vb) : '-'} ${f2(face(cp))} m from the block, in traffic ${T.cars.includes(car)}, along max ${f2(maxAlong)}; car ${behind.id}: ${bb ? bb.state : 'no body'} gap ${f2(gap)} m`);
   check(b && b.state === 'track' && T.cars.includes(car) && Math.abs(b.vb) < 0.5, `the car stops before the block, still in the traffic (${b?.state}, v ${b ? f2(b.vb) : '-'})`);
-  check(face(car.rp) > 0.3 && face(car.rp) < 10, `... in front of it (${f2(face(car.rp))} m from it)`);
+  check(face(cp) > 0.3 && face(cp) < 10, `... in front of it (${f2(face(cp))} m from it)`);
   check(maxAlong < 10, `its ghost waits for it (along at most ${f2(maxAlong)} m)`);
   check(bb && Math.abs(bb.vb) < 0.5 && gap > 0.3, `the car behind stops behind it (${bb?.state}, gap ${f2(gap)} m)`);
   check(inside === 0 && touch === 0, `nobody in the block (${inside}) or touching a wall or a body (${touch} contact(s))`);
   w.report();
-  results.block = { stopAt: f2(face(car.rp)), gapBehind: f2(gap), along: f2(maxAlong) };
+  results.block = { stopAt: f2(face(cp)), gapBehind: f2(gap), along: f2(maxAlong) };
   return ctx;
 }
 
@@ -331,7 +338,7 @@ async function wreck() {
     if (restAt < 0 && wb?.state === 'rest') restAt = ctx.t;
     if (!wb || wb.state !== 'rest') return;
     phys.world.contactPairsWith(wb.chassis, (other) => phys.world.contactPair(wb.chassis, other, (m) => { if (m.numContacts() > 0 && other.parent()?.isDynamic()) touched++; }));
-    for (const b of phys.bodies.values()) if (b.state === 'track' && Math.abs(b.vb) < 0.3 && Math.hypot(b.car.rp.x - car.rp.x, b.car.rp.z - car.rp.z) < 12) stoppers.add(b.car.id);
+    for (const b of phys.bodies.values()) if (b.state === 'track' && Math.abs(b.vb) < 0.3 && Math.hypot(rp(ctx, b.car).x - rp(ctx, car).x, rp(ctx, b.car).z - rp(ctx, car).z) < 12) stoppers.add(b.car.id);
   });
   log(`wreck: car ${car.id} wrecked at ${v0.toFixed(1)} m/s, at rest after ${f2(restAt - t0)} s; ${stoppers.size} car(s) stopped behind it, ${touched} touch(es)`);
   check(restAt > 0, 'the wreck comes to rest');
@@ -350,7 +357,7 @@ async function motorbike() {
       return { car: c, distance: Math.hypot(p.x - f.x, p.z - f.z) };
     }).sort((a, b) => a.distance - b.distance)[0]?.car;
   if (!check(bike, 'seeded traffic includes a moving motorbike')) return ctx;
-  const { x, z } = bike.rp, spec = VH.VEHICLES.moto;
+  const { x, z } = rp(ctx, bike), spec = VH.VEHICLES.moto;
   check(bike.len === spec.len, 'the motorbike uses its catalogue length');
   const box = [x - 30, z - 30, x + 30, z + 30];
   ctx.sim.edited(box);

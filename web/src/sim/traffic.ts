@@ -57,20 +57,29 @@ export interface Ground {
 }
 
 // Physical bodies for some cars (physics/rapier/life-phys.ts): tick() in the traffic's tick, after the cars moved (it
-// may slow a car whose body is held up: its ghost waits); owns(c): c has a body; pose(c, a): the presentation's, after
-// it set the car's kinematic pose (rp, rh, pitch, roll) between the last two ticks (a: 0 at the last but one, 1 at the
-// last), puts it where its body is.
+// may slow a car whose body is held up: its ghost waits); owns(c): c has a body; pose(c, a, under): the presentation's
+// (view/life.ts, which keeps it): the pose drawn between the last two ticks (a: 0 at the last but one, 1 at the last),
+// where its body is, else under (its kinematic pose; for a parked car, where it was drawn last).
 export interface TrafficBodies {
   beforeTick?(traffic: Traffic): void;
   tick(dt: number, traffic: Traffic): void;
   owns(c: Car): boolean;
   controlled?(c: Car): boolean;
-  pose(c: Car, a: number): void;
+  /** the drawn pose of car c (a: between the last two ticks; under: what it is drawn at without a body, the path's
+   * pose for a car in the traffic, the last drawn otherwise): under itself, or a pose of its own (read it, copy it) */
+  pose(c: Car, a: number, under: RoadPose): RoadPose;
   /** what pose(c, a) draws from, for a client's copy of the traffic (sim/snapshot.ts); null: nothing (its path's pose) */
   drawState?(c: Car): BodyDraw | null;
 }
 
 // (a car's body as drawn, BodyDraw: contract/agents.ts)
+
+/** pose p with what is left (k, 1 .. 0) of a release's difference (BodyDraw's fade) added; body: it has one still (its
+ * roll is its own, else the roll is blended out too). A new pose (TrafficBodies.pose: life-phys.ts, sim/snapshot.ts) */
+export function fadeOut(p: RoadPose, f: { dx: number; dy: number; dz: number; dh: number }, k: number, body: boolean): RoadPose {
+  return { x: p.x + f.dx * k, y: p.y + f.dy * k, z: p.z + f.dz * k, h: (p.h ?? 0) + f.dh * k, pitch: p.pitch,
+    roll: body ? p.roll : (p.roll ?? 0) * (1 - k) };
+}
 
 // a car's kinematic pose: the ground point between its axles on its path, its heading, nose up
 export interface CarPose { x: number; y: number; z: number; h: number; pitch: number }
@@ -778,7 +787,6 @@ export class Traffic {
     car.by = null;
     car.why = 'free';
     car.wait = 0;
-    car.rp ??= { ...car.detachedPose };
     this.detachedCars.push(car);
     this.trimParked();
     return true;

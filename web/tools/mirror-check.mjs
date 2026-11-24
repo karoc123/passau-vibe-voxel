@@ -32,9 +32,12 @@ const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(
 const fail = [];
 let compared = 0, frames = 0, acked = true;
 const key = (o) => `${o.kind}:${o.bike ? 'r' : ''}${o.id}`;
-const drawn = (T) => {
+const drawn = (T, life) => {
   const m = new Map();
-  for (const o of [...T.roadVehicles(), ...T.people, ...T.riders]) if (o.rp) m.set(key(o), [o.rp.x, o.rp.y, o.rp.z, o.rh ?? 0, o.pitch ?? 0, o.roll ?? 0]);
+  for (const o of [...T.roadVehicles(), ...T.people, ...T.riders]) {
+    const d = life.drawn(o.kind, o.id);
+    if (d) m.set(key(o), [d.x, d.y, d.z, d.h ?? 0, d.pitch ?? 0, d.roll ?? 0]);
+  }
   return m;
 };
 const matrices = (life) => { const out = []; life.group.traverse((c) => { if (c.isInstancedMesh) out.push([c.count, ...c.instanceMatrix.array.slice(0, c.count * 16), ...(c.instanceColor?.array.slice(0, c.count * 3) ?? [])]); }); return out; };
@@ -46,11 +49,11 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   // (a player follows a car at 10 s, walks as a person from 30 s to 50 s, lets go at 60 s)
   if (f === 10 * FPS && direct.traffic.cars.length) { followed = direct.traffic.cars[0].id; send({ kind: 'follow', entity: { kind: 'car', id: followed } }); }
   if (f === 30 * FPS) {
-    const p = direct.traffic.people.find((q) => q.rp);
+    const p = direct.traffic.people.find((q) => lifeA.drawn('person', q.id)), d = p && lifeA.drawn('person', p.id);
     if (p) {
       walked = p.id;
       send({ kind: 'follow', entity: { kind: 'person', id: walked } });
-      send({ kind: 'enterSeat', entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: p.rp.x, y: p.rp.y, z: p.rp.z, h: p.rh ?? 0, moving: false } });
+      send({ kind: 'enterSeat', entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: d.x, y: d.y, z: d.z, h: d.h ?? 0, moving: false } });
     }
   }
   if (walked !== null && f > 30 * FPS && f < 50 * FPS) {
@@ -65,7 +68,7 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   lifeA.update(1 / FPS, 0, focus);
   lifeB.update(1 / FPS, 0, focus);
   frames++;
-  const A = drawn(direct.traffic), B = drawn(mirror.traffic);
+  const A = drawn(direct.traffic, lifeA), B = drawn(mirror.traffic, lifeB);
   if (A.size !== B.size) fail.push(`t=${t.toFixed(2)}: ${A.size} agents drawn, ${B.size} from the snapshot`);
   for (const [k, v] of A) {
     const w = B.get(k);
