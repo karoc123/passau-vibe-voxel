@@ -37,7 +37,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| E13–E16, E21 | One tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md); E10–E12 landed) | S–M each | **Ready** from E13 (order in the plan) |
+| E14–E16, E21 | Mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md); E10–E13 landed) | S–M each | **Ready** from E14 (order in the plan) |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
@@ -156,6 +156,14 @@ per-kind adapters, `SEATS` per type); `Seat {entity, role, index}`, seat key `ki
 (`SeatReads`), the snapshot drops `player.notes`/`craftEvents`; `WorldSim.mayEnter` (always true). Open: events land on
 the next running tick (one frame late at 60 fps, gone with E13); empty crafts' events are published; no gate for
 `impact` (browser only); no interest filter; `mayEnter` may move to `GameMode` (E14).
+
+E13 = M3 landed (merge `c52918f8`): `WorldSim.update` clamps dt (`MAX_DT` 0.1 s) and runs whole ticks (`runTick`: commands,
+edit keeper/left-vehicle rule, crafts `keep()` + `clock.run(STEP)`, `Traffic.tick`, events); `Traffic.frame()`/`tick()`;
+crafts' `drawn(alpha)` blends (plane/drone nlerp, others shortest-angle); `FrameTime {dt, tick, alpha}`; craft shells
+`place(dt)` after the sim; `seatInput` `seq`/`tick`, `ack {seq, tick}` (tick first applied in). judder.mjs measures
+plane/boat/drone (`--what`): 28/28 ≤ 0.5 cm (before: E up to 88.7 cm). `window.__crafts` tool hook. Open: no teleport
+counter for remote interpolation, worker alpha one update behind (M4); turning flight not measured; inputs not
+buffered by tick (M5); `life.update` viewer is last frame's camera.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
