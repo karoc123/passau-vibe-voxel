@@ -442,7 +442,9 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   command claiming another player acts as the session's (planted: trusting the claim fails two checks); leaving the
   player's last session frees the seat and another player takes it. `life-edit events` reads the direct side through
   a second session of the pilot (no ack: it sent none). Baseline 18 → 17 (only the removal of
-  `sim-client → world-sim`). Fast set 16/16, `popin-check` (and `--mirror`), `tsc`, `life-phys --driver`.
+  `sim-client → world-sim`). Fast set 16/16, `popin-check` (and `--mirror`), `tsc`, `life-phys --driver`, `judder`
+  28/28; the page plain, `?mirror=1`, `?worker=1` (each also with `?dig=1`): follow, walk as a person, the walk,
+  drive, every craft, dig, `client.player` `'local'`, no command naming a player, 0 page errors.
   Not done: `Session` has no input seq of its own (the client numbers its seat inputs, the session acks them);
   edit outcomes go to the sending session only (their refs are its client's), not to every session of the player.
 
