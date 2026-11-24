@@ -1,6 +1,6 @@
-// What the world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot), and the
-// client's copy of the traffic it is drawn from (TrafficMirror). Plain data, structured-cloneable: it crosses to the
-// page from a Web Worker as it is (later, quantised, to a network client); the gates check that (CloneLink).
+// What the world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; its types, plain
+// data: sim/contract/snapshot.ts), and the client's copy of the traffic it is drawn from (TrafficMirror). It crosses to
+// the page from a Web Worker as it is (later, quantised, to a network client); the gates check that (CloneLink).
 //   takeSnapshot(sim, player, since)   the sim side (sim/sim-server.ts): the traffic's agents as they are after the
 //                                      update (enough for the client's own path maths: Traffic.carPose, personPoint),
 //                                      the bodies' drawn poses, trains, boats, the walked people, the crafts (their
@@ -10,59 +10,37 @@
 //                                      its agents set from each snapshot, one object per id (the drawn fields, the
 //                                      nav's ride carry over); what view/life.ts draws (TrafficView)
 // No three.js, no DOM (tools/core-deps.mjs).
-import type { DriverSnapshot } from '../physics/rapier/player-car';
-import type { BoatView } from './boat-traffic';
 import { saveState } from './craft/core-state';
-import type { CraftType } from './craft/cores';
-import { STEP, Traffic, type BodyDraw, type Ground } from './traffic';
-import type { TrainState } from './train-traffic';
-import type { Car, Person, RoadPose, TrafficData, WalkPose } from './types';
-import type { CommandResult } from './commands';
-import type { TrafficView } from './sim-client';
-import type { Ack, CraftId, PlayerId, Seat, SimEvent, WorldSim } from './world-sim';
-import type { Region, LiveNode } from '../core/live-edits';
+import { STEP, Traffic, type Ground, type TrafficBodies } from './traffic';
+import type { Car, TrafficData } from './types';
+import type { BodyDraw, BoatView, CarState, Person, PersonState } from './contract/agents';
+import type { CommandResult } from './contract/commands';
+import type { SimEvent } from './contract/events';
+import type { PlayerId } from './contract/ids';
+import type { RoadPose, WalkPose } from './contract/pose';
+import type { CraftState, EditNote, Snapshot } from './contract/snapshot';
+import type { WorldSim } from './world-sim';
 
-// what a client's path maths and drawing read of a car, a person
+// what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState: these keys,
+// all of them, with the types Car and Person have)
 const CAR_KEYS = ['id', 'e', 'lane', 's', 'ds', 'off', 'dOff', 'prev', 'prevOff', 'prev2', 'prev2Off', 'next', 'next2', 'len', 'bus',
   'vt', 'col', 'brake', 'v', 'wait', 'detachedPose'] as const;
 const PERSON_KEYS = ['id', 'e', 'dir', 's', 'v', 'lat', 'ph', 'wait', 'col', 'bike'] as const;
-export type CarState = Pick<Car, (typeof CAR_KEYS)[number]>;
-export type PersonState = Pick<Person, (typeof PERSON_KEYS)[number]>;
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+export type StatesAreTheContracts = [
+  Assert<Same<Pick<Car, (typeof CAR_KEYS)[number]>, CarState>>,
+  Assert<Same<Pick<Person, (typeof PERSON_KEYS)[number]>, PersonState>>,
+];
 
-/** a craft put down: what its shell or the page's drawing reads (its core's state: core-state.ts) */
-export interface CraftState { id: CraftId; type: CraftType; pilot: PlayerId | null; placed: boolean; core: Record<string, unknown> }
-
-/** a level-1 node edited (its columns now) or given its files again (null) since the last snapshot (a worker's: the
- * page's live edits follow the world's) */
-export interface EditNote { tx: number; ty: number; node: LiveNode | null; region: Region }
-
-export interface Snapshot {
-  tick: number;
-  /** s since the last tick: how far between the last two to draw */
-  acc: number;
-  /** the world clock (the signals) and day */
-  t: number;
-  day: number;
-  active: { x: number; z: number } | null;
-  cars: CarState[];
-  detached: CarState[];
-  people: PersonState[];
-  riders: PersonState[];
-  /** the cars with a body (or its fade), by car id */
-  bodies: [number, BodyDraw][];
-  trains: TrainState[];
-  boats: BoatView | null;
-  /** the people walked by players: their pose, by person id */
-  walked: [number, WalkPose][];
-  /** the crafts put down, piloted or left */
-  crafts: CraftState[];
-  /** the events of the ticks after the last snapshot's */
-  events: SimEvent[];
-  /** the player's reads; results since the last snapshot (what their seat's entity did: events); ack: their last
-   * seat input taken (its seq, the tick it was applied in: the state here is that of tick, after it) */
-  player: { seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };
-  edits: EditNote[];
-}
+/** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
+ * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
+ * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
+ * snapshots (docs/plans/local-server.md: TrafficMirror). Read only, except the drawn fields (rp, rh, pitch, roll) on
+ * its agents. */
+export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
+  'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
+  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
 
 const pick = <T extends object, K extends keyof T>(o: T, keys: readonly K[]) => {
   const out = {} as Pick<T, K>;

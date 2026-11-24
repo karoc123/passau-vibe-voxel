@@ -2,7 +2,8 @@
 // builds a small map (2 x 2 tiles of 64 m, world.ts synthMap), drops the car, drives it with scripted input at a fixed 1/60 s step and
 // judges the outcome from its telemetry.
 import RAPIER from '@dimforge/rapier3d-compat';
-import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarInput, type CarEvent, type CarTuning, type RideTuning } from '../src/physics/rapier/car';
+import { bus, CAR, RapierCar, RIDE, TUNED, type CarBuild, type CarEvent, type CarTuning, type RideTuning } from '../src/physics/rapier/car';
+import type { CarInput } from '../src/sim/contract/inputs';
 import { RapierTerrain, WHEEL_GROUPS } from '../src/physics/rapier/terrain';
 import type { Check } from './check';
 import { synthMap, STREET, WALL, WATER, type ScenarioMap } from './world';

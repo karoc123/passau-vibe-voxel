@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../view/life';
-import type { Pose } from '../sim/types';
+import type { Pose } from '../sim/contract/pose';
 import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';

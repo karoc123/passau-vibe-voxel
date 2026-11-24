@@ -1,6 +1,7 @@
 import { hash } from '../core/num';
 import { at, farFrom, prepPath, pt, type Path, type Viewer } from './path';
 import type { TrainPathData, TrainService } from './types';
+import type { TrainState } from './contract/agents';
 
 // Trains on the open-air railway (scripts/traffic.py: the OSM route=train relations, one path per track, each route
 // with the stations it stops at): every route sends a train every half hour, from the map edge or a tunnel portal;
@@ -31,7 +32,7 @@ export interface CoachPose {
 }
 
 /** a train as a snapshot carries it (sim/snapshot.ts): what its coaches' poses are drawn from */
-export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
+// (a train as saved, TrainState: contract/agents.ts)
 
 export interface CoachBox extends CoachPose {
   readonly size: typeof COACH_SIZE;

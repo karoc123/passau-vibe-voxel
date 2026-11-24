@@ -4,6 +4,7 @@
 // tunes differently from the ride, RIDE), its length in the traffic, and its model (boxes in its own frame:
 // x left, y up from the ground, z forward; drawn by view/meshes.ts). docs/plans/vehicles.md: how to add one.
 import { frozen } from '../core/frozen';
+import type { VehicleId } from './contract/ids';
 
 // The chassis and its drive: half extents of the chassis' box (m; its bottom 0.45 m under the body's origin), mass
 // (kg), wheels (chassis space; the front ones steer, the rear ones are driven), the engine's force per driven wheel
@@ -78,7 +79,7 @@ export const busBuild = (len: number): CarBuild => ({
   engine: 14000, brake: 400, top: 17, ride: 0.84,
 });
 
-export type VehicleId = 'car' | 'coupe' | 'van' | 'pickup' | 'bus' | 'moto' | 'camper';
+// (VehicleId, the types' names: contract/ids.ts)
 
 export const VEHICLES: Record<VehicleId, VehicleType> = {
   // the traffic's car, as the player's has always driven (its numbers are tools/rapier-car.mjs's: keep them)

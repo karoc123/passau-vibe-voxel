@@ -2,6 +2,7 @@ import { frozen } from '../../core/frozen';
 import { FixedStep } from '../../core/fixed-step';
 import { SafeTrail } from '../../core/safe-trail';
 import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../../core/vec';
+import type { PlaneInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
 import { waterTop, type WaterColumns } from '../river';
 
@@ -135,11 +136,7 @@ export const JET: PlaneConfig = frozen({
   AEROBATIC: true,
 });
 
-export interface PlaneInput {
-  turn: number; // -1..1, +1 right
-  pitch: number; // -1..1, +1 nose up
-  throttle: number; // 0..1, the lever
-}
+// (its input, PlaneInput: contract/inputs.ts)
 
 export interface PlaneWorld {
   W: number;

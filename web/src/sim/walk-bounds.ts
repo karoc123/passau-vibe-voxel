@@ -1,7 +1,7 @@
 // How far a client's walk may move the person it walks as (WorldSim walkPose): the walk is the client's (nav/foot.ts),
 // the sim takes its poses only within reach of the last one taken. No three.js, no DOM (tools/core-deps.mjs).
 import { frozen } from '../core/frozen';
-import type { WalkPose } from './types';
+import type { WalkPose } from './contract/pose';
 
 /** m/s across (speed), up (climb) and down (fall) between two poses, plus slack m on each (an uneven frame, a kerb);
  * take: how far (m, across) from where the sim has a person a walker's enterSeat may start. foot.ts walks at 2.2 m/s, runs at 7,

@@ -14,13 +14,30 @@
 //                             step (the plane's respawn) drawn where it is
 // The shells (nav/boat.ts, ...) keep the panel, the camera, the model and the input mapping; they read the core.
 import type { FixedStep } from '../../core/fixed-step';
+import type { Meta } from '../../core/meta';
+import type { TileCache } from '../../core/tile-cache';
 import type { Vec3 } from '../../core/vec';
-import type { Pose } from '../types';
+import type { CraftSpot } from '../contract/commands';
+import type { CraftId, CraftType, PlayerId } from '../contract/ids';
+import type { Pose } from '../contract/pose';
 import type { CollisionOptions, VoxelCollision } from './voxel-collision';
 
-/** where a craft is put down: x, z, heading h, a height for one that starts in the air or afloat, a speed along h for
- * one that starts moving, water: afloat (the floatplane) */
-export interface CraftSpot { x: number; y?: number; z: number; h: number; speed?: number; water?: boolean }
+/** a player craft (a CraftCore; WorldSim's crafts): an entity with one seat, its pilot's; stepped once put down */
+export interface Craft<C extends CraftCore = CraftCore> {
+  readonly id: CraftId;
+  readonly type: CraftType;
+  readonly core: C;
+  /** its own: the tiles round it (the shell reads it too: its camera's sweep, its panel) */
+  readonly collision: VoxelCollision;
+  /** the player in the pilot's seat */
+  readonly pilot: PlayerId | null;
+  /** put down (placeCraft): stepped from then on */
+  readonly placed: boolean;
+}
+
+/** what the crafts' collisions read: the map, the node files (the viewer's shared TileCache) and the clock (ms) their
+ * fetch pacing reads (WorldSim's crafts; a shell's own, nav/craft.ts) */
+export interface CraftWorld { meta: Meta; cache: TileCache; now: () => number }
 
 export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   /** its fixed step (step size), run by WorldSim each world tick for STEP s */

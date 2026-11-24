@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { Meta } from '../src/core/meta';
-import { BOAT, BoatMotion, findSpawn, type BoatInput, type BoatWorld } from '../src/sim/craft/boat-motion';
+import { BOAT, BoatMotion, findSpawn, type BoatWorld } from '../src/sim/craft/boat-motion';
+import type { BoatInput } from '../src/sim/contract/inputs';
 import { downstream, nearestRiver } from '../src/sim/river';
 import type { Check } from './check';
 import { makeWorld } from './world';

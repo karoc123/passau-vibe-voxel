@@ -18,10 +18,11 @@
 // The shared world publishes its pose. StreetLife draws the vehicle model.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
+import type { CarInput } from '../../sim/contract/inputs';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
 import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild, type RideTuning } from './vehicle';
 
-export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
+// (its input, CarInput: sim/contract/inputs.ts)
 export type CarStatus = 'ok' | 'water';
 // what happened in a step: a wall hit (speed lost), a landing (speed into the ground; crash: a hard one), a step's
 // wedge laid (its rise)

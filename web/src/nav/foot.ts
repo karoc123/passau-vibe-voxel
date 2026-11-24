@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { WalkPose } from '../sim/types';
+import type { WalkPose } from '../sim/contract/pose';
 import { clamp } from '../util';
 import type { World } from '../core/world';
 import type { Glide } from './glide';

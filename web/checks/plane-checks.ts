@@ -1,4 +1,5 @@
-import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/sim/craft/plane-flight';
+import { PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneWorld } from '../src/sim/craft/plane-flight';
+import type { PlaneInput } from '../src/sim/contract/inputs';
 import type { Check } from './check';
 import { BoxWorld } from './world';
 

@@ -6,9 +6,11 @@
 // (tools/core-deps.mjs).
 import { FixedStep } from '../../core/fixed-step';
 import { lerpAngle, type Vec3 } from '../../core/vec';
-import type { CraftCore, CraftSpot } from './craft-core';
+import type { CraftSpot } from '../contract/commands';
+import type { CraftInput } from '../contract/inputs';
+import type { CraftCore } from './craft-core';
 import { craftWorld, CRAFT_RADIUS } from './craft-collision';
-import { CRAFT, CraftMotion, type CraftInput, type CraftKind, type CraftMotionWorld, type CraftStep, type CraftTuning } from './craft-motion';
+import { CRAFT, CraftMotion, type CraftKind, type CraftMotionWorld, type CraftStep, type CraftTuning } from './craft-motion';
 import type { VoxelCollision } from './voxel-collision';
 
 export const NO_CRAFT_INPUT: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: 0, side: 0 });

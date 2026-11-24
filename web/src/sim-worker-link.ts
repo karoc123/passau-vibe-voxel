@@ -2,9 +2,11 @@
 // a Web Worker. One frame in flight at a time: while the worker works on one, the page's frames add their time and
 // commands to the next, sent when its snapshot is back (so a slow sim slows the sim, never the page). The page draws
 // the latest snapshot: one update behind the frame that sent the input.
-import type { SimCommand, SimLink } from './sim/sim-client';
-import type { Snapshot } from './sim/snapshot';
-import type { PlayerId, SimInput } from './sim/world-sim';
+import type { SimLink } from './sim/sim-client';
+import type { SimCommand } from './sim/contract/commands';
+import type { Snapshot } from './sim/contract/snapshot';
+import type { SimInput } from './sim/contract/inputs';
+import type { PlayerId } from './sim/contract/ids';
 import type { FromWorker, ToWorker } from './sim.worker';
 import type { HostOptions } from './sim-host';
 

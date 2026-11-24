@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { Meta } from '../src/core/meta';
-import { collisionWorld, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from '../src/sim/craft/plane-flight';
+import { collisionWorld, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneWorld } from '../src/sim/craft/plane-flight';
+import type { PlaneInput } from '../src/sim/contract/inputs';
 import { waterTop } from '../src/sim/river';
 import type { Check } from './check';
 import { holdPath } from './plane-checks';

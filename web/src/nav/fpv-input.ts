@@ -1,4 +1,4 @@
-import type { FlightInput } from '../sim/craft/fpv-flight';
+import type { FlightInput } from '../sim/contract/inputs';
 import { gamepads } from './input';
 import './fpv-input.css';
 

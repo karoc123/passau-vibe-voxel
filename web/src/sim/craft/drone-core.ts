@@ -6,15 +6,16 @@
 // quaternion (nlerp).
 import { FixedStep } from '../../core/fixed-step';
 import { add, addScaled, component, copy, copyQuat, length, lengthSq, lerp, nlerpQuat, quat, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
-import type { CraftCore, CraftSpot } from './craft-core';
-import { FpvFlight, REBOUND_SPEED, type FlightInput } from './fpv-flight';
+import type { CraftSpot } from '../contract/commands';
+import type { DroneInput } from '../contract/inputs';
+import type { CraftCore } from './craft-core';
+import { FpvFlight, REBOUND_SPEED } from './fpv-flight';
 import type { ImpactKind, Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
 const SURFACE_CLEARANCE = 0.002;
 
-/** the sticks, or null: disarmed (it holds still) */
-export type DroneInput = FlightInput | null;
+// (its input, DroneInput: the sticks or null, contract/inputs.ts)
 /** a hit at speed (m/s into what it met) */
 export interface DroneEvent { kind: 'impact'; hit: ImpactKind; speed: number }
 export interface DroneDrawn { position: Vec3; attitude: Quat }

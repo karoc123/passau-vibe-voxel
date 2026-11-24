@@ -1,4 +1,4 @@
-import type { PlayerId } from '../sim/world-sim';
+import type { PlayerId } from '../sim/contract/ids';
 
 /** the viewer's own player: the one id this client sends its commands as (the sim knows only player ids; a server
  * would give each client its own) */

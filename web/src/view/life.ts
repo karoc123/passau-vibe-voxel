@@ -5,8 +5,11 @@ import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from 
 import type { SimClient } from '../sim/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
-import type { Car, Kind, Person, Pose, Rideable, Vec3 } from '../sim/types';
-import { VEHICLE_IDS, vehicleOf, type VehicleId } from '../sim/vehicles';
+import type { Car, Kind, Rideable, Vec3 } from '../sim/types';
+import type { Pose } from '../sim/contract/pose';
+import type { Person } from '../sim/contract/agents';
+import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
+import type { VehicleId } from '../sim/contract/ids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, sim/sim-client.ts TrafficView, ticked by main.ts) drawn between its last two ticks with instanced

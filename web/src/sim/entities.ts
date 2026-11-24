@@ -5,27 +5,17 @@
 //   exists(ref)   the entity is in the world
 //   pose(ref)     where it is (map metres, heading h: 0 +z, pi/2 +x), or null: gone, or not put down
 //   seats(ref)    the seats its model has, by its kind and type (SEATS; the seat table, WorldSim, says who holds them)
-import type { Pose } from './types';
-import type { VehicleId } from './vehicles';
-import type { CraftType } from './craft/cores';
+// (EntityRef, Role, Seat: contract/ids.ts)
+import type { CraftType, EntityKind, EntityRef, Role, Seat, VehicleId } from './contract/ids';
+import type { Pose } from './contract/pose';
 
-/** what an entity is; numbered per kind */
-export type EntityKind = 'car' | 'person' | 'craft';
-/** an entity of the world: a car (Car.id), a person (Person.id) or a craft (CraftId); the kinds are numbered apart */
-export interface EntityRef { kind: EntityKind; id: number }
 /** an entity's key in a map ("car:12") */
 export const entityKey = (r: EntityRef) => `${r.kind}:${r.id}`;
 export const sameEntity = (a: EntityRef | null | undefined, b: EntityRef | null | undefined) =>
   !!a && !!b && a.kind === b.kind && a.id === b.id;
 
-/** what a seat's holder does: drives a car, pilots a craft, walks as a person */
-export type Role = 'driver' | 'pilot' | 'walker';
 /** a seat of an entity's model: its role and which of that role's seats (0: the first) */
 export interface SeatSpec { readonly role: Role; readonly index: number }
-
-/** a player's place on an entity (ADR 0008: control per seat): one of the seats of its model (SEATS). A seat holds at
- * most one player, a player at most one seat (the seat table: WorldSim seat) */
-export interface Seat { entity: EntityRef; role: Role; index: number }
 
 const one = (role: Role): readonly SeatSpec[] => Object.freeze([Object.freeze({ role, index: 0 })]);
 const DRIVER = one('driver'), PILOT = one('pilot'), WALKER = one('walker'), NONE: readonly SeatSpec[] = Object.freeze([]);

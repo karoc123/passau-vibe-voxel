@@ -1,11 +1,10 @@
 import { frozen } from '../../core/frozen';
 import { set, vec3, type Vec3 } from '../../core/vec';
+import type { CraftInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
 
 export type CraftKind = 'hovercraft' | 'helicopter' | 'paraglider';
-// turn +1: right (the heading falls, as the cars' and the boat's); drive +1: forward; lift +1: climb (helicopter);
-// side +1: sideways to the right (helicopter)
-export interface CraftInput { turn: number; drive: number; lift: number; side: number }
+// (its input, CraftInput: contract/inputs.ts)
 export interface CraftMotionWorld {
   surface(x: number, z: number): { height: number; water: boolean } | null;
   sweep(p: Vec3, d: Vec3, fromHeading: number, toHeading: number): Sweep;

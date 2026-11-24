@@ -6,13 +6,14 @@
 // a ThreadLink) or in a Web Worker (sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
 import { liveEdits } from '../core/live-edits';
 import { apply as applyEdit } from '../core/world-edits';
-import { takeSnapshot, type EditNote, type Snapshot } from './snapshot';
-import type { CommandResult } from './commands';
+import { takeSnapshot } from './snapshot';
+import type { CommandResult, SimCommand } from './contract/commands';
+import type { PlayerId, Role } from './contract/ids';
+import type { SimInput } from './contract/inputs';
+import type { EditNote, Snapshot } from './contract/snapshot';
 import type { GameMode } from './mode';
 import { sandbox } from './modes/sandbox';
-import type { Role } from './entities';
-import type { SimCommand } from './sim-client';
-import type { PlayerId, SimInput, WorldSim } from './world-sim';
+import type { WorldSim } from './world-sim';
 
 export class SimServer {
   // the edits sent, applied at the start of the next update; their outcomes, by player

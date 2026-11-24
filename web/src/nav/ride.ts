@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LOCAL_PLAYER } from './player';
-import type { Person, Pose } from '../sim/types';
+import type { Pose } from '../sim/contract/pose';
+import type { Person } from '../sim/contract/agents';
 import { vehicleOf } from '../sim/vehicles';
 import type { Picked, StreetLife } from '../view/life';
 import type { World } from '../core/world';

@@ -5,7 +5,7 @@
 // DOM, no fetch (tools/core-deps.mjs).
 //   inputs:   update(dt, { hour, day, focus, viewer }): the frame's time, run as whole world ticks (STEP; the rest
 //             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
-//             water); the players' commands (sim/commands.ts PlayerCommand, keyed by player id: send), queued and
+//             water); the players' commands (sim/contract/commands.ts PlayerCommand, keyed by player id: send), queued and
 //             applied in order at the start of the next tick (apply: the one place a seat is taken or left);
 //             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
 //             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
@@ -25,32 +25,25 @@
 //             theirs (a player's seat's: craftEvents, driverNotes); the entities (sim/entities.ts: cars, people, crafts
 //             read through their own stores)
 import type { LifePhysics } from '../physics/rapier/life-phys';
-import type { DriveNote, DriverSnapshot } from '../physics/rapier/player-car';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
-import type { Person, RoadPose, TrafficData, Vec3, WalkPose } from './types';
-import { Entities, SEATS, sameEntity, type EntityRef, type Role, type Seat } from './entities';
+import type { TrafficData } from './types';
+import { Entities, SEATS, sameEntity } from './entities';
 import { vehicleOf } from './vehicles';
-import type { VehicleId } from './vehicles';
-import type { Meta } from '../core/meta';
-import type { TileCache } from '../core/tile-cache';
-import type { CraftCore, CraftSpot } from './craft/craft-core';
-import { CORES, type CoreOf, type CraftType } from './craft/cores';
+import type { Craft, CraftWorld } from './craft/craft-core';
+import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
-import type { CommandResult, PlayerCommand } from './commands';
+import type { CommandResult, CraftSpot, PlayerCommand } from './contract/commands';
+import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
+import { MAX_DT, type FrameTime, type SimInput } from './contract/inputs';
+import { EVENT_TICKS, type DriveNote, type SimEvent } from './contract/events';
+import type { Ack, DriverSnapshot } from './contract/snapshot';
+import type { WalkPose } from './contract/pose';
 import { boundWalk } from './walk-bounds';
 import type { GameMode, ModeWorld } from './mode';
-
-/** a participant in the world (ADR 0007); the sim numbers none of its own, a host names them (the viewer's own:
- * nav/player.ts LOCAL_PLAYER) */
-export type PlayerId = string;
-
-export type CraftId = number;
-
-export type { Seat };
 
 /** what the sim keeps of a player: the entity followed (kept in the sim wherever it goes, no rights over it), the seat
  * held, and, walking as a person, the walk's poses taken (the walk itself is the client's, sent as poses) */
@@ -63,66 +56,14 @@ export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: numb
 // a seat's key in the seat table
 const seatKey = (s: Seat) => `${s.entity.kind}:${s.entity.id}:${s.role}:${s.index}`;
 
-/** a player craft (sim/craft/craft-core.ts): an entity with one seat, its pilot's; stepped once put down */
-export interface Craft<C extends CraftCore = CraftCore> {
-  readonly id: CraftId;
-  readonly type: CraftType;
-  readonly core: C;
-  /** its own: the tiles round it (the shell reads it too: its camera's sweep, its panel) */
-  readonly collision: VoxelCollision;
-  /** the player in the pilot's seat */
-  readonly pilot: PlayerId | null;
-  /** put down (placeCraft): stepped from then on */
-  readonly placed: boolean;
-}
-type InputOf<C> = C extends CraftCore<infer I> ? I : never;
-/** what a pilot sends (seatInput): the input of their craft's type */
-export type CraftInput = InputOf<CoreOf<CraftType>>;
+// (a player craft, Craft: sim/craft/craft-core.ts)
 type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
 
-/** what the crafts' collisions read: the map, the node files (the viewer's shared TileCache) and the clock (ms) their
- * fetch pacing reads */
-export interface CraftWorld { meta: Meta; cache: TileCache; now: () => number }
+// (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, SimInput, FrameTime, MAX_DT, Ack, SimEvent,
+// EVENT_TICKS: sim/contract/; CraftWorld: sim/craft/craft-core.ts)
 
-/** what one update is given: the world's hour and day of the year, the focus (the middle of what is simulated) and
- * the viewer (where agents may come and go unseen far from; by default the focus) */
-export interface SimInput {
-  hour: number;
-  day?: number;
-  focus: { x: number; z: number };
-  viewer?: { x: number; z: number; y?: number };
-}
-
-/** the frame's time once the sim's update has run (docs/plans/smooth-motion-and-lag.md section 3: fixed once a frame,
- * every reader the same): dt the frame's (s, at most MAX_DT), tick the ticks run, alpha how far past the last tick
- * what is drawn is (0..1: the traffic, the bodies and the crafts drawn between their last two ticks) */
-export interface FrameTime { dt: number; tick: number; alpha: number }
-
-/** the most one update counts for (s): a longer frame (a stall, a tab in the background) runs this much */
-export const MAX_DT = 0.1;
-
-/** the last seat input a player's seat took: its seq (the client's number), the tick it was first applied in */
-export interface Ack { seq: number; tick: number }
-
-/** what happened in a tick, to an entity or a player; tick: the tick that produced it (WorldSim.tick after it):
- *   struck            a person knocked down by a driven car (where, how fast it went: drawn falling, view/life.ts)
- *   impact            the same contact as a fact about the entity hit: by whom, how fast (m/s), where
- *   dropped           a person fallen into a hole
- *   seated, unseated  a player into a seat or out of it (the tick the command was applied in)
- *   craft             what happened to a craft (its core's event, e: its type's, as the shell reads it)
- *   drive             what the driver of a car is to be told (life-phys.ts PlayerCar's note) */
-export type SimEvent =
-  | { tick: number; kind: 'struck'; person: Person; pose: RoadPose; vx: number; vz: number }
-  | { tick: number; kind: 'impact'; entity: EntityRef; by?: EntityRef; speed: number; at: Vec3 }
-  | { tick: number; kind: 'dropped'; person: Person }
-  | { tick: number; kind: 'seated' | 'unseated'; player: PlayerId; seat: Seat }
-  | { tick: number; kind: 'craft'; entity: EntityRef; e: unknown }
-  | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote };
 // an event yet to be given its tick
 type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> : never) : never;
-
-/** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */
-export const EVENT_TICKS = 300;
 
 export class WorldSim {
   readonly traffic: Traffic;

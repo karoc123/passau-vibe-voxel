@@ -1,5 +1,7 @@
 import type { Path, PathData } from './path';
-import type { VehicleId } from './vehicles';
+import type { VehicleId } from './contract/ids';
+import type { Person } from './contract/agents';
+import type { RoadPose } from './contract/pose';
 
 // a point in the world (x east, y up, z south: as three.js', without it: the sim runs headless)
 export interface Vec3 { x: number; y: number; z: number }
@@ -85,28 +87,6 @@ export interface Car extends Blocked {
   block: { o: Car; gap: number } | null;
 }
 
-export interface Person {
-  kind: 'person';
-  /** its entity id, kept while it lives (people and riders are numbered apart from the cars: sim/entities.ts EntityRef) */
-  id: number;
-  e: number;
-  dir: number;
-  s: number;
-  v: number;
-  lat: number;
-  ph: number;
-  wait: boolean;
-  col: string; // their shirt ('#rrggbb')
-  bike?: boolean;
-  rp?: Vec3; // drawn (view/life.ts)
-  rh?: number;
-}
-
 export type Agent = Car;
 export type Rideable = Car | Person;
 export type Kind = 'car' | 'person';
-export interface Pose { x: number; y: number; z: number; h: number }
-/** where a player walking as a person puts them (their feet, their heading), and whether they walk */
-export interface WalkPose extends Pose { moving: boolean }
-
-export interface RoadPose extends Pose { pitch: number; roll: number }
