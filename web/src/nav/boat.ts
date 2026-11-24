@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Meta } from '../types';
 import { clamp } from '../util';
-import { findSpawn, NO_BOAT_INPUT, type BoatEvent, type BoatInput } from '../sim/craft/boat-motion';
+import { findSpawn, NO_BOAT_INPUT, type BoatDrawn, type BoatEvent, type BoatInput } from '../sim/craft/boat-motion';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
@@ -117,9 +117,8 @@ export class BoatMode implements PlayerCraft {
     return true;
   }
 
-  // (the sim steps the boat after this, in the same frame: main.ts; this sends the input and draws the last step; the
-  // frame it is put down it is not in yet)
-  update(dt: number) {
+  // (before the sim's update, main.ts: the input sent, what happened to it; the frame it is put down it is not in yet)
+  update(_dt: number) {
     if (this.phase === 'finding') this.find();
     if (this.phase === 'on' && this.link.refused()) { this.panel.say('Someone else took that boat.', 2500); this.nav.flyUp(); }
     if (this.phase === 'on') {
@@ -133,12 +132,18 @@ export class BoatMode implements PlayerCraft {
         this.shakeUntil = performance.now() + 450;
         this.shakeA = clamp(e.speed / 20, 0.08, 0.5);
       }
-      const m = c.core.motion;
-      this.model.visible = true;
-      this.model.update(c.core.drawn(c.core.clock.alpha), m.speed, this.env.night(), m.t);
-      this.chase(dt);
     }
     this.draw();
+  }
+
+  // (after the sim's update: the hull and the camera where the boat is drawn this frame)
+  place(dt: number) {
+    const c = this.phase === 'on' ? this.craft : null;
+    if (!c) return;
+    const m = c.core.motion, d = c.core.drawn(this.link.alpha);
+    this.model.visible = true;
+    this.model.update(d, m.speed, this.env.night(), m.t);
+    this.chase(d, dt);
   }
 
   private find() {
@@ -210,16 +215,16 @@ export class BoatMode implements PlayerCraft {
 
   // behind the boat along a heading that follows its own with a lag (a turn shows it a little from the side), over the
   // water; pulled in where the collision meets something between the boat and the camera
-  private chase(dt: number) {
+  private chase(d: BoatDrawn, dt: number) {
     const m = this.craft!.core.motion, now = performance.now();
-    this.camYaw = followAngle(this.camYaw, m.h, 3.2, dt);
+    this.camYaw = followAngle(this.camYaw, d.h, 3.2, dt);
     this.camY += (m.y - this.camY) * follow(3, dt);
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY;
-    const eye = new THREE.Vector3(m.x, base + 1.6, m.z);
+    const eye = new THREE.Vector3(d.x, base + 1.6, d.z);
     const off = new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom);
     const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.link.col!.sweep(eye, off), off, 0.25, 0.4));
     if (now < this.shakeUntil) shake(pos, this.shakeA * (this.shakeUntil - now) / 450, now);
-    const at = new THREE.Vector3(m.x + Math.sin(m.h) * AHEAD, base + 1.2, m.z + Math.cos(m.h) * AHEAD);
+    const at = new THREE.Vector3(d.x + Math.sin(d.h) * AHEAD, base + 1.2, d.z + Math.cos(d.h) * AHEAD);
     const cam = this.rig.place(pos, this.rig.look(pos, at), 60 + 8 * clamp(Math.abs(m.speed) / 18.5, 0, 1), dt);
     // (the shadow fit and the fog read the target: as the ride's)
     this.target.copy(cam.position).addScaledVector(cam.getWorldDirection(this.look), 10);

@@ -105,8 +105,7 @@ export class FpvMode implements PlayerCraft {
 
   private get craft() { return this.on ? this.link.craft : null; }
 
-  // (the sim steps the drone after this, in the same frame: main.ts; this sends the input and draws the last step; the
-  // frame it is put down it is not in yet)
+  // (before the sim's update, main.ts: the input sent, what happened to it; the frame it is put down it is not in yet)
   update() {
     const active = this.on, col = this.link.col;
     const now = performance.now();
@@ -123,7 +122,6 @@ export class FpvMode implements PlayerCraft {
       for (const e of this.link.events() as DroneEvent[]) {
         this.impact = { at: now, strength: clamp(e.speed / 26, 0.22, 0.75), message: `Impact with ${e.hit} at ${Math.round(e.speed * 3.6)} km/h · Armed` };
       }
-      this.applyCamera();
     }
     if (this.impact && now - this.impact.at >= IMPACT_MESSAGE_MS) this.impact = null;
     this.impactTint.style.opacity = active && this.impact
@@ -260,9 +258,10 @@ export class FpvMode implements PlayerCraft {
     return this.source === 'keyboard' ? this.keyboard() : this.controller;
   }
 
-  private applyCamera() {
-    if (this.phase === 'loading' || !this.craft) return;
-    const { core } = this.craft, d = core.drawn(core.clock.alpha);
+  // (after the sim's update: the camera where the drone is drawn this frame)
+  place() {
+    if (!this.on || !this.link.col || this.phase === 'loading' || !this.craft) return;
+    const { core } = this.craft, d = core.drawn(this.link.alpha);
     this.camera.position.copy(d.position);
     this.camera.quaternion.copy(d.attitude).multiply(this.tilt);
     this.camera.getWorldDirection(this.look);

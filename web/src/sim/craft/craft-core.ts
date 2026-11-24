@@ -1,13 +1,17 @@
 // A player craft's core, the one contract WorldSim steps (sim/world-sim.ts crafts; docs/adr/0008-server-vision.md:
 // every player-controlled thing on the world clock, sim side). Each craft keeps its own fixed step (FixedStep: its step
-// size, its most steps a frame), run by WorldSim.update; its motion law stays in its own module (boat-motion.ts,
-// craft-motion.ts, fpv-flight.ts, plane-flight.ts), the core wraps it. No three.js, no DOM (tools/core-deps.mjs).
-//   reset(spot)               put down at spot, standing still (or at spot.speed)
+// size), run by WorldSim in each world tick: STEP worth of its steps (sim/traffic.ts STEP; 2 or 4 of them) with that
+// tick's input; its motion law stays in its own module (boat-motion.ts, craft-motion.ts, fpv-flight.ts,
+// plane-flight.ts), the core wraps it. No three.js, no DOM (tools/core-deps.mjs).
+//   reset(spot)               put down at spot, standing still (or at spot.speed); drawn there, not coming from where
+//                             it was (keep)
+//   keep()                    the start of a world tick: where it is drawn from (its drawn state now, kept)
 //   step(input, dt, world)    one fixed step of dt s through the craft's collision; false: not taken (a tile not in) or
-//                             held (ended, disarmed): the rest of the frame's time is dropped
+//                             held (ended, disarmed): the rest of the tick's time is dropped
 //   pose                      where it is now (x, y, z, heading h: 0 +z, pi/2 +x)
-//   drawn(alpha)              its pose as drawn, alpha (0..1) of the way past the last step (the shells draw the last
-//                             step as before: alpha is there for a drawing between the last two)
+//   drawn(alpha)              its pose as drawn between the world's last two ticks: alpha (0..1, WorldSim's FrameTime)
+//                             of the way from where it was kept to where it is now; one put somewhere at once in a
+//                             step (the plane's respawn) drawn where it is
 // The shells (nav/boat.ts, ...) keep the panel, the camera, the model and the input mapping; they read the core.
 import type { FixedStep } from '../../core/fixed-step';
 import type { Vec3 } from '../../core/vec';
@@ -19,7 +23,7 @@ import type { CollisionOptions, VoxelCollision } from './voxel-collision';
 export interface CraftSpot { x: number; y?: number; z: number; h: number; speed?: number; water?: boolean }
 
 export interface CraftCore<I = unknown, E = unknown, D = unknown> {
-  /** its fixed step (step size, most steps a frame, longest frame), run by WorldSim.update */
+  /** its fixed step (step size), run by WorldSim each world tick for STEP s */
   readonly clock: FixedStep;
   /** its collision's cube and look-ahead (VoxelCollision, made by WorldSim) */
   readonly reach: CollisionOptions;
@@ -29,6 +33,8 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   /** what happened since they were last read (WorldSim: the world's craft events, read by its pilot: craftEvents) */
   readonly events: E[];
   reset(spot: CraftSpot): void;
+  /** a world tick starts: what drawn(alpha) blends from (alpha 0) is its drawn state now */
+  keep(): void;
   step(input: I, dt: number, world: VoxelCollision): boolean;
   readonly pose: Pose;
   /** m/s, where its collision fetches ahead */

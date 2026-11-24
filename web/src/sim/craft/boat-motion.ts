@@ -12,6 +12,7 @@
 import { FixedStep } from '../../core/fixed-step';
 import { frozen } from '../../core/frozen';
 import { SafeTrail } from '../../core/safe-trail';
+import { lerpAngle } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
 
 export interface BoatInput {
@@ -257,8 +258,9 @@ export function findSpawn(world: BoatWorld, x: number, z: number, h: number, rad
   return null;
 }
 
-// The boat as WorldSim steps it (craft-core.ts): its motion at 1/120 s, at most 12 steps (0.1 s) a frame; the bumps
-// of the steps since its pilot last read them. Its collision: the drone's cube and look-ahead (VoxelCollision's).
+// The boat as WorldSim steps it (craft-core.ts): its motion at 1/120 s (four a world tick); the bumps of the steps
+// since its pilot last read them. Its collision: the drone's cube and look-ahead (VoxelCollision's). Drawn between the
+// world's last two ticks (the hull as drawn at each, its heading, pitch and roll the shorter way).
 export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
   readonly motion: BoatMotion;
   readonly clock = new FixedStep(1 / 120, 12, 0.1);
@@ -266,9 +268,17 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
   readonly neutral = NO_BOAT_INPUT;
   readonly events: BoatEvent[] = [];
 
+  // drawn: the hull as drawn at the world tick's start
+  private from: BoatDrawn = { x: 0, y: 0, z: 0, h: 0, pitch: 0, roll: 0 };
+
   constructor(cfg: BoatTuning = BOAT) { this.motion = new BoatMotion(cfg); }
 
-  reset(spot: CraftSpot) { this.motion.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z, h: spot.h }); }
+  reset(spot: CraftSpot) {
+    this.motion.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z, h: spot.h });
+    this.keep();
+  }
+
+  keep() { this.from = this.motion.drawn(); }
 
   step(input: BoatInput, dt: number, world: BoatWorld) {
     const ev = this.motion.step(input, dt, world);
@@ -279,7 +289,14 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
 
   get pose() { return this.motion.pose; }
   get velocity() { return { x: this.motion.vx, y: 0, z: this.motion.vz }; }
-  // (as drawn at the last step)
-  drawn(_alpha: number) { return this.motion.drawn(); }
-  unstick(world: BoatWorld) { return this.motion.unstick(world); }
+  drawn(alpha: number): BoatDrawn {
+    const a = this.from, b = this.motion.drawn(), t = Math.min(1, Math.max(0, alpha)), l = (u: number, v: number) => u + (v - u) * t;
+    return { x: l(a.x, b.x), y: l(a.y, b.y), z: l(a.z, b.z), h: lerpAngle(a.h, b.h, t), pitch: lerpAngle(a.pitch, b.pitch, t), roll: lerpAngle(a.roll, b.roll, t) };
+  }
+
+  unstick(world: BoatWorld) {
+    if (!this.motion.unstick(world)) return false;
+    this.keep();
+    return true;
+  }
 }

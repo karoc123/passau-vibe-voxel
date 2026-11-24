@@ -62,3 +62,38 @@ export function quatNormalize<T extends Quat>(o: T) {
   l = 1 / l;
   return setQuat(o, o.x * l, o.y * l, o.z * l, o.w * l);
 }
+
+// o between a and b (t 0..1), on the straight line
+export function lerp<T extends Vec3>(o: T, a: Vec3, b: Vec3, t: number) {
+  return set(o, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+}
+// o between the unit quaternions a and b (t 0..1): blended the shorter way and normalised (nlerp: for the small turn
+// between two fixed steps as good as slerp)
+export function nlerpQuat<T extends Quat>(o: T, a: Quat, b: Quat, t: number) {
+  const s = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0 ? -1 : 1;
+  return quatNormalize(setQuat(o, a.x + (s * b.x - a.x) * t, a.y + (s * b.y - a.y) * t, a.z + (s * b.z - a.z) * t,
+    a.w + (s * b.w - a.w) * t));
+}
+// the rotation taking +z to fwd and +y to up (both unit, at right angles; +x to up x fwd)
+export function quatFromBasis<T extends Quat>(o: T, fwd: Vec3, up: Vec3) {
+  const xx = up.y * fwd.z - up.z * fwd.y, xy = up.z * fwd.x - up.x * fwd.z, xz = up.x * fwd.y - up.y * fwd.x;
+  // (the matrix's columns: x, up, fwd; as three.js Quaternion.setFromRotationMatrix)
+  const m11 = xx, m12 = up.x, m13 = fwd.x, m21 = xy, m22 = up.y, m23 = fwd.y, m31 = xz, m32 = up.z, m33 = fwd.z;
+  const tr = m11 + m22 + m33;
+  if (tr > 0) {
+    const s = 0.5 / Math.sqrt(tr + 1);
+    return setQuat(o, (m32 - m23) * s, (m13 - m31) * s, (m21 - m12) * s, 0.25 / s);
+  }
+  if (m11 > m22 && m11 > m33) {
+    const s = 2 * Math.sqrt(1 + m11 - m22 - m33);
+    return setQuat(o, 0.25 * s, (m12 + m21) / s, (m13 + m31) / s, (m32 - m23) / s);
+  }
+  if (m22 > m33) {
+    const s = 2 * Math.sqrt(1 + m22 - m11 - m33);
+    return setQuat(o, (m12 + m21) / s, 0.25 * s, (m23 + m32) / s, (m13 - m31) / s);
+  }
+  const s = 2 * Math.sqrt(1 + m33 - m11 - m22);
+  return setQuat(o, (m13 + m31) / s, (m23 + m32) / s, 0.25 * s, (m21 - m12) / s);
+}
+/** the angle a turned towards b by t of the shorter way between them */
+export const lerpAngle = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;

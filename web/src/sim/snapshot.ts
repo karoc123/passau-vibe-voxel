@@ -19,7 +19,7 @@ import type { TrainState } from './train-traffic';
 import type { Car, Person, RoadPose, TrafficData, WalkPose } from './types';
 import type { CommandResult } from './commands';
 import type { TrafficView } from './sim-client';
-import type { CraftId, PlayerId, Seat, SimEvent, WorldSim } from './world-sim';
+import type { Ack, CraftId, PlayerId, Seat, SimEvent, WorldSim } from './world-sim';
 import type { Region, LiveNode } from '../core/live-edits';
 
 // what a client's path maths and drawing read of a car, a person
@@ -58,8 +58,9 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
-  /** the player's reads; results since the last snapshot (what their seat's entity did: events) */
-  player: { seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[] };
+  /** the player's reads; results since the last snapshot (what their seat's entity did: events); ack: their last
+   * seat input taken (its seq, the tick it was applied in: the state here is that of tick, after it) */
+  player: { seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };
   edits: EditNote[];
 }
 
@@ -85,7 +86,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
     walked, crafts, events: sim.eventsSince(since).map((e) => ('person' in e ? { ...e, person: pick(e.person, PERSON_KEYS) as Person } : e)),
-    player: { seat: sim.seat(player), driver: sim.driverSnapshot(player), results },
+    player: { seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: sim.ack(player) },
     edits,
   };
 }

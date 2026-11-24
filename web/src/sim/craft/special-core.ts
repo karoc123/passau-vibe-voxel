@@ -1,10 +1,11 @@
 // The helicopter, the hovercraft and the paraglider as WorldSim steps them (craft-core.ts): their motion
-// (craft-motion.ts CraftMotion) at 1/60 s, at most 6 steps (0.1 s) a frame, through their probes (craft-collision.ts
+// (craft-motion.ts CraftMotion) at 1/60 s (two a world tick), through their probes (craft-collision.ts
 // craftWorld). A landing on foot or on the water (the paraglider's) ends it: it steps no more, and its pilot hears of it
-// (events: 'landed', 'splash'). An empty seat: hands off (the helicopter let down onto its skids). No three.js, no DOM
+// (events: 'landed', 'splash'). An empty seat: hands off (the helicopter let down onto its skids). Drawn between the
+// world's last two ticks (heading, pitch and bank the shorter way: they never roll over). No three.js, no DOM
 // (tools/core-deps.mjs).
 import { FixedStep } from '../../core/fixed-step';
-import type { Vec3 } from '../../core/vec';
+import { lerpAngle, type Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
 import { craftWorld, CRAFT_RADIUS } from './craft-collision';
 import { CRAFT, CraftMotion, type CraftInput, type CraftKind, type CraftMotionWorld, type CraftStep, type CraftTuning } from './craft-motion';
@@ -26,6 +27,8 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
   /** what the last step did ('blocked': met a wall; 'loading': waited for a tile) */
   result: CraftStep = 'moving';
   private worlds = new WeakMap<VoxelCollision, CraftMotionWorld>();
+  // drawn: where it was at the world tick's start
+  private readonly from: SpecialDrawn = { x: 0, y: 0, z: 0, h: 0, pitch: 0, bank: 0 };
 
   constructor(readonly kind: CraftKind, cfg: CraftTuning = CRAFT) {
     this.motion = new CraftMotion(kind, cfg);
@@ -46,6 +49,12 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
   reset(spot: CraftSpot) {
     this.motion.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z }, spot.h, spot.speed ?? 0);
     this.result = 'moving';
+    this.keep();
+  }
+
+  keep() {
+    const m = this.motion, f = this.from;
+    f.x = m.p.x; f.y = m.p.y; f.z = m.p.z; f.h = m.heading; f.pitch = m.pitch; f.bank = m.bank;
   }
 
   step(input: CraftInput, dt: number, col: VoxelCollision) {
@@ -57,9 +66,9 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
 
   get pose() { const { p, heading } = this.motion; return { x: p.x, y: p.y, z: p.z, h: heading }; }
   get velocity() { return this.motion.velocity; }
-  // (as drawn at the last step)
-  drawn(_alpha: number): SpecialDrawn {
-    const m = this.motion;
-    return { x: m.p.x, y: m.p.y, z: m.p.z, h: m.heading, pitch: m.pitch, bank: m.bank };
+  drawn(alpha: number): SpecialDrawn {
+    const m = this.motion, a = this.from, t = Math.min(1, Math.max(0, alpha)), l = (u: number, v: number) => u + (v - u) * t;
+    return { x: l(a.x, m.p.x), y: l(a.y, m.p.y), z: l(a.z, m.p.z), h: lerpAngle(a.h, m.heading, t), pitch: lerpAngle(a.pitch, m.pitch, t),
+      bank: lerpAngle(a.bank, m.bank, t) };
   }
 }

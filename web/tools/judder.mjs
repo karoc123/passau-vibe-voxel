@@ -15,7 +15,8 @@ const LIMIT = 0.005; // m
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const errors = [];
 // the crafts (world metres = ?cam= grid + (6144, 2048)): the shell's id, where it is put in, its camera's start, the
-// keys held, whether its step is measured on the ground plane only (the boat bobs), the slowest it must go
+// keys held, whether it is measured on the ground plane only (the boat's hull bobs as drawn: left out of J and E), the
+// slowest it must go
 const CRAFTS = {
   plane: { shell: 'plane', at: { x: 6500, y: 160, z: 2600, h: 0 }, cam: '356,200,452,356,100,552', keys: [], flat: false, vmin: 30 },
   boat: { shell: 'boat', at: { x: 8160.5, z: 2880.5, h: 1.8 }, cam: '2016,60,782,2016,0,832', keys: ['KeyW'], flat: true, vmin: 8 },
@@ -105,7 +106,7 @@ function reportCraft(what, name, log) {
   const flat = CRAFTS[what].flat;
   const rel = log.map(([, , , , x, y, z, qx, qy, qz, qw, cx, cy, cz]) => {
     // (x - c turned by the inverse of q)
-    const vx = x - cx, vy = y - cy, vz = z - cz, ix = -qx, iy = -qy, iz = -qz;
+    const vx = x - cx, vy = flat ? 0 : y - cy, vz = z - cz, ix = -qx, iy = -qy, iz = -qz;
     const tx = 2 * (iy * vz - iz * vy), ty = 2 * (iz * vx - ix * vz), tz = 2 * (ix * vy - iy * vx);
     return [vx + qw * tx + iy * tz - iz * ty, vy + qw * ty + iz * tx - ix * tz, vz + qw * tz + ix * ty - iy * tx];
   });

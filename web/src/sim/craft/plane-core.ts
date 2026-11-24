@@ -1,16 +1,19 @@
 // The floatplane and the jet as WorldSim steps them (craft-core.ts): their flight (plane-flight.ts PlaneFlight) at its
-// own STEP, at most MAX_STEPS a frame, through their collision (the fuselage's cube, RADIUS; fetched HORIZON s ahead).
+// own STEP (two a world tick), through their collision (the fuselage's cube, RADIUS; fetched HORIZON s ahead).
 // Put down in the air (at spot.speed, else RESPAWN_SPEED; the engine at RESPAWN_THROTTLE) or afloat (spot.water: still,
 // the engine idle). Its pilot hears what happened (PlaneEvent: crash, respawn, ...). An empty seat: the stick let go,
 // the lever back (it glides down, or floats), and crashed it stays down (no one flies it back to a safe point). No
-// three.js, no DOM (tools/core-deps.mjs).
+// three.js, no DOM (tools/core-deps.mjs). Drawn between the world's last two ticks: the position on the line, the
+// attitude by quaternion (nlerp: it rolls over), heading, path angle and bank (the chase camera's) the shorter way.
 import { FixedStep } from '../../core/fixed-step';
-import { vec3, type Vec3 } from '../../core/vec';
+import { copy, lerp, lerpAngle, nlerpQuat, quat, quatFromBasis, rotate, set, vec3, type Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
 import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneInput, type PlaneWorld } from './plane-flight';
 import type { VoxelCollision } from './voxel-collision';
 
-export interface PlaneDrawn { p: Vec3; fwd: Vec3; up: Vec3 }
+/** as drawn: where it is, where its nose points and the cockpit's up; its heading, flight-path angle and bank */
+export interface PlaneDrawn { p: Vec3; fwd: Vec3; up: Vec3; heading: number; gamma: number; bank: number }
+const drawnState = () => ({ p: vec3(), fwd: vec3(), up: vec3(), heading: 0, gamma: 0, bank: 0 });
 
 export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> {
   readonly flight: PlaneFlight;
@@ -19,8 +22,12 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
   readonly events: PlaneEvent[];
   private worlds = new WeakMap<VoxelCollision, PlaneWorld>();
   private readonly v = vec3();
-  private readonly fwd = vec3();
-  private readonly up = vec3();
+  // drawn: where it was at the world tick's start (and how often it had jumped then), now, and between
+  private readonly from = { ...drawnState(), jumps: 0 };
+  private readonly now = drawnState();
+  private readonly out = drawnState();
+  private readonly qa = quat();
+  private readonly qb = quat();
 
   constructor(readonly cfg: PlaneConfig = PLANE) {
     this.flight = new PlaneFlight(cfg);
@@ -44,6 +51,22 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
     f.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z, heading: spot.h, speed: spot.speed, water });
     f.engine = water ? 0 : this.cfg.RESPAWN_THROTTLE;
     f.events.length = 0;
+    this.keep();
+  }
+
+  keep() {
+    const f = this.from;
+    this.state(f);
+    f.jumps = this.flight.jumps;
+  }
+
+  // its drawn state now into o
+  private state(o: PlaneDrawn) {
+    const f = this.flight;
+    f.attitude(o.fwd, o.up);
+    copy(o.p, f.p);
+    o.heading = f.heading; o.gamma = f.gamma; o.bank = f.bank;
+    return o;
   }
 
   step(input: PlaneInput, dt: number, col: VoxelCollision) {
@@ -53,15 +76,24 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
 
   get pose() { const { p, heading } = this.flight; return { x: p.x, y: p.y, z: p.z, h: heading }; }
   get velocity() { return this.flight.velocity(this.v); }
-  // (as drawn at the last step: where it is, where its nose points and the cockpit's up)
-  drawn(_alpha: number): PlaneDrawn {
-    this.flight.attitude(this.fwd, this.up);
-    return { p: this.flight.p, fwd: this.fwd, up: this.up };
+  // (between the tick's start and now; put somewhere at once since: now)
+  drawn(alpha: number): PlaneDrawn {
+    const a = this.from, b = this.state(this.now), o = this.out;
+    const t = this.flight.jumps !== a.jumps ? 1 : Math.min(1, Math.max(0, alpha));
+    lerp(o.p, a.p, b.p, t);
+    const q = nlerpQuat(this.qa, quatFromBasis(this.qa, a.fwd, a.up), quatFromBasis(this.qb, b.fwd, b.up), t);
+    rotate(set(o.fwd, 0, 0, 1), q);
+    rotate(set(o.up, 0, 1, 0), q);
+    o.heading = lerpAngle(a.heading, b.heading, t);
+    o.gamma = a.gamma + (b.gamma - a.gamma) * t;
+    o.bank = lerpAngle(a.bank, b.bank, t);
+    return o;
   }
 
   /** back to the last safe pose (T) */
   unstick(col: VoxelCollision) {
     this.flight.respawn(this.world(col));
+    this.keep();
     return true;
   }
 }

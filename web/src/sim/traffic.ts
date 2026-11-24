@@ -89,7 +89,7 @@ function phase(ctrl: Controller, t: number, axis: number) {
 const signal = (ctrl: Controller, t: number, axis: number) => { const k = phase(ctrl, t, axis); return k < GREEN ? 'G' : k < GREEN + AMBER ? 'Y' : 'R'; };
 const pedGreen = (ctrl: Controller, t: number, axis: number) => phase(ctrl, t, axis) < PED_GREEN;
 
-type Density = { cars: number; peds: number; bikes: number };
+export type Density = { cars: number; peds: number; bikes: number };
 
 export class Traffic {
   ground: Ground | null = null;
@@ -121,7 +121,8 @@ export class Traffic {
   edits: [number, number, number, number][] = [];
   day = 180;
   t = 0;
-  // the time since the last tick (s, under STEP): how far between the last two ticks to draw
+  // the time since the last tick (s, under STEP): how far between the last two ticks to draw; kept by whoever runs the
+  // ticks (sim/world-sim.ts WorldSim.update; update here for a traffic run alone)
   acc = 0;
   private readonly rand: Rng;
   private readonly outs = new Map<number, number[]>();
@@ -188,11 +189,18 @@ export class Traffic {
   }
   private anyOf<T>(a: T[]) { return a[(this.rand() * a.length) | 0]; }
 
-  // The ticks due after dt s (at most 0.1 s of them). focus: the middle of what is simulated (the active circle: what
-  // is looked at); viewer: where it is seen from (the camera; by default the focus, on the ground), what agents come
-  // and go far from.
+  // The ticks due after dt s (at most 0.1 s of them), for a traffic run alone (the world sim runs its own: frame,
+  // tick). focus: the middle of what is simulated (the active circle: what is looked at); viewer: where it is seen from (the
+  // camera; by default the focus, on the ground), what agents come and go far from.
   update(dt: number, hour: number, focus: { x: number; z: number }, viewer: Viewer = focus) {
-    dt = Math.min(dt, 0.1);
+    const density = this.frame(hour, focus, viewer);
+    this.acc += Math.min(dt, 0.1);
+    while (this.acc >= STEP) { this.tick(density, hour); this.acc -= STEP; }
+  }
+
+  /** a frame's own part, before its ticks: the active circle round the focus, the viewer, the hour's density (what
+   * the frame's ticks populate to); when warm (the first fill), the city filled at once */
+  frame(hour: number, focus: { x: number; z: number }, viewer: Viewer = focus): Density {
     const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
     if (d2 > JUMP_R * JUMP_R) this.warm = true;
@@ -207,9 +215,11 @@ export class Traffic {
         * (0.2 + 0.4 * (1 - Math.cos(2 * Math.PI * (this.day - 15) / 365))),
     };
     if (this.warm) this.populate(density); // (drawn this frame)
-    this.acc += dt;
-    while (this.acc >= STEP) { this.step(STEP, density, hour); this.acc -= STEP; }
+    return density;
   }
+
+  /** one tick (STEP s) at the frame's density and hour */
+  tick(density: Density, hour: number) { this.step(STEP, density, hour); }
 
   // a signal's state now: green, amber, red
   signal(ctrl: number, axis: number) { return signal(this.ctrls[ctrl], this.t, axis); }
