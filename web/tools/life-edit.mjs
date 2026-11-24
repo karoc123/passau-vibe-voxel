@@ -34,6 +34,8 @@
 //          pilot counts as a focus (the edits near them kept); left, a craft goes on with hands off; a pilot walking as
 //          a person leaves the craft first, back in it leaves the person; a craft followed is an entity (sim/entities.ts)
 //          where its core is, and a focus.
+//   rates  the crafts at three frame rates (one tick a frame, two, uneven under one): a boat, a helicopter, a drone
+//          and a floatplane bit-identical at every tick (WorldSim steps them in its ticks with each tick's input).
 //   left   a vehicle stays in the world when left (ADR 0008), through a SimServer and a client of its snapshots
 //          (MirrorSimClient): two pilots get out of a helicopter in the air and a boat under way (leaveSeat); both
 //          stay and are stepped hands off (the helicopter lets down onto its skids, the boat coasts), listed empty by
@@ -46,7 +48,7 @@
 //          (craftEvents), the client's as the sim's; a pilot entering after reads none of them. The driver's notes as
 //          drive events of the car: in players (driverNotes).
 // Prints the costs (the bodies' tick, the colliders).
-// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|left|events|keep ...]; prints one PASS line, or the failures and exit 1
+// usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|rates|left|events|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
 
@@ -642,6 +644,53 @@ async function crafts() {
   }
 }
 
+// The crafts at three frame rates (docs/plans/entities-and-modes.md E13: the world's ticks step them, each tick STEP
+// worth of its own fixed steps with that tick's input): a boat, a helicopter, a drone and a floatplane, four pilots,
+// their input a function of the tick it is applied in (held over 6 ticks); run in frames of one tick, of two ticks,
+// and of uneven times under a tick (1/144 .. 1/30 s). Each craft's pose and its drawn ends (drawn(0): where it was at
+// the tick's start, drawn(1): where it is) bit-identical at every tick the runs share, the craft events too.
+async function craftRates() {
+  const tq = (tick) => Math.floor(tick / 6) * 6 * STEP;
+  const plan = [['boat', 8160.5, 2880.5, 1.8, (t) => ({ throttle: 1, steer: Math.sin(t * 0.7), drift: t > 2 && t < 2.5 }), afloat(8160.5, 2880.5, 1.8)],
+    ['helicopter', STREET.x, STREET.y, 0, (t) => ({ lift: t < 2 ? 1 : 0, drive: t < 2 ? 0 : 1, turn: t > 3 ? -0.5 : 0, side: 0 }), aloft(STREET.x, STREET.y, 0, 40)],
+    ['drone', STREET.x + 60, STREET.y, 0, (t) => ({ roll: 0.05, pitch: t < 0.4 ? 0.2 : 0, yaw: 0.1, throttle: 0.5 }), aloft(STREET.x + 60, STREET.y, 0, 30)],
+    ['floatplane', STREET.x - 60, STREET.y, 0, (t) => ({ turn: Math.sin(t), pitch: 0.2, throttle: 0.8 }), aloft(STREET.x - 60, STREET.y, 0, 120)]];
+  const pilots = ['A', 'B', 'C', 'D'], END = 120, focus = { x: STREET.x, z: STREET.y };
+  const replay = async (frames) => {
+    const w = await craftWorld(plan);
+    if (!w) return null;
+    const { sim, crafts: cs } = w, states = new Map();
+    cs.forEach((c, k) => sim.send({ kind: 'enterSeat', player: pilots[k], entity: { kind: 'craft', id: c.id }, role: 'pilot' }));
+    for (let i = 0; sim.tick < END; i++) {
+      const at = tq(sim.tick);
+      cs.forEach((c, k) => sim.send({ kind: 'seatInput', player: pilots[k], role: 'pilot', input: plan[k][4](at) }));
+      const t0 = sim.tick;
+      sim.update(frames[i % frames.length], { hour: HOUR, focus });
+      if (sim.tick > t0) states.set(sim.tick, JSON.stringify(cs.map((c) => [c.core.pose, c.core.drawn(0), c.core.drawn(1)])));
+    }
+    return { states, end: sim.tick, events: JSON.stringify(sim.eventsSince(-1).filter((e) => e.kind === 'craft')), moved: cs.map((c, k) => Math.hypot(c.core.pose.x - plan[k][1], c.core.pose.z - plan[k][2])) };
+  };
+  Math.random = noRandom;
+  try {
+    const runs = [];
+    for (const frames of [[STEP], [2 * STEP], [1 / 144, 1 / 60, STEP, 1 / 120, 1 / 90, 1 / 75, 1 / 144, 1 / 144, STEP * 0.99]]) {
+      const r = await replay(frames);
+      if (!r) return;
+      runs.push(r);
+    }
+    const [a, ...others] = runs;
+    let shared = 0, differ = 0;
+    for (const r of others) for (const [t, s] of r.states) if (a.states.has(t)) { shared++; if (a.states.get(t) !== s) differ++; }
+    check(runs.every((r) => r.end === END && r.states.get(END) === a.states.get(END)) && !differ && shared > END,
+      `rates: four crafts bit-identical at every tick shared by one-tick, two-tick and uneven frames (${shared} ticks, ${differ} differ)`);
+    check(runs.every((r) => r.events === a.events), 'rates: the craft events the same at the three rates');
+    check(a.moved.every((m) => m > 5), `rates: each craft moved under its pilot (${a.moved.map((m) => m.toFixed(1)).join(', ')} m)`);
+    results.rates = { crafts: 4, ticks: END, shared };
+  } finally {
+    Math.random = realRandom;
+  }
+}
+
 async function left() {
   const { SimServer } = await load('sim/sim-server.ts'), { MirrorSimClient, ThreadLink } = await load('sim/sim-client.ts');
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
@@ -738,6 +787,10 @@ async function craftEvents() {
       JSON.stringify(logged) === JSON.stringify(mirrored) && logged.every((e) => e.entity.kind === 'craft' && e.entity.id === drone.id) &&
       JSON.stringify(logged.map((e) => e.e)) === JSON.stringify(mine) && !client.craftEvents('B').length,
     `events: the drone's impacts the world's craft events, read once by its pilot, the client's as the sim's (${mine.length})`);
+    // (each seat input numbered by the client; the snapshot acks the last one taken, the tick it was applied in)
+    const ack = client.ack('B'), n = Math.round(5 / STEP);
+    check(ack?.seq === n && ack.tick === sim.tick && JSON.stringify(ack) === JSON.stringify(sim.ack('B')),
+      `events: the pilot's seat inputs acked: seq ${ack?.seq} of ${n}, tick ${ack?.tick} of ${sim.tick}, the client's as the sim's`);
     client.send({ kind: 'leaveSeat', player: 'B' });
     tick(STEP, null, via);
     server.send({ kind: 'enterSeat', player: 'C', entity: { kind: 'craft', id: drone.id }, role: 'pilot' });
@@ -788,6 +841,7 @@ if (want('moto')) done(await motorbike());
 if (want('transit')) transit();
 if (want('players')) await players();
 if (want('crafts')) await crafts();
+if (want('rates')) await craftRates();
 if (want('left')) await left();
 if (want('events')) await craftEvents();
 if (want('keep')) await keep();

@@ -4,7 +4,7 @@ import { clamp, el } from '../util';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../sim/sim-client';
-import type { PlaneCore } from '../sim/craft/plane-core';
+import type { PlaneCore, PlaneDrawn } from '../sim/craft/plane-core';
 import { JET, PLANE, type PlaneConfig, type PlaneEvent, type PlaneInput } from '../sim/craft/plane-flight';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
@@ -327,7 +327,7 @@ export class PlaneMode implements PlayerCraft {
     this.tint.style.opacity = active && k < 1 ? String(0.7 * (1 - k)) : '0';
   }
 
-  // (the sim steps the plane after this, in the same frame: main.ts; this sends the input and draws the last step)
+  // (before the sim's update, main.ts: the input sent, what happened to it)
   private fly(dt: number) {
     const now = performance.now();
     if (this.link.refused()) { this.panel.say('Someone else took that plane.', 2500); this.nav.flyUp(); return; }
@@ -352,11 +352,18 @@ export class PlaneMode implements PlayerCraft {
       else if (e.type === 'takeoff') this.panel.say('Airborne', 1500);
       else if (e.type === 'bump') this.panel.say('Bump', 1200);
     }
+  }
+
+  // (after the sim's update: the model and the chase camera where the plane is drawn this frame)
+  place(dt: number) {
+    const c = this.phase === 'flying' ? this.link.craft : null;
+    if (!c) return;
+    const core = c.core, f = core.flight, now = performance.now();
     this.model.group.visible = f.state !== 'crashed';
-    const d = core.drawn(core.clock.alpha);
+    const d = core.drawn(this.link.alpha);
     this.model.orient(d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
     this.model.animate(dt, f.engine, this.env.night(), now);
-    this.chase(dt, now);
+    this.chase(d, dt, now);
   }
 
   private input(dt: number): PlaneInput {
@@ -383,7 +390,7 @@ export class PlaneMode implements PlayerCraft {
   // the chase camera: behind and over the plane. The floatplane's along a heading and pitch that follow its own with a
   // lag, rolled by a quarter of its bank; the jet's along its nose and its up, both lagged (it rolls with the jet,
   // through loops and inverted). Kept clear of what the collision holds; the field of view by speed; shaken by a crash
-  private chase(dt: number, now: number) {
+  private chase(d: PlaneDrawn, dt: number, now: number) {
     const core = this.craft!.core, collision = this.link.col!, f = core.flight, c = this.cam, ch = this.type.chase, aero = this.type.cfg.AEROBATIC;
     let fwd: THREE.Vector3, off: THREE.Vector3;
     if (aero) {
@@ -394,24 +401,24 @@ export class PlaneMode implements PlayerCraft {
       fwd = this.v3.copy(c.fwd);
       off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom).addScaledVector(c.up, ch.up * this.zoom);
     } else {
-      c.yaw = followAngle(c.yaw, f.heading, ch.lag, dt);
-      c.pitch += (f.gamma * 0.7 - c.pitch) * follow(ch.rollLag, dt);
+      c.yaw = followAngle(c.yaw, d.heading, ch.lag, dt);
+      c.pitch += (d.gamma * 0.7 - c.pitch) * follow(ch.rollLag, dt);
       fwd = this.v3.set(Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch), Math.cos(c.yaw) * Math.cos(c.pitch));
       off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom);
       off.y += ch.up * this.zoom;
     }
-    const hit = f.state !== 'crashed' ? collision.sweep(f.p, off) : 'loading';
-    const want = off.multiplyScalar(clearShare(hit, off, 0.15, 0.5)).add(f.p);
-    const look = fwd.multiplyScalar(ch.look).add(f.p);
+    const hit = f.state !== 'crashed' ? collision.sweep(d.p, off) : 'loading';
+    const want = off.multiplyScalar(clearShare(hit, off, 0.15, 0.5)).add(d.p);
+    const look = fwd.multiplyScalar(ch.look).add(d.p);
     const crash = (now - this.crashAt) / CRASH_TINT_MS;
     if (crash < 1) shake(want, 0.8 * (1 - crash) ** 2, now);
     const up = this.camera.up.copy(aero ? c.up : THREE.Object3D.DEFAULT_UP);
     const q = this.rig.look(want, look, up);
-    if (!aero) q.multiply(this.bank.setFromAxisAngle(Z, -f.bank * 0.25));
+    if (!aero) q.multiply(this.bank.setFromAxisAngle(Z, -d.bank * 0.25));
     // (from where the map camera was to the chase pose over the entry)
     this.rig.place(want, q, ch.fov(f.v), dt);
     // (the shadows' fit and the fog read the target: ahead of the plane)
-    this.target.copy(f.p).addScaledVector(this.v3.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)), aero ? 200 : 150);
+    this.target.copy(d.p).addScaledVector(this.v3.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)), aero ? 200 : 150);
   }
 
   // ------------------------------------------------------------------ the panel

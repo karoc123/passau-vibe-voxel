@@ -1,6 +1,6 @@
 # Entities, seats, health, items and game modes in the world sim
 
-Status: E10, E11, E12 landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
+Status: E10, E11, E12, E13 landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
 rules of a game are a mode layered on the world sim; the sim offers entities with ids, seats, health and items), on
 [ADR 0006](../adr/0006-world-sim-seam.md), [ADR 0007](../adr/0007-player-control-in-world-sim.md) and
 [local-server.md](local-server.md) (E9). Assumes E7 (commands queued per tick, one seat per player, `leaveSeat`, seat
@@ -347,6 +347,19 @@ stated; none waits on E8's internals.
 
 ### E13. One tick loop in WorldSim (M, not neutral)
 
+- **Landed** (= M3 of [smooth-motion-and-lag.md](smooth-motion-and-lag.md)): `WorldSim.update(dt)` clamps dt
+  (`MAX_DT` 0.1 s), keeps the accumulator (`Traffic.acc`, written by the sim; `Traffic.update` stays for a traffic
+  run alone) and runs `runTick` per whole tick: commands due, edit keeper and presence, crafts (`core.keep()`, then
+  `clock.run(STEP)`: 2 or 4 of their own steps with that tick's input), `Traffic.tick` (`Traffic.frame` once per
+  update: active circle, viewer, density), the tick's events. `seated`/`unseated` and `craft` events carry the tick
+  they happened in (E12's one-frame-late point is gone). `CraftCore.keep()` and `drawn(alpha)` between the tick's
+  start and now (plane, drone: quaternion nlerp; special crafts, boat: angles the shorter way; reset, unstick and the
+  plane's respawn, `PlaneFlight.jumps`, not blended). `WorldSim.time` / `SimClient.time` = `FrameTime { dt, tick,
+  alpha }`. `seatInput { seq, tick }` stamped by the clients; `WorldSim.ack(player)`, snapshot `player.ack { seq,
+  tick }` (tick: the one it was first applied in). Walk bounds now on the tick clock. Checks: life-edit `rates`
+  (boat, helicopter, drone, floatplane bit-identical at one-tick, two-tick and uneven frames; the craft events
+  alike), the ack in `events`; mirror-check compares ack and `FrameTime`. Not done: a `teleport` count for remote
+  interpolation (M4); input buffering by `tick` on the sim (M5: `tick` is carried, not used).
 - **Waits for:** E7.
 - **Do:** `WorldSim.update(dt)` accumulates and runs whole world ticks itself: per tick commands due, crafts stepped
   STEP worth on their own `FixedStep` with that tick's input, the traffic's one tick (`Traffic.step`, traffic.ts:447),

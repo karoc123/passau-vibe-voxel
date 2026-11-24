@@ -1,8 +1,8 @@
 // The server side of a SimClient (sim/sim-client.ts; docs/plans/local-server.md): the players' commands handed to the
-// world sim (WorldSim.send: queued there and applied in the order sent at the start of its next update, before its
-// ticks; ADR 0007), the world's edits applied at the start of the next update, their outcomes kept per player, and a
-// snapshot per player after an update (sim/snapshot.ts). Run in the page's thread (LocalSimClient, MirrorSimClient
-// over a ThreadLink) or in a Web Worker (sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
+// world sim (WorldSim.send: queued there and applied in the order sent at the start of its next tick; ADR 0007), the
+// world's edits applied at the start of the next update, their outcomes kept per player, and a snapshot per player
+// after an update (sim/snapshot.ts). Run in the page's thread (LocalSimClient, MirrorSimClient over a ThreadLink) or
+// in a Web Worker (sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
 import { liveEdits } from '../core/live-edits';
 import { apply as applyEdit } from '../core/world-edits';
 import { takeSnapshot, type EditNote, type Snapshot } from './snapshot';

@@ -42,7 +42,7 @@ import './style.css';
 
 declare global {
   interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer;
-    __board?: () => boolean }
+    __board?: () => boolean; __crafts?: PlayerCraft[] }
 }
 
 const TODAY = dayOfYear(new Date());
@@ -512,6 +512,7 @@ async function boot() {
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
+  window.__crafts = crafts; // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
 }
 
@@ -548,11 +549,11 @@ renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
   // the frame's order (docs/plans/smooth-motion-and-lag.md): the players' input (the car's, Nav's, the crafts that own
-  // the camera), the sim's update, this frame's poses drawn, then the ride camera on them, then what reads the camera
+  // the camera), the sim's update (its ticks; the frame's time: sim.time), this frame's poses drawn, then the cameras
+  // on them (the ride's, a craft's own), then what reads the camera
   for (const c of crafts) if (c.view === 'ride') c.update(dt);
   nav.update(dt);
   for (const c of crafts) if (c.view === 'own') c.update(dt);
-  craftsView?.update(sim, dt, daylight.night);
   if (sim && life) {
     // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
     // far from the camera, which sees them
@@ -560,7 +561,9 @@ renderer.setAnimationLoop((now) => {
     life.group.visible = !city || city.complete;
     if (life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
   }
+  craftsView?.update(sim, dt, daylight.night);
   nav.place(dt);
+  for (const c of crafts) c.place?.(dt);
   const bodyMode = nav.craft?.id ?? nav.mode;
   if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
   if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;

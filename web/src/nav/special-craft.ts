@@ -124,9 +124,8 @@ class SpecialCraft implements PlayerCraft {
 
   private get craft() { return this.phase === 'on' || this.phase === 'landing' ? this.link.craft : null; }
 
-  // (the sim steps the craft after this, in the same frame: main.ts; this sends the input and draws the last step; the
-  // frame it is put down it is not in yet)
-  update(dt: number) {
+  // (before the sim's update, main.ts: the input sent, what happened to it; the frame it is put down it is not in yet)
+  update(_dt: number) {
     if (this.phase === 'finding') this.findStart();
     if (this.phase === 'on' && this.link.refused()) {
       this.panel.say(`Someone else took that ${CONFIG[this.id].name.toLowerCase()}.`, 2500);
@@ -143,9 +142,13 @@ class SpecialCraft implements PlayerCraft {
         }
         break;
       }
-      if (this.phase === 'on' && this.craft) this.render(dt);
     }
     this.draw();
+  }
+
+  // (after the sim's update: the model and the camera where the craft is drawn this frame)
+  place(dt: number) {
+    if (this.phase === 'on' && this.craft) this.render(dt);
   }
 
   private findStart() {
@@ -216,7 +219,7 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private render(dt: number) {
-    const core = this.craft!.core, collision = this.link.col!, m = core.drawn(core.clock.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
+    const core = this.craft!.core, collision = this.link.col!, m = core.drawn(this.link.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
     group.visible = true;
     group.position.set(m.x, m.y - cfg.drop, m.z);
     group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');

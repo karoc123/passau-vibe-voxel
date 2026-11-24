@@ -180,6 +180,8 @@ export class PlaneFlight {
   atEdge = false;
   waiting = false; // the last step waited for a collision tile
   t = 0;
+  /** how often it was put somewhere at once (reset, respawn): not drawn moving there (plane-core.ts drawn) */
+  jumps = 0;
   readonly events: PlaneEvent[] = [];
   private crashLeft = 0;
   private crashAt = 0;
@@ -205,6 +207,7 @@ export class PlaneFlight {
   }
 
   private place(s: Safe) {
+    this.jumps++;
     set(this.p, s.x, s.y, s.z);
     this.heading = s.heading;
     this.gamma = this.bank = this.pitchRate = this.roll = 0;

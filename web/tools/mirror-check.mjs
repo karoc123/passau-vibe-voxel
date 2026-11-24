@@ -4,7 +4,7 @@
 // other through MirrorSimClient over a ThreadLink (a TrafficMirror set from each snapshot, as from a Web Worker). Every
 // frame the drawn poses of every car, person and rider (by id), the signal heads, the trains' coaches, the boats and
 // the walked person must agree bit for bit; a player follows a car, walks as a person and lets go on the way (the
-// commands through both clients).
+// commands through both clients; the walk's seat inputs acked alike).
 // usage (in web/): node tools/mirror-check.mjs [-v] [--seconds S]; prints PASS with the counts compared, or FAIL
 import fs from 'node:fs';
 import * as THREE from 'three';
@@ -28,7 +28,7 @@ const direct = new LocalSimClient(a), mirror = new MirrorSimClient(new ThreadLin
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
-let compared = 0, frames = 0;
+let compared = 0, frames = 0, acked = true;
 const key = (o) => `${o.kind}:${o.bike ? 'r' : ''}${o.id}`;
 const drawn = (T) => {
   const m = new Map();
@@ -73,7 +73,11 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   const ma = matrices(lifeA), mb = matrices(lifeB);
   if (JSON.stringify(ma) !== JSON.stringify(mb) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: instance matrices differ`);
   if (JSON.stringify(direct.seat(LOCAL_PLAYER)) !== JSON.stringify(mirror.seat(LOCAL_PLAYER)) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: seats differ`);
+  // (the seat inputs' acks and the frame's time: seq, tick, alpha)
+  if (JSON.stringify([direct.ack(LOCAL_PLAYER), direct.time]) !== JSON.stringify([mirror.ack(LOCAL_PLAYER), mirror.time]) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: ack or frame time differ`);
+  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(direct.ack(LOCAL_PLAYER)?.seq > 0)) acked = false;
   if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} ${A.size} agents, seat ${JSON.stringify(mirror.seat(LOCAL_PLAYER))}`);
 }
+if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }
-console.log(`PASS mirror-check: ${frames} frames, ${compared} agent poses, the instance matrices, seats and walked poses alike (direct and from snapshots)`);
+console.log(`PASS mirror-check: ${frames} frames, ${compared} agent poses, the instance matrices, seats, walked poses, seat input acks and frame times alike (direct and from snapshots)`);

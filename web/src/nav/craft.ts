@@ -40,8 +40,11 @@ export interface PlayerCraft {
   board?(craft: CraftView): boolean;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */
   leave(): void;
-  /** every frame, on or not (its panel) */
+  /** every frame, on or not, before the sim's update (main.ts): its input sent, its panel, what happened to it */
   update(dt: number): void;
+  /** every frame after the sim's update (main.ts; 'own' only): its model and its camera on the pose it is drawn at in
+   * this frame (between the world's last two ticks: CraftLink.alpha) */
+  place?(dt: number): void;
 }
 
 /** the light and the rivers' points, for the crafts on the water */
@@ -103,6 +106,9 @@ export class CraftLink<K extends CraftType> {
     return c && c.type === this.type ? c as CraftView<CoreOf<K>> : null;
   }
 
+  /** how far between the world's last two ticks this frame is drawn (the craft's drawn(alpha)) */
+  get alpha() { return this.sim?.time.alpha ?? 1; }
+
   /** the craft this frame (null: not made yet), the shell's collision fetched round it */
   frame() {
     const c = this.craft;
@@ -110,7 +116,7 @@ export class CraftLink<K extends CraftType> {
     return c;
   }
 
-  /** a craft of the link's type made, the local player its pilot, put down at spot (from the next update) */
+  /** a craft of the link's type made, the local player its pilot, put down at spot (from the next tick) */
   spawn(spot: SimSpot) {
     this.sim!.send({ kind: 'spawnCraft', player: LOCAL_PLAYER, type: this.type, spot });
     this.held = true;

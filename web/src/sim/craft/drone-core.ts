@@ -1,10 +1,11 @@
-// The FPV drone as WorldSim steps it (craft-core.ts): its flight (fpv-flight.ts FpvFlight) at 1/120 s (a frame counts
-// for at most 0.1 s), moved through its collision's cube: stopped a hair short of what it meets, sliding along it when
+// The FPV drone as WorldSim steps it (craft-core.ts): its flight (fpv-flight.ts FpvFlight) at 1/120 s (four a world
+// tick), moved through its collision's cube: stopped a hair short of what it meets, sliding along it when
 // it comes in slowly, bounced (and its pilot told: events, 'impact') when fast. Disarmed (input null: before arming,
 // out of focus) it holds still where it is; an empty seat cuts the throttle (it falls and comes to rest). No three.js,
-// no DOM (tools/core-deps.mjs).
+// no DOM (tools/core-deps.mjs). Drawn between the world's last two ticks: the position on the line, the attitude by
+// quaternion (nlerp).
 import { FixedStep } from '../../core/fixed-step';
-import { add, addScaled, component, copy, length, lengthSq, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
+import { add, addScaled, component, copy, copyQuat, length, lengthSq, lerp, nlerpQuat, quat, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
 import type { CraftCore, CraftSpot } from './craft-core';
 import { FpvFlight, REBOUND_SPEED, type FlightInput } from './fpv-flight';
 import type { ImpactKind, Sweep } from './sweep';
@@ -29,11 +30,20 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn> 
   private col: VoxelCollision | null = null;
   private readonly next = vec3();
   private readonly glide = vec3();
+  // drawn: where it was at the world tick's start, and between that and now
+  private readonly from: DroneDrawn = { position: vec3(), attitude: quat() };
+  private readonly out: DroneDrawn = { position: vec3(), attitude: quat() };
 
   // (its yaw: the camera looks along -z, so heading h is yaw h + pi)
   reset(spot: CraftSpot) {
     this.flight.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z }, spot.h + Math.PI);
     this.waiting = false;
+    this.keep();
+  }
+
+  keep() {
+    copy(this.from.position, this.flight.position);
+    copyQuat(this.from.attitude, this.flight.attitude);
   }
 
   step(input: DroneInput, dt: number, col: VoxelCollision) {
@@ -50,8 +60,12 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn> 
   }
 
   get velocity() { return this.flight.velocity; }
-  // (as drawn at the last step)
-  drawn(_alpha: number): DroneDrawn { return { position: this.flight.position, attitude: this.flight.attitude }; }
+  drawn(alpha: number): DroneDrawn {
+    const a = this.from, o = this.out, t = Math.min(1, Math.max(0, alpha));
+    lerp(o.position, a.position, this.flight.position, t);
+    nlerpQuat(o.attitude, a.attitude, this.flight.attitude, t);
+    return o;
+  }
 
   private readonly move = (position: Vec3, displacement: Vec3, velocity: Vec3) => {
     const col = this.col!, collision = col.sweep(position, displacement);
