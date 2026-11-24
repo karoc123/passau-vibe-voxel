@@ -1,6 +1,6 @@
 # Smooth motion and lag: the frame, the clocks, prediction
 
-Status: research and design, nothing built. Reference case: the driven car judders ("set back, then jumps forward",
+Status: M1 and M3 built (section 4); the rest is research and design. Reference case: the driven car judders ("set back, then jumps forward",
 worse with speed), with the sim in the page's thread and with `?worker=1`. Target: [ADR 0008](../adr/0008-server-vision.md)
 (an authoritative server, 10–50 players), on [ADR 0006](../adr/0006-world-sim-seam.md),
 [ADR 0007](../adr/0007-player-control-in-world-sim.md), [local-server.md](local-server.md) and
@@ -339,6 +339,18 @@ E17–E19 stand (owner's decision 3: no hurry). M9, M10 with the server and the 
 
 ### M3. One tick loop, crafts interpolated (M, not neutral) = E13
 
+- **Landed** (what: [entities-and-modes.md](entities-and-modes.md) E13): the frame is input (car, Nav's controls,
+  own-camera crafts' `update`: input, events, panel) → `sim.update` (whole ticks; `FrameTime` from `sim.time`) →
+  `life.update` → `CraftsView` (crafts not flown here, at the frame's alpha) → `Nav.place` → the own-camera crafts'
+  `place` (model and camera on `drawn(alpha)` of this frame). Cores keep the tick's start (`keep()`) and blend to now;
+  no samplers moved (the cores' `drawn` is the sampler); no `teleport` count yet (placement and the plane's respawn
+  are not blended: enough locally, M4 needs the count). `tools/judder.mjs --what car,plane,boat,drone` (crafts:
+  sampled just before the render, E's speed from the drawn path over ±0.1 s; the boat's bobbing left out). Measured
+  (headless, synthetic rAF), max J / E in cm over the 7 patterns: before, plane 0.00 / 88.7 (38.2 at 120 Hz steady:
+  a 1/60 s core moving in every other frame), boat 0.7 / 31.0, drone 0.00 / 59.5 (the shells drew the state before
+  the sim's update, a frame late, and between no steps); after, plane 0.00 / 0.01, boat 0.00 / 0.10, drone 0.00 /
+  0.09, car unchanged 0.0 / 0.04 (7/7 each, 28/28). J of the plane and the drone is 0 by construction in these runs
+  (straight flight; the drone's camera is the drone).
 - **Do:** E13 as amended in section 3: `WorldSim` owns the accumulator; cores keep `prev`/`cur`, `drawn(alpha)`
   blends (quaternion nlerp for attitude); `FrameTime`; samplers in `sim/`; `teleport`; commands with `seq` and
   `tick`, snapshot `ack`.
