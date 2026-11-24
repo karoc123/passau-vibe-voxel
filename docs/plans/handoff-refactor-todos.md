@@ -37,8 +37,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | **Ready** |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| E7 | Commands a server can trust | M | **Ready** (queueing done in E9) |
-| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Waits** (E7 first; order in the plan) |
+| E10–E16, E21 | Entities, seats, events, one tick loop, mode layer, health/items, spawn, avatar ([plan](entities-and-modes.md)) | S–M each | **Ready** from E10 (order in the plan) |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
@@ -140,16 +139,15 @@ poses) → `Nav.place` (the ride camera) → what reads the camera; `Rider.updat
 80 km/h (before: J 36.9 cm), camera 9.00 m behind. Open: crafts with their own camera still place it before the sim
 (M3/E13); `life.update`'s viewer is last frame's camera; the worker's snapshot clock (M4).
 
-### E7. Commands a server can trust (M, from E2's open points)
-
-- **Why:** after E2, `follow`/`walkAs`/`walkPose`/`release` apply at once while `takeWheel` is queued per tick; the
-  walker seat lives in `WorldSim.players`, the driver seat in `LifePhysics.drivers`, and nothing in the sim stops a
-  player from holding both (only `nav` does); a client's walk pose is taken as given.
-- **Do:** every player command (walker, driver, and E4's `enterCraft`/`craftInput`/`leaveCraft`) queued and applied at the start of a tick, in order; one seat per player enforced by
-  the sim, `release`/`releaseWheel` become one `leaveSeat`; the seat table owned by `WorldSim` (the driver's state
-  stays in the physics); a walk pose bounded (speed, step height) against the last one. `LOCAL_PLAYER` moves out of
-  the sim to the client (`nav/`).
-- **Gates:** tsc, core-deps, life-edit (players scenario), rapier-car, popin-check.
+E7 landed (merge after `e86b1663`): `WorldSim.send` queues every player command (`sim/commands.ts` `PlayerCommand`),
+applied in order in one `apply()` at the start of the update; the seat table in `WorldSim` (`occupants` keyed
+`kind:id:role`), one seat per player, a second seat switches (the old one left only if the new one can be taken);
+`leaveSeat` replaces `release`/`releaseWheel`/`leaveCraft`; LifePhysics' own claim queue is gone (`takeWheel` returns
+a boolean, always reported); walk poses bounded (`sim/walk-bounds.ts`, `Tuning.walk`: 12 m/s across, 10 up, 80 down,
+0.5 m slack, `walkAs` within 5 m), a clamp reported and `Foot.correct` puts the walk back; `LOCAL_PLAYER` in
+`nav/player.ts`. Open from E7: commands apply at the update's start, not per tick (E13); results nobody reads
+(`spawnCraft`, `placeCraft`) pile up; a fall over 80 m/s is slowed by the clamp; `walkAs` start height not bounded;
+no seq/tick (M5).
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
