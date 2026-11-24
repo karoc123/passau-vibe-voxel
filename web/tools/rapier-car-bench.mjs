@@ -15,7 +15,7 @@ const budget = opt('--budget', 2), kmh = opt('--speed', 80), noCouple = flag('--
 const [x0, z0, x1, z1] = argv.length >= 4 ? argv.map(Number) : [1500, 700, 2300, 760];
 
 const T = await imp('src/physics/rapier/terrain.ts');
-const TD = await imp('src/tile-data.ts');
+const TD = await imp('src/core/tile-data.ts');
 const R = (await import('@dimforge/rapier3d-compat')).default;
 await R.init();
 const meta = JSON.parse(fs.readFileSync(`${dataDir}/meta.json`, 'utf8'));

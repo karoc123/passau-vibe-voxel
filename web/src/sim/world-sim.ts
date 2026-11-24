@@ -35,7 +35,7 @@ import type { Person, RoadPose, TrafficData, Vec3, WalkPose } from './types';
 import { Entities, SEATS, sameEntity, type EntityRef, type Role, type Seat } from './entities';
 import { vehicleOf } from './vehicles';
 import type { VehicleId } from './vehicles';
-import type { Meta } from '../types';
+import type { Meta } from '../core/meta';
 import type { TileCache } from '../core/tile-cache';
 import type { CraftCore, CraftSpot } from './craft/craft-core';
 import { CORES, type CoreOf, type CraftType } from './craft/cores';

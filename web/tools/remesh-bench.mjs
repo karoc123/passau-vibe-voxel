@@ -17,7 +17,7 @@ const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(web, 'public/data');
 globalThis.self ??= globalThis; // (the worker module sets self.onmessage when loaded)
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
-const TD = await imp('src/tile-data.ts'), CO = await imp('src/core/columns.ts');
+const TD = await imp('src/core/tile-data.ts'), CO = await imp('src/core/columns.ts');
 
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };

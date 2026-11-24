@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { dataTexture, fetchGzip } from './util';
-import { TILE_N as T } from './tile-data';
+import { TILE_N as T } from './core/tile-data';
 
 // The bare terrain (scripts/terrain.py), in square chunks of 256 height steps (257 samples a side, the last shared with
 // the next chunk) and 512 colour texels, clipped at the map's edges: data/terrain/near (heights every 4 m, colours

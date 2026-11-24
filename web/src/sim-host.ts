@@ -18,7 +18,7 @@ import type { Ground } from './sim/traffic';
 import type { Tuning } from './sim/tuning';
 import type { TrafficData } from './sim/types';
 import { WorldSim } from './sim/world-sim';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import type { TileCache } from './core/tile-cache';
 
 export interface HostOptions {

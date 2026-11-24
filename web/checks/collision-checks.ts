@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
-import type { ColumnData, Meta } from '../src/types';
-import { decodeTile, roomOffsets, TILE_N as N } from '../src/tile-data';
-import { World } from '../src/world';
+import type { ColumnData, Meta } from '../src/core/meta';
+import { decodeTile, roomOffsets, TILE_N as N } from '../src/core/tile-data';
+import { World } from '../src/core/world';
 import { STEP, walkStep } from '../src/nav/walk';
 import type { Check } from './check';
 import { fetchedCollision, makeWorld, serve, type TestWorld, type WorldSpec } from './world';

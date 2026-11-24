@@ -1,4 +1,4 @@
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 
 // OSM maps few of Passau's street lamps (123, most on the bridges), so the lanes and alleys stood dark. Every street and
 // footway in the built-up town is lit: a pool every ~26 m along it, unless a lamp (mapped or placed) is already within

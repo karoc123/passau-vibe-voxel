@@ -1,4 +1,4 @@
-import { DECODED_TAGS } from './core/tile-sections';
+import { DECODED_TAGS } from './tile-sections';
 
 export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
 // planes: the roof plane per column, bld: the building per column (both apron included), kept with the columns so a

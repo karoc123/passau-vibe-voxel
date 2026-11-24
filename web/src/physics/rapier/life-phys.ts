@@ -29,7 +29,7 @@ import { pt } from '../../sim/path';
 import { STEP as TICK, type BodyDraw, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
 import type { CoachBox } from '../../sim/train-traffic';
 import type { Car, RoadPose } from '../../sim/types';
-import type { Meta } from '../../types';
+import type { Meta } from '../../core/meta';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
 import { createVehicle, createWheels, REST, RIDE, WHEEL_R, warmUp, type CarBuild, type RideTuning } from './vehicle';
 import { buildOf, VEHICLES, type VehicleId } from '../../sim/vehicles';

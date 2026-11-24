@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TILE_N, type Fields } from './tile-data';
+import { TILE_N, type Fields } from './core/tile-data';
 import { dataTexture } from './util';
 import { LAMP_PAGE, type LampLight } from './lamplight';
 

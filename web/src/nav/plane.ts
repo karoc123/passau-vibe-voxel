@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Meta } from '../types';
+import type { Meta } from '../core/meta';
 import { clamp, el } from '../util';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';

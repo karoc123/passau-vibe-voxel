@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, wrapAngle } from '../util';
-import type { World } from '../world';
+import type { World } from '../core/world';
 
 const WALK_SPEED = 2.4;
 const RUN_SPEED = 5.7;

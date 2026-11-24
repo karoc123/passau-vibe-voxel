@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import type { Meta } from './types';
+import type { Meta } from './core/meta';
 import { CUT_T } from './daylight';
 import { CHUNK, chunkTexture, fetchChunk, type TerrainChunk } from './terrain';
-import { TILE_N as T } from './tile-data';
+import { TILE_N as T } from './core/tile-data';
 
 // The ground beyond the view distance (settings.ts dist): the bare terrain (scripts/terrain.py, data/terrain/far{k}),
 // no buildings, under the fog -- at the distance the fog is full (daylight.ts), so what it shows is the land's outline

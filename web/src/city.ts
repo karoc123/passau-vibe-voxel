@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Caption } from './caption';
 import type { TileNode, TileStreamer } from './stream';
-import type { ColumnData, Meta, Zones } from './types';
+import type { ColumnData, Meta } from './core/meta';
+import type { Zones } from './types';
 import { dataTexture, fetchJson, pushTo } from './util';
 import type { DepthPrepass } from './prepass';
 import type { Lod } from './settings';
@@ -11,7 +12,7 @@ import { FarGround } from './farground';
 import { FieldPages } from './fields';
 import { loadTerrain } from './terrain';
 import type { LampLight } from './lamplight';
-import { TILE_N as T } from './tile-data';
+import { TILE_N as T } from './core/tile-data';
 
 // The view distance (settings.ts dist, setDist): a 128 m tile is wanted (loaded, meshed) while its nearest point lies
 // within the distance + LOAD_M of the camera along the ground, kept once in until it is further than + KEEP_M (so a

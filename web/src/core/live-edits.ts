@@ -4,7 +4,7 @@
 // before its file, and drop what they built of it when it changes. Transient (docs/adr/0001-world-layers.md L2):
 // nothing is kept beyond the process. Empty unless something edits, so nothing changes by default. One world per
 // process (docs/adr/0008-server-vision.md): the module's liveEdits.
-import type { Columns, RawColumns } from '../tile-data';
+import type { Columns, RawColumns } from './tile-data';
 import type { WorldOp } from './layers';
 
 // base: the node's tiles/1 columns (with the ground); foliage: its tiles/1f columns, null: as in the file; ops: the

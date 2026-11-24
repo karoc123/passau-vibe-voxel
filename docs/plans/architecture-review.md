@@ -321,6 +321,17 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   declares); importers updated (14 of `tile-data`, 24 of `types`, 11 of `world`).
 - **Gates:** fast set; `mesh-golden` with a file recorded before (the mesher imports `tile-data`); A1's baseline
   shrinks by 9.
+- **Landed** (2026-11-24): `core/meta.ts` holds `Meta`, `WorldId`, `TileLevel`, `ColumnData` and, because `Meta`
+  names them, `Label`, `Facts`, `View`, `Vec3Tuple` (all meta.json data); `types.ts` keeps `FloodInfo`, `Zones`,
+  `Place` and re-exports the rest for one step (every importer already switched, so the re-export can go).
+  `tile-data.ts`, `world.ts`, `tile-world.ts` are in `core/` (git mv); `World.raycast` takes `Point` (no three).
+  Importers in `src/` and `checks/` switched, and the tools' load paths (`imp('src/tile-data.ts')`,
+  `load('tile-data.ts')`, `load('world.ts')` in 12 tools). Baseline R1 47 → 35: the 9 headless → root entries and
+  3 server → root ones (`sim-host.ts`, `sim.worker.ts` → `types.ts`; `sim.worker.ts` → `tile-world.ts`); none
+  added. `core/` now imports only `core/`; `sim/`, `physics/` nothing from the root. The fast set scans 55
+  modules (with `core/world.ts`, `core/tile-world.ts`). `mesh-golden` identical (106 meshes), fast set 16/16,
+  `popin-check`, `vite build`, and the page with and without `?worker=1` load without errors. Comments and docs that
+  name the old paths (`tile-data.ts`, `world.ts` in prose) were left as they are.
 
 ### A3. The contract module (M)
 

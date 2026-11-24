@@ -1,7 +1,7 @@
 import { component, type Vec3 } from '../../core/vec';
 import type { ImpactKind, Sweep } from './sweep';
-import type { Meta } from '../../types';
-import type { RawColumns } from '../../tile-data';
+import type { Meta } from '../../core/meta';
+import type { RawColumns } from '../../core/tile-data';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 import type { TileCache } from '../../core/tile-cache';
 import { capField, surfaceAt, type CapField } from '../../core/surface';

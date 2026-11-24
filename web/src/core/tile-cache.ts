@@ -5,7 +5,7 @@
 //
 // Reference-counted: acquire() a node (its load starts or is shared), release() it when done; a node nobody holds is
 // dropped, the last `keep` of them kept (most recently released last) for a reader coming back to it.
-import { decodeTile, type Columns, type RawColumns } from '../tile-data';
+import { decodeTile, type Columns, type RawColumns } from './tile-data';
 import type { LiveEdits } from './live-edits';
 
 // a node's tiles/1 columns (with the ground, planes, bld, rooms) and its tiles/1f columns

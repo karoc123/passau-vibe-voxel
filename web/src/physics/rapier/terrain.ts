@@ -16,7 +16,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { capField, capSlot, cornerQ, diagonal02, surfaceAt, type CapField } from '../../core/surface';
 import { liveEdits, type Region } from '../../core/live-edits';
 import { TileCache } from '../../core/tile-cache';
-import type { Meta } from '../../types';
+import type { Meta } from '../../core/meta';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 
 export const CHUNK = 16;

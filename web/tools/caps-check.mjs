@@ -18,7 +18,7 @@ import { dataDir as dir } from './data-dir.mjs';
 
 globalThis.self ??= globalThis;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
-const TD = await imp('src/tile-data.ts'), SF = await imp('src/core/surface.ts'), RF = await imp('src/roofs.ts');
+const TD = await imp('src/core/tile-data.ts'), SF = await imp('src/core/surface.ts'), RF = await imp('src/roofs.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };
 const raw = (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
