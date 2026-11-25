@@ -20,6 +20,7 @@ apply across the whole fixture, including areas outside the local defects.
 | `dietzing` | 11 of 50 LoD2-matched outlines moved (22.0%, minimum 40%; fixture added with Q8) |
 | `gaissa` | 30 of 93 LoD2-matched outlines moved (32.3%, minimum 40%) |
 | `haissengasse` | Footpaths sunk 2.09% and hovering 2.12% (maximum 1.50% each) |
+| `holes` | Bridge deck 8092867 sags 2.1 m, tunnels 24153461 and 101216178 blocked (the same with every block built: the fixture's south edge, not the block left out; for `covers` and `windows`) |
 | `hals` | Footpaths hovering 3.22% (maximum 1.50%), cap roughness p99 14.45 cm (maximum 12 cm) |
 | `kachlet` | 445 of 1419 LoD2-matched outlines moved (31.4%, minimum 40%) |
 

@@ -237,7 +237,7 @@ def _cut_osm(ws, rdir, src):
     ovm = np.array([(e["type"], e["id"]) in have for e in els], bool)
     out, cuts = {}, {}
     for w in ws:
-        ra, rb, ca, cb = w.region(_halo())
+        ra, rb, ca, cb = w.region(_halo(), nodes=False)
         m = always | ((bb[:, 2] >= ca - OSM_MARGIN) & (bb[:, 0] <= cb + OSM_MARGIN)
                       & (bb[:, 3] >= ra - OSM_MARGIN) & (bb[:, 1] <= rb + OSM_MARGIN))
         sub = [els[i] for i in np.flatnonzero(m)]
@@ -277,7 +277,7 @@ def region_key(w, osm_hash, deps, features=None):
     """the hash of everything region w's build reads (deps: the code files it loaded last time, scripts/-relative;
     features: the large features' decisions it looked up, features.py)"""
     import region
-    box = w.region(region.HALO)
+    box = w.region(region.HALO, nodes=False)
     d = dict(box=list(box), core=[w.r0, w.r1, w.c0, w.c1], config=config_part(), osm=osm_hash,
              rasters={p: raster_hash(p, box) for p in RASTERS}, raw={p: file_sha(p) for p in RAW_FILES},
              env={k: os.environ.get(k) for k in ENV}, code={f: code_sha(HERE / f) for f in sorted(deps)})

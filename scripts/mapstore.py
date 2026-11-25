@@ -19,22 +19,49 @@ import tilefile
 
 
 class _Cover:
-    """which window of a cover (a grid of windows, window.split / window.cover) holds a map cell"""
+    """which window of a cover (window.cover / window.split, cut to the built blocks) holds a map cell: every window's
+    core starts on a window.ALIGN block's corner, so each block lies in one window at most (a partial block's core
+    holds only its first rows); a cell in no window, or not built (window.Window.boxes), is empty"""
 
     def __init__(self, ws):
+        import window
         self.ws = list(ws)
-        self.D, self.W = self.ws[0].D, self.ws[0].W
-        self.rcuts = sorted({w.r0 for w in self.ws})
-        self.ccuts = sorted({w.c0 for w in self.ws})
-        self.at = {(w.r0, w.c0): w for w in self.ws}
-        assert len(self.at) == len(self.rcuts) * len(self.ccuts), "the cover is not a grid"
+        self.D, self.W, self.boxes = self.ws[0].D, self.ws[0].W, self.ws[0].boxes
+        self.A = window.ALIGN
+        self.at = {}
+        for w in self.ws:
+            assert w.r0 % self.A == 0 and w.c0 % self.A == 0, "a core not on the blocks' corners"
+            for br in range(w.r0 // self.A, -(-w.r1 // self.A)):
+                for bc in range(w.c0 // self.A, -(-w.c1 // self.A)):
+                    assert (br, bc) not in self.at, "windows overlap"
+                    self.at[(br, bc)] = w
+        self._mask = {}
 
-    def index(self, r, c):
-        """per cell the (row band, column band) indices of its window"""
-        return np.searchsorted(self.rcuts, r, side="right") - 1, np.searchsorted(self.ccuts, c, side="right") - 1
+    def window_at(self, r, c):
+        """the window whose core holds map cell (r, c), or None"""
+        w = self.at.get((r // self.A, c // self.A))
+        return w if w is not None and w.holds(r, c) else None
 
-    def window(self, ib, jb):
-        return self.at[(self.rcuts[ib], self.ccuts[jb])]
+    def built(self, r, c):
+        """whether map cell (r, c) is built"""
+        return self.boxes is None or any(r0 <= r < r1 and c0 <= c < c1 for r0, r1, c0, c1 in self.boxes)
+
+    def core_mask(self, w):
+        """the core's built cells (bool, the core's shape), or None when all of them are"""
+        k = (w.r0, w.c0)
+        if k not in self._mask:
+            self._mask[k] = w.built((w.r0, w.r1, w.c0, w.c1))
+        return self._mask[k]
+
+    def windows_in(self, r0, r1, c0, c1):
+        """the windows whose cores meet rows r0..r1, columns c0..c1 (map cells), in the cover's order"""
+        found = {self.at[(br, bc)] for br in range(r0 // self.A, -(-r1 // self.A)) for bc in range(c0 // self.A, -(-c1 // self.A))
+                 if (br, bc) in self.at}
+        return [w for w in self.ws if w in found and w.r0 < r1 and w.r1 > r0 and w.c0 < c1 and w.c1 > c0]
+
+    def band_cuts(self):
+        """the rows where a band starts: the cores' first and last rows, 0 (then each band to the next, the last to D)"""
+        return sorted({0} | {w.r0 for w in self.ws} | {w.r1 for w in self.ws if w.r1 < self.D})
 
 
 class MapRaster:
@@ -59,7 +86,7 @@ class MapRaster:
             return self._cache[k]
         z = np.load(self.rdir(w) / "core.npz")
         arrs = [z[k_] for k_ in self.keys]
-        a = self.fn(*arrs) if self.fn else arrs[0]
+        a = self._masked(w, self.fn(*arrs) if self.fn else arrs[0])
         if hasattr(self, "dtype"):
             a = a.astype(self.dtype, copy=False)
         self._cache[k] = a
@@ -67,22 +94,27 @@ class MapRaster:
             self._cache.popitem(last=False)
         return a
 
+    def _masked(self, w, a):
+        """a core's array with its cells that are not built (only in a cover whose cores hold empty blocks) `fill`"""
+        m = self.cov.core_mask(w)
+        if m is None:
+            return a
+        m = m[::self.scale, ::self.scale].reshape(m[::self.scale, ::self.scale].shape + (1,) * (a.ndim - 2))
+        return np.where(m, a, np.asarray(self.fill, a.dtype))
+
     def box(self, r0, r1, c0, c1):
-        """rows r0..r1, columns c0..c1 (this raster's cells), `fill` beyond the map"""
+        """rows r0..r1, columns c0..c1 (this raster's cells), `fill` beyond the map and where nothing is built"""
         s = self.scale
         out = np.full((r1 - r0, c1 - c0) + self.tail, self.fill, self.dtype)
         ya, yb, xa, xb = max(r0, 0), min(r1, self.shape[0]), max(c0, 0), min(c1, self.shape[1])
         if ya >= yb or xa >= xb:
             return out
-        ib0, jb0 = self.cov.index(ya * s, xa * s)
-        ib1, jb1 = self.cov.index((yb - 1) * s, (xb - 1) * s)
-        for ib in range(int(ib0), int(ib1) + 1):
-            for jb in range(int(jb0), int(jb1) + 1):
-                w = self.cov.window(ib, jb)
-                a = self._chunk(w)
-                wr0, wc0 = w.r0 // s, w.c0 // s
-                y0, y1 = max(ya, wr0), min(yb, w.r1 // s)
-                x0, x1 = max(xa, wc0), min(xb, w.c1 // s)
+        for w in self.cov.windows_in(ya * s, yb * s, xa * s, xb * s):
+            a = self._chunk(w)
+            wr0, wc0 = w.r0 // s, w.c0 // s
+            y0, y1 = max(ya, wr0), min(yb, -(-w.r1 // s))
+            x0, x1 = max(xa, wc0), min(xb, -(-w.c1 // s))
+            if y0 < y1 and x0 < x1:
                 out[y0 - r0:y1 - r0, x0 - c0:x1 - c0] = a[y0 - wr0:y1 - wr0, x0 - wc0:x1 - wc0]
         return out
 
@@ -101,20 +133,29 @@ class MapRaster:
                 c += self.shape[1]
             assert 0 <= r < self.shape[0] and 0 <= c < self.shape[1], (r, c)
             s = self.scale
-            ib, jb = self.cov.index(r * s, c * s)
-            w = self.cov.window(int(ib), int(jb))
+            w = self.cov.window_at(r * s, c * s)
+            if w is None:
+                return np.full(self.tail, self.fill, self.dtype)[()] if self.tail else self.dtype.type(self.fill)
             return self._chunk(w)[r - w.r0 // s, c - w.c0 // s]
         r, c = np.broadcast_arrays(np.asarray(r), np.asarray(c))
         r, c = r.astype(np.int64), c.astype(np.int64)
         assert r.size == 0 or (r.min() >= 0 and r.max() < self.shape[0] and c.min() >= 0 and c.max() < self.shape[1])
-        out = np.empty(r.shape + self.tail, self.dtype)
+        out = np.full(r.shape + self.tail, self.fill, self.dtype)
         s = self.scale
-        ib, jb = self.cov.index(r * s, c * s)
-        key = ib * len(self.cov.ccuts) + jb
+        A = self.cov.A
+        nbc = -(-self.cov.W // A)
+        key = (r * s // A) * nbc + c * s // A
         for k in np.unique(key):
+            w = self.cov.at.get((int(k) // nbc, int(k) % nbc))
+            if w is None:
+                continue
             m = key == k
-            w = self.cov.window(int(k) // len(self.cov.ccuts), int(k) % len(self.cov.ccuts))
-            out[m] = self._chunk(w)[r[m] - w.r0 // s, c[m] - w.c0 // s]
+            rr, cc = r[m], c[m]
+            inside = (rr * s >= w.r0) & (rr * s < w.r1) & (cc * s >= w.c0) & (cc * s < w.c1)
+            if not inside.all():  # (a partial block's core: the cells beyond it stay empty)
+                m[m] = inside
+                rr, cc = rr[inside], cc[inside]
+            out[m] = self._chunk(w)[rr - w.r0 // s, cc - w.c0 // s]
         return out
 
     def map_chunks(self, fn, halo):
@@ -131,6 +172,7 @@ class MapRaster:
                 s = parent.scale
                 r0, r1, c0, c1 = w.r0 // s, w.r1 // s, w.c0 // s, w.c1 // s
                 a = fn(parent.box(r0 - halo, r1 + halo, c0 - halo, c1 + halo))[halo:halo + r1 - r0, halo:halo + c1 - c0]
+                a = self._masked(w, a)
                 if hasattr(self, "dtype"):
                     a = a.astype(self.dtype, copy=False)
                 self._cache[k] = a
@@ -149,8 +191,9 @@ class MapRaster:
     def bands(self):
         """the raster row band by row band (the cover's rows of windows): (first row, band)"""
         s = self.scale
-        for k, r0 in enumerate(self.cov.rcuts):
-            r1 = self.cov.rcuts[k + 1] if k + 1 < len(self.cov.rcuts) else self.cov.D
+        cuts = self.cov.band_cuts()
+        for k, r0 in enumerate(cuts):
+            r1 = cuts[k + 1] if k + 1 < len(cuts) else self.cov.D
             yield r0 // s, self.box(r0 // s, r1 // s, 0, self.shape[1])
 
 
@@ -200,8 +243,11 @@ class MapVolume:
         if k in self._blocks:
             self._blocks.move_to_end(k)
             return self._blocks[k]
-        ib, jb = self.cov.index(br * VBLOCK, bc * VBLOCK)
-        w = self.cov.window(int(ib), int(jb))
+        w = self.cov.window_at(br * VBLOCK, bc * VBLOCK)
+        if w is None or not self.cov.built(br * VBLOCK, bc * VBLOCK):  # (built blocks are whole VBLOCK blocks)
+            b = np.zeros((0, VBLOCK, VBLOCK), self.dtype)
+            self._blocks[k] = b
+            return b
         if (w.r0, w.c0) not in self._z:
             self._z[(w.r0, w.c0)] = np.load(self.rdir(w) / "vol.npz")
         b = self._z[(w.r0, w.c0)][f"{br - w.r0 // VBLOCK}_{bc - w.c0 // VBLOCK}"]

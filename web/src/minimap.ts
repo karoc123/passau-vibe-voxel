@@ -40,8 +40,11 @@ export class Minimap {
   private lastT = -Infinity;
   private last: MapPose | null = null;
   private barBottom = -1;
+  // the built blocks [x0, z0, x1, z1] (core/built.ts), null: the whole map; what is not built shows as outside
+  private readonly built: [number, number, number, number][] | null;
 
   constructor(meta: Meta) {
+    this.built = meta.built ?? null;
     this.labels = meta.labels.slice().sort((a, b) => (b.far ?? 0) - (a.far ?? 0));
     this.atlas.width = Math.ceil(meta.W / CELL);
     this.atlas.height = Math.ceil(meta.D / CELL);
@@ -102,7 +105,8 @@ export class Minimap {
     this.dirty = false;
     const ctx = this.atlas.getContext('2d')!;
     ctx.fillStyle = BASE;
-    ctx.fillRect(0, 0, this.atlas.width, this.atlas.height);
+    if (!this.built) ctx.fillRect(0, 0, this.atlas.width, this.atlas.height);
+    else for (const [x0, z0, x1, z1] of this.built) ctx.fillRect(x0 / CELL, z0 / CELL, (x1 - x0) / CELL, (z1 - z0) / CELL);
     ctx.fillStyle = WATER;
     const water = new Path2D(), step = RIVER_SAMPLE / CELL;
     for (let i = 0; i + 1 < this.river.length; i += 2) {

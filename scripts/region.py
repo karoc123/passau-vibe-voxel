@@ -39,9 +39,26 @@ def core_slices():
     return slice(r0, r1), slice(c0, c1)
 
 
+_CORE_BUILT = []  # (the core's built cells, window.built_mask: made when first asked)
+
+
+def core_built():
+    """the core's built cells (bool, the core's shape), or None when all of them are (window.py)"""
+    if not _CORE_BUILT:
+        import window
+        r0, r1, c0, c1 = aoi.CORE
+        _CORE_BUILT.append(window.built_mask(aoi.BOXES, (r0 + aoi.MR0, r1 + aoi.MR0, c0 + aoi.MC0, c1 + aoi.MC0)))
+    return _CORE_BUILT[0]
+
+
 def in_core(r, c):
+    """whether the region's cell (r, c) is its core's and built (what a region hands over: the cells of a block not
+    built, in a core of several blocks, are nobody's: window.py)"""
     r0, r1, c0, c1 = aoi.CORE
-    return r0 <= r < r1 and c0 <= c < c1
+    if not (r0 <= r < r1 and c0 <= c < c1):
+        return False
+    m = core_built()
+    return m is None or bool(m[r - r0, c - c0])
 
 
 def load_npz(path, keys=None):

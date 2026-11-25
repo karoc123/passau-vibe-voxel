@@ -9,7 +9,7 @@ from pathlib import Path
 
 from shapely.ops import unary_union
 
-from aoi import W, D
+from aoi import is_built
 from osm import OSM
 
 
@@ -23,7 +23,7 @@ DE_KIND = {"place of worship": "Kirche church", "station": "Bahnhof", "stop": "H
 
 
 def inside(x, y):
-    return 0 <= x < W and 0 <= y < D
+    return is_built(y, x)
 
 
 def kind_of(t):

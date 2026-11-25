@@ -101,12 +101,12 @@ def cat_of(kind):
 
 def places(top_at):
     """the labels of PLACES that stand on the map, in map cells"""
-    from aoi import MAP_D, MAP_W, MC0, MR0, to_grid
+    from aoi import MAP_D, MAP_W, MC0, MR0, is_built, to_grid
     out = []
     for n, f in PLACES.items():
         c, r = (int(v) for v in to_grid(*f["at"]))
         c, r = c + MC0, r + MR0
-        if not (0 <= r < MAP_D and 0 <= c < MAP_W):
+        if not is_built(r, c):
             continue
         k = f.get("r", 6)
         z = max(top_at(rr, cc) for rr in range(max(r - k, 0), min(r + k + 1, MAP_D))
@@ -168,7 +168,8 @@ def greens(osm, labels, top_at):
     """Named parks, gardens, marinas and harbours over 2.5 ha on the map that no label names or stands in. An outline
     cut by the map edge comes as an open line."""
     from shapely.geometry import Polygon, box
-    frame = box(0, 0, W, D)
+    from aoi import BOXES, built_shape
+    frame = box(0, 0, W, D) if BOXES is None else built_shape()
     shapes = [(t, g) for _, _, t, g in osm.areas] + [(t, Polygon(g.coords)) for _, t, g in osm.lines if len(g.coords) >= 3]
     names = {l["name"] for l in labels}
     out = []

@@ -67,13 +67,18 @@ def main():
         b1 = min(b0 + BAND, aoi.MAP_D)
         g = window.npz_rows("data/ground.npz", "g", b0, b1).astype(np.int32)
         top = g + window.npz_rows("data/ground.npz", "b", b0, b1)
+        built = window.built_mask(aoi.BOXES, (b0, b1, 0, aoi.MAP_W))  # (what is not built does not count: window.py)
         for i in np.flatnonzero((r0i < b1) & (r1i > b0)):
             ra, rb = max(r0i[i], b0) - b0, min(r1i[i], b1) - b0
             gs = g[ra:rb, c0i[i]:c1i[i]]
+            ts = (top if bld[i] else g)[ra:rb, c0i[i]:c1i[i]]
+            if built is not None:
+                bs = built[ra:rb, c0i[i]:c1i[i]]
+                gs, ts = gs[bs], ts[bs]
             if gs.size == 0:
                 continue
             lo[i] = min(lo[i], int(gs.min()))
-            hi[i] = max(hi[i], int((top if bld[i] else g)[ra:rb, c0i[i]:c1i[i]].max()))
+            hi[i] = max(hi[i], int(ts.max()))
     shards = [{} for _ in range(SHARDS)]
     for i, k in enumerate(keys):
         if lo[i] > hi[i]:

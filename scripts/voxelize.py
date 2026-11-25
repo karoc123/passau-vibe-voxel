@@ -35,7 +35,7 @@ from shapely.ops import unary_union as _uu
 from scipy.spatial import cKDTree
 
 from aoi import BASE, C0, CX, CY, D, MAP_D, MAP_W, MC0, MR0, R0, RIVER_LEVEL, RIVER_STRETCHES, W, river_level
-from aoi import CORE as _RCORE
+from aoi import BOXES as _BOXES, CORE as _RCORE
 import constants as K  # (the ground colours, the ground classes)
 from constants import (M_BRONZE, M_CAR, M_CLASSIC, M_CLOCK, M_CONCRETE, M_FLOODLIT, M_GLASS, M_GRASS, M_JET, M_LAMP,
                        M_LEAF, M_MARK, M_METAL, M_ROOF, M_SIGN, M_SOIL, M_SOLID, M_TENEMENT, M_WALL, M_WATER, M_WOOD)
@@ -286,6 +286,9 @@ def decided(ctx, geom, decide, shape_=None, fid=None):
         if FEATURES_MODE:
             import features
             r_, c_ = cells_of(geom, fallback=False)
+            if (_cb := region.core_built()) is not None:  # (a cell not built is nobody's: window.py)
+                _k = _cb[np.asarray(r_) - _RCORE[0], np.asarray(c_) - _RCORE[2]]
+                r_, c_ = np.asarray(r_)[_k], np.asarray(c_)[_k]
             kind = fid.split(":")[1]
             FEATURE_STATS[fid] = [kind, features.counts(kind, r_, c_, ctx.exg, ctx.lum, ctx.nd_mean)]
             return []
@@ -3962,7 +3965,7 @@ def export_tiles(ctx):
     EXPORT_IDS, PLANES, g, vol = ctx.EXPORT_IDS, ctx.PLANES, ctx.g, ctx.vol
     # the core's nodes (tiles.export_window: from the region's volume, the same bytes as from the whole map's)
     _kr0, _kr1, _kc0, _kc1 = aoi_core = (CORE_SL[0].start + MR0, CORE_SL[0].stop + MR0, CORE_SL[1].start + MC0, CORE_SL[1].stop + MC0)  # (map cells)
-    _win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W)
+    _win = window.Window(_kr0, _kr1, _kc0, _kc1, MAP_D, MAP_W, _BOXES)  # (what is not built stays empty)
     _ea, _eb, _ec, _ed = _win.region(tiles.HALO)  # (the core and the nodes' apron: all the export reads)
     _es = (slice(_ea - MR0, _eb - MR0), slice(_ec - MC0, _ed - MC0))
     RESULT["tiles"] = {str(k): v for k, v in tiles.export_window(vol[(slice(None),) + _es], g[_es], PLANES[_es], (_ea, _eb, _ec, _ed),
@@ -4164,8 +4167,10 @@ def palette_lists(ctx):
     (RDIR / "vol.npy").unlink(missing_ok=True)  # (as it was kept before)
     # (the registry's new colours: those the core uses -- one met only in the halo, which another region builds, is not
     # this region's to add)
-    _used = set(np.unique(vol[(slice(None),) + CORE_SL]).tolist())
+    _cb = region.core_built()  # (the core's built cells: what is not built is nobody's, window.py)
+    _used = set(np.unique(vol[(slice(None),) + CORE_SL] if _cb is None else vol[(slice(None),) + CORE_SL][:, _cb]).tolist())
     _gc = CORE_OUT["g"][CORE_SL].astype(np.int64)  # (a histogram of the core's ground: the map's median, regions.py)
+    _gc = _gc if _cb is None else _gc[_cb]
     RESULT["g_hist"] = [int(_gc.min()), np.bincount((_gc - _gc.min()).ravel()).tolist()]
     RESULT.update(core=list(aoi_core), Hm=Hm, new_palette=[list(e) for e in pal.new if pal.index[e] in _used], ids=dict(trunk=C["trunk"], pole=C["pole"], fence=C["fence"]), sanity=SANITY,
                   lamps=[[k_, [c + MC0, r + MR0, z_]] for (c, r, z_), k_ in zip(lamps, LAMP_KEYS) if in_core(r, c)],

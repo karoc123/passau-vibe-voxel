@@ -18,6 +18,7 @@ import { liveEdits, type Region } from '../../core/live-edits';
 import { TileCache } from '../../core/tile-cache';
 import type { Meta } from '../../core/meta';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
+import { Built, type BuiltMeta } from '../../core/built';
 
 export const CHUNK = 16;
 // collision groups (membership << 16 | filter). The car's chassis (and its wheels' rays) are G_CAR; what only the car
@@ -34,6 +35,8 @@ const LEAD_S = 1.2; // ... and within REACH of where it will be in this many sec
 const KEEP_MS = 3000; // a chunk not needed for this long is removed
 const NEED_NOW = 12; // a body with an unbuilt chunk within this is frozen
 const BUILD_BUDGET_MS = 2;
+// a chunk of a block not built (core/built.ts) is a wall from WALL_LO to WALL_HI m: nothing drives off there
+const WALL_LO = -64, WALL_HI = 1024;
 
 export interface TerrainTile {
   S: number;
@@ -170,6 +173,7 @@ export class RapierTerrain {
   private readonly nx: number;
   private readonly nz: number;
   private readonly pal: TerrainPalette;
+  private readonly built: Built;
   private readonly tiles = new Map<number, TerrainTile | 'loading' | 'failed'>();
   private readonly chunks = new Map<number, Chunk>();
   private readonly cache: TileCache;
@@ -181,12 +185,13 @@ export class RapierTerrain {
   private readonly unlisten: () => void;
   readonly stats: TerrainStats = { chunks: 0, voxels: 0, tris: 0, tilesLoading: 0, builds: 0, buildMsTotal: 0, buildJsMsTotal: 0, buildMsMax: 0, lastFrameBuildMs: 0, frameBuildMsMax: 0, slowest: { ms: 0, js: 0, voxels: 0, rest: 0, n: 0 }, decodeMsMax: 0 };
 
-  constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] },
+  constructor(private readonly R: typeof RAPIER, private readonly world: RAPIER.World, meta: BuiltMeta & { tiles: { N: number }; palette: Meta['palette'] },
     readonly origin: { x: number; z: number }, opts: TerrainOptions = {}) {
     this.N = meta.tiles.N;
     this.nx = Math.ceil(meta.W / this.N);
     this.nz = Math.ceil(meta.D / this.N);
     this.pal = terrainPalette(meta.palette);
+    this.built = new Built(meta);
     if (!opts.cache && !opts.load) throw new Error('RapierTerrain: a cache or a load is needed');
     this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load!, edits: liveEdits });
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
@@ -255,10 +260,11 @@ export class RapierTerrain {
     for (const [key] of order) {
       if (built >= this.budgetChunks || (this.budgetChunks === Infinity && spent > this.budgetMs)) break;
       const cx = key % 4096, cz = Math.floor(key / 4096);
-      const tile = this.tile(Math.floor((cx * CHUNK) / this.N), Math.floor((cz * CHUNK) / this.N));
-      if (!tile) continue;
+      const wall = !this.built.node(CHUNK, cx, cz);
+      const tile = wall ? null : this.tile(Math.floor((cx * CHUNK) / this.N), Math.floor((cz * CHUNK) / this.N));
+      if (!tile && !wall) continue;
       const t0 = performance.now();
-      this.chunks.set(key, this.build(tile, cx, cz, now));
+      this.chunks.set(key, tile ? this.build(tile, cx, cz, now) : this.wall(cx, cz, now));
       built++;
       const ms = performance.now() - t0;
       spent += ms;
@@ -358,7 +364,7 @@ export class RapierTerrain {
   // The tile at world (x, z), loaded and decoded (null: off the map or failed)
   async prefetch(x: number, z: number): Promise<TerrainTile | null> {
     const tx = Math.floor(x / this.N), tz = Math.floor(z / this.N);
-    if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) return null;
+    if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz || !this.built.node(this.N, tx, tz)) return null;
     this.tile(tx, tz);
     await this.loads.get(tx + tz * this.nx);
     const t = this.tiles.get(tx + tz * this.nx);
@@ -387,6 +393,13 @@ export class RapierTerrain {
       .finally(() => this.loads.delete(key));
     this.loads.set(key, load);
     return null;
+  }
+
+  // a chunk of a block not built: one box, as high as anything goes (built blocks are whole chunks: core/built.ts)
+  private wall(cx: number, cz: number, now: number): Chunk {
+    const h = (WALL_HI - WALL_LO) / 2, x = cx * CHUNK - this.origin.x + CHUNK / 2, z = cz * CHUNK - this.origin.z + CHUNK / 2;
+    const c = this.world.createCollider(this.R.ColliderDesc.cuboid(CHUNK / 2, h, CHUNK / 2).setTranslation(x, WALL_LO + h, z).setFriction(0.9));
+    return { colliders: [c], vox: null, usedAt: now, voxels: 0, tris: 0 };
   }
 
   private build(tile: TerrainTile, cx: number, cz: number, now: number): Chunk {

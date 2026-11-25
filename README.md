@@ -103,7 +103,10 @@ run on that mix: ~3 min on the real map instead of ~9). It writes no `data/cache
 committing data.
 
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
-size), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
+size, the bounding box of the blocks), the blocks built (`blocks`: runs of the project grid's 1024 m blocks, each whole
+or only its first rows; a block not listed is empty, as beyond the map: no region, node files, terrain, traffic or
+labels there, its cells dropped from whatever a cover's core holds of them, `scripts/window.py`; in the viewer a cut
+face like the map's edge and a wall for whatever moves, `web/src/core/built.ts`), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
 box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
 and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; elsewhere 290.921 m;
@@ -118,7 +121,7 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | Step | Writes |
 |---|---|
 | `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets covering the AOI; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`, `tn_09275.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB) and the Landkreis Passau (38 MB; the map's west and north edges reach into it), read by `alkis_tn.py`; `data/raw/laser/*.laz`: the LiDAR point clouds (40 sheets, 3.5 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted); `data/raw/treespecies_2022.tif`, `treespecies_2016.tif`: DLR Tree Species Germany cut to the map's window (EPSG:3035 as published, ~60 kB each; `clip_species.py` under `python -I` reads only the window's tiles of the 530 MB cloud-optimised GeoTIFFs over HTTP ranges, `scripts/species_map.py` puts them on the grid for `voxelize.py`; without them, or with `NO_SPECIES_MAP=1`, the conifers come from OSM and the laser alone). Files already there are not fetched again |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets under the built blocks and a region's halo (384 m) round them; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`, `tn_09275.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB) and the Landkreis Passau (38 MB; the map's west and north edges reach into it), read by `alkis_tn.py`; `data/raw/laser/*.laz`: the LiDAR point clouds (40 sheets, 3.5 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted); `data/raw/treespecies_2022.tif`, `treespecies_2016.tif`: DLR Tree Species Germany cut to the map's window (EPSG:3035 as published, ~60 kB each; `clip_species.py` under `python -I` reads only the window's tiles of the 530 MB cloud-optimised GeoTIFFs over HTTP ranges, `scripts/species_map.py` puts them on the grid for `voxelize.py`; without them, or with `NO_SPECIES_MAP=1`, the conifers come from OSM and the laser alone). Files already there are not fetched again |
 | `laser.py` | `data/laser.npz`: per 1 m cell vegetation statistics from the point clouds (highest return, lowest tenth, pulses caught in the canopy, single-return pulses, ground returns); optional for `voxelize.py` (`NO_LASER=1` ignores it) |
 | `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, each 1 m cell's colour: the median of its 5 x 5 orthophoto pixels); `data/orto.npy`: the orthophoto at 0.2 m, for `look.py` |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
@@ -190,6 +193,9 @@ failure; `-j 2` regions at once by default):
 | `windows [STEP ...]` | the windowed steps (`zones`, `terrain`, `tile_fields`, `tiles_lod`) over the whole fixture and over 2 × 2 windows (both seams and a corner; `--covers 2x1,1x2` others): the same bytes | ~9 min (`tiles_lod.py`) |
 | `extent` | the fixture against `altstadt_wide.json` (1024 m more to the west): every 128 m block of the volume and every tile node that sees the same map within `region.HALO` holds the same voxels, colour by colour (what growing the map relies on) | ~6.5 min the first time, then seconds |
 | `all` | `verify`, `covers`, `windows`, `extent` | ~30 min |
+
+`--fixture scripts/fixtures/holes.json` has a block left out and one built only in its first rows: run `covers` and
+`windows` on it after a change to what a cover or a window holds (`window.py`, `mapstore.py`).
 
 Not covered: the node steps (`tris.mjs`, `lamps.mjs`) and `climate.py`. `FINALDUMP=1` still makes `voxelize.py`
 save the whole volume (`data/cache/final_vol.npy`, for `traffic.py` run alone).
@@ -360,6 +366,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `core/tile-data.ts` reads (needs `uv`) | fast |
 | `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
 | `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
+| `edge` | the map's edge at a block not built (`core/built.ts`, meta.json `built`): the drone's sweep, the boat's water, the walker, the Rapier car (a wall) and the plane (`EDGE`) kept out of it | fast |
 | `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
 | `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
 | `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |

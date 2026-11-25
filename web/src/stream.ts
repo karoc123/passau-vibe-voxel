@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ColumnData, Meta, TileLevel } from './core/meta';
 import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.worker';
 import { roomOffsets, type Columns, type Fields } from './core/tile-data';
+import { Built } from './core/built';
 import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import type { LiveEdits, LiveNode, Region } from './core/live-edits';
@@ -184,6 +185,8 @@ export class TileStreamer implements ColumnSource {
   readonly nodes = new Map<string, TileNode>();
   readonly group = new THREE.Group();
   readonly world: World;
+  // what of the map is built (core/built.ts)
+  readonly built: Built;
   version = 0;
   private editSeq = 0;
   update: (camera: THREE.Camera) => void = () => {};
@@ -203,6 +206,7 @@ export class TileStreamer implements ColumnSource {
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
     this.ctx = { N: this.N, W: meta.W, D: meta.D, ...paletteFlags(meta.palette) };
+    this.built = new Built(meta);
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
@@ -266,6 +270,11 @@ export class TileStreamer implements ColumnSource {
     n.job = makeJob(n, false, 0);
     n.ready = n.job.done;
     this.nodes.set(key, n);
+    if (!this.built.node(this.N * s, tx, ty)) { // (a block not built has no node files: empty, nothing to fetch)
+      n.state = 'ready'; n.empty = true;
+      n.job.resolve();
+      return n;
+    }
     this.enqueue(n.job);
     return n;
   }

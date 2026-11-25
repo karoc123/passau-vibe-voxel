@@ -1,4 +1,5 @@
 import type { Meta } from './core/meta';
+import { Built } from './core/built';
 
 // OSM maps few of Passau's street lamps (123, most on the bridges), so the lanes and alleys stood dark. Every street and
 // footway in the built-up town is lit: a pool every ~26 m along it, unless a lamp (mapped or placed) is already within
@@ -51,7 +52,7 @@ export function placeStreetLamps(meta: Meta, roads: Way[], peds: Way[], ground: 
     (cells.get(c) ?? cells.set(c, []).get(c)!).push([x, y]);
   };
   for (const [x, y] of meta.lamps) add(x + 0.5, y + 0.5);
-  const town = townMask(meta, ground);
+  const town = townMask(meta, ground), onMap = new Built(meta);
   const lit = (x: number, y: number, ped: boolean) => {
     const { built, wild, water } = town(x, y);
     return built >= 20 || water >= 40 || wild < (ped ? 0.5 : 0.75);
@@ -63,7 +64,7 @@ export function placeStreetLamps(meta: Meta, roads: Way[], peds: Way[], ground: 
       while (next <= d + l) {
         const t = (next - d) / l, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = p[i][2] + (p[i + 1][2] - p[i][2]) * t;
         next += 26;
-        if (x < 0 || y < 0 || x >= meta.W || y >= meta.D || near(x, y) || !lit(x, y, ped)) continue;
+        if (!onMap.at(x, y) || near(x, y) || !lit(x, y, ped)) continue;
         add(x, y); placed.push([x, y, z]);
       }
       d += l;

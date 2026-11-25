@@ -61,6 +61,8 @@ export interface WorldSpec {
   // rooms (scripts/interiors.py): the voids recorded in the node files' room section, mat the fill (what stood there);
   // their voxels must hold no box
   rooms?: Box[];
+  // the built blocks (meta.json built, core/built.ts), absent: all of it
+  built?: [number, number, number, number][];
 }
 
 function encode(sections: [string, ArrayBufferView][]) {
@@ -116,7 +118,7 @@ export async function makeWorld(spec: WorldSpec): Promise<TestWorld> {
   for (let ty = 0; ty < nz; ty++) for (let tx = 0; tx < nx; tx++) for (const f of [false, true])
     files.set(`data/tiles/${f ? '1f' : '1'}/${tx}_${ty}.bin`, await gzip(tile(spec, tx, ty, f)));
   const meta = { W, D, H, base: 0, theta_deg: 0, tiles: { N: TILE_N, levels: [], tris: { 1: [], '1f': [], '1c': [] } },
-    palette: Object.values(PAL).map((p) => [...p]), lamps: [], labels: [], views: {}, sources: { osm: '' } } as unknown as Meta;
+    palette: Object.values(PAL).map((p) => [...p]), lamps: [], labels: [], views: {}, sources: { osm: '' }, ...(spec.built ? { built: spec.built } : {}) } as unknown as Meta;
   serve(files);
   return { meta, collision: fetchedCollision(meta), files };
 }
@@ -146,7 +148,7 @@ export const EARTH = 0, STREET = 1, WALL = 2, WATER = 3;
 export interface Col { g: number; mat?: number; runs?: [number, number, number][] }
 
 // a map of `tiles` x `tiles` tiles of N m from a column function of world (x, z)
-export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; palette: [number, number, number, number][] }; tiles: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] };
+export type ScenarioMap = { meta: { W: number; D: number; tiles: { N: number }; palette: [number, number, number, number][]; built?: [number, number, number, number][] }; tiles: { tx: number; tz: number; tile: ReturnType<typeof terrainTile> }[] };
 
 // surf: the scenario's analytic road surface (m) at grid point (x, z) -- its caps, as scripts/caps.py would write them:
 // on each STREET column's ground run with nothing on it, and on a STREET run topping a column over its ground (a deck),

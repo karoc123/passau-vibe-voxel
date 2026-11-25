@@ -1,6 +1,7 @@
 import { capField, surfaceAt, type CapField } from './surface';
 import type { ColumnData, Meta } from './meta';
 import { paletteMask, RULES, semanticTable } from './semantics';
+import { Built } from './built';
 
 export interface ColumnSource {
   N: number;
@@ -16,6 +17,8 @@ type Point = { x: number; y: number; z: number };
 export class World {
   readonly W: number;
   readonly D: number;
+  // what of the map is built (core/built.ts): a block not built is as off the map
+  readonly built: Built;
   hitAxis = 0;
   private cache: ColumnData | null = null;
   private cacheVersion = -1;
@@ -29,6 +32,7 @@ export class World {
   constructor(private readonly src: ColumnSource, meta: Meta) {
     this.W = meta.W;
     this.D = meta.D;
+    this.built = new Built(meta);
     const t = semanticTable(meta.palette);
     this.leaf = paletteMask(t, (f) => !RULES.standOnForWalker(f), 1, 4096);
     this.wet = paletteMask(t, RULES.water);
@@ -71,7 +75,8 @@ export class World {
     return best;
   }
 
-  inside(x: number, r: number) { return x >= 0 && r >= 0 && x < this.W && r < this.D; }
+  // on the map and built (core/built.ts)
+  inside(x: number, r: number) { return this.built.at(x, r); }
 
   private node(x: number, r: number): ColumnData | null {
     const { src } = this, c = this.cache;

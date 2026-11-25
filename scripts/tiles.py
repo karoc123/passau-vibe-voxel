@@ -239,15 +239,24 @@ def export(vol, g, out, note, face_ids=(), fol_ids=(), grass_ids=(), bare_id=0, 
     return dict(N=N, levels=levels, bytes=sum(st_[0] for st_ in stats.values()))
 
 
-def remove_stale(out, levels, note, split=True):
-    """node files of an earlier, larger map are not in the new manifest: they go, so the folder holds this build only"""
+def has_node(s, tx, ty, boxes):
+    """whether node (tx, ty) of level s holds a built cell (boxes: window.Window.boxes, None: the whole map)"""
+    if boxes is None:
+        return True
+    n = N * s
+    return any(r0 < (ty + 1) * n and r1 > ty * n and c0 < (tx + 1) * n and c1 > tx * n for r0, r1, c0, c1 in boxes)
+
+
+def remove_stale(out, levels, note, split=True, boxes=None):
+    """node files of an earlier, larger map are not in the new manifest, nor those of a block no longer built: they go,
+    so the folder holds this build only"""
     for lv in levels:
         s, nx, ny = lv["s"], lv["nx"], lv["ny"]
         dirs = [str(s)] + (["1f"] if s == 1 and split else [])
         for d in dirs:
             (out / d).mkdir(parents=True, exist_ok=True)
         stale = [f for d in dirs for f in (out / d).glob("*.bin")
-                 if not (lambda tx, ty: tx < nx and ty < ny)(*map(int, f.stem.split("_")))]
+                 if not (lambda tx, ty: tx < nx and ty < ny and has_node(s, tx, ty, boxes))(*map(int, f.stem.split("_")))]
         for f in stale:
             f.unlink()
         if stale:
@@ -295,6 +304,21 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
     ra, rb, ca, cb = region
     assert ra % max(LEVELS) == 0 and ca % max(LEVELS) == 0, "region not aligned to the coarsest level's blocks"
     D, W = win.D, win.W
+    built = win.built(region)
+    if built is not None:  # (a block not built is empty, as beyond the map: its nodes are not written, and its cells
+        # in a node's apron or beside a facade are air; copies, vol is the caller's)
+        R, C = rb - ra, cb - ca
+        if vol.shape[1:] != (R, C):  # (a region of voxelize.py ends short of its partial block's end: empty there)
+            assert vol.shape[1] <= R and vol.shape[2] <= C and not built[vol.shape[1]:].any() and not built[:, vol.shape[2]:].any(), \
+                "the volume does not reach a built cell of the region"
+            pad = ((0, R - vol.shape[1]), (0, C - vol.shape[2]))
+            vol, g = np.pad(vol, ((0, 0),) + pad), np.pad(g, pad)
+            planes = None if planes is None else np.pad(planes, pad)
+        vol = np.where(built, vol, np.uint16(0))
+        g = np.where(built, g, 0).astype(g.dtype)
+        planes = None if planes is None else np.where(built, planes, 0).astype(planes.dtype)
+        if rooms is not None and len(rooms):
+            rooms = rooms[built[rooms[:, 0], rooms[:, 1]]]
     face = np.array(sorted(face_ids), np.uint16)
     if len(fol_ids):
         is_fol = np.zeros(65536, bool); is_fol[list(fol_ids)] = True; is_fol[list(grass_ids)] = True
@@ -326,6 +350,8 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                 for tx in range(win.c0 // (N * s), -(-win.c1 // (N * s))):
                     if not win.holds(ty * N * s, tx * N * s):
                         continue
+                    if built is not None and not built[ty * N * s - ra:(ty + 1) * N * s - ra, tx * N * s - ca:(tx + 1) * N * s - ca].any():
+                        continue  # (no node in a block not built)
                     r0, c0 = ty * N - 1, tx * N - 1
                     nw = np.zeros((Hs, N + 2, N + 2), np.uint16)
                     gw = np.zeros((N + 2, N + 2), np.uint8)
