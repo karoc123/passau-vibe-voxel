@@ -362,6 +362,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
 | `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
 | `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
+| `mirror-check` | the page's drawing from snapshots against `tools/mirror-golden.json`, and every body's pose from the snapshot against the sim's; the golden is of one data build, so after a rebuild check the page, then `node tools/mirror-check.mjs --write-golden` | fast |
 | `section-check` | sectioned re-meshing of an edited node equals the whole node's mesh | full |
 | `popin-check` | the street life, trains and boats: nothing appears, vanishes or jumps near a moving viewer | full |
 | `surface-gap` | the car's surface against the drawn one on the real city; `--check` against the baseline | full |
