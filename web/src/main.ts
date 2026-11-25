@@ -16,7 +16,6 @@ import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
-import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import type { CraftView, SimClient } from './client/sim-client';
 import type { CraftsView } from './nav/crafts-view';
@@ -25,11 +24,11 @@ import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
 import { checkBuild, CLIENT_FILES, dataUrl, HOST_FILES } from './core/data-contract';
-import type { Facts, Label, Meta, View } from './core/meta';
+import type { Meta, View } from './core/meta';
 import type { FloodInfo, Place } from './types';
-import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
-import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
-import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
+import { dayOfYear } from './sun';
+import { $, coarsePointer, el, fetchJson } from './util';
+import { type Climate, Precip } from './weather';
 import type { World } from './core/world';
 import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { LampLight } from './lamplight';
@@ -41,6 +40,8 @@ import { ViewDistance } from './view-distance';
 import { toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
+import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
+import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
 import { openSession, pageEdits, pageView, PageTime, sessionOptions } from './app/session';
@@ -75,7 +76,7 @@ const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 90
 const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
-const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
+const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => goTo.flyTo(v), onMode);
 movingActors.add(nav.actors);
 // the player's crafts (nav/craft.ts), one line each; their panels in this order. Loaded once the city is shown (boot)
 const CRAFTS = () => [
@@ -89,10 +90,10 @@ const CRAFTS = () => [
 let crafts: PlayerCraft[] = [];
 // the world's crafts the local player does not fly (left by their pilots, or other players'): nav/crafts-view.ts
 let craftsView: CraftsView | null = null;
-const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], onDay: (d) => { setDay(d); share(); },
-  onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
-  onHour: (h) => { setHour(h); share(); },
-  onWeather: (w) => { setWeather(w); share(); } });
+const bar = new Bar({ days: DAYS, weathers: WEATHER_NAMES, onDay: (d) => dayWeather.onDay(d), onDayEnd: () => dayWeather.onDayEnd(),
+  onHour: (h) => dayWeather.onHour(h), onWeather: (w) => dayWeather.onWeather(w) });
+// the bar's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
+const dayWeather = makeDayWeather({ bar, daylight, ask: (h, d) => pageTime?.ask(h, d) });
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
@@ -108,16 +109,17 @@ let city: Awaited<ReturnType<typeof installCity>> | null = null;
 // the view distance and the far plane (view-distance.ts), each frame
 const viewDistance = new ViewDistance({ camera, scene, map, daylight, gfx, city: () => city, budget });
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
-let fly: ((now: number) => void) | null = null;
 let prepass: DepthPrepass | null = null;
 let barRect: DOMRect | null = null;
-let climate: Climate | null = null;
 const caption = new Caption();
 const perf = new Perf();
 let setWindows: ((hour: number, day: number) => void) | null = null;
 let lampHeads: LampHeads | null = null;
 
-nav.cancelFly = () => { fly = null; };
+// the fly-to, the search's places and the labels clicked (ui/go-to.ts)
+const goTo = makeGoTo({ camera, target: controls.target, nav, world: () => world, labels: () => labels, views: () => views,
+  follow: followNearest });
+nav.cancelFly = goTo.cancel;
 const modeTools = el('div', 'mode-tools', '', bar.el);
 const walkButton = el('button', 'mode-button', 'Walk', modeTools);
 walkButton.type = 'button';
@@ -260,119 +262,10 @@ function onMode(m: Mode, ride: Ride | null) {
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
 
-// the hour shown at once; asked of the world (its time of day: the host's, PageTime) unless it is the world's own
-function setHour(h: number, ask = true) {
-  daylight.apply(h);
-  bar.setHour(h);
-  if (ask) pageTime?.ask(h, daylight.day);
-}
-
-const timesOf = (d: number) => ({ morning: Math.max(7.5, hourAt(d, 6, false)), midday: solarNoon(d), 'golden hour': hourAt(d, 5, true),
-  'blue hour': hourAt(d, -7, true), night: Math.min(23.5, Math.max(23, hourAt(d, -14, true))) });
-
-function setDay(d: number, ask = true) {
-  const times = timesOf(daylight.day), was = Object.entries(times).find(([, h]) => Math.abs(h - daylight.hour) < 1 / 3)?.[0] as keyof typeof times | undefined;
-  daylight.day = d;
-  const now = timesOf(d);
-  bar.setDay(d, now);
-  offerWeathers(d);
-  setHour(was ? now[was] : daylight.hour, ask);
-}
-
-function offerWeathers(d: number) {
-  const snow = climate?.snowy[d - 1] ?? true;
-  bar.offer('snow', snow);
-  if (!snow && weatherName === 'snow') setWeather('typical');
-}
-
-let weatherName = 'typical';
-let fade: { from: Weather; to: Weather; t0: number } | null = null;
-function setWeather(name: string, now = false) {
-  weatherName = name;
-  const t = name === 'typical' && climate ? typical(climate, daylight.day) : null;
-  const to = t?.w ?? WEATHERS[name] ?? WEATHERS.clear;
-  bar.setWeather(name, t?.said ?? '');
-  fade = now ? null : { from: { ...daylight.weather }, to, t0: performance.now() };
-  if (now) { daylight.weather = to; daylight.apply(daylight.hour); }
-}
-
-function stepWeather(now: number) {
-  if (!fade) return;
-  const k = Math.min(1, (now - fade.t0) / 1500), e = ease(k), { from, to } = fade;
-  daylight.weather = { cloud: lerp(from.cloud, to.cloud, e), rain: lerp(from.rain, to.rain, e), snow: lerp(from.snow, to.snow, e), cover: lerp(from.cover, to.cover, e) };
-  daylight.apply(daylight.hour);
-  if (k >= 1) fade = null;
-}
-
-let shareT = 0;
-function share() {
-  clearTimeout(shareT);
-  shareT = setTimeout(() => {
-    const d = dateOf(daylight.day), qs = new URLSearchParams(location.search); // as it is now: the settings write to it too
-    qs.set('date', `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-    qs.set('hour', daylight.hour.toFixed(2));
-    if (weatherName !== 'typical') qs.set('weather', weatherName); else qs.delete('weather');
-    history.replaceState(null, '', `?${qs}`);
-  }, 400);
-}
-
-function flyTo(v: Pick<View, 'pos' | 'target' | 'ms'>) {
-  const p0 = camera.position.clone(), q0 = controls.target.clone(), t0 = performance.now();
-  const p1 = new THREE.Vector3(...v.pos), q1 = new THREE.Vector3(...v.target);
-  fly = (now) => {
-    const t = Math.min(1, (now - t0) / (v.ms ?? 1600)), e = ease(t);
-    camera.position.lerpVectors(p0, p1, e);
-    controls.target.lerpVectors(q0, q1, e);
-    if (t >= 1) fly = null;
-  };
-}
-
-// a bridge searched or clicked: walked to on its deck, not under it (a label of kind bridge/footbridge, a place of kind
-// bridge, or a street over one: Passau's are named …brücke / …steg); nav's setWalk lands on a deck only if there is one
-const onBridge = (kind: string, name: string) => /^(foot)?bridge$/.test(kind) || (kind === 'street' && /(brücke|steg)$/i.test(name));
-
-// frame a place from the current compass direction, ~30° down, with a label on it; at street level, walk there
-function goPlace(x: number, y: number, size: number, pin: Facts | null, name = pin?.name ?? '', kind = pin?.kind ?? '') {
-  if (!world) return;
-  if (nav.craftView) nav.setOrbit();
-  const g = world.groundAt(x, y), top = world.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
-  labels?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
-  if (!nav.onMap) {
-    nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name), thirdPerson: nav.third });
-    return;
-  }
-  const t = new THREE.Vector3(x + 0.5, g + Math.min(h * 0.5, 60), y + 0.5);
-  const dist = Math.min(800, Math.max(170, size * 1.6 + h * 1.8));
-  const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z), el = 0.52;
-  const pos = t.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(dist));
-  flyTo({ pos: pos.toArray(), target: t.toArray() });
-}
-
-function goView(v: View) {
-  nav.setOrbit();
-  labels?.pin(null);
-  flyTo(v);
-}
-
-function onLabel(l: Label) {
-  const v = Object.values(views).find((w) => w.label === l.name);
-  if (v && nav.onMap) goView(v);
-  else goPlace(l.x, l.y, 60, null, l.name, l.kind);
-}
-
 // moving vehicles are hard to click from the air: the nearest one to what you look at
 function followNearest(kind: Kind) {
   const ag = life?.nearest(kind, focus(), null);
   if (ag) nav.startRide(ag);
-}
-
-function searchItems(meta: Meta): SearchItem[] {
-  return [
-    ...Object.values(meta.views).map((v) => ({ name: v.label, kind: 'viewpoint', featured: true, go: () => goView(v) })),
-    ...meta.labels.map((l) => ({ name: l.name, alt: [l.en, l.alt].join(' '), kind: l.kind, go: () => goPlace(l.x, l.y, Math.max(40, (l.R ?? 20) * 1.4), null, l.name, l.kind) })),
-    { name: 'Follow a car', alt: 'car bus Auto ride follow', kind: 'action', go: () => followNearest('car') },
-    { name: 'Follow someone', alt: 'person people pedestrian Fußgänger walk with follow', kind: 'action', go: () => followNearest('person') },
-  ];
 }
 
 // keep the focus over the city and the camera within 1.5 km of it
@@ -386,8 +279,7 @@ function keepInside() {
 }
 
 async function boot() {
-  let meta: Meta;
-  [meta, climate] = await Promise.all([fetchJson<Meta>(dataUrl(HOST_FILES.meta)), fetchJson<Climate>(dataUrl(CLIENT_FILES.climate))]);
+  const [meta, climate] = await Promise.all([fetchJson<Meta>(dataUrl(HOST_FILES.meta)), fetchJson<Climate>(dataUrl(CLIENT_FILES.climate))]);
   // a build this code does not read stops here, said (core/data-contract.ts; the host checks it again, hostSim)
   try { checkBuild(meta, (w) => console.warn(w)); } catch (e) { toast((e as Error).message); throw e; }
   views = meta.views;
@@ -431,21 +323,17 @@ async function boot() {
   daylight.grade = post.grade;
   daylight.ao = post.n8.configuration;
   daylight.theta = (meta.theta_deg || 0) * Math.PI / 180;
-  const md = qs.get('date')?.split('-').map(Number);
-  setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
-  setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
-  setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
+  dayWeather.start(climate, qs, TODAY);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
     crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target, meta.origin), pixelsHigh: () => post.height });
   viewDistance.reset(); // (the view distance handed to the city on the next frame)
-  labels = new Labels(meta.labels, onLabel);
+  labels = new Labels(meta.labels, goTo.onLabel);
   labels.gate = city.gate;
   labels.visible = labelsOn;
   const mapView = minimap = new Minimap(meta);
   hud = new Hud(renderer.domElement, nav.mode);
-  bar.search.setItems(searchItems(meta));
-  fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => bar.search.setItems([...searchItems(meta),
-    ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
+  bar.search.setItems(goTo.searchItems(meta));
+  fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => bar.search.setItems(goTo.searchItems(meta, places)));
   fountains = new Fountains(scene, meta.jets ?? []);
   fetchJson<FloodInfo>(dataUrl(CLIENT_FILES.flood)).then((info) => {
     riverPoints = info.river ?? [];
@@ -522,8 +410,8 @@ let viewDist = 0, redraws = 0; // (this frame's: the camera's distance to the ta
 renderer.setAnimationLoop(frameLoop({
   // the players' input (the car's, Nav's, the crafts that own the camera); first the map's fly-to and the weather's fade
   input: (now, dt) => {
-    fly?.(now);
-    stepWeather(now);
+    goTo.step(now);
+    dayWeather.step(now);
     for (const c of crafts) if (c.view === 'ride') c.update(dt);
     nav.update(dt);
     for (const c of crafts) if (c.view === 'own') c.update(dt);
@@ -535,7 +423,7 @@ renderer.setAnimationLoop(frameLoop({
     sim.send(pageView(sim, focus(), camera.position));
     sim.update(dt);
     const t = pageTime?.follow();
-    if (t) { if (t.day !== daylight.day) setDay(t.day, false); if (t.hour !== daylight.hour) setHour(t.hour, false); }
+    if (t) dayWeather.show(t);
     life.group.visible = !city || city.complete;
   },
   // this frame's poses drawn
@@ -597,7 +485,7 @@ renderer.setAnimationLoop(frameLoop({
   },
 }, t0));
 
-hook('__three', { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,
+hook('__three', { camera, controls, nav, bar, scene, renderer, flyTo: goTo.flyTo, setHour: dayWeather.setHour, setDay: dayWeather.setDay, setWeather: dayWeather.setWeather, map, daylight, post, budget,
   // the detail, as the visitor would set it (tools)
   level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx,
   // any graphics setting, as the visitor would set it (tools)
