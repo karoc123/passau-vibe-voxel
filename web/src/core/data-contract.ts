@@ -13,8 +13,15 @@ export const FORMAT_VERSION = 1;
 export const HOST_FILES = { meta: 'meta.json', traffic: 'traffic.json', boats: 'boats.json', tiles: 'tiles/' } as const;
 
 /** what a client (the page) loads besides the host's, relative to data/ (main.ts, city.ts and the render modules) */
-export const CLIENT_FILES = ['climate.json', 'streetlamps.json', 'places.json', 'flood.json', 'zones.json',
-  'phenology.json', 'windows.json', 'windows.bin', 'terrain.bin', 'terrain/', 'objects/'] as const;
+export const CLIENT_FILES = {
+  climate: 'climate.json', streetlamps: 'streetlamps.json', places: 'places.json', flood: 'flood.json',
+  zones: 'zones.json', phenology: 'phenology.json', windows: 'windows.json', windowsBin: 'windows.bin',
+  terrainBin: 'terrain.bin', terrain: 'terrain/', objects: 'objects/',
+} as const;
+
+/** a data file's URL: <file> (a name of HOST_FILES or CLIENT_FILES, with its path under a directory one) under base's
+ * data/ ('' : relative to the page) */
+export const dataUrl = (file: string, base = '') => `${base}data/${file}`;
 
 /** a data build's identity: what host and client must share (meta.json world) */
 export interface DataBuild { formatVersion: number; buildId: string }

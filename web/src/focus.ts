@@ -3,6 +3,7 @@
 // shard, never the whole map). The view: from compass bearing ?az= (degrees, where the camera stands seen from the
 // object: 180 = from the south; default 200), ?el= degrees over the horizon (default 30, streets 55), ?fit= distance
 // factor (default 1: the object's box just fills the view). With ?crop=fit only the tiles round the object load.
+import { CLIENT_FILES, dataUrl } from './core/data-contract';
 import { fetchJson } from './util';
 
 const SHARDS = 64;
@@ -26,7 +27,7 @@ export function focusKey(q: string): { key: string; id: number } | null {
 export async function focusView(q: string, qs: URLSearchParams, fovDeg: number, aspect: number): Promise<FocusView | null> {
   const k = focusKey(q);
   if (!k) { console.error(`focus: "${q}" is not bld:<id>, bld:r<id> or street:<id>`); return null; }
-  const shard = await fetchJson<Record<string, [number, number, number, number, number, number]>>(`data/objects/${k.id % SHARDS}.json`).catch(() => null);
+  const shard = await fetchJson<Record<string, [number, number, number, number, number, number]>>(dataUrl(`${CLIENT_FILES.objects}${k.id % SHARDS}.json`)).catch(() => null);
   const box = shard?.[k.key];
   if (!box) { console.error(`focus: ${q} is not on the map (data/objects/${k.id % SHARDS}.json)`); return null; }
   const [x0, z0, x1, z1, y0, y1] = box;

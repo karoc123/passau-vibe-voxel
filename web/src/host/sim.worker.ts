@@ -18,6 +18,7 @@ import type { BoatData } from '../sim/boat-traffic';
 import { unpackTraffic } from '../sim/traffic-pack';
 import type { TrafficData } from '../sim/types';
 import { tileWorld } from '../core/tile-world';
+import { dataUrl, HOST_FILES } from '../core/data-contract';
 import type { Meta } from '../core/meta';
 
 /** how the worker answers (a Web Worker: its postMessage; host-smoke: a list) */
@@ -40,9 +41,9 @@ if (scope) {
 }
 
 async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
-  const [meta, raw] = await Promise.all([fetchJson<Meta>(`${m.base}data/meta.json`), fetchJson<TrafficData>(`${m.base}data/traffic.json`)]);
+  const [meta, raw] = await Promise.all([fetchJson<Meta>(dataUrl(HOST_FILES.meta, m.base)), fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic, m.base))]);
   const cache = tileCacheAt(meta.tiles.N, m.base), world = tileWorld(meta, cache);
-  const boats = fetchJson<BoatData>(`${m.base}data/boats.json`);
+  const boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats, m.base));
   const server = hostSim({ meta, traffic: unpackTraffic(raw), boats }, browserPorts(cache),
     { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: { ...m.physics, at: () => focus } });
   server.trackEdits();

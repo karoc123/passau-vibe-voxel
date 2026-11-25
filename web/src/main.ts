@@ -24,7 +24,7 @@ import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
-import { checkBuild } from './core/data-contract';
+import { checkBuild, CLIENT_FILES, dataUrl, HOST_FILES } from './core/data-contract';
 import type { Facts, Label, Meta, View } from './core/meta';
 import type { FloodInfo, Place } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
@@ -385,7 +385,7 @@ function keepInside() {
 
 async function boot() {
   let meta: Meta;
-  [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
+  [meta, climate] = await Promise.all([fetchJson<Meta>(dataUrl(HOST_FILES.meta)), fetchJson<Climate>(dataUrl(CLIENT_FILES.climate))]);
   // a build this code does not read stops here, said (core/data-contract.ts; the host checks it again, hostSim)
   try { checkBuild(meta, (w) => console.warn(w)); } catch (e) { toast((e as Error).message); throw e; }
   views = meta.views;
@@ -398,7 +398,7 @@ async function boot() {
   // the light on the ground at night, drawn into the pages of the nodes shown (lamplight.ts, fields.ts)
   const lamps = new LampLight(meta);
   // the street lamps placed along the streets (streetlamps.ts, web/tools/lamps.mjs)
-  const streetLamps = fetchJson<{ lamps: [number, number, number][] }>('data/streetlamps.json').then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
+  const streetLamps = fetchJson<{ lamps: [number, number, number][] }>(dataUrl(CLIENT_FILES.streetlamps)).then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
   // (the session's options, its edits: the page's, its client's, read by the streamer and the page's TileCache)
   const session = sessionOptions(qs), edits = pageEdits(session);
@@ -442,15 +442,15 @@ async function boot() {
   const mapView = minimap = new Minimap(meta);
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
-  fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),
+  fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => bar.search.setItems([...searchItems(meta),
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
-  fetchJson<FloodInfo>('data/flood.json').then((info) => {
+  fetchJson<FloodInfo>(dataUrl(CLIENT_FILES.flood)).then((info) => {
     riverPoints = info.river ?? [];
     mapView.setRiver(riverPoints);
   })
     .catch((e) => { riverPoints = []; console.warn('river points', e); });
-  fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
+  fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic)).then(unpackTraffic).then((td) => {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client: local, mirrored or in a worker (app/session.ts)

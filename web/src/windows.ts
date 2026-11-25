@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CLIENT_FILES, dataUrl } from './core/data-contract';
 import { dataTexture, fetchGzip, fetchJson } from './util';
 import type { VoxelUniforms } from './voxelMaterial';
 
@@ -12,7 +13,7 @@ const CENTRES = [16.5, 18.5, 20.5, 22.5, 27];
 // windows.bin: per building (zones.py id) its kind and habit, a byte each (128 to a row of the texture, as uBldOn);
 // the light the windows spill on the street comes with the tiles (scripts/tile_fields.py, fields.ts)
 export async function loadWindows(U: VoxelUniforms) {
-  const [stats, buf] = await Promise.all([fetchJson<WinStats>('data/windows.json'), fetchGzip('data/windows.bin')]);
+  const [stats, buf] = await Promise.all([fetchJson<WinStats>(dataUrl(CLIENT_FILES.windows)), fetchGzip(dataUrl(CLIENT_FILES.windowsBin))]);
   const b = new Uint8Array(buf), rows = Math.max(1, Math.ceil(b.length / 128)), table = new Uint8Array(rows * 128);
   table.set(b);
   const tex = dataTexture(table, 128, rows, THREE.RedFormat);

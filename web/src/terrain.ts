@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Meta } from './core/meta';
 import { dataTexture, fetchGzip } from './util';
+import { CLIENT_FILES, dataUrl } from './core/data-contract';
 import { TILE_N as T } from './core/tile-data';
 
 // The bare terrain (scripts/terrain.py), in square chunks of 256 height steps (257 samples a side, the last shared with
@@ -16,7 +17,7 @@ export interface TerrainChunk {
 }
 
 export async function fetchChunk(dir: string, cx: number, cy: number): Promise<TerrainChunk> {
-  const buf = await fetchGzip(`data/terrain/${dir}/${cx}_${cy}.bin`);
+  const buf = await fetchGzip(dataUrl(`${CLIENT_FILES.terrain}${dir}/${cx}_${cy}.bin`));
   const [hw, hh, cw, ch] = new Uint16Array(buf, 0, 4);
   return { hw, hh, cw, ch, h: new Uint16Array(buf, 8, hw * hh), rgb: new Uint8Array(buf, 8 + hw * hh * 2, cw * ch * 3) };
 }
