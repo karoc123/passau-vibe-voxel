@@ -1,4 +1,4 @@
-// The local server (docs/plans/local-server.md, ADR 0008): the world sim in a Web Worker. It loads the map and the
+// The local server (ADR 0008): the world sim in a Web Worker. It loads the map and the
 // traffic itself, owns the world's TileCache, its live edits (core/live-edits.ts: this thread's module is the
 // world's), its ground and water (core/tile-world.ts) and the road physics (Rapier, loaded here), and runs a
 // SimServer (sim/server/sim-server.ts) as host/sim-host.ts wires it (its browser ports: host/browser.ts), with one

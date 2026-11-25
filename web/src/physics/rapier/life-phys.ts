@@ -1,4 +1,4 @@
-// The traffic's cars near player edits as real Rapier bodies (docs/plans/life-physics.md: the A+B hybrid).
+// The traffic's cars near player edits as real Rapier bodies (README "Driving": the body rules).
 //
 // Part of the world sim (sim/traffic.ts): no three.js, no DOM, no camera (tools/core-deps.mjs); stepped in the
 // traffic's fixed tick (TrafficBodies.tick, SUB physics steps a tick), its colliders built a fixed number of chunks a

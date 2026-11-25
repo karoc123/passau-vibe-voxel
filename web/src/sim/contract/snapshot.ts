@@ -1,5 +1,5 @@
 // The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): what the
-// world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; made by sim/server/snapshot.ts
+// world sim publishes to a client after an update (the snapshot, ADR 0008; made by sim/server/snapshot.ts
 // takeSnapshot, read by its TrafficMirror). Plain data, structured-cloneable: it crosses to the page from a Web Worker
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).

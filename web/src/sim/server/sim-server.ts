@@ -1,4 +1,4 @@
-// The server side of a SimClient (client/sim-client.ts; docs/plans/local-server.md): the world sim, the game mode made
+// The server side of a SimClient (client/sim-client.ts; ADR 0008): the world sim, the game mode made
 // (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, the world's edits applied at the start of
 // the next update if the mode allows them (mayEdit), and the connections to it: one Session each
 // (docs/plans/architecture-review.md F2, A7). Run in the page's thread (LocalSimClient, MirrorSimClient over a

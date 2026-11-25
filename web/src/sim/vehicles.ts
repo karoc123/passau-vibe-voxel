@@ -2,7 +2,7 @@
 // a server share it; tools/core-deps.mjs scans it with the sim). Each type: its body on Rapier's raycast wheels
 // (physics/rapier/vehicle.ts createVehicle: the chassis' box, mass, wheels, engine, brakes, top speed, and what it
 // tunes differently from the ride, RIDE), its length in the traffic, and its model (boxes in its own frame:
-// x left, y up from the ground, z forward; drawn by view/meshes.ts). docs/plans/vehicles.md: how to add one.
+// x left, y up from the ground, z forward; drawn by view/meshes.ts). README "Driving": the mix.
 import { frozen } from '../core/frozen';
 import type { VehicleId } from './contract/ids';
 

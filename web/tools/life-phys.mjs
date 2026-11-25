@@ -1,4 +1,4 @@
-// The traffic's bodies near edits (src/physics/rapier/life-phys.ts, docs/plans/life-physics.md): what they cost, and
+// The traffic's bodies near edits (src/physics/rapier/life-phys.ts; README "Driving"): what they cost, and
 // how often a body loses its ghost, headless on the real data (the world sim, src/sim/world-sim.ts WorldSim, started
 // by the host as a server starts it: src/host/node.ts, hostSim, its tiles and road physics through the file ports). The traffic runs WARM s round a point, then an edit there (a box marked edited, the voxels
 // unchanged: the busiest case, every car near it a body on intact streets) and RUN s measured, per config:

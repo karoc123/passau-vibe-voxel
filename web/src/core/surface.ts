@@ -2,7 +2,7 @@
 // corner heights (a "cap") instead of the flat top of its voxel. One field per level-1 node (CapField), read by the
 // mesher (mesher.worker.ts), the walkers' World (world.ts), the car's terrain (physics/rapier/terrain.ts) and the
 // drone's surface (sim/craft/voxel-collision.ts) through the accessors below -- nobody else reads the corners -- so what is
-// drawn is what is stood and driven on. docs/plans/surface-caps.md.
+// drawn is what is stood and driven on. docs/adr/0005-surface-caps.md.
 //
 // The node's `caps` section (scripts/caps.py, written by tile_fields.py) fills it: capField below decodes it and keeps
 // only the records that are live in the columns given (an edit kills a cap by itself, nothing is recomputed). A node
@@ -107,7 +107,7 @@ export function decodeCaps(caps: Uint16Array): Int32Array {
 }
 
 // The field of a level-1 node's caps section over its columns (as they are now: the file's, or edited), null: no caps
-// section. A record is kept only where it is live in these columns (the edit rule, docs/plans/surface-caps.md 5): a
+// section. A record is kept only where it is live in these columns (the edit rule, docs/adr/0005-surface-caps.md): a
 // run ends exactly at its ztop, no run starts there (the cell above is air) and the column is solid from the cell its
 // lowest corner is in up to ztop. Slot 0 if ztop is the column's ground, else 1 (a deck: the column's last run); a
 // record that breaks the writer's rules (a column past the node, a slot taken twice) is ignored.

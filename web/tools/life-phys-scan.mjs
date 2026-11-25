@@ -1,5 +1,5 @@
 // Where the traffic's paths (traffic.json) leave no room for a car on the drawn surface (docs/plans/road-clearance.md,
-// docs/plans/life-physics.md): every metre of every road's centreline -- or, --lanes, of every lane's path as the
+// README "Driving"): every metre of every road's centreline -- or, --lanes, of every lane's path as the
 // traffic drives it (o0 + lane * 3 m right of the road's line, mitred: sim/path.ts at) --, across a car's footprint
 // (+-0.8 m), the surface the car stands on (the highest solid top, a cap as drawn, at most 1.2 m over the path's whole-
 // level height) and what is over it (the Rapier terrain's solids: terrainTile, the foliage tile's included):

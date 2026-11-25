@@ -1,4 +1,4 @@
-// What the world sim publishes to a client after an update (docs/plans/local-server.md: the snapshot; its types, plain
+// What the world sim publishes to a client after an update (the snapshot, ADR 0008; its types, plain
 // data: sim/contract/snapshot.ts). It crosses to the page from a Web Worker as it is (later, quantised, to a network
 // client); the gates check that (CloneLink). The client's copy of the traffic it is drawn from: client/sim-client.ts
 // TrafficMirror.

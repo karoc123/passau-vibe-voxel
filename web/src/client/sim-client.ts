@@ -1,4 +1,4 @@
-// What the page holds of the world sim (docs/plans/local-server.md, ADR 0008: "the page sends commands and draws
+// What the page holds of the world sim (ADR 0008: "the page sends commands and draws
 // snapshots"): a SimClient. The page never reaches into the WorldSim; it holds one session of the server
 // (sim/server/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands
 // (SimCommand: plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped
@@ -348,7 +348,7 @@ export class MirrorSimClient implements SimClient {
 /** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
  * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
  * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
- * snapshots (docs/plans/local-server.md: TrafficMirror). Read only: what is drawn where is the view's (view/life.ts). */
+ * snapshots (ADR 0008). Read only: what is drawn where is the view's (view/life.ts). */
 export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
   'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
   { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };

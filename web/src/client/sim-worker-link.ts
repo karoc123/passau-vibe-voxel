@@ -1,4 +1,4 @@
-// The page's end of the local server (host/sim.worker.ts; docs/plans/local-server.md): a SimLink
+// The page's end of the local server (host/sim.worker.ts; ADR 0008): a SimLink
 // (client/sim-client.ts) over a Web Worker; the messages: sim/contract/worker.ts. One frame in flight at a time: while
 // the worker works on one, the page's frames add their time and commands to the next, sent when its snapshot is back
 // (so a slow sim slows the sim, never the page). The page draws the latest snapshot: one update behind the frame that
