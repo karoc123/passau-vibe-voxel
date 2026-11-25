@@ -2,6 +2,7 @@ import { frozen } from '../../core/frozen';
 import { FixedStep } from '../../core/fixed-step';
 import { SafeTrail } from '../../core/safe-trail';
 import { add, addScaled, copy, cross, dot, length, lengthSq, normalize, scale, set, vec3, type Vec3 } from '../../core/vec';
+import type { PlaneEvent, PlaneFlightState, PlaneState } from '../contract/crafts';
 import type { PlaneInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
 import { waterTop, type WaterColumns } from '../river';
@@ -148,12 +149,8 @@ export interface PlaneWorld {
   water(x: number, z: number): number | null;
 }
 
-export type PlaneState = 'air' | 'water' | 'crashed';
+// (where it is, PlaneState, and what it tells its pilot, PlaneEvent: contract/crafts.ts)
 export interface PlanePose { x: number; y: number; z: number; heading: number; speed?: number; water?: boolean }
-export type PlaneEvent =
-  | { type: 'skim' | 'touchdown' | 'takeoff' | 'bump' }
-  | { type: 'crash'; what: string; kmh: number }
-  | { type: 'respawn'; throttle: number };
 type Safe = Required<PlanePose>;
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -194,6 +191,22 @@ export class PlaneFlight {
   constructor(readonly cfg: PlaneConfig = PLANE) {
     this.clock = new FixedStep(cfg.STEP, cfg.MAX_STEPS);
     this.safe = new SafeTrail(cfg.SAFE_EVERY, cfg.SAFE_KEEP);
+  }
+
+  /** its state on the wire (contract/crafts.ts); not: the crash's countdown, the safe trail and the start (respawn),
+   * the clock (the steps), the steps' scratch */
+  save(): PlaneFlightState {
+    const { heading, gamma, bank, pitchRate, roll, aoa, v, engine, state, load, stalled, atEdge, waiting, t, jumps } = this;
+    return { p: { ...this.p }, heading, gamma, bank, pitchRate, roll, aoa, v, engine, state, load, stalled, atEdge, waiting, t, jumps,
+      fw: { ...this.fw }, lu: { ...this.lu } };
+  }
+
+  restore(s: PlaneFlightState) {
+    copy(this.p, s.p);
+    this.heading = s.heading; this.gamma = s.gamma; this.bank = s.bank; this.pitchRate = s.pitchRate; this.roll = s.roll;
+    this.aoa = s.aoa; this.v = s.v; this.engine = s.engine; this.state = s.state; this.load = s.load; this.stalled = s.stalled;
+    this.atEdge = s.atEdge; this.waiting = s.waiting; this.t = s.t; this.jumps = s.jumps;
+    copy(this.fw, s.fw); copy(this.lu, s.lu);
   }
 
   reset(pose: PlanePose) {

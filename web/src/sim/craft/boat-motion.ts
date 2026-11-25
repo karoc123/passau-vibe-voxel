@@ -15,6 +15,7 @@ import { SafeTrail } from '../../core/safe-trail';
 import { lerpAngle } from '../../core/vec';
 import type { BoatInput } from '../contract/inputs';
 import type { CraftSpot } from '../contract/commands';
+import type { BoatCoreState, BoatEvent, BoatMotionState } from '../contract/crafts';
 import type { CraftCore } from './craft-core';
 
 // (its input, BoatInput: contract/inputs.ts)
@@ -29,7 +30,7 @@ export interface BoatWorld {
 export interface BoatPose { x: number; y: number; z: number; h: number }
 // as drawn: with the pitch (+: nose up), the roll (+: the right side down) and the heave of the bobbing
 export interface BoatDrawn extends BoatPose { pitch: number; roll: number }
-export type BoatEvent = { kind: 'bump'; speed: number };
+// (its events, BoatEvent: contract/crafts.ts)
 
 // all the numbers, in one place: read-only (DEFAULT_TUNING.boat, sim/tuning.ts); a boat given others differs
 export const BOAT = frozen({
@@ -86,6 +87,17 @@ export class BoatMotion {
   // standing still at p
   private place(p: BoatPose) {
     Object.assign(this, { x: p.x, y: p.y, z: p.z, h: p.h, vx: 0, vz: 0, yaw: 0, pitch: 0, roll: 0, accel: 0, waiting: false });
+  }
+
+  /** its state on the wire (contract/crafts.ts); not: accel, bumpT (the steps'), the safe trail (unstick) */
+  save(): BoatMotionState {
+    const { x, z, y, h, vx, vz, yaw, pitch, roll, t, waiting } = this;
+    return { x, z, y, h, vx, vz, yaw, pitch, roll, t, waiting };
+  }
+
+  restore(s: BoatMotionState) {
+    this.x = s.x; this.z = s.z; this.y = s.y; this.h = s.h; this.vx = s.vx; this.vz = s.vz; this.yaw = s.yaw;
+    this.pitch = s.pitch; this.roll = s.roll; this.t = s.t; this.waiting = s.waiting;
   }
 
   get pose(): BoatPose { return { x: this.x, y: this.y, z: this.z, h: this.h }; }
@@ -259,7 +271,7 @@ export function findSpawn(world: BoatWorld, x: number, z: number, h: number, rad
 // The boat as WorldSim steps it (craft-core.ts): its motion at 1/120 s (four a world tick); the bumps of the steps
 // since its pilot last read them. Its collision: the drone's cube and look-ahead (VoxelCollision's). Drawn between the
 // world's last two ticks (the hull as drawn at each, its heading, pitch and roll the shorter way).
-export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
+export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn, BoatCoreState> {
   readonly motion: BoatMotion;
   readonly clock = new FixedStep(1 / 120, 12, 0.1);
   readonly reach = {};
@@ -283,6 +295,12 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn> {
     if (ev === 'loading') return false;
     this.events.push(...ev);
     return true;
+  }
+
+  save(): BoatCoreState { return { motion: this.motion.save(), from: { ...this.from } }; }
+  load(s: BoatCoreState) {
+    this.motion.restore(s.motion);
+    this.from = { ...s.from };
   }
 
   get pose() { return this.motion.pose; }

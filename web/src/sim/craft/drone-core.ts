@@ -7,20 +7,20 @@
 import { FixedStep } from '../../core/fixed-step';
 import { add, addScaled, component, copy, copyQuat, length, lengthSq, lerp, nlerpQuat, quat, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
 import type { CraftSpot } from '../contract/commands';
+import type { DroneCoreState, DroneEvent, ImpactKind } from '../contract/crafts';
 import type { DroneInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
 import { FpvFlight, REBOUND_SPEED } from './fpv-flight';
-import type { ImpactKind, Sweep } from './sweep';
+import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
 const SURFACE_CLEARANCE = 0.002;
 
 // (its input, DroneInput: the sticks or null, contract/inputs.ts)
-/** a hit at speed (m/s into what it met) */
-export interface DroneEvent { kind: 'impact'; hit: ImpactKind; speed: number }
+// (its events, DroneEvent: a hit at speed; contract/crafts.ts)
 export interface DroneDrawn { position: Vec3; attitude: Quat }
 
-export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn> {
+export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, DroneCoreState> {
   readonly flight = new FpvFlight();
   readonly clock = new FixedStep(1 / 120, Infinity, 0.1);
   readonly reach = {};
@@ -51,6 +51,17 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn> 
     if (!input) return false;
     this.col = col;
     return this.flight.step(input, dt, this.move);
+  }
+
+  save(): DroneCoreState {
+    return { flight: this.flight.save(), waiting: this.waiting, from: { position: { ...this.from.position }, attitude: { ...this.from.attitude } } };
+  }
+
+  load(s: DroneCoreState) {
+    this.flight.restore(s.flight);
+    this.waiting = s.waiting;
+    copy(this.from.position, s.from.position);
+    copyQuat(this.from.attitude, s.from.attitude);
   }
 
   get pose() {

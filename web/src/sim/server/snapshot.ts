@@ -8,7 +8,6 @@
 //                                      crafts (their cores' state), the events since (the crafts' and the drivers'
 //                                      among them), the session's player's reads (id, seat, car, results, ack)
 // No three.js, no DOM (tools/core-deps.mjs).
-import { saveState } from '../craft/core-state';
 import type { Car } from '../types';
 import type { BodyDraw, CarState, Person, PersonState } from '../contract/agents';
 import type { CommandResult } from '../contract/commands';
@@ -44,14 +43,15 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   const walked: [number, WalkPose][] = [];
   for (const p of T.people) { const w = sim.walkedPose(p.id); if (w) walked.push([p.id, { ...w }]); }
   const boats = T.boats, crafts: CraftState[] = [];
-  for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: saveState(c.core) });
+  // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
+  for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
   return {
     tick: sim.tick, acc: T.acc, t: T.t, day: T.day, active: T.active && { x: T.active.x, z: T.active.z },
     cars: T.cars.map((c) => pick(c, CAR_KEYS)), detached: T.detachedCars.map((c) => pick(c, CAR_KEYS)),
     people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
-    walked, crafts, events: sim.eventsSince(since).map((e) => ('person' in e ? { ...e, person: pick(e.person, PERSON_KEYS) as Person } : e)),
+    walked, crafts, events: sim.eventsSince(since),
     player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
     edits,
   };

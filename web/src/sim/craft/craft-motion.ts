@@ -1,5 +1,6 @@
 import { frozen } from '../../core/frozen';
-import { set, vec3, type Vec3 } from '../../core/vec';
+import { copy, set, vec3, type Vec3 } from '../../core/vec';
+import type { CraftMotionState, CraftStep } from '../contract/crafts';
 import type { CraftInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
 
@@ -10,7 +11,7 @@ export interface CraftMotionWorld {
   sweep(p: Vec3, d: Vec3, fromHeading: number, toHeading: number): Sweep;
   landing(p: Vec3): Sweep;
 }
-export type CraftStep = 'moving' | 'blocked' | 'loading' | 'landed' | 'splash';
+// (what a step did, CraftStep: contract/crafts.ts)
 
 // How much larger the helicopter and the hovercraft are drawn and probed than the box measures they are written in
 // (craft-models.ts, craft-collision.ts): at 1x they read as toys beside the cars, the bus and the houses. The helicopter
@@ -70,6 +71,17 @@ export class CraftMotion {
   constructor(readonly kind: CraftKind, readonly cfg: CraftTuning = CRAFT) {}
 
   get speed() { return Math.hypot(this.velocity.x, this.velocity.z); }
+
+  /** its state on the wire (contract/crafts.ts); not: delta, raised (the steps') */
+  save(): CraftMotionState {
+    const { heading, yaw, bank, pitch, grounded } = this;
+    return { p: { ...this.p }, velocity: { ...this.velocity }, heading, yaw, bank, pitch, grounded };
+  }
+
+  restore(s: CraftMotionState) {
+    copy(this.p, s.p); copy(this.velocity, s.velocity);
+    this.heading = s.heading; this.yaw = s.yaw; this.bank = s.bank; this.pitch = s.pitch; this.grounded = s.grounded;
+  }
 
   reset(p: Vec3, heading: number, speed = 0) {
     set(this.p, p.x, p.y, p.z);

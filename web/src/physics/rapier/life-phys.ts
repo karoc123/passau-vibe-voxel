@@ -26,7 +26,7 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
-import { fadeOut, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import { fadeOut, fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
 import type { BodyDraw } from '../../sim/contract/agents';
 import type { CoachBox } from '../../sim/train-traffic';
 import type { Car } from '../../sim/types';
@@ -739,7 +739,7 @@ export class LifePhysics implements TrafficBodies {
       const pose = { x: w.x, y: w.z, z: w.y, h: Math.atan2(ahead.x - w.x, ahead.y - w.y), pitch: 0, roll: 0 };
       if (!T.removePerson(person)) return;
       b.body.setLinvel({ x: v.x * 0.95, y: v.y, z: v.z * 0.95 }, true);
-      T.struck.push({ tick: T.tickNumber, person, pose, vx: v.x, vz: v.z, by: b.car.id });
+      T.struck.push({ tick: T.tickNumber, ...fallen(person), pose, vx: v.x, vz: v.z, by: b.car.id });
       b.driver!.note(T.tickNumber, 'Ouch!', 600);
     };
     // A hit removes an agent from the lists.

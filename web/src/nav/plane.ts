@@ -5,7 +5,7 @@ import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
 import type { PlaneCore, PlaneDrawn } from '../sim/craft/plane-core';
-import { JET, PLANE, type PlaneConfig, type PlaneEvent } from '../sim/craft/plane-flight';
+import { JET, PLANE, type PlaneConfig } from '../sim/craft/plane-flight';
 import type { PlaneInput } from '../sim/contract/inputs';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
@@ -343,7 +343,7 @@ export class PlaneMode implements PlayerCraft {
       this.cam.pitch = 0;
       f.attitude(this.cam.fwd, this.cam.up);
     }
-    for (const e of this.link.events() as PlaneEvent[]) {
+    for (const e of this.link.events()) {
       if (e.type === 'crash') {
         this.crashAt = now;
         this.panel.say(e.what === 'water' ? `Splash! (${e.kmh} km/h) Back at a safe point…` : `Crash! (${e.what}, ${e.kmh} km/h) Back at a safe point…`, 0);

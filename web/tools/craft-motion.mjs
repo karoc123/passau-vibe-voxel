@@ -1,4 +1,7 @@
-// The player craft motion laws against the same swept voxel probes as the viewer.
+// The player craft motion laws against the same swept voxel probes as the viewer; and every craft core's wire state
+// (docs/plans/architecture-review.md A6: save(), load(); sim/craft/core-state.ts): each field it holds stirred to a
+// value of its own, a client's copy loaded from save() (structured-cloned) holds the same but for what core-state.ts
+// lists as not on the wire, draws and stands where the core does, and save() shares no object with the core.
 // Run from web/ with node tools/craft-motion.mjs.
 import { load } from './real-city.mjs';
 import { imp } from './lib.mjs';
@@ -100,6 +103,22 @@ check('paraglider touches down on dry ground', run(glider, 20, { drive: -1 }) ==
   Math.abs(glider.motion.p.y - 6.45) < 0.3);
 glider.motion.reset({ x: 64, y: 8, z: 30 }, Math.PI, 8);
 check('paraglider reports a water landing', run(glider, 4, { drive: -1 }) === 'splash');
+
+// the wire state: each craft type
+const { CORES } = await load('sim/craft/cores.ts');
+const { DEFAULT_TUNING } = await load('sim/tuning.ts');
+const { stir, wireGaps, aliased } = await load('sim/craft/core-state.ts');
+for (const type of Object.keys(CORES)) {
+  const core = CORES[type](DEFAULT_TUNING), copy = CORES[type](DEFAULT_TUNING);
+  core.reset({ x: 64, y: 20, z: 64, h: 0.3, speed: 5 });
+  stir(type, core);
+  const state = core.save();
+  copy.load(structuredClone(state));
+  const gaps = wireGaps(type, core, copy), shared = aliased(core, state);
+  const seen = (c) => JSON.stringify([c.pose, c.velocity, c.drawn(0), c.drawn(0.37), c.drawn(1)]);
+  check(`${type}: its wire state is all it holds (${gaps.length ? `not on the copy: ${gaps.join(', ')}` : 'save, load'}), the copy drawn alike${
+    shared.length ? `; save() shares ${shared.join(', ')}` : ''}`, !gaps.length && !shared.length && seen(core) === seen(copy));
+}
 
 for (const { name, pass } of out) console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}`);
 if (out.some(({ pass }) => !pass)) process.exitCode = 1;

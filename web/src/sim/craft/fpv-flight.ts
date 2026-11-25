@@ -1,4 +1,5 @@
 import { clamp } from '../../core/num';
+import type { FpvFlightState } from '../contract/crafts';
 import type { FlightInput } from '../contract/inputs';
 import {
   add, addScaled, axisAngle, clampLength, copy, copyQuat, cross, divide, dot, length, quat, quatMul, quatNormalize, rotate,
@@ -36,6 +37,14 @@ export class FpvFlight {
   private readonly impactSpin = vec3();
   private readonly priorAttitude = quat();
   private readonly priorVelocity = vec3();
+
+  /** its state on the wire (contract/crafts.ts); not: impactSpin (the steps' spin after a hit), the steps' scratch */
+  save(): FpvFlightState { return { position: { ...this.position }, attitude: { ...this.attitude }, velocity: { ...this.velocity } }; }
+  restore(s: FpvFlightState) {
+    copy(this.position, s.position);
+    copyQuat(this.attitude, s.attitude);
+    copy(this.velocity, s.velocity);
+  }
 
   reset(position: Vec3, yaw: number) {
     copy(this.position, position);

@@ -2,6 +2,7 @@
 // not the world's): a session's on the world sim's event log (sim/server/sim-server.ts Session), a client's on its copy of
 // it (client/sim-client.ts MirrorSimClient). Each reader keeps its own, so two readers of one player each get every
 // event. No three.js, no DOM (tools/core-deps.mjs).
+import type { CraftEventOf } from './contract/crafts';
 import type { SimEvent } from './contract/events';
 import type { EntityRef, PlayerId, Seat } from './contract/ids';
 
@@ -32,5 +33,10 @@ export class SeatReads {
     for (const e of log) if (e.tick > r.tick && e.kind === kind && same((e as { entity: EntityRef }).entity, seat.entity)) out.push(e as Extract<SimEvent, { kind: K }>);
     r.tick = now;
     return out;
+  }
+
+  /** the craft events taken (take's): each its craft's type and its core's event */
+  crafts(log: readonly SimEvent[], player: PlayerId, seat: Seat | null, now: number): CraftEventOf[] {
+    return this.take(log, player, seat, 'craft', now).map((x) => ({ craft: x.craft, e: x.e }) as CraftEventOf);
   }
 }

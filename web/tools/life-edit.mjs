@@ -44,7 +44,7 @@
 //          flies it, the client's copy where the sim's is; by the edits' presence rule (a short keeping here) the empty
 //          boat goes once no focus has been near it for the delay; a parked car stays while B flies by it, and both go
 //          once B has left the helicopter too.
-//   events a craft's core events are the world's (craft: tick, entity), through a SimServer and a client of its
+//   events a craft's core events are the world's (craft: tick, entity, its type), through a SimServer and a client of its
 //          snapshots: a drone falling under its pilot's cut throttle hits the ground; its pilot reads the impacts once
 //          (craftEvents), the client's as a second session's of the same player (which sent no input: no ack); a pilot
 //          entering after reads none of them. The driver's notes as
@@ -807,9 +807,9 @@ async function craftEvents() {
     mine.push(...client.craftEvents());
     direct.push(...B2.craftEvents());
     const logged = sim.eventsSince(-1).filter((e) => e.kind === 'craft'), mirrored = client.eventsSince(-1).filter((e) => e.kind === 'craft');
-    check(mine.length > 0 && mine.every((e) => e.kind === 'impact') && JSON.stringify(mine) === JSON.stringify(direct) &&
+    check(mine.length > 0 && mine.every((x) => x.craft === 'drone' && x.e.kind === 'impact') && JSON.stringify(mine) === JSON.stringify(direct) &&
       JSON.stringify(logged) === JSON.stringify(mirrored) && logged.every((e) => e.entity.kind === 'craft' && e.entity.id === drone.id) &&
-      JSON.stringify(logged.map((e) => e.e)) === JSON.stringify(mine) && !client.craftEvents().length,
+      JSON.stringify(logged.map(({ craft, e }) => ({ craft, e }))) === JSON.stringify(mine) && !client.craftEvents().length,
     `events: the drone's impacts the world's craft events, read once by its pilot, the client's as the sim's (${mine.length})`);
     // (each seat input numbered by the client; the snapshot acks the last one taken, the tick it was applied in)
     const ack = client.ack(), n = Math.round(5 / STEP);
@@ -888,7 +888,7 @@ async function sessions() {
     }, frame);
     tick(STEP, null, frame);
     mine.A.push(...ca.craftEvents()); mine.B.push(...cb.craftEvents()); mine.A2.push(...A2.craftEvents());
-    const logA = sim.eventLog.filter(of(da)).map((e) => e.e), logB = sim.eventLog.filter(of(db)).map((e) => e.e), n = Math.round(5 / STEP);
+    const pair = ({ craft, e }) => ({ craft, e }), logA = sim.eventLog.filter(of(da)).map(pair), logB = sim.eventLog.filter(of(db)).map(pair), n = Math.round(5 / STEP);
     check(mine.A.length > 0 && mine.B.length > 0 && JSON.stringify(mine.A) === JSON.stringify(logA) && JSON.stringify(mine.B) === JSON.stringify(logB) &&
       JSON.stringify(mine.A2) === JSON.stringify(logA) && JSON.stringify(logA) !== JSON.stringify(logB),
     `sessions: each reads its own drone's events (A ${mine.A.length}, B ${mine.B.length}; A's second session ${mine.A2.length})`);

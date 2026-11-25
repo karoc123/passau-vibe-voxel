@@ -8,16 +8,17 @@
 import { FixedStep } from '../../core/fixed-step';
 import { copy, lerp, lerpAngle, nlerpQuat, quat, quatFromBasis, rotate, set, vec3, type Vec3 } from '../../core/vec';
 import type { CraftSpot } from '../contract/commands';
+import type { PlaneCoreState, PlaneEvent } from '../contract/crafts';
 import type { PlaneInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
-import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneEvent, type PlaneWorld } from './plane-flight';
+import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneWorld } from './plane-flight';
 import type { VoxelCollision } from './voxel-collision';
 
 /** as drawn: where it is, where its nose points and the cockpit's up; its heading, flight-path angle and bank */
 export interface PlaneDrawn { p: Vec3; fwd: Vec3; up: Vec3; heading: number; gamma: number; bank: number }
 const drawnState = () => ({ p: vec3(), fwd: vec3(), up: vec3(), heading: 0, gamma: 0, bank: 0 });
 
-export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> {
+export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, PlaneCoreState> {
   readonly flight: PlaneFlight;
   readonly clock: FixedStep;
   readonly reach: { radius: number; horizon: number };
@@ -74,6 +75,18 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn> 
   step(input: PlaneInput, dt: number, col: VoxelCollision) {
     if (input === this.neutral && this.flight.state === 'crashed') return false;
     return this.flight.step(input, dt, this.world(col));
+  }
+
+  save(): PlaneCoreState {
+    const { p, fwd, up, heading, gamma, bank, jumps } = this.from;
+    return { flight: this.flight.save(), from: { p: { ...p }, fwd: { ...fwd }, up: { ...up }, heading, gamma, bank, jumps } };
+  }
+
+  load(s: PlaneCoreState) {
+    this.flight.restore(s.flight);
+    const f = this.from, o = s.from;
+    copy(f.p, o.p); copy(f.fwd, o.fwd); copy(f.up, o.up);
+    f.heading = o.heading; f.gamma = o.gamma; f.bank = o.bank; f.jumps = o.jumps;
   }
 
   get pose() { const { p, heading } = this.flight; return { x: p.x, y: p.y, z: p.z, h: heading }; }

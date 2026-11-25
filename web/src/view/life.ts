@@ -87,13 +87,13 @@ export class StreetLife {
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
     if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
     for (const e of events) {
-      const d = e.kind === 'dropped' && this.drawnPeople.get(e.person.id);
-      if (d) this.addFallen(e.person.col, !!e.person.bike, d, d.h, 0, 1, 0, 0);
+      const d = e.kind === 'dropped' && this.drawnPeople.get(e.person);
+      if (d) this.addFallen(e.col, e.bike, d, d.h, 0, 1, 0, 0);
     }
     for (const e of events) {
       if (e.kind !== 'struck') continue;
-      const { person, pose, vx, vz } = e, v = Math.hypot(vx, vz) || 1;
-      this.addFallen(person.col, !!person.bike, pose, pose.h, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
+      const { col, bike, pose, vx, vz } = e, v = Math.hypot(vx, vz) || 1;
+      this.addFallen(col, bike, pose, pose.h, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
     }
     this.render(Math.min(dt, 0.1), night, T.acc);
   }

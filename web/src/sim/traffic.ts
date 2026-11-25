@@ -14,6 +14,7 @@ import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, prepPath, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 import type { BodyDraw, Person } from './contract/agents';
+import type { Fallen } from './contract/events';
 import type { RoadPose } from './contract/pose';
 
 export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
@@ -47,6 +48,10 @@ const PARKED = 8, PARKED_MAX = 24;
 const HOLE = 1;
 
 export const DEFAULT_SEED = 1;
+
+/** a person fallen out of the crowd as the events name it (struck, dropped: contract/events.ts): by id, with what its
+ * fall is drawn with */
+export const fallen = (p: Person): Fallen => ({ person: p.id, col: p.col, bike: !!p.bike });
 
 // the ground the agents stand on (world.ts World: the edited columns too)
 export interface Ground {
@@ -116,8 +121,8 @@ export class Traffic {
   riders: Person[] = [];
   // the people fallen into a hole and knocked down (by a driven car: life-phys.ts) in the ticks since the world sim
   // last took them (WorldSim.update: its events)
-  dropped: { tick: number; person: Person }[] = [];
-  struck: { tick: number; person: Person; pose: RoadPose; vx: number; vz: number; by: number }[] = [];
+  dropped: ({ tick: number } & Fallen)[] = [];
+  struck: ({ tick: number; pose: RoadPose; vx: number; vz: number; by: number } & Fallen)[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
   edits: [number, number, number, number][] = [];
@@ -494,7 +499,7 @@ export class Traffic {
       if (this.held.person.has(p.id)) return true;
       this.personPoint(p, 0, P);
       if (!this.hole(P.x, P.y, P.z)) return true;
-      this.dropped.push({ tick: this.tickNumber, person: p });
+      this.dropped.push({ tick: this.tickNumber, ...fallen(p) });
       return false;
     });
     this.people = drop(this.people);
