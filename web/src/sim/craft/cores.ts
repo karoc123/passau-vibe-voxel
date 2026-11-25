@@ -1,6 +1,7 @@
 // The player crafts WorldSim makes (sim/world-sim.ts addCraft), by type: each core (craft-core.ts) made with its part
 // of the world's tuning (sim/tuning.ts). No three.js, no DOM (tools/core-deps.mjs).
 import type { Tuning } from '../tuning';
+import type { CraftEvents, CraftStates } from '../contract/crafts';
 import type { CraftType } from '../contract/ids';
 import type { PilotInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
@@ -28,3 +29,8 @@ type InputOf<C> = C extends CraftCore<infer I> ? I : never;
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 export type PilotInputIsTheCores = Assert<Same<PilotInput, InputOf<CoreOf<CraftType>>>>;
+// the contract's craft events and wire states (contract/crafts.ts) are the cores', type by type
+type EventOf<C> = C extends CraftCore<unknown, infer E> ? E : never;
+type StateOf<C> = C extends CraftCore<unknown, unknown, unknown, infer S> ? S : never;
+export type CraftEventsAreTheCores = Assert<Same<CraftEvents, { [K in CraftType]: EventOf<CoreOf<K>> }>>;
+export type CraftStatesAreTheCores = Assert<Same<CraftStates, { [K in CraftType]: StateOf<CoreOf<K>> }>>;

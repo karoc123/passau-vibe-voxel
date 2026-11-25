@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Meta } from '../core/meta';
 import { clamp } from '../util';
-import { findSpawn, NO_BOAT_INPUT, type BoatDrawn, type BoatEvent } from '../sim/craft/boat-motion';
+import { findSpawn, NO_BOAT_INPUT, type BoatDrawn } from '../sim/craft/boat-motion';
 import type { BoatInput } from '../sim/contract/inputs';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import { BoatModel } from './boat-model';
@@ -128,7 +128,7 @@ export class BoatMode implements PlayerCraft {
     }
     const c = this.phase === 'on' ? this.link.frame() : null;
     if (c) {
-      for (const e of this.link.events() as BoatEvent[]) {
+      for (const e of this.link.events()) {
         this.panel.say(e.speed > 5 ? 'Crash!' : 'Bump!', 600);
         this.shakeUntil = performance.now() + 450;
         this.shakeA = clamp(e.speed / 20, 0.08, 0.5);

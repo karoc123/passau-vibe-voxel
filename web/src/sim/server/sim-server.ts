@@ -15,6 +15,7 @@ import { apply as applyEdit } from '../../core/world-edits';
 import { takeSnapshot } from './snapshot';
 import { SeatReads } from '../seat-reads';
 import type { CommandResult, SimCommand } from '../contract/commands';
+import type { CraftEventOf } from '../contract/crafts';
 import { EVENT_TICKS, type DriveNote } from '../contract/events';
 import type { PlayerId, Role, Seat } from '../contract/ids';
 import type { SimInput } from '../contract/inputs';
@@ -151,7 +152,7 @@ export class Session {
   /** what the player driving is to be told since this session last asked (the drive events of their car since they took it) */
   driverNotes(): DriveNote[] { return this.reads.take(this.sim.eventLog, this.player, this.seat(), 'drive', this.sim.tick).map((e) => e.note); }
   /** what happened to the player's craft since this session last asked (its craft events since they took it), oldest first */
-  craftEvents(): unknown[] { return this.reads.take(this.sim.eventLog, this.player, this.seat(), 'craft', this.sim.tick).map((e) => e.e); }
+  craftEvents(): CraftEventOf[] { return this.reads.crafts(this.sim.eventLog, this.player, this.seat(), this.sim.tick); }
 
   /** the sim's state for this session after the last update (the events since its last snapshot, its player's
    * outcomes, the edits since the last) */

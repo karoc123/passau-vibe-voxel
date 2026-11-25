@@ -7,7 +7,7 @@ import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
 import type { CraftInput } from '../sim/contract/inputs';
-import { NO_CRAFT_INPUT, type SpecialEvent } from '../sim/craft/special-core';
+import { NO_CRAFT_INPUT } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
 import { stickAxis, TouchSticks } from './touch-sticks';
@@ -135,7 +135,7 @@ class SpecialCraft implements PlayerCraft {
     if (this.phase === 'on') {
       this.link.input(inFocus() ? this.input() : NO_CRAFT_INPUT);
       this.link.frame();
-      for (const e of this.link.events() as SpecialEvent[]) {
+      for (const e of this.link.events()) {
         if (e === 'landed') this.landOnFoot();
         else {
           this.panel.say('Water landing. Choose a dry landing spot next time.', 3500);

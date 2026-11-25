@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type { CraftView, SimClient } from '../client/sim-client';
 import type { CraftSpot as SimSpot } from '../sim/contract/commands';
+import type { CraftEvents } from '../sim/contract/crafts';
 import type { CraftId, CraftType } from '../sim/contract/ids';
 import type { PilotInput } from '../sim/contract/inputs';
 import type { CraftWorld } from '../sim/craft/craft-core';
@@ -143,7 +144,12 @@ export class CraftLink<K extends CraftType> {
   input(input: PilotInput) { this.sim?.send({ kind: 'seatInput', role: 'pilot', input }); }
 
   /** what happened to the craft since the last call */
-  events(): unknown[] { return this.craft ? this.sim!.craftEvents() : []; }
+  events(): CraftEvents[K][] {
+    const out: CraftEvents[K][] = [];
+    // (the seat's craft is of the link's type: craft; its events are its type's)
+    if (this.craft) for (const x of this.sim!.craftEvents()) if (x.craft === this.type) out.push(x.e as CraftEvents[K]);
+    return out;
+  }
 
   /** back to a safe spot nearby (T); whether it was, in results('resetCraft') */
   reset() { this.sim?.send({ kind: 'request', request: { kind: 'resetCraft' } }); }

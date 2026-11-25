@@ -4,8 +4,8 @@
 import type { VehicleId } from './ids';
 import type { RoadPose } from './pose';
 
-/** a person of the crowd (sim/traffic.ts), on foot or on a bike. Whole in the events that name one (struck, dropped:
- * contract/events.ts) */
+/** a person of the crowd (sim/traffic.ts), on foot or on a bike. The events name one by id (struck, dropped:
+ * contract/events.ts Fallen) */
 export interface Person {
   kind: 'person';
   /** its entity id, kept while it lives (people and riders are numbered apart from the cars: contract/ids.ts EntityRef) */

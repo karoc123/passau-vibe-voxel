@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { length } from '../core/vec';
 import { HOVER_THROTTLE } from '../sim/craft/fpv-flight';
 import type { FlightInput } from '../sim/contract/inputs';
-import type { DroneEvent } from '../sim/craft/drone-core';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
 import type { Nav } from './nav';
@@ -120,7 +119,7 @@ export class FpvMode implements PlayerCraft {
       if (this.link.refused()) { this.toggle(); return; }
       this.link.input(this.phase === 'flying' ? this.flightInput() : null);
       this.link.frame();
-      for (const e of this.link.events() as DroneEvent[]) {
+      for (const e of this.link.events()) {
         this.impact = { at: now, strength: clamp(e.speed / 26, 0.22, 0.75), message: `Impact with ${e.hit} at ${Math.round(e.speed * 3.6)} km/h · Armed` };
       }
     }

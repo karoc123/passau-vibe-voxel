@@ -12,6 +12,9 @@
 //   drawn(alpha)              its pose as drawn between the world's last two ticks: alpha (0..1, WorldSim's FrameTime)
 //                             of the way from where it was kept to where it is now; one put somewhere at once in a
 //                             step (the plane's respawn) drawn where it is
+//   save(), load(state)       its state on the wire (contract/crafts.ts CraftStates, by type: a snapshot's crafts): what
+//                             a client's copy of it reads (pose, drawn, velocity, what its shell shows), declared field
+//                             by field; core-state.ts checks nothing else it holds differs on the copy (tools/craft-motion.mjs)
 // The shells (nav/boat.ts, ...) keep the panel, the camera, the model and the input mapping; they read the core.
 import type { FixedStep } from '../../core/fixed-step';
 import type { Meta } from '../../core/meta';
@@ -39,7 +42,7 @@ export interface Craft<C extends CraftCore = CraftCore> {
  * fetch pacing reads (WorldSim's crafts; a shell's own, nav/craft.ts) */
 export interface CraftWorld { meta: Meta; cache: TileCache; now: () => number }
 
-export interface CraftCore<I = unknown, E = unknown, D = unknown> {
+export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   /** its fixed step (step size), run by WorldSim each world tick for STEP s */
   readonly clock: FixedStep;
   /** its collision's cube and look-ahead (VoxelCollision, made by WorldSim) */
@@ -57,6 +60,10 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown> {
   /** m/s, where its collision fetches ahead */
   readonly velocity: Vec3;
   drawn(alpha: number): D;
+  /** its state on the wire: plain data, objects of its own (none of the core's) */
+  save(): S;
+  /** a client's copy (a core of the same type and tuning, never stepped): state (save()'s) written into it */
+  load(state: S): void;
   /** back to a safe spot nearby (T); false: not now */
   unstick?(world: VoxelCollision): boolean;
 }

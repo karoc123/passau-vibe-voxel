@@ -39,6 +39,7 @@ import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand } from './contract/commands';
+import type { CraftEventOf } from './contract/crafts';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
 import { MAX_DT, type FrameTime, type SimInput } from './contract/inputs';
 import { EVENT_TICKS, type SimEvent } from './contract/events';
@@ -237,7 +238,7 @@ export class WorldSim {
     if (T.dropped.length || T.struck.length) {
       fresh.push(...T.dropped.map((d) => ({ kind: 'dropped' as const, ...d })));
       for (const { by, ...s } of T.struck) {
-        fresh.push({ kind: 'struck', ...s }, { tick: s.tick, kind: 'impact', entity: { kind: 'person', id: s.person.id },
+        fresh.push({ kind: 'struck', ...s }, { tick: s.tick, kind: 'impact', entity: { kind: 'person', id: s.person },
           by: { kind: 'car', id: by }, speed: Math.hypot(s.vx, s.vz), at: { x: s.pose.x, y: s.pose.y, z: s.pose.z } });
       }
       T.struck = [];
@@ -522,7 +523,8 @@ export class WorldSim {
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
       core.clock.run(STEP, (step) => core.step(c.input, step, c.collision));
-      if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, e });
+      // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores')
+      if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
     }
   }
 }

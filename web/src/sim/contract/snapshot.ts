@@ -6,12 +6,15 @@
 import type { LiveNode, Region } from '../../core/live-edits';
 import type { BodyDraw, BoatView, CarState, PersonState, TrainState } from './agents';
 import type { CommandResult } from './commands';
+import type { CraftStates } from './crafts';
 import type { SimEvent } from './events';
 import type { CraftId, CraftType, PlayerId, Seat } from './ids';
 import type { RoadPose, WalkPose } from './pose';
 
-/** a craft put down: what its shell or the page's drawing reads (its core's state: sim/craft/core-state.ts) */
-export interface CraftState { id: CraftId; type: CraftType; pilot: PlayerId | null; placed: boolean; core: Record<string, unknown> }
+/** a craft put down: what its shell or the page's drawing reads (core: its core's state, of its type: contract/crafts.ts,
+ * sim/craft/craft-core.ts save) */
+export type CraftState<K extends CraftType = CraftType> =
+  { [T in K]: { id: CraftId; type: T; pilot: PlayerId | null; placed: boolean; core: CraftStates[T] } }[K];
 
 /** a level-1 node edited (its columns now) or given its files again (null) since the last snapshot (a worker's: the
  * page's live edits follow the world's) */

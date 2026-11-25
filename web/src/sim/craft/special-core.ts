@@ -7,20 +7,21 @@
 import { FixedStep } from '../../core/fixed-step';
 import { lerpAngle, type Vec3 } from '../../core/vec';
 import type { CraftSpot } from '../contract/commands';
+import type { CraftStep, SpecialCoreState, SpecialEvent } from '../contract/crafts';
 import type { CraftInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
 import { craftWorld, CRAFT_RADIUS } from './craft-collision';
-import { CRAFT, CraftMotion, type CraftKind, type CraftMotionWorld, type CraftStep, type CraftTuning } from './craft-motion';
+import { CRAFT, CraftMotion, type CraftKind, type CraftMotionWorld, type CraftTuning } from './craft-motion';
 import type { VoxelCollision } from './voxel-collision';
 
 export const NO_CRAFT_INPUT: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: 0, side: 0 });
 const LET_DOWN: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: -1, side: 0 });
-export type SpecialEvent = 'landed' | 'splash';
+// (its events, SpecialEvent: contract/crafts.ts)
 /** as drawn: the motion's point (the paraglider's: the pilot's middle), its heading, pitch (+: nose up), bank (+: the
  * right side down) */
 export interface SpecialDrawn extends Vec3 { h: number; pitch: number; bank: number }
 
-export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialDrawn> {
+export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialDrawn, SpecialCoreState> {
   readonly motion: CraftMotion;
   readonly clock = new FixedStep(1 / 60, 6, 0.1);
   readonly reach: { radius: number };
@@ -64,6 +65,13 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     this.result = this.motion.step(input, dt, this.world(col));
     if (this.result === 'landed' || this.result === 'splash') { this.events.push(this.result); return false; }
     return this.result !== 'loading';
+  }
+
+  save(): SpecialCoreState { return { motion: this.motion.save(), result: this.result, from: { ...this.from } }; }
+  load(s: SpecialCoreState) {
+    this.motion.restore(s.motion);
+    this.result = s.result;
+    Object.assign(this.from, s.from);
   }
 
   get pose() { const { p, heading } = this.motion; return { x: p.x, y: p.y, z: p.z, h: heading }; }

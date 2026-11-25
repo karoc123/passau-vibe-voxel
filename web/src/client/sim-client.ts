@@ -20,9 +20,9 @@ import type { Ground } from '../sim/traffic';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
 import { CORES } from '../sim/craft/cores';
-import { loadState } from '../sim/craft/core-state';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
+import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime, SimInput } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
@@ -79,7 +79,7 @@ export interface SimClient {
   /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first (the craft events of it) */
-  craftEvents(): unknown[];
+  craftEvents(): CraftEventOf[];
   /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
   /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied */
@@ -108,7 +108,7 @@ export interface InThreadSession {
   seat(): Seat | null;
   driver(): DriverSnapshot | null;
   driverNotes(): DriveNote[];
-  craftEvents(): unknown[];
+  craftEvents(): CraftEventOf[];
   snapshot(): Snapshot;
 }
 
@@ -295,7 +295,8 @@ export class MirrorSimClient implements SimClient {
   private take(s: Snapshot) {
     this.last = s;
     if (this.edits) for (const e of s.edits) liveEdits.set(e.tx, e.ty, e.node, e.region);
-    this.events.push(...this.traffic.apply(s));
+    this.traffic.apply(s);
+    this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
     const P = s.player;
@@ -310,7 +311,7 @@ export class MirrorSimClient implements SimClient {
       if (!m) L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) });
       m.pilot = c.pilot;
       m.placed = c.placed;
-      loadState(m.core, c.core);
+      m.core.load(c.core);
       seen.add(c.id);
     }
     for (const id of L.keys()) if (!seen.has(id)) L.delete(id);
@@ -340,7 +341,7 @@ export class MirrorSimClient implements SimClient {
     return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
-  craftEvents() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'craft', this.tick).map((e) => e.e) : []; }
+  craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }
 
@@ -391,11 +392,9 @@ export class TrafficMirror implements TrafficView {
   signal: Traffic['signal'] = (ctrl, axis) => this.T.signal(ctrl, axis);
   roadVehicles = () => this.T.roadVehicles();
 
-  /** the snapshot's agents in place of the last (one object per id); its events with the people they name as drawn
-   * here (a person fallen is gone from the snapshot's crowd, not yet from this) */
-  apply(s: Snapshot): SimEvent[] {
+  /** the snapshot's agents in place of the last (one object per id) */
+  apply(s: Snapshot) {
     const T = this.T;
-    const events = s.events.map((e) => ('person' in e ? { ...e, person: this.peopleById.get(e.person.id) ?? e.person } : e));
     T.acc = s.acc; T.t = s.t; T.day = s.day;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;
@@ -431,7 +430,6 @@ export class TrafficMirror implements TrafficView {
     this.boats = s.boats;
     this.walked.clear();
     for (const [id, w] of s.walked) this.walked.set(id, w);
-    return events;
   }
 
   // as LifePhysics.pose: a parked car or a wreck where it is, a body between its last two drawn poses, the fade back
