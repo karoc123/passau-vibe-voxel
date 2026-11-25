@@ -12,25 +12,16 @@ import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import { BLEND, laneOffset, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
 export { STEP, type CarPose, type Ground } from './road-net';
-import type { BodyDraw, Person } from './contract/agents';
+import { MAX_BIKES, MAX_CARS, MAX_PEOPLE, type BodyDraw, type Person } from './contract/agents';
 import type { Fallen } from './contract/events';
 import type { RoadPose } from './contract/pose';
 
-export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
 const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
 const BOX_IN = 7, BOX_OUT = 9;
-export const ACTIVE_R = 900, ACTIVE_CELL = 300;
-export const activeKey = (cx: number, cy: number) => cy * 65536 + cx;
-// Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the
-// hour's number, off the network, a dead end, the parked cars, the people knocked down), never in plain view. Closer
-// in a car at a dead end waits there, a rider turns back; the number over the hour's waits until enough are far.
-// Only the first fill (or a jump of the focus) puts them anywhere at once. (A car 300 m away is a few pixels tall, a
-// person 150 m away about as much: tools/popin-check.mjs checks 200 and 100 m.)
-export const CAR_POP_R = 300, PED_POP_R = 150;
 // the focus moved this far at once (or the first update): the circle is filled anew at once, near the focus too
 const JUMP_R = ACTIVE_R / 2;
 const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];

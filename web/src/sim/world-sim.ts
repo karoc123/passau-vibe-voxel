@@ -100,6 +100,8 @@ export class WorldSim {
   private frameDt = 0;
   private phys: LifePhysics | null = null;
   private loading: Promise<LifePhysics> | null = null;
+  // dispose ran: a road physics still loading is let go once it is in, none loads again
+  private disposed = false;
   private readonly keeper: EditKeeper;
   // the vehicles left ("craft:id", "car:id"): when a player was last near them
   private readonly left: Presence<string>;
@@ -204,7 +206,9 @@ export class WorldSim {
   async loadPhysics(warm?: { x: number; z: number }) {
     const load = this.opts.loadPhysics;
     if (!load) throw new Error('WorldSim: no physics loader');
+    if (this.disposed) throw new Error('WorldSim: disposed');
     this.loading ??= load(this.tuning).then((p) => {
+      if (this.disposed) { p.dispose(); throw new Error('WorldSim: disposed'); }
       this.phys = p;
       this.traffic.bodies = p;
       return p;
@@ -212,6 +216,16 @@ export class WorldSim {
     const p = await this.loading;
     if (warm) await p.warmTerrain(warm);
     return p;
+  }
+
+  /** the road physics let go (its Rapier world, its terrain's listener on the world's edits; one still loading once it
+   * is in): a host done with its world (host/sim-host.ts hostSim, SimServer.dispose) */
+  dispose() {
+    this.disposed = true;
+    this.phys?.dispose();
+    this.phys = null;
+    this.loading = null;
+    this.traffic.bodies = null;
   }
 
   /** the frame's time when its update has run: what is drawn between the last two ticks is alpha of the way */

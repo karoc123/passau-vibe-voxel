@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { Meta } from './core/meta';
-import { FOLIAGE_CLASSES } from './foliage';
 import { dataTexture } from './util';
 import { CLOUD_GLSL, cloudUniforms } from './clouds';
 import { SLANT, SLANT_STEPS } from './chamfer';
@@ -13,6 +12,8 @@ import { MAT, GROUND, groundClass, pavedGround } from './core/materials';
 export const REFL_MAX = 0.4;
 // the material ids and the ground's paved classes (three.js-free, core/materials.ts)
 export { MAT, GROUND, groundClass, pavedGround };
+// the foliage classes' slots in the shader (uFolDate, uFolCol; foliage.ts loadFoliage fills them from phenology.json)
+export const FOLIAGE_CLASSES = 16;
 
 type U<T> = { value: T };
 export interface VoxelUniforms {

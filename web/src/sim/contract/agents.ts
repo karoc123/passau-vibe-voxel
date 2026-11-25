@@ -4,6 +4,10 @@
 import type { VehicleId } from './ids';
 import type { RoadPose } from './pose';
 
+/** the most cars, people on foot and bikes the traffic holds (sim/traffic.ts), so a snapshot carries; the page sizes its
+ * instanced meshes by them (view/meshes.ts) */
+export const MAX_CARS = 1400, MAX_PEOPLE = 4000, MAX_BIKES = 1200;
+
 /** a person of the crowd (sim/traffic.ts), on foot or on a bike. The events name one by id (struck, dropped:
  * contract/events.ts Fallen) */
 export interface Person {

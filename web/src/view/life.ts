@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/traffic';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
@@ -16,7 +16,6 @@ import type { EntityRef, VehicleId } from '../sim/contract/ids';
 // shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
 // and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).
 
-export { CAR_POP_R, PED_POP_R } from '../sim/traffic';
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
 // fraction of a pixel wide)
 const HEADS_OUT = 600;

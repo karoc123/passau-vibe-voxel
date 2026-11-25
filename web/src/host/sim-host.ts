@@ -78,7 +78,7 @@ export const PAGE_PLAYER: PlayerId = 'local';
 export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
 
 /** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots; dispose: the host's listener on
- * the world's edits removed) */
+ * the world's edits removed, the road physics let go: WorldSim.dispose) */
 export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   // the build: one this code reads, or none said (core/data-contract.ts: a wrong formatVersion throws)
   const build = checkBuild(data.meta, (w) => ports.log(w));
@@ -101,9 +101,9 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   let make = MODES[opts.mode ?? 'sandbox'];
   if (!make) { ports.log(`no game mode ${opts.mode}; the sandbox`); make = MODES.sandbox; }
   // (the build goes into the hello each session is told: SimServer.hello; the edits' nodes made ready in the world's
-  // TileCache: SimServer's default EditTiles; the listener gone with the server, SimServer.dispose)
+  // TileCache: SimServer's default EditTiles; the listener and the road physics gone with the server, SimServer.dispose)
   const server = new SimServer(sim, make({ edits: !!opts.edits }), build);
-  server.onDispose(unlisten);
+  server.onDispose(() => { unlisten(); sim.dispose(); });
   return server;
 }
 

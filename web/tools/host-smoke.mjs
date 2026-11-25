@@ -131,8 +131,15 @@ async function edits() {
 }
 
 const fail = [];
+// (the hosts' listeners on the world's edits: each host's, its tile world's and, once loaded, its road physics'
+// terrain's; all gone with dispose)
+const listening = () => WE.liveEdits['listeners'].size, before = listening();
 const r1 = await direct(), r2 = await direct(), w = await worker();
+const T = r1.server.sim.traffic, sim = w.server.sim;
+if (!sim.physics) fail.push('the road physics not attached');
 for (const r of [r1, r2, w]) r.server.dispose();
+if (listening() !== before) fail.push(`after dispose: ${listening() - before} listener(s) of the 3 hosts' on the world's edits left`);
+if (sim.physics) fail.push('after dispose: the road physics still attached');
 const ed = await edits();
 fail.push(...ed.out);
 const diff = (x, y, what) => {
@@ -141,9 +148,7 @@ const diff = (x, y, what) => {
 };
 diff(r1, r2, 'run twice');
 diff(r1, w, 'through the worker\'s handle');
-const T = r1.server.sim.traffic, sim = w.server.sim;
 if (!T.cars.length || !T.people.length) fail.push(`no traffic (${T.cars.length} cars, ${T.people.length} people)`);
-if (!sim.physics) fail.push('the road physics not attached');
 if (w.last.player.id !== PAGE_PLAYER) fail.push(`the worker's snapshot names ${w.last.player.id}`);
 
 // the hello, through every transport
@@ -205,5 +210,5 @@ for (const [tn, make] of Object.entries(transports)) {
 }
 if (verbose) console.log(`  ${T.cars.length} cars, ${T.people.length} people, tick ${r1.server.sim.tick}; road physics loaded in ${w.loadMs.toFixed(0)} ms`);
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL host-smoke: ${fail.length} problem(s)`); process.exit(1); }
-console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; the road physics loaded through it (${(w.loadMs / 1000).toFixed(1)} s); the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too)`);
+console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; the road physics loaded through it (${(w.loadMs / 1000).toFixed(1)} s); the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too; the road physics' too)`);
 process.exit(0);
