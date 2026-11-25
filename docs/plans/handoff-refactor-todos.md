@@ -57,7 +57,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| F8 | Step 3: drop unread flood data | S–M | **Ready** (data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
@@ -188,21 +187,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   time in the air. Keep the wheelie.
 - **Gates:** `vehicles` 35/35 plus `bike_scrape` (a wall at 10° at 50 km/h: stays on), `bike_wall` unchanged
   (head-on: comes off). `rapier-car` 45/45.
-
-### F8. Step 3: drop the flood data nobody reads (S–M, data)
-
-- **Landed (merge `063026e0`):** steps 1–2. `nav/river.ts` `waterTop` is the water surface for boat, plane,
-  hovercraft and `BoatTraffic` (per ship, via `Traffic.water` / `World.waterColumn`); the slider, `flood.ts`,
-  `uDrop` and the sandbank branch are gone. `main.ts` still fetches `flood.json`, only for `river`.
-- **Do (needs a full rebuild, tile format change: follow ADR 0004):** `scripts/flood.py` shrinks to the river points
-  (a small `river.json` or into `meta.json`) and one bit per cell "river" for the reflections. Drop the spill grid
-  (`flood.bin`), the bed estimate, `flood.json`'s `base`, `surface0`, `fall`, `voxel_top`, `spill0`, `stretches`,
-  and the `flod` section's first plane (`tilefile.py`, `tile_fields.py`, `core/tile-sections.ts`, `fields.ts`
-  `riverAt().x`, `tile_roundtrip.py`).
-- **Also:** stale text left by steps 1–2: `scripts/flood.py`'s docstring (points to the deleted `flood.ts`), the
-  `flod` layout in `core/tile-sections.ts`, README lines on flood data.
-- **Watch:** a ship can jump in height when its tile loads (fallback: own last value, any ship's, then 4 m).
-- **Gates:** fast set; `tile-roundtrip`; `shoot.mjs --compare` on `eck` and `kachlet` with `--q seed=1` on both.
 
 ### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
 

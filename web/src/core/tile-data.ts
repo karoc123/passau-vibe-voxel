@@ -7,8 +7,8 @@ export interface RawColumns { counts: Uint16Array; runs: Uint16Array }
 // the caps it touches by itself: capField's liveness); roofCaps: a node's roofs' surfaces (every level; roofs.ts roofField;
 // null: none), likewise
 export interface Columns extends RawColumns { ground: Uint8Array; planes?: Uint16Array | null; bld?: Uint16Array | null; rooms?: Uint16Array | null; caps?: Uint16Array | null; roofCaps?: Uint16Array | null }
-// What the shader reads of a node (fields.ts), interleaved for its textures: cell RGBA per cell (N x N: the river's
-// level and bed, foliage class and tree), spill RG per cell of twice the size with its apron ((N / 2 + 2)^2)
+// What the shader reads of a node (fields.ts), interleaved for its textures: cell RGBA per cell (N x N: river 1 or 0,
+// unused 0, foliage class and tree), spill RG per cell of twice the size with its apron ((N / 2 + 2)^2)
 export interface Fields { cell: Uint8Array; spill: Uint8Array }
 
 // The node file's format (scripts/tilefile.py MAGIC, N): a node holds TILE_N x TILE_N cells (and its apron), so a level-1
@@ -28,9 +28,10 @@ export function roomOffsets(rooms: Uint16Array, n2: number) {
 }
 
 // A node file (scripts/tilefile.py): a header of tagged sections (core/tile-sections.ts TILE_SECTIONS) -- cnts, grnd,
-// runs, and (levels, not foliage) plns, bldg, flod, fols, spil (scripts/tile_fields.py), room (level 1, where it has
+// runs, and (levels, not foliage) plns, bldg, fols, spil, rivr (scripts/tile_fields.py), room (level 1, where it has
 // rooms; roomOffsets), caps (level 1, where it has sloped ground: core/surface.ts capField), roof (roofCaps: every level,
-// where it has sloped roofs: roofs.ts roofField). extra: every other section, raw (a tag this reader does not know, or a reserved one: brik)
+// where it has sloped roofs: roofs.ts roofField). extra: every other section, raw (a tag this reader does not know, a
+// reserved one: brik, a retired one: flod). A node without rivr (written before it) has no river: its fields say 0
 export function decodeTile(buf: ArrayBuffer, N: number) {
   const dv = new DataView(buf);
   if (buf.byteLength < 8 || dv.getUint32(0, true) !== TILE_MAGIC) throw new Error('tile: not a VXT2 node file (scripts/tile_fields.py)');
@@ -46,11 +47,11 @@ export function decodeTile(buf: ArrayBuffer, N: number) {
   const counts = new Uint16Array(buf, cnt[0], n2), ground = new Uint8Array(buf, grnd[0], n2);
   const runs = u16('runs')!, planes = u16('plns'), bld = u16('bldg'), rooms = u16('room'), caps = u16('caps'), roofCaps = u16('roof');
   // (planar in the file: it packs smaller)
-  const fl = u8('flod'), fo = u8('fols'), sp = u8('spil');
+  const rv = u8('rivr'), fo = u8('fols'), sp = u8('spil');
   let fields: Fields | null = null;
-  if (fl && fo && sp) {
+  if (fo && sp) {
     const a = N * N, m = (N / 2 + 2) ** 2, cell = new Uint8Array(a * 4), spill = new Uint8Array(m * 2);
-    for (let i = 0; i < a; i++) { cell[4 * i] = fl[i]; cell[4 * i + 1] = fl[a + i]; cell[4 * i + 2] = fo[i]; cell[4 * i + 3] = fo[a + i]; }
+    for (let i = 0; i < a; i++) { cell[4 * i] = rv ? (rv[i >> 3] >> (i & 7)) & 1 : 0; cell[4 * i + 2] = fo[i]; cell[4 * i + 3] = fo[a + i]; }
     for (let i = 0; i < m; i++) { spill[2 * i] = sp[i]; spill[2 * i + 1] = sp[m + i]; }
     fields = { cell, spill };
   }

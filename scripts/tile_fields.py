@@ -5,8 +5,8 @@ from the nodes shown (web/src/fields.ts).
   bldg  the building of each cell, apron included (data/zones.bin, zones.py): the mesher never merges faces across
         buildings and gives each face its building (city.ts shows a building once all its tiles are in). At 2, 4, 8 m
         the building of the cell's middle column, else of the first column of it that has one (row by row)
-  flod  per cell, no apron: the level at which the river reaches it (255: never) and the river bed in decimetres
-        (data/flood.bin, flood.py); at 2, 4, 8 m those of the cell's middle column
+  rivr  per cell, no apron, a bit: the river (data/river.bin, flood.py); at 2, 4, 8 m that of the cell's middle
+        column. (flod, before it, is dropped from a node written before)
   fols  per cell, no apron: foliage class and tree (data/foliage.bin, phenology.py) of the 2 m cell the cell's middle
         column is in (at 1 m each 2 m cell's four columns alike)
   caps  (level 1) the sloped surfaces of paved ground and bridge decks (caps.py: from data/surface.npz, prep.npz,
@@ -137,13 +137,12 @@ def cut_node(a, r0, c0, n, fill):
 
 def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     """The sections of the nodes (every level in `levels`: meta.json tiles.levels) whose first row and column lie in the
-    window's core, from the window's region of data/zones.bin, data/flood.bin, data/foliage.bin; table: windows.bin.
+    window's core, from the window's region of data/zones.bin, data/river.bin, data/foliage.bin; table: windows.bin.
     Returns {level: nodes written}."""
     D, W = win.D, win.W
     region = ra, rb, ca, cb = win.region(HALO)
     zones = wmod.gz_region(TMP / "zones.bin", (D, W), np.uint16, region)
-    spill_h = wmod.gz_region(TMP / "flood.bin", (D, W), np.uint8, region)
-    bed = wmod.gz_region(TMP / "flood.bin", (D, W), np.uint8, region, D * W)
+    river = wmod.gz_region(TMP / "river.bin", (D, W), np.uint8, region)
     w2, h2 = W // 2, D // 2  # the foliage's 2 m grid
     f2 = (ra // 2, min(rb // 2, h2), ca // 2, min(cb // 2, w2))
     fcls = wmod.gz_region(TMP / "foliage.bin", (h2, w2), np.uint8, f2)
@@ -163,7 +162,7 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
         Ds, Ws = -(-D // s), -(-W // s)
         oy, ox = ra // s, ca // s  # the region's corner at this level
         b = coarse_bld(zones, s)
-        fs, fd = middle(spill_h, s, 255), middle(bed, s, 0)
+        rv = middle(river, s, 0)
         # the window light on cells of 2s m: between the two 2 m cells around the middle (bilinear, clamped to the
         # map's edge); at 1 m the 2 m cells themselves
         hs, ws = (-(-D // 2), -(-W // 2)) if s == 1 else (-(-D // (2 * s)), -(-W // (2 * s)))
@@ -196,8 +195,8 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
                     continue
                 sec = tilefile.read(f, N)
                 sec["bldg"] = cut_node(b, ty * N - 1 - oy, tx * N - 1 - ox, S, 0).astype(np.uint16).tobytes()
-                fl = np.stack([cut_node(fs, ty * N - oy, tx * N - ox, N, 255), cut_node(fd, ty * N - oy, tx * N - ox, N, 0)])
-                sec["flod"] = fl.astype(np.uint8).tobytes()  # (planar: packs smaller)
+                sec["rivr"] = np.packbits(cut_node(rv, ty * N - oy, tx * N - ox, N, 0) > 0, bitorder="little").tobytes()
+                sec.pop("flod", None)  # (retired: a node written before rivr; tiles.py leaves unchanged nodes as they are)
                 sec["fols"] = foliage(ty * N, tx * N).astype(np.uint8).tobytes()
                 # (the apron beyond the map: the light as at the map's edge)
                 sec["spil"] = spil(ty * (N // 2) - 1, tx * (N // 2) - 1).astype(np.uint8).transpose(2, 0, 1).tobytes()

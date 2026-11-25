@@ -2,7 +2,7 @@
 // the water's top at a place (the voxels' water: VoxelCollision.waterColumn, world.ts World.waterColumn), and the river
 // points (flood.json `river`: x, z pairs, one river cell every 24 m), the one nearest a place and the way downstream
 // there. Plain numbers, no three.js, no DOM, no fetch: the columns and the points come from the caller (main.ts loads
-// the points with the flood data). Nothing here reads a level from the presentation: the water is where the voxels
+// them from flood.json). Nothing here reads a level from the presentation: the water is where the voxels
 // have it.
 
 /** what answers a column's water (VoxelCollision, World): its top (-1: none there); null: not loaded */

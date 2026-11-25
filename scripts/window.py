@@ -32,8 +32,7 @@ Network-wide after the regions (regions.py), over OSM's vectors and what the reg
 rasters and volumes where they look (mapstore.py: nothing of the map's size in memory): the labels (the parks',
 decluttered, their radii), the camera presets, traffic.py over the whole network.
 Still on the whole map's rasters (a window there would change what is built, not only where):
-  flood.py      the spill height is a connectivity (how high the water must rise to reach a cell from the river),
-                the river bed is made per row of the whole map (its westernmost bank, the thalweg smoothed over rows)
+  flood.py      the rivers: the water bodies of RIVER_MIN cells or more (a connectivity over the whole map)
   boats.py      the river: the largest water body
   web/tools/tris.mjs and lamps.mjs (node by node, and the lamps over data/zones.bin, foliage.bin, terrain.bin)
 

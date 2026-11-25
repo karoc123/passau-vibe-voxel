@@ -58,7 +58,7 @@ class Section(NamedTuple):
     levels: str  # the levels whose nodes have it
     layout: str  # S = N + 2: the node and its one-cell apron (tiles.py, tile_fields.py)
     owner: str  # the step that writes it
-    reserved: bool = False  # named, not written or read yet (decodeTile hands it over raw, as extra)
+    reserved: bool = False  # named, not written or read: yet (brik) or any more (flod); decodeTile hands it over raw, as extra
 
 
 # The registry, in the order write() puts the sections in (append only: a new tag goes last, a tag is never reused).
@@ -68,8 +68,9 @@ SECTIONS = (
     Section("runs", "1 2 4 8 1f", "uint16[3 * runs]: (z0, len, palette) per run, bottom up per column", "tiles.py"),
     Section("plns", "1 2 4 8", "uint16[S^2]: the roof plane of each column's top face", "tiles.py, tiles_lod.py"),
     Section("bldg", "1 2 4 8", "uint16[S^2]: the building of each cell (zones.py ids, 0: none)", "tile_fields.py"),
-    Section("flod", "1 2 4 8", "uint8[2][N^2], no apron, planar: the level at which the river reaches each cell, "
-            "the river bed", "tile_fields.py (flood.py)"),
+    Section("flod", "none (retired)", "RETIRED, no longer written or read: uint8[2][N^2], the level at which the "
+            "river reached each cell and a schematic river bed (rivr took its place; tile_fields.py drops it)",
+            "none (was tile_fields.py)", reserved=True),
     Section("fols", "1 2 4 8", "uint8[2][N^2], no apron, planar: foliage class and tree", "tile_fields.py (phenology.py)"),
     Section("spil", "1 2 4 8", "uint8[2][(N/2+2)^2], cells of 2 m, apron included, planar: the light of lit windows on "
             "the street before them, two kinds", "tile_fields.py spill_map"),
@@ -89,6 +90,8 @@ SECTIONS = (
             "its last run (the roof's voxel) as in caps, its 4 corner heights in 1/64 of a cell as zigzag differences "
             "(corner 0 from the west neighbour's corner 1 or the top, 1 from 0, 2 from 1, 3 from 0) -- a pitched "
             "roof's surface, drawn only (caps.py encode_roof; web/src/roofs.ts)", "tile_fields.py (caps.py)"),
+    Section("rivr", "1 2 4 8", "uint8[N^2 / 8], no apron: a bit per cell (row-major, the lowest bit first), 1 where the "
+            "river is (under its bridge decks too)", "tile_fields.py (flood.py)"),
 )
 ORDER = [s.tag for s in SECTIONS]
 

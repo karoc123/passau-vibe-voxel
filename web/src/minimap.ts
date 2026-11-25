@@ -6,7 +6,7 @@ import { el } from './util';
 import './minimap.css';
 
 const CELL = 8; // metres per pixel of the atlas
-const RIVER_SAMPLE = 24; // flood.json samples the surveyed water on this grid (scripts/flood.py)
+const RIVER_SAMPLE = 24; // flood.json samples the river on this grid (scripts/flood.py SAMPLE)
 const REACH = 560; // metres from the player to each edge of the minimap
 const SCALE = 200;
 const BASE = '#222b2a';

@@ -3,12 +3,11 @@ import { TILE_N, type Fields } from './core/tile-data';
 import { dataTexture } from './util';
 import { LAMP_PAGE, type LampLight } from './lamplight';
 
-// What the shader knows per cell besides the voxels -- the rivers' levels and bed, foliage, the light of lit windows
+// What the shader knows per cell besides the voxels -- where the river is, foliage, the light of lit windows
 // on the street (scripts/tile_fields.py) -- comes with each node's file (tile-data.ts Fields), at the node's own cell
 // size, and is read from the nodes shown, never from a map of the whole: a node shown (city.ts) gets a page in two
 // array textures, a node hidden gives it back, so what is on the GPU is the shown nodes' share, at most the view's.
-//   uPageF  RGBA8, per page N x N cells of s m: the level the river reaches the cell at (m over the base, 255: never),
-//           the river bed (dm), foliage class and tree
+//   uPageF  RGBA8, per page N x N cells of s m: river (1) or not (0), unused (0), foliage class and tree
 //   uPageS  RG8, per page (N/2 + 2)^2 cells of 2s m with a one-cell apron (bilinear across the node's edge): the
 //           window light (two kinds), a soft light blurred over ~6 m
 //   uPageL  RGBA8, per page (N/2 + 2)^2 cells of 2s m with a one-cell apron, as uPageS: the street lamps'
@@ -161,7 +160,7 @@ export const FIELDS_GLSL = `
     vec4 e = texelFetch(uPageIdx, t, 0) * 255.0 + 0.5;
     return e.w > 128.0 ? ivec2(int(e.x) + 256 * int(e.y), int(e.z)) : ivec2(-1, 1);
   }
-  // the cell's texel at p: the river's level and bed, foliage class and tree, as bytes over 255; a = 0 where no node is
+  // the cell's texel at p: river, unused, foliage class and tree, as bytes over 255; a = 0 where no node is
   // shown (else 1 + its slot)
   vec4 cellAt(vec2 p, out int a) {
     ivec2 pg = pageAt(p);
@@ -170,12 +169,12 @@ export const FIELDS_GLSL = `
     ivec2 c = ivec2(floor(p / float(pg.y))) & ${N - 1}, o = ivec2(pg.x & 1, (pg.x >> 1) & 1) * ${N};
     return texelFetch(uPageF, ivec3(o + c, pg.x >> 2), 0);
   }
-  // the river at p (scripts/flood.py): x the level at which it reaches the cell (m over the base, 255 never; no longer
-  // read since the river slider went), y the bed under the surveyed surface (m), -1 where no node is shown
-  vec2 riverAt(vec2 p) {
+  // the river at p (scripts/flood.py, the nodes' rivr): 1 river (under its bridge decks too), 0 not, -1 where no node
+  // is shown
+  float riverAt(vec2 p) {
     int a;
-    vec2 v = cellAt(p, a).rg * 255.0;
-    return a == 0 ? vec2(255.0, -1.0) : vec2(floor(v.x + 0.5), floor(v.y + 0.5) * 0.1);
+    float v = cellAt(p, a).r;
+    return a == 0 ? -1.0 : step(0.5 / 255.0, v);
   }
   // foliage at p (scripts/phenology.py): class and tree, as bytes over 255 (0: none, also where no node is shown)
   vec2 foliageAtP(vec2 p) { int a; return cellAt(p, a).ba; }

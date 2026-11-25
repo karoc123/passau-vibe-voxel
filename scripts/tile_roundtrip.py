@@ -5,8 +5,10 @@ usage: uv run python scripts/tile_roundtrip.py OUT_DIR [SEED]
                          (tiles.column_runs over a volume, tiles.room_section, tilefile.write)
   OUT_DIR/tile_noroom.bin  the same node without its room section (a node without rooms: every node before them)
   OUT_DIR/tile_extra.bin   the node with sections the registry does not decode: two unknown tags (one of odd length,
-                         one empty), handed in out of order, and the reserved brik -- kept by tilefile.write (after
-                         the registry's, sorted), read back and written again byte for byte; decodeTile's extra
+                         one empty), handed in out of order, the reserved brik and the retired flod -- kept by
+                         tilefile.write (after the registry's, sorted), read back and written again byte for byte;
+                         decodeTile's extra
+  OUT_DIR/tile_old.bin   the node as written before rivr: flod in its place (decodeTile: in extra, no river)
   (each with a caps section: records on ground runs and on decks, negative and positive corners, two in a column;
   and a roof section: records on last runs)
   OUT_DIR/expected.json  N; per column (apron included, row-major) its ground and runs [z0, len, palette] -- the runs
@@ -93,7 +95,8 @@ def main():
     planes = rng.integers(0, 65536, S * S, dtype=np.uint16)
     bld = rng.integers(0, 65536, S * S, dtype=np.uint16)
     a, m = N * N, (N // 2 + 2) ** 2
-    flod, fols = rng.integers(0, 256, 2 * a, dtype=np.uint8), rng.integers(0, 256, 2 * a, dtype=np.uint8)
+    river, fols = rng.integers(0, 2, a, dtype=np.uint8), rng.integers(0, 256, 2 * a, dtype=np.uint8)
+    rivr = np.packbits(river > 0, bitorder="little").tobytes()  # (as tile_fields.py writes it)
     spil = rng.integers(0, 256, 2 * m, dtype=np.uint8)
     rooms = rooms_of(cols, rng)
     # caps: on some columns' last run (a deck) and on a run below it (the ground's), corners within +-448 of its top
@@ -125,14 +128,15 @@ def main():
     room = tiles.room_section(rooms, 0, 0)
     out.mkdir(parents=True, exist_ok=True)
     sec = dict(cnts=counts.tobytes(), grnd=ground.tobytes(), runs=runs.tobytes(), plns=planes.tobytes(),
-               bldg=bld.tobytes(), flod=flod.tobytes(), fols=fols.tobytes(), spil=spil.tobytes(), caps=cap, roof=roof)
+               bldg=bld.tobytes(), fols=fols.tobytes(), spil=spil.tobytes(), caps=cap, roof=roof, rivr=rivr)
     tilefile.write(out / "tile_noroom.bin", sec)
     tilefile.write(out / "tile.bin", dict(sec, room=room))
     # unknown tags kept, after the registry's, sorted (handed in before the known ones, out of order)
     extra = {"zz~9": bytes(rng.integers(0, 256, 7, dtype=np.uint8)), "abcd": b"",
-             "brik": bytes(rng.integers(0, 256, 12, dtype=np.uint8))}
+             "brik": bytes(rng.integers(0, 256, 12, dtype=np.uint8)), "flod": bytes(rng.integers(0, 256, 2 * a, dtype=np.uint8))}
     tilefile.write(out / "tile_extra.bin", {"zz~9": extra["zz~9"], **sec, "abcd": extra["abcd"], "room": room,
-                                            "brik": extra["brik"]})
+                                            "brik": extra["brik"], "flod": extra["flod"]})
+    tilefile.write(out / "tile_old.bin", {**{t: v for t, v in sec.items() if t != "rivr"}, "room": room, "flod": extra["flod"]})
     back = tilefile.read(out / "tile_extra.bin", N)
     want_tags = tilefile.ORDER + ["abcd", "zz~9"]
     assert list(back) == want_tags, f"tile_extra.bin: tags {list(back)}, not {want_tags}"
@@ -143,11 +147,12 @@ def main():
     assert (out / "again" / "tile_extra.bin").read_bytes() == raw, "tile_extra.bin: read -> write not byte for byte"
     # the registry's tags alone: the order as before the registry (ORDER of today's sections)
     assert tilefile.ORDER[:9] == ["cnts", "grnd", "runs", "plns", "bldg", "flod", "fols", "spil", "room"]
-    # (the fields interleaved as decodeTile does: cell RGBA = river level, bed, foliage class, tree; spill RG)
-    cell = np.stack([flod[:a], flod[a:], fols[:a], fols[a:]], 1).ravel()
+    # (the fields interleaved as decodeTile does: cell RGBA = river, 0, foliage class, tree; spill RG)
+    cell = np.stack([river, np.zeros(a, np.uint8), fols[:a], fols[a:]], 1).ravel()
+    cell_old = np.stack([np.zeros(a, np.uint8), np.zeros(a, np.uint8), fols[:a], fols[a:]], 1).ravel()
     spill = np.stack([spil[:m], spil[m:]], 1).ravel()
     exp = dict(N=N, ground=ground.tolist(), columns=[[list(r) for r in rs] for rs in cols], planes=planes.tolist(),
-               bld=bld.tolist(), cell=cell.tolist(), spill=spill.tolist(), rooms=np.frombuffer(room, np.uint16).tolist(),
+               bld=bld.tolist(), cell=cell.tolist(), cellOld=cell_old.tolist(), spill=spill.tolist(), rooms=np.frombuffer(room, np.uint16).tolist(),
                extra={t: list(v) for t, v in extra.items()}, registry=[[x.tag, x.reserved] for x in tilefile.SECTIONS],
                caps=np.frombuffer(cap, np.uint16).tolist(), capRecords=want_caps.ravel().tolist(),
                roof=np.frombuffer(roof, np.uint16).tolist(), roofRecords=want_roof.ravel().tolist())

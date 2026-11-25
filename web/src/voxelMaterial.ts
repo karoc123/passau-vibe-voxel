@@ -724,7 +724,7 @@ const SURFACE = `
         vec2 q = vVox.xz + away * min((14.0 + 14.0 * float(i)) * k, 600.0);
         float f = floodAt(q, true, o, ow);
         // (none where no node shows: as before the river was known)
-        if (f > 0.0) { float bq = riverAt(floor(q) + 0.5).y; f *= bq < 0.0 ? 0.0 : 1.0 - step(0.05, bq); }
+        if (f > 0.0) { float rq = riverAt(floor(q) + 0.5); f *= rq < 0.0 ? 0.0 : 1.0 - rq; }
         fl += f;
       }
       gEmissive += (refl * 0.45 * vec3(1.0, 0.8, 0.6) + fl * 0.08 * vec3(1.0, 0.76, 0.46)) * shim * fres2 * uNight
