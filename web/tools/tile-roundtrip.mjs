@@ -2,7 +2,8 @@
 // tilefile.write) and what it holds, src/tile-data.ts decodeTile reads it back; every column's ground and runs, the
 // planes, buildings, fields and room spans compared (roomOffsets: each column's), and the two sides' N (tilefile.N,
 // TILE_N); the same node without its room section decodes to the same, rooms null; with sections decodeTile does not
-// interpret (two unknown tags, the reserved brik) to the same plus those, raw, in extra; and the registries
+// interpret (two unknown tags, the reserved brik, the retired flod) to the same plus those, raw, in extra; a node
+// written before rivr (flod in its place) to the same with flod in extra and no river; and the registries
 // (tilefile.SECTIONS, core/tile-sections.ts TILE_SECTIONS) list the same tags in the same order, the same reserved.
 // Files in a temp dir, removed unless a check fails.
 // usage: node tools/tile-roundtrip.mjs [SEED]; exit code 1 on a mismatch
@@ -37,9 +38,9 @@ const same = (name, got, want) => {
   if (i >= 0) fail(`${name}[${i}]: ${got[i]} != ${want[i]}`);
 };
 let nruns = 0;
-for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_noroom.bin', false, false], ['tile_extra.bin', true, true]]) {
+for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_noroom.bin', false, false], ['tile_extra.bin', true, true], ['tile_old.bin', true, 'old']]) {
   const t = decode(file), F = (what) => `${file} ${what}`;
-  const wantExtra = withExtra ? Object.keys(exp.extra).sort() : [], gotExtra = [...(t.extra?.keys() ?? [])].sort();
+  const wantExtra = withExtra === 'old' ? ['flod'] : withExtra ? Object.keys(exp.extra).sort() : [], gotExtra = [...(t.extra?.keys() ?? [])].sort();
   if (JSON.stringify(gotExtra) !== JSON.stringify(wantExtra)) fail(F(`extra: ${JSON.stringify(gotExtra)}, not ${JSON.stringify(wantExtra)}`));
   for (const tag of wantExtra) same(F(`extra ${tag}`), t.extra?.get(tag), exp.extra[tag]);
   if (t.counts.length !== S * S) fail(F(`counts: ${t.counts.length} columns, not ${S * S}`));
@@ -54,7 +55,7 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   same(F('ground'), t.ground, exp.ground);
   same(F('planes'), t.planes, exp.planes);
   same(F('bld'), t.bld, exp.bld);
-  same(F('fields.cell'), t.fields?.cell, exp.cell);
+  same(F('fields.cell'), t.fields?.cell, withExtra === 'old' ? exp.cellOld : exp.cell);
   same(F('fields.spill'), t.fields?.spill, exp.spill);
   same(F('caps'), t.caps, exp.caps);
   if (t.caps) same(F('caps records'), SF.decodeCaps(t.caps), exp.capRecords);
@@ -127,4 +128,4 @@ if (bad.length) {
   process.exit(1);
 }
 fs.rmSync(dir, { recursive: true, force: true });
-console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; roof; registries agree; paved ids agree)`);
+console.log(`tile round trip: ok (${S * S} columns, ${nruns} runs, ${exp.rooms.length / 4} room spans; without the room section; written before rivr; with extra sections ${Object.keys(exp.extra).sort().join(' ')}; caps and their liveness; roof; registries agree; paved ids agree)`);

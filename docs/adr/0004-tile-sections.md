@@ -18,10 +18,13 @@ does not know about it rewrote the node. `decodeTile` ignored unknown tags too, 
   order. It is append-only: new tags go last and a tag is never reused. `web/src/core/tile-sections.ts` mirrors it
   (three.js-free, under `core/`). The round trip checks that both list the same tags in the same order with the same
   `reserved` flags.
-- **Today's tags**: `cnts grnd runs` (all levels, incl. `1f`), `plns bldg flod fols spil` (levels 1, 2, 4, 8), `room`
+- **Today's tags**: `cnts grnd runs` (all levels, incl. `1f`), `plns bldg fols spil` (levels 1, 2, 4, 8), `room`
   (level 1, nodes with rooms; `interiors.py`), `caps` (level 1, nodes with sloped ground; after `brik`; `caps.py` via
   `tile_fields.py`: docs/adr/0005-surface-caps.md), `roof` (levels 1, 2, 4, 8, nodes with sloped roofs; after `caps`;
-  likewise).
+  likewise), `rivr` (levels 1, 2, 4, 8: a bit per cell, river; `flood.py` via `tile_fields.py`).
+- **A changed layout takes a new tag**, and the old one is retired: it keeps its name and place, flagged `reserved`,
+  so it is never reused (`flod`, the river's levels and bed, retired for `rivr`; `tile_fields.py` drops it). A node
+  without the new tag (a build before it) still decodes, so new code can run on old data until the rebuild.
 - **`brik` reserved**: for future sub-metre bricks, a sparse k³ refinement of 1 m cells in which the 1 m voxel stays
   the cell's representative (0001). Only the name and its place in the order are taken. Nothing writes or reads it yet.
 - **Unknown tags are kept**: `write` emits the registry's tags in order, then any other tag sorted by name. The output

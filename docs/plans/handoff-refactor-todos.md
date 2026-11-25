@@ -56,7 +56,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
-| F8 | Step 3: drop unread flood data | S–M | **Ready** (data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Packages
@@ -95,6 +94,9 @@ Open points left by landed engine work:
   (`web/tools/mirror-golden.json`) is of one data build: after a rebuild, check the drawing, then `--write-golden`.
 - **Timing (M4, M5):** worker alpha one update behind, no teleport counter; inputs not buffered by tick;
   `life.update`'s viewer is last frame's camera.
+- **Ships:** a ship's height jumps when its node is replaced: `World.waterColumn` takes the top from whichever node is
+  loaded (an 8 m node about 4 m higher than a 1 m node), and the fallback "any vessel's last top" can come from
+  another reach (about 9 m). Fix: take the top from level-1 nodes only, or the voxel's real top.
 - **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; no gate
   for `impact`; the parked-car cap (8/24) sits beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence;
   the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
@@ -171,21 +173,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 ### F2. Walk to a specific vehicle and get in (set aside)
 
 - Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
-
-### F8. Step 3: drop the flood data nobody reads (S–M, data)
-
-- **Landed (merge `063026e0`):** steps 1–2. `nav/river.ts` `waterTop` is the water surface for boat, plane,
-  hovercraft and `BoatTraffic` (per ship, via `Traffic.water` / `World.waterColumn`); the slider, `flood.ts`,
-  `uDrop` and the sandbank branch are gone. `main.ts` still fetches `flood.json`, only for `river`.
-- **Do (needs a full rebuild, tile format change: follow ADR 0004):** `scripts/flood.py` shrinks to the river points
-  (a small `river.json` or into `meta.json`) and one bit per cell "river" for the reflections. Drop the spill grid
-  (`flood.bin`), the bed estimate, `flood.json`'s `base`, `surface0`, `fall`, `voxel_top`, `spill0`, `stretches`,
-  and the `flod` section's first plane (`tilefile.py`, `tile_fields.py`, `core/tile-sections.ts`, `fields.ts`
-  `riverAt().x`, `tile_roundtrip.py`).
-- **Also:** stale text left by steps 1–2: `scripts/flood.py`'s docstring (points to the deleted `flood.ts`), the
-  `flod` layout in `core/tile-sections.ts`, README lines on flood data.
-- **Watch:** a ship can jump in height when its tile loads (fallback: own last value, any ship's, then 4 m).
-- **Gates:** fast set; `tile-roundtrip`; `shoot.mjs --compare` on `eck` and `kachlet` with `--q seed=1` on both.
 
 ### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
 

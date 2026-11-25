@@ -50,8 +50,8 @@ P=web/public/data
 M="$P/meta.json#-tiles.tris,tiles.bytes,world" # (meta.json as voxelize.py wrote it: tile_fields.py, tris.mjs and
                                                # world_id.py add these)
 bg places $S places -i $A scripts/osm.py data/raw/osm.json -o $P/places.json -- python scripts/places.py   # places.json (search index)
-bg flood $S flood -i $A data/ground.npz data/prep.npz $M -o data/flood.bin $P/flood.json \
-  -- python scripts/flood.py             # data/flood.bin, flood.json (river level slider; needs ground.npz, meta.json)
+bg flood $S flood -i $A data/ground.npz -o data/river.bin $P/flood.json \
+  -- python scripts/flood.py             # data/river.bin, flood.json (where the rivers are; needs ground.npz)
 bg boats $S boats -i $A scripts/osm.py data/ground.npz data/raw/osm.json -o $P/boats.json \
   -- python scripts/boats.py             # boats.json (cruise-ship berths on the Danube quay, the excursion boats' loop)
 bg terrain $S terrain -i $A scripts/window.py data/ground.npz $M -o $P/terrain data/terrain.bin \
@@ -68,7 +68,7 @@ bg phenology $S phenology -i $A scripts/foliage_photos.json scripts/tree_genera.
   data/raw/treespecies_2022.tif data/raw/treespecies_2016.tif data/trees.json data/crowns.npz data/ground.npz -o $P/phenology.json data/foliage.bin \
   -- python scripts/phenology.py         # phenology.json, data/foliage.bin (DWD + iNaturalist, cached in data/raw/dwd; needs trees.json)
 join                                     # (the steps above read only what voxelize.py wrote, not each other)
-$S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py scripts/constants.py data/zones.bin data/flood.bin data/foliage.bin \
+$S tile_fields -i $A scripts/window.py scripts/tilefile.py scripts/caps.py scripts/constants.py data/zones.bin data/river.bin data/foliage.bin \
   data/surface.npz data/prep.npz data/ground.npz data/qa_roadmask.bin.gz $P/windows.bin $M \
   -o $P/tiles -- python scripts/tile_fields.py   # tiles/: each node's buildings, rivers, foliage, window light, sloped caps
                                                  # (from the data/ maps above)
