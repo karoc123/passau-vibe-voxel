@@ -20,7 +20,6 @@
 // the in-thread link is given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
 import { LiveEdits } from '../core/live-edits';
-import type { Ground } from '../sim/traffic';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
 import { CORES } from '../sim/craft/cores';
@@ -32,8 +31,9 @@ import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
 import type { Ack, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { RoadPose, WalkPose } from '../sim/contract/pose';
-import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
-import { STEP, Traffic } from '../sim/traffic';
+import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
+import { RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
+import { coachPoses, trainTracks, type CoachPose } from '../sim/coaches';
 import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
 import { checkHello } from '../sim/hello';
@@ -353,11 +353,24 @@ export class MirrorSimClient implements SimClient {
  * re-run on the client's own TrafficData), the signals, trains, boats, the bodies' poses. Read only: what is drawn
  * where is the view's (view/life.ts) */
 export class TrafficMirror {
-  private readonly T: Traffic;
+  // the roads, footways and signals, and where on them things are drawn: the sim's own code (sim/road-net.ts)
+  private readonly net: RoadNet;
   private readonly carsById = new Map<number, Car>();
   private readonly peopleById = new Map<number, Person>();
   private readonly draws = new Map<number, BodyDraw>();
+  readonly cars: Car[] = [];
+  readonly detachedCars: Car[] = [];
+  people: Person[] = [];
+  riders: Person[] = [];
+  /** the middle of the sim's active circle (a new object whenever it moves) */
+  active: { x: number; z: number } | null = null;
+  /** the time since the last tick (s, under STEP) */
+  acc = 0;
+  private t = 0;
   boats: BoatView | null = null;
+  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the snapshot's trains */
+  readonly trains: { coaches(back?: number): IterableIterator<CoachPose> };
+  private trainList: readonly TrainState[] = [];
   /** the people walked by players, by person id */
   readonly walked = new Map<number, WalkPose>();
   readonly bodies = {
@@ -367,30 +380,26 @@ export class TrafficMirror {
 
   /** data: a TrafficData of its own (its paths are prepared in place: never the sim's); ground: the page's */
   constructor(data: TrafficData, ground: Ground | null) {
-    this.T = new Traffic(data);
-    this.T.ground = ground;
+    this.net = new RoadNet(data);
+    this.net.ground = ground;
+    const tracks = trainTracks(data.trains ?? []);
+    this.trains = { coaches: (back = 0) => coachPoses(tracks, this.trainList, back) };
   }
 
-  get heads() { return this.T.heads; }
-  get peds() { return this.T.peds; }
-  get cars() { return this.T.cars; }
-  get detachedCars() { return this.T.detachedCars; }
-  get people() { return this.T.people; }
-  get riders() { return this.T.riders; }
-  get active() { return this.T.active; }
-  get acc() { return this.T.acc; }
-  get trains() { return this.T.trains; }
-  get ground() { return this.T.ground; }
-  carPose: Traffic['carPose'] = (c, s, off, out) => this.T.carPose(c, s, off, out);
-  pathPoint: Traffic['pathPoint'] = (c, s, out, off) => this.T.pathPoint(c, s, out, off);
-  personPoint: Traffic['personPoint'] = (p, ds, out) => this.T.personPoint(p, ds, out);
-  signal: Traffic['signal'] = (ctrl, axis) => this.T.signal(ctrl, axis);
-  roadVehicles = () => this.T.roadVehicles();
+  get heads() { return this.net.heads; }
+  get peds() { return this.net.peds; }
+  get ground() { return this.net.ground; }
+  carPose: RoadNet['carPose'] = (c, s, off, out) => this.net.carPose(c, s, off, out);
+  pathPoint: RoadNet['carPoint'] = (c, s, out, off) => this.net.carPoint(c, s, out, off);
+  personPoint: RoadNet['personPoint'] = (p, ds, out) => this.net.personPoint(p, ds, out);
+  /** a signal's state now: green, amber, red */
+  signal = (ctrl: number, axis: number) => signalAt(this.net.ctrls[ctrl], this.t, axis);
+  roadVehicles = (): Car[] => this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars;
 
   /** the snapshot's agents in place of the last (one object per id) */
   apply(s: Snapshot) {
-    const T = this.T;
-    T.acc = s.acc; T.t = s.t; T.day = s.day;
+    const T = this;
+    T.acc = s.acc; T.t = s.t;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;
     else if (!T.active || T.active.x !== s.active.x || T.active.z !== s.active.z) T.active = s.active;
@@ -421,7 +430,7 @@ export class TrafficMirror {
     for (const id of this.peopleById.keys()) if (!seenPeople.has(id)) this.peopleById.delete(id);
     this.draws.clear();
     for (const [id, d] of s.bodies) this.draws.set(id, d);
-    T.trains.load(s.trains);
+    this.trainList = s.trains;
     this.boats = s.boats;
     this.walked.clear();
     for (const [id, w] of s.walked) this.walked.set(id, w);

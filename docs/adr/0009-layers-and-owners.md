@@ -17,7 +17,7 @@ Layers, innermost first. A module imports its own layer and the layers above it 
 |---|---|---|
 | data | `core/` | voxel columns, tile format and cache, edits, world queries, `Meta`, the data build's contract |
 | contract | `sim/contract/` | what crosses between host and client: ids, commands, events, snapshot, results, hello; types and constants only, all plain data that survives `structuredClone` |
-| shared | `sim/craft/`, `sim/path.ts`, `sim/vehicles.ts`, `sim/river.ts`, `sim/tuning.ts`, `sim/hello.ts`, … | code both sides run (a mirror re-runs it; prediction will) |
+| shared | `sim/craft/`, `sim/path.ts`, `sim/road-net.ts`, `sim/coaches.ts`, `sim/vehicles.ts`, `sim/river.ts`, `sim/tuning.ts`, `sim/hello.ts`, … | code both sides run (a mirror re-runs it; prediction will) |
 | domain | the rest of `sim/`, `physics/` | the world and its rules |
 | server | `sim/server/`, `host/` | sessions, snapshots per session, the one host `hostSim` and its platform entries; `host/` is the only place that reads a clock, a file or a URL |
 | client | `client/` | `SimClient`, the mirror, the links; never imports domain or server |
