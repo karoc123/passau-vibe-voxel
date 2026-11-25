@@ -52,7 +52,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
-| R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
@@ -70,13 +69,6 @@ Left:
 - **Class raster (code-health 18):** `caps.py` still finds steps by `ground.npz` rgb and paved ids by colour (the
   colours now come from `constants.py`, so a colour change follows). A class raster written by `voxelize.py` changes
   the outputs: golden differs by design, and it needs a data rebuild.
-
-### R7. Build time (code-health 19, M)
-
-- **Landed:** `traffic.build` split into steps, `traffic.LANE` checked against `LANE_W` by the `lanes` gate in `scripts/check.sh` (merge `e106f98b`).
-
-- **Build time:** vegetation 21 %, `debris.support_floating` 17 %. See `data/debug/timings.json` and
-  [build-speed-2.md](build-speed-2.md).
 
 ## Engine packages
 

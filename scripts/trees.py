@@ -25,14 +25,15 @@ def register():
     """the Einzelbäume points on the grid (the region's, aoi.py): [(x, y, height, easting, northing, row in the file)]"""
     if not BV_CSV.exists():
         return []
-    out = []
     with open(BV_CSV) as f:
-        for k, row in enumerate(csv.DictReader(f)):
-            e, n, h = float(row["x"]), float(row["y"]), float(row["height"])
-            x, y = to_grid(e, n)
-            if 0 <= x < W and 0 <= y < D:
-                out.append((float(x), float(y), h, e, n, k))
-    return out
+        rows = [r for r in csv.reader(f) if r]  # (as csv.DictReader: blank lines are no rows)
+    ix, iy, ih = (rows[0].index(k) for k in ("x", "y", "height"))
+    e = [float(r[ix]) for r in rows[1:]]
+    n = [float(r[iy]) for r in rows[1:]]
+    # (the whole file's points onto the grid at once: the same arithmetic per point as one at a time)
+    x, y = to_grid(np.array(e, np.float64), np.array(n, np.float64))
+    return [(float(x[k]), float(y[k]), float(rows[k + 1][ih]), e[k], n[k], int(k))
+            for k in np.flatnonzero((0 <= x) & (x < W) & (0 <= y) & (y < D))]
 
 
 def load(osm_trees, buildings=None):
@@ -54,16 +55,16 @@ def load(osm_trees, buildings=None):
         near_b = ndimage.distance_transform_edt(~buildings) <= BUILDING_M
     osm_kd = cKDTree([(t["x"], t["y"]) for t in out]) if out else None
     taken = set()
-    n_merged = n_bld = 0
+    n_merged = 0
     # nearest register point first, so each OSM tree takes the closest one; the others in the file's order (by their
     # distance to the nearest OSM tree, as before, they took the order of trees far off, beyond the region)
-    cand = []
-    for k, (x, y, h, e, n, _) in enumerate(reg):
-        if near_b is not None and near_b[int(y), int(x)]:
-            n_bld += 1
-            continue
-        d, i = osm_kd.query((x, y)) if osm_kd is not None else (np.inf, -1)
-        cand.append((d, i, k) if d <= MERGE_M else (np.inf, -1, k))
+    ks = [k for k, (x, y, *_) in enumerate(reg) if near_b is None or not near_b[int(y), int(x)]]
+    n_bld = len(reg) - len(ks)
+    if osm_kd is not None and ks:  # (all points in one query: each answered as alone)
+        dd, ii = osm_kd.query([(reg[k][0], reg[k][1]) for k in ks])
+    else:
+        dd, ii = np.full(len(ks), np.inf), np.full(len(ks), -1)
+    cand = [(d, i, k) if d <= MERGE_M else (np.inf, -1, k) for d, i, k in zip(dd, ii, ks)]
     cand.sort()
     for d, i, k in cand:
         x, y, h, e, n, row = reg[k]

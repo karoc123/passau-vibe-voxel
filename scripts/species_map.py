@@ -33,16 +33,31 @@ NONE = 255
 OTHER_BROADLEAF = "other broadleaved"
 
 
-def _on_grid(path):
+def _on_grid(path, index=False):
+    """the file's band on the region's grid (999 where it has no pixel); index: instead the flat index of the file's
+    pixel each cell takes (-1 where none)"""
     import rasterio
     from affine import Affine
     from rasterio.warp import Resampling, reproject
     x0, y0 = aoi.to_world(0, 0)
-    dst = np.full((aoi.D, aoi.W), 999, np.uint16)
     with rasterio.open(path) as src:
+        if index:
+            dst = np.full((aoi.D, aoi.W), -1, np.int32)
+            reproject(np.arange(src.height * src.width, dtype=np.int32).reshape(src.shape), dst,
+                      src_transform=src.transform, src_crs=src.crs, src_nodata=-1,
+                      dst_transform=Affine(1, 0, float(x0), 0, -1, float(y0)), dst_crs=aoi.CRS, dst_nodata=-1,
+                      resampling=Resampling.nearest, tolerance=0)
+            return dst
+        dst = np.full((aoi.D, aoi.W), 999, np.uint16)
         reproject(rasterio.band(src, 1), dst, dst_transform=Affine(1, 0, float(x0), 0, -1, float(y0)), dst_crs=aoi.CRS,
                   dst_nodata=999, resampling=Resampling.nearest, tolerance=0)
     return dst
+
+
+def _georef(path):
+    import rasterio
+    with rasterio.open(path) as src:
+        return src.crs, src.transform, src.shape, src.nodata
 
 
 def grid():
@@ -51,7 +66,19 @@ def grid():
     if not have:
         return None
     out = np.full((aoi.D, aoi.W), NONE, np.uint8)
-    for y in sorted(have, reverse=True):  # 2022 first; 2016 where it has no class
+    years = sorted(have, reverse=True)  # 2022 first; 2016 where it has no class
+    if len(years) > 1 and len({_georef(have[y]) for y in years}) == 1 and _georef(have[years[0]])[3] == 999:
+        # the files on one grid (as clip_species.py cuts them): the warp's pixel per cell once, not once per file (the
+        # same pixels: nearest neighbour takes a cell's pixel by its centre, whatever the band holds; 999 where none)
+        import rasterio
+        idx = _on_grid(have[years[0]], index=True)
+        for y in years:
+            with rasterio.open(have[y]) as src:
+                a = np.where(idx >= 0, src.read(1).ravel()[np.maximum(idx, 0)], 999)
+            m = (out == NONE) & (a <= 9)
+            out[m] = a[m]
+        return out
+    for y in years:
         a = _on_grid(have[y])
         m = (out == NONE) & (a <= 9)
         out[m] = a[m]

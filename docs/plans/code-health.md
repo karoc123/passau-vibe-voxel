@@ -258,7 +258,8 @@ another craft, another road-height fix, or any server work.
   `sim/path.ts` (not tied by a check).
 - **`except Exception`** round `offset_curve` drops rails and lane markings without a note (`voxelize.py:922, 929,
   1109`).
-- **Build time** (`data/debug/timings.json`): vegetation 21 %, `debris.support_floating` 17 %, `drop_debris` 7 %.
+- **Build time** (`data/debug/timings.json`): `drop_debris` 7 % (vegetation and `support_floating` roughly halved:
+  [build-speed-2.md](build-speed-2.md) 8.3).
 - **`VoxelCollision`:** four instances, each a `liveEdits` listener for the page's life, no release
   (`voxel-collision.ts:101-102`); `plane-real.ts:20` pokes a private field through a cast.
 

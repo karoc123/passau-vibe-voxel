@@ -41,7 +41,8 @@ def _owned(vol, occ_of, st, B, K, floor=False):
             e = int(np.argmax(filled))  # leading empty layers
             f = 0 if e else int(np.argmin(lay.all(1))) if not lay.all() else occ.shape[0]  # leading full ones
             z0 = e if e else max(f - 1, 0)
-            lab, k = ndimage.label(occ[z0:], st)
+            top = len(filled) - int(np.argmax(filled[::-1]))  # (and none of its empty layers on top)
+            lab, k = ndimage.label(occ[z0:top], st)
             if k == 0:
                 continue
             for lid, sl in enumerate(ndimage.find_objects(lab), 1):
@@ -117,6 +118,31 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=128, K=64, dbg=Path("dat
     json.dump(sorted(big, key=lambda b: -b["n"]), open(dbg / "floating.json", "w"))
 
 
+def _piece_stats(comps, vol, g, mat, trunk_ok, trunk_id):
+    """support_floating's numbers per piece, all pieces at once (tens of thousands in its first round: a loop of numpy
+    calls per piece was a third of the pass): its size, lowest voxel over the ground, its lowest voxel where a trunk may
+    stand (low: + 1000 to the height where none may; the first such voxel in the piece's order), leaf and building
+    voxels"""
+    if not comps:
+        return []
+    n_ = np.array([len(c[0]) for c in comps], np.int64)
+    st0 = np.concatenate([[0], np.cumsum(n_)[:-1]]).astype(np.int64)
+    zi, ri, ci = (np.concatenate([c[k] for c in comps]) for k in range(3))
+    v = vol[zi, ri, ci]
+    m = mat[v]
+    hz = zi - g[ri, ci]
+    pen = hz + np.where(trunk_ok[ri, ci], 0, 1000) if trunk_ok is not None else hz
+    j_ = np.lexsort((pen, np.repeat(np.arange(len(comps)), n_)))[st0]  # (a stable sort: the first lowest, as argmin)
+    # building stuff only: walls, glass, roofs, concrete, floodlit stone, cladding, signs -- not plain solids or metal
+    # (cable stays, trunks, fences, masts), which must never be propped up
+    is_bld = np.zeros(max(int(mat.max()) + 1, 22), bool)
+    is_bld[[1, 2, 7, 12, 13, 15, 16, 18, 19, 20, 21]] = True
+    hmin_, bld_ = np.minimum.reduceat(hz, st0), np.add.reduceat(is_bld[m].astype(np.int64), st0)
+    leaf_ = np.add.reduceat((m == 3).astype(np.int64), st0) + np.add.reduceat((v == trunk_id).astype(np.int64), st0)
+    return [dict(n=int(n_[k]), hmin=int(hmin_[k]), low=(int(pen[j_[k]]), int(ri[j_[k]]), int(ci[j_[k]])),
+                 leaf=int(leaf_[k]), bld=int(bld_[k])) for k in range(len(comps))]
+
+
 LOG = []  # every fill and set of posts the support pass made (data/debug/supports.json)
 
 
@@ -146,8 +172,8 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
     st = ndimage.generate_binary_structure(3, 1)
 
     def occ_of(sub, box):
-        o = solid[sub]
-        return o
+        # (the second round: every id but 0, as solid says, by a comparison instead of a gather through the table)
+        return solid[sub] if _noleaf else sub != 0
 
     comps, n_big = [], 0
     for item in _owned(vol, occ_of, st, B, K, floor=True):
@@ -155,25 +181,14 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
             n_big = item
             continue
         zi, ri, ci = item
-        if zi.min() == 0:
+        if zi[0] == 0:  # (zi ascends: np.nonzero in z-major order)
             continue  # the ground (the slab under everything) and what stands on it
         comps.append(item)
-    stats = []
-    for zi, ri, ci in comps:
-        v = vol[zi, ri, ci]
-        m = mat[v]
-        hz = zi - g[ri, ci]
-        okv = trunk_ok[ri, ci] if trunk_ok is not None else np.ones(len(zi), bool)
-        pen = hz + np.where(okv, 0, 1000)
-        j = int(np.argmin(pen))
-        stats.append(dict(n=len(zi), hmin=int(hz.min()), low=(int(pen[j]), int(ri[j]), int(ci[j])),
-                          cells=len(set((ri[:64] * Ww + ci[:64]).tolist())),
-                          leaf=int(np.isin(m, (3,)).sum() + (v == trunk_id).sum()),
-                          # building stuff only: walls, glass, roofs, concrete, floodlit stone, cladding, signs -- not
-                          # plain solids or metal (cable stays, trunks, fences, masts), which must never be propped up
-                          bld=int(np.isin(m, (1, 2, 7, 12, 13, 15, 16, 18, 19, 20, 21)).sum())))
+    stats = _piece_stats(comps, vol, g, mat, trunk_ok, trunk_id)
     cls = []
-    for s in stats:
+    for (_, ri, ci), s in zip(comps, stats):
+        if not _noleaf and s["n"] >= 12:
+            s["cells"] = len(set((ri[:64] * Ww + ci[:64]).tolist()))
         if _noleaf:
             hmin = min(s["low"][0] % 1000, s["hmin"])
             cls.append("build" if (s["bld"] >= 0.5 * s["n"] and s["n"] >= 12 and hmin >= 2) else "skip")
@@ -234,6 +249,7 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
     if _noleaf:
         note(f"floating, leaves not holding: {cls.count('build')} building pieces resting only on crowns: {n_fill} "
              f"columns filled down, {n_post} posts; pieces over {K} m across left: {n_big}")
+        del comps, stats  # (not held through the second round)
         return support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok, B, K, _noleaf=False, dbg=dbg)
     note(f"floating: {len(stats)} components; removed {n_drop} voxels; {n_trunk} crowns given a trunk; building pieces: "
          f"{n_fill} columns filled down inside outlines, {n_post} posts; {len(left)} left (listed); pieces over {K} m "
