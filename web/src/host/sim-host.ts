@@ -8,6 +8,7 @@
 // (client/sim-client.ts SimClient). The data comes in loaded and everything outside is a port (HostPorts: the node
 // files, the clock, the log, the road physics' code): no fetch, no clock, no console here (tools/core-deps.mjs), so the
 // wiring that ships is the one host-smoke runs in Node. No three.js, no DOM.
+import { checkBuild } from '../core/data-contract';
 import { liveEdits } from '../core/live-edits';
 import { frameOf } from '../core/layers';
 import { initWorldEdits } from '../core/world-edits';
@@ -44,7 +45,7 @@ export interface HostPorts {
   tiles: TileCache;
   /** the clock, ms (the crafts' collisions' budget) */
   now: () => number;
-  /** what went wrong where (a load failed, an unknown mode) */
+  /** what went wrong where (a load failed, an unknown mode, a build without its identity) */
   log: (what: string, error?: unknown) => void;
   /** the road physics' code */
   physicsLoader: () => Promise<LifePhysicsModule>;
@@ -74,6 +75,8 @@ export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { s
 
 /** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots) */
 export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
+  // the build: one this code reads, or none said (core/data-contract.ts: a wrong formatVersion throws)
+  checkBuild(data.meta, (w) => ports.log(w));
   const { meta } = data, N = meta.tiles.N, cache = ports.tiles, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
     crafts: { meta, cache, now: ports.now } });

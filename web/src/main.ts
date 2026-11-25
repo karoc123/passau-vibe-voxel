@@ -28,6 +28,7 @@ import type { Kind, TrafficData } from './sim/types';
 import type { BoatData } from './sim/boat-traffic';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
+import { checkBuild } from './core/data-contract';
 import type { Facts, Label, Meta, View } from './core/meta';
 import type { FloodInfo, Place } from './types';
 import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
@@ -413,6 +414,8 @@ function keepInside() {
 async function boot() {
   let meta: Meta;
   [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
+  // a build this code does not read stops here, said (core/data-contract.ts; the host checks it again, hostSim)
+  try { checkBuild(meta, (w) => console.warn(w)); } catch (e) { toast((e as Error).message); throw e; }
   views = meta.views;
   applyGfx(gfx.now);
   uniforms = makeUniforms(meta);

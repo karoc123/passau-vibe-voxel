@@ -597,6 +597,15 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   reads; `meta.world` checked where `meta.json` is loaded (`main.ts:413`, the host); a missing `world` warns (old
   builds). No pipeline change, no rebuild (`meta.json` has `world` today).
 - **Gates:** fast set; `tile-roundtrip`.
+- **Landed** (2026-11-25): `core/data-contract.ts`: `FORMAT_VERSION` (1, as `scripts/world_id.py`), `HOST_FILES`
+  (`meta.json`, `traffic.json`, `boats.json`, `tiles/`; `host/node.ts` reads through it), `CLIENT_FILES` (what the page
+  loads besides), `DataBuild` `{ formatVersion, buildId }` (for A6's hello) and `checkBuild(meta, warn)`: no `world`
+  warns and returns null, another `formatVersion` throws (the build, the version read, what to do). Called where meta
+  comes in: `hostSim` (through `ports.log`; so the page's thread, the worker and `host/node.ts` alike, without touching
+  `sim.worker.ts`) and `main.ts` boot (console.warn; a throw is toasted and stops the boot). Checked in Node on
+  synthetic metas (ok, no `world`, `formatVersion` 2, and through `hostSim`). Baseline unchanged.
+  Open: the page's and the worker's fetch paths still spell their file names (`data/…`); `DataBuild` is not yet
+  handed on (`SimServer`, the client) — A6's hello.
 
 Suggested order: A1, A5 (independent, small) → A2, A3 → A7 → A10 → A4, A12 → A6, A8, A9 → A11, A13, A14.
 A2/A3/A4 move many import lines: one at a time, not in parallel with each other or with an E/M package.

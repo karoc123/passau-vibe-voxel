@@ -5,6 +5,7 @@
 // the worker's, host/browser.ts), the clock performance.now, the log console.warn, the road physics' code (imported with
 // this module: vite's runner, tools/lib.mjs imp, is closed once it has loaded it, so no import() later). node:fs and
 // node:zlib through process.getBuiltinModule, so the app's types (no @types/node) cover it.
+import { HOST_FILES } from '../core/data-contract';
 import { liveEdits } from '../core/live-edits';
 import type { Meta } from '../core/meta';
 import * as lifePhysics from '../physics/rapier/life-phys';
@@ -25,7 +26,7 @@ const json = <T>(dir: string, p: string) => JSON.parse(fs().readFileSync(at(dir,
 
 /** a TileCache over <dir>/tiles/ (a node file that is not there: rejected), seen through the world's live edits */
 export const nodeTileCache = (dir: string, N: number) => new TileCache({ N, edits: liveEdits, keep: 9, load: async (p) => {
-  const b = zlib().gunzipSync(fs().readFileSync(at(dir, `tiles/${p}`)));
+  const b = zlib().gunzipSync(fs().readFileSync(at(dir, `${HOST_FILES.tiles}${p}`)));
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 } });
 
@@ -40,8 +41,8 @@ export const nodePorts = (tiles: TileCache): HostPorts => ({
 /** the world's data in <dir>: meta.json, traffic.json (unpacked), boats.json (null if it is not there) */
 export function readHostData(dir: string): HostData {
   return {
-    meta: json<Meta>(dir, 'meta.json'), traffic: unpackTraffic(json<TrafficData>(dir, 'traffic.json')),
-    boats: fs().existsSync(at(dir, 'boats.json')) ? json<BoatData>(dir, 'boats.json') : null,
+    meta: json<Meta>(dir, HOST_FILES.meta), traffic: unpackTraffic(json<TrafficData>(dir, HOST_FILES.traffic)),
+    boats: fs().existsSync(at(dir, HOST_FILES.boats)) ? json<BoatData>(dir, HOST_FILES.boats) : null,
   };
 }
 
