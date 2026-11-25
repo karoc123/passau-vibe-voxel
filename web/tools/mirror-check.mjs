@@ -7,13 +7,14 @@
 // the walked person must agree bit for bit; a player follows a car, walks as a person and lets go on the way (the
 // commands through both clients; the walk's seat inputs acked alike).
 // usage (in web/): node tools/mirror-check.mjs [-v] [--seconds S]; prints PASS with the counts compared, or FAIL
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import * as THREE from 'three';
 import { DATA, load } from './real-city.mjs';
 
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
-const FPS = 30;
+const FPS = 30, GOLDEN = new URL('mirror-golden.json', import.meta.url), WRITE = args.includes('--write-golden');
 const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts');
 const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
@@ -46,6 +47,14 @@ const drawn = (T, life) => {
 };
 const matrices = (life) => { const out = []; life.group.traverse((c) => { if (c.isInstancedMesh) out.push([c.count, ...c.instanceMatrix.array.slice(0, c.count * 16), ...(c.instanceColor?.array.slice(0, c.count * 3) ?? [])]); }); return out; };
 const send = (cmd) => { direct.send(cmd); mirror.send(cmd); };
+// the golden: per second of the run, a hash of what was drawn each frame (the instance matrices and colours) and the
+// player's reads (seat, ack, the frame's time, the time of day)
+const build = checkBuild(meta, () => {})?.buildId ?? null, seconds = [];
+let hasher = crypto.createHash('sha1');
+const goldenFrame = (c, life, f) => {
+  hasher.update(JSON.stringify([matrices(life), c.seat(), c.ack(), c.time, c.timeOfDay]));
+  if ((f + 1) % FPS === 0) { seconds.push(hasher.digest('hex').slice(0, 16)); hasher = crypto.createHash('sha1'); }
+};
 
 let followed = null, walked = null;
 for (let f = 0; f < SECONDS * FPS; f++) {
@@ -89,9 +98,18 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   // (the seat inputs' acks and the frame's time: seq, tick, alpha)
   if (JSON.stringify([direct.ack(), direct.time]) !== JSON.stringify([mirror.ack(), mirror.time]) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: ack or frame time differ`);
   if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(direct.ack()?.seq > 0)) acked = false;
+  goldenFrame(direct, lifeA, f);
   if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} ${A.size} agents, seat ${JSON.stringify(mirror.seat())}`);
 }
 if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
+if (WRITE) {
+  fs.writeFileSync(GOLDEN, JSON.stringify({ build, seed: 5, fps: FPS, seconds }, null, 1) + '\n');
+  console.log(`wrote ${GOLDEN.pathname}: ${seconds.length} s of build ${build}`);
+} else if (SECONDS === 90) {
+  const g = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+  if (g.build !== build) fail.push(`the golden is of build ${g.build}, the data ${build}: check the drawing, then --write-golden`);
+  else { const i = seconds.findIndex((h, k) => h !== g.seconds[k]); if (i >= 0 || seconds.length !== g.seconds.length) fail.push(`the golden differs from second ${i} on`); }
+}
 
 // The bodies (sim/body-pose.ts, contract/agents.ts BodyDraw: a body's poses cross as quaternions): one host with
 // the road physics and edits round BRIDGE, the player's session through a CloneLink; the player drives a moto (a
