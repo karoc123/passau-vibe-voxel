@@ -20,7 +20,7 @@ it on its own branch, and report.
 
 ## Gates
 
-- `cd web && node tools/gates.mjs` runs the fast set (15 gates, about 25 s). `--full` runs all 20, and
+- `cd web && node tools/gates.mjs` runs the fast set (17 gates, about 50 s). `--full` runs all 22, and
   `--golden FILE` adds the mesh comparison: record it with `node tools/mesh-golden.mjs write FILE` *before* the change.
 - `scripts/check.sh` runs palette, overrides and interiors. `scripts/check.sh --fixture` also runs `check.py verify`
   (minutes). Some verify failures already exist on main, so compare against main and do not expect all-green.
@@ -217,6 +217,13 @@ A4 landed: `sim/server/` (`SimServer`, `Session`, `takeSnapshot`), `client/` (`S
 Open (lead's call, for A12): `host/fetch.ts` and `host/viewer-tiles.ts` stay presentation in LAYERS because the
 page's mesher loads through them too: split page vs host loaders or inject them as ports in A12. `client/` still
 imports `sim/traffic.ts` (A11).
+
+A12 landed: `hostSim(data, ports, opts)` in `host/sim-host.ts` with ports `{ tiles, now, log, physicsLoader }` (no
+fetch/performance/console inside; core-deps `PORTS_ONLY` enforces it); `host/browser.ts` (page and worker),
+`host/node.ts` (`nodeHost`); mirror-check, popin-check, life-phys start through it; `sim.worker.ts` `handle(s, m,
+post)`; new fast gate `host-smoke`. The page's loaders moved back to the root (`src/fetch.ts`, `src/viewer-tiles.ts`),
+`host/` is server as a whole (the small fetch-helper duplication with `host/browser.ts` is accepted, lead's call).
+Baseline 13 → 10. Open: `hostSim` never removes its `liveEdits` listener (a dispose; with A9).
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
