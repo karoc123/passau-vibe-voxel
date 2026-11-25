@@ -1,23 +1,23 @@
-// What the page holds of the world sim (ADR 0008: "the page sends commands and draws
-// snapshots"): a SimClient. The page never reaches into the WorldSim; it holds one session of the server
-// (sim/server/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands
-// (SimCommand: plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped
-// on them; its view among them), runs the frame (update: the frame's dt; in the page's thread the sim's update
-// itself) and reads what the sim publishes: the traffic as drawn (TrafficView), the crafts in the world (piloted or left), its player's seat, car and
-// craft, the outcomes of its commands, the events since a tick.
-// LocalSimClient: the sim in the page's thread. Commands are queued and applied in the order sent at the start of the
-// next tick (ADR 0007); every craft shell and the nav send theirs before the update in main.ts's frame. A seat input
-// sent through a client gets the client's seq and the tick it is meant for (the tick seen + 1); the session answers
-// with ack (the last one taken). The frame's time (time: FrameTime) is fixed by the update: what is drawn
-// between the last two ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
-// MirrorSimClient: the sim reached through snapshots over a SimLink (ThreadLink, CloneLink here; WorkerLink:
-// client/sim-worker-link.ts), drawn from TrafficMirror (below).
-// Either one first takes its host's hello (sim/contract/hello.ts: the protocol, the data build, the tuning's hash;
-// an in-thread session's at once, a link's before its first snapshot) and compares it with its own (the app's: sim/hello.ts
-// hello); a host that differs is refused: client.hello rejects with what differs, the session is left (the link
-// closed) and the client sends, runs and takes nothing more.
+// What the page holds of the world sim (ADR 0008: "the page sends commands and draws snapshots"): a SimClient. The
+// page never reaches into the WorldSim; it holds one session of the server (sim/server/sim-server.ts Session: one
+// player, named by the host, client.player), sends its player's commands (SimCommand: plain data, so they can cross to
+// a Web Worker or a server; they name no player, the session's is stamped on them; its view among them), runs the
+// frame (update: the frame's dt) and reads what the sim publishes, in every mode from its snapshots: the traffic as
+// drawn (TrafficMirror), the crafts in the world (piloted or left), its player's seat, car and craft, the outcomes of
+// its commands, the events since a tick.
+// MirrorSimClient: the sim reached through snapshots over a SimLink: ThreadLink (a session in the page's thread,
+// synchronous: the snapshot of the frame's own update, no added latency), CloneLink (the gates' protocol check),
+// WorkerLink (client/sim-worker-link.ts). Commands are queued and applied in the order sent at the start of the next
+// tick (ADR 0007); every craft shell and the nav send theirs before the update in main.ts's frame. A seat input sent
+// through the client gets its seq and the tick it is meant for (the tick seen + 1); the session answers with ack (the
+// last one taken). The frame's time (time: FrameTime) is the latest snapshot's: what is drawn between the last two
+// ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
+// The client first takes its host's hello (sim/contract/hello.ts: the protocol, the data build, the tuning's hash;
+// before its first snapshot) and compares it with its own (the app's: sim/hello.ts hello); a host that differs is
+// refused: client.hello rejects with what differs, the link is closed (the session left) and the client sends, runs
+// and takes nothing more.
 // No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/adr/0009-layers-and-owners.md):
-// the in-thread client and link are given a session by the app (InThreadSession).
+// the in-thread link is given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
 import { LiveEdits } from '../core/live-edits';
 import type { Ground } from '../sim/traffic';
@@ -33,13 +33,13 @@ import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/even
 import type { Ack, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
-import { STEP, Traffic, type TrafficBodies } from '../sim/traffic';
+import { STEP, Traffic } from '../sim/traffic';
 import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
 import { checkHello } from '../sim/hello';
 import type { Hello } from '../sim/contract/hello';
 
-// (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView, TrafficMirror: below)
+// (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficMirror: below)
 
 /** a player craft as the page sees it: its id and type, its pilot, whether it is put down, its core's state (read
  * only: pose, drawn(alpha) at the frame's alpha (SimClient.time), the motion or flight its shell shows). Its
@@ -57,21 +57,21 @@ export interface SimClient {
    * (the client is then out of the session: it sends, runs and takes nothing more) */
   readonly hello: Promise<Hello>;
   /** the player whose commands this client sends and whose reads it holds: its session's (the host names it; null
-   * until the first snapshot of a session in another thread) */
+   * until the first snapshot) */
   readonly player: PlayerId | null;
   /** the world's tick as last seen: the number of ticks run */
   readonly tick: number;
   /** the frame's time after the last update (its dt, the tick, alpha: how far between the last two ticks to draw) */
   readonly time: FrameTime;
   /** the traffic as drawn */
-  readonly traffic: TrafficView;
+  readonly traffic: TrafficMirror;
   /** a command of the client's player, applied at the start of the next tick (a seat input given its seq and tick) */
   send(cmd: SimCommand): void;
   /** the frame: the commands sent applied, then the ticks due after dt s (what is simulated where: the players' views,
    * a view command; the time of day: the world's) */
   update(dt: number): void;
   /** the world's time of day and day of the year as last seen (the host's; a player asks for another: a setTime
-   * request); null before the first snapshot of a session in another thread */
+   * request); null before the first snapshot */
   readonly timeOfDay: TimeOfDay | null;
   /** the sim's events of the ticks after tick, oldest first */
   eventsSince(tick: number): SimEvent[];
@@ -101,94 +101,20 @@ export interface SimClient {
   edit(op: WorldOp): Promise<[number, number][]>;
   /** the world's edited nodes as this client sees them (core/live-edits.ts): what the page's streamer and TileCache
    * read. A client of another thread fills its own from the snapshots; in the sim's own thread the app hands it the
-   * world's (one world per process, ADR 0008) */
+   * world's (one world per process, ADR 0008: that server sends none) */
   readonly edits: LiveEdits;
 }
 
-/** what the in-thread client and link use of a session of the server in the page's thread (sim/server/sim-server.ts
- * Session, given by the app: the client names the server only through this) */
+/** what the in-thread link uses of a session of the server in the page's thread (sim/server/sim-server.ts Session,
+ * given by the app: the client names the server only through this) */
 export interface InThreadSession {
-  readonly player: PlayerId;
   /** what the host tells the session first (SimServer.hello) */
   readonly hello: Hello;
-  readonly sim: {
-    readonly tick: number;
-    readonly time: FrameTime;
-    readonly timeOfDay: TimeOfDay;
-    readonly traffic: TrafficView;
-    readonly crafts: ReadonlyMap<CraftId, CraftView>;
-    eventsSince(tick: number): SimEvent[];
-    walkedPose(personId: number): WalkPose | null;
-    craftOf(player: PlayerId): CraftView | null;
-    loadPhysics(warm?: { x: number; z: number }): Promise<unknown>;
-  };
+  readonly sim: { loadPhysics(warm?: { x: number; z: number }): Promise<unknown> };
   readonly server: { update(dt: number): void };
-  onEdit: ((ref: number, nodes: [number, number][] | null, error?: unknown) => void) | null;
   send(cmd: SimCommand): void;
-  results(kind?: CommandResult['kind'], role?: Role): CommandResult[];
-  ack(): Ack | null;
-  seat(): Seat | null;
-  driver(): DriverSnapshot | null;
-  driverNotes(): DriveNote[];
-  craftEvents(): CraftEventOf[];
   snapshot(): Snapshot;
   leave(): void;
-}
-
-/** the sim in the page's thread, read where it is (the page draws the sim's own objects): a session of the SimServer
- * over the WorldSim made by the page (host/sim-host.ts; the app connects it) */
-export class LocalSimClient implements SimClient {
-  readonly hello: Promise<Hello>;
-  private nextRef = 1;
-  private readonly seqs = new Seqs();
-  private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
-  // the host's hello refused (the session left)
-  private readonly refused: Error | null;
-
-  /** mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded); edits: the world's live
-   * edits, handed by the app (the sim is in this thread; without, an empty set of its own: a tool that draws nothing) */
-  constructor(private readonly session: InThreadSession, mine: Hello, readonly edits: LiveEdits = new LiveEdits()) {
-    this.refused = checkHello(session.hello, mine);
-    if (this.refused) session.leave();
-    this.hello = this.refused ? Promise.reject(this.refused) : Promise.resolve(session.hello);
-    session.onEdit = (ref, nodes, error) => {
-      const p = this.pending.get(ref);
-      this.pending.delete(ref);
-      if (nodes) p?.done(nodes); else p?.fail(error);
-    };
-  }
-
-  private get sim() { return this.session.sim; }
-  get player() { return this.session.player; }
-  get tick() { return this.sim.tick; }
-  get time() { return this.sim.time; }
-  get timeOfDay() { return this.sim.timeOfDay; }
-  get traffic(): TrafficView { return this.sim.traffic; }
-
-  send(cmd: SimCommand) { if (!this.refused) this.session.send(this.seqs.stamp(cmd, this.tick)); }
-
-  edit(op: WorldOp) {
-    if (this.refused) return Promise.reject(this.refused);
-    const ref = this.nextRef++;
-    return new Promise<[number, number][]>((done, fail) => {
-      this.pending.set(ref, { done, fail });
-      this.session.send({ kind: 'edit', op, ref });
-    });
-  }
-
-  update(dt: number) { if (!this.refused) this.session.server.update(dt); }
-
-  eventsSince(tick: number) { return this.sim.eventsSince(tick); }
-  results(kind: CommandResult['kind'], role?: Role) { return this.session.results(kind, role); }
-  seat() { return this.session.seat(); }
-  ack() { return this.session.ack(); }
-  walkedPose(personId: number) { return this.sim.walkedPose(personId); }
-  driver() { return this.session.driver(); }
-  driverNotes() { return this.session.driverNotes(); }
-  craftOf(): CraftView | null { return this.sim.craftOf(this.session.player); }
-  crafts(): readonly CraftView[] { return [...this.sim.crafts.values()].filter((c) => c.placed); }
-  craftEvents() { return this.session.craftEvents(); }
-  loadPhysics(warm?: { x: number; z: number }) { return this.sim.loadPhysics(warm).then(() => {}); }
 }
 
 /** a client's seat inputs' numbers: each one sent gets the next seq and the tick it is meant for */
@@ -211,8 +137,8 @@ export interface SimLink {
   close(): void;
 }
 
-/** a session of a SimServer in the page's thread: the frame's commands sent through it, the server's update, the
- * session's snapshot at once after it (the snapshot format checked without a worker: ?mirror=1) */
+/** a session of a SimServer in the page's thread (the page's default): the frame's commands sent through it, the
+ * server's update, the session's snapshot at once after it */
 export class ThreadLink implements SimLink {
   onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
@@ -292,7 +218,7 @@ export function plainData(v: unknown, at: string, typed: boolean, path = new Set
   path.delete(o);
 }
 
-/** the sim reached through snapshots (a worker's, or a ThreadLink's): the page draws a copy of the traffic
+/** the sim reached through snapshots (a ThreadLink's, a worker's): the page draws a copy of the traffic
  * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds its session's player's reads (player: the
  * snapshots name it) */
 export class MirrorSimClient implements SimClient {
@@ -422,16 +348,11 @@ export class MirrorSimClient implements SimClient {
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }
 
-/** what the presentation reads of the traffic (view/life.ts, nav/): the agents between their last two ticks and the
- * path maths that place them (the static roads and footways), the signals, trains, boats, the bodies' poses. In the
- * page's thread it is the sim's Traffic itself; a client of a worker or a server fills a Traffic of its own from
- * snapshots (ADR 0008). Read only: what is drawn where is the view's (view/life.ts). */
-export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'detachedCars' | 'people' | 'riders' | 'active' |
-  'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
-  { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
-
-/** the client's copy of the traffic, set from snapshots: what view/life.ts and the nav read (TrafficView) */
-export class TrafficMirror implements TrafficView {
+/** the client's copy of the traffic, set from snapshots: what the presentation reads of the traffic (view/life.ts,
+ * nav/): the agents between their last two ticks and the path maths that place them (the static roads and footways,
+ * re-run on the client's own TrafficData), the signals, trains, boats, the bodies' poses. Read only: what is drawn
+ * where is the view's (view/life.ts) */
+export class TrafficMirror {
   private readonly T: Traffic;
   private readonly carsById = new Map<number, Car>();
   private readonly peopleById = new Map<number, Person>();

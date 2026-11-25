@@ -1,7 +1,7 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
 // viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts, started by the
 // host: src/host/node.ts) is ticked
-// through its client (src/client/sim-client.ts, in this thread) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// through its client (src/client/sim-client.ts, in this thread, from its snapshots; --mirror: cloned, as a worker's) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
 // and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
@@ -38,11 +38,11 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts'), { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
-const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), pristine = MIRROR ? structuredClone(td) : null;
+const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), pristine = structuredClone(td);
 const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
 const label = (kind, x, y) => meta.labels.find((l) => l.kind === kind) ?? { x, y };
 // where the viewer starts, and the hours the run goes through (the density falling: agents to remove; rising: to add)
@@ -79,12 +79,12 @@ function run({ name, at: start, h0, h1 }) {
     visited.set(cur, (visited.get(cur) ?? 0) + 1);
   }
 
-  // (--mirror: drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does from a worker)
+  // (drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does; --mirror: through a CloneLink, as from a worker)
   // (started as a server starts it: src/host/node.ts, hostSim; the traffic's default seed, no ground, no road physics)
   const server = nodeHost(DATA, { world: null, physics: { bodies: false } }, { meta, traffic: td });
   const session = server.connect('p1');
   const mine = hello(checkBuild(meta, () => {}));
-  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null, mine) : new LocalSimClient(session, mine);
+  const sim = new MirrorSimClient(MIRROR ? new CloneLink(new ThreadLink(session)) : new ThreadLink(session), structuredClone(pristine), null, mine);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;

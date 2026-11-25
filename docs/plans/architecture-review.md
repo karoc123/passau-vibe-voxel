@@ -1,23 +1,13 @@
 # Architecture: open packages towards a server
 
 The target is [ADR 0009](../adr/0009-layers-and-owners.md) (layers, owners) under [ADR 0008](../adr/0008-server-vision.md).
-One package is left; one at a time, not in parallel with an E/M package. Every package: `tools/wt.sh tsc`,
-`core-deps` and the fast set green; extra gates named.
-
-## A11. One read path (S, plus measuring)
-
-- **Goal:** the page draws from snapshots in every mode; `LocalSimClient` and `TrafficView` as `Pick<Traffic>` go.
-- **Do:** first a body's drawn pose as a quaternion in the snapshot (the mirror lerps it today instead of slerping),
-  compared by `mirror-check`; measure the in-thread mirror's cost (the worker's apply measured 0.22–0.27 ms a frame);
-  then `app/session.ts` builds `MirrorSimClient(ThreadLink)` by default. In-thread the link is synchronous, so no
-  added latency.
-- **Later, not here:** `TrafficMirror` without a whole `Traffic` behind it (`client/` still imports
-  `sim/traffic.ts`; the path maths as shared functions over the road data).
-- **Gates:** `mirror-check` loses its reference side, so record the direct path's instance matrices once as a golden
-  before the flip; `popin-check`; `judder` car/plane/boat/drone unchanged.
+No package is open. A new one: one at a time, not in parallel with an E/M package; `tools/wt.sh tsc`, `core-deps` and
+the fast set green; extra gates named.
 
 ## Left over, no package yet
 
+- `TrafficMirror` without a whole `Traffic` behind it: `client/` still imports `sim/traffic.ts` (the R1 baseline);
+  the path maths as shared functions over the road data.
 - Open question (owner): does the creative camera simulate the world where it looks? Until answered an observer's
   camera is a view like a player's, behind one switch (`app/session.ts` `OBSERVER_VIEW`).
 - The link's `frame(dt, …)` becoming `advance(dt)` on the in-thread link only, the worker ticking on its own timer:

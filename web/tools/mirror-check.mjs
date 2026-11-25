@@ -1,12 +1,17 @@
-// The snapshot gate (ADR 0008, src/sim/server/snapshot.ts): what the page draws from the sim's snapshots is
-// what it draws from the sim itself. Two world sims (each started by the host, src/host/node.ts) from one seed on the real traffic data, ticked alike at a viewer
-// that stands, then drives along a road: one drawn by StreetLife through LocalSimClient (the sim's own objects), the
-// other through MirrorSimClient over a CloneLink of a ThreadLink (a TrafficMirror set from each snapshot, the snapshots
-// structured-cloned and the commands sent through JSON as to a Web Worker or a socket: the protocol gate). Every
-// frame the drawn poses of every car, person and rider (by id), the signal heads, the trains' coaches, the boats and
-// the walked person must agree bit for bit; a player follows a car, walks as a person and lets go on the way (the
-// commands through both clients; the walk's seat inputs acked alike).
-// usage (in web/): node tools/mirror-check.mjs [-v] [--seconds S]; prints PASS with the counts compared, or FAIL
+// The snapshot gate (ADR 0008, src/sim/server/snapshot.ts): what the page draws from the sim's snapshots is what the
+// sim drew itself. A world sim (started by the host, src/host/node.ts) from one seed on the real traffic data, ticked
+// at a viewer that stands, then drives along a road, drawn by StreetLife through MirrorSimClient over a CloneLink of a
+// ThreadLink (a TrafficMirror set from each snapshot, the snapshots structured-cloned and the commands sent through
+// JSON as to a Web Worker or a socket: the protocol gate); a player follows a car, walks as a person and lets go on the
+// way (the walk's seat inputs acked). Every frame's instance matrices and colours (every car, person and rider, the
+// signal heads, the trains' coaches, the boats, the walked person) and the player's reads (seat, ack, the frame's time,
+// the time of day) must match the golden (tools/mirror-golden.json: a hash per second of the run), recorded from the
+// page's direct path (StreetLife drawing the sim's own objects, LocalSimClient) before it went (A11). The time of day
+// from the snapshot is the host's. After a data rebuild the golden is of another build: check the drawing in the page,
+// then record it anew from this path with --write-golden.
+// Then the bodies (below): drawn alike by the sim and from its snapshots, bit for bit.
+// usage (in web/): node tools/mirror-check.mjs [-v] [--seconds S] [--write-golden]; prints PASS with the counts
+// compared, or FAIL (the golden holds 90 s: a shorter run is compared over its seconds; record with the default 90)
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import * as THREE from 'three';
@@ -16,7 +21,7 @@ const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30, GOLDEN = new URL('mirror-golden.json', import.meta.url), WRITE = args.includes('--write-golden');
 const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts');
-const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
@@ -25,28 +30,18 @@ const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
 const boats = fs.existsSync(`${DATA}boats.json`) ? JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8')) : null;
 const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 
-// (both started as a server starts them: src/host/node.ts, hostSim; no ground, no road physics)
-const host = () => nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false } }, { meta, traffic: data(), boats });
-const a = host(), b = host();
-// (the clients' own hello: this code, the build read, the default tuning; the hosts' must match it)
+// (started as a server starts it: src/host/node.ts, hostSim; no ground, no road physics)
+const b = nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false } }, { meta, traffic: data(), boats });
+// (the client's own hello: this code, the build read, the default tuning; the host's must match it)
 const mine = hello(checkBuild(meta, () => {}));
-const P = 'p1', direct = new LocalSimClient(a.connect(P), mine), link = new CloneLink(new ThreadLink(b.connect(P)));
+const P = 'p1', link = new CloneLink(new ThreadLink(b.connect(P)));
 const mirror = new MirrorSimClient(link, data(), null, mine);
-const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
+const lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
-let compared = 0, frames = 0, acked = true;
-const key = (o) => `${o.kind}:${o.bike ? 'r' : ''}${o.id}`;
-const drawn = (T, life) => {
-  const m = new Map();
-  for (const o of [...T.roadVehicles(), ...T.people, ...T.riders]) {
-    const d = life.drawn(o.kind, o.id);
-    if (d) m.set(key(o), [d.x, d.y, d.z, d.h ?? 0, d.pitch ?? 0, d.roll ?? 0]);
-  }
-  return m;
-};
+let frames = 0, drawnAgents = 0, acked = true;
 const matrices = (life) => { const out = []; life.group.traverse((c) => { if (c.isInstancedMesh) out.push([c.count, ...c.instanceMatrix.array.slice(0, c.count * 16), ...(c.instanceColor?.array.slice(0, c.count * 3) ?? [])]); }); return out; };
-const send = (cmd) => { direct.send(cmd); mirror.send(cmd); };
+const send = (cmd) => mirror.send(cmd);
 // the golden: per second of the run, a hash of what was drawn each frame (the instance matrices and colours) and the
 // player's reads (seat, ack, the frame's time, the time of day)
 const build = checkBuild(meta, () => {})?.buildId ?? null, seconds = [];
@@ -60,9 +55,9 @@ let followed = null, walked = null;
 for (let f = 0; f < SECONDS * FPS; f++) {
   const t = f / FPS, focus = { x: at.x + Math.max(0, t - 20) * 8, z: at.y };
   // (a player follows a car at 10 s, walks as a person from 30 s to 50 s, lets go at 60 s)
-  if (f === 10 * FPS && direct.traffic.cars.length) { followed = direct.traffic.cars[0].id; send({ kind: 'follow', entity: { kind: 'car', id: followed } }); }
+  if (f === 10 * FPS && mirror.traffic.cars.length) { followed = mirror.traffic.cars[0].id; send({ kind: 'follow', entity: { kind: 'car', id: followed } }); }
   if (f === 30 * FPS) {
-    const p = direct.traffic.people.find((q) => lifeA.drawn('person', q.id)), d = p && lifeA.drawn('person', p.id);
+    const p = mirror.traffic.people.find((q) => lifeB.drawn('person', q.id)), d = p && lifeB.drawn('person', p.id);
     if (p) {
       walked = p.id;
       send({ kind: 'follow', entity: { kind: 'person', id: walked } });
@@ -70,45 +65,36 @@ for (let f = 0; f < SECONDS * FPS; f++) {
     }
   }
   if (walked !== null && f > 30 * FPS && f < 50 * FPS) {
-    const w = direct.walkedPose(walked);
+    const w = mirror.walkedPose(walked);
     if (w) send({ kind: 'seatInput', role: 'walker', input: { ...w, x: w.x + 1.2 / FPS, moving: true } });
   }
   if (f === 50 * FPS) send({ kind: 'leaveSeat' });
   if (f === 60 * FPS) send({ kind: 'follow', entity: null });
-  // (the world's time: the hosts' to set; the view: the player's command)
-  for (const h of [a, b]) h.sim.setTime(17 + t / 600, 180);
+  // (the world's time: the host's to set; the view: the player's command)
+  b.sim.setTime(17 + t / 600, 180);
   send({ kind: 'view', view: { focus, viewer: focus } });
-  direct.update(1 / FPS);
   mirror.update(1 / FPS);
-  const ta = direct.timeOfDay, tb = mirror.timeOfDay;
+  const ta = b.sim.timeOfDay, tb = mirror.timeOfDay;
   if (ta.hour !== tb?.hour || ta.day !== tb?.day) fail.push(`t=${t.toFixed(2)}: the time of day ${JSON.stringify(ta)} vs ${JSON.stringify(tb)} from the snapshot`);
-  lifeA.update(1 / FPS, 0, focus);
   lifeB.update(1 / FPS, 0, focus);
   frames++;
-  const A = drawn(direct.traffic, lifeA), B = drawn(mirror.traffic, lifeB);
-  if (A.size !== B.size) fail.push(`t=${t.toFixed(2)}: ${A.size} agents drawn, ${B.size} from the snapshot`);
-  for (const [k, v] of A) {
-    const w = B.get(k);
-    compared++;
-    if (!w || v.some((x, i) => x !== w[i])) { if (fail.length < 20) fail.push(`t=${t.toFixed(2)} ${k}: ${v.map((x) => x.toFixed(3))} vs ${w?.map((x) => x.toFixed(3))}`); }
-  }
-  const ma = matrices(lifeA), mb = matrices(lifeB);
-  if (JSON.stringify(ma) !== JSON.stringify(mb) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: instance matrices differ`);
-  if (JSON.stringify(direct.seat()) !== JSON.stringify(mirror.seat()) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: seats differ`);
-  // (the seat inputs' acks and the frame's time: seq, tick, alpha)
-  if (JSON.stringify([direct.ack(), direct.time]) !== JSON.stringify([mirror.ack(), mirror.time]) && fail.length < 20) fail.push(`t=${t.toFixed(2)}: ack or frame time differ`);
-  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(direct.ack()?.seq > 0)) acked = false;
-  goldenFrame(direct, lifeA, f);
-  if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} ${A.size} agents, seat ${JSON.stringify(mirror.seat())}`);
+  const T = mirror.traffic;
+  for (const o of [...T.roadVehicles(), ...T.people, ...T.riders]) if (lifeB.drawn(o.kind, o.id)) drawnAgents++;
+  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(mirror.ack()?.seq > 0)) acked = false;
+  goldenFrame(mirror, lifeB, f);
+  if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} seat ${JSON.stringify(mirror.seat())}`);
 }
+if (!drawnAgents) fail.push('nothing drawn');
 if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
-if (WRITE) {
+if (WRITE && SECONDS !== 90) fail.push('--write-golden records the full 90 s');
+else if (WRITE) {
   fs.writeFileSync(GOLDEN, JSON.stringify({ build, seed: 5, fps: FPS, seconds }, null, 1) + '\n');
   console.log(`wrote ${GOLDEN.pathname}: ${seconds.length} s of build ${build}`);
-} else if (SECONDS === 90) {
+} else {
   const g = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
   if (g.build !== build) fail.push(`the golden is of build ${g.build}, the data ${build}: check the drawing, then --write-golden`);
-  else { const i = seconds.findIndex((h, k) => h !== g.seconds[k]); if (i >= 0 || seconds.length !== g.seconds.length) fail.push(`the golden differs from second ${i} on`); }
+  else if (seconds.length > g.seconds.length) fail.push(`the golden holds ${g.seconds.length} s, the run ${seconds.length}`);
+  else { const i = seconds.findIndex((h, k) => h !== g.seconds[k]); if (i >= 0) fail.push(`the golden differs from second ${i} on`); }
 }
 
 // The bodies (sim/body-pose.ts, contract/agents.ts BodyDraw: a body's poses cross as quaternions): one host with
@@ -169,4 +155,4 @@ async function bodies() {
   return n;
 }
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }
-console.log(`PASS mirror-check: ${frames} frames, ${compared} agent poses, the instance matrices, seats, walked poses, seat input acks and frame times alike (direct and from snapshots; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike`);
+console.log(`PASS mirror-check: ${frames} frames (${drawnAgents} agents drawn), the instance matrices, seats, seat input acks, frame times and time of day as the golden (${seconds.length} s; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike`);

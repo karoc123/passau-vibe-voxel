@@ -150,7 +150,7 @@ const LAYERS = [
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
-  ['client/', 'client'], // (SimClient, LocalSimClient, MirrorSimClient, TrafficMirror, the links)
+  ['client/', 'client'], // (SimClient, MirrorSimClient, TrafficMirror, the links)
   // (sim-host.ts: the wiring of a world, its loaders and clock as ports; browser.ts, node.ts: the ports; sim.worker.ts:
   // the worker's entry. The page's own loaders, fetch.ts and viewer-tiles.ts, are the root's: presentation, A12)
   ['host/', 'server'],

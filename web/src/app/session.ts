@@ -1,15 +1,15 @@
-// The page's session with the world sim: which client it gets and over which link (the one thing multiplayer adds to:
-// a network link). From the page's options (the query string):
-//   local (default): the world sim in this thread (host/sim-host.ts, made as a host would), read directly;
-//   ?mirror=1: in this thread, drawn from its snapshots all the same (sim/server/snapshot.ts);
-//   ?worker=1: in a Web Worker (host/sim.worker.ts), drawn from its snapshots.
+// The page's session with the world sim: its client and the link it reaches the sim over (the one thing multiplayer
+// adds to: a network link). The page draws from the sim's snapshots in every mode (sim/server/snapshot.ts,
+// client/sim-client.ts MirrorSimClient). From the page's options (the query string):
+//   thread (default): the world sim in this thread (host/sim-host.ts, made as a host would), over a ThreadLink;
+//   ?worker=1: in a Web Worker (host/sim.worker.ts), over a WorkerLink.
 // ?seed=: the traffic's seed (else a new one each load); ?mode=: the game mode the host makes (host/sim-host.ts MODES; by
 // default the sandbox, its edits allowed with ?dig=1). The road physics (the shared Rapier world) loaded on the first
 // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still loads
 // it), ?lpnear=, ?lpmax=.
 // Each client compares its host's hello with its own (sim/hello.ts hello: this code, the build of the page's meta.json,
 // the tuning) and refuses a host that differs (client.hello rejects: main.ts shows it).
-import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from '../client/sim-client';
+import { MirrorSimClient, ThreadLink, type SimClient } from '../client/sim-client';
 import { WorkerLink } from '../client/sim-worker-link';
 import { checkBuild, dataUrl, HOST_FILES } from '../core/data-contract';
 import { LiveEdits, liveEdits } from '../core/live-edits';
@@ -25,7 +25,7 @@ import type { TimeOfDay } from '../sim/contract/snapshot';
 import { fetchJson } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
 
-export type Transport = 'local' | 'mirror' | 'worker';
+export type Transport = 'thread' | 'worker';
 
 export interface SessionOptions {
   transport: Transport;
@@ -39,7 +39,7 @@ export interface SessionOptions {
 export function sessionOptions(qs: URLSearchParams): SessionOptions {
   const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1';
   return {
-    transport: qs.get('worker') === '1' ? 'worker' : qs.get('mirror') === '1' ? 'mirror' : 'local',
+    transport: qs.get('worker') === '1' ? 'worker' : 'thread',
     seed: qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0,
     eager, edits: eager,
     mode: qs.get('mode') ?? undefined,
@@ -71,13 +71,13 @@ export function openSession(o: SessionOptions, { meta, edits: live, traffic, wor
     const link = new WorkerLink({ seed, physics, eager, mode, edits, time });
     return { client: new MirrorSimClient(link, traffic, world, mine, live), link };
   }
-  const own = o.transport === 'mirror' ? structuredClone(traffic) : null;
-  const boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats));
+  // (the client's traffic data its own copy, taken before the host's sim prepares its paths in place)
+  const own = structuredClone(traffic), boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats));
   const server = hostSim({ meta, traffic, boats }, browserPorts(viewerTileCache(meta.tiles.N, live)), { seed, world, eager, mode, edits, physics, time });
   // (one session, the page's player: the host names it, the page's commands name none; the client handed the world's
   // live edits, the host's own: the server in this thread sends none in its snapshots)
   const session = server.connect(PAGE_PLAYER);
-  return { client: own ? new MirrorSimClient(new ThreadLink(session), own, world, mine, live) : new LocalSimClient(session, mine, live), link: null };
+  return { client: new MirrorSimClient(new ThreadLink(session), own, world, mine, live), link: null };
 }
 
 /** Whether the page's camera is a presence in the world while its player holds no seat (an observer: the orbit, free

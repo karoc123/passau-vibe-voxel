@@ -1,6 +1,6 @@
 // The hello (sim/contract/hello.ts; docs/adr/0009-layers-and-owners.md): made by the host (sim/server/sim-server.ts
 // SimServer.hello, from the data build hostSim checked and the sim's tuning), compared by the client with its own
-// (client/sim-client.ts: LocalSimClient, MirrorSimClient). Shared by both ends: no three.js, no DOM.
+// (client/sim-client.ts MirrorSimClient). Shared by both ends: no three.js, no DOM.
 //   tuningHash  the tuning a client must share with its host, hashed: of sim/tuning.ts Tuning the parts a client runs
 //               (CLIENT_TUNING: the crafts' motion laws, a mirror's cores are made with them, client/sim-client.ts) and
 //               the crafts' scale (CRAFT_SCALE: their collision); not the host's own (the cars' ride: the road physics;

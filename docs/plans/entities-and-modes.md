@@ -245,7 +245,7 @@ URL flags (main.ts:469-485, 419):
 | `?seed=` | the host (world); a mode gets its own `rng` from it |
 | `?dig=1` | sandbox option `edits: true` (and the page installs dig's input); a game mode decides edits itself |
 | `?lifephys=0`, `?lpnear=`, `?lpmax=` | host/physics options, not the mode |
-| `?worker=1`, `?mirror=1` | transport, not the mode |
+| `?worker=1` | transport, not the mode |
 | `?hour=`, `?date=`, `?weather=` | the client's clock: honoured only while the mode's clock source is `client` |
 | `?cam=`, `?view=`, `?focus=`, `?crop=` | the client's camera (an observer); a game mode places the player and may ignore them |
 
