@@ -150,7 +150,7 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     light = spill_map(table[zones] & 7, W, D, (ra, ca))  # 2 m cells from (ra / 2, ca / 2)
     # the sloped caps' corners over the region (None: no data/surface.npz, no caps written)
     capf = caps.region_fields(region, D, W, base, TMP) if palette is not None else None
-    paved = caps.cap_ids(palette) if capf is not None else None
+    deckable = caps.deck_ids(palette) if capf is not None else None
     cst = caps.Stats()
     # the roofs' corners (None: no data/surface.npz with roof_z, or caps.ROOFS off)
     roofs = caps.region_roofs(region, D, W, N, TMP, OUT / "tiles", palette, zones, (win.r0, win.r1, win.c0, win.c1)) if palette is not None else None
@@ -200,7 +200,7 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
                 sec["fols"] = foliage(ty * N, tx * N).astype(np.uint8).tobytes()
                 # (the apron beyond the map: the light as at the map's edge)
                 sec["spil"] = spil(ty * (N // 2) - 1, tx * (N // 2) - 1).astype(np.uint8).transpose(2, 0, 1).tobytes()
-                cb = caps.node_section(capf, sec, ty * N, tx * N, N, D, W, paved, cst) if capf is not None and s == 1 else b""
+                cb = caps.node_section(capf, sec, ty * N, tx * N, N, D, W, deckable, cst) if capf is not None and s == 1 else b""
                 if cb:
                     sec["caps"] = cb
                 else:

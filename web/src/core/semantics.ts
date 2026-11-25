@@ -12,7 +12,7 @@ export const SEM = {
   WATER: 1 << 2,
   LEAF: 1 << 3,
   GRASS: 1 << 4,
-  // paved ground: capped on a slope (materials.ts pavedGround; scripts/caps.py's paved ids, tools/tile-roundtrip.mjs)
+  // paved ground by colour (materials.ts pavedGround): the entries scripts/voxelize.py classes paved (tools/tile-roundtrip.mjs)
   PAVED: 1 << 5,
   // a building's wall material (materials.ts WALL_MATS; plain SOLID among them)
   WALL: 1 << 6,

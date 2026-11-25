@@ -114,13 +114,14 @@ for (const [file, withRooms, withExtra] of [['tile.bin', true, false], ['tile_no
   if (RF.roofField(2, { counts, runs: new Uint16Array(runs), roofCaps: null }) !== null) fail('roofField without a section: not null');
 }
 
-// the paved ground in two languages: the ids scripts/caps.py caps (paved_ids) are those core/semantics.ts calls PAVED
+// the paved ground in two languages: the ids whose ground scripts/voxelize.py classes paved (its class raster, which
+// scripts/caps.py caps) are those core/semantics.ts calls PAVED by colour
 {
   const SE = await imp('src/core/semantics.ts');
   const pal = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/palette.json'), 'utf8')).palette;
-  const py = JSON.parse(execFileSync('uv', ['run', '--quiet', 'python', 'scripts/caps.py', '--paved-ids'], { cwd: repo }).toString());
+  const py = JSON.parse(execFileSync('uv', ['run', '--quiet', 'python', 'scripts/palette_check.py', '--paved-ids'], { cwd: repo }).toString());
   const ts = [...SE.semanticTable(pal)].flatMap((f, i) => (f & SE.SEM.PAVED ? [i] : []));
-  if (JSON.stringify(py) !== JSON.stringify(ts)) fail(`paved ids: caps.py ${py.length} (${py.slice(0, 8)}...), semantics.ts ${ts.length} (${ts.slice(0, 8)}...)`);
+  if (JSON.stringify(py) !== JSON.stringify(ts)) fail(`paved ids: palette_check.py ${py.length} (${py.slice(0, 8)}...), semantics.ts ${ts.length} (${ts.slice(0, 8)}...)`);
 }
 
 if (bad.length) {

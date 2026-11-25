@@ -51,24 +51,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
-| R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
-
-## Packages
-
-### R6. The rest of `voxelize.py`'s stages (code-health 18, S–M)
-
-Landed (merges of `r6`, `r6b`): `voxelize.py` runs as `STAGES`, 20 `def stage(ctx)` functions over a `Ctx`
-(SimpleNamespace) with plain field names, the bridges' decks and bridgeheads a `bridges` stage of their own (timed as
-"bridge decks, bridgeheads"); `scripts/constants.py`; `tunnels.plan/build`, `underpass.build` return their results;
-`traffic.build(open_cut=..., bored=(floor, ids), walked=underpass.Walked)`, no module globals in tunnels/underpass.
-Left:
-
-- **Class raster (code-health 18):** `caps.py` still finds steps by `ground.npz` rgb and paved ids by colour (the
-  colours now come from `constants.py`, so a colour change follows). A class raster written by `voxelize.py` changes
-  the outputs: golden differs by design, and it needs a data rebuild.
 
 ## Engine packages
 
@@ -105,7 +90,6 @@ Rules for all of them, on top of the rules above:
   `voxelize.py --just x=COL,y=ROW` on a fixture or one region and say in the report that the rebuild is due.
 - Add a guard for each rule to `check.py verify` (a patch in `scripts/fixtures/road-defects.json` or a new counter
   in the build report), so the spot cannot come back unnoticed.
-- R6 moves the same code in `voxelize.py`. Do not run a Q package in parallel with the R6 stage that holds its block.
 
 Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
 green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.

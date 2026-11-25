@@ -14,8 +14,8 @@ flat cap is no cap); no section at all in a node without caps.
 """
 import numpy as np
 
-# the paved ground's colours (materials.ts GROUND_COLOURS), a kerb's, steps', a bare deck's: voxelize.py paints them
-from constants import BALLAST, DECK, GROUND_HEX, KERB, M_CONCRETE, M_MARK, M_ROOF, M_SOIL, M_SOLID, STEPS
+# what a cell's ground is: data/ground.npz cls, the class raster voxelize.py writes (constants.py)
+from constants import CLS_DECK, CLS_PAVED, CLS_STEPS, M_CONCRETE, M_MARK, M_ROOF, M_SOIL, M_SOLID
 
 
 def zigzag(v):
@@ -68,12 +68,12 @@ def decode(buf):
 # of the node's top. All on the map's grid from rasters within REACH of a cell: the same for any window cover.
 #
 # Which runs get a record (from the node's own columns, D1 of the plan: paved ground and decks only): the run ending
-# at the column's ground with air above, its top voxel paved (PAVED_IDS: web/src/core/materials.ts pavedGround) -- or
-# on a carriageway (data/qa_roadmask.bin.gz 1) any ground but grass and water (a strip of earth the data paints where a
-# bridge's way meets the road: a 15 cm dip at 50 km/h) --, and
-# the column's last run above the ground, its top a deck's surface (cap_ids: paved, the bare deck's concrete, a rail
-# deck's ballast), within DECK_TOL of the deck's profile. Lawns, fields, steps, water and anything standing on the
-# ground stay voxels.
+# at the column's ground with air above, the cell's ground paved or a bare deck (data/ground.npz cls: CLS_PAVED,
+# CLS_DECK, a bridge's way drawn on the ground at its end) -- or on a carriageway (data/qa_roadmask.bin.gz 1) any
+# ground but grass and water (a strip of earth the data paints where a bridge's way meets the road: a 15 cm dip at
+# 50 km/h) --, and the column's last run above the ground, its top a deck's surface (deck_ids: paving, concrete, a
+# rail deck's ballast or track bed), within DECK_TOL of the deck's profile. Lawns, fields, steps, water and anything
+# standing on the ground stay voxels.
 SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
 # a deck's nodes alone, more rounds after those (with the fallback nodes'): a deck is smooth in truth, and its profile
@@ -108,28 +108,10 @@ assert N_DECK <= N_RELAX  # cells: how far from a column what decides its corner
 ROOFS = True
 
 
-def quantised(hex_):
-    """a colour as voxelize.py's Palette quantises it (to 4, Python's round)"""
-    return tuple(min(255, round(int(hex_[i:i + 2], 16) / 4) * 4) for i in (1, 3, 5))
-
-
-def paved_ids(palette):
-    """per palette id: paved ground (web/src/core/materials.ts pavedGround, core/semantics.ts SEM.PAVED)"""
-    ground = {quantised(h) for h in GROUND_HEX} - {quantised(BALLAST)}
-    kerb = quantised(KERB)
-    return np.array([e[3] == M_MARK or (e[3] == M_SOLID and (tuple(e[:3]) == kerb or tuple(e[:3]) in ground))
-                     for e in palette], bool)
-
-
-
-def cap_ids(palette):
-    """per palette id, (the ground's run may get a cap: paved_ids, and the bare deck's concrete -- a bridge's way where
-    it is drawn on the ground at the bridge's end; a deck's top may: any deck surface -- paved, the bare deck, a rail
-    deck's ballast or track bed -- not a railing, a lamp, glass, leaves, water)"""
-    paved = paved_ids(palette)
-    bare = np.array([e[3] == M_CONCRETE and tuple(e[:3]) == quantised(DECK) for e in palette], bool)
-    deck = paved | np.array([e[3] in (M_SOLID, M_MARK, M_SOIL, M_CONCRETE) for e in palette], bool)
-    return paved | bare, deck
+def deck_ids(palette):
+    """per palette id, whether a deck's top may get a cap: any deck surface by its material -- paving, markings, the
+    bare deck's concrete, a rail deck's ballast or track bed -- not a railing, a lamp, glass, leaves, water"""
+    return np.array([e[3] in (M_SOLID, M_MARK, M_SOIL, M_CONCRETE) for e in palette], bool)
 
 
 def _shift(a, dy, dx, fill):
@@ -302,11 +284,11 @@ class Stats(dict):
             self[k] = self.get(k, 0) + v
 
 
-def node_section(F, sec, r0, c0, N, D, W, paved, stats=None):
+def node_section(F, sec, r0, c0, N, D, W, deckable, stats=None):
     """The caps section (bytes, b"" for none) of the level-1 node whose first cell is map cell (r0, c0), from its
     sections `sec` (cnts, grnd, runs) and the region's fields F (fields() of a region whose corner is map cell
     F["at"])."""
-    c, z, q, _ = node_records(F, sec, r0, c0, N, D, W, paved, stats)
+    c, z, q, _ = node_records(F, sec, r0, c0, N, D, W, deckable, stats)
     if not len(c):
         return b""
     b = encode(c, z, q)
@@ -315,7 +297,7 @@ def node_section(F, sec, r0, c0, N, D, W, paved, stats=None):
     return b
 
 
-def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
+def node_records(F, sec, r0, c0, N, D, W, deckable, stats=None):
     """node_section's records: column, ztop, corners [n, 4] (1/64 m), kind (0 ground, 1 deck)"""
     S = N + 2
     counts = np.frombuffer(sec["cnts"], np.uint16).astype(np.int64)
@@ -326,10 +308,8 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
     end = runs[:, 0] + runs[:, 1]
     nxt0 = np.append(runs[1:, 0], -1)
     nxt0[off[1:][counts > 0] - 1] = -1  # (a column's last run: nothing over it)
-    paved, deckable = paved
-    pid = np.minimum(runs[:, 2], len(paved) - 1)
-    known = runs[:, 2] < len(paved)
-    pv, dv = paved[pid] & known, deckable[pid] & known
+    known = runs[:, 2] < len(deckable)
+    dv = deckable[np.minimum(runs[:, 2], len(deckable) - 1)] & known
     # map cell of each column (the apron: the neighbours' cells), inside the map
     Y, X = np.divmod(np.arange(S * S), S)
     mr, mc = r0 + Y - 1, c0 + X - 1
@@ -346,7 +326,7 @@ def node_records(F, sec, r0, c0, N, D, W, paved, stats=None):
         Lr = F[lay]
         if kind == "ground":
             road = F["road"][lr[col], lc[col]] & inmap[col]
-            sel = (end == grnd[col]) & (nxt0 != end) & (pv | (road & dv))
+            sel = (end == grnd[col]) & (nxt0 != end) & (F["paved"][lr[col], lc[col]] | (road & dv))
         else:
             dk = F["deck"][lr[col], lc[col]]
             sel = last & (end > grnd[col]) & dv & np.isfinite(dk) & (np.abs(np.nan_to_num(dk) - end) <= DECK_TOL)
@@ -391,8 +371,12 @@ def region_fields(region, D, W, base, tmp="data"):
     deck = wmod.npz_region(tmp / "surface.npz", "deck", region).astype(np.float64)
     water = wmod.npz_region(tmp / "ground.npz", "water", region)
     bld = wmod.npz_region(tmp / "ground.npz", "b", region) > 0
-    rgb = wmod.npz_region(tmp / "ground.npz", "rgb", region)
-    steps = (rgb == np.array(quantised(STEPS), np.uint8)).all(-1)
+    import zipfile
+    with zipfile.ZipFile(tmp / "ground.npz") as z_:
+        if "cls.npy" not in z_.namelist():
+            raise SystemExit("data/ground.npz has no cls (the ground classes): build it again with voxelize.py")
+    cls = wmod.npz_region(tmp / "ground.npz", "cls", region)
+    steps = cls == CLS_STEPS
     # (prep.npz's dtm from its uncompressed copy where regions.py made a fresh one: else inflated from its start for
     # every window of tile_fields.py; the same bytes)
     sc = sidecar.load(tmp / "prep.npz", "dtm")
@@ -400,7 +384,6 @@ def region_fields(region, D, W, base, tmp="data"):
            else wmod.npz_region(tmp / "prep.npz", "dtm", region)).astype(np.float64) - base
     # where voxelize.py lifted the ground to the surface model (a carriageway on a structure the terrain model left
     # out: surface.npz gsrc), that surface is the ground's source, not the terrain model's trench under it
-    import zipfile
     with zipfile.ZipFile(tmp / "surface.npz") as z_:
         if "gsrc.npy" in z_.namelist():
             gs = wmod.npz_region(tmp / "surface.npz", "gsrc", region)
@@ -410,6 +393,7 @@ def region_fields(region, D, W, base, tmp="data"):
     road = (wmod.gz_region(qa, (D, W), np.uint8, region) == 1) if qa.exists() else np.zeros((D_, W_), bool)
     F = fields(gt, water, bld, steps, dtm, deck, road)
     F["road"] = road
+    F["paved"] = np.isin(cls, CLS_PAVED + (CLS_DECK,))  # (the ground's run may get a cap: paved, or a bare deck)
     F["deck"], F["bld"] = deck, bld
     F["at"] = (region[0], region[2])
     return F
@@ -432,7 +416,7 @@ def report(root=".", windows=None, note=print):
     pub, tmp = root / "web/public/data", root / "data"
     meta = json.loads((pub / "meta.json").read_text())
     N, W, D, base = meta["tiles"]["N"], meta["W"], meta["D"], meta["base"]
-    paved = cap_ids(meta["palette"])
+    deckable = deck_ids(meta["palette"])
     qa_all = None
     if (tmp / "qa_roadmask.bin.gz").exists():
         qa_all = np.frombuffer(gzip.decompress((tmp / "qa_roadmask.bin.gz").read_bytes()), np.uint8).reshape(D, W)
@@ -457,7 +441,7 @@ def report(root=".", windows=None, note=print):
                 f = pub / "tiles" / "1" / f"{tx}_{ty}.bin"
                 if win.holds(ty * N, tx * N) and f.exists():
                     sec = tilefile.read(f, N)
-                    node_section(F, sec, ty * N, tx * N, N, D, W, paved, st)
+                    node_section(F, sec, ty * N, tx * N, N, D, W, deckable, st)
                     if roofs is not None and sec.get("roof"):
                         col, _, q = decode_roof(sec["roof"])
                         y, x = np.divmod(col, N + 2)
@@ -848,10 +832,6 @@ def roof_section(F, sec, r0, c0, N, D, W, s=1, stats=None):
 
 def main(argv):
     import json
-    if "--paved-ids" in argv:
-        pal = json.loads((__import__("pathlib").Path(__file__).parent / "palette.json").read_text())["palette"]
-        print(json.dumps([int(i) for i in np.nonzero(paved_ids(pal))[0]]))
-        return
     if "--report" in argv:
         import window as wmod
         windows = None
@@ -861,7 +841,7 @@ def main(argv):
         out = report(".", windows)
         raise SystemExit(0 if out else 1)
     print(__doc__)
-    print("usage: uv run python scripts/caps.py --paved-ids | --report [--windows NXxNY | --window-size METRES]")
+    print("usage: uv run python scripts/caps.py --report [--windows NXxNY | --window-size METRES]")
 
 
 if __name__ == "__main__":
