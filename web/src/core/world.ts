@@ -90,7 +90,10 @@ export class World {
   }
 
   // the top of the water at (x, r) as sim/river.ts WaterColumns asks it (the river traffic floats on it): the top of a
-  // water run reaching the ground's top (as VoxelCollision.waterColumn), -1 none; null: not loaded (or off the map)
+  // water run reaching the ground's top (as VoxelCollision.waterColumn), -1 none; null: not loaded (or off the map).
+  // The same at every level: a distance level's water block stands up to s - 1 m over the river (scripts/tiles.py),
+  // so there the top is the column's ground, the river's surface at 1 m (as the mesher draws it: mesher.worker.ts
+  // sink), where that lies within the block's top metres; a ship's height does not jump when its node is replaced
   waterColumn(x: number, r: number): { water: number } | null {
     const c = this.column(x, r);
     if (!c) return null;
@@ -100,7 +103,7 @@ export class World {
       const hi = (R[k * 3] + R[k * 3 + 1]) * n.s;
       if (this.wet[R[k * 3 + 2]] && hi >= g) water = Math.max(water, hi);
     }
-    return { water };
+    return { water: n.s > 1 && water >= 0 && g > water - n.s ? g : water };
   }
 
   groundAt(x: number, r: number) {

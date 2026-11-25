@@ -93,9 +93,6 @@ Open points left by landed engine work:
   (`web/tools/mirror-golden.json`) is of one data build: after a rebuild, check the drawing, then `--write-golden`.
 - **Timing (M4, M5):** worker alpha one update behind, no teleport counter; inputs not buffered by tick;
   `life.update`'s viewer is last frame's camera.
-- **Ships:** a ship's height jumps when its node is replaced: `World.waterColumn` takes the top from whichever node is
-  loaded (an 8 m node about 4 m higher than a 1 m node), and the fallback "any vessel's last top" can come from
-  another reach (about 9 m). Fix: take the top from level-1 nodes only, or the voxel's real top.
 - **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; no gate
   for `impact`; the parked-car cap (8/24) sits beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence;
   the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
