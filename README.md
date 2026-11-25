@@ -198,8 +198,9 @@ save the whole volume (`data/cache/final_vol.npy`, for `traffic.py` run alone).
 
 - **Buildings.** OSM outlines are moved onto the LoD2 footprints (OSM stands ~3 m off the Bavarian data here);
   buildings LoD2 has and OSM lacks (sheds, back houses) are added from LoD2. Roofs are LoD2's planes where they agree
-  with the surface model, otherwise the surface model; OSM's `height` wins only for spires the model under-samples and
-  for buildings that went up after the survey flight.
+  with the surface model or a crown the laser saw stands over them (walls and a tower's rim return as vegetation too,
+  so not beside LoD2's own higher part), otherwise the surface model; OSM's `height` wins only for spires the model
+  under-samples and for buildings that went up after the survey flight.
 - **Rivers.** OSM's multipolygons of the Danube and the Ilz are cut by the map edge and do not close, so the rivers are
   taken from the terrain model: flat cells at the water's level. Each river keeps its own colour from the orthophoto
   (the Danube dark green, the Inn milky jade, the Ilz peat-dark), smoothed over ~50 m.

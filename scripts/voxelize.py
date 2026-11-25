@@ -1445,6 +1445,21 @@ def buildings(ctx):
     # to whole metres reads as noise there -- every roof a mottle of light and dark voxels. Shipped per column (plane_codes)
     ROOF_GX = np.full((D, W), np.nan, np.float32)
     ROOF_GY = np.full((D, W), np.nan, np.float32)
+    # the laser's crowns (scripts/laser.py, leaf-off 2021): canopy returns in a blob 3 cells across (walls, ledges and
+    # a tower's rim return as vegetation too, in lines along them), its holes closed; the highest vegetation return (m)
+    CROWN_TOP = None
+    if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
+        _lz = region.load_npz("data/laser.npz", ["veg_top", "n_canopy"])
+        _crown = ndimage.binary_opening(_lz["n_canopy"] > 0, np.ones((3, 3), bool))
+        CROWN_TOP = np.where(_crown | ndimage.binary_closing(_crown), _lz["veg_top"] / 10, 0).astype(np.float32)
+        del _lz, _crown
+
+    def crowns_over(lz, top):
+        """the cells whose top is a crown over the roof lz: the laser's vegetation 2 m and more over it and within 4 m
+        of the surface model's top (the trees grew from 2021 to the 2024 flight)"""
+        if CROWN_TOP is None:
+            return np.zeros((D, W), bool)
+        return (CROWN_TOP > 0) & (CROWN_TOP >= lz + 2) & (CROWN_TOP >= top - 4)
 
     def lod2_roofs(top):
         """The roofs of the LoD2 building models (scripts/lod2.py: planes fitted to the laser scan per building -- ridges,
@@ -1452,8 +1467,9 @@ def buildings(ctx):
         pitched roof every 1 m sample is a step of its own, so the old town's roofs were grey terraces and blobs; the
         planes give each a clean slope up to a straight ridge. Per cell: the LoD2 roof within 3.5 m of the surface model;
         or off it in a patch of under 30 cells (a chimney, an aerial, a crown over the roof up to 6 m above it; a notch
-        where the samples fell down a wall). A tower or a spire LoD2 lacks (a big patch above it, OSM's heights) and a
-        building LoD2 does not know keep the surface model.
+        where the samples fell down a wall); or under a crown the laser saw, whatever its size. A tower or a spire LoD2
+        lacks (a big patch above it with no vegetation returns, OSM's heights) and a building LoD2 does not know keep
+        the surface model.
         Returns the cells of pitched roofs (a slope of 0.3 or more) taken from LoD2."""
         if LOD2 is None:
             note("no data/lod2.npz (scripts/lod2.py): roofs from the surface model only")
@@ -1480,6 +1496,12 @@ def buildings(ctx):
             lab, n = ndimage.label(off)
             if n:
                 use |= off & np.r_[False, ndimage.sum(off, lab, range(1, n + 1)) < cap][lab]
+        # a crown over the roof is no tower, whatever its size: LoD2's roof under it (a tree over a low house stood as a
+        # tower of 20 m with the trunks inside and no wall on its inner side). Not where LoD2 itself stands that high
+        # within 2 m: the surface model's step a cell or two off LoD2's, where walls and ledges return as vegetation too
+        # (a church tower's rim, a step between two roofs)
+        lz_near = ndimage.maximum_filter(np.where(np.isfinite(lz), lz, -1e9), size=5)
+        use |= cand & (dlt > 3.5) & crowns_over(lz, top_dsm) & (lz_near < top_dsm - 3.5)
         # a building the two disagree on over half its roof (rebuilt since one of them, a courtyard roofed over): all of it
         # from the surface model -- patches of planes among the stepped samples read as rubble
         n_rev = 0
@@ -1499,6 +1521,11 @@ def buildings(ctx):
         report["counters"]["lod2_roofs"] = dict(used=used, total=total)
         note("LoD2 roofs taken:", used, "of", total, "building cells; pitched:", int(pitched.sum()),
              "; buildings left to the surface model:", n_rev)
+        # building cells standing 6 m or more over their LoD2 roof where the laser's top is a crown (check.py verify)
+        high = (cand & (top - lz >= 6) & crowns_over(lz, top))[core_slice]
+        report["counters"]["crown_roofs"] = dict(left=int(high.sum()), cells=int(bmask[core_slice].sum()))
+        note("building cells 6 m or more over their LoD2 roof under a crown (not taken: LoD2 as high within 2 m):",
+             int(high.sum()))
         return pitched
 
     def dsm_pitched_roofs(top):
