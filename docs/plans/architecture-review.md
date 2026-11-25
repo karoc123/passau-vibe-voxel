@@ -4,7 +4,7 @@ Status: review only, nothing built. Main `2b73ca1c` (after E14 lean), 2026-11-24
 gate added. File:line of `web/src/` at that commit. Target: the owner's direction of 2026-11-24
 ([handoff](handoff-refactor-todos.md)): stable, separated, more multiplayer-ready; no game rules, UI or lag tuning.
 Builds on ADR [0006](../adr/0006-world-sim-seam.md), [0007](../adr/0007-player-control-in-world-sim.md),
-[0008](../adr/0008-server-vision.md), [local-server.md](local-server.md), [entities-and-modes.md](entities-and-modes.md),
+[0008](../adr/0008-server-vision.md), local-server.md (E9 plan, deleted; in git at `b5483793`), [entities-and-modes.md](entities-and-modes.md),
 [smooth-motion-and-lag.md](smooth-motion-and-lag.md). It does not repeat their packages (E15–E21, M2–M10); it lists
 what they leave open structurally.
 

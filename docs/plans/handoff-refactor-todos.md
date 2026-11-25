@@ -126,7 +126,7 @@ E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a fro
 `sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
 with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
 
-E9 landed (merge after `6ab2e094`, plan and measurements in `docs/plans/local-server.md`): the page holds only a
+E9 landed (merge after `6ab2e094`, plan and measurements in `docs/plans/local-server.md`, deleted; in git at `b5483793`): the page holds only a
 `SimClient` (`sim/sim-client.ts`): `SimCommand`s as plain data, queued and applied at the start of the next update,
 `CommandResult`s for refusable commands, `TrafficView`/`CraftView` for drawing. `LocalSimClient` (default, page thread),
 `MirrorSimClient` over snapshots (`sim/snapshot.ts`, `TrafficMirror`) via `ThreadLink` (`?mirror=1`) or `WorkerLink`
@@ -339,5 +339,5 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 - **Road spots the general fixes do not reach:** see [road-defects.md](road-defects.md). They are road 1360 under a
   building, Bräugasse, Triftsperrstraße, the Schulstraße kink, road 2510, Steffelmühlweg, and bridges without a deck
   over water (Fritz-Abelein-Brücke, Triftsperre).
-- **Aircraft:** wings do not collide. The floatplane's streaming measurement (phase 4 in [plane.md](plane.md)) is
-  not done.
+- **Aircraft:** wings do not collide. The floatplane's streaming measurement (does tile streaming keep up at ~245 km/h;
+  if not, `focus()` 2 s ahead of the plane) is not done.

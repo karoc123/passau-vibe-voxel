@@ -3,7 +3,7 @@
 Status: M1 and M3 built (section 4); the rest is research and design. Reference case: the driven car judders ("set back, then jumps forward",
 worse with speed), with the sim in the page's thread and with `?worker=1`. Target: [ADR 0008](../adr/0008-server-vision.md)
 (an authoritative server, 10–50 players), on [ADR 0006](../adr/0006-world-sim-seam.md),
-[ADR 0007](../adr/0007-player-control-in-world-sim.md), [local-server.md](local-server.md) and
+[ADR 0007](../adr/0007-player-control-in-world-sim.md), local-server.md (E9 plan, deleted; in git at `b5483793`) and
 [entities-and-modes.md](entities-and-modes.md) (section 4, E13, E17–E19). File:line of `web/src/` at main `b8f769a7`.
 
 ## 1. The reference case

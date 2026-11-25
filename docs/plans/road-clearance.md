@@ -1,6 +1,6 @@
 # Carriageways a car can drive: clearance scan, classes, general fixes
 
-Branch `clearance`. Follows [life-physics.md](life-physics.md). Its scan found solid voxels in a car's body space on
+Branch `clearance`. Follows life-physics.md (deleted; in git at `b5483793`; its rules are in README "Driving"). Its scan found solid voxels in a car's body space on
 0.63 % of the road centreline. Kinematic traffic drives through such places; a Rapier car, physical traffic or the
 player gets stuck there.
 

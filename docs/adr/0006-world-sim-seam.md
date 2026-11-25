@@ -2,8 +2,7 @@
 
 Status: accepted. World sim: `web/src/sim/world-sim.ts` (`WorldSim`, its host), `web/src/sim/traffic.ts`, `web/src/sim/train-traffic.ts`,
 `web/src/sim/boat-traffic.ts` and `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). Presentation: `web/src/view/life.ts` (`StreetLife`). Checks:
-`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism). Plan and measurements:
-`docs/plans/life-physics.md`.
+`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism).
 
 ## Context
 
@@ -38,11 +37,12 @@ two runs differed.
   build of Rapier; across machines would need Rapier's enhanced-determinism build, not tried).
 - **Inputs** (all through `WorldSim`): the hour and day, the focus (what is simulated) and the viewer (where agents may
   come and go unseen), the edited boxes (`WorldSim.edited`, from `core/live-edits.ts` in `main.ts`), the ground and
-  water (`WorldSim.setWorld`: `world.ts` World), the tiles (injected loader or cache), and the players' commands keyed
-  by player id (`WorldSim.send`, `sim/commands.ts`: `follow`; a seat on an entity, one a player: the driver's with
-  `takeWheel`, `drive`, `resetDriver`, the walked person's with `walkAs`, `walkPose`, a craft's with `enterCraft`,
-  `craftInput`; `leaveSeat`; the viewer's player is the client's `LOCAL_PLAYER`, nav/player.ts). The traffic keeps
-  what players follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
+  water (`WorldSim.setWorld`: `core/world.ts` World), the tiles (injected loader or cache), and the players' commands
+  keyed by player id (`WorldSim.send`, `sim/contract/commands.ts`: `follow`; a seat on an entity, one a player: the
+  driver's with `takeWheel`, `drive`, `resetDriver`, the walked person's with `walkAs`, `walkPose`, a craft's with
+  `enterCraft`, `craftInput`; `leaveSeat`; the host names the page's player, `PAGE_PLAYER` in `host/sim-host.ts`, and
+  the server's `Session` (`sim/server/sim-server.ts`) stamps it on every command). The traffic keeps what players
+  follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.
 - **The world's edits** (`core/world-edits.ts`, ADR 0001) are kept by the world sim: `update` drops an edited node no
   player's focus has been near for a while (`sim/edit-keeper.ts`, `Tuning.edits`), before its ticks.

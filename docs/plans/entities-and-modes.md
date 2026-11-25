@@ -3,7 +3,7 @@
 Status: E10, E11, E12, E13, E14 (lean) landed (section 5); the rest is design. Target: [ADR 0008](../adr/0008-server-vision.md) ("A first game, as direction": the
 rules of a game are a mode layered on the world sim; the sim offers entities with ids, seats, health and items), on
 [ADR 0006](../adr/0006-world-sim-seam.md), [ADR 0007](../adr/0007-player-control-in-world-sim.md) and
-[local-server.md](local-server.md) (E9). Assumes E7 (commands queued per tick, one seat per player, `leaveSeat`, seat
+local-server.md (E9 plan, deleted; in git at `b5483793`) (E9). Assumes E7 (commands queued per tick, one seat per player, `leaveSeat`, seat
 table in `WorldSim`) lands first and E8 (a left vehicle stays in the world, can be entered) in whatever shape it takes:
 nothing below depends on E8's internals, only on "an entity with no occupied seat stays until the presence rule drops
 it". File:line of `web/src/` at main `69d7ad6e` in sections 0-3 (the state before E7-E12: kept as the design's

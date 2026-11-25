@@ -49,7 +49,7 @@ meshed, collided and written like a pipeline node, and an unedited node re-encod
   try it.
 - **Distance levels (2, 4, 8 m) never show L2.** They show L0; L1 there needs a downsampled L1 from the server
   (not built; `effectiveColumns` refuses persistent edits on them for now).
-- **Core without three.js or the DOM.** `web/src/core/` imports only `tile-data.ts`, so the viewer, the node tools and
+- **Core without three.js or the DOM.** `web/src/core/` imports nothing outside itself (the node decoder is `core/tile-data.ts`), so the viewer, the node tools and
   a Node server share one implementation. `web/tools/core-deps.mjs` checks it (no three.js, `util.ts`, `voxelMaterial.ts`
   or DOM global, transitively). The material ids are `core/materials.ts`; what a palette entry is to the physics,
   collision and walkers is `core/semantics.ts` (one flag table, each reader's rule named: `solidForCar`, ...).
