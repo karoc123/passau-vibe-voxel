@@ -19,7 +19,7 @@
 // No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/plans/architecture-review.md
 // section 3, layer 4b): the in-thread client and link are given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
-import { liveEdits } from '../core/live-edits';
+import { LiveEdits } from '../core/live-edits';
 import type { Ground } from '../sim/traffic';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
@@ -91,8 +91,13 @@ export interface SimClient {
   craftEvents(): CraftEventOf[];
   /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
-  /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied */
+  /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied (in the first tick
+   * after the host has its nodes in) */
   edit(op: WorldOp): Promise<[number, number][]>;
+  /** the world's edited nodes as this client sees them (core/live-edits.ts): what the page's streamer and TileCache
+   * read. A client of another thread fills its own from the snapshots; in the sim's own thread the app hands it the
+   * world's (one world per process, ADR 0008) */
+  readonly edits: LiveEdits;
 }
 
 /** what the in-thread client and link use of a session of the server in the page's thread (sim/server/sim-server.ts
@@ -134,8 +139,9 @@ export class LocalSimClient implements SimClient {
   // the host's hello refused (the session left)
   private readonly refused: Error | null;
 
-  /** mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded) */
-  constructor(private readonly session: InThreadSession, mine: Hello) {
+  /** mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded); edits: the world's live
+   * edits, handed by the app (the sim is in this thread; without, an empty set of its own: a tool that draws nothing) */
+  constructor(private readonly session: InThreadSession, mine: Hello, readonly edits: LiveEdits = new LiveEdits()) {
     this.refused = checkHello(session.hello, mine);
     if (this.refused) session.leave();
     this.hello = this.refused ? Promise.reject(this.refused) : Promise.resolve(session.hello);
@@ -302,10 +308,11 @@ export class MirrorSimClient implements SimClient {
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
-   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread); mine: the
-   * client's own hello (sim/hello.ts hello: this code, the build the app loaded) */
-  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly edits: boolean,
-    private readonly mine: Hello) {
+   * mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded); edits: the client's live
+   * edits, the snapshots' edits put into them (a server that tracks the world's edits sends them: a worker's; one in
+   * this thread sends none, its client is handed the world's own) */
+  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
+    readonly edits: LiveEdits = new LiveEdits()) {
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
     link.onHello = (h) => this.greet(h);
@@ -356,7 +363,7 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     if (!this.greeted) { this.refuse(new Error('sim: host refused: a snapshot came before its hello')); return; }
     this.last = s;
-    if (this.edits) for (const e of s.edits) liveEdits.set(e.tx, e.ty, e.node, e.region);
+    for (const e of s.edits) this.edits.set(e.tx, e.ty, e.node, e.region);
     this.traffic.apply(s);
     this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;

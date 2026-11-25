@@ -15,6 +15,8 @@ import type { BoatData } from '../sim/boat-traffic';
 import { unpackTraffic } from '../sim/traffic-pack';
 import type { TrafficData } from '../sim/types';
 import { hostSim, type HostData, type HostOptions, type HostPorts } from './sim-host';
+// (for the Node tools, which load each module graph apart: this graph's world edits, e.g. dropAll between hosts)
+export * as worldEdits from '../core/world-edits';
 
 interface NodeFs { readFileSync(p: string): Uint8Array; readFileSync(p: string, enc: 'utf8'): string; existsSync(p: string): boolean }
 interface NodeZlib { gunzipSync(b: Uint8Array): Uint8Array }

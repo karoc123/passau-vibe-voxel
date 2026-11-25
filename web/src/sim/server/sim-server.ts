@@ -1,18 +1,21 @@
 // The server side of a SimClient (client/sim-client.ts; ADR 0008): the world sim, the game mode made
-// (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, the world's edits applied at the start of
-// the next update if the mode allows them (mayEdit), and the connections to it: one Session each
-// (docs/plans/architecture-review.md F2, A7). Run in the page's thread (LocalSimClient, MirrorSimClient over a
-// ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
+// (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, and the connections to it: one Session
+// each (docs/plans/architecture-review.md F2, A7). An edit is a player's command like the others, held here until the
+// level-1 nodes it touches are in the world's TileCache (EditTiles: core/world-edits.ts ready), then sent on to the
+// sim, which applies it in its next tick if the mode allows it (WorldSim.apply, mayEdit). Run in the page's
+// thread (LocalSimClient, MirrorSimClient over a ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no
+// DOM (tools/core-deps.mjs).
 //   SimServer  the world's: hello (what each session is told first: sim/contract/hello.ts; the protocol, the data build
-//              the host loaded, the tuning's hash); connect(player) a session for a player the host names; update (the edits sent, then the
-//              world sim's update); trackEdits (the world's edits go with every session's snapshots)
+//              the host loaded, the tuning's hash); connect(player) a session for a player the host names; update (the
+//              world sim's update); trackEdits (the world's edits go with every session's snapshots); dispose (its
+//              listeners and the host's removed: onDispose)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
 //              one), and what the connection has read: the events (its last snapshot's tick), the outcomes of its
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
 //              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
 import { liveEdits } from '../../core/live-edits';
-import { apply as applyEdit } from '../../core/world-edits';
+import { ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
 import type { Hello } from '../contract/hello';
@@ -30,19 +33,32 @@ import type { WorldSim } from '../world-sim';
 
 type Edit = Extract<SimCommand, { kind: 'edit' }>;
 
+/** the host's tiles for the edits (the port; by default the world's, core/world-edits.ts touched, ready): the level-1
+ * nodes an op touches (throws: none known), and those nodes held in the world's TileCache, resolved once each is in
+ * or has failed, to their release */
+export interface EditTiles {
+  nodes(op: WorldOp): [number, number][];
+  ready(nodes: readonly [number, number][]): Promise<() => void>;
+}
+const WORLD_TILES: EditTiles = { nodes: touched, ready };
+
 export class SimServer {
-  // the edits sent, applied at the start of the next update, with the session each came through
-  private queue: { from: Session; cmd: Edit }[] = [];
   private readonly sessions = new Set<Session>();
   // the world's edits go with the snapshots (a client in another thread)
   private tracking = false;
+  // the edits held until their nodes are in, in the order sent: each sent on to the sim after the one before
+  private held: Promise<unknown> = Promise.resolve();
+  // what dispose undoes (the listeners added)
+  private readonly disposers: (() => void)[] = [];
 
   /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
   readonly hello: Hello;
 
   /** mode: the game's rules (the sim's from now on: WorldSim.mode; null: none, every seat may be taken, every request
-   * and edit refused); build: the data build the host loaded (host/sim-host.ts hostSim: checkBuild; null: none said) */
-  constructor(readonly sim: WorldSim, mode: GameMode | null = sandbox(), build: DataBuild | null = null) {
+   * and edit refused); build: the data build the host loaded (host/sim-host.ts hostSim: checkBuild; null: none said);
+   * tiles: where an edit's nodes are made ready (the world's TileCache) */
+  constructor(readonly sim: WorldSim, mode: GameMode | null = sandbox(), build: DataBuild | null = null,
+    private readonly tiles: EditTiles = WORLD_TILES) {
     sim.mode = mode;
     this.hello = hello(build, sim.tuning);
   }
@@ -58,7 +74,6 @@ export class SimServer {
   /** the session gone (Session.leave); the last of its player: the player leaves their seat and follows nothing */
   disconnect(session: Session) {
     if (!this.sessions.delete(session)) return;
-    this.queue = this.queue.filter((q) => q.from !== session);
     for (const s of this.sessions) if (s.player === session.player) return;
     this.sim.send(session.player, { kind: 'leaveSeat' });
     this.sim.send(session.player, { kind: 'follow', entity: null });
@@ -69,31 +84,29 @@ export class SimServer {
     if (this.tracking) return;
     this.tracking = true;
     for (const s of this.sessions) s.edits ??= [];
-    liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); });
+    this.disposers.push(liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); }));
   }
 
-  /** the edits sent applied, then the sim's update (its commands first, then the ticks due after dt s) */
-  update(dt: number, input: SimInput) {
-    const q = this.queue;
-    this.queue = [];
-    for (const { from, cmd } of q) this.edit(from, cmd);
-    this.sim.update(dt, input);
+  /** the sim's update (its commands first, then the ticks due after dt s) */
+  update(dt: number, input: SimInput) { this.sim.update(dt, input); }
+
+  /** (Session.send) an edit held until its nodes are in (after the edits sent before it), then sent on to the sim for
+   * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied */
+  holdEdit(from: Session, cmd: Edit) {
+    let nodes: [number, number][] = [];
+    try { nodes = this.tiles.nodes(cmd.op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
+    const ready = this.tiles.ready(nodes).catch(() => () => {});
+    this.held = this.held.then(() => ready).then((release) => {
+      if (!this.sessions.has(from)) { release(); return; }
+      this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) from.edited(r); });
+    });
   }
 
-  /** (Session.send) an edit kept for the next update */
-  queueEdit(from: Session, cmd: Edit) { this.queue.push({ from, cmd }); }
+  /** f done on dispose (the host's listeners on the world) */
+  onDispose(f: () => void) { this.disposers.push(f); }
 
-  // an edit applied to the world's voxels (core/world-edits.ts) if the mode allows it for the session's player; its
-  // outcome the session's once done
-  private edit(from: Session, cmd: Edit) {
-    const tick = this.sim.tick, ref = cmd.ref ?? 0, mode = this.sim.mode;
-    if (!mode?.mayEdit?.(this.sim.modeWorld, from.player, cmd.op)) {
-      from.edited({ tick, kind: 'edit', ok: false, ref }, null, new Error('edit not allowed'));
-      return;
-    }
-    applyEdit(cmd.op).then((nodes) => from.edited({ tick, kind: 'edit', ok: nodes.length > 0, ref, nodes }, nodes),
-      (e) => from.edited({ tick, kind: 'edit', ok: false, ref }, null, e));
-  }
+  /** the server's listeners and those given to onDispose removed (a host done with its world: a tool starting several) */
+  dispose() { for (const f of this.disposers.splice(0)) f(); }
 }
 
 /** one connection to a SimServer (SimServer.connect): its player, and what it has read */
@@ -110,7 +123,7 @@ export class Session {
   private acked: Ack | null = null;
   /** the world's edits since the last snapshot, when tracked (SimServer.trackEdits) */
   edits: EditNote[] | null = null;
-  /** an edit's answer, by its ref: the nodes changed (null: it failed) */
+  /** an edit's answer, by its ref, in the tick that applied it: the nodes changed (null: it was not made) */
   onEdit: ((ref: number, nodes: [number, number][] | null, error?: unknown) => void) | null = null;
 
   /** (made by SimServer.connect) */
@@ -120,10 +133,11 @@ export class Session {
   /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
   get hello(): Hello { return this.server.hello; }
 
-  /** a command, the session's player's: to the world sim (a seat input's ack the session's), an edit kept for the
-   * next update. Whatever player a command claims (none on the wire), it is this session's that acts */
+  /** a command, the session's player's: to the world sim (a seat input's ack the session's), an edit once its nodes
+   * are in (SimServer.holdEdit; its outcome the session's). Whatever player a command claims (none on the wire), it
+   * is this session's that acts */
   send(cmd: SimCommand) {
-    if (cmd.kind === 'edit') { this.server.queueEdit(this, cmd); return; }
+    if (cmd.kind === 'edit') { this.server.holdEdit(this, cmd); return; }
     const seq = cmd.kind === 'seatInput' ? cmd.seq : undefined;
     this.sim.send(this.player, cmd, seq === undefined ? undefined : (tick) => { this.acked = { seq, tick }; });
   }
@@ -149,10 +163,11 @@ export class Session {
     return mine.concat(edits);
   }
 
-  /** (SimServer) an edit's outcome, the session's own */
-  edited(r: CommandResult, nodes: [number, number][] | null, error?: unknown) {
+  /** (SimServer) an edit's outcome, the session's own (its nodes: none, it was not made: refused by the mode, or no
+   * world to edit) */
+  edited(r: CommandResult) {
     this.editOutcomes.push(r);
-    this.onEdit?.(r.ref ?? 0, nodes, error);
+    this.onEdit?.(r.ref ?? 0, r.nodes ?? null, r.nodes ? undefined : new Error('edit not allowed'));
   }
 
   /** the last seat input sent through this session that the player's seat took (seq, the tick it was applied in) */

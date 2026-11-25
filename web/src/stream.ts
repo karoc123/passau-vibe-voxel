@@ -4,7 +4,7 @@ import type { MeshOut, MeshRequest, MeshReply, SectionMeshes } from './mesher.wo
 import { roomOffsets, type Columns, type Fields } from './core/tile-data';
 import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
-import { liveEdits, type LiveNode, type Region } from './core/live-edits';
+import type { LiveEdits, LiveNode, Region } from './core/live-edits';
 import { viewerTileCache } from './viewer-tiles';
 import { hotBox, perSide, union, type Box } from './sections';
 
@@ -197,7 +197,7 @@ export class TileStreamer implements ColumnSource {
   // what the tiles are meshed with (tile-request.ts)
   private readonly ctx: TileContext;
 
-  constructor(readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene) {
+  constructor(readonly meta: Meta, private readonly material: THREE.Material, scene: THREE.Scene, private readonly edits: LiveEdits) {
     this.N = meta.tiles.N;
     this.levels = meta.tiles.levels.map((l) => l.s).sort((a, b) => b - a);
     this.dims = Object.fromEntries(meta.tiles.levels.map((l) => [l.s, l]));
@@ -205,8 +205,8 @@ export class TileStreamer implements ColumnSource {
     scene.add(this.group);
     this.spawn();
     this.world = new World(this, meta);
-    // (the world's edits, wherever they come from: core/world-edits.ts)
-    liveEdits.listen((tx, ty, live, region) => this.onLive(tx, ty, live, region));
+    // (the world's edits as the page's client sees them: SimClient.edits, handed by the app)
+    edits.listen((tx, ty, live, region) => this.onLive(tx, ty, live, region));
   }
 
   columns(key: string) { return this.nodes.get(key)?.data; }
@@ -442,7 +442,7 @@ export class TileStreamer implements ColumnSource {
       n.state = 'ready';
       if (re) this.recover(n);
       // (the world's edit of it changed while it was on its way: shown now)
-      if (n.s === 1 && (n.shows ?? null) !== (liveEdits.get(n.tx, n.ty) ?? null)) this.onLive(n.tx, n.ty, liveEdits.get(n.tx, n.ty) ?? null, null);
+      if (n.s === 1 && (n.shows ?? null) !== (this.edits.get(n.tx, n.ty) ?? null)) this.onLive(n.tx, n.ty, this.edits.get(n.tx, n.ty) ?? null, null);
       // (edited while it was being meshed from the columns before: again, in place)
       if (n.again) { n.again = false; this.remeshEdited(n); }
       n.job.resolve();
@@ -458,15 +458,15 @@ export class TileStreamer implements ColumnSource {
     if (live) { this.replaceColumns(key, live.base, live.foliage as Columns | null, region, live); return; }
     const n = this.nodes.get(key), f = this.nodes.get(`f/${tx}_${ty}`);
     if (!n?.shows && !f?.shows) return;
-    const cache = viewerTileCache(this.N);
+    const cache = viewerTileCache(this.N, this.edits);
     cache.acquire(tx, ty).then((v) => {
-      try { if (!liveEdits.get(tx, ty)) this.replaceColumns(key, v.base, v.foliage as Columns, null, null); } finally { cache.release(tx, ty); }
+      try { if (!this.edits.get(tx, ty)) this.replaceColumns(key, v.base, v.foliage as Columns, null, null); } finally { cache.release(tx, ty); }
     }, (e) => console.warn(`${key}: its files again`, e));
   }
 
   // a level-1 tile about to be meshed takes the world's edit of it, if it is not what it has (true: it does now)
   private syncLive(n: TileNode) {
-    const live = liveEdits.get(n.tx, n.ty);
+    const live = this.edits.get(n.tx, n.ty);
     if (!live || n.shows === live) return !!live && !!n.edited;
     const cols = n.foliage ? live.foliage : live.base;
     if (!cols) return false;

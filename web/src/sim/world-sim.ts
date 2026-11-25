@@ -7,7 +7,8 @@
 //             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
 //             water); the players' commands (sim/contract/commands.ts PlayerCommand, sent for a player id: send; the
 //             host stamps the id, sim/server/sim-server.ts Session), queued and applied in order at the start of the next tick
-//             (apply: the one place a seat is taken or left);
+//             (apply: the one place a seat is taken or left, and the world's voxels are edited: an edit, if the
+//             mode's mayEdit allows it, core/world-edits.ts applyNow, its nodes held in by the host before);
 //             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
 //             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
 //             commands; without one, every seat may be taken and every request is refused)
@@ -29,6 +30,7 @@
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
+import { applyNow as applyEdit } from '../core/world-edits';
 import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
@@ -67,8 +69,9 @@ type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown 
 type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> : never) : never;
 
 // a command queued: for whom (the host's stamp), and what its sender is told when a seat input of it is taken (the
-// tick it is applied in: a session's ack)
-interface Queued { player: PlayerId; cmd: PlayerCommand; taken?: (tick: number) => void }
+// tick it is applied in: a session's ack) or an edit of it applied (the tick, its outcome: the sender's own)
+type Taken = (tick: number, r?: CommandResult) => void;
+interface Queued { player: PlayerId; cmd: PlayerCommand; taken?: Taken }
 
 export class WorldSim {
   readonly traffic: Traffic;
@@ -290,8 +293,10 @@ export class WorldSim {
 
   /** player's command (player: the host's stamp, never a client's word), applied at the start of the next tick
    * (after those sent before it); taken: told the tick a seat input with a seq is applied in, if the seat held takes
-   * it (its sender's ack) */
-  send(player: PlayerId, cmd: PlayerCommand, taken?: (tick: number) => void) { this.queue.push({ player, cmd, taken }); }
+   * it (its sender's ack), and the tick an edit is applied in with its outcome (the sender's alone; without taken, the
+   * player's outcomes). An edit's nodes are to be in the world's TileCache by then (core/world-edits.ts ready: the
+   * host's, sim/server/sim-server.ts): a node not in is left out */
+  send(player: PlayerId, cmd: PlayerCommand, taken?: Taken) { this.queue.push({ player, cmd, taken }); }
 
   /** the seat the player holds (its entity in the world), or null */
   seat(player: PlayerId): Seat | null {
@@ -320,6 +325,15 @@ export class WorldSim {
       }
       case 'request': this.result(p, cmd.request.kind, !!this.mode?.request(this.face, p, cmd.request)); break;
       case 'leaveSeat': this.leaveSeat(p); break;
+      case 'edit': {
+        const r: CommandResult = { tick: this.tick, kind: 'edit', ok: false, ref: cmd.ref ?? 0 };
+        if (this.mode?.mayEdit?.(this.face, p, cmd.op)) {
+          // (the world's voxels changed now: its listeners hear of it in this tick, the sim's edited among them)
+          try { r.nodes = applyEdit(cmd.op); r.ok = r.nodes.length > 0; } catch { r.ok = false; }
+        }
+        if (taken) taken(this.tick + 1, r); else this.outcomes.push({ at: this.tick + 1, player: p, r });
+        break;
+      }
     }
   }
 

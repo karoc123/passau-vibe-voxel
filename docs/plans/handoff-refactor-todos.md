@@ -49,7 +49,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A8, A9, A11 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | A9 in progress; A8, A11 after it |
+| A8, A11 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | **Ready**, one at a time |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -84,13 +84,13 @@ Left:
 
 ## Engine packages
 
-Target: ADR 0006, 0007 and [ADR 0008](../adr/0008-server-vision.md). The architecture packages (A8, A9,
+Target: ADR 0006, 0007 and [ADR 0008](../adr/0008-server-vision.md). The architecture packages (A8,
 A11), their order and what landed are in [architecture-review.md](architecture-review.md); the commits are in
 `git log`. Open points left by landed engine work:
 
 - **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
-  temporary damage needs the TileCache to expose a node's raw files; `initWorldEdits` is still called by `dig.ts`;
-  `hostSim` never removes its `liveEdits` listener (A9).
+  temporary damage needs the TileCache to expose a node's raw files;
+  an edit's nodes are loaded before the mode is asked in its tick (a refused one loads them too), and `tileWorld` never removes its `cache.edits` listener.
 - **Wire:** worker not default (waits for prediction); no interest filter per client; snapshots are plain objects
   (no typed arrays or deltas); a Rapier body through the mirror lerps instead of slerping (A11); the worker's ground
   is level-1 nodes only and decodes nodes the page also decodes; Rapier is bundled twice; no gated run carries body poses, the driver snapshot or edit notes over the clone link.

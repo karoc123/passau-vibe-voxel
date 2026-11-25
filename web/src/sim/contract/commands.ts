@@ -11,9 +11,8 @@ import type { CarInput, PilotInput } from './inputs';
 import type { WalkPose } from './pose';
 import type { EntityRef, CraftType, Role, VehicleId } from './ids';
 
-/** what the page sends: a player's command to the world sim (PlayerCommand: applied at the start of the sim's next
- * tick, in order), or an edit, a change to the world's voxels (core/world-edits.ts) */
-export type SimCommand = PlayerCommand | { kind: 'edit'; op: WorldOp; ref?: number };
+/** what the page sends: a player's command to the world sim (PlayerCommand) */
+export type SimCommand = PlayerCommand;
 
 /** a player's command (the player: the session's it is sent through), applied at the start of the sim's next tick, in order:
  *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
@@ -29,13 +28,19 @@ export type SimCommand = PlayerCommand | { kind: 'edit'; op: WorldOp; ref?: numb
  *   leaveSeat     out of the seat held: the person walked back to the crowd's walk, the car parked where it is, the
  *                 craft left where it is, hands off (its core's neutral)
  *   request       what the player asks of the game mode (ModeRequest: a craft made, put down again, reset or
- *                 dropped; the car reset), granted or refused by it; its outcome a result of the request's kind */
+ *                 dropped; the car reset), granted or refused by it; its outcome a result of the request's kind
+ *   edit          a change to the world's voxels (op: core/world-edits.ts), made if the game mode allows it (mayEdit:
+ *                 sim/mode.ts). The host holds it until the level-1 nodes it touches are in (sim/server/sim-server.ts
+ *                 EditTiles) and then sends it on: it is applied at the start of the next tick run after that, so a
+ *                 tick or more after the commands sent with it. Its outcome (ref: the client's number for it; nodes:
+ *                 the level-1 nodes it changed) goes to the session it came through */
 export type PlayerCommand =
   | { kind: 'follow'; entity: EntityRef | null }
   | { kind: 'enterSeat'; entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }
   | ({ kind: 'seatInput'; seq?: number; tick?: number } & SeatInput)
   | { kind: 'leaveSeat' }
-  | { kind: 'request'; request: ModeRequest };
+  | { kind: 'request'; request: ModeRequest }
+  | { kind: 'edit'; op: WorldOp; ref?: number };
 
 /** a seat's input, by its role */
 export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: PilotInput } | { role: 'walker'; input: WalkPose };
@@ -43,7 +48,7 @@ export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; i
 /** what became of a command that can be refused (enterSeat, seatInput clamped, a request: by the request's kind, edit),
  * at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed */
 export interface CommandResult {
-  tick: number; kind: Exclude<PlayerCommand['kind'], 'request'> | ModeRequest['kind'] | 'edit'; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
+  tick: number; kind: Exclude<PlayerCommand['kind'], 'request'> | ModeRequest['kind']; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
 }
 
 /** what a player asks of the rules (a request command; its outcome is a result of the request's kind; the game mode,
