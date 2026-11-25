@@ -4,7 +4,7 @@
 #   overrides   scripts/overrides.py check: every per-object override valid (needs data/raw/osm.json; stale ones are
 #               printed, not failed)
 #   interiors   scripts/interiors.py --test: the synthetic checks of carving rooms
-#   lanes       scripts/traffic.py --lane-check: the lane spacing the same in traffic.py and web/src/sim/traffic.ts
+#   lanes       scripts/traffic.py --lane-check: the lane spacing the same in traffic.py and web/src/sim/road-net.ts
 # --fixture adds scripts/check.py verify: the hard checks on the fixture map's build (builds its workspace
 # data/check/<fixture>/base first where code or inputs changed: ~5 min from nothing, seconds when it is up to date).
 # usage: scripts/check.sh [--fixture]; a PASS / FAIL table with times, exit code 1 if a gate fails

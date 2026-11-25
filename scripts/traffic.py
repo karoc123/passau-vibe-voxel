@@ -357,7 +357,7 @@ def off_surface(surf, r, c, reach):
     return None
 
 
-# metres between the centres of two lanes of a road: web/src/sim/traffic.ts LANE_W must say the same (lane_check, run
+# metres between the centres of two lanes of a road: web/src/sim/road-net.ts LANE_W must say the same (lane_check, run
 # by scripts/check.sh), the cars drive the lanes the pipeline checks and places here
 LANE = 3.0
 
@@ -1018,15 +1018,15 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None, csolid=
 
 
 def lane_check():
-    """LANE against web/src/sim/traffic.ts LANE_W (the lanes the cars drive); 1 if they differ"""
+    """LANE against web/src/sim/road-net.ts LANE_W (the lanes the cars drive); 1 if they differ"""
     import re
     from pathlib import Path
-    ts = Path(__file__).resolve().parent.parent / "web/src/sim/traffic.ts"
+    ts = Path(__file__).resolve().parent.parent / "web/src/sim/road-net.ts"
     m = re.search(r"^const LANE_W = ([0-9.]+);", ts.read_text(), re.M)
     if not m or float(m.group(1)) != LANE:
         print(f"lane spacing: scripts/traffic.py LANE = {LANE}, {ts.name} LANE_W = {m.group(1) if m else 'not found'}")
         return 1
-    print(f"lane spacing: {LANE} m in scripts/traffic.py and web/src/sim/traffic.ts")
+    print(f"lane spacing: {LANE} m in scripts/traffic.py and web/src/sim/road-net.ts")
     return 0
 
 
