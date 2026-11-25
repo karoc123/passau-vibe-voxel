@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import type { CraftKind } from '../sim/craft/craft-motion';
+import { CRAFT_SCALE, type CraftKind } from '../sim/craft/craft-motion';
 
-// The crafts drawn from boxes, at the world's scale (1 unit = 1 m; the walker is 1.78 m, a car 4.6 m):
-// - hovercraft: a six-seat passenger hovercraft, 6.0 x 2.6 m, 1.9 m to the fan ducts' top over the skirt's foot;
-//   the origin 0.68 m over the surface it rides on (HOVER_HEIGHT), nose +z
-// - helicopter: a light four-seater (as an R44 / EC120): 10 m rotor, 8.4 m fuselage with the tail, 3.1 m to the
-//   rotor hub; the origin over the skids, their feet 1.1 m under it (SPAWN_HEIGHT)
+// The crafts drawn from boxes, at the world's scale (1 unit = 1 m; the walker is 1.78 m, a car 4.6 m, the bus 12 m).
+// The hovercraft and the helicopter are written below at a base size and drawn CRAFT_SCALE times that (craft-motion.ts;
+// their collision probes, craft-collision.ts, scale with them):
+// - hovercraft (x1.3): a passenger hovercraft, 7.8 x 3.4 m, 2.5 m to the fan ducts' top over the skirt's foot (base
+//   6.0 x 2.6 x 1.9); the origin HOVER_HEIGHT (0.88 m) over the surface it rides on, nose +z
+// - helicopter (x1.2): a light twin (as an H135/H145): 12 m rotor, 10.1 m fuselage with the tail, 3.7 m to the rotor
+//   hub (base 10 / 8.4 / 3.1); the origin over the skids, their feet SPAWN_HEIGHT (1.32 m) under it
 // - paraglider: a pilot seated in the harness under a 10 m arc of wing, its lines 6-7 m long; the origin at the feet
 //   (the motion's point is GLIDER_HEIGHT over them: special-craft.ts draws the model that much lower)
 // - drone: a 5-inch FPV quad, 0.25 m motor to motor; the origin its middle, nose -z (as its camera looks); drawn only
@@ -37,8 +39,8 @@ export function makeCraftModel(kind: CraftKind | 'drone'): CraftModel {
     return mesh;
   };
 
-  if (kind === 'hovercraft') return { group: hovercraft(group, part) };
-  if (kind === 'helicopter') return helicopter(group, part);
+  if (kind === 'hovercraft') { group.scale.setScalar(CRAFT_SCALE.hovercraft); return { group: hovercraft(group, part) }; }
+  if (kind === 'helicopter') { group.scale.setScalar(CRAFT_SCALE.helicopter); return helicopter(group, part); }
   if (kind === 'drone') return { group: drone(group, part) };
   return { group: paraglider(group, part, bar) };
 }
@@ -92,7 +94,7 @@ function helicopter(group: THREE.Group, part: Part) {
   part(group, PAINT, [0.12, 1.4, 0.75], 0, 1.15, -5.75);
   part(group, PAINT, [0.12, 0.5, 0.5], 0, 0.25, -5.85);
   part(group, WHITE, [1.8, 0.08, 0.45], 0, 0.62, -5.0);
-  // the main rotor: two crossed blades, 10 m, the hub 3.1 m over the ground
+  // the main rotor: two crossed blades, 10 m, the hub 3.1 m over the ground (before the scale)
   const rotor = new THREE.Group();
   rotor.position.y = 2.0;
   group.add(rotor);

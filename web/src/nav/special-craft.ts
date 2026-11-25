@@ -5,7 +5,7 @@ import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from '
 import type { CraftView } from '../client/sim-client';
 import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
-import { GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
+import { CRAFT_SCALE, GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
 import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT, type SpecialEvent } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
@@ -20,11 +20,13 @@ import './special-craft.css';
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
 // the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
-// `drop` m under the motion's point (the paraglider's is the pilot's middle, its model's origin the feet)
+// `drop` m under the motion's point (the paraglider's is the pilot's middle, its model's origin the feet); the
+// hovercraft's and the helicopter's framing scales with their models (CRAFT_SCALE), so they fill the view as before
+const HS = CRAFT_SCALE.hovercraft, CS = CRAFT_SCALE.helicopter;
 const CONFIG = {
-  hovercraft: { name: 'Hovercraft', back: 12, up: 4.5, look: 0.8, drop: 0,
+  hovercraft: { name: 'Hovercraft', back: 12 * HS, up: 4.5 * HS, look: 0.8 * HS, drop: 0,
     help: ['W/S thrust and reverse · A/D steer (it drifts) · Esc exit', 'Left stick: thrust, reverse and steer.'] },
-  helicopter: { name: 'Helicopter', back: 17, up: 6, look: 1.2, drop: 0,
+  helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
