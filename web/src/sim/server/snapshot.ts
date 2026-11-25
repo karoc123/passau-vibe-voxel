@@ -46,7 +46,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
   return {
-    tick: sim.tick, acc: T.acc, t: T.t, day: T.day, active: T.active && { x: T.active.x, z: T.active.z },
+    tick: sim.tick, acc: T.acc, t: T.t, hour: sim.timeOfDay.hour, day: T.day, active: T.active && { x: T.active.x, z: T.active.z },
     cars: T.cars.map((c) => pick(c, CAR_KEYS)), detached: T.detachedCars.map((c) => pick(c, CAR_KEYS)),
     people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
     bodies, trains: T.trains.save(),

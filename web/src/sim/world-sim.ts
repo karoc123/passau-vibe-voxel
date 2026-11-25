@@ -3,8 +3,9 @@
 // way. It owns the street traffic (traffic.ts, with the trains and the river boats) and, once loaded, the road physics
 // (physics/rapier/life-phys.ts, through the loader it is given: Rapier is loaded only when needed). No three.js, no
 // DOM, no fetch (tools/core-deps.mjs).
-//   inputs:   update(dt, { hour, day, focus, viewer }): the frame's time, run as whole world ticks (STEP; the rest
-//             carried to the next update: FrameTime's alpha); edited(box, cleared), setBoats, setWorld (ground and
+//   inputs:   update(dt): the frame's time, run as whole world ticks (STEP; the rest carried to the next update:
+//             FrameTime's alpha); setTime (the world's hour and day: the host's, or a mode's on a player's request);
+//             edited(box, cleared), setBoats, setWorld (ground and
 //             water); the players' commands (sim/contract/commands.ts PlayerCommand, sent for a player id: send; the
 //             host stamps the id, sim/server/sim-server.ts Session), queued and applied in order at the start of the next tick
 //             (apply: the one place a seat is taken or left, and the world's voxels are edited: an edit, if the
@@ -12,7 +13,8 @@
 //             the crafts made, put down and taken away (addCraft, placeCraft, removeCraft); the game mode (mode:
 //             sim/mode.ts, set by the host: whether a player may take a seat, the players' requests, applied with the
 //             commands; without one, every seat may be taken and every request is refused)
-//   owns:     the seat table (seat: one seat a player, one player a seat; the driver's car's state is the road
+//   owns:     the world's time of day (hour, day); each player's view (the active circle round the first player's
+//             focus; several circles are interest management, not yet); the seat table (seat: one seat a player, one player a seat; the driver's car's state is the road
 //             physics', a craft's pilot field follows the table); the walks' last poses (bounded: Tuning.walk);
 //             which of the world's edits are kept (sim/edit-keeper.ts: while a player is near them); the player
 //             crafts (sim/craft/craft-core.ts), each stepped in every world tick, STEP worth of its own fixed steps
@@ -40,20 +42,21 @@ import { vehicleOf } from './vehicles';
 import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
-import type { CommandResult, CraftSpot, PlayerCommand } from './contract/commands';
+import type { CommandResult, CraftSpot, PlayerCommand, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
-import { MAX_DT, type FrameTime, type SimInput } from './contract/inputs';
+import { MAX_DT, type FrameTime } from './contract/inputs';
 import { EVENT_TICKS, type SimEvent } from './contract/events';
-import type { DriverSnapshot } from './contract/snapshot';
+import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
 import { boundWalk } from './walk-bounds';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 
-/** what the sim keeps of a player: the entity followed (kept in the sim wherever it goes, no rights over it), the seat
- * held, and, walking as a person, the walk's poses taken (the walk itself is the client's, sent as poses) */
-export interface PlayerState { follow?: EntityRef; seat?: Seat; walk?: Walk }
+/** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
+ * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
+ * poses taken (the walk itself is the client's, sent as poses) */
+export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; walk?: Walk }
 
 /** a walk's poses taken: the last (pose, at the sim's clock at) and the one an update's poses are bounded against (the
  * last of an earlier update: from, fromAt) */
@@ -62,7 +65,7 @@ export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: numb
 // (a player craft, Craft: sim/craft/craft-core.ts)
 type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
 
-// (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, SimInput, FrameTime, MAX_DT, SimEvent,
+// (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, View, TimeOfDay, FrameTime, MAX_DT, SimEvent,
 // EVENT_TICKS: sim/contract/; CraftWorld: sim/craft/craft-core.ts)
 
 // an event yet to be given its tick
@@ -85,6 +88,11 @@ export class WorldSim {
   // the commands sent, applied at the start of the next tick; their outcomes of the last EVENT_TICKS ticks (at: the
   // tick that produced it, as an event's tick)
   private queue: Queued[] = [];
+  // the views sent since the last update, by player (the latest: taken at the update's start)
+  private views = new Map<PlayerId, View | null>();
+  // the world's time of day and day of the year (setTime); the view the active circle was last round
+  private hour = 12;
+  private lastView: View | null = null;
   private outcomes: { at: number; player: PlayerId; r: CommandResult }[] = [];
   // the sim's clock (s: the end of the tick being run), what the walks are bounded on; the last update's dt
   private clock = 0;
@@ -111,6 +119,7 @@ export class WorldSim {
     placeCraft: (id, spot) => this.placeCraft(id, spot),
     removeCraft: (id) => this.removeCraft(id),
     sit: (player, seat) => this.enterSeat(player, seat, false),
+    setTime: (hour, day) => this.setTime(hour, day),
     resetDriver: (player) => {
       if (this.seat(player)?.role !== 'driver' || !this.phys) return false;
       this.phys.resetDriver(player);
@@ -207,31 +216,55 @@ export class WorldSim {
   /** the frame's time when its update has run: what is drawn between the last two ticks is alpha of the way */
   get time(): FrameTime { return { dt: this.frameDt, tick: this.tick, alpha: this.traffic.acc / STEP }; }
 
-  /** the world ticks due after dt s (at most MAX_DT of them; the rest under STEP carried: time.alpha); what they did:
-   * eventsSince */
-  update(dt: number, { hour, day, focus, viewer }: SimInput) {
-    const T = this.traffic;
-    if (day !== undefined) T.day = day;
+  /** the world's time of day (hour, wrapped to 0..24) and day of the year (1..365; without: kept): the host's to
+   * set (at its start; later through a mode, a player's setTime request) */
+  setTime(hour: number, day?: number) {
+    if (!Number.isFinite(hour)) return;
+    this.hour = ((hour % 24) + 24) % 24;
+    if (day !== undefined && Number.isFinite(day)) this.traffic.day = Math.min(365, Math.max(1, Math.round(day)));
+  }
+
+  /** the world's time of day and day of the year */
+  get timeOfDay(): TimeOfDay { return { hour: this.hour, day: this.traffic.day }; }
+
+  /** the world ticks due after dt s (at most MAX_DT of them; the rest under STEP carried: time.alpha), simulated round
+   * the players' views (the views sent taken first); what they did: eventsSince */
+  update(dt: number) {
+    const T = this.traffic, hour = this.hour;
+    for (const [player, view] of this.views) {
+      if (view) this.player(player).view = view;
+      else delete (this.players.get(player) as PlayerState | undefined)?.view;
+    }
+    this.views.clear();
     dt = Math.min(MAX_DT, Math.max(0, dt));
     this.frameDt = dt;
-    const density = T.frame(hour, focus, viewer);
+    // (the active circle round the first player's view; with none, where it was)
+    const view = this.firstView() ?? this.lastView;
+    this.lastView = view;
+    const density = T.frame(hour, view?.focus ?? null, view?.viewer ?? view?.focus);
     T.acc += dt;
     while (T.acc >= STEP) {
-      this.runTick(focus, () => T.tick(density, hour));
+      this.runTick(() => T.tick(density, hour));
       T.acc -= STEP;
     }
+  }
+
+  // the first player's view (in the order they first came), or null
+  private firstView(): View | null {
+    for (const P of this.players.values()) if (P.view) return P.view;
+    return null;
   }
 
   // One world tick (ADR 0007's order): the commands due, the edits and the vehicles left no player is near any more
   // dropped (the tick sees it), the crafts' steps with this tick's input, the traffic's tick (the bodies in it), then
   // the tick's events in order
-  private runTick(focus: { x: number; z: number }, traffic: () => void) {
+  private runTick(traffic: () => void) {
     const T = this.traffic, t0 = this.tick;
     this.clock = (t0 + 1) * STEP;
     const q = this.queue;
     this.queue = [];
     for (const cmd of q) this.apply(cmd);
-    const now = t0 * STEP, foci = this.foci(focus);
+    const now = t0 * STEP, foci = this.foci();
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
     this.stepCrafts();
@@ -286,7 +319,7 @@ export class WorldSim {
   // taken, leaves the one held: one command switches seats, with no tick in between where the player holds none;
   // refused, the player keeps theirs. A seat's input (seatInput) is its role's. Following carries no rights. Only
   // players with sim authority come here: a creative camera (orbit, free flight) is the client's and only moves the
-  // focus and the viewer.
+  // focus and the viewer (its view; whether it has presence: app/session.ts OBSERVER_VIEW).
 
   /** what the game mode acts through (SimServer asks it about edits with it) */
   get modeWorld() { return this.face; }
@@ -296,7 +329,11 @@ export class WorldSim {
    * it (its sender's ack), and the tick an edit is applied in with its outcome (the sender's alone; without taken, the
    * player's outcomes). An edit's nodes are to be in the world's TileCache by then (core/world-edits.ts ready: the
    * host's, sim/server/sim-server.ts): a node not in is left out */
-  send(player: PlayerId, cmd: PlayerCommand, taken?: Taken) { this.queue.push({ player, cmd, taken }); }
+  send(player: PlayerId, cmd: PlayerCommand, taken?: Taken) {
+    if (cmd.kind === 'view') this.views.set(player, cmd.view && { focus: { x: cmd.view.focus.x, z: cmd.view.focus.z },
+      ...(cmd.view.viewer ? { viewer: { x: cmd.view.viewer.x, z: cmd.view.viewer.z, y: cmd.view.viewer.y } } : {}) });
+    else this.queue.push({ player, cmd, taken });
+  }
 
   /** the seat the player holds (its entity in the world), or null */
   seat(player: PlayerId): Seat | null {
@@ -313,6 +350,7 @@ export class WorldSim {
   // the one place a command takes effect
   private apply({ player: p, cmd, taken }: Queued) {
     switch (cmd.kind) {
+      case 'view': break; // (taken at the update's start: send)
       case 'follow': this.follow(p, cmd.entity); break;
       case 'enterSeat': this.result(p, cmd.kind, this.enterSeat(p, cmd), cmd.role ?? this.entities.seat(cmd.entity)?.role); break;
       case 'seatInput': {
@@ -436,11 +474,12 @@ export class WorldSim {
     return P;
   }
 
-  // Where the players are (map metres), for the edits kept (sim/edit-keeper.ts) and the vehicles left: the focus given,
-  // and each player's seat entity (the person walked, the car driven, the craft piloted) and entity followed
-  private foci(focus: { x: number; z: number }) {
-    const out = [focus], E = this.entities;
+  // Where the players are (map metres), for the edits kept (sim/edit-keeper.ts) and the vehicles left: each player's
+  // view's focus, seat entity (the person walked, the car driven, the craft piloted) and entity followed
+  private foci() {
+    const out: { x: number; z: number }[] = [], E = this.entities;
     for (const P of this.players.values()) {
+      if (P.view) out.push(P.view.focus);
       for (const ref of [P.seat?.entity, P.follow]) {
         const p = ref && E.pose(ref);
         if (p) out.push({ x: p.x, z: p.z });

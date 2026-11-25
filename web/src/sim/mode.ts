@@ -3,7 +3,7 @@
 // (SimServer; host/sim-host.ts: ?mode=, default sandbox) and kept on the WorldSim (WorldSim.mode), which asks it while it
 // applies the players' commands (each tick, in order). Today's only mode is the sandbox (sim/modes/sandbox.ts:
 // everything granted as asked). Kept to what that needs: whether a seat may be taken (mayEnter), whether an edit to
-// the world's voxels may be made (mayEdit), and the players' requests (request). No three.js, no DOM
+// the world's voxels may be made (mayEdit), and the players' requests (request: among them the world's time of day). No three.js, no DOM
 // (tools/core-deps.mjs).
 import type { WorldOp } from '../core/layers';
 import type { CraftSpot, ModeRequest } from './contract/commands';
@@ -26,6 +26,8 @@ export interface ModeWorld {
   removeCraft(id: CraftId): void;
   /** the player into seat as enterSeat takes it (free, the one held left first), not asking mayEnter; false: not */
   sit(player: PlayerId, seat: Seat): boolean;
+  /** the world's time of day (hour) and day of the year (without: kept), the same for every player */
+  setTime(hour: number, day?: number): void;
   /** the player's car back on the road; false: they drive none */
   resetDriver(player: PlayerId): boolean;
 }

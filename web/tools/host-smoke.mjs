@@ -28,7 +28,7 @@ const hash = (o) => crypto.createHash('sha1').update(JSON.stringify(o)).digest('
 const tick = () => new Promise((r) => setImmediate(r)); // (the node files' loads come in between frames)
 
 function start() {
-  const server = nodeHost(DATA, { seed: 3, world: 'tiles', physics: { bodies: true, at: () => focus } },
+  const server = nodeHost(DATA, { seed: 3, world: 'tiles', physics: { bodies: true } },
     { ...data, traffic: structuredClone(raw) });
   return { server, a: server.connect(PAGE_PLAYER), b: server.connect(P2) };
 }
@@ -36,11 +36,13 @@ function start() {
 function commands(server, f) {
   const T = server.sim.traffic;
   return {
-    a: f === FPS && T.cars.length ? [{ kind: 'follow', entity: { kind: 'car', id: T.cars[0].id } }] : [],
+    a: [VIEW, ...f === FPS && T.cars.length ? [{ kind: 'follow', entity: { kind: 'car', id: T.cars[0].id } }] : []],
     b: f === 2 * FPS && T.people.length ? [{ kind: 'follow', entity: { kind: 'person', id: T.people[0].id } }] : [],
   };
 }
-const input = (f) => ({ hour: 17 + f / FPS / 600, day: 180, focus, viewer: focus });
+// the page's view (a command of the first session's player) and the world's time of frame f (the host's to set)
+const VIEW = { kind: 'view', view: { focus, viewer: focus } };
+const setTime = (server, f) => server.sim.setTime(17 + f / FPS / 600, 180);
 
 async function direct() {
   const { server, a, b } = start(), out = [];
@@ -48,7 +50,8 @@ async function direct() {
     const c = commands(server, f);
     for (const x of c.a) a.send(x);
     for (const x of c.b) b.send(x);
-    server.update(1 / FPS, input(f));
+    setTime(server, f);
+    server.update(1 / FPS);
     out.push(hash(a.snapshot()), hash(b.snapshot()));
     await tick();
   }
@@ -57,14 +60,15 @@ async function direct() {
 
 async function worker() {
   const { server, a, b } = start(), out = [], posted = [], post = (m) => posted.push(m);
-  let at = null;
   for (let f = 0; f < FRAMES; f++) {
     const c = commands(server, f);
     for (const x of c.b) b.send(x);
-    handle(a, { kind: 'frame', dt: 1 / FPS, input: input(f), commands: c.a }, post, (p) => { at = p; });
+    setTime(server, f);
+    handle(a, { kind: 'frame', dt: 1 / FPS, commands: c.a }, post);
     const m = posted.pop();
     if (m?.kind !== 'snapshot' || posted.length) throw new Error(`frame ${f}: posted ${JSON.stringify(m?.kind)} (${posted.length} more)`);
-    if (at !== input(f).focus) throw new Error(`frame ${f}: the focus not handed on`);
+    const seen = server.sim.players.get(PAGE_PLAYER)?.view?.focus;
+    if (seen?.x !== focus.x || seen?.z !== focus.z) throw new Error(`frame ${f}: the view not taken`);
     out.push(hash(m.snapshot), hash(b.snapshot()));
     await tick();
   }
@@ -75,7 +79,7 @@ async function worker() {
   const ph = posted.pop();
   if (ph?.kind !== 'physics' || ph.id !== 7 || !ph.ok) throw new Error(`loadPhysics: ${JSON.stringify(ph)}`);
   const loadMs = performance.now() - t0;
-  for (let f = FRAMES; f < FRAMES + FPS; f++) { handle(a, { kind: 'frame', dt: 1 / FPS, input: input(f), commands: [] }, post); await tick(); }
+  for (let f = FRAMES; f < FRAMES + FPS; f++) { setTime(server, f); handle(a, { kind: 'frame', dt: 1 / FPS, commands: [VIEW] }, post); await tick(); }
   if (posted.length !== FPS || posted.some((m) => m.kind !== 'snapshot')) throw new Error(`after the physics: ${posted.length} posts`);
   return { out, server, loadMs, last: posted.at(-1).snapshot };
 }
@@ -86,11 +90,12 @@ async function worker() {
 // host's listener is gone (dropping the edit is no longer told to the sim)
 async function edits() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts');
-  const server = nodeHost(DATA, { seed: 3, world: 'tiles', edits: true, physics: { bodies: false, at: () => focus } },
+  const server = nodeHost(DATA, { seed: 3, world: 'tiles', edits: true, physics: { bodies: false } },
     { ...data, traffic: structuredClone(raw) });
   const a = server.connect(PAGE_PLAYER), b = server.connect(P2), sim = server.sim, T = sim.traffic, frame = frameOf(data.meta);
   let f = 0;
-  const run = async (n) => { for (let i = 0; i < n; i++) { server.update(1 / FPS, input(f++)); await tick(); } };
+  const update = () => { a.send(VIEW); setTime(server, f++); server.update(1 / FPS); };
+  const run = async (n) => { for (let i = 0; i < n; i++) { update(); await tick(); } };
   await run(FPS);
   T.ground.support(focus.x, focus.z, 1000); // (the node asked for: in by the next frame)
   await tick();
@@ -98,7 +103,7 @@ async function edits() {
   const op = { kind: 'sphere', col, row, z: cellToAbsZ(frame, Math.floor(h)), r: 4, colour: 0 };
   const boxes = T.edits.length, sent = sim.tick;
   a.send({ kind: 'edit', op, ref: 1 });
-  server.update(1 / FPS, input(f++));
+  update();
   const early = T.edits.length !== boxes || a.results('edit').length;
   await tick();
   const before = sim.tick;
@@ -178,7 +183,7 @@ for (const [tn, make] of Object.entries(transports)) {
     const { client, session } = make(h), what = `hello ${tn} ${cn}`, before = terminated;
     let got = null;
     client.hello.then((x) => { got = { ok: x }; }, (e) => { got = { error: e }; });
-    for (let f = 0; f < 3; f++) { client.update(1 / FPS, input(f)); for (let i = 0; i < 4; i++) await tick(); }
+    for (let f = 0; f < 3; f++) { client.update(1 / FPS); for (let i = 0; i < 4; i++) await tick(); }
     helloChecks++;
     if (!got) { fail.push(`${what}: no hello taken`); continue; }
     if (!word) {

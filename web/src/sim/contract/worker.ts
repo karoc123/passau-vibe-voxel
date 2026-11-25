@@ -4,8 +4,7 @@
 // (tools/core-deps.mjs R5).
 import type { SimCommand } from './commands';
 import type { Hello } from './hello';
-import type { SimInput } from './inputs';
-import type { Snapshot } from './snapshot';
+import type { Snapshot, TimeOfDay } from './snapshot';
 
 /** the road physics: bodies: traffic cars near edits become bodies (?lifephys=0: none; the drive still loads it);
  * near, maxBodies: their reach and number (?lpnear=, ?lpmax=); look: the bodies look ahead (default: yes;
@@ -13,8 +12,8 @@ import type { Snapshot } from './snapshot';
 export interface PhysicsOptions { bodies: boolean; near?: number; maxBodies?: number; look?: boolean }
 
 export type ToWorker =
-  | { kind: 'init'; base: string; seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean }
-  | { kind: 'frame'; dt: number; input: SimInput; commands: SimCommand[] }
+  | { kind: 'init'; base: string; seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean; time: TimeOfDay }
+  | { kind: 'frame'; dt: number; commands: SimCommand[] }
   | { kind: 'loadPhysics'; id: number; warm?: { x: number; z: number } };
 export type FromWorker =
   | { kind: 'hello'; hello: Hello } // (first, once the session is connected: before ready and any snapshot)

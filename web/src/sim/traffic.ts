@@ -206,12 +206,15 @@ export class Traffic {
   }
 
   /** a frame's own part, before its ticks: the active circle round the focus, the viewer, the hour's density (what
-   * the frame's ticks populate to); when warm (the first fill), the city filled at once */
-  frame(hour: number, focus: { x: number; z: number }, viewer: Viewer = focus): Density {
-    const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity;
-    this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    if (d2 > JUMP_R * JUMP_R) this.warm = true;
-    if (d2 > 120 * 120) this.setActive(focus.x, focus.z);
+   * the frame's ticks populate to); when warm (the first fill), the city filled at once. focus null: no one looks
+   * (the circle and the viewer kept where they were) */
+  frame(hour: number, focus: { x: number; z: number } | null, viewer: Viewer | null = focus): Density {
+    if (focus) {
+      const A = this.active, d2 = A ? (A.x - focus.x) ** 2 + (A.z - focus.z) ** 2 : Infinity, v: Viewer = viewer ?? focus;
+      this.viewer = { x: v.x, z: v.z, y: v.y };
+      if (d2 > JUMP_R * JUMP_R) this.warm = true;
+      if (d2 > 120 * 120) this.setActive(focus.x, focus.z);
+    }
     const hh = ((hour % 24) + 24) % 24;
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {

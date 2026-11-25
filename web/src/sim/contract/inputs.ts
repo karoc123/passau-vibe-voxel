@@ -1,6 +1,6 @@
 // The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): the
 // inputs, per seat's role (a driver's CarInput, a pilot's their craft's type's, a walker's WalkPose: contract/pose.ts)
-// and per update (SimInput, FrameTime). Types and constants only (tools/core-deps.mjs R5).
+// and the frame's time (FrameTime). Types and constants only (tools/core-deps.mjs R5).
 
 /** a driver's controls (physics/rapier/car.ts RapierCar) */
 export interface CarInput { gas: number; brake: number; steer: number; handbrake: boolean }
@@ -40,15 +40,6 @@ export interface PlaneInput {
 
 /** what a pilot sends (seatInput): the input of their craft's type (sim/craft/cores.ts checks it is every core's) */
 export type PilotInput = BoatInput | CraftInput | DroneInput | PlaneInput;
-
-/** what one update is given: the world's hour and day of the year, the focus (the middle of what is simulated) and
- * the viewer (where agents may come and go unseen far from; by default the focus) */
-export interface SimInput {
-  hour: number;
-  day?: number;
-  focus: { x: number; z: number };
-  viewer?: { x: number; z: number; y?: number };
-}
 
 /** the frame's time once the sim's update has run (docs/plans/smooth-motion-and-lag.md section 3: fixed once a frame,
  * every reader the same): dt the frame's (s, at most MAX_DT), tick the ticks run, alpha how far past the last tick

@@ -15,6 +15,10 @@ import type { EntityRef, CraftType, Role, VehicleId } from './ids';
 export type SimCommand = PlayerCommand;
 
 /** a player's command (the player: the session's it is sent through), applied at the start of the sim's next tick, in order:
+ *   view          where the player looks (View): the focus, the middle of what is simulated for them, and the viewer,
+ *                 where they see from (agents come and go unseen far from it; by default the focus); null: nowhere
+ *                 (no presence). Kept in the player's state until the next; taken at the start of the next update,
+ *                 before its ticks (it decides what they simulate), not in tick order with the other commands
  *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
  *   enterSeat     a seat of an entity (sim/entities.ts SEATS: role, index; without, its first): the driver's of a car (as
  *                 type choice), the walker's of a person on foot (from pose: where they are drawn, kept within
@@ -35,12 +39,18 @@ export type SimCommand = PlayerCommand;
  *                 tick or more after the commands sent with it. Its outcome (ref: the client's number for it; nodes:
  *                 the level-1 nodes it changed) goes to the session it came through */
 export type PlayerCommand =
+  | { kind: 'view'; view: View | null }
   | { kind: 'follow'; entity: EntityRef | null }
   | { kind: 'enterSeat'; entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }
   | ({ kind: 'seatInput'; seq?: number; tick?: number } & SeatInput)
   | { kind: 'leaveSeat' }
   | { kind: 'request'; request: ModeRequest }
   | { kind: 'edit'; op: WorldOp; ref?: number };
+
+/** where a player looks (map metres): focus, the middle of what is simulated round them (the active circle, the
+ * presence that keeps edits and vehicles left); viewer, where they see from (the camera; y its height), what agents
+ * come and go far from (without: the focus, on the ground) */
+export interface View { focus: { x: number; z: number }; viewer?: { x: number; z: number; y?: number } }
 
 /** a seat's input, by its role */
 export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: PilotInput } | { role: 'walker'; input: WalkPose };
@@ -57,13 +67,16 @@ export interface CommandResult {
  *   placeCraft   the player's craft put down again at spot
  *   resetCraft   the player's craft back to a safe spot nearby
  *   resetDriver  the player's car back on the road
- *   dropCraft    the player's craft taken out of the world (one that does not stay: the paraglider) */
+ *   dropCraft    the player's craft taken out of the world (one that does not stay: the paraglider)
+ *   setTime      the world's time of day (hour 0..24) and day of the year (without: the day kept), the same for
+ *                every player (docs/adr/0009-layers-and-owners.md: the host owns it) */
 export type ModeRequest =
   | { kind: 'craft'; type: CraftType; spot: CraftSpot }
   | { kind: 'placeCraft'; spot: CraftSpot }
   | { kind: 'resetCraft' }
   | { kind: 'resetDriver' }
-  | { kind: 'dropCraft' };
+  | { kind: 'dropCraft' }
+  | { kind: 'setTime'; hour: number; day?: number };
 
 /** where a craft is put down: x, z, heading h, a height for one that starts in the air or afloat, a speed along h for
  * one that starts moving, water: afloat (the floatplane) */

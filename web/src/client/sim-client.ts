@@ -2,8 +2,8 @@
 // snapshots"): a SimClient. The page never reaches into the WorldSim; it holds one session of the server
 // (sim/server/sim-server.ts Session: one player, named by the host, client.player), sends its player's commands
 // (SimCommand: plain data, so they can cross to a Web Worker or a server; they name no player, the session's is stamped
-// on them), runs the frame (update: the frame's input; in the page's thread the sim's update itself) and reads what the sim
-// publishes: the traffic as drawn (TrafficView), the crafts in the world (piloted or left), its player's seat, car and
+// on them; its view among them), runs the frame (update: the frame's dt; in the page's thread the sim's update
+// itself) and reads what the sim publishes: the traffic as drawn (TrafficView), the crafts in the world (piloted or left), its player's seat, car and
 // craft, the outcomes of its commands, the events since a tick.
 // LocalSimClient: the sim in the page's thread. Commands are queued and applied in the order sent at the start of the
 // next tick (ADR 0007); every craft shell and the nav send theirs before the update in main.ts's frame. A seat input
@@ -28,9 +28,9 @@ import { DEFAULT_TUNING } from '../sim/tuning';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
 import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
-import type { FrameTime, SimInput } from '../sim/contract/inputs';
+import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
-import type { Ack, DriverSnapshot, Snapshot } from '../sim/contract/snapshot';
+import type { Ack, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
 import { fadeOut, STEP, Traffic, type TrafficBodies } from '../sim/traffic';
@@ -66,8 +66,12 @@ export interface SimClient {
   readonly traffic: TrafficView;
   /** a command of the client's player, applied at the start of the next tick (a seat input given its seq and tick) */
   send(cmd: SimCommand): void;
-  /** the frame: the commands sent applied, then the ticks due after dt s (SimInput: the hour, the focus, the viewer) */
-  update(dt: number, input: SimInput): void;
+  /** the frame: the commands sent applied, then the ticks due after dt s (what is simulated where: the players' views,
+   * a view command; the time of day: the world's) */
+  update(dt: number): void;
+  /** the world's time of day and day of the year as last seen (the host's; a player asks for another: a setTime
+   * request); null before the first snapshot of a session in another thread */
+  readonly timeOfDay: TimeOfDay | null;
   /** the sim's events of the ticks after tick, oldest first */
   eventsSince(tick: number): SimEvent[];
   /** the outcomes of the player's commands of kind (a request's: its kind; and of a seat's role) since the last call
@@ -109,6 +113,7 @@ export interface InThreadSession {
   readonly sim: {
     readonly tick: number;
     readonly time: FrameTime;
+    readonly timeOfDay: TimeOfDay;
     readonly traffic: TrafficView;
     readonly crafts: ReadonlyMap<CraftId, CraftView>;
     eventsSince(tick: number): SimEvent[];
@@ -116,7 +121,7 @@ export interface InThreadSession {
     craftOf(player: PlayerId): CraftView | null;
     loadPhysics(warm?: { x: number; z: number }): Promise<unknown>;
   };
-  readonly server: { update(dt: number, input: SimInput): void };
+  readonly server: { update(dt: number): void };
   onEdit: ((ref: number, nodes: [number, number][] | null, error?: unknown) => void) | null;
   send(cmd: SimCommand): void;
   results(kind?: CommandResult['kind'], role?: Role): CommandResult[];
@@ -156,6 +161,7 @@ export class LocalSimClient implements SimClient {
   get player() { return this.session.player; }
   get tick() { return this.sim.tick; }
   get time() { return this.sim.time; }
+  get timeOfDay() { return this.sim.timeOfDay; }
   get traffic(): TrafficView { return this.sim.traffic; }
 
   send(cmd: SimCommand) { if (!this.refused) this.session.send(this.seqs.stamp(cmd, this.tick)); }
@@ -169,7 +175,7 @@ export class LocalSimClient implements SimClient {
     });
   }
 
-  update(dt: number, input: SimInput) { if (!this.refused) this.session.server.update(dt, input); }
+  update(dt: number) { if (!this.refused) this.session.server.update(dt); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
   results(kind: CommandResult['kind'], role?: Role) { return this.session.results(kind, role); }
@@ -193,11 +199,11 @@ class Seqs {
   }
 }
 
-/** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the frame's commands
- * and input sent, the snapshots back (onSnapshot), the road physics loaded there; close: the session left (the host
+/** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the frame's dt and
+ * commands sent, the snapshots back (onSnapshot), the road physics loaded there; close: the session left (the host
  * refused), nothing more sent or taken */
 export interface SimLink {
-  frame(dt: number, input: SimInput, commands: SimCommand[]): void;
+  frame(dt: number, commands: SimCommand[]): void;
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
   onHello: (h: Hello) => void;
   onSnapshot: (s: Snapshot) => void;
@@ -212,12 +218,12 @@ export class ThreadLink implements SimLink {
   private greeted = false;
   private closed = false;
   constructor(private readonly session: InThreadSession) {}
-  frame(dt: number, input: SimInput, commands: SimCommand[]) {
+  frame(dt: number, commands: SimCommand[]) {
     // (the session's hello before its first frame, as a host's first message)
     if (!this.greeted) { this.greeted = true; this.onHello(this.session.hello); }
     if (this.closed) return;
     for (const c of commands) this.session.send(c);
-    this.session.server.update(dt, input);
+    this.session.server.update(dt);
     this.onSnapshot(this.session.snapshot());
   }
   loadPhysics(warm?: { x: number; z: number }) { return this.session.sim.loadPhysics(warm).then(() => {}); }
@@ -226,7 +232,7 @@ export class ThreadLink implements SimLink {
 
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
  * life-edit's left and events; docs/adr/0009-layers-and-owners.md): each snapshot checked to be plain data and
- * structured-cloned (what postMessage does), the frame's commands and input and loadPhysics' warm checked and sent
+ * structured-cloned (what postMessage does), the frame's dt and commands and loadPhysics' warm checked and sent
  * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
  * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */
 export class CloneLink implements SimLink {
@@ -238,10 +244,10 @@ export class CloneLink implements SimLink {
     link.onHello = (h) => { this.crossed++; this.onHello(jsonTrip(h, 'hello')); };
     link.onSnapshot = (s) => { this.crossed++; this.onSnapshot(cloned(s, 'snapshot')); };
   }
-  frame(dt: number, input: SimInput, commands: SimCommand[]) {
-    const m = jsonTrip({ dt, input, commands }, 'frame');
+  frame(dt: number, commands: SimCommand[]) {
+    const m = jsonTrip({ dt, commands }, 'frame');
     this.crossed++;
-    this.link.frame(m.dt, m.input, m.commands);
+    this.link.frame(m.dt, m.commands);
   }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm && jsonTrip(warm, 'loadPhysics')); }
   close() { this.link.close(); }
@@ -339,6 +345,7 @@ export class MirrorSimClient implements SimClient {
   get tick() { return this.last?.tick ?? 0; }
   /** (the latest snapshot's tick and alpha: one update behind the frame with a worker, M4) */
   get time(): FrameTime { return { dt: this.dt, tick: this.tick, alpha: (this.last?.acc ?? 0) / STEP }; }
+  get timeOfDay(): TimeOfDay | null { return this.last && { hour: this.last.hour, day: this.last.day }; }
 
   send(cmd: SimCommand) { if (!this.refused) this.queue.push(this.seqs.stamp(cmd, this.tick)); }
 
@@ -351,12 +358,12 @@ export class MirrorSimClient implements SimClient {
     });
   }
 
-  update(dt: number, input: SimInput) {
+  update(dt: number) {
     if (this.refused) return;
     const q = this.queue;
     this.queue = [];
     this.dt = Math.min(dt, 0.1);
-    this.link.frame(dt, input, q);
+    this.link.frame(dt, q);
   }
 
   private take(s: Snapshot) {

@@ -3,10 +3,10 @@
 // world's), its ground and water (core/tile-world.ts) and the road physics (Rapier, loaded here), and runs a
 // SimServer (sim/server/sim-server.ts) as host/sim-host.ts wires it (its browser ports: host/browser.ts), with one
 // session per init: the page's player (host/sim-host.ts PAGE_PLAYER; the worker names it, the page's commands name
-// none). The page (client/sim-worker-link.ts) sends a frame (dt, the input, the commands) and gets its session's snapshot after it
+// none). The page (client/sim-worker-link.ts) sends a frame (dt, the commands: its view among them) and gets its session's snapshot after it
 // (sim/server/snapshot.ts: its player's id among its reads), with the edits since the last for its own live edits.
 // The messages (sim/contract/worker.ts ToWorker, FromWorker):
-//   in:  init { base, seed, physics, eager, mode, edits }; frame { dt, input, commands }; loadPhysics { id, warm }
+//   in:  init { base, seed, physics, eager, mode, edits, time }; frame { dt, commands }; loadPhysics { id, warm }
 //   out: hello (the session's: sim/contract/hello.ts, before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
 // greet (a session's first message) and handle (one message to a session, its answers to a post given) are exported:
 // tools/host-smoke.mjs drives them in Node.
@@ -27,7 +27,7 @@ export type Post = (m: FromWorker) => void;
 // (only as a Web Worker: in Node, tools/host-smoke.mjs imports handle alone)
 const scope = typeof self !== 'undefined' && typeof (self as { importScripts?: unknown }).importScripts === 'function'
   ? self as unknown as { postMessage(m: FromWorker): void; onmessage: ((e: MessageEvent<ToWorker>) => void) | null } : null;
-let session: Session | null = null, focus = { x: 0, z: 0 };
+let session: Session | null = null;
 const early: ToWorker[] = [];
 
 if (scope) {
@@ -36,7 +36,7 @@ if (scope) {
     const m = e.data;
     if (m.kind === 'init') { void init(m, post); return; }
     if (!session) { early.push(m); return; }
-    handle(session, m, post, (f) => { focus = f; });
+    handle(session, m, post);
   };
 }
 
@@ -45,26 +45,24 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   const cache = tileCacheAt(meta.tiles.N, m.base), world = tileWorld(meta, cache);
   const boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats, m.base));
   const server = hostSim({ meta, traffic: unpackTraffic(raw), boats }, browserPorts(cache),
-    { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: { ...m.physics, at: () => focus } });
+    { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: m.physics, time: m.time });
   server.trackEdits();
   const s = session = server.connect(PAGE_PLAYER);
   greet(s, post);
   post({ kind: 'ready' });
-  for (const q of early.splice(0)) handle(s, q, post, (f) => { focus = f; });
+  for (const q of early.splice(0)) handle(s, q, post);
 }
 
 /** what the page is told first when its session connects: the session's hello (the page compares it with its own) */
 export function greet(s: Session, post: Post) { post({ kind: 'hello', hello: s.hello }); }
 
 /** one message from the page to session s: a frame (its commands sent, the world updated, the session's snapshot
- * posted with the time it took by now) or a road physics' load (posted when done); setFocus: the frame's focus, where
- * the road physics' terrain starts */
-export function handle(s: Session, m: ToWorker, post: Post, setFocus: (f: { x: number; z: number }) => void = () => {}) {
+ * posted with the time it took by now) or a road physics' load (posted when done) */
+export function handle(s: Session, m: ToWorker, post: Post) {
   if (m.kind === 'frame') {
     const t0 = performance.now();
-    setFocus(m.input.focus);
     for (const c of m.commands) s.send(c);
-    s.server.update(m.dt, m.input);
+    s.server.update(m.dt);
     const snapshot = s.snapshot();
     post({ kind: 'snapshot', snapshot, ms: performance.now() - t0 });
   } else if (m.kind === 'loadPhysics') {
