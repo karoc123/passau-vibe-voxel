@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Meta } from './core/meta';
 import { CUT_T } from './daylight';
-import { CHUNK, chunkTexture, fetchChunk, type TerrainChunk } from './terrain';
+import { CHUNK, chunkTexture, fetchChunk, gridQuads, type TerrainChunk } from './terrain';
 import { TILE_N as T } from './core/tile-data';
 
 // The ground beyond the view distance (settings.ts dist): the bare terrain (scripts/terrain.py, data/terrain/far{k}),
@@ -83,11 +83,12 @@ export class FarGround {
         pos.set([x, d.h[(r0 + r) * d.hw + c0 + q] / 10 - 1, z], i * 3);
         uv.set([(x - X0) / (d.cw * cs), (z - Z0) / (d.ch * cs)], i * 2);
       }
-      for (let r = 0, j = 0; r < nr - 1; r++) for (let q = 0; q < nc - 1; q++, j += 6) { const i = r * nc + q; idx.set([i, i + nc, i + 1, i + 1, i + nc, i + nc + 1], j); }
+      const n = gridQuads(idx, nc, nr, (i) => d.h[(r0 + Math.floor(i / nc)) * d.hw + c0 + i % nc] > 0);
+      if (!n) { c.pieces.push(null); continue; }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.setIndex(new THREE.BufferAttribute(idx.subarray(0, n), 1));
       g.computeVertexNormals();
       const p: Piece = { mesh: null!, mask: new Uint32Array(2), origin: new THREE.Vector2(X0 + c0 * s, Z0 + r0 * s) };
       const m = p.mesh = new THREE.Mesh(g, this.material(tex, p));

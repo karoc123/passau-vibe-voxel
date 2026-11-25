@@ -147,6 +147,9 @@ export interface PlaneWorld {
   surface(x: number, z: number): { ground: number; top: number } | null;
   // the water's surface at (x, z); -1: no water; null: not known yet (its tile not in)
   water(x: number, z: number): number | null;
+  // is all of [x0, x1) x [z0, z1) built (core/built.ts all: a block not built is walled as the map's edge)? absent: the
+  // whole rectangle is
+  built?(x0: number, z0: number, x1: number, z1: number): boolean;
 }
 
 // (where it is, PlaneState, and what it tells its pilot, PlaneEvent: contract/crafts.ts)
@@ -457,6 +460,13 @@ export class PlaneFlight {
     };
     fit('x', w.W - lo);
     fit('z', w.D - lo);
+    // a block not built: no move to within EDGE of it, the move along its edge kept (along x, else along z); one
+    // already that near (put there) moves freely
+    const free = (dx: number, dz: number) => w.built!(p.x + dx - lo, p.z + dz - lo, p.x + dx + lo, p.z + dz + lo);
+    if (w.built && !free(d.x, d.z) && free(0, 0)) {
+      at = true;
+      if (free(d.x, 0)) d.z = 0; else if (free(0, d.z)) d.x = 0; else { d.x = 0; d.z = 0; }
+    }
     if (p.y + d.y > ceil) d.y = Math.min(0, ceil - p.y);
     this.atEdge = at;
   }
@@ -505,6 +515,7 @@ export class PlaneFlight {
 export interface CollisionLike extends WaterColumns {
   width: number;
   depth: number;
+  built?: { all(x0: number, z0: number, x1: number, z1: number): boolean };
   sweep(p: Vec3, d: Vec3): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
 }
@@ -514,5 +525,6 @@ export function collisionWorld(c: CollisionLike, H: number): PlaneWorld {
     sweep: (p, d) => c.sweep(p, d),
     surface: (x, z) => c.surface(x, z),
     water: (x, z) => waterTop(c, x, z),
+    ...(c.built ? { built: (x0: number, z0: number, x1: number, z1: number) => c.built!.all(x0, z0, x1, z1) } : {}),
   };
 }

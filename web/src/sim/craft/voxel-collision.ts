@@ -5,6 +5,7 @@ import type { RawColumns } from '../../core/tile-data';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
 import type { TileCache } from '../../core/tile-cache';
 import { capField, surfaceAt, type CapField } from '../../core/surface';
+import { Built } from '../../core/built';
 
 // the drone's cube's half side and how far ahead (s) its tiles are fetched; the plane passes its own (plane.ts)
 const RADIUS = 0.35, HORIZON = 2.2;
@@ -75,6 +76,8 @@ export class VoxelCollision {
   // per palette id: 1 for water (the boat's column, waterColumn)
   private readonly wet: Uint8Array;
   private readonly cache: TileCache;
+  // what of the map is built (core/built.ts): a block not built is a wall, as the map's edge
+  readonly built: Built;
   // the nodes this holds one reference to in the cache
   private readonly held = new Set<number>();
   private readonly tiles = new Map<number, CollisionTile>();
@@ -95,6 +98,7 @@ export class VoxelCollision {
     this.row = this.tileSide + 2;
     this.nx = Math.ceil(meta.W / this.tileSide);
     this.nz = Math.ceil(meta.D / this.tileSide);
+    this.built = new Built(meta);
     this.passable = paletteMask(semanticTable(meta.palette), (f) => !RULES.solidForDrone(f));
     this.wet = paletteMask(semanticTable(meta.palette), RULES.water);
     this.cache = cache;
@@ -149,12 +153,13 @@ export class VoxelCollision {
   // The collision runs include integer voxel tops. Hull clearance must respect those even on sloped caps.
   voxelGround(x: number, z: number) {
     const ix = Math.floor(x), iz = Math.floor(z);
+    if (!this.built.at(ix, iz)) return null; // (as off the map)
     return this.tileAt(ix, iz)?.ground[this.column(ix, iz)] ?? null;
   }
 
   surface(x: number, z: number) {
     const ix = Math.floor(x), iz = Math.floor(z);
-    const tile = this.tileAt(ix, iz);
+    const tile = this.built.at(ix, iz) ? this.tileAt(ix, iz) : undefined; // (not built: as off the map)
     if (!tile) return null;
     const i = this.column(ix, iz);
     let top = tile.ground[i];
@@ -195,9 +200,19 @@ export class VoxelCollision {
     const maxZ = Math.min(this.depth - 1, Math.floor(Math.max(p.z, p.z + d.z * fraction) + R));
     const minY = Math.min(p.y, p.y + d.y * fraction) - R;
     const maxY = Math.max(p.y, p.y + d.y * fraction) + R;
-    if (minY > this.ceiling - 600) return result();
+    const above = minY > this.ceiling - 600; // (over the city: only the walls of a block not built)
+    if (above && this.built.whole) return result();
 
     for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
+      if (!this.built.at(x, z)) { // (a block not built: a wall up to the ceiling, as the map's edge)
+        const wall = contact(p, d, x, -this.ceiling, this.ceiling, z, fraction, R);
+        if (wall && (wall.fraction < fraction || !hit)) {
+          ({ fraction, axis: normalAxis } = wall);
+          hit = 'city edge';
+        }
+        continue;
+      }
+      if (above) continue;
       const tile = this.tileAt(x, z);
       if (!tile) return 'loading';
       const i = this.column(x, z);
@@ -231,7 +246,7 @@ export class VoxelCollision {
   // between y0 and y1 (the ground: up to the water's bottom; the runs over it, foliage that is no grass; the water not).
   // null: not loaded.
   waterColumn(x: number, z: number, y0: number, y1: number): { water: number; blocked: boolean } | null {
-    if (x < 0 || z < 0 || x >= this.width || z >= this.depth) return { water: -1, blocked: true };
+    if (!this.built.at(x, z)) return { water: -1, blocked: true };
     const ix = Math.floor(x), iz = Math.floor(z), tile = this.tileAt(ix, iz);
     if (!tile) return null;
     const i = this.column(ix, iz), g = tile.ground[i];
@@ -267,6 +282,7 @@ export class VoxelCollision {
     const cells: { key: number; distance: number }[] = [];
     for (let j = Math.max(0, tz - 1); j <= Math.min(this.nz - 1, tz + 1); j++) {
       for (let i = Math.max(0, tx - 1); i <= Math.min(this.nx - 1, tx + 1); i++) {
+        if (!this.built.node(this.tileSide, i, j)) continue; // (no node file: nothing to fetch)
         cells.push({ key: i + j * this.nx, distance: Math.abs(i - tx) + Math.abs(j - tz) });
       }
     }

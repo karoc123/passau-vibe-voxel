@@ -3,6 +3,7 @@ import type { Meta } from './core/meta';
 import { dataTexture, fetchGzip } from './util';
 import { CLIENT_FILES, dataUrl } from './core/data-contract';
 import { TILE_N as T } from './core/tile-data';
+import { Built } from './core/built';
 
 // The bare terrain (scripts/terrain.py), in square chunks of 256 height steps (257 samples a side, the last shared with
 // the next chunk) and 512 colour texels, clipped at the map's edges: data/terrain/near (heights every 4 m, colours
@@ -22,6 +23,19 @@ export async function fetchChunk(dir: string, cx: number, cy: number): Promise<T
   return { hw, hh, cw, ch, h: new Uint16Array(buf, 8, hw * hh), rgb: new Uint8Array(buf, 8 + hw * hh * 2, cw * ch * 3) };
 }
 
+// a grid's quads (nc x nr vertices, row by row) as two triangles each into idx, those whose four vertices all have
+// ground (has: a height of 0 is none, a block not built: scripts/terrain.py); returns the indices written
+export function gridQuads(idx: Uint16Array, nc: number, nr: number, has: (i: number) => boolean) {
+  let j = 0;
+  for (let r = 0; r < nr - 1; r++) for (let q = 0; q < nc - 1; q++) {
+    const a = r * nc + q;
+    if (!has(a) || !has(a + 1) || !has(a + nc) || !has(a + nc + 1)) continue;
+    idx.set([a, a + nc, a + 1, a + 1, a + nc, a + nc + 1], j);
+    j += 6;
+  }
+  return j;
+}
+
 // the colours as a texture (RGBA)
 export function chunkTexture(c: TerrainChunk) {
   const n = c.cw * c.ch, rgba = new Uint8Array(n * 4);
@@ -35,8 +49,10 @@ export function chunkTexture(c: TerrainChunk) {
 export async function loadTerrain(meta: Meta, scene: THREE.Scene, nx: number, tiles: Iterable<number>) {
   const tw = Math.ceil(meta.W / 4), C = T / 4, per = (CHUNK * 4) / T;
   const byChunk = new Map<string, number[]>();
+  const built = new Built(meta);
   for (const i of tiles) {
     const tx = i % nx, ty = Math.floor(i / nx), k = `${Math.floor(tx / per)}_${Math.floor(ty / per)}`;
+    if (!built.node(T, tx, ty)) continue; // (a block not built: no ground)
     (byChunk.get(k) ?? byChunk.set(k, []).get(k)!).push(i);
   }
   const pieces = new Map<number, { mesh: THREE.Mesh; chunk: { n: number; tex: THREE.DataTexture } }>();
@@ -58,11 +74,12 @@ export async function loadTerrain(meta: Meta, scene: THREE.Scene, nx: number, ti
         pos.set([(tx * C + q) * 4, c.h[(lr + r) * c.hw + lc + q] / 10, (ty * C + r) * 4], j * 3);
         uv.set([(lc + q) * 2 / c.cw, (lr + r) * 2 / c.ch], j * 2);
       }
-      for (let r = 0, j = 0; r < nr - 1; r++) for (let q = 0; q < nc - 1; q++, j += 6) { const a = r * nc + q; idx.set([a, a + nc, a + 1, a + 1, a + nc, a + nc + 1], j); }
+      const n = gridQuads(idx, nc, nr, (j) => c.h[(lr + Math.floor(j / nc)) * c.hw + lc + j % nc] > 0);
+      if (!n) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.setIndex(new THREE.BufferAttribute(idx.subarray(0, n), 1));
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, mat);
       m.receiveShadow = true;

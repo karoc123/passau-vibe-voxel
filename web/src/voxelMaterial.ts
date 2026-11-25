@@ -7,6 +7,7 @@ import { WALL_TOP } from './roofs';
 import { FIELDS_GLSL, fieldUniforms } from './fields';
 import { FLOODLIT, floodCapsules, LIT_N } from './lamplight';
 import { MAT, GROUND, groundClass, pavedGround } from './core/materials';
+import { BLOCK } from './core/built';
 
 // what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
 export const REFL_MAX = 0.4;
@@ -20,6 +21,9 @@ export interface VoxelUniforms {
   [name: string]: THREE.IUniform;
   uPalette: U<THREE.Texture>;
   uSize: U<THREE.Vector2>;
+  // per 1024 m block of the map (core/built.ts BLOCK) its built rows / 128 (0: none, 8: all; meta.json built): where
+  // the cut stands (the map's edge, a block not built)
+  uBuilt: U<THREE.Texture>;
   // the map's corner in the project grid (meta.origin, as x, 0, z): what is hashed or patterned by its place (a cell's
   // tone, the leaves' turn, window rhythms, the ground's stones) is so in the project grid's coordinates, so a place
   // looks the same whatever the map's extent (scripts/aoi.py)
@@ -63,12 +67,21 @@ export interface VoxelUniforms {
   uIndoorAmb: U<number>;
 }
 
+// uBuilt's texture: per block its built rows / 128 (core/built.ts: a built box is a block's first rows, its columns
+// cut only by the map's edge)
+function builtTexture(meta: Meta) {
+  const nx = Math.ceil(meta.W / BLOCK), nz = Math.ceil(meta.D / BLOCK), a = new Uint8Array(nx * nz).fill(meta.built ? 0 : 8);
+  for (const [x0, z0, , z1] of meta.built ?? []) a[Math.floor(z0 / BLOCK) * nx + Math.floor(x0 / BLOCK)] = Math.ceil((z1 - z0) / 128);
+  return dataTexture(a, nx, nz, THREE.RedFormat);
+}
+
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
 
 export function makeUniforms(meta: Meta): VoxelUniforms {
   const U: VoxelUniforms = {
     uPalette: { value: makePaletteTexture(meta.palette) },
     uSize: { value: new THREE.Vector2(meta.W, meta.D) },
+    uBuilt: { value: builtTexture(meta) },
     uOrg: { value: new THREE.Vector3(meta.origin?.[0] ?? 0, 0, meta.origin?.[1] ?? 0) },
     uNight: { value: 0 },
     uTime: { value: 0 },
@@ -244,7 +257,7 @@ const FACE_PARS = `
 
 const FRAG_PARS = `
   uniform sampler2D uPalette; uniform vec2 uSpill; uniform float uShop; uniform float uIndoorAmb;
-  uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon;
+  uniform vec2 uSize; uniform float uNight; uniform float uTime; uniform vec3 uHorizon; uniform sampler2D uBuilt;
   uniform float uWet; uniform float uSnow; uniform float uAlbedo;
   ${FACE_PARS}
   // (AO and the wall's top do vary over a face)
@@ -272,6 +285,12 @@ const FRAG_PARS = `
   float span(float x, float w, float a, float b) { return (clamp(x + 0.5 * w, a, b) - clamp(x - 0.5 * w, a, b)) / w; }
   float bandInt(float x, float p, float a, float b) { float k = floor(x / p); return k * (b - a) + clamp(x - k * p - a, 0.0, b - a); }
   float band(float x, float w, float p, float a, float b) { return (bandInt(x + 0.5 * w, p, a, b) - bandInt(x - 0.5 * w, p, a, b)) / w; }
+  // whether map point q (x, row) is on the map and built (uBuilt: per ${BLOCK} m block its first rows / 128)
+  bool builtAt(vec2 q) {
+    if (q.x < 0.0 || q.y < 0.0 || q.x >= uSize.x || q.y >= uSize.y) return false;
+    ivec2 b = ivec2(floor(q / ${BLOCK}.0));
+    return q.y - float(b.y) * ${BLOCK}.0 < floor(texelFetch(uBuilt, b, 0).r * 255.0 + 0.5) * 128.0;
+  }
   // An old-town facade at x along the wall (from the building's first window axis) and lv above the street, box-filtered
   // over w (metres along, up): axes every P m, storeys of SH m over a ground floor of G m. Out: x = the opening, y = its
   // light surround, z = the window's frame and glazing bars inside it, w = the sill. Close up a window is a frame with a
@@ -642,7 +661,8 @@ const SURFACE = `
   // The map's edge, below the ground: cut like a diorama's block, not a slab of soil. Dark topsoil and loam follow the
   // surface; under them beds of gravel, sand and clay lie level, gently wavy; then the gneiss Passau stands on, in
   // courses; at the bottom a dark plinth under a pale trim line
-  bool cut = vert && lv < 0.0 && m != ${MAT.WATER} && (min(vVox.x, vVox.z) < 0.01 || vVox.x > uSize.x - 0.01 || vVox.z > uSize.y - 0.01);
+  // (a face whose cell beyond is off the map or in a block not built: uBuilt)
+  bool cut = vert && lv < 0.0 && m != ${MAT.WATER} && !builtAt(vVox.xz + vN.xz * 0.5);
   if (cut) {
     float along = abs(vN.x) > 0.5 ? vVox.z : vVox.x, dep = -lv, y = vVox.y, fy = fwV + 0.02;
     float wob = 0.9 * sin(along * 0.043) + 0.5 * sin(along * 0.117 + 1.3);

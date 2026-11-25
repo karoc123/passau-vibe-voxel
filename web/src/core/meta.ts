@@ -50,6 +50,8 @@ export interface Meta {
   // z = row from the corner); ?cam= and ?crop= boxes are in the project grid's (map cells + origin), so a link keeps
   // pointing at the same place when the map grows
   origin?: [number, number];
+  // the built blocks [x0, z0, x1, z1] (map cells; scripts/aoi.py built_boxes), absent: the whole rectangle (core/built.ts)
+  built?: [number, number, number, number][];
   // tris (web/tools/tris.mjs): each node's triangles as meshed, per level, row-major (ty * nx + tx): "1", "2", "4", "8",
   // "1f" a foliage tile's, "1c" its base tile's once the foliage shows (a 1 m tile with its foliage draws 1c + 1f)
   tiles: { N: number; levels: TileLevel[]; tris: Record<'1' | '1f' | '1c', number[]> & Partial<Record<'2' | '4' | '8', number[]>> };

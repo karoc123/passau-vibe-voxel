@@ -105,7 +105,8 @@ committing data.
 **The map's config: `scripts/map.json`.** The extent (a window of the project grid: its corner on 1024 m blocks, its
 size, the bounding box of the blocks), the blocks built (`blocks`: runs of the project grid's 1024 m blocks, each whole
 or only its first rows; a block not listed is empty, as beyond the map: no region, node files, terrain, traffic or
-labels there, its cells dropped from whatever a cover's core holds of them, `scripts/window.py`), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
+labels there, its cells dropped from whatever a cover's core holds of them, `scripts/window.py`; in the viewer a cut
+face like the map's edge and a wall for whatever moves, `web/src/core/built.ts`), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
 box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
 and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; elsewhere 290.921 m;
@@ -365,6 +366,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `core/tile-data.ts` reads (needs `uv`) | fast |
 | `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
 | `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
+| `edge` | the map's edge at a block not built (`core/built.ts`, meta.json `built`): the drone's sweep, the boat's water, the walker, the Rapier car (a wall) and the plane (`EDGE`) kept out of it | fast |
 | `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
 | `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
 | `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
