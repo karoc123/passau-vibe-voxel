@@ -159,6 +159,17 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
   vehicles cannot leave).
 - **Do:** then add the blocks along the Inn from the Innstadt to Ingling (Kraftwerk Passau-Ingling).
 - **Rebuild:** yes, plus the downloads for the new blocks (open data, CC BY 4.0, as today).
+- **WIP (2026-11-26):** steps 1 (blocks in `map.json`, pipeline) and 2 (edge in viewer and physics, gate `edge`) are
+  committed. Open, step 3: measured in OSM, Kraftwerk Passau-Ingling (way 27661875) spans project cols -309..170, rows
+  3028..3409, its weir (way 273300967) rows 3109..3204; the Inn runs from there north-east into the map at row 1408,
+  col ~1360. Blocks to add: row 1 cols 0..1 whole (the old strip's other blocks stay `rows: 384`), rows 2 and 3 cols
+  -1..0; `map.rows` 5504 (to project row 3456). New sheets (fetched into the worktree's `data/raw_new`, 2.8 GB):
+  1 km 821..824_5388, 825..828_5387, 825..830_5388 (with the halo of the old strip), LoD2 824/826/828_5386. DGM1 has
+  no data on the Austrian bank (827_5387 east, 828_5387): fill it in `prep.py` from the laser's ground returns (they
+  and DOM/DOP cover Austria). The Niederbayern OSM extract has next to nothing there (Geofabrik has no Upper Austria
+  extract). Still to do: the fill, the Inn's level above the weir (`river_levels.py`, a stretch box), a label for the
+  dam, `baeume_aoi.csv`/`treespecies_*.tif` cut again for the larger bounds, `osm.json` cut again (same extract:
+  `osm_pbf.py` with the new bbox), the fixture `scripts/fixtures/inn.json` built and looked at.
 
 ## Also open (for later)
 
