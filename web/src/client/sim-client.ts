@@ -33,7 +33,8 @@ import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/even
 import type { Ack, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
-import { fadeOut, STEP, Traffic, type TrafficBodies } from '../sim/traffic';
+import { STEP, Traffic, type TrafficBodies } from '../sim/traffic';
+import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
 import { checkHello } from '../sim/hello';
 import type { Hello } from '../sim/contract/hello';
@@ -429,9 +430,6 @@ export type TrafficView = Readonly<Pick<Traffic, 'heads' | 'peds' | 'cars' | 'de
   'acc' | 'trains' | 'ground' | 'carPose' | 'pathPoint' | 'personPoint' | 'signal' | 'roadVehicles'>> &
   { readonly bodies: Pick<TrafficBodies, 'owns' | 'pose'> | null; readonly boats: BoatView | null };
 
-const smooth01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
-const lerpAngle = (a: number, b: number, k: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
-
 /** the client's copy of the traffic, set from snapshots: what view/life.ts and the nav read (TrafficView) */
 export class TrafficMirror implements TrafficView {
   private readonly T: Traffic;
@@ -508,17 +506,9 @@ export class TrafficMirror implements TrafficView {
     for (const [id, w] of s.walked) this.walked.set(id, w);
   }
 
-  // as LifePhysics.pose: a parked car or a wreck where it is, a body between its last two drawn poses, the fade back
-  // onto its path blended out
+  // as LifePhysics.pose (sim/body-pose.ts drawnBodyPose, the same code): a parked car or a wreck where it is, a body
+  // between its last two poses, the fade back onto its path blended out
   private bodyPose(c: Car, a: number, under: RoadPose): RoadPose {
-    const d = this.draws.get(c.id);
-    let p = c.detachedPose ?? under;
-    if (!d) return p;
-    if (d.p0 && d.p1) {
-      const p0 = d.p0, q = d.p1, l = (u: number, v: number) => u + (v - u) * a;
-      p = { x: l(p0.x, q.x), y: l(p0.y, q.y), z: l(p0.z, q.z), h: lerpAngle(p0.h, q.h, a), pitch: lerpAngle(p0.pitch, q.pitch, a), roll: lerpAngle(p0.roll, q.roll, a) };
-    }
-    const f = d.fade;
-    return f ? fadeOut(p, f, 1 - smooth01((f.t + (a - 1) * STEP) / f.dur), d.body) : p;
+    return drawnBodyPose(this.draws.get(c.id), a, c.detachedPose ?? under, STEP);
   }
 }

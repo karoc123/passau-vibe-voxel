@@ -26,8 +26,9 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
-import { fadeOut, fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
-import type { BodyDraw } from '../../sim/contract/agents';
+import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import type { BodyDraw, BodyPose } from '../../sim/contract/agents';
+import { bodyPoseAt, drawnBodyPose } from '../../sim/body-pose';
 import type { CoachBox } from '../../sim/train-traffic';
 import type { Car } from '../../sim/types';
 import type { RoadPose } from '../../sim/contract/pose';
@@ -39,7 +40,7 @@ import type { VehicleId } from '../../sim/contract/ids';
 import { RapierCar } from './car';
 import { type CarInput, NO_INPUT, PARK } from '../../sim/contract/inputs';
 import { PlayerCar } from './player-car';
-import { FALL_MS, SINK_MS, type DriverSnapshot } from '../../sim/contract/snapshot';
+import { SINK_MS, type DriverSnapshot } from '../../sim/contract/snapshot';
 // (for the node tools, which load each module graph apart: the world's edits of this one, whose colliders hear them)
 export { liveEdits };
 export * as worldEdits from '../../core/world-edits';
@@ -441,20 +442,24 @@ export class LifePhysics implements TrafficBodies {
   // traffic, the last drawn otherwise): a parked car or a wreck where it is, the body's, and a blend back to the
   // kinematic one after a release (or a body put on its ghost again)
   pose(c: Car, a: number, under: RoadPose): RoadPose {
-    const b = this.bodies.get(c.id);
-    let p = under;
-    if (c.detachedPose) p = c.detachedPose;
-    if (b && b.state !== 'rest' && b.state !== 'path') p = this.poseAt(b, a, true);
-    const f = this.fades.get(c);
-    return f ? fadeOut(p, f, 1 - smooth01((f.t + (a - 1) * TICK) / f.dur), !!b) : p;
+    return drawnBodyPose(this.drawState(c), a, c.detachedPose ?? under, TICK);
   }
 
   drawState(c: Car): BodyDraw | null {
     const b = this.bodies.get(c.id), f = this.fades.get(c);
     if (!b && !f) return null;
     const moving = !!b && b.state !== 'rest' && b.state !== 'path';
-    return { owns: !!b && b.state !== 'path', body: !!b, p0: moving ? this.poseAt(b, 0, true) : null, p1: moving ? this.poseAt(b, 1, true) : null,
-      fade: f ? { ...f } : null };
+    const fall = b?.driver?.fallUntil ? { side: b.driver.fallSide, until: b.driver.fallUntil, tick: this.tickNumber } : null;
+    return { owns: !!b && b.state !== 'path', body: !!b, p0: moving ? this.mapPose(b.prev) : null, p1: moving ? this.mapPose(b.cur) : null,
+      drive: moving && b.drive ? { wheelZ: b.build.wheels[2].z, fall } : null, fade: f ? { ...f } : null };
+  }
+
+  // a body pose in map metres (the physics world's origin added)
+  private mapPose(p: P7): BodyPose {
+    const o: BodyPose = { x: p.x + this.origin.x, y: p.y, z: p.z + this.origin.z, qx: p.qx, qy: p.qy, qz: p.qz, qw: p.qw, ride: p.ride };
+    if (p.lean !== undefined) o.lean = p.lean;
+    if (p.wheelie !== undefined) o.wheelie = p.wheelie;
+    return o;
   }
 
   dispose() {
@@ -682,31 +687,10 @@ export class LifePhysics implements TrafficBodies {
     return (v.x * f.x + v.z * f.z) / (Math.hypot(f.x, f.z) || 1);
   }
 
-  // car c's pose (the ground under the body's origin; its heading, pitch, roll) between two body poses
-  private poseAt(b: Body, a: number, drawn = false): RoadPose {
-    const p0 = b.prev, p1 = b.cur;
-    const l = (u: number, v: number) => u + (v - u) * a;
-    const d = p0.qx * p1.qx + p0.qy * p1.qy + p0.qz * p1.qz + p0.qw * p1.qw, s = d < 0 ? -1 : 1;
-    let qx = l(p0.qx, p1.qx * s), qy = l(p0.qy, p1.qy * s), qz = l(p0.qz, p1.qz * s), qw = l(p0.qw, p1.qw * s);
-    const n = Math.hypot(qx, qy, qz, qw) || 1;
-    qx /= n; qy /= n; qz /= n; qw /= n;
-    const ride = l(p0.ride, p1.ride), up = upOf(qx, qy, qz, qw);
-    const x = l(p0.x, p1.x) + this.origin.x - up.x * ride, y = l(p0.y, p1.y) - up.y * ride, z = l(p0.z, p1.z) + this.origin.z - up.z * ride;
-    const m13 = 2 * (qx * qz + qw * qy), m23 = 2 * (qy * qz - qw * qx), m33 = 1 - 2 * (qx * qx + qy * qy);
-    const m21 = 2 * (qx * qy + qw * qz), m22 = 1 - 2 * (qx * qx + qz * qz), m31 = 2 * (qx * qz - qw * qy), m11 = 1 - 2 * (qy * qy + qz * qz);
-    const level = Math.abs(m23) < 0.9999999;
-    const h = level ? Math.atan2(m13, m33) : Math.atan2(-m31, m11);
-    const pitch = -Math.asin(-Math.max(-1, Math.min(1, m23)));
-    const roll = level ? Math.atan2(m21, m22) : 0;
-    if (!drawn || !b.drive) return { x, y, z, h, pitch, roll };
-    const wheelie = l(p0.wheelie ?? 0, p1.wheelie ?? 0);
-    let tilt = roll + l(p0.lean ?? 0, p1.lean ?? 0);
-    if (b.driver?.fallUntil) {
-      const now = (this.tickNumber - 1 + a) * TICK * 1000;
-      const k = Math.min(1, Math.max(0, (FALL_MS - (b.driver.fallUntil - now)) / 450));
-      tilt += (b.driver.fallSide * 1.45 - tilt) * k * k;
-    }
-    return { x, y: y + Math.sin(wheelie) * -b.build.wheels[2].z, z, h, pitch: pitch + wheelie, roll: tilt };
+  // car c's pose (the ground under the body's origin; its heading, pitch, roll) between two body poses (as the sim
+  // reads it: no lean, wheelie or fall; drawn: drawState)
+  private poseAt(b: Body, a: number): RoadPose {
+    return bodyPoseAt(b.prev, b.cur, a, null, TICK, this.origin.x, this.origin.z);
   }
 
   private publish(b: Body, now: number) {
@@ -848,7 +832,6 @@ export class LifePhysics implements TrafficBodies {
 
 // a wreck: no engine, the brakes on
 const WRECK_CMD: Cmd = { want: 0, vb: 0, ang: 0, stopped: true };
-const smooth01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 // a rotation's up (its y axis) and forward (its z axis)
 const upOf = (x: number, y: number, z: number, w: number) => ({ x: 2 * (x * y - w * z), y: 1 - 2 * (x * x + z * z), z: 2 * (y * z + w * x) });
 const fwdOf = (x: number, y: number, z: number, w: number) => ({ x: 2 * (x * z + w * y), y: 2 * (y * z - w * x), z: 1 - 2 * (x * x + y * y) });

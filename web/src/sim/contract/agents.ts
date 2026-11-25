@@ -49,14 +49,21 @@ export interface CarState {
   detachedPose?: RoadPose;
 }
 
-/** a car's body as drawn (sim/traffic.ts TrafficBodies.drawState): owns (a body, not on its path), body (one at all),
- * its drawn poses at the last two ticks (p0, p1; null: none moving it), its fade back onto its path (t, dur: s; d*: the
- * offset blended out) */
+/** a body's pose at a tick (sim/body-pose.ts bodyPoseAt): its origin (map metres), its rotation (a unit quaternion:
+ * blended, never its angles), how far the ground is under the origin along its up (ride); a driven body's lean and
+ * wheelie (rad) */
+export interface BodyPose { x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number; ride: number; lean?: number; wheelie?: number }
+
+/** a car's body as drawn (sim/traffic.ts TrafficBodies.drawState; drawn by sim/body-pose.ts drawnBodyPose): owns (a
+ * body, not on its path), body (one at all), its poses at the last two ticks (p0, p1; null: none moving it), a driven
+ * body's (drive: wheelZ, the rear wheel's offset its wheelie lifts by; fall: a rider coming off, to side, until the
+ * driver's ms, tick: the tick it is drawn at), its fade back onto its path (t, dur: s; d*: the offset blended out) */
 export interface BodyDraw {
   owns: boolean;
   body: boolean;
-  p0: RoadPose | null;
-  p1: RoadPose | null;
+  p0: BodyPose | null;
+  p1: BodyPose | null;
+  drive: { wheelZ: number; fall: { side: number; until: number; tick: number } | null } | null;
   fade: { dx: number; dy: number; dz: number; dh: number; t: number; dur: number } | null;
 }
 
