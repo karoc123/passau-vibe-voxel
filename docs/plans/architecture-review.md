@@ -6,8 +6,6 @@ the fast set green; extra gates named.
 
 ## Left over, no package yet
 
-- `TrafficMirror` without a whole `Traffic` behind it: `client/` still imports `sim/traffic.ts` (the R1 baseline);
-  the path maths as shared functions over the road data.
 - Open question (owner): does the creative camera simulate the world where it looks? Until answered an observer's
   camera is a view like a player's, behind one switch (`app/session.ts` `OBSERVER_VIEW`).
 - The link's `frame(dt, …)` becoming `advance(dt)` on the in-thread link only, the worker ticking on its own timer:

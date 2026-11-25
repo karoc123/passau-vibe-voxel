@@ -1,5 +1,6 @@
 import { hash } from '../core/num';
-import { at, farFrom, prepPath, pt, type Path, type Viewer } from './path';
+import { at, farFrom, pt, type Viewer } from './path';
+import { COACH_LENGTH, COACH_WIDTH, coachPoses, GAP, trainTracks, type CoachPose, type TrackPath } from './coaches';
 import type { TrainPathData, TrainService } from './types';
 import type { TrainState } from './contract/agents';
 
@@ -10,26 +11,15 @@ import type { TrainState } from './contract/agents';
 // waits until the track's start is that far, one past its track's end (into a tunnel, off the map) runs on along the
 // track's last straight until it is that far. (Twice a car's distance: a train is 4 m tall and 80-170 m long.)
 
-interface TrainPath extends TrainPathData, Path { next: number[] }
+type TrainPath = TrackPath & { next: number[] };
 interface Train { id: number; p: number; svc: TrainService; s: number; ds: number; v: number; n: number; wait: number; done: Set<number>; express: boolean; ahead?: Train | null }
 
-export const COACH_LENGTH = 20;
-export const COACH_WIDTH = 2.9;
 const COACH_HEIGHT = 4;
 const COACH_SIZE = Object.freeze({ x: COACH_WIDTH, y: COACH_HEIGHT, z: COACH_LENGTH });
-const GAP = 1, V = 16, A = 0.7, B = 0.9, DWELL = 25, HEADWAY = 1800, SPACING = 70;
+const V = 16, A = 0.7, B = 0.9, DWELL = 25, HEADWAY = 1800, SPACING = 70;
 export const POP_R = 600;
 
 const EXPRESS = /Intercity|DB|ČD|ÖBB|EC|IC/i;
-
-export interface CoachPose {
-  readonly id: string;
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly heading: number;
-  readonly express: boolean;
-}
 
 /** a train as a snapshot carries it (sim/server/snapshot.ts): what its coaches' poses are drawn from */
 // (a train as saved, TrainState: contract/agents.ts)
@@ -45,8 +35,7 @@ export class TrainTraffic {
   private nextId = 1;
 
   constructor(data: TrainPathData[], private readonly seed = 0) {
-    this.paths = data.filter((d) => d.svc.length && d.p.length >= 2).map((d, i) =>
-      Object.assign(prepPath({ ...d }), { next: d.svc.map((_, k) => this.draw(i * 31 + k + 5) * HEADWAY) }));
+    this.paths = trainTracks(data).map((d, i) => Object.assign(d, { next: d.svc.map((_, k) => this.draw(i * 31 + k + 5) * HEADWAY) }));
     this.byPath = this.paths.map(() => []);
     for (const p of this.paths)
       for (let s = 200 + this.draw(p.cum.length + 11) * 900; s < p.L - 50; s += 900 + this.draw(s) * 900)
@@ -124,24 +113,8 @@ export class TrainTraffic {
   }
 
   // Poses at the most recent tick by default. Back up one step for frame interpolation.
-  *coaches(back = 0): IterableIterator<CoachPose> {
-    const a = pt(), b = pt();
-    for (const tr of this.list) {
-      const p = this.paths[tr.p];
-      for (let k = 0; k < tr.n; k++) {
-        const front = tr.s - tr.ds * back - k * (COACH_LENGTH + GAP);
-        at(p, front, 0, a); at(p, front - COACH_LENGTH, 0, b);
-        yield {
-          id: `${tr.id}:${k}`,
-          x: (a.x + b.x) / 2,
-          y: Math.max(a.z, b.z) + 0.05,
-          z: (a.y + b.y) / 2,
-          heading: Math.atan2(a.x - b.x, a.y - b.y),
-          express: tr.express,
-        };
-      }
-    }
-  }
+  // (sim/coaches.ts coachPoses: the client's copy draws its coaches with the same code)
+  coaches(back = 0): IterableIterator<CoachPose> { return coachPoses(this.paths, this.list, back); }
 
   /** the trains as a snapshot carries them */
   save(): TrainState[] { return this.list.map(({ id, p, s, ds, n, express }) => ({ id, p, s, ds, n, express })); }

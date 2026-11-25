@@ -148,6 +148,7 @@ const LAYERS = [
   ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
   ['sim/hello.ts', 'shared'], // (the hello: made by the host, checked by the client; A6)
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
+  ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
   ['client/', 'client'], // (SimClient, MirrorSimClient, TrafficMirror, the links)
@@ -202,14 +203,11 @@ function codeOf(bare) {
 // InThreadSession, the worker's messages to sim/contract/worker.ts), A12 the host -> page loader ones (the host's
 // loaders as ports: host/browser.ts, host/node.ts).
 const BASELINE = [
-  "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain)",
-  "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain) type",
   "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
   "R1 view/meshes.ts (presentation) -> sim/traffic.ts (domain)",
-  "R1 view/trains.ts (presentation) -> sim/train-traffic.ts (domain)",
   "R2 type cycle: foliage.ts, voxelMaterial.ts",
   "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
 ];
