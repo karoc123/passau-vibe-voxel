@@ -101,8 +101,7 @@ Open points left by landed engine work:
   the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
 - **Sessions and modes:** edit outcomes go only to the sending session; an empty player entry stays in
   `WorldSim.players` after leaving; an unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
-- **Hygiene:** `CarState` is declared beside `Car`; go-to/search and the
-  weather/day/share controls are still in `main.ts`.
+- **Hygiene:** `CarState` is declared beside `Car`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 

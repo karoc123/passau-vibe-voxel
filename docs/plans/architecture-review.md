@@ -18,4 +18,3 @@ the fast set green; extra gates named.
   car type from `enterSeat.choice`, both trusted by the sandbox.
 - The drone's numbers are code (`fpv-flight.ts`), covered by `PROTOCOL` only, not by the tuning hash.
 - A network transport sends its hello as the first message, the same way, in `openSession`.
-- `main.ts` still holds go-to/search and the weather/day/share controls.
