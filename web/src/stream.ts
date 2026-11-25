@@ -6,6 +6,7 @@ import { World, type ColumnSource } from './core/world';
 import { paletteFlags, tileRequest, type TileContext } from './tile-request';
 import type { LiveEdits, LiveNode, Region } from './core/live-edits';
 import { viewerTileCache } from './viewer-tiles';
+import { dataUrl, HOST_FILES } from './core/data-contract';
 import { hotBox, perSide, union, type Box } from './sections';
 
 export interface TileNode {
@@ -378,7 +379,7 @@ export class TileStreamer implements ColumnSource {
   }
 
   private requestFor({ node: n, dataOnly, edit }: Job): { msg: MeshRequest; transfer: Transferable[] } {
-    const file = (k: string) => new URL(`data/tiles/${k}.bin`, location.href).href;
+    const file = (k: string) => new URL(dataUrl(`${HOST_FILES.tiles}${k}.bin`), location.href).href;
     const msg = tileRequest(this.ctx, n.s, n.tx, n.ty, n.foliage, file, n.keep, dataOnly);
     const transfer: Transferable[] = [];
     // (a level-1 tile the world has an edit of: its columns, not its file's; a new one's fields from its file still)

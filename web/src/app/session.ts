@@ -12,7 +12,7 @@
 import type * as THREE from 'three';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from '../client/sim-client';
 import { WorkerLink } from '../client/sim-worker-link';
-import { checkBuild } from '../core/data-contract';
+import { checkBuild, dataUrl, HOST_FILES } from '../core/data-contract';
 import { LiveEdits, liveEdits } from '../core/live-edits';
 import type { Meta } from '../core/meta';
 import type { World } from '../core/world';
@@ -71,7 +71,7 @@ export function openSession(o: SessionOptions, { meta, edits: live, traffic, wor
     return { client: new MirrorSimClient(link, traffic, world, mine, live), link };
   }
   const own = o.transport === 'mirror' ? structuredClone(traffic) : null;
-  const boats = fetchJson<BoatData>('data/boats.json');
+  const boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats));
   const server = hostSim({ meta, traffic, boats }, browserPorts(viewerTileCache(meta.tiles.N, live)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
   // (one session, the page's player: the host names it, the page's commands name none; the client handed the world's
   // live edits, the host's own: the server in this thread sends none in its snapshots)

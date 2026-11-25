@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Caption } from './caption';
 import type { TileNode, TileStreamer } from './stream';
 import type { ColumnData, Meta } from './core/meta';
+import { CLIENT_FILES, dataUrl } from './core/data-contract';
 import type { Zones } from './types';
 import { dataTexture, fetchJson, pushTo } from './util';
 import type { DepthPrepass } from './prepass';
@@ -75,7 +76,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   const cropList: number[] = [];
   if (ct) for (let ty = ct[1]; ty <= ct[3]; ty++) for (let tx = ct[0]; tx <= ct[2]; tx++) cropList.push(index(tx, ty));
   // (the buildings' boxes: which tiles each one is on; the columns' buildings come with the tiles)
-  const zonesIn = fetchJson<Zones>('data/zones.json');
+  const zonesIn = fetchJson<Zones>(dataUrl(CLIENT_FILES.zones));
   caption.show('Terrain', 0, 2 * total);
   // (the tiles in range as range() below will find them: the camera's window, or the whole map)
   // (in view first, then the nearest: loadTerrain fetches and builds its chunks in the order of their first tile)

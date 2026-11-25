@@ -101,7 +101,7 @@ A11), their order and what is left are in [architecture-review.md](architecture-
   the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
 - **Sessions and modes:** edit outcomes go only to the sending session; an empty player entry stays in
   `WorldSim.players` after leaving; an unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
-- **Hygiene:** the `types.ts` re-export can go; `CarState` is declared beside `Car`; go-to/search and the
+- **Hygiene:** `CarState` is declared beside `Car`; go-to/search and the
   weather/day/share controls are still in `main.ts`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)

@@ -1,6 +1,5 @@
 // The viewer's own data types (flood.json, zones.json, places). meta.json's (Meta with its labels and views, WorldId,
-// TileLevel) and a node's ColumnData are in core/meta.ts, re-exported here for one step.
-export type { ColumnData, Facts, Label, Meta, TileLevel, Vec3Tuple, View, WorldId } from './core/meta';
+// TileLevel) and a node's ColumnData are in core/meta.ts.
 
 // flood.json (scripts/flood.py): of it the viewer reads only the river's points (its other fields are unread)
 export interface FloodInfo {

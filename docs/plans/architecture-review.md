@@ -40,7 +40,6 @@ Two packages are left; one at a time, not in parallel with an E/M package. Every
   (`app/session.ts` `sessionOptions`); the page's player is the constant `PAGE_PLAYER`; the client asks for the road
   physics (`SimClient.loadPhysics`); a new craft's spot comes from the shell's search and the car type from
   `enterSeat.choice`, both trusted by the sandbox.
-- The page's and the worker's loaders still spell their file names (`data/…`) instead of `core/data-contract.ts`.
 - The drone's numbers are code (`fpv-flight.ts`), covered by `PROTOCOL` only, not by the tuning hash.
 - A network transport sends its hello as the first message, the same way, in `openSession`.
-- `main.ts` still holds go-to/search and the weather/day/share controls; `types.ts` still re-exports `core/meta.ts`.
+- `main.ts` still holds go-to/search and the weather/day/share controls.
