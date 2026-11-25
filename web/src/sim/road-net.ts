@@ -14,6 +14,16 @@ export const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
 const LANE_W = 3.0; // m between lane centres: scripts/traffic.py LANE, the lanes it checks and places (scripts/check.sh lanes)
 // how far (m) either side of a junction node a car's path is blended into the next road's
 export const BLEND = 7;
+// the active circle (sim/traffic.ts setActive): ACTIVE_R m round the focus, its roads found by ACTIVE_CELL m cell
+// (activeKey); the page draws the signal heads by the same cells (view/life.ts)
+export const ACTIVE_R = 900, ACTIVE_CELL = 300;
+export const activeKey = (cx: number, cy: number) => cy * 65536 + cx;
+// Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the
+// hour's number, off the network, a dead end, the parked cars, the people knocked down), never in plain view. Closer
+// in a car at a dead end waits there, a rider turns back; the number over the hour's waits until enough are far.
+// Only the first fill (or a jump of the focus) puts them anywhere at once. (A car 300 m away is a few pixels tall, a
+// person 150 m away about as much: tools/popin-check.mjs checks 200 and 100 m.)
+export const CAR_POP_R = 300, PED_POP_R = 150;
 
 // the ground the agents stand on (world.ts World: the edited columns too)
 export interface Ground {

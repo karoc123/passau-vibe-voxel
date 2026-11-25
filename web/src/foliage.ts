@@ -6,8 +6,6 @@ interface Phase { day: number; sd: number; n: number }
 interface Class { species: string; genera?: string[]; leaf: Phase | null; colour: Phase | null; fall: Phase | null; autumn?: string }
 interface Phenology { classes: Record<string, Class>; city: { leaf: number; colour: number; fall: number }; grass: [number, number, number][]; leaf: [number, number, number] }
 
-export const FOLIAGE_CLASSES = 16;
-
 // The classes' dates and colours (phenology.json); which tree each 2 m cell's leaves belong to comes with the tiles
 // (scripts/tile_fields.py fols, fields.ts)
 export async function loadFoliage(U: VoxelUniforms) {

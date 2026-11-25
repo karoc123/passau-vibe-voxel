@@ -201,14 +201,10 @@ function codeOf(bare) {
 // A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
 // module), A4 the client -> server ones (TrafficMirror to the client, the in-thread session as the client's
 // InThreadSession, the worker's messages to sim/contract/worker.ts), A12 the host -> page loader ones (the host's
-// loaders as ports: host/browser.ts, host/node.ts).
+// loaders as ports: host/browser.ts, host/node.ts), then the traffic's population constants (to the contract and
+// sim/road-net.ts), the edits' keeping (to sim/tuning.ts) and FOLIAGE_CLASSES (to voxelMaterial.ts).
 const BASELINE = [
-  "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
-  "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
-  "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
-  "R1 view/meshes.ts (presentation) -> sim/traffic.ts (domain)",
-  "R2 type cycle: foliage.ts, voxelMaterial.ts",
   "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
 ];
 

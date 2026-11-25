@@ -7,18 +7,14 @@
 // same ticks and foci drop the same edits. The rule itself (Presence) is the world sim's for the vehicles players left
 // as well (ADR 0008: a parked car, a craft no one pilots), with the same keeping. No three.js, no DOM
 // (tools/core-deps.mjs).
-import { frozen } from '../core/frozen';
 import type { WorldOp } from '../core/layers';
 import { liveEdits } from '../core/live-edits';
 import { drop } from '../core/world-edits';
 import { TILE_N } from '../core/tile-data';
+import { EDIT_KEEPING, type EditKeeping } from './tuning';
 // (for the node tools, which load each module graph apart: this graph's world edits)
 export * as worldEdits from '../core/world-edits';
 
-// radius: m from a focus to the node's square (map metres; a vehicle's place) within which it is kept; after: s of
-// world time with no focus that near before it is dropped
-export interface EditKeeping { readonly radius: number; readonly after: number }
-export const EDIT_KEEPING: EditKeeping = frozen({ radius: 600, after: 120 });
 
 type Foci = readonly { x: number; z: number }[];
 

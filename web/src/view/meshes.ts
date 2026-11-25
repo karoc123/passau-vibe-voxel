@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from '../sim/traffic';
+import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from '../sim/contract/agents';
 import { PALETTE, VEHICLE_IDS, VEHICLES, type VehicleType } from '../sim/vehicles';
 import type { VehicleId } from '../sim/contract/ids';
 export { MAX_BIKES, MAX_CARS, MAX_PEOPLE };

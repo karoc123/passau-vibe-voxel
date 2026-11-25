@@ -86,8 +86,7 @@ is left of the architecture work is in [architecture-review.md](architecture-rev
 Open points left by landed engine work:
 
 - **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
-  temporary damage needs the TileCache to expose a node's raw files; `SimServer.dispose` leaves the road physics
-  undisposed (its terrain's listener on `liveEdits` stays).
+  temporary damage needs the TileCache to expose a node's raw files.
 - **Wire:** worker not default (waits for prediction); no interest filter per client; snapshots are plain objects
   (no typed arrays or deltas); the worker's ground is level-1 nodes only and decodes nodes the page also decodes;
   Rapier is bundled twice; no gated run carries edit notes over the clone link; `mirror-check`'s golden
