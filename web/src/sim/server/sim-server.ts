@@ -14,7 +14,7 @@
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
 //              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
-//              and drops their view
+//              and drops the player from the world sim
 import { liveEdits } from '../../core/live-edits';
 import { ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
@@ -71,14 +71,13 @@ export class SimServer {
     return s;
   }
 
-  /** the session gone (Session.leave); the last of its player: the player leaves their seat, follows nothing and
-   * looks nowhere */
+  /** the session gone (Session.leave); the last of its player: the player looks nowhere and is gone from the world
+   * sim (WorldSim.leave: their seat left, their entry dropped) */
   disconnect(session: Session) {
     if (!this.sessions.delete(session)) return;
     for (const s of this.sessions) if (s.player === session.player) return;
-    this.sim.send(session.player, { kind: 'leaveSeat' });
-    this.sim.send(session.player, { kind: 'follow', entity: null });
     this.sim.send(session.player, { kind: 'view', view: null });
+    this.sim.leave(session.player);
   }
 
   /** the world's edits go with every session's snapshots (a client with live edits of its own: another thread) */
@@ -93,11 +92,14 @@ export class SimServer {
   update(dt: number) { this.sim.update(dt); }
 
   /** (Session.send) an edit held until its nodes are in (after the edits sent before it), then sent on to the sim for
-   * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied */
+   * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied. One the mode
+   * refuses now (WorldSim.mayEdit) holds no nodes: the sim refuses it in its tick, its outcome the same way */
   holdEdit(from: Session, cmd: Edit) {
     let nodes: [number, number][] = [];
-    try { nodes = this.tiles.nodes(cmd.op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
-    const ready = this.tiles.ready(nodes).catch(() => () => {});
+    if (this.sim.mayEdit(from.player, cmd.op)) {
+      try { nodes = this.tiles.nodes(cmd.op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
+    }
+    const ready = nodes.length ? this.tiles.ready(nodes).catch(() => () => {}) : Promise.resolve(() => {});
     this.held = this.held.then(() => ready).then((release) => {
       if (!this.sessions.has(from)) { release(); return; }
       this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) from.edited(r); });

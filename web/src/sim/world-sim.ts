@@ -32,7 +32,7 @@
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
-import { applyNow as applyEdit } from '../core/world-edits';
+import { applyNow as applyEdit, type WorldOp } from '../core/world-edits';
 import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
@@ -74,7 +74,8 @@ type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> 
 // a command queued: for whom (the host's stamp), and what its sender is told when a seat input of it is taken (the
 // tick it is applied in: a session's ack) or an edit of it applied (the tick, its outcome: the sender's own)
 type Taken = (tick: number, r?: CommandResult) => void;
-interface Queued { player: PlayerId; cmd: PlayerCommand; taken?: Taken }
+// (leave: the host's, not a client's: leave)
+interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' }; taken?: Taken }
 
 export class WorldSim {
   readonly traffic: Traffic;
@@ -118,7 +119,7 @@ export class WorldSim {
     addCraft: (type) => this.addCraft(type),
     placeCraft: (id, spot) => this.placeCraft(id, spot),
     removeCraft: (id) => this.removeCraft(id),
-    sit: (player, seat) => this.enterSeat(player, seat, false),
+    sit: (player, seat) => this.enterSeat(player, seat),
     setTime: (hour, day) => this.setTime(hour, day),
     resetDriver: (player) => {
       if (this.seat(player)?.role !== 'driver' || !this.phys) return false;
@@ -335,6 +336,14 @@ export class WorldSim {
     else this.queue.push({ player, cmd, taken });
   }
 
+  /** the player gone (their host's last connection left: SimServer.disconnect): in the next tick they leave their seat
+   * and their entry in players goes (their view: send a null one) */
+  leave(player: PlayerId) { this.queue.push({ player, cmd: { kind: 'leave' } }); }
+
+  /** whether the game mode lets player make an edit with op (its mayEdit; none: no), asked when the edit is applied
+   * and by the host before it holds the edit's nodes (sim/server/sim-server.ts holdEdit) */
+  mayEdit(player: PlayerId, op: WorldOp) { return !!this.mode?.mayEdit?.(this.face, player, op); }
+
   /** the seat the player holds (its entity in the world), or null */
   seat(player: PlayerId): Seat | null {
     const s = this.players.get(player)?.seat;
@@ -363,9 +372,10 @@ export class WorldSim {
       }
       case 'request': this.result(p, cmd.request.kind, !!this.mode?.request(this.face, p, cmd.request)); break;
       case 'leaveSeat': this.leaveSeat(p); break;
+      case 'leave': this.leaveSeat(p); (this.players as Map<PlayerId, PlayerState>).delete(p); this.held(); break;
       case 'edit': {
         const r: CommandResult = { tick: this.tick, kind: 'edit', ok: false, ref: cmd.ref ?? 0 };
-        if (this.mode?.mayEdit?.(this.face, p, cmd.op)) {
+        if (this.mayEdit(p, cmd.op)) {
           // (the world's voxels changed now: its listeners hear of it in this tick, the sim's edited among them)
           try { r.nodes = applyEdit(cmd.op); r.ok = r.nodes.length > 0; } catch { r.ok = false; }
         }
@@ -420,16 +430,16 @@ export class WorldSim {
   }
 
   // a seat of entity (role, index: without, its first) taken, the one held left first; true: held now (also when it
-  // was already); false: gone, no such seat, another's, not allowed (the mode's mayEnter; not asked with ask false: the
-  // mode seating the player itself), or the role's own refusal (a car: no road physics; a person: not in the crowd on
+  // was already); false: gone, no such seat, another's, not allowed (the mode's mayEnter, also when the mode seats the
+  // player itself: ModeWorld.sit), or the role's own refusal (a car: no road physics; a person: not in the crowd on
   // foot). The walker's from pose (where they are drawn: kept within Tuning.walk.take of where the sim has them), the
   // driver's as type choice (the car taken shows in driverSnapshot)
-  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }, ask = true) {
+  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }) {
     const seat = this.entities.seat(cmd.entity, cmd.role, cmd.index);
     if (!seat) return false;
     const by = this.occupants.get(seatKey(seat));
     if (by === player) return true;
-    if (by !== undefined || (ask && this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat))) return false;
+    if (by !== undefined || (this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat))) return false;
     const id = seat.entity.id;
     if (seat.role === 'walker') {
       const person = this.traffic.people.find((p) => p.id === id);

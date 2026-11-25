@@ -49,10 +49,12 @@ export function readHostData(dir: string): HostData {
 }
 
 /** the world sim's server over <dir>, as hostSim makes it; world 'tiles': its ground and water the level-1 nodes of its
- * TileCache (core/tile-world.ts, as the worker's); data: the tools' own (e.g. a fresh traffic per sim), by default read
+ * TileCache (core/tile-world.ts, as the worker's; let go with the server's dispose); data: the tools' own (e.g. a fresh traffic per sim), by default read
  * from dir */
 export function nodeHost(dir: string, opts: Omit<HostOptions, 'world'> & { world: HostOptions['world'] | 'tiles' },
   data: HostData = readHostData(dir)) {
-  const tiles = nodeTileCache(dir, data.meta.tiles.N);
-  return hostSim(data, nodePorts(tiles), { ...opts, world: opts.world === 'tiles' ? tileWorld(data.meta, tiles) : opts.world });
+  const tiles = nodeTileCache(dir, data.meta.tiles.N), own = opts.world === 'tiles' ? tileWorld(data.meta, tiles) : null;
+  const server = hostSim(data, nodePorts(tiles), { ...opts, world: opts.world === 'tiles' ? own : opts.world });
+  if (own) server.onDispose(own.dispose);
+  return server;
 }
