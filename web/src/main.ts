@@ -18,14 +18,10 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
-import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './client/sim-client';
+import type { CraftView, SimClient } from './client/sim-client';
 import type { CraftsView } from './nav/crafts-view';
-import { browserPorts } from './host/browser';
-import { hostSim, PAGE_PLAYER } from './host/sim-host';
-import { WorkerLink } from './client/sim-worker-link';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
-import type { BoatData } from './sim/boat-traffic';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
 import { checkBuild } from './core/data-contract';
@@ -38,15 +34,17 @@ import type { World } from './core/world';
 import { makeUniforms, makeVoxelMaterial, makeVoxelPrepassMaterial } from './voxelMaterial';
 import { LampLight } from './lamplight';
 import { DepthPrepass } from './prepass';
-import { AUTO_KEYS, DIST_MAX, DIST_MIN, type Gfx, gpuName, prepassPays, Settings } from './settings';
+import { AUTO_KEYS, DIST_MAX, type Gfx, gpuName, prepassPays, Settings } from './settings';
 import { AutoRes } from './autores';
 import { focusView } from './focus';
+import { ViewDistance } from './view-distance';
+import { toast } from './ui/toast';
+import { makeCredits } from './ui/credits';
+import { makeJumpButton } from './ui/jump';
+import { hook } from './app/debug-hooks';
+import { frameLoop } from './app/frame';
+import { openSession, sessionOptions } from './app/session';
 import './style.css';
-
-declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __sim?: SimClient; __simLink?: WorkerLink; __streamer?: TileStreamer;
-    __board?: () => boolean; __crafts?: PlayerCraft[] }
-}
 
 const TODAY = dayOfYear(new Date());
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
@@ -107,6 +105,8 @@ let riverPoints: number[] | null = null;
 let simLoaded: (sim: SimClient) => void = () => {};
 const simReady = new Promise<SimClient>((resolve) => { simLoaded = resolve; });
 let city: Awaited<ReturnType<typeof installCity>> | null = null;
+// the view distance and the far plane (view-distance.ts), each frame
+const viewDistance = new ViewDistance({ camera, scene, map, daylight, gfx, city: () => city, budget });
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
 let prepass: DepthPrepass | null = null;
@@ -148,28 +148,8 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
   gfxPanel.show();
 }
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
-const credits = el('div', '', `<div>Passau in voxels, derived from <a href="https://github.com/stared/warsaw-vibe-voxel" target="_blank" rel="noopener">warsaw-vibe-voxel</a> by <a href="https://p.migdal.pl/" target="_blank" rel="noopener">Piotr Migdał</a> & <a href="https://quesma.com/blog/invisible-cities-one-shot/" target="_blank" rel="noopener">Opus 5.5</a> (MIT)</div>
-  <div>data: <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener">Bayerische Vermessungsverwaltung</a> (CC BY 4.0) and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> contributors (ODbL)</div>
-  <div>weather <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0), phenology <a href="https://www.dwd.de/" target="_blank" rel="noopener">Deutscher Wetterdienst</a> (DL-DE BY 2.0)</div>
-  <div>tree species <a href="https://geoservice.dlr.de/web/maps/eoc:tcde:2022" target="_blank" rel="noopener">Tree Species Germany 2022/2016 – DLR Earth Observation Center (Wegler et al.)</a>, CC BY 4.0</div>`);
-credits.id = 'credits';
-credits.setAttribute('popover', 'auto');
-const creditsButton = el('button', '', '<span aria-hidden="true">?</span>');
-creditsButton.id = 'credits-button';
-creditsButton.type = 'button';
-creditsButton.setAttribute('aria-label', 'Credits and licenses');
-creditsButton.setAttribute('popovertarget', credits.id);
-document.addEventListener('keydown', (e) => {
-  // Let the browser close the popover before Escape can exit the current navigation mode.
-  if (e.key === 'Escape' && credits.matches(':popover-open')) e.stopPropagation();
-}, { capture: true });
-// on foot on a touch screen: Jump (Space), over the right thumb's look area (the sticks: nav.ts footSticks)
-const jumpButton = el('button', '', '<span aria-hidden="true">⤒</span>');
-jumpButton.id = 'jump-button';
-jumpButton.type = 'button';
-jumpButton.setAttribute('aria-label', 'Jump');
-jumpButton.addEventListener('pointerdown', (e) => { e.preventDefault(); nav.jump(); });
-jumpButton.addEventListener('click', (e) => { if (e.detail === 0) nav.jump(); }); // (the keyboard)
+makeCredits();
+makeJumpButton(() => nav.jump());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -206,14 +186,6 @@ addEventListener('keydown', (e) => {
     navigator.clipboard.writeText(text).then(() => toast('Copied: ' + text.split('  ')[0]), () => toast('Copy failed'));
   }
 });
-function toast(msg: string) {
-  const t = document.createElement('div');
-  t.textContent = msg;
-  t.style.cssText = 'position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);padding:6px 12px;border-radius:6px;'
-    + 'background:rgba(20,24,30,.85);color:#fff;font:13px system-ui,sans-serif;z-index:1000;pointer-events:none';
-  document.body.append(t);
-  setTimeout(() => t.remove(), 1600);
-}
 tamePinch(renderer.domElement);
 // A lost WebGL context (a GPU reset; on WSL also under load) is restored by three, but what lived only on the GPU is
 // gone: the tiles are meshed again (stream.ts remeshLost), the sky's light and the shadows drawn again
@@ -461,7 +433,7 @@ async function boot() {
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
     crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target, meta.origin), pixelsHigh: () => post.height });
-  cutNow = -1; // (the view distance handed to the city on the next frame)
+  viewDistance.reset(); // (the view distance handed to the city on the next frame)
   labels = new Labels(meta.labels, onLabel);
   labels.gate = city.gate;
   labels.visible = labelsOn;
@@ -479,40 +451,20 @@ async function boot() {
   fetchJson<TrafficData>('data/traffic.json').then(unpackTraffic).then((td) => {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
-    // (the traffic's seed: a new one each load, or ?seed= to see the same traffic again)
-    const seed = qs.get('seed') !== null ? +qs.get('seed')! : (Math.random() * 2 ** 32) >>> 0;
-    // (the world sim made as a host would, host/sim-host.ts; its road physics (the shared Rapier world) loaded on the first
-    // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still
-    // loads it), ?lpnear=, ?lpmax=)
-    // ?worker=1: in a Web Worker (host/sim.worker.ts), drawn from its snapshots (sim/server/snapshot.ts); ?mirror=1: in this
-    // thread, drawn from its snapshots all the same. ?mode=: the game mode the host makes (host/sim-host.ts MODES; by
-    // default the sandbox, its edits allowed with ?dig=1)
-    const n = (k: string) => (qs.get(k) !== null ? +qs.get(k)! : undefined), eager = qs.get('dig') === '1', edits = eager;
-    const mode = qs.get('mode') ?? undefined;
-    const physics = { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') };
-    let client: SimClient;
-    if (qs.get('worker') === '1') {
-      const link = window.__simLink = new WorkerLink({ seed, physics, eager, mode, edits });
-      client = new MirrorSimClient(link, td, world, true);
-    } else {
-      const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
-      const boats = fetchJson<BoatData>('data/boats.json');
-      const server = hostSim({ meta, traffic: td, boats }, browserPorts(viewerTileCache(meta.tiles.N)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
-      // (one session, the page's player: the host names it, the page's commands name none)
-      const session = server.connect(PAGE_PLAYER);
-      client = own ? new MirrorSimClient(new ThreadLink(session), own, world) : new LocalSimClient(session);
-    }
+    // the world sim's client: local, mirrored or in a worker (app/session.ts)
+    const { client, link } = openSession(sessionOptions(qs), { meta, traffic: td, world, focus });
+    if (link) hook('__simLink', link);
     sim = client;
     life = nav.life = new StreetLife(scene, client);
     nav.sim = client;
     movingActors.add(life.group);
-    window.__life = life;
-    window.__sim = client;
+    hook('__life', life);
+    hook('__sim', client);
     simLoaded(client);
   });
   $('#loading').classList.add('hidden');
-  window.__streamer = streamer;
-  window.__ready = true;
+  hook('__streamer', streamer);
+  hook('__ready', true);
   const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
     import('./nav/crafts-view')]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
@@ -523,7 +475,7 @@ async function boot() {
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];
-  window.__crafts = crafts; // (the shells, for the tools: judder.mjs enters one at a spot)
+  hook('__crafts', crafts); // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
 }
 
@@ -539,7 +491,7 @@ function boardNearest() {
   const shell = best && crafts.find((s) => s.boards?.includes(best.c.type));
   return !!(best && shell?.board?.(best.c));
 }
-window.__board = boardNearest;
+hook('__board', boardNearest);
 
 // ?crop=R: a tiny scene, only the 128 m tiles within R metres (along x and z) of the camera's first target;
 // ?crop=x0,z0,x1,z1: those meeting that box (metres, the project grid's x and z as ?cam=); with ?focus=, crop=fit: the
@@ -552,76 +504,89 @@ function cropOf(q: string | null, t: THREE.Vector3, origin: [number, number] = [
   return v.length === 4 ? [v[0] - ox, v[1] - oz, v[2] - ox, v[3] - oz] : null;
 }
 
-let lastT = performance.now();
-const t0 = lastT;
-renderer.setAnimationLoop((now) => {
-  fly?.(now);
-  stepWeather(now);
-  const dt = Math.min(0.1, (now - lastT) / 1000);
-  lastT = now;
-  // the frame's order (docs/plans/smooth-motion-and-lag.md): the players' input (the car's, Nav's, the crafts that own
-  // the camera), the sim's update (its ticks; the frame's time: sim.time), this frame's poses drawn, then the cameras
-  // on them (the ride's, a craft's own), then what reads the camera
-  for (const c of crafts) if (c.view === 'ride') c.update(dt);
-  nav.update(dt);
-  for (const c of crafts) if (c.view === 'own') c.update(dt);
-  if (sim && life) {
-    // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
-    // far from the camera, which sees them
+// the frame's phases, in the order of app/frame.ts PHASES
+const t0 = performance.now();
+let viewDist = 0, redraws = 0; // (this frame's: the camera's distance to the target; the shadow's redraws before the draw)
+renderer.setAnimationLoop(frameLoop({
+  // the players' input (the car's, Nav's, the crafts that own the camera); first the map's fly-to and the weather's fade
+  input: (now, dt) => {
+    fly?.(now);
+    stepWeather(now);
+    for (const c of crafts) if (c.view === 'ride') c.update(dt);
+    nav.update(dt);
+    for (const c of crafts) if (c.view === 'own') c.update(dt);
+  },
+  // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
+  // far from the camera, which sees them
+  sim: (_now, dt) => {
+    if (!sim || !life) return;
     sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
     life.group.visible = !city || city.complete;
-    if (life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
-  }
-  craftsView?.update(sim, dt, daylight.night);
-  nav.place(dt);
-  for (const c of crafts) c.place?.(dt);
-  const bodyMode = nav.craft?.id ?? nav.mode;
-  if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
-  if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
-  const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.third ? 'Exit walk' : 'Walk';
-  if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
-  walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
-  if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
-  const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
-  post.setHeight(above, gfx.now.tilt && !nav.craftView, camera.position.distanceTo(controls.target));
-  const viewDist = camera.position.distanceTo(controls.target);
-  viewCut(above);
-  daylight.setFogFrom(viewDist, above);
-  fitFar(); // (within the fog's far end)
-  const t = (performance.now() - t0) / 1000;
-  if (uniforms) uniforms.uTime.value = t;
-  daylight.clouds.tick(t);
-  setWindows?.(daylight.hour, daylight.day);
-  fountains?.update(t, daylight.night);
-  if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
-  const cp = camera.position;
-  precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
-  if (city?.complete) document.body.classList.remove('loading');
-  daylight.sky.mesh.position.copy(camera.position);
-  streamer?.update(camera);
-  daylight.fitShadow(focus(), camera, viewDist, map);
-  const redraws = daylight.redraws + daylight.patches;
-  if (stillChanged()) stillDue = true;
-  if (stillDue && now - redrawnAt > 300) { stillDue = false; redrawnAt = now; daylight.redrawShadow(); }
-  renderer.info.reset();
-  if (autoRes && !(gfx.isAuto('res') && gfx.isAuto('detail'))) autoRes.stop(); // the visitor set one of them
-  if (autoRes?.done) autoRes = null;
-  autoRes?.begin();
-  post.composer.render();
-  if (daylight.redraws + daylight.patches !== redraws) busy = true;
-  autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
-  busy = false;
-  perf.frame(now, document.hidden, renderer.info.render.triangles);
-  barRect ??= bar.rect;
-  minimap?.update(now, nav.mapPose, barRect.bottom);
-  labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
-});
+  },
+  // this frame's poses drawn
+  poses: (_now, dt) => {
+    if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
+    craftsView?.update(sim, dt, daylight.night);
+  },
+  // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
+  cameras: (_now, dt) => {
+    nav.place(dt);
+    for (const c of crafts) c.place?.(dt);
+    const bodyMode = nav.craft?.id ?? nav.mode;
+    if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
+    if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
+    const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.third ? 'Exit walk' : 'Walk';
+    if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
+    walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
+    if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
+  },
+  // what reads the camera: the view distance, the fog, the far plane, the animated uniforms, the tiles streamed, the
+  // shadow's fit and its redraw
+  cameraReaders: (now) => {
+    const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
+    post.setHeight(above, gfx.now.tilt && !nav.craftView, camera.position.distanceTo(controls.target));
+    viewDist = camera.position.distanceTo(controls.target);
+    viewDistance.update(above);
+    daylight.setFogFrom(viewDist, above);
+    viewDistance.fitFar(); // (within the fog's far end)
+    const t = (performance.now() - t0) / 1000;
+    if (uniforms) uniforms.uTime.value = t;
+    daylight.clouds.tick(t);
+    setWindows?.(daylight.hour, daylight.day);
+    fountains?.update(t, daylight.night);
+    if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
+    const cp = camera.position;
+    precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
+    if (city?.complete) document.body.classList.remove('loading');
+    daylight.sky.mesh.position.copy(camera.position);
+    streamer?.update(camera);
+    daylight.fitShadow(focus(), camera, viewDist, map);
+    redraws = daylight.redraws + daylight.patches;
+    if (stillChanged()) stillDue = true;
+    if (stillDue && now - redrawnAt > 300) { stillDue = false; redrawnAt = now; daylight.redrawShadow(); }
+  },
+  // the draw (timed by autores.ts while it measures), then the overlays placed by it: the map, the labels
+  render: (now) => {
+    renderer.info.reset();
+    if (autoRes && !(gfx.isAuto('res') && gfx.isAuto('detail'))) autoRes.stop(); // the visitor set one of them
+    if (autoRes?.done) autoRes = null;
+    autoRes?.begin();
+    post.composer.render();
+    if (daylight.redraws + daylight.patches !== redraws) busy = true;
+    autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
+    busy = false;
+    perf.frame(now, document.hidden, renderer.info.render.triangles);
+    barRect ??= bar.rect;
+    minimap?.update(now, nav.mapPose, barRect.bottom);
+    labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
+  },
+}, t0));
 
-window.__three = { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,
+hook('__three', { camera, controls, nav, bar, scene, renderer, flyTo, setHour, setDay, setWeather, map, daylight, post, budget,
   // the detail, as the visitor would set it (tools)
   level: () => gfx.now.detail, setLevel: (l: number) => { const c = { detail: Math.max(0, Math.min(1, l)) }; gfx.set(c); applyGfx(c); gfxPanel.show(); }, city: () => city, prepass: () => prepass, gfx,
   // any graphics setting, as the visitor would set it (tools)
-  setGfx: (c: Partial<Gfx>) => { gfx.set(c); applyGfx(c); gfxPanel.show(); } };
+  setGfx: (c: Partial<Gfx>) => { gfx.set(c); applyGfx(c); gfxPanel.show(); } });
 
 // what the city's shadow map shows: which tiles are drawn (a tile in or out, or one distance level for another, is
 // drawn again into the map where it casts: daylight.changed), and what folds, hides or thins them in its depth pass
@@ -648,47 +613,6 @@ function stillChanged() {
   if (key === stillKey) return false;
   stillKey = key;
   return true;
-}
-
-// The view distance now: the setting, but no less than VIEW_PER_HEIGHT times the camera's height over the ground (in
-// 100 m steps), so that from high up (the whole map's view, 2.5 km over it) the city below is not all haze. A street,
-// Oberhaus, the overview (~560 m up) keep the setting.
-const VIEW_PER_HEIGHT = 1.2, WHOLE_START = 0.75;
-let cutNow = -1, affordNow = Infinity;
-// 'Whole map' (dist 0) is DIST_MAX (5 km), so that on a large map it no longer loads all of it; its fog starts late.
-// Within what the budget affords (city.ts affordable): the coarsest level's nodes in range at most half the budget (as
-// detail 0 is twice the whole map's), the rest for the splits nearest and in view. Only a phone's ceiling ever makes it
-// bite (on a desktop the budget is at least twice the whole map at 8 m); the camera's height still widens it (the
-// overview: the whole map at 8 m). It shrinks at once and grows again only by AFFORD_STEP, not to and fro as the
-// camera moves; never under DIST_MIN.
-const AFFORD_STEP = 300;
-function viewCut(above: number) {
-  const a = Math.max(DIST_MIN, city?.affordable(budget() / 2) ?? Infinity);
-  if (a < affordNow || a >= affordNow + AFFORD_STEP) affordNow = a;
-  const want = gfx.now.dist || DIST_MAX, d = Math.min(want, affordNow), c = Math.max(d, Math.ceil((above * VIEW_PER_HEIGHT) / 100) * 100);
-  if (c === cutNow) return;
-  cutNow = c;
-  daylight.setCut(c, gfx.now.dist || d < want ? undefined : WHOLE_START);
-  city?.setDist(c);
-}
-
-// The far plane: out to the map's furthest corner from the camera (the far ground stands to the map's edge, faintly
-// through the view distance's fog: farground.ts), within FAR_PER_CUT times the view distance where there is one, and
-// within the weather fog's far end (daylight.setFogFrom: past it all is the fog's colour; in clear weather it lies
-// beyond Passau's map from anywhere in it, so on a larger map the far plane, with 'whole map', no longer grows with
-// the map), and never inside the sky's sphere (sky.ts, 6000 m). In FAR_STEP steps, so that it seldom changes (the depth's scale with
-// it: the TAA's history, the occlusion's horizons).
-const SKY_R = 6000, FAR_PER_CUT = 4, FAR_STEP = 500;
-function fitFar() {
-  if (map.isEmpty()) return;
-  const p = camera.position;
-  const reach = Math.hypot(Math.max(p.x - map.min.x, map.max.x - p.x), Math.max(p.y - map.min.y, map.max.y - p.y), Math.max(p.z - map.min.z, map.max.z - p.z));
-  const fogFar = (scene.fog as THREE.Fog | null)?.far ?? Infinity;
-  const want = Math.max(SKY_R + FAR_STEP, Math.min(reach, cutNow > 0 ? cutNow * FAR_PER_CUT : Infinity, fogFar));
-  const far = Math.ceil(want / FAR_STEP) * FAR_STEP;
-  if (far === camera.far) return;
-  camera.far = far;
-  camera.updateProjectionMatrix();
 }
 
 // busy: this frame changed the settings or redrew the shadow map (autores.ts leaves it out)

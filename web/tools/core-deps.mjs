@@ -17,7 +17,7 @@
 //   R2 no value-import cycle (hard), and the type cycles (cycles through type-only imports) are the baseline's;
 //   R3 determinism words in layers 0-3 (data, contract, shared, domain): no Math.random, Date.now, new Date,
 //      setTimeout, setInterval; performance.now only in PERF_NOW_OK (stats) until a stats clock is injected;
-//   R4 window.__ assigned only in HOOKS_OWNER;
+//   R4 window.__ assigned only in HOOKS_OWNER (app/debug-hooks.ts, which types them all; the rest call its hook());
 //   R5 the contract is types: a module of the contract layer (sim/contract/) declares no class and no function body
 //      (function or arrow) but a type guard's (its return type `x is T`); its constants are data.
 // R1-R5 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
@@ -152,8 +152,8 @@ const LAYERS = [
   // (sim-host.ts: the wiring of a world, its loaders and clock as ports; browser.ts, node.ts: the ports; sim.worker.ts:
   // the worker's entry. The page's own loaders, fetch.ts and viewer-tiles.ts, are the root's: presentation, A12)
   ['host/', 'server'],
-  ['view/', 'presentation'], ['nav/', 'presentation'],
-  ['main.ts', 'app'],
+  ['view/', 'presentation'], ['nav/', 'presentation'], ['ui/', 'presentation'], // (ui/: the page's small widgets)
+  ['main.ts', 'app'], ['app/', 'app'], // (the composition: main.ts; app/: the session, the frame's phases, the debug hooks)
   ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
 ];
 const ALLOWED = {
@@ -168,7 +168,7 @@ const ALLOWED = {
 };
 const HEADLESS = new Set(['data', 'contract', 'shared', 'domain']); // R3
 const PERF_NOW_OK = new Set(['physics/rapier/life-phys.ts', 'physics/rapier/terrain.ts']);
-const HOOKS_OWNER = 'main.ts';
+const HOOKS_OWNER = 'app/debug-hooks.ts';
 const TYPES_ONLY = 'contract'; // R5
 
 // R5: where a module (bare: comments and strings blanked) has code rather than types and data: a class, a function
@@ -247,7 +247,8 @@ for (const file of apps) {
     }
   }
   if (layer === TYPES_ONLY) for (const [what, at] of codeOf(bare)) found.push([`R5 ${r}: ${what}`, lineOf(bare, at)]);
-  if (r !== HOOKS_OWNER) for (const m of code.matchAll(/\bwindow(?:\s+as\s+[^)]*\))?\s*\.\s*(__[\w$]+)\s*=(?![=>])/g)) found.push([`R4 ${r}: window.${m[1]}`, lineOf(code, m.index)]);
+  // (window.__x = …, and window[name] = … as the owner's hook() writes)
+  if (r !== HOOKS_OWNER) for (const m of code.matchAll(/\bwindow(?:\s+as\s+[^)]*\))?\s*(?:\.\s*(__[\w$]+)|\[[^\]\n]*\])\s*=(?![=>])/g)) found.push([`R4 ${r}: window${m[1] ? `.${m[1]}` : '[…]'}`, lineOf(code, m.index)]);
 }
 
 // strongly connected components (Tarjan) over value imports (R2: none allowed) and over all imports (the type cycles)
