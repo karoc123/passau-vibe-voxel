@@ -48,7 +48,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A6, A8, A9, A11, A13 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
+| A6 hello, A8, A9, A11 (A13 in progress) | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -231,6 +231,12 @@ throws. Open: `DataBuild` goes to the client with A6's hello; page/worker fetche
 
 Craft sizes landed: `CRAFT_SCALE` in `sim/craft/craft-motion.ts` (helicopter 1.2, hovercraft 1.3) scales model,
 collision, hover/landing height and chase camera; handling unchanged.
+
+A6 landed without `hello`: `struck`/`dropped` carry `Fallen { person, col, bike }` (no `Person` on the wire);
+`sim/contract/crafts.ts` types each craft's events and wire state; craft events are `{craft, e}`; cores declare
+`save()`/`load()` (motion laws `save()`/`restore()`), `core-state.ts` checks completeness (`NOT_ON_THE_WIRE`,
+craft-motion 26 checks). Lean wire state accepted (lead's call). Open: `hello` (protocol, `DataBuild` from A14,
+tuning hash).
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
