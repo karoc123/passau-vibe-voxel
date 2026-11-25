@@ -13,14 +13,15 @@ it on its own branch, and report.
   simulation free of three.js and the DOM where you touch it (see [ADR 0006](../adr/0006-world-sim-seam.md)).
 - Behaviour-neutral refactors must prove they are neutral: the same check counts, and for the pipeline a byte-exact
   `check.py golden --compare`.
-- `npm` is not on PATH. Use `web/node_modules/.bin/…` or `node`. Port 5173 is the owner's dev server, so use another
-  port for previews and stop it afterwards.
+- `npm` is not on PATH: run dev commands through `web/tools/wt.sh` (setup, tsc, gates, vite on a free port; in a
+  worktree it uses the main checkout's node_modules and data). Port 5173 is the owner's dev server; stop your own
+  vite afterwards.
 - A full data rebuild (`sh scripts/build_data.sh`, about 12 min) changes committed tiles. Do not run it unasked. Say
   in the report whether one is needed. Palette entries it appends go in their own commit.
 
 ## Gates
 
-- `cd web && node tools/gates.mjs` runs the fast set (17 gates, about 50 s). `--full` runs all 22, and
+- `cd web && node tools/gates.mjs` runs the fast set (under a minute). `--full` runs all, and
   `--golden FILE` adds the mesh comparison: record it with `node tools/mesh-golden.mjs write FILE` *before* the change.
 - `scripts/check.sh` runs palette, overrides and interiors. `scripts/check.sh --fixture` also runs `check.py verify`
   (minutes). Some verify failures already exist on main, so compare against main and do not expect all-green.
@@ -48,7 +49,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A6 hello, A8, A9, A11 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | one move package at a time; rest waits as listed |
+| A6 hello, A8, A9, A11 | Architecture packages ([review](architecture-review.md), order and owner answers there) | S–M each | **Ready**, one at a time (A6 hello first) |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -81,167 +82,28 @@ Left:
 - **Build time:** vegetation 21 %, `debris.support_floating` 17 %. See `data/debug/timings.json` and
   [build-speed-2.md](build-speed-2.md).
 
-## Engine packages (audit of main 21d7830e, 2026-11-23)
+## Engine packages
 
-The owner's direction: the engine's architecture first, so the vision can change cheaply. Target: ADR 0006, 0007 and
-[ADR 0008](../adr/0008-server-vision.md) (one world per server, server authoritative, 10–50 players, edits kept by presence).
-Only the car is decided in the world sim today; the sim is built and ticked by the presentation (`sim/life.ts`
-creates `Traffic`, `main.ts` ticks it only while it is drawn); edits belong to the renderer (`dig.ts` edits streamed
-nodes, `stream.ts` publishes and drops them).
-Every package is behaviour-neutral unless it says otherwise: same gate counts.
+Target: ADR 0006, 0007 and [ADR 0008](../adr/0008-server-vision.md). The architecture packages (A6 hello, A8, A9,
+A11), their order and what landed are in [architecture-review.md](architecture-review.md); the commits are in
+`git log`. Open points left by landed engine work:
 
-E6 landed (merge `08f44469`): cores in `sim/craft/`, `sim/river.ts`; presentation in `view/`; core-deps scans
-`core/`, `sim/`, `physics/` whole. `nav/craft-collision.ts` stays in `nav/` (type import of `VoxelCollision`, which
-imports `fetch`; E4 moves `VoxelCollision` to the sim side).
-
-E1 landed (merge after E5): `sim/world-sim.ts` `WorldSim` owns the traffic, the road physics (through an injected
-loader, given `WorldSim.tuning`) and the drive commands by player id; `StreetLife(scene, sim)` only draws; `main.ts`,
-`life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs` create and tick it. Open from E1: the tick still runs only while the
-life is drawn (`main.ts`, `if (life.group.visible)`; owner's call); `WorldSim.events` is one object per update (a server
-with several clients needs tick-numbered event lists, E2); `nav.ts` still writes `life.sim.traffic.keep` and `ctl` (E2).
-
-E2 landed: `Person.id` (own numbering per kind; `EntityRef {kind, id}`), `WorldSim.players` with `follow`, `walkAs`,
-`walkPose`, `release`, `seat`; `Traffic.held` replaces `keep`/`ctl`; ride and possession in `nav/ride.ts`; the sim ticks
-whether or not it is drawn (about 0.5 ms a frame at 60 fps, measured); `eventsSince(tick)` keeps `EVENT_TICKS` = 300.
-Open points went to E7.
-
-E3 landed: `core/world-edits.ts` `apply(op, region)` is the one way to edit (ops are `core/layers.ts` `WorldOp`s, kept
-per node in order); the streamer only draws `liveEdits`; `sim/edit-keeper.ts` (owned by `WorldSim`, run before the
-ticks) keeps an edit while a focus (`WorldSim.foci`: the viewer's focus and every player's entity) is within
-`Tuning.edits.radius` (600 m) and drops it `after` (120 s, world time) once none is; nodes sharing an op go together.
-Open from E3: radius and delay are guesses (owner); a placed block leaves trees poking through (old life-edit rule);
-temporary damage (an op with an expiry) needs the TileCache to expose a node's raw files to rebuild it from its
-remaining ops; `initWorldEdits` is called by `dig.ts` and may move to `main.ts` once something else edits.
-
-E4 landed: `sim/craft/craft-core.ts` `CraftCore` (`clock`, `reach`, `neutral`, `events`, `reset`, `step`, `pose`,
-`velocity`, `drawn`, `unstick?`), cores for boat, hovercraft, helicopter, paraglider, drone, floatplane, jet
-(`sim/craft/cores.ts` `CORES`, built from `WorldSim.tuning`); `WorldSim.crafts` by craft id with a pilot seat
-(`addCraft`, `placeCraft`, `removeCraft`, `enterCraft`, `craftInput`, `resetCraft`, `leaveCraft`, `craftEvents`), stepped
-before the traffic; pilots are foci; `VoxelCollision` in `sim/craft/` with cache and clock injected; the nav files are
-shells. Open from E4: the shell still makes and removes the craft (a mode's job later; does a left craft stay in the
-world?); `drawn(alpha)` ignores alpha (interpolation is smoother, not neutral); the drone has no `Tuning` entry;
-craft commands apply at once (E7).
-
-E5 landed (merge on `main` after `3ba77d23`): `sim/tuning.ts` `Tuning` and a frozen `DEFAULT_TUNING`; `RIDE` lives in
-`sim/vehicles.ts`; `BoatMotion`, `CraftMotion`, `RapierCar` (`rideTuning`), `LifePhysics` (5th parameter) take their part
-with the default as fallback. Nothing in `nav/` passes `DEFAULT_TUNING` yet: `WorldSim` (E1) and E4 pass it from the top.
-
-E9 landed (merge after `6ab2e094`, plan and measurements in `docs/plans/local-server.md`, deleted; in git at `b5483793`): the page holds only a
-`SimClient` (`sim/sim-client.ts`): `SimCommand`s as plain data, queued and applied at the start of the next update,
-`CommandResult`s for refusable commands, `TrafficView`/`CraftView` for drawing. `LocalSimClient` (default, page thread),
-`MirrorSimClient` over snapshots (`sim/snapshot.ts`, `TrafficMirror`) via `ThreadLink` (`?mirror=1`) or `WorkerLink`
-(`?worker=1`, `sim.worker.ts`); `sim-host.ts` wires the WorldSim the same in both; new fast gate `mirror-check` (two
-sims, one through snapshots, bit-equal over 2700 frames). Worker: +1 frame input latency (no prediction yet), sim time
-leaves the page (~0.05 ms/frame + ~0.25 ms snapshot apply). Open from E9: worker not default (waits for client
-prediction); no interest filter per client; snapshots are plain objects (no typed arrays/deltas); a Rapier body through
-the mirror lerps instead of slerping (no gate); the worker's ground is level-1 nodes only (`tile-world.ts`) and decodes
-nodes the page also decodes; Rapier is bundled twice (page and worker chunk); `window.__sim` is now the client.
-
-E8 landed (merge after `9de35751`): a left craft stays (empty-seat input per type: helicopter lets down, drone cuts
-throttle, plane glides and stays down once crashed, boats hands off), a parked car stays; both dropped by the shared
-presence rule (`sim/edit-keeper.ts` `Presence`, `Tuning.edits`). Commands `enterCraft`/`leaveCraft`; `SimClient.crafts()`;
-snapshot `crafts` (all placed, full core state); shells `board(craft)`, F boards the nearest empty craft within 150 m;
-`nav/crafts-view.ts` draws crafts not piloted locally; life-edit scenario `left`. Open from E8: no on-screen hint for F,
-not on foot; 1–2 frames on leave where nobody draws the craft; paraglider still removed on leave; the parked-car cap
-(8/24) kept beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence; no interest filter for crafts.
-
-M1 landed: the frame is input (car, Nav's controls, own-camera crafts) → `sim.update` → `life.update` (this frame's
-poses) → `Nav.place` (the ride camera) → what reads the camera; `Rider.update` split into `control` and `place`.
-`tools/judder.mjs` (needs a dev server and Chrome; not in the gate runner): J and E 0.0 / ≤ 0.04 cm in all 7 patterns at
-80 km/h (before: J 36.9 cm), camera 9.00 m behind. Open: crafts with their own camera still place it before the sim
-(M3/E13); `life.update`'s viewer is last frame's camera; the worker's snapshot clock (M4).
-
-E7 landed (merge after `e86b1663`): `WorldSim.send` queues every player command (`sim/commands.ts` `PlayerCommand`),
-applied in order in one `apply()` at the start of the update; the seat table in `WorldSim` (`occupants` keyed
-`kind:id:role`), one seat per player, a second seat switches (the old one left only if the new one can be taken);
-`leaveSeat` replaces `release`/`releaseWheel`/`leaveCraft`; LifePhysics' own claim queue is gone (`takeWheel` returns
-a boolean, always reported); walk poses bounded (`sim/walk-bounds.ts`, `Tuning.walk`: 12 m/s across, 10 up, 80 down,
-0.5 m slack, `walkAs` within 5 m), a clamp reported and `Foot.correct` puts the walk back; `LOCAL_PLAYER` in
-`nav/player.ts`. Open from E7: commands apply at the update's start, not per tick (E13); results nobody reads
-(`spawnCraft`, `placeCraft`) pile up; a fall over 80 m/s is slowed by the clamp; `walkAs` start height not bounded;
-no seq/tick (M5).
-
-E10–E12 landed (merge `ce55404f`): `sim/entities.ts` (EntityKind car/person/craft, `Entities` exists/pose/seats over
-per-kind adapters, `SEATS` per type); `Seat {entity, role, index}`, seat key `kind:id:role:index`; `enterSeat`,
-`seatInput`, `leaveSeat` replace `takeWheel`/`drive`/`walkAs`/`walkPose`/`enterCraft`/`craftInput` (no aliases);
-`seated`/`unseated`, `craft`, `drive`, `impact` events with tick and entity; `craftEvents`/`driverNotes` read the log
-(`SeatReads`), the snapshot drops `player.notes`/`craftEvents`; `WorldSim.mayEnter` (always true). Open: events land on
-the next running tick (one frame late at 60 fps, gone with E13); empty crafts' events are published; no gate for
-`impact` (browser only); no interest filter; `mayEnter` may move to `GameMode` (E14).
-
-E13 = M3 landed (merge `c52918f8`): `WorldSim.update` clamps dt (`MAX_DT` 0.1 s) and runs whole ticks (`runTick`: commands,
-edit keeper/left-vehicle rule, crafts `keep()` + `clock.run(STEP)`, `Traffic.tick`, events); `Traffic.frame()`/`tick()`;
-crafts' `drawn(alpha)` blends (plane/drone nlerp, others shortest-angle); `FrameTime {dt, tick, alpha}`; craft shells
-`place(dt)` after the sim; `seatInput` `seq`/`tick`, `ack {seq, tick}` (tick first applied in). judder.mjs measures
-plane/boat/drone (`--what`): 28/28 ≤ 0.5 cm (before: E up to 88.7 cm). `window.__crafts` tool hook. Open: no teleport
-counter for remote interpolation, worker alpha one update behind (M4); turning flight not measured; inputs not
-buffered by tick (M5); `life.update` viewer is last frame's camera.
-
-E14 landed lean (merge `92bef3f5`): `sim/mode.ts` (`GameMode {id, request, mayEnter?, mayEdit?}`, five `ModeRequest`s,
-narrow `ModeWorld`), `sim/modes/sandbox.ts` (today's logic, edits only with `?dig=1`); `WorldSim.mode` replaces
-`mayEnter`; `spawnCraft`/`placeCraft`/`resetCraft`/`resetDriver`/`dropCraft` are `{kind: 'request'}` commands; SimServer
-asks `mayEdit`; `?mode=` (MODES in sim-host.ts). Left out on purpose: lifecycle hooks, `mayTransfer`, `Traffic.population`.
-Open: unread results pile up; unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
-
-A1 landed (merge `1977e553`): `core-deps` checks a layer table (R1), value cycles (R2), determinism words (R3) and
-`window.__*` only in main.ts (R4) against a shrinking `BASELINE` (51 entries; `node tools/core-deps.mjs --baseline`
-prints it, the diff may only remove lines). A5 landed (merge `2d37a14e`): `CloneLink` (structuredClone + `plainData`
-for snapshots, JSON for frames/commands) in mirror-check, life-edit `left`/`events`, popin-check `--mirror`; no bugs
-found. Open: no gated run carries body poses, the driver snapshot or edit notes over the clone link.
-
-A2 landed: `core/meta.ts` (Meta, ColumnData, …; `types.ts` re-exports them for one step), `core/tile-data.ts`,
-`core/world.ts` (raycast takes `Point`), `core/tile-world.ts`; R1 baseline 47 → 35; mesh-golden identical. Open: prose
-references to the old paths (ADR 0001/0004, README, `scripts/tilefile.py`, comments, gates.mjs guards text); the
-`types.ts` re-export can go.
-
-A3 landed: `sim/contract/` (ids, pose, inputs, commands, events, agents, snapshot; types only, R5 in core-deps);
-`CraftWorld`/`Craft` in `sim/craft/craft-core.ts`, `TrafficView` in `sim/snapshot.ts`; baseline 39 → 18 (R1 16, R2 2).
-Open: `Person` in the contract whole incl. drawn fields (A6/A10); `CarState` declared beside `Car` (checked equal);
-ADR 0007 still names `sim/commands.ts`.
-
-A7 landed: `SimServer.connect(player)` returns a `Session` (in `sim/sim-server.ts`) that stamps its player on every
-command and owns the connection's reads (event and result cursors, edit outcomes, seat reads in `sim/seat-reads.ts`,
-ack, pending edits); `LOCAL_PLAYER` and `nav/player.ts` gone, the host names the page's player (`PAGE_PLAYER`);
-results are a tick log kept `EVENT_TICKS`; `life-edit sessions` checks two clients through CloneLink; baseline 18 → 17.
-Open: `Session` moves to `sim/server/` with A4; edit outcomes only to the sending session; an empty player entry stays
-in `WorldSim.players` after leaving.
-
-A10 landed: `Car` and `Person` carry no drawn fields (`rp`, `rh`, `pitch`, `roll`); `StreetLife` keeps a `Drawn` per
-car and person id; `TrafficBodies.pose` returns a `RoadPose`; `detachCar` no longer seeds a pose; `Picked`/`Ride` hold
-an `AgentRef`, the nav reads `life.agent(ref)`/`life.pose(ref)` and has `nav.sim`. Outputs byte-identical to main
-(mirror-check, popin-check, life-edit, rapier-car); baseline unchanged at 17. Open: older plan docs still name `c.rp`.
-
-A4 landed: `sim/server/` (`SimServer`, `Session`, `takeSnapshot`), `client/` (`SimClient` and kin, `TrafficMirror`,
-`TrafficView`, `sim-worker-link.ts`), `host/` (`sim-host`, `sim.worker`, `viewer-tiles`, `fetch`); worker messages in
-`sim/contract/worker.ts`; the client takes an `InThreadSession` port, no client → server imports; baseline 17 → 13.
-Open (lead's call, for A12): `host/fetch.ts` and `host/viewer-tiles.ts` stay presentation in LAYERS because the
-page's mesher loads through them too: split page vs host loaders or inject them as ports in A12. `client/` still
-imports `sim/traffic.ts` (A11).
-
-A12 landed: `hostSim(data, ports, opts)` in `host/sim-host.ts` with ports `{ tiles, now, log, physicsLoader }` (no
-fetch/performance/console inside; core-deps `PORTS_ONLY` enforces it); `host/browser.ts` (page and worker),
-`host/node.ts` (`nodeHost`); mirror-check, popin-check, life-phys start through it; `sim.worker.ts` `handle(s, m,
-post)`; new fast gate `host-smoke`. The page's loaders moved back to the root (`src/fetch.ts`, `src/viewer-tiles.ts`),
-`host/` is server as a whole (the small fetch-helper duplication with `host/browser.ts` is accepted, lead's call).
-Baseline 13 → 10. Open: `hostSim` never removes its `liveEdits` listener (a dispose; with A9).
-
-A14 landed: `core/data-contract.ts` (`FORMAT_VERSION`, `HOST_FILES`, `CLIENT_FILES`, `DataBuild`, `checkBuild`);
-checked first in `hostSim` (via `ports.log`) and in `main.ts` boot: no `world` warns, another `formatVersion`
-throws. Open: `DataBuild` goes to the client with A6's hello; page/worker fetches still spell their own paths.
-
-Craft sizes landed: `CRAFT_SCALE` in `sim/craft/craft-motion.ts` (helicopter 1.2, hovercraft 1.3) scales model,
-collision, hover/landing height and chase camera; handling unchanged.
-
-A6 landed without `hello`: `struck`/`dropped` carry `Fallen { person, col, bike }` (no `Person` on the wire);
-`sim/contract/crafts.ts` types each craft's events and wire state; craft events are `{craft, e}`; cores declare
-`save()`/`load()` (motion laws `save()`/`restore()`), `core-state.ts` checks completeness (`NOT_ON_THE_WIRE`,
-craft-motion 26 checks). Lean wire state accepted (lead's call). Open: `hello` (protocol, `DataBuild` from A14,
-tuning hash).
-
-A13 landed: `app/session.ts` (`sessionOptions`, `openSession`: local, mirror, worker), `app/frame.ts` (`PHASES`
-input, sim, poses, cameras, cameraReaders, render; `frameLoop`), `app/debug-hooks.ts` (all `window.__*`, R4 owner,
-R4 also catches `window[…] =`), `ui/` toast/credits/jump, `view-distance.ts`. Open: go-to/search and the
-weather/day/share controls still in `main.ts`.
+- **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
+  temporary damage needs the TileCache to expose a node's raw files; `initWorldEdits` is still called by `dig.ts`;
+  `hostSim` never removes its `liveEdits` listener (A9).
+- **Wire:** worker not default (waits for prediction); no interest filter per client; snapshots are plain objects
+  (no typed arrays or deltas); a Rapier body through the mirror lerps instead of slerping (A11); the worker's ground
+  is level-1 nodes only and decodes nodes the page also decodes; Rapier is bundled twice; `DataBuild` reaches the
+  client only with A6's hello; no gated run carries body poses, the driver snapshot or edit notes over the clone link.
+- **Timing (M4, M5):** worker alpha one update behind, no teleport counter; inputs not buffered by tick;
+  `life.update`'s viewer is last frame's camera.
+- **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; no gate
+  for `impact`; the parked-car cap (8/24) sits beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence;
+  the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
+- **Sessions and modes:** edit outcomes go only to the sending session; an empty player entry stays in
+  `WorldSim.players` after leaving; an unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
+- **Hygiene:** the `types.ts` re-export can go; `CarState` is declared beside `Car`; go-to/search and the
+  weather/day/share controls are still in `main.ts`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 
