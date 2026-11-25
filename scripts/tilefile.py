@@ -1,4 +1,4 @@
-"""The node files' container (web/public/data/tiles/{s}/{tx}_{ty}.bin, web/src/tile-data.ts decodeTile), gzip of:
+"""The node files' container (web/public/data/tiles/{s}/{tx}_{ty}.bin, web/src/core/tile-data.ts decodeTile), gzip of:
 
   magic    b"VXT2"
   n        uint32            sections
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 MAGIC = b"VXT2"
-N = 128  # a node's cells a side (and a level-1 tile's metres; meta.json tiles.N, web/src/tile-data.ts TILE_N)
+N = 128  # a node's cells a side (and a level-1 tile's metres; meta.json tiles.N, web/src/core/tile-data.ts TILE_N)
 
 
 def pack(sections):

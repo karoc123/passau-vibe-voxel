@@ -31,7 +31,7 @@ considered and rejected (data and meshing cost).
   what is smoothed is what is drawn. The rules are in `scripts/caps.py`, run by `tile_fields.py`: changing them is a
   rerun of that step, not of the regions.
 - **The client reads them** through `core/surface.ts` (`capField`, `cornerQ`, `surfaceAt`), three.js-free: the mesher
-  draws the quad and the risers between neighbours' corners; `world.ts`, the car's Rapier terrain (one trimesh per
+  draws the quad and the risers between neighbours' corners; `core/world.ts`, the car's Rapier terrain (one trimesh per
   chunk for every body, the run's top voxel left out of the shell) and the drone's surface query take the same
   heights. There is no second surface for the car, and no inference from the voxels: the legacy path
   (`core/caps-legacy.ts`, the car's `DRIVE` field) and its switch (`?caps=0`, `CAPS=0`) were deleted once the data had

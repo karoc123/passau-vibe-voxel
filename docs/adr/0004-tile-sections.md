@@ -1,7 +1,7 @@
 # 0004 Node file sections: one registry, unknown tags kept
 
 Status: accepted. Code: `scripts/tilefile.py` (`SECTIONS`, `write`), `web/src/core/tile-sections.ts`
-(`TILE_SECTIONS`), `web/src/tile-data.ts` (`decodeTile` `extra`); check: `web/tools/tile-roundtrip.mjs` (runs
+(`TILE_SECTIONS`), `web/src/core/tile-data.ts` (`decodeTile` `extra`); check: `web/tools/tile-roundtrip.mjs` (runs
 `scripts/tile_roundtrip.py`).
 
 ## Context

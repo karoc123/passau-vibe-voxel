@@ -14,7 +14,7 @@ the same interface with one player.
   pedestrian or camera mode. A vehicle or pedestrian has its own entity id, retained when it changes between traffic,
   player control and a parked or wrecked state. A vehicle type such as `bus` describes a model shared by many entities.
 - The sim accepts commands keyed by player id, including `takeWheel(playerId, entityId)`, control input and release
-  (`sim/commands.ts` `PlayerCommand`, sent with `WorldSim.send` and applied in order at the start of the next update:
+  (`sim/contract/commands.ts` `PlayerCommand`, sent with `WorldSim.send` and applied in order at the start of the next update:
   `takeWheel`, `drive`, `resetDriver`, `leaveSeat`, read back with `driverSnapshot`, `driverNotes` and `results`; the
   seat table in `WorldSim` holds one seat a player; `nav/drive.ts` reaches it through its `SimClient`).
   The sim checks eligibility and availability, transfers control at a tick boundary and reports the outcome. If two

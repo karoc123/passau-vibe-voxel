@@ -356,7 +356,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `core-deps` | `src/core/`, `src/sim/`, `src/physics/` and what they import: no three.js, no DOM (ADR 0001) | fast |
 | `layers` | `core/layers.ts` on a synthetic world: L0 + L1 + L2 edits, two builds, deltas encoded | fast |
 | `edit-roundtrip` | `core/columns.ts` on a real node: thousands of random edits against a dense reference | fast |
-| `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `tile-data.ts` reads (needs `uv`) | fast |
+| `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `core/tile-data.ts` reads (needs `uv`) | fast |
 | `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
 | `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
 | `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
@@ -371,7 +371,7 @@ Benches and diagnostics (not gates): `remesh-bench` (meshing an edited node from
 `mesh-profile` (where a node's meshing time goes, V8 profiler), `life-phys` (the traffic's bodies near edits: cost,
 lost ghosts), `life-phys-scan` (where the traffic's paths leave no room for a car), `rapier-car-bench`.
 
-**FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/nav/voxel-collision.ts`)
+**FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/sim/craft/voxel-collision.ts`)
 over a small synthetic world (`checks/collision-checks.ts` on `checks/world.ts`: a ground height per column, boxes for walls and decks,
 written as real node files and served through a stubbed fetch): a sweep before the tiles are in waits, the drone's
 cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
