@@ -77,14 +77,7 @@ export interface TrafficBodies {
   drawState?(c: Car): BodyDraw | null;
 }
 
-// (a car's body as drawn, BodyDraw: contract/agents.ts)
-
-/** pose p with what is left (k, 1 .. 0) of a release's difference (BodyDraw's fade) added; body: it has one still (its
- * roll is its own, else the roll is blended out too). A new pose (TrafficBodies.pose: life-phys.ts, client/sim-client.ts TrafficMirror) */
-export function fadeOut(p: RoadPose, f: { dx: number; dy: number; dz: number; dh: number }, k: number, body: boolean): RoadPose {
-  return { x: p.x + f.dx * k, y: p.y + f.dy * k, z: p.z + f.dz * k, h: (p.h ?? 0) + f.dh * k, pitch: p.pitch,
-    roll: body ? p.roll : (p.roll ?? 0) * (1 - k) };
-}
+// (a car's body as drawn, BodyDraw: contract/agents.ts; drawn by sim/body-pose.ts)
 
 // a car's kinematic pose: the ground point between its axles on its path, its heading, nose up
 export interface CarPose { x: number; y: number; z: number; h: number; pitch: number }

@@ -6,8 +6,8 @@
 // Worker's message handler (src/host/sim.worker.ts handle, its post a list), and every snapshot of every session must
 // be the same in all three (the worker's minus its time). Then the road physics loaded through the handler
 // (loadPhysics: the physics port, the tiles port; answered ok) and a few frames run with it.
-// Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a client of each transport (in-thread
-// LocalSimClient; MirrorSimClient over CloneLink(ThreadLink); over WorkerLink, its Worker a stand-in whose messages go
+// Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a MirrorSimClient over each transport (in-thread
+// ThreadLink; CloneLink(ThreadLink); WorkerLink, its Worker a stand-in whose messages go
 // through sim.worker.ts greet and handle) takes the host's hello when it matches its own, and refuses it (client.hello
 // rejects naming what differs; the session left, no snapshot taken) when the protocol, the data build or the tuning
 // differ; the tuning's hash is the same for a copy of the tuning with its keys in another order or another host-only
@@ -146,7 +146,7 @@ if (w.last.player.id !== PAGE_PLAYER) fail.push(`the worker's snapshot names ${w
 // the hello, through every transport
 const { hello, tuningHash } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const { DEFAULT_TUNING } = await load('sim/tuning.ts');
-const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { WorkerLink } = await load('client/sim-worker-link.ts');
 const host = r1.server, build = checkBuild(data.meta, () => {}), mine = hello(build);
 if (!build) fail.push('hello: the data has no build (meta.json world)');
@@ -169,7 +169,7 @@ globalThis.Worker = class {
   terminate() { terminated++; workerSession?.leave(); }
 };
 const transports = {
-  local: (h) => { const s = host.connect('l'); return { client: new LocalSimClient(s, h), session: s }; },
+  thread: (h) => { const s = host.connect('l'); return { client: new MirrorSimClient(new ThreadLink(s), structuredClone(raw), null, h), session: s }; },
   mirror: (h) => { const s = host.connect('m'); return { client: new MirrorSimClient(new CloneLink(new ThreadLink(s)), structuredClone(raw), null, h), session: s }; },
   worker: (h) => { const client = new MirrorSimClient(new WorkerLink({ seed: 3, physics: { bodies: false }, eager: false, edits: false }), structuredClone(raw), null, h);
     return { client, get session() { return workerSession; } }; },
@@ -194,7 +194,7 @@ for (const [tn, make] of Object.entries(transports)) {
     } else {
       if (!got.error) fail.push(`${what}: taken, not refused`);
       else if (!got.error.message.includes(word)) fail.push(`${what}: refused for ${got.error.message}`);
-      if (tn !== 'local' && client.tick !== 0) fail.push(`${what}: a snapshot taken after the refusal`);
+      if (client.tick !== 0) fail.push(`${what}: a snapshot taken after the refusal`);
       if (tn === 'worker' && terminated !== before + 1) fail.push(`${what}: the worker not ended`);
       if (verbose && cn === 'protocol' && tn === 'worker') console.log(`  ${got.error?.message}`);
     }

@@ -16,23 +16,22 @@ import type { WalkPose } from '../contract/pose';
 import type { Ack, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 
-// what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState: these keys,
-// all of them, with the types Car and Person have)
-const CAR_KEYS = ['id', 'e', 'lane', 's', 'ds', 'off', 'dOff', 'prev', 'prevOff', 'prev2', 'prev2Off', 'next', 'next2', 'len', 'bus',
-  'vt', 'col', 'brake', 'v', 'wait', 'detachedPose'] as const;
-const PERSON_KEYS = ['id', 'e', 'dir', 's', 'v', 'lat', 'ph', 'wait', 'col', 'bike'] as const;
+// what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState): every key,
+// an optional one undefined too (a car's object is reused by id: TrafficMirror apply), with the types Car and Person
+// have. Object literals, not a copy by a list of keys: an object built key by key from a list (its optional keys
+// undefined) is several times slower to make and to read (measured in A11: 0.7 ms a frame of the mirror's apply)
+type Every<T> = { [K in keyof Required<T>]: T[K] };
+const carState = (c: Car) => ({ id: c.id, e: c.e, lane: c.lane, s: c.s, ds: c.ds, off: c.off, dOff: c.dOff, prev: c.prev,
+  prevOff: c.prevOff, prev2: c.prev2, prev2Off: c.prev2Off, next: c.next, next2: c.next2, len: c.len, bus: c.bus, vt: c.vt,
+  col: c.col, brake: c.brake, v: c.v, wait: c.wait, detachedPose: c.detachedPose }) satisfies Every<CarState>;
+const personState = (p: Person) => ({ id: p.id, e: p.e, dir: p.dir, s: p.s, v: p.v, lat: p.lat, ph: p.ph, wait: p.wait,
+  col: p.col, bike: p.bike }) satisfies Every<PersonState>;
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 export type StatesAreTheContracts = [
-  Assert<Same<Pick<Car, (typeof CAR_KEYS)[number]>, CarState>>,
-  Assert<Same<Pick<Person, (typeof PERSON_KEYS)[number]>, PersonState>>,
+  Assert<Same<Pick<Car, keyof CarState>, CarState>>,
+  Assert<Same<Pick<Person, keyof PersonState>, PersonState>>,
 ];
-
-const pick = <T extends object, K extends keyof T>(o: T, keys: readonly K[]) => {
-  const out = {} as Pick<T, K>;
-  for (const k of keys) out[k] = o[k];
-  return out;
-};
 
 /** the sim's state after its update for a session of player; since: the tick of the session's last snapshot (its events
  * after it); results: the player's command outcomes since; edits: the nodes changed since; ack: the session's last seat
@@ -47,8 +46,8 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
   return {
     tick: sim.tick, acc: T.acc, t: T.t, hour: sim.timeOfDay.hour, day: T.day, active: T.active && { x: T.active.x, z: T.active.z },
-    cars: T.cars.map((c) => pick(c, CAR_KEYS)), detached: T.detachedCars.map((c) => pick(c, CAR_KEYS)),
-    people: T.people.map((p) => pick(p, PERSON_KEYS)), riders: T.riders.map((p) => pick(p, PERSON_KEYS)),
+    cars: T.cars.map(carState), detached: T.detachedCars.map(carState),
+    people: T.people.map(personState), riders: T.riders.map(personState),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
     walked, crafts, events: sim.eventsSince(since),

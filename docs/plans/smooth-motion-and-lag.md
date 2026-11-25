@@ -360,10 +360,10 @@ E17–E19 stand (owner's decision 3: no hurry). M9, M10 with the server and the 
 ### M4. Render clock and snapshot buffer in the mirror client (M)
 
 - **Do:** `MirrorSimClient` keeps a ring of snapshots by tick and a render clock advanced by the frame's `dt`
-  (section 3); `TrafficMirror` samples between two snapshots instead of applying the latest; body poses as
-  quaternions. A `LagLink` (a `SimLink` wrapper: delay, jitter, loss, burst; seeded) so the buffer is tested without
+  (section 3); `TrafficMirror` samples between two snapshots instead of applying the latest. A `LagLink` (a
+  `SimLink` wrapper: delay, jitter, loss, burst; seeded) so the buffer is tested without
   a network, over `ThreadLink` and over the worker.
-- **Gates:** judder with `?worker=1` and `?mirror=1`: E ≤ 0.5 cm in every pattern (today 36.9 cm); with `LagLink`
+- **Gates:** judder by default (in the page's thread, from snapshots) and with `?worker=1`: E ≤ 0.5 cm in every pattern (today 36.9 cm); with `LagLink`
   at 50 ± 20 ms and 2 % loss: E ≤ 1 cm for followed traffic, no frame without motion; mirror-check; the measured
   delay shown by `?pace=1`.
 

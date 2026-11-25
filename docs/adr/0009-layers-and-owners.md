@@ -41,7 +41,7 @@ One owner per piece of state:
 Every client checks the host's hello (protocol, data build, tuning hash) before it sends or draws anything.
 
 Owner answers that stand: the host owns the time of day, the same for everyone; the page draws from snapshots in
-every mode once the body pose crosses as a quaternion (A11); edits cross as columns, not ops, so the client needs no
+every mode (in its own thread over a `ThreadLink`; a body's pose crosses as quaternions); edits cross as columns, not ops, so the client needs no
 determinism; the gates stay local (`.github/` is not touched).
 
 ## Consequences
