@@ -7,6 +7,7 @@ Not part of overrides.py check: overrides.py is loaded by the region builds (reg
 change to it would rebuild every region.
 
 usage: uv run python scripts/palette_check.py [REV]     (REV: default HEAD)
+       uv run python scripts/palette_check.py --paved-ids  the registry's ids of paved ground (paved_ids)
 """
 import json
 import subprocess
@@ -44,5 +45,19 @@ def check(rev="HEAD"):
     return not errs
 
 
+def paved_ids():
+    """the registry's ids whose ground voxelize.py calls paved (constants.GROUND_CLASSES in CLS_PAVED, each in its
+    colour as voxelize.Palette quantises it, plain M_SOLID; every marking): what web/src/core/semantics.ts calls PAVED
+    by colour (web/tools/tile-roundtrip.mjs compares them)"""
+    import constants as K
+    pal = [tuple(e) for e in json.loads((HERE / "palette.json").read_text())["palette"]]
+    q = lambda h: tuple(min(255, int(round(int(h[i:i + 2], 16) / 4)) * 4) for i in (1, 3, 5))  # noqa: E731
+    paved = {q(getattr(K, k.upper())) + (K.M_SOLID,) for k, c in K.GROUND_CLASSES.items() if c in K.CLS_PAVED}
+    return [i for i, e in enumerate(pal) if e[3] == K.M_MARK or e in paved]
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--paved-ids"]:
+        print(json.dumps(paved_ids()))
+        sys.exit(0)
     sys.exit(0 if check(*sys.argv[1:2]) else 1)
