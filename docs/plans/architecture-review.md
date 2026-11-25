@@ -589,6 +589,16 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   view-distance policy (`main.ts:644-683`) to its own module. No behaviour change, no new abstraction beyond the
   list of phases.
 - **Gates:** fast set; `shoot.mjs --compare` on two views; `judder` (frame order) by hand.
+- **Landed** (2026-11-25): `app/session.ts` (`sessionOptions(qs)` → `{ transport: local | mirror | worker, seed, mode,
+  edits, physics }`; `openSession(opts, data)` → `{ client, link }`), `app/frame.ts` (`PHASES`: input, sim, poses,
+  cameras, cameraReaders, render; `frameLoop(steps, start)` computes dt and runs them in that order; `main.ts` gives
+  each its work, the statements in the same order as before), `app/debug-hooks.ts` (`DebugHooks` types all eight
+  `window.__*`, `hook(name, value)` sets them; core-deps R4's owner is now this file, and R4 also catches
+  `window[…] =`), `ui/toast.ts`, `ui/credits.ts`, `ui/jump.ts`, `view-distance.ts` (`ViewDistance`: the view cut and
+  the far plane). core-deps: `app/` is layer app, `ui/` presentation. `main.ts` 695 → 619 lines. Baseline unchanged.
+  Fast set, judder (car, plane) and a browser pass (plain, mirror, worker) pass; render setup untouched, so no
+  `shoot --compare`. Open: go-to/search (`goPlace`, `searchItems`) and the weather/day controls are still in
+  `main.ts`; a network transport goes into `openSession`.
 
 ### A14. Data build identity checked at load (S, hygiene)
 
