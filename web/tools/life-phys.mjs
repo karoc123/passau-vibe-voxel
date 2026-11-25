@@ -30,9 +30,10 @@ const f2 = (x) => x.toFixed(2);
 for (const [near, max] of configs) {
   const { W } = await nodeWorld();
   const focus = { x: AX, z: AZ };
-  const { sim } = nodeHost(DATA, { seed: 7, world: W, physics: { bodies: true, near, maxBodies: max, look, at: () => focus } }, { meta, traffic: td });
+  const { sim } = nodeHost(DATA, { seed: 7, world: W, physics: { bodies: true, near, maxBodies: max, look }, time: { hour: HOUR, day: 180 } }, { meta, traffic: td });
   const T = sim.traffic;
-  for (let i = 0; i < WARM / STEP; i++) sim.update(STEP, { hour: HOUR, focus });
+  const view = { kind: 'view', view: { focus } };
+  for (let i = 0; i < WARM / STEP; i++) { sim.send('benchmark', view); sim.update(STEP); }
   const phys = await sim.loadPhysics();
   const want = near * 1.2 + 64;
   for (let tz = Math.floor((AZ - want) / N); tz <= Math.floor((AZ + want) / N); tz++) for (let tx = Math.floor((AX - want) / N); tx <= Math.floor((AX + want) / N); tx++) await phys.terrain.prefetch(tx * N + 1, tz * N + 1);
@@ -50,7 +51,8 @@ for (const [near, max] of configs) {
       sim.send('benchmark', { kind: 'seatInput', role: 'driver', input: { gas: !s || s.kmh < 30 ? 1 : 0, brake: 0, steer: 0, handbrake: false } });
     }
     const t0 = performance.now();
-    sim.update(STEP, { hour: HOUR, focus });
+    sim.send('benchmark', view);
+    sim.update(STEP);
     all.push(performance.now() - t0);
     const s = phys.stats;
     tick.push(s.tickMs); step.push(s.stepMs); ter.push(s.terrainMs); nb.push(s.bodies);

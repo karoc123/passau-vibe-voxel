@@ -102,6 +102,11 @@ export interface LifePhysStats {
 }
 export type LogKind = 'spawn' | 'release' | 'lost' | 'rest' | 'resync';
 
+/** the road physics' origin on a map of W x D m: the chunk at its middle (no point of it farther than half its
+ * diagonal: f32 keeps 0.5 mm there on a 9 km map) */
+export const mapOrigin = (meta: { W: number; D: number }) =>
+  ({ x: Math.floor(meta.W / 2 / CHUNK) * CHUNK, z: Math.floor(meta.D / 2 / CHUNK) * CHUNK });
+
 export class LifePhysics implements TrafficBodies {
   readonly world: RAPIER.World;
   readonly terrain: RapierTerrain;
@@ -126,21 +131,22 @@ export class LifePhysics implements TrafficBodies {
   private readonly B = pt();
   private readonly pose0: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
 
-  // Rapier initialised (load()). focus: where the action is (the physics' origin, for f32 precision); terrain: where
-  // the tiles come from (a cache or a load); rideTuning: the cars' ride (read-only, Tuning.ride: sim/tuning.ts)
-  constructor(meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] }, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {},
+  // Rapier initialised (load()). The physics' origin (f32 precision) is the map's middle (mapOrigin), whoever looks
+  // where; terrain: where the tiles come from (a cache or a load); rideTuning: the cars' ride (read-only, Tuning.ride:
+  // sim/tuning.ts)
+  constructor(meta: { W: number; D: number; tiles: { N: number }; palette: Meta['palette'] }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {},
     readonly rideTuning: RideTuning = RIDE) {
     this.opts = { ...DEFAULTS, ...opts };
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = STEP;
-    this.origin = { x: Math.floor(focus.x / CHUNK) * CHUNK, z: Math.floor(focus.z / CHUNK) * CHUNK };
+    this.origin = mapOrigin(meta);
     this.terrain = new RapierTerrain(RAPIER, this.world, meta, this.origin, { reach: REACH, needNow: NEED_NOW, budgetChunks: this.opts.chunksPerTick, ...terrain });
   }
 
-  static async load(meta: Meta, focus: { x: number; z: number }, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {}, rideTuning: RideTuning = RIDE) {
+  static async load(meta: Meta, opts: Partial<LifePhysOptions> = {}, terrain: TerrainOptions = {}, rideTuning: RideTuning = RIDE) {
     await RAPIER.init();
     warmUp();
-    return new LifePhysics(meta, focus, opts, terrain, rideTuning);
+    return new LifePhysics(meta, opts, terrain, rideTuning);
   }
 
   owns(c: Car) { const b = this.bodies.get(c.id); return !!b && b.state !== 'path'; }

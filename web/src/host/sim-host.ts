@@ -25,6 +25,7 @@ import type { Meta } from '../core/meta';
 import type { TileCache } from '../core/tile-cache';
 import type { PlayerId } from '../sim/contract/ids';
 import type { PhysicsOptions } from '../sim/contract/worker';
+import type { TimeOfDay } from '../sim/contract/snapshot';
 
 /** the world's data, loaded by the platform (the page and the worker: fetched; host/node.ts: read from disk) */
 export interface HostData {
@@ -56,8 +57,11 @@ export interface HostOptions {
   seed?: number;
   /** what the agents stand on and the boats float on (the viewer: the streamer's World; the worker: tileWorld) */
   world: (Ground & WaterColumns) | null;
-  /** the road physics (sim/contract/worker.ts PhysicsOptions); at: where its terrain starts (the focus) */
-  physics: PhysicsOptions & { at: () => { x: number; z: number } };
+  /** the road physics (sim/contract/worker.ts PhysicsOptions) */
+  physics: PhysicsOptions;
+  /** the world's time of day and day of the year at the start (without: the sim's default; later a mode's, on a
+   * player's setTime request) */
+  time?: TimeOfDay;
   /** the road physics loaded at once (?dig=1: edits to come) */
   eager?: boolean;
   /** the game mode, by id (?mode=; MODES; without, or unknown: the sandbox) */
@@ -82,6 +86,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
     crafts: { meta, cache, now: ports.now } });
   sim.setWorld(opts.world, opts.world);
+  if (opts.time) sim.setTime(opts.time.hour, opts.time.day);
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;
   // a node freed is its file again)
   initWorldEdits({ cache, frame: frameOf(meta), nx: level.nx, ny: level.ny });
@@ -107,8 +112,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
 async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics'], ports: HostPorts) {
   try {
     const { LifePhysics, DEFAULTS } = await ports.physicsLoader();
-    const f = opts.at();
-    return await LifePhysics.load(meta, { x: f.x, z: f.z }, {
+    return await LifePhysics.load(meta, {
       near: opts.bodies ? opts.near ?? DEFAULTS.near : 0, maxBodies: opts.maxBodies ?? DEFAULTS.maxBodies,
       ...(opts.look !== undefined ? { look: opts.look } : {}),
     }, { cache: ports.tiles }, tuning.ride);

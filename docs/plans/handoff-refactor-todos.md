@@ -49,7 +49,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 |---|---|---|---|
 | M2 | `?pace=1`: real frame times and live judder on the owner's machine | S | On hold (owner direction 2026-11-24) |
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
-| A8, A11 | Architecture packages ([plan](architecture-review.md); target [ADR 0009](../adr/0009-layers-and-owners.md)) | S–M each | **Ready**, one at a time |
+| A11 | Architecture package ([plan](architecture-review.md); target [ADR 0009](../adr/0009-layers-and-owners.md)) | S | **Ready** |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
@@ -84,9 +84,9 @@ Left:
 
 ## Engine packages
 
-Target: ADR 0006, 0007, [ADR 0008](../adr/0008-server-vision.md) and [ADR 0009](../adr/0009-layers-and-owners.md). The architecture packages (A8,
-A11), their order and what is left are in [architecture-review.md](architecture-review.md); the commits are in
-`git log`. Open points left by landed engine work:
+Target: ADR 0006, 0007, [ADR 0008](../adr/0008-server-vision.md) and [ADR 0009](../adr/0009-layers-and-owners.md). The
+architecture package (A11) and what is left are in [architecture-review.md](architecture-review.md); the commits are
+in `git log`. Open points left by landed engine work:
 
 - **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
   temporary damage needs the TileCache to expose a node's raw files;

@@ -231,7 +231,7 @@ no-op, so neutral.
 | `dropCraft` on leave (nav/craft.ts:132-133) | gone with E8 (the craft stays); sandbox may still despawn a player's previous craft when they spawn a new one (one per player), so the map does not fill |
 | `takeWheel` with `choice` (drive.ts:144: the car's type changed at claim, life-phys.ts:202-209) | `mayEnter` true; the type change stays a sandbox privilege (`request { kind: 'vehicleType' }` later, or kept as a `takeWheel` option only sandbox grants) |
 | `walkAs` a crowd person (nav/ride.ts:94-109) | `mayEnter` true for any person |
-| follow, orbit, free flight, first-person walk (`Mode` nav/nav.ts:33: `orbit`, `walk`) | client-only: no seat. The player is an observer; its focus comes in `SimInput` as today |
+| follow, orbit, free flight, first-person walk (`Mode` nav/nav.ts:33: `orbit`, `walk`) | client-only: no seat. The player is an observer; its camera is its `view` command (`app/session.ts` `OBSERVER_VIEW`) |
 | hour and day from the page (main.ts:554) | `clock({ source: 'client' })` |
 | `edit` from dig (dig.ts) | `mayEdit` true when the host was started with edits on |
 | population by the hour | multipliers 1 |

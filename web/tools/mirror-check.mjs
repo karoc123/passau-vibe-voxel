@@ -25,7 +25,7 @@ const boats = fs.existsSync(`${DATA}boats.json`) ? JSON.parse(fs.readFileSync(`$
 const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 
 // (both started as a server starts them: src/host/node.ts, hostSim; no ground, no road physics)
-const host = () => nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false, at: () => ({ x: at.x, z: at.y }) } }, { meta, traffic: data(), boats });
+const host = () => nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false } }, { meta, traffic: data(), boats });
 const a = host(), b = host();
 // (the clients' own hello: this code, the build read, the default tuning; the hosts' must match it)
 const mine = hello(checkBuild(meta, () => {}));
@@ -66,9 +66,13 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   }
   if (f === 50 * FPS) send({ kind: 'leaveSeat' });
   if (f === 60 * FPS) send({ kind: 'follow', entity: null });
-  const input = { hour: 17 + t / 600, day: 180, focus, viewer: focus };
-  direct.update(1 / FPS, input);
-  mirror.update(1 / FPS, input);
+  // (the world's time: the hosts' to set; the view: the player's command)
+  for (const h of [a, b]) h.sim.setTime(17 + t / 600, 180);
+  send({ kind: 'view', view: { focus, viewer: focus } });
+  direct.update(1 / FPS);
+  mirror.update(1 / FPS);
+  const ta = direct.timeOfDay, tb = mirror.timeOfDay;
+  if (ta.hour !== tb?.hour || ta.day !== tb?.day) fail.push(`t=${t.toFixed(2)}: the time of day ${JSON.stringify(ta)} vs ${JSON.stringify(tb)} from the snapshot`);
   lifeA.update(1 / FPS, 0, focus);
   lifeB.update(1 / FPS, 0, focus);
   frames++;

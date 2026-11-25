@@ -14,6 +14,7 @@
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
 //              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
+//              and drops their view
 import { liveEdits } from '../../core/live-edits';
 import { ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
@@ -25,7 +26,6 @@ import type { CommandResult, SimCommand } from '../contract/commands';
 import type { CraftEventOf } from '../contract/crafts';
 import { EVENT_TICKS, type DriveNote } from '../contract/events';
 import type { PlayerId, Role, Seat } from '../contract/ids';
-import type { SimInput } from '../contract/inputs';
 import type { Ack, DriverSnapshot, EditNote, Snapshot } from '../contract/snapshot';
 import type { GameMode } from '../mode';
 import { sandbox } from '../modes/sandbox';
@@ -71,12 +71,14 @@ export class SimServer {
     return s;
   }
 
-  /** the session gone (Session.leave); the last of its player: the player leaves their seat and follows nothing */
+  /** the session gone (Session.leave); the last of its player: the player leaves their seat, follows nothing and
+   * looks nowhere */
   disconnect(session: Session) {
     if (!this.sessions.delete(session)) return;
     for (const s of this.sessions) if (s.player === session.player) return;
     this.sim.send(session.player, { kind: 'leaveSeat' });
     this.sim.send(session.player, { kind: 'follow', entity: null });
+    this.sim.send(session.player, { kind: 'view', view: null });
   }
 
   /** the world's edits go with every session's snapshots (a client with live edits of its own: another thread) */
@@ -87,8 +89,8 @@ export class SimServer {
     this.disposers.push(liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); }));
   }
 
-  /** the sim's update (its commands first, then the ticks due after dt s) */
-  update(dt: number, input: SimInput) { this.sim.update(dt, input); }
+  /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first) */
+  update(dt: number) { this.sim.update(dt); }
 
   /** (Session.send) an edit held until its nodes are in (after the edits sent before it), then sent on to the sim for
    * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied */

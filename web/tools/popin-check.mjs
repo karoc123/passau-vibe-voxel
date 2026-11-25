@@ -81,7 +81,7 @@ function run({ name, at: start, h0, h1 }) {
 
   // (--mirror: drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does from a worker)
   // (started as a server starts it: src/host/node.ts, hostSim; the traffic's default seed, no ground, no road physics)
-  const server = nodeHost(DATA, { world: null, physics: { bodies: false, at: () => ({ x: start.x, z: start.y }) } }, { meta, traffic: td });
+  const server = nodeHost(DATA, { world: null, physics: { bodies: false } }, { meta, traffic: td });
   const session = server.connect('p1');
   const mine = hello(checkBuild(meta, () => {}));
   const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null, mine) : new LocalSimClient(session, mine);
@@ -107,7 +107,9 @@ function run({ name, at: start, h0, h1 }) {
     place();
     if (verbose && f % (FPS * 20) === 0) console.log(`  ${name} t=${t.toFixed(0)} viewer on road ${cur} (${viewer.x.toFixed(0)}, ${viewer.z.toFixed(0)})`);
     const focus = { x: viewer.x, z: viewer.z };
-    sim.update(dt, { hour: h0 + (h1 - h0) * t / SECONDS, focus });
+    server.sim.setTime(h0 + (h1 - h0) * t / SECONDS);
+    sim.send({ kind: 'view', view: { focus } });
+    sim.update(dt);
     life.update(dt, 0, focus);
     const now = new Map();
     for (const c of T.roadVehicles()) { const d = life.drawn('car', c.id); if (d) now.set(c, ['car', d.x, d.z]); }

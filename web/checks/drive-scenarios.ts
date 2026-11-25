@@ -50,7 +50,7 @@ export class Drive {
 
 export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], withPedestrian = false, choice?: VehicleId, trains?: TrainPathData[]): Drive {
   const map = synthMap(2, col);
-  const physics = new LifePhysics(map.meta, { x, z }, { chunksPerTick: 99 }, { load: () => Promise.reject(null) });
+  const physics = new LifePhysics(map.meta, { chunksPerTick: 99 }, { load: () => Promise.reject(null) });
   for (const t of map.tiles) physics.terrain.setTile(t.tx, t.tz, t.tile);
   const y = col(Math.floor(x), Math.floor(z)).g, car = carAt(x, y, z);
   car.v = kmh / 3.6;
@@ -84,7 +84,7 @@ function kinematicBodies(d: Drive) {
 
 function sharedReplay() {
   const map = synthMap(2, street);
-  const physics = new LifePhysics(map.meta, { x: 64, z: 50 }, { chunksPerTick: 3 }, { load: () => Promise.reject(null) });
+  const physics = new LifePhysics(map.meta, { chunksPerTick: 3 }, { load: () => Promise.reject(null) });
   for (const t of map.tiles) physics.terrain.setTile(t.tx, t.tz, t.tile);
   const traffic = new Traffic({ roads: [{ p: [[64, 4, 10], [64, 120, 10]], a: 0, b: 1, w: 1, lanes: 1, v: 0.1, c: 1, o0: 0 }],
     peds: [], ctrls: [] }, 7);

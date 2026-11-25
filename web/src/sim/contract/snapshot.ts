@@ -41,12 +41,18 @@ export interface DriverSnapshot {
   fallMs: number;
 }
 
+/** the world's time of day (hour 0..24) and day of the year (1..365): world state the host sets, the same for every
+ * player */
+export interface TimeOfDay { hour: number; day: number }
+
 export interface Snapshot {
   tick: number;
   /** s since the last tick: how far between the last two to draw */
   acc: number;
-  /** the world clock (the signals) and day */
+  /** the world clock (the signals: s) */
   t: number;
+  /** the world's time of day and day of the year (the host's: WorldSim.setTime; the page's light follows it) */
+  hour: number;
   day: number;
   active: { x: number; z: number } | null;
   cars: CarState[];

@@ -43,7 +43,7 @@ import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
-import { openSession, pageEdits, sessionOptions } from './app/session';
+import { openSession, pageEdits, pageView, PageTime, sessionOptions } from './app/session';
 import './style.css';
 
 const TODAY = dayOfYear(new Date());
@@ -99,7 +99,7 @@ let world: World | null = null, labels: Labels | null = null, hud: Hud | null = 
 let minimap: Minimap | null = null;
 // the world sim's client (client/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
 // traffic is loaded (the crafts wait for it: simReady)
-let sim: SimClient | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
+let sim: SimClient | null = null, pageTime: PageTime | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
 let simLoaded: (sim: SimClient) => void = () => {};
@@ -260,21 +260,23 @@ function onMode(m: Mode, ride: Ride | null) {
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
 
-function setHour(h: number) {
+// the hour shown at once; asked of the world (its time of day: the host's, PageTime) unless it is the world's own
+function setHour(h: number, ask = true) {
   daylight.apply(h);
   bar.setHour(h);
+  if (ask) pageTime?.ask(h, daylight.day);
 }
 
 const timesOf = (d: number) => ({ morning: Math.max(7.5, hourAt(d, 6, false)), midday: solarNoon(d), 'golden hour': hourAt(d, 5, true),
   'blue hour': hourAt(d, -7, true), night: Math.min(23.5, Math.max(23, hourAt(d, -14, true))) });
 
-function setDay(d: number) {
+function setDay(d: number, ask = true) {
   const times = timesOf(daylight.day), was = Object.entries(times).find(([, h]) => Math.abs(h - daylight.hour) < 1 / 3)?.[0] as keyof typeof times | undefined;
   daylight.day = d;
   const now = timesOf(d);
   bar.setDay(d, now);
   offerWeathers(d);
-  setHour(was ? now[was] : daylight.hour);
+  setHour(was ? now[was] : daylight.hour, ask);
 }
 
 function offerWeathers(d: number) {
@@ -454,7 +456,7 @@ async function boot() {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client: local, mirrored or in a worker (app/session.ts)
-    const { client, link } = openSession(session, { meta, edits, traffic: td, world, focus });
+    const { client, link } = openSession(session, { meta, edits, traffic: td, world, time: { hour: daylight.hour, day: daylight.day } });
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
       console.error(e.message);
@@ -464,6 +466,7 @@ async function boot() {
     });
     if (link) hook('__simLink', link);
     sim = client;
+    pageTime = new PageTime(client);
     life = nav.life = new StreetLife(scene, client);
     nav.sim = client;
     movingActors.add(life.group);
@@ -525,11 +528,14 @@ renderer.setAnimationLoop(frameLoop({
     nav.update(dt);
     for (const c of crafts) if (c.view === 'own') c.update(dt);
   },
-  // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what is looked at; agents come and go
-  // far from the camera, which sees them
+  // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what the page's player looks at (its
+  // view: the focus; agents come and go far from the camera, which sees them); the light follows the world's time
   sim: (_now, dt) => {
     if (!sim || !life) return;
-    sim.update(dt, { hour: daylight.hour, day: daylight.day, focus: focus(), viewer: camera.position });
+    sim.send(pageView(sim, focus(), camera.position));
+    sim.update(dt);
+    const t = pageTime?.follow();
+    if (t) { if (t.day !== daylight.day) setDay(t.day, false); if (t.hour !== daylight.hour) setHour(t.hour, false); }
     life.group.visible = !city || city.complete;
   },
   // this frame's poses drawn

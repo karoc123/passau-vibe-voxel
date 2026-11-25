@@ -109,10 +109,16 @@ async function edit(ctx, op, box) {
 }
 const clearEdits = () => WE.dropAll();
 
+// a frame's input as the tools give it (hour, day, focus, viewer) to a world sim: the world's time set as its host
+// does (setTime) and the focus as the view of the tools' own player (EYE: the one look, as the page's), then its update
+const EYE = 'eye';
+const look = (sim, { hour, day, focus, viewer }) => { sim.setTime(hour, day); sim.send(EYE, { kind: 'view', view: { focus, viewer } }); };
+const update = (sim, dt, input) => { look(sim, input); sim.update(dt); };
+
 // a fresh world sim round the bridge, WARM s on, bodies attached (nothing edited: they must cost nothing)
 async function setup(at) {
   const { W, src, colData } = await nodeWorld();
-  const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, { x: at.x, z: at.y }, {}, { load: async (p) => raw(p) }, tuning.ride) });
+  const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, {}, { load: async (p) => raw(p) }, tuning.ride) });
   sim.setWorld(W);
   const phys = await sim.loadPhysics(), T = sim.traffic;
   // (the tiles round the bridge decoded up front, as the page's streaming has them: no load lands mid-run)
@@ -131,7 +137,7 @@ function run(ctx, seconds, each) {
   Math.random = noRandom;
   try {
     for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) {
-      ctx.sim.update(STEP, { hour: HOUR, focus: ctx.focus });
+      update(ctx.sim, STEP, { hour: HOUR, focus: ctx.focus });
       ctx.t += STEP;
       if (ctx.T.edits.length) ctx.costs.push(ctx.phys.stats.tickMs);
       each?.(i);
@@ -391,12 +397,12 @@ function transit() {
     });
     const advance = (ticks, hour) => {
       for (let i = 0; i < ticks; i += ticksPerFrame)
-        sim.update(STEP * ticksPerFrame, { hour, day: 200, focus, viewer: focus });
+        update(sim, STEP * ticksPerFrame, { hour, day: 200, focus, viewer: focus });
       snapshots.push(snapshot());
     };
     Math.random = noRandom;
     try {
-      sim.update(STEP / 4, { hour: 10, day: 200, focus });
+      update(sim, STEP / 4, { hour: 10, day: 200, focus });
       check(world.tickNumber === 0 && !world.boats.poses.length, 'boats wait for the first world tick');
       advance(30, 10);
       advance(60, 10);
@@ -431,7 +437,7 @@ function transit() {
 async function players() {
   const sim = new WorldSim(td, { seed: SEED }), T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
   const tick = (seconds, f = focus, each) => {
-    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i); sim.update(STEP, { hour: HOUR, focus: f }); }
+    for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i); update(sim, STEP, { hour: HOUR, focus: f }); }
   };
   const S = sessionsOf(sim, 'A', 'B');
   const send = (kind, player, more = {}) => S[player].send({ kind, ...more });
@@ -491,7 +497,7 @@ async function players() {
     // a hole (a ground with nothing under the street round a person walked): the others there fall, the one walked
     // stands; two readers of the events, one every tick, one every 2 s, get the same ones with their ticks
     const sim2 = new WorldSim(td, { seed: SEED }), T2 = sim2.traffic;
-    const tick2 = (seconds, each) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { sim2.update(STEP, { hour: HOUR, focus }); each?.(i); } };
+    const tick2 = (seconds, each) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { update(sim2, STEP, { hour: HOUR, focus }); each?.(i); } };
     tick2(5);
     const q = T2.people.find((r) => !r.wait), Q = q && T2.personPoint(q, 0, { x: 0, y: 0, z: 0 });
     if (!check(q, 'a person near the bridge')) return;
@@ -522,9 +528,9 @@ async function players() {
 // driver walking as a person leaves the wheel first (the car parked where it is), taking the wheel again leaves the
 // person; leaveSeat leaves whatever is held
 async function driverSeat() {
-  const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, { x: BRIDGE.x, z: BRIDGE.y }, {}, { load: async (p) => raw(p) }, tuning.ride) });
+  const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, {}, { load: async (p) => raw(p) }, tuning.ride) });
   const phys = await sim.loadPhysics(), T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
-  const tick = (seconds) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) sim.update(STEP, { hour: HOUR, focus }); };
+  const tick = (seconds) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) update(sim, STEP, { hour: HOUR, focus }); };
   const S = sessionsOf(sim, 'A', 'B');
   Math.random = noRandom;
   try {
@@ -593,7 +599,7 @@ async function craftWorld(plan, tuning) {
     crafts.push(c);
   }
   // (run: the frame, by default the sim's update; focus: the viewer's)
-  const tick = (seconds, each, { focus = { x: BRIDGE.x, z: BRIDGE.y }, run = (dt, input) => sim.update(dt, input) } = {}) => {
+  const tick = (seconds, each, { focus = { x: BRIDGE.x, z: BRIDGE.y }, run = (dt, input) => update(sim, dt, input) } = {}) => {
     for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { each?.(i * STEP); ms += STEP * 1000; run(STEP, { hour: HOUR, focus }); }
   };
   return { sim, crafts, tick };
@@ -691,7 +697,7 @@ async function craftRates() {
       const at = tq(sim.tick);
       cs.forEach((c, k) => sim.send(pilots[k], { kind: 'seatInput', role: 'pilot', input: plan[k][4](at) }));
       const t0 = sim.tick;
-      sim.update(frames[i % frames.length], { hour: HOUR, focus });
+      update(sim, frames[i % frames.length], { hour: HOUR, focus });
       if (sim.tick > t0) states.set(sim.tick, JSON.stringify(cs.map((c) => [c.core.pose, c.core.drawn(0), c.core.drawn(1)])));
     }
     return { states, end: sim.tick, events: JSON.stringify(sim.eventsSince(-1).filter((e) => e.kind === 'craft')), moved: cs.map((c, k) => Math.hypot(c.core.pose.x - plan[k][1], c.core.pose.z - plan[k][2])) };
@@ -727,7 +733,7 @@ async function left() {
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
   const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
   // (every frame through the client: player B's commands with it, the others' through their sessions on the server)
-  const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
+  const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); } };
   const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
   Math.random = noRandom;
   try {
@@ -796,7 +802,7 @@ async function craftEvents() {
   // (B's client over its session; B2 a second session of B's, read here; C another player's)
   const { sim, crafts: [drone], tick } = w, server = new SimServer(sim), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
   const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
-  const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
+  const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;
   try {
@@ -867,12 +873,12 @@ async function sessions() {
   const sA = server.connect('A'), sB = server.connect('B'), A2 = server.connect('A');
   // (a session's link that does not advance the world: the host does, once a frame, before the clients)
   const follow = (session) => ({ onHello: () => {}, onSnapshot: () => {}, greeted: false,
-    frame(dt, input, commands) { if (!this.greeted) { this.greeted = true; this.onHello(session.hello); } for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
+    frame(dt, commands) { if (!this.greeted) { this.greeted = true; this.onHello(session.hello); } for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
     loadPhysics: () => Promise.resolve(), close: () => session.leave() });
   const traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
   const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null, mineFor(sim));
   let clients = [ca, cb];
-  const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { server.update(dt, input); for (const c of clients) c.update(dt, input); } };
+  const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); server.update(dt); for (const c of clients) c.update(dt); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }, of = (d) => (e) => e.kind === 'craft' && e.entity.id === d.id;
   Math.random = noRandom;
   try {

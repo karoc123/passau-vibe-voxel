@@ -6,8 +6,7 @@
 // client refused it): the worker is ended.
 import type { SimLink } from './sim-client';
 import type { SimCommand } from '../sim/contract/commands';
-import type { Snapshot } from '../sim/contract/snapshot';
-import type { SimInput } from '../sim/contract/inputs';
+import type { Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { FromWorker, PhysicsOptions, ToWorker } from '../sim/contract/worker';
 import type { Hello } from '../sim/contract/hello';
 
@@ -18,14 +17,13 @@ export class WorkerLink implements SimLink {
   private readonly worker: Worker;
   private busy = false;
   private dt = 0;
-  private input: SimInput | null = null;
   private commands: SimCommand[] = [];
   private nextId = 1;
   private readonly physics = new Map<number, { done: () => void; fail: (e: unknown) => void }>();
   /** the worker's time for the last frames (update and snapshot, ms), for the tools */
   readonly times: number[] = [];
 
-  constructor(opts: { seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean }) {
+  constructor(opts: { seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean; time: TimeOfDay }) {
     this.worker = new Worker(new URL('../host/sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.worker.onerror = (e) => console.error('sim worker', e.message);
@@ -42,17 +40,15 @@ export class WorkerLink implements SimLink {
     this.physics.clear();
   }
 
-  frame(dt: number, input: SimInput, commands: SimCommand[]) {
+  frame(dt: number, commands: SimCommand[]) {
     this.dt += dt;
-    this.input = input;
     this.commands.push(...commands);
     if (!this.busy) this.flush();
   }
 
   private flush() {
-    if (!this.input) return;
     this.busy = true;
-    this.post({ kind: 'frame', dt: this.dt, input: this.input, commands: this.commands });
+    this.post({ kind: 'frame', dt: this.dt, commands: this.commands });
     this.dt = 0;
     this.commands = [];
   }
