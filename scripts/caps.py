@@ -1,5 +1,5 @@
 """Sloped surfaces as data: the `caps` section of the level-1 nodes (tilefile.py SECTIONS; web/src/core/surface.ts
-reads it; docs/plans/surface-caps.md).
+reads it; docs/adr/0005-surface-caps.md).
 
 A cap replaces the flat top face of one run of one column by a quad with four corner heights (1/64 m above the
 volume's floor). Per column at most two: on the run that ends at the ground (grnd) and on the column's last run above

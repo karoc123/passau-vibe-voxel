@@ -3902,7 +3902,7 @@ def qa_lists(ctx):
     CORE_OUT["walk"] = walked.level
     report["counters"]["underpass_open_bed"] = underpass.open_over_bed(vol, g, is_road, rail_bed, CORE_SL, walked.level)
     # the continuous surfaces the voxels were rounded from, for the sloped caps (caps.py, via regions.py data/surface.npz;
-    # docs/plans/surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
+    # docs/adr/0005-surface-caps.md): nothing here decides, it only keeps what was computed. gt: the ground as the tiles have
     # it (grnd: a bore's floor, not the hill over it as g above); deck: a deck's surface where it is built (m over BASE,
     # NaN elsewhere); roof_z: the roof's height at the cell's middle where its plane is known (the float zt was rounded
     # from), roof_gx / roof_gy: its rise per metre east / south (NaN: unknown)
