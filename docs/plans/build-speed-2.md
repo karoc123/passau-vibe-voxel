@@ -190,7 +190,7 @@ has its own workspace.
 | A5 | `laser.py`: counts over each sheet's own box, one sort | `laser.py` | ~-50 s (estimate) | - | 1 h | low |
 | A6 | `topz` layer by layer; the child's own peak (`VmHWM`) | `voxelize.py`, `regions.py` | regions' peak -15 %: ~-30 s (estimate) | the same | 30 min | none (debug image, scheduling) |
 | B2 | `check.py`: the after-steps side by side; fixtures side by side | `check.py` | - | golden 2.3 -> ~1.6 min each, three at once | 30 min | none |
-| M1 | timers where there are none | `prep.py`, `laser.py`, `regions.py`, `debris.py`, `voxelize.py` | (measures) | | 30 min | none |
+| M1 | timers where there are none | `prep.py`, `laser.py`, `regions.py` | (measures) | | 30 min | none |
 
 Implement A1, A2, B1 first (two hours, the bulk of both targets); A3-A5 together (they all rerun prep or laser
 once); A6, B2, M1 whenever.
@@ -368,9 +368,7 @@ for the three. Say so in `check.py`'s docstring where the runtimes are listed.
   read vs counted). Decides A4 and A5's real numbers.
 - `regions.py` `main`: the seconds of `cut_osm`, the sidecars, the map rasters, labels, `traffic.build` (file
   times say rasters 9 s, the rest 18 s; nothing to do there now).
-- `voxelize.py` / `debris.py`: sub-stages inside "vegetation" (401 s) and "support_floating" (354 s), the two
-  largest stages after A1, on one fixture build. Nothing in their code is obviously wasted (read, not profiled);
-  no step here touches them.
+- (`voxelize.py` vegetation, `debris.py` support_floating: profiled and made faster, see 8.3.)
 
 ---
 
@@ -420,7 +418,7 @@ The `voxelize.py` rebuild (run 2 = 808 s) by the same sums: ~510-530 s, of which
 
 After this round the regions are again ~45 % of a full build and ~70 % of a `voxelize.py` rebuild, and inside
 them (2494 s -> ~1950 s summed) vegetation (21 %), support_floating (18 %), ground classes (11 %) and the export
-(10 %) lead: four stages of real work, none with a known waste. The region phase is bound by 39 GB / ~4 GB a
+(10 %) lead (the first two then roughly halved, 8.3: ~-300 s summed). The region phase is bound by 39 GB / ~4 GB a
 region = 6-7 at once on 6 fast cores, so its floor on this machine is ~5 min; more speed there needs the stages
 themselves to get cheaper (M1 first) or a machine with more RAM and P-cores, not more scheduling.
 The serial chain prep -> laser (140 s after A3-A5) only matters when `data/raw`, `aoi.py` or `map.json` change.
@@ -535,3 +533,33 @@ and then every region and feature pass: `prep.npz`'s arrays changed): `git statu
 prep ~105 s and laser ~90 s in the build's log; the time before the feature pass (no 2.4 GB sidecar to copy and hash);
 the regions' `stats.json` peaks (the large ones ~-15 % expected) and how many ran at once; `data/cache/inputs/prep.npz/`
 without `orto.npy`; `look.py` on one building (reads `data/orto.npy`).
+
+### 8.3 Done: vegetation and support_floating (handoff R7, 2026-11-25; no full build needed: outputs unchanged)
+
+Profiled per statement (cProfile, and a timer around each statement of `vegetation`) on altstadt's region `0_0` and on
+two regions of the real map (`1024_4096`, forest; `2048_7168`), run alone into scratch folders from the real inputs:
+
+- `voxelize.py` `vegetation`: the leaves filled for all canopy cells' columns at once (was one pass over every canopy
+  cell per height); the branches' voxels (`put`/`seg`) collected per batch of trees and drawn by `_put_wood` in numpy
+  (a tree only writes into its own cells, so only the first of a voxel asked for twice counts -- same result as one by
+  one); the crowns' reach in 16 directions for 256 trees at a time; `trees.register` (the Einzelbäume CSV) and the
+  OSM matching as array operations; `species_map.grid` warps the files' pixel index once instead of each file
+  (both files share one grid; checked equal to the per-file warp over the whole map).
+- `debris.py` `support_floating`: the per-piece numbers (`_piece_stats`) for all pieces at once (round one has
+  40 000-140 000 pieces, a numpy loop each was a third of the pass); in round two `occ` is `sub != 0` instead of a
+  gather through the table; the boxes' empty top layers are not labelled. The labelling of the 2.3x-overlapping boxes
+  (`ndimage.label`, `find_objects`) is what is left (~60 %): one label per region instead would change the logged
+  count of big pieces and need ~1 GB of labels.
+
+| region (one at a time, machine otherwise lightly loaded) | vegetation | support_floating |
+|---|---|---|
+| real `1024_4096` (forest, the slowest) | 17.2 -> 8.8 s | 13.7 -> 8.1 s |
+| real `2048_7168` | 10.4 -> 6.2 s | 10.8 -> 7.5 s |
+| altstadt fixture `0_0` | 4.4 -> 2.6 s | 4.9 -> 3.5 s |
+
+Estimate for a full build: of the regions' ~1880 s summed (`timings.json`), vegetation 378 -> ~190 s and
+support_floating 333 -> ~200 s, ~-17 % of the region phase. Proof: `check.py golden --compare` on haissengasse and
+altstadt, 0 of 262 / 460 outputs differ; on the three regions above, every file of the region's folder (`vol.npz`,
+`core.npz` arrays, `out.json` with all notes and trees, the debug lists) and every tile written the same bytes as
+`main`'s. Region peaks unchanged within noise (the "palette, lists" stage's `np.unique` peaks ~250 MB higher or not
+from run to run, with `main`'s code as well).

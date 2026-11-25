@@ -2626,25 +2626,32 @@ def vegetation(ctx):
     if trunks:
         tn_ = tone[rr, cc].astype(np.int32)
         cz_ = czc[rr, cc]
-    for zz in range(int(g.min()) + 1, int((g + crown_top).max()) + 1):
-        m = (zz >= g[rr, cc] + crown_bot[rr, cc]) & (zz < g[rr, cc] + crown_top[rr, cc])
-        if not m.any():
+    # every canopy cell's column of leaves from crown_bot up to crown_top (none at or under the lowest ground), cells in
+    # batches; each voxel is one cell's at one height and fills only where the volume is empty, so the order is free
+    _zlo = int(g.min()) + 1
+    _zb = np.maximum(g[rr, cc] + crown_bot[rr, cc], _zlo).astype(np.int64)
+    _nz = np.maximum((g[rr, cc] + crown_top[rr, cc]).astype(np.int64) - _zb, 0)
+    for a_ in range(0, len(rr), 1 << 13):
+        k_ = np.repeat(np.arange(a_, min(a_ + (1 << 13), len(rr))), _nz[a_:a_ + (1 << 13)])
+        if not len(k_):
             continue
-        sel = (rr[m], cc[m])
-        col_ = leafidx[sel]
+        _first = np.concatenate([[0], np.flatnonzero(np.diff(k_)) + 1])
+        zz = _zb[k_] + (np.arange(len(k_)) - np.repeat(_first, np.diff(np.append(_first, len(k_)))))
+        r_k, c_k = rr[k_], cc[k_]
+        col_ = leafidx[r_k, c_k]
         if trunks:
-            t_ = tn_[m]
+            t_ = tn_[k_]
             # clumps of 3 x 3 x 3 voxels (fewer colour seams for the mesher than single voxels): a fifth of those in the
             # upper half one tone lighter, a tenth underneath one darker
-            hz = (((rr[m] + R0) // 3) * 73856093 ^ ((cc[m] + C0) // 3) * 19349663 ^ (zz // 3) * 83492791) % 10  # (the project grid's)
-            up_ = zz >= cz_[m]
+            hz = (((r_k + R0) // 3) * 73856093 ^ ((c_k + C0) // 3) * 19349663 ^ (zz // 3) * 83492791) % 10  # (the project grid's)
+            up_ = zz >= cz_[k_]
             sh_ = np.where(up_ & (hz < 2), -1, np.where(~up_ & (hz < 1), 1, 0))
             b_ = t_ % 5  # broadleaf: lightness step within the hue family
             leaf_ = LEAVES_[np.clip(t_ - b_ + np.clip(b_ + sh_, 0, 4), 0, 9)]
             n_ = NEEDLES[np.clip((-2 - t_) + sh_, 0, 4)]
             col_ = np.where(t_ >= 0, leaf_, np.where(t_ <= -2, n_, col_))
-        cur = vol[zz][sel]
-        vol[zz][sel] = np.where(cur == 0, col_, cur)
+        cur = vol[zz, r_k, c_k]
+        vol[zz, r_k, c_k] = np.where(cur == 0, col_, cur)
     note("canopy cells:", int(veg.sum()), "crowns:", len(trunks))
     for r_, c_, thick in trunks:  # from the ground one voxel into the crown's lowest point, over the trunk
         hb = int(crown_bot[r_, c_]) + 1
@@ -2670,7 +2677,27 @@ def vegetation(ctx):
         _isleaf[[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF]] = True
         _AZ = np.linspace(0, 2 * np.pi, 16, endpoint=False)
         _ST = np.arange(1, 2 * region.CROWN_R + 1) * 0.5
+        # what put() and seg() ask for, in order: (from, to (x, y, z), colour, tree), drawn by _put_wood a batch of trees
+        # at a time. A tree writes only into its own cells, so the trees do not see each other's wood
+        _ops = []
+        # each crown's reach along 16 directions from its trunk's centre: to the last of its own cells before a gap
+        # (all trees at once, 256 at a time; the same arithmetic per tree as one by one)
+        _reach = np.zeros((len(trunks), len(_AZ)))
+        _tr = np.array([(r_, c_) for r_, c_, _ in trunks], np.int64)
+        for a_ in range(0, len(trunks), 256):
+            _i = np.arange(a_, min(a_ + 256, len(trunks)))
+            _y = (_tr[_i, 0] + 0.5)[:, None, None] + np.outer(np.sin(_AZ), _ST)[None]
+            _x = (_tr[_i, 1] + 0.5)[:, None, None] + np.outer(np.cos(_AZ), _ST)[None]
+            _ri, _ci = np.floor(_y).astype(np.int64), np.floor(_x).astype(np.int64)
+            _in = (_ri >= 0) & (_ri < D) & (_ci >= 0) & (_ci < W)
+            _ri, _ci = np.clip(_ri, 0, D - 1), np.clip(_ci, 0, W - 1)
+            _in &= veg[_ri, _ci] & (own[_ri, _ci] == (_i + 1)[:, None, None])
+            _fo = np.argmin(_in, 2)
+            _reach[_i] = np.where(_in.all(2), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
         for i_, (r0_, c0_, thick_) in enumerate(trunks):
+            if len(_ops) >= 1 << 14:  # (drawn in batches between trees: the trees' rasters, not the volume, shape them)
+                n_wood += _put_wood(_ops, vol, H, g, veg, own, crown_bot, crown_top, _isleaf, C["twig"])
+                _ops.clear()
             if evg[i_] or not veg[r0_, c0_]:
                 continue
             zb_ = int(g[r0_, c0_] + crown_bot[r0_, c0_])
@@ -2678,15 +2705,7 @@ def vegetation(ctx):
             if zt_ - zb_ < 4:
                 continue
             own_id = i_ + 1
-            # the crown's reach along 16 directions from the trunk's centre: to the last of its own cells before a gap
-            _y = r0_ + 0.5 + np.outer(np.sin(_AZ), _ST)
-            _x = c0_ + 0.5 + np.outer(np.cos(_AZ), _ST)
-            _ri, _ci = np.floor(_y).astype(np.int64), np.floor(_x).astype(np.int64)
-            _in = (_ri >= 0) & (_ri < D) & (_ci >= 0) & (_ci < W)
-            _ri, _ci = np.clip(_ri, 0, D - 1), np.clip(_ci, 0, W - 1)
-            _in &= veg[_ri, _ci] & (own[_ri, _ci] == own_id)
-            _fo = np.argmin(_in, 1)
-            reach_ = np.where(_in.all(1), _ST[-1], np.where(_fo > 0, _ST[np.maximum(_fo - 1, 0)], 0.0))
+            reach_ = _reach[i_]
             if reach_.max() < (1 if con[i_] else 2):  # (a larch's narrow cone: its leader and what branches fit)
                 continue
             rng_ = np.random.default_rng(cell_hash(r0_, c0_, "limbs"))
@@ -2712,22 +2731,12 @@ def vegetation(ctx):
                 return True
 
             def put(z, r, c, col):
-                nonlocal n_wood
-                if not (0 <= r < D and 0 <= c < W and 0 <= z < H) or own[r, c] != own_id or z <= g[r, c]:
-                    return
-                v = vol[z, r, c]
-                if col == C["twig"] and not hidden(z, r, c):  # a branch stays under the leaf surface
-                    return
-                if (v == 0 and z < g[r, c] + crown_top[r, c]) or _isleaf[v]:
-                    vol[z, r, c] = col
-                    n_wood += 1
+                """one wood voxel (_put_wood says where it goes in)"""
+                _ops.append(((c, r, z), (c, r, z), col, own_id))
 
             def seg(p, q, col):
-                d = np.subtract(q, p, dtype=np.float64)
-                n = int(np.ceil(np.abs(d).max()))
-                for t in range(n + 1):
-                    x, y, z = (p + d * (t / max(n, 1)))
-                    put(int(np.floor(z)), int(np.floor(y)), int(np.floor(x)), col)
+                """a line of wood voxels from p to q (x, y, z): ceil of its longest axis steps"""
+                _ops.append((tuple(p), tuple(q), col, own_id))
 
             def tip(a, frac, lo, hi, base):
                 """a point frac of the reach out along azimuth a (from the trunk), its height lo..hi of the way from the
@@ -2811,6 +2820,7 @@ def vegetation(ctx):
                     t2 = tip(a + rng_.uniform(-0.5, 0.5), 0.8, 0.1, 0.4, m2[2] - 2)
                     if t2 is not None:
                         seg(m2, t2, C["twig"])
+        n_wood += _put_wood(_ops, vol, H, g, veg, own, crown_bot, crown_top, _isleaf, C["twig"])
     note("broadleaf crowns given branches:", n_wtree, "larches:", n_ltree, "wood voxels:", n_wood)
     # the tree register for the viewer and for phenology.py: the trees standing in the core (a region's), each with its
     # place in the map's order (regions.py sorts by it: OSM's trees as osm.json has them, the register's as its file does,
@@ -2851,6 +2861,47 @@ def vegetation(ctx):
     RESULT["crown_ids"] = _crown_ids
     vars(ctx).update(crown_owner=crown_owner, tree_of_record=tree_of_record, nd_mean=nd_mean, trunk_ok_db=trunk_ok_db,
                      veg=veg)
+
+
+def _put_wood(ops, vol, H, g, veg, own, crown_bot, crown_top, isleaf, twig):
+    """vegetation's branches, all trees' at once: ops [(p, q, colour, tree)] in the order they were asked for, each a
+    line of voxels p + (q - p) * t / n, t = 0 .. n = ceil of its longest axis (a single voxel: p = q). A voxel is wood
+    when it is in the volume, in its tree's own cells (own) and over the ground there, a twig only under the leaf surface
+    (inside a crown on all four sides and above, from the crowns' rasters), and it is empty under the crown's top or
+    leaves. Only the first of the voxels asked for twice that pass the static tests counts: it either turns to wood
+    (wood is no leaf: the later ones fail) or fails and leaves the voxel as it was (they fail as well). Returns the
+    number of wood voxels."""
+    if not ops:
+        return 0
+    D, W = g.shape
+    P = np.array([o[0] for o in ops], np.float64)
+    d = np.subtract(np.array([o[1] for o in ops], np.float64), P, dtype=np.float64)
+    n = np.ceil(np.abs(d).max(1)).astype(np.int64)
+    k = np.repeat(np.arange(len(ops)), n + 1)
+    t = np.arange(len(k)) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)
+    xyz = np.floor(P[k] + d[k] * (t / np.maximum(n, 1)[k])[:, None]).astype(np.int64)
+    c, r, z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
+    col = np.array([o[2] for o in ops], np.int64)[k]
+    tree = np.array([o[3] for o in ops], np.int64)[k]
+    ok = (0 <= r) & (r < D) & (0 <= c) & (c < W) & (0 <= z) & (z < H)
+    r_, c_ = np.where(ok, r, 0), np.where(ok, c, 0)
+    ok &= (own[r_, c_] == tree) & (z > g[r_, c_])
+    hid = np.ones(len(k), bool)
+    for dr, dc, dz in ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, 1)):
+        rn, cn, zn = r + dr, c + dc, z + dz
+        inb = (0 <= rn) & (rn < D) & (0 <= cn) & (cn < W)
+        rn, cn = np.where(inb, rn, 0), np.where(inb, cn, 0)
+        gn = g[rn, cn]
+        hid &= inb & veg[rn, cn] & (gn + crown_bot[rn, cn] <= zn) & (zn < gn + crown_top[rn, cn])
+    ok &= (col != twig) | hid  # (a branch stays under the leaf surface)
+    i = np.flatnonzero(ok)
+    _, first = np.unique((z[i] * D + r[i]) * W + c[i], return_index=True)
+    i = i[first]
+    z, r, c, col = z[i], r[i], c[i], col[i]
+    v = vol[z, r, c]
+    w = ((v == 0) & (z < g[r, c] + crown_top[r, c])) | isleaf[v]
+    vol[z[w], r[w], c[w]] = col[w]
+    return int(w.sum())
 
 
 def kerb(near, c, r):
