@@ -1,22 +1,25 @@
-import { GLIDER_HEIGHT, HOVER_HEIGHT, type CraftKind, type CraftMotionWorld } from './craft-motion';
+import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT, type CraftKind, type CraftMotionWorld } from './craft-motion';
 import { waterTop } from '../river';
 import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
-export const CRAFT_RADIUS = { hovercraft: 0.53, helicopter: 0.59, paraglider: 0.45 };
-export const SPAWN_HEIGHT = { hovercraft: HOVER_HEIGHT, helicopter: 1.1, paraglider: GLIDER_HEIGHT };
+// (the hovercraft's and the helicopter's measures below are the models' before their CRAFT_SCALE, and scaled by it)
+const S = CRAFT_SCALE;
+export const CRAFT_RADIUS = { hovercraft: 0.53 * S.hovercraft, helicopter: 0.59 * S.helicopter, paraglider: 0.45 };
+export const SPAWN_HEIGHT = { hovercraft: HOVER_HEIGHT, helicopter: 1.1 * S.helicopter, paraglider: GLIDER_HEIGHT };
 
 // Cubes (CRAFT_RADIUS half-size) over each model (craft-models.ts), rotated with the heading: the hovercraft's skirt,
-// cabin and fan ducts; the helicopter's skids and cabin, tail, and the rotor disc's rim (10 m) and middle; the pilot
-// and the wing's arc.
+// cabin and fan ducts; the helicopter's skids and cabin, tail, and the rotor disc's rim (10 m before the scale) and
+// middle; the pilot and the wing's arc.
 const rim = (r: number, y: number) => Array.from({ length: 8 }, (_, i): [number, number, number] =>
   [r * Math.sin(i * Math.PI / 4), y, r * Math.cos(i * Math.PI / 4)]);
+const scaled = (k: number, ps: [number, number, number][]) => ps.map(([x, y, z]): [number, number, number] => [x * k, y * k, z * k]);
 const PROBES: Record<CraftKind, readonly [number, number, number][]> = {
-  hovercraft: [[0, 0, 0], [-0.77, 0, 2.3], [0.77, 0, 2.3], [-0.77, 0, -2.3], [0.77, 0, -2.3], [-0.77, 0, 0], [0.77, 0, 0],
-    [0, 0.75, 0.5], [-0.66, 1.0, -2.3], [0.66, 1.0, -2.3]],
-  helicopter: [[0, -0.5, 0.3], [-0.5, -0.5, 1.2], [0.5, -0.5, 1.2], [-0.5, -0.5, -0.7], [0.5, -0.5, -0.7],
+  hovercraft: scaled(S.hovercraft, [[0, 0, 0], [-0.77, 0, 2.3], [0.77, 0, 2.3], [-0.77, 0, -2.3], [0.77, 0, -2.3], [-0.77, 0, 0], [0.77, 0, 0],
+    [-0.77, 0, 1.15], [0.77, 0, 1.15], [-0.77, 0, -1.15], [0.77, 0, -1.15], [0, 0.75, 0.5], [-0.66, 1.0, -2.3], [0.66, 1.0, -2.3]]),
+  helicopter: scaled(S.helicopter, [[0, -0.5, 0.3], [-0.5, -0.5, 1.2], [0.5, -0.5, 1.2], [-0.5, -0.5, -0.7], [0.5, -0.5, -0.7],
     [0, 0.5, 1.5], [0, 0.6, -2.4], [0, 0.7, -4.3], [0, 1.0, -5.75],
-    ...rim(4.4, 2.0), ...rim(2.2, 2.0)],
+    ...rim(4.4, 2.0), ...rim(2.2, 2.0)]),
   paraglider: [[0, 0, 0], [0, 0.95, 0], [0, 7.1, 0.15], [-2.7, 6.4, 0.15], [2.7, 6.4, 0.15], [-4.6, 4.6, 0.15], [4.6, 4.6, 0.15]],
 };
 

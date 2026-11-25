@@ -40,9 +40,9 @@ function run({ motion, world }, seconds, input = {}) {
 const hover = await craft('hovercraft');
 hover.motion.reset({ x: 64, y: 5 + SPAWN_HEIGHT.hovercraft, z: 20 }, 0);
 run(hover, 4.5, { drive: 1 });
-check('hovercraft crosses a low bank from water to land', hover.motion.p.z > 45 && hover.motion.p.y >= 6.65);
+check('hovercraft crosses a low bank from water to land', hover.motion.p.z > 45 && hover.motion.p.y >= 6 + SPAWN_HEIGHT.hovercraft - 0.03);
 run(hover, 16, { drive: -1 });
-check('hovercraft crosses from land back to water', hover.motion.p.z < 39 && hover.motion.p.y < 5.8);
+check('hovercraft crosses from land back to water', hover.motion.p.z < 39 && hover.motion.p.y < 5 + SPAWN_HEIGHT.hovercraft + 0.12);
 hover.motion.reset({ x: 64, y: 6 + SPAWN_HEIGHT.hovercraft, z: 75 }, 0);
 check('hovercraft stops at a wall', run(hover, 3, { drive: 1 }) === 'blocked' && hover.motion.p.z < 88.1);
 hover.motion.reset({ x: 64, y: 5 + SPAWN_HEIGHT.hovercraft, z: 8 }, 0, 20);
@@ -79,7 +79,7 @@ run(heli, 2, { side: 1 });
 check('helicopter slides sideways to the right on E (toward -x at heading 0)', heli.motion.p.x < 58 && heli.motion.bank > 0.05);
 heli.motion.reset({ x: 64, y: heli.motion.p.y, z: 65 }, 0);
 run(heli, 12, { lift: -1 });
-check('helicopter lands and remains supported', Math.abs(heli.motion.p.y - 7.09) < 0.05 && heli.motion.grounded);
+check('helicopter lands and remains supported', Math.abs(heli.motion.p.y - (6 + SPAWN_HEIGHT.helicopter)) < 0.05 && heli.motion.grounded);
 const parked = { ...heli.motion.p };
 run(heli, 2, { drive: 1, turn: 1 });
 check('helicopter does not taxi or turn on its skids', Math.hypot(heli.motion.p.x - parked.x, heli.motion.p.z - parked.z) < 0.01 &&

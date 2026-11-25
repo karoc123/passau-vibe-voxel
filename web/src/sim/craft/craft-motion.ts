@@ -12,7 +12,12 @@ export interface CraftMotionWorld {
 }
 export type CraftStep = 'moving' | 'blocked' | 'loading' | 'landed' | 'splash';
 
-export const HOVER_HEIGHT = 0.68;
+// How much larger the helicopter and the hovercraft are drawn and probed than the box measures they are written in
+// (craft-models.ts, craft-collision.ts): at 1x they read as toys beside the cars, the bus and the houses. The helicopter
+// as a light twin (H135/H145 class: 12 m rotor, 10 m fuselage with the tail, the hub 3.7 m up); the hovercraft as a
+// small passenger craft of 7.8 x 3.4 m. The motion's laws (m/s, m/s²) stay as they are.
+export const CRAFT_SCALE = frozen({ hovercraft: 1.3, helicopter: 1.2, paraglider: 1 });
+export const HOVER_HEIGHT = 0.68 * CRAFT_SCALE.hovercraft; // the origin over the surface: the skirt's foot
 export const GLIDER_HEIGHT = 0.48;
 const WALKABLE_STEP = 1.15;
 const G = 9.81;
@@ -158,7 +163,7 @@ export class CraftMotion {
 
     // The skirt follows land and water. Raise it before crossing a small step, with an upward sweep for headroom.
     const dx = v.x * dt, dz = v.z * dt;
-    const reach = Math.sign(vf) * 3.0; // the skirt's end (probes at 2.3 m, 0.53 half-size) and a little
+    const reach = Math.sign(vf) * 3.0 * CRAFT_SCALE.hovercraft; // the skirt's end (the probes', CRAFT_RADIUS) and a little
     const ahead = world.surface(this.p.x + dx + s * reach, this.p.z + dz + c * reach);
     const next = world.surface(this.p.x + dx, this.p.z + dz);
     if (!ahead || !next) return 'loading';
