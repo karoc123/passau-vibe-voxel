@@ -4,10 +4,12 @@
 // check) and src/physics/ (the Rapier bodies: the traffic's, the player's car); their presentation lives in view/ and
 // nav/. And the client (src/client/sim-client.ts: SimClient, the mirror, the links but the worker's), which a Node
 // client would share. A static scan of every module under src/core/, src/sim/ and src/physics/, of
-// src/client/sim-client.ts, and everything they import, transitively (relative imports, type-only ones included):
+// src/client/sim-client.ts and src/host/sim-host.ts, and everything they import, transitively (relative imports,
+// type-only ones included):
 //   - no import of three (or three/...), util.ts (three.js helpers and the DOM) or voxelMaterial.ts (the shaders);
 //   - no DOM global in the code (comments and strings left out): window, document, location, navigator, localStorage,
 //     sessionStorage, requestAnimationFrame, HTML...Element, ... and no fetch (core takes its loader injected).
+// And src/host/sim-host.ts (the one host's wiring, A12) likewise, with no clock, console or process: ports.
 // And for all of src/ (the shipped app): no import from web/checks/ (the check harnesses the tools run).
 // And the layer rules of docs/plans/architecture-review.md section 3 (package A1), over every module of src/:
 //   R1 layer table: LAYERS maps today's files to a layer, ALLOWED says which layers each may import (every import
@@ -92,10 +94,13 @@ function resolve(from, spec) {
 const IMPORT_RE = /\b(?:import|export)\s+(?:type\s+)?(?:[\w$*{},\s]+?\s+from\s+)?(['"])([^'"\n]+)\1|\bimport\s*\(\s*(['"])([^'"\n]+)\3\s*\)/g;
 const lineOf = (s, at) => s.slice(0, at).split('\n').length;
 const bad = [], seen = new Set(), queue = [];
+const PORTS_ONLY = ['host/sim-host.ts'];
 const walk = (d, out) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) out.push(f); } return out; };
 // the headless directories, whole, and the headless client (A4 moved it out of sim/)
 for (const d of ['core', 'sim', 'physics']) for (const f of walk(path.join(src, d), [])) queue.push([f, null]);
 queue.push([path.join(src, 'client', 'sim-client.ts'), null]);
+// the one host's wiring (A12): headless, and its clock, log and loaders are ports (PORTS_ONLY below)
+queue.push([path.join(src, 'host', 'sim-host.ts'), null]);
 while (queue.length) {
   const [file, via] = queue.shift();
   if (seen.has(file)) continue;
@@ -112,6 +117,13 @@ while (queue.length) {
   const own = new Set([...bare.matchAll(/\b(?:type|interface|class|enum)\s+([\w$]+)/g)].map((m) => m[1]));
   for (const m of code.matchAll(/\bimport\s+(?:type\s+)?\{([^}]*)\}/g)) for (const n of m[1].split(',')) { const k = n.trim().split(/\s+as\s+/).pop().replace(/^type\s+/, ''); if (k) own.add(k); }
   for (const m of bare.matchAll(DOM_RE)) if (!own.has(m[0])) bad.push(`${where(lineOf(bare, m.index))}: DOM global ${m[0]}`);
+}
+
+// the host's wiring takes its clock, its log and its loaders as ports (A12: host/sim-host.ts HostPorts): no
+// performance, console, Date or process in it (fetch and the DOM: the scan above)
+for (const f of PORTS_ONLY) {
+  const { bare } = lex(fs.readFileSync(path.join(src, f), 'utf8'));
+  for (const m of bare.matchAll(/(?<![\w$.])(?:performance|console|Date|process)(?![\w$])/g)) bad.push(`src/${f}:${lineOf(bare, m.index)}: ${m[0]}: a port's (HostPorts), not the host's`);
 }
 
 // nothing in src/ imports from checks/ (it would ship a test harness)
@@ -137,11 +149,9 @@ const LAYERS = [
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
   ['client/', 'client'], // (SimClient, LocalSimClient, MirrorSimClient, TrafficMirror, the links)
-  // (host/fetch.ts and host/viewer-tiles.ts: the page's loaders as much as the host's (the mesher, util.ts and stream.ts
-  // load through them, and presentation may not import the server), so placed with the root until they are split or
-  // injected (A12: the host's loaders as ports))
-  ['host/fetch.ts', 'presentation'], ['host/viewer-tiles.ts', 'presentation'],
-  ['host/', 'server'], // (sim-host.ts, sim.worker.ts: the wiring of a world, the worker's entry)
+  // (sim-host.ts: the wiring of a world, its loaders and clock as ports; browser.ts, node.ts: the ports; sim.worker.ts:
+  // the worker's entry. The page's own loaders, fetch.ts and viewer-tiles.ts, are the root's: presentation, A12)
+  ['host/', 'server'],
   ['view/', 'presentation'], ['nav/', 'presentation'],
   ['main.ts', 'app'],
   ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
@@ -187,13 +197,11 @@ function codeOf(bare) {
 // Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 took the headless -> root ones,
 // A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
 // module), A4 the client -> server ones (TrafficMirror to the client, the in-thread session as the client's
-// InThreadSession, the worker's messages to sim/contract/worker.ts).
+// InThreadSession, the worker's messages to sim/contract/worker.ts), A12 the host -> page loader ones (the host's
+// loaders as ports: host/browser.ts, host/node.ts).
 const BASELINE = [
   "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain)",
   "R1 client/sim-client.ts (client) -> sim/traffic.ts (domain) type",
-  "R1 host/sim-host.ts (server) -> host/fetch.ts (presentation)",
-  "R1 host/sim.worker.ts (server) -> host/fetch.ts (presentation)",
-  "R1 host/sim.worker.ts (server) -> host/viewer-tiles.ts (presentation)",
   "R1 sim/tuning.ts (shared) -> sim/edit-keeper.ts (domain)",
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R1 view/life.ts (presentation) -> sim/traffic.ts (domain)",
@@ -285,5 +293,5 @@ if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (verbose) { console.log(`baseline (${BASELINE.length}):`); for (const k of BASELINE) console.log(`  ${k}`); }
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
 const of = (r) => BASELINE.filter((k) => k.startsWith(r)).length;
-console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals; ${apps.length} modules of src/ import nothing from checks/`);
 console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only); none new, none gone`);

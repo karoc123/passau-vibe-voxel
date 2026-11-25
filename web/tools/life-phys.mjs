@@ -1,6 +1,6 @@
 // The traffic's bodies near edits (src/physics/rapier/life-phys.ts, docs/plans/life-physics.md): what they cost, and
-// how often a body loses its ghost, headless on the real data (the world sim alone: src/sim/world-sim.ts WorldSim, as
-// tools/life-edit.mjs). The traffic runs WARM s round a point, then an edit there (a box marked edited, the voxels
+// how often a body loses its ghost, headless on the real data (the world sim, src/sim/world-sim.ts WorldSim, started
+// by the host as a server starts it: src/host/node.ts, hostSim, its tiles and road physics through the file ports). The traffic runs WARM s round a point, then an edit there (a box marked edited, the voxels
 // unchanged: the busiest case, every car near it a body on intact streets) and RUN s measured, per config:
 //   bodies (avg, max), the bodies' tick (avg, p99, max ms; of which the world's steps and the colliders), the
 //   colliders (chunks built, voxels, cap triangles), bodies spawned / released / put back on their ghosts (resync, with
@@ -8,7 +8,7 @@
 // usage (in web/): node tools/life-phys.mjs [--at X,Z] [--hour H] [--run S] [--box M] [--driver] [--no-look] [-v] NEAR[:MAX] ...
 //   (default: 30 60 100; MAX: the most bodies, default life-phys.ts MAX_BODIES; --box: the edited box's side, m)
 import fs from 'node:fs';
-import { DATA, load, nodeWorld, rawTile, readMeta } from './real-city.mjs';
+import { DATA, load, nodeWorld, readMeta } from './real-city.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); if (i < 0) return d; const v = argv[i + 1]; argv.splice(i, 2); return v; };
@@ -17,7 +17,7 @@ const driver = flag('--driver');
 const verbose = flag('-v'), look = !flag('--no-look');
 const [AX, AZ] = opt('--at', '6500,2600').split(',').map(Number);
 const HOUR = +opt('--hour', 17), RUN = +opt('--run', 30), BOX = +opt('--box', 8), WARM = 20;
-const LP = await load('physics/rapier/life-phys.ts'), { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts');
+const LP = await load('physics/rapier/life-phys.ts'), { STEP } = await load('sim/traffic.ts'), { nodeHost } = await load('host/node.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const configs = (argv.length ? argv : ['30', '60', '100']).map((a) => a.split(':').map(Number));
 const meta = readMeta(), N = meta.tiles.N;
@@ -30,9 +30,8 @@ const f2 = (x) => x.toFixed(2);
 for (const [near, max] of configs) {
   const { W } = await nodeWorld();
   const focus = { x: AX, z: AZ };
-  const sim = new WorldSim(td, { seed: 7, loadPhysics: (tuning) => LP.LifePhysics.load(meta, focus, { near, maxBodies: max ?? LP.MAX_BODIES, look }, { load: async (p) => rawTile(p) }, tuning.ride) });
+  const { sim } = nodeHost(DATA, { seed: 7, world: W, physics: { bodies: true, near, maxBodies: max, look, at: () => focus } }, { meta, traffic: td });
   const T = sim.traffic;
-  sim.setWorld(W);
   for (let i = 0; i < WARM / STEP; i++) sim.update(STEP, { hour: HOUR, focus });
   const phys = await sim.loadPhysics();
   const want = near * 1.2 + 64;

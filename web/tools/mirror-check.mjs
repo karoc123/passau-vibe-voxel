@@ -1,5 +1,5 @@
 // The snapshot gate (docs/plans/local-server.md, src/sim/server/snapshot.ts): what the page draws from the sim's snapshots is
-// what it draws from the sim itself. Two world sims from one seed on the real traffic data, ticked alike at a viewer
+// what it draws from the sim itself. Two world sims (each started by the host, src/host/node.ts) from one seed on the real traffic data, ticked alike at a viewer
 // that stands, then drives along a road: one drawn by StreetLife through LocalSimClient (the sim's own objects), the
 // other through MirrorSimClient over a CloneLink of a ThreadLink (a TrafficMirror set from each snapshot, the snapshots
 // structured-cloned and the commands sent through JSON as to a Web Worker or a socket: the protocol gate). Every
@@ -14,8 +14,8 @@ import { DATA, load } from './real-city.mjs';
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const SECONDS = (() => { const i = args.indexOf('--seconds'); return i >= 0 ? +args[i + 1] : 90; })();
 const FPS = 30;
-const { StreetLife } = await load('view/life.ts'), { WorldSim } = await load('sim/world-sim.ts');
-const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts'), { SimServer } = await load('sim/server/sim-server.ts');
+const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts');
+const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
 const data = () => unpackTraffic(structuredClone(raw));
@@ -23,8 +23,9 @@ const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
 const boats = fs.existsSync(`${DATA}boats.json`) ? JSON.parse(fs.readFileSync(`${DATA}boats.json`, 'utf8')) : null;
 const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 
-const a = new SimServer(new WorldSim(data(), { seed: 5 })), b = new SimServer(new WorldSim(data(), { seed: 5 }));
-if (boats) { a.sim.setBoats(boats); b.sim.setBoats(boats); }
+// (both started as a server starts them: src/host/node.ts, hostSim; no ground, no road physics)
+const host = () => nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false, at: () => ({ x: at.x, z: at.y }) } }, { meta, traffic: data(), boats });
+const a = host(), b = host();
 const P = 'p1', direct = new LocalSimClient(a.connect(P)), link = new CloneLink(new ThreadLink(b.connect(P)));
 const mirror = new MirrorSimClient(link, data(), null);
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);

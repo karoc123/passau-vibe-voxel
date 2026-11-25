@@ -5,7 +5,7 @@ import type { Meta } from '../src/core/meta';
 import { VoxelCollision, type CollisionOptions } from '../src/sim/craft/voxel-collision';
 import { TileCache } from '../src/core/tile-cache';
 import { liveEdits } from '../src/core/live-edits';
-import { fetchGzip } from '../src/host/fetch';
+import { fetchGzip } from '../src/fetch';
 import { MAT } from '../src/core/materials';
 import { TILE_MAGIC as MAGIC, TILE_N } from '../src/core/tile-data';
 import { encodeCaps } from '../src/core/surface';
