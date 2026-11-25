@@ -11,7 +11,7 @@
 //     sessionStorage, requestAnimationFrame, HTML...Element, ... and no fetch (core takes its loader injected).
 // And src/host/sim-host.ts (the one host's wiring, A12) likewise, with no clock, console or process: ports.
 // And for all of src/ (the shipped app): no import from web/checks/ (the check harnesses the tools run).
-// And the layer rules of docs/plans/architecture-review.md section 3 (package A1), over every module of src/:
+// And the layer rules of docs/adr/0009-layers-and-owners.md, over every module of src/:
 //   R1 layer table: LAYERS maps today's files to a layer, ALLOWED says which layers each may import (every import
 //      statement, type-only ones included);
 //   R2 no value-import cycle (hard), and the type cycles (cycles through type-only imports) are the baseline's;
@@ -195,7 +195,7 @@ function codeOf(bare) {
   return out;
 }
 
-// Today's violations (docs/plans/architecture-review.md section 1). Only shrinks: A2 took the headless -> root ones,
+// Today's violations (docs/adr/0009-layers-and-owners.md). Only shrinks: A2 took the headless -> root ones,
 // A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
 // module), A4 the client -> server ones (TrafficMirror to the client, the in-thread session as the client's
 // InThreadSession, the worker's messages to sim/contract/worker.ts), A12 the host -> page loader ones (the host's
@@ -286,7 +286,7 @@ if (process.argv.includes('--baseline')) {
 }
 for (const [k, at] of found) {
   if (base.get(k) > 0) { base.set(k, base.get(k) - 1); continue; }
-  bad.push(`${k}${at ? ` (line ${at})` : ''}: new layer violation (docs/plans/architecture-review.md section 3; LAYERS, ALLOWED here)`);
+  bad.push(`${k}${at ? ` (line ${at})` : ''}: new layer violation (docs/adr/0009-layers-and-owners.md; LAYERS, ALLOWED here)`);
 }
 for (const [k, left] of base) for (let i = 0; i < left; i++) bad.push(`${k}: in BASELINE but no longer found; delete it there (node tools/core-deps.mjs --baseline)`);
 

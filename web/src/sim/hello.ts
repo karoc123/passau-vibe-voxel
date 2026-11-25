@@ -1,4 +1,4 @@
-// The hello (sim/contract/hello.ts; docs/plans/architecture-review.md A6): made by the host (sim/server/sim-server.ts
+// The hello (sim/contract/hello.ts; docs/adr/0009-layers-and-owners.md): made by the host (sim/server/sim-server.ts
 // SimServer.hello, from the data build hostSim checked and the sim's tuning), compared by the client with its own
 // (client/sim-client.ts: LocalSimClient, MirrorSimClient). Shared by both ends: no three.js, no DOM.
 //   tuningHash  the tuning a client must share with its host, hashed: of sim/tuning.ts Tuning the parts a client runs

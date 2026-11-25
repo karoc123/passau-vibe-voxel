@@ -25,7 +25,7 @@
 //             (resultsSince: by player, each with the tick that produced it) and the events, each with the tick that
 //             produced it (eventsSince: struck, impact, dropped, seated, unseated, craft, drive), so several readers can
 //             each take theirs; the entities (sim/entities.ts: cars, people, crafts read through their own stores).
-//             The world keeps no reader's state (docs/plans/architecture-review.md F2, A7): what a reader has read,
+//             The world keeps no reader's state (docs/adr/0009-layers-and-owners.md): what a reader has read,
 //             the seat events it has taken, its last seat input taken are its session's (sim/server/sim-server.ts Session)
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';

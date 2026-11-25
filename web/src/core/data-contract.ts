@@ -1,4 +1,4 @@
-// The data build's contract (docs/plans/architecture-review.md F11, A14): the files under data/ (web/public/data, written
+// The data build's contract (docs/adr/0009-layers-and-owners.md): the files under data/ (web/public/data, written
 // by the pipeline, scripts/build_data.sh) a host and a client load, and the formatVersion of meta.json `world`
 // (scripts/world_id.py FORMAT_VERSION: the layout of the node files and of the edits' addresses) this code reads.
 // checkBuild is called where meta.json comes in: the page (main.ts) and the host (host/sim-host.ts hostSim, so the

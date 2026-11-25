@@ -1,5 +1,5 @@
 // meta.json's types (Meta, its labels and views, WorldId, TileLevel) and a node's column data (ColumnData): plain data
-// the viewer, the sim and the tools share; imports nothing. (Out of types.ts, architecture-review A2.)
+// the viewer, the sim and the tools share; imports nothing.
 export type Vec3Tuple = [number, number, number];
 
 export interface View {

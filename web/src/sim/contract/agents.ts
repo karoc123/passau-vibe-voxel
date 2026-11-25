@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): the
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): the
 // traffic's agents as a snapshot carries them (enough for the client's own path maths: Traffic.carPose, personPoint),
 // the cars' bodies as drawn, the trains, the boats. Types only (tools/core-deps.mjs R5).
 import type { VehicleId } from './ids';

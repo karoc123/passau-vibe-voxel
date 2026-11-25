@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md F4, A6): the hello, the first
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md): the hello, the first
 // thing a host tells a client when its session connects, before any snapshot. The client compares it with its own
 // (sim/hello.ts checkHello) and refuses a host that differs: a mirror re-runs the sim's path maths on its own data and
 // loads the crafts' cores with its own tuning, so both ends must speak the same protocol, have loaded the same data

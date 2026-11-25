@@ -1,4 +1,4 @@
-// The host in Node (docs/plans/architecture-review.md A12): host/sim-host.ts hostSim over a data/ directory on disk
+// The host in Node (docs/adr/0009-layers-and-owners.md): host/sim-host.ts hostSim over a data/ directory on disk
 // (web/public/data, or a fixture's build), as the Node tools start their sims (tools/host-smoke.mjs, mirror-check.mjs,
 // popin-check.mjs, life-phys.mjs) and as a Node server would. The data read from the files at once; the ports: the
 // node files read and gunzipped from <dir>/tiles/ through a TileCache over the world's live edits (as the page's and

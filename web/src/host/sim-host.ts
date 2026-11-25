@@ -1,4 +1,4 @@
-// The one host (docs/plans/architecture-review.md A12): the world sim made and wired as a
+// The one host (docs/adr/0009-layers-and-owners.md): the world sim made and wired as a
 // server would, the same for the page's thread (main.ts), the Web Worker (host/sim.worker.ts), the Node tools and a
 // Node server (host/node.ts). The WorldSim (sim/world-sim.ts) with its road physics' loader (Rapier, the tiles through
 // the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and water, the river boats' timetable,

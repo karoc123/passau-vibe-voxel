@@ -52,7 +52,7 @@
 //          sandbox grants a request (dropCraft: the drone gone) and refuses an edit (edits off); a test mode refuses a
 //          request (craft: none made).
 //   sessions two players, each through a client of its own session (snapshots through a CloneLink) on one SimServer,
-//          and a second session of one of them (docs/plans/architecture-review.md A7): each client is named its player
+//          and a second session of one of them (docs/adr/0009-layers-and-owners.md): each client is named its player
 //          by its snapshots, sees only its own results, seat events (craftEvents) and ack; the second session of a
 //          player reads the same results and seat events and no ack of the other's inputs; a command claiming another
 //          player acts as the session's (the claim ignored); leaving a session frees its player's seat once no other
@@ -854,7 +854,7 @@ async function craftEvents() {
   }
 }
 
-// Two players through sessions of one SimServer (docs/plans/architecture-review.md A7): A and B each through a client of
+// Two players through sessions of one SimServer (docs/adr/0009-layers-and-owners.md): A and B each through a client of
 // its own session, its snapshots through a CloneLink (a link that sends the frame's commands and takes the session's
 // snapshot, the world ticked once a frame by the host: two clients on one world); A2 a second session of A's, read here.
 // Two drones over the street, one each; the pilots cut the throttle (A every tick, B every other) and their drones fall.

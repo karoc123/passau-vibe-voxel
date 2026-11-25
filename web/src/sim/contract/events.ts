@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): what
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): what
 // happened in a tick (WorldSim.eventsSince; a snapshot's events). Types and constants only (tools/core-deps.mjs R5).
 import type { Vec3 } from '../../core/vec';
 import type { EntityRef, PlayerId, Seat } from './ids';

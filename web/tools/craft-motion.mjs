@@ -1,5 +1,5 @@
 // The player craft motion laws against the same swept voxel probes as the viewer; and every craft core's wire state
-// (docs/plans/architecture-review.md A6: save(), load(); sim/craft/core-state.ts): each field it holds stirred to a
+// (docs/adr/0009-layers-and-owners.md: save(), load(); sim/craft/core-state.ts): each field it holds stirred to a
 // value of its own, a client's copy loaded from save() (structured-cloned) holds the same but for what core-state.ts
 // lists as not on the wire, draws and stands where the core does, and save() shares no object with the core.
 // Run from web/ with node tools/craft-motion.mjs.

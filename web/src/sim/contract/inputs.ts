@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): the
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): the
 // inputs, per seat's role (a driver's CarInput, a pilot's their craft's type's, a walker's WalkPose: contract/pose.ts)
 // and per update (SimInput, FrameTime). Types and constants only (tools/core-deps.mjs R5).
 

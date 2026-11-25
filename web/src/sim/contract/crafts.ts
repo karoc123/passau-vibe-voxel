@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1; A6): what a
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): what a
 // player craft tells its pilot (its core's events, per craft type: a SimEvent 'craft' carries one) and its core's
 // state as a snapshot carries it (save(), load(): sim/craft/craft-core.ts; sim/craft/core-state.ts checks it is
 // complete). Each core declares these; sim/craft/cores.ts asserts they are the cores', type by type. Types only

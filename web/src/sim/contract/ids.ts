@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): the ids
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): the ids
 // a command, an event or a snapshot names. Types and constants only (tools/core-deps.mjs R5); imports core/ and the
 // contract, nothing else (R1).
 

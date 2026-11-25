@@ -1,6 +1,6 @@
 // The server side of a SimClient (client/sim-client.ts; ADR 0008): the world sim, the game mode made
 // (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, and the connections to it: one Session
-// each (docs/plans/architecture-review.md F2, A7). An edit is a player's command like the others, held here until the
+// each (docs/adr/0009-layers-and-owners.md). An edit is a player's command like the others, held here until the
 // level-1 nodes it touches are in the world's TileCache (EditTiles: core/world-edits.ts ready), then sent on to the
 // sim, which applies it in its next tick if the mode allows it (WorldSim.apply, mayEdit). Run in the page's
 // thread (LocalSimClient, MirrorSimClient over a ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no

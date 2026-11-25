@@ -16,8 +16,8 @@
 // an in-thread session's at once, a link's before its first snapshot) and compares it with its own (the app's: sim/hello.ts
 // hello); a host that differs is refused: client.hello rejects with what differs, the session is left (the link
 // closed) and the client sends, runs and takes nothing more.
-// No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/plans/architecture-review.md
-// section 3, layer 4b): the in-thread client and link are given a session by the app (InThreadSession).
+// No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/adr/0009-layers-and-owners.md):
+// the in-thread client and link are given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
 import { LiveEdits } from '../core/live-edits';
 import type { Ground } from '../sim/traffic';
@@ -225,7 +225,7 @@ export class ThreadLink implements SimLink {
 }
 
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
- * life-edit's left and events; docs/plans/architecture-review.md F4, A5): each snapshot checked to be plain data and
+ * life-edit's left and events; docs/adr/0009-layers-and-owners.md): each snapshot checked to be plain data and
  * structured-cloned (what postMessage does), the frame's commands and input and loadPhysics' warm checked and sent
  * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
  * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */

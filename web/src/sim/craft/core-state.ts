@@ -1,4 +1,4 @@
-// The check that a craft core's declared wire state is complete (docs/plans/architecture-review.md A6): each core says
+// The check that a craft core's declared wire state is complete (docs/adr/0009-layers-and-owners.md): each core says
 // what crosses (save(), load(): sim/craft/craft-core.ts, contract/crafts.ts); this looks at everything it holds by
 // reflection (saveState: its fields and its motion's or flight's, numbers, strings, vectors, its clock; not functions,
 // frozen objects such as its tuning, maps and sets, the collision) and finds what differs on a client's copy loaded from

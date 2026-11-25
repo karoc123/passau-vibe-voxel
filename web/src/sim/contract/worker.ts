@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): the
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): the
 // messages between the page (client/sim-worker-link.ts WorkerLink) and the sim in a Web Worker (host/sim.worker.ts),
 // and the road physics' options the page gives the host (host/sim-host.ts HostOptions). Types only
 // (tools/core-deps.mjs R5).

@@ -1,4 +1,4 @@
-// The one host in Node (docs/plans/architecture-review.md A12, gate G2): the world sim started through
+// The one host in Node (docs/adr/0009-layers-and-owners.md): the world sim started through
 // src/host/node.ts (host/sim-host.ts hostSim with the file ports: the node files from disk, its ground and water from
 // them as the worker's) on the real data, two sessions on it (the page's player and a second), FRAMES frames at 30 fps
 // at a viewer by the cathedral, the first following a car, the second a person; a snapshot per session per frame.
@@ -6,7 +6,7 @@
 // Worker's message handler (src/host/sim.worker.ts handle, its post a list), and every snapshot of every session must
 // be the same in all three (the worker's minus its time). Then the road physics loaded through the handler
 // (loadPhysics: the physics port, the tiles port; answered ok) and a few frames run with it.
-// Then the hello (docs/plans/architecture-review.md A6; sim/hello.ts): a client of each transport (in-thread
+// Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a client of each transport (in-thread
 // LocalSimClient; MirrorSimClient over CloneLink(ThreadLink); over WorkerLink, its Worker a stand-in whose messages go
 // through sim.worker.ts greet and handle) takes the host's hello when it matches its own, and refuses it (client.hello
 // rejects naming what differs; the session left, no snapshot taken) when the protocol, the data build or the tuning

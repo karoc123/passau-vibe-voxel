@@ -1,4 +1,4 @@
-// The contract between the world sim and its clients (docs/plans/architecture-review.md section 3, layer 1): where
+// The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): where
 // something is (map metres, x east, y up, z south; heading h: 0 +z, pi/2 +x). Types only (tools/core-deps.mjs R5).
 
 export interface Pose { x: number; y: number; z: number; h: number }
