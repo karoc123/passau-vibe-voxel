@@ -20,10 +20,12 @@ import type { SearchItem } from './search';
 import { StreetLife } from './view/life';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type CraftView, type SimClient } from './client/sim-client';
 import type { CraftsView } from './nav/crafts-view';
+import { browserPorts } from './host/browser';
 import { hostSim, PAGE_PLAYER } from './host/sim-host';
 import { WorkerLink } from './client/sim-worker-link';
-import { viewerTileCache } from './host/viewer-tiles';
+import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
+import type { BoatData } from './sim/boat-traffic';
 import { unpackTraffic } from './sim/traffic-pack';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, View } from './core/meta';
@@ -491,7 +493,8 @@ async function boot() {
       client = new MirrorSimClient(link, td, world, true);
     } else {
       const own = qs.get('mirror') === '1' ? structuredClone(td) : null;
-      const server = hostSim(meta, td, { seed, world, cache: viewerTileCache(meta.tiles.N), eager, mode, edits, physics: { ...physics, at: focus } });
+      const boats = fetchJson<BoatData>('data/boats.json');
+      const server = hostSim({ meta, traffic: td, boats }, browserPorts(viewerTileCache(meta.tiles.N)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
       // (one session, the page's player: the host names it, the page's commands name none)
       const session = server.connect(PAGE_PLAYER);
       client = own ? new MirrorSimClient(new ThreadLink(session), own, world) : new LocalSimClient(session);

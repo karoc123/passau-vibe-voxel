@@ -7,7 +7,7 @@
 // of the box (main.ts). drop(tx, ty) gives a node its files again. Who keeps an edit and for how long is not decided
 // here (sim/edit-keeper.ts).
 // One world per process (ADR 0008): the live edits are the module's (liveEdits), the TileCache the one given to
-// initWorldEdits (the viewer: host/viewer-tiles.ts; a tool: its own over the files on disk).
+// initWorldEdits (the viewer: viewer-tiles.ts; a tool: its own over the files on disk).
 // Later (not built): an edit that expires (damage for a while) or lasts (a built house, ADR 0001 L1) is an op kept
 // apart from the others; a node is then made again from its files and the ops left (core/layers.ts effectiveColumns,
 // over the TileCache's files), instead of op upon op as here.

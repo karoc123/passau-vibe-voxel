@@ -556,6 +556,29 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `post` as a parameter so G2 can drive it in Node. New gate `host-smoke` (G2), fast set.
 - **Files:** `host/*`, `tools/host-smoke.mjs` (new), `tools/gates.mjs`, the three tools.
 - **Gates:** `host-smoke`, `mirror-check`, `popin-check`; browser check `?worker=1`.
+- **Landed** (2026-11-25): `host/sim-host.ts` `hostSim(data, ports, opts)`: `HostData` `{ meta, traffic, boats? }`
+  (boats as data or a promise: the page's and the worker's fetch, set when in, as before), `HostPorts` `{ tiles, now,
+  log, physicsLoader }` (`tiles` is the tile loader as a `TileCache`, so the page's stays shared with its streamer;
+  `physicsLoader` gives the road physics' module), `HostOptions` as before minus `cache` and `base` (`seed` optional:
+  the traffic's default). No `fetch`, `performance`, `console`, `Date`, `process` in it: `core-deps` scans it with the
+  headless modules and fails on those words (`PORTS_ONLY`). `host/browser.ts`: `browserPorts(tiles)` and the worker's
+  `fetchJson`, `fetchGzip`, `tileCacheAt`; `host/node.ts`: `nodeTileCache`, `nodePorts`, `readHostData`,
+  `nodeHost(dir, opts, data?)` (`world: 'tiles'`: a `tileWorld` over its cache, as the worker's; node:fs/zlib through
+  `process.getBuiltinModule`, so no `@types/node`; the physics module imported statically, vite's runner closes after
+  the load). `mirror-check`, `popin-check`, `life-phys` start their sims through `nodeHost` (`life-edit` keeps its bare
+  `WorldSim`s); `PhysicsOptions.look` (optional) carries `life-phys --no-look`. `sim.worker.ts` `handle(s, m, post,
+  setFocus)` is exported; the worker's `onmessage` is set only in a worker scope. The A4 open point: the page's loaders
+  moved out of `host/` to the root (`fetch.ts`, `viewer-tiles.ts` `viewerTileCache`; presentation), the host gets them
+  only as ports, `host/` is server in `LAYERS` whole; the two fetch helpers and the cache's line are written twice
+  (`fetch.ts`/`viewer-tiles.ts` and `host/browser.ts`), as no layer both may import may fetch. Baseline 13 -> 10, only
+  removals (the three host -> page loader entries). New fast gate `host-smoke` (~5 s): `nodeHost` on the real data with
+  its ground from the tiles, two sessions x 240 frames, every snapshot hashed: run twice and once through `handle`,
+  all alike; then `loadPhysics` through `handle` (Rapier through the physics port, terrain through the tile port).
+  Measured: `mirror-check --seconds 60` output byte-identical to main's; `life-phys --run 4 60` counts as main's. Fast
+  set 17/17, `popin-check`, `tsc`; the page plain and `?worker=1`: traffic moves, follow a car, drive (the road physics
+  through the browser port), 0 page errors.
+  Open: `hostSim` still registers a `liveEdits` listener it never removes (one per host; tools that start several hosts
+  in one process collect them; harmless while no edit is made); the handoff's gate count text.
 
 ### A13. App composition (M, hygiene)
 

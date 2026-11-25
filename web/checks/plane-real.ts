@@ -10,7 +10,7 @@ import { VoxelCollision } from '../src/sim/craft/voxel-collision';
 import { fetchedCollision } from './world';
 import { TileCache } from '../src/core/tile-cache';
 import { liveEdits } from '../src/core/live-edits';
-import { fetchGzip } from '../src/host/fetch';
+import { fetchGzip } from '../src/fetch';
 
 // The plane on the real data (web/tools/plane.mjs, which serves the node files from public/data/tiles to fetch): the
 // real VoxelCollision with the plane's radius and horizon, its water (waterColumn) as the viewer reads it. The Danube's line is

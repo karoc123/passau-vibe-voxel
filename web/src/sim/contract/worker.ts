@@ -7,8 +7,9 @@ import type { SimInput } from './inputs';
 import type { Snapshot } from './snapshot';
 
 /** the road physics: bodies: traffic cars near edits become bodies (?lifephys=0: none; the drive still loads it);
- * near, maxBodies: their reach and number (?lpnear=, ?lpmax=) */
-export interface PhysicsOptions { bodies: boolean; near?: number; maxBodies?: number }
+ * near, maxBodies: their reach and number (?lpnear=, ?lpmax=); look: the bodies look ahead (default: yes;
+ * tools/life-phys.mjs --no-look) */
+export interface PhysicsOptions { bodies: boolean; near?: number; maxBodies?: number; look?: boolean }
 
 export type ToWorker =
   | { kind: 'init'; base: string; seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean }

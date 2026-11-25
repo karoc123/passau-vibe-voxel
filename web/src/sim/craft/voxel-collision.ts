@@ -55,7 +55,7 @@ function contact(p: Vec3, d: Vec3, x: number, lo: number, hi: number, z: number,
 // A craft's collision (one each: the FPV drone, the boat, the special crafts, the floatplane and the jet, with their
 // own radius and horizon): a small cache of the 1 m tiles near it, independent of visibility, render budget and the
 // mesh-worker queue. Sim side (no three.js, no DOM, no fetch: tools/core-deps.mjs): the nodes' files come through the
-// TileCache given (core/tile-cache.ts: the viewer's shared one, host/viewer-tiles.ts, or a tool's reading the disk), held
+// TileCache given (core/tile-cache.ts: the viewer's shared one, viewer-tiles.ts, or a tool's reading the disk), held
 // while near; `now` is the clock (ms) its fetch pacing and retries read (the viewer's: performance.now).
 export class VoxelCollision {
   readonly width: number;
