@@ -520,19 +520,6 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
 - **Gates:** `life-edit` (rates, determinism), `mirror-check`, `popin-check`, `rapier-car`, `surface-gap` (the
   origin), `judder` by hand.
 
-### A9. Edits through the command path (M, not neutral)
-
-- **Goal:** F7. An edit is applied in a tick the host chose; the page has one edits owner.
-- **Do:** `edit` becomes a `PlayerCommand`; `WorldSim.apply` asks `mode.mayEdit`; the host resolves the touched
-  nodes before the tick that applies it (a port: `tiles.ready(nodes): Promise`, the command held until then, its
-  result carrying the tick it was applied in); the client owns a `LiveEdits` instance given to the streamer and the
-  page's `TileCache` (in-thread it is handed the world's instance by the app; no `import { liveEdits }` in
-  `client/`, `stream.ts` or the shells); `hostSim` keeps its listener's unsubscribe.
-- **Files:** `sim/server/`, `sim/world-sim.ts`, `core/world-edits.ts`, `core/live-edits.ts`, `client/`,
-  `stream.ts`, `host/viewer-tiles.ts`, `dig.ts`.
-- **Gates:** `life-edit`, `edit-roundtrip`, `layers`, `world-smoke`; browser check `?dig=1` in-thread and with
-  `?worker=1`.
-
 ### A10. Drawn state off the sim's objects; picks by id (M)
 
 - **Goal:** F3, first half: layer-3 objects carry no presentation fields.

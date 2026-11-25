@@ -73,7 +73,8 @@ export const PAGE_PLAYER: PlayerId = 'local';
 /** the game modes a host can make, by id */
 export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
 
-/** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots) */
+/** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots; dispose: the host's listener on
+ * the world's edits removed) */
 export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   // the build: one this code reads, or none said (core/data-contract.ts: a wrong formatVersion throws)
   const build = checkBuild(data.meta, (w) => ports.log(w));
@@ -84,7 +85,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;
   // a node freed is its file again)
   initWorldEdits({ cache, frame: frameOf(meta), nx: level.nx, ny: level.ny });
-  liveEdits.listen((tx, ty, node, region) => {
+  const unlisten = liveEdits.listen((tx, ty, node, region) => {
     sim.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
     if (node && opts.physics.bodies) sim.loadPhysics().catch(() => {});
   });
@@ -94,8 +95,11 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   else if (boats) sim.setBoats(boats);
   let make = MODES[opts.mode ?? 'sandbox'];
   if (!make) { ports.log(`no game mode ${opts.mode}; the sandbox`); make = MODES.sandbox; }
-  // (the build goes into the hello each session is told: SimServer.hello)
-  return new SimServer(sim, make({ edits: !!opts.edits }), build);
+  // (the build goes into the hello each session is told: SimServer.hello; the edits' nodes made ready in the world's
+  // TileCache: SimServer's default EditTiles; the listener gone with the server, SimServer.dispose)
+  const server = new SimServer(sim, make({ edits: !!opts.edits }), build);
+  server.onDispose(unlisten);
+  return server;
 }
 
 // The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode

@@ -84,7 +84,7 @@ function run({ name, at: start, h0, h1 }) {
   const server = nodeHost(DATA, { world: null, physics: { bodies: false, at: () => ({ x: start.x, z: start.y }) } }, { meta, traffic: td });
   const session = server.connect('p1');
   const mine = hello(checkBuild(meta, () => {}));
-  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null, false, mine) : new LocalSimClient(session, mine);
+  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null, mine) : new LocalSimClient(session, mine);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;

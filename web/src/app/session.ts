@@ -13,6 +13,7 @@ import type * as THREE from 'three';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from '../client/sim-client';
 import { WorkerLink } from '../client/sim-worker-link';
 import { checkBuild } from '../core/data-contract';
+import { LiveEdits, liveEdits } from '../core/live-edits';
 import type { Meta } from '../core/meta';
 import type { World } from '../core/world';
 import { browserPorts } from '../host/browser';
@@ -45,8 +46,15 @@ export function sessionOptions(qs: URLSearchParams): SessionOptions {
   };
 }
 
+/** the page's live edits, its client's (SimClient.edits; the streamer and the page's TileCache read them): the world's
+ * own when the sim runs in this thread (one world per process, ADR 0008), else an empty set the client fills from its
+ * snapshots */
+export const pageEdits = (o: SessionOptions): LiveEdits => (o.transport === 'worker' ? new LiveEdits() : liveEdits);
+
 export interface SessionData {
   meta: Meta;
+  /** the page's live edits (pageEdits) */
+  edits: LiveEdits;
   traffic: TrafficData;
   world: World | null;
   // what the sim is simulated round (the page's focus)
@@ -54,18 +62,19 @@ export interface SessionData {
 }
 
 // the client, and the worker's link with ?worker=1 (for the tools)
-export function openSession(o: SessionOptions, { meta, traffic, world, focus }: SessionData): { client: SimClient; link: WorkerLink | null } {
+export function openSession(o: SessionOptions, { meta, edits: live, traffic, world, focus }: SessionData): { client: SimClient; link: WorkerLink | null } {
   const { seed, physics, eager, mode, edits } = o;
   // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
   const mine = hello(checkBuild(meta, () => {}));
   if (o.transport === 'worker') {
     const link = new WorkerLink({ seed, physics, eager, mode, edits });
-    return { client: new MirrorSimClient(link, traffic, world, true, mine), link };
+    return { client: new MirrorSimClient(link, traffic, world, mine, live), link };
   }
   const own = o.transport === 'mirror' ? structuredClone(traffic) : null;
   const boats = fetchJson<BoatData>('data/boats.json');
-  const server = hostSim({ meta, traffic, boats }, browserPorts(viewerTileCache(meta.tiles.N)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
-  // (one session, the page's player: the host names it, the page's commands name none)
+  const server = hostSim({ meta, traffic, boats }, browserPorts(viewerTileCache(meta.tiles.N, live)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
+  // (one session, the page's player: the host names it, the page's commands name none; the client handed the world's
+  // live edits, the host's own: the server in this thread sends none in its snapshots)
   const session = server.connect(PAGE_PLAYER);
-  return { client: own ? new MirrorSimClient(new ThreadLink(session), own, world, false, mine) : new LocalSimClient(session, mine), link: null };
+  return { client: own ? new MirrorSimClient(new ThreadLink(session), own, world, mine, live) : new LocalSimClient(session, mine, live), link: null };
 }

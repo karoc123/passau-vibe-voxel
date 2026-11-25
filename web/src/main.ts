@@ -43,7 +43,7 @@ import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
-import { openSession, sessionOptions } from './app/session';
+import { openSession, pageEdits, sessionOptions } from './app/session';
 import './style.css';
 
 const TODAY = dayOfYear(new Date());
@@ -400,7 +400,9 @@ async function boot() {
   // the street lamps placed along the streets (streetlamps.ts, web/tools/lamps.mjs)
   const streetLamps = fetchJson<{ lamps: [number, number, number][] }>('data/streetlamps.json').then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
-  streamer = new TileStreamer(meta, tileMat, scene);
+  // (the session's options, its edits: the page's, its client's, read by the streamer and the page's TileCache)
+  const session = sessionOptions(qs), edits = pageEdits(session);
+  streamer = new TileStreamer(meta, tileMat, scene, edits);
   // ?dig=1: a click carves a hole in the city, until the page is loaded again (dig.ts; a developer's switch)
   if (qs.get('dig') === '1') { const S = streamer; import('./dig').then(({ installDig }) => installDig(S, camera, renderer.domElement, simReady)); }
   prepass = new DepthPrepass(streamer.group, scene);
@@ -452,7 +454,7 @@ async function boot() {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client: local, mirrored or in a worker (app/session.ts)
-    const { client, link } = openSession(sessionOptions(qs), { meta, traffic: td, world, focus });
+    const { client, link } = openSession(session, { meta, edits, traffic: td, world, focus });
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
       console.error(e.message);
@@ -478,7 +480,7 @@ async function boot() {
     env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => glider.deploy(source, at),
     sim: simReady,
-    tiles: { meta, cache: viewerTileCache(meta.tiles.N), now: () => performance.now() },
+    tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
   };
   const glider = new ParagliderMode(ctx);
   crafts = [...modes.map((C) => new C(ctx)), glider];

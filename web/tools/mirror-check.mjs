@@ -30,7 +30,7 @@ const a = host(), b = host();
 // (the clients' own hello: this code, the build read, the default tuning; the hosts' must match it)
 const mine = hello(checkBuild(meta, () => {}));
 const P = 'p1', direct = new LocalSimClient(a.connect(P), mine), link = new CloneLink(new ThreadLink(b.connect(P)));
-const mirror = new MirrorSimClient(link, data(), null, false, mine);
+const mirror = new MirrorSimClient(link, data(), null, mine);
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];

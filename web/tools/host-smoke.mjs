@@ -19,7 +19,7 @@ import { DATA, hasData, load } from './real-city.mjs';
 if (!hasData()) { console.log(`SKIP host-smoke: no ${DATA}meta.json / traffic.json`); process.exit(0); }
 const verbose = process.argv.includes('-v');
 const FRAMES = 240, FPS = 30, P2 = 'p2';
-const { nodeHost, readHostData } = await load('host/node.ts'), { PAGE_PLAYER } = await load('host/sim-host.ts');
+const { nodeHost, readHostData, worldEdits: WE } = await load('host/node.ts'), { PAGE_PLAYER } = await load('host/sim-host.ts');
 const { handle, greet } = await load('host/sim.worker.ts');
 const data = readHostData(DATA), raw = structuredClone(data.traffic);
 const spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
@@ -80,8 +80,53 @@ async function worker() {
   return { out, server, loadMs, last: posted.at(-1).snapshot };
 }
 
+// An edit through the command path (A9), on a host of its own with edits allowed (no bodies: nothing loads the road
+// physics): held until its nodes are in (not in the update right after it is sent), applied in the sim's next tick,
+// its outcome to the sending session alone, carrying that tick; refused by a mode without mayEdit; after dispose, the
+// host's listener is gone (dropping the edit is no longer told to the sim)
+async function edits() {
+  const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts');
+  const server = nodeHost(DATA, { seed: 3, world: 'tiles', edits: true, physics: { bodies: false, at: () => focus } },
+    { ...data, traffic: structuredClone(raw) });
+  const a = server.connect(PAGE_PLAYER), b = server.connect(P2), sim = server.sim, T = sim.traffic, frame = frameOf(data.meta);
+  let f = 0;
+  const run = async (n) => { for (let i = 0; i < n; i++) { server.update(1 / FPS, input(f++)); await tick(); } };
+  await run(FPS);
+  T.ground.support(focus.x, focus.z, 1000); // (the node asked for: in by the next frame)
+  await tick();
+  const h = T.ground.support(focus.x, focus.z, 1000), [col, row] = mapToGrid(frame, Math.floor(focus.x), Math.floor(focus.z));
+  const op = { kind: 'sphere', col, row, z: cellToAbsZ(frame, Math.floor(h)), r: 4, colour: 0 };
+  const boxes = T.edits.length, sent = sim.tick;
+  a.send({ kind: 'edit', op, ref: 1 });
+  server.update(1 / FPS, input(f++));
+  const early = T.edits.length !== boxes || a.results('edit').length;
+  await tick();
+  const before = sim.tick;
+  await run(2);
+  const ra = a.results('edit'), rb = b.results('edit'), out = [];
+  if (early) out.push('the edit applied before its nodes were in');
+  if (ra.length !== 1 || !ra[0].ok || ra[0].ref !== 1 || !ra[0].nodes?.length || ra[0].tick !== before) out.push(`the edit's outcome: ${JSON.stringify(ra)} (sent at tick ${sent}, the next tick run after its nodes were in: ${before})`);
+  if (rb.length) out.push(`the other session read the edit's outcome: ${JSON.stringify(rb)}`);
+  if (T.edits.length <= boxes) out.push('the sim not told of the edit');
+  sim.mode = { id: 'test', request: () => false };
+  a.send({ kind: 'edit', op, ref: 2 });
+  await tick();
+  await run(2);
+  const no = a.results('edit');
+  if (no.length !== 1 || no[0].ok || no[0].ref !== 2 || no[0].nodes) out.push(`a mode without mayEdit: ${JSON.stringify(no)}`);
+  const n = T.edits.length;
+  server.dispose();
+  WE.dropAll();
+  if (T.edits.length !== n || WE.liveEdits.size) out.push(`after dispose: the sim told of the edit dropped (${n} -> ${T.edits.length}), ${WE.liveEdits.size} left`);
+  if (verbose) console.log(`  edit at ground ${h.toFixed(1)} m: ${ra[0]?.nodes?.length} node(s), applied in tick ${ra[0]?.tick} (sent at ${sent})`);
+  return { out, nodes: ra[0]?.nodes?.length ?? 0, ticks: (ra[0]?.tick ?? sent) - sent };
+}
+
 const fail = [];
 const r1 = await direct(), r2 = await direct(), w = await worker();
+for (const r of [r1, r2, w]) r.server.dispose();
+const ed = await edits();
+fail.push(...ed.out);
 const diff = (x, y, what) => {
   const i = x.out.findIndex((h, k) => h !== y.out[k]);
   if (i >= 0) fail.push(`${what}: frame ${i >> 1} session ${i & 1 ? P2 : PAGE_PLAYER} differs`);
@@ -120,8 +165,8 @@ globalThis.Worker = class {
 };
 const transports = {
   local: (h) => { const s = host.connect('l'); return { client: new LocalSimClient(s, h), session: s }; },
-  mirror: (h) => { const s = host.connect('m'); return { client: new MirrorSimClient(new CloneLink(new ThreadLink(s)), structuredClone(raw), null, false, h), session: s }; },
-  worker: (h) => { const client = new MirrorSimClient(new WorkerLink({ seed: 3, physics: { bodies: false }, eager: false, edits: false }), structuredClone(raw), null, false, h);
+  mirror: (h) => { const s = host.connect('m'); return { client: new MirrorSimClient(new CloneLink(new ThreadLink(s)), structuredClone(raw), null, h), session: s }; },
+  worker: (h) => { const client = new MirrorSimClient(new WorkerLink({ seed: 3, physics: { bodies: false }, eager: false, edits: false }), structuredClone(raw), null, h);
     return { client, get session() { return workerSession; } }; },
 };
 const cases = [['matching', mine, null], ['protocol', { ...mine, protocol: mine.protocol + 1 }, 'protocol'],
@@ -152,5 +197,5 @@ for (const [tn, make] of Object.entries(transports)) {
 }
 if (verbose) console.log(`  ${T.cars.length} cars, ${T.people.length} people, tick ${r1.server.sim.tick}; road physics loaded in ${w.loadMs.toFixed(0)} ms`);
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL host-smoke: ${fail.length} problem(s)`); process.exit(1); }
-console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; the road physics loaded through it (${(w.loadMs / 1000).toFixed(1)} s); the hello taken or refused through 3 transports (${helloChecks} cases)`);
+console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; the road physics loaded through it (${(w.loadMs / 1000).toFixed(1)} s); the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listener gone with dispose`);
 process.exit(0);
