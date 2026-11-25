@@ -54,7 +54,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
-| Q5 | A crown over a roof is not a tower | S–M | **Ready** |
 | F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Step 3: drop unread flood data | S–M | **Ready** (data rebuild) |
@@ -122,25 +121,9 @@ Rules for all of them, on top of the rules above:
 Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
 green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.
 
-### Q5. A crown over a roof is not a tower (S–M)
-
-- **Waits for:** nothing.
-- **Today:** `voxelize.py` `lod2_roofs` takes the LoD2 roof where it is within 3.5 m of the surface model, and up
-  to 6 m under it in patches under 30 cells ("a crown over the roof"). A bigger or higher patch counts as "a tower
-  LoD2 lacks" and keeps the surface model. A large tree over a low house fails both tests: at -5851,435 the LoD2
-  roof is 5 m over the ground, the crown over its south half 19–24 m, and the house is built 20 m tall there with
-  the trunks inside. The inner side of that "tower" has no wall, which is the missing wall the owner saw.
-- **Measured:** 11 900 building cells are built 6 m or more over their LoD2 roof; on 6 700 of them the laser's top
-  return is vegetation at that height (`laser.npz` `veg_top`, `n_canopy`), in about 1 900 patches.
-- **Do:** one rule: where the surface model stands over the LoD2 roof and the laser says the top is vegetation (or
-  an Einzelbaum crown from `crowns.npz` covers the cell), the roof is LoD2's, whatever the patch's size. A real
-  tower has no vegetation returns and keeps the surface model.
-- **Do:** check the wall at a height step inside one building on a real tower (a church tower over its nave): if
-  the inner wall is missing there too, that is a second defect; note it, do not fix it here.
-- **Do:** a build counter: building cells over their LoD2 roof by 6 m or more under vegetation (should go to near 0).
-- **Gates:** `check.py verify`; `shoot.mjs --compare` on `dom` and `oberhaus` (towers and spires must not shrink).
-- **Verify spots:** `?cam=-5819.4,178.2,351.3,-5850.7,108.9,435`; others of the kind at -1102,1292; 2919,-85;
-  -5099,519.
+Q5 (a crown over a roof takes LoD2's roof, `crown_roofs` counter) landed in code; its data rebuild is still due. Left:
+at -1102,1292 a 1-2 m strip stands 10 m over LoD2 where the surface model's step inside one building lies a cell or
+two off LoD2's (walls return as vegetation there, so the crown rule leaves it).
 
 ### Q7. Spot fixes the general rules leave (S each, low priority)
 

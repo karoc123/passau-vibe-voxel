@@ -267,6 +267,7 @@ def differ(ref, got):
 LOD2_SHARE = 0.90     # building cells whose roof is LoD2's (0.965)
 LASER_SHARE = 0.80    # canopy cells whose height is the laser's (0.884)
 SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprints, each way, per region (1.35)
+CROWN_ROOFS_MAX = 12.0  # building cells per 10 000 standing 6 m or more over their LoD2 roof under a crown (8.9)
 # the sloped caps (caps.py report): the carriageway cells with a cap, the capped carriageway's roughness (the second
 # difference per metre, p99, cm), linked capped neighbours whose shared corners differ (altstadt: 0.984, 8.6, 0.0035)
 CAPS = dict(road_share=0.95, rough_p99_cm=12.0, mismatch_share=0.01)
@@ -448,6 +449,19 @@ def verify(fx, jobs, ws=None):
         print(f"  {label}: {a} of {b} ({a / max(b, 1):.3f}, at least {lim})")
         if a < lim * b:
             bad.append(f"{label}: {a} of {b}, under {lim}")
+    # a crown over a roof is no tower (voxelize.py lod2_roofs' crown_roofs counter): the cells left are those beside
+    # LoD2's own higher part, where the surface model's step and the walls' vegetation returns are a cell or two off
+    crowns = [r.get("crown_roofs") for r in regions]
+    if any(c is None for c in crowns):
+        bad.append("crowns over roofs: no crown_roofs counter in the report (voxelize.py lod2_roofs)")
+    else:
+        left, cells = sum(c["left"] for c in crowns), sum(c["cells"] for c in crowns)
+        per = 1e4 * left / max(cells, 1)
+        print(f"  crowns over roofs: {left} building cells 6 m or more over their LoD2 roof under a crown "
+              f"({per:.1f} per 10 000, at most {CROWN_ROOFS_MAX})")
+        if per > CROWN_ROOFS_MAX:
+            bad.append(f"crowns over roofs: {left} building cells 6 m or more over their LoD2 roof under a crown "
+                       f"({per:.1f} per 10 000, more than {CROWN_ROOFS_MAX})")
     shifts = [r["osm_lod2"]["mean_shift_m"] for r in regions if r.get("osm_lod2", {}).get("mean_shift_m") is not None]
     worst = max((max(abs(dx), abs(dy)) for dx, dy in shifts), default=None)
     print(f"  OSM outlines' mean shift onto LoD2: up to {worst} m (at most {SHIFT_MAX})")
