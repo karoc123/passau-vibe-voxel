@@ -52,7 +52,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
-| F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
+| F11 | Grow the map along the Inn to Ingling (blocks and edge landed) | M | **In progress** (`worktree-agent-a6bc0240c8d913578`, needs a data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Engine packages
@@ -129,20 +129,18 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 - Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
 
-### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
+### F11. Grow the map along the Inn to Ingling (M)
 
-- **Today:** the map is one rectangle (`scripts/map.json` `map`: 9,344 x 3,456 m, corner on 1,024 m blocks). Each
-  1,024 m block is already built as its own region (`scripts/regions.py`, `window.cover`). The Klinikum lies just
-  south of the map's edge, Ingling roughly 1.2 km beyond it (estimated from approximate coordinates; check).
-- **Why not just a bigger rectangle:** 2 km more to the south over the full width is about 19 km2 of mostly
-  irrelevant land; following the Inn is about 4–6 km2.
-- **Do:** let `map.json` name the built blocks (the rectangle stays the bounding box; a block not listed is empty).
-  Adapt what assumes a full rectangle: `scripts/fetch_bayern.sh` (downloads the rectangle's 1 km tiles), the
-  region cover, `mapstore.py`'s assembly and the whole-map passes (labels, traffic, flood, boats), the viewer's
-  tile index (empty tiles already exist), and the map's edge at a missing block (what the player sees and that
-  vehicles cannot leave).
-- **Do:** then add the blocks along the Inn from the Innstadt to Ingling (Kraftwerk Passau-Ingling).
-- **Rebuild:** yes, plus the downloads for the new blocks (open data, CC BY 4.0, as today).
+- **Landed:** `scripts/map.json` `blocks` names the built 1 km blocks and the pipeline builds only them (identity:
+  `check.py golden --compare` 0 differences; fixture `holes.json`); a block not built is the map's edge in viewer and
+  physics (gate `edge`).
+- **Left:** add the blocks. Branch `worktree-agent-a6bc0240c8d913578` has commit `623f91c2` (WIP): the draft fixture
+  `inn.json` and notes on the plan, with the blocks, coordinates and downloads. Its worktree's `data/raw_new` holds the
+  downloads (14 one-km sheets, 3 LoD2 tiles) and the new `osm.json`. Open: fill the terrain on the Austrian bank,
+  where DGM1 has no data, from the laser's ground points in `prep.py`; set the Inn's level above the weir
+  (`river_levels.py`); label the dam; build and look at `inn.json`.
+- **Rebuild:** yes. Cut `osm.json`, `baeume_aoi.csv` and `treespecies_*.tif` again for the new bounds, then run the
+  full rebuild (open data, CC BY 4.0).
 
 ## Also open (for later)
 
