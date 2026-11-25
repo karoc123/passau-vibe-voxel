@@ -2,8 +2,7 @@
 
 Status: accepted. World sim: `web/src/sim/world-sim.ts` (`WorldSim`, its host), `web/src/sim/traffic.ts`, `web/src/sim/train-traffic.ts`,
 `web/src/sim/boat-traffic.ts` and `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). Presentation: `web/src/view/life.ts` (`StreetLife`). Checks:
-`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism). Plan and measurements:
-`docs/plans/life-physics.md`.
+`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism).
 
 ## Context
 

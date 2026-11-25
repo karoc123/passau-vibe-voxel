@@ -1,6 +1,6 @@
 # Plan: build speed, round 2 (full build 18:43 -> ~11 min; a `voxelize.py` edit: 13.5 min -> 3 min to look, ~8.5 min to finish)
 
-Follows `docs/plans/build-speed.md` (S0, P1, P2, P3, P5, P6+P8, P10, P11 done). Analysis only: nothing but this file
+Follows `docs/plans/build-speed.md` (deleted; in git at `b5483793`) (S0, P1, P2, P3, P5, P6+P8, P10, P11 done). Analysis only: nothing but this file
 was changed, no build was started. Numbers marked **measured** are from the two full builds' logs
 (`data/bs/rebuild.log`, 2026-11-21 20:29-20:48, with prep/lod2/laser; `data/bs/rebuild2.log`, 22:33-, without them),
 `data/debug/timings.json`, the regions' `stats.json` / file times, or from probes of a few seconds on one core

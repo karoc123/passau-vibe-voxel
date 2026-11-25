@@ -326,7 +326,7 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `seed=` | the street life's random seed (default: a new one each load) |
 | `autores=1\|0` | measure resolution and detail once even under automation (`1`) or never (`0`; `autores.ts`) |
 | `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch); loads the cars' physics ahead |
-| `lifephys=0` | no Rapier bodies for traffic cars near edits (they drive on over a hole; docs/plans/life-physics.md) |
+| `lifephys=0` | no Rapier bodies for traffic cars near edits (they drive on over a hole; see Driving) |
 | `lpnear=`, `lpmax=` | debug knobs of those bodies: the reach round an edit in m (default 60), the most bodies (default 60) |
 | `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the ⚙ panel), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
 
@@ -487,7 +487,7 @@ W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, T puts it back on the road, and **Esc** takes you back to the map. **Vehicle: …** beside
 **Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus, motorbike or camper van
-(`web/src/sim/vehicles.ts`, docs/plans/vehicles.md).
+(`web/src/sim/vehicles.ts`).
 
 The car is a rigid body on four ray-cast wheels with suspension (Rapier, `web/src/physics/rapier/`: `life-phys.ts`,
 `car.ts`), over colliders built from the same 1 m voxel data near the car (`terrain.ts`), including bridge decks;
@@ -506,13 +506,20 @@ panel and input are `web/src/nav/drive.ts`; it sends the local player's commands
 `physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless
 in `tools/rapier-car.mjs` (`drive_*`).
 
+The traffic takes some of its cars from the same catalog, by the car's id (no random number drawn): about 1 in 14 a
+coupé, 1 in 12 a van, 1 in 16 a pickup, 1 in 20 a motorbike, 1 in 56 a camper van. A traffic car within 60 m of an
+edited box (at most 60) becomes a Rapier body chasing its path (`physics/rapier/life-phys.ts`); one that drives into
+a dug hole is a wreck and stays as a collider. A body that loses its path (3 m across, 10 m along, rolled over, water)
+is a wreck within 12 m of an edit, else it is blended back onto the path over 0.6–2 s. With nothing edited there are
+no bodies and no Rapier step.
+
 ## Boat
 
 Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
 downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
 exits; touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
 the bridges. The motion is `web/src/sim/craft/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
-the mode is `nav/boat.ts`; design and controls in `docs/plans/boat.md`.
+the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide with nor avoid it.
 
 ## Plane
 
@@ -525,7 +532,7 @@ for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climb
 stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings near level) to float and taxi; past
 ~97 km/h with the stick pulled it takes off. Land, roofs and fast or steep water are a crash: back at a safe pose ~3 s
 earlier. The flight is `web/src/sim/craft/plane-flight.ts` (no DOM, fixed step, all numbers in `PLANE`), checked by
-`tools/plane.mjs`; the mode is `nav/plane.ts`; design in `docs/plans/plane.md`.
+`tools/plane.mjs`; the mode is `nav/plane.ts`.
 
 **Jet** in the same panel: a small aerobatic trainer, started in the air only (it needs no runway and cannot land).
 The same keys, but A/D roll (200°/s; let go and the bank holds, within ~35° of level the wings level themselves) and

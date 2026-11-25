@@ -1,6 +1,6 @@
 # 0007 Player control in the world sim
 
-F4 implemented [shared road physics](../plans/shared-road-physics.md). F5 added train and boat motion to the world
+F4 implemented shared road physics (the player's car and the traffic's bodies in one Rapier world). F5 added train and boat motion to the world
 clock. Both build on [ADR 0006](0006-world-sim-seam.md).
 
 The street sim already runs without a renderer, but driving and walking a followed pedestrian still write into its

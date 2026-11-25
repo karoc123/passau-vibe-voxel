@@ -4,7 +4,7 @@ Status: accepted (phase A: ground and bridge decks; phase B: roofs, section `roo
 `scripts/caps.py` (writer, run by `scripts/tile_fields.py`), `web/src/core/surface.ts` (reader; roofs:
 `web/src/roofs.ts` `roofField`, `slopeBase`); checks:
 `web/tools/caps-check.mjs`, `web/tools/surface-gap.mjs` (baseline `docs/plans/surface-gap-baseline.json`),
-`web/tools/tile-roundtrip.mjs`, `scripts/check.py verify`. Plan: `docs/plans/surface-caps.md`.
+`web/tools/tile-roundtrip.mjs`, `scripts/check.py verify`.
 
 ## Context
 
