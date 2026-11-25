@@ -70,6 +70,9 @@ const meta = readMeta(), N = meta.tiles.N;
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 // (a world sim's sessions: a host's, SimServer.connect, with no game mode unless asked; sessions('A', 'B') -> { A, B })
 const { SimServer } = await load('sim/server/sim-server.ts');
+// (a client's own hello for a bare SimServer: no build, as the server says none; the sim's tuning, so a scenario that
+// tunes its world gives its client the same)
+const { hello } = await load('sim/hello.ts'), mineFor = (sim) => hello(null, sim.tuning);
 const sessionsOf = (sim, ...players) => { const server = new SimServer(sim, null); return Object.fromEntries(players.map((p) => [p, server.connect(p)])); };
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const WE = LP.worldEdits, LY = await load('core/layers.ts'), TC = await load('core/tile-cache.ts');
@@ -722,7 +725,7 @@ async function left() {
   const w = await craftWorld(plan, { ...DEFAULT_TUNING, edits: keeping });
   if (!w) return;
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null);
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, false, mineFor(sim));
   // (every frame through the client: player B's commands with it, the others' through their sessions on the server)
   const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
@@ -792,7 +795,7 @@ async function craftEvents() {
   if (!w) return;
   // (B's client over its session; B2 a second session of B's, read here; C another player's)
   const { sim, crafts: [drone], tick } = w, server = new SimServer(sim), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null);
+  const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, false, mineFor(sim));
   const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => client.update(dt, input) };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;
@@ -860,10 +863,11 @@ async function sessions() {
   const { sim, crafts: [da, db], tick } = w, server = new SimServer(sim);
   const sA = server.connect('A'), sB = server.connect('B'), A2 = server.connect('A');
   // (a session's link that does not advance the world: the host does, once a frame, before the clients)
-  const follow = (session) => ({ onSnapshot: () => {}, frame(dt, input, commands) { for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
-    loadPhysics: () => Promise.resolve() });
+  const follow = (session) => ({ onHello: () => {}, onSnapshot: () => {}, greeted: false,
+    frame(dt, input, commands) { if (!this.greeted) { this.greeted = true; this.onHello(session.hello); } for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
+    loadPhysics: () => Promise.resolve(), close: () => session.leave() });
   const traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
-  const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null);
+  const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null, false, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null, false, mineFor(sim));
   let clients = [ca, cb];
   const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { server.update(dt, input); for (const c of clients) c.update(dt, input); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }, of = (d) => (e) => e.kind === 'craft' && e.entity.id === d.id;

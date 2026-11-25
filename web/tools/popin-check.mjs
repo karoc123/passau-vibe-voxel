@@ -39,7 +39,7 @@ Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
 const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts'), { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
-const { unpackTraffic } = await load('sim/traffic-pack.ts');
+const { unpackTraffic } = await load('sim/traffic-pack.ts'), { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
 const td = unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), pristine = MIRROR ? structuredClone(td) : null;
@@ -83,7 +83,8 @@ function run({ name, at: start, h0, h1 }) {
   // (started as a server starts it: src/host/node.ts, hostSim; the traffic's default seed, no ground, no road physics)
   const server = nodeHost(DATA, { world: null, physics: { bodies: false, at: () => ({ x: start.x, z: start.y }) } }, { meta, traffic: td });
   const session = server.connect('p1');
-  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null) : new LocalSimClient(session);
+  const mine = hello(checkBuild(meta, () => {}));
+  const sim = MIRROR ? new MirrorSimClient(new CloneLink(new ThreadLink(session)), structuredClone(pristine), null, false, mine) : new LocalSimClient(session, mine);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;

@@ -7,14 +7,18 @@
 // default the sandbox, its edits allowed with ?dig=1). The road physics (the shared Rapier world) loaded on the first
 // edit, with ?dig=1, or when the drive mode warms up. ?lifephys=0: no traffic bodies near edits (the drive still loads
 // it), ?lpnear=, ?lpmax=.
+// Each client compares its host's hello with its own (sim/hello.ts hello: this code, the build of the page's meta.json,
+// the tuning) and refuses a host that differs (client.hello rejects: main.ts shows it).
 import type * as THREE from 'three';
 import { LocalSimClient, MirrorSimClient, ThreadLink, type SimClient } from '../client/sim-client';
 import { WorkerLink } from '../client/sim-worker-link';
+import { checkBuild } from '../core/data-contract';
 import type { Meta } from '../core/meta';
 import type { World } from '../core/world';
 import { browserPorts } from '../host/browser';
 import { hostSim, PAGE_PLAYER } from '../host/sim-host';
 import type { BoatData } from '../sim/boat-traffic';
+import { hello } from '../sim/hello';
 import type { TrafficData } from '../sim/types';
 import { fetchJson } from '../util';
 import { viewerTileCache } from '../viewer-tiles';
@@ -52,14 +56,16 @@ export interface SessionData {
 // the client, and the worker's link with ?worker=1 (for the tools)
 export function openSession(o: SessionOptions, { meta, traffic, world, focus }: SessionData): { client: SimClient; link: WorkerLink | null } {
   const { seed, physics, eager, mode, edits } = o;
+  // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
+  const mine = hello(checkBuild(meta, () => {}));
   if (o.transport === 'worker') {
     const link = new WorkerLink({ seed, physics, eager, mode, edits });
-    return { client: new MirrorSimClient(link, traffic, world, true), link };
+    return { client: new MirrorSimClient(link, traffic, world, true, mine), link };
   }
   const own = o.transport === 'mirror' ? structuredClone(traffic) : null;
   const boats = fetchJson<BoatData>('data/boats.json');
   const server = hostSim({ meta, traffic, boats }, browserPorts(viewerTileCache(meta.tiles.N)), { seed, world, eager, mode, edits, physics: { ...physics, at: focus } });
   // (one session, the page's player: the host names it, the page's commands name none)
   const session = server.connect(PAGE_PLAYER);
-  return { client: own ? new MirrorSimClient(new ThreadLink(session), own, world) : new LocalSimClient(session), link: null };
+  return { client: own ? new MirrorSimClient(new ThreadLink(session), own, world, false, mine) : new LocalSimClient(session, mine), link: null };
 }

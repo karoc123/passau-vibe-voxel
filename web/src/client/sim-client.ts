@@ -12,6 +12,10 @@
 // between the last two ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
 // MirrorSimClient: the sim reached through snapshots over a SimLink (ThreadLink, CloneLink here; WorkerLink:
 // client/sim-worker-link.ts), drawn from TrafficMirror (below).
+// Either one first takes its host's hello (sim/contract/hello.ts: the protocol, the data build, the tuning's hash;
+// an in-thread session's at once, a link's before its first snapshot) and compares it with its own (the app's: sim/hello.ts
+// hello); a host that differs is refused: client.hello rejects with what differs, the session is left (the link
+// closed) and the client sends, runs and takes nothing more.
 // No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/plans/architecture-review.md
 // section 3, layer 4b): the in-thread client and link are given a session by the app (InThreadSession).
 import type { WorldOp } from '../core/world-edits';
@@ -31,6 +35,8 @@ import type { RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
 import { fadeOut, STEP, Traffic, type TrafficBodies } from '../sim/traffic';
 import { SeatReads } from '../sim/seat-reads';
+import { checkHello } from '../sim/hello';
+import type { Hello } from '../sim/contract/hello';
 
 // (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficView, TrafficMirror: below)
 
@@ -46,6 +52,9 @@ export interface CraftView<C extends CraftCore = CraftCore> {
 }
 
 export interface SimClient {
+  /** the host's hello once it is taken (it matched the client's own); rejects with what differs if the host is refused
+   * (the client is then out of the session: it sends, runs and takes nothing more) */
+  readonly hello: Promise<Hello>;
   /** the player whose commands this client sends and whose reads it holds: its session's (the host names it; null
    * until the first snapshot of a session in another thread) */
   readonly player: PlayerId | null;
@@ -90,6 +99,8 @@ export interface SimClient {
  * Session, given by the app: the client names the server only through this) */
 export interface InThreadSession {
   readonly player: PlayerId;
+  /** what the host tells the session first (SimServer.hello) */
+  readonly hello: Hello;
   readonly sim: {
     readonly tick: number;
     readonly time: FrameTime;
@@ -110,16 +121,24 @@ export interface InThreadSession {
   driverNotes(): DriveNote[];
   craftEvents(): CraftEventOf[];
   snapshot(): Snapshot;
+  leave(): void;
 }
 
 /** the sim in the page's thread, read where it is (the page draws the sim's own objects): a session of the SimServer
  * over the WorldSim made by the page (host/sim-host.ts; the app connects it) */
 export class LocalSimClient implements SimClient {
+  readonly hello: Promise<Hello>;
   private nextRef = 1;
   private readonly seqs = new Seqs();
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
+  // the host's hello refused (the session left)
+  private readonly refused: Error | null;
 
-  constructor(private readonly session: InThreadSession) {
+  /** mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded) */
+  constructor(private readonly session: InThreadSession, mine: Hello) {
+    this.refused = checkHello(session.hello, mine);
+    if (this.refused) session.leave();
+    this.hello = this.refused ? Promise.reject(this.refused) : Promise.resolve(session.hello);
     session.onEdit = (ref, nodes, error) => {
       const p = this.pending.get(ref);
       this.pending.delete(ref);
@@ -133,9 +152,10 @@ export class LocalSimClient implements SimClient {
   get time() { return this.sim.time; }
   get traffic(): TrafficView { return this.sim.traffic; }
 
-  send(cmd: SimCommand) { this.session.send(this.seqs.stamp(cmd, this.tick)); }
+  send(cmd: SimCommand) { if (!this.refused) this.session.send(this.seqs.stamp(cmd, this.tick)); }
 
   edit(op: WorldOp) {
+    if (this.refused) return Promise.reject(this.refused);
     const ref = this.nextRef++;
     return new Promise<[number, number][]>((done, fail) => {
       this.pending.set(ref, { done, fail });
@@ -143,7 +163,7 @@ export class LocalSimClient implements SimClient {
     });
   }
 
-  update(dt: number, input: SimInput) { this.session.server.update(dt, input); }
+  update(dt: number, input: SimInput) { if (!this.refused) this.session.server.update(dt, input); }
 
   eventsSince(tick: number) { return this.sim.eventsSince(tick); }
   results(kind: CommandResult['kind'], role?: Role) { return this.session.results(kind, role); }
@@ -167,25 +187,35 @@ class Seqs {
   }
 }
 
-/** how a MirrorSimClient reaches its sim: the frame's commands and input sent, the snapshots back (onSnapshot), the
- * road physics loaded there */
+/** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the frame's commands
+ * and input sent, the snapshots back (onSnapshot), the road physics loaded there; close: the session left (the host
+ * refused), nothing more sent or taken */
 export interface SimLink {
   frame(dt: number, input: SimInput, commands: SimCommand[]): void;
   loadPhysics(warm?: { x: number; z: number }): Promise<void>;
+  onHello: (h: Hello) => void;
   onSnapshot: (s: Snapshot) => void;
+  close(): void;
 }
 
 /** a session of a SimServer in the page's thread: the frame's commands sent through it, the server's update, the
  * session's snapshot at once after it (the snapshot format checked without a worker: ?mirror=1) */
 export class ThreadLink implements SimLink {
+  onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
+  private greeted = false;
+  private closed = false;
   constructor(private readonly session: InThreadSession) {}
   frame(dt: number, input: SimInput, commands: SimCommand[]) {
+    // (the session's hello before its first frame, as a host's first message)
+    if (!this.greeted) { this.greeted = true; this.onHello(this.session.hello); }
+    if (this.closed) return;
     for (const c of commands) this.session.send(c);
     this.session.server.update(dt, input);
     this.onSnapshot(this.session.snapshot());
   }
   loadPhysics(warm?: { x: number; z: number }) { return this.session.sim.loadPhysics(warm).then(() => {}); }
+  close() { if (!this.closed) { this.closed = true; this.session.leave(); } }
 }
 
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
@@ -194,10 +224,12 @@ export class ThreadLink implements SimLink {
  * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
  * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */
 export class CloneLink implements SimLink {
+  onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
-  /** the messages that crossed (snapshots, frames) */
+  /** the messages that crossed (the hello, snapshots, frames) */
   crossed = 0;
   constructor(private readonly link: SimLink) {
+    link.onHello = (h) => { this.crossed++; this.onHello(jsonTrip(h, 'hello')); };
     link.onSnapshot = (s) => { this.crossed++; this.onSnapshot(cloned(s, 'snapshot')); };
   }
   frame(dt: number, input: SimInput, commands: SimCommand[]) {
@@ -206,6 +238,7 @@ export class CloneLink implements SimLink {
     this.link.frame(m.dt, m.input, m.commands);
   }
   loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm && jsonTrip(warm, 'loadPhysics')); }
+  close() { this.link.close(); }
 }
 
 /** v as structuredClone gives it (a worker's postMessage), once it is checked to be plain data (plainData) */
@@ -251,6 +284,11 @@ export function plainData(v: unknown, at: string, typed: boolean, path = new Set
  * snapshots name it) */
 export class MirrorSimClient implements SimClient {
   readonly traffic: TrafficMirror;
+  readonly hello: Promise<Hello>;
+  // the host's hello: taken (it matched), or refused (the link closed); settle: the hello's promise
+  private greeted: Hello | null = null;
+  private refused: Error | null = null;
+  private settle!: { ok: (h: Hello) => void; fail: (e: Error) => void };
   private queue: SimCommand[] = [];
   private readonly seqs = new Seqs();
   private last: Snapshot | null = null;
@@ -264,10 +302,30 @@ export class MirrorSimClient implements SimClient {
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
-   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread) */
-  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly edits = false) {
+   * edits: the snapshots' edits put into the page's live edits (a worker's; not in the sim's own thread); mine: the
+   * client's own hello (sim/hello.ts hello: this code, the build the app loaded) */
+  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly edits: boolean,
+    private readonly mine: Hello) {
     this.traffic = new TrafficMirror(data, ground);
+    this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
+    link.onHello = (h) => this.greet(h);
     link.onSnapshot = (s) => this.take(s);
+  }
+
+  // the host's hello: taken if it matches the client's own, else refused
+  private greet(h: Hello) {
+    if (this.greeted || this.refused) return;
+    const e = checkHello(h, this.mine);
+    if (e) { this.refuse(e); return; }
+    this.greeted = h;
+    this.settle.ok(h);
+  }
+
+  private refuse(e: Error) {
+    this.refused = e;
+    this.queue = [];
+    this.link.close();
+    this.settle.fail(e);
   }
 
   get player(): PlayerId | null { return this.last?.player.id ?? null; }
@@ -275,9 +333,10 @@ export class MirrorSimClient implements SimClient {
   /** (the latest snapshot's tick and alpha: one update behind the frame with a worker, M4) */
   get time(): FrameTime { return { dt: this.dt, tick: this.tick, alpha: (this.last?.acc ?? 0) / STEP }; }
 
-  send(cmd: SimCommand) { this.queue.push(this.seqs.stamp(cmd, this.tick)); }
+  send(cmd: SimCommand) { if (!this.refused) this.queue.push(this.seqs.stamp(cmd, this.tick)); }
 
   edit(op: WorldOp) {
+    if (this.refused) return Promise.reject(this.refused);
     const ref = this.nextRef++;
     return new Promise<[number, number][]>((done, fail) => {
       this.pending.set(ref, { done, fail });
@@ -286,6 +345,7 @@ export class MirrorSimClient implements SimClient {
   }
 
   update(dt: number, input: SimInput) {
+    if (this.refused) return;
     const q = this.queue;
     this.queue = [];
     this.dt = Math.min(dt, 0.1);
@@ -293,6 +353,8 @@ export class MirrorSimClient implements SimClient {
   }
 
   private take(s: Snapshot) {
+    if (this.refused) return;
+    if (!this.greeted) { this.refuse(new Error('sim: host refused: a snapshot came before its hello')); return; }
     this.last = s;
     if (this.edits) for (const e of s.edits) liveEdits.set(e.tx, e.ty, e.node, e.region);
     this.traffic.apply(s);

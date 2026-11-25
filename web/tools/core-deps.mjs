@@ -146,6 +146,7 @@ const LAYERS = [
   ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'], ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
   ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
+  ['sim/hello.ts', 'shared'], // (the hello: made by the host, checked by the client; A6)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
   ['client/', 'client'], // (SimClient, LocalSimClient, MirrorSimClient, TrafficMirror, the links)

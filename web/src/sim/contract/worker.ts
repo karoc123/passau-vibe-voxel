@@ -3,6 +3,7 @@
 // and the road physics' options the page gives the host (host/sim-host.ts HostOptions). Types only
 // (tools/core-deps.mjs R5).
 import type { SimCommand } from './commands';
+import type { Hello } from './hello';
 import type { SimInput } from './inputs';
 import type { Snapshot } from './snapshot';
 
@@ -16,6 +17,7 @@ export type ToWorker =
   | { kind: 'frame'; dt: number; input: SimInput; commands: SimCommand[] }
   | { kind: 'loadPhysics'; id: number; warm?: { x: number; z: number } };
 export type FromWorker =
+  | { kind: 'hello'; hello: Hello } // (first, once the session is connected: before ready and any snapshot)
   | { kind: 'ready' }
   | { kind: 'snapshot'; snapshot: Snapshot; ms: number }
   | { kind: 'physics'; id: number; ok: boolean; error?: string };

@@ -2,15 +2,19 @@
 // (client/sim-client.ts) over a Web Worker; the messages: sim/contract/worker.ts. One frame in flight at a time: while
 // the worker works on one, the page's frames add their time and commands to the next, sent when its snapshot is back
 // (so a slow sim slows the sim, never the page). The page draws the latest snapshot: one update behind the frame that
-// sent the input.
+// sent the input. The worker's first message is its session's hello (handed to the client, onHello); closed (the
+// client refused it): the worker is ended.
 import type { SimLink } from './sim-client';
 import type { SimCommand } from '../sim/contract/commands';
 import type { Snapshot } from '../sim/contract/snapshot';
 import type { SimInput } from '../sim/contract/inputs';
 import type { FromWorker, PhysicsOptions, ToWorker } from '../sim/contract/worker';
+import type { Hello } from '../sim/contract/hello';
 
 export class WorkerLink implements SimLink {
+  onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
+  private closed = false;
   private readonly worker: Worker;
   private busy = false;
   private dt = 0;
@@ -28,7 +32,15 @@ export class WorkerLink implements SimLink {
     this.post({ kind: 'init', base: new URL('.', location.href).href, ...opts });
   }
 
-  private post(m: ToWorker) { this.worker.postMessage(m); }
+  private post(m: ToWorker) { if (!this.closed) this.worker.postMessage(m); }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.worker.terminate();
+    for (const p of this.physics.values()) p.fail(new Error('sim worker closed'));
+    this.physics.clear();
+  }
 
   frame(dt: number, input: SimInput, commands: SimCommand[]) {
     this.dt += dt;
@@ -54,7 +66,9 @@ export class WorkerLink implements SimLink {
   }
 
   private receive(m: FromWorker) {
-    if (m.kind === 'snapshot') {
+    if (this.closed) return;
+    if (m.kind === 'hello') this.onHello(m.hello);
+    else if (m.kind === 'snapshot') {
       this.busy = false;
       this.times.push(m.ms);
       if (this.times.length > 600) this.times.splice(0, 300);
