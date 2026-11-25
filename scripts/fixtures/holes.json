@@ -1,0 +1,16 @@
+{
+ "about": "Fixture map for scripts/check.py with blocks not built (scripts/map.json `blocks`, window.py): round the Altstadt as altstadt.json, 2048 x 1408 m (project rows 0-1408, columns 1024-3072); built: both blocks of block row 0, of block row 1 the west one (its 384 rows within the map) and the east one's first 128 rows; the rest of the east block is empty. For `covers` and `windows`: every cover writes the same bytes, the cells not built dropped. All but `name`, `map`, `blocks` and `regions` as in scripts/map.json (pinned for the project).",
+ "name": "Passau Altstadt with a block not built (fixture)",
+ "crs": 25832,
+ "grid": {"x0": 827371, "y0": 5390500},
+ "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
+ "map": {"col0": 1024, "row0": 0, "cols": 2048, "rows": 1408},
+ "base": 287,
+ "rivers": {"level": 290.921, "stretches": []},
+ "blocks": [
+  {"row": 0, "cols": [1, 2]},
+  {"row": 1, "cols": [1, 1]},
+  {"row": 1, "cols": [2, 2], "rows": 128}
+ ],
+ "regions": {"size": 1024, "jobs": 2}
+}

@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 
 import window as wmod
-from aoi import D, W
+from aoi import BOXES, D, W
 import lod2_ids
 from osm import OSM, footprints, lod2_only_ids
 
@@ -95,7 +95,7 @@ def main():
     cols = 0
     with gzip.GzipFile(TMP / "zones.bin", "wb", compresslevel=9, mtime=0) as fh:
         rows = wmod.RowWriter(fh, W, np.uint16)
-        for win in wmod.from_args(sys.argv, D, W):
+        for win in wmod.from_args(sys.argv, D, W, BOXES):
             # the footprints as voxelize.py drew them (moved onto LoD2's)
             bld, _ = footprints(ids, lambda k: len(blds) + 1 + k, (win.r0, win.r1, win.c0, win.c1), neg)
             bld = bld.astype(np.uint16)
@@ -105,6 +105,7 @@ def main():
                 if win.holds(r, c):
                     under[k] = int(bld[r - win.r0, c - win.c0])
             rows.put(win.r0, win.c0, bld)
+        rows.finish(D)
     print("buildings", n, "columns", cols)
     boxes = [v for _, _, _, x0, y0, x1, y1 in stats.rows() for v in (x0, y0, x1 - x0, y1 - y0)]
     json.dump({"boxes": boxes, "labels": under, "keys": keys}, open(OUT / "zones.json", "w"), separators=(",", ":"))

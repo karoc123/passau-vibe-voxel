@@ -63,15 +63,16 @@ HERE = Path(__file__).resolve().parent
 
 def cover(argv):
     """the regions asked for: --regions NXxNY, --region-size METRES, --whole (one region), else scripts/map.json's"""
+    D, W, B = aoi.MAP_D, aoi.MAP_W, aoi.BOXES  # (the blocks not built are in no region: window.py)
     if "--whole" in argv:
-        return window.cover(aoi.MAP_D, aoi.MAP_W, None)
+        return window.cover(D, W, None, B)
     for i, a in enumerate(argv):
         if a == "--regions":
             nx, ny = map(int, argv[i + 1].lower().split("x"))
-            return window.split(aoi.MAP_D, aoi.MAP_W, nx, ny)
+            return window.split(D, W, nx, ny, B)
         if a == "--region-size":
-            return window.cover(aoi.MAP_D, aoi.MAP_W, int(argv[i + 1]))
-    return window.cover(aoi.MAP_D, aoi.MAP_W, aoi.CONFIG.get("regions", {}).get("size"))
+            return window.cover(D, W, int(argv[i + 1]), B)
+    return window.cover(D, W, aoi.CONFIG.get("regions", {}).get("size"), B)
 
 
 def rdir(w):
@@ -118,7 +119,7 @@ def estimate(w, fpass):
         st = json.load(open(f))
         return 1.1 * st["peak_mb"], st["wall"]
     except (OSError, ValueError, KeyError):
-        ra, rb, ca, cb = w.region(region.HALO)
+        ra, rb, ca, cb = w.region(region.HALO, nodes=False)
         cells = (w.r1 - w.r0) * (w.c1 - w.c0) if fpass else (rb - ra) * (cb - ca)
         return 1.1 * (MEM_FPASS if fpass else MEM_PER_CELL * cells), cells / 1e6 * (5 if fpass else 60)
 
@@ -163,7 +164,7 @@ def build(ws, jobs, fpass=False, budget=None):
     while todo or running:
         while todo and (i := admit()) is not None:
             w = todo.pop(i)
-            ra, rb, ca, cb = (w.r0, w.r1, w.c0, w.c1) if fpass else w.region(region.HALO)
+            ra, rb, ca, cb = (w.r0, w.r1, w.c0, w.c1) if fpass else w.region(region.HALO, nodes=False)
             out = rdir(w) / "fpass" if fpass else rdir(w)
             out.mkdir(parents=True, exist_ok=True)
             env = dict(os.environ, VOXEL_REGION=f"{ra},{rb},{ca},{cb}", VOXEL_CORE=f"{w.r0},{w.r1},{w.c0},{w.c1}",
@@ -348,7 +349,7 @@ def main(argv):
     OUT.mkdir(parents=True, exist_ok=True)
     DBG.mkdir(parents=True, exist_ok=True)
     levels = tiles.manifest(aoi.MAP_D, aoi.MAP_W)
-    tiles.remove_stale(OUT / "tiles", levels, note, split=True)
+    tiles.remove_stale(OUT / "tiles", levels, note, split=True, boxes=aoi.BOXES)
     osm_hashes = region_inputs.cut_osm(ws, rdir)
     import sidecar
     for p in region_inputs.RASTERS:  # (uncompressed copies of the map-sized inputs: what the regions read of them)
@@ -453,13 +454,18 @@ def main(argv):
     cov = mapstore._Cover(ws)
     n_owned = [0]
 
-    def owner_bands():  # (each core's crowns as indices into trees.json, band by band)
-        for k, r0 in enumerate(cov.rcuts):
-            r1 = cov.rcuts[k + 1] if k + 1 < len(cov.rcuts) else D_
+    def owner_bands():  # (each core's crowns as indices into trees.json, band by band; -1 where nothing is built)
+        cuts = cov.band_cuts()
+        for k, r0 in enumerate(cuts):
+            r1 = cuts[k + 1] if k + 1 < len(cuts) else D_
             band = np.full(((r1 - r0) // 2, W_ // 2), -1, np.int32)
-            for c0 in cov.ccuts:
-                w = cov.at[(r0, c0)]
-                band[:, w.c0 // 2:w.c1 // 2] = luts[(w.r0, w.c0)][np.load(rdir(w) / "core.npz")["crowns"]]
+            for w in cov.windows_in(r0, r1, 0, W_):
+                own = luts[(w.r0, w.c0)][np.load(rdir(w) / "core.npz")["crowns"]]
+                m = cov.core_mask(w)
+                if m is not None:
+                    own[~m[::2, ::2]] = -1
+                y0, y1 = max(r0, w.r0), min(r1, w.r1)
+                band[(y0 - r0) // 2:(y1 - r0) // 2, w.c0 // 2:w.c1 // 2] = own[(y0 - w.r0) // 2:(y1 - w.r0) // 2]
             n_owned[0] += int((band >= 0).sum())
             yield band
     mapstore.write_npz("data/crowns.npz", dict(owner=((D_ // 2, W_ // 2), np.int32, owner_bands())))
@@ -483,6 +489,8 @@ def main(argv):
         fv = np.lib.format.open_memmap("data/cache/final_vol.npy", "w+", np.uint16, (Hm, D_, W_))  # a map-sized file)
         for w in ws:
             v = mapstore.load_volume(rdir(w) / "vol.npz", (res[w]["Hm"], w.r1 - w.r0, w.c1 - w.c0))
+            if cov.core_mask(w) is not None:
+                v[:, ~cov.core_mask(w)] = 0
             fv[:v.shape[0], w.r0:w.r1, w.c0:w.c1] = v
         fv.flush()
         del fv
@@ -526,6 +534,8 @@ def main(argv):
                              trees="Bayerische Vermessungsverwaltung, Laserdaten (2021) + Einzelbäume 3D (2024) (CC BY 4.0)",
                              **({"tree_species": "Tree Species Germany 2022/2016, DLR Earth Observation Center (Wegler et al.) "
                                  "(CC BY 4.0)"} if list(Path(aoi.RAW).glob("treespecies_*.tif")) else {})))
+    if aoi.BOXES is not None:  # the built blocks [x0, z0, x1, z1] (map cells; the rest of the map is empty: window.py)
+        meta["built"] = [[c0, r0, c1, r1] for r0, r1, c0, c1 in aoi.BOXES]
     json.dump(meta, open(OUT / "meta.json", "w"))
     # traffic.py over the whole network, on what the regions handed over
     open_cut = {o for r in res.values() for o in r["open_cut"]}  # (the layer -1 ways open to the sky)

@@ -153,7 +153,9 @@ def fields_window(win, levels, N, table, note=print, palette=None, base=None):
     paved = caps.cap_ids(palette) if capf is not None else None
     cst = caps.Stats()
     # the roofs' corners (None: no data/surface.npz with roof_z, or caps.ROOFS off)
-    roofs = caps.region_roofs(region, D, W, N, TMP, OUT / "tiles", palette, zones, (win.r0, win.r1, win.c0, win.c1)) if palette is not None else None
+    # (a core ending inside a block, one built only in its first rows: to the block's end, where its nodes reach)
+    core = (win.r0, min(-(-win.r1 // wmod.ALIGN) * wmod.ALIGN, D), win.c0, min(-(-win.c1 // wmod.ALIGN) * wmod.ALIGN, W))
+    roofs = caps.region_roofs(region, D, W, N, TMP, OUT / "tiles", palette, zones, core) if palette is not None else None
     L = light.astype(np.float32)
     S, M = N + 2, N // 2 + 2
     written = {}
@@ -246,10 +248,11 @@ def main():
     jobs = int(argv[argv.index("-j") + 1]) if "-j" in argv else min(8, max(1, (os.cpu_count() or 2) // 2))
     # the whole map in one window unless a cover is given, or windows of ALIGN in a pool of `jobs` processes: the same
     # bytes (each node belongs to the one window whose core holds its first cell; check.py windows), a window's memory
+    boxes = wmod.boxes_of(dict(meta=meta["built"]) if "built" in meta else None)  # (the built blocks: window.py)
     if jobs > 1 and "--windows" not in argv and "--window-size" not in argv:
-        wins = wmod.cover(D, W, wmod.ALIGN)
+        wins = wmod.cover(D, W, wmod.ALIGN, boxes)
     else:
-        wins = wmod.from_args(argv, D, W)
+        wins = wmod.from_args(argv, D, W, boxes)
     jobs = max(1, min(jobs, len(wins)))
     total = {}
 

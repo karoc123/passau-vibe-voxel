@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 import window as wmod
+from aoi import BOXES
 
 STEP = 4
 CH = 256  # height samples to a chunk's side (and one more, shared with the next)
@@ -123,7 +124,7 @@ def main():
     tmp = tempfile.TemporaryFile(dir="data") if rebuild else None
     crow = wmod.RowWriter(tmp, cw, np.uint8, (3,)) if rebuild else None
     nn, size = 0, 0
-    for win in wmod.from_args(sys.argv, D, W):
+    for win in wmod.from_args(sys.argv, D, W, BOXES):
         ra, rb, ca, cb = win.region(HALO)
         h4 = (ra // 4, -(-rb // 4), ca // 4, -(-cb // 4))  # the region's 4 m samples
         c2 = (ra // 2, min(rb // 2, ch), ca // 2, min(cb // 2, cw))  # its 2 m colours
@@ -131,6 +132,9 @@ def main():
             g = wmod.npz_region("data/ground.npz", "g", (ra, rb, ca, cb)).astype(np.float32)
             # each vertex: the mean over the 4 m around it, so roads and squares stay, the 1 m terraces don't
             h = np.round(ndimage.uniform_filter(g, STEP)[::STEP, ::STEP] * 10).astype(np.uint16)
+            built = win.built((ra, rb, ca, cb))
+            if built is not None:  # (a sample in an empty block: 0, no ground; the viewer leaves it out)
+                h[~built[::STEP, ::STEP]] = 0
             rgb = wmod.npz_region("data/ground.npz", "rgb", (ra, rb, ca, cb))
             c = np.ascontiguousarray(rgb[1::2, 1::2])[:c2[1] - c2[0], :c2[3] - c2[2]]
         else:
@@ -157,6 +161,7 @@ def main():
                 nn += 1
     print("near", (th, tw), (ch, cw), nn, "chunks", size // 1024, "KB")
     if rebuild:
+        crow.finish(ch)
         tmp.seek(0)
         with gzip.GzipFile(whole, "wb", compresslevel=9, mtime=0) as fh:
             fh.write(hw.tobytes())

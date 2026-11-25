@@ -75,11 +75,12 @@ def paste(dst, node, N, r0, c0):
         dst[ya:yb, xa:xb] = a[ya - r0:yb - r0, xa - c0:xb - c0]
 
 
-def region_volume(src, N, region):
+def region_volume(src, N, region, boxes=None):
     """the finished level-1 volume, ground, roof planes and rooms (interiors.runs()' spans, in the region's rows and
-    columns) over region (ra, rb, ca, cb) from the level-1 nodes (src: the tiles folder)"""
+    columns) over region (ra, rb, ca, cb) from the level-1 nodes (src: the tiles folder; boxes: the built blocks,
+    window.Window.boxes: a block not built has no nodes, it is empty)"""
     ra, rb, ca, cb = region
-    nodes = [(tx, ty) for ty in range(ra // N, -(-rb // N)) for tx in range(ca // N, -(-cb // N))]
+    nodes = [(tx, ty) for ty in range(ra // N, -(-rb // N)) for tx in range(ca // N, -(-cb // N)) if tiles.has_node(1, tx, ty, boxes)]
     data, H = {}, 1
     for tx, ty in nodes:
         b = read_node(src / "1" / f"{tx}_{ty}.bin", N, planes=True)
@@ -116,11 +117,12 @@ def main():
     levels = (8,) if check else tuple(s for s in tiles.LEVELS if s != 1)
     note = lambda *a: print(*a, flush=True)
     man = tiles.manifest(D, W, levels)
-    tiles.remove_stale(dst, man, note, split=False)
-    windows = window.from_args(sys.argv, D, W)
+    boxes = window.boxes_of(dict(meta=meta["built"]) if "built" in meta else None)
+    tiles.remove_stale(dst, man, note, split=False, boxes=boxes)
+    windows = window.from_args(sys.argv, D, W, boxes)
     for w in windows:
         region = w.region(tiles.HALO)
-        vol, g, planes, rooms = region_volume(OUT / "tiles", N, region)
+        vol, g, planes, rooms = region_volume(OUT / "tiles", N, region, boxes)
         st = tiles.export_window(vol, g, planes, region, w, dst, face_ids=face, wall_ids=walls, levels=levels, rooms=rooms)
         print(f"window {w}: volume {vol.shape}, nodes written:",
               {s: f"{v[0] / 2 ** 20:.1f} MB" for s, v in st.items()}, flush=True)

@@ -44,6 +44,65 @@ RAW = "data/raw"
 MAP_R0, MAP_C0 = CONFIG["map"]["row0"], CONFIG["map"]["col0"]
 MAP_D, MAP_W = CONFIG["map"]["rows"], CONFIG["map"]["cols"]
 assert MAP_R0 % 1024 == 0 and MAP_C0 % 1024 == 0, "the map's corner is not on the project grid's 1024 m blocks"
+
+
+def built_boxes(config):
+    """the map's built blocks as boxes (r0, r1, c0, c1) of map cells, row by row: config["blocks"] (each a run of the
+    project grid's 1024 m blocks in one block row, `row` and `cols` [first, last] as project cell // 1024, the whole
+    block or only its first `rows` rows) clipped to config["map"], whose bounding box it must be; without "blocks" the
+    whole map. A cell of no box is empty: nothing is built there (window.py)"""
+    m = config["map"]
+    D_, W_, r0, c0 = m["rows"], m["cols"], m["row0"], m["col0"]
+    if "blocks" not in config:
+        return [(0, D_, 0, W_)]
+    out = {}
+    for b in config["blocks"]:
+        assert b.get("rows", 1024) % 128 == 0, "a block's rows: a multiple of 128 (whole level-1 nodes)"
+        for bc in range(b["cols"][0], b["cols"][1] + 1):
+            ra, ca = b["row"] * 1024 - r0, bc * 1024 - c0
+            box = (max(ra, 0), min(ra + b.get("rows", 1024), D_), max(ca, 0), min(ca + 1024, W_))
+            assert box[0] < box[1] and box[2] < box[3], f"block {b['row']}, {bc} lies outside the map"
+            assert (b["row"], bc) not in out, f"block {b['row']}, {bc} listed twice"
+            out[(b["row"], bc)] = box
+    out = sorted(out.values())
+    assert (min(b[0] for b in out), max(b[1] for b in out), min(b[2] for b in out), max(b[3] for b in out)) == (0, D_, 0, W_), \
+        "the map's rectangle is not the bounding box of its blocks"
+    return out
+
+
+# the built blocks (map cells; built_boxes), whether they are the whole map, and as window.Window.boxes takes them
+# (None: the whole map)
+BUILT = built_boxes(CONFIG)
+WHOLE = sum((b[1] - b[0]) * (b[3] - b[2]) for b in BUILT) == MAP_D * MAP_W
+BOXES = None if WHOLE else tuple(BUILT)
+
+
+def is_built(r, c):
+    """whether map cell (r, c) is on the map and built (a float point: the cell it lies in)"""
+    if BOXES is None:
+        return 0 <= r < MAP_D and 0 <= c < MAP_W
+    return any(r0 <= r < r1 and c0 <= c < c1 for r0, r1, c0, c1 in BOXES)
+
+
+def sheets(size, halo, margin=10):
+    """the names ("<easting>_<northing>" in km of the south-west corner) of the size x size m sheets of EPSG:25832 (1000:
+    the 1 km rasters, 2000: LoD2's 2 km tiles) that what the build reads touches: each built block grown by `halo` (a
+    region's, region.HALO) within the map, and `margin` m; by easting, then northing (fetch_bayern.sh)"""
+    k, out = size // 1000, set()
+    for r0, r1, c0, c1 in BUILT:
+        r0, r1, c0, c1 = max(r0 - halo, 0), min(r1 + halo, MAP_D), max(c0 - halo, 0), min(c1 + halo, MAP_W)
+        x0, x1 = GRID_X0 + MAP_C0 + c0 - margin, GRID_X0 + MAP_C0 + c1 + margin
+        y0, y1 = GRID_Y0 - MAP_R0 - r1 - margin, GRID_Y0 - MAP_R0 - r0 + margin
+        out |= {(e, n) for e in range(int(x0 // size) * k, int(x1 // size) * k + 1, k)
+                for n in range(int(y0 // size) * k, int(y1 // size) * k + 1, k)}
+    return [f"{e}_{n}" for e, n in sorted(out)]
+
+
+def built_shape():
+    """what is built as a shapely geometry in map cells (x = column, y = row)"""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    return unary_union([box(c0, r0, c1, r1) for r0, r1, c0, c1 in BUILT])
 # the volume's floor in metres above sea level, pinned for the project (the map's lowest terrain, 290.57 m, less the
 # 3 m slab under it): voxel z = metres above sea level - BASE wherever on the map, not the lowest point of what is built
 BASE = CONFIG["base"]

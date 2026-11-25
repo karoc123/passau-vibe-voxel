@@ -18,7 +18,7 @@ from pyproj import Transformer
 from scipy.ndimage import grey_closing, maximum_filter1d
 from shapely.geometry import LineString
 
-from aoi import CRS, D, RAW, W, to_grid
+from aoi import BOXES, CRS, D, RAW, W, to_grid
 from ways import layer_of, level_of, num, underground, unlit
 
 DRIVE = {"motorway": 22, "trunk": 16, "primary": 14, "secondary": 13.9, "tertiary": 12.5, "unclassified": 11,
@@ -417,7 +417,7 @@ class Osm:
 
     def inside(self, nid, m=3):
         x, y = self.nodes[nid]
-        return m <= x < W - m and m <= y < D - m
+        return inside_xy(x, y, m)
 
     def z_at(self, x, y, bridge):
         g, nd_mean, water = self.g, self.nd_mean, self.water
@@ -805,6 +805,15 @@ def chain(ws):
     return seq
 
 
+def inside_xy(x, y, m=3):
+    """whether map point (x, y) lies in what is built, m or more from its edge (the map's, or a block's not built:
+    aoi.BOXES, window.py)"""
+    if BOXES is None:
+        return m <= x < W - m and m <= y < D - m
+    return all(any(r0 <= v < r1 and c0 <= u < c1 for r0, r1, c0, c1 in BOXES)
+               for u, v in ((x - m, y - m), (x + m, y - m), (x - m, y + m), (x + m, y + m)))
+
+
 def runs(osm, seq, stop=()):
     """the pieces of a chain inside the map and off the `stop` nodes; one that leaves the map ends on its edge (it
     ended on its last node inside, up to 60 m short: vehicles appeared out of nowhere). The edge points are added to
@@ -813,8 +822,15 @@ def runs(osm, seq, stop=()):
 
     def edge(i, o):
         (xi, yi), (xo, yo) = nodes[i], nodes[o]
-        f = min([(b - a) / (c - a) for a, c, b in ((xi, xo, 3), (xi, xo, W - 3.01), (yi, yo, 3), (yi, yo, D - 3.01))
-                 if (c - b) * (a - b) < 0] or [0])
+        if BOXES is None:
+            f = min([(b - a) / (c - a) for a, c, b in ((xi, xo, 3), (xi, xo, W - 3.01), (yi, yo, 3), (yi, yo, D - 3.01))
+                     if (c - b) * (a - b) < 0] or [0])
+        else:  # (the edge of what is built, to a centimetre: the last point of i -> o still inside, by halving)
+            lo, hi = 0.0, 1.0
+            while (hi - lo) * math.hypot(xo - xi, yo - yi) > 0.01:
+                mid = (lo + hi) / 2
+                lo, hi = (mid, hi) if inside_xy(xi + (xo - xi) * mid, yi + (yo - yi) * mid, 3.01) else (lo, mid)
+            f = lo
         n = -10 ** 9 - len(nodes)
         nodes[n] = (xi + (xo - xi) * f, yi + (yo - yi) * f)
         return n

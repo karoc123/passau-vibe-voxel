@@ -1,5 +1,5 @@
 {
- "about": "The map: its extent, the volume's floor and the rivers' levels, in one place (read by scripts/aoi.py; MAP_CONFIG=path picks another file). grid: the project grid's corner in EPSG:25832 (column = easting - x0, row = y0 - northing), fixed for the project: hashes, noise and curated places key on it, so a cell looks the same whatever the extent. map: the window of the project grid that is built, its corner (col0, row0) on multiples of 1024 (window.ALIGN), any size. anchor: the place the grid was laid out from (Dom St. Stephan). base: the volume's floor, m a.s.l. (the lowest terrain less 3 m). rivers: the water level where OSM's outlines do not reach (the rivers taken from the terrain model): `level` everywhere, unless a stretch's box (EPSG:25832 x0, y0, x1, y1) holds the cell (the first that does). regions: the default cover of scripts/regions.py (size in metres, a multiple of 1024, or null: the whole map as one region) and how many build at once (a number, or auto: the cores less 4), within mem_gb of memory if given (else REGION_MEM_GB, else 75 % of what is available when the build starts; scripts/regions.py plan).",
+ "about": "The map: its extent, the volume's floor and the rivers' levels, in one place (read by scripts/aoi.py; MAP_CONFIG=path picks another file). grid: the project grid's corner in EPSG:25832 (column = easting - x0, row = y0 - northing), fixed for the project: hashes, noise and curated places key on it, so a cell looks the same whatever the extent. map: the window of the project grid that is built, its corner (col0, row0) on multiples of 1024 (window.ALIGN), any size, the bounding box of the blocks. blocks: the 1024 m blocks of the project grid that are built, each entry a run of them in one block row (row and cols [first, last] as project row or column // 1024), the whole block or only its first `rows` rows (a multiple of 128), all clipped to `map`; a block not listed is empty: no tiles, terrain or traffic, and a wall for whatever moves (aoi.built_boxes, window.py). anchor: the place the grid was laid out from (Dom St. Stephan). base: the volume's floor, m a.s.l. (the lowest terrain less 3 m). rivers: the water level where OSM's outlines do not reach (the rivers taken from the terrain model): `level` everywhere, unless a stretch's box (EPSG:25832 x0, y0, x1, y1) holds the cell (the first that does). regions: the default cover of scripts/regions.py (size in metres, a multiple of 1024, or null: the whole map as one region) and how many build at once (a number, or auto: the cores less 4), within mem_gb of memory if given (else REGION_MEM_GB, else 75 % of what is available when the build starts; scripts/regions.py plan).",
  "name": "Passau",
  "crs": 25832,
  "grid": {"x0": 827371, "y0": 5390500},
@@ -34,5 +34,11 @@
   {"name": "Ilz below Hals", "box": [828960, 5391150, 829250, 5392600], "level": 293.9},
   {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9}
  ]},
+ "blocks": [
+  {"row": -2, "cols": [-6, 3]},
+  {"row": -1, "cols": [-6, 3]},
+  {"row": 0, "cols": [-6, 3]},
+  {"row": 1, "cols": [-6, 3]}
+ ],
  "regions": {"size": 1024, "jobs": "auto"}
 }

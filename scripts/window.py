@@ -58,10 +58,20 @@ class Window:
     c1: int
     D: int  # the map's rows and columns
     W: int
+    # the map's built blocks, (r0, r1, c0, c1) each (aoi.built_boxes; meta.json `built`), or None: the whole map. A cell
+    # in none is empty: whatever a step makes of it there is dropped (built)
+    boxes: tuple = None
 
-    def region(self, halo):
-        """(ra, rb, ca, cb): the core grown by halo cells on each side, clipped to the map"""
-        return max(self.r0 - halo, 0), min(self.r1 + halo, self.D), max(self.c0 - halo, 0), min(self.c1 + halo, self.W)
+    def region(self, halo, nodes=True):
+        """(ra, rb, ca, cb): the core grown by halo cells on each side, clipped to the map. nodes: a core that ends
+        inside a block (one built only in its first rows) is taken to the block's end first, as far as its nodes reach
+        (the cells there are not built: empty); not for a region of voxelize.py, which builds the core alone"""
+        r1, c1 = (-(-self.r1 // ALIGN) * ALIGN, -(-self.c1 // ALIGN) * ALIGN) if nodes else (self.r1, self.c1)
+        return max(self.r0 - halo, 0), min(r1 + halo, self.D), max(self.c0 - halo, 0), min(c1 + halo, self.W)
+
+    def built(self, region):
+        """which cells of the region (ra, rb, ca, cb) are built, a bool array; None when all of them are"""
+        return built_mask(self.boxes, region)
 
     def local(self, region):
         """the core as slices into an array of the region (ra, rb, ca, cb)"""
@@ -88,29 +98,69 @@ def _cuts(n, k):
     return [(a, min(b, n)) for a, b in zip(edges[:-1], edges[1:]) if a < min(b, n)]
 
 
-def split(D, W, nx=1, ny=1):
-    """nx x ny windows over the map, row by row"""
-    return [Window(r0, r1, c0, c1, D, W) for r0, r1 in _cuts(D, ny) for c0, c1 in _cuts(W, nx)]
+def boxes_of(built):
+    """the built boxes as Window.boxes takes them: None for the whole map (aoi.WHOLE, or no meta.json `built`), else a
+    tuple of (r0, r1, c0, c1); `built` is aoi.BUILT's list of such, or meta.json's [x0, z0, x1, z1] (dict(meta=...))"""
+    if built is None:
+        return None
+    if isinstance(built, dict):
+        built = [(z0, z1, x0, x1) for x0, z0, x1, z1 in built["meta"]]
+    return tuple(tuple(int(v) for v in b) for b in built)
 
 
-def cover(D, W, size=None):
-    """windows of size x size cells (a multiple of ALIGN) over the map, row by row; None: one window, the whole map"""
+def built_mask(boxes, region):
+    """which cells of region (ra, rb, ca, cb) lie in a built box: a bool array, None when all of them do"""
+    if boxes is None:
+        return None
+    ra, rb, ca, cb = region
+    m = np.zeros((rb - ra, cb - ca), bool)
+    for r0, r1, c0, c1 in boxes:
+        y0, y1, x0, x1 = max(r0, ra), min(r1, rb), max(c0, ca), min(c1, cb)
+        if y0 < y1 and x0 < x1:
+            m[y0 - ra:y1 - ra, x0 - ca:x1 - ca] = True
+    return None if m.all() else m
+
+
+def _built_part(ws, boxes):
+    """the windows ws cut to what is built: each core shrunk to the bounding box of its built cells (the blocks' north
+    west corners stay, so a node of every level still lies in the core holding its first cell), those with none
+    dropped. A core may still hold empty cells (a block missing between built ones, in a window of several blocks)"""
+    if boxes is None:
+        return ws
+    out = []
+    for w in ws:
+        parts = [(max(r0, w.r0), min(r1, w.r1), max(c0, w.c0), min(c1, w.c1)) for r0, r1, c0, c1 in boxes]
+        parts = [p for p in parts if p[0] < p[1] and p[2] < p[3]]
+        if parts:
+            out.append(Window(min(p[0] for p in parts), max(p[1] for p in parts), min(p[2] for p in parts),
+                              max(p[3] for p in parts), w.D, w.W, boxes))
+    return out
+
+
+def split(D, W, nx=1, ny=1, boxes=None):
+    """nx x ny windows over the map, row by row (cut to the built boxes: _built_part)"""
+    return _built_part([Window(r0, r1, c0, c1, D, W) for r0, r1 in _cuts(D, ny) for c0, c1 in _cuts(W, nx)], boxes)
+
+
+def cover(D, W, size=None, boxes=None):
+    """windows of size x size cells (a multiple of ALIGN) over the map, row by row; None: one window, the whole map
+    (cut to the built boxes: _built_part)"""
     if size is None:
-        return [Window(0, D, 0, W, D, W)]
+        return _built_part([Window(0, D, 0, W, D, W)], boxes)
     assert size % ALIGN == 0, f"window size {size} is no multiple of {ALIGN}"
-    return [Window(r0, min(r0 + size, D), c0, min(c0 + size, W), D, W)
-            for r0 in range(0, D, size) for c0 in range(0, W, size)]
+    return _built_part([Window(r0, min(r0 + size, D), c0, min(c0 + size, W), D, W)
+                        for r0 in range(0, D, size) for c0 in range(0, W, size)], boxes)
 
 
-def from_args(argv, D, W):
+def from_args(argv, D, W, boxes=None):
     """the windows asked for on the command line: --windows NXxNY, --window-size METRES, else the whole map"""
     for i, a in enumerate(argv):
         if a == "--windows":
             nx, ny = map(int, argv[i + 1].lower().split("x"))
-            return split(D, W, nx, ny)
+            return split(D, W, nx, ny, boxes)
         if a == "--window-size":
-            return cover(D, W, int(argv[i + 1]))
-    return cover(D, W, None)
+            return cover(D, W, int(argv[i + 1]), boxes)
+    return cover(D, W, None, boxes)
 
 
 def cut(a, box, fill=0):
@@ -171,20 +221,38 @@ def gz_region(path, shape, dtype, region, offset=0):
 
 
 class RowWriter:
-    """a whole-map array written row band by row band (the windows of one band of a cover, left to right) into a
-    gzip stream, as gzip.GzipFile(..., mtime=0).write(a.tobytes()) would: the same bytes"""
+    """a whole-map array written row band by row band (the windows of a cover in its order: a band's windows start on
+    the same row, left to right) into a gzip stream, as gzip.GzipFile(..., mtime=0).write(a.tobytes()) would: the same
+    bytes. Rows and columns no window covers (an empty block: window.py) are zeros; finish(D) writes the rest"""
 
     def __init__(self, fh, W, dtype, tail=()):
         self.fh, self.W, self.dtype, self.tail = fh, W, np.dtype(dtype), tuple(tail)
-        self.band, self.r = None, 0
+        self.parts, self.r, self.done = [], 0, 0
+
+    def _flush(self, upto):
+        """the rows from the band's first up to `upto` (the next band's first row, or the array's end)"""
+        if upto <= self.done:
+            return
+        band = np.zeros((upto - self.done, self.W) + self.tail, self.dtype)
+        for c, a in self.parts:
+            band[self.r - self.done:self.r - self.done + a.shape[0], c:c + a.shape[1]] = a
+        self.fh.write(band.tobytes())
+        self.parts, self.done = [], upto
 
     def put(self, r, c, a):
         """a: a window's core, its first row r and column c (in the array's own cells)"""
-        if self.band is None:
-            self.band = np.zeros((a.shape[0], self.W) + self.tail, self.dtype)
+        if self.parts and r != self.r:
+            assert r >= self.r + max(a_.shape[0] for _, a_ in self.parts), "windows out of order"
+            self._flush(r)
+        if not self.parts:
+            assert r >= self.done, "windows out of order"
+            if r > self.done:
+                self._flush(r)  # (rows no window covers)
             self.r = r
-        assert r == self.r and a.shape[0] == self.band.shape[0], "windows out of order"
-        self.band[:, c:c + a.shape[1]] = a
-        if c + a.shape[1] == self.W:
-            self.fh.write(self.band.tobytes())
-            self.band = None
+        self.parts.append((c, a))
+
+    def finish(self, D):
+        """the last band and the empty rows after it, up to the array's D rows"""
+        if self.parts:
+            assert D >= self.r + max(a_.shape[0] for _, a_ in self.parts)
+        self._flush(D)

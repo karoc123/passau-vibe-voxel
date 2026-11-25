@@ -12,14 +12,16 @@
 # window is read (HTTP ranges, ~1 MB each) by scripts/clip_species.py into treespecies_2022.tif, treespecies_2016.tif.
 set -e
 cd "$(dirname "$0")/.."
+# the sheets under the built blocks (scripts/map.json `blocks`) and a region's halo round them (what the regions read;
+# a block not built gets none of its own)
 TILES=$(PYTHONPATH=scripts uv run python -c "
-from aoi import world_bounds
-x0, y0, x1, y1 = world_bounds(10)
-print(' '.join(f'{e}_{n}' for e in range(int(x0 // 1000), int(x1 // 1000) + 1) for n in range(int(y0 // 1000), int(y1 // 1000) + 1)))")
+from aoi import sheets
+from region import HALO
+print(' '.join(sheets(1000, HALO)))")
 TILES2=$(PYTHONPATH=scripts uv run python -c "
-from aoi import world_bounds
-x0, y0, x1, y1 = world_bounds(10)
-print(' '.join(f'{e}_{n}' for e in range(int(x0 // 2000) * 2, int(x1 // 2000) * 2 + 1, 2) for n in range(int(y0 // 2000) * 2, int(y1 // 2000) * 2 + 1, 2)))")
+from aoi import sheets
+from region import HALO
+print(' '.join(sheets(2000, HALO)))")
 BOUNDS=$(PYTHONPATH=scripts uv run python -c "
 from aoi import world_bounds
 print(*(round(v) for v in world_bounds(10)))")

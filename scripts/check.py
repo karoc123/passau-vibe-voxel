@@ -96,8 +96,11 @@ class Fixture:
         self.home = CHECK / self.name
 
     def cover(self, size="config"):
+        import aoi
         import window
-        return window.cover(self.D, self.W, self.cfg.get("regions", {}).get("size") if size == "config" else size)
+        boxes = aoi.built_boxes(self.cfg)
+        boxes = None if boxes == [(0, self.D, 0, self.W)] else tuple(boxes)
+        return window.cover(self.D, self.W, self.cfg.get("regions", {}).get("size") if size == "config" else size, boxes)
 
 
 def env_for(ws, fx):

@@ -32,6 +32,10 @@ if not river.any():
     print("note: no river on this map (no water body of", RIVER_MIN, "cells)")
 # under the bridge decks too: gaps of up to 60 m along the grid's columns (north-south) closed
 river |= ndimage.binary_closing(river, structure=np.ones((61, 1), bool))
+import window  # noqa: E402
+from aoi import BOXES  # noqa: E402
+if (built := window.built_mask(BOXES, (0, D, 0, W))) is not None:
+    river &= built  # (nothing where nothing is built: window.py)
 
 with gzip.GzipFile(Path("data") / "river.bin", "wb", compresslevel=9, mtime=0) as fh:
     fh.write(river.astype(np.uint8).tobytes())
