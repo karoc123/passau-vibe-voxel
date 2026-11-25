@@ -431,6 +431,18 @@ function transit() {
     'each vessel floats on the water top under it');
   check(a[3].vessels.some((p) => p.kind === 'boat') && a[3].vessels.every((p) => p.y === 8 || p.y === 9),
     'without the columns a vessel keeps the last water top known');
+  // the water known west of x 8100 only (another reach, 13 m): a vessel east of it, with no top of its own and none
+  // known near it, floats at the default, not on another vessel's top from elsewhere
+  {
+    const sim = new WorldSim(data, { seed: SEED });
+    sim.setBoats(boats);
+    sim.setWorld(null, { waterColumn: (x) => (x < 8100 ? { water: 13 } : null) });
+    Math.random = noRandom;
+    try { update(sim, STEP, { hour: 10, day: 200, focus, viewer: focus }); } finally { Math.random = realRandom; }
+    const v = sim.traffic.boats.poses, west = v.filter((p) => p.x < 8100), east = v.filter((p) => p.x >= 8100);
+    check(west.length && east.length && west.every((p) => p.y === 13) && east.every((p) => p.y === 4),
+      `a vessel where no top is known does not borrow another reach's (${west.length} at 13 m, east: ${[...new Set(east.map((p) => p.y))]})`);
+  }
   results.transit = { replay: 'same', coaches: a[0].coaches.length, vessels: a[0].vessels.length };
 }
 

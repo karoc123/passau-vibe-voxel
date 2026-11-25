@@ -37,7 +37,7 @@ const GATES = [
   { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)' },
   { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)' },
   { name: 'tile-roundtrip', cmd: ['tools/tile-roundtrip.mjs'], set: 'fast', secs: 2, guards: 'node file format: scripts/tilefile.py, tiles.py column_runs, tile-data.ts, core/tile-sections.ts (needs uv)' },
-  { name: 'boat', cmd: ['tools/boat.mjs'], set: 'fast', expect: 20, secs: 1.7, guards: 'sim/craft/boat-motion.ts, sim/river.ts, core/safe-trail.ts; checks/boat-checks.ts, world.ts' },
+  { name: 'boat', cmd: ['tools/boat.mjs'], set: 'fast', expect: 20, secs: 5.5, guards: 'sim/craft/boat-motion.ts, sim/river.ts, core/safe-trail.ts, core/world.ts waterColumn (the river traffic\'s top at every node level); checks/boat-checks.ts, world.ts' },
   { name: 'collision', cmd: ['tools/collision.mjs'], set: 'fast', expect: 16, secs: 2.7, guards: 'sim/craft/voxel-collision.ts, the tile format; checks/collision-checks.ts, world.ts' },
   { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 26, secs: 1.2, guards: 'sim/craft/craft-motion.ts and sim/craft/craft-collision.ts, the craft cores\' wire state (sim/craft/core-state.ts, sim/contract/crafts.ts); checks/world.ts' },
   { name: 'world-smoke', cmd: ['tools/world-smoke.mjs'], set: 'fast', data: true, secs: 2.5, guards: 'core/ stack, layers, mesher from columns, rapier terrain.ts' },

@@ -17,7 +17,8 @@ import type { BoatPose, BoatView } from './contract/agents';
 //   the pier casts off the next slides in.
 // The routes and timetables are sampled on the world tick, from its day and hour. Each vessel floats on the water's top
 // where it is (sim/river.ts waterTop: the voxels' water, as the world's columns have it); where that is not known (no
-// columns given, its tile not in, off the map) at the last top it had, else the last any vessel had, else WATER.
+// columns given, its tile not in, off the map) at the last top it had, else the last top known within PLACE m of
+// it, else WATER -- never another vessel's top from elsewhere: the reaches above and below the Kachlet differ by 9 m.
 // On a partial map (the check fixtures) any part may be missing: no berths (no cruise ships), an empty tour (no
 // excursion boats) or no fairway (the cruise ships stay moored all day).
 
@@ -42,6 +43,7 @@ const VC = 3.6, ACC_C = 0.015; // cruise ships under way: 13 km/h, m/s²
 const RUN_OUT = 1000;
 const MORNING = 6 * 3600, LATEST_IN = 9.25 * 3600, EVENING = 18 * 3600, LATEST_OUT = 23.75 * 3600; // s after midnight
 const WATER = 4; // m: the water's top before any is known (no columns given: the node checks)
+const PLACE = 32; // m: the cells the last known tops are kept by
 
 // (a vessel's pose, BoatPose, and what is drawn of them, BoatView: contract/agents.ts)
 
@@ -79,9 +81,9 @@ export class BoatTraffic implements BoatView {
   private ships: Ship[] = [];
   private departures: number[] = [];
   private currentPoses: readonly BoatPose[] = [];
-  // the last water top known under each vessel (ships: their slot, boats: -1 - fleet slot), and under any
+  // the last water top known under each vessel (ships: their slot, boats: -1 - fleet slot), and in each PLACE cell
   private readonly tops = new Map<number, number>();
-  private lastTop = WATER;
+  private readonly placeTops = new Map<number, number>();
   private previousPoses: readonly BoatPose[] = [];
 
   constructor(data: BoatData, private readonly seed = 0) {
@@ -276,10 +278,11 @@ export class BoatTraffic implements BoatView {
 
   // the water's top under vessel `key` at (x, z), else the last known (see the head of the file)
   private top(key: number, x: number, z: number, water: WaterColumns | null) {
-    const w = water ? waterTop(water, x, z) : null;
-    if (w === null || w < 0) return this.tops.get(key) ?? this.lastTop;
+    const w = water ? waterTop(water, x, z) : null, cell = Math.floor(x / PLACE) * 65536 + Math.floor(z / PLACE);
+    if (w === null || w < 0) return this.tops.get(key) ?? this.placeTops.get(cell) ?? WATER;
     this.tops.set(key, w);
-    return this.lastTop = w;
+    this.placeTops.set(cell, w);
+    return w;
   }
 
   // water: the world's columns the vessels float on (null: none, all at WATER)
