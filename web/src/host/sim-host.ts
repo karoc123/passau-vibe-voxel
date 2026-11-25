@@ -76,7 +76,7 @@ export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { s
 /** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots) */
 export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   // the build: one this code reads, or none said (core/data-contract.ts: a wrong formatVersion throws)
-  checkBuild(data.meta, (w) => ports.log(w));
+  const build = checkBuild(data.meta, (w) => ports.log(w));
   const { meta } = data, N = meta.tiles.N, cache = ports.tiles, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
     crafts: { meta, cache, now: ports.now } });
@@ -94,7 +94,8 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   else if (boats) sim.setBoats(boats);
   let make = MODES[opts.mode ?? 'sandbox'];
   if (!make) { ports.log(`no game mode ${opts.mode}; the sandbox`); make = MODES.sandbox; }
-  return new SimServer(sim, make({ edits: !!opts.edits }));
+  // (the build goes into the hello each session is told: SimServer.hello)
+  return new SimServer(sim, make({ edits: !!opts.edits }), build);
 }
 
 // The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode

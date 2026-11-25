@@ -453,6 +453,13 @@ async function boot() {
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client: local, mirrored or in a worker (app/session.ts)
     const { client, link } = openSession(sessionOptions(qs), { meta, traffic: td, world, focus });
+    // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
+    client.hello.catch((e: Error) => {
+      console.error(e.message);
+      const text = $('#loading-text');
+      text.textContent = e.message;
+      $('#loading').classList.remove('hidden');
+    });
     if (link) hook('__simLink', link);
     sim = client;
     life = nav.life = new StreetLife(scene, client);

@@ -7,8 +7,9 @@
 // (sim/server/snapshot.ts: its player's id among its reads), with the edits since the last for its own live edits.
 // The messages (sim/contract/worker.ts ToWorker, FromWorker):
 //   in:  init { base, seed, physics, eager, mode, edits }; frame { dt, input, commands }; loadPhysics { id, warm }
-//   out: ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
-// handle (one message to a session, its answers to a post given) is exported: tools/host-smoke.mjs drives it in Node.
+//   out: hello (the session's: sim/contract/hello.ts, before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
+// greet (a session's first message) and handle (one message to a session, its answers to a post given) are exported:
+// tools/host-smoke.mjs drives them in Node.
 import { browserPorts, fetchJson, tileCacheAt } from './browser';
 import { hostSim, PAGE_PLAYER } from './sim-host';
 import type { FromWorker, ToWorker } from '../sim/contract/worker';
@@ -46,9 +47,13 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
     { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: { ...m.physics, at: () => focus } });
   server.trackEdits();
   const s = session = server.connect(PAGE_PLAYER);
+  greet(s, post);
   post({ kind: 'ready' });
   for (const q of early.splice(0)) handle(s, q, post, (f) => { focus = f; });
 }
+
+/** what the page is told first when its session connects: the session's hello (the page compares it with its own) */
+export function greet(s: Session, post: Post) { post({ kind: 'hello', hello: s.hello }); }
 
 /** one message from the page to session s: a frame (its commands sent, the world updated, the session's snapshot
  * posted with the time it took by now) or a road physics' load (posted when done); setFocus: the frame's focus, where

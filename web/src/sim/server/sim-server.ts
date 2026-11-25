@@ -3,7 +3,8 @@
 // the next update if the mode allows them (mayEdit), and the connections to it: one Session each
 // (docs/plans/architecture-review.md F2, A7). Run in the page's thread (LocalSimClient, MirrorSimClient over a
 // ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no DOM (tools/core-deps.mjs).
-//   SimServer  the world's: connect(player) a session for a player the host names; update (the edits sent, then the
+//   SimServer  the world's: hello (what each session is told first: sim/contract/hello.ts; the protocol, the data build
+//              the host loaded, the tuning's hash); connect(player) a session for a player the host names; update (the edits sent, then the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
 //              one), and what the connection has read: the events (its last snapshot's tick), the outcomes of its
@@ -12,6 +13,9 @@
 //              player each get everything; leaving the last one of a player frees the player's seat
 import { liveEdits } from '../../core/live-edits';
 import { apply as applyEdit } from '../../core/world-edits';
+import type { DataBuild } from '../../core/data-contract';
+import { hello } from '../hello';
+import type { Hello } from '../contract/hello';
 import { takeSnapshot } from './snapshot';
 import { SeatReads } from '../seat-reads';
 import type { CommandResult, SimCommand } from '../contract/commands';
@@ -33,9 +37,15 @@ export class SimServer {
   // the world's edits go with the snapshots (a client in another thread)
   private tracking = false;
 
+  /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
+  readonly hello: Hello;
+
   /** mode: the game's rules (the sim's from now on: WorldSim.mode; null: none, every seat may be taken, every request
-   * and edit refused) */
-  constructor(readonly sim: WorldSim, mode: GameMode | null = sandbox()) { sim.mode = mode; }
+   * and edit refused); build: the data build the host loaded (host/sim-host.ts hostSim: checkBuild; null: none said) */
+  constructor(readonly sim: WorldSim, mode: GameMode | null = sandbox(), build: DataBuild | null = null) {
+    sim.mode = mode;
+    this.hello = hello(build, sim.tuning);
+  }
 
   /** a connection for player (the host names it: a client never does); its commands are the player's */
   connect(player: PlayerId): Session {
@@ -107,6 +117,8 @@ export class Session {
   constructor(readonly server: SimServer, readonly player: PlayerId) {}
 
   get sim() { return this.server.sim; }
+  /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
+  get hello(): Hello { return this.server.hello; }
 
   /** a command, the session's player's: to the world sim (a seat input's ack the session's), an edit kept for the
    * next update. Whatever player a command claims (none on the wire), it is this session's that acts */

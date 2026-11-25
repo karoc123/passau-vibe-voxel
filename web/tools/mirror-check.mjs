@@ -17,6 +17,7 @@ const FPS = 30;
 const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts');
 const { LocalSimClient, MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts');
+const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const raw = JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'));
 const data = () => unpackTraffic(structuredClone(raw));
 const meta = JSON.parse(fs.readFileSync(`${DATA}meta.json`, 'utf8'));
@@ -26,8 +27,10 @@ const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771
 // (both started as a server starts them: src/host/node.ts, hostSim; no ground, no road physics)
 const host = () => nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false, at: () => ({ x: at.x, z: at.y }) } }, { meta, traffic: data(), boats });
 const a = host(), b = host();
-const P = 'p1', direct = new LocalSimClient(a.connect(P)), link = new CloneLink(new ThreadLink(b.connect(P)));
-const mirror = new MirrorSimClient(link, data(), null);
+// (the clients' own hello: this code, the build read, the default tuning; the hosts' must match it)
+const mine = hello(checkBuild(meta, () => {}));
+const P = 'p1', direct = new LocalSimClient(a.connect(P), mine), link = new CloneLink(new ThreadLink(b.connect(P)));
+const mirror = new MirrorSimClient(link, data(), null, false, mine);
 const lifeA = new StreetLife(new THREE.Scene(), direct), lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];

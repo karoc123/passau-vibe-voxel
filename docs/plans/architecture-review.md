@@ -442,8 +442,23 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   (26 checks; planted: a field left out of `PlaneFlight.save`, a new field on `SpecialCore`, `from` shared by
   `BoatCore.save` each fail). Fast set 16/16, `popin-check --mirror`, `life-edit` (`events`, `left`, `rates`,
   `sessions`, `dig`), `mirror-check` bit-equal, `core-deps` baseline unchanged. Browser, plain and `?mirror=1`: the floatplane, a glider out of it (`landed`), the plane nosed down (`crash`, `respawn`), a driven car into a person (`struck` by id, drawn falling), 0 page errors. Open: `gates.mjs` still expects 19
-  `craft-motion` checks and does not name `core-state.ts` in its guards (A12 holds that file); the session's
-  `hello` (protocol number, `buildId`, tuning hash).
+  `craft-motion` checks and does not name `core-state.ts` in its guards (A12 holds that file).
+- **`hello` landed** (2026-11-25): `sim/contract/hello.ts` (types and data): `PROTOCOL` (1; bumped by hand when what
+  crosses changes shape or meaning, or the sim code a mirror re-runs; not for data or tuning numbers) and `Hello`
+  `{ protocol, build: DataBuild | null, tuning }`. `sim/hello.ts` (shared): `tuningHash` (cyrb53 over sorted-key JSON of
+  the tuning a client runs, `CLIENT_TUNING` boat/plane/jet/craft, and `CRAFT_SCALE`; host-only ride, edits, walk left
+  out; kept per value), `hello(build, tuning)`, `helloMismatch`, `checkHello`. `SimServer(sim, mode, build)` makes
+  `hello` (hostSim passes `checkBuild`'s result); `Session.hello`. Clients take their own hello (`app/session.ts`:
+  the page's meta build, default tuning): `LocalSimClient(session, mine)` checks at once, `MirrorSimClient(link, data,
+  ground, edits, mine)` on `SimLink.onHello` (ThreadLink: before its first frame; CloneLink: JSON-tripped; WorkerLink:
+  the worker's first message, `FromWorker` `hello`, posted by `sim.worker.ts` `greet` before `ready`). A snapshot
+  before the hello is refused too. Refused: `client.hello` rejects with what differs, the session is left
+  (`SimLink.close`: ThreadLink leaves, WorkerLink terminates the worker) and the client sends, runs and takes nothing
+  more; `main.ts` shows the message over the page (`#loading`); a tool that does not catch dies of the unhandled
+  rejection. Gate: `host-smoke` (15 cases: matching, protocol, build, no build, tuning x local/mirror/worker, the
+  worker a stand-in through `greet`/`handle`; the hash order-independent, blind to host-only numbers, not to a craft's).
+  Open: the drone's numbers are code (`fpv-flight.ts`), covered by `PROTOCOL` only; a network transport gets its
+  hello the same way (first message) in `openSession`.
 
 ### A7. Sessions (M)
 
@@ -635,8 +650,8 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   comes in: `hostSim` (through `ports.log`; so the page's thread, the worker and `host/node.ts` alike, without touching
   `sim.worker.ts`) and `main.ts` boot (console.warn; a throw is toasted and stops the boot). Checked in Node on
   synthetic metas (ok, no `world`, `formatVersion` 2, and through `hostSim`). Baseline unchanged.
-  Open: the page's and the worker's fetch paths still spell their file names (`data/…`); `DataBuild` is not yet
-  handed on (`SimServer`, the client) — A6's hello.
+  Open: the page's and the worker's fetch paths still spell their file names (`data/…`). (`DataBuild` goes to the
+  client in A6's hello, landed.)
 
 Suggested order: A1, A5 (independent, small) → A2, A3 → A7 → A10 → A4, A12 → A6, A8, A9 → A11, A13, A14.
 A2/A3/A4 move many import lines: one at a time, not in parallel with each other or with an E/M package.
