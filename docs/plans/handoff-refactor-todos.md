@@ -88,8 +88,8 @@ is left of the architecture work is in [architecture-review.md](architecture-rev
 Open points left by landed engine work:
 
 - **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
-  temporary damage needs the TileCache to expose a node's raw files;
-  an edit's nodes are loaded before the mode is asked in its tick (a refused one loads them too), and `tileWorld` never removes its `cache.edits` listener.
+  temporary damage needs the TileCache to expose a node's raw files; `SimServer.dispose` leaves the road physics
+  undisposed (its terrain's listener on `liveEdits` stays).
 - **Wire:** worker not default (waits for prediction); no interest filter per client; snapshots are plain objects
   (no typed arrays or deltas); the worker's ground is level-1 nodes only and decodes nodes the page also decodes;
   Rapier is bundled twice; no gated run carries edit notes over the clone link; `mirror-check`'s golden
@@ -99,8 +99,8 @@ Open points left by landed engine work:
 - **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; no gate
   for `impact`; the parked-car cap (8/24) sits beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence;
   the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
-- **Sessions and modes:** edit outcomes go only to the sending session; an empty player entry stays in
-  `WorldSim.players` after leaving; an unknown `?mode=` warns and falls back; `ModeWorld.sit` bypasses `mayEnter`.
+- **Sessions and modes:** edit outcomes go only to the sending session; an unknown `?mode=` warns and falls back;
+  `mayEdit` is asked twice (before the nodes are held and in the tick), so it must be a plain answer.
 - **Hygiene:** `CarState` is declared beside `Car`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)

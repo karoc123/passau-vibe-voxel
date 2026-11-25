@@ -24,7 +24,7 @@ export interface ModeWorld {
   placeCraft(id: CraftId, spot: CraftSpot): void;
   /** craft id taken out of the world (its pilot leaves it first) */
   removeCraft(id: CraftId): void;
-  /** the player into seat as enterSeat takes it (free, the one held left first), not asking mayEnter; false: not */
+  /** the player into seat as enterSeat takes it (free, the one held left first, mayEnter asked); false: not */
   sit(player: PlayerId, seat: Seat): boolean;
   /** the world's time of day (hour) and day of the year (without: kept), the same for every player */
   setTime(hour: number, day?: number): void;
@@ -38,6 +38,7 @@ export interface GameMode {
   request(w: ModeWorld, player: PlayerId, r: ModeRequest): boolean;
   /** whether player may take seat, asked once it is found free (without: always) */
   mayEnter?(w: ModeWorld, player: PlayerId, seat: Seat): boolean;
-  /** whether player may make an edit to the world's voxels (without: never) */
+  /** whether player may make an edit to the world's voxels (without: never); asked when the host gets the edit (a
+   * refused one's nodes are not loaded) and again when it is applied, so a plain answer, no state changed */
   mayEdit?(w: ModeWorld, player: PlayerId, op: WorldOp): boolean;
 }

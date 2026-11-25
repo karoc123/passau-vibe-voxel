@@ -800,7 +800,9 @@ async function craftEvents() {
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
   if (!w) return;
   // (B's client over its session; B2 a second session of B's, read here; C another player's)
-  const { sim, crafts: [drone], tick } = w, server = new SimServer(sim), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
+  // (the host's tiles for the edits: every op touches node 0_0, each hold counted; SimServer's default mode, the sandbox)
+  const holds = [], tiles = { nodes: () => [[0, 0]], ready: (nodes) => { holds.push(nodes.length); return Promise.resolve(() => {}); } };
+  const { sim, crafts: [drone], tick } = w, server = new SimServer(sim, undefined, null, tiles), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
   const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
   const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
@@ -845,15 +847,22 @@ async function craftEvents() {
     await new Promise((d) => setTimeout(d, 0));
     const dropped = client.results('dropCraft'), edits = client.results('edit');
     check(sim.mode.id === 'sandbox' && dropped.length === 1 && dropped[0].ok && !sim.crafts.has(drone.id) && client.crafts().length === 0 &&
-      client.seat() === null && edit === 'refused' && edits.length === 1 && !edits[0].ok,
-    `events: the sandbox grants a request through the client (the drone dropped: ${!sim.crafts.has(drone.id)}), refuses an edit (${edit})`);
-    const asked = [];
+      client.seat() === null && edit === 'refused' && edits.length === 1 && !edits[0].ok && !holds.length,
+    `events: the sandbox grants a request through the client (the drone dropped: ${!sim.crafts.has(drone.id)}), refuses an edit (${edit}; its nodes held ${holds.length} time(s))`);
+    const asked = [], sandbox = sim.mode;
     sim.mode = { id: 'test', request: (w, player, r) => { asked.push(`${player}:${r.kind}`); return false; } };
     client.send({ kind: 'request', request: { kind: 'craft', type: 'drone', spot: { x: STREET.x, y: 100, z: STREET.y, h: 0 } } });
     tick(STEP, null, via);
     const made = client.results('craft');
     check(asked.join() === 'B:craft' && made.length === 1 && !made[0].ok && sim.crafts.size === 0 && client.seat() === null,
       `events: a test mode refuses a request for a craft (asked ${asked.join()}; none made)`);
+    // the mode's own seating (ModeWorld.sit) asks its mayEnter: a sandbox that lets no seat be taken makes no craft
+    sim.mode = { ...sandbox, mayEnter: () => false };
+    client.send({ kind: 'request', request: { kind: 'craft', type: 'drone', spot: { x: STREET.x, y: 100, z: STREET.y, h: 0 } } });
+    tick(STEP, null, via);
+    const seated = client.results('craft');
+    check(seated.length === 1 && !seated[0].ok && sim.crafts.size === 0 && client.seat() === null,
+      `events: a mode's own seating asks its mayEnter (a craft request with no seat allowed: ${JSON.stringify(seated)}, ${sim.crafts.size} craft(s))`);
     results.events = { impacts: mine.length, read: 'once' };
   } finally {
     Math.random = realRandom;
@@ -919,15 +928,15 @@ async function sessions() {
     // B takes the drone A left
     A2.leave();
     tick(2 * STEP, null, frame);
-    const kept = sim.seat('A')?.entity.id === da.id;
+    const kept = sim.seat('A')?.entity.id === da.id && sim.players.has('A');
     sA.leave();
     clients = [cb];
     tick(2 * STEP, null, frame);
-    const freed = sim.seat('A') === null && da.pilot === null && sim.crafts.has(da.id);
+    const freed = sim.seat('A') === null && da.pilot === null && sim.crafts.has(da.id) && !sim.players.has('A');
     cb.send({ kind: 'enterSeat', entity: { kind: 'craft', id: da.id }, role: 'pilot' });
     tick(2 * STEP, null, frame);
     check(kept && freed && cb.results('enterSeat', 'pilot')[0]?.ok === true && da.pilot === 'B' && cb.craftOf()?.id === da.id,
-      `sessions: leaving a session frees its player's seat once none of the player's is left (kept: ${kept}, freed: ${freed}); another takes it`);
+      `sessions: leaving a session frees its player's seat and drops the player once none of the player's is left (kept: ${kept}, freed: ${freed}); another takes it`);
     results.sessions = { clients: 2, of: 'A,B', second: 'A', left: 'freed' };
   } finally {
     Math.random = realRandom;

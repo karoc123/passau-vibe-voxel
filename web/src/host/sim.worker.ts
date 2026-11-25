@@ -47,6 +47,7 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   const server = hostSim({ meta, traffic: unpackTraffic(raw), boats }, browserPorts(cache),
     { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: m.physics, time: m.time });
   server.trackEdits();
+  server.onDispose(world.dispose);
   const s = session = server.connect(PAGE_PLAYER);
   greet(s, post);
   post({ kind: 'ready' });
