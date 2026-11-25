@@ -423,6 +423,27 @@ for the first server. Every package: `tsc`, `core-deps` and the fast set green; 
   `sim/craft/core-state.ts`, `view/life.ts` (reads events), `client/`, `host/sim.worker.ts`.
 - **Gates:** `protocol` (A5), `mirror-check`, `life-edit` (`events`, `left`, `rates`), `craft-motion`, `plane`,
   `boat`. Edits as ops instead of columns on the wire: not here (open question 4).
+- **Landed without `hello`** (2026-11-25; `hello` deferred: it comes with A14, after A12): `struck` and `dropped` name
+  the person by id with what the fall is drawn with (`contract/events.ts` `Fallen {person, col, bike}`;
+  `sim/traffic.ts` `fallen(p)`), so the snapshot's `pick` of the event's person and the mirror's re-link by id are
+  gone (`TrafficMirror.apply` returns nothing; the client takes `s.events` as they are). New `contract/crafts.ts`
+  (types only): each craft type's events (`BoatEvent`, `SpecialEvent`, `DroneEvent`, `PlaneEvent`, `ImpactKind`,
+  `CraftStep`, `PlaneState` moved there from `sim/craft/`), `CraftEvents` by type, `CraftEventOf<K>` (`{craft, e}`),
+  and the cores' wire states (`CraftStates` by type). A `craft` event carries `craft` (its type) and a typed `e`;
+  `Session.craftEvents()` and `SimClient.craftEvents()` return `CraftEventOf[]` (`SeatReads.crafts`); `CraftLink.events()`
+  is `CraftEvents[K][]`, the shells' casts gone. `CraftCore` gained `save(): S` and `load(S)`; each core declares its
+  state field by field (its motion law's `save()`/`restore()`: `BoatMotion`, `CraftMotion`, `FpvFlight`,
+  `PlaneFlight`); `CraftState` is a union by type with `core: CraftStates[type]`; `cores.ts` asserts the contract's
+  events and states are the cores', type by type. Left off the wire on purpose (client copies are never stepped): the
+  clocks, `reach`, `neutral`, the steps' scratch, the safe trails and respawn state, the boat's `accel`/`bumpT`, the
+  drone's `impactSpin`, the plane's crash countdown. `core-state.ts` is now only the check: `NOT_ON_THE_WIRE` per type
+  (with why), `stir` (every reflected field set to a value of its own), `wireGaps` (what differs on a copy loaded from
+  `save()`), `aliased` (`save()` must share no object with the core); `craft-motion.mjs` runs it for all seven types
+  (26 checks; planted: a field left out of `PlaneFlight.save`, a new field on `SpecialCore`, `from` shared by
+  `BoatCore.save` each fail). Fast set 16/16, `popin-check --mirror`, `life-edit` (`events`, `left`, `rates`,
+  `sessions`, `dig`), `mirror-check` bit-equal, `core-deps` baseline unchanged. Browser, plain and `?mirror=1`: the floatplane, a glider out of it (`landed`), the plane nosed down (`crash`, `respawn`), a driven car into a person (`struck` by id, drawn falling), 0 page errors. Open: `gates.mjs` still expects 19
+  `craft-motion` checks and does not name `core-state.ts` in its guards (A12 holds that file); the session's
+  `hello` (protocol number, `buildId`, tuning hash).
 
 ### A7. Sessions (M)
 
