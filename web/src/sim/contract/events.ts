@@ -5,8 +5,15 @@ import type { EntityRef, PlayerId, Seat } from './ids';
 import type { RoadPose } from './pose';
 import type { CraftEventOf } from './crafts';
 
-/** what the driver of a car is to be told (physics/rapier/player-car.ts PlayerCar's notes): its text, for ms */
-export interface DriveNote { tick: number; text: string; ms: number }
+/** why a rider came off a motorbike (physics/rapier/player-car.ts PlayerCar.fall): running into the world (wall: a
+ * wall, a kerb, a parked car), a car of the traffic, a train's coach (speed: m/s lost along the heading, or the shove
+ * from what moved into it, whichever threw it); a crash landing (speed: m/s into the ground); tipped over past 60°
+ * (side, speed 0) */
+export interface FallCause { kind: 'wall' | 'car' | 'train' | 'landing' | 'side'; speed: number }
+
+/** what the driver of a car is to be told (physics/rapier/player-car.ts PlayerCar's notes): its text, for ms; fall:
+ * why the rider came off, on the note that says so */
+export interface DriveNote { tick: number; text: string; ms: number; fall?: FallCause }
 
 /** a person of the crowd fallen (struck, dropped): its id (contract/agents.ts Person: gone from the crowd then) and
  * what its fall is drawn with (its shirt, on a bike or not) */

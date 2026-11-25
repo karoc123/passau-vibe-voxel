@@ -500,7 +500,9 @@ the car runs into are shoved away along the hit and tip over flat (a short scrip
 no physics: `view/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
-(no control for a moment). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
+(no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
+on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
+(`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
 ~1.5 s after the city is shown; taking the wheel before that waits for it. Rapier is the only car physics. The mode's
 panel and input are `web/src/nav/drive.ts`; it sends the local player's commands to the world sim
 (`web/src/sim/world-sim.ts`, which `main.ts` creates and ticks). The shared road world resolves player commands and contacts, and

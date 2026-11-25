@@ -14,7 +14,7 @@ import { synthMap, WATER, type Col } from './world';
 const FRAME_MS = 1000 / 60, PLAYER = 'driver';
 const r2 = (x: number) => Math.round(x * 100) / 100;
 let id = 1;
-const carAt = (x: number, y: number, z: number): Car => ({
+export const carAt = (x: number, y: number, z: number): Car => ({
   id: id++, kind: 'car', v: 0, brake: 0, len: 4.4, bus: false, col: '#fff',
   detachedPose: { x, y, z, h: 0, pitch: 0, roll: 0 },
   geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 1 },
@@ -48,12 +48,13 @@ export class Drive {
   }
 }
 
-export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], withPedestrian = false, choice?: VehicleId, trains?: TrainPathData[]): Drive {
+export function takeOver(col: (x: number, z: number) => Col, x: number, z: number, kmh: number, others: Car[] = [], withPedestrian = false, choice?: VehicleId, trains?: TrainPathData[], heading = 0): Drive {
   const map = synthMap(2, col);
   const physics = new LifePhysics(map.meta, { chunksPerTick: 99 }, { load: () => Promise.reject(null) });
   for (const t of map.tiles) physics.terrain.setTile(t.tx, t.tz, t.tile);
   const y = col(Math.floor(x), Math.floor(z)).g, car = carAt(x, y, z);
   car.v = kmh / 3.6;
+  car.detachedPose!.h = heading;
   const traffic = new Traffic({ roads: [], peds: withPedestrian ? [{ p: [[x - 2, 50, y], [x + 2, 50, y]], a: 0, b: 1, w: 1 }] : [], ctrls: [], trains });
   traffic.bodies = physics;
   traffic.detachedCars.push(car, ...others);
