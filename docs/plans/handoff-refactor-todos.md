@@ -8,7 +8,7 @@ it on its own branch, and report.
 
 - Commit locally on a branch named after the package. **Never push.** Do not touch `.github/` (CI, Pages).
 - Open data only. `scripts/palette.json` is append-only. In shaders, add no new and no `flat` varyings.
-- Do not create or rewrite `CLAUDE.md` or `IDEAS.md`.
+- `CLAUDE.md` only points to `AGENTS.md`; change `AGENTS.md` only when the owner asks. Do not create `IDEAS.md`.
 - Keep it simple and do not over-engineer. The long-term goal is a server-hosted, multiplayer-capable world, so keep
   simulation free of three.js and the DOM where you touch it (see [ADR 0006](../adr/0006-world-sim-seam.md)).
 - Behaviour-neutral refactors must prove they are neutral: the same check counts, and for the pipeline a byte-exact
