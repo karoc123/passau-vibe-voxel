@@ -1446,12 +1446,16 @@ def buildings(ctx):
     ROOF_GX = np.full((D, W), np.nan, np.float32)
     ROOF_GY = np.full((D, W), np.nan, np.float32)
     # the laser's crowns (scripts/laser.py, leaf-off 2021): canopy returns in a blob 3 cells across (walls, ledges and
-    # a tower's rim return as vegetation too, in lines along them), its holes closed; the highest vegetation return (m)
+    # a tower's rim return as vegetation too, in lines along them), its holes and notches closed; the highest vegetation
+    # return (m) of the blob within 1 m. (A hole the winter pulses passed through, a rim cell the laser saw low and the
+    # image-matched surface smeared high kept the surface model: pillars of 20 m with windows under a crown)
     CROWN_TOP = None
     if Path("data/laser.npz").exists() and not os.environ.get("NO_LASER"):
         _lz = region.load_npz("data/laser.npz", ["veg_top", "n_canopy"])
-        _crown = ndimage.binary_opening(_lz["n_canopy"] > 0, np.ones((3, 3), bool))
-        CROWN_TOP = np.where(_crown | ndimage.binary_closing(_crown), _lz["veg_top"] / 10, 0).astype(np.float32)
+        _sq = np.ones((3, 3), bool)
+        _crown = ndimage.binary_opening(_lz["n_canopy"] > 0, _sq)
+        CROWN_TOP = np.where(_crown | ndimage.binary_closing(_crown, _sq),
+                             ndimage.maximum_filter(np.where(_crown, _lz["veg_top"], 0), size=3) / 10, 0).astype(np.float32)
         del _lz, _crown
 
     def crowns_over(lz, top):
@@ -1501,7 +1505,22 @@ def buildings(ctx):
         # within 2 m: the surface model's step a cell or two off LoD2's, where walls and ledges return as vegetation too
         # (a church tower's rim, a step between two roofs)
         lz_near = ndimage.maximum_filter(np.where(np.isfinite(lz), lz, -1e9), size=5)
-        use |= cand & (dlt > 3.5) & crowns_over(lz, top_dsm) & (lz_near < top_dsm - 3.5)
+        crowned = crowns_over(lz, top_dsm)
+        use |= cand & (dlt > 3.5) & crowned & (lz_near < top_dsm - 3.5)
+        # and a sliver of the surface model left among them (1-2 cells, half its ring under the crown: a notch the
+        # laser saw no crown in) is no pillar either: LoD2's roof (not beside LoD2's own higher part, as above)
+        off = cand & ~use & (dlt > 3.5) & (lz_near < top_dsm - 3.5)
+        lab, n = ndimage.label(off, np.ones((3, 3), bool))
+        for i, sl_ in enumerate(ndimage.find_objects(lab)):
+            if sl_ is None or sl_[0].stop - sl_[0].start > 2 or sl_[1].stop - sl_[1].start > 2:
+                continue
+            box = tuple(slice(max(s.start - 1, 0), s.stop + 1) for s in sl_)
+            own = lab[box] == i + 1
+            if own.sum() > 2:
+                continue
+            ring = ndimage.binary_dilation(own, np.ones((3, 3), bool)) & ~own
+            if crowned[box][ring].sum() * 2 >= ring.sum():
+                use[box] |= own
         # a building the two disagree on over half its roof (rebuilt since one of them, a courtyard roofed over): all of it
         # from the surface model -- patches of planes among the stepped samples read as rubble
         n_rev = 0

@@ -267,7 +267,7 @@ def differ(ref, got):
 LOD2_SHARE = 0.90     # building cells whose roof is LoD2's (0.965)
 LASER_SHARE = 0.80    # canopy cells whose height is the laser's (0.884)
 SHIFT_MAX = 3.0       # m: the mean shift of OSM's outlines onto LoD2's footprints, each way, per region (1.35)
-CROWN_ROOFS_MAX = 12.0  # building cells per 10 000 standing 6 m or more over their LoD2 roof under a crown (8.9)
+CROWN_ROOFS_MAX = 12.0  # building cells per 10 000 standing 6 m or more over their LoD2 roof under a crown (10.0)
 # the sloped caps (caps.py report): the carriageway cells with a cap, the capped carriageway's roughness (the second
 # difference per metre, p99, cm), linked capped neighbours whose shared corners differ (altstadt: 0.984, 8.6, 0.0035)
 CAPS = dict(road_share=0.95, rough_p99_cm=12.0, mismatch_share=0.01)
