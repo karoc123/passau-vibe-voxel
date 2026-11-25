@@ -24,9 +24,9 @@ import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, 
 
 // (its input, CarInput: sim/contract/inputs.ts)
 export type CarStatus = 'ok' | 'water';
-// what happened in a step: a wall hit (speed lost), a landing (speed into the ground; crash: a hard one), a step's
-// wedge laid (its rise)
-export interface CarEvent { kind: 'impact' | 'landing' | 'step'; speed: number; crash?: boolean }
+// what happened in a step: a wall hit (speed lost; head: of it, the speed lost along the heading), a landing (speed
+// into the ground; crash: a hard one), a step's wedge laid (its rise)
+export interface CarEvent { kind: 'impact' | 'landing' | 'step'; speed: number; crash?: boolean; head?: number }
 
 export interface CarTuning {
   steps: boolean;
@@ -43,6 +43,7 @@ const MAX_STEER = 0.55, STEER_FALL = 14; // rad, m/s (CarBuild tune: steer, stee
 // a bike (CarBuild bike): drawn leaning into its turns, at most LEAN_MAX (rad), eased over LEAN_S; a wheelie of up to
 // WHEELIE (rad) under full throttle from low speed; kept upright on its wheels (bike())
 const LEAN_MAX = 0.7, LEAN_S = 0.12, WHEELIE = 0.16;
+const RIGHT_AIR = 0.3; // s: in the air this long a bike is still kept upright (a bump, a kerb's hop)
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
 // m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
 // ones launch the car off their top and drop its front at their foot: tools/rapier-car.mjs terrace_*)
@@ -142,13 +143,14 @@ export class RapierCar {
     if (B.bike) this.bike(input, v, dt);
   }
 
-  // A bike on its wheels kept upright (its roll rate pulled to what rights it, firmly: no balance to keep), and drawn
-  // leaning into its turn as far as its sideways acceleration (speed x yaw rate) asks; a wheelie under full throttle
-  // from low speed. In the air: airAssist rights it, the lean eases off.
+  // A bike on a wheel, or in the air for less than RIGHT_AIR, kept upright (its roll rate pulled to what rights it,
+  // firmly: no balance to keep); on both wheels drawn leaning into its turn as far as its sideways acceleration (speed
+  // x yaw rate) asks, a wheelie under full throttle from low speed. Longer in the air: airAssist rights it, the lean
+  // eases off.
   private bike(input: CarInput, v: number, dt: number) {
     const b = this.body, q = b.rotation(), w = b.angvel();
-    const ground = this.wheelsInContact() >= 2;
-    if (ground) {
+    const wheels = this.wheelsInContact(), ground = wheels >= 2;
+    if (wheels > 0 || this.airTime < RIGHT_AIR) {
       const up = rotate(vec3(0, 1, 0), q), f = rotate(vec3(0, 0, 1), q);
       // (the roll error: about the forward axis, the turn that brings its up to the world's)
       const err = dot(cross(vec3(), up, vec3(0, 1, 0)), f), wf = w.x * f.x + w.y * f.y + w.z * f.z;
@@ -213,6 +215,12 @@ export class RapierCar {
     }
   }
 
+  // the horizontal speed lost along the heading from velocity a to b (m/s; 0 if it gained)
+  headLost(a: { x: number; z: number }, b: { x: number; z: number }) {
+    const f = rotate(vec3(0, 0, 1), this.body.rotation()), n = Math.hypot(f.x, f.z) || 1;
+    return Math.max(0, ((a.x - b.x) * f.x + (a.z - b.z) * f.z) / n);
+  }
+
   // After the world's step: landings, wall hits, water. Returns what happened in this step.
   afterStep(dt: number): CarEvent | null {
     this.time += dt;
@@ -228,7 +236,7 @@ export class RapierCar {
     }
     // a wall: horizontal speed lost in one step (more than the brakes could)
     const lost = Math.hypot(pv.x, pv.z) - Math.hypot(v.x, v.z);
-    if (lost > 1.5 && this.event?.kind !== 'landing') this.event = { kind: 'impact', speed: lost / 1 };
+    if (lost > 1.5 && this.event?.kind !== 'landing') this.event = { kind: 'impact', speed: lost, head: this.headLost(pv, v) };
     if (this.tuning.walls) this.wallTurn(dt);
     if (this.terrain) {
       const p = b.translation(), o = this.terrain.origin;

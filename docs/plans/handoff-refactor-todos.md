@@ -55,7 +55,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | R7 | Build time | M | **Ready** |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
 | Q5 | A crown over a roof is not a tower | S–M | **Ready** |
-| F7 | Motorbike falls (steering landed) | S–M | **Ready** |
 | F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
 | F8 | Step 3: drop unread flood data | S–M | **Ready** (data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
@@ -172,22 +171,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 ### F2. Walk to a specific vehicle and get in (set aside)
 
 - Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
-
-### F7. Motorbike falls (S–M)
-
-- **Waits for:** nothing. Steering landed in `80b7f7aa`: `Tune` `steerRamp` (0.3 s) and `latG` (0.8) in
-  `physics/rapier/car.ts`, check `bike_keys`. What is left is when the rider comes off.
-- **Today:** the rider comes off by the rules in `physics/rapier/player-car.ts`: an `impact` or a `knock` of 7 m/s
-  (25 km/h) or more (`FALL_IMPACT`), which includes touching any traffic car and any wall or kerb that costs that
-  speed in one step; a crash landing; or lying on its side. The righting in `car.ts` `bike()` works only with two
-  or more wheels on the ground. No test for a glancing hit.
-- **Do first:** show the cause of each fall in the note for a while ("came off: wall 9 m/s", "knock", "on its
-  side") and ride the real map, so the tuning is aimed at what happens in play.
-- **Do:** falls only when it makes sense: a head-on hit (the speed lost along the heading), not a glancing scrape
-  or a nudge on a car's corner; raise or split `FALL_IMPACT`. Righting also with one wheel down and for a short
-  time in the air. Keep the wheelie.
-- **Gates:** `vehicles` 35/35 plus `bike_scrape` (a wall at 10° at 50 km/h: stays on), `bike_wall` unchanged
-  (head-on: comes off). `rapier-car` 45/45.
 
 ### F8. Step 3: drop the flood data nobody reads (S–M, data)
 

@@ -37,9 +37,9 @@ import { CAR_GROUPS, CAR_ONLY_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkS
 import { createVehicle, createWheels, REST, RIDE, WHEEL_R, warmUp, type CarBuild, type RideTuning } from './vehicle';
 import { buildOf, VEHICLES } from '../../sim/vehicles';
 import type { VehicleId } from '../../sim/contract/ids';
-import { RapierCar } from './car';
+import { RapierCar, type CarEvent } from './car';
 import { type CarInput, NO_INPUT, PARK } from '../../sim/contract/inputs';
-import { PlayerCar } from './player-car';
+import { PlayerCar, type Hit } from './player-car';
 import { SINK_MS, type DriverSnapshot } from '../../sim/contract/snapshot';
 // (for the node tools, which load each module graph apart: the world's edits of this one, whose colliders hear them)
 export { liveEdits };
@@ -405,8 +405,8 @@ export class LifePhysics implements TrafficBodies {
         if (b.drive) {
           const before = velocities.get(b);
           const speed = before && b.driver ? this.coachImpact(b, before) : 0;
-          let event = b.drive.afterStep(STEP);
-          if (speed > 2 && (event?.kind !== 'impact' || speed > event.speed)) event = { kind: 'impact', speed };
+          let event: CarEvent | Hit | null = b.drive.afterStep(STEP);
+          if (speed > 2 && (event?.kind !== 'impact' || speed > event.speed)) event = { kind: 'coach', speed, ...hitOf(b.drive, before!, b.body.linvel()) };
           if (b.state === 'park' && b.drive.status === 'water') b.water = true;
           if (event) b.driver?.contact(T.tickNumber, now, event, !!b.build.bike, b.drive.lean);
         } else this.afterStep(b);
@@ -698,7 +698,7 @@ export class LifePhysics implements TrafficBodies {
     const drive = b.drive, driver = b.driver;
     if (!drive || !driver || driver.waiting) return;
     c.v = drive.kmh / 3.6;
-    if (b.build.bike && !driver.fallUntil && drive.airTime === 0 && !upright(drive, 0.5)) driver.fall(this.tickNumber, now, drive.lean);
+    if (b.build.bike && !driver.fallUntil && drive.airTime === 0 && !upright(drive, 0.5)) driver.fall(this.tickNumber, now, drive.lean, { kind: 'side', speed: 0 });
     if (drive.status === 'water' && !driver.sinkUntil) {
       driver.sinkUntil = now + SINK_MS;
       driver.note(this.tickNumber, 'Splash! Back on the road in a moment…', SINK_MS);
@@ -750,6 +750,8 @@ export class LifePhysics implements TrafficBodies {
       if (!contact) continue;
       const u = velocities.get(b) ?? b.body.linvel(), speed = Math.hypot(v.x - u.x, v.y - u.y, v.z - u.z);
       if (speed < KNOCK) continue;
+      // (what the hit did to the player's car: before the path branch sets its velocity back)
+      const hit = hitOf(player.drive!, v, player.body.linvel());
       if (b.state === 'path') {
         b.cur = this.read(b);
         const p = this.poseAt(b, 1), c = b.car;
@@ -765,7 +767,7 @@ export class LifePhysics implements TrafficBodies {
         b.cur = this.read(b);
         this.wreck(b.car, T, 'player contact');
       }
-      player.driver!.contact(T.tickNumber, now, { kind: 'knock', speed }, !!player.build.bike, player.drive!.lean);
+      player.driver!.contact(T.tickNumber, now, { kind: 'knock', speed, ...hit }, !!player.build.bike, player.drive!.lean);
     }
   }
 
@@ -837,6 +839,9 @@ const upOf = (x: number, y: number, z: number, w: number) => ({ x: 2 * (x * y - 
 const fwdOf = (x: number, y: number, z: number, w: number) => ({ x: 2 * (x * z + w * y), y: 2 * (y * z - w * x), z: 1 - 2 * (x * x + y * y) });
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+// what a hit from something moving did to a car in a step, from its velocity before (a) to after (b): the speed lost
+// along its heading, the change of its horizontal velocity (player-car.ts Hit)
+const hitOf = (car: RapierCar, a: Vec3, b: Vec3) => ({ head: car.headLost(a, b), shove: Math.hypot(b.x - a.x, b.z - a.z) });
 const upright = (car: RapierCar, min: number) => {
   const q = car.body.rotation();
   return upOf(q.x, q.y, q.z, q.w).y > min;

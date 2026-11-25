@@ -15,7 +15,10 @@
 //   bike_curb   -- a 0.3 m kerb across the way (a street's cap stepping up over a metre) at 40 km/h, square and at 30°;
 //                  and a 1 m terrace (car.ts' wedge) at 30 km/h: over it, upright
 //   bike_wall   -- into a wall at 50 km/h through the drive (physics/rapier/player-car.ts): the rider comes off (no input,
-//                  drawn on its side), then back on the road some way before it, upright, standing
+//                  drawn on its side; the note says why: a wall), then back on the road some way before it, upright,
+//                  standing
+//   bike_scrape -- glancing hits through the drive: a wall at 10° at 50 km/h, a voxel staircase wall at 10° met at
+//                  20° at 50 km/h, a parked car's corner (1.2 m off the line) at 30 km/h: met, the rider stays on
 // The default car's own scenarios stay tools/rapier-car.mjs's.
 // usage (in web/): node tools/vehicles.mjs [-v] [type ...]; one line a check, exit code 1 if one fails
 import { load } from './real-city.mjs';
@@ -130,7 +133,7 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   // into a wall through the drive: the rider comes off, then back on the road
   const d = ds.takeOver((_x, z) => (z >= 60 && z < 63 ? { g: 10, runs: [[10, 16, sc.WALL]] } : { g: 10 }), 64, 20, 50, [], false, 'moto');
   ds.run(d, 4, ds.cruise(50), (x) => !!x.snapshot?.fallMs);
-  const fell = !!d.snapshot?.fallMs, note = ds.said(d, 'Crash!'), at = d.traffic.t, held = (d.snapshot?.fallMs ?? 0) > FALL_MS - 1;
+  const fell = !!d.snapshot?.fallMs, note = ds.said(d, 'Crash!'), cause = d.notes.find((n) => n.fall)?.fall.kind, at = d.traffic.t, held = (d.snapshot?.fallMs ?? 0) > FALL_MS - 1;
   ds.run(d, 0.6, ds.cruise(50));
   const side = Math.abs(d.pose(d.car).roll ?? 0);
   ds.run(d, (FALL_MS + 200) / 1000, ds.cruise(50));
@@ -139,7 +142,23 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   const det = { fell, note, held, sideRoll: r2(side), backAfterS: r2(d.traffic.t - at), zBack: r2(p.z), onWheels: snapshot.onWheels, kmh: r2(d.kmh) };
   d.park();
   d.physics.dispose();
-  check('moto bike_wall', fell && note && held && side > 1.2 && !d.snapshot && p.z < 50 && Math.abs(p.y - 10) < 0.5, det);
+  check('moto bike_wall', fell && note && held && side > 1.2 && !d.snapshot && p.z < 50 && Math.abs(p.y - 10) < 0.5 && cause === 'wall', { ...det, cause });
+  // glancing: a wall at 10° at 50 km/h, a voxel staircase wall at 10° met at 10° more, a parked car's corner at 30 km/h
+  const wall = (x0) => (x) => (x >= x0 && x < x0 + 3 ? { g: 10, runs: [[10, 16, sc.WALL]] } : { g: 10 });
+  const T10 = Math.tan(10 * Math.PI / 180);
+  const stairs = (x, z) => { const w = 66 + Math.floor((z - 20) * T10); return x >= w && x < w + 3 ? { g: 10, runs: [[10, 16, sc.WALL]] } : { g: 10 }; };
+  const glance = {};
+  for (const [name, col, x, kmh, deg, others] of [['wall', wall(67), 64, 50, 10, []], ['stairs', stairs, 64.5, 50, 20, []],
+    ['corner', () => ({ g: 10 }), 64, 30, 0, [Object.assign(ds.carAt(65.2, 10, 45), { len: 4.4 })]]]) {
+    const g = ds.takeOver(col, x, 20, kmh, others, false, 'moto', undefined, deg * Math.PI / 180);
+    ds.run(g, 4, ds.cruise(kmh));
+    // (met: a wall turns it along itself; the car knocks)
+    const turned = Math.abs(g.snapshot.pose.h * 180 / Math.PI - deg) > 5, touched = name === 'corner' ? ds.said(g, 'Crash!') : turned;
+    glance[name] = { off: !!g.notes.find((n) => n.fall) || !!g.snapshot.fallMs, touched, kmh: r2(g.kmh) };
+    g.physics.dispose();
+  }
+  check('moto bike_scrape', Object.values(glance).every((o) => !o.off && o.touched && o.kmh > 0.7 * 30),
+    Object.fromEntries(Object.entries(glance).map(([k, o]) => [k, `${o.off ? 'off' : 'on'}/${o.touched ? 'met' : 'missed'}/${o.kmh}kmh`])));
 }
 
 for (const o of out) console.log(`${o.pass ? 'PASS' : 'FAIL'}  ${o.name.padEnd(18)} ${Object.entries(o.detail).map(([k, v]) => `${k}=${v}`).join(' ')}`);
