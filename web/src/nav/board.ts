@@ -1,6 +1,7 @@
 import type { CraftView } from '../client/sim-client';
 import type { CommandResult } from '../sim/contract/commands';
 import type { EntityRef, Role } from '../sim/contract/ids';
+import { craftBox } from '../sim/solids';
 import { fromBox, type Box } from '../sim/walk-bounds';
 import type { Picked } from '../view/life';
 import type { PlayerCraft } from './craft';
@@ -111,7 +112,7 @@ export class Boarding {
     for (const c of sim.crafts()) {
       const p = c.core.pose;
       if (c.pilot !== null || c.type === NOT_BOARDED || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
-      consider({ x: p.x, y: p.y - 1, z: p.z, h: p.h, r: 1.5, l: 3 }, { ref: { kind: 'craft', id: c.id }, role: 'pilot', label: c.type, craft: c });
+      consider(craftBox(c.type, p), { ref: { kind: 'craft', id: c.id }, role: 'pilot', label: c.type, craft: c });
     }
     return best;
   }

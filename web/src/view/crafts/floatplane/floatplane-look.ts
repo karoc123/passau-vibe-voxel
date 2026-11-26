@@ -1,39 +1,27 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import type { CraftView } from '../../../client/sim-client';
+import type { CoreOf } from '../../../sim/craft/cores';
+import { PLANE } from '../../../sim/craft/plane-flight';
+import { box, orient, type CraftFrame, type CraftLook } from '../craft-look';
 
-// The plane drawn from boxes in code (as the cars, view/meshes.ts, and the walker): a high-wing two-seater on floats,
-// 7 m long, 9 m span, nose +z, the floats' bottoms at y = -floatH (the flight's point is the fuselage's cube's centre,
-// plane-flight.ts FLOAT_H). One merged body with vertex colours, the propeller with a faint disc, the lights.
+// A high-wing two-seater on floats, 7 m long, 9 m span, nose +z, the floats' bottoms FLOAT_H under the flight's point
+// (the fuselage's cube's centre). One merged body with vertex colours, the propeller with a faint disc, the lights.
 
 const WHITE = 0xf2f2ee, BLUE = 0x1f4f9a, GLASS = 0x1c2630, DARK = 0x2a2c30, FLOAT = 0xd8d8d2, RED = 0xb02a22;
 
-export function box(w: number, h: number, l: number, x: number, y: number, z: number, hex: number, rx = 0, rz = 0) {
-  const g = new THREE.BoxGeometry(w, h, l);
-  if (rx) g.rotateX(rx);
-  if (rz) g.rotateZ(rz);
-  g.translate(x, y, z);
-  const c = new THREE.Color(hex), a = new Float32Array(g.attributes.position.count * 3);
-  for (let i = 0; i < a.length; i += 3) a.set([c.r, c.g, c.b], i);
-  g.setAttribute('color', new THREE.BufferAttribute(a, 3));
-  return g;
-}
-
-const basis = new THREE.Matrix4(), left = new THREE.Vector3();
-/** a model (nose +z, up +y, left +x) at p, its nose along fwd and its up along up (unit, across each other) */
-export function orient(g: THREE.Object3D, p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) {
-  g.position.copy(p);
-  g.quaternion.setFromRotationMatrix(basis.makeBasis(left.crossVectors(up, fwd), up, fwd));
-}
-
-export class PlaneModel {
+class FloatplaneLook implements CraftLook<'floatplane'> {
   readonly group = new THREE.Group();
   private readonly body: THREE.Mesh;
   private readonly prop = new THREE.Group();
   private readonly lamps: { mesh: THREE.Mesh; base: THREE.Color; strobe?: boolean }[] = [];
   private spin = 0;
 
-  constructor(floatH: number) {
-    const y0 = -floatH + 1.55; // the fuselage's floor over the floats' bottoms
+  private readonly fwd = new THREE.Vector3();
+  private readonly up = new THREE.Vector3();
+
+  constructor() {
+    const floatH = PLANE.FLOAT_H, y0 = -floatH + 1.55; // the fuselage's floor over the floats' bottoms
     const parts = [
       // fuselage: cabin, rear in two tapering boxes, cowling
       box(1.15, 1.25, 2.4, 0, y0 + 0.62, 0.9, WHITE),
@@ -89,12 +77,13 @@ export class PlaneModel {
     this.group.visible = false;
   }
 
-  /** placed at the flight's point, the nose along `fwd`, the cockpit's up along `up` (PlaneFlight.attitude) */
-  orient(p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
-
-  /** the propeller by the engine (0..1), the lamps by the night (0 day .. 1 night) */
-  animate(dt: number, engine: number, night: number, now: number) {
-    this.spin += (14 + 40 * engine) * dt;
+  // (hidden once crashed, until it is put back)
+  draw(c: CraftView<CoreOf<'floatplane'>>, { dt, alpha, night, now }: CraftFrame) {
+    const f = c.core.flight, d = c.core.drawn(alpha);
+    this.group.visible = f.state !== 'crashed';
+    orient(this.group, d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
+    // the propeller by the engine (0..1), the lamps by the night
+    this.spin += (14 + 40 * f.engine) * dt;
     this.prop.rotation.z = this.spin;
     const k = 1 + 3 * night;
     for (const l of this.lamps) {
@@ -103,10 +92,7 @@ export class PlaneModel {
     }
   }
 
-  dispose() {
-    this.group.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
-    });
-  }
+  hide() { this.group.visible = false; }
 }
+
+export const floatplaneLook = () => new FloatplaneLook();

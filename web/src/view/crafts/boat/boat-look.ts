@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { BoatDrawn } from '../sim/craft/boat-motion';
+import type { CraftView } from '../../../client/sim-client';
+import type { CoreOf } from '../../../sim/craft/cores';
+import type { CraftFrame, CraftLook } from '../craft-look';
 
-// The player's speedboat drawn (nav/boat.ts): boxes merged into one geometry with vertex colours, as the cars and the
-// river boats (view/meshes.ts, view/boats.ts); its nav lights brightened at night (as the cars' lamps: the bloom picks them
-// up); a trail of foam behind it at speed. Local frame as view/boats.ts: x across (+x the port side, left), y up from the
-// waterline, z along, +z the bow.
+// The speedboat: boxes merged into one geometry with vertex colours, as the cars and the river boats; its nav lights
+// brightened at night (the bloom picks them up, as the cars' lamps); a trail of foam behind it at speed. Local frame as
+// the river boats': x across (+x the port side, left), y up from the waterline, z along, +z the bow.
 
 const WHITE = 0xf3f2ee, HULL = 0x1c2a3a, STRIPE = 0xc23a2b, TEAK = 0x9a6b43, SEAT = 0xe7e1d2, DARK = 0x23262b, GLASS = 0x2a3a46;
 
@@ -47,7 +48,7 @@ function hull() {
 const RED = new THREE.Color(1, 0.08, 0.05), GREEN = new THREE.Color(0.05, 1, 0.25), WHITE_L = new THREE.Color(1, 0.96, 0.85);
 const FOAM_N = 320, FOAM_LIFE = 2.4, FOAM_EVERY = 0.6; // foam patches kept, s each lives, m of way between two pairs
 
-export class BoatModel {
+class BoatLook implements CraftLook<'boat'> {
   readonly group = new THREE.Group();
   private readonly hull: THREE.Mesh;
   private readonly lights: { mat: THREE.MeshBasicMaterial; base: THREE.Color }[] = [];
@@ -59,7 +60,7 @@ export class BoatModel {
   private readonly e = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly c = new THREE.Color();
 
-  constructor(parent: THREE.Object3D) {
+  constructor() {
     this.hull = new THREE.Mesh(hull(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.1 }));
     this.hull.castShadow = this.hull.receiveShadow = true;
     const light = (base: THREE.Color, x: number, y: number, z: number) => {
@@ -80,16 +81,17 @@ export class BoatModel {
     this.foam.renderOrder = 2;
     this.group.add(this.hull, this.foam);
     this.group.visible = false;
-    parent.add(this.group);
   }
 
-  set visible(v: boolean) {
-    this.group.visible = v;
-    if (!v) { this.foamAt.length = 0; this.foam.count = 0; }
+  hide() {
+    this.group.visible = false;
+    this.foamAt.length = 0;
+    this.foam.count = 0;
   }
 
-  // drawn at `d`, going `speed` m/s; night 0..1 (daylight.night); t the clock (s)
-  update(d: BoatDrawn, speed: number, night: number, t: number) {
+  draw(c: CraftView<CoreOf<'boat'>>, { alpha, night }: CraftFrame) {
+    const m = c.core.motion, d = c.core.drawn(alpha), speed = m.speed, t = m.t;
+    this.group.visible = true;
     this.hull.position.set(d.x, d.y, d.z);
     // (YXZ: the heading, then the pitch, nose up about the beam, then the roll about the length)
     this.hull.quaternion.setFromEuler(this.e.set(-d.pitch, d.h, d.roll));
@@ -136,3 +138,5 @@ export class BoatModel {
     if (n) { this.foam.instanceMatrix.needsUpdate = true; this.foam.instanceColor!.needsUpdate = true; }
   }
 }
+
+export const boatLook = () => new BoatLook();

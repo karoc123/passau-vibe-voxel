@@ -4,7 +4,8 @@ import { clamp } from '../util';
 import { findSpawn, NO_BOAT_INPUT, type BoatDrawn } from '../sim/craft/boat-motion';
 import type { BoatInput } from '../sim/contract/inputs';
 import { DEFAULT_TUNING } from '../sim/tuning';
-import { BoatModel } from './boat-model';
+import { craftLook } from '../view/crafts';
+import type { CraftLook } from '../view/crafts/craft-look';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
@@ -19,7 +20,7 @@ import './boat.css';
 // steer, Space drift, T unstick, Esc exit; the same touch stick and handbrake button; the gamepad as the car's). Put
 // down on the water nearest the map's focus, facing downstream. The boat is a craft of the world sim's (CraftLink: its
 // core, sim/craft/boat-motion.ts BoatCore, stepped on the world's clock with its collision), the local player in its
-// pilot's seat; the model in boat-model.ts. Here: the panel, the input, the chase camera. Out of
+// pilot's seat; Here: the panel, the input, the chase camera. Out of
 // focus its input is hands off (input.ts), as the car's. Left, the boat stays afloat where it is (board: back in).
 
 const KEYS: ReadonlySet<string> = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space']);
@@ -41,7 +42,7 @@ export class BoatMode implements PlayerCraft {
   private readonly env: CraftEnv;
   // the boat in the world sim while the player is in it (its client, its own collision)
   private readonly link: CraftLink<'boat'>;
-  private readonly model: BoatModel;
+  private readonly model: CraftLook<'boat'>;
   private readonly touch: TouchSticks;
   private readonly drift = new HoldButton('boat-drift-button', 'Drift', 'Drift (hold)');
   private readonly keys = new HeldKeys(KEYS);
@@ -64,7 +65,8 @@ export class BoatMode implements PlayerCraft {
     const { nav, camera, target, meta, host, canvas, env } = ctx;
     this.nav = nav; this.target = target; this.meta = meta; this.env = env;
     this.link = new CraftLink(ctx, 'boat');
-    this.model = new BoatModel(nav.actors);
+    this.model = craftLook('boat');
+    nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, { onPinch: (r) => { this.zoom = clamp(this.zoom * r, 0.5, 2.2); }, camera: 'right' });
     const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat');
@@ -141,9 +143,8 @@ export class BoatMode implements PlayerCraft {
   place(dt: number) {
     const c = this.phase === 'on' ? this.craft : null;
     if (!c) return;
-    const m = c.core.motion, d = c.core.drawn(this.link.alpha);
-    this.model.visible = true;
-    this.model.update(d, m.speed, this.env.night(), m.t);
+    const d = c.core.drawn(this.link.alpha);
+    this.model.draw(c, { dt, alpha: this.link.alpha, night: this.env.night(), now: performance.now() });
     this.chase(d, dt);
   }
 
@@ -188,7 +189,7 @@ export class BoatMode implements PlayerCraft {
   leave() {
     this.link.close();
     this.phase = 'off';
-    this.model.visible = false;
+    this.model.hide();
     this.touch.setActive(false);
     this.keys.clear();
     this.drift.release();

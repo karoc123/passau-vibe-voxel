@@ -18,7 +18,7 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import { StreetLife } from './view/life';
 import type { CraftView, SimClient } from './client/sim-client';
-import type { CraftsView } from './nav/crafts-view';
+import type { CraftsView } from './view/crafts/crafts-view';
 import type { ParagliderMode } from './nav/special-craft';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
@@ -94,7 +94,7 @@ const CRAFTS = () => [
   import('./nav/special-craft').then((m) => m.HelicopterMode),
 ];
 let crafts: PlayerCraft[] = [];
-// the world's crafts the local player does not fly (left by their pilots, or other players'): nav/crafts-view.ts
+// the world's crafts the local player does not fly (left by their pilots, or other players')
 let craftsView: CraftsView | null = null;
 let glider: ParagliderMode | null = null;
 const bar = new Bar({ days: DAYS, weathers: WEATHER_NAMES, onDay: (d) => dayWeather.onDay(d), onDayEnd: () => dayWeather.onDayEnd(),
@@ -399,7 +399,7 @@ async function boot() {
   hook('__streamer', streamer);
   hook('__ready', true);
   const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
-    import('./nav/crafts-view')]);
+    import('./view/crafts/crafts-view')]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
     deployGlider: (source, at) => wing.deploy(source, at),

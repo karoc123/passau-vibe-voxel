@@ -14,6 +14,9 @@
 // And the weapons are packages (src/sim/weapons/<name>/), so removing one is deleting its folder and one line: no
 // module of the scan above imports a file of a package but the registry, src/sim/weapons/index.ts, and the package's
 // own files (the core reaches a weapon through the registry; no package leans on another).
+// And the craft looks are packages (src/view/crafts/<type>/: a craft's model and what moves on it), so a craft's look
+// changes inside its folder: no module of src/ imports a file of a package but the registry, src/view/crafts/index.ts,
+// and the package's own files.
 // And the layer rules of docs/adr/0009-layers-and-owners.md, over every module of src/:
 //   R1 layer table: LAYERS maps today's files to a layer, ALLOWED says which layers each may import (every import
 //      statement, type-only ones included);
@@ -137,13 +140,16 @@ for (const f of PORTS_ONLY) {
   for (const m of bare.matchAll(/(?<![\w$.])(?:performance|console|Date|process)(?![\w$])/g)) bad.push(`src/${f}:${lineOf(bare, m.index)}: ${m[0]}: a port's (HostPorts), not the host's`);
 }
 
-// nothing in src/ imports from checks/ (it would ship a test harness)
+// nothing in src/ imports from checks/ (it would ship a test harness); a craft look's package only from the registry
+const looks = path.join(src, 'view', 'crafts'), LOOK_REGISTRY = path.join(looks, 'index.ts');
+const lookOf = (f) => { const r = path.relative(looks, f).split(path.sep); return r.length > 1 && r[0] !== '..' ? r[0] : null; };
 const apps = walk(src, []);
 for (const file of apps) {
   const { code } = lex(fs.readFileSync(file, 'utf8'));
   for (const m of code.matchAll(IMPORT_RE)) {
-    const target = resolve(file, m[2] ?? m[4]);
+    const target = resolve(file, m[2] ?? m[4]), look = target && lookOf(target);
     if (target && !path.relative(checks, target).startsWith('..')) bad.push(`${rel(file)}:${lineOf(code, m.index)}: imports ${m[2] ?? m[4]}: checks/ is not part of the app`);
+    if (look && file !== LOOK_REGISTRY && lookOf(file) !== look) bad.push(`${rel(file)}:${lineOf(code, m.index)}: imports ${m[2] ?? m[4]}: a craft look's package, which only ${rel(LOOK_REGISTRY)} imports`);
   }
 }
 
@@ -311,5 +317,5 @@ if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (verbose) { console.log(`baseline (${BASELINE.length}):`); for (const k of BASELINE) console.log(`  ${k}`); }
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
 const of = (r) => BASELINE.filter((k) => k.startsWith(r)).length;
-console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals, a weapon package imported only by sim/weapons/index.ts; ${apps.length} modules of src/ import nothing from checks/`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals, a weapon package imported only by sim/weapons/index.ts; ${apps.length} modules of src/ import nothing from checks/ and a craft look's package only through view/crafts/index.ts`);
 console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only), R6 ${of('R6')} (touch read outside touch/); none new, none gone`);

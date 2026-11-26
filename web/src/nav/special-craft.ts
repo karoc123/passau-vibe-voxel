@@ -3,9 +3,9 @@ import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
-import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { CRAFT_SCALE, GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
+import { craftLook } from '../view/crafts';
 import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
@@ -15,16 +15,16 @@ import './special-craft.css';
 
 // The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
-// Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts). Left, the
+// Here: the panel, the input, the chase camera. Out of focus the input is hands off (input.ts). Left, the
 // helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes.
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
-// the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
-// `drop` m under the motion's point (the paraglider's is the pilot's middle, its model's origin the feet); the
-// hovercraft's and the helicopter's framing scales with their models (CRAFT_SCALE), so they fill the view as before
-const HS = CRAFT_SCALE.hovercraft, CS = CRAFT_SCALE.helicopter;
+// the chase camera: back and up from the craft (m), at what it looks (m over the model's origin); the feet `drop` m
+// under the motion's point (the paraglider's is the pilot's middle); the helicopter's framing scales with its model
+// (CRAFT_SCALE), so it fills the view as before
+const CS = CRAFT_SCALE.helicopter;
 const CONFIG = {
-  hovercraft: { name: 'Hovercraft', back: 12 * HS, up: 4.5 * HS, look: 0.8 * HS, drop: 0,
+  hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
     help: ['W/S thrust and reverse · A/D steer (it drifts) · Esc exit', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
@@ -60,7 +60,7 @@ class SpecialCraft implements PlayerCraft {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
     this.link = new CraftLink(ctx, id);
     this.boards = id === 'paraglider' ? [] : [id];
-    this.model = makeCraftModel(id);
+    this.model = craftLook(id);
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
@@ -111,7 +111,7 @@ class SpecialCraft implements PlayerCraft {
   leave() {
     this.phase = 'off';
     this.start = null;
-    this.model.group.visible = false;
+    this.model.hide();
     this.touch.setActive(false);
     this.keys.clear();
     this.rig.end();
@@ -245,14 +245,8 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private render(dt: number) {
-    const core = this.craft!.core, collision = this.link.col!, m = core.drawn(this.link.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
-    group.visible = true;
-    group.position.set(m.x, m.y - cfg.drop, m.z);
-    group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');
-    // the rotors idle slower on the skids
-    const spin = this.id === 'helicopter' ? (core.motion.grounded ? 9 : 24) * dt : 0;
-    if (rotor) rotor.rotation.y = (rotor.rotation.y + spin) % (2 * Math.PI);
-    if (tailRotor) tailRotor.rotation.x = (tailRotor.rotation.x + 4 * spin) % (2 * Math.PI);
+    const c = this.craft!, collision = this.link.col!, m = c.core.drawn(this.link.alpha), cfg = CONFIG[this.id], group = this.model.group;
+    this.model.draw(c, { dt, alpha: this.link.alpha, night: this.ctx.env.night(), now: performance.now() });
     this.camYaw = followAngle(this.camYaw, m.h, 4, dt);
     this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom);
     const eye = this.pos.copy(group.position);
