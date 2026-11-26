@@ -1,6 +1,6 @@
 // A car's body as drawn, from what crosses in a snapshot (contract/agents.ts BodyDraw): shared by the sim's own
 // drawing of it (physics/rapier/life-phys.ts LifePhysics.pose) and a client's copy of the traffic
-// (client/sim-client.ts TrafficMirror), so both draw the same pose bit for bit. The body's rotation is a quaternion
+// (client/sim-client.ts TrafficMirror), so both draw the same pose (the client's from poses rounded to the mm). The body's rotation is a quaternion
 // at each tick, blended between the two (normalised lerp, the shorter way), its heading, pitch and roll read from
 // the blend; never the angles blended. No three.js, no DOM.
 import type { BodyDraw, BodyPose } from './contract/agents';

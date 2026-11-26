@@ -25,6 +25,8 @@ export const activeKey = (cx: number, cy: number) => cy * 65536 + cx;
 // Only the first fill (or a jump of the focus) puts them anywhere at once. (A car 300 m away is a few pixels tall, a
 // person 150 m away about as much: tools/popin-check.mjs checks 200 and 100 m.)
 export const CAR_POP_R = 300, PED_POP_R = 150;
+// how far a person's step phase (ph) turns per metre walked, ridden: the sim's and a client's working it out alike
+export const PH_WALK = 4.2, PH_RIDE = 1.6;
 
 // the ground the agents stand on (world.ts World: the edited columns too)
 export interface Ground {

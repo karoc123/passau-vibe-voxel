@@ -5,7 +5,8 @@
 // follows a car, walks as a person and lets go on the way (the walk's seat inputs acked). Agents must be drawn, the
 // time of day must be the host's, and the render clock must draw every tick in order, never more than a few ticks
 // behind the newest snapshot.
-// Then the bodies (below): drawn alike by the sim and from its snapshots, bit for bit, at the tick drawn.
+// Then the bodies (below): drawn alike by the sim and from its snapshots at the tick drawn, within what the snapshot's
+// rounding leaves (BODY_M, BODY_RAD).
 // usage (in web/): node tools/mirror-check.mjs [-v] [--seconds S]; prints PASS with the counts compared, or FAIL
 import fs from 'node:fs';
 import * as THREE from 'three';
@@ -34,6 +35,43 @@ const mirror = new MirrorSimClient(link, data(), null, mine);
 const lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
+// The cars and people as sent (sim/agent-wire.ts: what changed since the last snapshot, rounded): read back by a
+// client's end, every field the sim's within WIRE_M (ds, dOff worked out by the client) but for ph and wait, which the
+// client works out its own way (a step's phase, a wait it does not draw); each tick, all of the traffic's, so ids
+// coming and going, ways changing and one sent whole again are all crossed. The wire is the protocol: a field lost
+// or misread draws a car in the wrong place.
+const { AgentWire, AgentRead } = await load('sim/agent-wire.ts');
+const WIRE_M = 0.011, wireOut = new AgentWire(), wireIn = new AgentRead((e) => b.sim.traffic.net.roads[e].L);
+let wireN = 0, wireHad = new Set();
+const wireCheck = () => {
+  const T = b.sim.traffic, tick = b.sim.tick;
+  // (a tenth of the cars and people left out each tick, so some leave sight and come back)
+  const some = (l) => l.filter((o) => (o.id * 7 + tick) % 10);
+  const cars = some(T.cars), walkers = some(T.people), riders = some(T.riders);
+  const gotC = wireIn.readCars(cars.map((c) => wireOut.car(c)), tick);
+  const [gotP, gotR] = wireIn.readPeople(walkers.map((p) => wireOut.person(p)), riders.map((p) => wireOut.person(p)), tick);
+  wireOut.done();
+  const same = (want, got, keys, what) => {
+    if (want.length !== got.length) { fail.push(`wire t=${tick}: ${got.length} ${what} read of ${want.length}`); return; }
+    want.forEach((w, i) => {
+      const g = got[i];
+      for (const k of keys) {
+        // (none: prev2, next2 -1, prev2Off 0, as sim/road-net.ts reads them)
+        const a = w[k] ?? { prev2: -1, next2: -1, prev2Off: 0 }[k], c = g[k];
+        const ok = typeof a === 'number' ? Math.abs(a - c) <= WIRE_M : a === c || (k === 'bike' && !a && !c);
+        if (!ok && fail.length < 20) fail.push(`wire t=${tick}: ${what} ${w.id} ${k} ${a} read as ${c}`);
+        wireN++;
+      }
+    });
+  };
+  same(cars, gotC, ['id', 'e', 'lane', 's', 'off', 'prev', 'prevOff', 'prev2', 'prev2Off', 'next', 'next2', 'len', 'bus', 'vt', 'col', 'brake', 'v'], 'car');
+  // (ds, dOff: of a car the client had the tick before; one new to it is guessed)
+  const had = cars.map((c) => wireHad.has(c.id));
+  same(cars.filter((_, i) => had[i]), gotC.filter((_, i) => had[i]), ['ds', 'dOff'], 'car');
+  wireHad = new Set(cars.map((c) => c.id));
+  same(walkers, gotP, ['id', 'e', 'dir', 's', 'v', 'lat', 'wait', 'col', 'bike'], 'person');
+  same(riders, gotR, ['id', 'e', 'dir', 's', 'v', 'lat', 'wait', 'col', 'bike'], 'rider');
+};
 let frames = 0, drawnAgents = 0, acked = true, lastDrawn = -1, maxLead = 0;
 const send = (cmd) => mirror.send(cmd);
 
@@ -62,6 +100,7 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   mirror.update(1 / FPS);
   b.update(1 / FPS);
   session.deliver();
+  wireCheck();
   const ta = b.sim.timeOfDay, tb = mirror.timeOfDay;
   if (ta.hour !== tb?.hour || ta.day !== tb?.day) fail.push(`t=${t.toFixed(2)}: the time of day ${JSON.stringify(ta)} vs ${JSON.stringify(tb)} from the snapshot`);
   lifeB.update(1 / FPS, 0, focus);
@@ -84,7 +123,11 @@ if (maxLead > 2) fail.push(`the render clock fell ${maxLead.toFixed(2)} ticks be
 // the road physics and edits round BRIDGE, the player's session through a CloneLink; the player drives a moto (a
 // driven body: lean, wheelie) and digs a hole under a car nearby (bodies falling, wrecks, fades). Every frame every
 // car with a body is drawn alike by the sim (LifePhysics.pose, kept per tick) and from the snapshot of the tick the
-// client draws (TrafficMirror bodies.pose) at three alphas, bit for bit.
+// client draws (TrafficMirror bodies.pose) at three alphas, alike within BODY_M m and BODY_RAD rad: a snapshot carries
+// positions to the mm and a body's rotation to 1e-5 (sim/agent-wire.ts wireBody), so its x, y, z may be a mm or two off
+// (the ride too), its angles far less; the same code drawing both is what is checked, not the bits.
+const BODY_M = 0.002, BODY_RAD = 0.0005;
+const alike = (x, y) => x.every((v, j) => Math.abs(j < 3 ? v - y[j] : Math.atan2(Math.sin(v - y[j]), Math.cos(v - y[j]))) <= (j < 3 ? BODY_M : BODY_RAD));
 const bodyCounts = await bodies();
 async function bodies() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), { worldEdits: WE } = await load('host/node.ts');
@@ -125,7 +168,7 @@ async function bodies() {
         K.forEach((k, i) => {
           n.poses++;
           const y = m && num(c.traffic.bodies.pose(m, k, under));
-          if ((!y || x[i].some((v, j) => v !== y[j])) && fail.length < 20) fail.push(`bodies f=${f} tick ${c.time.tick} car ${id} a=${k}: ${x[i].map((v) => v.toFixed(4))} vs ${y?.map((v) => v.toFixed(4))}`);
+          if ((!y || !alike(x[i], y)) && fail.length < 20) fail.push(`bodies f=${f} tick ${c.time.tick} car ${id} a=${k}: ${x[i].map((v) => v.toFixed(4))} vs ${y?.map((v) => v.toFixed(4))}`);
         });
       }
     }
@@ -150,4 +193,4 @@ async function bodies() {
   return n;
 }
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }
-console.log(`PASS mirror-check: ${frames} frames (${drawnAgents} agents drawn), seat input acks, the time of day, every tick drawn in order (at most ${maxLead.toFixed(2)} ticks behind; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike`);
+console.log(`PASS mirror-check: ${frames} frames (${drawnAgents} agents drawn), ${wireN} agents' fields read back from the wire alike, seat input acks, the time of day, every tick drawn in order (at most ${maxLead.toFixed(2)} ticks behind; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike (${BODY_M * 1000} mm, ${BODY_RAD} rad)`);

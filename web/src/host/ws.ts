@@ -16,6 +16,9 @@ const BATCH = 2;
 // A socket that has this much unsent gets no snapshots until it drains: a slow phone must not grow the host's memory.
 // The events of the ticks it missed come with its next snapshot.
 const BACKLOG = 4 << 20;
+// Messages smaller than this go uncompressed: a tick's few small changes deflate well too (ws's default, 1024, left
+// the phone's small messages raw).
+const DEFLATE_FROM = 64;
 
 export interface ServeOptions {
   /** the data directory (meta.json, traffic.json, tiles/) */
@@ -30,18 +33,18 @@ export interface ServeOptions {
   clock?: typeof clock;
 }
 
-interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number }
+interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number }
 
 export function serve(o: ServeOptions) {
   const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
   const server = nodeHost(o.dir, { ...start, world: 'tiles' });
   server.trackEdits();
   const conns = new Set<Conn>();
-  const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: 1024 } });
+  const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: DEFLATE_FROM } });
   wss.on('error', (e) => o.log(`ws: ${e.message}`));
   const port = new Promise<number>((ok) => wss.on('listening', () => ok(wss.address().port)));
   wss.on('connection', (ws, req) => {
-    const c: Conn = { ws, s: server.connect(), out: [], bytes: 0 };
+    const c: Conn = { ws, s: server.connect(), out: [], bytes: 0, sock: req.socket, wire: req.socket.bytesWritten };
     conns.add(c);
     o.log(`${c.s.player} joined from ${req.socket.remoteAddress}`);
     ws.send(JSON.stringify([{ kind: 'hello', hello: c.s.hello }, { kind: 'ready' }] satisfies FromWorker[]));
@@ -79,11 +82,12 @@ export function serve(o: ServeOptions) {
     /** the port it listens on, once it does (port 0: one the system picked) */
     port,
     /** since the last call: the ms per tick (the sim's, the snapshots' and their sending), the bytes sent per player
-     * (before the socket's deflate) */
+     * (before the socket's deflate), the bytes the socket wrote per player (deflated, the frames' headers too) */
     stats() {
-      const out = { ticks, tickMs: tickMs / (ticks || 1), sendMs: sendMs / (ticks || 1), bytes: [...conns].map((c) => [c.s.player, c.bytes] as const) };
+      const out = { ticks, tickMs: tickMs / (ticks || 1), sendMs: sendMs / (ticks || 1), bytes: [...conns].map((c) => [c.s.player, c.bytes] as const),
+        wire: [...conns].map((c) => [c.s.player, c.sock.bytesWritten - c.wire] as const) };
       ticks = 0; tickMs = 0; sendMs = 0;
-      for (const c of conns) c.bytes = 0;
+      for (const c of conns) { c.bytes = 0; c.wire = c.sock.bytesWritten; }
       return out;
     },
     close() {

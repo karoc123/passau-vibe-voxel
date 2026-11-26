@@ -4,7 +4,7 @@
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).
 import type { LiveNode, Region } from '../../core/live-edits';
-import type { BodyDraw, BoatView, CarState, PersonState, TrainState } from './agents';
+import type { BodyDraw, BoatView, CarState, CarWire, PersonWire, TrainState } from './agents';
 import type { CommandResult } from './commands';
 import type { CraftStates } from './crafts';
 import type { SimEvent } from './events';
@@ -49,7 +49,7 @@ export interface DriverSnapshot {
  * player */
 export interface TimeOfDay { hour: number; day: number }
 
-/** a session's world after a tick, whole (no deltas). Its cars, people, bodies, walked, avatars, crafts and events are
+/** a session's world after a tick, whole but for the cars' and people's (CarWire: what changed since the last). Its cars, people, bodies, walked, avatars, crafts and events are
  * those near the session's player only (its own seat's entity always): a thing missing from one is gone for it */
 export interface Snapshot {
   /** the tick whose state this is; what moves is drawn between it and the tick before */
@@ -59,10 +59,12 @@ export interface Snapshot {
   /** the world's time of day and day of the year (the host's: WorldSim.setTime; the page's light follows it) */
   hour: number;
   day: number;
-  cars: CarState[];
+  /** the traffic's cars, people and riders: what changed since the session's last snapshot (contract/agents.ts CarWire) */
+  cars: CarWire[];
+  /** the cars out of the traffic (left, parked, a wreck) */
   detached: CarState[];
-  people: PersonState[];
-  riders: PersonState[];
+  people: PersonWire[];
+  riders: PersonWire[];
   /** the cars with a body (or its fade), by car id */
   bodies: [number, BodyDraw][];
   trains: TrainState[];
