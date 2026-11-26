@@ -1,7 +1,7 @@
 // The street life's pop-in gate (src/view/life.ts), headless on the real traffic data (public/data/traffic.json): a
 // viewer drives along the road network (and stands still a while), the world sim (src/sim/world-sim.ts, started by the
 // host: src/host/node.ts) is ticked
-// through its client (src/client/sim-client.ts, in this thread, from its snapshots; --mirror: cloned, as a worker's) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
+// by this tool and drawn through its client (src/client/sim-client.ts, from its snapshots; --mirror: cloned, as a worker's) and the life drawn every frame as main.ts does (focus: the viewer; the scene only StreetLife's meshes', never rendered),
 // and every car, person and rider drawn is followed from frame to frame. Flagged:
 //   appear  -- an agent drawn now that was not in the last frame, within R m of the viewer
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import * as THREE from 'three';
 import { DATA, load } from './real-city.mjs';
+import { sessionLink } from './lib.mjs';
 
 const args = process.argv.slice(2), verbose = args.includes('-v');
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? Number(args[i + 1]) : d; };
@@ -38,7 +39,7 @@ const mulberry = (seed) => () => {
 Math.random = mulberry(SEED >>> 0);
 const rnd = mulberry((SEED * 7919 + 1) >>> 0);
 
-const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts'), { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+const { StreetLife } = await load('view/life.ts'), { nodeHost } = await load('host/node.ts'), { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
 const { unpackTraffic } = await load('sim/traffic-pack.ts'), { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const loaded = TRANSIT ? { trains: await load('sim/train-traffic.ts'), boats: await load('sim/boat-traffic.ts'), world: await load('sim/traffic.ts') } : null;
 const { prepPath, at, pt } = await load('sim/path.ts');
@@ -82,9 +83,9 @@ function run({ name, at: start, h0, h1 }) {
   // (drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does; --mirror: through a CloneLink, as from a worker)
   // (started as a server starts it: src/host/node.ts, hostSim; the traffic's default seed, no ground, no road physics)
   const server = nodeHost(DATA, { world: null, physics: { bodies: false } }, { meta, traffic: td });
-  const session = server.connect('p1');
+  const session = sessionLink(server.connect('p1'));
   const mine = hello(checkBuild(meta, () => {}));
-  const sim = new MirrorSimClient(MIRROR ? new CloneLink(new ThreadLink(session)) : new ThreadLink(session), structuredClone(pristine), null, mine);
+  const sim = new MirrorSimClient(MIRROR ? new CloneLink(session) : session, structuredClone(pristine), null, mine);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
   const dt = 1 / FPS, v = KMH / 3.6, P = pt(), F = pt();
   let s = 0;
@@ -110,6 +111,8 @@ function run({ name, at: start, h0, h1 }) {
     server.sim.setTime(h0 + (h1 - h0) * t / SECONDS);
     sim.send({ kind: 'view', view: { focus } });
     sim.update(dt);
+    server.update(dt);
+    session.deliver();
     life.update(dt, 0, focus);
     const now = new Map();
     for (const c of T.roadVehicles()) { const d = life.drawn('car', c.id); if (d) now.set(c, ['car', d.x, d.z]); }
@@ -131,7 +134,8 @@ function run({ name, at: start, h0, h1 }) {
       }
       for (const [o, [k, x, z]] of last) if (!now.has(o) && near(k, x, z)) flag('vanish', k, x, z);
     }
-    last = now;
+    // (the street first drawn once the first snapshot is in, a frame after the first update)
+    if (now.size || last) last = now;
   }
   console.log(`  ${name}: ${T.cars.length} cars, ${T.people.length} people, ${T.riders.length} riders at the end (hour ${h0} to ${h1})`);
 }

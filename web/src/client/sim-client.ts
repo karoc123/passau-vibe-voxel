@@ -1,23 +1,17 @@
 // What the page holds of the world sim (ADR 0008: "the page sends commands and draws snapshots"): a SimClient. The
-// page never reaches into the WorldSim; it holds one session of the server (sim/server/sim-server.ts Session: one
-// player, named by the host, client.player), sends its player's commands (SimCommand: plain data, so they can cross to
-// a Web Worker or a server; they name no player, the session's is stamped on them; its view among them), runs the
-// frame (update: the frame's dt) and reads what the sim publishes, in every mode from its snapshots: the traffic as
-// drawn (TrafficMirror), the crafts in the world (piloted or left), its player's seat, car and craft, the outcomes of
-// its commands, the events since a tick.
-// MirrorSimClient: the sim reached through snapshots over a SimLink: ThreadLink (a session in the page's thread,
-// synchronous: the snapshot of the frame's own update, no added latency), CloneLink (the gates' protocol check),
-// WorkerLink (client/sim-worker-link.ts). Commands are queued and applied in the order sent at the start of the next
-// tick (ADR 0007); every craft shell and the nav send theirs before the update in main.ts's frame. A seat input sent
-// through the client gets its seq and the tick it is meant for (the tick seen + 1); the session answers with ack (the
-// last one taken). The frame's time (time: FrameTime) is the latest snapshot's: what is drawn between the last two
-// ticks (the traffic, the crafts' drawn(alpha)) is drawn at its alpha.
-// The client first takes its host's hello (sim/contract/hello.ts: the protocol, the data build, the tuning's hash;
-// before its first snapshot) and compares it with its own (the app's: sim/hello.ts hello); a host that differs is
-// refused: client.hello rejects with what differs, the link is closed (the session left) and the client sends, runs
-// and takes nothing more.
-// No three.js, no DOM (tools/core-deps.mjs). The client never imports the server (docs/adr/0009-layers-and-owners.md):
-// the in-thread link is given a session by the app (InThreadSession).
+// page never reaches into the WorldSim; it holds one session of the server (one player, named by the host,
+// client.player), sends its player's commands (plain data naming no player: the session's is stamped on them) and
+// reads what the sim publishes, from its snapshots: the traffic as drawn (TrafficMirror), the crafts in the world
+// (piloted or left), its player's seat, car and craft, the outcomes of its commands, the events since a tick.
+// The server ticks on its own clock; the page does not drive it. Snapshots wait in a short buffer and are drawn on a
+// render clock that runs with the page's frames a little behind the newest snapshot, so snapshots arriving unevenly
+// never show as a stop and a jump. What the player must learn at once (seat, results, events, edits, the time of day)
+// is read from the newest snapshot as it arrives; what is drawn (agents, bodies, the crafts' poses) from the one the
+// render clock is in. A seat input gets its seq and the tick it is meant for (the tick seen + 1); the session answers
+// with ack (the last one taken).
+// The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
+// differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
+// No three.js, no DOM. The client never imports the server.
 import type { WorldOp } from '../core/world-edits';
 import { LiveEdits } from '../core/live-edits';
 import type { Car, TrafficData } from '../sim/types';
@@ -67,8 +61,7 @@ export interface SimClient {
   readonly traffic: TrafficMirror;
   /** a command of the client's player, applied at the start of the next tick (a seat input given its seq and tick) */
   send(cmd: SimCommand): void;
-  /** the frame: the commands sent applied, then the ticks due after dt s (what is simulated where: the players' views,
-   * a view command; the time of day: the world's) */
+  /** the frame: the commands sent on, the render clock moved on by dt s and what it is in drawn */
   update(dt: number): void;
   /** the world's time of day and day of the year as last seen (the host's; a player asks for another: a setTime
    * request); null before the first snapshot */
@@ -97,21 +90,9 @@ export interface SimClient {
   /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied (in the first tick
    * after the host has its nodes in) */
   edit(op: WorldOp): Promise<[number, number][]>;
-  /** the world's edited nodes as this client sees them (core/live-edits.ts): what the page's streamer and TileCache
-   * read. A client of another thread fills its own from the snapshots; in the sim's own thread the app hands it the
-   * world's (one world per process, ADR 0008: that server sends none) */
+  /** the world's edited nodes as this client sees them, filled from the snapshots: what the page's streamer and
+   * TileCache read */
   readonly edits: LiveEdits;
-}
-
-/** what the in-thread link uses of a session of the server in the page's thread (sim/server/sim-server.ts Session,
- * given by the app: the client names the server only through this) */
-export interface InThreadSession {
-  /** what the host tells the session first (SimServer.hello) */
-  readonly hello: Hello;
-  readonly server: { update(dt: number): void };
-  send(cmd: SimCommand): void;
-  snapshot(): Snapshot;
-  leave(): void;
 }
 
 /** a client's seat inputs' numbers: each one sent gets the next seq and the tick it is meant for */
@@ -123,53 +104,33 @@ class Seqs {
   }
 }
 
-/** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the frame's dt and
- * commands sent, the snapshots back (onSnapshot); close: the session left (the host refused), nothing more sent or
- * taken */
+/** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the commands sent,
+ * the snapshots back on the host's own clock (onSnapshot); close: the session left (the host refused), nothing more
+ * sent or taken */
 export interface SimLink {
-  frame(dt: number, commands: SimCommand[]): void;
+  send(commands: SimCommand[]): void;
   onHello: (h: Hello) => void;
   onSnapshot: (s: Snapshot) => void;
   close(): void;
 }
 
-/** a session of a SimServer in the page's thread (the page's default): the frame's commands sent through it, the
- * server's update, the session's snapshot at once after it */
-export class ThreadLink implements SimLink {
-  onHello: (h: Hello) => void = () => {};
-  onSnapshot: (s: Snapshot) => void = () => {};
-  private greeted = false;
-  private closed = false;
-  constructor(private readonly session: InThreadSession) {}
-  frame(dt: number, commands: SimCommand[]) {
-    // (the session's hello before its first frame, as a host's first message)
-    if (!this.greeted) { this.greeted = true; this.onHello(this.session.hello); }
-    if (this.closed) return;
-    for (const c of commands) this.session.send(c);
-    this.session.server.update(dt);
-    this.onSnapshot(this.session.snapshot());
-  }
-  close() { if (!this.closed) { this.closed = true; this.session.leave(); } }
-}
-
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
  * life-edit's left and events; docs/adr/0009-layers-and-owners.md): each snapshot checked to be plain data and
- * structured-cloned (what postMessage does), the frame's dt and commands checked and sent
- * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
- * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */
+ * structured-cloned (what postMessage does), the commands checked and sent through JSON (what a socket would). So a
+ * snapshot or a command that is not plain data, or that shares an object with the sim or the client, fails the gate
+ * that runs through it instead of passing by reference. */
 export class CloneLink implements SimLink {
   onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
-  /** the messages that crossed (the hello, snapshots, frames) */
+  /** the messages that crossed (the hello, snapshots, commands) */
   crossed = 0;
   constructor(private readonly link: SimLink) {
     link.onHello = (h) => { this.crossed++; this.onHello(jsonTrip(h, 'hello')); };
     link.onSnapshot = (s) => { this.crossed++; this.onSnapshot(cloned(s, 'snapshot')); };
   }
-  frame(dt: number, commands: SimCommand[]) {
-    const m = jsonTrip({ dt, commands }, 'frame');
+  send(commands: SimCommand[]) {
     this.crossed++;
-    this.link.frame(m.dt, m.commands);
+    this.link.send(jsonTrip(commands, 'commands'));
   }
   close() { this.link.close(); }
 }
@@ -212,9 +173,20 @@ export function plainData(v: unknown, at: string, typed: boolean, path = new Set
   path.delete(o);
 }
 
-/** the sim reached through snapshots (a ThreadLink's, a worker's): the page draws a copy of the traffic
- * (TrafficMirror) and of the crafts, set from the latest snapshot; it holds its session's player's reads (player: the
- * snapshots name it) */
+// The render clock (in ticks) and how far behind the newest snapshot it is held. Each snapshot holds its tick and the
+// one before, so the clock may run up to the newest. The least lead seen over the last WINDOW s is kept between
+// LEAD_LO and LEAD_HI by running the clock a little faster or slower: per tick out of the band SLOWER when it is about
+// to run dry (which would stop what is drawn), FASTER when it lags (which costs only latency), and FAR more per tick
+// beyond half a tick out, so a large error goes within a second or two; at most SLEW, a change of pace too small to
+// see. Behind by more than RESYNC ticks (the page was hidden, the server stalled), it is set START behind the newest.
+const WINDOW = 0.5, LEAD_LO = 0.05, LEAD_HI = 0.3, SLOWER = 0.02, FASTER = 0.005, FAR = 0.02, SLEW = 0.02;
+const RESYNC = 6, START = 0.8;
+// the snapshots held at most (a page in the background draws none)
+const KEEP = 64;
+
+/** the sim reached through snapshots (a worker's; a tool's own session): the page draws a copy of the traffic
+ * (TrafficMirror) and of the crafts at its render clock; it holds its session's player's reads from the newest
+ * snapshot (player: the snapshots name it) */
 export class MirrorSimClient implements SimClient {
   readonly traffic: TrafficMirror;
   readonly hello: Promise<Hello>;
@@ -226,6 +198,14 @@ export class MirrorSimClient implements SimClient {
   private readonly seqs = new Seqs();
   private last: Snapshot | null = null;
   private dt = 0;
+  // the snapshots not yet drawn past, oldest first (one per tick); the one drawn and how far into its tick; the render
+  // clock (ticks; null until the first snapshot); the frames' own clock (s) and the leads seen on it
+  private readonly buffer: Snapshot[] = [];
+  private drawn: Snapshot | null = null;
+  private alpha = 0;
+  private at: number | null = null;
+  private clock = 0;
+  private readonly leads: [number, number][] = [];
   private events: SimEvent[] = [];
   private readonly reads = new SeatReads();
   private outcomes: CommandResult[] = [];
@@ -235,9 +215,8 @@ export class MirrorSimClient implements SimClient {
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
-   * mine: the client's own hello (sim/hello.ts hello: this code, the build the app loaded); edits: the client's live
-   * edits, the snapshots' edits put into them (a server that tracks the world's edits sends them: a worker's; one in
-   * this thread sends none, its client is handed the world's own) */
+   * mine: the client's own hello (this code, the build the app loaded); edits: the client's live edits, the snapshots'
+   * edits put into them */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
     readonly edits: LiveEdits = new LiveEdits()) {
     this.traffic = new TrafficMirror(data, ground);
@@ -264,8 +243,10 @@ export class MirrorSimClient implements SimClient {
 
   get player(): PlayerId | null { return this.last?.player.id ?? null; }
   get tick() { return this.last?.tick ?? 0; }
-  /** (the latest snapshot's tick and alpha: one update behind the frame with a worker, M4) */
-  get time(): FrameTime { return { dt: this.dt, tick: this.tick, alpha: (this.last?.acc ?? 0) / STEP }; }
+  /** the frame's time: the tick drawn and how far into it */
+  get time(): FrameTime { return { dt: this.dt, tick: this.drawn?.tick ?? 0, alpha: this.alpha }; }
+  /** how far the render clock is behind the newest snapshot (ticks), for the tools */
+  get lead() { return this.last && this.at !== null ? this.last.tick - this.at : 0; }
   get timeOfDay(): TimeOfDay | null { return this.last && { hour: this.last.hour, day: this.last.day }; }
 
   send(cmd: SimCommand) { if (!this.refused) this.queue.push(this.seqs.stamp(cmd, this.tick)); }
@@ -283,16 +264,56 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     const q = this.queue;
     this.queue = [];
+    if (q.length) this.link.send(q);
     this.dt = Math.min(dt, 0.1);
-    this.link.frame(dt, q);
+    this.advance(this.dt);
+  }
+
+  // the render clock moved on by the frame's dt, and the snapshot it is in drawn
+  private advance(dt: number) {
+    const B = this.buffer;
+    if (!B.length) return;
+    const newest = B[B.length - 1].tick;
+    this.clock += dt;
+    if (this.at === null || newest - this.at > RESYNC) { this.at = newest - START; this.leads.length = 0; }
+    else {
+      const L = this.leads;
+      while (L.length && L[0][0] < this.clock - WINDOW) L.shift();
+      let least = Infinity;
+      for (const [, l] of L) least = Math.min(least, l);
+      const off = least === Infinity ? 0 : least < LEAD_LO ? least - LEAD_LO : least > LEAD_HI ? least - LEAD_HI : 0;
+      const pace = off * (off < 0 ? SLOWER : FASTER) + Math.sign(off) * Math.max(0, Math.abs(off) - 0.5) * FAR;
+      this.at += (dt / STEP) * (1 + Math.max(-SLEW, Math.min(SLEW, pace)));
+    }
+    this.leads.push([this.clock, newest - this.at]);
+    // (nothing newer to draw: held at the newest)
+    if (this.at > newest) this.at = newest;
+    let i = 0;
+    while (B[i].tick < this.at) i++;
+    if (i) B.splice(0, i);
+    const s = B[0];
+    this.alpha = Math.max(0, Math.min(1, this.at - (s.tick - 1)));
+    if (s !== this.drawn) this.draw(s);
+    this.traffic.acc = this.alpha * STEP;
+  }
+
+  // the snapshot drawn from now on: the traffic and the crafts' poses as they were in it
+  private draw(s: Snapshot) {
+    this.drawn = s;
+    this.traffic.apply(s);
+    for (const c of s.crafts) this.craftList.get(c.id)?.core.load(c.core);
   }
 
   private take(s: Snapshot) {
     if (this.refused) return;
     if (!this.greeted) { this.refuse(new Error('sim: host refused: a snapshot came before its hello')); return; }
     this.last = s;
+    const B = this.buffer;
+    // (a snapshot of a tick already held is the newer word on it)
+    if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
+    B.push(s);
+    if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.edits.set(e.tx, e.ty, e.node, e.region);
-    this.traffic.apply(s);
     this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
@@ -302,13 +323,13 @@ export class MirrorSimClient implements SimClient {
       if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
       this.outcomes.push(r);
     }
+    // (which crafts there are and who pilots them: at once; a new one's pose from here until a snapshot with it is drawn)
     const L = this.craftList, seen = new Set<CraftId>();
     for (const c of s.crafts) {
       let m = L.get(c.id);
-      if (!m) L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) });
+      if (!m) { L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) }); m.core.load(c.core); }
       m.pilot = c.pilot;
       m.placed = c.placed;
-      m.core.load(c.core);
       seen.add(c.id);
     }
     for (const id of L.keys()) if (!seen.has(id)) L.delete(id);
@@ -357,7 +378,7 @@ export class TrafficMirror {
   riders: Person[] = [];
   /** the middle of the sim's active circle (a new object whenever it moves) */
   active: { x: number; z: number } | null = null;
-  /** the time since the last tick (s, under STEP) */
+  /** how far into the tick drawn the render clock is (s, under STEP) */
   acc = 0;
   private t = 0;
   boats: BoatView | null = null;
@@ -392,7 +413,7 @@ export class TrafficMirror {
   /** the snapshot's agents in place of the last (one object per id) */
   apply(s: Snapshot) {
     const T = this;
-    T.acc = s.acc; T.t = s.t;
+    T.t = s.t;
     // (a new object only when it moves: the signal heads are placed again then)
     if (!s.active) T.active = null;
     else if (!T.active || T.active.x !== s.active.x || T.active.z !== s.active.z) T.active = s.active;

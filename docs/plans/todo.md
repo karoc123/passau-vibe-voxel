@@ -4,8 +4,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Step 1, the server's own clock:** the worker ticks on a timer; the client buffers snapshots and draws at server
-  time minus a delay (M4 in smooth-motion-and-lag.md); the worker is the default; `ThreadLink` goes.
 - **Step 2, two browsers:** a WebSocket host on Node (`ws`, added in this step); two players see each other.
 - **Steps 3–8** after that, in the order of target-architecture.md.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
@@ -42,6 +40,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
 - A fall over 80 m/s is slowed by the walk clamp; `walkAs` start height is unbounded.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
-- Rapier is bundled twice; the worker decodes nodes the page also decodes.
+- The worker decodes nodes the page also decodes.
+- The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
+  removes it. The world keeps ticking while the tab is hidden.
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Minimap: click for a waypoint, a full-screen map, other players on it.

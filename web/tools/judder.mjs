@@ -31,12 +31,28 @@ page.on('pageerror', (e) => errors.push(e.message));
 await page.addInitScript(() => {
   const real = window.requestAnimationFrame.bind(window);
   const R = window.__raf = { dts: null, i: 0, t: 0, lastReal: -1 };
+  const clock = new BroadcastChannel('judder-clock');
   window.requestAnimationFrame = (cb) => real((now) => {
-    if (!R.dts) { R.t = now; return cb(now); }
-    if (now !== R.lastReal) { R.lastReal = now; R.t += R.dts[R.i++ % R.dts.length]; }
+    if (!R.dts) { R.t = now; clock.postMessage(now + 1000 / 60 - 2); return cb(now); }
+    if (now !== R.lastReal) {
+      R.lastReal = now; R.t += R.dts[R.i++ % R.dts.length];
+      clock.postMessage(R.t + R.dts[R.i % R.dts.length] - 2);
+    }
     cb(R.t);
   });
 });
+// the sim worker's clock made to follow the synthetic one (the software renderer here draws far slower than the
+// timestamps say; the worker's own clock would run ahead of the frames): set to 2 ms before the next frame's time, as
+// a worker ticking in real time would have ticked by then
+page.on('worker', (w) => w.evaluate(() => {
+  const real = performance.now.bind(performance), clock = new BroadcastChannel('judder-clock');
+  let base = 0, first = null, t = null;
+  clock.onmessage = (e) => { if (first === null) { first = e.data; base = real(); } t = e.data; };
+  performance.now = () => (t === null ? real() : base + (t - first));
+  // (its timers short, so it ticks within a few real ms of each jump of the frames' clock, however fast they come)
+  const timeout = setTimeout.bind(self);
+  self.setTimeout = (f, d) => timeout(f, Math.min(d ?? 0, 2));
+}).catch(() => {}));
 await page.goto(`http://127.0.0.1:${PORT}/?cam=${craft?.cam ?? '1400,60,350,1460,10,420'}&crop=600&seed=7&res=0.5&shadow=0&ao=0&bloom=0&taa=0&refl=0${extra ? '&' + extra : ''}`);
 await page.waitForFunction(() => window.__life?.group.visible, null, { timeout: 240000 });
 await page.waitForTimeout(3000);
@@ -62,7 +78,7 @@ await page.evaluate(() => {
     const c = [...T.cars, ...T.detachedCars].find((q) => q.id === id), r = c && window.__life.drawn('car', id);
     if (!r) return;
     const d = c.detachedPose;
-    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, r.x, r.y, r.z, r.h, cam.position.x, cam.position.y, cam.position.z, S.driver().kmh, d.x, d.z]);
+    M.log.push([window.__raf.t, Math.min(dt, 0.1), S.tick, T.acc, r.x, r.y, r.z, r.h, cam.position.x, cam.position.y, cam.position.z, S.driver().kmh, d.x, d.z, S.lead]);
   };
 });
 } else {
@@ -87,8 +103,11 @@ await page.evaluate(() => {
   });
 }
 
+  await page.evaluate(() => { window.__raf.dts = [1000 / 60]; window.__raf.i = 0; });
+  // (the render clock settled first after the load's slow frames: steady pacing is measured, not its start)
+  await page.waitForFunction(() => window.__raf.i >= 1000 || (window.__raf.i >= 60 && window.__sim.lead < 0.8), null, { timeout: 600000, polling: 100 });
   for (const k of craft?.keys ?? ['KeyW']) await key('keydown', k);
-  await page.evaluate(() => { window.__raf.dts = [1000 / 60]; window.__m.log = []; });
+  await page.evaluate(() => { window.__m.log = []; });
   await page.waitForFunction(() => window.__m.log.length >= 200, null, { timeout: 600000, polling: 250 });
   await page.evaluate((dts) => { window.__raf.dts = dts; window.__raf.i = 0; window.__m.log = []; }, dts);
   // (a craft's speed is taken over +-0.1 s round each frame: that much more on each side)
@@ -156,7 +175,7 @@ function report(name, log) {
     const pred = v * (log[i][1] - log[i - 1][1]);
     sum += Math.abs(dA); max = Math.max(max, Math.abs(dA)); sumW += Math.abs(w); maxW = Math.max(maxW, Math.abs(w)); vsum += v; n++;
     sumPred += Math.abs(dA - pred);
-    rows.push({ i, dt: log[i][1] * 1000, tick: log[i][2], a: log[i][3] * 30, v, along: rel[i].along, dA, d, w, pred });
+    rows.push({ i, dt: log[i][1] * 1000, tick: log[i][2], a: log[i][3] * 30, lead: log[i][14], v, along: rel[i].along, dA, d, w, pred });
   }
   const v = vsum / n, back = rel.reduce((a, r) => a + r.along, 0) / rel.length;
   // on screen: the car's ground point shifts by dA along the road, seen from `back` behind and `up` above
@@ -167,8 +186,9 @@ function report(name, log) {
   console.log(`   minus v*(dt_i - dt_i-1) [one-frame-late camera model]: residual mean ${(100 * sumPred / n).toFixed(2)} cm`);
   console.log(`   drawn car in the world, step - v*dt: mean ${(100 * sumW / n).toFixed(2)} cm, max ${(100 * maxW).toFixed(2)} cm`);
   results.push({ what: 'car', name, J: max, E: maxW, v, vmin: 60 / 3.6 });
-  const k = Math.max(0, rows.findIndex((r, j) => j > 20 && r.dt > 1.5 * rows[j - 1].dt) - 3);
-  console.log(rows.slice(k, k + 9).map((r) => `   f${r.i} dt ${r.dt.toFixed(1)} tick ${r.tick} a ${r.a.toFixed(2)} along ${r.along.toFixed(3)} d ${(100 * r.dA).toFixed(1)}cm pred ${(100 * r.pred).toFixed(1)}cm step ${r.d.toFixed(3)} (v*dt ${(r.v * r.dt / 1000).toFixed(3)})`).join('\n'));
+  // (round the frame drawn least evenly)
+  const worst = rows.reduce((b, r, j) => (Math.abs(r.w) > Math.abs(rows[b].w) ? j : b), 0), k = Math.max(0, worst - 4);
+  console.log(rows.slice(k, k + 9).map((r) => `   f${r.i} dt ${r.dt.toFixed(1)} tick ${r.tick} a ${r.a.toFixed(2)} lead ${r.lead?.toFixed(2)} along ${r.along.toFixed(3)} d ${(100 * r.dA).toFixed(1)}cm pred ${(100 * r.pred).toFixed(1)}cm step ${r.d.toFixed(3)} (v*dt ${(r.v * r.dt / 1000).toFixed(3)})`).join('\n'));
 }
 
 // patterns (ms)

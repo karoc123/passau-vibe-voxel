@@ -61,6 +61,7 @@
 // usage (in web/): node tools/life-edit.mjs [-v] [dig|block|wreck|moto|transit|players|crafts|rates|left|events|sessions|keep ...]; prints one PASS line, or the failures and exit 1
 import fs from 'node:fs';
 import { DATA, load, nodeWorld, rawTile as raw, readMeta } from './real-city.mjs';
+import { sessionLink } from './lib.mjs';
 
 const argv = process.argv.slice(2), verbose = argv.includes('-v');
 const only = argv.filter((a) => !a.startsWith('-'));
@@ -791,16 +792,23 @@ async function craftRates() {
 }
 
 async function left() {
-  const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+  const { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
   const keeping = { radius: 300, after: 10 };
   const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
   const w = await craftWorld(plan, { ...DEFAULT_TUNING, presence: keeping });
   if (!w) return;
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
-  // (every frame through the client: player B's commands with it, the others' through their sessions on the server)
-  const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); } };
+  const link = sessionLink(server.connect('B'));
+  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
+  // (every frame: player B's commands through the client, the others' through their sessions on the server; the
+  // world's update, its snapshot to the client; the crafts' poses kept by tick, for the client's drawn tick)
+  const poses = new Map();
+  const near = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => {
+    look(sim, input); client.update(dt); server.update(dt); link.deliver();
+    poses.set(sim.tick, new Map([...sim.crafts.values()].map((c) => [c.id, { ...c.core.pose }])));
+    poses.delete(sim.tick - 10);
+  } };
   const away = { ...near, focus: { x: BRIDGE.x, z: BRIDGE.y } };
   Math.random = noRandom;
   try {
@@ -841,9 +849,10 @@ async function left() {
       refused.length === 1 && !refused[0].ok && heli.pilot === 'B', 'left: another player enters the empty helicopter (the client sees its seat); the first is refused it');
     const g = heli.core.pose.y;
     tick(2, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } }), near);
-    const p = heli.core.pose, q = client.craftOf().core.pose;
-    check(p.y > g + 5 && p.x === q.x && p.y === q.y && p.z === q.z && p.h === q.h,
-      `left: B flies it up (${(p.y - g).toFixed(1)} m); the client's copy is where the sim's is`);
+    client.update(0);
+    const p = poses.get(client.time.tick)?.get(heli.id), q = client.craftOf().core.pose;
+    check(heli.core.pose.y > g + 5 && p && p.x === q.x && p.y === q.y && p.z === q.z && p.h === q.h,
+      `left: B flies it up (${(heli.core.pose.y - g).toFixed(1)} m); the client's copy is where the sim's was in the tick it draws`);
     // the viewer's focus away: B in the helicopter keeps the car by it; once B has left it too, both go after the delay
     tick(keeping.after + 1, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 0, drive: 0, turn: 0, side: 0 } }), away);
     const kept = T.detachedCars.includes(car.c) && sim.crafts.has(heli.id);
@@ -863,15 +872,16 @@ async function left() {
 // 30 m over the street, its pilot B (through the client) cutting the throttle, falls and hits the ground (DroneEvent
 // impact); B reads them once (craftEvents) from the client as from the sim; C, entering it after B leaves, none of B's
 async function craftEvents() {
-  const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+  const { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
   const w = await craftWorld([['drone', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 30)]]);
   if (!w) return;
   // (B's client over its session; B2 a second session of B's, read here; C another player's)
   // (the host's tiles for the edits: every op touches node 0_0, each hold counted; SimServer's default mode, the sandbox)
   const holds = [], tiles = { nodes: () => [[0, 0]], ready: (nodes) => { holds.push(nodes.length); return Promise.resolve(() => {}); } };
   const { sim, crafts: [drone], tick } = w, server = new SimServer(sim, undefined, null, tiles), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
-  const client = new MirrorSimClient(new CloneLink(new ThreadLink(B)), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
-  const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); } };
+  const link = sessionLink(B);
+  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
+  const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); server.update(dt); link.deliver(); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;
   try {
@@ -947,14 +957,16 @@ async function sessions() {
   if (!w) return;
   const { sim, crafts: [da, db], tick } = w, server = new SimServer(sim);
   const sA = server.connect('A'), sB = server.connect('B'), A2 = server.connect('A');
-  // (a session's link that does not advance the world: the host does, once a frame, before the clients)
-  const follow = (session) => ({ onHello: () => {}, onSnapshot: () => {}, greeted: false,
-    frame(dt, commands) { if (!this.greeted) { this.greeted = true; this.onHello(session.hello); } for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
-    close: () => session.leave() });
-  const traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
-  const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null, mineFor(sim));
-  let clients = [ca, cb];
-  const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); server.update(dt); for (const c of clients) c.update(dt); } };
+  // (the host advances the world once a frame and each session's snapshot goes to its client; then the clients' frames,
+  // their commands for the next)
+  const la = sessionLink(sA), lb = sessionLink(sB), traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
+  const ca = new MirrorSimClient(new CloneLink(la), traffic(), null, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(lb), traffic(), null, mineFor(sim));
+  let clients = [[ca, la], [cb, lb]];
+  const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => {
+    look(sim, input); server.update(dt);
+    for (const [, l] of clients) l.deliver();
+    for (const [c] of clients) c.update(dt);
+  } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }, of = (d) => (e) => e.kind === 'craft' && e.entity.id === d.id;
   Math.random = noRandom;
   try {
@@ -997,7 +1009,7 @@ async function sessions() {
     tick(2 * STEP, null, frame);
     const kept = sim.seat('A')?.entity.id === da.id && sim.players.has('A');
     sA.leave();
-    clients = [cb];
+    clients = [[cb, lb]];
     tick(2 * STEP, null, frame);
     const freed = sim.seat('A') === null && da.pilot === null && sim.crafts.has(da.id) && !sim.players.has('A');
     cb.send({ kind: 'enterSeat', entity: { kind: 'craft', id: da.id }, role: 'pilot' });

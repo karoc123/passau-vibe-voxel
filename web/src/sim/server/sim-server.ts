@@ -2,9 +2,8 @@
 // (sim/mode.ts; by default the sandbox, sim/modes/sandbox.ts) and given to it, and the connections to it: one Session
 // each (docs/adr/0009-layers-and-owners.md). An edit is a player's command like the others, held here until the
 // level-1 nodes it touches are in the world's TileCache (EditTiles: core/world-edits.ts ready), then sent on to the
-// sim, which applies it in its next tick if the mode allows it (WorldSim.apply, mayEdit). Run in the page's
-// thread (MirrorSimClient over a ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no
-// DOM (tools/core-deps.mjs).
+// sim, which applies it in its next tick if the mode allows it (WorldSim.apply, mayEdit). Run in a Web Worker on its
+// own clock, or by a Node tool. No three.js, no DOM (tools/core-deps.mjs).
 //   SimServer  the world's: hello (what each session is told first: sim/contract/hello.ts; the protocol, the data build
 //              the host loaded, the tuning's hash); connect(player) a session for a player the host names (or a new id); update (the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots); dispose (its

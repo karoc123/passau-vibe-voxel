@@ -151,16 +151,14 @@ in the tick.
 | `sim/edit-keeper.ts` `Presence`, `EditKeeper` | Stay; become the store of kept things per cell, with a file behind it. |
 | Parked-car cap 8/24 in `traffic.ts` | Goes; presence decides. |
 | `sim/server/snapshot.ts` | Changes: filtered by the session's cells, agents at 10 Hz. |
-| `client/sim-client.ts` `TrafficMirror` | Stays (the client's path maths). Gains a snapshot buffer and a render clock. |
-| `ThreadLink`, `link.frame(dt)` | Go. The server ticks itself; solo play runs it in a Web Worker. |
+| `client/sim-client.ts` `TrafficMirror` | Stays (the client's path maths). |
 | `host/sim.worker.ts` `handle` | Stays; the WebSocket entry calls the same handler. |
 | `sim/mode.ts`, `sim/entities.ts`, seats | Stay as they are. No extension until a game needs one. |
 | `core/`, tiles, mesher, `view/`, `nav/` | Unchanged. |
 
 ### The path, each step playable
 
-1. **The server's own clock.** The worker ticks on a timer. The client buffers snapshots and draws at server time
-   minus a delay (M4 of `smooth-motion-and-lag.md`). The worker becomes the default; `ThreadLink` is deleted.
+1. **The server's own clock.** Landed 2026-11-26.
 2. **Two browsers.** `host/ws.ts` on Node with a WebSocket link; everyone gets the full snapshot at 10–15 Hz. Two
    players see each other's vehicles. This is the first real test of every abstraction built since ADR 0006. New
    dependency: `ws` (MIT, npm, by the websockets organisation), approved; added in this step.
@@ -214,8 +212,7 @@ questions in `FRAGEN.md`. ADRs 0006–0009 are merged into one after step 2.
 
 | Item | Reason | Risk |
 |---|---|---|
-| `ThreadLink`, `pageEdits`' two cases, `link.frame(dt)` | A second way to run the sim that no server can use. | Medium. Needs step 1 first, or motion gets worse. |
-| `CloneLink`, `plainData`, `tools/mirror-check.mjs`, `mirror-golden.json` | They prove data survives a clone and matches a deleted path. A real worker and a two-client smoke test prove more. | Low after step 2. |
+| `CloneLink`, `plainData`, `tools/mirror-check.mjs` | They prove data survives a clone and matches a deleted path. A real worker and a two-client smoke test prove more. | Low after step 2. |
 | Bit-exact determinism in `tools/life-edit.mjs` (1004 lines), rule R3 in `core-deps.mjs`, the replay claims in ADR 0007 | No consumer. Seeded randomness stays; it is cheap. | Low. Prediction tolerates small differences. |
 | `core-deps.mjs` rules R2, R4, R5 and the baseline ratchet | Eight layers and five rules for 25 000 lines. Two rules suffice: the headless folders import no three.js or DOM; `client/`, `view/`, `nav/` import no domain or server. | Low. |
 | `OBSERVER_VIEW` in `app/session.ts` | A switch kept for a question now answered (decision 5). | None. |

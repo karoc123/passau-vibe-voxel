@@ -1,7 +1,7 @@
 # Smooth motion and lag: render clock and input commands
 
 The rest of the plan (frame order, one tick loop, crafts interpolated) landed; its research is in `git log` of this
-file. These two packages are part of target step 1 (the server's own clock). Owner questions on tick rate and car
+file. M4 (render clock and snapshot buffer) landed with target step 1; M5 is left. Owner questions on tick rate and car
 prediction are in `FRAGEN.md`.
 
 ## Clocks
@@ -14,16 +14,6 @@ prediction are in `FRAGEN.md`.
 
 A frame fixes these once and every reader gets the same values. In solo play (worker on the same machine) the delay
 is small but not zero; the code path is the same as over a network.
-
-## M4. Render clock and snapshot buffer
-
-- **Why:** the page draws the latest snapshot as it arrives, so uneven arrival shows as judder ("set back, then jumps
-  forward"), worse with speed. A server on its own clock makes this the normal case.
-- **Do:** the mirror client keeps a ring of snapshots by tick and a render clock advanced by the frame's `dt`; the
-  traffic mirror samples between two snapshots instead of applying the latest. A seeded link wrapper (delay, jitter,
-  loss, burst) tests the buffer without a network.
-- **Done when:** `judder.mjs` by default and with the worker: E ≤ 0.5 cm in every pacing pattern; with 50 ± 20 ms and
-  2 % loss: E ≤ 1 cm for followed traffic, no frame without motion. The owner drives once at speed.
 
 ## M5. Input commands: tick, ack, buffer
 

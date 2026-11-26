@@ -48,7 +48,9 @@ export class DriveMode implements PlayerCraft {
   private readonly help: HTMLDivElement;
   private pending: Ride | null = null;
   private driving: Ride | null = null;
-  private claimTick: number | null = null;
+  // the wheel taken (its answer came back): from then on, no car of the player's means the car was lost. Not the tick
+  // the claim was sent at: the server ticks on its own clock, and a snapshot of a later tick may still predate the claim
+  private taken = false;
   // the wheel refused while the host's road physics loads: asked for again at this time (performance.now)
   private retryAt: number | null = null;
   private snapshot: DriverSnapshot | null = null;
@@ -86,11 +88,12 @@ export class DriveMode implements PlayerCraft {
       // road physics loads: asked for again; its load failed: told)
       const results = this.world.results('enterSeat', 'driver'), now = performance.now();
       const refused = results.find((r) => !r.ok && r.reason !== 'loading');
-      if (!refused && results.some((r) => !r.ok)) { this.claimTick = null; this.retryAt = now + RETRY_MS; }
+      if (!refused && results.some((r) => !r.ok)) this.retryAt = now + RETRY_MS;
+      if (results.some((r) => r.ok)) this.taken = true;
       if (this.retryAt !== null && now >= this.retryAt) this.claim(this.world, this.driving);
       this.snapshot = this.world.driver();
       if (refused?.reason === 'failed') this.panel.say('Road physics could not load', 1800);
-      if (refused || (!this.snapshot && this.claimTick !== null && this.world.tick > this.claimTick)) this.nav.leaveCraft();
+      if (refused || (!this.snapshot && this.taken)) this.nav.leaveCraft();
       else if (this.retryAt === null) {
         const focused = inFocus();
         this.world.send({ kind: 'seatInput', role: 'driver', input: focused ? this.input() : PARK });
@@ -156,7 +159,7 @@ export class DriveMode implements PlayerCraft {
   private claim(world: SimClient, ride: Ride) {
     world.send({ kind: 'enterSeat', entity: { kind: 'car', id: ride.ref.id }, role: 'driver',
       choice: this.choice === 'any' ? undefined : this.choice });
-    this.claimTick = world.tick;
+    this.taken = false;
     this.retryAt = null;
   }
 
@@ -166,7 +169,7 @@ export class DriveMode implements PlayerCraft {
     this.world?.send({ kind: 'leaveSeat' });
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
-    this.claimTick = null;
+    this.taken = false;
     this.retryAt = null;
     this.snapshot = null;
     this.keys.clear();

@@ -1,9 +1,6 @@
 // The viewer's one TileCache (core/tile-cache.ts) over data/tiles/, seen through the page's live edits (its client's,
-// SimClient.edits: the world's own when the sim runs in the page's thread): the crafts' collisions (nav/, sim/craft/),
-// the car's Rapier terrain (physics/rapier/life-phys.ts), the world's edits and the streamer's files again share each
-// node's fetch and decode. The page's host gets it as its tile port (app/session.ts, host/browser.ts browserPorts); a
-// Web Worker running the sim (host/sim.worker.ts) makes its own (host/browser.ts tileCacheAt, the same over the data's
-// base URL).
+// SimClient.edits): the crafts' collisions and the streamer's files share each node's fetch and decode. The Web Worker
+// running the sim makes its own.
 import type { LiveEdits } from './core/live-edits';
 import { TileCache } from './core/tile-cache';
 import { dataUrl, HOST_FILES } from './core/data-contract';

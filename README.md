@@ -357,8 +357,7 @@ exit code 1 on a failure. `--list` shows every gate, its set and the files it gu
 `scripts/check.sh` (`--fixture` adds `check.py verify` on the fixture map, minutes; some verify failures exist on main,
 so compare against main).
 
-Gotcha: `mirror-check`'s golden (`tools/mirror-golden.json`) is of one data build; after a data rebuild check the page,
-then `node tools/mirror-check.mjs --write-golden`. Building ids are 16-bit end to end: the map's stay below 60000
+Gotcha: building ids are 16-bit end to end: the map's stay below 60000
 (`scripts/zones.py` fails there), 60000-65535 are reserved for players' builds.
 
 Not gates: `remesh-bench`, `mesh-profile`, `life-phys`, `life-phys-scan` (where the traffic's paths leave no room for a
@@ -429,10 +428,10 @@ another). Driving into the river ends in a splash and a restart a little way bac
 (no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
 on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
 (`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded by the host
-in the background at its start (in the page's thread ~1.5 s on, when the page is idle: `host/browser.ts`); the wheel
+in the background at its start (in the sim's Web Worker); the wheel
 asked for before that is refused as loading and `drive.ts` asks again. Rapier is the only car physics. The mode's
 panel and input are `web/src/nav/drive.ts`; it sends the local player's commands to the world sim
-(`web/src/sim/world-sim.ts`, which `main.ts` creates and ticks). The shared road world resolves player commands and contacts, and
+(`web/src/sim/world-sim.ts`, which ticks on its own clock in a Web Worker). The shared road world resolves player commands and contacts, and
 `physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless
 in `tools/rapier-car.mjs` (`drive_*`).
 
