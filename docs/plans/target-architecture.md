@@ -3,10 +3,18 @@
 Status: accepted by the owner (2026-11-26, section 6); steps 1 to 4 landed. Facts are marked by their source
 (code path or URL); everything under "Judgement" is mine.
 
-Goal (owner): a Raspberry Pi 5 hosts 10–50 players (ADR 0008) on a map of several km² that keeps growing. Not
-measured now (no Pi); the design must make cost depend on players and what they see.
+Goal (owner, revised 2026-11-26 after concepts-and-scale.md): 3–8 players at once is normal, 16 in a round, 50 is
+a stress test, on a map of several km² that keeps growing. The owner provides the hosts; a Raspberry Pi 5 is a wish,
+measured when one is at hand. The design must make cost depend on players and what they see. Over its tick the host
+gives way in this order: ambient people, then cars, then the send rate of others' agents; never the player's own
+vehicle, never slow motion.
 
 ## 0. The game (owner, 2026-11-26; a direction, not a spec)
+
+Open again (owner, 2026-11-26, after concepts-and-scale.md): the genre, the round's length and whether players
+shoot each other are not decided; the lines below are the leading idea, not the plan. Decided: a lobby later, so a
+group starts together; the game need not be fun alone; the phone need not be equal in every mode; other cities get
+no work now (split where it falls out anyway; the next is likely another Bavarian one).
 
 - **Round-based co-op survival shooter in a living city** (in the spirit of PUBG, Rust, DayZ). Fun for three first;
   PvP between squads later, in the same structure.
@@ -20,8 +28,9 @@ measured now (no Pi); the design must make cost depend on players and what they 
 - **Vehicles stand in the world and are found;** spawning one on demand is a sandbox/debug tool only.
 - **Changes:** one edit mechanism, two targets. In a round, an overlay that dies with the round (destruction makes
   holes; no structural collapse). In the creative mode (free movement), changes are written into the map; that is
-  how Passau will be maintained, the import pipeline then only makes new maps.
-- **Fun beats realism.** The phone stays a full client (touch, aim assist).
+  how Passau will be maintained, the import pipeline then only makes new maps. Only the owner's team writes into
+  the map, never in a deployed build; that needs a concept of its own first.
+- **Fun beats realism.** The phone stays a client (touch, aim assist), not necessarily equal in every mode.
 - **Later ideas, not goals now:** a simple slot inventory, loot by building type (needs building function in the
   data), enterable buildings (generated, then hand-built for key places).
 - **Now:** multiplayer must work (steps 1 and 2 below) before any of the above.
