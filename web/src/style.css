@@ -239,6 +239,18 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
 @media (pointer: coarse) and (orientation: landscape) {
   #fire-button { width: 60px; height: 60px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
 }
+/* the next slot left of Fire, aim left of Jump (touch) */
+.arms-touch { display: none; position: fixed; z-index: 4; width: 48px; height: 48px; padding: 0; border: 1px solid rgba(255,255,255,.55);
+  border-radius: 50%; background: rgba(16,17,20,.4); color: #fff; font: 600 20px Inter, system-ui, sans-serif; touch-action: manipulation;
+  -webkit-user-select: none; user-select: none; }
+.arms-touch:active, .arms-touch.on { background: rgba(255,255,255,.28); border-color: #fff; }
+#slot-button { right: calc(98px + var(--sr)); bottom: calc(206px + var(--sb)); }
+#aim-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
+@media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch { display: grid; place-items: center; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
+  #aim-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
+}
 #hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
 #hud .hint:empty { display: none; }
 /* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */

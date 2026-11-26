@@ -29,7 +29,10 @@ export interface Fallen { person: number; col: string; bike: boolean }
  *   drive             what the driver of a car is to be told (life-phys.ts PlayerCar's note)
  *   shot              a player's weapon fired: from at to to, what stopped it there (hit: an entity, 'world' the
  *                     voxels, null nothing within its range)
- *   blast             an explosion of a player's weapon at at, radius r (m) */
+ *   launch            a player's weapon let go a projectile at at with velocity v (m/s): it flies as its weapon's
+ *                     package says until its blast
+ *   blast             an explosion of a player's weapon at at, radius r (m): the crater it leaves follows as an
+ *                     edit of the world's */
 export type SimEvent =
   | ({ tick: number; kind: 'struck'; pose: RoadPose; vx: number; vz: number } & Fallen)
   | { tick: number; kind: 'impact'; entity: EntityRef; by?: EntityRef; speed: number; at: Vec3 }
@@ -38,6 +41,7 @@ export type SimEvent =
   | ({ tick: number; kind: 'craft'; entity: EntityRef } & CraftEventOf)
   | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote }
   | { tick: number; kind: 'shot'; weapon: WeaponId; player: PlayerId; at: Vec3; to: Vec3; hit: EntityRef | 'world' | null }
+  | { tick: number; kind: 'launch'; weapon: WeaponId; player: PlayerId; at: Vec3; v: Vec3 }
   | { tick: number; kind: 'blast'; weapon: WeaponId; player: PlayerId; at: Vec3; r: number };
 
 /** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */

@@ -15,9 +15,10 @@
 // over the TileCache's files), instead of op upon op as here.
 // Pure data: no three.js, no DOM.
 import { EditableNode, opBounds, touchedNodes, type NodeColumns } from './columns';
-import { toCellOp, type Frame, type WorldOp } from './layers';
+import { cellToAbsZ, mapToGrid, toCellOp, type Frame, type WorldOp } from './layers';
 import { liveEdits, type LiveNode, type Region } from './live-edits';
 import type { TileCache } from './tile-cache';
+import type { Columns } from './tile-data';
 
 export type { WorldOp };
 export { liveEdits };
@@ -76,7 +77,10 @@ export function applyNow(op: WorldOp, region?: Region): [number, number][] {
     if (!v) continue;
     const e = new EditableNode(N, v.base as NodeColumns, tx, ty);
     e.apply(cell);
-    const enc = e.encode(), base = { ...v.base, ...enc };
+    // (the columns alone: a file's other sections, decodeTile's fields and extra, are no plain data to send a client,
+    // and the mesher reads them from the file)
+    const { fields: _f, extra: _x, ...cols } = v.base as Columns & { fields?: unknown; extra?: unknown };
+    const enc = e.encode(), base = { ...cols, ...enc };
     // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs; only what carves takes trees
     // and grass with it)
     let foliage: LiveNode['foliage'] = { ...v.foliage, ground: enc.ground };
@@ -100,6 +104,13 @@ export function apply(op: WorldOp, region?: Region): Promise<[number, number][]>
   });
   queue = run.catch(() => {});
   return run;
+}
+
+// A crater: the cells within r m (a multiple of 1/4) of the cell at map point (x, y, z) (y up) made air, in the
+// world's grid
+export function crater(x: number, y: number, z: number, r: number): WorldOp {
+  const { frame } = theWorld(), [col, row] = mapToGrid(frame, Math.floor(x), Math.floor(z));
+  return { kind: 'sphere', col, row, z: cellToAbsZ(frame, Math.floor(y)), r, colour: 0 };
 }
 
 // node (tx, ty) as its files again (its edits gone)

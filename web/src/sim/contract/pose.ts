@@ -3,7 +3,8 @@
 
 export interface Pose { x: number; y: number; z: number; h: number }
 /** where a player walking as a person puts them (their feet, their heading), and whether they walk: the walker's
- * input (contract/commands.ts SeatInput) */
-export interface WalkPose extends Pose { moving: boolean }
+ * input (contract/commands.ts SeatInput); arm: the weapon slot in their hand, the page's word (only drawn: the others
+ * see that gun on the avatar) */
+export interface WalkPose extends Pose { moving: boolean; arm?: number }
 
 export interface RoadPose extends Pose { pitch: number; roll: number }

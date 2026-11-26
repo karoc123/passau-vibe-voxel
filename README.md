@@ -525,10 +525,13 @@ following. W/S walk, A/D turn, Q/E look up and down, Shift runs and Space jumps;
 it back after a tab switch). On touch screens the left thumb walks, the right thumb looks and a pinch zooms.
 **Esc** releases the mouse and returns to the map.
 
-On foot you carry two weapon slots: **1** the machine gun, **2** (empty for now); 1/2 or the wheel switch (Ctrl+wheel
-zooms). The left button fires (held: about 10 shots a second), the right button aims (a narrower view). On a touch
-screen the Fire button above Jump fires while held. The host decides each shot from your eyes as it has them; the
-others nearby see its flash, tracer and sparks. Nothing breaks and nobody is hurt yet.
+On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch
+(Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
+the right button aims (a narrower view). On a touch screen the Fire button above Jump fires while held, the button left
+of it takes the next slot and the one left of Jump aims (tap again to stop). The host decides each shot and each
+grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and
+sparks, the grenade's arc and its blast. A grenade blows a crater of about 3 m into whatever it hits, the same for
+every player (also one who joins later) and kept until the host restarts. Nobody is hurt yet.
 
 ## Known limits
 

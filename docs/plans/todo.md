@@ -15,21 +15,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (the free camera is a presence).
 
-## Next: weapons (owner 2026-11-26): the grenade launcher
-
-- The core and the MG landed. Slot 2, a grenade launcher whose grenade blows a ~3 m crater (the same for all players,
-  kept until the host restarts; later it dies with the round; no collapse, no debris), 1 per 1.5 s, as a package:
-  `src/sim/weapons/launcher/` (with its `gate.mjs`, found by tools/gates.mjs), `src/view/weapons/launcher/`, one line
-  in each `index.ts`. The host decides flight and blast; others see the grenade in flight and the blast. Still to
-  build in the core: the edit path for damage (a blast's crater through the world's edits).
-- The weapon held in the hand is missing: first person sees no gun, others see none on the avatar. Each package
-  brings its model (the view side), the core only where it hangs.
-
 ## Later, in this order of likelihood
 
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
+- An edited node crosses the network host whole (its columns, base64 in JSON; ~1 MB a node, to every player): sending
+  the ops for the page to apply over its own node files would be far smaller.
 
 ## On hold until the game is decided (owner 2026-11-24)
 
