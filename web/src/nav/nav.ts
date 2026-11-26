@@ -8,6 +8,7 @@ import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
 import type { World } from '../core/world';
 import type { PlayerCraft } from './craft';
+import { Arms } from './arms';
 import { Foot, type Stick } from './foot';
 import { Glide } from './glide';
 import { gameKey, onFocusLoss } from './input';
@@ -21,7 +22,8 @@ import { HEAD } from './walk';
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
-//   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up
+//   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
+//          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
 //          drags to look (touch-sticks.ts, as the drive mode's); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
@@ -72,11 +74,12 @@ export class Nav {
   private walkPending = false;
   // the avatar asked for on foot (walkBody): for which session's player, where the walk put it last
   private body: { player: string | null; x: number; z: number } | null = null;
+  /** the weapons on foot */
+  readonly arms = new Arms();
   private hoverT = 0;
   private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
   private quietT = 0;
-  private wheelBack = 0;
-  private wheelBackT = 0;
+  private wheelT = 0;
   private walkStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
@@ -181,6 +184,7 @@ export class Nav {
         return;
       }
       if (this.craftView || this.driving) return;
+      if (this.onFoot && /^Digit\d$/.test(e.code)) { this.arms.select(+e.code.slice(5)); e.preventDefault(); return; }
       if (e.code === 'Space' && (this.onFoot || this.ride?.ref.kind === 'person')) { // following someone: become them, then jump
         if (this.onFoot) this.foot.jump();
         else this.rider.jumpAsked = true;
@@ -199,7 +203,7 @@ export class Nav {
       if (k) K.delete(k);
       if (this.orbit.turned && !K.turning) { this.orbit.turned = false; if (this.onMap) this.orbit.retarget(); }
     });
-    onFocusLoss(() => K.clear());
+    onFocusLoss(() => { K.clear(); this.arms.trigger = false; this.foot.aim = false; });
   }
 
   private requestMouse() {
@@ -220,7 +224,8 @@ export class Nav {
   }
 
   private lookWithMouse(e: MouseEvent) {
-    const scale = 0.0027;
+    // (aiming narrows the view: the mouse turns it as much on the screen)
+    const scale = 0.0027 * this.camera.fov / 65;
     this.look(e.movementX * scale, e.movementY * scale * 0.8);
   }
 
@@ -242,6 +247,16 @@ export class Nav {
     });
     document.addEventListener('pointerlockerror', () => {
       if (this.mouseLook && !this.mouseLook.locked) this.mouseLook = null;
+    });
+    // (mouse events, not pointer events: a second button pressed while one is held is no pointerdown)
+    dom.addEventListener('mousedown', (e) => {
+      if (!this.onFoot || document.pointerLockElement !== dom) return;
+      if (e.button === 0) this.arms.trigger = true;
+      else if (e.button === 2) this.foot.aim = true;
+    });
+    addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.arms.trigger = false;
+      else if (e.button === 2) this.foot.aim = false;
     });
     dom.addEventListener('mousemove', e => {
       if (this.onFoot && document.pointerLockElement === dom) this.lookWithMouse(e);
@@ -313,12 +328,9 @@ export class Nav {
     e.preventDefault();
     if (this.riding) { this.zoomRide(Math.exp(e.deltaY * 0.004)); return; }
     if (e.ctrlKey) { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
-    if (e.deltaY > 0) { // keep scrolling back and you rise to the bird's-eye view
-      const now = performance.now();
-      this.wheelBack = (now - this.wheelBackT < 600 ? this.wheelBack : 0) + e.deltaY;
-      this.wheelBackT = now;
-      if (this.wheelBack > 900) { this.wheelBack = 0; this.flyUp(); }
-    }
+    // (a trackpad sends a burst of small wheel events for one swipe: one slot each 200 ms)
+    const now = performance.now();
+    if (this.onFoot && e.deltaY && now - this.wheelT > 200) { this.wheelT = now; this.arms.cycle(Math.sign(e.deltaY)); }
   }
 
   // Ctrl+C over the map: what is under the mouse (or the middle of the view) as text to paste into a note or a
@@ -578,6 +590,9 @@ export class Nav {
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
+    // (after the walk's pose: the host fires from where it has just put the body)
+    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera);
+    else { this.arms.trigger = false; this.foot.aim = false; }
   }
 
   // On foot the player is a body the world knows (an avatar: the others see it walk), moved by this walk: put down

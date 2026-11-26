@@ -9,7 +9,8 @@ import type { Ride } from './nav';
 import { backOff, EYE } from './spots';
 import { STEP, walkStep } from './walk';
 
-const GRAV = 16, WALK_FOV = 65;
+// aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
+const GRAV = 16, WALK_FOV = 65, AIM_FOV = 32;
 
 /** the left touch stick on foot: [forward, right] in -1..1 */
 export type Stick = [number, number] | null;
@@ -21,6 +22,9 @@ export class Foot {
   pitch = 0;
   feet = 0;
   vy = 0;
+  /** the right mouse button held: the view narrowed */
+  aim = false;
+  private fovBack: number | null = null;
   /** at the eyes (EYE over the feet) */
   readonly pos = new THREE.Vector3();
 
@@ -42,6 +46,8 @@ export class Foot {
     this.yaw = Math.atan2(f.x, f.z);
     this.pitch = pitch;
     this.vy = 0;
+    this.aim = false;
+    this.fovBack = null;
     if (exact) {
       this.pos.set(t.x, 0, t.z);
       this.feet = w.support(t.x, t.z, t.y + 1.5);
@@ -81,7 +87,13 @@ export class Foot {
     }
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
-    this.glide.place(this.pos, q, WALK_FOV, false, dt);
+    let fov = WALK_FOV, settle = false;
+    if (this.aim) { this.fovBack ??= this.camera.fov; fov = AIM_FOV; settle = true; }
+    else if (this.fovBack !== null) {
+      fov = this.fovBack; settle = true;
+      if (Math.abs(this.camera.fov - fov) < 0.05) this.fovBack = null;
+    }
+    this.glide.place(this.pos, q, fov, settle, dt);
     const look = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
   }

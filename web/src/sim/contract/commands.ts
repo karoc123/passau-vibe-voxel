@@ -37,7 +37,10 @@ export type SimCommand = PlayerCommand;
  *                 sim/mode.ts). The host holds it until the level-1 nodes it touches are in (sim/server/sim-server.ts
  *                 EditTiles) and then sends it on: it is applied at the start of the next tick run after that, so a
  *                 tick or more after the commands sent with it. Its outcome (ref: the client's number for it; nodes:
- *                 the level-1 nodes it changed) goes to the session it came through */
+ *                 the level-1 nodes it changed) goes to the session it came through
+ *   fire          the weapon in slot fired once along h (heading) and pitch (up), from the player's eyes as the host has
+ *                 them; only on foot, at most at the weapon's rate (sim/weapons/weapon.ts Trigger): else ignored, with
+ *                 no outcome (a held trigger sends one ~10 times a second). What it hit is a shot event */
 export type PlayerCommand =
   | { kind: 'view'; view: View | null }
   | { kind: 'follow'; entity: EntityRef | null }
@@ -45,7 +48,8 @@ export type PlayerCommand =
   | ({ kind: 'seatInput'; seq?: number; tick?: number } & SeatInput)
   | { kind: 'leaveSeat' }
   | { kind: 'request'; request: ModeRequest }
-  | { kind: 'edit'; op: WorldOp; ref?: number };
+  | { kind: 'edit'; op: WorldOp; ref?: number }
+  | { kind: 'fire'; slot: number; h: number; pitch: number };
 
 /** where a player looks (map metres): focus, the middle of what is simulated round them (the active circle, the
  * presence that keeps edits and vehicles left); viewer, where they see from (the camera; y its height), what agents
@@ -59,7 +63,7 @@ type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: P
  * at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed; a
  * refusal's reason, when it is one a client may wait out (Refusal) */
 export interface CommandResult {
-  tick: number; kind: Exclude<PlayerCommand['kind'], 'request'> | ModeRequest['kind']; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
+  tick: number; kind: Exclude<PlayerCommand['kind'], 'request' | 'fire'> | ModeRequest['kind']; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
   reason?: Refusal;
 }
 

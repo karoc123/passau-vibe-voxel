@@ -52,11 +52,13 @@ import type { WalkPose } from './contract/pose';
 import { boundWalk } from './walk-bounds';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
+import { weaponIn } from './weapons';
+import { aimDir, EYE, Trigger, type Body, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
  * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
  * poses taken (the walk itself is the client's, sent as poses) */
-export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; walk?: Walk }
+export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; walk?: Walk; trigger?: Trigger }
 
 /** a walk's poses taken: the last (pose, at the sim's clock at), the one an update's poses are bounded against (the
  * last of an earlier update: from, fromAt), the one at the end of the tick before (prev: what is drawn from) and the
@@ -105,6 +107,8 @@ export class WorldSim {
   private clock = 0;
   private frameDt = 0;
   private phys: LifePhysics | null = null;
+  // what a shot flies through (setWorld)
+  private voxels: VoxelRay | null = null;
   private loading: Promise<LifePhysics> | null = null;
   // the last load of the road physics failed (a car's seat refused as 'failed' until one is in)
   private physFailed = false;
@@ -213,7 +217,8 @@ export class WorldSim {
   get ground() { return this.traffic.ground; }
 
   /** the world the agents stand on and the boats float on (world.ts World) */
-  setWorld(ground: Ground | null, water: WaterColumns | null = null) {
+  setWorld(ground: Ground | null, water: WaterColumns | null = null, voxels: VoxelRay | null = null) {
+    this.voxels = voxels;
     this.traffic.ground = ground;
     this.traffic.water = water;
   }
@@ -424,7 +429,51 @@ export class WorldSim {
         if (taken) taken(this.tick + 1, r); else this.outcomes.push({ at: this.tick + 1, player: p, r });
         break;
       }
+      case 'fire': this.fire(p, cmd.slot, cmd.h, cmd.pitch); break;
     }
+  }
+
+  // a shot from the eyes of the player on foot, where this sim has them (never the page's word for them), if their
+  // weapon in slot is ready
+  private fire(player: PlayerId, slot: number, h: number, pitch: number) {
+    const P = this.players.get(player) as PlayerState | undefined, s = P && this.seat(player), w = weaponIn(slot);
+    if (!P?.walk || s?.role !== 'walker' || !w || !Number.isFinite(h) || !Number.isFinite(pitch)) return;
+    if (!(P.trigger ??= new Trigger()).pull(w, this.clock)) return;
+    const f = P.walk.pose, from = { x: f.x, y: f.y + EYE, z: f.z };
+    const shot = w.fire(this.shotWorld(s.entity), from, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
+    this.due.push({ kind: 'shot', weapon: w.id, player, ...shot });
+  }
+
+  // the voxels and the bodies a shot of the player on `own` meets (their own body left out)
+  private shotWorld(own: EntityRef): ShotWorld {
+    const T = this.traffic, sim = this;
+    return {
+      voxels: this.voxels,
+      *bodies(): Generator<Body> {
+        const at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, pt = { x: 0, y: 0, z: 0 };
+        const mine = (kind: EntityRef['kind'], id: number) => own.kind === kind && own.id === id;
+        for (const list of [T.cars, T.detachedCars]) for (const c of list) {
+          if (mine('car', c.id)) continue;
+          const d = c.detachedPose;
+          if (d) Object.assign(at, d); else T.carPose(c, c.s, c.off, at);
+          yield { entity: { kind: 'car', id: c.id }, x: at.x, y: at.y, z: at.z, h: at.h, r: 0.9, l: c.bus ? 6 : 2.2, ht: c.bus ? 3 : 1.5 };
+        }
+        for (const list of [T.people, T.riders]) for (const p of list) {
+          if (mine('person', p.id)) continue;
+          const w = sim.walkedPose(p.id), q = w ? null : T.personPoint(p, 0, pt);
+          // (personPoint: x, z on the map as x, y; the height as z)
+          yield { entity: { kind: 'person', id: p.id }, x: w?.x ?? q!.x, y: w?.y ?? q!.z, z: w?.z ?? q!.y, h: 0, r: 0.3, l: p.bike ? 0.9 : 0.3, ht: 1.8 };
+        }
+        for (const [id, by] of sim.avatars) {
+          const w = sim.players.get(by)?.walk?.pose;
+          if (w && !mine('avatar', id)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: 0.3, l: 0.3, ht: 1.8 };
+        }
+        for (const c of sim.crafts.values()) {
+          const p = c.core.pose;
+          if (c.placed && !mine('craft', c.id)) yield { entity: { kind: 'craft', id: c.id }, x: p.x, y: p.y - 1, z: p.z, h: p.h, r: 1.5, l: 3, ht: 2 };
+        }
+      },
+    };
   }
 
   // (produced by the tick being run, as its events)

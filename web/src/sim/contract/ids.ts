@@ -8,6 +8,9 @@ export type PlayerId = string;
 
 export type CraftId = number;
 
+/** a weapon (sim/weapons/index.ts WEAPONS: its package's id) */
+export type WeaponId = string;
+
 /** what an entity is; numbered per kind. An avatar is a player's own body on foot (never one of the crowd): made by
  * the game mode on a walk request, gone when its walker leaves it */
 export type EntityKind = 'car' | 'person' | 'craft' | 'avatar';

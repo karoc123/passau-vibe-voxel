@@ -40,6 +40,8 @@ import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
+import { makeArmsHud, makeFireButton } from './ui/arms';
+import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
@@ -102,6 +104,7 @@ let world: World | null = null, labels: Labels | null = null, hud: Hud | null = 
 let minimap: Minimap | null = null;
 // the world sim's client (client/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
 // traffic is loaded (the crafts wait for it: simReady)
+let weapons: WeaponsView | null = null;
 let sim: SimClient | null = null, pageTime: PageTime | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
 let riverPoints: number[] | null = null;
@@ -154,6 +157,8 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 makeCredits();
 makeJumpButton(() => nav.jump());
+makeFireButton((down) => { nav.arms.trigger = down; });
+const armsHud = makeArmsHud();
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -367,6 +372,7 @@ async function boot() {
     sim = client;
     pageTime = new PageTime(client);
     life = nav.life = new StreetLife(scene, client);
+    nav.arms.view = weapons = new WeaponsView(scene, client);
     nav.sim = client;
     movingActors.add(life.group);
     hook('__life', life);
@@ -442,6 +448,7 @@ renderer.setAnimationLoop(frameLoop({
   poses: (_now, dt) => {
     if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
     craftsView?.update(sim, dt, daylight.night);
+    weapons?.update(dt);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
   cameras: (_now, dt) => {
@@ -452,6 +459,7 @@ renderer.setAnimationLoop(frameLoop({
     if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
+    armsHud.set(nav.arms.slot);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },

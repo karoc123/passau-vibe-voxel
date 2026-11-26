@@ -221,6 +221,24 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 @media (pointer: coarse) and (orientation: landscape) {
   #jump-button { width: 56px; height: 56px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
 }
+/* on foot: the crosshair at the middle, the weapon slots at the bottom; Fire (touch) above Jump */
+#arms { display: none; }
+body[data-mode=walk]:not(.noui) #arms { display: block; }
+#arms .crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 3; pointer-events: none;
+  background: linear-gradient(#fff, #fff) center / 2px 14px no-repeat, linear-gradient(#fff, #fff) center / 14px 2px no-repeat;
+  opacity: .8; mix-blend-mode: difference; }
+#arms .slots { position: fixed; left: 50%; bottom: calc(14px + var(--sb)); transform: translateX(-50%); z-index: 3; display: flex; gap: 6px;
+  pointer-events: none; font: 600 12px Inter, system-ui, sans-serif; color: #fff; }
+#arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }
+#arms .slots span.on { opacity: 1; background: rgba(16,17,20,.7); outline: 1px solid rgba(255,255,255,.7); }
+#fire-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; width: 68px; height: 68px; padding: 0;
+  border: 1px solid rgba(255,200,120,.7); border-radius: 50%; background: rgba(60,20,10,.45); color: #fff; font: 600 24px Inter, system-ui, sans-serif;
+  touch-action: none; -webkit-user-select: none; user-select: none; }
+#fire-button:active { background: rgba(255,160,80,.35); border-color: #fff; }
+@media (pointer: coarse) { body[data-mode=walk]:not(.noui) #fire-button { display: grid; place-items: center; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #fire-button { width: 60px; height: 60px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
+}
 #hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
 #hud .hint:empty { display: none; }
 /* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */

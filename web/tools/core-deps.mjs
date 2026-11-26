@@ -103,7 +103,8 @@ const weapons = path.join(src, 'sim', 'weapons'), WEAPON_REGISTRY = path.join(we
 const packageOf = (f) => { const r = path.relative(weapons, f).split(path.sep); return r.length > 1 && r[0] !== '..' ? r[0] : null; };
 const walk = (d, out) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(ts|tsx|mjs|js)$/.test(e.name)) out.push(f); } return out; };
 // the headless directories, whole, and the headless client (A4 moved it out of sim/)
-for (const d of ['core', 'sim', 'physics']) for (const f of walk(path.join(src, d), [])) queue.push([f, null]);
+// (a weapon package's gate.mjs is a node tool beside its code, not part of the app)
+for (const d of ['core', 'sim', 'physics']) for (const f of walk(path.join(src, d), [])) if (path.basename(f) !== 'gate.mjs') queue.push([f, null]);
 queue.push([path.join(src, 'client', 'sim-client.ts'), null]);
 // the one host's wiring (A12): headless, and its clock, log and loaders are ports (PORTS_ONLY below)
 queue.push([path.join(src, 'host', 'sim-host.ts'), null]);
@@ -151,7 +152,9 @@ for (const file of apps) {
 const LAYERS = [
   ['core/', 'data'],
   ['sim/contract/', 'contract'],
-  ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'], ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
+  ['sim/craft/', 'shared'], ['sim/path.ts', 'shared'],
+  ['sim/vehicles.ts', 'shared'], ['sim/river.ts', 'shared'],
+  ['sim/weapons/', 'shared'], // (fired by the host; their slots and pace are the page's too)
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
   ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
   ['sim/hello.ts', 'shared'], // (the hello: made by the host, checked by the client; A6)
