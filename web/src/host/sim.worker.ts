@@ -16,6 +16,7 @@ import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Session } from '../sim/server/sim-server';
 import type { BoatData } from '../sim/boat-traffic';
 import { STEP } from '../sim/road-net';
+import { Overload } from './overload';
 import { unpackTraffic } from '../sim/traffic-pack';
 import type { TrafficData } from '../sim/types';
 import { tileWorld } from '../core/tile-world';
@@ -56,7 +57,9 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   greet(s, post);
   post({ kind: 'ready' });
   for (const q of early.splice(0)) handle(s, q);
-  clock(() => step(s, post));
+  // (the page's own host sends to no one else: of the overload's steps only the crowd's)
+  const load = new Overload(server.sim.traffic, 1, Math.round(1 / STEP), STEP * 1000);
+  clock(() => load.tick(step(s, post)));
 }
 
 /** the host's clock: tick() each STEP when it is due (a timer to the next one), until the stop it returns */
@@ -80,10 +83,11 @@ export function handle(s: Session, m: ToWorker) {
   if (m.kind === 'commands') for (const c of m.commands) s.send(c);
 }
 
-/** one tick of the world, then the session's snapshot posted with the time both took */
+/** one tick of the world, then the session's snapshot posted with the time both took (returned) */
 export function step(s: Session, post: Post) {
   const t0 = performance.now();
   s.server.update(STEP);
-  const snapshot = s.snapshot();
-  post({ kind: 'snapshot', snapshot, ms: performance.now() - t0 });
+  const snapshot = s.snapshot(), ms = performance.now() - t0;
+  post({ kind: 'snapshot', snapshot, ms });
+  return ms;
 }
