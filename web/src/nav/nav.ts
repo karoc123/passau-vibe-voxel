@@ -19,8 +19,8 @@ import { EYE, findStreet, openSpot, walkNet } from './spots';
 import { stickAxis, TouchSticks } from './touch-sticks';
 import { HEAD } from './walk';
 
-// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
-// arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
+// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and
+// down, Shift faster; arrows forward, back, turn: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
@@ -94,7 +94,7 @@ export class Nav {
       world: () => this.world, hitAt: (cx, cy) => this.hitAt(cx, cy), flyTo: (v) => this.flyTo(v), land: (opts) => { this.setWalk(opts); },
     });
     dom.style.cursor = 'grab';
-    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world);
+    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world, (near) => this.life?.solids(near) ?? []);
     this.rider = new Rider({
       camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
       changed: (R) => this.onMode(this.mode, R),

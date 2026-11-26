@@ -7,7 +7,8 @@ import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';
 import type { Ride } from './nav';
 import { backOff, EYE } from './spots';
-import { STEP, walkStep } from './walk';
+import type { Solid } from '../sim/solids';
+import { footKeys, STEP, stride, walkFrame } from './walk';
 
 // aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
 const GRAV = 16, WALK_FOV = 65, AIM_FOV = 32;
@@ -16,7 +17,8 @@ const GRAV = 16, WALK_FOV = 65, AIM_FOV = 32;
 export type Stick = [number, number] | null;
 
 // On foot (nav.ts mode walk, and walking as the person followed): where the feet are, the steps (walk.ts, up kerbs
-// and stairs, sliding along walls), gravity and jumps, and the camera at the eyes. Nav feeds the input.
+// and stairs, sliding along walls and round the solid things near: solids), gravity and jumps, and the camera at the
+// eyes. Nav feeds the input.
 export class Foot {
   yaw = 0;
   pitch = 0;
@@ -29,7 +31,8 @@ export class Foot {
   readonly pos = new THREE.Vector3();
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls,
-    private readonly keys: MoveKeys, private readonly glide: Glide, private readonly world: () => World | null) {}
+    private readonly keys: MoveKeys, private readonly glide: Glide, private readonly world: () => World | null,
+    private readonly solids: (near: { x: number; z: number }) => readonly Solid[]) {}
 
   /** Space: a jump, at once if standing */
   jump() {
@@ -60,9 +63,10 @@ export class Foot {
     this.pos.y = this.feet + EYE;
   }
 
-  // one collision-checked horizontal step, sliding along walls; true if it moved
-  private stepBy(m: THREE.Vector3) {
-    return walkStep(this.world()!, this.pos, this.feet, m);
+  // pushed out of what moved into the walker, then one collision-checked horizontal step (none: null), sliding along
+  // walls and cars; true if it stepped
+  private stepBy(m: { x: number; z: number } | null) {
+    return walkFrame(this.world()!, this.pos, this.feet, m, this.solids(this.pos));
   }
 
   // on whatever is underfoot: up kerbs and stairs, off ledges, jumps
@@ -76,15 +80,15 @@ export class Foot {
     P.y = this.feet + EYE;
   }
 
-  // A/D/Q/E look, W/S walk (Shift runs), else the stick
+  // the arrows turn, Q/E look, W/S walk, A/D step sideways (Shift runs), else the stick
   updateWalk(dt: number, stick: Stick) {
-    const K = this.keys, tr = K.axis('tr', 'tl'), tp = K.axis('tu', 'td'), go = K.axis('f', 'b');
-    if (tr || tp) this.look(-tr * (K.shift ? 2.6 : 1.8) * dt, tp * dt);
-    if (go) this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 20 : 6) * dt));
+    const K = this.keys, { go, side, turn } = footKeys(K), tp = K.axis('tu', 'td');
+    if (turn || tp) this.look(-turn * (K.shift ? 2.6 : 1.8) * dt, tp * dt);
+    if (go || side) this.stepBy(stride(this.yaw, go, side, (K.shift ? 20 : 6) * dt));
     else if (stick) {
-      const [f, r] = stick, sx = Math.sin(this.yaw), sz = Math.cos(this.yaw);
-      this.stepBy(new THREE.Vector3(sx * f - sz * r, 0, sz * f + sx * r).multiplyScalar(6 * dt));
-    }
+      const [f, r] = stick;
+      this.stepBy({ x: (Math.sin(this.yaw) * f - Math.cos(this.yaw) * r) * 6 * dt, z: (Math.cos(this.yaw) * f + Math.sin(this.yaw) * r) * 6 * dt });
+    } else this.stepBy(null);
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
     let fov = WALK_FOV, settle = false;
@@ -111,14 +115,14 @@ export class Foot {
   }
 
   // walking as the person followed (the walk is the client's; where it puts them goes to the sim: ride.ts): W/S walk,
-  // A/D turn them, Q/E look; the ride camera at their eyes turns with them
+  // A/D step sideways, the arrows turn them, Q/E look; the ride camera at their eyes turns with them
   walkAs(R: Ride, dt: number): WalkPose {
-    const P = this.pos, K = this.keys, tp = K.axis('tu', 'td'), go = K.axis('f', 'b');
-    this.yaw -= K.axis('tr', 'tl') * (K.shift ? 2.6 : 1.8) * dt;
+    const P = this.pos, K = this.keys, tp = K.axis('tu', 'td'), { go, side, turn } = footKeys(K);
+    this.yaw -= turn * (K.shift ? 2.6 : 1.8) * dt;
     if (tp) R.dpitch = clamp(R.dpitch + tp * dt, -1.2, 1.2);
     this.yaw += R.dyaw;
     R.dyaw = 0;
-    const moving = !!go && this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 7 : 2.2) * dt));
+    const moving = this.stepBy(go || side ? stride(this.yaw, go, side, (K.shift ? 7 : 2.2) * dt) : null);
     this.stand(dt);
     return { x: P.x, y: this.feet, z: P.z, h: this.yaw, moving };
   }
