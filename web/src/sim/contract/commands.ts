@@ -56,10 +56,16 @@ export interface View { focus: { x: number; z: number }; viewer?: { x: number; z
 export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: PilotInput } | { role: 'walker'; input: WalkPose };
 
 /** what became of a command that can be refused (enterSeat, seatInput clamped, a request: by the request's kind, edit),
- * at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed */
+ * at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed; a
+ * refusal's reason, when it is one a client may wait out (Refusal) */
 export interface CommandResult {
   tick: number; kind: Exclude<PlayerCommand['kind'], 'request'> | ModeRequest['kind']; ok: boolean; role?: Role; ref?: number; nodes?: [number, number][];
+  reason?: Refusal;
 }
+
+/** why a car's seat was refused although it may be taken later: the host's road physics still loading (ask again), or
+ * its last load failed (the host tries again) */
+export type Refusal = 'loading' | 'failed';
 
 /** what a player asks of the rules (a request command; its outcome is a result of the request's kind; the game mode,
  * sim/mode.ts, grants or refuses it):

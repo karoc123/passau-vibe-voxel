@@ -4,8 +4,10 @@
 // at a viewer by the cathedral, the first following a car, the second a person; a snapshot per session per frame.
 // Run three times: twice driven directly (session.send, server.update, session.snapshot) and once through the Web
 // Worker's message handler (src/host/sim.worker.ts handle, its post a list), and every snapshot of every session must
-// be the same in all three (the worker's minus its time). Then the road physics loaded through the handler
-// (loadPhysics: the physics port, the tiles port; answered ok) and a few frames run with it.
+// be the same in all three (the worker's minus its time). Then the road physics, the host's to load (no client asks
+// for it): a car's seat asked for through the handler before it is in is refused as loading and starts its load (the
+// physics port, the tiles port); asked again once it is in, taken (the player's driver in the snapshot), and a few
+// frames run with it. A host started eager has it in without anyone asking.
 // Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a MirrorSimClient over each transport (in-thread
 // ThreadLink; CloneLink(ThreadLink); WorkerLink, its Worker a stand-in whose messages go
 // through sim.worker.ts greet and handle) takes the host's hello when it matches its own, and refuses it (client.hello
@@ -74,16 +76,36 @@ async function worker() {
     out.push(hash(m.snapshot), hash(b.snapshot()));
     await tick();
   }
-  // the road physics through the handler: the physics port (Rapier), its terrain through the tiles port
+  // a car's seat before the road physics is in: refused as loading, its load started by the host (the physics port,
+  // Rapier; its terrain warmed round the car through the tiles port); once in, the seat asked again is taken
+  const car = server.sim.traffic.cars.find((c) => c.v > 1) ?? server.sim.traffic.cars[0];
+  const seat = { kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' };
+  const frame = (f, commands) => { setTime(server, f); handle(a, { kind: 'frame', dt: 1 / FPS, commands: [VIEW, ...commands] }, post); };
   const t0 = performance.now();
-  handle(a, { kind: 'loadPhysics', id: 7, warm: focus }, post);
-  for (let i = 0; i < 6000 && !posted.length; i++) await tick();
-  const ph = posted.pop();
-  if (ph?.kind !== 'physics' || ph.id !== 7 || !ph.ok) throw new Error(`loadPhysics: ${JSON.stringify(ph)}`);
+  let f = FRAMES;
+  frame(f++, [seat]);
+  const early = [];
+  for (let i = 0; i < 3; i++) { frame(f++, []); early.push(...posted.splice(0).flatMap((m) => m.snapshot.player.results)); }
+  if (early.length !== 1 || early[0].ok || early[0].reason !== 'loading' || server.sim.physics) throw new Error(`a car's seat while the road physics loads: ${JSON.stringify(early)}`);
+  for (let i = 0; i < 6000 && !server.sim.physics; i++) await tick();
+  if (!server.sim.physics) throw new Error('the road physics not loaded after a car\'s seat was asked for');
   const loadMs = performance.now() - t0;
-  for (let f = FRAMES; f < FRAMES + FPS; f++) { setTime(server, f); handle(a, { kind: 'frame', dt: 1 / FPS, commands: [VIEW] }, post); await tick(); }
+  posted.length = 0;
+  frame(f++, [seat]);
+  for (let i = 1; i < FPS; i++) { frame(f++, []); await tick(); }
   if (posted.length !== FPS || posted.some((m) => m.kind !== 'snapshot')) throw new Error(`after the physics: ${posted.length} posts`);
-  return { out, server, loadMs, last: posted.at(-1).snapshot };
+  const taken = posted.flatMap((m) => m.snapshot.player.results), last = posted.at(-1).snapshot;
+  if (taken.length !== 1 || !taken[0].ok || last.player.seat?.role !== 'driver' || last.player.driver?.entityId !== car.id) throw new Error(`a car's seat once the road physics is in: ${JSON.stringify(taken)}, seat ${JSON.stringify(last.player.seat)}`);
+  return { out, server, loadMs, last };
+}
+
+// a host started eager (the page's: host/start.ts) has the road physics in without a seat asked for
+async function eager() {
+  const server = nodeHost(DATA, { seed: 3, world: null, eager: true, physics: { bodies: false } }, { ...data, traffic: structuredClone(raw) });
+  for (let i = 0; i < 6000 && !server.sim.physics; i++) await tick();
+  const ok = !!server.sim.physics;
+  server.dispose();
+  return ok;
 }
 
 // An edit through the command path (A9), on a host of its own with edits allowed (no bodies: nothing loads the road
@@ -144,6 +166,7 @@ if (listening() !== before) fail.push(`after dispose: ${listening() - before} li
 if (sim.physics) fail.push('after dispose: the road physics still attached');
 const ed = await edits();
 fail.push(...ed.out);
+if (!(await eager())) fail.push('an eager host: the road physics not loaded at its start');
 const diff = (x, y, what) => {
   const i = x.out.findIndex((h, k) => h !== y.out[k]);
   if (i >= 0) fail.push(`${what}: frame ${i >> 1} session ${i & 1 ? P2 : 'p1'} differs`);
@@ -164,7 +187,7 @@ const { hostStart } = await load('host/start.ts'), { goldenHour, dayOfDate } = a
   const want = { seed: 7, mode: 'x', edits: true, eager: true, physics: { bodies: false, near: 50, maxBodies: 9 }, time: { day: 172, hour: 13.5 } };
   if (JSON.stringify(s) !== JSON.stringify(want)) fail.push(`hostStart: ${JSON.stringify(s)}`);
   const d = hostStart('', now, () => 0.5), today = dayOfDate(2026, 10, 26);
-  if (d.seed !== 2 ** 31 || d.mode !== undefined || d.edits || !d.physics.bodies || d.time.day !== today || d.time.hour !== goldenHour(today, 2026)) fail.push(`hostStart defaults: ${JSON.stringify(d)}`);
+  if (d.seed !== 2 ** 31 || d.mode !== undefined || d.edits || !d.eager || !d.physics.bodies || d.time.day !== today || d.time.hour !== goldenHour(today, 2026)) fail.push(`hostStart defaults: ${JSON.stringify(d)}`);
 }
 
 // the hello, through every transport
@@ -227,5 +250,5 @@ for (const [tn, make] of Object.entries(transports)) {
 }
 if (verbose) console.log(`  ${T.cars.length} cars, ${T.people.length} people, tick ${r1.server.sim.tick}; road physics loaded in ${w.loadMs.toFixed(0)} ms`);
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL host-smoke: ${fail.length} problem(s)`); process.exit(1); }
-console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; the road physics loaded through it (${(w.loadMs / 1000).toFixed(1)} s); the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too; the road physics' too)`);
+console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; a car's seat refused while the host loads the road physics, taken once it is in (${(w.loadMs / 1000).toFixed(1)} s), an eager host's loaded at its start; the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too; the road physics' too)`);
 process.exit(0);

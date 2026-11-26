@@ -14,10 +14,8 @@ export type ToWorker =
   // (base: where the data is; query: the page's URL's search, which the host reads its start config from:
   // host/start.ts hostStart)
   | { kind: 'init'; base: string; query: string }
-  | { kind: 'frame'; dt: number; commands: SimCommand[] }
-  | { kind: 'loadPhysics'; id: number; warm?: { x: number; z: number } };
+  | { kind: 'frame'; dt: number; commands: SimCommand[] };
 export type FromWorker =
   | { kind: 'hello'; hello: Hello } // (first, once the session is connected: before ready and any snapshot)
   | { kind: 'ready' }
-  | { kind: 'snapshot'; snapshot: Snapshot; ms: number }
-  | { kind: 'physics'; id: number; ok: boolean; error?: string };
+  | { kind: 'snapshot'; snapshot: Snapshot; ms: number };

@@ -42,7 +42,7 @@ import { vehicleOf } from './vehicles';
 import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
-import type { CommandResult, CraftSpot, PlayerCommand, View } from './contract/commands';
+import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
 import { MAX_DT, type FrameTime } from './contract/inputs';
@@ -100,6 +100,8 @@ export class WorldSim {
   private frameDt = 0;
   private phys: LifePhysics | null = null;
   private loading: Promise<LifePhysics> | null = null;
+  // the last load of the road physics failed (a car's seat refused as 'failed' until one is in)
+  private physFailed = false;
   // dispose ran: a road physics still loading is let go once it is in, none loads again
   private disposed = false;
   private readonly keeper: EditKeeper;
@@ -121,7 +123,7 @@ export class WorldSim {
     addCraft: (type) => this.addCraft(type),
     placeCraft: (id, spot) => this.placeCraft(id, spot),
     removeCraft: (id) => this.removeCraft(id),
-    sit: (player, seat) => this.enterSeat(player, seat),
+    sit: (player, seat) => this.enterSeat(player, seat) === true,
     setTime: (hour, day) => this.setTime(hour, day),
     resetDriver: (player) => {
       if (this.seat(player)?.role !== 'driver' || !this.phys) return false;
@@ -202,7 +204,8 @@ export class WorldSim {
   edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
 
   /** the road physics loaded (once; again after a failure) and attached to the traffic; warm: where the terrain's
-   * colliders are wanted soon (a drive about to start) */
+   * colliders are wanted soon (a drive about to start). The host's to call (host/sim-host.ts: at its start, on an
+   * edit); a car's seat asked for before it is in starts it too (enterSeat) */
   async loadPhysics(warm?: { x: number; z: number }) {
     const load = this.opts.loadPhysics;
     if (!load) throw new Error('WorldSim: no physics loader');
@@ -210,9 +213,10 @@ export class WorldSim {
     this.loading ??= load(this.tuning).then((p) => {
       if (this.disposed) { p.dispose(); throw new Error('WorldSim: disposed'); }
       this.phys = p;
+      this.physFailed = false;
       this.traffic.bodies = p;
       return p;
-    }).catch((error) => { this.loading = null; throw error; });
+    }).catch((error) => { this.loading = null; this.physFailed = true; throw error; });
     const p = await this.loading;
     if (warm) await p.warmTerrain(warm);
     return p;
@@ -375,7 +379,11 @@ export class WorldSim {
     switch (cmd.kind) {
       case 'view': break; // (taken at the update's start: send)
       case 'follow': this.follow(p, cmd.entity); break;
-      case 'enterSeat': this.result(p, cmd.kind, this.enterSeat(p, cmd), cmd.role ?? this.entities.seat(cmd.entity)?.role); break;
+      case 'enterSeat': {
+        const r = this.enterSeat(p, cmd);
+        this.result(p, cmd.kind, r === true, cmd.role ?? this.entities.seat(cmd.entity)?.role, typeof r === 'string' ? r : undefined);
+        break;
+      }
       case 'seatInput': {
         if (this.seat(p)?.role !== cmd.role) break;
         if (cmd.seq !== undefined) taken?.(this.tick + 1);
@@ -400,9 +408,10 @@ export class WorldSim {
   }
 
   // (produced by the tick being run, as its events)
-  private result(player: PlayerId, kind: CommandResult['kind'], ok: boolean, role?: Role) {
+  private result(player: PlayerId, kind: CommandResult['kind'], ok: boolean, role?: Role, reason?: Refusal) {
     const r: CommandResult = { tick: this.tick, kind, ok };
     if (role) r.role = role;
+    if (reason) r.reason = reason;
     this.outcomes.push({ at: this.tick + 1, player, r });
   }
 
@@ -445,10 +454,11 @@ export class WorldSim {
 
   // a seat of entity (role, index: without, its first) taken, the one held left first; true: held now (also when it
   // was already); false: gone, no such seat, another's, not allowed (the mode's mayEnter, also when the mode seats the
-  // player itself: ModeWorld.sit), or the role's own refusal (a car: no road physics; a person: not in the crowd on
-  // foot). The walker's from pose (where they are drawn: kept within Tuning.walk.take of where the sim has them), the
-  // driver's as type choice (the car taken shows in driverSnapshot)
-  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }) {
+  // player itself: ModeWorld.sit), or the role's own refusal (a car: no road physics, a Refusal while it loads or after
+  // its load failed, the load started here with the terrain warmed round the car; a person: not in the crowd on foot).
+  // The walker's from pose (where they are drawn: kept within Tuning.walk.take of where the sim has them), the
+  // driver's as type choice (the car taken shows in driverSnapshot; the terrain round it warmed)
+  private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }): boolean | Refusal {
     const seat = this.entities.seat(cmd.entity, cmd.role, cmd.index);
     if (!seat) return false;
     const by = this.occupants.get(seatKey(seat));
@@ -467,8 +477,14 @@ export class WorldSim {
       this.player(player).walk = { pose: start, at: t, from: start, fromAt: t };
       this.held();
     } else if (seat.role === 'driver') {
-      const phys = this.phys;
-      if (!phys) return false;
+      const phys = this.phys, at = this.entities.pose(seat.entity), warm = at ? { x: at.x, z: at.z } : undefined;
+      if (!phys) {
+        if (!this.opts.loadPhysics || this.disposed) return false;
+        const failed = this.physFailed;
+        this.loadPhysics(warm).catch(() => {});
+        return failed ? 'failed' : 'loading';
+      }
+      if (warm) phys.warmTerrain(warm).catch(() => {});
       this.leaveSeat(player);
       if (!phys.takeWheel(this.traffic, player, id, cmd.choice)) return false;
       this.sit(player, seat);

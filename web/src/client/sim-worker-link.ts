@@ -18,8 +18,6 @@ export class WorkerLink implements SimLink {
   private busy = false;
   private dt = 0;
   private commands: SimCommand[] = [];
-  private nextId = 1;
-  private readonly physics = new Map<number, { done: () => void; fail: (e: unknown) => void }>();
   /** the worker's time for the last frames (update and snapshot, ms), for the tools */
   readonly times: number[] = [];
 
@@ -37,8 +35,6 @@ export class WorkerLink implements SimLink {
     if (this.closed) return;
     this.closed = true;
     this.worker.terminate();
-    for (const p of this.physics.values()) p.fail(new Error('sim worker closed'));
-    this.physics.clear();
   }
 
   frame(dt: number, commands: SimCommand[]) {
@@ -54,14 +50,6 @@ export class WorkerLink implements SimLink {
     this.commands = [];
   }
 
-  loadPhysics(warm?: { x: number; z: number }) {
-    const id = this.nextId++;
-    return new Promise<void>((done, fail) => {
-      this.physics.set(id, { done, fail });
-      this.post({ kind: 'loadPhysics', id, warm });
-    });
-  }
-
   private receive(m: FromWorker) {
     if (this.closed) return;
     if (m.kind === 'hello') this.onHello(m.hello);
@@ -72,10 +60,6 @@ export class WorkerLink implements SimLink {
       this.onSnapshot(m.snapshot);
       // (the frames sent meanwhile go at once: the next snapshot is not a page frame late)
       if (this.dt > 0) this.flush();
-    } else if (m.kind === 'physics') {
-      const p = this.physics.get(m.id);
-      this.physics.delete(m.id);
-      if (m.ok) p?.done(); else p?.fail(new Error(m.error));
     }
   }
 }

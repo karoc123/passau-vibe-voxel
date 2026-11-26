@@ -25,7 +25,7 @@
 //          with the car followed when the focus moves away; a walk pose 100 m off is taken clamped (Tuning.walk) and
 //          the walk told, a run's step from there is not; the seat taken and left as events (seated, unseated); let go,
 //          both leave with the circle. Over a hole the others fall and the one walked stands; two readers of the events
-//          (WorldSim.eventsSince) at different rates get the same ones, each with its tick. With the road physics: a car holds one driver (another's enterSeat refused);
+//          (WorldSim.eventsSince) at different rates get the same ones, each with its tick. A car's seat before the road physics is in refused as loading (its load started; one that fails: as failed), taken once it is in. With the road physics: a car holds one driver (another's enterSeat refused);
 //          the driver walking as a person leaves the wheel first, back at the wheel leaves the person; leaveSeat; a seat
 //          the game mode does not allow (WorldSim.mode: a test mode's mayEnter) refused.
 //   crafts two players, each the pilot of a craft of the world sim's (a boat, a helicopter; WorldSim addCraft,
@@ -556,19 +556,28 @@ async function players() {
   await driverSeat();
 }
 
-// The driver's seat in the seat table (with the road physics): one player a car, another's enterSeat refused; the
-// driver walking as a person leaves the wheel first (the car parked where it is), taking the wheel again leaves the
-// person; leaveSeat leaves whatever is held
+// The driver's seat in the seat table (with the road physics): asked for before the road physics is in, refused
+// ('loading', the load started by it: the host's), taken once it is in; a load that fails refused as 'failed'; one
+// player a car, another's enterSeat refused; the driver walking as a person leaves the wheel first (the car parked
+// where it is), taking the wheel again leaves the person; leaveSeat leaves whatever is held
 async function driverSeat() {
   const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, {}, { load: async (p) => raw(p) }, tuning.ride) });
-  const phys = await sim.loadPhysics(), T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
+  const T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
   const tick = (seconds) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) update(sim, STEP, { hour: HOUR, focus }); };
   const S = sessionsOf(sim, 'A', 'B');
+  let phys = null;
   Math.random = noRandom;
   try {
     tick(5);
     const c = T.cars.find((q) => q.v > 1 && !q.bus), p = T.people.find((q) => !q.wait);
     if (!check(c && p, 'seats: a moving car and a person near the bridge')) return;
+    S.A.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
+    tick(STEP);
+    const early = S.A.results('enterSeat', 'driver');
+    check(early.length === 1 && !early[0].ok && early[0].reason === 'loading' && sim.seat('A') === null && !sim.physics,
+      `seats: a car's seat asked for while the road physics is not in is refused as loading (${JSON.stringify(early)})`);
+    phys = await sim.loadPhysics();
+    await failedLoad();
     S.A.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
     S.B.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
     tick(STEP);
@@ -615,8 +624,24 @@ async function driverSeat() {
     results.players.seats = 'one';
   } finally {
     Math.random = realRandom;
-    phys.dispose();
+    phys?.dispose();
   }
+}
+
+// (a world sim whose road physics cannot load: a car's seat refused as loading, then as failed, the load tried again)
+async function failedLoad() {
+  let tries = 0;
+  const sim = new WorldSim(td, { seed: SEED, loadPhysics: () => { tries++; return Promise.reject(new Error('no road physics (test)')); } });
+  const focus = { x: BRIDGE.x, z: BRIDGE.y }, step = () => update(sim, STEP, { hour: HOUR, focus });
+  for (let i = 0; i < 10; i++) step();
+  const c = sim.traffic.cars[0], ask = () => { sim.send('A', { kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' }); step(); return sim.resultsSince('A', -1).at(-1); };
+  if (!check(c, 'seats: a car near the bridge (a road physics that cannot load)')) return;
+  const first = ask();
+  await new Promise((r) => setImmediate(r));
+  const then = ask();
+  await new Promise((r) => setImmediate(r));
+  check(first?.reason === 'loading' && then?.reason === 'failed' && !then.ok && tries === 2 && !sim.physics,
+    `seats: a road physics that cannot load: refused as loading, then as failed, tried again (${first?.reason}, ${then?.reason}, ${tries} load(s))`);
 }
 
 // Crafts in the world sim: a world sim with the crafts' collisions over the node files (their own TileCache, the clock
@@ -925,7 +950,7 @@ async function sessions() {
   // (a session's link that does not advance the world: the host does, once a frame, before the clients)
   const follow = (session) => ({ onHello: () => {}, onSnapshot: () => {}, greeted: false,
     frame(dt, commands) { if (!this.greeted) { this.greeted = true; this.onHello(session.hello); } for (const c of commands) session.send(c); this.onSnapshot(session.snapshot()); },
-    loadPhysics: () => Promise.resolve(), close: () => session.leave() });
+    close: () => session.leave() });
   const traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
   const ca = new MirrorSimClient(new CloneLink(follow(sA)), traffic(), null, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(follow(sB)), traffic(), null, mineFor(sim));
   let clients = [ca, cb];
