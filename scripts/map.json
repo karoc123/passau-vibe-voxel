@@ -32,7 +32,7 @@
   {"name": "Ilz: the loop below the Hals weir, along the weir", "box": [828940, 5391480, 828960, 5391520], "level": 295.85},
   {"name": "Ilz above the Hals weir", "box": [827900, 5391380, 828960, 5392600], "level": 301.4},
   {"name": "Ilz below Hals", "box": [828960, 5391150, 829250, 5392600], "level": 293.9},
-  {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9},
+  {"name": "Ilz above Ilzstadt", "box": [829000, 5390800, 829560, 5391150], "level": 292.9},
   {"name": "Inn above the Ingling dam (Kraftwerk Passau-Ingling, OSM way 273300967), west of the weir", "box": [826347, 5387000, 827200, 5387300], "level": 302.95},
   {"name": "Inn above the Ingling dam, along the weir", "box": [827200, 5387000, 827300, 5387300], "level": 302.95},
   {"name": "Inn above the Ingling dam, along the weir", "box": [827300, 5387000, 827400, 5387312], "level": 302.95},

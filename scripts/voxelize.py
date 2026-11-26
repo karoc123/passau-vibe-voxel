@@ -875,10 +875,11 @@ def ground_classes(ctx):
                 _m = _bl == i_
                 _gt = _glw[_m & (_glw >= 0)]
                 _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
-                # a river's body (its terrain within 0.8 m of its stretch's level) stands at the stretch's level, cell
+                # a river's body (its terrain within 1.5 m of its stretch's level) stands at the stretch's level, cell
                 # by cell: the median of the terrain model rounded per 64 m block, over water near x.5 m, put 1 m
-                # cliffs across open water on the blocks' lines (the Danube below the Kachlet, -1664, 763)
-                _river[i_] = not len(_gt) and abs(float(np.median(dtm[_ws][_m])) - float(np.median(_rl[_m]))) <= 0.8
+                # cliffs across open water on the blocks' lines (the Danube below the Kachlet, -1664, 763; the
+                # Racklau harbour, its terrain model 1.4 m over the Danube's level, -4000, -1020)
+                _river[i_] = not len(_gt) and abs(float(np.median(dtm[_ws][_m])) - float(np.median(_rl[_m]))) <= 1.5
             _lv = _lut[_bl[_bs]]
             _rv = _river[_bl[_bs]]
             _lv[_rv] = np.floor(_rl[_bs][_rv] - BASE + 0.5).astype(np.int32)
