@@ -10,7 +10,7 @@ import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
-import { stickAxis, TouchSticks } from './touch-sticks';
+import { TouchSticks } from '../touch/sticks';
 import './special-craft.css';
 
 // The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
@@ -208,16 +208,16 @@ class SpecialCraft implements PlayerCraft {
 
   private input(): CraftInput {
     const { keys, touch } = this, pad = gamepad();
-    const left = touch.left, right = touch.right;
+    const left = touch.axes('left'), right = touch.axes('right');
     return {
       drive: clamp(keys.any('KeyW', 'ArrowUp') - keys.any('KeyS', 'ArrowDown') - padAxis(pad?.axes[1]) +
-        (left ? stickAxis(left.dy, left.radius) : 0), -1, 1),
+        (left?.y ?? 0), -1, 1),
       turn: clamp(keys.any('KeyD', 'ArrowRight') - keys.any('KeyA', 'ArrowLeft') + padAxis(pad?.axes[0]) +
-        (left ? stickAxis(left.dx, left.radius) : 0), -1, 1),
+        (left?.x ?? 0), -1, 1),
       lift: clamp(keys.any('Space') - keys.any('ShiftLeft', 'ShiftRight') + (pad?.buttons[7]?.value ?? 0) -
-        (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right ? stickAxis(right.dy, right.radius) : 0), -1, 1),
+        (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right?.y ?? 0), -1, 1),
       side: clamp(keys.any('KeyE') - keys.any('KeyQ') + padAxis(pad?.axes[2]) +
-        (right ? stickAxis(right.dx, right.radius) : 0), -1, 1),
+        (right?.x ?? 0), -1, 1),
     };
   }
 

@@ -9,7 +9,7 @@ import { JET, PLANE, type PlaneConfig } from '../sim/craft/plane-flight';
 import type { PlaneInput } from '../sim/contract/inputs';
 import { PlaneModel } from './plane-model';
 import { JetModel } from './jet-model';
-import { stickAxis, TouchSticks } from './touch-sticks';
+import { TouchSticks } from '../touch/sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
@@ -377,9 +377,9 @@ export class PlaneMode implements PlayerCraft {
     // stick: flight convention, stick back (S, down, the touch stick pulled down, the pad's stick back) = nose up
     let turn = (has('KeyD', 'ArrowRight') ? 1 : 0) - (has('KeyA', 'ArrowLeft') ? 1 : 0);
     let back = (has('KeyS', 'ArrowDown') ? 1 : 0) - (has('KeyW', 'ArrowUp') ? 1 : 0);
-    const s = this.touch.left;
+    const s = this.touch.axes('left');
     if (s) {
-      const x = clamp(stickAxis(s.dx, s.radius), -1, 1), y = clamp(stickAxis(s.dy, s.radius), -1, 1);
+      const x = clamp(s.x, -1, 1), y = clamp(s.y, -1, 1);
       turn += Math.sign(x) * Math.abs(x) ** 1.5;
       back -= Math.sign(y) * Math.abs(y) ** 1.3;
     }

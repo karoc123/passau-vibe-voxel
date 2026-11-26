@@ -5,7 +5,7 @@ import type { SimClient } from '../client/sim-client';
 import { CRASH_MS, SINK_MS, type DriverSnapshot } from '../sim/contract/snapshot';
 import type { Nav, Ride } from './nav';
 import type { CraftContext, PlayerCraft } from './craft';
-import { stickAxis, TouchSticks } from './touch-sticks';
+import { TouchSticks } from '../touch/sticks';
 import { VEHICLE_IDS, VEHICLES, vehicleOf } from '../sim/vehicles';
 import type { VehicleId } from '../sim/contract/ids';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
@@ -187,9 +187,9 @@ export class DriveMode implements PlayerCraft {
     const pressed = (...codes: string[]) => this.keys.any(...codes);
     const pad = gamepad(), stick = padAxis(pad?.axes[0]);
     // the one touch stick: up gas, down brake (below ~0.8 m/s reverse, car.ts), sideways steer on a curve
-    const left = this.touch.left;
-    const pedal = left ? clamp(stickAxis(left.dy, left.radius), -1, 1) : 0;
-    const sx = left ? clamp(stickAxis(left.dx, left.radius), -1, 1) : 0;
+    const left = this.touch.axes('left');
+    const pedal = left ? clamp(left.y, -1, 1) : 0;
+    const sx = left ? clamp(left.x, -1, 1) : 0;
     const steering = Math.sign(sx) * Math.abs(sx) ** STEER_CURVE;
     const handbrake = this.handbrake.held;
     return {

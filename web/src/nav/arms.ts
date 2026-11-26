@@ -12,6 +12,8 @@ export class Arms {
   view: WeaponsView | null = null;
   // s until the weapon in hand may fire again
   private wait = 0;
+  // a tap asked for one shot: kept until the weapon may fire, so a tap during the wait still fires
+  private once = false;
 
   select(slot: number) {
     if (slot >= 1 && slot <= SLOTS) this.slot = slot;
@@ -22,12 +24,17 @@ export class Arms {
     this.slot = (((this.slot - 1 + step) % SLOTS) + SLOTS) % SLOTS + 1;
   }
 
-  /** on foot, each frame: a held trigger fires along h and pitch (the host's ray: from the player's eyes as it has
-   * them), its flash drawn from camera */
-  update(dt: number, sim: SimClient | null, h: number, pitch: number, camera: THREE.Camera) {
+  /** one shot, as soon as the weapon may fire */
+  pull() { this.once = true; }
+
+  /** on foot, each frame: a held trigger (the mouse's, or held: the touch's) fires along h and pitch (the host's ray:
+   * from the player's eyes as it has them), its flash drawn from camera */
+  update(dt: number, sim: SimClient | null, h: number, pitch: number, camera: THREE.Camera, held = false) {
     this.wait = Math.max(0, this.wait - dt);
     const w = weaponIn(this.slot);
-    if (!this.trigger || !w || !sim || this.wait > 0) return;
+    if (!w || !sim) { this.once = false; return; }
+    if (!(this.trigger || held || this.once) || this.wait > 0) return;
+    this.once = false;
     this.wait += 1 / w.rate;
     sim.send({ kind: 'fire', slot: this.slot, h, pitch });
     this.view?.fired(w.id, camera);

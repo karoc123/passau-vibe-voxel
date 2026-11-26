@@ -46,7 +46,7 @@ const GATES = [
   { name: 'tsc', cmd: [tsc, '--noEmit'], set: 'fast', secs: 0.7, guards: 'all of src/ and checks/ (types)', paths: [] },
   { name: 'knip', cmd: [path.join(web, 'node_modules/knip/bin/knip.js'), '--no-progress'], set: 'fast', secs: 3, wide: ['src/**', 'tools/**'], guards: 'no unused file, export or dependency in src/, checks/, tools/ and package.json (knip.config.js: the entries, the TS the tools load by name)', paths: ['src/**', 'checks/**', 'tools/**', 'knip.config.js'] },
   { name: 'gate-coverage', cmd: ['tools/gates.mjs', '--coverage'], set: 'fast', secs: 0.1, wide: ['src/**', 'tools/**'], guards: 'every file of src/ and tools/ in a gate\'s paths, CORE or UNGATED (this file)', paths: ['src/**', 'tools/**'] },
-  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, wide: ['src/**'], guards: 'src/core/, src/sim/ (with sim/craft/), src/physics/ and their imports: no three.js, no DOM, a weapon package (sim/weapons/<name>/) imported only by sim/weapons/index.ts; nothing in src/ imports checks/; all of src/: layer table, no value-import cycle, determinism words, window.__ hooks, sim/contract/ types only (a ratchet: BASELINE in the tool)', paths: ['src/**', 'tools/core-deps.mjs'] },
+  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, wide: ['src/**'], guards: 'src/core/, src/sim/ (with sim/craft/), src/physics/ and their imports: no three.js, no DOM, a weapon package (sim/weapons/<name>/) imported only by sim/weapons/index.ts; nothing in src/ imports checks/; all of src/: layer table, no value-import cycle, determinism words, window.__ hooks, sim/contract/ types only, touch read only in src/touch/ (a ratchet: BASELINE in the tool)', paths: ['src/**', 'tools/core-deps.mjs'] },
   { name: 'bld-ids', cmd: ['tools/bld-ids.mjs'], set: 'fast', secs: 0.4, guards: 'mesher.worker.ts greedy merge, building ids', paths: [...MESH, 'tools/bld-ids.mjs'] },
   { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)', paths: ['tools/layers.mjs'] },
   { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)', paths: [...DATA, 'tools/edit-roundtrip.mjs'] },
@@ -87,7 +87,7 @@ const CORE = ['src/core/**', 'src/sim/contract/**', 'src/fetch.ts', 'checks/chec
 // files of src/ and tools/ with no gate of their own, on purpose (tsc and core-deps still read all of src/): the
 // viewer's drawing, input and page (three.js and the DOM: tools/judder.mjs and shoot.mjs, run by hand) and the tools
 // run by hand
-const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs', 'tools/where.mjs',
+const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'src/touch/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs', 'tools/where.mjs',
   'tools/lamps.mjs', 'tools/life-phys.mjs', 'tools/life-phys-scan.mjs', 'tools/mesh-profile.mjs', 'tools/remesh-bench.mjs',
   'tools/rapier-car-bench.mjs', 'tools/serve.mjs', 'tools/tris.mjs'];
 

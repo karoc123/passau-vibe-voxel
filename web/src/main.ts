@@ -39,8 +39,8 @@ import { focusView } from './focus';
 import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
-import { makeJumpButton } from './ui/jump';
-import { makeArmsHud, makeFireButton, makeTouchArms } from './ui/arms';
+import { makeJumpButton, makeTouchArms } from './touch/buttons';
+import { makeArmsHud } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
@@ -167,7 +167,6 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 makeCredits();
 makeJumpButton(() => nav.jump());
-makeFireButton((down) => { nav.arms.trigger = down; });
 const armsHud = makeArmsHud();
 const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');

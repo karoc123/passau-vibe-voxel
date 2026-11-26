@@ -9,15 +9,15 @@ import { clamp, coarsePointer } from '../util';
 import type { World } from '../core/world';
 import type { PlayerCraft } from './craft';
 import { Arms } from './arms';
-import { Foot, type Stick } from './foot';
+import { Foot } from './foot';
 import { Glide } from './glide';
 import { gameKey, onFocusLoss } from './input';
 import { MoveKeys } from './move-keys';
 import { OrbitInput } from './orbit';
 import { Rider } from './ride';
 import { EYE, findStreet, openSpot, walkNet } from './spots';
-import { stickAxis, TouchSticks } from './touch-sticks';
 import { HEAD } from './walk';
+import { FootTouch } from '../touch/foot';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
@@ -25,7 +25,7 @@ import { HEAD } from './walk';
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
-//          drags to look (touch-sticks.ts, as the drive mode's); two fingers close together pinch to zoom
+//          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
 //   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
 //          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
@@ -83,9 +83,7 @@ export class Nav {
   private walkStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
-  // touch on foot: left thumb walks, right thumb looks (the drag since the last move)
-  private readonly footSticks: TouchSticks;
-  private lookFrom = { dx: 0, dy: 0 };
+  private readonly footTouch: FootTouch;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -101,30 +99,18 @@ export class Nav {
     });
     this.bindKeys();
     this.bindPointer();
-    this.footSticks = new TouchSticks(dom, {
-      onStart: () => { this.lookFrom = { dx: 0, dy: 0 }; this.cancelFly(); },
-      onMove: (side, s) => {
-        if (side !== 'right') return;
+    this.footTouch = new FootTouch(dom, {
+      start: () => this.cancelFly(),
+      look: (dx, dy) => {
         const k = 2.4 * (this.camera.fov * Math.PI / 180) / innerHeight;
         // a stick, not a drag of the scene: right turns right (yaw grows to the left), up looks up
-        this.look(-(s.dx - this.lookFrom.dx) * k, (s.dy - this.lookFrom.dy) * k * 0.7);
-        this.lookFrom = { dx: s.dx, dy: s.dy };
+        this.look(-dx * k, dy * k * 0.7);
       },
-      // a short touch that hardly moved: a tap (follow who is there, as with one finger elsewhere)
-      onEnd: (_side, s) => {
-        if (Math.hypot(s.dx, s.dy) < 8 && performance.now() - s.t < 600) this.tap(s.startX + s.dx, s.startY - s.dy);
-      },
+      tap: (x, y) => this.tap(x, y),
+      fire: () => this.arms.pull(),
       // two fingers close together: the field of view
-      onPinch: (ratio) => this.setFov(this.camera.fov * ratio),
+      pinch: (ratio) => this.setFov(this.camera.fov * ratio),
     });
-  }
-
-  /** the left touch stick while on foot: [forward, right] in -1..1, or null */
-  private footStick(): Stick {
-    const s = this.footSticks.left;
-    if (!s) return null;
-    const f = clamp(stickAxis(s.dy, s.radius), -1, 1), r = clamp(stickAxis(s.dx, s.radius), -1, 1);
-    return f || r ? [f, r] : null;
   }
 
   /** Space on foot (the touch Jump button) */
@@ -587,16 +573,16 @@ export class Nav {
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
     dt = Math.min(dt, 0.1);
-    this.footSticks.setActive(this.onFoot);
+    this.footTouch.setActive(this.onFoot);
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
-    if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
+    if (this.onFoot) this.foot.updateWalk(dt, this.footTouch.move);
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
     // (after the walk's pose: the host fires from where it has just put the body)
-    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera);
+    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
     else { this.arms.trigger = false; this.foot.aim = false; }
   }
 
