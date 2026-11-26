@@ -468,6 +468,16 @@ export class StreetLife {
     return o ? { ref: { kind, id: o.id }, label: StreetLife.label(o) } : null;
   }
 
+  /** the ones of a kind drawn within r m of from (across), with where they are drawn */
+  near(kind: Kind, from: { x: number; z: number }, r: number) {
+    const D = this.drawnOf(kind), out: { picked: Picked; pose: Pose; agent: Readonly<Rideable> }[] = [];
+    for (const o of this.listOf(kind)) {
+      const d = D.get(o.id);
+      if (d && Math.hypot(d.x - from.x, d.z - from.z) < r) out.push({ picked: { ref: { kind, id: o.id }, label: StreetLife.label(o) }, pose: { x: d.x, y: d.y, z: d.z, h: d.h ?? 0 }, agent: o });
+    }
+    return out;
+  }
+
   /** the nearest one of a kind, preferring one that moves */
   nearest(kind: Kind, from: { x: number; z: number }, skip: AgentRef | null): Picked | null {
     let best: Rideable | null = null, bd = Infinity;

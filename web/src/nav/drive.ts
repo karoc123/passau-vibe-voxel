@@ -166,7 +166,7 @@ export class DriveMode implements PlayerCraft {
   // left (Park, the map, a walk, another ride or craft): the car parks where it is
   leave() {
     if (!this.driving) return;
-    this.world?.send({ kind: 'leaveSeat' });
+    this.world?.send({ kind: 'leaveSeat', pose: this.nav.stepOut ?? undefined });
     this.nav.rideCamera.shake.set(0, 0, 0);
     this.driving = null;
     this.taken = false;

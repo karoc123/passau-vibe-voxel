@@ -40,7 +40,8 @@ import { focusView } from './focus';
 import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
-import { makeCanopyButton, makeJumpButton, makeTouchArms } from './touch/buttons';
+import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from './touch/buttons';
+import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
@@ -171,6 +172,8 @@ makeCredits();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
 const armsHud = makeArmsHud();
+const boarding = new Boarding(nav, () => crafts, (s) => toast(s));
+const boardButton = makeBoardButton(() => boarding.press());
 const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
@@ -442,6 +445,7 @@ renderer.setAnimationLoop(frameLoop({
   input: (now, dt) => {
     goTo.step(now);
     dayWeather.step(now);
+    boarding.update();
     for (const c of crafts) if (c.view === 'ride') c.update(dt);
     nav.update(dt);
     for (const c of crafts) if (c.view === 'own') c.update(dt);
@@ -476,6 +480,7 @@ renderer.setAnimationLoop(frameLoop({
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    boardButton.set((key) => boarding.label(key));
     touchArms.set(nav.aiming);
     canopyButton.show(glider?.canopyAction ?? null);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;

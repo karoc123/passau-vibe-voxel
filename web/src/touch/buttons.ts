@@ -1,7 +1,7 @@
 import './touch.css';
 
-// (touch.css shows them on a touch screen only; there is no Fire button: the right thumb's taps and holds on the view
-// fire, foot.ts)
+// (touch.css shows them on a touch screen only, but Get in/out; there is no Fire button: the right thumb's taps and
+// holds on the view fire, foot.ts)
 function button(id: string, cls = '') {
   const b = Object.assign(document.createElement('button'), { id, type: 'button', className: cls });
   document.body.append(b);
@@ -47,6 +47,26 @@ export function makeCanopyButton(press: () => void) {
       shown = what;
       b.classList.toggle('on', !!what);
       if (what) b.textContent = what === 'release' ? 'Release' : 'Open canopy';
+    },
+  };
+}
+
+/** near a vehicle on foot, or in one: get in or out (the E key's, as a button to tap or click; nav/board.ts) */
+export function makeBoardButton(press: () => void) {
+  const b = button('board-button');
+  b.hidden = true;
+  // (pointerdown, not click: on foot a touch elsewhere is a stick, and the press must not wait for its release)
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); press(); });
+  b.addEventListener('click', (e) => { if (e.detail === 0) press(); }); // (the keyboard)
+  let shown: string | null = null;
+  return {
+    /** what it says (given whether there is a keyboard to name E on); null: hidden */
+    set(label: (key: boolean) => string | null) {
+      const t = label(!matchMedia('(pointer: coarse)').matches);
+      if (t === shown) return;
+      shown = t;
+      b.hidden = t === null;
+      if (t !== null) b.textContent = t;
     },
   };
 }

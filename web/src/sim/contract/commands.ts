@@ -23,14 +23,18 @@ export type SimCommand = PlayerCommand;
  *   enterSeat     a seat of an entity (sim/entities.ts SEATS: role, index; without, its first): the driver's of a car (as
  *                 type choice), the walker's of a person on foot (from pose: where they are drawn, kept within
  *                 Tuning.walk.take of where the sim has them), the pilot's of a craft; refused: gone, no such seat, held
- *                 by another, not allowed (the game mode's mayEnter: sim/mode.ts), or (a car) no road physics. The one held is left first
+ *                 by another ('taken'), from foot (the player's avatar) a vehicle beyond Tuning.walk.board of where the
+ *                 sim has the walker ('far'), not allowed (the game mode's mayEnter: sim/mode.ts), or (a car) no road
+ *                 physics. The one held is left first
  *   seatInput     the controls of the seat held, until the next: a driver's CarInput, a pilot's their craft's type's
  *                 input, a walker's pose (the walk is the client's), bounded against the last one taken (Tuning.walk:
  *                 clamped, refused, walkedPose has the pose taken); ignored for a role not held. seq: the client's
  *                 number for it (increasing per client; its session's ack: the last taken), tick: the world tick it was
  *                 sent for (the client's tick + 1; it is applied at the next tick run)
  *   leaveSeat     out of the seat held: the person walked back to the crowd's walk, the car parked where it is, the
- *                 craft left where it is, hands off (its core's neutral)
+ *                 craft left where it is, hands off (its core's neutral); with pose (a vehicle's
+ *                 seat left), out on foot there in the same tick: the player's avatar put down at pose, kept within
+ *                 Tuning.walk.board of the vehicle (as the mode's walk; the mode's mayEnter asked)
  *   request       what the player asks of the game mode (ModeRequest: a craft made, put down again, reset or
  *                 dropped; the car reset), granted or refused by it; its outcome a result of the request's kind
  *   edit          a change to the world's voxels (op: core/world-edits.ts), made if the game mode allows it (mayEdit:
@@ -46,7 +50,7 @@ export type PlayerCommand =
   | { kind: 'follow'; entity: EntityRef | null }
   | { kind: 'enterSeat'; entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }
   | ({ kind: 'seatInput'; seq?: number; tick?: number } & SeatInput)
-  | { kind: 'leaveSeat' }
+  | { kind: 'leaveSeat'; pose?: WalkPose }
   | { kind: 'request'; request: ModeRequest }
   | { kind: 'edit'; op: WorldOp; ref?: number }
   | { kind: 'fire'; slot: number; h: number; pitch: number };
@@ -67,9 +71,9 @@ export interface CommandResult {
   reason?: Refusal;
 }
 
-/** why a car's seat was refused although it may be taken later: the host's road physics still loading (ask again), or
- * its last load failed (the host tries again) */
-export type Refusal = 'loading' | 'failed';
+/** why a seat was refused although it may be taken later: a car's while the host's road physics loads (ask again), or
+ * after its last load failed (the host tries again); another player's ('taken'); too far from the walker ('far') */
+export type Refusal = 'loading' | 'failed' | 'taken' | 'far';
 
 /** what a player asks of the rules (a request command; its outcome is a result of the request's kind; the game mode,
  * sim/mode.ts, grants or refuses it):
