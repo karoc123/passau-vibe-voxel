@@ -131,6 +131,9 @@ export class Traffic {
   day = 180;
   /** the share of the hour's people and riders wanted (1: all): a host over its tick thins its crowd first */
   crowd = 1;
+  /** the share of the hour's cars wanted (1: all): a host still over its tick with its crowd thinned thins its cars;
+   * those over it leave at a road's end out of sight (never one followed or a body in play; one driven is not in cars) */
+  carShare = 1;
   t = 0;
   // the time since the last tick (s, under STEP): how far between the last two ticks to draw; kept by whoever runs the
   // ticks (sim/world-sim.ts WorldSim.update; update here for a traffic run alone)
@@ -227,7 +230,7 @@ export class Traffic {
     const hh = ((hour % 24) + 24) % 24;
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {
-      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)),
+      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)) * this.carShare,
       peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)) * this.crowd,
       // the counters' day: the commute to work and home, a lunch hump, little at night; a fifth of July's in January
       bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
@@ -676,7 +679,7 @@ export class Traffic {
     const lst = e.lists[car.lane];
     lst.splice(lst.indexOf(car), 1);
     car.lcTo = undefined;
-    const r = this.regions[this.roadOwner[e.i]], over = !!r && r.cars > r.targetCars + 4;
+    const r = this.regions[this.roadOwner[e.i]], over = !!r && r.cars > r.targetCars + 4 && !this.held.car.has(car.id) && !this.bodies?.owns(car);
     if ((car.next < 0 || over) && this.mayLeave(car, e)) { this.boxLeave(car); return false; }
     if (car.next < 0) {
       lst.push(car);

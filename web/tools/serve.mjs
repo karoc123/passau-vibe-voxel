@@ -1,5 +1,6 @@
 // The world as a network host (src/host/ws.ts) for pages opened with ?server=ws://<this machine>:<port>. Bound to every
-// interface by default, so a phone on the LAN reaches it. Every 10 s: the players, the ms per tick, the kB/s per player.
+// interface by default, so a phone on the LAN reaches it. Every 10 s: the players, the ms per tick, the kB/s per player,
+// what the host gives way to over its tick (crowd and cars: their share; send: every Nth tick to those on foot).
 // usage (in web/): node tools/serve.mjs [--port 5300] [--host 0.0.0.0] [query, e.g. 'dig=1&seed=3']
 import os from 'node:os';
 import { imp } from './lib.mjs';
@@ -17,6 +18,6 @@ setInterval(() => {
   const s = h.stats();
   if (!s.bytes.length) return;
   const per = s.bytes.map(([p, b]) => `${p} ${(b / 10240).toFixed(0)} kB/s`).join(', ');
-  console.log(`${s.bytes.length} player(s): tick ${s.tickMs.toFixed(2)} ms + snapshots ${s.sendMs.toFixed(2)} ms; ${per} (before deflate)`);
+  console.log(`${s.bytes.length} player(s): tick ${s.tickMs.toFixed(2)} ms + snapshots ${s.sendMs.toFixed(2)} ms; ${per} (before deflate); crowd ${s.crowd.toFixed(2)} cars ${s.cars.toFixed(2)} send 1/${s.every}`);
 }, 10000);
 process.on('SIGINT', () => { h.close(); process.exit(0); });
