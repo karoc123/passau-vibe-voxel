@@ -1,5 +1,8 @@
 // Two players over a real WebSocket (src/host/ws.ts on a free port, the page's own client and SocketLink, Node's
-// WebSocket) in one world by the cathedral, on the host's clock and the clients' render clocks in real time. The first
+// WebSocket) in one world by the cathedral, the host's ticks and the clients' frames (60 a second of the run's time,
+// a tick every second frame) in lockstep: a tick waits for the commands of the frames before it, a frame for the
+// snapshots sent before it. Host and clients share this one thread; on the wall clock a busy machine starved them
+// (the clients fell seconds behind, the host held back their snapshots, a walk drawn in 21 % of frames). The first
 // flies a helicopter, the second drives a car of the traffic and makes an edit, then the first walks on foot; each
 // must see the other's player (their own id each), the other's craft, car or body moving smoothly (drawn somewhere new
 // in nearly every frame), the body gone when its walk ends, and the other's edit in its own live edits. A third player stands by the Ingling dam, 3 km off: each of the first and the
@@ -20,22 +23,44 @@ const { easeAvatar } = await load('view/life.ts');
 
 const data = readHostData(DATA), spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const focus = { x: spot.x, z: spot.y }, dam = data.meta.labels.find((l) => /Ingling/.test(l.name)) ?? { x: 6105, y: 5207 };
-const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: `seed=3&dig=1${every}`, log: (l) => { if (verbose) console.log(`  host: ${l}`); } });
+let tick = null;
+const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: `seed=3&dig=1${every}`, log: (l) => { if (verbose) console.log(`  host: ${l}`); },
+  clock: (t) => { tick = t; return () => {}; } });
+// the commands sent by the clients and taken by the host's sessions, the snapshots each client got
+let sent = 0, taken = 0;
+const connect = host.server.connect.bind(host.server);
+host.server.connect = (...a) => { const s = connect(...a), send = s.send.bind(s); s.send = (c) => { taken++; send(c); }; return s; };
 const port = await host.port, mine = hello(checkBuild(data.meta, () => {})), fail = [];
-const client = () => new MirrorSimClient(new SocketLink(`ws://127.0.0.1:${port}`), structuredClone(data.traffic), null, mine);
+const client = () => {
+  const link = new SocketLink(`ws://127.0.0.1:${port}`), c = new MirrorSimClient(link, structuredClone(data.traffic), null, mine);
+  const send = link.send.bind(link), take = link.onSnapshot;
+  link.send = (cmds) => { sent += cmds.length; send(cmds); };
+  link.onSnapshot = (s) => { c.snapshots++; take(s); };
+  c.snapshots = 0;
+  return c;
+};
 const A = client(), B = client(), C = client(), view = { kind: 'view', view: { focus, viewer: { ...focus, y: 30 } } };
 const far = { kind: 'view', view: { focus: { x: dam.x, z: dam.y } } };
 
-// the frames: both clients' commands sent and their render clocks moved on, at about 60 fps in real time
-// (each client's render clock on the real time between frames, as a page's on its frames' times)
-let frames = 0, t0 = performance.now();
-const frame = () => new Promise((r) => setTimeout(() => {
-  const now = performance.now(), dt = (now - t0) / 1000;
-  t0 = now;
-  for (const c of [A, B, C]) { c.send(c === C ? far : view); c.update(dt); }
-  frames++;
-  r();
-}, 1000 / 60));
+// the frames: every second one a tick of the host once its sessions have the commands sent so far, and the clients
+// moved on once they have the snapshots sent by then; then each client's commands sent and its render clock moved on by
+// 1/60 s, as a page's on its frames
+const nth = ei > 0 ? Math.max(1, Math.round(+process.argv[ei + 1])) : 1, flush = Math.max(2, nth); // (as host/ws.ts sends)
+let frames = 0, ticks = 0;
+async function settle(what, ok) {
+  for (const t0 = performance.now(); !ok(); await new Promise((r) => setImmediate(r)))
+    if (performance.now() - t0 > 10000) throw new Error(`${what}: not within 10 s of wall time`);
+}
+async function frame() {
+  if (frames++ % 2 === 0) {
+    await settle('the clients\' commands at the host', () => taken >= sent);
+    tick();
+    ticks++;
+    const due = Math.floor(Math.floor(ticks / flush) * flush / nth);
+    await settle('the host\'s snapshots at the clients', () => [A, B, C].every((c) => c.snapshots >= due));
+  } else await new Promise((r) => setImmediate(r));
+  for (const c of [A, B, C]) { c.send(c === C ? far : view); c.update(1 / 60); }
+}
 const until = async (what, ok, seconds) => {
   for (let i = 0; i < seconds * 60; i++) { if (ok()) return true; await frame(); }
   fail.push(`${what}: not within ${seconds} s`);
