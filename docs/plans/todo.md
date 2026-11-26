@@ -4,10 +4,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Steps 4–8** in the order of target-architecture.md.
-- The network host sends every tick's full snapshot (about 110–180 KB of JSON, 3–5 MB/s per player before deflate):
-  the page draws between a tick and the one before, so sending fewer would judder. Interest filter (step 4) and wire
-  compaction (step 8) cut it. `?every=2` halves the bytes, but the page then shows motion stopping in a quarter of
+- **Steps 5–8** in the order of target-architecture.md.
+- The network host sends every tick's snapshot of what is within ~1 km of the player (ws-smoke: ~5 MB/s by the
+  cathedral, ~1.5 MB/s by the dam, before deflate): the page draws between a tick and the one before, so sending fewer
+  would judder. The 350 m agent ring (step 5) and wire compaction (step 8) cut it. `?every=2` halves the bytes, but the page then shows motion stopping in a quarter of
   its frames (ws-smoke: 75 % moved): it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
