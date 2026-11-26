@@ -529,8 +529,9 @@ into you shoves you along. The crowd is not: you pass through people.
 
 On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch
 (Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
-the right button aims (a narrower view). On a touch screen the Fire button above Jump fires while held, the button left
-of it takes the next slot and the one left of Jump aims (tap again to stop). The host decides each shot and each
+the right button aims (a narrower view). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
+(and may then drag to sweep), a drag only looks; the button up and left of Jump takes the next slot and the one left of
+Jump aims (tap again to stop). A tap on the left half picks whom to follow. The host decides each shot and each
 grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and
 sparks, the grenade's arc and its blast. A grenade blows a crater of about 3 m into whatever it hits, the same for
 every player (also one who joins later) and kept until the host restarts. Nobody is hurt yet.

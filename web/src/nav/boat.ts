@@ -8,7 +8,7 @@ import { BoatModel } from './boat-model';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
-import { stickAxis, TouchSticks } from './touch-sticks';
+import { TouchSticks } from '../touch/sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
@@ -202,9 +202,9 @@ export class BoatMode implements PlayerCraft {
   private input(): BoatInput {
     const pressed = (...codes: string[]) => this.keys.any(...codes);
     const pad = gamepad(), stick = padAxis(pad?.axes[0]);
-    const left = this.touch.left;
-    const pedal = left ? clamp(stickAxis(left.dy, left.radius), -1, 1) : 0;
-    const sx = left ? clamp(stickAxis(left.dx, left.radius), -1, 1) : 0;
+    const left = this.touch.axes('left');
+    const pedal = left ? clamp(left.y, -1, 1) : 0;
+    const sx = left ? clamp(left.x, -1, 1) : 0;
     const gas = Math.max(pressed('KeyW', 'ArrowUp'), pad?.buttons[7]?.value ?? 0, pedal);
     const back = Math.max(pressed('KeyS', 'ArrowDown'), pad?.buttons[6]?.value ?? 0, -pedal);
     return {

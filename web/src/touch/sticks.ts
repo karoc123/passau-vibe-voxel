@@ -1,4 +1,5 @@
-import { clamp } from '../util';
+import { clamp } from '../core/num';
+import './touch.css';
 
 export const DEAD_ZONE = 5; // CSS pixels
 export type Side = 'left' | 'right';
@@ -39,7 +40,7 @@ export function stickAxis(offset: number, radius: number) {
 
 const ring = (kind: string) => Object.assign(document.createElement('div'), { className: `stick-ring ${kind}` });
 
-// faint rings where the thumbs are (style.css .stick-ring): the base where the thumb went down, the size of the
+// faint rings where the thumbs are (touch.css .stick-ring): the base where the thumb went down, the size of the
 // stick's reach, and the knob where it is now
 class Rings {
   private readonly base = ring('base');
@@ -135,6 +136,12 @@ export class TouchSticks {
   get left(): Readonly<Stick> | null { return this.decided(this.sticks.left); }
   get right(): Readonly<Stick> | null { return this.decided(this.sticks.right); }
 
+  /** a stick's deflection for a mode to map: x right, y up, 0 inside the dead zone, 1 at the ring (more beyond it) */
+  axes(side: Side): { x: number; y: number } | null {
+    const s = this[side];
+    return s && { x: stickAxis(s.dx, s.radius), y: stickAxis(s.dy, s.radius) };
+  }
+
   private decided(s: Stick | null) { return s && !this.undecided(s) ? s : null; }
 
   // a lone stick just put down that has hardly moved: maybe the first finger of a pinch (see PINCH_WINDOW)
@@ -168,3 +175,6 @@ export class TouchSticks {
     return this.sticks.left?.id === id ? 'left' : this.sticks.right?.id === id ? 'right' : null;
   }
 }
+
+/** the device takes touches (a laptop's touch screen too, unlike a coarse pointer) */
+export const touchScreen = () => navigator.maxTouchPoints > 0;

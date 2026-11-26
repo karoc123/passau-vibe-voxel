@@ -1,7 +1,7 @@
-import { clamp } from '../util';
+import { clamp } from '../core/num';
 import { DRONE } from '../sim/craft/fpv-flight';
 import type { FlightInput } from '../sim/contract/inputs';
-import { DEAD_ZONE, stickAxis, TouchSticks } from './touch-sticks';
+import { DEAD_ZONE, stickAxis, TouchSticks } from './sticks';
 
 const MAX_ROTATION_INPUT = 0.42; // Match the keyboard's gentler rates.
 
