@@ -49,7 +49,7 @@ const glider = new CraftLink(ctx, 'paraglider');
 await null;
 const world = { support: () => G, blocked: () => false };
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
-const foot = new Foot(camera, { target: new THREE.Vector3() }, new MoveKeys(), new Glide(camera), () => world);
+const foot = new Foot(camera, { target: new THREE.Vector3() }, new MoveKeys(), new Glide(camera), () => world, () => []);
 
 // the page's walk body (nav.ts walkBody): put down the first frame, then its pose each frame
 let body = false, clamped = 0, fastest = 0, last = null;
