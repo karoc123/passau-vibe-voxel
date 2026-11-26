@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { box, orient } from './plane-model';
+import type { CraftView } from '../../../client/sim-client';
+import type { CoreOf } from '../../../sim/craft/cores';
+import { box, orient, type CraftFrame, type CraftLook } from '../craft-look';
 
-// The jet drawn from boxes in code (as the floatplane, plane-model.ts): a small two-seat aerobatic trainer in red and
+// A small two-seat aerobatic trainer in red and
 // white, ~9 m long, 7.6 m span, nose +z, its belly at y = -1.3 (the flight's point is the fuselage's cube's centre).
 // One merged body with vertex colours; the exhaust a glow (basic materials, additive: no new shader) that grows into
 // an afterburner's flame over the last 15 % of the throttle; the lights as the floatplane's, and a landing light.
@@ -10,13 +12,15 @@ import { box, orient } from './plane-model';
 const WHITE = 0xf2f2ee, RED = 0xc4202a, GLASS = 0x1a2430, DARK = 0x2a2c30, METAL = 0x5a5e66;
 const AB_FROM = 0.85; // the throttle where the afterburner's flame starts (drawn only: the thrust is the lever's)
 
-export class JetModel {
+class JetLook implements CraftLook<'jet'> {
   readonly group = new THREE.Group();
   private readonly flame = new THREE.Group();
   private readonly outer: THREE.Mesh;
   private readonly core: THREE.Mesh;
   private readonly glow: THREE.Mesh;
   private readonly lamps: { mesh: THREE.Mesh; base: THREE.Color; strobe?: boolean; night?: boolean }[] = [];
+  private readonly fwd = new THREE.Vector3();
+  private readonly up = new THREE.Vector3();
 
   constructor() {
     const parts = [
@@ -81,10 +85,18 @@ export class JetModel {
     this.group.visible = false;
   }
 
-  orient(p: THREE.Vector3Like, fwd: THREE.Vector3, up: THREE.Vector3) { orient(this.group, p, fwd, up); }
+  // (hidden once crashed, until it is put back)
+  draw(c: CraftView<CoreOf<'jet'>>, { alpha, night, now }: CraftFrame) {
+    const d = c.core.drawn(alpha);
+    this.group.visible = c.core.flight.state !== 'crashed';
+    orient(this.group, d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
+    this.animate(c.core.flight.engine, night, now);
+  }
+
+  hide() { this.group.visible = false; }
 
   /** the exhaust by the engine (0..1; the afterburner over AB_FROM), the lamps by the night (0 day .. 1 night) */
-  animate(_dt: number, engine: number, night: number, now: number) {
+  private animate(engine: number, night: number, now: number) {
     const ab = Math.max(0, (engine - AB_FROM) / (1 - AB_FROM)), flicker = 0.9 + 0.1 * Math.sin(now * 0.07) * Math.sin(now * 0.031);
     // the nozzle glows a little with the engine, more by night; the flame is a short heat shimmer, long with reheat
     (this.glow.material as THREE.MeshBasicMaterial).opacity = Math.min(1, engine * (0.15 + 0.7 * night) + 0.6 * ab);
@@ -99,11 +111,6 @@ export class JetModel {
       (l.mesh.material as THREE.MeshBasicMaterial).color.copy(l.base).multiplyScalar(on ? k : 0.15);
     }
   }
-
-  dispose() {
-    this.group.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
-    });
-  }
 }
+
+export const jetLook = () => new JetLook();

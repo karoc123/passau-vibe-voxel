@@ -50,6 +50,7 @@ import { EVENT_TICKS, type SimEvent } from './contract/events';
 import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
 import { besideBox, boundWalk, reaches, type Box } from './walk-bounds';
+import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
@@ -540,7 +541,7 @@ export class WorldSim {
         }
         for (const c of sim.crafts.values()) {
           const p = c.core.pose;
-          if (c.placed && !mine('craft', c.id)) yield { entity: { kind: 'craft', id: c.id }, x: p.x, y: p.y - 1, z: p.z, h: p.h, r: 1.5, l: 3, ht: 2 };
+          if (c.placed && !mine('craft', c.id)) yield { entity: { kind: 'craft', id: c.id }, ...craftBox(c.type, p) };
         }
       },
     };

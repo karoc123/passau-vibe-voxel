@@ -38,6 +38,7 @@ const walk = (p, x, y, z, h = 0) => {
 const avatarOf = (c, name) => c.traffic.avatars.find((a) => a.player === name);
 // how far (m, across) a pose is from a footprint's sides (sim/walk-bounds.ts)
 const { fromBox } = await imp('src/sim/walk-bounds.ts');
+const { craftBox } = await imp('src/sim/solids.ts');
 
 // the scenario on one vehicle: ref, its footprint now (box()), the seat's role; wait: ticks for a seat's answer
 async function scenario(what, host, P, ref, role, box, wait = 2) {
@@ -98,7 +99,7 @@ async function scenario(what, host, P, ref, role, box, wait = 2) {
   pilot.c.send({ kind: 'leaveSeat' });
   await P.tick(30);
   const id = heli.id, ref = { kind: 'craft', id };
-  const box = () => { const p = host.sim.crafts.get(id).core.pose; return { x: p.x, y: p.y - 1, z: p.z, h: p.h, r: 1.5, l: 3 }; };
+  const box = () => craftBox('helicopter', host.sim.crafts.get(id).core.pose);
   await scenario('helicopter', host, P, ref, 'pilot', box);
   host.dispose();
 }

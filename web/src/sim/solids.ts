@@ -40,9 +40,9 @@ export function carShape(c: { vt?: VehicleId; bus: boolean; len: number }): Shap
 // The crafts standing in the world: the hovercraft's skirt and the helicopter's cabin and tail (their collision's
 // probes and cube, sim/craft/craft-collision.ts), the boat's hull. Not solid: the paraglider and the drone (small,
 // and dropped or flown), the planes (on the water or in the air)
-const HS = CRAFT_SCALE.hovercraft, CS = CRAFT_SCALE.helicopter;
+const CS = CRAFT_SCALE.helicopter;
 export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
-  hovercraft: { hx: 1.3 * HS, hz: 2.83 * HS, y0: -HOVER_HEIGHT, top: 1.6 * HS },
+  hovercraft: { hx: 2.9, hz: 6.4, y0: -HOVER_HEIGHT, top: 3.1 },
   helicopter: { hx: 1.09 * CS, hz: 4.22 * CS, fwd: -2.12 * CS, y0: -1.09 * CS, top: 1.6 * CS },
   boat: { hx: BOAT.beam / 2, hz: BOAT.length / 2, y0: -0.5, top: 1.5 },
 };
@@ -52,6 +52,15 @@ export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
 const VESSEL = { ship: { hx: CRUISE_B / 2, y0: -1.4, top: 7.4 }, boat: { hx: TOUR_B / 2, y0: -1, top: 3.7 } };
 /** a vessel of the river traffic (its length is its pose's) */
 export const vesselShape = (p: Pick<BoatPose, 'kind' | 'len'>): Shape => ({ ...VESSEL[p.kind], hz: p.len / 2 });
+
+// what a craft of no shape here is to a shot and to a boarding walker: a box round its pilot
+const SMALL_CRAFT: Shape = { hx: 1.5, hz: 3, y0: -1, top: 1 };
+/** a craft's box (y its foot, ht its height; r, l half its width and length) as a shot and a boarding walker meet it:
+ * its shape where it has one, so both agree with what the walker bumps into */
+export function craftBox(type: CraftType, p: Pose) {
+  const s = solidAt(CRAFT_SHAPES[type] ?? SMALL_CRAFT, p);
+  return { x: s.x, y: s.y, z: s.z, h: s.h, r: s.hx, l: s.hz, ht: s.top };
+}
 
 /** shape s placed on pose p */
 export function solidAt(s: Shape, p: Pose): Solid {

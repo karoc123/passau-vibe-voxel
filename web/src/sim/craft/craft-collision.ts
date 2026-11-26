@@ -3,20 +3,23 @@ import { waterTop } from '../river';
 import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
 
-// (the hovercraft's and the helicopter's measures below are the models' before their CRAFT_SCALE, and scaled by it)
+// (the helicopter's measures below are its model's before its CRAFT_SCALE, and scaled by it)
 const S = CRAFT_SCALE;
-export const CRAFT_RADIUS = { hovercraft: 0.53 * S.hovercraft, helicopter: 0.59 * S.helicopter, paraglider: 0.45 };
+export const CRAFT_RADIUS = { hovercraft: 0.8, helicopter: 0.59 * S.helicopter, paraglider: 0.45 };
 export const SPAWN_HEIGHT = { hovercraft: HOVER_HEIGHT, helicopter: 1.1 * S.helicopter, paraglider: GLIDER_HEIGHT };
 
-// Cubes (CRAFT_RADIUS half-size) over each model (craft-models.ts), rotated with the heading: the hovercraft's skirt,
-// cabin and fan ducts; the helicopter's skids and cabin, tail, and the rotor disc's rim (10 m before the scale) and
-// middle; the pilot and the wing's arc.
+// Cubes (CRAFT_RADIUS half-size) over each model, rotated with the heading. The hovercraft's skirt: rows close enough
+// that no metre of wall slips between two cubes, and a middle column for what it is lowered onto; its cabin and its
+// fan ducts higher up. The helicopter's skids and cabin, tail, and the rotor disc's rim (10 m before the scale) and
+// middle. The pilot and the wing's arc.
 const rim = (r: number, y: number) => Array.from({ length: 8 }, (_, i): [number, number, number] =>
   [r * Math.sin(i * Math.PI / 4), y, r * Math.cos(i * Math.PI / 4)]);
 const scaled = (k: number, ps: [number, number, number][]) => ps.map(([x, y, z]): [number, number, number] => [x * k, y * k, z * k]);
+const SKIRT_ROWS = [-5.6, -3.73, -1.87, 0, 1.87, 3.73, 5.6];
 const PROBES: Record<CraftKind, readonly [number, number, number][]> = {
-  hovercraft: scaled(S.hovercraft, [[0, 0, 0], [-0.77, 0, 2.3], [0.77, 0, 2.3], [-0.77, 0, -2.3], [0.77, 0, -2.3], [-0.77, 0, 0], [0.77, 0, 0],
-    [-0.77, 0, 1.15], [0.77, 0, 1.15], [-0.77, 0, -1.15], [0.77, 0, -1.15], [0, 0.75, 0.5], [-0.66, 1.0, -2.3], [0.66, 1.0, -2.3]]),
+  hovercraft: [...SKIRT_ROWS.flatMap((z): [number, number, number][] => [[-2, 0, z], [2, 0, z]]),
+    [0, 0, -5.6], [0, 0, -2.8], [0, 0, 0], [0, 0, 2.8], [0, 0, 5.6],
+    [0, 1.5, 3], [-1.3, 1.5, 0.6], [1.3, 1.5, 0.6], [0, 1.5, -1.8], [-1.4, 2.3, -5.1], [1.4, 2.3, -5.1]],
   helicopter: scaled(S.helicopter, [[0, -0.5, 0.3], [-0.5, -0.5, 1.2], [0.5, -0.5, 1.2], [-0.5, -0.5, -0.7], [0.5, -0.5, -0.7],
     [0, 0.5, 1.5], [0, 0.6, -2.4], [0, 0.7, -4.3], [0, 1.0, -5.75],
     ...rim(4.4, 2.0), ...rim(2.2, 2.0)]),

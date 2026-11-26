@@ -63,6 +63,7 @@ export interface CraftMotionState {
   p: Vec3; velocity: Vec3;
   heading: number; yaw: number; bank: number; pitch: number;
   grounded: boolean;
+  throttle: number;
 }
 /** their core (sim/craft/special-core.ts): the motion, what its last step did, as drawn at the world tick's start */
 export interface SpecialCoreState {
