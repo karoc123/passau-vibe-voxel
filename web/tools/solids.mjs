@@ -2,7 +2,8 @@
 // in Node, host/node.ts nodeHost, a few seconds): the page's walk (nav/walk.ts walkFrame) against what its street life
 // draws (view/life.ts solids, three.js in Node, no renderer) of the host's world as its snapshots bring it. A car the
 // host holds out of the traffic (as one parked or driven by another player is) stops the walker walking at it and
-// strafing into it; moved into the walker it shoves it ahead, never through. Another player on foot stops it; a
+// strafing into it; moved into the walker it shoves it ahead, never through, and squeezing it against a wall pushes it
+// out past its side, never leaves it in the car. Another player on foot stops it; a
 // hovercraft another player sits in stops it, and so does a traffic boat lying at its pier. On foot A/D step sideways
 // (the heading kept) and the arrows turn.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
@@ -23,8 +24,10 @@ const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surfa
 // an excursion boat lying at its pier (x 181..219, its side at z 216: the tour's start)
 data.boats = { berths: [], tour: [[200, 220], [250, 220]] };
 const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 120 }, data);
-// the walk's world: flat ground, nothing in the way (the voxels are tools/collision.mjs's)
-const ground = { support: () => G, blocked: () => false };
+// the walk's world: flat ground, nothing in the way but a wall west of x 22 for z 90..110 (the voxels are
+// tools/collision.mjs's)
+const WALL = 22, wall = (x, z) => x < WALL && z > 90 && z < 110;
+const ground = { support: () => G, blocked: (x, z) => wall(x, z) };
 
 const player = (name, x, z) => {
   const s = server.connect(name), link = sessionLink(s);
@@ -120,6 +123,17 @@ P.x = 200; P.z = 205; yaw = 0;
 for (let i = 0; i < 3 / STEP; i++) frame(stride(yaw, 1, 0, 6 * STEP));
 const hull = 220 - TOUR_B / 2 - WALKER_R;
 check(P.z < hull + 0.01 && P.z > hull - 0.4, `a traffic boat stops the walker (z ${P.z.toFixed(2)}, its side ${hull.toFixed(2)})`);
+
+// a car driven at the walker standing at a wall (along -x at 4 m/s, its front up to the wall): the walker squeezed out
+// past the car's side, never left in it
+P.x = WALL + 1; P.z = 100; yaw = Math.PI / 2;
+const hz = carShape(car).hz;
+putCar(WALL + 12, 100, -Math.PI / 2);
+for (let i = 0; i < 10; i++) frame(null);
+cx = WALL + 12;
+for (let i = 0; i < 4 / STEP; i++) { cx = Math.max(WALL + hz, cx - 4 * STEP); putCar(cx, 100, -Math.PI / 2); frame(null); }
+for (let i = 0; i < 10; i++) frame(null);
+check(inCar() <= 0.01 && !wall(P.x, P.z), `a car driven at the walker against a wall squeezes it out past its side (walker ${P.x.toFixed(2)}, ${P.z.toFixed(2)}; the car's front at ${(cx - hz).toFixed(2)}, the wall at ${WALL}; in it ${Math.max(0, inCar()).toFixed(2)} m)`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);
