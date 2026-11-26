@@ -117,12 +117,9 @@ two off LoD2's (walls return as vegetation there, so the crown rule leaves it).
   - Passage through a building at voxel 1998,21,681 (owner, 2026-11-23): the house is built solid where a way runs
     through it. Check first whether OSM maps the way as `tunnel=building_passage` / `covered=yes` and whether
     `clearance.py` reads it there. `?cam=1938.5,69.3,669.7,1998,21.7,681.7&date=07-16&hour=20.38`.
-  - Ingling (F11's new blocks, `check.py verify --fixture scripts/fixtures/inn.json`): the forebay about 150 m above
-    the weir stands as a sandy pit (293-302 m) under the 302.95 m pool (DGM1 ramps across the weir; the OSM water
-    outline 160959413 does not close in the cut: a curated water body would fix it); rail bridge decks 131994367
-    (10.8 m sag) and 131994370, the dam's service bridge 1282737017 (2.3 m), tunnels 482662855 (blocked 107 m) and
-    94450270 (a hole), service road 212067382 on water; the Austrian bank has no OSM or ALKIS, so part of its forest
-    stands on bare ground.
+  - Inn fixture (`scripts/fixtures/inn.json`): the Wels-Passau railway's Inn bridge (ways 131994367, 131994370,
+    near 1292,1440) is a through truss; its deck is right, but the truss is not drawn (the surface model's top chords
+    stand 11 m over the rails, which is why `DECK_SAG_KNOWN` lists the two ways).
 - Road spots older than this list are in [road-defects.md](road-defects.md).
 
 ## Feature packages

@@ -25,6 +25,9 @@ A building file (all keys optional except `osm`):
   label           {name, en, kind, height, year, rebuilt, by, building} as landmarks.LABELS
 A street file:
   width, lanes, surface   OSM tags set on the way (surface: a key of SURFACES)
+  layer           the OSM layer set on a bridge way: voxelize.py builds one deck surface per layer from the ways of
+                  that layer within 10 m (their low end), so a deck beside another of the same layer at another level
+                  (the Ingling dam's crest road over the footbridge slung on the weir's face) needs a layer of its own
   sidewalk        {left, right (m), surface, kerb: bool}: paved strips beside the carriageway, a kerb line between
   trees           {side: both|left|right, spacing, offset, start, end, species, height}: young trees along it
   lamps           {side, spacing, offset, start, end, height}: street lamps along it
@@ -39,7 +42,12 @@ A water file (a lock chamber, a basin: water whose level is its own, not the riv
                   the polygon is then no part of any river body (voxelize.py: the bodies' medians are taken without it).
                   A lock chamber's level is a state (full or empty), not a structure: say which in `note`
   walls           {colour, material}: the faces of the banks 2 m or more over the water within 2 m of the polygon
-                  (default concrete #a7a49d); the outline counts as a mapped wall, so grassy crests get faces too
+                  (default concrete #a7a49d); the outline counts as a mapped wall, so grassy crests get faces too.
+                  false: none (a reservoir's natural banks)
+  close           true: a multipolygon whose outer ring the extract's bbox cut (fetch_osm.sh keeps the nodes inside it
+                  and their neighbours; osm.py) is closed by joining the ends of each open run of its outer members
+                  with a straight line; without it the ring polygonizes to nothing and the water is lost. Only for a
+                  ring whose cut ends lie off the map (say where in `note`): the line is drawn as it is
   gates           [{way, top, sill, colour, material, walkway_colour}]: waterway=lock_gate lines drawn as walls across
                   the water, from the lower water's surface to `top` (m a.s.l.), its top voxel a walkway
                   (walkway_colour, default #b8bcc0 metal), the leaves colour/material (default #54585c metal); `sill`
@@ -218,8 +226,10 @@ def _along(d, where, extra=()):
 
 
 def _street(d, where):
-    _keys(d, ("osm", "note", "sources", "width", "lanes", "surface", "sidewalk", "trees", "lamps", "piers"), where,
-          required=("osm",))
+    _keys(d, ("osm", "note", "sources", "width", "lanes", "surface", "layer", "sidewalk", "trees", "lamps", "piers"),
+          where, required=("osm",))
+    if "layer" in d:
+        _num(d["layer"], f"{where}.layer", -5, 5, integer=True)
     if "width" in d:
         _num(d["width"], f"{where}.width", 1, 40)
     if "lanes" in d:
@@ -260,10 +270,12 @@ def _street(d, where):
 
 
 def _water(d, where):
-    _keys(d, ("osm", "note", "sources", "level", "walls", "gates"), where, required=("osm", "level"))
+    _keys(d, ("osm", "note", "sources", "level", "walls", "gates", "close"), where, required=("osm", "level"))
     _num(d["level"], f"{where}.level", 250, 400)
-    if "walls" in d:
+    if "walls" in d and d["walls"] is not False:
         _style(d["walls"], f"{where}.walls")
+    if "close" in d and d["close"] is not True:
+        raise Invalid(f"{where}.close: true or left out")
     if not isinstance(d.get("gates", []), list):
         raise Invalid(f"{where}.gates: a list")
     seen = set()
@@ -349,6 +361,12 @@ def streets():
 
 def waters():
     return load()["water"]
+
+
+def closes(typ, oid):
+    """whether the water override of OSM (typ, oid) closes its cut outer ring (`close`)"""
+    o = waters().get((typ, oid))
+    return bool(o and o["data"].get("close"))
 
 
 def building_for(typ, oid):
@@ -526,10 +544,11 @@ def _piers(e, spec, back):
 
 
 def patch_elements(elements):
-    """OSM's elements as the overrides change them, in place: a street's tags (width, lanes, surface), and the trees and
-    lamps and bridge piers it adds as nodes (natural=tree, highway=street_lamp, bridge:support=pier; ids SYNTH_BASE +
-    way id x 1000 + k, after the elements, by way id). Returns the elements. Only ways present are patched (a
-    region's cut patches its own: it holds the whole way, so the piers' stations are the same in every cut)."""
+    """OSM's elements as the overrides change them, in place: a street's tags (width, lanes, surface, layer), and the
+    trees, lamps and bridge piers it adds as nodes (natural=tree, highway=street_lamp, bridge:support=pier; ids
+    SYNTH_BASE + way id x 1000 + k, after the elements, by way id). Returns the elements. Only ways present are
+    patched (a region's cut patches its own: it holds the whole way, so the piers' stations are the same in every
+    cut)."""
     objs = streets()
     if not objs:
         return elements
@@ -542,7 +561,7 @@ def patch_elements(elements):
             continue
         d = objs[("way", e["id"])]["data"]
         t = e.setdefault("tags", {})
-        for k in ("width", "lanes", "surface"):
+        for k in ("width", "lanes", "surface", "layer"):
             if k in d:
                 t[k] = str(d[k])
         if "piers" in d:
@@ -721,7 +740,7 @@ WALKWAY = "#b8bcc0"
 def water_levels(areas, cells_of, base):
     """[(oid, rows, cols, g, walls style, polygon)] of the water overrides among areas (voxelize's osm.areas, the
     region's grid): the cells whose centres lie in the polygon and the ground index g of its level (the top water voxel
-    is g - 1, as voxelize.py's river levels)"""
+    is g - 1, as voxelize.py's river levels); walls style None: no walls"""
     import math
     objs = waters()
     out = []
@@ -733,7 +752,7 @@ def water_levels(areas, cells_of, base):
         rr, cc = cells_of(geom, fallback=False)
         w = d.get("walls", {})
         out.append((oid, rr, cc, int(math.floor(d["level"] - base + 0.5)),
-                    (w.get("colour", WALL_STYLE[0]), w.get("material", WALL_STYLE[1])), geom))
+                    None if w is False else (w.get("colour", WALL_STYLE[0]), w.get("material", WALL_STYLE[1])), geom))
     return out
 
 
@@ -754,7 +773,7 @@ def lock_gates(vol, g, water, lines, pal, mats, cells_of, base, note):
     n_g = n_v = 0
     for o in waters().values():
         d = o["data"]
-        wall = pal(*_style_of(d.get("walls", {}), WALL_STYLE, mats))
+        wall = pal(*_style_of(d.get("walls") or {}, WALL_STYLE, mats))
         for gt in d.get("gates", []):
             line = byid.get(gt["way"])
             if line is None:

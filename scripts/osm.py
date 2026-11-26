@@ -6,7 +6,7 @@ import json
 
 from pyproj import Transformer
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
-from shapely.ops import polygonize, unary_union
+from shapely.ops import linemerge, polygonize, unary_union
 
 import overrides
 from aoi import CRS, OSM_PATH, to_grid as _aoi_grid
@@ -18,6 +18,11 @@ def to_grid(lon, lat):
     x, y = _T.transform(lon, lat)
     i, j = _aoi_grid(x, y)
     return float(i), float(j)
+
+
+def _merged(g):
+    """the LineStrings of linemerge's result"""
+    return list(g.geoms) if hasattr(g, "geoms") else [g]
 
 
 def _coords(geom):
@@ -71,6 +76,9 @@ class OSM:
                     (inner if m.get("role") == "inner" else outer).append(LineString(c))
                 if not outer:
                     continue
+                if overrides.closes("relation", e["id"]):  # (a ring the extract's bbox cut: scripts/overrides/water)
+                    outer = [LineString(list(l_.coords) + [l_.coords[0]]) if not l_.is_ring else l_
+                             for l_ in _merged(linemerge(outer))]
                 o = unary_union(list(polygonize(unary_union(outer))))
                 if inner:
                     i = unary_union(list(polygonize(unary_union(inner))))

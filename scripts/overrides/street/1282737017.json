@@ -1,0 +1,16 @@
+{
+  "osm": {
+    "type": "way",
+    "id": 1282737017,
+    "geom": "1d4509c88ae6",
+    "tags": "d0b3bab9aa33",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "The Ingling dam's crest road (private service bridge over the weir, project col -30 to 115, row 3161-3139). OSM tags it layer=1, as the footbridge 65198985 (bicycle, metal, lit) slung on the weir's downstream face 3 m beside it. The surface model has the road at 308.5-308.9 m (LoD2's weir piers 308.5 m) and the footbridge at 306-307.5 m. voxelize.py builds one deck per layer from the low end of that layer's ways within 10 m, so the road's deck came out at the footbridge's 306.6 m: 2.3 m under its own level over 36 m (deck_sag), a 2 m step down from the piers' tops. A layer of its own (2) gives the road its own deck at the surface model's level. In OSM the two ways do not cross, so layer=2 there would be a possible but not a needed correction.",
+  "sources": [
+    "osm",
+    "dsm",
+    "lod2"
+  ],
+  "layer": 2
+}

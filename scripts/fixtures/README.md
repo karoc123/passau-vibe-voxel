@@ -22,6 +22,7 @@ apply across the whole fixture, including areas outside the local defects.
 | `haissengasse` | Footpaths sunk 2.09% and hovering 2.12% (maximum 1.50% each) |
 | `holes` | Bridge deck 8092867 sags 2.1 m, tunnels 24153461 and 101216178 blocked (the same with every block built: the fixture's south edge, not the block left out; for `covers` and `windows`) |
 | `hals` | Footpaths hovering 3.22% (maximum 1.50%), cap roughness p99 14.45 cm (maximum 12 cm) |
+| `inn` | Bridge deck 8092867 sags 2.1 m (as in `holes`) |
 | `kachlet` | 445 of 1419 LoD2-matched outlines moved (31.4%, minimum 40%) |
 
 The LoD2 ratio measures how many outlines were shifted among those already

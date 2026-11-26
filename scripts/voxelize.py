@@ -990,7 +990,8 @@ def ground_classes(ctx):
                      bridge_roads=bridge_roads, bridge_shapes=bridge_shapes, bridge_ways=bridge_ways,
                      cycle_shapes=cycle_shapes, explicit=explicit, foot_shapes=foot_shapes, gcol=gcol,
                      is_road=is_road, lit_ground_ways=lit_ground_ways, lm=lm, parking_mask=parking_mask,
-                     rail_beds=rail_beds, rails=rails, road_lines=road_lines, splash_pads=splash_pads, tn=tn)
+                     rail_beds=rail_beds, rails=rails, road_lines=road_lines, splash_pads=splash_pads, tn=tn,
+                     tn_cover=tn_cover)
 
 
 def tag(f, k):
@@ -1893,6 +1894,7 @@ def natural_ground(ctx):
         ctx.CORE, ctx.H, ctx.TN, ctx.water_overrides, ctx.bmask, ctx.boti, ctx.cell_maxh, ctx.cellcol, ctx.exg,
         ctx.explicit, ctx.g, ctx.gcol, ctx.lum, ctx.nd_max, ctx.nd_mean, ctx.osm, ctx.over, ctx.pitched_m,
         ctx.render, ctx.tn, ctx.top, ctx.topi, ctx.vol)
+    tn_cover = ctx.tn_cover
     # ---------------------------------------------------------------- natural ground
     # open land OSM says nothing about (the default paving, no path, square, car park or building on it) is not pavement
     # when the ortho or the terrain says otherwise: the wooded and grassy hillsides under Oberhaus and Mariahilf, gardens
@@ -1943,6 +1945,13 @@ def natural_ground(ctx):
     _nat[_k] = np.where(_green, C["grass2"], np.where(_bank, C["shore"], C["dirt"]))[_k]
     _k = tn == TN["parking"]
     _nat[_k] = np.where(_green, C["grass"], C["parking"])[_k]
+    # beyond the cadastre (the Inn's Austrian bank above the Innstadt: no ALKIS, and no OSM in the Niederbayern extract)
+    # nothing tells a forest from a yard: under crowns the ortho does not see green on the flat (a shaded or leaf-off
+    # canopy) the rules above left pale paving and bare earth -- the bank's forest stood on bare ground. There open land
+    # under the crowns is forest floor
+    if tn_cover is not None:
+        _k = ~tn_cover & _crown & np.isin(_nat, [C["paving"], C["dirt"], C["dirt2"]])
+        _nat[_k] = C["garden"]
     # the waterline: the ortho's cells there mix the river's brown-green with the bank (a lime and orange seam along every
     # quay's foot); within 3 m of the water a bank is rip-rap unless plainly green
     _edge = (ndimage.distance_transform_edt(~_water) <= 3) & ~_water & (_ex3 < 0.08)
@@ -2037,8 +2046,9 @@ def natural_ground(ctx):
     # a water override's outline is a wall too (a lock chamber's), faced in its own colour (default concrete) within 2 m
     _lockwall = np.zeros((D, W), np.uint16)
     if water_overrides:
-        burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, geom_ in water_overrides])
-        burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in water_overrides])
+        burn(_osm_wall, [(geom_.boundary.buffer(1.5), 1) for *_, sty_, geom_ in water_overrides if sty_])
+        burn(_lockwall, [(geom_.boundary.buffer(2), pal(sty_[0], landmarks.MAT_IDS[sty_[1]])) for *_, sty_, geom_ in water_overrides
+                         if sty_])
     _wall = (g - _nb_lo >= 2) & (~_natural_top | (_osm_wall > 0))
     n_rw = n_lw = 0
     _rr0, _cc0 = np.mgrid[R0:R0 + D, C0:C0 + W]  # (the project grid's: the same stones in every region)

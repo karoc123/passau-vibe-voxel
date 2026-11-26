@@ -70,6 +70,22 @@
       ]
     }
   ],
+  "inn": [
+    {
+      "name": "Ingling forebay is the 302.95 m pool, not a dry pit (handoff Q7: scripts/overrides/water/r2084318.json)",
+      "patches": [
+        {"kind": "water", "box": [-110, 3215, 40, 3290], "min_m": 16, "max_m": 16}
+      ]
+    },
+    {
+      "name": "Ingling dam's crest road at its own level, not the footbridge's beside it (handoff Q7: street/1282737017.json)",
+      "patches": [
+        {"kind": "bridge", "box": [-21, 3159, -18, 3161], "min_m": 21, "max_m": 22.5},
+        {"kind": "bridge", "box": [10, 3154, 13, 3156], "min_m": 21, "max_m": 22.5},
+        {"kind": "bridge", "box": [43, 3150, 46, 3151], "min_m": 21, "max_m": 22.5}
+      ]
+    }
+  ],
   "kachlet": [
     {
       "name": "St 2125 over the service passage",
