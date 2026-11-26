@@ -5,11 +5,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
   walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
-  observer-view switch (the free camera is a presence).
+  observer-view switch (orbit mode is a presence, unseen: GLOSSARY.md).
 
 - Overload (target-architecture.md): only the first step is built, the crowd thinned to a fifth at most while a
   second's ticks average over 80 % of the tick (host/ws.ts). Next: cars, then the others' send rate; the page's own
@@ -40,6 +39,18 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   never one of the crowd).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
 - Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
+
+## Owner's next (2026-11-27)
+
+- Esc opens a menu leading to settings; there a player may give a name (optional), shown over their avatar or
+  vehicle and on the map. Esc on foot today flies up: that moves.
+- A start menu: alone or a server, the server preselected as the one `./voxel start` serves the page with.
+- Ping shown to the player (with a host).
+- The motorbike: a huge turning circle, little fun to ride.
+- A car hitting a pedestrian: they topple over instead of being thrown ahead.
+- Standing close to a wall it turns see-through and shows what is behind.
+- A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
+  carry walkable, differing houses.
 
 ## Pipeline and city
 

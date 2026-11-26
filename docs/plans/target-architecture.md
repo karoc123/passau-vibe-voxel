@@ -242,7 +242,7 @@ Adopted into `AGENTS.md` (owner, 2026-11-26).
 2. Solo play always in a Web Worker, the in-thread mode deleted: yes.
 3. Far traffic may be a picture until its cell is promoted: yes.
 4. Player target: stays 10–50 (ADR 0008).
-5. The free camera counts as a presence: yes.
+5. Orbit mode counts as a presence: yes (unseen by the others).
 6. Kept things on disk: yes, later (step 6).
 7. Drop the bit-exact determinism requirement: yes.
 8. WebSocket first, WebTransport later: yes. `ws` (MIT, npm) is added only in step 2.
