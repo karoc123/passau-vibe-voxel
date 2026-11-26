@@ -55,8 +55,8 @@ export interface CarState {
   detachedPose?: RoadPose; // its pose out of the traffic: authoritative, independent of drawing
 }
 
-/** a car of the traffic as a snapshot carries it (sim/agent-wire.ts), by length: [id, s, v, brake] while nothing else
- * changed since the session's last snapshot; then its lane offset (off); then its way (e, lane, prev, prevOff, prev2,
+/** a car of the traffic as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts),
+ * by length: [id, s, v, brake] while nothing else changed since the sample before; then its lane offset (off); then its way (e, lane, prev, prevOff, prev2,
  * prev2Off, next, next2; -1 none); then what it is (len, bus 1/0, vt or 0, col), sent when it comes into sight or
  * changes. ds, dOff and wait are the client's to work out. Lengths cm, speeds cm/s */
 export type CarWire =
@@ -67,7 +67,7 @@ export type CarWire =
   | [id: number, s: number, v: number, brake: number, off: number, e: number, lane: number, prev: number, prevOff: number,
     prev2: number, prev2Off: number, next: number, next2: number, len: number, bus: number, vt: VehicleId | 0, col: string];
 
-/** a person of the crowd as a snapshot carries them (sim/agent-wire.ts), by length: [id, s]; then their way (e, dir,
+/** a person of the crowd as a snapshot carries a sample of them (sim/agent-wire.ts), by length: [id, s]; then their way (e, dir,
  * wait 1/0) when it changed; then who they are (v, lat, ph, col), sent when they come into sight or change. A rider
  * is one of the snapshot's riders; ph after that is the client's to work out */
 export type PersonWire =

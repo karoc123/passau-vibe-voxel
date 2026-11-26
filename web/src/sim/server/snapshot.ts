@@ -38,12 +38,13 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   const T = sim.traffic, B = T.bodies, S = sight?.look(sim, player) ? sight : null;
   const cars: CarWire[] = [], detached: CarState[] = [], people: PersonWire[] = [], riders: PersonWire[] = [];
   let i = 0;
-  for (const c of T.cars) if (!S || S.car(c.id, i++)) cars.push(wire.car(c));
+  const tick = sim.tick;
+  for (const c of T.cars) if (!S || S.car(c.id, i++)) { const w = wire.car(c, tick); if (w) cars.push(w); }
   for (const c of T.detachedCars) if (!S || S.car(c.id, i++)) detached.push(carState(c));
   i = 0;
-  for (const p of T.people) if (!S || S.person(p.id, i++)) people.push(wire.person(p));
-  for (const p of T.riders) if (!S || S.person(p.id, i++)) riders.push(wire.person(p));
-  wire.done();
+  for (const p of T.people) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) people.push(w); }
+  for (const p of T.riders) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) riders.push(w); }
+  const gone = wire.done();
   const bodies: [number, BodyDraw][] = [];
   if (B?.drawState) for (const c of T.roadVehicles()) {
     if (S && !S.has('car', c.id)) continue;
@@ -67,7 +68,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   if (S) { events = events.filter((e) => S.event(e)); S.done(); }
   return {
     tick: sim.tick, t: T.t, hour: sim.timeOfDay.hour, day: T.day,
-    cars, detached, people, riders,
+    cars, detached, people, riders, gone,
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
     walked, avatars, crafts, events,

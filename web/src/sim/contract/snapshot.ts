@@ -50,8 +50,10 @@ export interface DriverSnapshot {
  * player */
 export interface TimeOfDay { hour: number; day: number }
 
-/** a session's world after a tick, whole but for the cars' and people's (CarWire: what changed since the last). Its cars, people, bodies, walked, avatars, crafts and events are
- * those near the session's player only (its own seat's entity always): a thing missing from one is gone for it */
+/** a session's world after a tick, whole but for the cars' and people's (CarWire: samples where the client's reckoning
+ * of them drifts, sim/agent-wire.ts; gone: those it holds no more). Its cars, people, bodies, walked, avatars, crafts
+ * and events are those near the session's player only (its own seat's entity always): a thing missing from one is
+ * gone for it */
 export interface Snapshot {
   /** the tick whose state this is; what moves is drawn between it and the tick before */
   tick: number;
@@ -60,12 +62,14 @@ export interface Snapshot {
   /** the world's time of day and day of the year (the host's: WorldSim.setTime; the page's light follows it) */
   hour: number;
   day: number;
-  /** the traffic's cars, people and riders: what changed since the session's last snapshot (contract/agents.ts CarWire) */
+  /** the traffic's cars, people and riders: the samples since the session's last snapshot (contract/agents.ts CarWire) */
   cars: CarWire[];
   /** the cars out of the traffic (left, parked, a wreck) */
   detached: CarState[];
   people: PersonWire[];
   riders: PersonWire[];
+  /** the cars, and the people and riders, by id, gone from the session's sight (or from the traffic) */
+  gone: [cars: number[], people: number[]];
   /** the cars with a body (or its fade), by car id */
   bodies: [number, BodyDraw][];
   trains: TrainState[];
