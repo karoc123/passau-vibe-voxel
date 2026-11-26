@@ -49,6 +49,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
+- Hans-Hösl-Straße 20 (way 1100616130, grid -2926,432): from the north the north wall is gone and the roof hangs
+  down inside (`shoot.mjs --focus bld:1100616130`: f-nw broken, f-sw whole). Mesher (chamfer walls, roof slopes) or
+  facing culling; the owner sees more such houses.
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
