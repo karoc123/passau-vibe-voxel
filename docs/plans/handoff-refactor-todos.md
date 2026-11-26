@@ -52,7 +52,6 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
-| F11 | Grow the map along the Inn to Ingling | M | **Ready to merge** (`worktree-agent-a6bc0240c8d913578`, then the data rebuild in its section) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Engine packages
@@ -118,6 +117,12 @@ two off LoD2's (walls return as vegetation there, so the crown rule leaves it).
   - Passage through a building at voxel 1998,21,681 (owner, 2026-11-23): the house is built solid where a way runs
     through it. Check first whether OSM maps the way as `tunnel=building_passage` / `covered=yes` and whether
     `clearance.py` reads it there. `?cam=1938.5,69.3,669.7,1998,21.7,681.7&date=07-16&hour=20.38`.
+  - Ingling (F11's new blocks, `check.py verify --fixture scripts/fixtures/inn.json`): the forebay about 150 m above
+    the weir stands as a sandy pit (293-302 m) under the 302.95 m pool (DGM1 ramps across the weir; the OSM water
+    outline 160959413 does not close in the cut: a curated water body would fix it); rail bridge decks 131994367
+    (10.8 m sag) and 131994370, the dam's service bridge 1282737017 (2.3 m), tunnels 482662855 (blocked 107 m) and
+    94450270 (a hole), service road 212067382 on water; the Austrian bank has no OSM or ALKIS, so part of its forest
+    stands on bare ground.
 - Road spots older than this list are in [road-defects.md](road-defects.md).
 
 ## Feature packages
@@ -128,25 +133,6 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 ### F2. Walk to a specific vehicle and get in (set aside)
 
 - Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
-
-### F11. Grow the map along the Inn to Ingling (M)
-
-- **On the branch, waiting for the rebuild:** the blocks along the Inn to the Ingling dam are in `scripts/map.json`
-  (fixture `scripts/fixtures/inn.json` built and looked at). The owner's rebuild, from the main checkout:
-  1. `cp -n` the new sheets from the branch worktree's `data/raw` (or let `fetch_bayern.sh` fetch them: ~2.7 GB).
-  2. Cut `osm.json` again for the larger bounds from the same extract (the bbox `fetch_osm.sh` prints):
-     `uv run --with osmium python scripts/osm_pbf.py data/raw/geofabrik/niederbayern-latest.osm.pbf 48.5483,13.3522,48.6044,13.4856 data/raw/osm.json`
-     (or `OSM_REFRESH=1`: a newer extract, the whole map changes).
-  3. `sh scripts/build_data.sh` (it runs `fetch_bayern.sh`, which cuts `baeume_aoi.csv` and `treespecies_*.tif` again
-     because `data/raw/cut_bounds.txt` is new; then every region builds again: the map's config changed). Palette
-     entries it appends go in their own commit; `mirror-check`'s golden is recorded again after a look at the page.
-- **Known spot:** the Ingling dam's forebay, about 150 m upstream of the weir and the river's middle, stands as a sandy
-  pit (293-302 m) under the 302.95 m pool: DGM1 ramps across the weir there, and the Inn's OSM water outline above the
-  dam (way 160959413) does not close within the cut. A curated water body (an override of its level) would fix it.
-  `check.py verify --fixture scripts/fixtures/inn.json` also flags, in the new blocks: the railway bridge decks
-  131994367 (10.8 m sag over 94 m) and 131994370, the dam's service bridge 1282737017 (2.3 m), the tunnels 482662855
-  (blocked 107 m) and 94450270 (a hole), service road 212067382 on water; and the Austrian bank (no OSM, no ALKIS)
-  shows bare ground under part of its forest.
 
 ## Also open (for later)
 
