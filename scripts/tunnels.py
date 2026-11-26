@@ -23,6 +23,12 @@ One the street over it leaves less than LOW m somewhere (a railway embankment th
 solid and noted. Only ways something covers: one that nothing covers (a street under a bridge's deck, at grade) is
 left as it is.
 
+An underground car park's ways are neither (car_park): its aisles (service=parking_aisle) and the tunnel=yes ways that
+end on one (its ramps) lie in a building's basement or podium, not in the ground, and the car park is not built. The
+Universität's under the Zentralbibliothek (aisle 482662855, ramp 94450270, project col 1087-1150, row 1421-1500): the
+terrain model runs over the library's podium 3-6 m over the car park's floor, so the aisle was left solid along its
+107 m, and the ramp's inner portal took the podium's level for its floor (a hole in the footway over it).
+
 plan() gives the ways bored (and the covered passages carved) besides its plan, for underpass.py (which leaves them)
 and traffic.py; build() gives a Bored: `floor`, the driving or walking level (z of the first free voxel) of every
 bored cell, -1 elsewhere, for traffic.py (cars and walkers go through, not over the hill), and `lowered`, (r, c) ->
@@ -98,9 +104,9 @@ def _floor(z0, z1, s, L, top):
     return np.where((top - 1 - z < LOW) & (top - 1 - zd >= LOW), zd, z)
 
 
-def _plan_covered(osm, g, out, ids):
+def _plan_covered(osm, g, out, ids, skip=frozenset()):
     """the covered passages (module doc): appended to out as (way id, tags, line, Covered, z0, z1, a, b) -- covered
-    from a to b along it, cut open before and after; the ones carved into ids"""
+    from a to b along it, cut open before and after; the ones carved into ids; none of skip (car_park)"""
     import shapely
     from shapely.strtree import STRtree
 
@@ -110,7 +116,7 @@ def _plan_covered(osm, g, out, ids):
     surf = [(t_, l_) for _, t_, l_ in osm.lines if bed(t_) and not underground(t_) and t_.get("bridge") in (None, "no")]
     tree = STRtree([l_ for _, l_ in surf])
     for oid, t, line in osm.lines:
-        if t.get("tunnel") != "yes" or oid in ids or line.length < 3 or not bed(t):
+        if t.get("tunnel") != "yes" or oid in ids or oid in skip or line.length < 3 or not bed(t):
             continue
         kind, half = bed(t)
         x0, y0 = line.coords[0]
@@ -140,13 +146,23 @@ def _plan_covered(osm, g, out, ids):
             ids.add(oid)
 
 
+def car_park(lines):
+    """the ids of an underground car park's tunnel=yes ways among lines (osm.lines): its aisles and the ways ending on
+    one (its ramps: an end node shared)"""
+    tun = [(oid, t, line) for oid, t, line in lines if t.get("tunnel") == "yes"]
+    aisles = {oid for oid, t, _ in tun if t.get("service") == "parking_aisle"}
+    ends = {line.coords[k] for oid, _, line in tun if oid in aisles for k in (0, -1)}
+    return aisles | {oid for oid, _, line in tun if line.coords[0] in ends or line.coords[-1] in ends}
+
+
 def plan(osm, g):
     """(the tunnels under a hill: [(way id, tags, line, profile, z0, z1, portal s0, portal s1)], then the covered
     passages (_plan_covered: their profile a Covered); the ids of the ways bored or carved)"""
     ids = set()
     out = []
+    skip = car_park(osm.lines)
     for oid, t, line in osm.lines:
-        if t.get("tunnel") != "yes" or line.length < 10 or t.get("highway") is None:
+        if t.get("tunnel") != "yes" or line.length < 10 or t.get("highway") is None or oid in skip:
             continue
         prof = _profile(t)
         if prof is None:
@@ -168,7 +184,7 @@ def plan(osm, g):
         k = np.nonzero(covered)[0]
         out.append((oid, t, line, prof, z0, z1, float(ss[k[0]]), float(ss[k[-1]])))
         ids.add(oid)
-    _plan_covered(osm, g, out, ids)
+    _plan_covered(osm, g, out, ids, skip)
     return out, ids
 
 

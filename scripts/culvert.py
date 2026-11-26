@@ -111,7 +111,9 @@ def carry(osm, wet, g, lo, wlev, cells_of):
 
 def wet_metres(osm, wet, core):
     """{way id: metres of its centreline on water} of every way the rule looks at, counted in core (the region's
-    core: (r0, r1, c0, c1)), and the subset of them that are carriageways or railways"""
+    core: (r0, r1, c0, c1)), and the subset of them that are carriageways or railways -- but a ramp that runs into the
+    water on purpose (canoe=portage, leisure=slipway: the portage road 212067382 by the Ingling dam's forebay, sett down
+    into the pool) is listed only"""
     D, W = wet.shape
     r0, r1, c0, c1 = core
     out, hard = {}, {}
@@ -122,6 +124,7 @@ def wet_metres(osm, wet, core):
         n = int((ok & wet[r, c] & (r >= r0) & (r < r1) & (c >= c0) & (c < c1)).sum())
         if n:
             out[str(oid)] = n
-            if t.get("railway") in RAILS or t.get("highway") in ROADS:
+            if (t.get("railway") in RAILS or t.get("highway") in ROADS) and t.get("canoe") != "portage" \
+                    and t.get("leisure") != "slipway":
                 hard[str(oid)] = n
     return out, hard

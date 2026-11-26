@@ -1,0 +1,18 @@
+{
+  "osm": {
+    "type": "relation",
+    "id": 2084318,
+    "geom": "6bf69a731221",
+    "tags": "eb4a8963159c",
+    "osm_timestamp": "2026-11-16T21:22:36Z"
+  },
+  "note": "The Inn's pool above the Ingling dam (Kraftwerk Passau-Ingling, weir way 273300967), the forebay from the weir (project row ~3180) to the map's south edge (row 3456). OSM's outline (outer way 160959413) runs ~11 km up the Inn; the extract keeps only its nodes near the map, so its ring stopped open at both banks ~300 m south of the map's edge (827431,5386743 and 827667,5386769, EPSG:25832) and polygonized to nothing. The rivers from the terrain model took most of the pool, but DGM1 ramps across the weir (it has the surfaces on either side): 150 m above the weir a dry pit of 293-302 m stood under the 302.95 m pool. Closed off the map (`close`) at the pool's level, as scripts/map.json's stretch gives it (302.95 m, the plant's operating level). Its banks are natural (dikes, riprap, the Austrian forest), so no wall faces.",
+  "sources": [
+    "osm",
+    "dgm1",
+    "dop20"
+  ],
+  "level": 302.95,
+  "walls": false,
+  "close": true
+}

@@ -287,6 +287,9 @@ DECK_SAG_KNOWN = {
     27663642: "Stockbauersteig (hals): crowns over its east end, its west end's ramp smoothed into the bank",
     1169724321: "Steffelmuehlweg (kachlet): crowns over a short bridge the ortho does not see green",
     1272598946: "footway (altstadt): crowns over 3 m of it",
+    131994367: "Wels-Passau railway's Inn bridge (inn), a through truss: the surface model sees its top chords 11 m "
+               "over the rails (314 m) over the 85 m river span; the deck at 303 m meets both approaches",
+    131994370: "the same bridge's other track (inn)",
 }
 
 

@@ -261,13 +261,16 @@ lists them and their parameters).
   `dormer`, `chimney`, `bay_window` (oriel), `arcade` (arches cut into the ground floor). Placed `at` the centre,
   the highest column, an EPSG:25832 point or a fraction along and across the footprint, `repeat`ed by a step. A new
   part is a function and an entry in `PARTS`.
-- **Streets**: `width`, `lanes`, `surface` (set as the way's OSM tags when OSM is read, so the volume, the traffic
-  and the lamps all see them), `sidewalk` (paved strips left and right of the carriageway, with a kerb line),
+- **Streets**: `width`, `lanes`, `surface`, `layer` (set as the way's OSM tags when OSM is read, so the volume, the
+  traffic and the lamps all see them; `layer` gives a bridge way a deck of its own beside another of the same layer at
+  another level), `sidewalk` (paved strips left and right of the carriageway, with a kerb line),
   `trees` and `lamps` every so many metres along a side (added as OSM nodes, ids from 10^15: young trees where the
   surface model has no crown, lamps with their poles and light).
-- **Water** (`scripts/overrides/water/<way id>.json`, a `natural=water` area): a `level` of its own (m a.s.l.; the
-  polygon then leaves the river bodies whose median level the rest of the water takes), `walls` (the face colour of
-  its banks, default concrete; its outline counts as a mapped wall) and `gates` (`waterway=lock_gate` lines drawn from
+- **Water** (`scripts/overrides/water/<way id>.json` or `r<relation id>.json`, a `natural=water` area): a `level` of
+  its own (m a.s.l.; the polygon then leaves the river bodies whose median level the rest of the water takes), `walls`
+  (the face colour of its banks, default concrete; its outline counts as a mapped wall; `false`: natural banks),
+  `close` (a multipolygon whose outer ring the extract's bbox cut, closed off the map: the Inn's pool above the Ingling
+  dam) and `gates` (`waterway=lock_gate` lines drawn from
   the lower water to a `top`, a walkway on top, concrete under an optional `sill`; the river water by a gate's outer
   side takes its stretch's level, not the DGM's interpolated median over the approach). The Kachlet lock's two chambers
   (one full, one empty, as on the survey day) are the example; their gate ways' geometry is in the file's `osm` basis.
