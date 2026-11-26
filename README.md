@@ -333,8 +333,8 @@ tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN 
 
 Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
 port 5300). Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
-what lies near them, two to a message; 1.5-5 MB/s per player before the socket's deflate (the old town is the most),
-about a third of that on the wire. Under WSL2 the LAN reaches the host only with mirrored networking
+what lies near them, two to a message: the bodies, crafts and avatars whole, the cars, people and trains only when the
+page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)

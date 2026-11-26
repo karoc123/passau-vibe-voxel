@@ -176,9 +176,10 @@ if (walk && (walk.share < 0.9 || walk.dist < 5)) fail.push(`A's body as B draws 
 // The bytes each player's socket wrote (deflated, as over the internet) from A's walk on, kB a second of the world's
 // time: A on foot, B driving by the cathedral, C by the dam. A busy machine skips a backed-up socket's snapshots, which
 // only lowers it, so the budget holds under load. Measured 2026-11-26 (players by the cathedral, cars sent within
-// 350 m, people 200 m, compact cars and people): ~45-60 kB/s on foot or driving there, ~20 by the dam; before, 1.7 MB/s.
+// 350 m, people 200 m; cars, people and trains sent when the page's reckoning drifts, boats when they move, edits as
+// ops): ~12-15 kB/s on foot or driving there, ~2 by the dam; the target is 20 mean, 50 peak.
 // --interest 100000 for the bytes unfiltered (no budget then).
-const BUDGET = 120;
+const BUDGET = 25;
 const perS = (list) => { const m = new Map(list.map(([p, b]) => [p, b / 1024 / (stats.ticks * STEP)])); return [A, B, C].map((X) => m.get(X.player) ?? 0); };
 const kb = perS(stats.bytes), wire = perS(stats.wire);
 if (!arg('interest') && wire.some((k) => k > BUDGET)) fail.push(`sent over the socket (deflated): ${wire.map((k) => k.toFixed(0)).join(' / ')} kB/s to A / B / C, over the budget of ${BUDGET}`);
