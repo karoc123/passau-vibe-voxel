@@ -72,6 +72,8 @@ export class Nav {
   private orbitFov = 0;
   private readonly rider: Rider;
   private walkPending = false;
+  // the avatar asked for on foot (walkBody): for which session's player, where the walk put it last
+  private body: { player: string | null; x: number; z: number } | null = null;
   private hoverT = 0;
   private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
   private quietT = 0;
@@ -633,10 +635,27 @@ export class Nav {
     dt = Math.min(dt, 0.1);
     this.footSticks.setActive(this.onFoot);
     this.fitNear();
+    // (off foot: the body gone before a ride's own seat is asked for)
+    if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
     if (this.third) this.foot.updatePedestrian(dt, this.footStick());
     else if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
+    if (this.onFoot) this.walkBody();
+  }
+
+  // On foot the player is a body the world knows (an avatar: the others see it walk), moved by this walk: put down
+  // when the walk starts, again after a jump of the walk (a landing elsewhere) or with a new session (the host
+  // reconnected), then the walk's pose every frame; the walk stays this page's own, so it answers at once
+  private walkBody() {
+    const sim = this.sim;
+    if (!sim) return;
+    sim.results('walk');
+    const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
+    const pose = { x, y: f.feet, z, h: this.third ? f.pedestrian?.facing ?? f.yaw : f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3 };
+    if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
+    else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
+    this.body = { player: sim.player, x, z };
   }
 
   /** after the sim's update and the street's drawing (main.ts): the ride's camera on this frame's poses */

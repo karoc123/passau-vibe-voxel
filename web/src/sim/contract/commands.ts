@@ -74,6 +74,8 @@ export type Refusal = 'loading' | 'failed';
  *   resetCraft   the player's craft back to a safe spot nearby
  *   resetDriver  the player's car back on the road
  *   dropCraft    the player's craft taken out of the world (one that does not stay: the paraglider)
+ *   walk         the player on foot: their own body (an avatar) put down at pose, the player its walker (its seat
+ *                inputs move it; leaving the seat takes it away); on foot already: put down there again
  *   setTime      the world's time of day (hour 0..24) and day of the year (without: the day kept), the same for
  *                every player (docs/adr/0009-layers-and-owners.md: the host owns it) */
 export type ModeRequest =
@@ -82,6 +84,7 @@ export type ModeRequest =
   | { kind: 'resetCraft' }
   | { kind: 'resetDriver' }
   | { kind: 'dropCraft' }
+  | { kind: 'walk'; pose: WalkPose }
   | { kind: 'setTime'; hour: number; day?: number };
 
 /** where a craft is put down: x, z, heading h, a height for one that starts in the air or afloat, a speed along h for

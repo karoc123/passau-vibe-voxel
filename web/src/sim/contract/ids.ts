@@ -8,9 +8,11 @@ export type PlayerId = string;
 
 export type CraftId = number;
 
-/** what an entity is; numbered per kind */
-export type EntityKind = 'car' | 'person' | 'craft';
-/** an entity of the world: a car (Car.id), a person (Person.id) or a craft (CraftId); the kinds are numbered apart */
+/** what an entity is; numbered per kind. An avatar is a player's own body on foot (never one of the crowd): made by
+ * the game mode on a walk request, gone when its walker leaves it */
+export type EntityKind = 'car' | 'person' | 'craft' | 'avatar';
+/** an entity of the world: a car (Car.id), a person (Person.id), a craft (CraftId) or an avatar; the kinds are
+ * numbered apart */
 export interface EntityRef { kind: EntityKind; id: number }
 
 /** what a seat's holder does: drives a car, pilots a craft, walks as a person */

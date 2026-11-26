@@ -58,9 +58,16 @@ import type { GameMode, ModeWorld } from './mode';
  * poses taken (the walk itself is the client's, sent as poses) */
 export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; walk?: Walk }
 
-/** a walk's poses taken: the last (pose, at the sim's clock at) and the one an update's poses are bounded against (the
- * last of an earlier update: from, fromAt) */
-export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number }
+/** a walk's poses taken: the last (pose, at the sim's clock at), the one an update's poses are bounded against (the
+ * last of an earlier update: from, fromAt), the one at the end of the tick before (prev: what is drawn from) and the
+ * walk's velocity across (m/s, between the last two ticks a pose was taken in, sent: the last one's place and time:
+ * what a tick without one goes on at) */
+export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number; prev: WalkPose; vx: number; vz: number; sent: { x: number; z: number; at: number } }
+
+// A walker's poses reach the host as their page's frames send them, unevenly: a tick none reached would stand still
+// and the next jump, which the other players see as a stutter. Moving, such a tick goes on at the walk's velocity, for
+// at most GUESS_S after the last pose taken; the next pose taken replaces the guess.
+const GUESS_S = 0.1;
 
 // (a player craft, Craft: sim/craft/craft-core.ts)
 type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
@@ -111,6 +118,9 @@ export class WorldSim {
   private nextCraft = 1;
   /** the entities (sim/entities.ts): the cars, people and crafts read through their own stores */
   readonly entities: Entities;
+  /** the players' own bodies on foot (avatars), by id: their walker */
+  readonly avatars: ReadonlyMap<number, PlayerId> = new Map<number, PlayerId>();
+  private nextAvatar = 1;
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -122,6 +132,7 @@ export class WorldSim {
     addCraft: (type) => this.addCraft(type),
     placeCraft: (id, spot) => this.placeCraft(id, spot),
     removeCraft: (id) => this.removeCraft(id),
+    walk: (player, pose) => this.walk(player, pose),
     sit: (player, seat) => this.enterSeat(player, seat) === true,
     setTime: (hour, day) => this.setTime(hour, day),
     resetDriver: (player) => {
@@ -182,6 +193,15 @@ export class WorldSim {
           return c?.placed ? { x: c.core.pose.x, y: c.core.pose.y, z: c.core.pose.z, h: c.core.pose.h } : null;
         },
         seats: (id) => SEATS.craft[this.crafts.get(id)!.type],
+      },
+      // (where its walker puts it)
+      avatar: {
+        exists: (id) => this.avatars.has(id),
+        pose: (id) => {
+          const by = this.avatars.get(id), w = by === undefined ? null : this.players.get(by)?.walk?.pose;
+          return w ? { x: w.x, y: w.y, z: w.z, h: w.h } : null;
+        },
+        seats: () => SEATS.avatar,
       },
     });
   }
@@ -276,7 +296,13 @@ export class WorldSim {
     this.clock = (t0 + 1) * STEP;
     const q = this.queue;
     this.queue = [];
+    for (const P of this.players.values()) if (P.walk) P.walk.prev = P.walk.pose;
     for (const cmd of q) this.apply(cmd);
+    for (const P of this.players.values()) {
+      const W = P.walk;
+      if (W && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9)
+        W.pose = { ...W.pose, x: W.pose.x + W.vx * STEP, z: W.pose.z + W.vz * STEP };
+    }
     const now = t0 * STEP, foci = this.foci();
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
@@ -436,6 +462,7 @@ export class WorldSim {
     this.due.push({ kind: 'unseated', player, seat: s });
     if (s.role === 'walker') {
       delete P.walk;
+      if (s.entity.kind === 'avatar') (this.avatars as Map<number, PlayerId>).delete(s.entity.id);
       this.held();
     } else if (s.role === 'driver') this.phys?.releaseWheel(player);
     else {
@@ -460,15 +487,22 @@ export class WorldSim {
     if (by !== undefined || (this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat))) return false;
     const id = seat.entity.id;
     if (seat.role === 'walker') {
-      const person = this.traffic.people.find((p) => p.id === id);
-      if (!person) return false;
-      const at = this.traffic.personPoint(person, 0, { x: 0, y: 0, z: 0 }), take = this.tuning.walk.take;
-      const pose = cmd.pose ?? { x: at.x, y: at.z, z: at.y, h: 0, moving: false };
-      const dx = pose.x - at.x, dz = pose.z - at.y, d = Math.hypot(dx, dz), k = d > take ? take / d : 1;
-      const start = k < 1 ? { ...pose, x: at.x + dx * k, z: at.y + dz * k } : { ...pose }, t = this.clock - STEP;
+      let start: WalkPose;
+      if (seat.entity.kind === 'avatar') {
+        if (!cmd.pose) return false;
+        start = { ...cmd.pose };
+      } else {
+        const person = this.traffic.people.find((p) => p.id === id);
+        if (!person) return false;
+        const at = this.traffic.personPoint(person, 0, { x: 0, y: 0, z: 0 }), take = this.tuning.walk.take;
+        const pose = cmd.pose ?? { x: at.x, y: at.z, z: at.y, h: 0, moving: false };
+        const dx = pose.x - at.x, dz = pose.z - at.y, d = Math.hypot(dx, dz), k = d > take ? take / d : 1;
+        start = k < 1 ? { ...pose, x: at.x + dx * k, z: at.y + dz * k } : { ...pose };
+      }
+      const t = this.clock - STEP;
       this.leaveSeat(player);
       this.sit(player, seat);
-      this.player(player).walk = { pose: start, at: t, from: start, fromAt: t };
+      this.player(player).walk = { pose: start, at: t, from: start, fromAt: t, prev: start, vx: 0, vz: 0, sent: { x: start.x, z: start.z, at: t } };
       this.held();
     } else if (seat.role === 'driver') {
       const phys = this.phys, at = this.entities.pose(seat.entity), warm = at ? { x: at.x, z: at.z } : undefined;
@@ -495,10 +529,28 @@ export class WorldSim {
     const W = this.players.get(player)?.walk;
     if (!W) return true;
     if (W.at !== this.clock) { W.from = W.pose; W.fromAt = W.at; }
-    const taken = boundWalk(W.from, pose, this.clock - W.fromAt, this.tuning.walk);
+    const taken = boundWalk(W.from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
     W.pose = { ...taken };
     W.at = this.clock;
+    if (dt > 0) { W.vx = (taken.x - S.x) / dt; W.vz = (taken.z - S.z) / dt; W.sent = { x: taken.x, z: taken.z, at: this.clock }; }
+    else { S.x = taken.x; S.z = taken.z; }
     return taken === pose;
+  }
+
+  // the player on foot (a mode's walk): their avatar put down at pose (one held: there again, nothing drawn between);
+  // else a new one, the player its walker (the seat held left first); false: not seated (the mode's mayEnter)
+  private walk(player: PlayerId, pose: WalkPose) {
+    const s = this.seat(player), W = this.players.get(player)?.walk;
+    if (s?.entity.kind === 'avatar' && W) {
+      const at = { ...pose }, t = this.clock - STEP;
+      Object.assign(W, { pose: at, at: t, from: at, fromAt: t, prev: at, vx: 0, vz: 0, sent: { x: at.x, z: at.z, at: t } });
+      return true;
+    }
+    const id = this.nextAvatar++, avatars = this.avatars as Map<number, PlayerId>;
+    avatars.set(id, player);
+    if (this.enterSeat(player, { entity: { kind: 'avatar', id }, role: 'walker', pose }) === true) return true;
+    avatars.delete(id);
+    return false;
   }
 
   private player(id: PlayerId) {
@@ -546,8 +598,8 @@ export class WorldSim {
     const { held, walked } = this.traffic;
     held.car.clear(); held.person.clear(); walked.clear();
     for (const P of this.players.values()) {
-      if (P.follow && P.follow.kind !== 'craft') held[P.follow.kind].add(P.follow.id);
-      if (P.seat?.role === 'walker') { held.person.add(P.seat.entity.id); walked.add(P.seat.entity.id); }
+      if (P.follow?.kind === 'car' || P.follow?.kind === 'person') held[P.follow.kind].add(P.follow.id);
+      if (P.seat?.role === 'walker' && P.seat.entity.kind === 'person') { held.person.add(P.seat.entity.id); walked.add(P.seat.entity.id); }
     }
   }
 

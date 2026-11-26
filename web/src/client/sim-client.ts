@@ -11,6 +11,8 @@
 // with ack (the last one taken).
 // The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
 // differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
+// A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
+// what the player held is gone with the old session.
 // No three.js, no DOM. The client never imports the server.
 import type { WorldOp } from '../core/world-edits';
 import { LiveEdits } from '../core/live-edits';
@@ -23,8 +25,8 @@ import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
-import type { Ack, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
-import type { RoadPose, WalkPose } from '../sim/contract/pose';
+import type { Ack, AvatarState, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
+import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
 import { RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
 import { coachPoses, trainTracks, type CoachPose } from '../sim/coaches';
@@ -207,7 +209,7 @@ export class MirrorSimClient implements SimClient {
   private clock = 0;
   private readonly leads: [number, number][] = [];
   private events: SimEvent[] = [];
-  private readonly reads = new SeatReads();
+  private reads = new SeatReads();
   private outcomes: CommandResult[] = [];
   // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
@@ -225,13 +227,29 @@ export class MirrorSimClient implements SimClient {
     link.onSnapshot = (s) => this.take(s);
   }
 
-  // the host's hello: taken if it matches the client's own, else refused
+  // the host's hello: taken if it matches the client's own, else refused; a later one, a new session: its reads afresh
   private greet(h: Hello) {
-    if (this.greeted || this.refused) return;
+    if (this.refused) return;
     const e = checkHello(h, this.mine);
     if (e) { this.refuse(e); return; }
+    if (this.greeted) { this.restart(); return; }
     this.greeted = h;
     this.settle.ok(h);
+  }
+
+  // a new session (its tick may start anew): nothing of the old one's snapshots, events, outcomes or crafts kept; its
+  // edits not yet answered failed
+  private restart() {
+    this.last = this.drawn = null;
+    this.buffer.length = 0;
+    this.at = null;
+    this.leads.length = 0;
+    this.events = [];
+    this.outcomes = [];
+    this.reads = new SeatReads();
+    this.craftList.clear();
+    for (const p of this.pending.values()) p.fail(new Error('edit lost: the host connection was lost'));
+    this.pending.clear();
   }
 
   private refuse(e: Error) {
@@ -385,6 +403,8 @@ export class TrafficMirror {
   private trainList: readonly TrainState[] = [];
   /** the people walked by players, by person id */
   readonly walked = new Map<number, WalkPose>();
+  /** the players' own bodies on foot (avatarPose: where one is drawn) */
+  avatars: AvatarState[] = [];
   readonly bodies = {
     owns: (c: Car) => !!this.draws.get(c.id)?.owns,
     pose: (c: Car, a: number, under: RoadPose) => this.bodyPose(c, a, under),
@@ -443,6 +463,15 @@ export class TrafficMirror {
     this.boats = s.boats;
     this.walked.clear();
     for (const [id, w] of s.walked) this.walked.set(id, w);
+    this.avatars = s.avatars;
+  }
+
+  /** where avatar a is drawn a (0..1) of the way from its tick before to its tick */
+  avatarPose(a: AvatarState, alpha: number, out: Pose): Pose {
+    const p = a.prev, q = a.pose, dh = Math.atan2(Math.sin(q.h - p.h), Math.cos(q.h - p.h));
+    out.x = p.x + (q.x - p.x) * alpha; out.y = p.y + (q.y - p.y) * alpha; out.z = p.z + (q.z - p.z) * alpha;
+    out.h = p.h + dh * alpha;
+    return out;
   }
 
   // as LifePhysics.pose (sim/body-pose.ts drawnBodyPose, the same code): a parked car or a wreck where it is, a body
