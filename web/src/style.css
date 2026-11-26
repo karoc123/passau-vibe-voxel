@@ -6,6 +6,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* pinches zoom the map, never the page */ background: #1b1d22; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
 #app canvas { display: block; }
+/* on foot with the eyes under the water's top (a fall into it): murky green-blue */
+#app canvas.underwater { filter: sepia(.4) hue-rotate(140deg) saturate(1.8) brightness(.55) blur(1.5px); }
 
 #bar { --t2: rgba(255,255,255,.62); position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }

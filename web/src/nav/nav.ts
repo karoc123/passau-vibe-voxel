@@ -636,6 +636,7 @@ export class Nav {
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
+    this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);
     // (after the walk's pose: the host fires from where it has just put the body)
     if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
     else { this.arms.trigger = false; this.foot.aim = false; }
@@ -649,7 +650,7 @@ export class Nav {
     if (!sim) return;
     sim.results('walk');
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
-    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot };
+    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot, ...(f.swimming ? { swim: true } : {}) };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
     else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
     this.body = { player: sim.player, x, z };
