@@ -1,6 +1,9 @@
-// The solid things a walker meets besides the voxels: each kind declares its shape here, an upright box on its pose,
-// and the walk (nav/walk.ts) is blocked and pushed by all of them alike. A new kind becomes solid by a shape here and
-// a line where its drawn poses are gathered (view/life.ts solids), never by walk code of its own. No three.js, no DOM.
+// The solid things the walker and the crafts meet besides the voxels: each kind declares its shape here, an upright
+// box on its pose. The walk (nav/walk.ts) is blocked and pushed by all of them alike, a craft with a shape is pushed
+// out of them (sim/world-sim.ts stepCrafts) and the river's vessels give way to the crafts. A new kind becomes solid by
+// a shape here and a line where its poses are gathered (the page's: view/life.ts solids; the host's: WorldSim
+// solidsNear), never by collision code of its own. No three.js, no DOM.
+import type { BoatPose } from './contract/agents';
 import type { CraftType, VehicleId } from './contract/ids';
 import type { Pose } from './contract/pose';
 import { COACH_LENGTH, COACH_WIDTH } from './coaches';
@@ -43,6 +46,14 @@ export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
   boat: { hx: BOAT.beam / 2, hz: BOAT.length / 2, y0: -0.5, top: 1.5 },
 };
 
+/** the river's vessels' measures (m): a cruise ship's longest length and its beam, an excursion boat's */
+export const CRUISE_L = 135, CRUISE_B = 11.4, TOUR_L = 38, TOUR_B = 8;
+// the river's vessels, as view/boats.ts draws them: the hull from under the waterline to the sun deck (a cruise ship)
+// or the open top deck (an excursion boat)
+const VESSEL = { ship: { hx: CRUISE_B / 2, y0: -1.4, top: 7.4 }, boat: { hx: TOUR_B / 2, y0: -1, top: 3.7 } };
+/** a vessel of the river traffic (its length is its pose's) */
+export const vesselShape = (p: Pick<BoatPose, 'kind' | 'len'>): Shape => ({ ...VESSEL[p.kind], hz: p.len / 2 });
+
 // what a craft of no shape here is to a shot and to a boarding walker: a box round its pilot
 const SMALL_CRAFT: Shape = { hx: 1.5, hz: 3, y0: -1, top: 1 };
 /** a craft's box (y its foot, ht its height; r, l half its width and length) as a shot and a boarding walker meet it:
@@ -73,6 +84,27 @@ export function reach(s: Solid, x: number, z: number, feet: number, out?: { x: n
     if (mv < mu) { depth = WALKER_R + mv; ov = v < 0 ? -1 : 1; ou = 0; } else { depth = WALKER_R + mu; ov = 0; ou = u < 0 ? -1 : 1; }
   }
   if (out) { out.x = c * ov + n * ou; out.z = -n * ov + c * ou; }
+  return depth;
+}
+
+/** how far box a reaches into box b across (m; 0 or less: clear of it, or above or below it), and which way a gets out
+ * of it soonest (out: a unit x, z) */
+export function overlap(a: Solid, b: Solid, out?: { x: number; z: number }): number {
+  if (a.y >= b.y + b.top || b.y >= a.y + a.top) return -1;
+  const dx = a.x - b.x, dz = a.z - b.z;
+  let depth = Infinity, nx = 0, nz = 0;
+  // (the four sides' directions: each box's across (cos h, -sin h) and along (sin h, cos h))
+  for (const s of [a, b]) {
+    const c = Math.cos(s.h), n = Math.sin(s.h);
+    for (const [lx, lz] of [[c, -n], [n, c]]) {
+      const ra = a.hx * Math.abs(Math.cos(a.h) * lx - Math.sin(a.h) * lz) + a.hz * Math.abs(Math.sin(a.h) * lx + Math.cos(a.h) * lz);
+      const rb = b.hx * Math.abs(Math.cos(b.h) * lx - Math.sin(b.h) * lz) + b.hz * Math.abs(Math.sin(b.h) * lx + Math.cos(b.h) * lz);
+      const d = dx * lx + dz * lz, o = ra + rb - Math.abs(d);
+      if (o <= 0) return o;
+      if (o < depth) { depth = o; nx = d < 0 ? -lx : lx; nz = d < 0 ? -lz : lz; }
+    }
+  }
+  if (out) { out.x = nx; out.z = nz; }
   return depth;
 }
 

@@ -12,6 +12,7 @@
 //   drawn(alpha)              its pose as drawn between the world's last two ticks: alpha (0..1, WorldSim's FrameTime)
 //                             of the way from where it was kept to where it is now; one put somewhere at once in a
 //                             step (the plane's respawn) drawn where it is
+//   meet(n, depth, world)     met a solid thing (sim/solids.ts: its type has a shape): pushed out of it, bounced
 //   save(), load(state)       its state on the wire (contract/crafts.ts CraftStates, by type: a snapshot's crafts): what
 //                             a client's copy of it reads (pose, drawn, velocity, what its shell shows), declared field
 //                             by field; core-state.ts checks nothing else it holds differs on the copy (tools/craft-motion.mjs)
@@ -64,6 +65,9 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   save(): S;
   /** a client's copy (a core of the same type and tuning, never stepped): state (save()'s) written into it */
   load(state: S): void;
+  /** met a solid thing (sim/solids.ts; the craft's type has a shape there) depth m deep, n (a unit x, z) the way out
+   * of it: pushed out as far as its own collision lets it, its speed into it turned back or lost as at a wall */
+  meet?(n: { x: number; z: number }, depth: number, world: VoxelCollision): void;
   /** back to a safe spot nearby (T); false: not now */
   unstick?(world: VoxelCollision): boolean;
 }

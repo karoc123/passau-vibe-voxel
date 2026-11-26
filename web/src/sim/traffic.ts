@@ -7,7 +7,7 @@
 // at signalled crossings. Density follows the hour. Near player edits some cars are physical bodies (`bodies`:
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
 import { pushTo, rng, type Rng } from '../core/num';
-import { BoatTraffic, type BoatData } from './boat-traffic';
+import { BoatTraffic, type BoatData, type InTheWay } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
@@ -103,6 +103,8 @@ export class Traffic {
   readonly heads: NonNullable<TrafficData['heads']>;
   readonly trains: TrainTraffic;
   private boatTraffic: BoatTraffic | null = null;
+  /** whether something the river's vessels give way to is in a vessel's way (WorldSim's: the crafts) */
+  inTheWay: InTheWay = () => false;
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
@@ -488,7 +490,7 @@ export class Traffic {
     this.stepRiders(dt);
     this.trains.tick(this.t, dt, hour, this.viewers);
     this.bodies?.tick(dt, this);
-    this.boatTraffic?.tick(this.t, hour, this.day, this.water);
+    this.boatTraffic?.tick(this.t, hour, this.day, this.water, this.inTheWay);
   }
 
   // ------------------------------------------------------------------ player edits
