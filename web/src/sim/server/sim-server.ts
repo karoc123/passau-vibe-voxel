@@ -6,7 +6,7 @@
 // thread (MirrorSimClient over a ThreadLink) or in a Web Worker (host/sim.worker.ts). No three.js, no
 // DOM (tools/core-deps.mjs).
 //   SimServer  the world's: hello (what each session is told first: sim/contract/hello.ts; the protocol, the data build
-//              the host loaded, the tuning's hash); connect(player) a session for a player the host names; update (the
+//              the host loaded, the tuning's hash); connect(player) a session for a player the host names (or a new id); update (the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots); dispose (its
 //              listeners and the host's removed: onDispose)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
@@ -50,6 +50,8 @@ export class SimServer {
   private held: Promise<unknown> = Promise.resolve();
   // what dispose undoes (the listeners added)
   private readonly disposers: (() => void)[] = [];
+  // the player ids connect has made
+  private players = 0;
 
   /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
   readonly hello: Hello;
@@ -63,12 +65,20 @@ export class SimServer {
     this.hello = hello(build, sim.tuning);
   }
 
-  /** a connection for player (the host names it: a client never does); its commands are the player's */
-  connect(player: PlayerId): Session {
+  /** a connection for player (the host names it: a client never does; without, a new id no session holds: p1, p2,
+   * ...); its commands are the player's, its client learns it from its snapshots (Snapshot player) */
+  connect(player: PlayerId = this.newPlayer()): Session {
     const s = new Session(this, player);
     if (this.tracking) s.edits = [];
     this.sessions.add(s);
     return s;
+  }
+
+  private newPlayer(): PlayerId {
+    const held = new Set([...this.sessions].map((s) => s.player));
+    let id: PlayerId;
+    do id = `p${++this.players}`; while (held.has(id));
+    return id;
   }
 
   /** the session gone (Session.leave); the last of its player: the player looks nowhere and is gone from the world

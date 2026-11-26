@@ -1,6 +1,6 @@
 import type { Bar } from '../bar';
 import type { Daylight } from '../daylight';
-import { dateOf, dayOfYear, hourAt, solarNoon } from '../sun';
+import { dateOf, hourAt, solarNoon } from '../sun';
 import { ease, lerp } from '../util';
 import { type Climate, typical, type Weather, WEATHERS } from '../weather';
 
@@ -75,13 +75,13 @@ export function makeDayWeather({ bar, daylight, ask }: { bar: Bar; daylight: Day
     onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
     onHour: (h: number) => { setHour(h); share(); },
     onWeather: (w: string) => { setWeather(w); share(); },
-    // the start: the climate, then the URL's day, weather and hour (else today, the typical weather, golden hour)
-    start(c: Climate, qs: URLSearchParams, today: number) {
+    // the start: the climate, the world's start time (the host's: host/start.ts, from the URL's ?date, ?hour), the URL's
+    // weather (else the typical one)
+    start(c: Climate, qs: URLSearchParams, time: { hour: number; day: number }) {
       climate = c;
-      const md = qs.get('date')?.split('-').map(Number);
-      setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : today);
+      setDay(time.day);
       setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
-      setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
+      setHour(time.hour);
     },
     // the world's time of day (PageTime.follow), shown without asking it back
     show(t: { hour: number; day: number }) {

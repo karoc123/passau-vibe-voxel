@@ -40,7 +40,7 @@ two runs differed.
   water (`WorldSim.setWorld`: `core/world.ts` World), the tiles (injected loader or cache), and the players' commands
   keyed by player id (`WorldSim.send`, `sim/contract/commands.ts`: `follow`; a seat on an entity, one a player: the
   driver's with `takeWheel`, `drive`, `resetDriver`, the walked person's with `walkAs`, `walkPose`, a craft's with
-  `enterCraft`, `craftInput`; `leaveSeat`; the host names the page's player, `PAGE_PLAYER` in `host/sim-host.ts`, and
+  `enterCraft`, `craftInput`; `leaveSeat`; the host names each player (`SimServer.connect`: a new id per connection), and
   the server's `Session` (`sim/server/sim-server.ts`) stamps it on every command). The traffic keeps what players
   follow or walk as by entity id (`Traffic.held`, `Traffic.walked`).
   For a server, "the viewer" becomes the set of players' positions.

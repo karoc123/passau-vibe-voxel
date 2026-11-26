@@ -3,7 +3,7 @@
 // contract, nothing else (R1).
 
 /** a participant in the world (ADR 0007); the sim numbers none of its own, a host names them (a session's: SimServer
- * connect; the page's own: host/sim-host.ts PAGE_PLAYER) and stamps it on the commands sent through the session */
+ * connect, a new id when none is given: the page's own) and stamps it on the commands sent through the session */
 export type PlayerId = string;
 
 export type CraftId = number;

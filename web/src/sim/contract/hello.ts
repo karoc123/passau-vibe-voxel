@@ -10,7 +10,7 @@ import type { DataBuild } from '../../core/data-contract';
  * differently; or the sim's code a mirror re-runs: the path maths behind CarState, a core's load), so that a client
  * and a host of different code refuse each other instead of drawing nonsense. Not for the data (that is build) nor
  * for the tuning's numbers (that is tuning) */
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 
 /** what a host says when a session connects (SimServer.hello; the worker's FromWorker 'hello') */
 export interface Hello {

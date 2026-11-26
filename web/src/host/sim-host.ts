@@ -4,7 +4,8 @@
 // the host's TileCache), its crafts' world (the same TileCache, the clock), its ground and water, the river boats' timetable,
 // and the world's edits: set up here (core/world-edits.ts initWorldEdits), each one told to the sim (its box; the road
 // physics loaded on the first unless asked not to), and the game mode (sim/mode.ts: ?mode=, by default the sandbox).
-// The host names the page's player (PAGE_PLAYER) and connects its session; the page holds only the client
+// Its options are the host's (a page's: host/start.ts hostStart, from its URL). The host connects the page's session,
+// its player named by the server (SimServer.connect); the page holds only the client
 // (client/sim-client.ts SimClient). The data comes in loaded and everything outside is a port (HostPorts: the node
 // files, the clock, the log, the road physics' code): no fetch, no clock, no console here (tools/core-deps.mjs), so the
 // wiring that ships is the one host-smoke runs in Node. No three.js, no DOM.
@@ -23,7 +24,6 @@ import type { TrafficData } from '../sim/types';
 import { WorldSim } from '../sim/world-sim';
 import type { Meta } from '../core/meta';
 import type { TileCache } from '../core/tile-cache';
-import type { PlayerId } from '../sim/contract/ids';
 import type { PhysicsOptions } from '../sim/contract/worker';
 import type { TimeOfDay } from '../sim/contract/snapshot';
 
@@ -69,10 +69,6 @@ export interface HostOptions {
   /** the sandbox's edits to the world's voxels allowed (?dig=1) */
   edits?: boolean;
 }
-
-/** the one player a page's host connects (SimServer.connect: one page, one session; the page learns it from its
- * session, SimClient.player, and never names it in a command) */
-export const PAGE_PLAYER: PlayerId = 'local';
 
 /** the game modes a host can make, by id */
 export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };

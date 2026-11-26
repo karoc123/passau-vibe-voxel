@@ -323,7 +323,7 @@ async function boot() {
   daylight.grade = post.grade;
   daylight.ao = post.n8.configuration;
   daylight.theta = (meta.theta_deg || 0) * Math.PI / 180;
-  dayWeather.start(climate, qs, TODAY);
+  dayWeather.start(climate, qs, session.start.time);
   city = await installCity({ streamer, uniforms, meta, scene, focus, camera, caption, budget, lamps, prepass, lod: { mode: gfx.now.lod, px: gfx.now.lodpx }, occlusion: gfx.now.occl, dist: gfx.now.dist || DIST_MAX,
     crop: cropOf(qs.get('crop') === 'fit' && fo ? String(Math.ceil(fo.reach + 128)) : qs.get('crop'), controls.target, meta.origin), pixelsHigh: () => post.height });
   viewDistance.reset(); // (the view distance handed to the city on the next frame)
@@ -344,7 +344,7 @@ async function boot() {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client: local, mirrored or in a worker (app/session.ts)
-    const { client, link } = openSession(session, { meta, edits, traffic: td, world, time: { hour: daylight.hour, day: daylight.day } });
+    const { client, link } = openSession(session, { meta, edits, traffic: td, world });
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
       console.error(e.message);

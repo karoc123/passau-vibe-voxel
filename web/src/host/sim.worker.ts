@@ -1,17 +1,18 @@
 // The local server (ADR 0008): the world sim in a Web Worker. It loads the map and the
 // traffic itself, owns the world's TileCache, its live edits (core/live-edits.ts: this thread's module is the
 // world's), its ground and water (core/tile-world.ts) and the road physics (Rapier, loaded here), and runs a
-// SimServer (sim/server/sim-server.ts) as host/sim-host.ts wires it (its browser ports: host/browser.ts), with one
-// session per init: the page's player (host/sim-host.ts PAGE_PLAYER; the worker names it, the page's commands name
-// none). The page (client/sim-worker-link.ts) sends a frame (dt, the commands: its view among them) and gets its session's snapshot after it
+// SimServer (sim/server/sim-server.ts) as host/sim-host.ts wires it (its browser ports: host/browser.ts) with the start
+// config it reads from the page's URL (host/start.ts hostStart), with one session per init: the page's player (the
+// host names it, SimServer.connect; the page's commands name none). The page (client/sim-worker-link.ts) sends a frame (dt, the commands: its view among them) and gets its session's snapshot after it
 // (sim/server/snapshot.ts: its player's id among its reads), with the edits since the last for its own live edits.
 // The messages (sim/contract/worker.ts ToWorker, FromWorker):
-//   in:  init { base, seed, physics, eager, mode, edits, time }; frame { dt, commands }; loadPhysics { id, warm }
+//   in:  init { base, query }; frame { dt, commands }; loadPhysics { id, warm }
 //   out: hello (the session's: sim/contract/hello.ts, before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
 // greet (a session's first message) and handle (one message to a session, its answers to a post given) are exported:
 // tools/host-smoke.mjs drives them in Node.
 import { browserPorts, fetchJson, tileCacheAt } from './browser';
-import { hostSim, PAGE_PLAYER } from './sim-host';
+import { hostSim } from './sim-host';
+import { hostStart } from './start';
 import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Session } from '../sim/server/sim-server';
 import type { BoatData } from '../sim/boat-traffic';
@@ -44,11 +45,10 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   const [meta, raw] = await Promise.all([fetchJson<Meta>(dataUrl(HOST_FILES.meta, m.base)), fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic, m.base))]);
   const cache = tileCacheAt(meta.tiles.N, m.base), world = tileWorld(meta, cache);
   const boats = fetchJson<BoatData>(dataUrl(HOST_FILES.boats, m.base));
-  const server = hostSim({ meta, traffic: unpackTraffic(raw), boats }, browserPorts(cache),
-    { seed: m.seed, world, eager: m.eager, mode: m.mode, edits: m.edits, physics: m.physics, time: m.time });
+  const server = hostSim({ meta, traffic: unpackTraffic(raw), boats }, browserPorts(cache), { ...hostStart(m.query), world });
   server.trackEdits();
   server.onDispose(world.dispose);
-  const s = session = server.connect(PAGE_PLAYER);
+  const s = session = server.connect();
   greet(s, post);
   post({ kind: 'ready' });
   for (const q of early.splice(0)) handle(s, q, post);

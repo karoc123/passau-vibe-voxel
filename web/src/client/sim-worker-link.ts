@@ -6,8 +6,8 @@
 // client refused it): the worker is ended.
 import type { SimLink } from './sim-client';
 import type { SimCommand } from '../sim/contract/commands';
-import type { Snapshot, TimeOfDay } from '../sim/contract/snapshot';
-import type { FromWorker, PhysicsOptions, ToWorker } from '../sim/contract/worker';
+import type { Snapshot } from '../sim/contract/snapshot';
+import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Hello } from '../sim/contract/hello';
 
 export class WorkerLink implements SimLink {
@@ -23,11 +23,12 @@ export class WorkerLink implements SimLink {
   /** the worker's time for the last frames (update and snapshot, ms), for the tools */
   readonly times: number[] = [];
 
-  constructor(opts: { seed: number; physics: PhysicsOptions; eager: boolean; mode?: string; edits: boolean; time: TimeOfDay }) {
+  /** query: the page's URL's search, handed to the host, which reads its start config from it (host/start.ts) */
+  constructor(query: string) {
     this.worker = new Worker(new URL('../host/sim.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.worker.onerror = (e) => console.error('sim worker', e.message);
-    this.post({ kind: 'init', base: new URL('.', location.href).href, ...opts });
+    this.post({ kind: 'init', base: new URL('.', location.href).href, query });
   }
 
   private post(m: ToWorker) { if (!this.closed) this.worker.postMessage(m); }
