@@ -1,0 +1,24 @@
+{
+ "about": "Fixture map for scripts/check.py: the blocks along the Inn from the Innstadt's west to the Ingling dam (Kraftwerk Passau-Ingling) as scripts/map.json lists them, project rows 1024-3456, columns -1024-2048 (3072 x 2432 m), built: block row 1's three blocks (the west one only its first 384 rows, as on the map), block rows 2 and 3 its two west blocks; the Inn's east bank south of the Innstadt is Austria (no DGM1, no LoD2, no OSM in the Niederbayern extract). All but `name`, `map`, `blocks` and `regions` as in scripts/map.json (pinned for the project).",
+ "name": "Passau Inn to Ingling (fixture)",
+ "crs": 25832,
+ "grid": {"x0": 827371, "y0": 5390500},
+ "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
+ "map": {"col0": -1024, "row0": 1024, "cols": 3072, "rows": 2432},
+ "base": 287,
+ "rivers": {"level": 290.921, "stretches": [
+  {"name": "Inn above the Ingling dam (Kraftwerk Passau-Ingling, OSM way 273300967), west of the weir", "box": [826347, 5387000, 827200, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827200, 5387000, 827300, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827300, 5387000, 827400, 5387312], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827400, 5387000, 827540, 5387328], "level": 302.95},
+  {"name": "Inn above the Ingling dam, east of the weir", "box": [827540, 5387000, 828400, 5387340], "level": 302.95},
+  {"name": "Inn below the Ingling dam, its first kilometre", "box": [826800, 5387300, 827900, 5388300], "level": 291.45}
+ ]},
+ "blocks": [
+  {"row": 1, "cols": [-1, -1], "rows": 384},
+  {"row": 1, "cols": [0, 1]},
+  {"row": 2, "cols": [-1, 0]},
+  {"row": 3, "cols": [-1, 0]}
+ ],
+ "regions": {"size": 1024, "jobs": 2}
+}

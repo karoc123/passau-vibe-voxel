@@ -172,8 +172,9 @@ def downsample_planes(planes, s):
     return np.where(2 * nz >= s * s, best, 0).astype(np.uint16)
 
 
-def plane_window(planes, r0, c0):
-    """the roof plane codes of a node and its apron (r0, c0: the window's first row and column at its level), as bytes"""
+def plane_window(planes, r0, c0, keep=None):
+    """the roof plane codes of a node and its apron (r0, c0: the window's first row and column at its level), as bytes
+    (keep: apron_kept's, the cells left 0 where it is False)"""
     if planes is None:
         return b""
     D, W = planes.shape
@@ -181,7 +182,31 @@ def plane_window(planes, r0, c0):
     ra, rb, ca, cb = max(r0, 0), min(r0 + N + 2, D), max(c0, 0), min(c0 + N + 2, W)
     if ra < rb and ca < cb:
         pw[ra - r0:rb - r0, ca - c0:cb - c0] = planes[ra:rb, ca:cb]
+    if keep is not None:
+        pw[~keep] = 0
     return pw.tobytes()
+
+
+def apron_kept(built, r0, c0):
+    """which cells of a node's window (N + 2 square from row r0, column c0 of `built`, a level's built cells) are kept:
+    its own cells that are built, and the apron's beside one of them (what lies beside an empty cell is the map's edge
+    there, whatever is beyond: the same bytes in every cover)"""
+    S = N + 2
+    b = np.zeros((S, S), bool)
+    ra, rb, ca, cb = max(r0, 0), min(r0 + S, built.shape[0]), max(c0, 0), min(c0 + S, built.shape[1])
+    if ra < rb and ca < cb:
+        b[ra - r0:rb - r0, ca - c0:cb - c0] = built[ra:rb, ca:cb]
+    own = b[1:-1, 1:-1]
+    keep = b.copy()
+    keep[0, 1:-1] &= own[0]
+    keep[-1, 1:-1] &= own[-1]
+    keep[1:-1, 0] &= own[:, 0]
+    keep[1:-1, -1] &= own[:, -1]
+    keep[0, 0] &= own[0, 0]
+    keep[0, -1] &= own[0, -1]
+    keep[-1, 0] &= own[-1, 0]
+    keep[-1, -1] &= own[-1, -1]
+    return keep
 
 
 def column_runs(vol_win):
@@ -308,9 +333,9 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
     if built is not None:  # (a block not built is empty, as beyond the map: its nodes are not written, and its cells
         # in a node's apron or beside a facade are air; copies, vol is the caller's)
         R, C = rb - ra, cb - ca
-        if vol.shape[1:] != (R, C):  # (a region of voxelize.py ends short of its partial block's end: empty there)
-            assert vol.shape[1] <= R and vol.shape[2] <= C and not built[vol.shape[1]:].any() and not built[:, vol.shape[2]:].any(), \
-                "the volume does not reach a built cell of the region"
+        if vol.shape[1:] != (R, C):  # (a region of voxelize.py ends short of its partial block's end: what a node
+            # holds there is not built, nor beside a built cell of it: its apron is kept only beside one, apron_kept)
+            assert vol.shape[1] <= R and vol.shape[2] <= C, "the volume is larger than the region"
             pad = ((0, R - vol.shape[1]), (0, C - vol.shape[2]))
             vol, g = np.pad(vol, ((0, 0),) + pad), np.pad(g, pad)
             planes = None if planes is None else np.pad(planes, pad)
@@ -360,6 +385,11 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                     if rr0 < rr1 and cc0 < cc1:
                         nw[:, rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = vs[:, rr0 - oy:rr1 - oy, cc0 - ox:cc1 - ox]
                         gw[rr0 - r0:rr1 - r0, cc0 - c0:cc1 - c0] = np.clip(gs[rr0 - oy:rr1 - oy, cc0 - ox:cc1 - ox], 0, 255)
+                    keep = None
+                    if built is not None:  # (the apron beside a cell of the node not built: empty, whatever is there)
+                        keep = apron_kept(built[::s, ::s], r0 - oy, c0 - ox)
+                        nw[:, ~keep] = 0
+                        gw[~keep] = 0
                     top = int(np.nonzero(nw.reshape(Hs, -1).any(1))[0].max()) + 1 if nw.any() else 1
                     nw = nw[:top]
                     if split:
@@ -375,7 +405,7 @@ def export_window(vol, g, planes, region, win, out, face_ids=(), fol_ids=(), gra
                     sec = dict(cnts=counts.tobytes(), grnd=gw.tobytes(), runs=runs.tobytes())
                     if ps is not None:
                         # (beyond the region only beyond the map, where plane_window gives 0 as before)
-                        sec["plns"] = plane_window(ps, r0 - oy, c0 - ox)
+                        sec["plns"] = plane_window(ps, r0 - oy, c0 - ox, keep)
                     if s == 1 and (rm := room_section(rooms, r0 - oy, c0 - ox)):
                         sec["room"] = rm
                     f = out / str(s) / f"{tx}_{ty}.bin"

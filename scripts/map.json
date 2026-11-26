@@ -4,7 +4,7 @@
  "crs": 25832,
  "grid": {"x0": 827371, "y0": 5390500},
  "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
- "map": {"col0": -6144, "row0": -2048, "cols": 9344, "rows": 3456},
+ "map": {"col0": -6144, "row0": -2048, "cols": 9344, "rows": 5504},
  "base": 287,
  "rivers": {"level": 290.921, "stretches": [
   {"name": "Danube above the Kachlet dam (and the Gaißa)", "box": [821000, 5388900, 824880, 5392600], "level": 299.75},
@@ -32,13 +32,23 @@
   {"name": "Ilz: the loop below the Hals weir, along the weir", "box": [828940, 5391480, 828960, 5391520], "level": 295.85},
   {"name": "Ilz above the Hals weir", "box": [827900, 5391380, 828960, 5392600], "level": 301.4},
   {"name": "Ilz below Hals", "box": [828960, 5391150, 829250, 5392600], "level": 293.9},
-  {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9}
+  {"name": "Ilz above Ilzstadt", "box": [829100, 5390800, 829560, 5391150], "level": 292.9},
+  {"name": "Inn above the Ingling dam (Kraftwerk Passau-Ingling, OSM way 273300967), west of the weir", "box": [826347, 5387000, 827200, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827200, 5387000, 827300, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827300, 5387000, 827400, 5387312], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827400, 5387000, 827540, 5387328], "level": 302.95},
+  {"name": "Inn above the Ingling dam, east of the weir", "box": [827540, 5387000, 828400, 5387340], "level": 302.95},
+  {"name": "Inn below the Ingling dam, its first kilometre", "box": [826800, 5387300, 827900, 5388300], "level": 291.45}
  ]},
  "blocks": [
   {"row": -2, "cols": [-6, 3]},
   {"row": -1, "cols": [-6, 3]},
   {"row": 0, "cols": [-6, 3]},
-  {"row": 1, "cols": [-6, 3]}
+  {"row": 1, "cols": [-6, -1], "rows": 384},
+  {"row": 1, "cols": [0, 1]},
+  {"row": 1, "cols": [2, 3], "rows": 384},
+  {"row": 2, "cols": [-1, 0]},
+  {"row": 3, "cols": [-1, 0]}
  ],
  "regions": {"size": 1024, "jobs": "auto"}
 }
