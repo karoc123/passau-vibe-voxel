@@ -3,7 +3,8 @@
 //   --changed [REF]: before a merge, only the gates whose paths match what changed since REF (default main; the diff
 //     from the merge-base, REF...HEAD, plus uncommitted and untracked files): which gates and why (the first file each
 //     matched), which skipped. tsc always runs; nothing matched: tsc alone. With --full, the full set's gates too.
-//   fast set (default, under a minute on 20 cores): tsc and every check that runs in seconds; after a series of merges;
+//   fast set (default, about a minute and a half on 20 cores: the load gate runs alone at the end): tsc and every check
+//   that runs in seconds; after a series of merges;
 //   full set (--full): also section-check, popin-check, caps-check --all, surface-gap --check against
 //     tools/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE, recorded
 //     before the change with `node tools/mesh-golden.mjs write FILE`).
@@ -30,7 +31,8 @@ const FULL = args.includes('--full'), VERBOSE = args.includes('-v'), LIST = args
 const golden = opt('--golden');
 const jobs = Math.max(1, +(opt('-j') ?? Math.min(8, Math.floor(os.availableParallelism() / 2))));
 
-// name, the command (run in web/ with this node), set, real data needed, PASS lines expected (at least), seconds as
+// name, the command (run in web/ with this node), set, real data needed, alone (it times the host: run after the
+// others, by itself), PASS lines expected (at least), seconds as
 // measured (WSL, 20 cores, alone; for the order: longest first), what it guards, and `paths`: the files it guards, as
 // globs relative to web/ (`*` within a folder, `**` at any depth; the pipeline is ../scripts/), from its guards and
 // from what the tool imports and reads. tsc has none (it always runs); `wide`: those of its paths that are all of a
@@ -70,6 +72,7 @@ const GATES = [
   { name: 'host-smoke', cmd: ['tools/host-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 5, guards: 'host/ (sim-host.ts hostSim, its ports: node.ts; sim.worker.ts handle, step): the one host started in Node, two sessions run twice and through the worker\'s handler alike, the road physics loaded through its ports; the hello (sim/hello.ts, sim/contract/hello.ts) taken or refused (protocol, build, tuning) by the mirror and worker clients', paths: [...DATA, ...SIM, 'src/host/**', 'src/client/**', 'tools/host-smoke.mjs'] },
   { name: 'board', cmd: ['tools/board.mjs'], set: 'fast', expect: 9, secs: 6, guards: 'sim/world-sim.ts enterSeat from foot and leaveSeat onto foot (sim/walk-bounds.ts reaches, besideBox; Tuning.walk.board) through the host and its sessions: a helicopter left in the world (synthetic world) and a car of the traffic (real data, with the road physics) got into from beside it, refused far off and once taken, seen gone by another page, got out of onto foot beside it', paths: [...DATA, ...SIM, 'src/host/**', 'src/client/**', 'src/physics/rapier/**', 'src/sim/craft/**', 'src/sim/weapons/weapon.ts', 'checks/world.ts', 'tools/board.mjs'] },
   { name: 'ws-smoke', cmd: ['tools/ws-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 20, guards: 'host/ws.ts, client/sim-worker-link.ts SocketLink: two players over a real WebSocket see each other\'s craft, car and body on foot moving smoothly (the body gone when the walk ends) on their render clocks, and each other\'s edits; sim/traffic.ts circles: street life round two players 3 km apart', paths: [...DATA, ...SIM, 'src/host/**', 'src/client/**', 'src/sim/craft/craft-core.ts', 'src/view/life.ts', 'tools/ws-smoke.mjs'] },
+  { name: 'load', cmd: ['tools/load.mjs'], set: 'fast', data: true, alone: true, expect: 1, secs: 25, guards: 'the network host (host/ws.ts) with 16 players by the cathedral over real WebSockets, walking, driving and firing (craters): tick p95 and p99, ticks a second, bytes per player (mean, peak); the host\'s tile cache (host/node.ts), the shots\' bodies (sim/weapons/weapon.ts, sim/world-sim.ts), the crowd over holes (sim/traffic.ts), the crowd thinned over the tick', paths: [...DATA, ...SIM, 'src/host/**', 'src/physics/rapier/**', 'src/sim/weapons/**', 'src/sim/craft/**', 'tools/load.mjs'] },
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections', paths: [...DATA, ...MESH, 'tools/section-check.mjs'] },
   { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/traffic.ts (one run with a second player far off), sim/train-traffic.ts, sim/boat-traffic.ts', paths: [...DATA, ...SIM, 'src/view/**', 'tools/popin-check.mjs'] },
   { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps', paths: [...DATA, ...MESH, 'tools/caps-check.mjs'] },
@@ -181,18 +184,18 @@ function run(g) {
   });
 }
 
-// longest first, `jobs` at a time
-const queue = [...gates].sort((a, b) => b.secs - a.secs);
+// longest first, `jobs` at a time; then those that time the machine (`alone`), one by one with nothing beside them
+const queue = gates.filter((g) => !g.alone).sort((a, b) => b.secs - a.secs);
 const results = new Map();
 const t0 = performance.now();
 console.log(`gates (${ci >= 0 ? 'changed' : FULL ? 'full' : named.length ? 'named' : 'fast'}): ${gates.length}, ${jobs} at a time`);
-await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
-  for (let g; (g = queue.shift()); ) {
-    const r = await run(g);
-    results.set(g.name, r);
-    console.log(`  ${r.status.padEnd(4)} ${g.name} (${fmt(r.secs)})`);
-  }
-}));
+const runOne = async (g) => {
+  const r = await run(g);
+  results.set(g.name, r);
+  console.log(`  ${r.status.padEnd(4)} ${g.name} (${fmt(r.secs)})`);
+};
+await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => { for (let g; (g = queue.shift()); ) await runOne(g); }));
+for (const g of gates.filter((x) => x.alone)) await runOne(g);
 const wall = (performance.now() - t0) / 1000;
 
 const rows = gates.map((g) => results.get(g.name));

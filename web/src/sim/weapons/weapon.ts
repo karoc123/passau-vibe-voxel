@@ -18,14 +18,23 @@ export const REACH = 300;
 export interface VoxelRay {
   raycast(o: Vec3, d: Vec3, max: number): number;
   hold?(around: readonly { x: number; z: number }[], r: number): void;
+  /** whether the voxels along the ray up to max m are loaded (the nodes that are not: asked for) */
+  ready?(o: Vec3, d: Vec3, max: number): boolean;
 }
 
 /** something a shot can hit: an upright box standing on (x, y, z), turned to heading h; r its half width, l its half
  * length (along h), ht its height */
 export interface Body { entity: EntityRef; x: number; y: number; z: number; h: number; r: number; l: number; ht: number }
 
-/** what a weapon fires into: the voxels and the bodies (the shooter's own left out) */
-export interface ShotWorld { voxels: VoxelRay | null; bodies(): Iterable<Body> }
+/** a box on the map (x, z): [x0, z0, x1, z1] */
+export type MapBox = readonly [number, number, number, number];
+
+/** what a weapon fires into: the voxels and the bodies (the shooter's own left out); near: at least those whose foot
+ * is in the box (without one, all) */
+export interface ShotWorld { voxels: VoxelRay | null; bodies(near?: MapBox): Iterable<Body> }
+
+// the farthest a body's box reaches from its foot on the map (a bus's half length), with a metre to spare
+const BODY_REACH = 7;
 
 /** what a shot did: from at to to, what stopped it (null: nothing within its range) */
 export interface Shot { at: Vec3; to: Vec3; hit: EntityRef | 'world' | null }
@@ -63,8 +72,9 @@ export function aimDir(h: number, pitch: number): Vec3 {
 export function trace(world: ShotWorld, o: Vec3, d: Vec3, max: number): Shot {
   let t = Math.min(max, world.voxels?.raycast(o, d, max) ?? Infinity), hit: Shot['hit'] = t < max ? 'world' : null;
   // (a body is tested only when its foot is near the ray's track on the map: the crowd is thousands)
-  const ex = o.x + d.x * t, ez = o.z + d.z * t;
-  for (const b of world.bodies()) {
+  const ex = o.x + d.x * t, ez = o.z + d.z * t, m = BODY_REACH;
+  // (the crowd's poses read the ground's voxels: only those near the track are asked for, or a shot loads the map)
+  for (const b of world.bodies([Math.min(o.x, ex) - m, Math.min(o.z, ez) - m, Math.max(o.x, ex) + m, Math.max(o.z, ez) + m])) {
     const reach = Math.max(b.r, b.l) + 1;
     if (segDist2(o.x, o.z, ex, ez, b.x, b.z) > reach * reach) continue;
     const tb = boxHit(o, d, b);

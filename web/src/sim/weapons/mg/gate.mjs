@@ -6,7 +6,7 @@
 // put down in a part of the world no ray has asked for stops at the wall there (the host keeps the voxels round a
 // player on foot loaded; a node read only when a ray first meets it let that shot through).
 // usage (in web/): node src/sim/weapons/mg/gate.mjs; prints PASS lines, or FAIL and exit 1
-import { imp, sessionLink, synthData } from '../../../../tools/lib.mjs';
+import { imp, sessionLink, synthData, wallTick } from '../../../../tools/lib.mjs';
 
 const { WorldSim } = await imp('src/sim/world-sim.ts');
 const { SimServer } = await imp('src/sim/server/sim-server.ts');
@@ -123,22 +123,24 @@ for (let i = 0; i < 60; i++) v.update(1 / 60);
 check(during > before && shown() === before, `the view draws a shot of another player (${during - before} things shown) and lets it go`);
 
 // a fresh part of the world: a wall 2 m thick at x 200..202, ground up to y 5; the player put down 30 m before it,
-// shooting at once (a few ticks: the host's clock, the node files read between them)
-{
+// shooting at once (a few ticks: the host's clock, the node files read between them); with the network host's files
+// read off the thread, a shot fired at once waits for them on the host's 33 ms ticks
+for (const offThread of [false, true]) {
   const { nodeHost } = await imp('src/host/node.ts');
   const G = 5, X = 200;
   const { dir, data } = await synthData({ size: [384, 256], ground: () => G, boxes: [{ x0: X, x1: X + 2, z0: 0, z1: 256, y0: G, y1: G + 10, mat: 'wall' }] });
-  const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false } }, data), s = host.connect('f'), link = sessionLink(s);
+  const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, offThread }, data), s = host.connect('f'), link = sessionLink(s);
   const c = new MirrorSimClient(new CloneLink(link), traffic(), null, host.hello);
-  const step = async () => { c.update(STEP); host.update(STEP); link.deliver(); await new Promise((r) => setImmediate(r)); };
+  const step = async () => { c.update(STEP); host.update(STEP); link.deliver(); await (offThread ? wallTick() : new Promise((r) => setImmediate(r))); };
   c.send({ kind: 'request', request: { kind: 'walk', pose: { x: X - 30, y: G, z: 100, h: Math.PI / 2, moving: false } } });
-  for (let i = 0; i < 3; i++) await step();
+  // (off the thread: fired in the walk's own tick, before any of its nodes can be in)
+  if (!offThread) for (let i = 0; i < 3; i++) await step();
   const t = host.sim.tick;
   c.send({ kind: 'fire', slot: 1, h: Math.PI / 2, pitch: 0 });
-  await step();
-  const s0 = c.eventsSince(t).find((e) => e.kind === 'shot');
+  let s0;
+  for (let i = 0; i < 20 && !s0; i++) { await step(); s0 = c.eventsSince(t).find((e) => e.kind === 'shot'); }
   check(c.seat()?.role === 'walker' && s0?.hit === 'world' && Math.abs(s0.to.x - X) < 0.05,
-    `the first shot in a fresh part of the world stops at its wall (${JSON.stringify(s0?.to)}, ${s0?.hit})`);
+    `the first shot in a fresh part of the world stops at its wall${offThread ? ' (the files read off the thread: it waits for them)' : ''} (${JSON.stringify(s0?.to)}, ${s0?.hit})`);
   host.dispose();
 }
 

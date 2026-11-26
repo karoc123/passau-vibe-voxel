@@ -128,9 +128,12 @@ Weapons, 25 clustered, 17 on foot firing (one run each, the noisiest numbers her
    whole every tick. 50 at one place would need ~35 Mbit/s up (estimated from the slope), a VDSL line's whole upload.
 3. **Past one core the host does not degrade, it starves.** At 44 ms of work per 33 ms tick the clients received
    under one message a second. There is no rule for what gives way first.
-4. **Firing stalls the tick.** The profile of the launcher run shows synchronous gunzip and decoding of node files,
-   garbage collection and surface queries at the top. The host's tile cache keeps 9 nodes while 17 walkers each
-   hold the voxels 300 m round them; likely the cache thrashes (not proven).
+4. **Firing stalled the tick** (fixed 2026-11-26, gate `load`). Counted: ~12 node loads a tick under fire, every one
+   from a ground query. Each shot and each grenade's flight asked the height of every car and person in the world,
+   and while any crater stood every person's height was asked every tick; their nodes, beyond the 96 held and the 9
+   kept, were read, gunzipped and decoded again on the tick. Now only those near the track or in an edited box are
+   asked, the host keeps 256 unheld nodes and reads and gunzips off the thread: 10 players, 3 firing, from p95
+   46 ms to 11; 16 players from 48 to 15–19 (one loaded run 36), ~1 load in 10 s.
 5. **Spread players pay for traffic.** Ten spread players reach the car cap (1400); sim cost triples against the
    cluster. This is what step 5 (flow, a 350 m agent ring) answers; the measurement confirms the step.
 6. **Memory:** 0.5 GB empty, 1.2–1.7 GB at 50. A 2 GB machine is too small; 4 GB holds.
@@ -228,7 +231,7 @@ New todos, in the order proposed:
    (it guards what a player notices: the host keeping its tick).
 4. Step 5, flow, unchanged: it is what makes spread players cheap.
 5. Prediction of the own car (step 7), earlier than planned if the first mode is a chase.
-6. Weapons under load (the node files off the tick), only when a mode fires in earnest.
+6. Weapons under load: the stall is fixed; a shot still walks every car and person on the map (cheaply).
 
 ## 6. Questions for the owner, the most plan-changing first
 

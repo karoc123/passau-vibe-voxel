@@ -11,6 +11,12 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (the free camera is a presence).
 
+- Overload (target-architecture.md): only the first step is built, the crowd thinned to a fifth at most while a
+  second's ticks average over 80 % of the tick (host/ws.ts). Next: cars, then the others' send rate; the page's own
+  worker host has none.
+- Bytes with a round at one spot (gate `load`, 16 by the cathedral, a third firing): 20–30 kB/s mean per player,
+  over the 20 target; the gate holds 35. The bodies near craters, avatars and cars let go go whole every tick.
+
 ## Later, in this order of likelihood
 
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per

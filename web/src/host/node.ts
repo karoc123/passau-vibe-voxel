@@ -18,20 +18,36 @@ import { hostSim, type HostData, type HostOptions, type HostPorts } from './sim-
 // (for the Node tools, which load each module graph apart: this graph's world edits, e.g. dropAll between hosts)
 export * as worldEdits from '../core/world-edits';
 
-interface NodeFs { readFileSync(p: string): Uint8Array; readFileSync(p: string, enc: 'utf8'): string; existsSync(p: string): boolean }
-interface NodeZlib { gunzipSync(b: Uint8Array): Uint8Array }
+type Done<T> = (e: Error | null, v: T) => void;
+interface NodeFs {
+  readFileSync(p: string): Uint8Array; readFileSync(p: string, enc: 'utf8'): string; readFile(p: string, cb: Done<Uint8Array>): void;
+  existsSync(p: string): boolean;
+}
+interface NodeZlib { gunzipSync(b: Uint8Array): Uint8Array; gunzip(b: Uint8Array, cb: Done<Uint8Array>): void }
 declare const process: { getBuiltinModule(id: string): unknown };
 const fs = () => process.getBuiltinModule('node:fs') as NodeFs;
 const zlib = () => process.getBuiltinModule('node:zlib') as NodeZlib;
 const at = (dir: string, p: string) => `${dir.replace(/\/+$/, '')}/${p}`;
 const json = <T>(dir: string, p: string) => JSON.parse(fs().readFileSync(at(dir, p), 'utf8')) as T;
 
+// The host's nodes nobody holds kept for a reader coming back, ~1 MB each decoded: the crowd's ground is asked for round
+// each player out to the street life's radius (~200 nodes at one spot), and a node dropped and asked again is decoded
+// again on the tick (with 9 kept, 10 players firing by the cathedral decoded ~12 nodes a tick).
+const HOST_KEEP = 256;
+
+const bytes = (b: Uint8Array) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+
 /** a TileCache over <dir>/tiles/ (a node file that is not there: rejected), seen through edits (default: the world's live
- * edits; a tool's client: its own) */
-export const nodeTileCache = (dir: string, N: number, edits = liveEdits) => new TileCache({ N, edits, keep: 9, load: async (p) => {
-  const b = zlib().gunzipSync(fs().readFileSync(at(dir, `${HOST_FILES.tiles}${p}`)));
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
-} });
+ * edits; a tool's client: its own), keep nodes nobody holds kept. offThread: the files read and gunzipped on Node's
+ * pool, only their decoding the caller's (a network host's tick); else at once, as the tools' ticks expect a node asked
+ * for to be in by the next turn of the event loop */
+export const nodeTileCache = (dir: string, N: number, edits = liveEdits, keep = 9, offThread = false) => new TileCache({ N, edits, keep,
+  load: offThread
+    ? (p) => new Promise((ok, no) => fs().readFile(at(dir, `${HOST_FILES.tiles}${p}`), (e, z) => {
+      if (e) no(e); else zlib().gunzip(z, (e2, b) => (e2 ? no(e2) : ok(bytes(b))));
+    }))
+    : async (p) => bytes(zlib().gunzipSync(fs().readFileSync(at(dir, `${HOST_FILES.tiles}${p}`)))),
+});
 
 /** the Node ports over tiles */
 export const nodePorts = (tiles: TileCache): HostPorts => ({
@@ -49,13 +65,13 @@ export function readHostData(dir: string): HostData {
   };
 }
 
-/** the world sim's server over <dir>, as hostSim makes it; world 'tiles': its ground and water the level-1 nodes of its
+/** the world sim's server over <dir>, as hostSim makes it (offThread: its node files read so, nodeTileCache); world 'tiles': its ground and water the level-1 nodes of its
  * TileCache (core/tile-world.ts, as the worker's; let go with the server's dispose); data: the tools' own (e.g. a fresh traffic per sim), by default read
  * from dir */
-export function nodeHost(dir: string, opts: Omit<HostOptions, 'world'> & { world: HostOptions['world'] | 'tiles' },
+export function nodeHost(dir: string, opts: Omit<HostOptions, 'world'> & { world: HostOptions['world'] | 'tiles'; offThread?: boolean },
   data: HostData = readHostData(dir)) {
-  const tiles = nodeTileCache(dir, data.meta.tiles.N), own = opts.world === 'tiles' ? tileWorld(data.meta, tiles) : null;
+  const tiles = nodeTileCache(dir, data.meta.tiles.N, liveEdits, HOST_KEEP, opts.offThread), own = opts.world === 'tiles' ? tileWorld(data.meta, tiles) : null;
   const server = hostSim(data, nodePorts(tiles), { ...opts, world: opts.world === 'tiles' ? own : opts.world });
   if (own) server.onDispose(own.dispose);
-  return server;
+  return Object.assign(server, { cache: tiles });
 }
