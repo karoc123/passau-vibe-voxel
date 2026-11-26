@@ -3,7 +3,8 @@
 // draws (view/life.ts solids, three.js in Node, no renderer) of the host's world as its snapshots bring it. A car the
 // host holds out of the traffic (as one parked or driven by another player is) stops the walker walking at it and
 // strafing into it; moved into the walker it shoves it ahead, never through. Another player on foot stops it; a
-// hovercraft another player sits in stops it. On foot A/D step sideways (the heading kept) and the arrows turn.
+// hovercraft another player sits in stops it, and so does a traffic boat lying at its pier. On foot A/D step sideways
+// (the heading kept) and the arrows turn.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -14,11 +15,13 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
-const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES } = await imp('src/sim/solids.ts');
+const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES, TOUR_B } = await imp('src/sim/solids.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
 const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth' });
+// an excursion boat lying at its pier (x 181..219, its side at z 216: the tour's start)
+data.boats = { berths: [], tour: [[200, 220], [250, 220]] };
 const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 120 }, data);
 // the walk's world: flat ground, nothing in the way (the voxels are tools/collision.mjs's)
 const ground = { support: () => G, blocked: () => false };
@@ -111,6 +114,12 @@ for (let i = 0; i < 3 / STEP; i++) frame(stride(yaw, 1, 0, 6 * STEP));
 const hp = hc?.core.pose;
 const hside = hp && hp.x - CRAFT_SHAPES.hovercraft.hx - WALKER_R;
 check(hp && P.x < hside + 0.01 && P.x > hside - 0.4, `a hovercraft stops the walker (x ${P.x.toFixed(2)}, the craft at ${hp?.x.toFixed(2)})`);
+
+// the excursion boat lying at its pier, walked at (as from a jetty)
+P.x = 200; P.z = 205; yaw = 0;
+for (let i = 0; i < 3 / STEP; i++) frame(stride(yaw, 1, 0, 6 * STEP));
+const hull = 220 - TOUR_B / 2 - WALKER_R;
+check(P.z < hull + 0.01 && P.z > hull - 0.4, `a traffic boat stops the walker (z ${P.z.toFixed(2)}, its side ${hull.toFixed(2)})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

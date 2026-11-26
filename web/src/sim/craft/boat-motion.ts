@@ -4,7 +4,7 @@
 // it lies still (drawn only: the motion is flat). It stays on the water: a step that would put any of its outline
 // points on land, against a quay wall or a bridge pier (anything solid from just under the waterline to its top) is not
 // taken; it bounces off along the shore's normal and slides on. Under bridges it passes (what is over its top does not
-// count).
+// count). The solid things (cars, crafts, the river's vessels: sim/solids.ts) it bounces off alike (meet).
 //
 // Pure: no DOM, no three.js; the world through one query (BoatWorld, which VoxelCollision.waterColumn answers). Runs
 // in node (tools/boat.mjs, checks/boat-checks.ts) as in the viewer.

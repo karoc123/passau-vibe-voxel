@@ -56,6 +56,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - `walkAs` start height is unbounded.
 - Walkers and solid things (ADR 0010): a car does not feel a walker; the host does not check them; the walker cannot
   stand on a car's roof; a car squeezing the walker against a wall leaves it inside the car.
+- Crafts and solid things (ADR 0012): cars do not feel crafts (a driven car passes through a parked hovercraft:
+  crafts as kinematic bodies in the road physics would fix it); planes, drone and paraglider have no shape.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
 - The worker decodes nodes the page also decodes.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)

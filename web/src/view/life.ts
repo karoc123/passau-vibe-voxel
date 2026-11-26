@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
+import { lerp, wrapAngle } from '../util';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
@@ -10,7 +11,7 @@ import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
-import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, type Solid } from '../sim/solids';
+import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, client/sim-client.ts TrafficMirror, ticked by main.ts) drawn between its last two ticks with instanced
@@ -76,6 +77,8 @@ export class StreetLife {
   private frame = 0;
   // the train coaches drawn this frame (solids)
   private coaches: CoachPose[] = [];
+  // how far back from the last tick the trains and boats are drawn this frame (0..1; solids)
+  private back = 0;
   // the world tick whose events were drawn last (WorldSim.eventsSince)
   private seen: number;
 
@@ -145,7 +148,7 @@ export class StreetLife {
   private render(dt: number, night: number, lead: number) {
     this.frame++;
     this.drawCars(lead / STEP, night, dt);
-    const back = 1 - lead / STEP;
+    const back = this.back = 1 - lead / STEP;
     this.coaches = [...this.traffic.trains.coaches(back)];
     this.trains.render(this.coaches, night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
@@ -454,6 +457,13 @@ export class StreetLife {
     }
     for (const d of this.drawnAvatars.values()) if (d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
     for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }));
+    // (the river's vessels where view/boats.ts draws them: a walker on a jetty meets the boat alongside)
+    const B = this.traffic.boats, back = this.back;
+    for (const p of B?.poses ?? []) {
+      if (Math.abs(p.x - near.x) > r + p.len / 2 || Math.abs(p.z - near.z) > r + p.len / 2) continue;
+      const q = B!.previous.find((o) => o.kind === p.kind && o.id === p.id) ?? p;
+      out.push(solidAt(vesselShape(p), { x: lerp(p.x, q.x, back), y: lerp(p.y, q.y, back), z: lerp(p.z, q.z, back), h: p.heading + wrapAngle(q.heading - p.heading) * back }));
+    }
     const me = this.client.player;
     for (const c of this.client.crafts()) {
       const shape = CRAFT_SHAPES[c.type], p = c.core.pose;

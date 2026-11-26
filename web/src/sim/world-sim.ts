@@ -56,6 +56,7 @@ import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
 import { carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
+import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
@@ -777,7 +778,7 @@ export class WorldSim {
   // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
   // crafts with a shape, the river's vessels, the train coaches. Not the walkers: their walk is their page's, and a
   // craft shoves them as a car does.
-  private solidsNear(own: Craft, shape: Shape): Solid[] {
+  private solidsNear(own: Craft, shape: Shape, coaches: () => readonly CoachPose[]): Solid[] {
     const T = this.traffic, p = own.core.pose, v = own.core.velocity, out: Solid[] = [];
     const r = Math.hypot(shape.hx, shape.hz) + Math.abs(shape.fwd ?? 0) + Math.hypot(v.x, v.z) * STEP + 1;
     const near = (x: number, z: number, R: number) => Math.abs(x - p.x) < r + R && Math.abs(z - p.z) < r + R;
@@ -790,7 +791,7 @@ export class WorldSim {
       if (c !== own && c.placed && s && near(q.x, q.z, CRAFT_REACH)) out.push(solidAt(s, q));
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
-    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
+    for (const k of coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
     return out;
   }
 
@@ -809,12 +810,15 @@ export class WorldSim {
   // tick's steps (STEP worth) at its own fixed step with its pilot's input (or the neutral); a step not taken (a tile
   // not in) drops the rest of the tick. Its core's events become the world's (craft), this tick's
   private stepCrafts() {
+    // (the coaches' poses, all the trains', worked out once a tick if a craft wants them)
+    let coaches: CoachPose[] | null = null;
+    const trains = () => (coaches ??= [...this.traffic.trains.coaches()]);
     for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
       if (!c.placed) continue;
       const core = c.core;
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
-      const shape = CRAFT_SHAPES[c.type], near = shape && core.meet ? this.solidsNear(c, shape) : null;
+      const shape = CRAFT_SHAPES[c.type], near = shape && core.meet ? this.solidsNear(c, shape, trains) : null;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
         if (near?.length) meetSolids(core, shape!, near, c.collision);

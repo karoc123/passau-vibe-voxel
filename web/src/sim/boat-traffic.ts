@@ -2,6 +2,7 @@ import { hash, smooth, wrapAngle } from '../core/num';
 import { at, prepPath, pt, type Path } from './path';
 import { waterTop, type WaterColumns } from './river';
 import type { BoatPose, BoatView } from './contract/agents';
+import { CRUISE_B, CRUISE_L, TOUR_B, TOUR_L } from './solids';
 
 // Boats on the rivers (scripts/boats.py -> data/boats.json):
 // - river-cruise ships moored along the old town's Danube quay (the OSM berths: Zollände, A14, Liegestelle 3..8), bow
@@ -32,7 +33,6 @@ type XY = [number, number];
 export interface Fairway { up: XY[]; down: XY[]; turnE: [number, number, XY[]]; turnW: [number, number, XY[]] }
 export interface BoatData { berths: Berth[]; tour: XY[]; fairway?: Fairway }
 
-export const CRUISE_L = 135, CRUISE_B = 11.4, TOUR_L = 38, TOUR_B = 8;
 export const MAX_CRUISE = 24;
 const V = 2.8, ACC = 0.06; // m/s along the loop (10 km/h: the round trip takes ~42 min, as the real one about 45), m/s²
 const BOARD = 12 * 60; // a boat is lit and boarding this long before it casts off

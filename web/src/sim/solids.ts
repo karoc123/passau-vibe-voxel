@@ -6,7 +6,6 @@
 import type { BoatPose } from './contract/agents';
 import type { CraftType, VehicleId } from './contract/ids';
 import type { Pose } from './contract/pose';
-import { CRUISE_B, TOUR_B } from './boat-traffic';
 import { COACH_LENGTH, COACH_WIDTH } from './coaches';
 import { CRAFT_SCALE, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
@@ -47,6 +46,8 @@ export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
   boat: { hx: BOAT.beam / 2, hz: BOAT.length / 2, y0: -0.5, top: 1.5 },
 };
 
+/** the river's vessels' measures (m): a cruise ship's longest length and its beam, an excursion boat's */
+export const CRUISE_L = 135, CRUISE_B = 11.4, TOUR_L = 38, TOUR_B = 8;
 // the river's vessels, as view/boats.ts draws them: the hull from under the waterline to the sun deck (a cruise ship)
 // or the open top deck (an excursion boat)
 const VESSEL = { ship: { hx: CRUISE_B / 2, y0: -1.4, top: 7.4 }, boat: { hx: TOUR_B / 2, y0: -1, top: 3.7 } };
