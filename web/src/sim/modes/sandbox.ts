@@ -1,4 +1,4 @@
-// The sandbox (docs/plans/entities-and-modes.md section 3): the viewer's behaviour as a mode. Every request granted as
+// The sandbox: the viewer's behaviour as a mode. Every request granted as
 // asked (a craft made where the client's shell found a spot, the player its pilot; put down again, reset, dropped; a
 // car reset; the world's time of day set: the hour bar), every seat may be taken, edits to the world's voxels only
 // when the host was started with them (?dig=1). No three.js, no DOM (tools/core-deps.mjs).

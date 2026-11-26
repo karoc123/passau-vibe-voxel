@@ -744,7 +744,7 @@ async function crafts() {
   }
 }
 
-// The crafts at three frame rates (docs/plans/entities-and-modes.md E13: the world's ticks step them, each tick STEP
+// The crafts at three frame rates (the world's ticks step them, each tick STEP
 // worth of its own fixed steps with that tick's input): a boat, a helicopter, a drone and a floatplane, four pilots,
 // their input a function of the tick it is applied in (held over 6 ticks); run in frames of one tick, of two ticks,
 // and of uneven times under a tick (1/144 .. 1/30 s). Each craft's pose and its drawn ends (drawn(0): where it was at

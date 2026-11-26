@@ -198,12 +198,7 @@ function codeOf(bare) {
   return out;
 }
 
-// Today's violations (docs/adr/0009-layers-and-owners.md). Only shrinks: A2 took the headless -> root ones,
-// A3 the contract's, nav's and the sim's two type cycles, A7 the client -> world-sim one (SeatReads to its own shared
-// module), A4 the client -> server ones (TrafficMirror to the client, the in-thread session as the client's
-// InThreadSession, the worker's messages to sim/contract/worker.ts), A12 the host -> page loader ones (the host's
-// loaders as ports: host/browser.ts, host/node.ts), then the traffic's population constants (to the contract and
-// sim/road-net.ts), the edits' keeping (to sim/tuning.ts) and FOLIAGE_CLASSES (to voxelMaterial.ts).
+// Today's violations (docs/adr/0009-layers-and-owners.md). Only shrinks.
 const BASELINE = [
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",

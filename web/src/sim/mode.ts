@@ -1,4 +1,4 @@
-// The game mode (docs/plans/entities-and-modes.md section 3, ADR 0008: the rules of a game are a mode layered on the
+// The game mode (ADR 0008: the rules of a game are a mode layered on the
 // world sim): what a player may do that the sim itself does not decide. One mode per world sim, made by its host
 // (SimServer; host/sim-host.ts: ?mode=, default sandbox) and kept on the WorldSim (WorldSim.mode), which asks it while it
 // applies the players' commands (each tick, in order). Today's only mode is the sandbox (sim/modes/sandbox.ts:

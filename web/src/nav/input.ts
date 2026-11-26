@@ -1,5 +1,5 @@
-// What every mode reads from the keyboard, the gamepad and the window's focus, in one place (docs/plans/code-health.md
-// item 11): one typing guard, one gamepad reader, one focus-loss policy.
+// What every mode reads from the keyboard, the gamepad and the window's focus, in one place: one
+// typing guard, one gamepad reader, one focus-loss policy.
 //
 // Keys: a mode listens to keydown itself and first asks gameKey(e): not with Ctrl, Cmd or Alt (browser shortcuts), not
 // while typing in a field. A global toggle (a key that works in every mode, e.g. N for the labels, M for a minimap)

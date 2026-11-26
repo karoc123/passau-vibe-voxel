@@ -41,8 +41,8 @@ export interface PlaneInput {
 /** what a pilot sends (seatInput): the input of their craft's type (sim/craft/cores.ts checks it is every core's) */
 export type PilotInput = BoatInput | CraftInput | DroneInput | PlaneInput;
 
-/** the frame's time once the sim's update has run (docs/plans/smooth-motion-and-lag.md section 3: fixed once a frame,
- * every reader the same): dt the frame's (s, at most MAX_DT), tick the ticks run, alpha how far past the last tick
+/** the frame's time once the sim's update has run (fixed once a frame, every
+ * reader the same): dt the frame's (s, at most MAX_DT), tick the ticks run, alpha how far past the last tick
  * what is drawn is (0..1: the traffic, the bodies and the crafts drawn between their last two ticks) */
 export interface FrameTime { dt: number; tick: number; alpha: number }
 

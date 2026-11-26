@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Sweep } from '../sim/craft/sweep';
 
-// The chase camera's shared parts (docs/plans/code-health.md item 12): smoothing that is the same at any frame rate,
+// The chase camera's shared parts: smoothing that is the same at any frame rate,
 // the pull-in where the collision meets something between the craft and the camera, the shake, and the glide in from
 // where the map camera was. Each craft says where its camera wants to be (behind and over it, its own distances and
 // lags); ChaseRig puts the camera there. The field of view is put back by Nav on leaving (its orbitFov).
