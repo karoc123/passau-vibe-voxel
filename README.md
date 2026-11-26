@@ -312,6 +312,7 @@ pnpm check                                   # tsc
 pnpm gates                                   # tsc + the fast headless checks (node tools/gates.mjs), see "Agent tools"
 pnpm build                                   # static site in web/dist
 node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screenshot (see "Agent tools")
+node tools/where.mjs 25,1713                  # what lies at a ?cam=/HUD point (block built?, tile node, OSM names); or a name: where.mjs Tierheim
 ```
 
 ### Two or more players

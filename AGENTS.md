@@ -20,7 +20,8 @@
 ## Running things
 
 - `web/tools/wt.sh` runs setup, tsc, gates and vite (`npm` is not on PATH). In an agent worktree, `tools/wt.sh setup`
-  comes first. Port 5173 is the owner's dev server.
+  comes first. Port 5173 is the owner's dev server, 5300 the owner's game server.
+- Commits stay local (the owner pushes); `.github/` is the owner's.
 - Test by need: tsc and the gates guarding what you changed (`node tools/gates.mjs --list`); the full fast set once
   before handing back.
 - A full data rebuild (`scripts/build_data.sh`) rewrites committed tiles: not unasked. `scripts/palette.json` is
