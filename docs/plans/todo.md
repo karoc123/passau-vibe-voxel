@@ -27,12 +27,17 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Later, in this order of likelihood
 
+- Bandwidth for internet play, phones included (owner 2026-11-26): ~5 MB/s per player is far too much; a plan
+  with measured levers is being made. Cheap first: radius by seat (on foot ~300 m), car fields sent once on entering
+  sight, numbers in arrays.
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
 
 ## On hold until the game is decided (owner 2026-11-24)
 
+- Concepts to choose from later (2026-11-26 study): extraction at the Domplatz (co-op, §0), courier/taxi runs
+  against the clock (no combat), a bridgehead PvP, chase the helicopter, flood rescue, a demolition round.
 - E15 health and items, E16 spawn/despawn/keep, E21 the player's avatar (owner: on foot always an avatar of its own,
   never one of the crowd).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
