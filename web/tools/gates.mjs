@@ -14,9 +14,9 @@
 // gate is printed after the table (-v: every gate's).
 // usage (in web/): node tools/gates.mjs [--full] [--changed [REF]] [--golden FILE] [-j N] [-v] [--list] [--coverage] [gate ...]
 //   gate ...: only those (by name, from either set); --list: the table with each gate's paths and the coverage check,
-//   nothing run; --coverage: only the check that every file of src/ and tools/ is in a gate's paths, CORE or UNGATED
-//   (the gate gate-coverage: a new package without a gate fails it); -j: gates at once (default: half the cores, at
-//   most 8); exit code 1 if a gate fails
+//   nothing run (with --changed: which gates it would run); --coverage: only the check that every file of src/ and
+//   tools/ is in a gate's paths, CORE or UNGATED (the gate gate-coverage: a new package without a gate fails it);
+//   -j: gates at once (default: half the cores, at most 8); exit code 1 if a gate fails
 // pnpm gates / pnpm gates:full run the same.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -100,7 +100,7 @@ const show = (paths) => {
   for (const [k, g] of Object.entries(GROUPS)) if (g.every((p) => rest.includes(p))) { out.push(k); rest = rest.filter((p) => !g.includes(p)); }
   return [...out, ...rest].join(' ');
 };
-if (LIST) {
+if (LIST && !args.includes('--changed')) {
   for (const g of GATES) console.log(`${g.name.padEnd(15)} ${g.set.padEnd(5)} ${g.data ? 'data' : '    '} ~${String(g.secs).padStart(4)} s  ${g.guards}\n${''.padEnd(16)}paths: ${g.name === 'tsc' ? '(always runs)' : show(g.paths)}`);
   console.log(`\nCORE (selects every gate): ${CORE.join(' ')}`);
   for (const [k, g] of Object.entries(GROUPS)) console.log(`${k}: ${g.join(' ')}`);
@@ -135,6 +135,7 @@ if (ci >= 0) {
   const skip = gates.filter((g) => !why.has(g));
   if (skip.length) console.log(`  skip ${skip.map((g) => g.name).join(' ')}`);
   gates = gates.filter((g) => why.has(g));
+  if (LIST) process.exit(0);
 }
 
 const fmt = (s) => `${s.toFixed(1)} s`;
