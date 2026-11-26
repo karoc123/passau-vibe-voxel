@@ -806,9 +806,10 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
   // corners counter-clockwise seen from outside
   const [L, R] = (B[1] - A[1]) * -nx + (B[0] - A[0]) * ny >= 0 ? [A, B] : [B, A];
   // where the roof's edge over this corner is filled (roofs.ts), its fascia goes on from where the prism stops
-  const fill = slopes?.fillFloor(p.px, p.py, p.sx, p.sy);
+  const fill = slopes?.fillFloor(p.px, p.py, p.sx, p.sy, p.a, p.b);
   if (fill !== undefined && p.z0 * 64 >= fill) return;
-  const capTop = p.capTop && fill === undefined;
+  // (no lid where the fill's fascia goes on from it; one under it, apart -- a gap between, a porous facade's -- keeps its own)
+  const capTop = p.capTop && (fill === undefined || p.z1 * 64 < fill);
   // an eave's prism under a sloped roof (roofs.ts) comes up to the slope, not to the top of its voxels (in 1/64 m)
   const top = (q: number[]) => {
     if (fill !== undefined) return Math.min(p.z1 * 64, fill);
@@ -827,6 +828,32 @@ function emitPrism(p: Prism, s: number, x0: number, y0: number, out: QuadBuffer,
   if (foot !== null) wall(foot, p.z0 * 64, p.z0 * 64, p.aoBottom);
   if (p.aoBottom < 3 && p.z1 - p.z0 > 1 && Math.min(tL, tR) > (p.z0 + 1) * 64) { wall(p.z0 * 64, (p.z0 + 1) * 64, (p.z0 + 1) * 64, p.aoBottom); wall((p.z0 + 1) * 64, tL, tR, 3); }
   else wall(p.z0 * 64, tL, tR, p.aoBottom);
+  // Its lid against the staircase cells along its legs. Brought down to a slope it can lie under such a cell's top:
+  // a voxel roof, a taller wall beside the eave, or a higher roof's slope than the one it came down to (the lowest
+  // round a corner); that cell's side the prism hid is open above the lid -- a cheek closes it, from the lid up to the
+  // prism's top or, on a slope's cell, to where its side over the slope begins (roofs.ts). Or it stands over a
+  // slope's cell (at least a quarter metre up from its layer's foot): the prism's inside shows over that slope -- a
+  // cheek facing the cell closes it, from the slope up to the lid
+  if (fill === undefined && p.roof && p.capTop && slopes) {
+    for (const [n, ux, uy] of [[p.a, -p.sx, 0], [p.b, 0, -p.sy]]) for (let k = 0; k < n; k++) {
+      const g0 = [P[0] + ux * k, P[1] + uy * k], g1 = [P[0] + ux * (k + 1), P[1] + uy * (k + 1)];
+      const cx = ux ? Math.min(g0[0], g1[0]) : p.sx > 0 ? P[0] : P[0] - 1, cy = uy ? Math.min(g0[1], g1[1]) : p.sy > 0 ? P[1] : P[1] - 1;
+      const side = ux ? slopes.sideFloor(cx, cy, 1, -p.sy) : slopes.sideFloor(cx, cy, 0, -p.sx);
+      const z1 = side < 0 ? p.z1 * 64 : Math.min(p.z1 * 64, side);
+      const l0 = k === 0 ? tP : top(g0), l1 = k + 1 === n ? (ux ? (A === L ? tL : tR) : (B === L ? tL : tR)) : top(g1);
+      // (facing out of the cell -- towards -sy along x, -sx along y -- counter-clockwise seen from there; or into it)
+      const outFlip = ux ? Math.sign(g1[0] - g0[0]) !== -p.sy : Math.sign(g1[1] - g0[1]) !== p.sx;
+      const nOut = ux ? 2 + (p.sy < 0 ? 1 : 0) : (p.sx < 0 ? 1 : 0), nIn = nOut ^ 1;
+      const cheek = (inward: boolean, b0: number, b1: number, t0: number, t1: number) => {
+        const [q0, q1, lo0, lo1, hi0, hi1] = outFlip !== inward ? [g1, g0, b1, b0, t1, t0] : [g0, g1, b0, b1, t0, t1];
+        out.reserve(4);
+        v(q0, lo0, inward ? nIn : nOut, 3, 0); v(q1, lo1, inward ? nIn : nOut, 3, 0); v(q1, hi1, inward ? nIn : nOut, 3, 0); v(q0, hi0, inward ? nIn : nOut, 3, 0);
+      };
+      if (l0 < z1 || l1 < z1) cheek(false, Math.min(l0, z1), Math.min(l1, z1), z1, z1);
+      const c0 = slopes.cornerAt(cx, cy, g0[0], g0[1]), c1 = slopes.cornerAt(cx, cy, g1[0], g1[1]);
+      if (c0 >= 0 && (l0 > c0 || l1 > c1)) cheek(true, Math.min(c0, l0), Math.min(c1, l1), l0, l1);
+    }
+  }
   const up = -p.a * p.b * p.sx * p.sy > 0; // P, A, B counter-clockwise from above
   if (capTop) {
     let nrm = 5, w = 0;
