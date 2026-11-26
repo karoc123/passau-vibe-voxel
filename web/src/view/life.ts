@@ -9,6 +9,8 @@ import type { Car, Kind, Rideable } from '../sim/types';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
+import type { CoachPose } from '../sim/coaches';
+import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, client/sim-client.ts TrafficMirror, ticked by main.ts) drawn between its last two ticks with instanced
@@ -72,6 +74,8 @@ export class StreetLife {
   private readonly drawnPeople = new Map<number, Drawn>();
   private readonly drawnAvatars = new Map<number, Drawn>();
   private frame = 0;
+  // the train coaches drawn this frame (solids)
+  private coaches: CoachPose[] = [];
   // the world tick whose events were drawn last (WorldSim.eventsSince)
   private seen: number;
 
@@ -142,7 +146,8 @@ export class StreetLife {
     this.frame++;
     this.drawCars(lead / STEP, night, dt);
     const back = 1 - lead / STEP;
-    this.trains.render(this.traffic.trains.coaches(back), night);
+    this.coaches = [...this.traffic.trains.coaches(back)];
+    this.trains.render(this.coaches, night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
     let n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
     n += this.drawAvatars(dt, lead / STEP, n);
@@ -436,6 +441,25 @@ export class StreetLife {
     const d = this.drawnOf(ref.kind).get(ref.id);
     if (!d || !this.agent(ref)) return null;
     return { x: d.x, y: d.y, z: d.z, h: d.h ?? 0 };
+  }
+
+  /** the solid things within r m of near as drawn this frame (the walker meets what it sees; sim/solids.ts): the
+   * cars, the train coaches, the other players on foot, the crafts standing about but the local player's own. The
+   * crowd is not solid: people walk the footways in thousands and step round nobody, so they would wall the walker in */
+  solids(near: { x: number; z: number }, r = 25): Solid[] {
+    const out: Solid[] = [], by = (x: number, z: number) => Math.abs(x - near.x) < r && Math.abs(z - near.z) < r;
+    for (const c of this.traffic.roadVehicles()) {
+      const d = this.drawnCars.get(c.id);
+      if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d));
+    }
+    for (const d of this.drawnAvatars.values()) if (d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
+    for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }));
+    const me = this.client.player;
+    for (const c of this.client.crafts()) {
+      const shape = CRAFT_SHAPES[c.type], p = c.core.pose;
+      if (shape && c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) out.push(solidAt(shape, p));
+    }
+    return out;
   }
 
   /** the first one of a kind drawn, or null */
