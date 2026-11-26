@@ -29,7 +29,10 @@ costs about 50 µs a craft a tick and works for every craft alike.
 
 ## Consequences
 
-- Cars do not feel crafts: a driven car passes through a parked hovercraft, and a craft wedged against a shore by a
-  moving thing is passed through. Both change if crafts become bodies to the cars.
+- To the road physics' cars (a driven car) the crafts with a shape are walls it does not move, as a train's coaches
+  are: a car bumps off a hovercraft and does not shove it. The traffic's cars without a body still do not feel crafts,
+  and a craft wedged against a shore by a moving thing is passed through.
+- The planes have a shape (the fuselage, not the wings) but no meet: solid to others, they do not feel what they run
+  into. The drone and the paraglider have none: light, they would be walls to what meets them.
 - A held vessel may come in late; a ship rafted outside it is not held back with it.
 - Shapes are upright boxes: a helicopter let down onto a car is pushed off sideways, it does not land on the roof.

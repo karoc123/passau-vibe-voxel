@@ -88,6 +88,8 @@ export interface SimClient {
   driverNotes(): DriveNote[];
   /** the craft the player pilots, or null */
   craftOf(): CraftView | null;
+  /** the cars driven by players near this one (its own among them), by car id with its driver */
+  drivers(): readonly [number, PlayerId][];
   /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first (the craft events of it) */
@@ -436,6 +438,7 @@ export class MirrorSimClient implements SimClient {
     return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
+  drivers(): readonly [number, PlayerId][] { return this.last?.drivers ?? []; }
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
 }
 

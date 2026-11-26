@@ -26,10 +26,9 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
-import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies } from '../../sim/traffic';
+import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies, type WallBox } from '../../sim/traffic';
 import type { BodyDraw, BodyPose } from '../../sim/contract/agents';
 import { bodyPoseAt, drawnBodyPose } from '../../sim/body-pose';
-import type { CoachBox } from '../../sim/train-traffic';
 import type { Car } from '../../sim/types';
 import type { RoadPose } from '../../sim/contract/pose';
 import type { Meta } from '../../core/meta';
@@ -89,8 +88,8 @@ interface Body {
 interface CoachBody {
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
-  from: CoachBox;
-  to: CoachBox;
+  from: WallBox;
+  to: WallBox;
 }
 interface Fade { dx: number; dy: number; dz: number; dh: number; t: number; dur: number }
 interface Cmd { want: number; vb: number; ang: number; stopped: boolean }
@@ -470,11 +469,13 @@ export class LifePhysics implements TrafficBodies {
     this.world.free();
   }
 
-  // Coaches interact with player chassis as kinematic walls. They never enter the road vehicle wreck path.
+  // Coaches, and the walls the world puts in the traffic (the crafts: Traffic.walls), interact with player chassis as
+  // kinematic walls. They never enter the road vehicle wreck path. A coach's hit is a train's (coachImpact); a wall's
+  // is the car core's, as at a voxel wall.
   private syncCoaches(T: Traffic, driveDist: (x: number, z: number) => number) {
     const nearby = new Set<string>();
     if (this.drivers.size) {
-      for (const box of T.trains.coachBoxes()) {
+      for (const [boxes, coach] of [[T.trains.coachBoxes(), true], [T.walls(), false]] as const) for (const box of boxes) {
         const { x, y, z, size } = box;
         if (driveDist(x, z) > DRIVE_RADIUS + size.z / 2) continue;
         nearby.add(box.id);
@@ -490,7 +491,7 @@ export class LifePhysics implements TrafficBodies {
         const collider = this.world.createCollider(RAPIER.ColliderDesc.cuboid(size.x / 2, size.y / 2, size.z / 2)
           .setCollisionGroups(CAR_ONLY_GROUPS), body);
         this.coachBodies.set(box.id, { body, collider, from: box, to: box });
-        this.coachColliders.add(collider.handle);
+        if (coach) this.coachColliders.add(collider.handle);
       }
     }
     for (const [id, coach] of this.coachBodies) {

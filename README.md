@@ -12,7 +12,11 @@ The date, the hour and the weather are sliders; cars, trains, pedestrians and bi
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
 (`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
-and heading, rivers, roads and nearby landmarks.
+and heading, rivers, roads and nearby landmarks. **,** (comma), the corner button on the minimap or the button left
+of **Map** (also on a phone) opens the whole city full screen with street names: drag to move, wheel or pinch to zoom,
+**,** or **Esc** closes it. A click or tap on either map sets a waypoint (a beam over the spot in the city, its
+distance and direction at the top of the screen); clicking it again, its distance or **Backspace** clears it. With a
+host (`?server=`) both maps show the other players near you, labelled, on foot or in what they drive or fly.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).
@@ -463,7 +467,9 @@ the car runs into are shoved away along the hit and tip over flat (a short scrip
 no physics: `view/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
-(no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
+(no control for a moment). The motorbike turns on a ~2.7 m circle at walking pace and leans up to ~45° at speed
+(a fast corner wants slowing down), out-accelerates the cars except the coupé, and stops from 50 km/h in ~8 m
+(`tools/vehicles.mjs` `bike_turn`). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
 on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
 (`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded by the host
 in the background at its start (in the sim's Web Worker); the wheel

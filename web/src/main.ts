@@ -10,7 +10,9 @@ import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
-import { Minimap } from './minimap';
+import { MapData, type MapMark, Minimap } from './minimap';
+import { FullMap } from './fullmap';
+import { Waypoint } from './waypoint';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { gameKey, typing } from './nav/input';
@@ -104,7 +106,9 @@ const dayWeather = makeDayWeather({ bar, daylight, ask: (h, d) => pageTime?.ask(
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
-let minimap: Minimap | null = null;
+let minimap: Minimap | null = null, fullmap: FullMap | null = null;
+// the page's own waypoint (waypoint.ts), set from the maps
+const waypoint = new Waypoint(scene);
 // the world sim's client (client/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
 // traffic is loaded (the crafts wait for it: simReady)
 let weapons: WeaponsView | null = null;
@@ -200,6 +204,15 @@ addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyM' && gameKey(e) && !e.repeat && minimap) {
     minimap.toggle();
+    e.preventDefault();
+  }
+  // , the full map; Backspace or Delete clears the waypoint
+  if (e.code === 'Comma' && gameKey(e) && !e.repeat && fullmap) {
+    fullmap.toggle();
+    e.preventDefault();
+  }
+  if ((e.code === 'Backspace' || e.code === 'Delete') && gameKey(e) && !e.repeat && waypoint.at) {
+    waypoint.clear();
     e.preventDefault();
   }
   // Ctrl+C with nothing selected: the spot under the mouse and a link to look at it (nav.spotText), to report a fault
@@ -356,10 +369,16 @@ async function boot() {
   labels = new Labels(meta.labels, goTo.onLabel);
   labels.gate = city.gate;
   labels.visible = labelsOn;
-  const mapView = minimap = new Minimap(meta);
+  const mapView = new MapData(meta), marks = { pose: nav.mapPose, waypoint, others: otherPlayers };
+  const full = fullmap = new FullMap(mapView, marks);
+  minimap = new Minimap(mapView, marks, () => full.open());
+  hook('__map', { minimap, full, waypoint });
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(goTo.searchItems(meta));
-  fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => bar.search.setItems(goTo.searchItems(meta, places)));
+  fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => {
+    bar.search.setItems(goTo.searchItems(meta, places));
+    mapView.setPlaces(places);
+  });
   fountains = new Fountains(scene, meta.jets ?? []);
   fetchJson<FloodInfo>(dataUrl(CLIENT_FILES.flood)).then((info) => {
     riverPoints = info.river ?? [];
@@ -410,6 +429,21 @@ async function boot() {
   crafts = [...modes.map((C) => new C(ctx)), wing];
   hook('__crafts', crafts); // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
+}
+
+// the other players near this one as the maps mark them: on foot, at the wheel, flying (the array reused)
+const others: MapMark[] = [];
+function otherPlayers(): readonly MapMark[] {
+  others.length = 0;
+  const me = sim?.player;
+  if (!sim || !life) return others;
+  for (const a of life.avatarsDrawn()) if (a.player !== me) others.push({ player: a.player, x: a.pose.x, z: a.pose.z });
+  for (const c of sim.crafts()) if (c.pilot && c.pilot !== me) others.push({ player: c.pilot, x: c.core.pose.x, z: c.core.pose.z });
+  for (const [car, player] of sim.drivers()) {
+    const d = player !== me && life.drawn('car', car);
+    if (d) others.push({ player, x: d.x, z: d.z });
+  }
+  return others;
 }
 
 // the shell that flies the nearest craft no one pilots within BOARD_R m of the map's focus, put in it; false: none
@@ -501,6 +535,7 @@ renderer.setAnimationLoop(frameLoop({
     setWindows?.(daylight.hour, daylight.day);
     fountains?.update(t, daylight.night);
     if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
+    waypoint.update(camera, nav.mapPose(), world);
     const cp = camera.position;
     precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
     if (city?.complete) document.body.classList.remove('loading');
@@ -524,7 +559,8 @@ renderer.setAnimationLoop(frameLoop({
     busy = false;
     perf.frame(now, document.hidden, renderer.info.render.triangles);
     barRect ??= bar.rect;
-    minimap?.update(now, nav.mapPose, barRect.bottom);
+    minimap?.update(now, barRect.bottom);
+    fullmap?.update(now);
     labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
   },
 }, t0));

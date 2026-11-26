@@ -1,0 +1,30 @@
+# Glossary
+
+The words the owner and the code use for the same thing. One name per thing; use these in code, docs and talk.
+
+## Modes of the player
+
+- **Orbit mode**: the map view the page starts in; the city dragged, turned and zoomed from above, a double-click
+  flies there. The player has no body in it and is seen by nobody (owner 2026-11-27). Not "free camera".
+- **Walk**: on foot, first person (walker, avatar). Swims in deep water.
+- **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
+- **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
+  paraglider.
+
+## World and multiplayer
+
+- **Host**: the one place the world is simulated (in a browser's worker alone, or `serve` for several players).
+- **Page**: the browser side of a player: draws and takes input; its walk is its own, the rest the host's.
+- **Session**: one player's connection to a host.
+- **Tick**: one step of the host's simulation (30 a second); the budget is its 33 ms.
+- **Snapshot**: what a host sends a session each tick about what lies near that player.
+- **Presence**: a place the host keeps living (street life, traffic) because a player is there.
+- **Overload**: the host over its tick; it gives way in a fixed order (people, cars, send rate).
+- **PROTOCOL**: the number page and host must share; bumped when the wire or the shared code changes.
+
+## Map data
+
+- **Node**: one file of tiles (an octree node) the page and the host stream in.
+- **Region**: a block of the map the pipeline builds at once.
+- **Stretch**: a piece of river with one water level, between weirs (map config).
+- **Gate**: an automated check guarding what a player would notice (`web/tools/gates.mjs`).

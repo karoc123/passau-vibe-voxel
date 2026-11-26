@@ -13,6 +13,7 @@ import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
+import { WALKER_R } from './solids';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
 export { STEP, type CarPose, type Ground } from './road-net';
@@ -42,6 +43,8 @@ const PARKED = 8, PARKED_MAX = 24;
 // path's height and they fall (dropped: drawn falling, view/life.ts). The cars there are bodies (life-phys.ts): theirs fall.
 // Nothing edited: nothing looked at.
 const HOLE = 1;
+// a walker this far (m) across a car's line (its half width, the walker's, a little room) is in its way
+const WALKER_LAT = 0.9 + WALKER_R + 0.3;
 
 export const DEFAULT_SEED = 1;
 
@@ -64,6 +67,10 @@ export interface TrafficBodies {
   /** what pose(c, a) draws from, for a client's copy of the traffic (client/sim-client.ts TrafficMirror); null: nothing (its path's pose) */
   drawState?(c: Car): BodyDraw | null;
 }
+
+/** an upright box (m): its foot's middle, heading, size across (x), up (y) and along (z) */
+export interface WallBox { readonly id: string; readonly x: number; readonly y: number; readonly z: number; readonly heading: number;
+  readonly size: { readonly x: number; readonly y: number; readonly z: number } }
 
 // (a car's body as drawn, BodyDraw: contract/agents.ts; drawn by sim/body-pose.ts)
 
@@ -105,6 +112,11 @@ export class Traffic {
   private boatTraffic: BoatTraffic | null = null;
   /** whether something the river's vessels give way to is in a vessel's way (WorldSim's: the crafts) */
   inTheWay: InTheWay = () => false;
+  /** the players on foot, where their walks are this tick (WorldSim's): a car stops for one in its way as for a car */
+  walkers: readonly { x: number; y: number; z: number }[] = [];
+  /** the things the road physics' cars meet as walls it does not move (WorldSim's: the crafts with a shape), upright
+   * boxes on their foot */
+  walls: () => Iterable<WallBox> = () => [];
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
@@ -119,6 +131,9 @@ export class Traffic {
   day = 180;
   /** the share of the hour's people and riders wanted (1: all): a host over its tick thins its crowd first */
   crowd = 1;
+  /** the share of the hour's cars wanted (1: all): a host still over its tick with its crowd thinned thins its cars;
+   * those over it leave at a road's end out of sight (never one followed or a body in play; one driven is not in cars) */
+  carShare = 1;
   t = 0;
   // the time since the last tick (s, under STEP): how far between the last two ticks to draw; kept by whoever runs the
   // ticks (sim/world-sim.ts WorldSim.update; update here for a traffic run alone)
@@ -215,7 +230,7 @@ export class Traffic {
     const hh = ((hour % 24) + 24) % 24;
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {
-      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)),
+      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)) * this.carShare,
       peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)) * this.crowd,
       // the counters' day: the commute to work and home, a lunch hump, little at night; a fifth of July's in January
       bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
@@ -445,6 +460,13 @@ export class Traffic {
       for (const o of nextRoad.lists[nextLane]) if (o.v < 2 && o.s - o.len < room) { room = o.s - o.len; rb = o; }
       if (room < car.len + 2 && nextRoad.L > car.len + 4 && rb !== ig) stop(e.L - BOX_IN - car.s, 'no-room-exit', rb);
     }
+    // a player on foot in the way (ahead within its width, at its height): stopped for, assertive or not
+    const g = car.geo;
+    for (const w of this.walkers) {
+      if (Math.abs(w.y - g.z) > 2) continue;
+      const rx = w.x - g.px, ry = w.z - g.py, along = rx * g.fx + ry * g.fy;
+      if (along > -1 && along < 40 && Math.abs(rx * g.fy - ry * g.fx) < WALKER_LAT) stop(along - WALKER_R, 'walker', null);
+    }
     const b = car.block;
     if (b && b.o !== ig) { // physical blocker; circular waits are broken after 6 s when the blocker is stuck too
       const align = b.o.geo.fx * car.geo.fx + b.o.geo.fy * car.geo.fy, sameDir = align > 0.7;
@@ -657,7 +679,7 @@ export class Traffic {
     const lst = e.lists[car.lane];
     lst.splice(lst.indexOf(car), 1);
     car.lcTo = undefined;
-    const r = this.regions[this.roadOwner[e.i]], over = !!r && r.cars > r.targetCars + 4;
+    const r = this.regions[this.roadOwner[e.i]], over = !!r && r.cars > r.targetCars + 4 && !this.held.car.has(car.id) && !this.bodies?.owns(car);
     if ((car.next < 0 || over) && this.mayLeave(car, e)) { this.boxLeave(car); return false; }
     if (car.next < 0) {
       lst.push(car);

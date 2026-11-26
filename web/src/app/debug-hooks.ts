@@ -5,6 +5,9 @@ import type { SocketLink, WorkerLink } from '../client/sim-worker-link';
 import type { PlayerCraft } from '../nav/craft';
 import type { TileStreamer } from '../stream';
 import type { StreetLife } from '../view/life';
+import type { FullMap } from '../fullmap';
+import type { Minimap } from '../minimap';
+import type { Waypoint } from '../waypoint';
 
 export interface DebugHooks {
   // the city is shown (shoot.mjs waits for it)
@@ -20,6 +23,8 @@ export interface DebugHooks {
   __board: () => boolean;
   // the player's craft shells (judder.mjs enters one at a spot)
   __crafts: PlayerCraft[];
+  // the maps and the waypoint (tools/maps.mjs)
+  __map: { minimap: Minimap; full: FullMap; waypoint: Waypoint };
 }
 
 declare global {
