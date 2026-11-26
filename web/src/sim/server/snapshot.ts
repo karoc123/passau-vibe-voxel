@@ -10,7 +10,7 @@
 //                                      what is far from the player left out (its sight: interest.ts)
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { Car } from '../types';
-import type { BodyDraw, CarState, CarWire, PersonWire } from '../contract/agents';
+import type { BodyDraw, CarState, CarWire, PersonWire, TrainWire } from '../contract/agents';
 import { AgentWire, round, wireBody, wirePose } from '../agent-wire';
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
@@ -44,6 +44,9 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   i = 0;
   for (const p of T.people) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) people.push(w); }
   for (const p of T.riders) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) riders.push(w); }
+  const trains: TrainWire[] = [];
+  for (const t of T.trains.save()) { const w = wire.train(t, tick); if (w) trains.push(w); }
+  const boats = T.boats && wire.boatsOf(T.boats);
   const gone = wire.done();
   const bodies: [number, BodyDraw][] = [];
   if (B?.drawState) for (const c of T.roadVehicles()) {
@@ -58,7 +61,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const w = sim.players.get(player)?.walk;
     if (w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z))) avatars.push({ id, player, pose: { ...w.pose }, prev: { ...w.prev } });
   }
-  const boats = T.boats, crafts: CraftState[] = [];
+  const crafts: CraftState[] = [];
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) {
     if (c.placed && (!S || S.sees('craft', c.id, c.core.pose.x, c.core.pose.z)))
@@ -69,8 +72,8 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   return {
     tick: sim.tick, t: T.t, hour: sim.timeOfDay.hour, day: T.day,
     cars, detached, people, riders, gone,
-    bodies, trains: T.trains.save(),
-    boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
+    bodies, trains,
+    boats,
     walked, avatars, crafts, events,
     player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
     edits,

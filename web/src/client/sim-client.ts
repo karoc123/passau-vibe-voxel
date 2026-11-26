@@ -437,13 +437,23 @@ export class MirrorSimClient implements SimClient {
 }
 
 /** a snapshot as the client holds it: all its cars and people, each as last sampled (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[]; riders: Sampled<PersonState>[] };
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null };
 
 // A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
 const BLEND_S = 0.3, SNAP = 4;
 const left = (t: number, from: number) => { const u = Math.min(1, (t - from) * STEP / BLEND_S); return 1 - u * u * (3 - 2 * u); };
-interface Reckoned { st: Sampled<CarState>; old: Sampled<CarState> | null; es: number; eo: number; from: number }
+interface Reckoned<T> { st: Sampled<T>; old: Sampled<T> | null; es: number; eo: number; from: number }
+// the samples of a list in place of the last (a new one's correction worked out when it is next reckoned)
+function resample<T extends { id: number }>(R: Map<number, Reckoned<T>>, list: readonly Sampled<T>[], seen: { has(id: number): boolean }) {
+  for (const st of list) {
+    const r = R.get(st.id);
+    if (!r) R.set(st.id, { st, old: null, es: 0, eo: 0, from: 0 });
+    else if (r.st !== st) { r.old = r.st; r.st = st; }
+  }
+  if (R.size > list.length) for (const id of R.keys()) if (!seen.has(id)) R.delete(id);
+}
 
 /** the client's copy of the traffic, set from snapshots: what the presentation reads of the traffic (view/life.ts,
  * nav/): the agents between their last two ticks and the path maths that place them (the static roads and footways,
@@ -458,7 +468,8 @@ export class TrafficMirror {
   // the cars and people as last sent (a snapshot carries what changed since: sim/agent-wire.ts); the samples the cars
   // and people drawn are reckoned on from, and the corrections being blended out
   private readonly wire: AgentRead;
-  private readonly sampled = new Map<number, Reckoned>();
+  private readonly sampled = new Map<number, Reckoned<CarState>>();
+  private readonly trainSamples = new Map<number, Reckoned<TrainState>>();
   private readonly walking = new Map<number, Sampled<PersonState>>();
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
@@ -468,9 +479,11 @@ export class TrafficMirror {
   acc = 0;
   private t = 0;
   boats: BoatView | null = null;
-  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the snapshot's trains */
+  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the trains reckoned (back: none) */
   readonly trains: { coaches(back?: number): IterableIterator<CoachPose> };
-  private trainList: readonly TrainState[] = [];
+  // the trains as drawn now (reckoned), by id
+  private readonly trainsById = new Map<number, TrainState>();
+  private trainList: TrainState[] = [];
   /** the people walked by players, by person id */
   readonly walked = new Map<number, WalkPose>();
   /** the players' own bodies on foot (avatarPose: where one is drawn) */
@@ -503,7 +516,8 @@ export class TrafficMirror {
    * arrives) */
   read(s: Snapshot): Taken {
     const [people, riders] = this.wire.readPeople(s.people, s.riders, s.gone[1], s.tick);
-    return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders };
+    return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders, trains: this.wire.readTrains(s.trains, s.gone[2], s.tick),
+      boats: this.wire.readBoats(s.boats, s.gone[3]) };
   }
 
   /** a new session: what the last one sent of the cars and people forgotten */
@@ -531,13 +545,7 @@ export class TrafficMirror {
     cars(s.cars, T.cars, seenCars, out);
     cars(s.detached, T.detachedCars, seenCars, null);
     for (const id of this.carsById.keys()) if (!seenCars.has(id)) this.carsById.delete(id);
-    const R = this.sampled;
-    for (const st of s.cars) {
-      const r = R.get(st.id);
-      if (!r) R.set(st.id, { st, old: null, es: 0, eo: 0, from: 0 });
-      else if (r.st !== st) { r.old = r.st; r.st = st; }
-    }
-    if (R.size > s.cars.length) for (const id of R.keys()) if (!seenCars.has(id)) R.delete(id);
+    resample(this.sampled, s.cars, seenCars);
     const seenPeople = new Set<number>();
     const people = (list: PersonState[]) => list.map((st) => {
       let p = this.peopleById.get(st.id);
@@ -554,17 +562,35 @@ export class TrafficMirror {
     for (const l of [s.people, s.riders]) for (const st of l) W.set(st.id, st);
     this.draws.clear();
     for (const [id, d] of s.bodies) this.draws.set(id, d);
-    this.trainList = s.trains;
+    const trains = new Set<number>(), TB = this.trainsById;
+    this.trainList = s.trains.map((st) => {
+      let t = TB.get(st.id);
+      if (!t) TB.set(st.id, t = { ...st, ds: 0 });
+      trains.add(st.id);
+      return t;
+    });
+    for (const id of TB.keys()) if (!trains.has(id)) TB.delete(id);
+    resample(this.trainSamples, s.trains, trains);
     this.boats = s.boats;
     this.walked.clear();
     for (const [id, w] of s.walked) this.walked.set(id, w);
     this.avatars = s.avatars;
   }
 
-  /** the cars and people where they are at render time t (ticks, as a snapshot's tick: its state is that at t = tick),
-   * each reckoned on along its way from its last sample at the speed sent; a car's correction (where the sample before
-   * had it now, less where this one has it) blended out */
+  /** the cars, people and trains where they are at render time t (ticks, as a snapshot's tick: its state is that at
+   * t = tick), each reckoned on along its way from its last sample at the speed sent; a car's or train's correction
+   * (where the sample before had it now, less where this one has it) blended out */
   reckon(t: number) {
+    for (const tr of this.trainList) {
+      const r = this.trainSamples.get(tr.id)!, st = r.st, s = reckon(st.s, st.ds / STEP, st.at, t);
+      if (r.old) {
+        const o = r.old, es = reckon(o.s, o.ds / STEP, o.at, t) + r.es * left(t, r.from) - s;
+        r.es = Math.abs(es) < SNAP ? es : 0;
+        r.from = t;
+        r.old = null;
+      }
+      tr.s = s + r.es * left(t, r.from);
+    }
     const R = this.sampled, roads = this.net.roads;
     for (const c of this.cars) {
       const r = R.get(c.id);

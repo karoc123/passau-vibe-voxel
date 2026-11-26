@@ -96,6 +96,11 @@ export interface BodyDraw {
 /** a train as saved and loaded (sim/train-traffic.ts TrainTraffic save, load) */
 export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
 
+/** a train as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts), by length:
+ * [id, s, v]; then what it is (its track p, coaches n, express 1/0), sent when it comes into sight. Lengths cm,
+ * speeds cm/s */
+export type TrainWire = [id: number, s: number, v: number] | [id: number, s: number, v: number, p: number, n: number, express: number];
+
 /** a ship or a boat on the river (sim/boat-traffic.ts) */
 export interface BoatPose {
   // IDs are stable by berth slot for cruise ships and by fleet slot for excursion boats.
@@ -109,6 +114,10 @@ export interface BoatPose {
   readonly lit: boolean;
   readonly underway: boolean;
 }
+
+/** the boats as a snapshot carries them (sim/agent-wire.ts): the poses changed since the session's last snapshot
+ * (moored ones are sent once), the river's clock (s) and day */
+export interface BoatsWire { poses: BoatPose[]; elapsed: number; day: number }
 
 /** what the presentation draws of the boats (view/boats.ts): their poses at the last two ticks, the time and day
  * (sim/boat-traffic.ts BoatTraffic) */
