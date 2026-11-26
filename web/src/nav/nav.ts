@@ -106,7 +106,8 @@ export class Nav {
       onMove: (side, s) => {
         if (side !== 'right') return;
         const k = 2.4 * (this.camera.fov * Math.PI / 180) / innerHeight;
-        this.look((s.dx - this.lookFrom.dx) * k, -(s.dy - this.lookFrom.dy) * k * 0.7);
+        // a stick, not a drag of the scene: right turns right (yaw grows to the left), up looks up
+        this.look(-(s.dx - this.lookFrom.dx) * k, (s.dy - this.lookFrom.dy) * k * 0.7);
         this.lookFrom = { dx: s.dx, dy: s.dy };
       },
       // a short touch that hardly moved: a tap (follow who is there, as with one finger elsewhere)
@@ -226,7 +227,8 @@ export class Nav {
   private lookWithMouse(e: MouseEvent) {
     // (aiming narrows the view: the mouse turns it as much on the screen)
     const scale = 0.0027 * this.camera.fov / 65;
-    this.look(e.movementX * scale, e.movementY * scale * 0.8);
+    // (yaw grows to the left: the mouse right turns right, up looks up)
+    this.look(-e.movementX * scale, -e.movementY * scale * 0.8);
   }
 
   private bindPointer() {
