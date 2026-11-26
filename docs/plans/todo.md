@@ -22,6 +22,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   `src/sim/weapons/launcher/` (with its `gate.mjs`, found by tools/gates.mjs), `src/view/weapons/launcher/`, one line
   in each `index.ts`. The host decides flight and blast; others see the grenade in flight and the blast. Still to
   build in the core: the edit path for damage (a blast's crater through the world's edits).
+- The weapon held in the hand is missing: first person sees no gun, others see none on the avatar. Each package
+  brings its model (the view side), the core only where it hangs.
 
 ## Later, in this order of likelihood
 
@@ -49,6 +51,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
+- Stelzhamerstraße's underpass below the railway at Auerbach (way 8022045, tunnel=yes layer=-1, grid -1282,1146):
+  the road sinks and there is no passage under the tracks (new block col -2 row 1 since the map's growth).
 - Hans-Hösl-Straße 20 (way 1100616130, grid -2926,432): from the north the north wall is gone and the roof hangs
   down inside (`shoot.mjs --focus bld:1100616130`: f-nw broken, f-sw whole). Mesher (chamfer walls, roof slopes) or
   facing culling; the owner sees more such houses.
