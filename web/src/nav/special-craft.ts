@@ -30,7 +30,8 @@ const CONFIG = {
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
-    help: ['A/D steer · W speed bar · S brake (flare to land) · Esc exit', 'Left stick: turn, speed bar and brake.'] },
+    help: ['A/D steer · W speed bar · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
+      'Left stick: turn, speed bar and brake. Release: let go of the wing; falling, Open canopy.'] },
 } as const;
 
 class SpecialCraft implements PlayerCraft {
@@ -49,12 +50,13 @@ class SpecialCraft implements PlayerCraft {
   private readonly pos = new THREE.Vector3();
   private readonly offset = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
+  protected get on() { return this.phase === 'on'; }
   private phase: 'off' | 'finding' | 'on' | 'landing' = 'off';
   private start: (CraftSpot & { deadline: number }) | null = null;
   private camYaw = 0;
   private zoom = 1;
 
-  constructor(private readonly ctx: CraftContext, readonly id: CraftKind) {
+  constructor(protected readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
     this.link = new CraftLink(ctx, id);
     this.boards = id === 'paraglider' ? [] : [id];
@@ -122,6 +124,27 @@ class SpecialCraft implements PlayerCraft {
     this.link.open();
     this.link.board(craft.id);
     this.activate(craft.core.pose.h);
+    return true;
+  }
+
+  // G or the touch button: on the wing let go of it into a free fall on foot (the velocity kept), falling open a wing
+  // again over the body (its speed across kept; the canopy's opening takes the fall's). false: neither now
+  protected canopy() {
+    const nav = this.ctx.nav;
+    if (this.phase === 'on') {
+      const c = this.craft;
+      if (!c) return false;
+      const { p, velocity: v, heading } = c.core.motion;
+      if (!nav.fall(new THREE.Vector3(p.x, p.y - CONFIG[this.id].drop, p.z), new THREE.Vector3(v.x, v.y, v.z), heading)) return false;
+      this.panel.say('Falling: G opens a canopy again.', 3000);
+      return true;
+    }
+    if (this.phase !== 'off' || !this.link.sim || !nav.canOpen) return false;
+    const f = nav.fallPose, speed = Math.hypot(f.vx, f.vz), h = speed > 1 ? Math.atan2(f.vx, f.vz) : f.yaw;
+    if (!nav.openCanopy(this)) return false;
+    this.link.open();
+    this.link.spawn({ x: f.x, y: f.y + CONFIG[this.id].drop, z: f.z, h, speed });
+    this.activate(h);
     return true;
   }
 
@@ -273,6 +296,20 @@ export class HelicopterMode extends SpecialCraft {
 }
 
 export class ParagliderMode extends SpecialCraft {
-  constructor(ctx: CraftContext) { super(ctx, 'paraglider'); }
+  constructor(ctx: CraftContext) {
+    super(ctx, 'paraglider');
+    // (after the plane's G, which deploys this wing and marks the key used: not let go of in the same press)
+    addEventListener('keydown', (e) => {
+      if (e.code === 'KeyG' && !e.repeat && !e.defaultPrevented && gameKey(e) && this.canopy()) e.preventDefault();
+    });
+  }
+
+  /** the touch button's: as G */
+  press() { return this.canopy(); }
+
+  /** what G does now: let go of the wing, open one again, or nothing */
+  get canopyAction(): 'release' | 'open' | null {
+    return this.on ? 'release' : this.ctx.nav.canOpen ? 'open' : null;
+  }
   deploy(source: PlayerCraft, at: CraftSpot) { return this.deployFrom(source, at); }
 }
