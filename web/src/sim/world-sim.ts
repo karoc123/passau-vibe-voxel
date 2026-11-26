@@ -57,7 +57,7 @@ import { weaponIn } from './weapons';
 import { carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import type { CoachPose } from './coaches';
-import { aimDir, EYE, REACH, Trigger, type Body, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
+import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
  * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
@@ -88,7 +88,7 @@ type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> 
 // tick it is applied in: a session's ack) or an edit of it applied (the tick, its outcome: the sender's own)
 type Taken = (tick: number, r?: CommandResult) => void;
 // (leave, damage: the host's, not a client's: leave, damage)
-interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'damage'; op: WorldOp }; taken?: Taken }
+interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'damage'; op: WorldOp }; taken?: Taken; waited?: number }
 // a projectile in flight: whose, of which weapon, the body it left (it flies through that one), its time aloft (s)
 interface Flying { player: PlayerId; weapon: WeaponId; own: EntityRef; p: Projectile; t: number }
 
@@ -413,7 +413,8 @@ export class WorldSim {
   }
 
   // the one place a command takes effect
-  private apply({ player: p, cmd, taken }: Queued) {
+  private apply(q: Queued) {
+    const { player: p, cmd, taken } = q;
     switch (cmd.kind) {
       case 'view': break; // (taken at the update's start: send)
       case 'follow': this.follow(p, cmd.entity); break;
@@ -448,7 +449,11 @@ export class WorldSim {
         if (taken) taken(this.tick + 1, r); else this.outcomes.push({ at: this.tick + 1, player: p, r });
         break;
       }
-      case 'fire': this.fire(p, cmd.slot, cmd.h, cmd.pitch); break;
+      case 'fire':
+        // (a ray into a node not loaded meets nothing: the shot waits for its nodes, a few ticks at most)
+        if ((q.waited ?? 0) >= FIRE_WAIT || this.aimLoaded(p, cmd.h, cmd.pitch)) this.fire(p, cmd.slot, cmd.h, cmd.pitch);
+        else this.queue.push({ ...q, waited: (q.waited ?? 0) + 1 });
+        break;
       case 'damage': {
         // (no mode asked: the blast was the weapon's, fired as the rules allowed)
         try { applyEdit(cmd.op); this.keeper.last(cmd.op); } catch { /* (no world to edit) */ }
@@ -456,6 +461,14 @@ export class WorldSim {
         break;
       }
     }
+  }
+
+  // whether the voxels along the aim of the player on foot are loaded (not on foot: nothing to wait for)
+  private aimLoaded(player: PlayerId, h: number, pitch: number) {
+    const W = this.players.get(player)?.walk, V = this.voxels;
+    if (!W || !V?.ready || !Number.isFinite(h) || !Number.isFinite(pitch)) return true;
+    const f = W.pose;
+    return V.ready({ x: f.x, y: f.y + EYE, z: f.z }, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))), REACH);
   }
 
   // a shot from the eyes of the player on foot, where this sim has them (never the page's word for them), if their
@@ -521,18 +534,24 @@ export class WorldSim {
     const T = this.traffic, sim = this;
     return {
       voxels: this.voxels,
-      *bodies(): Generator<Body> {
+      *bodies(near?: MapBox): Generator<Body> {
         const at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, pt = { x: 0, y: 0, z: 0 };
         const mine = (kind: EntityRef['kind'], id: number) => own.kind === kind && own.id === id;
+        const out = (x: number, z: number) => !!near && (x < near[0] || z < near[1] || x > near[2] || z > near[3]);
         for (const list of [T.cars, T.detachedCars]) for (const c of list) {
           if (mine('car', c.id)) continue;
           const d = c.detachedPose;
-          if (d) Object.assign(at, d); else T.carPose(c, c.s, c.off, at);
+          // (where it is on the map first: its height reads the ground's voxels)
+          if (d) Object.assign(at, d); else T.carPose(c, c.s, c.off, at, true);
+          if (out(at.x, at.z)) continue;
+          if (!d) T.carPose(c, c.s, c.off, at);
           yield { entity: { kind: 'car', id: c.id }, x: at.x, y: at.y, z: at.z, h: at.h, r: 0.9, l: c.bus ? 6 : 2.2, ht: c.bus ? 3 : 1.5 };
         }
         for (const list of [T.people, T.riders]) for (const p of list) {
           if (mine('person', p.id)) continue;
-          const w = sim.walkedPose(p.id), q = w ? null : T.personPoint(p, 0, pt);
+          const w = sim.walkedPose(p.id);
+          if (w ? out(w.x, w.z) : out(T.personPoint(p, 0, pt, true).x, pt.y)) continue;
+          const q = w ? null : T.personPoint(p, 0, pt);
           // (personPoint: x, z on the map as x, y; the height as z)
           yield { entity: { kind: 'person', id: p.id }, x: w?.x ?? q!.x, y: w?.y ?? q!.z, z: w?.z ?? q!.y, h: 0, r: 0.3, l: p.bike ? 0.9 : 0.3, ht: 1.8 };
         }
@@ -835,6 +854,8 @@ const finitePose = (p: WalkPose) => [p.x, p.y, p.z, p.h].every(Number.isFinite);
 // how far a solid thing may be from a craft and still be met in a tick (m, from its pose, past the craft's reach): a
 // car's (a bus's half length, the tick its gathered place lags), a craft's (the helicopter's tail and rotor), a coach's
 const CAR_REACH = 12, CRAFT_REACH = 8, COACH_REACH = 12;
+// the ticks a shot waits at most for the nodes along its aim (a node read off the thread is in within a tick or two)
+const FIRE_WAIT = 15;
 // a vessel gives way to a craft this far (m) beside its hull too: it slows to a stop before it would scrape past
 const BESIDE = 2;
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });

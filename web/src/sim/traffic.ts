@@ -117,6 +117,8 @@ export class Traffic {
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
   edits: [number, number, number, number][] = [];
   day = 180;
+  /** the share of the hour's people and riders wanted (1: all): a host over its tick thins its crowd first */
+  crowd = 1;
   t = 0;
   // the time since the last tick (s, under STEP): how far between the last two ticks to draw; kept by whoever runs the
   // ticks (sim/world-sim.ts WorldSim.update; update here for a traffic run alone)
@@ -214,10 +216,10 @@ export class Traffic {
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {
       cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)),
-      peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)),
+      peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)) * this.crowd,
       // the counters' day: the commute to work and home, a lunch hump, little at night; a fifth of July's in January
       bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
-        * (0.2 + 0.4 * (1 - Math.cos(2 * Math.PI * (this.day - 15) / 365))),
+        * (0.2 + 0.4 * (1 - Math.cos(2 * Math.PI * (this.day - 15) / 365))) * this.crowd,
     };
     if (this.regions.some((r) => r.warm)) this.populate(density); // (drawn this frame)
     return density;
@@ -501,18 +503,25 @@ export class Traffic {
     else this.edits.push([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
   }
 
+  // is (x, z) in an edited box?
+  private inEdit(x: number, z: number) { return this.edits.some((b) => x >= b[0] && z >= b[1] && x < b[2] && z < b[3]); }
+
   // is the ground at (x, z) more than HOLE m under height y, in an edited box?
   private hole(x: number, z: number, y: number) {
     const G = this.ground;
-    if (!G || !this.edits.some((b) => x >= b[0] && z >= b[1] && x < b[2] && z < b[3])) return false;
+    if (!G || !this.inEdit(x, z)) return false;
     return G.support(x, z, y + 1.5) < y - HOLE;
   }
 
   // the people and riders over a hole fall (out of the crowd: dropped, drawn falling)
   private dropOverHoles() {
-    const P = this.pA;
+    const P = this.pA, all = this.edits.reduce((u, b) => [Math.min(u[0], b[0]), Math.min(u[1], b[1]), Math.max(u[2], b[2]), Math.max(u[3], b[3])], [Infinity, Infinity, -Infinity, -Infinity]);
     const drop = (list: Person[]) => list.filter((p) => {
       if (this.held.person.has(p.id)) return true;
+      // (where they are on the map first: their height reads the ground's voxels, every person every tick while an
+      // edit stands)
+      this.personPoint(p, 0, P, true);
+      if (P.x < all[0] || P.y < all[1] || P.x >= all[2] || P.y >= all[3] || !this.inEdit(P.x, P.y)) return true;
       this.personPoint(p, 0, P);
       if (!this.hole(P.x, P.y, P.z)) return true;
       this.dropped.push({ tick: this.tickNumber, ...fallen(p) });
@@ -751,9 +760,9 @@ export class Traffic {
   // a car's drawn path (carPoint) at arc length s on its road, for what steers a body along it (TrafficBodies)
   pathPoint(car: Car, s: number, out: Pt, off = car.off) { return this.net.carPoint(car, s, out, off); }
 
-  carPose(c: Car, s: number, off: number, out: CarPose) { return this.net.carPose(c, s, off, out); }
+  carPose(c: Car, s: number, off: number, out: CarPose, flat = false) { return this.net.carPose(c, s, off, out, flat); }
 
-  personPoint(p: Person, ds: number, out: Pt) { return this.net.personPoint(p, ds, out); }
+  personPoint(p: Person, ds: number, out: Pt, flat = false) { return this.net.personPoint(p, ds, out, flat); }
 
   // Person p out of the crowd (knocked down: view/life.ts); whether they were in it
   removePerson(p: Person) {

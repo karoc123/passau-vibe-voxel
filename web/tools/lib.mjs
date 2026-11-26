@@ -1,7 +1,7 @@
 // Not a tool: what the node tools share. imp: a module of web/ (src/..., checks/...) loaded through vite's runner, as
 // the viewer's build resolves it; serveTiles: fetch() answering the node files from disk, at the paths VoxelCollision
 // fetches (data/tiles/...); sessionLink: a client's link to a host the tool ticks itself; synthData: a synthetic world
-// as a data directory a real host (host/node.ts nodeHost) runs on.
+// as a data directory a real host (host/node.ts nodeHost) runs on; wallTick: a tick of wall time.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +26,10 @@ export function sessionLink(session) {
     },
   };
 }
+
+// a host's tick of wall time (33 ms): what a host whose node files are read off the thread (host/node.ts offThread)
+// needs between ticks for them to come in, as on its clock
+export const wallTick = () => new Promise((r) => setTimeout(r, 1000 / 30));
 
 // fetch() of .../data/tiles/<p> reads <dir>/tiles/<p> (404 if it is not there), anything else as before
 export function serveTiles(dir) {

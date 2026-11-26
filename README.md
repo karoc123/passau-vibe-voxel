@@ -383,7 +383,8 @@ whole fast set after a series of merges. `--list` shows every gate, its set, wha
 that every file of `src/` and `tools/` is in a gate's paths or in `UNGATED` (the gate `gate-coverage`: a new package
 needs a gate or a line there); name gates to run only those; `--full` adds the slow ones; `--golden FILE` adds the
 mesher's byte comparison (record it before the change with `node tools/mesh-golden.mjs write FILE`); `-v` prints
-every gate's output. The gate `knip` fails on an unused file, export or dependency; a module only a tool loads by name
+every gate's output. The gate `load` times the network host (16 players by the cathedral, ~20 s, up to three runs):
+it runs after the others, alone, and a machine busy with other work can fail it; run it again by name. The gate `knip` fails on an unused file, export or dependency; a module only a tool loads by name
 (`imp('src/...')`, real-city's `load('...')`) is an entry through `web/knip.config.js`, a name loaded any other way
 goes in its `ignore`. The pipeline's quick gates:
 `scripts/check.sh` (`--fixture` adds `check.py verify` on the fixture map, minutes; some verify failures exist on main,

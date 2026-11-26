@@ -7,14 +7,18 @@
 import type { TileCache } from './tile-cache';
 import { roomOffsets, type Columns } from './tile-data';
 import type { ColumnData, Meta } from './meta';
+import type { Vec3 } from './vec';
 import { World, type ColumnSource } from './world';
 
 const HOLD = 96;
 
 /** the World over cache's level-1 nodes; hold: the nodes within r m of these points (map x, z) loaded and kept, those
  * of the call before let go; dispose: its listener on the cache's live edits removed */
-export function tileWorld(meta: Meta, cache: TileCache): World & { hold(around: readonly { x: number; z: number }[], r: number): void; dispose(): void } {
+export function tileWorld(meta: Meta, cache: TileCache): World & { hold(around: readonly { x: number; z: number }[], r: number): void;
+  ready(o: Vec3, d: Vec3, max: number): boolean; dispose(): void } {
   const N = meta.tiles.N, S = N + 2, data = new WeakMap<Columns, ColumnData>(), held: string[] = [], asked = new Set<string>();
+  // (nodes whose files could not be read: nothing to wait for)
+  const failed = new Set<string>();
   const colData = (tx: number, ty: number, c: Columns): ColumnData => {
     let d = data.get(c);
     if (!d) {
@@ -36,7 +40,7 @@ export function tileWorld(meta: Meta, cache: TileCache): World & { hold(around: 
           held.push(t);
           src.version++;
           while (held.length > HOLD) { const [x, y] = held.shift()!.split('_').map(Number); asked.delete(`${x}_${y}`); cache.release(x, y); }
-        }, () => {}); // (a node with no files: not asked again)
+        }, () => { failed.add(t); }); // (a node with no files: not asked again)
       }
       return undefined;
     },
@@ -59,7 +63,7 @@ export function tileWorld(meta: Meta, cache: TileCache): World & { hold(around: 
         if (near.get(k) !== e) { cache.release(tx, ty); return; }
         e.in = true;
         src.version++;
-      }, () => {});
+      }, () => { failed.add(k); });
     }
     for (const [k, e] of near) {
       if (want.has(k)) continue;
@@ -67,5 +71,21 @@ export function tileWorld(meta: Meta, cache: TileCache): World & { hold(around: 
       if (e.in) { const [tx, ty] = k.split('_').map(Number); cache.release(tx, ty); }
     }
   };
-  return Object.assign(new World(src, meta), { hold, dispose: () => unlisten?.() });
+  const world = new World(src, meta);
+  // the nodes the ray's track on the map crosses (sampled finer than a node), each in, failed or off the built map;
+  // those not yet: asked for
+  const ready = (o: Vec3, d: Vec3, max: number) => {
+    let all = true;
+    const step = N / 4, n = Math.ceil(max / step);
+    for (let i = 0; i <= n; i++) {
+      const t = Math.min(max, i * step), x = o.x + d.x * t, z = o.z + d.z * t;
+      if (!world.inside(x, z)) continue;
+      const tx = Math.floor(x / N), ty = Math.floor(z / N), k = `${tx}_${ty}`;
+      if (failed.has(k) || cache.view(tx, ty)) continue;
+      src.columns(`1/${k}`);
+      all = false;
+    }
+    return all;
+  };
+  return Object.assign(world, { hold, ready, dispose: () => unlisten?.() });
 }

@@ -101,9 +101,9 @@ export class RoadNet {
 
   // A car's kinematic pose with its front at arc length s, lane offset off: both axles on the blended path, the body
   // following the curve; on a ramp (world.ts surface: the paths' heights are whole metres) both axles on it, the body
-  // pitched between them
-  carPose(c: Car, s: number, off: number, out: CarPose) {
-    const A = this.carPoint(c, s, this.pA, off), B = this.carPoint(c, s - (c.len - 1.2), this.pB, off), G = this.ground;
+  // pitched between them; flat: the paths' heights alone (where it is on the map, without reading the ground's voxels)
+  carPose(c: Car, s: number, off: number, out: CarPose, flat = false) {
+    const A = this.carPoint(c, s, this.pA, off), B = this.carPoint(c, s - (c.len - 1.2), this.pB, off), G = flat ? null : this.ground;
     out.h = Math.atan2(A.x - B.x, A.y - B.y);
     out.x = (A.x + B.x) / 2; out.z = (A.y + B.y) / 2;
     out.pitch = 0; out.y = Math.max(A.z, B.z);
@@ -116,12 +116,12 @@ export class RoadNet {
 
   // Where a person walking or riding is, ds m on along their way (out: x, z on the map as x, y; their height as z):
   // a walker off the way's line by their lat (on its side, if it has one), a rider right of it
-  personPoint(p: Person, ds: number, out: Pt) {
+  personPoint(p: Person, ds: number, out: Pt, flat = false) {
     const e = this.peds[p.e], A = at(e, p.s + ds * p.dir, 0, out), B = at(e, p.s + (ds + 0.5) * p.dir, 0, this.tmp2);
     const l = Math.hypot(B.x - A.x, B.y - A.y) || 1, dx = (B.x - A.x) / l, dy = (B.y - A.y) / l;
     const lat = p.bike || e.side === undefined ? p.lat : p.lat * e.side * p.dir;
     const x = A.x - dy * lat, y = A.y + dx * lat;
-    out.z = this.ground ? this.ground.surface(x, y, A.z) : A.z;
+    out.z = this.ground && !flat ? this.ground.surface(x, y, A.z) : A.z;
     out.x = x; out.y = y;
     return out;
   }

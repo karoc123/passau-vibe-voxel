@@ -20,6 +20,11 @@ const BACKLOG = 4 << 20;
 // the phone's small messages raw).
 const DEFLATE_FROM = 64;
 
+// Over its tick the host gives way in the owner's order (people, then cars, then the others' send rate; never the
+// player's own vehicle, never slow motion): only the first step is built, the crowd thinned while the ticks of the
+// last second average over OVER of the tick, filled again under UNDER. The trimmed go out of sight first.
+const OVER = 0.8, UNDER = 0.5, THINNEST = 0.2;
+
 export interface ServeOptions {
   /** the data directory (meta.json, traffic.json, tiles/) */
   dir: string;
@@ -37,7 +42,7 @@ interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; so
 
 export function serve(o: ServeOptions) {
   const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
-  const server = nodeHost(o.dir, { ...start, world: 'tiles' });
+  const server = nodeHost(o.dir, { ...start, world: 'tiles', offThread: true });
   server.trackEdits();
   const conns = new Set<Conn>();
   const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: DEFLATE_FROM } });
@@ -57,7 +62,8 @@ export function serve(o: ServeOptions) {
     ws.on('close', () => { conns.delete(c); c.s.leave(); o.log(`${c.s.player} left`); });
   });
 
-  let n = 0, ticks = 0, tickMs = 0, sendMs = 0;
+  let n = 0, ticks = 0, tickMs = 0, sendMs = 0, second = 0;
+  const T = server.sim.traffic, budget = STEP * 1000, per = Math.round(1 / STEP);
   const stop = (o.clock ?? clock)(() => {
     const t0 = performance.now();
     server.update(STEP);
@@ -75,16 +81,25 @@ export function serve(o: ServeOptions) {
     }
     tickMs += ms;
     sendMs += performance.now() - t0 - ms;
+    second += performance.now() - t0;
+    if (n % per === 0) {
+      const mean = second / per;
+      if (mean > OVER * budget) T.crowd = Math.max(THINNEST, T.crowd * 0.8);
+      else if (mean < UNDER * budget && T.crowd < 1) T.crowd = Math.min(1, T.crowd * 1.25);
+      second = 0;
+    }
   });
 
   return {
     server,
+    /** the world's node files (TileCache): its loads and size, for the tools */
+    tiles: server.cache,
     /** the port it listens on, once it does (port 0: one the system picked) */
     port,
     /** since the last call: the ms per tick (the sim's, the snapshots' and their sending), the bytes sent per player
      * (before the socket's deflate), the bytes the socket wrote per player (deflated, the frames' headers too) */
     stats() {
-      const out = { ticks, tickMs: tickMs / (ticks || 1), sendMs: sendMs / (ticks || 1), bytes: [...conns].map((c) => [c.s.player, c.bytes] as const),
+      const out = { ticks, tickMs: tickMs / (ticks || 1), sendMs: sendMs / (ticks || 1), crowd: T.crowd, bytes: [...conns].map((c) => [c.s.player, c.bytes] as const),
         wire: [...conns].map((c) => [c.s.player, c.sock.bytesWritten - c.wire] as const) };
       ticks = 0; tickMs = 0; sendMs = 0;
       for (const c of conns) { c.bytes = 0; c.wire = c.sock.bytesWritten; }
