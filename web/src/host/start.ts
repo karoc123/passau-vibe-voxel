@@ -8,6 +8,8 @@
 //   ?lifephys=0   no traffic bodies near edits (the drive still loads the road physics); ?lpnear=, ?lpmax=: their
 //                 reach and number
 //   ?date=MM-DD, ?hour=   the world's day and hour at the start (else today, at its golden hour: sim/sun.ts)
+//   ?active=      the radius (m) of the street life round each player (else sim/road-net.ts ACTIVE_R)
+//   ?every=       a network host sends every Nth tick's snapshot (else every one: host/ws.ts)
 import type { PhysicsOptions } from '../sim/contract/worker';
 import type { TimeOfDay } from '../sim/contract/snapshot';
 import { dayOfDate, goldenHour } from '../sim/sun';
@@ -23,7 +25,11 @@ export interface HostStart {
   eager: boolean;
   physics: PhysicsOptions;
   time: TimeOfDay;
+  activeR?: number;
+  every?: number;
 }
+
+const positive = (v: number | undefined) => (v !== undefined && v > 0 ? v : undefined);
 
 /** the start config of query (a URL's search) at now */
 export function hostStart(query: string | URLSearchParams, now = new Date(), random = Math.random): HostStart {
@@ -37,5 +43,6 @@ export function hostStart(query: string | URLSearchParams, now = new Date(), ran
     edits: dig, eager: true,
     physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') },
     time: { day, hour: qs.get('hour') ? +qs.get('hour')! : goldenHour(day, year) },
+    activeR: positive(n('active')), every: positive(n('every')),
   };
 }

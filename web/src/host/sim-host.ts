@@ -69,6 +69,8 @@ export interface HostOptions {
   mode?: string;
   /** the sandbox's edits to the world's voxels allowed (?dig=1) */
   edits?: boolean;
+  /** the radius (m) of the street life round each player (?active=; without: sim/road-net.ts ACTIVE_R) */
+  activeR?: number;
 }
 
 /** the game modes a host can make, by id */
@@ -81,7 +83,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   const build = checkBuild(data.meta, (w) => ports.log(w));
   const { meta } = data, N = meta.tiles.N, cache = ports.tiles, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
-    crafts: { meta, cache, now: ports.now } });
+    crafts: { meta, cache, now: ports.now }, activeR: opts.activeR });
   sim.setWorld(opts.world, opts.world);
   if (opts.time) sim.setTime(opts.time.hour, opts.time.day);
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;

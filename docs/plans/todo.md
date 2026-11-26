@@ -4,10 +4,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Steps 3–8** in the order of target-architecture.md.
+- **Steps 4–8** in the order of target-architecture.md.
 - The network host sends every tick's full snapshot (about 110–180 KB of JSON, 3–5 MB/s per player before deflate):
   the page draws between a tick and the one before, so sending fewer would judder. Interest filter (step 4) and wire
-  compaction (step 8) cut it.
+  compaction (step 8) cut it. `?every=2` halves the bytes, but the page then shows motion stopping in a quarter of
+  its frames (ws-smoke: 75 % moved): it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (the free camera is a presence).

@@ -54,13 +54,13 @@ export class TrainTraffic {
 
   private len(tr: Train) { return tr.n * (COACH_LENGTH + GAP) - GAP; }
 
-  // is the train (both its ends) at least POP_R from the viewer?
-  private far(tr: Train, v: Viewer) {
+  // is the train (both its ends) at least POP_R from every viewer?
+  private far(tr: Train, viewers: readonly Viewer[]) {
     const p = this.paths[tr.p], a = at(p, tr.s, 0, pt()), b = at(p, tr.s - this.len(tr), 0, pt());
-    return farFrom(v, a.x, a.y, a.z, POP_R) && farFrom(v, b.x, b.y, b.z, POP_R);
+    return viewers.every((v) => farFrom(v, a.x, a.y, a.z, POP_R) && farFrom(v, b.x, b.y, b.z, POP_R));
   }
 
-  tick(t: number, dt: number, hour: number, viewer: Viewer) {
+  tick(t: number, dt: number, hour: number, viewers: readonly Viewer[]) {
     const hh = ((hour % 24) + 24) % 24;
     const run = !(hh > 0.25 && hh < 4.5);
     // each track's trains, front first (by where they are at the start of the tick; on a track no train passes another)
@@ -81,7 +81,7 @@ export class TrainTraffic {
         const last = byPath[i].reduce((m, tr) => Math.min(m, tr.s - this.len(tr)), Infinity);
         if (last < SPACING + 40) { p.next[k] = t + 20; return; } // the track is occupied: try again in a while
         const g = byPath[i], tr = this.spawn(p, k, 0); // (behind the rest: their tails are past SPACING + 40)
-        if (!this.far(tr, viewer)) { this.list.pop(); p.next[k] = t + 5; return; } // in sight: a little later
+        if (!this.far(tr, viewers)) { this.list.pop(); p.next[k] = t + 5; return; } // in sight: a little later
         tr.ahead = g.length ? g[g.length - 1] : null;
         g.push(tr);
         p.next[k] = t + HEADWAY * (0.85 + 0.3 * this.draw(t + k));
@@ -108,7 +108,7 @@ export class TrainTraffic {
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const tr = this.list[i];
-      if (tr.s - this.len(tr) > this.paths[tr.p].L + 10 && this.far(tr, viewer)) this.list.splice(i, 1);
+      if (tr.s - this.len(tr) > this.paths[tr.p].L + 10 && this.far(tr, viewers)) this.list.splice(i, 1);
     }
   }
 

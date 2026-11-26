@@ -131,7 +131,7 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
     const d = takeOver(street, 64, 25, 50, [], false, 'car', testTrack(-1100, [1134.5]));
     const viewer = { x: 64, z: 50 };
     // Let the scheduled train brake and dwell across the test street before the driver takes the wheel.
-    for (let i = 1; i <= 20 / STEP; i++) d.traffic.trains.tick(i * STEP, STEP, 12, viewer);
+    for (let i = 1; i <= 20 / STEP; i++) d.traffic.trains.tick(i * STEP, STEP, 12, [viewer]);
     const start = d.traffic.trains.coachBoxes().next().value!;
     let approachKmh = 0;
     const throttle = cruise(50);

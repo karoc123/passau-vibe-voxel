@@ -7,7 +7,9 @@
 //   vanish  -- an agent drawn in the last frame, within R m of the viewer, gone now
 //   jump    -- an agent drawn in both frames, within R m, moved more than JUMP m in one frame
 // (R: CAR_R for cars, PED_R for people and riders.) Agents in front of the viewer (within 60 degrees of its heading)
-// are counted apart. The first frame (the street filled for the first time) is not checked. Math.random is seeded:
+// are counted apart. The first frame (the street filled for the first time) is not checked. In one run a second
+// player joins far off and stands there: their circle is filled at once, never in the first's sight, and from their
+// next frame on what is drawn near them is checked as well. Math.random is seeded:
 // the run is the same every time.
 // The train and boat sim poses (--transit, on traffic.json's tracks and boats.json) the same way,
 // for viewers standing at each track's ends and stations, the fairway's ends, the berths and the pier: the trains
@@ -50,7 +52,7 @@ const label = (kind, x, y) => meta.labels.find((l) => l.kind === kind) ?? { x, y
 const RUNS = [
   { name: 'Altstadt', at: label('cathedral', 8085, 2771), h0: 17, h1: 20 },
   { name: 'Hauptbahnhof', at: label('station', 7019, 2871), h0: 6, h1: 9 },
-  { name: 'Innstadt', at: label('district', 8196, 3207), h0: 13, h1: 11 },
+  { name: 'Innstadt', at: label('district', 8196, 3207), h0: 13, h1: 11, second: { at: meta.labels.find((l) => /Ingling/.test(l.name)) ?? { x: 6105, y: 5207 }, join: 15 } },
 ];
 
 const roads = td.roads.map((r) => prepPath({ p: r.p.map((q) => [...q]), a: r.a, b: r.b, w: r.w }));
@@ -64,7 +66,7 @@ const counts = {};
 for (const k of ['car', 'person', 'rider', 'train', 'ship', 'boat']) counts[k] = { appear: 0, vanish: 0, jump: 0, appearFront: 0, vanishFront: 0, jumpFront: 0 };
 const examples = [];
 
-function run({ name, at: start, h0, h1 }) {
+function run({ name, at: start, h0, h1, second }) {
   // the viewer's route: from the road nearest the start along the roads (either way along them, as a viewer may),
   // the straightest and least driven on at each node
   let cur = 0, dir = 1, best = Infinity;
@@ -83,7 +85,9 @@ function run({ name, at: start, h0, h1 }) {
   // (drawn from the sim's snapshots, sim/server/snapshot.ts, as the page does; --mirror: through a CloneLink, as from a worker)
   // (started as a server starts it: src/host/node.ts, hostSim; the traffic's default seed, no ground, no road physics)
   const server = nodeHost(DATA, { world: null, physics: { bodies: false } }, { meta, traffic: td });
-  const session = sessionLink(server.connect('p1'));
+  const session = sessionLink(server.connect('p1')), other = second && server.connect('p2');
+  const far2 = second && { x: second.at.x, z: second.at.y };
+  let joined = -1;
   const mine = hello(checkBuild(meta, () => {}));
   const sim = new MirrorSimClient(MIRROR ? new CloneLink(session) : session, structuredClone(pristine), null, mine);
   const T = sim.traffic, life = new StreetLife(new THREE.Scene(), sim);
@@ -110,6 +114,7 @@ function run({ name, at: start, h0, h1 }) {
     const focus = { x: viewer.x, z: viewer.z };
     server.sim.setTime(h0 + (h1 - h0) * t / SECONDS);
     sim.send({ kind: 'view', view: { focus } });
+    if (other && t >= second.join) { other.send({ kind: 'view', view: { focus: far2 } }); if (joined < 0) joined = f; }
     sim.update(dt);
     server.update(dt);
     session.deliver();
@@ -119,7 +124,9 @@ function run({ name, at: start, h0, h1 }) {
     for (const p of T.people) { const d = life.drawn('person', p.id); if (d) now.set(p, ['person', d.x, d.z]); }
     for (const p of T.riders) { const d = life.drawn('person', p.id); if (d) now.set(p, ['rider', d.x, d.z]); }
     if (last) {
-      const near = (k, x, z) => Math.hypot(x - viewer.x, z - viewer.z) < (k === 'car' ? CAR_R : PED_R);
+      // (near either player; the second from the frame after their circle was filled)
+      const R = (k) => (k === 'car' ? CAR_R : PED_R);
+      const near = (k, x, z) => Math.hypot(x - viewer.x, z - viewer.z) < R(k) || (joined >= 0 && f > joined + 1 && Math.hypot(x - far2.x, z - far2.z) < R(k));
       const front = (x, z) => { const dx = x - viewer.x, dz = z - viewer.z, l = Math.hypot(dx, dz) || 1; return (dx * viewer.hx + dz * viewer.hz) / l > 0.5; };
       const flag = (what, k, x, z, extra = '') => {
         counts[k][what]++;
@@ -137,7 +144,8 @@ function run({ name, at: start, h0, h1 }) {
     // (the street first drawn once the first snapshot is in, a frame after the first update)
     if (now.size || last) last = now;
   }
-  console.log(`  ${name}: ${T.cars.length} cars, ${T.people.length} people, ${T.riders.length} riders at the end (hour ${h0} to ${h1})`);
+  const by = (v) => T.cars.filter((c) => { const d = life.drawn('car', c.id); return d && Math.hypot(d.x - v.x, d.z - v.z) < 400; }).length;
+  console.log(`  ${name}: ${T.cars.length} cars, ${T.people.length} people, ${T.riders.length} riders at the end (hour ${h0} to ${h1})` + (far2 ? `; ${by(viewer)} cars within 400 m of the first player, ${by(far2)} of the second` : ''));
 }
 
 if (STREET) for (const r of RUNS) run(r);
@@ -186,7 +194,7 @@ function transit() {
     const trains = new TrainTraffic(td.trains ?? []), check = follow([v], { train: TRAIN_R }, { train: JUMP + 17 * dt });
     for (let f = 1, F = Math.round(TRAIN_S / dt); f <= F; f++) {
       const t = f * dt;
-      trains.tick(t, dt, H0 + t / 3600, v);
+      trains.tick(t, dt, H0 + t / 3600, [v]);
       check(new Map(Array.from(trains.coaches(), ({ id, x, z }) => [id, ['train', x, z]])), t);
     }
   }
