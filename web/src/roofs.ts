@@ -82,7 +82,9 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   return {
     hidden,
     // a filled step's fascia starts at this height (1/64 m) over the inner corner at grid point (X, Y) (tile
-    // coordinates) on the side (sx, sy) of it, as a chamfer's prism (chamfer.ts) has them; undefined: none
+    // coordinates) on the side (sx, sy) of it, with legs a, b, as a chamfer's prism (chamfer.ts) has them; undefined:
+    // none (a prism whose legs run on past the fill's, into another building's cells, is not cut by it: the rest of its
+    // triangle stood open)
     fillFloor,
     // the steps of the eaves that could be filled, as found (each depends on the others next to it, and on what lies
     // under its triangle: mesher.worker.ts meshSections)
@@ -99,6 +101,19 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         h = Math.min(h, hq[c * 4 + kk] / Q);
       }
       return h;
+    },
+    // slope cell (X, Y)'s height (tile coordinates) at its corner on grid point (GX, GY) (1/64 m); -1: no slope's cell
+    cornerAt(X: number, Y: number, GX: number, GY: number) {
+      if (X < -1 || Y < -1 || X > N || Y > N) return -1;
+      const c = (X + 1) + S * (Y + 1);
+      return reg[c] < 0 ? -1 : hq[c * 4 + cornerIdx(c, GX + 1, GY + 1)];
+    },
+    // where the face on side (d: 0 x, 1 y; dir) of slope cell (X, Y) that emit draws towards an empty cell begins
+    // (1/64 m); under it the cell's voxel faces are drawn, or hidden (a chamfer's prism). -1: no slope's cell
+    sideFloor(X: number, Y: number, d: number, dir: number) {
+      if (X < -1 || Y < -1 || X > N || Y > N) return -1;
+      const c = (X + 1) + S * (Y + 1);
+      return reg[c] < 0 ? -1 : edgeFloor(c, EDGES[d * 2 + (dir > 0 ? 1 : 0)]) * Q;
     },
     hide() {
       for (let Y = Math.max(1, by0); Y <= Math.min(N, by1 - 1); Y++) for (let X = Math.max(1, bx0); X <= Math.min(N, bx1 - 1); X++) {
@@ -136,7 +151,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
   // layer of walls; the ones next to another (sharing an outer corner) are filled where what lies under the triangle
   // stays below the fascia
   function eaveSteps() {
-    const fills: Fill[] = [], covered = new Uint8Array(SS), floors = new Map<number, number>();
+    const fills: Fill[] = [], covered = new Uint8Array(SS), floors = new Map<number, number[]>();
     const inS = (x: number, y: number) => x >= 0 && y >= 0 && x < S && y < S;
     const sol = (x: number, y: number, b: number) => inS(x, y) && reg[x + S * y] >= 0 && bid[x + S * y] === b;
     // from (X, Y) along (ux, uy), the roof on the (ox, oy) side: the cells up to the outer corner
@@ -175,7 +190,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       // it stands above its floor, and nothing under the triangle comes up through it: a street, or a lower roof
       // (what stands above the floor is inside it, behind the fascia)
       const cs = fillCorners(f);
-      if (Math.min(cs[0][0], cs[1][0], cs[2][0]) <= f.floor) continue;
+      if (Math.min(cs[0][0], cs[1][0], cs[2][0]) <= f.floor || !level(f)) continue;
       let ok = true;
       for (let k = 0; k < a && ok; k++) ok = clear(f, cs, X - k * sx, Y);
       for (let k = 1; k < b && ok; k++) ok = clear(f, cs, X, Y - k * sy);
@@ -183,7 +198,20 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       fills.push(f);
       for (let k = 0; k < a; k++) covered[X - k * sx + S * (Y + sy)] |= 1 << (sy > 0 ? 2 : 3);
       for (let k = 0; k < b; k++) covered[X + sx + S * (Y - k * sy)] |= 1 << (sx > 0 ? 0 : 1);
-      floors.set(((px - 1) * 4096 + (py - 1)) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0), f.floor);
+      floors.set(((px - 1) * 4096 + (py - 1)) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0), [f.floor, a, b]);
+    }
+    // whether the cells along its legs meet at every grid point of them (the inner corner, the three round it;
+    // between): where two roofs of different heights meet there (a lower roof beside the step), the fill's edge takes
+    // the lower and the higher cell's side it covers is left open above it -- a hole through the roof's edge
+    function level(f: Fill) {
+      const { X, Y, sx, sy, a, b, px, py } = f;
+      const h = (c: number, gx: number, gy: number) => hq[c * 4 + cornerIdx(c, gx, gy)];
+      const ca = (k: number) => X - k * sx + S * (Y + sy), cb = (k: number) => X + sx + S * (Y - k * sy);
+      const hp = h(ca(0), px, py);
+      if (Math.abs(hp - h(cb(0), px, py)) > MERGE_TOL || Math.abs(hp - h(X + sx + S * (Y + sy), px, py)) > MERGE_TOL) return false;
+      for (let k = 1; k < a; k++) if (Math.abs(h(ca(k - 1), px - k * sx, py) - h(ca(k), px - k * sx, py)) > MERGE_TOL) return false;
+      for (let k = 1; k < b; k++) if (Math.abs(h(cb(k - 1), px, py - k * sy) - h(cb(k), px, py - k * sy)) > MERGE_TOL) return false;
+      return true;
     }
     // whether what is in cell (x, y) (its top; a slope's surface) stays under the fill's triangle where the two
     // overlap: compared at the corners of the triangle clipped to the cell, both being planes there (a slope's cell
@@ -212,7 +240,10 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     }
     return {
       fills, covered, cand,
-      fillFloor: (X: number, Y: number, sx: number, sy: number) => floors.get((X * 4096 + Y) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0)),
+      fillFloor: (X: number, Y: number, sx: number, sy: number, a: number, b: number) => {
+        const f = floors.get((X * 4096 + Y) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0));
+        return f && f[1] === a && f[2] === b ? f[0] : undefined;
+      },
     };
   }
 
@@ -470,7 +501,12 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
         if (v && v < 65534) vertical(out, e[0], -e[1], X, Y, e, Math.min(a0, tp * Q), Math.min(a1, tp * Q), tp * Q, tp * Q, v, 0, ground[n], bid[n], x0, y0);
       }
     }
-    if (!up) return;
+    // under a higher slope beside it that does not reach down (a roof slab over nothing: a canopy, an eave over a
+    // lower one) the cell's side is open from lo up to that slab's bottom, though hide() took its voxel faces
+    // (a slab's bottom: solid there; not a column whose cap rises over its voxels)
+    let open = lo;
+    if (!up && reg[n] >= 0 && !border) while (open < T[c] && vol[n + SS * (open + 1)] === 0) open++;
+    if (!up && (open === lo || vol[n + SS * (open + 1)] === 0)) return;
     // a skirt over the node's edge where the roof goes on in the next node (the same corners there: drawn for when that
     // node is not shown, a level's nodes swap whole) is a sliver of the roof
     const skirt = border && reg[n] >= 0;
@@ -496,7 +532,8 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
     // between the two nodes' slopes as a hairline. Where that roof is lower the skirt is the step down to it, seen, and
     // meets the edge: sunk, it left a slit under the edge, a dashed line of what lies behind)
     const k0 = skirt && cornerOf(n, c, e, 0) >= a0 ? 1 : 0, k1 = skirt && cornerOf(n, c, e, 1) >= a1 ? 1 : 0;
-    vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k0, a1 - k1, pal, lit, ground[c], bid[c], x0, y0);
+    if (!up) vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, Math.min(a0, open * Q), Math.min(a1, open * Q), pal, lit, ground[c], bid[c], x0, y0);
+    else vertical(out, e[0], e[1], X, Y, e, lo * Q, lo * Q, a0 - k0, a1 - k1, pal, lit, ground[c], bid[c], x0, y0);
   }
 
   // a vertical face on cell (X, Y)'s edge e, facing (axis d, dir), from low to high at the edge's two ends

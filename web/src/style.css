@@ -49,7 +49,8 @@ body[data-nav=craft] #bar .mode-tools > :not(.mode-active) { display: none; }
 body[data-mode=fpv] #labels { display: none; }
 /* the plane, and the drone while it flies: a compact strip of its panel alone (nav/plane.css, nav/fpv.css: their own) */
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) :is(#hud, .caption),
-body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools) { display: none; }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools, .bar-fold) { display: none; }
+@media (min-width: 601px) and (min-height: 501px) { body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > .bar-fold { display: none; } }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100% - 28px - var(--sl) - var(--sr)); }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active {
   display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 0 8px; border-radius: 6px; background: rgba(16,17,20,.62);
@@ -208,6 +209,15 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   #bar .search input { height: 36px; }
   #bar.folded .bar-fold { margin-top: 4px; } /* centred on the mode buttons' line (44 px) */
 }
+/* play (on foot, riding, in a craft) on a small screen: folded, the bar is one strip, the fold button and the mode's
+   own buttons and status, so the view stays free; the other modes, the help and the options open with the button,
+   which stays even where a craft's strip hides the rest of the bar (beside it when open) */
+@media (max-width: 600px), (max-height: 500px) {
+  body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar:not(.folded) > .mode-tools { margin-left: 44px; }
+  body:not([data-nav=orbit]) #bar.folded .mode-tools > :not(.mode-active, .walk-button),
+  body:not([data-nav=orbit]) #bar.folded .mode-active :is(.mode-help, .plane-invert) { display: none; }
+  body:not([data-nav=orbit]) #bar.folded .mode-active .mode-status:not(:empty) { padding-bottom: 4px; }
+}
 
 /* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
 #jump-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(120px + var(--sb)); z-index: 4; width: 60px; height: 60px; padding: 0;
@@ -238,6 +248,18 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
 @media (pointer: coarse) { body[data-mode=walk]:not(.noui) #fire-button { display: grid; place-items: center; } }
 @media (pointer: coarse) and (orientation: landscape) {
   #fire-button { width: 60px; height: 60px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
+}
+/* the next slot left of Fire, aim left of Jump (touch) */
+.arms-touch { display: none; position: fixed; z-index: 4; width: 48px; height: 48px; padding: 0; border: 1px solid rgba(255,255,255,.55);
+  border-radius: 50%; background: rgba(16,17,20,.4); color: #fff; font: 600 20px Inter, system-ui, sans-serif; touch-action: manipulation;
+  -webkit-user-select: none; user-select: none; }
+.arms-touch:active, .arms-touch.on { background: rgba(255,255,255,.28); border-color: #fff; }
+#slot-button { right: calc(98px + var(--sr)); bottom: calc(206px + var(--sb)); }
+#aim-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
+@media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch { display: grid; place-items: center; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
+  #aim-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
 }
 #hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
 #hud .hint:empty { display: none; }

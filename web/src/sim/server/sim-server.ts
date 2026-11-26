@@ -21,7 +21,8 @@ import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
 import type { Hello } from '../contract/hello';
 import { takeSnapshot } from './snapshot';
-import { Sight } from './interest';
+import { radii, Sight, type Radii } from './interest';
+import { AgentWire } from '../agent-wire';
 import { SeatReads } from '../seat-reads';
 import type { CommandResult, SimCommand } from '../contract/commands';
 import type { CraftEventOf } from '../contract/crafts';
@@ -54,9 +55,9 @@ export class SimServer {
   // the player ids connect has made
   private players = 0;
 
-  /** the radius (m) round its player a session is sent the world's things in (sim/server/interest.ts Sight; null: all
-   * of them), for the sessions connected after it is set */
-  interest: number | null = null;
+  /** the radii (m) round its player a session is sent the world's things in, by kind (sim/server/interest.ts Sight;
+   * one number: that for all; null: all of them), for the sessions connected after it is set */
+  interest: Radii | number | null = null;
 
   /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
   readonly hello: Hello;
@@ -74,7 +75,8 @@ export class SimServer {
    * ...); its commands are the player's, its client learns it from its snapshots (Snapshot player) */
   connect(player: PlayerId = this.newPlayer()): Session {
     const s = new Session(this, player);
-    if (this.tracking) s.edits = [];
+    // (one joining late is sent the world's edits as they are: the craters made before it came)
+    if (this.tracking) s.edits = [...liveEdits.entries()].map(([tx, ty, node]) => ({ tx, ty, node, region: null }));
     this.sessions.add(s);
     return s;
   }
@@ -103,22 +105,31 @@ export class SimServer {
     this.disposers.push(liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); }));
   }
 
-  /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first) */
-  update(dt: number) { this.sim.update(dt); }
+  /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first); the blasts'
+   * craters held as the edits are, then applied by the sim */
+  update(dt: number) {
+    this.sim.update(dt);
+    for (const { player, op } of this.sim.takeDamage()) this.hold(op, (release) => this.sim.damage(player, op, release));
+  }
+
+  // after the edits and craters held before: op's nodes held in the world's TileCache, then handed their release
+  private hold(op: WorldOp, then: (release: () => void) => void) {
+    let nodes: [number, number][] = [];
+    try { nodes = this.tiles.nodes(op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
+    const ready = nodes.length ? this.tiles.ready(nodes).catch(() => () => {}) : Promise.resolve(() => {});
+    this.held = this.held.then(() => ready).then(then);
+  }
 
   /** (Session.send) an edit held until its nodes are in (after the edits sent before it), then sent on to the sim for
    * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied. One the mode
    * refuses now (WorldSim.mayEdit) holds no nodes: the sim refuses it in its tick, its outcome the same way */
   holdEdit(from: Session, cmd: Edit) {
-    let nodes: [number, number][] = [];
-    if (this.sim.mayEdit(from.player, cmd.op)) {
-      try { nodes = this.tiles.nodes(cmd.op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
-    }
-    const ready = nodes.length ? this.tiles.ready(nodes).catch(() => () => {}) : Promise.resolve(() => {});
-    this.held = this.held.then(() => ready).then((release) => {
+    const send = (release: () => void) => {
       if (!this.sessions.has(from)) { release(); return; }
       this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) from.edited(r); });
-    });
+    };
+    if (this.sim.mayEdit(from.player, cmd.op)) this.hold(cmd.op, send);
+    else this.held = this.held.then(() => send(() => {}));
   }
 
   /** f done on dispose (the host's listeners on the world) */
@@ -141,11 +152,16 @@ export class Session {
   private readonly reads = new SeatReads();
   private acked: Ack | null = null;
   private readonly sight: Sight | null;
+  // what it was sent of the traffic's cars and people (a snapshot carries what changed since)
+  private readonly wire = new AgentWire();
   /** the world's edits since the last snapshot, when tracked (SimServer.trackEdits) */
   edits: EditNote[] | null = null;
 
   /** (made by SimServer.connect) */
-  constructor(readonly server: SimServer, readonly player: PlayerId) { this.sight = server.interest ? new Sight(server.interest) : null; }
+  constructor(readonly server: SimServer, readonly player: PlayerId) {
+    const r = server.interest;
+    this.sight = r ? new Sight(typeof r === 'number' ? radii(r, r) : r) : null;
+  }
 
   get sim() { return this.server.sim; }
   /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
@@ -199,10 +215,11 @@ export class Session {
   craftEvents(): CraftEventOf[] { return this.reads.crafts(this.sim.eventLog, this.player, this.seat(), this.sim.tick); }
 
   /** the sim's state for this session after the last update (the events since its last snapshot, its player's
-   * outcomes, the edits since the last) */
+   * outcomes, the edits since the last). Each one taken must reach the session's client: its cars and people are
+   * what changed since the one before */
   snapshot(): Snapshot {
     const since = this.since;
     this.since = this.sim.tick;
-    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight);
+    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight, this.wire);
   }
 }

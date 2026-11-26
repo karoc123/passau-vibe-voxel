@@ -40,7 +40,7 @@ import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
-import { makeArmsHud, makeFireButton } from './ui/arms';
+import { makeArmsHud, makeFireButton, makeTouchArms } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
@@ -126,7 +126,7 @@ const goTo = makeGoTo({ camera, target: controls.target, nav, world: () => world
   follow: followNearest });
 nav.cancelFly = goTo.cancel;
 const modeTools = el('div', 'mode-tools', '', bar.el);
-const walkButton = el('button', 'mode-button', 'Walk', modeTools);
+const walkButton = el('button', 'mode-button walk-button', 'Walk', modeTools);
 walkButton.type = 'button';
 walkButton.disabled = true;
 walkButton.addEventListener('click', e => {
@@ -135,6 +135,16 @@ walkButton.addEventListener('click', e => {
   const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
   void nav.toggleWalk(!touch && !coarsePointer());
 });
+// on a phone the bar open over play hides half the view: leaving the map folds it (style.css: then only the mode's
+// own buttons and status beside the fold button), back on the map it opens again if it was open
+const smallScreen = matchMedia('(max-width: 600px), (max-height: 500px)');
+let openOnMap = false;
+function foldForPlay(fromMap: boolean, toMap: boolean) {
+  if (fromMap && !toMap) {
+    openOnMap = !bar.folded;
+    if (smallScreen.matches) bar.fold(true);
+  } else if (toMap && openOnMap) bar.fold(false);
+}
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -159,6 +169,7 @@ makeCredits();
 makeJumpButton(() => nav.jump());
 makeFireButton((down) => { nav.arms.trigger = down; });
 const armsHud = makeArmsHud();
+const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -448,7 +459,7 @@ renderer.setAnimationLoop(frameLoop({
   poses: (_now, dt) => {
     if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
     craftsView?.update(sim, dt, daylight.night);
-    weapons?.update(dt);
+    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
   cameras: (_now, dt) => {
@@ -456,10 +467,14 @@ renderer.setAnimationLoop(frameLoop({
     for (const c of crafts) c.place?.(dt);
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
-    if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
+    if (document.body.dataset.nav !== nav.mode) {
+      foldForPlay(document.body.dataset.nav === 'orbit', nav.mode === 'orbit');
+      document.body.dataset.nav = nav.mode;
+    }
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    touchArms.set(nav.aiming);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },
@@ -495,6 +510,7 @@ renderer.setAnimationLoop(frameLoop({
     if (autoRes?.done) autoRes = null;
     autoRes?.begin();
     post.composer.render();
+    if (nav.onFoot) weapons?.drawHeld(renderer, camera, nav.arms.slot, daylight.night);
     if (daylight.redraws + daylight.patches !== redraws) busy = true;
     autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
     busy = false;

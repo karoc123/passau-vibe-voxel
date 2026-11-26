@@ -12,7 +12,7 @@ import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
 export { STEP, type CarPose, type Ground } from './road-net';
@@ -700,7 +700,7 @@ export class Traffic {
         pe.wait = false;
       }
       pe.s += pe.v * dt * pe.dir;
-      pe.ph += pe.v * dt * 4.2;
+      pe.ph += pe.v * dt * PH_WALK;
       if (pe.s >= 0 && pe.s <= e.L) continue;
       const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j]);
       if (!opts.length) { pe.dir *= -1; pe.s = Math.min(Math.max(pe.s, 0), e.L); continue; }
@@ -723,7 +723,7 @@ export class Traffic {
         pe.wait = false;
       }
       pe.s += pe.v * dt * pe.dir;
-      pe.ph += pe.v * dt * 1.6;
+      pe.ph += pe.v * dt * PH_RIDE;
       if (pe.s >= 0 && pe.s <= e.L) return true;
       const opts = (this.padj.get(pe.s < 0 ? e.a : e.b) ?? []).filter(([j]) => j !== pe.e && this.pedOn[j] && this.peds[j].bk);
       if (!opts.length) {

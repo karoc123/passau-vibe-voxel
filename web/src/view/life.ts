@@ -291,10 +291,11 @@ export class StreetLife {
     return i - i0;
   }
 
-  /** where the other players on foot are drawn (their avatars, by player; tools/) */
-  avatarsDrawn(): { player: string; pose: Readonly<RoadPose> }[] {
-    const out: { player: string; pose: Readonly<RoadPose> }[] = [];
-    for (const av of this.traffic.avatars) { const d = this.drawnAvatars.get(av.id); if (d && d.frame === this.frame) out.push({ player: av.player, pose: d }); }
+  /** where the other players on foot are drawn (their avatars, by player; arm: the slot in their hand), for their guns
+   * (view/weapons/weapons-view.ts) and the tools */
+  avatarsDrawn(): { player: string; pose: Readonly<RoadPose>; arm?: number }[] {
+    const out: { player: string; pose: Readonly<RoadPose>; arm?: number }[] = [];
+    for (const av of this.traffic.avatars) { const d = this.drawnAvatars.get(av.id); if (d && d.frame === this.frame) out.push({ player: av.player, pose: d, arm: av.pose.arm }); }
     return out;
   }
 

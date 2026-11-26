@@ -160,6 +160,7 @@ const LAYERS = [
   ['sim/hello.ts', 'shared'], // (the hello: made by the host, checked by the client; A6)
   ['sim/sun.ts', 'shared'], // (the sun's maths: the page's light, the host's start time)
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
+  ['sim/agent-wire.ts', 'shared'], // (the cars and people as sent: a session's and a mirror's)
   ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],

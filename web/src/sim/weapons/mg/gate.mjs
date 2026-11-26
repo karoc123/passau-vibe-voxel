@@ -2,8 +2,11 @@
 // (WorldSim, SimServer, a client per player over a CloneLink, so commands cross as JSON and snapshots as clones) a
 // player on foot fires at a wall and at another player's body; the shots stop there, at most at the MG's rate, only on
 // foot; a player near sees them, one far off does not; the world's voxels stay as they were; the view draws them.
+// Then on node files a real host reads (tools/lib.mjs synthData, host/node.ts nodeHost): the first shot of a player
+// put down in a part of the world no ray has asked for stops at the wall there (the host keeps the voxels round a
+// player on foot loaded; a node read only when a ray first meets it let that shot through).
 // usage (in web/): node src/sim/weapons/mg/gate.mjs; prints PASS lines, or FAIL and exit 1
-import { imp, sessionLink } from '../../../../tools/lib.mjs';
+import { imp, sessionLink, synthData } from '../../../../tools/lib.mjs';
 
 const { WorldSim } = await imp('src/sim/world-sim.ts');
 const { SimServer } = await imp('src/sim/server/sim-server.ts');
@@ -83,12 +86,12 @@ for (let i = 0; i < 90; i++) { A.c.send({ kind: 'fire', slot: 1, h: Math.PI / 2,
 const n = shots(A.c, t0).length, most = rate * 90 * STEP + 2;
 check(n >= rate * 90 * STEP - 1 && n <= most, `a held trigger fires ${n} shots in 3 s (rate ${rate}/s, at most ${most})`);
 
-// the empty slot 2, a slot that is none, a pitch that is no number: nothing
+// a slot that is none, a pitch that is no number: nothing
 t0 = sim.tick;
 for (let i = 0; i < 10; i++) tick();
-for (const cmd of [{ slot: 2, h: 0, pitch: 0 }, { slot: 7, h: 0, pitch: 0 }, { slot: 1, h: 0, pitch: null }]) A.c.send({ kind: 'fire', ...cmd });
+for (const cmd of [{ slot: 0, h: 0, pitch: 0 }, { slot: 7, h: 0, pitch: 0 }, { slot: 1, h: 0, pitch: null }]) A.c.send({ kind: 'fire', ...cmd });
 tick();
-check(shots(A.c, t0).length === 0, 'an empty slot, no slot, a broken aim: no shot');
+check(A.c.eventsSince(t0).every((e) => !('weapon' in e)), 'no slot, a broken aim: no shot');
 
 // off foot: no shot
 A.c.send({ kind: 'leaveSeat' });
@@ -118,6 +121,26 @@ v.update(1 / 60);
 const during = shown();
 for (let i = 0; i < 60; i++) v.update(1 / 60);
 check(during > before && shown() === before, `the view draws a shot of another player (${during - before} things shown) and lets it go`);
+
+// a fresh part of the world: a wall 2 m thick at x 200..202, ground up to y 5; the player put down 30 m before it,
+// shooting at once (a few ticks: the host's clock, the node files read between them)
+{
+  const { nodeHost } = await imp('src/host/node.ts');
+  const G = 5, X = 200;
+  const { dir, data } = await synthData({ size: [384, 256], ground: () => G, boxes: [{ x0: X, x1: X + 2, z0: 0, z1: 256, y0: G, y1: G + 10, mat: 'wall' }] });
+  const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false } }, data), s = host.connect('f'), link = sessionLink(s);
+  const c = new MirrorSimClient(new CloneLink(link), traffic(), null, host.hello);
+  const step = async () => { c.update(STEP); host.update(STEP); link.deliver(); await new Promise((r) => setImmediate(r)); };
+  c.send({ kind: 'request', request: { kind: 'walk', pose: { x: X - 30, y: G, z: 100, h: Math.PI / 2, moving: false } } });
+  for (let i = 0; i < 3; i++) await step();
+  const t = host.sim.tick;
+  c.send({ kind: 'fire', slot: 1, h: Math.PI / 2, pitch: 0 });
+  await step();
+  const s0 = c.eventsSince(t).find((e) => e.kind === 'shot');
+  check(c.seat()?.role === 'walker' && s0?.hit === 'world' && Math.abs(s0.to.x - X) < 0.05,
+    `the first shot in a fresh part of the world stops at its wall (${JSON.stringify(s0?.to)}, ${s0?.hit})`);
+  host.dispose();
+}
 
 if (fail.length) { for (const f of fail) console.log(`FAIL ${f}`); process.exit(1); }
 console.log('PASS weapon mg');

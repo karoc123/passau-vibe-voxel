@@ -12,7 +12,7 @@ declare module 'ws' {
   }
   export class WebSocketServer {
     constructor(opts: { host?: string; port: number; perMessageDeflate?: boolean | object });
-    on(event: 'connection', f: (ws: WebSocket, req: { socket: { remoteAddress?: string } }) => void): this;
+    on(event: 'connection', f: (ws: WebSocket, req: { socket: { remoteAddress?: string; bytesWritten: number } }) => void): this;
     on(event: 'listening', f: () => void): this;
     on(event: 'error', f: (e: Error) => void): this;
     address(): { port: number };
