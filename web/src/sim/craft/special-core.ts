@@ -67,6 +67,18 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     return this.result !== 'loading';
   }
 
+  // pushed out of a solid thing as far as its probes let it; the speed into it lost, as into a wall (CraftMotion slide)
+  meet(n: { x: number; z: number }, depth: number, col: VoxelCollision) {
+    if (this.ended) return;
+    const m = this.motion, d = { x: n.x * (depth + 1e-3), y: 0, z: n.z * (depth + 1e-3) };
+    const hit = this.world(col).sweep(m.p, d, m.heading, m.heading);
+    if (hit === 'loading') return;
+    const f = hit.hit ? Math.max(0, hit.fraction - 0.002) : 1;
+    m.p.x += d.x * f; m.p.z += d.z * f;
+    const v = m.velocity, vn = v.x * n.x + v.z * n.z;
+    if (vn < 0) { v.x -= vn * n.x; v.z -= vn * n.z; }
+  }
+
   save(): SpecialCoreState { return { motion: this.motion.save(), result: this.result, from: { ...this.from } }; }
   load(s: SpecialCoreState) {
     this.motion.restore(s.motion);

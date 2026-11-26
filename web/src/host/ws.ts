@@ -2,7 +2,6 @@
 // with a player of its own. A frame either way is JSON: to the page an array of the worker's messages, from it the
 // worker's commands message.
 import { WebSocketServer, type WebSocket } from 'ws';
-import { bytesOut } from '../core/json-bytes';
 import { nodeHost } from './node';
 import { hostStart } from './start';
 import { clock, handle } from './sim.worker';
@@ -68,7 +67,7 @@ export function serve(o: ServeOptions) {
     if (n % flush === 0) {
       for (const c of conns) {
         if (!c.out.length) continue;
-        const text = JSON.stringify(c.out, bytesOut);
+        const text = JSON.stringify(c.out);
         c.out = [];
         c.ws.send(text);
         c.bytes += text.length;

@@ -5,9 +5,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- The network host sends every tick's snapshot (cars within 350 m, 1 km from an aircraft; people 200 m; the rest
-  ~1 km): the page draws between a tick and the one before, so sending fewer would judder. `?every=2` halves the
-  bytes, but the page then shows motion stopping in a quarter of its frames: it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
   walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
@@ -16,25 +13,25 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Later, in this order of likelihood
 
-- Bandwidth for internet play, phones included (owner 2026-11-26). Target <= 20 kB/s mean, 50 kB/s peak. Now at the
-  cathedral (deflated, per player): ~50 kB/s on foot, ~55 driving, ~130 in the helicopter (350 cars in its 1 km);
-  ws-smoke holds it under 120. Levers left: agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars at 30 Hz
-  (~9 on foot); trains (~9 kB/s now) and boats as timetables; edits as ops. Binary only after a Pi measurement.
+- Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
+  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25. What is left
+  is every tick's bodies (~4) and crafts (~4, a helicopter's core whole). Not measured: a busy square, a fight with
+  many craters (each ~90 B, but a late joiner gets a node's whole op list), a phone on 4G. Binary only after a Pi
+  measurement. Trains are still simulated with spacing on the host (step 5: from the timetable).
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
-- An edited node crosses the network host whole (its columns, base64 in JSON; ~1 MB a node, to every player): sending
-  the ops for the page to apply over its own node files would be far smaller.
 
 ## On hold until the game is decided (owner 2026-11-24)
 
-- Concepts to choose from later (2026-11-26 study): extraction at the Domplatz (co-op, §0), courier/taxi runs
-  against the clock (no combat), a bridgehead PvP, chase the helicopter, flood rescue, a demolition round.
+- Concepts to choose from later (concepts-and-scale.md): manhunt, courier/rally, bridgehead PvP, extraction (§0),
+  flood rescue. Open: genre, round length, PvP. Decided: a lobby later.
+- Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
+  in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
 - E15 health and items, E16 spawn/despawn/keep, E21 the player's avatar (owner: on foot always an avatar of its own,
   never one of the crowd).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
-- F2 walk to a vehicle and get in (set aside, ADR 0008). Debug spawning of crafts and car type stays client-trusted
-  until placed vehicles replace it.
+- Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
 ## Pipeline and city
 
@@ -56,10 +53,19 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
-- A fall over 80 m/s is slowed by the walk clamp; `walkAs` start height is unbounded.
+- `walkAs` start height is unbounded.
+- Walkers and solid things (ADR 0010): a car does not feel a walker; the host does not check them; the walker cannot
+  stand on a car's roof; a car squeezing the walker against a wall leaves it inside the car.
+- Crafts and solid things (ADR 0012): cars do not feel crafts (a driven car passes through a parked hovercraft:
+  crafts as kinematic bodies in the road physics would fix it); planes, drone and paraglider have no shape.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
 - The worker decodes nodes the page also decodes.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
   removes it. The world keeps ticking while the tab is hidden.
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
+- Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
+  a car is got into at any speed (no stopping it first); the host's reach uses a rough box for a car (2.2 m half-length).
+- Passengers (the hovercraft has a cabin for ~20): the seat table takes more seats per craft, but a passenger needs a
+  shell of its own (camera, getting out, the craft taken away under it), a free seat offered by the boarding, and the
+  craft's passengers sent and drawn; together not cheap, and it touches the seats, boarding and snapshot.
 - Minimap: click for a waypoint, a full-screen map, other players on it.

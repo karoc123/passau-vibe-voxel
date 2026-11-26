@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
+import { lerp, wrapAngle } from '../util';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import type { Car, Kind, Rideable } from '../sim/types';
-import type { Pose, RoadPose } from '../sim/contract/pose';
+import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
+import { FLOAT } from '../nav/swim';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
+import type { CoachPose } from '../sim/coaches';
+import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, client/sim-client.ts TrafficMirror, ticked by main.ts) drawn between its last two ticks with instanced
@@ -72,6 +76,10 @@ export class StreetLife {
   private readonly drawnPeople = new Map<number, Drawn>();
   private readonly drawnAvatars = new Map<number, Drawn>();
   private frame = 0;
+  // the train coaches drawn this frame (solids)
+  private coaches: CoachPose[] = [];
+  // how far back from the last tick the trains and boats are drawn this frame (0..1; solids)
+  private back = 0;
   // the world tick whose events were drawn last (WorldSim.eventsSince)
   private seen: number;
 
@@ -136,14 +144,16 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ drawing
-  // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
+  // trains, boats and avatars between their last two ticks (lead: time since the last one), the cars and people where
+  // the mirror reckons them now, so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
     this.frame++;
     this.drawCars(lead / STEP, night, dt);
-    const back = 1 - lead / STEP;
-    this.trains.render(this.traffic.trains.coaches(back), night);
+    const back = this.back = 1 - lead / STEP;
+    this.coaches = [...this.traffic.trains.coaches(back)];
+    this.trains.render(this.coaches, night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
-    let n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
+    let n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
     n += this.drawAvatars(dt, lead / STEP, n);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
@@ -162,7 +172,7 @@ export class StreetLife {
   private drawCars(a: number, night: number, dt: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     const tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
-    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, back = 1 - a, B = this.traffic.bodies;
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, B = this.traffic.bodies;
     const pose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
     const before = pt(), middle = pt(), after = pt(), ease = 1 - Math.exp(-dt / LEAN_S);
     const laneLean = (c: Car, s: number, off: number) => {
@@ -191,7 +201,8 @@ export class StreetLife {
       V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
     for (const c of T.cars) {
-      const s = c.s - c.ds * back, off = c.off - c.dOff * back;
+      // (where the mirror reckons it now)
+      const s = c.s, off = c.off;
       T.carPose(c, s, off, pose);
       const d = this.entry(this.drawnCars, c.id, pose.x, pose.y, pose.z);
       d.x = pose.x; d.y = pose.y; d.z = pose.z;
@@ -218,7 +229,7 @@ export class StreetLife {
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 
-  private drawPeople(dt: number, lead: number) {
+  private drawPeople(dt: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), T = this.traffic;
     this.people.forEach((p, i) => {
@@ -228,13 +239,20 @@ export class StreetLife {
       if (C) { // walked by a player (WorldSim enterSeat, a walker's): where they put them, their step's phase this side's
         r = this.entry(this.drawnPeople, p.id, C.x, C.y, C.z);
         r.x = C.x; r.y = C.y; r.z = C.z; r.h = C.h;
+        if (C.swim) {
+          r.ph = (r.ph ?? p.ph) + dt * (C.moving ? 5 : 2);
+          swimming(m, r, r.ph);
+          M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
+          M.torso.setColorAt(i, this.col(p.col));
+          return;
+        }
         if (C.moving) { const ph = (r.ph ?? p.ph) + dt * 9; r.ph = ph; bob = Math.sin(ph); }
       } else {
-        const ds = p.wait ? 0 : p.v * lead;
-        T.personPoint(p, ds, A);
-        T.personPoint(p, ds + 0.5, B);
+        // (where the mirror reckons them now)
+        T.personPoint(p, 0, A);
+        T.personPoint(p, 0.5, B);
         r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 6, k);
-        if (!p.wait) bob = Math.sin(p.ph + ds * 4.2);
+        if (!p.wait) bob = Math.sin(p.ph);
       }
       pos.set(r.x, r.y, r.z);
       pos.y += 0.05 * Math.abs(bob);
@@ -246,14 +264,13 @@ export class StreetLife {
   }
 
   // a rider on a bike: the person sits 0.45 m up, keeping right of the way's line; the bike under them
-  private drawRiders(dt: number, lead: number, i0: number) {
+  private drawRiders(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), sit = new THREE.Vector3(1, 0.82, 1);
     const one = new THREE.Vector3(1, 1, 1), T = this.traffic;
     this.riders.forEach((p, i) => {
-      const ds = p.wait ? 0 : p.v * lead;
-      T.personPoint(p, ds, A);
-      T.personPoint(p, ds + 1, B);
+      T.personPoint(p, 0, A);
+      T.personPoint(p, 1, B);
       const r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 8, k);
       q.setFromAxisAngle(up, r.h);
       pos.set(r.x, r.y, r.z);
@@ -281,9 +298,12 @@ export class StreetLife {
       r.frame = this.frame;
       easeAvatar(r, pose, dt);
       let bob = 0;
-      if (av.pose.moving) { r.ph = (r.ph ?? 0) + dt * 9; bob = Math.sin(r.ph); }
-      pos.set(r.x, r.y + 0.05 * Math.abs(bob), r.z);
-      m.compose(pos, q.setFromAxisAngle(up, r.h), one);
+      if (av.pose.swim) { r.ph = (r.ph ?? 0) + dt * (av.pose.moving ? 5 : 2); swimming(m, r, r.ph); }
+      else {
+        if (av.pose.moving) { r.ph = (r.ph ?? 0) + dt * 9; bob = Math.sin(r.ph); }
+        pos.set(r.x, r.y + 0.05 * Math.abs(bob), r.z);
+        m.compose(pos, q.setFromAxisAngle(up, r.h), one);
+      }
       M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
       M.torso.setColorAt(i, this.col(AVATAR_COLS[hashOf(av.player) % AVATAR_COLS.length]));
       i++;
@@ -437,10 +457,46 @@ export class StreetLife {
     return { x: d.x, y: d.y, z: d.z, h: d.h ?? 0 };
   }
 
+  /** the solid things within r m of near as drawn this frame (the walker meets what it sees; sim/solids.ts): the
+   * cars, the train coaches, the other players on foot, the crafts standing about but the local player's own. The
+   * crowd is not solid: people walk the footways in thousands and step round nobody, so they would wall the walker in */
+  solids(near: { x: number; z: number }, r = 25): Solid[] {
+    const out: Solid[] = [], by = (x: number, z: number) => Math.abs(x - near.x) < r && Math.abs(z - near.z) < r;
+    for (const c of this.traffic.roadVehicles()) {
+      const d = this.drawnCars.get(c.id);
+      if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d));
+    }
+    for (const d of this.drawnAvatars.values()) if (d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
+    for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }));
+    // (the river's vessels where view/boats.ts draws them: a walker on a jetty meets the boat alongside)
+    const B = this.traffic.boats, back = this.back;
+    for (const p of B?.poses ?? []) {
+      if (Math.abs(p.x - near.x) > r + p.len / 2 || Math.abs(p.z - near.z) > r + p.len / 2) continue;
+      const q = B!.previous.find((o) => o.kind === p.kind && o.id === p.id) ?? p;
+      out.push(solidAt(vesselShape(p), { x: lerp(p.x, q.x, back), y: lerp(p.y, q.y, back), z: lerp(p.z, q.z, back), h: p.heading + wrapAngle(q.heading - p.heading) * back }));
+    }
+    const me = this.client.player;
+    for (const c of this.client.crafts()) {
+      const shape = CRAFT_SHAPES[c.type], p = c.core.pose;
+      if (shape && c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) out.push(solidAt(shape, p));
+    }
+    return out;
+  }
+
   /** the first one of a kind drawn, or null */
   first(kind: Kind): Picked | null {
     const D = this.drawnOf(kind), o = this.listOf(kind).find((q) => D.has(q.id));
     return o ? { ref: { kind, id: o.id }, label: StreetLife.label(o) } : null;
+  }
+
+  /** the ones of a kind drawn within r m of from (across), with where they are drawn */
+  near(kind: Kind, from: { x: number; z: number }, r: number) {
+    const D = this.drawnOf(kind), out: { picked: Picked; pose: Pose; agent: Readonly<Rideable> }[] = [];
+    for (const o of this.listOf(kind)) {
+      const d = D.get(o.id);
+      if (d && Math.hypot(d.x - from.x, d.z - from.z) < r) out.push({ picked: { ref: { kind, id: o.id }, label: StreetLife.label(o) }, pose: { x: d.x, y: d.y, z: d.z, h: d.h ?? 0 }, agent: o });
+    }
+    return out;
   }
 
   /** the nearest one of a kind, preferring one that moves */
@@ -456,4 +512,20 @@ export class StreetLife {
     if (!best) return null;
     return { ref: { kind, id: best.id }, label: StreetLife.label(best) };
   }
+}
+
+// A swimmer (a walk pose's swim) at r (its soles, FLOAT under the water's top), its stroke's phase ph: the body lying
+// forward along its heading, chest at the top of the water, rolling side to side with each stroke (the crowd's mesh has
+// no arms to move)
+const SWIM_TILT = 1.3, SW = { yaw: new THREE.Quaternion(), tilt: new THREE.Quaternion(), roll: new THREE.Quaternion(), axis: new THREE.Vector3(), at: new THREE.Vector3() };
+function swimming(m: THREE.Matrix4, r: Pick<WalkPose, 'x' | 'y' | 'z' | 'h'>, ph: number) {
+  const { yaw, tilt, roll, axis, at } = SW;
+  yaw.setFromAxisAngle(axis.set(0, 1, 0), r.h);
+  tilt.setFromAxisAngle(axis.set(1, 0, 0), SWIM_TILT);
+  roll.setFromAxisAngle(axis.set(0, 1, 0), 0.35 * Math.sin(ph));
+  const q = yaw.multiply(tilt).multiply(roll);
+  // (the body's middle, 0.85 m up it from the soles, just under the water's top)
+  axis.set(0, 1, 0).applyQuaternion(q);
+  at.set(r.x, r.y + FLOAT - 0.2, r.z).addScaledVector(axis, -0.85);
+  m.compose(at, q, new THREE.Vector3(1, 1, 1));
 }

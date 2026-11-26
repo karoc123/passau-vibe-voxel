@@ -14,6 +14,9 @@
 // And the weapons are packages (src/sim/weapons/<name>/), so removing one is deleting its folder and one line: no
 // module of the scan above imports a file of a package but the registry, src/sim/weapons/index.ts, and the package's
 // own files (the core reaches a weapon through the registry; no package leans on another).
+// And the craft looks are packages (src/view/crafts/<type>/: a craft's model and what moves on it), so a craft's look
+// changes inside its folder: no module of src/ imports a file of a package but the registry, src/view/crafts/index.ts,
+// and the package's own files.
 // And the layer rules of docs/adr/0009-layers-and-owners.md, over every module of src/:
 //   R1 layer table: LAYERS maps today's files to a layer, ALLOWED says which layers each may import (every import
 //      statement, type-only ones included);
@@ -23,7 +26,9 @@
 //   R4 window.__ assigned only in HOOKS_OWNER (app/debug-hooks.ts, which types them all; the rest call its hook());
 //   R5 the contract is types: a module of the contract layer (sim/contract/) declares no class and no function body
 //      (function or arrow) but a type guard's (its return type `x is T`); its constants are data.
-// R1-R5 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
+//   R6 touch is read in touch/ only: no pointerType compared with 'touch' or 'pen', no maxTouchPoints, TouchEvent,
+//      .touches or touch* event names elsewhere, so a mode takes the fingers as touch/ hands them (sticks' axes, intents).
+// R1-R6 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
 // longer occurs fails too (delete it, so the list stays true). After a fix or a move, `node tools/core-deps.mjs
 // --baseline` prints the list as it is now, to paste over BASELINE; it may only get shorter (review the diff).
 // usage (in web/): node tools/core-deps.mjs [-v] [--baseline]; prints PASS and the modules scanned (-v: and the
@@ -135,17 +140,20 @@ for (const f of PORTS_ONLY) {
   for (const m of bare.matchAll(/(?<![\w$.])(?:performance|console|Date|process)(?![\w$])/g)) bad.push(`src/${f}:${lineOf(bare, m.index)}: ${m[0]}: a port's (HostPorts), not the host's`);
 }
 
-// nothing in src/ imports from checks/ (it would ship a test harness)
+// nothing in src/ imports from checks/ (it would ship a test harness); a craft look's package only from the registry
+const looks = path.join(src, 'view', 'crafts'), LOOK_REGISTRY = path.join(looks, 'index.ts');
+const lookOf = (f) => { const r = path.relative(looks, f).split(path.sep); return r.length > 1 && r[0] !== '..' ? r[0] : null; };
 const apps = walk(src, []);
 for (const file of apps) {
   const { code } = lex(fs.readFileSync(file, 'utf8'));
   for (const m of code.matchAll(IMPORT_RE)) {
-    const target = resolve(file, m[2] ?? m[4]);
+    const target = resolve(file, m[2] ?? m[4]), look = target && lookOf(target);
     if (target && !path.relative(checks, target).startsWith('..')) bad.push(`${rel(file)}:${lineOf(code, m.index)}: imports ${m[2] ?? m[4]}: checks/ is not part of the app`);
+    if (look && file !== LOOK_REGISTRY && lookOf(file) !== look) bad.push(`${rel(file)}:${lineOf(code, m.index)}: imports ${m[2] ?? m[4]}: a craft look's package, which only ${rel(LOOK_REGISTRY)} imports`);
   }
 }
 
-// ---- the layer rules (R1-R5) ----
+// ---- the layer rules (R1-R6) ----
 
 // Layer of a module (path relative to src/), first match wins: 'dir/' a folder, else one file. Today's layout (A2-A4
 // move files; this table follows them). A mixed module is placed where its main code goes in section 3.
@@ -162,6 +170,7 @@ const LAYERS = [
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
   ['sim/agent-wire.ts', 'shared'], // (the cars and people as sent: a session's and a mirror's)
   ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
+  ['sim/solids.ts', 'shared'], // (the shapes the page's walk meets)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
   ['client/', 'client'], // (SimClient, MirrorSimClient, TrafficMirror, the links)
@@ -169,6 +178,7 @@ const LAYERS = [
   // the worker's entry. The page's own loaders, fetch.ts and viewer-tiles.ts, are the root's: presentation, A12)
   ['host/', 'server'],
   ['view/', 'presentation'], ['nav/', 'presentation'], ['ui/', 'presentation'], // (ui/: the page's small widgets)
+  ['touch/', 'touch'], // (the fingers as sticks, taps and holds: knows no mode; R6)
   ['main.ts', 'app'], ['app/', 'app'], // (the composition: main.ts; app/: the session, the frame's phases, the debug hooks)
   ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
 ];
@@ -179,13 +189,15 @@ const ALLOWED = {
   domain: ['data', 'contract', 'shared', 'domain'],
   server: ['data', 'contract', 'shared', 'domain', 'server'],
   client: ['data', 'contract', 'shared', 'client'],
-  presentation: ['data', 'contract', 'shared', 'client', 'presentation'],
-  app: ['data', 'contract', 'shared', 'domain', 'server', 'client', 'presentation', 'app'],
+  touch: ['data', 'contract', 'shared', 'touch'],
+  presentation: ['data', 'contract', 'shared', 'client', 'touch', 'presentation'],
+  app: ['data', 'contract', 'shared', 'domain', 'server', 'client', 'touch', 'presentation', 'app'],
 };
 const HEADLESS = new Set(['data', 'contract', 'shared', 'domain']); // R3
 const PERF_NOW_OK = new Set(['physics/rapier/life-phys.ts', 'physics/rapier/terrain.ts']);
 const HOOKS_OWNER = 'app/debug-hooks.ts';
 const TYPES_ONLY = 'contract'; // R5
+const TOUCH_RE = /pointerType\s*[!=]==?\s*['"](?:touch|pen)['"]|['"](?:touch|pen)['"]\s*[!=]==?\s*[\w$.]*pointerType|\bmaxTouchPoints\b|\bTouch(?:Event|List)\b|\.touches\b|['"]touch(?:start|move|end|cancel)['"]/g; // R6
 
 // R5: where a module (bare: comments and strings blanked) has code rather than types and data: a class, a function
 // body (function or arrow) that is not a type guard's (its return type `x is T`). Type and interface declarations are
@@ -214,6 +226,12 @@ function codeOf(bare) {
 const BASELINE = [
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
+  "R6 main.ts: pointerType==='pen'",
+  "R6 main.ts: pointerType==='touch'",
+  "R6 nav/nav.ts: pointerType==='touch'",
+  "R6 nav/nav.ts: pointerType==='touch'",
+  "R6 nav/nav.ts: pointerType==='touch'",
+  "R6 nav/orbit.ts: .touches",
 ];
 
 const srcRel = (f) => path.relative(src, f).split(path.sep).join('/');
@@ -250,6 +268,7 @@ for (const file of apps) {
       found.push([`R3 ${r}: ${word}`, lineOf(bare, m.index)]);
     }
   }
+  if (layer !== 'touch') for (const m of code.matchAll(TOUCH_RE)) found.push([`R6 ${r}: ${m[0].replace(/\s+/g, '').replace(/"/g, "'")}`, lineOf(code, m.index)]);
   if (layer === TYPES_ONLY) for (const [what, at] of codeOf(bare)) found.push([`R5 ${r}: ${what}`, lineOf(bare, at)]);
   // (window.__x = …, and window[name] = … as the owner's hook() writes)
   if (r !== HOOKS_OWNER) for (const m of code.matchAll(/\bwindow(?:\s+as\s+[^)]*\))?\s*(?:\.\s*(__[\w$]+)|\[[^\]\n]*\])\s*=(?![=>])/g)) found.push([`R4 ${r}: window${m[1] ? `.${m[1]}` : '[…]'}`, lineOf(code, m.index)]);
@@ -298,5 +317,5 @@ if (verbose || bad.length) console.log(`scanned: ${scanned.join(', ')}`);
 if (verbose) { console.log(`baseline (${BASELINE.length}):`); for (const k of BASELINE) console.log(`  ${k}`); }
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
 const of = (r) => BASELINE.filter((k) => k.startsWith(r)).length;
-console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals, a weapon package imported only by sim/weapons/index.ts; ${apps.length} modules of src/ import nothing from checks/`);
-console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only); none new, none gone`);
+console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals, a weapon package imported only by sim/weapons/index.ts; ${apps.length} modules of src/ import nothing from checks/ and a craft look's package only through view/crafts/index.ts`);
+console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only), R6 ${of('R6')} (touch read outside touch/); none new, none gone`);

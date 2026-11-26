@@ -55,8 +55,8 @@ export interface CarState {
   detachedPose?: RoadPose; // its pose out of the traffic: authoritative, independent of drawing
 }
 
-/** a car of the traffic as a snapshot carries it (sim/agent-wire.ts), by length: [id, s, v, brake] while nothing else
- * changed since the session's last snapshot; then its lane offset (off); then its way (e, lane, prev, prevOff, prev2,
+/** a car of the traffic as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts),
+ * by length: [id, s, v, brake] while nothing else changed since the sample before; then its lane offset (off); then its way (e, lane, prev, prevOff, prev2,
  * prev2Off, next, next2; -1 none); then what it is (len, bus 1/0, vt or 0, col), sent when it comes into sight or
  * changes. ds, dOff and wait are the client's to work out. Lengths cm, speeds cm/s */
 export type CarWire =
@@ -67,7 +67,7 @@ export type CarWire =
   | [id: number, s: number, v: number, brake: number, off: number, e: number, lane: number, prev: number, prevOff: number,
     prev2: number, prev2Off: number, next: number, next2: number, len: number, bus: number, vt: VehicleId | 0, col: string];
 
-/** a person of the crowd as a snapshot carries them (sim/agent-wire.ts), by length: [id, s]; then their way (e, dir,
+/** a person of the crowd as a snapshot carries a sample of them (sim/agent-wire.ts), by length: [id, s]; then their way (e, dir,
  * wait 1/0) when it changed; then who they are (v, lat, ph, col), sent when they come into sight or change. A rider
  * is one of the snapshot's riders; ph after that is the client's to work out */
 export type PersonWire =
@@ -96,6 +96,11 @@ export interface BodyDraw {
 /** a train as saved and loaded (sim/train-traffic.ts TrainTraffic save, load) */
 export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
 
+/** a train as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts), by length:
+ * [id, s, v]; then what it is (its track p, coaches n, express 1/0), sent when it comes into sight. Lengths cm,
+ * speeds cm/s */
+export type TrainWire = [id: number, s: number, v: number] | [id: number, s: number, v: number, p: number, n: number, express: number];
+
 /** a ship or a boat on the river (sim/boat-traffic.ts) */
 export interface BoatPose {
   // IDs are stable by berth slot for cruise ships and by fleet slot for excursion boats.
@@ -109,6 +114,10 @@ export interface BoatPose {
   readonly lit: boolean;
   readonly underway: boolean;
 }
+
+/** the boats as a snapshot carries them (sim/agent-wire.ts): the poses changed since the session's last snapshot
+ * (moored ones are sent once), the river's clock (s) and day */
+export interface BoatsWire { poses: BoatPose[]; elapsed: number; day: number }
 
 /** what the presentation draws of the boats (view/boats.ts): their poses at the last two ticks, the time and day
  * (sim/boat-traffic.ts BoatTraffic) */

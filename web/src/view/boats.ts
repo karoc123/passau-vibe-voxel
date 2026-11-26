@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash, lerp, wrapAngle } from '../util';
-import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B, MAX_CRUISE } from '../sim/boat-traffic';
+import { MAX_CRUISE } from '../sim/boat-traffic';
+import { CRUISE_L, CRUISE_B, TOUR_L, TOUR_B } from '../sim/solids';
 import type { BoatView } from '../sim/contract/agents';
 
 const MAX_TOUR = 6;

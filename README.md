@@ -333,8 +333,8 @@ tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN 
 
 Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
 port 5300). Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
-what lies near them, two to a message; 1.5-5 MB/s per player before the socket's deflate (the old town is the most),
-about a third of that on the wire. Under WSL2 the LAN reaches the host only with mirrored networking
+what lies near them, two to a message: the bodies, crafts and avatars whole, the cars, people and trains only when the
+page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
@@ -500,7 +500,7 @@ The same keys, but A/D roll (200°/s; let go and the bank holds, within ~35° of
 W/S pitch about the wings (hold S for a loop); let go and it holds its path, so a turn is bank and pull. ~450 km/h
 level at full throttle (the last 15 % of the lever drawn as the afterburner), ~630 in a dive, up to 7 g; hard pulls
 bleed speed, below ~166 km/h it stalls. Any water is a splash. Its numbers are `JET` in `plane-flight.ts` (the same
-core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
+core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/crafts/jet/`.
 
 ## Paraglider, hovercraft and helicopter
 
@@ -516,19 +516,22 @@ core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
 The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch or
 gamepad stick climbs and descends (up/down) and slides sideways; the gamepad triggers climb and descend too.
 Their motion laws and numbers are `CRAFT` in `web/src/sim/craft/craft-motion.ts`, the models (at the walker's and the
-cars' scale) `web/src/nav/craft-models.ts`. **Esc** returns to the map.
+cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc** returns to the map.
 
 ## Walking
 
 Click **Walk** in the toolbar to start on foot, in first person, at the current view or beside the vehicle you're
-following. W/S walk, A/D turn, Q/E look up and down, Shift runs and Space jumps; the mouse looks around (a click takes
-it back after a tab switch). On touch screens the left thumb walks, the right thumb looks and a pinch zooms.
-**Esc** releases the mouse and returns to the map.
+following. W/S walk, A/D step sideways, the left/right arrows turn, Q/E look up and down, Shift runs and Space jumps;
+the mouse looks around (a click takes it back after a tab switch). On touch screens the left thumb walks, the right
+thumb looks and a pinch zooms. **Esc** releases the mouse and returns to the map. Cars, train coaches, other players
+on foot and the crafts standing about (hovercraft, helicopter, boat) are solid: you walk round them, and a car driven
+into you shoves you along. The crowd is not: you pass through people.
 
 On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch
 (Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
-the right button aims (a narrower view). On a touch screen the Fire button above Jump fires while held, the button left
-of it takes the next slot and the one left of Jump aims (tap again to stop). The host decides each shot and each
+the right button aims (a narrower view). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
+(and may then drag to sweep), a drag only looks; the button up and left of Jump takes the next slot and the one left of
+Jump aims (tap again to stop). A tap on the left half picks whom to follow. The host decides each shot and each
 grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and
 sparks, the grenade's arc and its blast. A grenade blows a crater of about 3 m into whatever it hits, the same for
 every player (also one who joins later) and kept until the host restarts. Nobody is hurt yet.

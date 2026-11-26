@@ -18,7 +18,8 @@ import { Perf } from './perf';
 import { makePost } from './post';
 import { StreetLife } from './view/life';
 import type { CraftView, SimClient } from './client/sim-client';
-import type { CraftsView } from './nav/crafts-view';
+import type { CraftsView } from './view/crafts/crafts-view';
+import type { ParagliderMode } from './nav/special-craft';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
@@ -39,8 +40,9 @@ import { focusView } from './focus';
 import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
-import { makeJumpButton } from './ui/jump';
-import { makeArmsHud, makeFireButton, makeTouchArms } from './ui/arms';
+import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from './touch/buttons';
+import { Boarding } from './nav/board';
+import { makeArmsHud } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
@@ -92,8 +94,9 @@ const CRAFTS = () => [
   import('./nav/special-craft').then((m) => m.HelicopterMode),
 ];
 let crafts: PlayerCraft[] = [];
-// the world's crafts the local player does not fly (left by their pilots, or other players'): nav/crafts-view.ts
+// the world's crafts the local player does not fly (left by their pilots, or other players')
 let craftsView: CraftsView | null = null;
+let glider: ParagliderMode | null = null;
 const bar = new Bar({ days: DAYS, weathers: WEATHER_NAMES, onDay: (d) => dayWeather.onDay(d), onDayEnd: () => dayWeather.onDayEnd(),
   onHour: (h) => dayWeather.onHour(h), onWeather: (w) => dayWeather.onWeather(w) });
 // the bar's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
@@ -167,8 +170,10 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 makeCredits();
 makeJumpButton(() => nav.jump());
-makeFireButton((down) => { nav.arms.trigger = down; });
+const canopyButton = makeCanopyButton(() => glider?.press());
 const armsHud = makeArmsHud();
+const boarding = new Boarding(nav, () => crafts, (s) => toast(s));
+const boardButton = makeBoardButton(() => boarding.press());
 const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
@@ -394,15 +399,15 @@ async function boot() {
   hook('__streamer', streamer);
   hook('__ready', true);
   const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
-    import('./nav/crafts-view')]);
+    import('./view/crafts/crafts-view')]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
-    deployGlider: (source, at) => glider.deploy(source, at),
+    deployGlider: (source, at) => wing.deploy(source, at),
     sim: simReady,
     tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
   };
-  const glider = new ParagliderMode(ctx);
-  crafts = [...modes.map((C) => new C(ctx)), glider];
+  const wing = glider = new ParagliderMode(ctx);
+  crafts = [...modes.map((C) => new C(ctx)), wing];
   hook('__crafts', crafts); // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
 }
@@ -440,6 +445,7 @@ renderer.setAnimationLoop(frameLoop({
   input: (now, dt) => {
     goTo.step(now);
     dayWeather.step(now);
+    boarding.update();
     for (const c of crafts) if (c.view === 'ride') c.update(dt);
     nav.update(dt);
     for (const c of crafts) if (c.view === 'own') c.update(dt);
@@ -474,7 +480,9 @@ renderer.setAnimationLoop(frameLoop({
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    boardButton.set((key) => boarding.label(key));
     touchArms.set(nav.aiming);
+    canopyButton.show(glider?.canopyAction ?? null);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },

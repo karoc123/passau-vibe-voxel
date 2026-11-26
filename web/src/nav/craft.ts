@@ -160,7 +160,7 @@ export class CraftLink<K extends CraftType> {
   /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
    * out of the world; the shell's collision let go */
   close(drop = false) {
-    if (this.held) this.sim?.send(drop ? { kind: 'request', request: { kind: 'dropCraft' } } : { kind: 'leaveSeat' });
+    if (this.held) this.sim?.send(drop ? { kind: 'request', request: { kind: 'dropCraft' } } : { kind: 'leaveSeat', pose: this.ctx.nav.stepOut ?? undefined });
     this.held = false;
     this.col?.release();
     this.col = null;

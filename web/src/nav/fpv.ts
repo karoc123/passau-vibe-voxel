@@ -3,7 +3,8 @@ import { length } from '../core/vec';
 import { DRONE } from '../sim/craft/fpv-flight';
 import type { FlightInput } from '../sim/contract/inputs';
 import { FpvInput } from './fpv-input';
-import { FpvTouch } from './fpv-touch';
+import { FpvTouch } from '../touch/fpv';
+import { touchScreen } from '../touch/sticks';
 import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
@@ -35,7 +36,7 @@ export class FpvMode implements PlayerCraft {
   private on = false;
   private readonly radio = new FpvInput();
   private readonly touch: FpvTouch;
-  private readonly hasTouch = navigator.maxTouchPoints > 0;
+  private readonly hasTouch = touchScreen();
   // the drone in the world sim while the player is in it (its client, its own collision)
   private readonly link: CraftLink<'drone'>;
   private readonly keys = new HeldKeys(FLIGHT_KEYS);

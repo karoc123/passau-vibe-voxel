@@ -2,30 +2,30 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../view/life';
 import type { SimClient } from '../client/sim-client';
-import type { Pose } from '../sim/contract/pose';
+import type { Pose, WalkPose } from '../sim/contract/pose';
 import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
 import type { World } from '../core/world';
 import type { PlayerCraft } from './craft';
 import { Arms } from './arms';
-import { Foot, type Stick } from './foot';
+import { Foot } from './foot';
 import { Glide } from './glide';
 import { gameKey, onFocusLoss } from './input';
 import { MoveKeys } from './move-keys';
 import { OrbitInput } from './orbit';
 import { Rider } from './ride';
 import { EYE, findStreet, openSpot, walkNet } from './spots';
-import { stickAxis, TouchSticks } from './touch-sticks';
 import { HEAD } from './walk';
+import { FootTouch } from '../touch/foot';
 
-// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
-// arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
+// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and
+// down, Shift faster; arrows forward, back, turn: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
-//          drags to look (touch-sticks.ts, as the drive mode's); two fingers close together pinch to zoom
+//          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
 //   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
 //          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
@@ -74,6 +74,9 @@ export class Nav {
   private walkPending = false;
   // the avatar asked for on foot (walkBody): for which session's player, where the walk put it last
   private body: { player: string | null; x: number; z: number } | null = null;
+  /** while a vehicle is being got out of (getOut): where its shell asks the host to put the player down on foot, in
+   * the same command that leaves the seat (leaveSeat's pose) */
+  stepOut: WalkPose | null = null;
   /** the weapons on foot */
   readonly arms = new Arms();
   private hoverT = 0;
@@ -83,9 +86,7 @@ export class Nav {
   private walkStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
-  // touch on foot: left thumb walks, right thumb looks (the drag since the last move)
-  private readonly footSticks: TouchSticks;
-  private lookFrom = { dx: 0, dy: 0 };
+  private readonly footTouch: FootTouch;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -94,37 +95,25 @@ export class Nav {
       world: () => this.world, hitAt: (cx, cy) => this.hitAt(cx, cy), flyTo: (v) => this.flyTo(v), land: (opts) => { this.setWalk(opts); },
     });
     dom.style.cursor = 'grab';
-    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world);
+    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world, (near) => this.life?.solids(near) ?? []);
     this.rider = new Rider({
       camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
       changed: (R) => this.onMode(this.mode, R),
     });
     this.bindKeys();
     this.bindPointer();
-    this.footSticks = new TouchSticks(dom, {
-      onStart: () => { this.lookFrom = { dx: 0, dy: 0 }; this.cancelFly(); },
-      onMove: (side, s) => {
-        if (side !== 'right') return;
+    this.footTouch = new FootTouch(dom, {
+      start: () => this.cancelFly(),
+      look: (dx, dy) => {
         const k = 2.4 * (this.camera.fov * Math.PI / 180) / innerHeight;
         // a stick, not a drag of the scene: right turns right (yaw grows to the left), up looks up
-        this.look(-(s.dx - this.lookFrom.dx) * k, (s.dy - this.lookFrom.dy) * k * 0.7);
-        this.lookFrom = { dx: s.dx, dy: s.dy };
+        this.look(-dx * k, dy * k * 0.7);
       },
-      // a short touch that hardly moved: a tap (follow who is there, as with one finger elsewhere)
-      onEnd: (_side, s) => {
-        if (Math.hypot(s.dx, s.dy) < 8 && performance.now() - s.t < 600) this.tap(s.startX + s.dx, s.startY - s.dy);
-      },
+      tap: (x, y) => this.tap(x, y),
+      fire: () => this.arms.pull(),
       // two fingers close together: the field of view
-      onPinch: (ratio) => this.setFov(this.camera.fov * ratio),
+      pinch: (ratio) => this.setFov(this.camera.fov * ratio),
     });
-  }
-
-  /** the left touch stick while on foot: [forward, right] in -1..1, or null */
-  private footStick(): Stick {
-    const s = this.footSticks.left;
-    if (!s) return null;
-    const f = clamp(stickAxis(s.dy, s.radius), -1, 1), r = clamp(stickAxis(s.dx, s.radius), -1, 1);
-    return f || r ? [f, r] : null;
   }
 
   /** Space on foot (the touch Jump button) */
@@ -454,12 +443,54 @@ export class Nav {
       this.craft = c;
       return true;
     }
-    if (!this.canStartCraft) return false;
+    // (from foot: got in walking up to it, the seat already the host's: board.ts)
+    if (!this.canStartCraft && !this.onFoot) return false;
+    if (this.onFoot) this.releaseMouse();
     this.rememberSky();
     if (this.riding) {
       this.leaveRide(); // (the car driven parked: dropCraft)
       this.glide.stop();
     }
+    this.toCraft(c);
+    return true;
+  }
+
+  /** falling on foot high enough to open a canopy (Foot.canOpen) */
+  get canOpen() { return this.onFoot && this.foot.canOpen; }
+
+  // Out of the fall into a craft that opens over it (the paraglider). The craft's own request moves the player's seat
+  // from the body to it in one command, so the body is not left (no leaveSeat). false: not falling high enough
+  openCanopy(c: PlayerCraft) {
+    if (!this.canOpen || c.view !== 'own') return false;
+    this.body = null;
+    this.releaseMouse();
+    this.glide.stop();
+    this.toCraft(c);
+    return true;
+  }
+
+  /** the feet and velocity of the fall, while on foot (the canopy's spot) */
+  get fallPose() {
+    const f = this.foot;
+    return { x: f.pos.x, y: f.feet, z: f.pos.z, vx: f.carry.x, vy: f.vy, vz: f.carry.z, yaw: f.yaw };
+  }
+
+  // Out of the craft piloted (the paraglider let go) into a free fall on foot from feet at `at` with velocity v,
+  // facing yaw: at once, as the craft is gone this frame; the tiles where it lands asked for meanwhile
+  fall(at: THREE.Vector3, v: THREE.Vector3, yaw: number) {
+    if (!this.craftView || !this.world) return false;
+    this.foot.fallAt(at, v, yaw);
+    this.streamer?.ensure(at.x, at.z, 200).catch(() => {});
+    this.glide.start(250);
+    this.mode = 'walk';
+    this.leaveRide();
+    this.controls.enabled = false;
+    this.dom.style.cursor = 'default';
+    this.onMode(this.mode, null);
+    return true;
+  }
+
+  private toCraft(c: PlayerCraft) {
     this.cancelFly();
     this.keys.clear();
     this.orbit.turned = false;
@@ -468,7 +499,6 @@ export class Nav {
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
-    return true;
   }
 
   // out of the craft (the car's Park): it lets go. One that owns the camera leaves to the map
@@ -506,15 +536,7 @@ export class Nav {
     this.cancelFly();
     const ride = this.ride, pose = ride && this.life?.pose(ride.ref);
     if (pose) {
-      const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
-      const at = new THREE.Vector3(pose.x, pose.y, pose.z);
-      const side = new THREE.Vector3(-facing.z, 0, facing.x);
-      const exits = ride.ref.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
-      const clear = exits.find(p => {
-        const y = world.support(p.x, p.z, p.y + 1.02);
-        return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, y, y + HEAD);
-      });
-      await this.setWalk(clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 });
+      await this.setWalk(exitFrom(world, pose, ride.ref.kind === 'person' ? 0 : 2));
       return;
     }
     const facing = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
@@ -564,7 +586,26 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
+  /** out of the vehicle driven or the craft piloted onto foot beside it, the host putting the body down there as the
+   * seat is left (stepOut), so the others see the player step out; false: in none */
+  getOut() {
+    const w = this.world, c = this.craft, ride = this.driving ? this.ride : null;
+    const pose = c && (ride ? this.life?.pose(ride.ref) : c.mapPose);
+    if (!w || !c || !pose || this.walkPending) return false;
+    const opts = exitFrom(w, pose, ride ? 2 : 3), at = opts.at!;
+    this.stepOut = { x: at.x, y: at.y, z: at.z, h: Math.atan2(opts.facing!.x, opts.facing!.z), moving: false };
+    this.dropCraft();
+    this.stepOut = null;
+    void this.setWalk(opts);
+    return true;
+  }
+
+  /** the host has moved the player from their body on foot into a seat (board.ts): the body is not to be left again */
+  tookSeat() { this.body = null; }
+
   startRide(ag: Picked) {
+    // (the body on foot left before the ride's own seat is asked for: a seat taken from foot is the host's to reach)
+    if (this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
     this.rememberSky();
     this.releaseMouse();
     this.dropCraft();
@@ -587,16 +628,17 @@ export class Nav {
   // ------------------------------------------------------------------ every frame
   update(dt: number) {
     dt = Math.min(dt, 0.1);
-    this.footSticks.setActive(this.onFoot);
+    this.footTouch.setActive(this.onFoot);
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
-    if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
+    if (this.onFoot) this.foot.updateWalk(dt, this.footTouch.move);
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
+    this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);
     // (after the walk's pose: the host fires from where it has just put the body)
-    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera);
+    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
     else { this.arms.trigger = false; this.foot.aim = false; }
   }
 
@@ -608,7 +650,7 @@ export class Nav {
     if (!sim) return;
     sim.results('walk');
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
-    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot };
+    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot, ...(f.swimming ? { swim: true } : {}) };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
     else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
     this.body = { player: sim.player, x, z };
@@ -636,4 +678,19 @@ export class Nav {
     if (next === 'off') this.hopOff();
     else if (next) { const { view, zoom } = this.ride!; this.startRide(next); Object.assign(this.ride!, { view, zoom }); }
   }
+}
+
+// where to step out of what stands at pose: a side free to stand on (side m out from its middle, either side), else
+// where it is (side 0: a person's place)
+function exitFrom(world: World, pose: Pose, side: number): WalkOpts {
+  const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
+  const at = new THREE.Vector3(pose.x, pose.y, pose.z);
+  const out = new THREE.Vector3(-facing.z, 0, facing.x);
+  const exits = side ? [at.clone().addScaledVector(out, side), at.clone().addScaledVector(out, -side)] : [at];
+  const clear = exits.find(p => {
+    const y = world.support(p.x, p.z, p.y + 1.02);
+    // (from the voxel over the one stood on: a road's cap stands within its voxel, which is solid)
+    return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, Math.ceil(y - 0.01), y + HEAD);
+  });
+  return clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 };
 }

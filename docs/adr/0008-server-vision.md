@@ -60,8 +60,10 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
 ## Consequences
 
 - E1 (`WorldSim`), E2 (players by id), E3 (edits owned by the world) and E4 (crafts on the world clock) are required,
-  not optional. E3 drops instance injection (one world) and gains the presence rule. F2 (walk to a vehicle) is set
-  aside.
+  not optional. E3 drops instance injection (one world) and gains the presence rule. F2 (walk to a vehicle) was set
+  aside; superseded (owner, 2026-11-26): it is wanted now. On foot a vehicle within reach is got into by asking the
+  host for its seat, which goes by where it has the walker and by the seat being free; getting out puts the body down
+  beside the vehicle in the same tick.
 - New gameplay (damage, weapons, police, missions) goes into the sim with ids, not into `nav/` or `view/`.
 - The world sim ticks whether or not a viewer draws it (today `main.ts` gates it on the life being visible; E2 lifts
   that). Events become tick-numbered so several clients can read them.

@@ -6,6 +6,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* pinches zoom the map, never the page */ background: #1b1d22; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
 #app canvas { display: block; }
+/* on foot with the eyes under the water's top (a fall into it): murky green-blue */
+#app canvas.underwater { filter: sepia(.4) hue-rotate(140deg) saturate(1.8) brightness(.55) blur(1.5px); }
 
 #bar { --t2: rgba(255,255,255,.62); position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
@@ -219,19 +221,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   body:not([data-nav=orbit]) #bar.folded .mode-active .mode-status:not(:empty) { padding-bottom: 4px; }
 }
 
-/* on foot on a touch screen: the Jump button (main.ts) and the sticks' hint in the legend (hud.ts) */
-#jump-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(120px + var(--sb)); z-index: 4; width: 60px; height: 60px; padding: 0;
-  border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
-  touch-action: none; -webkit-user-select: none; user-select: none; }
-#jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
-@media (pointer: coarse) { body[data-mode=walk]:not(.noui) #jump-button { display: grid; place-items: center; } }
-/* landscape: the right thumb rests ~100-150 px in from the bottom right corner, so the button sits on the edge beside
-   it, just above the "?" (#credits-button: 8 px in, 44 px), out of the stick's ring (radius <= 72 px around the thumb)
-   and far from the bar (top left); the safe area keeps it off a notch or the home indicator */
-@media (pointer: coarse) and (orientation: landscape) {
-  #jump-button { width: 56px; height: 56px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
-}
-/* on foot: the crosshair at the middle, the weapon slots at the bottom; Fire (touch) above Jump */
+/* on foot: the crosshair at the middle, the weapon slots at the bottom */
 #arms { display: none; }
 body[data-mode=walk]:not(.noui) #arms { display: block; }
 #arms .crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 3; pointer-events: none;
@@ -241,33 +231,8 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
   pointer-events: none; font: 600 12px Inter, system-ui, sans-serif; color: #fff; }
 #arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }
 #arms .slots span.on { opacity: 1; background: rgba(16,17,20,.7); outline: 1px solid rgba(255,255,255,.7); }
-#fire-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; width: 68px; height: 68px; padding: 0;
-  border: 1px solid rgba(255,200,120,.7); border-radius: 50%; background: rgba(60,20,10,.45); color: #fff; font: 600 24px Inter, system-ui, sans-serif;
-  touch-action: none; -webkit-user-select: none; user-select: none; }
-#fire-button:active { background: rgba(255,160,80,.35); border-color: #fff; }
-@media (pointer: coarse) { body[data-mode=walk]:not(.noui) #fire-button { display: grid; place-items: center; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #fire-button { width: 60px; height: 60px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
-}
-/* the next slot left of Fire, aim left of Jump (touch) */
-.arms-touch { display: none; position: fixed; z-index: 4; width: 48px; height: 48px; padding: 0; border: 1px solid rgba(255,255,255,.55);
-  border-radius: 50%; background: rgba(16,17,20,.4); color: #fff; font: 600 20px Inter, system-ui, sans-serif; touch-action: manipulation;
-  -webkit-user-select: none; user-select: none; }
-.arms-touch:active, .arms-touch.on { background: rgba(255,255,255,.28); border-color: #fff; }
-#slot-button { right: calc(98px + var(--sr)); bottom: calc(206px + var(--sb)); }
-#aim-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
-@media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch { display: grid; place-items: center; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
-  #aim-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
-}
 #hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
 #hud .hint:empty { display: none; }
-/* the touch sticks' rings (nav/touch-sticks.ts): faint, never catching a touch */
-.stick-ring { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; box-sizing: border-box; border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
-.stick-ring.knob { width: 46px; height: 46px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); }
-.noui .stick-ring { display: none; }
 /* driving on a touch screen: the handbrake (nav/drive.ts, held) where the right thumb rests, the left thumb on the one
    stick; in the Jump button's place (on foot only), so above the "?" and clear of the bar, inside the safe area */
 #handbrake-button, #boat-drift-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(110px + var(--sb)); z-index: 4; width: 72px; height: 72px;

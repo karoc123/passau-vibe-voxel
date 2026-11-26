@@ -3,34 +3,35 @@ import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
-import { makeCraftModel } from './craft-models';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { CRAFT_SCALE, GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
+import { craftLook } from '../view/crafts';
 import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT } from '../sim/craft/special-core';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ModePanel } from './mode-panel';
-import { stickAxis, TouchSticks } from './touch-sticks';
+import { TouchSticks } from '../touch/sticks';
 import './special-craft.css';
 
 // The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
-// Here: the panel, the input, the chase camera, the model. Out of focus the input is hands off (input.ts). Left, the
+// Here: the panel, the input, the chase camera. Out of focus the input is hands off (input.ts). Left, the
 // helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes.
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
-// the chase camera: back and up from the craft (m), at what it looks (m over the motion's point); the model drawn
-// `drop` m under the motion's point (the paraglider's is the pilot's middle, its model's origin the feet); the
-// hovercraft's and the helicopter's framing scales with their models (CRAFT_SCALE), so they fill the view as before
-const HS = CRAFT_SCALE.hovercraft, CS = CRAFT_SCALE.helicopter;
+// the chase camera: back and up from the craft (m), at what it looks (m over the model's origin); the feet `drop` m
+// under the motion's point (the paraglider's is the pilot's middle); the helicopter's framing scales with its model
+// (CRAFT_SCALE), so it fills the view as before
+const CS = CRAFT_SCALE.helicopter;
 const CONFIG = {
-  hovercraft: { name: 'Hovercraft', back: 12 * HS, up: 4.5 * HS, look: 0.8 * HS, drop: 0,
+  hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
     help: ['W/S thrust and reverse · A/D steer (it drifts) · Esc exit', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
-    help: ['A/D steer · W speed bar · S brake (flare to land) · Esc exit', 'Left stick: turn, speed bar and brake.'] },
+    help: ['A/D steer · W speed bar · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
+      'Left stick: turn, speed bar and brake. Release: let go of the wing; falling, Open canopy.'] },
 } as const;
 
 class SpecialCraft implements PlayerCraft {
@@ -49,16 +50,17 @@ class SpecialCraft implements PlayerCraft {
   private readonly pos = new THREE.Vector3();
   private readonly offset = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
+  protected get on() { return this.phase === 'on'; }
   private phase: 'off' | 'finding' | 'on' | 'landing' = 'off';
   private start: (CraftSpot & { deadline: number }) | null = null;
   private camYaw = 0;
   private zoom = 1;
 
-  constructor(private readonly ctx: CraftContext, readonly id: CraftKind) {
+  constructor(protected readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
     this.link = new CraftLink(ctx, id);
     this.boards = id === 'paraglider' ? [] : [id];
-    this.model = makeCraftModel(id);
+    this.model = craftLook(id);
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
@@ -109,7 +111,7 @@ class SpecialCraft implements PlayerCraft {
   leave() {
     this.phase = 'off';
     this.start = null;
-    this.model.group.visible = false;
+    this.model.hide();
     this.touch.setActive(false);
     this.keys.clear();
     this.rig.end();
@@ -122,6 +124,27 @@ class SpecialCraft implements PlayerCraft {
     this.link.open();
     this.link.board(craft.id);
     this.activate(craft.core.pose.h);
+    return true;
+  }
+
+  // G or the touch button: on the wing let go of it into a free fall on foot (the velocity kept), falling open a wing
+  // again over the body (its speed across kept; the canopy's opening takes the fall's). false: neither now
+  protected canopy() {
+    const nav = this.ctx.nav;
+    if (this.phase === 'on') {
+      const c = this.craft;
+      if (!c) return false;
+      const { p, velocity: v, heading } = c.core.motion;
+      if (!nav.fall(new THREE.Vector3(p.x, p.y - CONFIG[this.id].drop, p.z), new THREE.Vector3(v.x, v.y, v.z), heading)) return false;
+      this.panel.say('Falling: G opens a canopy again.', 3000);
+      return true;
+    }
+    if (this.phase !== 'off' || !this.link.sim || !nav.canOpen) return false;
+    const f = nav.fallPose, speed = Math.hypot(f.vx, f.vz), h = speed > 1 ? Math.atan2(f.vx, f.vz) : f.yaw;
+    if (!nav.openCanopy(this)) return false;
+    this.link.open();
+    this.link.spawn({ x: f.x, y: f.y + CONFIG[this.id].drop, z: f.z, h, speed });
+    this.activate(h);
     return true;
   }
 
@@ -208,28 +231,22 @@ class SpecialCraft implements PlayerCraft {
 
   private input(): CraftInput {
     const { keys, touch } = this, pad = gamepad();
-    const left = touch.left, right = touch.right;
+    const left = touch.axes('left'), right = touch.axes('right');
     return {
       drive: clamp(keys.any('KeyW', 'ArrowUp') - keys.any('KeyS', 'ArrowDown') - padAxis(pad?.axes[1]) +
-        (left ? stickAxis(left.dy, left.radius) : 0), -1, 1),
+        (left?.y ?? 0), -1, 1),
       turn: clamp(keys.any('KeyD', 'ArrowRight') - keys.any('KeyA', 'ArrowLeft') + padAxis(pad?.axes[0]) +
-        (left ? stickAxis(left.dx, left.radius) : 0), -1, 1),
+        (left?.x ?? 0), -1, 1),
       lift: clamp(keys.any('Space') - keys.any('ShiftLeft', 'ShiftRight') + (pad?.buttons[7]?.value ?? 0) -
-        (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right ? stickAxis(right.dy, right.radius) : 0), -1, 1),
+        (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right?.y ?? 0), -1, 1),
       side: clamp(keys.any('KeyE') - keys.any('KeyQ') + padAxis(pad?.axes[2]) +
-        (right ? stickAxis(right.dx, right.radius) : 0), -1, 1),
+        (right?.x ?? 0), -1, 1),
     };
   }
 
   private render(dt: number) {
-    const core = this.craft!.core, collision = this.link.col!, m = core.drawn(this.link.alpha), { group, rotor, tailRotor } = this.model, cfg = CONFIG[this.id];
-    group.visible = true;
-    group.position.set(m.x, m.y - cfg.drop, m.z);
-    group.rotation.set(-m.pitch, m.h, m.bank, 'YXZ');
-    // the rotors idle slower on the skids
-    const spin = this.id === 'helicopter' ? (core.motion.grounded ? 9 : 24) * dt : 0;
-    if (rotor) rotor.rotation.y = (rotor.rotation.y + spin) % (2 * Math.PI);
-    if (tailRotor) tailRotor.rotation.x = (tailRotor.rotation.x + 4 * spin) % (2 * Math.PI);
+    const c = this.craft!, collision = this.link.col!, m = c.core.drawn(this.link.alpha), cfg = CONFIG[this.id], group = this.model.group;
+    this.model.draw(c, { dt, alpha: this.link.alpha, night: this.ctx.env.night(), now: performance.now() });
     this.camYaw = followAngle(this.camYaw, m.h, 4, dt);
     this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom);
     const eye = this.pos.copy(group.position);
@@ -273,6 +290,20 @@ export class HelicopterMode extends SpecialCraft {
 }
 
 export class ParagliderMode extends SpecialCraft {
-  constructor(ctx: CraftContext) { super(ctx, 'paraglider'); }
+  constructor(ctx: CraftContext) {
+    super(ctx, 'paraglider');
+    // (after the plane's G, which deploys this wing and marks the key used: not let go of in the same press)
+    addEventListener('keydown', (e) => {
+      if (e.code === 'KeyG' && !e.repeat && !e.defaultPrevented && gameKey(e) && this.canopy()) e.preventDefault();
+    });
+  }
+
+  /** the touch button's: as G */
+  press() { return this.canopy(); }
+
+  /** what G does now: let go of the wing, open one again, or nothing */
+  get canopyAction(): 'release' | 'open' | null {
+    return this.on ? 'release' : this.ctx.nav.canOpen ? 'open' : null;
+  }
   deploy(source: PlayerCraft, at: CraftSpot) { return this.deployFrom(source, at); }
 }

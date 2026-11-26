@@ -87,6 +87,9 @@ export class Sight {
     return xs.length > 0;
   }
 
+  /** whether the last look found the player somewhere */
+  get somewhere() { return this.xs.length > 0; }
+
   /** whether (x, z) is within d m of where the player is */
   near(x: number, z: number, d = this.r.other) {
     const xs = this.xs, zs = this.zs, d2 = d * d;
