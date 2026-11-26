@@ -342,8 +342,8 @@ tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN 
 
 Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
 port 5300). Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
-what lies near them, two to a message: the bodies, crafts and avatars whole, the cars, people and trains only when the
-page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
+what lies near them, two to a message: the crafts whole, the bodies, avatars and cars let go when they change (one at
+rest once), the cars, people and trains only when the page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
@@ -392,7 +392,7 @@ whole fast set after a series of merges. `--list` shows every gate, its set, wha
 that every file of `src/` and `tools/` is in a gate's paths or in `UNGATED` (the gate `gate-coverage`: a new package
 needs a gate or a line there); name gates to run only those; `--full` adds the slow ones; `--golden FILE` adds the
 mesher's byte comparison (record it before the change with `node tools/mesh-golden.mjs write FILE`); `-v` prints
-every gate's output. The gate `load` times the network host (16 players by the cathedral, ~20 s, up to three runs):
+every gate's output. The gate `load` times the network host (one player firing alone, then 16 players by the cathedral, ~50 s, up to three runs):
 it runs after the others, alone, and a machine busy with other work can fail it; run it again by name. The gate `knip` fails on an unused file, export or dependency; a module only a tool loads by name
 (`imp('src/...')`, real-city's `load('...')`) is an entry through `web/knip.config.js`, a name loaded any other way
 goes in its `ignore`. The pipeline's quick gates:

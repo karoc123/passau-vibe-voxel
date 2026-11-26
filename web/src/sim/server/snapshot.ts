@@ -7,15 +7,16 @@
 //                                      personPoint), the bodies' drawn poses, trains, boats, the walked people, the avatars, the
 //                                      crafts (their cores' state), the events since (the crafts' and the drivers'
 //                                      among them), the session's player's reads (id, seat, car, results, ack);
-//                                      what is far from the player left out (its sight: interest.ts)
+//                                      what is far from the player left out (its sight: interest.ts), what the
+//                                      session holds already of the agents, bodies and avatars too (wire)
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { Car } from '../types';
-import type { BodyDraw, CarState, CarWire, PersonWire, TrainWire } from '../contract/agents';
+import type { BodyWire, CarState, CarWire, PersonWire, TrainWire } from '../contract/agents';
 import { AgentWire, round, wireBody, wirePose } from '../agent-wire';
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
 import type { WalkPose } from '../contract/pose';
-import type { Ack, AvatarState, CraftState, EditNote, Snapshot } from '../contract/snapshot';
+import type { Ack, AvatarWire, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 import type { Sight } from './interest';
 
@@ -40,32 +41,32 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   let i = 0;
   const tick = sim.tick;
   for (const c of T.cars) if (!S || S.car(c.id, i++)) { const w = wire.car(c, tick); if (w) cars.push(w); }
-  for (const c of T.detachedCars) if (!S || S.car(c.id, i++)) detached.push(carState(c));
+  for (const c of T.detachedCars) if (!S || S.car(c.id, i++)) { const w = wire.detachedCar(carState(c)); if (w) detached.push(w); }
   i = 0;
   for (const p of T.people) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) people.push(w); }
   for (const p of T.riders) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) riders.push(w); }
   const trains: TrainWire[] = [];
   for (const t of T.trains.save()) { const w = wire.train(t, tick); if (w) trains.push(w); }
   const boats = T.boats && wire.boatsOf(T.boats);
-  const gone = wire.done();
-  const bodies: [number, BodyDraw][] = [];
+  const bodies: [number, BodyWire][] = [];
   if (B?.drawState) for (const c of T.roadVehicles()) {
     if (S && !S.has('car', c.id)) continue;
-    const d = B.drawState(c);
-    if (d) bodies.push([c.id, wireBody(d)]);
+    const d = B.drawState(c), w = d && wire.body(c.id, wireBody(d), tick);
+    if (w) bodies.push([c.id, w]);
   }
   const walked: [number, WalkPose][] = [];
   for (const p of T.people) { const w = (!S || S.has('person', p.id)) && sim.walkedPose(p.id); if (w) walked.push([p.id, { ...w }]); }
-  const avatars: AvatarState[] = [];
+  const avatars: AvatarWire[] = [];
   for (const [id, player] of sim.avatars) {
-    const w = sim.players.get(player)?.walk;
-    if (w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z))) avatars.push({ id, player, pose: { ...w.pose }, prev: { ...w.prev } });
+    const w = sim.players.get(player)?.walk, a = w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z)) && wire.avatar({ id, player, pose: w.pose, prev: w.prev });
+    if (a) avatars.push(a);
   }
   const drivers: [number, PlayerId][] = [];
   for (const id of sim.players.keys()) {
     const seat = sim.seat(id);
     if (seat?.role === 'driver' && (!S || S.has('car', seat.entity.id))) drivers.push([seat.entity.id, id]);
   }
+  const gone = wire.done();
   const crafts: CraftState[] = [];
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) {
@@ -80,7 +81,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     bodies, trains,
     boats,
     walked, avatars, drivers, crafts, events,
-    player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
+    player: wire.player({ id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } }),
     edits,
   };
 }

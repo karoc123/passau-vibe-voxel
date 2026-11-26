@@ -12,18 +12,15 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Overload (target-architecture.md): all three steps built (host/overload.ts), but the third cuts a whole session's
   snapshots to every second tick (not for a player in a vehicle or firing), not the others' agents inside one: that
-  needs AgentWire to keep what a snapshot leaves out (after PROTOCOL 20). Cars given back refill slowly (from sources).
-- Bytes with a round at one spot (gate `load`, 16 by the cathedral, a third firing): 20–30 kB/s mean per player,
-  over the 20 target; the gate holds 35. The bodies near craters, avatars and cars let go go whole every tick.
-  Half done (paused) on branch `worktree-agent-ac166447049eedf13`: resting ones sent once (PROTOCOL 20); gates not
-  run, the no-growth check in `load` and the 10/16-player numbers still to do.
+  needs AgentWire to keep what a snapshot leaves out. Cars given back refill slowly (from sources).
 
 ## Later, in this order of likelihood
 
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
-  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25. What is left
-  is every tick's bodies (~4) and crafts (~4, a helicopter's core whole). Not measured: a busy square, a fight with
-  many craters (each ~90 B, but a late joiner gets a node's whole op list), a phone on 4G. Binary only after a Pi
+  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
+  16 at the cathedral 13–16 (`load` holds 20). What is left is every tick's moving bodies (~5 kB/s raw each: the
+  traffic within 60 m of a crater) and crafts (~4, a helicopter's core whole, a parked one too). Not measured: a busy
+  square, a late joiner after many craters (a node's whole op list), a phone on 4G. Binary only after a Pi
   measurement. Trains are still simulated with spacing on the host (step 5: from the timetable).
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.

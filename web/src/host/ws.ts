@@ -78,7 +78,9 @@ export function serve(o: ServeOptions) {
     server.update(STEP);
     const ms = performance.now() - t0;
     ticks++;
-    if (++n % every === 0) for (const c of conns) if (c.ws.bufferedAmount < BACKLOG && full(c)) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms });
+    // (ms to 0.1: its 15 digits were ~0.7 kB/s a player)
+    const ms10 = Math.round(ms * 10) / 10;
+    if (++n % every === 0) for (const c of conns) if (c.ws.bufferedAmount < BACKLOG && full(c)) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms: ms10 });
     if (n % flush === 0) {
       for (const c of conns) {
         if (!c.out.length) continue;

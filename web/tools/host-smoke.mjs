@@ -87,7 +87,7 @@ async function worker() {
   let f = FRAMES;
   frame(f++, [seat]);
   const early = [];
-  for (let i = 0; i < 3; i++) { frame(f++, []); early.push(...posted.splice(0).flatMap((m) => m.snapshot.player.results)); }
+  for (let i = 0; i < 3; i++) { frame(f++, []); early.push(...posted.splice(0).flatMap((m) => m.snapshot.player?.results ?? [])); }
   if (early.length !== 1 || early[0].ok || early[0].reason !== 'loading' || server.sim.physics) throw new Error(`a car's seat while the road physics loads: ${JSON.stringify(early)}`);
   for (let i = 0; i < 6000 && !server.sim.physics; i++) await tick();
   if (!server.sim.physics) throw new Error('the road physics not loaded after a car\'s seat was asked for');
@@ -96,7 +96,8 @@ async function worker() {
   frame(f++, [seat]);
   for (let i = 1; i < FPS; i++) { frame(f++, []); await tick(); }
   if (posted.length !== FPS || posted.some((m) => m.kind !== 'snapshot')) throw new Error(`after the physics: ${posted.length} posts`);
-  const taken = posted.flatMap((m) => m.snapshot.player.results), last = posted.at(-1).snapshot;
+  // (the player's reads come when they change: the last of them)
+  const taken = posted.flatMap((m) => m.snapshot.player?.results ?? []), last = { ...posted.at(-1).snapshot, player: posted.findLast((m) => m.snapshot.player).snapshot.player };
   if (taken.length !== 1 || !taken[0].ok || last.player.seat?.role !== 'driver' || last.player.driver?.entityId !== car.id) throw new Error(`a car's seat once the road physics is in: ${JSON.stringify(taken)}, seat ${JSON.stringify(last.player.seat)}`);
   return { out, server, loadMs, last };
 }

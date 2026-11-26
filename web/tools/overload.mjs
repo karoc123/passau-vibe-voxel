@@ -20,14 +20,19 @@ const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log
   clock: (t) => { tick = t; return () => {}; } });
 const port = await host.port, sim = host.server.sim, T = sim.traffic;
 
-// a client: the snapshots it got (tick, world time, its seat, the detached cars' ids)
+// a client: the snapshots it got (tick, world time, its seat, the detached cars' ids it holds after each: a snapshot
+// carries those that changed and the player's reads when they did, the page keeps the rest)
 const client = () => {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`), c = { ws, got: [], open: false };
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`), c = { ws, got: [], open: false }, held = new Set();
+  let seat = null;
   ws.on('open', () => { c.open = true; });
   ws.on('message', (data) => {
     for (const m of JSON.parse(data.toString())) if (m.kind === 'snapshot') {
       const s = m.snapshot;
-      c.got.push({ tick: s.tick, t: s.t, seat: s.player.seat, detached: s.detached.map((d) => d.id) });
+      for (const id of s.gone[4]) held.delete(id);
+      for (const d of s.detached) held.add(d.id);
+      if (s.player) seat = s.player.seat;
+      c.got.push({ tick: s.tick, t: s.t, seat, detached: [...held] });
     }
   });
   c.send = (...commands) => { if (c.open) ws.send(JSON.stringify({ kind: 'commands', commands })); };

@@ -27,7 +27,7 @@ import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
-import type { Ack, AvatarState, DriverSnapshot, EditNote, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
+import type { Ack, AvatarState, DriverSnapshot, EditNote, PlayerReads, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
 import { AgentRead, reckon, type Sampled } from '../sim/agent-wire';
@@ -203,7 +203,7 @@ export class MirrorSimClient implements SimClient {
   private settle!: { ok: (h: Hello) => void; fail: (e: Error) => void };
   private queue: SimCommand[] = [];
   private readonly seqs = new Seqs();
-  private last: Snapshot | null = null;
+  private last: Snapshot & { player: PlayerReads } | null = null;
   private dt = 0;
   // the snapshots not yet drawn past, oldest first (one per tick); the one drawn and how far into its tick; the render
   // clock (ticks; null until the first snapshot); the frames' own clock (s) and the leads seen on it
@@ -333,10 +333,13 @@ export class MirrorSimClient implements SimClient {
     for (const c of s.crafts) this.craftList.get(c.id)?.core.load(c.core);
   }
 
-  private take(s: Snapshot) {
+  private take(w: Snapshot) {
     if (this.refused) return;
     if (!this.greeted) { this.refuse(new Error('sim: host refused: a snapshot came before its hello')); return; }
-    this.last = s;
+    // (the player's reads left out: those before, without their results)
+    const held = this.last?.player;
+    if (!w.player && !held) { this.refuse(new Error('sim: host sent no player reads')); return; }
+    const s = this.last = { ...w, player: w.player ?? { ...held!, results: [] } };
     const B = this.buffer;
     // (a snapshot of a tick already held is the newer word on it)
     if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
@@ -439,9 +442,10 @@ export class MirrorSimClient implements SimClient {
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
 }
 
-/** a snapshot as the client holds it: all its cars and people, each as last sampled (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
-  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null };
+/** a snapshot as the client holds it: all its cars and people, each as last sampled, and all the cars out of the
+ * traffic, bodies and avatars it holds (TrafficMirror read) */
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats' | 'avatars' | 'bodies'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null; avatars: AvatarState[]; bodies: [number, BodyDraw][] };
 
 // A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
@@ -520,7 +524,7 @@ export class TrafficMirror {
   read(s: Snapshot): Taken {
     const [people, riders] = this.wire.readPeople(s.people, s.riders, s.gone[1], s.tick);
     return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders, trains: this.wire.readTrains(s.trains, s.gone[2], s.tick),
-      boats: this.wire.readBoats(s.boats, s.gone[3]) };
+      boats: this.wire.readBoats(s.boats, s.gone[3]), ...this.wire.readHeld(s) };
   }
 
   /** a new session: what the last one sent of the cars and people forgotten */

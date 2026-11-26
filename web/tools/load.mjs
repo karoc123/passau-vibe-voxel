@@ -4,7 +4,8 @@
 // into the houses round them (craters, bodies near them). What a player would notice: ticks over their 33 ms (the
 // world stutters for everyone), fewer ticks than 30 a second (slow motion), and the bytes their socket is sent
 // (deflated, as over the internet; a phone's line). A shared machine makes one run's tail noisy, so a run over the tick
-// budget is run again (--runs, default 3) and the best judged; the bytes hardly depend on the machine.
+// budget is run again (--runs, default 3) and the best judged; the bytes hardly depend on the machine. First one player
+// alone fires at a road a while: its bytes must not grow with the craters (firing, below).
 // usage (in web/): node tools/load.mjs [--players 16] [--seconds 10] [--runs 3] [--warm 5] [-v]; prints PASS with the
 // numbers, or FAIL and what failed
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
@@ -66,9 +67,9 @@ if (!isMainThread) {
 
   // The budgets. Ticks: p95 of the best run under the 33 ms tick (alone here ~15-19 at 16 players: a loaded machine has
   // margin), p99 under two ticks, at least RATE of the world's 30 ticks a second. Bytes per player, deflated: 50 kB/s
-  // in any second. The mean's target is 20; measured 2026-11-26 at 20-30 with 16 players (the bodies near craters,
-  // the avatars and the cars let go sent whole every tick), so the gate holds 35 until that is cut (docs/plans/todo.md).
-  const P95 = 33, P99 = 66, RATE = 0.9, MEAN_KB = 35, PEAK_KB = 50;
+  // in any second, 20 on the mean (measured 2026-11-27 at 13-16 with 16 players; 23-26 while the bodies, the avatars
+  // and the cars let go were sent whole every tick).
+  const P95 = 33, P99 = 66, RATE = 0.9, MEAN_KB = 20, PEAK_KB = 50;
 
   async function run() {
     // (each tick's time: the sim's and the snapshots' with their sending, as the clock runs it)
@@ -123,6 +124,51 @@ if (!isMainThread) {
     };
   }
 
+  // One player alone by the cathedral firing the launcher and the MG in turn at a road FIRE s (craters; the traffic
+  // near them gets bodies, queues before them): the bytes (before deflate) its socket was sent a second over the last
+  // LAST s. A body at rest, a fade, a standing avatar, unchanged reads cost nothing: what a snapshot may carry is the
+  // world round it (BASE) and the bodies moving (PER_MOVING each; before they were sent whole every tick, at rest or
+  // not, the bytes climbed with every crater: 33 to 77 kB/s).
+  const FIRE = 24, LAST = 8, BASE = 18, PER_MOVING = 6;
+  async function firing() {
+    const { default: WebSocket } = await import('ws');
+    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: () => {} });
+    const port = await host.port, sim = host.server.sim, T = sim.traffic;
+    const ground = (x, z) => T.ground?.support(x, z, 1000) ?? 0;
+    for (const t0 = performance.now(); !(ground(spot.x, spot.y) > 0 && sim.physics); await new Promise((r) => setTimeout(r, 50)))
+      if (performance.now() - t0 > 30000) throw new Error('no ground or road physics by the cathedral within 30 s');
+    const x = spot.x + 25, z = spot.y, y = ground(x, z), at = { x: 0, y: 0, z: 0, h: 0, pitch: 0, roll: 0 };
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, { perMessageDeflate: true });
+    ws.on('error', () => {});
+    await new Promise((r) => ws.on('open', r));
+    const send = (commands) => ws.send(JSON.stringify({ kind: 'commands', commands }));
+    send([{ kind: 'view', view: { focus: { x, z }, viewer: { x, y: y + 2, z } } }, { kind: 'request', request: { kind: 'walk', pose: { x, y, z, h: 0, moving: false } } }]);
+    // (the road: where a car of the traffic 25..45 m off is, once the traffic has filled in round the player)
+    await new Promise((r) => setTimeout(r, 2000));
+    const road = T.cars.filter((c) => !c.bus).map((c) => (T.carPose(c, c.s, c.off, at), { ...at })).find((p) => Math.hypot(p.x - x, p.z - z) > 25 && Math.hypot(p.x - x, p.z - z) < 45);
+    if (!road) throw new Error('no car of the traffic 25..45 m from the cathedral');
+    const h = Math.atan2(road.x - x, road.z - z), pitch = Math.atan2(road.y - y - 1.7, Math.hypot(road.x - x, road.z - z));
+    let t = 0;
+    const loop = setInterval(() => { t++; send([{ kind: 'fire', slot: Math.floor(t / 60) % 2 ? 2 : 1, h: h + 0.05 * Math.sin(t / 5), pitch }]); }, 1000 / 30);
+    const kb = [], moving = [];
+    host.stats();
+    for (let s = 0; s < FIRE; s++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const st = host.stats();
+      kb.push((st.bytes[0]?.[1] ?? 0) / 1024 / Math.max(1, st.ticks / 30));
+      let n = 0;
+      for (const c of T.roadVehicles()) { const d = T.bodies?.drawState?.(c); if (d?.p0 && d.p1 && Math.hypot(d.p1.x - d.p0.x, d.p1.y - d.p0.y, d.p1.z - d.p0.z) > 0.005) n++; }
+      moving.push(n);
+    }
+    clearInterval(loop);
+    ws.close();
+    host.close();
+    const mean = (a) => a.slice(-LAST).reduce((u, v) => u + v, 0) / LAST, m = mean(kb), n = mean(moving);
+    return { kb: m, moving: n, budget: BASE + PER_MOVING * n, first: kb.slice(0, 3).map((v) => v.toFixed(1)).join(' '), shots: t };
+  }
+  const fired = await firing();
+  console.log(`firing: one player ${fired.shots} ticks firing by the cathedral, ${fired.kb.toFixed(1)} kB/s (before deflate) over the last ${LAST} s with ${fired.moving.toFixed(1)} bodies moving (budget ${fired.budget.toFixed(1)}; the first seconds ${fired.first})`);
+
   const out = [];
   for (let i = 0; i < runs; i++) {
     const r = await run();
@@ -141,6 +187,7 @@ if (!isMainThread) {
   const kbMean = Math.min(...out.map((r) => r.mean)), kbPeak = Math.min(...out.map((r) => r.peak));
   if (kbMean > MEAN_KB) fail.push(`${kbMean.toFixed(1)} kB/s mean per player, budget ${MEAN_KB}`);
   if (kbPeak > PEAK_KB) fail.push(`${kbPeak.toFixed(1)} kB/s peak per player in a second, budget ${PEAK_KB}`);
+  if (fired.kb > fired.budget) fail.push(`one player firing: ${fired.kb.toFixed(1)} kB/s over the last ${LAST} s, budget ${fired.budget.toFixed(1)} (${BASE} and ${PER_MOVING} a body moving): what the client holds is sent again`);
   const sum = `${players} players by the cathedral: tick p95 ${best.p95.toFixed(1)} ms (budget ${P95}), p99 ${best.p99.toFixed(1)} (${P99}); ${kbMean.toFixed(1)} kB/s mean (${MEAN_KB}), ${kbPeak.toFixed(1)} peak (${PEAK_KB}) per player`;
   if (fail.length) { console.log(fail.map((f) => `  ${f}`).join('\n')); console.log(`FAIL load: ${sum}`); process.exit(1); }
   console.log(`PASS load: ${sum}`);
