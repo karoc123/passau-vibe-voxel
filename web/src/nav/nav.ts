@@ -243,7 +243,9 @@ export class Nav {
         else document.exitPointerLock();
       } else if (this.mouseLook?.locked) {
         this.releasePedestrianMouse();
-        if (this.third) this.flyUp();
+        // Esc ends the walk; a tab switch or alt-tab also takes the lock, and must not. Focus and visibility settle a
+        // moment after the lock goes, hence the wait.
+        setTimeout(() => { if (this.third && document.hasFocus() && !document.hidden) this.flyUp(); }, 150);
       }
     });
     document.addEventListener('pointerlockerror', () => {
@@ -254,6 +256,8 @@ export class Nav {
     });
     dom.addEventListener('pointerdown', (e) => {
       if (this.craftView || (this.third && document.pointerLockElement === dom)) return;
+      // back from another tab on foot: a click takes the mouse again
+      if (this.third && e.pointerType === 'mouse') { this.requestPedestrianMouse(); return; }
       if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
