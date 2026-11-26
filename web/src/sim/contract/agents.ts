@@ -28,7 +28,7 @@ export interface Person {
 /** what a client's path maths and drawing read of a person (sim/server/snapshot.ts personState) */
 export type PersonState = Pick<Person, 'id' | 'e' | 'dir' | 's' | 'v' | 'lat' | 'ph' | 'wait' | 'col' | 'bike'>;
 
-/** what a client's path maths and drawing read of a car (sim/types.ts Car; sim/server/snapshot.ts carState) */
+/** what a client's path maths and drawing read of a car (sim/types.ts Car extends it; sim/server/snapshot.ts carState) */
 export interface CarState {
   id: number;
   e: number;
@@ -39,18 +39,20 @@ export interface CarState {
   dOff: number;
   prev: number;
   prevOff: number;
+  // the road before prev and the one after next, with prev's offset there (-1, none: view/life.ts carPoint blends them in
+  // when prev or next is shorter than its blend)
   prev2?: number;
   prev2Off?: number;
   next: number;
   next2?: number;
   len: number;
   bus: boolean;
-  vt?: VehicleId;
-  col: string;
+  vt?: VehicleId; // its type (sim/vehicles.ts; none: the car, or a bus)
+  col: string; // its paint ('#rrggbb')
   brake: number;
   v: number;
   wait: number;
-  detachedPose?: RoadPose;
+  detachedPose?: RoadPose; // its pose out of the traffic: authoritative, independent of drawing
 }
 
 /** a body's pose at a tick (sim/body-pose.ts bodyPoseAt): its origin (map metres), its rotation (a unit quaternion:

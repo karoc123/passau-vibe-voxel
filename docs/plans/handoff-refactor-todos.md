@@ -68,12 +68,11 @@ Open points left by landed engine work:
   (`web/tools/mirror-golden.json`) is of one data build: after a rebuild, check the drawing, then `--write-golden`.
 - **Timing (M4, M5):** worker alpha one update behind, no teleport counter; inputs not buffered by tick;
   `life.update`'s viewer is last frame's camera.
-- **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; no gate
-  for `impact`; the parked-car cap (8/24) sits beside presence; `EditKeeping`/`Tuning.edits` not renamed to presence;
-  the drone has no `Tuning` entry; a fall over 80 m/s is slowed by the walk clamp; `walkAs` start height unbounded.
+- **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; the
+  parked-car cap (8/24) sits beside presence (`Tuning.presence`); a fall over 80 m/s is slowed by the walk clamp;
+  `walkAs` start height unbounded.
 - **Sessions and modes:** edit outcomes go only to the sending session; an unknown `?mode=` warns and falls back;
   `mayEdit` is asked twice (before the nodes are held and in the tick), so it must be a plain answer.
-- **Hygiene:** `CarState` is declared beside `Car`.
 
 ## Pipeline quality packages (from play reports, 2026-11-22)
 

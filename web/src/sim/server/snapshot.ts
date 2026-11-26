@@ -16,22 +16,16 @@ import type { WalkPose } from '../contract/pose';
 import type { Ack, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 
-// what a client's path maths and drawing read of a car, a person (the contract's CarState, PersonState): every key,
-// an optional one undefined too (a car's object is reused by id: TrafficMirror apply), with the types Car and Person
-// have. Object literals, not a copy by a list of keys: an object built key by key from a list (its optional keys
-// undefined) is several times slower to make and to read (measured in A11: 0.7 ms a frame of the mirror's apply)
+// what a client's path maths and drawing read of a car, a person (the contract's CarState, which Car extends, and
+// PersonState): every key, an optional one undefined too (a car's object is reused by id: TrafficMirror apply).
+// Object literals, not a copy by a list of keys: an object built key by key from a list (its optional keys undefined)
+// is several times slower to make and to read (measured in A11: 0.7 ms a frame of the mirror's apply)
 type Every<T> = { [K in keyof Required<T>]: T[K] };
 const carState = (c: Car) => ({ id: c.id, e: c.e, lane: c.lane, s: c.s, ds: c.ds, off: c.off, dOff: c.dOff, prev: c.prev,
   prevOff: c.prevOff, prev2: c.prev2, prev2Off: c.prev2Off, next: c.next, next2: c.next2, len: c.len, bus: c.bus, vt: c.vt,
   col: c.col, brake: c.brake, v: c.v, wait: c.wait, detachedPose: c.detachedPose }) satisfies Every<CarState>;
 const personState = (p: Person) => ({ id: p.id, e: p.e, dir: p.dir, s: p.s, v: p.v, lat: p.lat, ph: p.ph, wait: p.wait,
   col: p.col, bike: p.bike }) satisfies Every<PersonState>;
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Assert<T extends true> = T;
-export type StatesAreTheContracts = [
-  Assert<Same<Pick<Car, keyof CarState>, CarState>>,
-  Assert<Same<Pick<Person, keyof PersonState>, PersonState>>,
-];
 
 /** the sim's state after its update for a session of player; since: the tick of the session's last snapshot (its events
  * after it); results: the player's command outcomes since; edits: the nodes changed since; ack: the session's last seat

@@ -11,7 +11,7 @@ import type { WorldOp } from '../core/layers';
 import { liveEdits } from '../core/live-edits';
 import { drop } from '../core/world-edits';
 import { TILE_N } from '../core/tile-data';
-import { EDIT_KEEPING, type EditKeeping } from './tuning';
+import { PRESENCE, type PresenceTuning } from './tuning';
 // (for the node tools, which load each module graph apart: this graph's world edits)
 export * as worldEdits from '../core/world-edits';
 
@@ -23,7 +23,7 @@ type Foci = readonly { x: number; z: number }[];
 export class Presence<K> {
   private readonly seen = new Map<K, number>();
 
-  constructor(readonly keeping: EditKeeping = EDIT_KEEPING) {}
+  constructor(readonly keeping: PresenceTuning = PRESENCE) {}
 
   /** a focus within radius of point (x, z) */
   near(foci: Foci, x: number, z: number) { return foci.some((f) => Math.hypot(f.x - x, f.z - z) <= this.keeping.radius); }
@@ -45,7 +45,7 @@ export class EditKeeper {
   // per edited node ("tx_ty")
   private readonly presence: Presence<string>;
 
-  constructor(keeping: EditKeeping = EDIT_KEEPING, private readonly N = TILE_N) { this.presence = new Presence(keeping); }
+  constructor(keeping: PresenceTuning = PRESENCE, private readonly N = TILE_N) { this.presence = new Presence(keeping); }
 
   // at world time `now` (s), the players' foci (map metres: x east, z south); returns the nodes dropped
   update(now: number, foci: Foci): number {

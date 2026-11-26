@@ -1,7 +1,5 @@
 import type { Path, PathData } from './path';
-import type { VehicleId } from './contract/ids';
-import type { Person } from './contract/agents';
-import type { RoadPose } from './contract/pose';
+import type { CarState, Person } from './contract/agents';
 
 // a point in the world (x east, y up, z south: as three.js', without it: the sim runs headless)
 export interface Vec3 { x: number; y: number; z: number }
@@ -44,33 +42,12 @@ interface Blocked {
   ignoreT?: number;
 }
 
-export interface Car extends Blocked {
+// a car of the traffic: what a snapshot carries of it (the contract's CarState: contract/agents.ts) and the traffic's own
+export interface Car extends Blocked, CarState {
   kind: 'car';
-  id: number;
-  detachedPose?: RoadPose; // authoritative pose out of traffic, independent of drawing
-  e: number;
-  lane: number;
   lcTo?: number;
-  s: number;
-  off: number;
-  len: number;
-  bus: boolean;
-  vt?: VehicleId; // its type (sim/vehicles.ts; none: the car, or a bus)
-  col: string; // its paint ('#rrggbb')
   v0f: number;
-  prev: number;
-  prevOff: number;
-  next: number;
-  // the road before prev and the one after next, with prev's offset there (-1, none: view/life.ts carPoint blends them in
-  // when prev or next is shorter than its blend)
-  prev2?: number;
-  prev2Off?: number;
-  next2?: number;
-  brake: number;
-  wait: number;
   ghost: number;
-  ds: number;
-  dOff: number;
   boxNode: number;
   boxFrom: number;
   boxTo: number;

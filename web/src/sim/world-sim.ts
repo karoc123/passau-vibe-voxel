@@ -140,8 +140,8 @@ export class WorldSim {
   } = {}) {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED);
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
-    this.keeper = new EditKeeper(this.tuning.edits);
-    this.left = new Presence(this.tuning.edits);
+    this.keeper = new EditKeeper(this.tuning.presence);
+    this.left = new Presence(this.tuning.presence);
     const T = this.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, ahead = { x: 0, y: 0, z: 0 };
     const car = (id: number) => T.cars.find((c) => c.id === id) ?? T.detachedCars.find((c) => c.id === id);
     const person = (id: number) => T.people.find((p) => p.id === id) ?? T.riders.find((p) => p.id === id);

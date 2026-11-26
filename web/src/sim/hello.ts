@@ -4,9 +4,9 @@
 //   tuningHash  the tuning a client must share with its host, hashed: of sim/tuning.ts Tuning the parts a client runs
 //               (CLIENT_TUNING: the crafts' motion laws, a mirror's cores are made with them, client/sim-client.ts) and
 //               the crafts' scale (CRAFT_SCALE: their collision); not the host's own (the cars' ride: the road physics;
-//               the edits' keeping; the walk's bounds: the host checks them). Its JSON with the keys sorted, through a
-//               53-bit string hash (cyrb53); kept per value. A craft's numbers that are code, not tuning (the drone's,
-//               sim/craft/fpv-flight.ts), are the protocol's: PROTOCOL bumped when they change
+//               presence: what is kept; the walk's bounds: the host checks them). Its JSON with the keys sorted, through
+//               a 53-bit string hash (cyrb53); kept per value. A craft's numbers that are code, not tuning (its step,
+//               its laws' shape), are the protocol's: PROTOCOL bumped when they change
 //   hello       a hello of this code: PROTOCOL, the build, the tuning's hash
 //   helloMismatch, checkHello  what differs (null: nothing); the error a client refuses with
 import type { DataBuild } from '../core/data-contract';
@@ -15,7 +15,7 @@ import { CRAFT_SCALE } from './craft/craft-motion';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
 /** the parts of the tuning a client runs as the host does (sim/craft/cores.ts: the cores a mirror loads) */
-export const CLIENT_TUNING = ['boat', 'plane', 'jet', 'craft'] as const satisfies readonly (keyof Tuning)[];
+export const CLIENT_TUNING = ['boat', 'plane', 'jet', 'craft', 'drone'] as const satisfies readonly (keyof Tuning)[];
 
 const hashes = new WeakMap<Tuning, string>();
 
