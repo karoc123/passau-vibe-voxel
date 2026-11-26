@@ -11,7 +11,8 @@
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
 //              one), and what the connection has read: the events (its last snapshot's tick), the outcomes of its
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
-//              driverNotes), its last seat input taken (ack), the world's edits not yet sent. Two sessions of one
+//              driverNotes), its last seat input taken (ack), the world's edits not yet sent, what it was sent
+//              (its sight: what is near its player). Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
 //              and drops the player from the world sim
 import { liveEdits } from '../../core/live-edits';
@@ -20,6 +21,7 @@ import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
 import type { Hello } from '../contract/hello';
 import { takeSnapshot } from './snapshot';
+import { Sight } from './interest';
 import { SeatReads } from '../seat-reads';
 import type { CommandResult, SimCommand } from '../contract/commands';
 import type { CraftEventOf } from '../contract/crafts';
@@ -51,6 +53,10 @@ export class SimServer {
   private readonly disposers: (() => void)[] = [];
   // the player ids connect has made
   private players = 0;
+
+  /** the radius (m) round its player a session is sent the world's things in (sim/server/interest.ts Sight; null: all
+   * of them), for the sessions connected after it is set */
+  interest: number | null = null;
 
   /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
   readonly hello: Hello;
@@ -134,11 +140,12 @@ export class Session {
   // the seat events taken (craftEvents, driverNotes)
   private readonly reads = new SeatReads();
   private acked: Ack | null = null;
+  private readonly sight: Sight | null;
   /** the world's edits since the last snapshot, when tracked (SimServer.trackEdits) */
   edits: EditNote[] | null = null;
 
   /** (made by SimServer.connect) */
-  constructor(readonly server: SimServer, readonly player: PlayerId) {}
+  constructor(readonly server: SimServer, readonly player: PlayerId) { this.sight = server.interest ? new Sight(server.interest) : null; }
 
   get sim() { return this.server.sim; }
   /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
@@ -196,6 +203,6 @@ export class Session {
   snapshot(): Snapshot {
     const since = this.since;
     this.since = this.sim.tick;
-    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked);
+    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight);
   }
 }

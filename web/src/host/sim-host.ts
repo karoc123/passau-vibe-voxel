@@ -16,6 +16,8 @@ import { initWorldEdits } from '../core/world-edits';
 import type { BoatData } from '../sim/boat-traffic';
 import type { WaterColumns } from '../sim/river';
 import { SimServer } from '../sim/server/sim-server';
+import { SEND_MARGIN } from '../sim/server/interest';
+import { ACTIVE_R } from '../sim/road-net';
 import type { GameMode } from '../sim/mode';
 import { sandbox } from '../sim/modes/sandbox';
 import type { Ground } from '../sim/traffic';
@@ -71,6 +73,9 @@ export interface HostOptions {
   edits?: boolean;
   /** the radius (m) of the street life round each player (?active=; without: sim/road-net.ts ACTIVE_R) */
   activeR?: number;
+  /** the radius (m) round each player in which they are sent the world's things (?interest=; without: the street life's
+   * and SEND_MARGIN) */
+  interest?: number;
 }
 
 /** the game modes a host can make, by id */
@@ -102,6 +107,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   // (the build goes into the hello each session is told: SimServer.hello; the edits' nodes made ready in the world's
   // TileCache: SimServer's default EditTiles; the listener and the road physics gone with the server, SimServer.dispose)
   const server = new SimServer(sim, make({ edits: !!opts.edits }), build);
+  server.interest = opts.interest ?? (opts.activeR ?? ACTIVE_R) + SEND_MARGIN;
   server.onDispose(() => { unlisten(); sim.dispose(); });
   return server;
 }

@@ -1,6 +1,6 @@
 # Target architecture: cost follows players, not the city
 
-Status: accepted by the owner (2026-11-26, section 6); steps 1 to 3 landed. Facts are marked by their source
+Status: accepted by the owner (2026-11-26, section 6); steps 1 to 4 landed. Facts are marked by their source
 (code path or URL); everything under "Judgement" is mine.
 
 Goal (owner): a Raspberry Pi 5 hosts 10–50 players (ADR 0008) on a map of several km² that keeps growing. Not
@@ -150,7 +150,7 @@ in the tick.
 | `physics/rapier/life-phys.ts`, `terrain.ts` | Stay. |
 | `sim/edit-keeper.ts` `Presence`, `EditKeeper` | Stay; become the store of kept things per cell, with a file behind it. |
 | Parked-car cap 8/24 in `traffic.ts` | Goes; presence decides. |
-| `sim/server/snapshot.ts` | Changes: filtered by the session's cells, agents at 10 Hz. |
+| `sim/server/snapshot.ts` | Filtered by a radius per session (step 4); by cells, agents at 10 Hz later. |
 | `client/sim-client.ts` `TrafficMirror` | Stays (the client's path maths). |
 | `host/sim.worker.ts` `handle` | Stays; the WebSocket entry calls the same handler. |
 | `sim/mode.ts`, `sim/entities.ts`, seats | Stay as they are. No extension until a game needs one. |
@@ -161,7 +161,8 @@ in the tick.
 1. **The server's own clock.** Landed 2026-11-26.
 2. **Two browsers.** Landed 2026-11-26 (every tick's full snapshot, two to a message at 15 Hz).
 3. **Many foci.** Landed 2026-11-26 (a circle per player, overlaps counted once, a count budget per circle).
-4. **Interest filter.** A session's snapshot holds its cells only; entities enter and leave by id.
+4. **Interest filter.** Landed 2026-11-26 (a radius round the player's view and seat, not cells yet: `?interest=`,
+   default the street life's + 150 m; trains and boats still go to all, they become flow in step 5).
 5. **Flow.** Trains from the timetable; far road traffic drawn by the client; the agent ring shrinks from 900 m to
    about 350 m; a promoted cell is filled from the flow.
 6. **Kept things on disk**, per cell, so a restart of the Pi keeps what players left.
