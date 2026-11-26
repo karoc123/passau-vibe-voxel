@@ -61,6 +61,11 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const w = sim.players.get(player)?.walk;
     if (w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z))) avatars.push({ id, player, pose: { ...w.pose }, prev: { ...w.prev } });
   }
+  const drivers: [number, PlayerId][] = [];
+  for (const id of sim.players.keys()) {
+    const seat = sim.seat(id);
+    if (seat?.role === 'driver' && (!S || S.has('car', seat.entity.id))) drivers.push([seat.entity.id, id]);
+  }
   const crafts: CraftState[] = [];
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) {
@@ -74,7 +79,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     cars, detached, people, riders, gone,
     bodies, trains,
     boats,
-    walked, avatars, crafts, events,
+    walked, avatars, drivers, crafts, events,
     player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
     edits,
   };
