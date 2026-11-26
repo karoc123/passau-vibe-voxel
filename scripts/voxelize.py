@@ -649,7 +649,9 @@ def ground_classes(ctx):
         hw = t.get("highway")
         if hw == "construction":
             hw = t.get("construction")
-        if not hw or underground(t) or hw in ("corridor", "elevator", "proposed"):
+        # (a building passage is drawn on the ground like the street it carries on: tunnels.building_passages opens the
+        # building over it once the set pieces stand)
+        if not hw or (underground(t) and not tunnels.through_building(t)) or hw in ("corridor", "elevator", "proposed"):
             continue
         base = hw.replace("_link", "")
         w = way_width(t)
@@ -674,7 +676,7 @@ def ground_classes(ctx):
                     and not unlit(t):
                 bridge_roads.append((line, w, oid))
             continue
-        if t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT):
+        if (t.get("lit") == "yes" or (t.get("lit") != "no" and hw not in UNLIT)) and not tunnels.through_building(t):
             lit_ground_ways.append(poly)
         if hw in ROADS or base in ROADS:
             _s = t.get("surface") or (area_surface(line) if base in ("service", "living_street") else None)
@@ -867,11 +869,20 @@ def ground_classes(ctx):
         if len(_ids):
             _lut = np.full(_bn + 1, -1, np.int32)
             _gw, _glw = g[_ws], _gatelv[_ws]
+            _rl = np.broadcast_to(RIVER_LV, (D, W))[_ws]
+            _river = np.zeros(_bn + 1, bool)
             for i_ in _ids:
                 _m = _bl == i_
                 _gt = _glw[_m & (_glw >= 0)]
                 _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
-            _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lut[_bl[_bs]]
+                # a river's body (its terrain within 0.8 m of its stretch's level) stands at the stretch's level, cell
+                # by cell: the median of the terrain model rounded per 64 m block, over water near x.5 m, put 1 m
+                # cliffs across open water on the blocks' lines (the Danube below the Kachlet, -1664, 763)
+                _river[i_] = not len(_gt) and abs(float(np.median(dtm[_ws][_m])) - float(np.median(_rl[_m]))) <= 0.8
+            _lv = _lut[_bl[_bs]]
+            _rv = _river[_bl[_bs]]
+            _lv[_rv] = np.floor(_rl[_bs][_rv] - BASE + 0.5).astype(np.int32)
+            _wlev[_b[0]:_b[1], _b[2]:_b[3]] = _lv
     note(f"rivers from the terrain model: level {RIVER_LEVEL:.1f} m{' (and per stretch)' if RIVER_STRETCHES else ''}, {int((_wat & ~_w0).sum())} cells added to OSM's {int(_w0.sum())}")
     core_slice = (slice(_RCORE[0], _RCORE[1]), slice(_RCORE[2], _RCORE[3]))
     report["counters"]["water_gate"] = dict(dropped=int(_wgated[core_slice].sum()), gated=tn_water is not None)
@@ -1129,6 +1140,14 @@ def buildings(ctx):
             if p.get("parent") is not None:
                 kids.setdefault(id(p["parent"]), []).append(p)
         shifts, matched = [], {}
+        # (each feature's own cells, before: what it gains below never covers a street or a path on the ground that its
+        # OSM outline left free -- the Dom's, moved 3 m south-east onto its LoD2 footprint, had covered the Zengergasse
+        # along its whole south side, the footway buried inside the church; OSM traced the two on the same imagery)
+        own0 = {id(f): f["rr"].astype(np.int64) * W + f["cc"] for f in outlines + parts}
+        street = np.zeros((D, W), np.uint8)
+        burn(street, [(l_.buffer(way_width(t_) / 2, cap_style="flat"), 1) for _, t_, l_ in osm.lines
+                      if t_.get("highway") and not underground(t_) and not on_bridge(t_) and t_.get("area") != "yes"
+                      and way_width(t_) > 0])
         for o in outlines:
             rr, cc = o["rr"], o["cc"]
             if len(rr) < 12 or o["tags"].get("building") in ("roof", "carport", "canopy"):
@@ -1207,7 +1226,14 @@ def buildings(ctx):
             if k.any() and k.mean() < 0.5:
                 f["rr"], f["cc"] = f["rr"][~k], f["cc"][~k]
                 n_drop += int(k.sum())
-        note(f"building cells from the LoD2 footprints: {n_add} added, {n_drop} dropped (no building there)")
+        n_way = 0
+        for f in allf:
+            k = (street[f["rr"], f["cc"]] > 0) & ~np.isin(f["rr"].astype(np.int64) * W + f["cc"], own0.get(id(f), ()))
+            if k.any():
+                f["rr"], f["cc"] = f["rr"][~k], f["cc"][~k]
+                n_way += int(k.sum())
+        note(f"building cells from the LoD2 footprints: {n_add} added, {n_drop} dropped (no building there), {n_way} "
+             f"left to the streets and paths on the ground they came onto")
 
     align_to_lod2(outlines, parts)
 
@@ -1283,11 +1309,34 @@ def buildings(ctx):
                 src_osm.append((f["id"], tag(f, "name"), round(p90, 1), f["maxh"], "spire" if small else "new"))
     for s in src_osm:
         note("OSM height used (LiDAR lower):", s)
-    # OSM buildings absent in LiDAR without height info
+    # OSM buildings the surface model does not see (low across the outline): decided whole, never in part -- the
+    # cells over 2 m alone (a crane, a crown, a pole, a fence in a building pit) had stood as one-cell wall columns
+    # 12-26 m high, stilts (Kainzenweg 11, w135706643, -117, 2022). In a pit (the surface a metre and more under the
+    # terrain: pulled down or being built since the flight) not drawn; else drawn whole at OSM's height (levels)
+    def low_surface(f):
+        v = nd_max[f["rr"], f["cc"]]
+        return len(v) and np.median(v) < 1.5 and (v < 2).mean() >= 0.8
+
+    def osm_height(f):
+        return f["maxh"] if f["maxh"] is not None else 3.2 * (parse_len(tag(f, "building:levels")) or 1)
+
+    def in_pit(f):
+        return np.median(nd_max[f["rr"], f["cc"]]) < -1
+
+    n_pit, n_whole = [], []
     for f in render:
-        if f["maxh"] is None and np.median(nd_max[f["rr"], f["cc"]]) < 1.5:
-            top[f["rr"], f["cc"]] = 3.2 * (parse_len(tag(f, "building:levels")) or 1)
-            note("no LiDAR + no height -> levels:", f["id"], tag(f, "name"))
+        if f["part"] or f["tags"].get("building") in ("roof", "carport", "canopy") or (f["minh"] or 0) >= 2.5 \
+                or not low_surface(f):
+            continue
+        if in_pit(f):
+            top[f["rr"], f["cc"]] = 0.0
+            f["pit"] = True
+            n_pit.append(f["id"])
+        else:
+            top[f["rr"], f["cc"]] = osm_height(f)
+            n_whole.append(f["id"])
+    note("buildings the surface model does not see: in a pit, not drawn", len(n_pit), n_pit[:8], "; drawn whole at "
+         "OSM's height", len(n_whole), n_whole[:8])
 
     # tree canopy over low roofs: clip to OSM height
     cell_maxh = np.full((D, W), np.nan, np.float32)
@@ -1634,7 +1683,26 @@ def buildings(ctx):
     topi[_pit] = _cl[_pit]
     note("roof pits filled:", int(_pit.sum()))
     boti = np.round(bot_rel).astype(np.int32)
+    _b0 = bmask.copy()
     bmask &= topi >= 2
+    # (and whatever else leaves an outline mostly under 2 m: decided whole by the same rule, no stilts from it)
+    n_guard = 0
+    for f in render:
+        if f["part"] or f.get("pit") or f["tags"].get("building") in ("roof", "carport", "canopy") \
+                or (f["minh"] or 0) >= 2.5 or len(f["rr"]) < 4:
+            continue
+        rr_, cc_ = f["rr"], f["cc"]
+        kept = bmask[rr_, cc_] & _b0[rr_, cc_]
+        if kept.mean() >= 0.4:
+            continue
+        n_guard += 1
+        if in_pit(f):
+            bmask[rr_, cc_] = False
+        else:
+            topi[rr_, cc_] = np.maximum(topi[rr_, cc_], int(round(osm_height(f))))
+            bmask[rr_, cc_] = topi[rr_, cc_] >= 2
+            roof_exact[rr_, cc_] = g[rr_, cc_] + topi[rr_, cc_]
+    note("outlines left mostly under 2 m, decided whole:", n_guard)
     # buildings standing in water: near none but the Kachlet plant's and the locks' (Q1's gate, # water)
     _biw = np.zeros((D, W), bool)
     _biw[core_slice] = (bmask & (gcol == C["water"]))[core_slice]
@@ -3832,6 +3900,7 @@ def landmarks_tunnels(ctx):
     carriageway_sanity(road_lines, SANITY, lambda r, c: vol[g[r, c] - 1, r, c], "after the underpasses")
     RESULT["labels"] = landmarks.details(vol, g, topi, feats, pal, osm, cells_of, note)  # (labels.py finishes them: regions.py)
     bored = tunnels.build(vol, g, pal, C, STONE, note, bore_plan)  # (after the set pieces: the curtain wall stands over the bore)
+    bore_ids |= tunnels.building_passages(vol, g, osm, bmask, bored, note)  # (after the set pieces too: the Dom's over the Zengergasse)
     vars(ctx).update(bore_ids=bore_ids, bored=bored, bore_plan=bore_plan, rail_bed=rail_bed, walked=walked,
                      bkind=bkind)
 
