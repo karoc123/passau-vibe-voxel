@@ -43,7 +43,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Owner's next (2026-11-27)
 
 - Esc opens a menu leading to settings; there a player may give a name (optional), shown over their avatar or
-  vehicle and on the map. Esc on foot today flies up: back to orbit mode becomes an entry of that menu.
+  vehicle and on the map. Esc on foot today flies up: back to orbit mode becomes an entry of that menu,
+  and full screen too (the phone as well).
 - A start menu: alone or a server, the server preselected as the one `./voxel start` serves the page with.
 - Ping shown to the player (with a host).
 - A frame-rate cap, set in the settings: 60 by default, 30 on a phone (the battery).
@@ -64,6 +65,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   pipeline feature needs it.
 
 ## Small defects
+
+- Gate `maps` failed twice in a busy parallel run (16/18), passes alone: a timing assumption to find.
 
 - Buildings seen through (`tools/see-through.mjs --all --classify`): 8 left. 6 "steep caps" are steep roofs (50 deg
   and more) where an eave cell without a cap (its voxels off its plane) meets capped ones, e.g. 49_25 bld 301; 2 are
