@@ -28,6 +28,7 @@ import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/even
 import type { Ack, AvatarState, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
+import { AgentRead } from '../sim/agent-wire';
 import { RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
 import { coachPoses, trainTracks, type CoachPose } from '../sim/coaches';
 import { drawnBodyPose } from '../sim/body-pose';
@@ -202,8 +203,8 @@ export class MirrorSimClient implements SimClient {
   private dt = 0;
   // the snapshots not yet drawn past, oldest first (one per tick); the one drawn and how far into its tick; the render
   // clock (ticks; null until the first snapshot); the frames' own clock (s) and the leads seen on it
-  private readonly buffer: Snapshot[] = [];
-  private drawn: Snapshot | null = null;
+  private readonly buffer: Taken[] = [];
+  private drawn: Taken | null = null;
   private alpha = 0;
   private at: number | null = null;
   private clock = 0;
@@ -248,6 +249,7 @@ export class MirrorSimClient implements SimClient {
     this.outcomes = [];
     this.reads = new SeatReads();
     this.craftList.clear();
+    this.traffic.forget();
     for (const p of this.pending.values()) p.fail(new Error('edit lost: the host connection was lost'));
     this.pending.clear();
   }
@@ -316,7 +318,7 @@ export class MirrorSimClient implements SimClient {
   }
 
   // the snapshot drawn from now on: the traffic and the crafts' poses as they were in it
-  private draw(s: Snapshot) {
+  private draw(s: Taken) {
     this.drawn = s;
     this.traffic.apply(s);
     for (const c of s.crafts) this.craftList.get(c.id)?.core.load(c.core);
@@ -329,7 +331,7 @@ export class MirrorSimClient implements SimClient {
     const B = this.buffer;
     // (a snapshot of a tick already held is the newer word on it)
     if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
-    B.push(s);
+    B.push(this.traffic.read(s));
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.edits.set(e.tx, e.ty, e.node, e.region);
     this.events.push(...s.events);
@@ -380,6 +382,9 @@ export class MirrorSimClient implements SimClient {
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
 }
 
+/** a snapshot as the client holds it: its cars and people whole (TrafficMirror read) */
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders'> & { cars: CarState[]; people: PersonState[]; riders: PersonState[] };
+
 /** the client's copy of the traffic, set from snapshots: what the presentation reads of the traffic (view/life.ts,
  * nav/): the agents between their last two ticks and the path maths that place them (the static roads and footways,
  * re-run on the client's own TrafficData), the signals, trains, boats, the bodies' poses. Read only: what is drawn
@@ -390,6 +395,8 @@ export class TrafficMirror {
   private readonly carsById = new Map<number, Car>();
   private readonly peopleById = new Map<number, Person>();
   private readonly draws = new Map<number, BodyDraw>();
+  // the cars and people as last sent (a snapshot carries what changed since: sim/agent-wire.ts)
+  private readonly wire: AgentRead;
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
@@ -414,6 +421,7 @@ export class TrafficMirror {
   constructor(data: TrafficData, ground: Ground | null) {
     this.net = new RoadNet(data);
     this.net.ground = ground;
+    this.wire = new AgentRead((e) => this.net.roads[e].L);
     const tracks = trainTracks(data.trains ?? []);
     this.trains = { coaches: (back = 0) => coachPoses(tracks, this.trainList, back) };
   }
@@ -428,8 +436,17 @@ export class TrafficMirror {
   signal = (ctrl: number, axis: number) => signalAt(this.net.ctrls[ctrl], this.t, axis);
   roadVehicles = (): Car[] => this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars;
 
+  /** snapshot s with its cars and people whole, read in the order the session sent them (each one, as it arrives) */
+  read(s: Snapshot): Taken {
+    const [people, riders] = this.wire.readPeople(s.people, s.riders, s.tick);
+    return { ...s, cars: this.wire.readCars(s.cars, s.tick), people, riders };
+  }
+
+  /** a new session: what the last one sent of the cars and people forgotten */
+  forget() { this.wire.clear(); }
+
   /** the snapshot's agents in place of the last (one object per id) */
-  apply(s: Snapshot) {
+  apply(s: Taken) {
     const T = this;
     T.t = s.t;
     const cars = (list: CarState[], into: Car[], seen: Set<number>) => {

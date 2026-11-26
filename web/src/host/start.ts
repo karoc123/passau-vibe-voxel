@@ -10,7 +10,7 @@
 //   ?date=MM-DD, ?hour=   the world's day and hour at the start (else today, at its golden hour: sim/sun.ts)
 //   ?active=      the radius (m) of the street life round each player (else sim/road-net.ts ACTIVE_R)
 //   ?interest=    the radius (m) round each player in which they are sent the agents, crafts, bodies on foot and
-//                 events (else the street life's and sim/server/interest.ts SEND_MARGIN)
+//                 events, one for all (else by kind: sim/server/interest.ts radii)
 //   ?every=       a network host sends every Nth tick's snapshot (else every one: host/ws.ts)
 import type { PhysicsOptions } from '../sim/contract/worker';
 import type { TimeOfDay } from '../sim/contract/snapshot';

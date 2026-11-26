@@ -7,7 +7,8 @@
 // must see the other's player (their own id each), the other's craft, car or body moving smoothly (drawn somewhere new
 // in nearly every frame), the body gone when its walk ends, and the other's edit in its own live edits. A third player
 // stands by the Ingling dam, 3 km off: the first and the third must each have cars of the street life around them and
-// be sent nothing of the other's place (no cars, people, crafts: the host's interest filter).
+// be sent nothing of the other's place (no cars, people, crafts: the host's interest filter). What each socket writes
+// (deflated) from A's walk on must stay within BUDGET kB/s: the phone over the internet.
 // usage (in web/): node tools/ws-smoke.mjs [-v] [--every N] [--interest M] (the host's ?every=, ?interest=); prints
 // PASS with the numbers, or FAIL
 import { DATA, hasData, load } from './real-city.mjs';
@@ -128,6 +129,8 @@ if (await until('B\'s edit made', () => nodes, 10)) await until('A has B\'s edit
 // A on foot (the commands the Walk button sends: nav.ts walkBody): put down by the cathedral, then walking east at
 // 5 m/s; B draws A's body (as view/life.ts: between its ticks, eased) moving smoothly on its render clock, and no
 // more once A stops walking
+// (the bytes from here on: the edit's nodes, sent whole to everyone, are not what this measures)
+host.stats();
 const g0 = ground(), body = () => B.traffic.avatars.find((a) => a.player === A.player);
 let walk = null, gone = false, wx = focus.x;
 const walkPose = (moving) => ({ x: wx, y: g0, z: focus.z, h: Math.PI / 2, moving });
@@ -168,10 +171,16 @@ const ok = (m, what) => { if (!m) return; if (m.share < 0.9 || m.dist < 1) fail.
 ok(fly, 'A\'s helicopter as B draws it');
 ok(drive, 'B\'s car as A draws it');
 if (walk && (walk.share < 0.9 || walk.dist < 5)) fail.push(`A's body as B draws it: drawn somewhere new in ${(walk.share * 100).toFixed(0)}% of frames, ${walk.dist.toFixed(1)} m in 2 s`);
-// (kB a second of the world's time; not checked: a busy machine skips a socket's snapshots while it is backed up.
-// --interest 100000 for the bytes unfiltered)
-const rate = new Map(stats.bytes.map(([p, b]) => [p, b / 1024 / (stats.ticks * STEP)])), kb = [A, B, C].map((X) => rate.get(X.player) ?? 0);
-const line = `3 players over a WebSocket (${life[0]} cars within 400 m of the cathedral, ${life[1]} of the dam 3 km off, ${strange.join(' / ')} of the other's place): A's helicopter seen by B (moved in ${((fly?.share ?? 0) * 100).toFixed(0)}% of frames, ${fly?.dist.toFixed(0)} m), B's car seen by A (${((drive?.share ?? 0) * 100).toFixed(0)}%, ${drive?.dist.toFixed(0)} m), B's edit in A's edits (${nodes?.length ?? 0} node(s)), A on foot seen by B (${((walk?.share ?? 0) * 100).toFixed(0)}%, ${walk?.dist.toFixed(0)} m${gone ? ', gone when A stopped' : ''}); host ${stats.tickMs.toFixed(2)} ms/tick + ${stats.sendMs.toFixed(2)} ms snapshots, ${kb.map((k) => k.toFixed(0)).join(' / ')} kB/s to A / B / C before deflate`;
+// The bytes each player's socket wrote (deflated, as over the internet) from A's walk on, kB a second of the world's
+// time: A on foot, B driving by the cathedral, C by the dam. A busy machine skips a backed-up socket's snapshots, which
+// only lowers it, so the budget holds under load. Measured 2026-11-26 (players by the cathedral, cars sent within
+// 350 m, people 200 m, compact cars and people): ~45-60 kB/s on foot or driving there, ~20 by the dam; before, 1.7 MB/s.
+// --interest 100000 for the bytes unfiltered (no budget then).
+const BUDGET = 120;
+const perS = (list) => { const m = new Map(list.map(([p, b]) => [p, b / 1024 / (stats.ticks * STEP)])); return [A, B, C].map((X) => m.get(X.player) ?? 0); };
+const kb = perS(stats.bytes), wire = perS(stats.wire);
+if (!arg('interest') && wire.some((k) => k > BUDGET)) fail.push(`sent over the socket (deflated): ${wire.map((k) => k.toFixed(0)).join(' / ')} kB/s to A / B / C, over the budget of ${BUDGET}`);
+const line = `3 players over a WebSocket (${life[0]} cars within 400 m of the cathedral, ${life[1]} of the dam 3 km off, ${strange.join(' / ')} of the other's place): A's helicopter seen by B (moved in ${((fly?.share ?? 0) * 100).toFixed(0)}% of frames, ${fly?.dist.toFixed(0)} m), B's car seen by A (${((drive?.share ?? 0) * 100).toFixed(0)}%, ${drive?.dist.toFixed(0)} m), B's edit in A's edits (${nodes?.length ?? 0} node(s)), A on foot seen by B (${((walk?.share ?? 0) * 100).toFixed(0)}%, ${walk?.dist.toFixed(0)} m${gone ? ', gone when A stopped' : ''}); host ${stats.tickMs.toFixed(2)} ms/tick + ${stats.sendMs.toFixed(2)} ms snapshots, ${wire.map((k) => k.toFixed(0)).join(' / ')} kB/s to A / B / C (${kb.map((k) => k.toFixed(0)).join(' / ')} before deflate)`;
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL ws-smoke: ${line}`); process.exit(1); }
 console.log(`PASS ws-smoke: ${line}`);
 process.exit(0);

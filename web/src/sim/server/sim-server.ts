@@ -21,7 +21,8 @@ import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
 import type { Hello } from '../contract/hello';
 import { takeSnapshot } from './snapshot';
-import { Sight } from './interest';
+import { radii, Sight, type Radii } from './interest';
+import { AgentWire } from '../agent-wire';
 import { SeatReads } from '../seat-reads';
 import type { CommandResult, SimCommand } from '../contract/commands';
 import type { CraftEventOf } from '../contract/crafts';
@@ -54,9 +55,9 @@ export class SimServer {
   // the player ids connect has made
   private players = 0;
 
-  /** the radius (m) round its player a session is sent the world's things in (sim/server/interest.ts Sight; null: all
-   * of them), for the sessions connected after it is set */
-  interest: number | null = null;
+  /** the radii (m) round its player a session is sent the world's things in, by kind (sim/server/interest.ts Sight;
+   * one number: that for all; null: all of them), for the sessions connected after it is set */
+  interest: Radii | number | null = null;
 
   /** what a session is told when it connects (Session.hello): this code's protocol, the build, the sim's tuning */
   readonly hello: Hello;
@@ -151,11 +152,16 @@ export class Session {
   private readonly reads = new SeatReads();
   private acked: Ack | null = null;
   private readonly sight: Sight | null;
+  // what it was sent of the traffic's cars and people (a snapshot carries what changed since)
+  private readonly wire = new AgentWire();
   /** the world's edits since the last snapshot, when tracked (SimServer.trackEdits) */
   edits: EditNote[] | null = null;
 
   /** (made by SimServer.connect) */
-  constructor(readonly server: SimServer, readonly player: PlayerId) { this.sight = server.interest ? new Sight(server.interest) : null; }
+  constructor(readonly server: SimServer, readonly player: PlayerId) {
+    const r = server.interest;
+    this.sight = r ? new Sight(typeof r === 'number' ? radii(r, r) : r) : null;
+  }
 
   get sim() { return this.server.sim; }
   /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
@@ -209,10 +215,11 @@ export class Session {
   craftEvents(): CraftEventOf[] { return this.reads.crafts(this.sim.eventLog, this.player, this.seat(), this.sim.tick); }
 
   /** the sim's state for this session after the last update (the events since its last snapshot, its player's
-   * outcomes, the edits since the last) */
+   * outcomes, the edits since the last). Each one taken must reach the session's client: its cars and people are
+   * what changed since the one before */
   snapshot(): Snapshot {
     const since = this.since;
     this.since = this.sim.tick;
-    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight);
+    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight, this.wire);
   }
 }
