@@ -224,6 +224,9 @@ function tamePinch(dom: HTMLElement) {
     e.stopImmediatePropagation(); e.preventDefault();
     dom.dispatchEvent(new WheelEvent('wheel', { deltaY: e.deltaY * 3, deltaMode: e.deltaMode, clientX: e.clientX, clientY: e.clientY, bubbles: true, cancelable: true }));
   }, { capture: true, passive: false });
+  // a pinch or Ctrl+wheel over the HUD, on foot or in a craft would zoom the whole page; the game's handlers still get it
+  addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  addEventListener('gesturestart', (e) => e.preventDefault());
 }
 
 function onResize() {
