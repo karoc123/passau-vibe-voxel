@@ -5,10 +5,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- The network host sends every tick's snapshot of what is within ~1 km of the player (ws-smoke: ~5 MB/s by the
-  cathedral, ~1.5 MB/s by the dam, before deflate): the page draws between a tick and the one before, so sending fewer
-  would judder. The 350 m agent ring (step 5) and wire compaction (step 8) cut it. `?every=2` halves the bytes, but the page then shows motion stopping in a quarter of
-  its frames (ws-smoke: 75 % moved): it would have to draw across the gap.
+- The network host sends every tick's snapshot (cars within 350 m, 1 km from an aircraft; people 200 m; the rest
+  ~1 km): the page draws between a tick and the one before, so sending fewer would judder. `?every=2` halves the
+  bytes, but the page then shows motion stopping in a quarter of its frames: it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
   walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
@@ -17,12 +16,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Later, in this order of likelihood
 
-- Bandwidth for internet play, phones included (owner 2026-11-26). Measured at the cathedral: ~1.7 MB/s per player
-  after deflate (people and cars ~95 %); an edit sends its whole node, ~4.5 MB to everyone. Target <= 20 kB/s mean,
-  50 kB/s peak. Levers in order (deflate kB/s after each, on foot): edits as ops in sight; radius per kind (cars
-  350 m, people 200 m; a pilot more) 280; rounding 111; arrays, static fields once, what the client can derive left
-  out 47; agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars stay 30 Hz 9; trains/boats as timetables 7.
-  ws.ts `threshold: 1024` leaves small messages uncompressed (~64). Binary only after a Pi measurement.
+- Bandwidth for internet play, phones included (owner 2026-11-26). Target <= 20 kB/s mean, 50 kB/s peak. Now at the
+  cathedral (deflated, per player): ~50 kB/s on foot, ~55 driving, ~130 in the helicopter (350 cars in its 1 km);
+  ws-smoke holds it under 120. Levers left: agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars at 30 Hz
+  (~9 on foot); trains (~9 kB/s now) and boats as timetables; edits as ops. Binary only after a Pi measurement.
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
