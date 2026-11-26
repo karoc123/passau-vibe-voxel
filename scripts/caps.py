@@ -498,8 +498,9 @@ def report(root=".", windows=None, note=print):
 # with no plane of its own amid its roof's (three or four sides) takes theirs, where its top fits it. A slope cell (10
 # degrees and more, as plane_codes ships a plane code) is that plane; a flatter one (a fitted roof's flat ridge, a flat
 # roof beside a slope) is level at its voxels' top. Each grid point takes, per cell around it, the cell's plane there,
-# and the cells that meet at it -- of one building within 2 m (3 m for opposing slopes at a ridge), any within a
-# metre -- one height: the lowest plane's at a ridge or hip, the highest one's in a valley, else their mean.
+# and the cells that meet at it -- of one building within 2 m as far as their slopes part them over a cell (3 m for
+# opposing slopes at a ridge), any within a metre -- one height: the lowest plane's at a ridge or hip, the highest
+# one's in a valley, else their mean.
 # A cell keeps its own plane if the result moves it more than its span (0.75 m + half its rise per metre), except
 # when that plane rises above the lowest at a ridge or hip. The mesher hides voxels under or over the drawn cap.
 # On the map's grid, from the rasters and the nodes' tops: two nodes hold the same corners for the columns they share.
@@ -645,8 +646,13 @@ def roof_fields(roof_z, gx, gy, bid, top, roof, *, measure_ridges=False):
         facing = (rise_i > 0.05) & (rise_j > 0.05)
         same = b[i] == b[j]
         both = ex[i] & ex[j]
-        link[i, j] = both & ((d <= 64) | (same & (d <= 128)))
-        ridge_gap[i, j] = both & same & facing & (d > 128) & (d <= 192)
+        # (more than a metre apart only as far as their slopes part them over a cell: two slopes of a ridge on the
+        # grid's diagonal, 2 m at most, 3 m for the ridge's gap below. A lower roof meeting a higher one, gentle slopes 2 m apart, had its shared
+        # corners at the lower one's height or the higher one's, its cells twisted 2 m within one metre -- a steep cap
+        # the eye looks through; each keeps its own height there, the mesher draws the step's face)
+        part_ = 64 * (np.abs(ggx[i]) + np.abs(ggy[i]) + np.abs(ggx[j]) + np.abs(ggy[j]))
+        link[i, j] = both & ((d <= 64) | (same & (d <= np.minimum(part_, 128))))
+        ridge_gap[i, j] = both & same & facing & (d > 128) & (d <= np.minimum(part_, 192))
     for _ in range(3):
         for i, j in pairs:
             m = np.where(link[i, j], np.minimum(lab[i], lab[j]), 9)

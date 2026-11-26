@@ -38,7 +38,7 @@ from collections import namedtuple
 
 import numpy as np
 
-from ways import cells, num
+from ways import cells, layer_of, level_of, num
 
 CARRIAGE = ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service",
             "living_street")
@@ -375,3 +375,54 @@ def _cover(vol, g, C, note, covered, lining, masonry, res):
              f"clearance {lo_h if lo_h < 10 ** 6 else '-'} m at least (the vehicle's {clear})")
     note(f"covered passages: {len(covered)} ways, {n_c} columns carved ({n_cut} cut open), {n_low} lower than the "
          f"vehicle's clearance")
+
+
+def through_building(t):
+    """a way OSM maps through a building at the ground (tunnel=building_passage: an archway, a gateway through a
+    house), not its steps"""
+    return t.get("tunnel") == "building_passage" and t.get("highway") not in (None, "steps") \
+        and t.get("indoor") != "yes" and t.get("location") not in ("underground", "indoor") and layer_of(t) >= 0 \
+        and level_of(t) >= 0
+
+
+def building_passages(vol, g, osm, bmask, res, note):
+    """The building passages (through_building): voxelize.py draws such a way on the ground like the street it carries
+    on, and the building stood over it from the ground up -- the Seminarbogen, Grosse Messergasse's archway (way
+    136323331), and every other gateway was a wall across its street. The building over the way is opened up from its
+    ground, the way's width, the vehicle's clearance high (CLEAR: 4 m, a footway's LOW, OSM's maxheight where it is
+    lower), leaving a metre of it at least over the passage (lower, the cell stays as it is: no building there to pass
+    under, or one too low). Its cells' ground is the passage's floor in res.floor (Bored.floor: traffic.py drives and
+    walks through, not over the house). Returns the ids of the ways opened."""
+    from ways import way_width
+    D, W = g.shape
+    H = vol.shape[0]
+    ids, n_c = set(), 0
+    for oid, t, line in osm.lines:
+        if not through_building(t):
+            continue
+        w = way_width(t)
+        if w <= 0 or line.length < 1:
+            continue
+        road = (t.get("highway") or "").replace("_link", "") in CARRIAGE
+        h = CLEAR["road"] if road else LOW
+        mh = num(t.get("maxheight"))
+        if mh is not None and mh >= 2:
+            h = min(h, int(mh))
+        # (round at its ends: it joins the streets it leads to where they meet under the building's edge)
+        rr, cc = cells(line.buffer(w / 2), D, W, fallback=True)
+        for r, c in zip(rr.tolist(), cc.tolist()):
+            z = int(g[r, c])
+            if z < 1 or z >= H:
+                continue
+            solid = np.nonzero(vol[z:, r, c])[0]
+            if len(solid) and bmask[r, c]:  # (a building's column: not a crown or a lamp over the way outside it)
+                top = z + int(solid[-1])
+                hc = min(h, top - z)  # (a metre of the building over it at least: top is its highest voxel)
+                if hc >= 2 and vol[z:z + hc, r, c].any():
+                    vol[z:z + hc, r, c] = 0
+                    n_c += 1
+            res.floor[r, c] = z if res.floor[r, c] < 0 else min(int(res.floor[r, c]), z)
+        if len(rr):
+            ids.add(oid)
+    note(f"building passages: {len(ids)} ways, {n_c} columns opened under the buildings over them")
+    return ids

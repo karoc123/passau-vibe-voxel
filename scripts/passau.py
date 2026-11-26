@@ -16,6 +16,15 @@ SET_PIECES = dict(dom=(675, 815, 1880, 2085), niederhaus=(495, 605, 2555, 2695),
                   poststeg=(810, 950, 968, 1048))
 
 
+# the mapped streets and paths on the ground (and through a building), as a Project view of a bool raster: the set
+# pieces' walls stand beside them, not across them (build sets it; None: nothing is kept open)
+_WAYS = [None]
+
+
+def _on_way(r, c):
+    return _WAYS[0] is not None and bool(_WAYS[0][r, c])
+
+
 class Project:
     """an array of the region (aoi.py) indexed by the project grid's rows and columns (its last two axes): integers,
     slices with both ends, integer arrays. Out of the region is an error, not numpy's wrap-around."""
@@ -153,8 +162,8 @@ def _fill_from_lod2(vol, g, box, bid_at, wall, roof, min_h=6):
         r, c = r + r0, c + c0
         h = int(round(lz[r, c]))
         gz = int(g[r, c])
-        if h < min_h or vol[gz:, r, c].any():
-            continue
+        if h < min_h or vol[gz:, r, c].any() or _on_way(r, c):
+            continue  # (LoD2's footprint of the Dom reaches over the Zengergasse along its south side and under its bridge)
         vol[gz:gz + h - 1, r, c] = wall
         vol[gz + h - 1, r, c] = roof
         n += 1
@@ -372,8 +381,8 @@ def _stair_turret(vol, g, pal, mats, r0, r1, c0, c1, h, cap):
         for c in range(c0, c1):
             col = vol[:, r, c]
             nz = np.nonzero(col[g0:])[0]
-            if len(nz) and nz[-1] > h + cap + 1:
-                continue
+            if (len(nz) and nz[-1] > h + cap + 1) or _on_way(r, c):
+                continue  # (the Zengergasse passes under the bridge to the Residenz at its foot: it stays open)
             col[g0:] = 0
             col[int(g[r, c]):g0 + h] = mats[0]
             ring = min(r - r0, r1 - 1 - r, c - c0, c1 - 1 - c)
@@ -906,6 +915,19 @@ def build(vol, g, pal, note, osm=None):
         pickle.dump(dict(entries=pal.entries, lines=list(osm.lines) if osm is not None else []),
                     open("data/cache/passau_rest.pkl", "wb"))
     from aoi import C0, D, R0, W
+    _WAYS[0] = None
+    if osm is not None:
+        import tunnels
+        from ways import cells, underground, way_width
+        m = np.zeros(g.shape, bool)
+        for _, t, line in osm.lines:
+            hw = t.get("highway")
+            if not hw or t.get("area") == "yes" or (underground(t) and not tunnels.through_building(t)) \
+                    or t.get("bridge") not in (None, "no") or way_width(t) <= 0:
+                continue
+            rr, cc = cells(line.buffer(way_width(t) / 2, cap_style="flat"), *g.shape)
+            m[rr, cc] = True
+        _WAYS[0] = Project(m)
     vol, g = Project(vol), Project(g)
 
     def here(k):

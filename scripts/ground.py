@@ -32,8 +32,9 @@ T = dict(
     # slope); a steep slope (rise per metre) smoothed over the hillside
     wall_drop=3, wall_share=0.65, steep=0.25,
     # tunnel: the longest short road tunnel (m); the street level from the surface ways this far past its footprint (m),
-    # their spread at most (m); the footprint lifted when it lies this far under the street (m)
-    tunnel_len=150, tunnel_clear=4, tunnel_spread=2, tunnel_depth=(1.5, 6),
+    # their spread at most (m); the footprint lifted when it lies this far under the street (m) (from 1 m where the
+    # laser saw no ground: a deck), and on from it this far (m)
+    tunnel_len=150, tunnel_clear=4, tunnel_spread=2, tunnel_depth=(1.5, 6), tunnel_reach=12,
     # passage: the band each side of the passage (m) the ways crossing it are lifted in, their ground this far past it
     # (m) on either side; lifted when this far under the line between (m); the surface model's low end from the
     # street's surface (m) and over the terrain model (m)
@@ -136,11 +137,14 @@ def pits(ctx):
 def tunnel(ctx):
     """The street over a road tunnel: the terrain model's ground can sag metres over a short tunnel, and the trams and
     cars on it dipped into the cut. A short tunnelled carriageway (under 150 m) crossed by surface ways: the street
-    level is where those ways stand 4 m clear of it on either side; its footprint lower than that by 1.5-6 m is lifted
-    to it"""
+    level is where those ways stand 4 m clear of it on either side; its footprint lower than that by 1.5-6 m (1-6 m
+    where the laser saw no ground under it), where the surface model sees the street over it, is lifted to it (or to
+    the surface model, a deck over the street's ground)"""
     from shapely.ops import unary_union
     osm, g, D, W = ctx.osm, ctx.g.copy(), ctx.D, ctx.W
-    surf = [l_ for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") == "tram") and t_.get("tunnel") is None
+    # (a railway too: a road under the tracks on a structure OSM tags only as the road's tunnel, the terrain model
+    # humped under the deck and the tracks on its slopes -- Stelzhamerstrasse at Auerbach, -1282, 1156)
+    surf = [l_ for _, t_, l_ in osm.lines if (t_.get("highway") or t_.get("railway") in RAILS) and t_.get("tunnel") is None
             and layer_of(t_) >= 0]
     stree = STRtree(surf)
     n = 0
@@ -149,7 +153,10 @@ def tunnel(ctx):
            and (t_.get("highway") or "").replace("_link", "") in MAIN_ROADS]
     # a dual carriageway's two tunnels and the strip between them are one crossing
     tun = unary_union(tun).buffer(6).buffer(-6) if tun else None
-    clear, (d0, d1) = T["tunnel_clear"], T["tunnel_depth"]
+    clear, (d0, d1), (k0, k1) = T["tunnel_clear"], T["tunnel_depth"], T["pass_deck"]
+    # (a deck's level: the highest of the 3 x 3 medians round a cell, so that its edge, where the median straddles the
+    # deck and the road under it, stands at the deck too and not a ledge a metre or two under it)
+    deck_top = ndimage.maximum_filter(ctx.dsm_low(3, "median"), 3) if tun else None
     for foot in getattr(tun, "geoms", [tun] if tun else []):
         levels = []
         for k in stree.query(foot):
@@ -164,9 +171,35 @@ def tunnel(ctx):
         if len(levels) < 2 or np.percentile(levels, 80) - np.percentile(levels, 20) > T["tunnel_spread"]:
             continue
         street = int(np.median(levels))
-        rr_, cc_ = ctx.cells_of(foot)
-        low = (street - g[rr_, cc_] >= d0) & (street - g[rr_, cc_] <= d1) & ~ctx.corridor[rr_, cc_]
-        g[rr_[low], cc_[low]] = street
+        # lifted where the surface model sees the street over it (its low end over 3 x 3 m within -1..+2 m of the
+        # street): to the street, or where the laser saw no ground within 3 m (a deck) to the surface model, a metre
+        # over the street's ground beside it on a railway's embankment, and from 1 m under it. Not the open approach
+        # to a portal, whose road the surface model sees down at the tunnel's floor; nor up to a lawn's or
+        # undergrowth's return over open ground (2 m pillars in the wood over the Pionierstrasse's tunnel, -2047,
+        # 2529). And on from the footprint through such cells, tunnel_reach m at most: the terrain model's hump under
+        # a railway's deck is wider than the road (its pavements), and the tracks beside the footprint had stepped
+        # 2-5 m down off the lifted strip onto its slopes
+        rr_, cc_ = ctx.cells_of(foot.buffer(T["tunnel_reach"]))
+        if not len(rr_):
+            continue
+        r0, c0 = rr_.min(), cc_.min()
+        win = np.zeros((rr_.max() - r0 + 1, cc_.max() - c0 + 1), bool)
+        deck = ctx.dsm_low(3, "median")[rr_, cc_]
+        # (the laser's pulses slant under a deck's edge to the ground: Auerbach's saw it 2 m in under its north edge)
+        on_deck = np.zeros_like(win)
+        if ctx.n_ground is not None:
+            on_deck[rr_ - r0, cc_ - c0] = ctx.n_ground[rr_, cc_] == 0
+        on_deck = ndimage.binary_dilation(on_deck, np.ones((3, 3), bool), iterations=3)[rr_ - r0, cc_ - c0]
+        to = np.where(on_deck, np.maximum(street, np.round(deck_top[rr_, cc_])), street).astype(g.dtype)
+        dep = to - g[rr_, cc_]
+        cand = (deck - street >= k0) & (deck - street <= k1) & ((dep >= d0) | on_deck & (dep >= 1)) & (dep <= d1) \
+            & ~ctx.corridor[rr_, cc_]
+        win[rr_[cand] - r0, cc_[cand] - c0] = True
+        seed = np.zeros_like(win)
+        fr, fc = ctx.cells_of(foot)
+        seed[fr - r0, fc - c0] = True
+        low = ndimage.binary_propagation(seed & win, structure=np.ones((3, 3), bool), mask=win)[rr_ - r0, cc_ - c0]
+        g[rr_[low], cc_[low]] = to[low]
         n += int(low.sum())
     ctx.note("ground over short road tunnels lifted to the street crossing them:", n)
     return g
