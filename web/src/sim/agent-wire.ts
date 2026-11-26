@@ -6,10 +6,10 @@
 // between. Over the internet cars and people were ~95 % of a snapshot's bytes. The cars out of the traffic, the bodies
 // and the avatars are sent when they change, a body come to rest once (else every shot's bodies and wrecks were sent
 // whole every tick for as long as they lay near: 7 bodies were 57 kB/s). No three.js, no DOM.
-import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, CarState, CarWire, PersonState, PersonWire, TrainState, TrainWire } from './contract/agents';
+import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire, TrainState, TrainWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { AvatarState, AvatarWire, Snapshot } from './contract/snapshot';
+import type { AvatarState, AvatarWire, PlayerReads, Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
@@ -51,11 +51,13 @@ const drifts = (h: { s: number; v: number; tick: number }, s: number, v: number,
 /** how far (m; a quaternion's part, rad) a body's pose may move between two ticks and still be at rest, and stray from
  * the rest pose sent before it is sent again: a car's body standing in a queue jitters by a mm or so */
 export const STILL_M = 0.005, STILL_Q = 1e-3;
+const samePose = (a: BodyPose, b: BodyPose) => a.x === b.x && a.y === b.y && a.z === b.z && a.ride === b.ride && a.qx === b.qx
+  && a.qy === b.qy && a.qz === b.qz && a.qw === b.qw && a.lean === b.lean && a.wheelie === b.wheelie;
 const still = (a: BodyPose, b: BodyPose) => Math.abs(a.x - b.x) <= STILL_M && Math.abs(a.y - b.y) <= STILL_M && Math.abs(a.z - b.z) <= STILL_M
   && Math.abs(a.ride - b.ride) <= STILL_M && Math.abs(a.qx - b.qx) <= STILL_Q && Math.abs(a.qy - b.qy) <= STILL_Q
   && Math.abs(a.qz - b.qz) <= STILL_Q && Math.abs(a.qw - b.qw) <= STILL_Q && Math.abs((a.lean ?? 0) - (b.lean ?? 0)) <= STILL_Q
   && Math.abs((a.wheelie ?? 0) - (b.wheelie ?? 0)) <= STILL_Q;
-interface BodySent { gen: number; key: string; rest: BodyPose | null }
+interface BodySent { gen: number; key: string; rest: BodyPose | null; p1: BodyPose | null }
 
 /** what one session was sent of the traffic's cars and people: car and person give each one's wire form against it
  * at tick, or null when the client's reckoning of it holds (all of it when new to the session); the cars out of the
@@ -70,6 +72,7 @@ export class AgentWire {
   private readonly bodies = new Map<number, BodySent>();
   private readonly avatars = new Map<number, { gen: number; player: string; pose: WalkPose; prev: WalkPose }>();
   private gen = 0;
+  private playerKey = '';
 
   /** a car out of the traffic (as sent: sim/server/snapshot.ts carState), or null when unchanged */
   detachedCar(c: CarState): CarState | null {
@@ -79,17 +82,28 @@ export class AgentWire {
     return c;
   }
 
-  /** car id's body as drawn (wireBody's), or null when the client's copy holds. One at rest (its last two poses within
-   * STILL_*, no fade, no fall) is sent once as standing at its pose, then again only when it strays from it */
-  body(id: number, d: BodyDraw): BodyDraw | null {
-    const h = this.bodies.get(id), p = d.p1;
-    const rest = p && d.p0 && !d.fade && !d.drive?.fall && still(d.p0, p) ? p : null;
-    const w = rest ? { ...d, p0: rest } : d;
-    // (at rest: what it is besides its pose; else the whole draw)
-    const key = rest ? `${d.owns} ${d.body} ${d.drive?.wheelZ}` : JSON.stringify(w);
+  /** car id's body as drawn (wireBody's) at tick, or null when the client's copy holds. One at rest (its last two
+   * poses within STILL_*, no fade, no fall) is sent once as standing at its pose, then again only when it strays from
+   * it; a fade once (the client runs its t on with the ticks: it is the end of every body's run, ~3 kB/s sent whole);
+   * a moving one without the p0 the client was sent as its p1 */
+  body(id: number, d: BodyDraw, tick: number): BodyWire | null {
+    const h = this.bodies.get(id), p = d.p1, f = d.fade;
+    const rest = p && d.p0 && !f && !d.drive?.fall && still(d.p0, p) ? p : null;
+    const w: BodyWire = rest ? { ...d, p0: rest } : { ...d };
+    // (at rest: what it is besides its pose; else the whole draw, a fade by the tick it began)
+    const key = rest ? `${d.owns} ${d.body} ${d.drive?.wheelZ}` : JSON.stringify({ ...w, fade: f && { ...f, t: Math.round(tick - f.t / STEP) } });
     if (h && h.key === key && (!rest || (h.rest && still(h.rest, rest)))) { h.gen = this.gen; return null; }
-    this.bodies.set(id, { gen: this.gen, key, rest });
+    this.bodies.set(id, { gen: this.gen, key, rest, p1: w.p1 });
+    if (h?.p1 && w.p0 && samePose(h.p1, w.p0)) delete w.p0;
     return w;
+  }
+
+  /** the session's player's reads, or undefined when they are those sent before and it has no results */
+  player(p: PlayerReads): PlayerReads | undefined {
+    const key = JSON.stringify({ ...p, results: [] });
+    if (!p.results.length && key === this.playerKey) return undefined;
+    this.playerKey = key;
+    return p;
   }
 
   /** an avatar (its poses rounded), or null when it stands where it was sent standing; prev left out when it is the
@@ -205,24 +219,45 @@ export class AgentRead {
 
   constructor(private readonly L: (road: number) => number) {}
 
-  private readonly held = { detached: new Held<CarState>(), bodies: new Held<[number, BodyDraw]>(), avatars: new Held<AvatarState>() };
+  private readonly held = { detached: new Held<CarState>(), avatars: new Held<AvatarState>() };
+  // the bodies as sent, by car id, with the tick of the snapshot that sent each (a fade's t runs on from it)
+  private readonly bodies = new Map<number, { d: BodyDraw; at: number }>();
+  private bodyList: [number, BodyDraw][] = [];
+  private fades = 0;
 
   /** a new session: nothing of the last one's known */
   clear() {
     this.cars.clear(); this.people.clear(); this.trains.clear(); this.boats.clear();
     this.carList = []; this.lists = [[], []]; this.trainList = []; this.boatList = [];
     for (const h of Object.values(this.held)) h.clear();
+    this.bodies.clear(); this.bodyList = []; this.fades = 0;
   }
 
   /** the cars out of the traffic, the bodies and the avatars after a snapshot (s: its changed ones and gone) */
-  readHeld(s: Pick<Snapshot, 'detached' | 'bodies' | 'avatars' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[] } {
+  readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[] } {
     const H = this.held, A = H.avatars;
     return {
       detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[4]),
-      bodies: H.bodies.read(s.bodies.map((b) => [b[0], b]), s.gone[5]),
+      bodies: this.readBodies(s.bodies, s.gone[5], s.tick),
       // (prev left out: the pose sent before)
       avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[6]),
     };
+  }
+
+  // the bodies after the snapshot of tick (p0 left out: the p1 sent before; a fade's t run on from the tick it was sent)
+  private readBodies(changed: [number, BodyWire][], gone: readonly number[], tick: number): [number, BodyDraw][] {
+    const M = this.bodies;
+    for (const id of gone) M.delete(id);
+    for (const [id, w] of changed) M.set(id, { d: { ...w, p0: w.p0 === undefined ? M.get(id)?.d.p1 ?? w.p1 : w.p0 }, at: tick });
+    if (!gone.length && !changed.length && !this.fades) return this.bodyList;
+    this.fades = 0;
+    this.bodyList = [];
+    for (const [id, { d, at }] of M) {
+      const f = d.fade;
+      if (f) this.fades++;
+      this.bodyList.push([id, f && tick !== at ? { ...d, fade: { ...f, t: f.t + (tick - at) * STEP } } : d]);
+    }
+    return this.bodyList;
   }
 
   /** the cars after the snapshot of tick: its samples (one unknown or cut short is left out: it cannot be drawn) and

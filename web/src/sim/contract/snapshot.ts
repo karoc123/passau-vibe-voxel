@@ -4,7 +4,7 @@
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).
 import type { WorldOp } from '../../core/layers';
-import type { BodyDraw, BoatsWire, CarState, CarWire, PersonWire, TrainWire } from './agents';
+import type { BodyWire, BoatsWire, CarState, CarWire, PersonWire, TrainWire } from './agents';
 import type { CommandResult } from './commands';
 import type { CraftStates } from './crafts';
 import type { SimEvent } from './events';
@@ -53,6 +53,11 @@ export interface DriverSnapshot {
  * player */
 export interface TimeOfDay { hour: number; day: number }
 
+/** a session's player (id: the host names it, sim/server/sim-server.ts SimServer.connect) and its reads; results since
+ * the last snapshot (what their seat's entity did: events); ack: the session's last seat input taken (its seq, the
+ * tick it was applied in: the state here is that of tick, after it) */
+export interface PlayerReads { id: PlayerId; seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null }
+
 /** a session's world after a tick: the traffic's cars, people, trains and boats, the cars out of the traffic, the
  * bodies and the avatars as what changed for the session since its last snapshot (sim/agent-wire.ts: the client
  * keeps the rest; gone: those it holds no more), the rest whole. Its cars, people, bodies, walked, avatars, crafts
@@ -76,7 +81,7 @@ export interface Snapshot {
    * the bodies (by car id), the avatars, by id, gone from the session's sight (or from the world) */
   gone: [cars: number[], people: number[], trains: number[], boats: number[], detached: number[], bodies: number[], avatars: number[]];
   /** the cars with a body (or its fade), by car id, whose draw changed (one at rest: once, its p0 its p1) */
-  bodies: [number, BodyDraw][];
+  bodies: [number, BodyWire][];
   /** the trains: the samples since the session's last snapshot (contract/agents.ts TrainWire) */
   trains: TrainWire[];
   boats: BoatsWire | null;
@@ -88,9 +93,7 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
-  /** the session's player (id: the host names it, sim/server/sim-server.ts SimServer.connect) and its reads; results since
-   * the last snapshot (what their seat's entity did: events); ack: the session's last seat input taken (its seq, the
-   * tick it was applied in: the state here is that of tick, after it) */
-  player: { id: PlayerId; seat: Seat | null; driver: DriverSnapshot | null; results: CommandResult[]; ack: Ack | null };
+  /** the session's player and its reads, left out when they are those sent before and there are no results */
+  player?: PlayerReads;
   edits: EditNote[];
 }

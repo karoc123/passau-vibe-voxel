@@ -40,7 +40,7 @@ const fail = [];
 // wait, which the client works out its own way, and its place on its way within DRIFT (+ the rounding) on the ticks a
 // drift is sent, REACH between; each tick, all of the traffic's, so ids coming and going, ways changing and one sent
 // whole again are all crossed. The wire is the protocol: a field lost or misread draws a car in the wrong place.
-const { AgentWire, AgentRead, AGENT_TICKS, DRIFT, reckon } = await load('sim/agent-wire.ts');
+const { AgentWire, AgentRead, AGENT_TICKS, DRIFT, reckon, STILL_M, STILL_Q } = await load('sim/agent-wire.ts');
 const { STEP } = await load('sim/road-net.ts');
 const WIRE_M = 0.011, REACH = 0.3, wireOut = new AgentWire(), wireIn = new AgentRead((e) => b.sim.traffic.net.roads[e].L);
 let wireN = 0, wireSent = 0, wireHeld = 0, wireMax = 0;
@@ -151,9 +151,12 @@ if (maxLead > 2) fail.push(`the render clock fell ${maxLead.toFixed(2)} ticks be
 // car with a body is drawn alike by the sim (LifePhysics.pose, kept per tick) and from the snapshot of the tick the
 // client draws (TrafficMirror bodies.pose) at three alphas, alike within BODY_M m and BODY_RAD rad: a snapshot carries
 // positions to the mm and a body's rotation to 1e-5 (sim/agent-wire.ts wireBody), so its x, y, z may be a mm or two off
-// (the ride too), its angles far less; the same code drawing both is what is checked, not the bits.
+// (the ride too), its angles far less; the same code drawing both is what is checked, not the bits. A body sent at
+// rest (its p0 its p1) is drawn where it was sent until it strays by STILL_M, a quaternion's part by STILL_Q: so much
+// more (its origin also swung by the rotation's error over its ride).
 const BODY_M = 0.002, BODY_RAD = 0.0005;
-const alike = (x, y) => x.every((v, j) => Math.abs(j < 3 ? v - y[j] : Math.atan2(Math.sin(v - y[j]), Math.cos(v - y[j]))) <= (j < 3 ? BODY_M : BODY_RAD));
+const alike = (x, y, rest) => x.every((v, j) => Math.abs(j < 3 ? v - y[j] : Math.atan2(Math.sin(v - y[j]), Math.cos(v - y[j])))
+  <= (j < 3 ? BODY_M + (rest ? 2 * STILL_M : 0) : BODY_RAD + (rest ? 4 * STILL_Q : 0)));
 const bodyCounts = await bodies();
 async function bodies() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), { worldEdits: WE } = await load('host/node.ts');
@@ -193,8 +196,8 @@ async function bodies() {
         const m = mine.get(id);
         K.forEach((k, i) => {
           n.poses++;
-          const y = m && num(c.traffic.bodies.pose(m, k, under));
-          if ((!y || !alike(x[i], y)) && fail.length < 20) fail.push(`bodies f=${f} tick ${c.time.tick} car ${id} a=${k}: ${x[i].map((v) => v.toFixed(4))} vs ${y?.map((v) => v.toFixed(4))}`);
+          const y = m && num(c.traffic.bodies.pose(m, k, under)), d = c.traffic.draws.get(id);
+          if ((!y || !alike(x[i], y, d?.p0 && d.p1 && JSON.stringify(d.p0) === JSON.stringify(d.p1))) && fail.length < 20) fail.push(`bodies f=${f} tick ${c.time.tick} car ${id} a=${k}: ${x[i].map((v) => v.toFixed(4))} vs ${y?.map((v) => v.toFixed(4))}`);
         });
       }
     }

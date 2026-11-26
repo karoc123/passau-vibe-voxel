@@ -11,7 +11,7 @@
 //                                      session holds already of the agents, bodies and avatars too (wire)
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { Car } from '../types';
-import type { BodyDraw, CarState, CarWire, PersonWire, TrainWire } from '../contract/agents';
+import type { BodyWire, CarState, CarWire, PersonWire, TrainWire } from '../contract/agents';
 import { AgentWire, round, wireBody, wirePose } from '../agent-wire';
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
@@ -48,10 +48,10 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   const trains: TrainWire[] = [];
   for (const t of T.trains.save()) { const w = wire.train(t, tick); if (w) trains.push(w); }
   const boats = T.boats && wire.boatsOf(T.boats);
-  const bodies: [number, BodyDraw][] = [];
+  const bodies: [number, BodyWire][] = [];
   if (B?.drawState) for (const c of T.roadVehicles()) {
     if (S && !S.has('car', c.id)) continue;
-    const d = B.drawState(c), w = d && wire.body(c.id, wireBody(d));
+    const d = B.drawState(c), w = d && wire.body(c.id, wireBody(d), tick);
     if (w) bodies.push([c.id, w]);
   }
   const walked: [number, WalkPose][] = [];
@@ -76,7 +76,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     bodies, trains,
     boats,
     walked, avatars, crafts, events,
-    player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
+    player: wire.player({ id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } }),
     edits,
   };
 }

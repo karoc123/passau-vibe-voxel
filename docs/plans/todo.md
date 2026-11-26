@@ -14,16 +14,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Overload (target-architecture.md): only the first step is built, the crowd thinned to a fifth at most while a
   second's ticks average over 80 % of the tick (host/ws.ts). Next: cars, then the others' send rate; the page's own
   worker host has none.
-- Bytes with a round at one spot (gate `load`, 16 by the cathedral, a third firing): 20–30 kB/s mean per player,
-  over the 20 target; the gate holds 35. The bodies near craters, avatars and cars let go go whole every tick.
-  Half done (paused) on branch `worktree-agent-ac166447049eedf13`: resting ones sent once (PROTOCOL 20); gates not
-  run, the no-growth check in `load` and the 10/16-player numbers still to do.
 
 ## Later, in this order of likelihood
 
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
-  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25. What is left
-  is every tick's bodies (~4) and crafts (~4, a helicopter's core whole). Not measured: a busy square, a fight with
+  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
+  16 at the cathedral 13–16 (`load` holds 20). What is left is every tick's moving bodies (~5 kB/s raw each: the
+  traffic within 60 m of a crater) and crafts (~4, a helicopter's core whole, a parked one too). Not measured: a busy square, a fight with
   many craters (each ~90 B, but a late joiner gets a node's whole op list), a phone on 4G. Binary only after a Pi
   measurement. Trains are still simulated with spacing on the host (step 5: from the timetable).
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.

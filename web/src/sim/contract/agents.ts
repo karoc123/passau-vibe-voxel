@@ -92,6 +92,9 @@ export interface BodyDraw {
   drive: { wheelZ: number; fall: { side: number; until: number; tick: number } | null } | null;
   fade: { dx: number; dy: number; dz: number; dh: number; t: number; dur: number } | null;
 }
+/** a body's draw as a snapshot carries it (sim/agent-wire.ts): p0 left out when it is the p1 sent before (a moving
+ * body's last pose); a fade's t is that at the snapshot's tick, sent again only when it does not run on with the ticks */
+export type BodyWire = Omit<BodyDraw, 'p0'> & { p0?: BodyPose | null };
 
 /** a train as saved and loaded (sim/train-traffic.ts TrainTraffic save, load) */
 export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
