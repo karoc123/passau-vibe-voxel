@@ -289,9 +289,28 @@ async function dig() {
   return ctx;
 }
 
+// the focus moved to the moving car with one behind it nearest STREET (within FIND m: the tiles setup decodes reach
+// 400 m): where such a pair is after the warm-up follows from the seeded traffic over the whole network, so it moves
+// whenever the map's roads change (the F11 rebuild left none within 120 m of STREET, the nearest 216 m off)
+const FIND = 300;
+// ok(car): a further test the car must pass (block: nothing else where its block will land)
+function refocus(ctx, minV, ok = () => true) {
+  const cands = ctx.T.cars.filter((c) => !c.bus && c.v >= minV && behindOf(ctx, c))
+    .map((c) => { const p = drawn(ctx, c); return { c, p, d: Math.hypot(p.x - STREET.x, p.z - STREET.y) }; })
+    .filter((r) => r.d < FIND && ok(r.c)).sort((a, b) => a.d - b.d);
+  if (cands.length) ctx.focus = { x: Math.round(cands[0].p.x), z: Math.round(cands[0].p.z) };
+  return cands[0]?.c ?? null;
+}
+// the block 25 m ahead of car c (7 x 7 m) holds no other car's pose, within 3 m: a car caught as it lands is not what
+// the block check is about (the F11 data's nearest pair had an oncoming car crossing that square)
+const blockFree = (ctx, c) => {
+  const p = drawn(ctx, c), ax = p.x + Math.sin(p.h) * 25, az = p.z + Math.cos(p.h) * 25;
+  return ctx.T.cars.every((o) => { if (o === c) return true; const q = drawn(ctx, o); return Math.abs(q.x - ax) > 6.5 || Math.abs(q.z - az) > 6.5; });
+};
+
 async function block() {
   const ctx = await setup(STREET), { T, phys } = ctx;
-  const car = pickCar(ctx, -99, 6, true);
+  const car = refocus(ctx, 6, (c) => blockFree(ctx, c));
   if (!check(car, `a moving car with one behind it near (${ctx.focus.x}, ${ctx.focus.z})`)) return null;
   const p = drawn(ctx, car), h = p.h, ax = p.x + Math.sin(h) * 25, az = p.z + Math.cos(h) * 25;
   const op = { kind: 'box', x: Math.floor(ax) - 3, y: Math.floor(az) - 3, z: Math.floor(p.y), w: 7, d: 7, h: 3, id: 30 };
@@ -331,6 +350,7 @@ async function wreck() {
   const ctx = await setup(STREET), { T, phys } = ctx;
   // (an edit that changes nothing, round the focus: the cars near it get bodies; then a moving one with a body and
   // one behind it is wrecked)
+  refocus(ctx, 5);
   const f = ctx.focus;
   ctx.sim.edited([f.x - 40, f.z - 40, f.x + 40, f.z + 40]);
   let car = null;
