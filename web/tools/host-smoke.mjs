@@ -11,7 +11,9 @@
 // through sim.worker.ts greet and handle) takes the host's hello when it matches its own, and refuses it (client.hello
 // rejects naming what differs; the session left, no snapshot taken) when the protocol, the data build or the tuning
 // differ; the tuning's hash is the same for a copy of the tuning with its keys in another order or another host-only
-// number (the edits' keeping), another for one craft number.
+// number (the edits' keeping), another for one craft number. Then the host's own: the players it names
+// (SimServer.connect: new ids), its start config read from a page's query (host/start.ts hostStart: the parameters,
+// the defaults), and the worker's init carrying nothing but the page's query.
 // usage (in web/): node tools/host-smoke.mjs [-v]; prints PASS with the counts, or FAIL
 import crypto from 'node:crypto';
 import { DATA, hasData, load } from './real-city.mjs';
@@ -19,7 +21,7 @@ import { DATA, hasData, load } from './real-city.mjs';
 if (!hasData()) { console.log(`SKIP host-smoke: no ${DATA}meta.json / traffic.json`); process.exit(0); }
 const verbose = process.argv.includes('-v');
 const FRAMES = 240, FPS = 30, P2 = 'p2';
-const { nodeHost, readHostData, worldEdits: WE } = await load('host/node.ts'), { PAGE_PLAYER } = await load('host/sim-host.ts');
+const { nodeHost, readHostData, worldEdits: WE } = await load('host/node.ts');
 const { handle, greet } = await load('host/sim.worker.ts');
 const data = readHostData(DATA), raw = structuredClone(data.traffic);
 const spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
@@ -30,7 +32,7 @@ const tick = () => new Promise((r) => setImmediate(r)); // (the node files' load
 function start() {
   const server = nodeHost(DATA, { seed: 3, world: 'tiles', physics: { bodies: true } },
     { ...data, traffic: structuredClone(raw) });
-  return { server, a: server.connect(PAGE_PLAYER), b: server.connect(P2) };
+  return { server, a: server.connect(), b: server.connect(P2) };
 }
 // the frame f's commands for each session (the first follows a car at 1 s, the second a person at 2 s)
 function commands(server, f) {
@@ -67,7 +69,7 @@ async function worker() {
     handle(a, { kind: 'frame', dt: 1 / FPS, commands: c.a }, post);
     const m = posted.pop();
     if (m?.kind !== 'snapshot' || posted.length) throw new Error(`frame ${f}: posted ${JSON.stringify(m?.kind)} (${posted.length} more)`);
-    const seen = server.sim.players.get(PAGE_PLAYER)?.view?.focus;
+    const seen = server.sim.players.get(a.player)?.view?.focus;
     if (seen?.x !== focus.x || seen?.z !== focus.z) throw new Error(`frame ${f}: the view not taken`);
     out.push(hash(m.snapshot), hash(b.snapshot()));
     await tick();
@@ -92,7 +94,7 @@ async function edits() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), listened = WE.liveEdits['listeners'].size;
   const server = nodeHost(DATA, { seed: 3, world: 'tiles', edits: true, physics: { bodies: false } },
     { ...data, traffic: structuredClone(raw) });
-  const a = server.connect(PAGE_PLAYER), b = server.connect(P2), sim = server.sim, T = sim.traffic, frame = frameOf(data.meta);
+  const a = server.connect(), b = server.connect(P2), sim = server.sim, T = sim.traffic, frame = frameOf(data.meta);
   let f = 0;
   const update = () => { a.send(VIEW); setTime(server, f++); server.update(1 / FPS); };
   const run = async (n) => { for (let i = 0; i < n; i++) { update(); await tick(); } };
@@ -144,12 +146,26 @@ const ed = await edits();
 fail.push(...ed.out);
 const diff = (x, y, what) => {
   const i = x.out.findIndex((h, k) => h !== y.out[k]);
-  if (i >= 0) fail.push(`${what}: frame ${i >> 1} session ${i & 1 ? P2 : PAGE_PLAYER} differs`);
+  if (i >= 0) fail.push(`${what}: frame ${i >> 1} session ${i & 1 ? P2 : 'p1'} differs`);
 };
 diff(r1, r2, 'run twice');
 diff(r1, w, 'through the worker\'s handle');
 if (!T.cars.length || !T.people.length) fail.push(`no traffic (${T.cars.length} cars, ${T.people.length} people)`);
-if (w.last.player.id !== PAGE_PLAYER) fail.push(`the worker's snapshot names ${w.last.player.id}`);
+if (w.last.player.id !== 'p1') fail.push(`the worker's snapshot names ${w.last.player.id}, not the host's first id p1`);
+// the host names its players (SimServer.connect without an id: a new one no session holds)
+{
+  const ids = [r1.server.connect(), r1.server.connect()].map((s) => (s.leave(), s.player));
+  if (ids.includes('p1') || ids.includes(P2) || ids[0] === ids[1]) fail.push(`connect: the host's new ids ${ids} (held: p1, ${P2})`);
+}
+// the host's start config from the page's URL (host/start.ts): the parameters as the page had them, the defaults
+const { hostStart } = await load('host/start.ts'), { goldenHour, dayOfDate } = await load('sim/sun.ts');
+{
+  const now = new Date(2026, 10, 26, 9), s = hostStart('seed=7&mode=x&dig=1&lifephys=0&lpnear=50&lpmax=9&date=06-21&hour=13.5', now);
+  const want = { seed: 7, mode: 'x', edits: true, eager: true, physics: { bodies: false, near: 50, maxBodies: 9 }, time: { day: 172, hour: 13.5 } };
+  if (JSON.stringify(s) !== JSON.stringify(want)) fail.push(`hostStart: ${JSON.stringify(s)}`);
+  const d = hostStart('', now, () => 0.5), today = dayOfDate(2026, 10, 26);
+  if (d.seed !== 2 ** 31 || d.mode !== undefined || d.edits || !d.physics.bodies || d.time.day !== today || d.time.hour !== goldenHour(today, 2026)) fail.push(`hostStart defaults: ${JSON.stringify(d)}`);
+}
 
 // the hello, through every transport
 const { hello, tuningHash } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
@@ -172,6 +188,7 @@ globalThis.Worker = class {
   postMessage(m) {
     const post = (x) => queueMicrotask(() => this.onmessage?.({ data: structuredClone(x) }));
     m = structuredClone(m);
+    if (m.kind === 'init' && (typeof m.query !== 'string' || Object.keys(m).length !== 3)) fail.push(`the worker's init carries more than the page's query: ${JSON.stringify(m)}`);
     if (m.kind === 'init') { workerSession = host.connect('w'); greet(workerSession, post); post({ kind: 'ready' }); } else handle(workerSession, m, post);
   }
   terminate() { terminated++; workerSession?.leave(); }
@@ -179,7 +196,7 @@ globalThis.Worker = class {
 const transports = {
   thread: (h) => { const s = host.connect('l'); return { client: new MirrorSimClient(new ThreadLink(s), structuredClone(raw), null, h), session: s }; },
   mirror: (h) => { const s = host.connect('m'); return { client: new MirrorSimClient(new CloneLink(new ThreadLink(s)), structuredClone(raw), null, h), session: s }; },
-  worker: (h) => { const client = new MirrorSimClient(new WorkerLink({ seed: 3, physics: { bodies: false }, eager: false, edits: false }), structuredClone(raw), null, h);
+  worker: (h) => { const client = new MirrorSimClient(new WorkerLink('seed=3'), structuredClone(raw), null, h);
     return { client, get session() { return workerSession; } }; },
 };
 const cases = [['matching', mine, null], ['protocol', { ...mine, protocol: mine.protocol + 1 }, 'protocol'],

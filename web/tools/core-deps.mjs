@@ -147,6 +147,7 @@ const LAYERS = [
   ['sim/tuning.ts', 'shared'], ['sim/types.ts', 'shared'], ['sim/traffic-pack.ts', 'shared'], ['sim/walk-bounds.ts', 'shared'],
   ['sim/seat-reads.ts', 'shared'], // (a reader's reads of the event log: a session's, a mirror client's; A7)
   ['sim/hello.ts', 'shared'], // (the hello: made by the host, checked by the client; A6)
+  ['sim/sun.ts', 'shared'], // (the sun's maths: the page's light, the host's start time)
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
   ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
