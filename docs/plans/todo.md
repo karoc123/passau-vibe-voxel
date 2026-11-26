@@ -19,12 +19,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Bandwidth for internet play, phones included (owner 2026-11-26). Target <= 20 kB/s mean, 50 kB/s peak. Now at the
   cathedral (deflated, per player): ~50 kB/s on foot, ~55 driving, ~130 in the helicopter (350 cars in its 1 km);
   ws-smoke holds it under 120. Levers left: agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars at 30 Hz
-  (~9 on foot); trains (~9 kB/s now) and boats as timetables; edits as ops. Binary only after a Pi measurement.
+  (~9 on foot); trains (~9 kB/s now) and boats as timetables. Binary only after a Pi measurement.
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
-- An edited node crosses the network host whole (its columns, base64 in JSON; ~1 MB a node, to every player): sending
-  the ops for the page to apply over its own node files would be far smaller.
 
 ## On hold until the game is decided (owner 2026-11-24)
 

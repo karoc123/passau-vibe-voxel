@@ -14,8 +14,10 @@
 // A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
 // what the player held is gone with the old session.
 // No three.js, no DOM. The client never imports the server.
-import type { WorldOp } from '../core/world-edits';
-import { LiveEdits } from '../core/live-edits';
+import { editNode, opRegion, type WorldOp } from '../core/world-edits';
+import { LiveEdits, type LiveNode, type Region } from '../core/live-edits';
+import type { Frame } from '../core/layers';
+import type { NodeView, TileCache } from '../core/tile-cache';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
 import { CORES } from '../sim/craft/cores';
@@ -25,7 +27,7 @@ import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
-import type { Ack, AvatarState, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
+import type { Ack, AvatarState, DriverSnapshot, EditNote, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
 import { AgentRead } from '../sim/agent-wire';
@@ -216,12 +218,16 @@ export class MirrorSimClient implements SimClient {
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
+  // the nodes whose edits wait for their files, by "tx_ty": each note after the one before
+  private readonly editing = new Map<string, Promise<unknown>>();
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
    * mine: the client's own hello (this code, the build the app loaded); edits: the client's live edits, the snapshots'
-   * edits put into them */
+   * edits applied into them over the node files of tiles (its TileCache over these edits, the world's frame; none:
+   * the edits are not applied) */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
-    readonly edits: LiveEdits = new LiveEdits()) {
+    readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null) {
+    if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
     link.onHello = (h) => this.greet(h);
@@ -333,14 +339,20 @@ export class MirrorSimClient implements SimClient {
     if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
     B.push(this.traffic.read(s));
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
-    for (const e of s.edits) this.edits.set(e.tx, e.ty, e.node, e.region);
+    for (const e of s.edits) this.takeEdit(e);
     this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
     const P = s.player;
     for (const r of P.results) {
       const p = r.kind === 'edit' && r.ref !== undefined ? this.pending.get(r.ref) : undefined;
-      if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
+      if (p) {
+        this.pending.delete(r.ref!);
+        const nodes = r.nodes;
+        // (answered once the page's own nodes show it)
+        if (nodes) void Promise.all(nodes.map(([tx, ty]) => this.editing.get(`${tx}_${ty}`))).then(() => p.done(nodes));
+        else p.fail(new Error('edit failed'));
+      }
       this.outcomes.push(r);
     }
     // (which crafts there are and who pilots them: at once; a new one's pose from here until a snapshot with it is drawn)
@@ -353,6 +365,47 @@ export class MirrorSimClient implements SimClient {
       seen.add(c.id);
     }
     for (const id of L.keys()) if (!seen.has(id)) L.delete(id);
+  }
+
+  // an edit note applied now, or once its node's files are in (after the notes on the node before it)
+  private takeEdit(n: EditNote) {
+    const T = this.tiles;
+    if (!T) return;
+    const k = `${n.tx}_${n.ty}`, before = this.editing.get(k);
+    if (!before && this.applyEdit(n)) return;
+    const { cache } = T;
+    const run = (before ?? Promise.resolve()).then(() => cache.acquire(n.tx, n.ty).then(() => {
+      try { if (!this.applyEdit(n)) console.warn(`sim-client: node ${k} not in for its edit`); } finally { cache.release(n.tx, n.ty); }
+    }, () => console.warn(`sim-client: node ${k}'s files for its edit failed`)));
+    this.editing.set(k, run);
+    void run.then(() => { if (this.editing.get(k) === run) this.editing.delete(k); });
+  }
+
+  // note n applied over the client's copy of its node; false: its columns are not at hand (its files to load first)
+  private applyEdit(n: EditNote): boolean {
+    const { cache, frame } = this.tiles!, E = this.edits, live = E.get(n.tx, n.ty);
+    if (!n.ops) { E.set(n.tx, n.ty, null); return true; }
+    const have = live?.ops ?? [];
+    let ops = n.ops;
+    if (n.from !== have.length) {
+      // (a new session sends a node's ops from its first again: those applied already skipped, unless the history
+      // differs: then from the files)
+      const k = have.length - n.from, same = (a: WorldOp, b: WorldOp) => JSON.stringify(a) === JSON.stringify(b);
+      if (n.from === 0 && k > 0 && ops.length >= k && ops.slice(0, k).every((op, i) => same(op, have[i]))) ops = ops.slice(k);
+      else if (n.from === 0) E.set(n.tx, n.ty, null);
+      else console.warn(`sim-client: node ${n.tx}_${n.ty} sent ops from ${n.from}, ${have.length} applied`);
+    }
+    if (!ops.length) return true;
+    const v = cache.view(n.tx, n.ty);
+    if (!v) return false;
+    let node: LiveNode = { base: v.base, foliage: v.foliage, ops: E.get(n.tx, n.ty)?.ops ?? [] }, region: Region = null;
+    for (const op of ops) {
+      node = editNode(frame, n.tx, n.ty, { base: node.base, foliage: node.foliage as NodeView['foliage'], edited: true }, op, node.ops ?? []);
+      const r = opRegion(frame, op);
+      region = region ? [Math.min(region[0], r[0]), Math.min(region[1], r[1]), Math.max(region[2], r[2]), Math.max(region[3], r[3])] : r;
+    }
+    E.set(n.tx, n.ty, node, region);
+    return true;
   }
 
   eventsSince(tick: number) {

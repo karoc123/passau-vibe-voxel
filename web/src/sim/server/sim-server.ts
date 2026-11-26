@@ -11,12 +11,12 @@
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
 //              one), and what the connection has read: the events (its last snapshot's tick), the outcomes of its
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
-//              driverNotes), its last seat input taken (ack), the world's edits not yet sent, what it was sent
+//              driverNotes), its last seat input taken (ack), the world's edits' ops it was sent (EditFeed), what it was sent
 //              (its sight: what is near its player). Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
 //              and drops the player from the world sim
 import { liveEdits } from '../../core/live-edits';
-import { ready, touched, type WorldOp } from '../../core/world-edits';
+import { nodeMetres, ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
 import type { Hello } from '../contract/hello';
@@ -75,8 +75,8 @@ export class SimServer {
    * ...); its commands are the player's, its client learns it from its snapshots (Snapshot player) */
   connect(player: PlayerId = this.newPlayer()): Session {
     const s = new Session(this, player);
-    // (one joining late is sent the world's edits as they are: the craters made before it came)
-    if (this.tracking) s.edits = [...liveEdits.entries()].map(([tx, ty, node]) => ({ tx, ty, node, region: null }));
+    // (one joining late is sent the ops of the edited nodes near it: the craters made before it came)
+    if (this.tracking) s.edits = new EditFeed();
     this.sessions.add(s);
     return s;
   }
@@ -101,8 +101,8 @@ export class SimServer {
   trackEdits() {
     if (this.tracking) return;
     this.tracking = true;
-    for (const s of this.sessions) s.edits ??= [];
-    this.disposers.push(liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); }));
+    for (const s of this.sessions) s.edits ??= new EditFeed();
+    this.disposers.push(liveEdits.listen((tx, ty, node) => { if (!node) for (const s of this.sessions) s.edits?.dropped(tx, ty); }));
   }
 
   /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first); the blasts'
@@ -126,7 +126,7 @@ export class SimServer {
   holdEdit(from: Session, cmd: Edit) {
     const send = (release: () => void) => {
       if (!this.sessions.has(from)) { release(); return; }
-      this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) from.edited(r); });
+      this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) { for (const [tx, ty] of r.nodes ?? []) from.edits?.mine.add(`${tx}_${ty}`); from.edited(r); } });
     };
     if (this.sim.mayEdit(from.player, cmd.op)) this.hold(cmd.op, send);
     else this.held = this.held.then(() => send(() => {}));
@@ -154,8 +154,8 @@ export class Session {
   private readonly sight: Sight | null;
   // what it was sent of the traffic's cars and people (a snapshot carries what changed since)
   private readonly wire = new AgentWire();
-  /** the world's edits since the last snapshot, when tracked (SimServer.trackEdits) */
-  edits: EditNote[] | null = null;
+  /** the world's edits it was sent, when tracked (SimServer.trackEdits) */
+  edits: EditFeed | null = null;
 
   /** (made by SimServer.connect) */
   constructor(readonly server: SimServer, readonly player: PlayerId) {
@@ -220,6 +220,43 @@ export class Session {
   snapshot(): Snapshot {
     const since = this.since;
     this.since = this.sim.tick;
-    return takeSnapshot(this.sim, this.player, since, this.results(), this.edits?.splice(0) ?? [], this.acked, this.sight, this.wire);
+    const s = takeSnapshot(this.sim, this.player, since, this.results(), [], this.acked, this.sight, this.wire);
+    const S = this.sight;
+    if (this.edits) s.edits = this.edits.take(S?.somewhere ? (x, z, d) => S.near(x, z, S.r.other + d) : null);
+    return s;
+  }
+}
+
+/** what a session was sent of the world's edits: each edited node's ops, the new ones each snapshot, once it is near
+ * the player (an op is ~70 bytes where the node's columns are ~1 MB; the client applies them over its own files) */
+export class EditFeed {
+  // the ops sent by node ("tx_ty"); the nodes given their files again since (sent as such, then from their first op)
+  private readonly sent = new Map<string, number>();
+  private readonly reset = new Set<string>();
+  /** the nodes the session's own edits changed: sent wherever the player is (a dig at the far end of the view) */
+  readonly mine = new Set<string>();
+
+  dropped(tx: number, ty: number) { if (this.sent.has(`${tx}_${ty}`)) this.reset.add(`${tx}_${ty}`); }
+
+  /** the notes since the last call; near(x, z, d): whether map point (x, z) is within the sight's radius + d of the
+   * player (null: everything is near). A node once sent stays sent, near or not: its ops after must follow */
+  take(near: ((x: number, z: number, d: number) => boolean) | null): EditNote[] {
+    const out: EditNote[] = [];
+    for (const k of this.reset) {
+      const [tx, ty] = k.split('_').map(Number);
+      out.push({ tx, ty, from: 0, ops: null });
+      this.sent.delete(k);
+    }
+    this.reset.clear();
+    // (no node edited: no world to edit perhaps)
+    const N = liveEdits.size ? nodeMetres() : 0;
+    for (const [tx, ty, node] of liveEdits.entries()) {
+      const k = `${tx}_${ty}`, n = this.sent.get(k) ?? 0, ops = node.ops ?? [];
+      if (ops.length <= n) continue;
+      if (!n && near && !this.mine.has(k) && !near((tx + 0.5) * N, (ty + 0.5) * N, N * Math.SQRT1_2)) continue;
+      out.push({ tx, ty, from: n, ops: ops.slice(n) });
+      this.sent.set(k, ops.length);
+    }
+    return out;
   }
 }

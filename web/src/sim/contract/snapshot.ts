@@ -3,7 +3,7 @@
 // takeSnapshot, read by its TrafficMirror). Plain data, structured-cloneable: it crosses to the page from a Web Worker
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).
-import type { LiveNode, Region } from '../../core/live-edits';
+import type { WorldOp } from '../../core/layers';
 import type { BodyDraw, BoatView, CarState, CarWire, PersonWire, TrainState } from './agents';
 import type { CommandResult } from './commands';
 import type { CraftStates } from './crafts';
@@ -20,9 +20,10 @@ export type CraftState<K extends CraftType = CraftType> =
  * and at the tick before (drawn between them) */
 export interface AvatarState { id: number; player: PlayerId; pose: WalkPose; prev: WalkPose }
 
-/** a level-1 node edited (its columns now) or given its files again (null) since the last snapshot (a worker's: the
- * page's live edits follow the world's) */
-export interface EditNote { tx: number; ty: number; node: LiveNode | null; region: Region }
+/** a level-1 node's edits since the last snapshot: the ops from its from-th on, which the client applies in order over
+ * its own copy of the node (core/world-edits.ts editNode: the same columns as the host's); ops null: the node is its
+ * files again */
+export interface EditNote { tx: number; ty: number; from: number; ops: WorldOp[] | null }
 
 /** the last seat input a session sent that its player's seat took: its seq (the client's number), the tick it was
  * first applied in */

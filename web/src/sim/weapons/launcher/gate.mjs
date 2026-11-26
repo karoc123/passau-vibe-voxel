@@ -1,8 +1,9 @@
 // The grenade launcher's gate, on a synthetic world (flat ground, a wall; node files a real host reads: tools/lib.mjs
 // synthData, host/node.ts nodeHost, a few seconds): players on foot through the host, each with a client of its
 // snapshots. A grenade flies (launch), bursts on the wall (blast) and leaves a crater of the blast's radius: every cell
-// within it air, every one beyond it as it was; the same nodes in every client's live edits as in the host's, also in
-// those of a player who joins after and of one whose snapshots cross as JSON (the network host's frames); kept when
+// within it air, every one beyond it as it was. The crater crosses as its op, to the players near it only (one far
+// off is sent it once it looks near), and each client applies it over its own node files: the same columns, cell for
+// cell, as the host's, also for a player who joins after and one whose snapshots cross as JSON; kept when
 // nobody has been near for longer than the edits' keeping. A grenade bursts on a body, which stays as it was. A held
 // trigger fires at most one each 1.5 s; one far off is sent neither flight nor blast; the others are told the slot in a
 // player's hand. The view draws the flight and the blast and lets them go, an avatar's gun is its slot's, each weapon
@@ -11,10 +12,11 @@
 // usage (in web/): node src/sim/weapons/launcher/gate.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from '../../../../tools/lib.mjs';
 
-const { nodeHost, worldEdits } = await imp('src/host/node.ts');
+const { nodeHost, nodeTileCache, worldEdits } = await imp('src/host/node.ts');
+const { LiveEdits } = await imp('src/core/live-edits.ts');
+const { frameOf } = await imp('src/core/layers.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { bytesOut, bytesIn } = await imp('src/core/json-bytes.ts');
 const { weaponIn } = await imp('src/sim/weapons/index.ts');
 const { PRESENCE } = await imp('src/sim/tuning.ts');
 
@@ -30,16 +32,29 @@ server.trackEdits();
 const N = data.meta.tiles.N, live = worldEdits.liveEdits;
 
 const traffic = () => ({ roads: [], peds: [], ctrls: [] });
-// json: the snapshots cross as the network host sends them (JSON with its typed arrays packed)
+// a client applies the edits' ops over its own node files, as the page does over its TileCache
+const client = (link, hello) => {
+  const edits = new LiveEdits();
+  return new MirrorSimClient(link, traffic(), null, hello, edits, { cache: nodeTileCache(dir, N, edits), frame: frameOf(data.meta) });
+};
+// the edits the snapshots carried: the ops (not the nodes' columns), and their bytes as JSON
+let opNotes = 0, opBytes = 0, notOps = 0;
+
+// json: the snapshots cross as the network host sends them (JSON)
 const player = (name, x, z, json = false) => {
   const s = server.connect(name), link = sessionLink(s);
-  const c = new MirrorSimClient(json ? jsonLink(link) : new CloneLink(link), traffic(), null, server.hello);
+  const c = client(json ? jsonLink(link) : new CloneLink(link), server.hello);
+  const take = link.onSnapshot;
+  link.onSnapshot = (snap) => {
+    for (const e of snap.edits) { opNotes++; opBytes += JSON.stringify(e).length; if (e.ops && !e.ops.every((o) => o.kind === 'sphere')) notOps++; }
+    take(snap);
+  };
   c.send({ kind: 'view', view: { focus: { x, z } } });
   c.send({ kind: 'request', request: { kind: 'walk', pose: { x, y: G, z, h: Math.PI / 2, moving: false, arm: 2 } } });
   return { c, link };
 };
 const jsonLink = (link) => {
-  const trip = (v) => JSON.parse(JSON.stringify(v, bytesOut), bytesIn), out = { onHello() {}, onSnapshot() {}, send: (c) => link.send(c), close: () => link.close() };
+  const trip = (v) => JSON.parse(JSON.stringify(v)), out = { onHello() {}, onSnapshot() {}, send: (c) => link.send(c), close: () => link.close() };
   link.onHello = (h) => out.onHello(trip(h));
   link.onSnapshot = (s) => out.onSnapshot(trip(s));
   return out;
@@ -108,18 +123,27 @@ check(hc.ok, `the crater: ${hc.text}`);
 
 // the same edit for everyone: every client's nodes as the host's
 const nodesOf = () => [...live.entries()].map(([tx, ty]) => [tx, ty]);
+const bytes = (a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+const eq = (a, b) => !!a && !!b && a.constructor === b.constructor && bytes(a).equals(bytes(b));
+// (cell for cell: the columns and the ground, the foliage's too)
 const same = (c) => nodesOf().length > 0 && nodesOf().every(([tx, ty]) => {
   const h = live.get(tx, ty), e = c.edits.get(tx, ty);
-  return e && e.base.runs instanceof Uint16Array && e.base.counts instanceof Uint16Array
-    && Buffer.from(e.base.runs.buffer, e.base.runs.byteOffset, e.base.runs.byteLength).equals(Buffer.from(h.base.runs.buffer, h.base.runs.byteOffset, h.base.runs.byteLength))
-    && e.base.counts.every((v, i) => v === h.base.counts[i]);
+  return e && ['counts', 'runs', 'ground'].every((k) => eq(e.base[k], h.base[k]) && eq(e.foliage[k], h.foliage[k]));
 });
-check(same(A.c) && same(B.c) && same(C.c), `every client has the crater's ${nodesOf().length} node(s) as the host has them`);
+// (a client loads a node's files before it applies the ops: a few ticks)
+const settle = async (ok) => { for (let i = 0; i < 100 && !ok(); i++) await tick(); };
+await settle(() => same(A.c) && same(B.c));
+check(same(A.c) && same(B.c), `A and B have the crater's ${nodesOf().length} node(s) as the host has them, cell for cell`);
+check(opNotes > 0 && notOps === 0 && opBytes / opNotes < 200, `the crater crosses as its op: ${opNotes} note(s) of ${(opBytes / opNotes).toFixed(0)} bytes`);
+check(C.c.edits.size === 0, 'C, 250 m off, is sent none of it');
 const D = player('d', 44, 120), E = player('e', 46, 122, true);
 all.push(D, E);
-await tick(2);
+await settle(() => same(D.c) && same(E.c));
 check(same(D.c), 'a player who joins after has them');
-check(same(E.c), 'one whose snapshots cross as JSON (the network host\'s) has them too');
+check(same(E.c), "one whose snapshots cross as JSON (the network host's) has them too");
+C.c.send({ kind: 'view', view: { focus: { x: 70, z: 128 } } });
+await settle(() => same(C.c));
+check(same(C.c), 'C has them once it looks near');
 
 // at B's body: it bursts there, B is still on foot where it was
 await tick(50);
@@ -139,6 +163,11 @@ for (let i = 0; i < 9 / STEP; i++) { fire(0.6, 0); await tick(); }
 const n = of(A.c, t0, 'launch').length, most = Math.floor(9 / 1.5) + 1;
 check(n >= most - 2 && n <= most, `a held trigger launches ${n} grenades in 9 s (at most ${most})`);
 check(weaponIn(2)?.id === 'launcher', 'the launcher is in slot 2');
+
+// (many ops on the same nodes: each client applies them in the order the host did)
+const opsOn = () => Math.max(...nodesOf().map(([tx, ty]) => live.get(tx, ty).ops.length));
+await settle(() => all.every((p) => same(p.c)));
+check(opsOn() > 3 && all.every((p) => same(p.c)), `after ${opsOn()} ops on a node every client has the craters' nodes as the host has them`);
 
 // kept: everyone gone far off, for longer than the edits' keeping
 await tick(Math.ceil(6 / STEP));
@@ -186,7 +215,7 @@ server.dispose();
   const host = serve({ dir, host: '127.0.0.1', port: 0, query: 'interest=80', log: () => {}, clock: (t) => { step = t; return () => {}; } });
   const port = await host.port;
   const join = (x, z) => {
-    const link = new SocketLink(`ws://127.0.0.1:${port}`), c = new MirrorSimClient(link, traffic(), null, host.server.hello);
+    const link = new SocketLink(`ws://127.0.0.1:${port}`), c = client(link, host.server.hello);
     c.send({ kind: 'view', view: { focus: { x, z } } });
     c.send({ kind: 'request', request: { kind: 'walk', pose: { x, y: G, z, h: Math.PI / 2, moving: false } } });
     return c;
@@ -199,7 +228,7 @@ server.dispose();
   P.send({ kind: 'fire', slot: 2, h: Math.PI / 2, pitch: 0.1 });
   let b = null;
   for (let i = 0; i < 120 && !b; i++) { await run([P], 1); b = P.eventsSince(t).find((e) => e.kind === 'blast'); }
-  // (a node's columns are a large frame: ticks until it is in)
+  // (the client loads the node files before it applies the ops: ticks until they are in)
   const until = async (cs, ok) => { for (let i = 0; i < 3000 && !ok(); i++) await run(cs, 1); };
   await until([P], () => P.edits.size > 0);
   const L = join(44, 120);

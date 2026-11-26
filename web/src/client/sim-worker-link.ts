@@ -2,7 +2,6 @@
 // posts a snapshot after each tick; the page only sends its commands. The worker's first message is its session's
 // hello (handed to the client, onHello); closed (the client refused it): the worker is ended. The same messages reach
 // a host on another machine over a WebSocket (SocketLink).
-import { bytesIn } from '../core/json-bytes';
 import type { SimLink } from './sim-client';
 import type { SimCommand } from '../sim/contract/commands';
 import type { Snapshot } from '../sim/contract/snapshot';
@@ -83,7 +82,7 @@ export class SocketLink implements SimLink {
     };
     ws.onmessage = (e: MessageEvent<string>) => {
       if (this.closed) return;
-      for (const m of JSON.parse(e.data, bytesIn) as FromWorker[]) receive(this, m);
+      for (const m of JSON.parse(e.data) as FromWorker[]) receive(this, m);
     };
     ws.onclose = () => {
       if (this.closed || ws !== this.ws) return;
