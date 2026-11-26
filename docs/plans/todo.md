@@ -16,6 +16,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   worker host has none.
 - Bytes with a round at one spot (gate `load`, 16 by the cathedral, a third firing): 20–30 kB/s mean per player,
   over the 20 target; the gate holds 35. The bodies near craters, avatars and cars let go go whole every tick.
+  Half done (paused) on branch `worktree-agent-ac166447049eedf13`: resting ones sent once (PROTOCOL 20); gates not
+  run, the no-growth check in `load` and the 10/16-player numbers still to do.
 
 ## Later, in this order of likelihood
 
