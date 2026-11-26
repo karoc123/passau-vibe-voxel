@@ -47,6 +47,11 @@ PLACES = {
     # up the Inn (OSM way 27661875: the power plant's outline, its weir way 273300967)
     "Kraftwerk Passau-Ingling": dict(en="Passau-Ingling dam", kind="Inn dam and power plant", alt="Innkraftwerk Ingling Stauwehr",
                                      at=(827332, 5387341), r=15, far=5000),
+    # Kohlbruck (OSM place node 6309488313; the pool's hall, way 1098451824, in way 8093850; the shelter's node 9751328823)
+    "Kohlbruck": dict(kind="district", at=(825444, 5387301), far=5000),
+    "Passauer Erlebnisbad": dict(en="Passau leisure pool", kind="swimming pool", alt="PEB Hallenbad Freibad",
+                                 at=(825363, 5387856), r=40, far=3000),
+    "Tierheim Passau": dict(en="Passau animal shelter", kind="animal shelter", at=(826473, 5386977), r=12, far=1500),
     # Ilzstadt, Hals and up the Ilz
     "St. Salvator": dict(kind="church", alt="Salvatorkirche", at=(829895, 5390065), r=12, far=3000),
     "St. Bartholomäus": dict(kind="church", at=(830061, 5390157), r=12, far=3000),

@@ -4,7 +4,7 @@
  "crs": 25832,
  "grid": {"x0": 827371, "y0": 5390500},
  "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
- "map": {"col0": -6144, "row0": -2048, "cols": 9344, "rows": 5504},
+ "map": {"col0": -6144, "row0": -2048, "cols": 9344, "rows": 5760},
  "base": 287,
  "rivers": {"level": 290.921, "stretches": [
   {"name": "Danube above the Kachlet dam (and the Gaißa)", "box": [821000, 5388900, 824880, 5392600], "level": 299.75},
@@ -38,17 +38,19 @@
   {"name": "Inn above the Ingling dam, along the weir", "box": [827300, 5387000, 827400, 5387312], "level": 302.95},
   {"name": "Inn above the Ingling dam, along the weir", "box": [827400, 5387000, 827540, 5387328], "level": 302.95},
   {"name": "Inn above the Ingling dam, east of the weir", "box": [827540, 5387000, 828400, 5387340], "level": 302.95},
+  {"name": "Inn above the Ingling dam, south of the boxes along the weir", "box": [826347, 5386700, 828400, 5387000], "level": 302.95},
   {"name": "Inn below the Ingling dam, its first kilometre", "box": [826800, 5387300, 827900, 5388300], "level": 291.45}
  ]},
  "blocks": [
   {"row": -2, "cols": [-6, 3]},
   {"row": -1, "cols": [-6, 3]},
   {"row": 0, "cols": [-6, 3]},
-  {"row": 1, "cols": [-6, -1], "rows": 384},
-  {"row": 1, "cols": [0, 1]},
+  {"row": 1, "cols": [-6, -4], "rows": 384},
+  {"row": 1, "cols": [-3, 1]},
   {"row": 1, "cols": [2, 3], "rows": 384},
-  {"row": 2, "cols": [-1, 0]},
-  {"row": 3, "cols": [-1, 0]}
+  {"row": 2, "cols": [-3, 0]},
+  {"row": 3, "cols": [-3, -1], "rows": 640},
+  {"row": 3, "cols": [0, 0], "rows": 384}
  ],
  "regions": {"size": 1024, "jobs": "auto"}
 }
