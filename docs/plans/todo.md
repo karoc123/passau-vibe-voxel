@@ -24,8 +24,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## On hold until the game is decided (owner 2026-11-24)
 
-- Concepts to choose from later (2026-11-26 study): extraction at the Domplatz (co-op, §0), courier/taxi runs
-  against the clock (no combat), a bridgehead PvP, chase the helicopter, flood rescue, a demolition round.
+- Concepts to choose from later (concepts-and-scale.md): manhunt, courier/rally, bridgehead PvP, extraction (§0),
+  flood rescue. Open: genre, round length, PvP. Decided: a lobby later.
+- Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
+  in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
 - E15 health and items, E16 spawn/despawn/keep, E21 the player's avatar (owner: on foot always an avatar of its own,
   never one of the crowd).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
