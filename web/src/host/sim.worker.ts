@@ -7,7 +7,8 @@
 // The messages:
 //   in:  init { base, query }; commands { commands }
 //   out: hello (before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms }
-// greet, handle and step are exported: the Node tools drive them without a clock.
+// greet, handle and step are exported: the Node tools drive them without a clock; the WebSocket host (host/ws.ts)
+// shares the clock and the handler.
 import { browserPorts, fetchJson, tileCacheAt } from './browser';
 import { hostSim } from './sim-host';
 import { hostStart } from './start';
@@ -55,20 +56,20 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   greet(s, post);
   post({ kind: 'ready' });
   for (const q of early.splice(0)) handle(s, q);
-  run(s, post);
+  clock(() => step(s, post));
 }
 
-// the clock: each tick when it is due (a timer to the next one), each followed by its snapshot
-function run(s: Session, post: Post) {
+/** the host's clock: tick() each STEP when it is due (a timer to the next one), until the stop it returns */
+export function clock(tick: () => void) {
   const ms = STEP * 1000;
-  let next = performance.now() + ms;
-  const due = () => {
+  let next = performance.now() + ms, timer = setTimeout(due, ms);
+  function due() {
     const now = performance.now();
-    for (let n = 0; next <= now && n < CATCH_UP; n++, next += ms) step(s, post);
+    for (let n = 0; next <= now && n < CATCH_UP; n++, next += ms) tick();
     if (next <= now) next = now + ms;
-    setTimeout(due, next - performance.now());
-  };
-  setTimeout(due, ms);
+    timer = setTimeout(due, next - performance.now());
+  }
+  return () => clearTimeout(timer);
 }
 
 /** what the page is told first when its session connects: the session's hello (the page compares it with its own) */

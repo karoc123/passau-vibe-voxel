@@ -1,7 +1,7 @@
 // Every window.__* the page sets, for the tools (web/tools: shoot.mjs, judder.mjs, …) and the console; typed once here
 // and set only here (tools/core-deps.mjs R4).
 import type { SimClient } from '../client/sim-client';
-import type { WorkerLink } from '../client/sim-worker-link';
+import type { SocketLink, WorkerLink } from '../client/sim-worker-link';
 import type { PlayerCraft } from '../nav/craft';
 import type { TileStreamer } from '../stream';
 import type { StreetLife } from '../view/life';
@@ -13,8 +13,8 @@ export interface DebugHooks {
   __three: object;
   __life: StreetLife;
   __sim: SimClient;
-  // the sim worker's link (its tick times)
-  __simLink: WorkerLink;
+  // the sim's link (its tick times)
+  __simLink: WorkerLink | SocketLink;
   __streamer: TileStreamer;
   // into the nearest craft no one pilots (F)
   __board: () => boolean;

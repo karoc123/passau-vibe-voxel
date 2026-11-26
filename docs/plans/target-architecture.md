@@ -1,6 +1,6 @@
 # Target architecture: cost follows players, not the city
 
-Status: accepted by the owner (2026-11-26, section 6); steps 1 and 2 are being built. Facts are marked by their source
+Status: accepted by the owner (2026-11-26, section 6); steps 1 and 2 landed. Facts are marked by their source
 (code path or URL); everything under "Judgement" is mine.
 
 Goal (owner): a Raspberry Pi 5 hosts 10–50 players (ADR 0008) on a map of several km² that keeps growing. Not
@@ -159,9 +159,7 @@ in the tick.
 ### The path, each step playable
 
 1. **The server's own clock.** Landed 2026-11-26.
-2. **Two browsers.** `host/ws.ts` on Node with a WebSocket link; everyone gets the full snapshot at 10–15 Hz. Two
-   players see each other's vehicles. This is the first real test of every abstraction built since ADR 0006. New
-   dependency: `ws` (MIT, npm, by the websockets organisation), approved; added in this step.
+2. **Two browsers.** Landed 2026-11-26 (every tick's full snapshot, two to a message at 15 Hz).
 3. **Many foci.** The active set is the union of all players' cells, with a budget per player.
 4. **Interest filter.** A session's snapshot holds its cells only; entities enter and leave by id.
 5. **Flow.** Trains from the timetable; far road traffic drawn by the client; the agent ring shrinks from 900 m to

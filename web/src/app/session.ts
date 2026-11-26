@@ -1,11 +1,12 @@
 // The page's session with the world sim: its client and the link it reaches the sim over. The sim runs in a Web Worker
-// on its own clock (a network link later goes in the same place); the page draws from its snapshots. The world's start
+// on its own clock, or on a host on the network (?server=); the page draws from its snapshots. The world's start
 // (its seed, game mode, edits, road physics, time of day) is the host's: the worker reads it from the page's URL,
-// which the page hands it; the page learns the world's time and its player from its snapshots.
+// which the page hands it, a network host from its own command line; the page learns the world's time and its player
+// from its snapshots.
 // Each client compares its host's hello with its own (this code, the build of the page's meta.json, the tuning) and
 // refuses a host that differs (client.hello rejects: main.ts shows it).
 import { MirrorSimClient, type SimClient } from '../client/sim-client';
-import { WorkerLink } from '../client/sim-worker-link';
+import { SocketLink, WorkerLink } from '../client/sim-worker-link';
 import { checkBuild } from '../core/data-contract';
 import type { LiveEdits } from '../core/live-edits';
 import type { Meta } from '../core/meta';
@@ -19,12 +20,16 @@ import type { TimeOfDay } from '../sim/contract/snapshot';
 export interface SessionOptions {
   /** the page's URL's search (the worker's host reads its start from it) */
   query: string;
+  /** ?server=ws://host:port: a host on the network (host/ws.ts) instead of the worker; a bare ?server: this page's
+   * machine, the host's default port */
+  server: string | null;
   /** the host's start as the page reads it from the same URL: only the time the page shows until the world's comes */
   start: HostStart;
 }
 
 export function sessionOptions(qs: URLSearchParams): SessionOptions {
-  return { query: qs.toString(), start: hostStart(qs) };
+  const server = qs.get('server');
+  return { query: qs.toString(), start: hostStart(qs), server: server === '' ? `ws://${location.hostname}:${HOST_PORT}` : server };
 }
 
 export interface SessionData {
@@ -35,11 +40,14 @@ export interface SessionData {
   world: World | null;
 }
 
-// the client, and the worker's link (for the tools)
-export function openSession(o: SessionOptions, { meta, edits, traffic, world }: SessionData): { client: SimClient; link: WorkerLink } {
+/** host/ws.ts's default port (tools/serve.mjs) */
+const HOST_PORT = 5300;
+
+// the client, and its link (for the tools)
+export function openSession(o: SessionOptions, { meta, edits, traffic, world }: SessionData): { client: SimClient; link: WorkerLink | SocketLink } {
   // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
   const mine = hello(checkBuild(meta, () => {}));
-  const link = new WorkerLink(o.query);
+  const link = o.server ? new SocketLink(o.server) : new WorkerLink(o.query);
   return { client: new MirrorSimClient(link, traffic, world, mine, edits), link };
 }
 
