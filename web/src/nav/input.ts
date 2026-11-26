@@ -12,7 +12,7 @@
 // (fpv.ts: a radio's throttle may have moved meanwhile).
 
 /** a gamepad's stick inside this is at rest */
-export const DEADZONE = 0.12;
+const DEADZONE = 0.12;
 export const PAUSED = 'Hands off (window not in focus)';
 
 /** the key is meant for a page control: typed into a text field or a list, or Space and Enter on a focused button,

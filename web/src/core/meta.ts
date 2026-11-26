@@ -1,6 +1,6 @@
 // meta.json's types (Meta, its labels and views, WorldId, TileLevel) and a node's column data (ColumnData): plain data
 // the viewer, the sim and the tools share; imports nothing.
-export type Vec3Tuple = [number, number, number];
+type Vec3Tuple = [number, number, number];
 
 export interface View {
   label: string;
@@ -68,7 +68,7 @@ export interface Meta {
 
 // meta.json world: buildId hashes the contents of tiles/1 and 1f (the L0 base build); edits are addressed in the project
 // grid (grid: its corner, EPSG:25832, column = easting - x0, row = y0 - northing) and absolute height (0002-addressing)
-export interface WorldId {
+interface WorldId {
   formatVersion: number;
   buildId: string;
   paletteLen: number;

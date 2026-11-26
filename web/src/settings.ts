@@ -23,12 +23,12 @@ export type Preset = 'low' | 'medium' | 'high';
 
 export const SHADOWS = [0, 1024, 2048, 4096];
 // the internal resolution with the TAA, unless the resolution is set: two thirds (in pixels 0.45 of the screen's)
-export const TAA_RES = 0.67;
+const TAA_RES = 0.67;
 // the view distance's range (metres; DIST_MAX on the slider, stored as 0, is the most: main.ts viewCut)
 export const DIST_MIN = 600, DIST_MAX = 5000;
 const KEY = 'passau.gfx', AUTO_KEY = 'passau.gfx.auto';
 // raised when the measuring changes enough that remembered results should be measured again (2: the detail too)
-export const AUTO_VERSION = 2;
+const AUTO_VERSION = 2;
 // the settings chosen by measuring, while neither the URL nor the visitor set them
 export const AUTO_KEYS = ['res', 'detail'] as const;
 export type AutoKey = typeof AUTO_KEYS[number];
@@ -60,7 +60,7 @@ export function gpuName() {
 const LOW_DIST = 1500, MEDIUM_DIST = 2500;
 
 // High is what the viewer did before there were settings (phones: 2048 shadows, no tilt-shift)
-export function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
+function presets(phone: boolean, wide: boolean, prepass = false): Record<Preset, Gfx> {
   const high: Gfx = { res: 1, detail: 1, shadow: phone ? 2048 : 4096, ao: true, bloom: true, tilt: wide && !phone, refl: true, grade: 1, lod: 'auto', lodpx: 1.2, prepass, occl: true, dist: 0, taa: false };
   return {
     low: { ...high, res: 0.6, detail: 0.5, shadow: 1024, ao: false, bloom: false, tilt: false, refl: false, lodpx: 2.2, dist: LOW_DIST },

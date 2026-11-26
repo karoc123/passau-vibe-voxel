@@ -8,7 +8,7 @@ import { liveEdits } from '../core/live-edits';
 import { TileCache } from '../core/tile-cache';
 import type { HostPorts } from './sim-host';
 
-export async function fetchGzip(url: string): Promise<ArrayBuffer> {
+async function fetchGzip(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${res.status} ${url}`);
   return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();

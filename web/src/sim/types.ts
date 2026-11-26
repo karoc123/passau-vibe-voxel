@@ -1,10 +1,7 @@
 import type { Path, PathData } from './path';
 import type { CarState, Person } from './contract/agents';
 
-// a point in the world (x east, y up, z south: as three.js', without it: the sim runs headless)
-export interface Vec3 { x: number; y: number; z: number }
-
-export interface SignalRef { ctrl: number; axis: number }
+interface SignalRef { ctrl: number; axis: number }
 export interface Controller { x: number; y: number; off: number }
 
 export interface RoadData extends PathData {
@@ -17,7 +14,7 @@ export interface RoadData extends PathData {
 }
 export interface Road extends RoadData, Path { i: number; lists: Car[][] }
 
-export interface PedData extends PathData { a: number; b: number; w: number; x?: SignalRef; side?: number; bk?: number }
+interface PedData extends PathData { a: number; b: number; w: number; x?: SignalRef; side?: number; bk?: number }
 export interface PedEdge extends PedData, Path { i: number }
 
 // a railway track and the routes on it (view/trains.ts)

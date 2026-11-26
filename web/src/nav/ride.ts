@@ -129,7 +129,7 @@ export class Rider {
 // The ride camera: at the eyes (first person) or behind and above (chase), kept clear of what is between; the car
 // driven (drive.ts) through it too, its height followed with a short lag and shaken by a crash. Nav glides the camera
 // there (glide.ts).
-export class RideCamera {
+class RideCamera {
   /** the driven car's camera: shaken by a crash, dipped by a splash (drive.ts) */
   readonly shake = new THREE.Vector3();
   private y: number | null = null;

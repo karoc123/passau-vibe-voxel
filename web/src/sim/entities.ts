@@ -9,11 +9,6 @@
 import type { CraftType, EntityKind, EntityRef, Role, Seat, VehicleId } from './contract/ids';
 import type { Pose } from './contract/pose';
 
-/** an entity's key in a map ("car:12") */
-export const entityKey = (r: EntityRef) => `${r.kind}:${r.id}`;
-export const sameEntity = (a: EntityRef | null | undefined, b: EntityRef | null | undefined) =>
-  !!a && !!b && a.kind === b.kind && a.id === b.id;
-
 /** a seat of an entity's model: its role and which of that role's seats (0: the first) */
 export interface SeatSpec { readonly role: Role; readonly index: number }
 

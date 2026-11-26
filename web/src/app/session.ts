@@ -54,7 +54,7 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
 /** Whether the page's camera is a presence in the world while its player holds no seat (an observer: the orbit, free
  * flight): the world simulated round where it looks (today's behaviour), or only round the players' seats. The owner's
  * open question; one switch so either answer stays cheap. */
-export const OBSERVER_VIEW = true;
+const OBSERVER_VIEW = true;
 
 /** the page's view command for this frame: where it looks (focus: the orbit's target or the camera) and sees from (the
  * camera); none (no presence) for an observer while OBSERVER_VIEW is off */

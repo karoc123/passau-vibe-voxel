@@ -7,7 +7,7 @@ const thisYear = () => new Date().getFullYear();
 
 export const dayOfYear = (d: Date) => S.dayOfDate(d.getFullYear(), d.getMonth(), d.getDate());
 export const dateOf = (day: number, year = thisYear()) => new Date(year, 0, day);
-export const utcOffset = (day: number, year = thisYear()) => S.utcOffset(day, year);
+const utcOffset = (day: number, year = thisYear()) => S.utcOffset(day, year);
 export const sunAt = (day: number, hour: number) => S.sunAt(day, hour, thisYear());
 export const solarNoon = (day: number) => S.solarNoon(day, thisYear());
 export const hourAt = (day: number, deg: number, evening: boolean) => S.hourAt(day, deg, evening, thisYear());
@@ -15,7 +15,7 @@ export const hourAt = (day: number, deg: number, evening: boolean) => S.hourAt(d
 // Clear-sky transmittance of the direct beam at 610, 550, 465 nm: Rayleigh (Bucholtz), urban haze (Ångström β 0.05,
 // α 1.3), ozone (Chappuis band); Kasten-Young air mass
 const TAU = [0.191, 0.244, 0.339];
-export const airMass = (elDeg: number) => { const h = Math.max(elDeg, -0.5); return 1 / (Math.sin(h * RAD) + 0.50572 * (h + 6.07995) ** -1.6364); };
+const airMass = (elDeg: number) => { const h = Math.max(elDeg, -0.5); return 1 / (Math.sin(h * RAD) + 0.50572 * (h + 6.07995) ** -1.6364); };
 export const beam = (elDeg: number) => TAU.map((t) => Math.exp(-airMass(elDeg) * t)) as [number, number, number];
 
 // The moon, low precision (its main periodic terms; a degree or so off, enough for the sky): elevation and azimuth as

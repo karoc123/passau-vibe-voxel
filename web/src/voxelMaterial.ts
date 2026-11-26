@@ -6,15 +6,15 @@ import { SLANT, SLANT_STEPS } from './chamfer';
 import { WALL_TOP } from './roofs';
 import { FIELDS_GLSL, fieldUniforms } from './fields';
 import { FLOODLIT, floodCapsules, LIT_N } from './lamplight';
-import { MAT, GROUND, groundClass, pavedGround } from './core/materials';
+import { MAT, GROUND, groundClass } from './core/materials';
 import { BLOCK } from './core/built';
 
 // what mirrors marks itself in the scene's alpha at up to this (post.ts Reflections)
 export const REFL_MAX = 0.4;
 // the material ids and the ground's paved classes (three.js-free, core/materials.ts)
-export { MAT, GROUND, groundClass, pavedGround };
+export { MAT };
 // the foliage classes' slots in the shader (uFolDate, uFolCol; foliage.ts loadFoliage fills them from phenology.json)
-export const FOLIAGE_CLASSES = 16;
+const FOLIAGE_CLASSES = 16;
 
 type U<T> = { value: T };
 export interface VoxelUniforms {
@@ -927,5 +927,3 @@ export function makeVoxelPrepassMaterial(uniforms: VoxelUniforms) {
   m.customProgramCacheKey = () => 'voxel-prepass';
   return m;
 }
-
-export type VoxelMaterial = ReturnType<typeof makeVoxelMaterial>;

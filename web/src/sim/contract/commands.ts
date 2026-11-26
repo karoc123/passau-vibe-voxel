@@ -53,7 +53,7 @@ export type PlayerCommand =
 export interface View { focus: { x: number; z: number }; viewer?: { x: number; z: number; y?: number } }
 
 /** a seat's input, by its role */
-export type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: PilotInput } | { role: 'walker'; input: WalkPose };
+type SeatInput = { role: 'driver'; input: CarInput } | { role: 'pilot'; input: PilotInput } | { role: 'walker'; input: WalkPose };
 
 /** what became of a command that can be refused (enterSeat, seatInput clamped, a request: by the request's kind, edit),
  * at the tick it was applied before; a seat's: its role; an edit's: its ref and the level-1 nodes it changed; a

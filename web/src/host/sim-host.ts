@@ -39,7 +39,7 @@ export interface HostData {
 }
 
 /** the road physics' code (physics/rapier/life-phys.ts: Rapier; the page's own chunk, loaded when first wanted) */
-export type LifePhysicsModule = typeof import('../physics/rapier/life-phys');
+type LifePhysicsModule = typeof import('../physics/rapier/life-phys');
 
 /** what the host reads of the world outside it (host/browser.ts: the page's and the worker's; host/node.ts: files) */
 export interface HostPorts {
@@ -79,7 +79,7 @@ export interface HostOptions {
 }
 
 /** the game modes a host can make, by id */
-export const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
+const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
 
 /** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots; dispose: the host's listener on
  * the world's edits removed, the road physics let go: WorldSim.dispose) */

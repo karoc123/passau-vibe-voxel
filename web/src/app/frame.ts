@@ -2,7 +2,7 @@
 // own the camera), the sim's update (its ticks; the frame's time: sim.time), this frame's poses drawn, then the cameras
 // on them (the ride's, a craft's own), then what reads the camera, then the render. The order is this list's; main.ts
 // gives each phase its work.
-export const PHASES = ['input', 'sim', 'poses', 'cameras', 'cameraReaders', 'render'] as const;
+const PHASES = ['input', 'sim', 'poses', 'cameras', 'cameraReaders', 'render'] as const;
 export type Phase = (typeof PHASES)[number];
 
 // now: the frame's time (ms, requestAnimationFrame's); dt: seconds since the last frame, at most 0.1

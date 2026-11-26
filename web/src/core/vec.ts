@@ -12,7 +12,6 @@ export const quat = (x = 0, y = 0, z = 0, w = 1): Quat => ({ x, y, z, w });
 
 export function set<T extends Vec3>(o: T, x: number, y: number, z: number) { o.x = x; o.y = y; o.z = z; return o; }
 export const copy = <T extends Vec3>(o: T, a: Vec3) => set(o, a.x, a.y, a.z);
-export const clone = (a: Vec3) => vec3(a.x, a.y, a.z);
 // (i: 0 x, 1 y, 2 z)
 export const component = (a: Vec3, i: number) => (i === 0 ? a.x : i === 1 ? a.y : a.z);
 export function setComponent<T extends Vec3>(o: T, i: number, v: number) { if (i === 0) o.x = v; else if (i === 1) o.y = v; else o.z = v; return o; }
