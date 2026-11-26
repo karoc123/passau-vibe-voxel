@@ -203,7 +203,7 @@ class SpecialCraft implements PlayerCraft {
     const facing = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
     const nav = this.ctx.nav;
     const returnToMap = () => { if (this.phase === 'landing') nav.flyUp(); };
-    void nav.setWalk({ at, exact: true, facing, thirdPerson: true, ms: 500 }).then(returnToMap, returnToMap);
+    void nav.setWalk({ at, exact: true, facing, ms: 500 }).then(returnToMap, returnToMap);
   }
 
   private input(): CraftInput {

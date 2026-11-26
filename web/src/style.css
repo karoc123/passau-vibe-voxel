@@ -149,8 +149,6 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 /* HUD: a legend, not a control panel -- outlines only, semi-transparent, never in the way of the pointer */
 #hud { --o: rgba(255,255,255,.55); position: fixed; left: calc(14px + var(--sl)); bottom: calc(14px + var(--sb)); z-index: 4; pointer-events: none;
   font: 11px Inter, system-ui, sans-serif; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
-@media (max-width: 940px) { #hud.pedestrian { bottom: calc(64px + var(--sb)); } }
-@media (max-width: 600px) { #hud.pedestrian { bottom: calc(94px + var(--sb)); } }
 #hud .who { font-weight: 600; color: #fff; margin-bottom: 6px; }
 #hud .who:empty { display: none; }
 #hud .row { display: flex; align-items: flex-end; gap: 16px; }
@@ -216,7 +214,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
   border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
   touch-action: none; -webkit-user-select: none; user-select: none; }
 #jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
-@media (pointer: coarse) { body:is([data-mode=walk], [data-mode=pedestrian]):not(.noui) #jump-button { display: grid; place-items: center; } }
+@media (pointer: coarse) { body[data-mode=walk]:not(.noui) #jump-button { display: grid; place-items: center; } }
 /* landscape: the right thumb rests ~100-150 px in from the bottom right corner, so the button sits on the edge beside
    it, just above the "?" (#credits-button: 8 px in, 44 px), out of the stick's ring (radius <= 72 px around the thumb)
    and far from the bar (top left); the safe area keeps it off a notch or the home indicator */

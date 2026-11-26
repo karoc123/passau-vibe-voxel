@@ -516,13 +516,12 @@ gamepad stick climbs and descends (up/down) and slides sideways; the gamepad tri
 Their motion laws and numbers are `CRAFT` in `web/src/sim/craft/craft-motion.ts`, the models (at the walker's and the
 cars' scale) `web/src/nav/craft-models.ts`. **Esc** returns to the map.
 
-## Third-person walking
+## Walking
 
-Click **Walk** in the toolbar to start on foot at the current view or beside the vehicle you're following. Use W/A/S/D
-or the arrow keys to move relative to the camera, Shift to sprint and Space to jump. Move the mouse to look around
-and scroll to zoom. On touch screens, drag to look, pinch to zoom and tap the ground to walk there.
-**Esc** releases the mouse and returns to the map. The chase camera pulls in near walls, and the character uses the viewer's voxel walking
-collision for kerbs, stairs, walls and bridge decks.
+Click **Walk** in the toolbar to start on foot, in first person, at the current view or beside the vehicle you're
+following. W/S walk, A/D turn, Q/E look up and down, Shift runs and Space jumps; the mouse looks around (a click takes
+it back after a tab switch). On touch screens the left thumb walks, the right thumb looks and a pinch zooms.
+**Esc** releases the mouse and returns to the map.
 
 ## Known limits
 

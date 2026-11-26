@@ -121,7 +121,7 @@ export class Rider {
       H.changed(R);
       H.foot.startAs(p);
     }
-    if (this.jumpAsked) { H.foot.jump(false); this.jumpAsked = false; }
+    if (this.jumpAsked) { H.foot.jump(); this.jumpAsked = false; }
     sim.send({ kind: 'seatInput', role: 'walker', input: H.foot.walkAs(R, dt) });
   }
 }
