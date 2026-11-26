@@ -40,12 +40,114 @@
   border-radius: 8px;
   background: #222b2a;
   box-shadow: 0 3px 12px rgba(0,0,0,.38);
+  overflow: hidden;
+}
+#minimap[hidden] { display: none; }
+#minimap canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.map-expand {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(16,17,20,.72);
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-expand svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.map-expand:is(:hover, :focus-visible) { background: #2d3036; }
+
+#fullmap-button {
+  position: fixed;
+  right: calc(100px + var(--sr));
+  bottom: calc(8px + var(--sb));
+  z-index: 4;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#fullmap-button .map-expand { position: static; width: 30px; height: 26px; border-radius: 13px; background: rgba(16,17,20,.85); }
+
+#fullmap {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: #171c20;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#fullmap[hidden] { display: none; }
+#fullmap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#fullmap .marks { cursor: crosshair; }
+#fullmap .close {
+  position: absolute;
+  top: calc(12px + var(--st));
+  right: calc(12px + var(--sr));
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255,255,255,.45);
+  border-radius: 20px;
+  background: rgba(16,17,20,.85);
+  color: #fff;
+  font: 600 20px/1 Inter, system-ui, sans-serif;
+  cursor: pointer;
+}
+#fullmap .hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + var(--sb));
+  transform: translateX(-50%);
+  max-width: calc(100% - 120px);
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(16,17,20,.85);
+  color: rgba(255,255,255,.8);
+  font: 12px Inter, system-ui, sans-serif;
+  text-align: center;
   pointer-events: none;
 }
+
+#waypoint-chip {
+  position: fixed;
+  left: 50%;
+  top: calc(12px + var(--st));
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border: 1px solid #ff4fd8;
+  border-radius: 14px;
+  background: rgba(16,17,20,.85);
+  color: #fff;
+  font: 600 13px Inter, system-ui, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#waypoint-chip[hidden] { display: none; }
+/* (the bar spans the top of a phone) */
+@media (max-width: 600px) { #waypoint-chip { top: auto; bottom: calc(112px + var(--sb)); } }
+#waypoint-chip .arrow { display: inline-block; color: #ff4fd8; }
+#waypoint-chip .x { color: rgba(255,255,255,.6); font-weight: 400; }
 @media (max-width: 600px) {
   #minimap {
     top: clamp(calc(12px + var(--st)), calc(var(--bar-bottom, 0px) + 12px), calc(100dvh - var(--minimap-size) - var(--sb) - 130px));
     right: calc(8px + var(--sr));
   }
 }
-.noui :is(#minimap, #minimap-button), .loading :is(#minimap, #minimap-button) { display: none; }
+.noui :is(#minimap, #minimap-button, #fullmap-button, #waypoint-chip), .loading :is(#minimap, #minimap-button, #fullmap-button) { display: none; }

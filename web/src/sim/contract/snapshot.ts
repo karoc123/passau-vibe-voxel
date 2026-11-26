@@ -80,6 +80,8 @@ export interface Snapshot {
   walked: [number, WalkPose][];
   /** the players' own bodies on foot */
   avatars: AvatarState[];
+  /** the cars driven by players, by car id with its driver (for a map's markers) */
+  drivers: [car: number, player: PlayerId][];
   /** the crafts put down, piloted or left */
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */

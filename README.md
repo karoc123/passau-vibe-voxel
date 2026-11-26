@@ -12,7 +12,11 @@ The date, the hour and the weather are sliders; cars, trains, pedestrians and bi
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
 (`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
-and heading, rivers, roads and nearby landmarks.
+and heading, rivers, roads and nearby landmarks. **,** (comma), the corner button on the minimap or the button left
+of **Map** (also on a phone) opens the whole city full screen with street names: drag to move, wheel or pinch to zoom,
+**,** or **Esc** closes it. A click or tap on either map sets a waypoint (a beam over the spot in the city, its
+distance and direction at the top of the screen); clicking it again, its distance or **Backspace** clears it. With a
+host (`?server=`) both maps show the other players near you, labelled, on foot or in what they drive or fly.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).

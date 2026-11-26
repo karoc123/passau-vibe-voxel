@@ -90,4 +90,3 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Passengers (the hovercraft has a cabin for ~20): the seat table takes more seats per craft, but a passenger needs a
   shell of its own (camera, getting out, the craft taken away under it), a free seat offered by the boarding, and the
   craft's passengers sent and drawn; together not cheap, and it touches the seats, boarding and snapshot.
-- Minimap: click for a waypoint, a full-screen map, other players on it.
