@@ -19,6 +19,9 @@ export type CraftState<K extends CraftType = CraftType> =
 /** a player's own body on foot (an avatar: contract/ids.ts): its id, its player, where its walker put it at the tick
  * and at the tick before (drawn between them) */
 export interface AvatarState { id: number; player: PlayerId; pose: WalkPose; prev: WalkPose }
+/** an avatar as a snapshot carries it (sim/agent-wire.ts, mm and 1e-4 rad): sent when it moved; prev left out when it
+ * is the pose sent before */
+export type AvatarWire = Omit<AvatarState, 'prev'> & { prev?: WalkPose };
 
 /** a level-1 node's edits since the last snapshot: the ops from its from-th on, which the client applies in order over
  * its own copy of the node (core/world-edits.ts editNode: the same columns as the host's); ops null: the node is its
@@ -50,10 +53,11 @@ export interface DriverSnapshot {
  * player */
 export interface TimeOfDay { hour: number; day: number }
 
-/** a session's world after a tick, whole but for the cars' and people's (CarWire: samples where the client's reckoning
- * of them drifts, sim/agent-wire.ts; gone: those it holds no more). Its cars, people, bodies, walked, avatars, crafts
- * and events are those near the session's player only (its own seat's entity always): a thing missing from one is
- * gone for it */
+/** a session's world after a tick: the traffic's cars, people, trains and boats, the cars out of the traffic, the
+ * bodies and the avatars as what changed for the session since its last snapshot (sim/agent-wire.ts: the client
+ * keeps the rest; gone: those it holds no more), the rest whole. Its cars, people, bodies, walked, avatars, crafts
+ * and events are those near the session's player only (its own seat's entity always): a thing missing from walked or
+ * crafts is gone for it */
 export interface Snapshot {
   /** the tick whose state this is; what moves is drawn between it and the tick before */
   tick: number;
@@ -64,22 +68,22 @@ export interface Snapshot {
   day: number;
   /** the traffic's cars, people and riders: the samples since the session's last snapshot (contract/agents.ts CarWire) */
   cars: CarWire[];
-  /** the cars out of the traffic (left, parked, a wreck) */
+  /** the cars out of the traffic (left, parked, a wreck) that changed */
   detached: CarState[];
   people: PersonWire[];
   riders: PersonWire[];
-  /** the cars, the people and riders, the trains, the boats (a ship's id, -1 - a boat's), by id, gone from the
-   * session's sight (or from the world) */
-  gone: [cars: number[], people: number[], trains: number[], boats: number[]];
-  /** the cars with a body (or its fade), by car id */
+  /** the cars, the people and riders, the trains, the boats (a ship's id, -1 - a boat's), the cars out of the traffic,
+   * the bodies (by car id), the avatars, by id, gone from the session's sight (or from the world) */
+  gone: [cars: number[], people: number[], trains: number[], boats: number[], detached: number[], bodies: number[], avatars: number[]];
+  /** the cars with a body (or its fade), by car id, whose draw changed (one at rest: once, its p0 its p1) */
   bodies: [number, BodyDraw][];
   /** the trains: the samples since the session's last snapshot (contract/agents.ts TrainWire) */
   trains: TrainWire[];
   boats: BoatsWire | null;
   /** the people walked by players: their pose, by person id */
   walked: [number, WalkPose][];
-  /** the players' own bodies on foot */
-  avatars: AvatarState[];
+  /** the players' own bodies on foot that moved */
+  avatars: AvatarWire[];
   /** the crafts put down, piloted or left */
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */

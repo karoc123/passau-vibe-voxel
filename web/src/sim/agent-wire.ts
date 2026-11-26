@@ -3,10 +3,13 @@
 // client draws each one on from its last sample at the speed sent (reckoned: dead reckoning along its way), so a
 // sample is sent only when that drifts: a way changed or one new comes at once, a drift past DRIFT m only on every
 // AGENT_TICKS-th tick (10 a second), one past URGENT m (a car stopped short) at once. A car cruising or standing, a person walking a footway, is not sent at all
-// between. Over the internet cars and people were ~95 % of a snapshot's bytes. No three.js, no DOM.
+// between. Over the internet cars and people were ~95 % of a snapshot's bytes. The cars out of the traffic, the bodies
+// and the avatars are sent when they change, a body come to rest once (else every shot's bodies and wrecks were sent
+// whole every tick for as long as they lay near: 7 bodies were 57 kB/s). No three.js, no DOM.
 import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, CarState, CarWire, PersonState, PersonWire, TrainState, TrainWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
-import type { RoadPose } from './contract/pose';
+import type { RoadPose, WalkPose } from './contract/pose';
+import type { AvatarState, AvatarWire, Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
@@ -45,15 +48,65 @@ const drifts = (h: { s: number; v: number; tick: number }, s: number, v: number,
   return now + dv * STEP > URGENT || (tick % AGENT_TICKS === 0 && now + dv * AHEAD > DRIFT);
 };
 
+/** how far (m; a quaternion's part, rad) a body's pose may move between two ticks and still be at rest, and stray from
+ * the rest pose sent before it is sent again: a car's body standing in a queue jitters by a mm or so */
+export const STILL_M = 0.005, STILL_Q = 1e-3;
+const still = (a: BodyPose, b: BodyPose) => Math.abs(a.x - b.x) <= STILL_M && Math.abs(a.y - b.y) <= STILL_M && Math.abs(a.z - b.z) <= STILL_M
+  && Math.abs(a.ride - b.ride) <= STILL_M && Math.abs(a.qx - b.qx) <= STILL_Q && Math.abs(a.qy - b.qy) <= STILL_Q
+  && Math.abs(a.qz - b.qz) <= STILL_Q && Math.abs(a.qw - b.qw) <= STILL_Q && Math.abs((a.lean ?? 0) - (b.lean ?? 0)) <= STILL_Q
+  && Math.abs((a.wheelie ?? 0) - (b.wheelie ?? 0)) <= STILL_Q;
+interface BodySent { gen: number; key: string; rest: BodyPose | null }
+
 /** what one session was sent of the traffic's cars and people: car and person give each one's wire form against it
- * at tick, or null when the client's reckoning of it holds (all of it when new to the session); done ends the
- * snapshot: the ones not in it forgotten (sent whole when they come back), their ids returned as gone */
+ * at tick, or null when the client's reckoning of it holds (all of it when new to the session); the cars out of the
+ * traffic, the bodies and the avatars likewise, null when the client's copy holds; done ends the snapshot: the ones
+ * not in it forgotten (sent whole when they come back), their ids returned as gone */
 export class AgentWire {
   private readonly cars = new Map<number, CarSent>();
   private readonly people = new Map<number, PersonSent>();
   private readonly trains = new Map<number, TrainSent>();
   private readonly boats = new Map<number, { gen: number; pose: BoatPose }>();
+  private readonly detached = new Map<number, { gen: number; key: string }>();
+  private readonly bodies = new Map<number, BodySent>();
+  private readonly avatars = new Map<number, { gen: number; player: string; pose: WalkPose; prev: WalkPose }>();
   private gen = 0;
+
+  /** a car out of the traffic (as sent: sim/server/snapshot.ts carState), or null when unchanged */
+  detachedCar(c: CarState): CarState | null {
+    const key = JSON.stringify(c), h = this.detached.get(c.id);
+    if (h?.key === key) { h.gen = this.gen; return null; }
+    this.detached.set(c.id, { gen: this.gen, key });
+    return c;
+  }
+
+  /** car id's body as drawn (wireBody's), or null when the client's copy holds. One at rest (its last two poses within
+   * STILL_*, no fade, no fall) is sent once as standing at its pose, then again only when it strays from it */
+  body(id: number, d: BodyDraw): BodyDraw | null {
+    const h = this.bodies.get(id), p = d.p1;
+    const rest = p && d.p0 && !d.fade && !d.drive?.fall && still(d.p0, p) ? p : null;
+    const w = rest ? { ...d, p0: rest } : d;
+    // (at rest: what it is besides its pose; else the whole draw)
+    const key = rest ? `${d.owns} ${d.body} ${d.drive?.wheelZ}` : JSON.stringify(w);
+    if (h && h.key === key && (!rest || (h.rest && still(h.rest, rest)))) { h.gen = this.gen; return null; }
+    this.bodies.set(id, { gen: this.gen, key, rest });
+    return w;
+  }
+
+  /** an avatar (its poses rounded), or null when it stands where it was sent standing; prev left out when it is the
+   * pose sent before */
+  avatar(a: AvatarState): AvatarWire | null {
+    const pose = wireWalk(a.pose), prev = wireWalk(a.prev), h = this.avatars.get(a.id);
+    if (h && h.player === a.player) {
+      h.gen = this.gen;
+      if (sameWalk(h.pose, pose) && sameWalk(h.prev, pose)) return null;
+      const w: AvatarWire = sameWalk(prev, h.pose) ? { id: a.id, player: a.player, pose } : { id: a.id, player: a.player, pose, prev };
+      h.prev = w.prev ?? h.pose;
+      h.pose = pose;
+      return w;
+    }
+    this.avatars.set(a.id, { gen: this.gen, player: a.player, pose, prev });
+    return { id: a.id, player: a.player, pose, prev };
+  }
 
   car(c: CarState, tick: number): CarWire | null {
     const s = round(c.s, CM), v = round(c.v, CM), off = round(c.off, CM), prevOff = round(c.prevOff, CM), prev2Off = round(c.prev2Off ?? 0, CM);
@@ -114,16 +167,21 @@ export class AgentWire {
     return { poses, elapsed: round(b.elapsed, MM), day: b.day };
   }
 
-  /** the snapshot's end: the ids of the cars, people, trains and boats it no longer holds */
-  done(): [number[], number[], number[], number[]] {
-    const gone: [number[], number[], number[], number[]] = [[], [], [], []];
-    [this.cars, this.people, this.trains, this.boats].forEach((M: Map<number, { gen: number }>, i) => {
+  /** the snapshot's end: the ids of the cars, people, trains, boats, cars out of the traffic, bodies and avatars it no
+   * longer holds */
+  done(): Snapshot['gone'] {
+    const gone: Snapshot['gone'] = [[], [], [], [], [], [], []];
+    [this.cars, this.people, this.trains, this.boats, this.detached, this.bodies, this.avatars].forEach((M: Map<number, { gen: number }>, i) => {
       for (const [id, h] of M) if (h.gen !== this.gen) { M.delete(id); gone[i].push(id); }
     });
     this.gen++;
     return gone;
   }
 }
+
+const wireWalk = (p: WalkPose): WalkPose => ({ ...p, x: round(p.x, MM), y: round(p.y, MM), z: round(p.z, MM), h: round(p.h, RAD) });
+const sameWalk = (a: WalkPose, b: WalkPose) => a.x === b.x && a.y === b.y && a.z === b.z && a.h === b.h && a.moving === b.moving
+  && a.arm === b.arm && a.swim === b.swim;
 
 // a boat's id on the wire: a ship's id, -1 - an excursion boat's
 const boatKey = (p: BoatPose) => p.kind === 'ship' ? p.id : -1 - p.id;
@@ -147,10 +205,24 @@ export class AgentRead {
 
   constructor(private readonly L: (road: number) => number) {}
 
+  private readonly held = { detached: new Held<CarState>(), bodies: new Held<[number, BodyDraw]>(), avatars: new Held<AvatarState>() };
+
   /** a new session: nothing of the last one's known */
   clear() {
     this.cars.clear(); this.people.clear(); this.trains.clear(); this.boats.clear();
     this.carList = []; this.lists = [[], []]; this.trainList = []; this.boatList = [];
+    for (const h of Object.values(this.held)) h.clear();
+  }
+
+  /** the cars out of the traffic, the bodies and the avatars after a snapshot (s: its changed ones and gone) */
+  readHeld(s: Pick<Snapshot, 'detached' | 'bodies' | 'avatars' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[] } {
+    const H = this.held, A = H.avatars;
+    return {
+      detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[4]),
+      bodies: H.bodies.read(s.bodies.map((b) => [b[0], b]), s.gone[5]),
+      // (prev left out: the pose sent before)
+      avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[6]),
+    };
   }
 
   /** the cars after the snapshot of tick: its samples (one unknown or cut short is left out: it cannot be drawn) and
@@ -238,6 +310,20 @@ export class AgentRead {
       this.lists = [walking, riding];
     }
     return this.lists;
+  }
+}
+
+// what a client holds of a kind sent when it changes: by id, and as a list (the one before when nothing changed)
+class Held<T> {
+  private readonly M = new Map<number, T>();
+  private list: T[] = [];
+  get(id: number) { return this.M.get(id); }
+  clear() { this.M.clear(); this.list = []; }
+  read(changed: [number, T][], gone: readonly number[]): T[] {
+    for (const id of gone) this.M.delete(id);
+    for (const [id, v] of changed) this.M.set(id, v);
+    if (gone.length || changed.length) this.list = [...this.M.values()];
+    return this.list;
   }
 }
 

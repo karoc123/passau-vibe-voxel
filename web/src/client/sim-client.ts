@@ -436,9 +436,10 @@ export class MirrorSimClient implements SimClient {
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
 }
 
-/** a snapshot as the client holds it: all its cars and people, each as last sampled (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
-  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null };
+/** a snapshot as the client holds it: all its cars and people, each as last sampled, and all the cars out of the
+ * traffic, bodies and avatars it holds (TrafficMirror read) */
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats' | 'avatars'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null; avatars: AvatarState[] };
 
 // A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
@@ -517,7 +518,7 @@ export class TrafficMirror {
   read(s: Snapshot): Taken {
     const [people, riders] = this.wire.readPeople(s.people, s.riders, s.gone[1], s.tick);
     return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders, trains: this.wire.readTrains(s.trains, s.gone[2], s.tick),
-      boats: this.wire.readBoats(s.boats, s.gone[3]) };
+      boats: this.wire.readBoats(s.boats, s.gone[3]), ...this.wire.readHeld(s) };
   }
 
   /** a new session: what the last one sent of the cars and people forgotten */
