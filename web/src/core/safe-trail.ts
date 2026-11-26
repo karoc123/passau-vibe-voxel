@@ -1,5 +1,5 @@
 // Where a craft last was safe, for the player's T (unstick, back on the road, the last safe point) and a respawn after a
-// crash: one for all (the car, the boat, the plane; docs/plans/code-health.md item 12). A pose is recorded at most
+// crash: one for all (the car, the boat, the plane). A pose is recorded at most
 // every `every` (in the craft's own clock: the car's ms, the boat's and the plane's seconds of steps), the newest
 // `keep` kept. Which poses are safe and which one to go back to is the craft's. No three.js, no DOM
 // (tools/core-deps.mjs): a server keeps the same.

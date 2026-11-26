@@ -278,7 +278,7 @@ MATCH_SHARE = 0.40    # matched OSM outlines moved onto their LoD2 footprints (0
 SURFACE = {"road": dict(sunk=0.015, hover=0.005),  # (0.0090, 0.0022)
            "ped": dict(sunk=0.015, hover=0.015)}  # shares of the metres walked, see surface() (0.0078, 0.0075)
 WET_MAX = 3           # m: a carriageway's or a railway's centreline on water (culvert.py; 9 m on the B 8 before it)
-# bridge ways the deck_sag counter (voxelize.py, handoff Q8) finds sagging that are known and are no deck on the ground
+# bridge ways the deck_sag counter (voxelize.py) finds sagging that are known and are no deck on the ground
 # beside it: their own level is a surface over the way (crowns), or a dip that is not the ground. Listed, not failed
 DECK_SAG_KNOWN = {
     8099444: "Poststeg (haissengasse): samples 5 m under its deck mid-span, over the tracks, not the ground",

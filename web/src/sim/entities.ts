@@ -1,4 +1,4 @@
-// The world's entities, one index over the kinds' own stores (docs/plans/entities-and-modes.md section 1): a car
+// The world's entities, one index over the kinds' own stores: a car
 // (Traffic, the road physics), a person (Traffic's crowd and riders, a walked one where its walker puts it), a craft
 // (WorldSim.crafts). Each kind keeps its storage and its numbering (Car.id picks the traffic vehicle's type); this
 // reads them through one adapter per kind. Read only. No three.js, no DOM (tools/core-deps.mjs).

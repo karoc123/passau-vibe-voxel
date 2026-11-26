@@ -1,5 +1,5 @@
-// The judder of what the player rides against its camera under emulated frame pacing (docs/plans/smooth-motion-and-lag.md
-// M1, M3): rAF is wrapped (synthetic timestamps), the sample is taken once the frame's camera is placed (the car: after
+// The judder of what the player rides against its camera under emulated frame pacing:
+// rAF is wrapped (synthetic timestamps), the sample is taken once the frame's camera is placed (the car: after
 // Nav.place; a craft: just before the render). J: the largest per-frame change of its position seen from the camera; E:
 // the largest |drawn step - v*dt| (the car: v its speed; a craft: v from its drawn path over +-0.1 s round the frame).
 // Subjects: the driven car (default), and the crafts a player flies with their own camera: the floatplane in the air,

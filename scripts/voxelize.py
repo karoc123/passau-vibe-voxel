@@ -879,7 +879,7 @@ def ground_classes(ctx):
     del _wgated
     gcol[_wat | _lockm] = C["water"]
     # a way over water with no bridge tag, where the surface model holds its banks' level across: carried over on ground
-    # (a culvert; scripts/culvert.py, handoff Q2)
+    # (a culvert; scripts/culvert.py)
     _ww0, _ = culvert.wet_metres(osm, gcol == C["water"], _RCORE)
     _cv, _cvl, _cvd = culvert.carry(osm, (gcol == C["water"]) & ~_lockm, g, GCTX.dsm_low(), np.where(_wlev >= 0, _wlev, g),
                                     cells_of)
@@ -3236,7 +3236,7 @@ def bridges(ctx):
     # way's first and last sample DECK_OVER m or more over the terrain, a sample within DECK_DIP m of it is dropped, as over
     # water: only the ends come down to the ground (abutments, ramps). A way's point under a crown counts for neither (a
     # footbridge under trees stood in their tops). The Dietzing bridge over the B 85 cutting (way 106617552, project col
-    # -2087, row -1658; road-defects #11) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
+    # -2087, row -1658) is drawn along its deck's north edge: 3 samples mid-span saw the road 7 m under
     # it, and the 10th percentile within 10 m below took the whole 23 m deck down to it
     DECK_OVER, DECK_DIP = 3.0, 1.5
     water_ = gcol == C["water"]

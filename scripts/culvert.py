@@ -16,7 +16,7 @@ roads stand 1-1.5 m over the water. Over open water the image-matched surface mo
 way OSM draws a few metres into the river off its bank (the Donauradweg at 1022, 671) has its noise there, not its
 bank's level, and stays in the water -- counted (wet_metres) for the build's check. A way higher over the water is a
 bridge OSM does not tag (the Anton-Niederleuthner-Brücke's end, way 8027919, 6 m over the Ilz): ground lifted there
-stood as a dam in the river, so it stays too (a fix in OSM: handoff Q7)."""
+stood as a dam in the river, so it stays too (a fix in OSM)."""
 import numpy as np
 import shapely
 from shapely.ops import substring

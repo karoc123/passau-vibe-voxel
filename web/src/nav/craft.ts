@@ -13,7 +13,7 @@ import type { Pose } from '../sim/contract/pose';
 import type { Nav } from './nav';
 import type { RiverPoints } from '../sim/river';
 
-// A craft the player gets into (docs/plans/code-health.md item 10): the drone (fpv.ts), the car (drive.ts), the boat
+// A craft the player gets into: the drone (fpv.ts), the car (drive.ts), the boat
 // (boat.ts), the floatplane and the jet (plane.ts). Each is one class made from a CraftContext and listed once in
 // main.ts (CRAFTS); Nav knows only this interface. A craft gets in through Nav (nav.enterCraft) and Nav lets it know
 // when it is left, whatever leaves it (Esc, the map, a search, a walk, another craft): leave(), once.

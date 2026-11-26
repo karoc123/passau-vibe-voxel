@@ -1,4 +1,4 @@
-// The frame's order (docs/plans/smooth-motion-and-lag.md, M1/M3): the players' input (the car's, Nav's, the crafts that
+// The frame's order: the players' input (the car's, Nav's, the crafts that
 // own the camera), the sim's update (its ticks; the frame's time: sim.time), this frame's poses drawn, then the cameras
 // on them (the ride's, a craft's own), then what reads the camera, then the render. The order is this list's; main.ts
 // gives each phase its work.
