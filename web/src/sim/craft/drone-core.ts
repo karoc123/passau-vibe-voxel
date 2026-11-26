@@ -10,18 +10,16 @@ import type { CraftSpot } from '../contract/commands';
 import type { DroneCoreState, DroneEvent, ImpactKind } from '../contract/crafts';
 import type { DroneInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
-import { FpvFlight, REBOUND_SPEED } from './fpv-flight';
+import { DRONE, FpvFlight, type DroneTuning } from './fpv-flight';
 import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
-
-const SURFACE_CLEARANCE = 0.002;
 
 // (its input, DroneInput: the sticks or null, contract/inputs.ts)
 // (its events, DroneEvent: a hit at speed; contract/crafts.ts)
 export interface DroneDrawn { position: Vec3; attitude: Quat }
 
 export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, DroneCoreState> {
-  readonly flight = new FpvFlight();
+  readonly flight: FpvFlight;
   readonly clock = new FixedStep(1 / 120, Infinity, 0.1);
   readonly reach = {};
   readonly neutral: DroneInput = Object.freeze({ roll: 0, pitch: 0, yaw: 0, throttle: 0 });
@@ -34,6 +32,9 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
   // drawn: where it was at the world tick's start, and between that and now
   private readonly from: DroneDrawn = { position: vec3(), attitude: quat() };
   private readonly out: DroneDrawn = { position: vec3(), attitude: quat() };
+
+  // cfg: its numbers (Tuning.drone)
+  constructor(readonly cfg: DroneTuning = DRONE) { this.flight = new FpvFlight(cfg); }
 
   // (its yaw: the camera looks along -z, so heading h is yaw h + pi)
   reset(spot: CraftSpot) {
@@ -88,13 +89,13 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
       return true;
     }
 
-    const fraction = clearance(collision.fraction, displacement);
+    const fraction = clearance(collision.fraction, displacement, this.cfg.clearance);
     addScaled(copy(this.next, position), displacement, fraction);
     // At low normal speed, use the remaining part of the step to slide along the surface.
     const axis = Math.abs(collision.axis) - 1;
     const approach = -component(velocity, axis) * Math.sign(collision.axis);
     let nextContact: Exclude<Sweep, 'loading'> | null = null;
-    if (approach < REBOUND_SPEED) {
+    if (approach < this.cfg.rebound) {
       setComponent(scale(copy(this.glide, displacement), 1 - fraction), axis, 0);
       if (lengthSq(this.glide) > 1e-10) {
         const slideHit = col.sweep(this.next, this.glide);
@@ -102,7 +103,7 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
           this.waiting = true;
           return false;
         }
-        addScaled(this.next, this.glide, slideHit.hit ? clearance(slideHit.fraction, this.glide) : slideHit.fraction);
+        addScaled(this.next, this.glide, slideHit.hit ? clearance(slideHit.fraction, this.glide, this.cfg.clearance) : slideHit.fraction);
         nextContact = slideHit;
       }
     }
@@ -115,11 +116,11 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
 
   private contact(hit: ImpactKind, axis: number) {
     const speed = this.flight.bounce(axis);
-    if (speed >= REBOUND_SPEED) this.events.push({ kind: 'impact', hit, speed });
+    if (speed >= this.cfg.rebound) this.events.push({ kind: 'impact', hit, speed });
   }
 }
 
-function clearance(fraction: number, travel: Vec3) {
+function clearance(fraction: number, travel: Vec3, gap: number) {
   const distance = length(travel);
-  return distance > 0 ? Math.max(0, fraction - SURFACE_CLEARANCE / distance) : fraction;
+  return distance > 0 ? Math.max(0, fraction - gap / distance) : fraction;
 }

@@ -1,5 +1,5 @@
 import { clamp } from '../util';
-import { HOVER_THROTTLE } from '../sim/craft/fpv-flight';
+import { DRONE } from '../sim/craft/fpv-flight';
 import type { FlightInput } from '../sim/contract/inputs';
 import { DEAD_ZONE, stickAxis, TouchSticks } from './touch-sticks';
 
@@ -7,8 +7,8 @@ const MAX_ROTATION_INPUT = 0.42; // Match the keyboard's gentler rates.
 
 export class FpvTouch {
   private readonly sticks: TouchSticks;
-  private throttle = HOVER_THROTTLE;
-  private startThrottle = HOVER_THROTTLE;
+  private throttle = DRONE.hover;
+  private startThrottle = DRONE.hover;
 
   // onPinch: two fingers close together (touch-sticks.ts), d0 / d of their distance since the last call
   constructor(canvas: HTMLCanvasElement, onInterrupted: () => void, onPinch: (ratio: number) => void) {
@@ -30,7 +30,7 @@ export class FpvTouch {
 
   reset() {
     this.setActive(false);
-    this.throttle = HOVER_THROTTLE;
+    this.throttle = DRONE.hover;
   }
 
   read(): FlightInput {

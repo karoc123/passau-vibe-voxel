@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { length } from '../core/vec';
-import { HOVER_THROTTLE } from '../sim/craft/fpv-flight';
+import { DRONE } from '../sim/craft/fpv-flight';
 import type { FlightInput } from '../sim/contract/inputs';
 import { FpvInput } from './fpv-input';
 import { FpvTouch } from './fpv-touch';
@@ -274,7 +274,7 @@ export class FpvMode implements PlayerCraft {
       roll: axis('KeyE', 'KeyQ'),
       pitch: axis('KeyW', 'KeyS'),
       yaw: axis('KeyD', 'KeyA'),
-      throttle: HOVER_THROTTLE + (this.keys.has('KeyR') ? 0.38 : 0) - (this.keys.has('KeyF') ? HOVER_THROTTLE : 0),
+      throttle: DRONE.hover + (this.keys.has('KeyR') ? 0.38 : 0) - (this.keys.has('KeyF') ? DRONE.hover : 0),
     };
   }
 

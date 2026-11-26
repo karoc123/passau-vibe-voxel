@@ -15,8 +15,7 @@ export const CORES = {
   hovercraft: (t: Tuning) => new SpecialCore('hovercraft', t.craft),
   helicopter: (t: Tuning) => new SpecialCore('helicopter', t.craft),
   paraglider: (t: Tuning) => new SpecialCore('paraglider', t.craft),
-  // (the drone has no tuning of its own yet: fpv-flight.ts's constants)
-  drone: (_t: Tuning) => new DroneCore(),
+  drone: (t: Tuning) => new DroneCore(t.drone),
   floatplane: (t: Tuning) => new PlaneCore(t.plane),
   jet: (t: Tuning) => new PlaneCore(t.jet),
 } satisfies Record<CraftType, (t: Tuning) => CraftCore>;

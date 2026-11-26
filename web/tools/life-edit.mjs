@@ -564,6 +564,16 @@ async function driverSeat() {
       drives.length === 1 && drives[0].entity.kind === 'car' && drives[0].entity.id === c.id && drives[0].tick === notes[0].tick,
     `seats: the driver's note a drive event of the car, read once by its driver (${notes.length})`);
     const P = T.personPoint(p, 0, { x: 0, y: 0, z: 0 });
+    // a person struck by the driven car (as a tick of the road physics records one: LifePhysics hitPeople) is a struck
+    // event and the impact event of the person, by the car, at its speed and place, both of the tick it happened in
+    const hit = { x: P.x, y: P.z, z: P.y, h: 0, pitch: 0, roll: 0 }, from = sim.tick;
+    T.struck.push({ tick: sim.tick + 1, person: p.id, col: p.col, bike: !!p.bike, pose: hit, vx: 3, vz: 4, by: c.id });
+    tick(STEP);
+    const hits = sim.eventsSince(from).filter((e) => e.kind === 'struck' || e.kind === 'impact'), [struck, impact] = hits;
+    check(hits.length === 2 && struck.kind === 'struck' && struck.person === p.id && impact.kind === 'impact' && impact.tick === struck.tick &&
+      JSON.stringify([impact.entity, impact.by, impact.speed, impact.at]) ===
+      JSON.stringify([{ kind: 'person', id: p.id }, { kind: 'car', id: c.id }, 5, { x: hit.x, y: hit.y, z: hit.z }]),
+    `seats: a person struck by the driven car an impact event of the person, by the car (${hits.map((e) => e.kind).join(', ')})`);
     S.A.send({ kind: 'enterSeat', entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
     tick(STEP);
     const switched = sim.seat('A')?.role === 'walker' && sim.driverSnapshot('A') === null && T.detachedCars.includes(c) && !phys.controlled(c);
@@ -740,7 +750,7 @@ async function left() {
   const { DEFAULT_TUNING } = await load('sim/tuning.ts');
   const keeping = { radius: 300, after: 10 };
   const plan = [['boat', 8160.5, 2880.5, 1.8, null, afloat(8160.5, 2880.5, 1.8)], ['helicopter', STREET.x, STREET.y, 0, null, aloft(STREET.x, STREET.y, 0, 40)]];
-  const w = await craftWorld(plan, { ...DEFAULT_TUNING, edits: keeping });
+  const w = await craftWorld(plan, { ...DEFAULT_TUNING, presence: keeping });
   if (!w) return;
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
   const client = new MirrorSimClient(new CloneLink(new ThreadLink(server.connect('B'))), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
