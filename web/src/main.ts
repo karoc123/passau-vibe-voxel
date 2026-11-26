@@ -44,7 +44,8 @@ import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
-import { openSession, pageEdits, pageView, PageTime, sessionOptions } from './app/session';
+import { openSession, pageView, PageTime, sessionOptions } from './app/session';
+import { LiveEdits } from './core/live-edits';
 import './style.css';
 
 const TODAY = dayOfYear(new Date());
@@ -295,7 +296,7 @@ async function boot() {
   const streetLamps = fetchJson<{ lamps: [number, number, number][] }>(dataUrl(CLIENT_FILES.streetlamps)).then((j) => j.lamps).catch((e) => { console.warn('street lamps', e); return []; });
   const tileMat = makeVoxelMaterial(uniforms);
   // (the session's options, its edits: the page's, its client's, read by the streamer and the page's TileCache)
-  const session = sessionOptions(qs), edits = pageEdits(session);
+  const session = sessionOptions(qs), edits = new LiveEdits();
   streamer = new TileStreamer(meta, tileMat, scene, edits);
   // ?dig=1: a click carves a hole in the city, until the page is loaded again (dig.ts; a developer's switch)
   if (qs.get('dig') === '1') { const S = streamer; import('./dig').then(({ installDig }) => installDig(S, camera, renderer.domElement, simReady)); }
@@ -343,7 +344,7 @@ async function boot() {
   fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic)).then(unpackTraffic).then((td) => {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
-    // the world sim's client: local, mirrored or in a worker (app/session.ts)
+    // the world sim's client, the sim in a Web Worker on its own clock
     const { client, link } = openSession(session, { meta, edits, traffic: td, world });
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
@@ -352,7 +353,7 @@ async function boot() {
       text.textContent = e.message;
       $('#loading').classList.remove('hidden');
     });
-    if (link) hook('__simLink', link);
+    hook('__simLink', link);
     sim = client;
     pageTime = new PageTime(client);
     life = nav.life = new StreetLife(scene, client);
@@ -416,8 +417,9 @@ renderer.setAnimationLoop(frameLoop({
     nav.update(dt);
     for (const c of crafts) if (c.view === 'own') c.update(dt);
   },
-  // the world sim ticks whether or not it is drawn (ADR 0008), simulated round what the page's player looks at (its
-  // view: the focus; agents come and go far from the camera, which sees them); the light follows the world's time
+  // the frame's commands to the world sim, which ticks on its own clock round what the page's player looks at (its
+  // view: the focus; agents come and go far from the camera, which sees them), and the snapshot this frame draws; the
+  // light follows the world's time
   sim: (_now, dt) => {
     if (!sim || !life) return;
     sim.send(pageView(sim, focus(), camera.position));

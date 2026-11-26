@@ -13,7 +13,7 @@ export interface DebugHooks {
   __three: object;
   __life: StreetLife;
   __sim: SimClient;
-  // ?worker=1: the worker's link
+  // the sim worker's link (its tick times)
   __simLink: WorkerLink;
   __streamer: TileStreamer;
   // into the nearest craft no one pilots (F)

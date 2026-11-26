@@ -374,7 +374,7 @@ The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a fail
 | `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
 | `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
 | `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
-| `mirror-check` | the page's drawing from snapshots against `tools/mirror-golden.json`, and every body's pose from the snapshot against the sim's; the golden is of one data build, so after a rebuild check the page, then `node tools/mirror-check.mjs --write-golden` | fast |
+| `mirror-check` | the page's drawing from snapshots on its render clock (every tick in order, a few ticks behind at most), and every body's pose from the snapshot against the sim's | fast |
 | `section-check` | sectioned re-meshing of an edited node equals the whole node's mesh | full |
 | `popin-check` | the street life, trains and boats: nothing appears, vanishes or jumps near a moving viewer | full |
 | `surface-gap` | the car's surface against the drawn one on the real city; `--check` against the baseline | full |
@@ -515,10 +515,10 @@ another). Driving into the river ends in a splash and a restart a little way bac
 (no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
 on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
 (`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded by the host
-in the background at its start (in the page's thread ~1.5 s on, when the page is idle: `host/browser.ts`); the wheel
+in the background at its start (in the sim's Web Worker); the wheel
 asked for before that is refused as loading and `drive.ts` asks again. Rapier is the only car physics. The mode's
 panel and input are `web/src/nav/drive.ts`; it sends the local player's commands to the world sim
-(`web/src/sim/world-sim.ts`, which `main.ts` creates and ticks). The shared road world resolves player commands and contacts, and
+(`web/src/sim/world-sim.ts`, which ticks on its own clock in a Web Worker). The shared road world resolves player commands and contacts, and
 `physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless
 in `tools/rapier-car.mjs` (`drive_*`).
 

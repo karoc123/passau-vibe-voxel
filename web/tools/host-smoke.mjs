@@ -3,14 +3,14 @@
 // them as the worker's) on the real data, two sessions on it (the page's player and a second), FRAMES frames at 30 fps
 // at a viewer by the cathedral, the first following a car, the second a person; a snapshot per session per frame.
 // Run three times: twice driven directly (session.send, server.update, session.snapshot) and once through the Web
-// Worker's message handler (src/host/sim.worker.ts handle, its post a list), and every snapshot of every session must
+// Worker's message handler and its tick (src/host/sim.worker.ts handle, step: no clock here; its post a list), and every snapshot of every session must
 // be the same in all three (the worker's minus its time). Then the road physics, the host's to load (no client asks
 // for it): a car's seat asked for through the handler before it is in is refused as loading and starts its load (the
 // physics port, the tiles port); asked again once it is in, taken (the player's driver in the snapshot), and a few
 // frames run with it. A host started eager has it in without anyone asking.
-// Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a MirrorSimClient over each transport (in-thread
-// ThreadLink; CloneLink(ThreadLink); WorkerLink, its Worker a stand-in whose messages go
-// through sim.worker.ts greet and handle) takes the host's hello when it matches its own, and refuses it (client.hello
+// Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a MirrorSimClient over each transport (a
+// CloneLink of a session this tool ticks; WorkerLink, its Worker a stand-in whose messages go
+// through sim.worker.ts greet, handle and step) takes the host's hello when it matches its own, and refuses it (client.hello
 // rejects naming what differs; the session left, no snapshot taken) when the protocol, the data build or the tuning
 // differ; the tuning's hash is the same for a copy of the tuning with its keys in another order or another host-only
 // number (the edits' keeping), another for one craft number. Then the host's own: the players it names
@@ -19,12 +19,13 @@
 // usage (in web/): node tools/host-smoke.mjs [-v]; prints PASS with the counts, or FAIL
 import crypto from 'node:crypto';
 import { DATA, hasData, load } from './real-city.mjs';
+import { sessionLink } from './lib.mjs';
 
 if (!hasData()) { console.log(`SKIP host-smoke: no ${DATA}meta.json / traffic.json`); process.exit(0); }
 const verbose = process.argv.includes('-v');
 const FRAMES = 240, FPS = 30, P2 = 'p2';
 const { nodeHost, readHostData, worldEdits: WE } = await load('host/node.ts');
-const { handle, greet } = await load('host/sim.worker.ts');
+const { handle, greet, step } = await load('host/sim.worker.ts');
 const data = readHostData(DATA), raw = structuredClone(data.traffic);
 const spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const focus = { x: spot.x, z: spot.y };
@@ -68,7 +69,8 @@ async function worker() {
     const c = commands(server, f);
     for (const x of c.b) b.send(x);
     setTime(server, f);
-    handle(a, { kind: 'frame', dt: 1 / FPS, commands: c.a }, post);
+    handle(a, { kind: 'commands', commands: c.a });
+    step(a, post);
     const m = posted.pop();
     if (m?.kind !== 'snapshot' || posted.length) throw new Error(`frame ${f}: posted ${JSON.stringify(m?.kind)} (${posted.length} more)`);
     const seen = server.sim.players.get(a.player)?.view?.focus;
@@ -80,7 +82,7 @@ async function worker() {
   // Rapier; its terrain warmed round the car through the tiles port); once in, the seat asked again is taken
   const car = server.sim.traffic.cars.find((c) => c.v > 1) ?? server.sim.traffic.cars[0];
   const seat = { kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' };
-  const frame = (f, commands) => { setTime(server, f); handle(a, { kind: 'frame', dt: 1 / FPS, commands: [VIEW, ...commands] }, post); };
+  const frame = (f, commands) => { setTime(server, f); handle(a, { kind: 'commands', commands: [VIEW, ...commands] }); step(a, post); };
   const t0 = performance.now();
   let f = FRAMES;
   frame(f++, [seat]);
@@ -193,7 +195,7 @@ const { hostStart } = await load('host/start.ts'), { goldenHour, dayOfDate } = a
 // the hello, through every transport
 const { hello, tuningHash } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const { DEFAULT_TUNING } = await load('sim/tuning.ts');
-const { MirrorSimClient, ThreadLink, CloneLink } = await load('client/sim-client.ts');
+const { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
 const { WorkerLink } = await load('client/sim-worker-link.ts');
 const host = r1.server, build = checkBuild(data.meta, () => {}), mine = hello(build);
 if (!build) fail.push('hello: the data has no build (meta.json world)');
@@ -205,22 +207,28 @@ if (tuningHash({ ...DEFAULT_TUNING, craft }) === mine.tuning) fail.push('hello: 
 if (tuningHash({ ...DEFAULT_TUNING, edits: { ...DEFAULT_TUNING.edits, after: 1 } }) !== mine.tuning) fail.push('hello: the tuning\'s hash has the host\'s own edits keeping');
 // (a stand-in for the Web Worker: its messages cloned and answered a turn later, through greet and handle)
 globalThis.location ??= { href: 'http://localhost/' };
-let workerSession = null, terminated = 0;
+// (its clock: tick(), once a frame here)
+let workerSession = null, workerTick = () => {}, terminated = 0;
 globalThis.Worker = class {
   onmessage = null; onerror = null;
   postMessage(m) {
     const post = (x) => queueMicrotask(() => this.onmessage?.({ data: structuredClone(x) }));
     m = structuredClone(m);
     if (m.kind === 'init' && (typeof m.query !== 'string' || Object.keys(m).length !== 3)) fail.push(`the worker's init carries more than the page's query: ${JSON.stringify(m)}`);
-    if (m.kind === 'init') { workerSession = host.connect('w'); greet(workerSession, post); post({ kind: 'ready' }); } else handle(workerSession, m, post);
+    if (m.kind === 'init') {
+      const s = workerSession = host.connect('w');
+      greet(s, post); post({ kind: 'ready' });
+      workerTick = () => { if (!s.left) step(s, post); };
+    } else handle(workerSession, m);
   }
-  terminate() { terminated++; workerSession?.leave(); }
+  terminate() { terminated++; workerSession.left = true; workerSession?.leave(); }
 };
+// (each with the host's tick once a frame: the tool's own for the mirror, the stand-in worker's clock)
 const transports = {
-  thread: (h) => { const s = host.connect('l'); return { client: new MirrorSimClient(new ThreadLink(s), structuredClone(raw), null, h), session: s }; },
-  mirror: (h) => { const s = host.connect('m'); return { client: new MirrorSimClient(new CloneLink(new ThreadLink(s)), structuredClone(raw), null, h), session: s }; },
+  mirror: (h) => { const s = host.connect('m'), l = sessionLink(s);
+    return { client: new MirrorSimClient(new CloneLink(l), structuredClone(raw), null, h), session: s, run: () => { host.update(1 / FPS); l.deliver(); } }; },
   worker: (h) => { const client = new MirrorSimClient(new WorkerLink('seed=3'), structuredClone(raw), null, h);
-    return { client, get session() { return workerSession; } }; },
+    return { client, get session() { return workerSession; }, run: () => workerTick() }; },
 };
 const cases = [['matching', mine, null], ['protocol', { ...mine, protocol: mine.protocol + 1 }, 'protocol'],
   ['build', { ...mine, build: { ...build, buildId: `${build?.buildId}-other` } }, 'data build'], ['no build', { ...mine, build: null }, 'data build'],
@@ -228,10 +236,10 @@ const cases = [['matching', mine, null], ['protocol', { ...mine, protocol: mine.
 let helloChecks = 0;
 for (const [tn, make] of Object.entries(transports)) {
   for (const [cn, h, word] of cases) {
-    const { client, session } = make(h), what = `hello ${tn} ${cn}`, before = terminated;
+    const { client, session, run } = make(h), what = `hello ${tn} ${cn}`, before = terminated;
     let got = null;
     client.hello.then((x) => { got = { ok: x }; }, (e) => { got = { error: e }; });
-    for (let f = 0; f < 3; f++) { client.update(1 / FPS); for (let i = 0; i < 4; i++) await tick(); }
+    for (let f = 0; f < 3; f++) { client.update(1 / FPS); run(); for (let i = 0; i < 4; i++) await tick(); }
     helloChecks++;
     if (!got) { fail.push(`${what}: no hello taken`); continue; }
     if (!word) {
@@ -250,5 +258,5 @@ for (const [tn, make] of Object.entries(transports)) {
 }
 if (verbose) console.log(`  ${T.cars.length} cars, ${T.people.length} people, tick ${r1.server.sim.tick}; road physics loaded in ${w.loadMs.toFixed(0)} ms`);
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL host-smoke: ${fail.length} problem(s)`); process.exit(1); }
-console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; a car's seat refused while the host loads the road physics, taken once it is in (${(w.loadMs / 1000).toFixed(1)} s), an eager host's loaded at its start; the hello taken or refused through 3 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too; the road physics' too)`);
+console.log(`PASS host-smoke: hostSim through host/node.ts, 2 sessions x ${FRAMES} frames, every snapshot alike run twice and through sim.worker.ts handle; a car's seat refused while the host loads the road physics, taken once it is in (${(w.loadMs / 1000).toFixed(1)} s), an eager host's loaded at its start; the hello taken or refused through 2 transports (${helloChecks} cases); an edit as a command: ${ed.nodes} node(s), applied ${ed.ticks} tick(s) after it was sent, its outcome its session's alone, refused by a mode without mayEdit, the host's listeners gone with dispose (its tile world's too; the road physics' too)`);
 process.exit(0);

@@ -2,7 +2,7 @@
 // by the pipeline, scripts/build_data.sh) a host and a client load, and the formatVersion of meta.json `world`
 // (scripts/world_id.py FORMAT_VERSION: the layout of the node files and of the edits' addresses) this code reads.
 // checkBuild is called where meta.json comes in: the page (main.ts) and the host (host/sim-host.ts hostSim, so the
-// page's thread, the worker and host/node.ts alike). A build without `world` (older than world_id.py) warns and loads;
+// worker and host/node.ts alike). A build without `world` (older than world_id.py) warns and loads;
 // one of another formatVersion throws. DataBuild is what a later hello (A6: protocol, build, tuning) carries of it.
 import type { Meta } from './meta';
 

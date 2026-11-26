@@ -62,11 +62,10 @@ Open points left by landed engine work:
 
 - **Edits:** keep radius (600 m) and delay (120 s) are guesses; a placed block leaves trees poking through;
   temporary damage needs the TileCache to expose a node's raw files.
-- **Wire:** worker not default (waits for prediction); no interest filter per client; snapshots are plain objects
-  (no typed arrays or deltas); the worker's ground is level-1 nodes only and decodes nodes the page also decodes;
-  Rapier is bundled twice; no gated run carries edit notes over the clone link; `mirror-check`'s golden
-  (`web/tools/mirror-golden.json`) is of one data build: after a rebuild, check the drawing, then `--write-golden`.
-- **Timing (M4, M5):** worker alpha one update behind, no teleport counter; inputs not buffered by tick;
+- **Wire:** no interest filter per client; snapshots are plain objects (no typed arrays or deltas); the worker's
+  ground is level-1 nodes only and decodes nodes the page also decodes; no gated run carries edit notes over the clone
+  link.
+- **Timing (M5):** no teleport counter; inputs not buffered by tick;
   `life.update`'s viewer is last frame's camera.
 - **Seats and crafts:** 1–2 frames on leave where nobody draws the craft; empty crafts' events are published; the
   parked-car cap (8/24) sits beside presence (`Tuning.presence`); a fall over 80 m/s is slowed by the walk clamp;

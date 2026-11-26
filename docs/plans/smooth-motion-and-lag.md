@@ -65,15 +65,6 @@ up, 55° fov). No source was changed.
 - Not measured: the owner's real frame times. The defect needs uneven frames; how uneven theirs are (a tick's cost
   landing in every second 60 Hz frame, tile streaming, GC) is unknown. M1's tool records it.
 
-### `?worker=1` has a second defect on top
-
-Same runs with the worker, 60 Hz, every 6th frame missed: car vs camera 11.7 / 36.9 cm (the same camera defect), and
-**the drawn car's step no longer follows the frame's time: step − v·dt mean 12.2, max 36.9 cm** (page thread: 0.05).
-The 33.3 ms frame moves the car 16.7 ms worth, the frame after moves it 33.3 ms worth: the page draws the last
-snapshot at the snapshot's own `acc` (snapshot.ts:81, 139), which is the time of the frame that sent it, one update
-late (sim-worker-link.ts:1-4). The control fixes the camera there too (0.0 cm) and leaves this (12.2 / 36.9 cm). Its
-fix is the playout clock of section 3 (M4), not M1; over a network it would be far worse (snapshots arrive in bursts).
-
 ### The fix (M1; described, not built)
 
 Per the engines' own rule (section 2, P3): the camera is placed once per frame, after the sim's update, from the pose
@@ -96,9 +87,7 @@ the followed thing is drawn at in that same frame.
 |---|---|---|---|
 | Crafts are not interpolated: `drawn(_alpha)` ignores alpha | plane-core.ts:57, drone-core.ts:54, special-core.ts:61, boat-motion.ts:283 | a 1/60 s core on a 144 Hz display moves in 2 of 5 frames; the shell's camera reads the same state, so the world judders, not the craft | M3 (E13) |
 | Crafts step on the frame's `dt`, not on the world tick | world-sim.ts:161, 401 | cannot be replayed from tick numbers (entities-and-modes.md section 4) | M3 (E13) |
-| The mirror client draws a snapshot at the snapshot's `acc` | snapshot.ts:139, sim-worker-link.ts | above | M4 |
 | The mirror client interpolates heading, pitch, roll as Euler angles | snapshot.ts:185 | fine upright; wrong through a roll-over | M4 |
-| People and riders are extrapolated (`v · lead`) then eased | life.ts:186-193, 211-218 | smooth; behind a link they need the same render time as the cars | M4 |
 | The chase camera's yaw is the body's yaw, unfiltered | ride.ts:145-151 | a body's yaw wobble swings the whole view; taste, after M1 | – |
 
 ## 2. Principles from the research
@@ -309,7 +298,6 @@ Projectiles that fly are simulated forward, not rewound. Ramming is physics on t
 | Package | Change |
 |---|---|
 | E13 (one tick loop) | Unchanged in aim; add: `FrameTime` and the frame order above; `prev`/`cur` in every core and `drawn(alpha)` that uses it; `prev = cur` and `teleport` on placement; commands carry `tick` besides `seq`; the snapshot `ack { seq, tick }`. Becomes M3. |
-| – (missing) | The mirror client's render clock and snapshot buffer. entities-and-modes.md section 4 says "everything else is drawn from snapshots as now"; "as now" is the second defect of section 1. New: M4, before E17. |
 | E17 (craft prediction) | Add: the state ring, the tolerance, the error offset as specified here, the predicted clock and the server's buffer hint (M5). "Decays over ~100 ms" becomes the two-rate rule. Becomes M6. |
 | E18 (car prediction) | As planned (one-body world, kinematic proxies, no `takeSnapshot`); add: the state list, proxies at their interpolated pose, P12's caveat, the judder gate with injected lag. Becomes M7. |
 | E19 (worker by default) | Waits for M4 too (not only E17); gate adds the judder tool with `?worker=1`. Becomes M8. |
@@ -356,16 +344,6 @@ E17–E19 stand (owner's decision 3: no hurry). M9, M10 with the server and the 
   `tick`, snapshot `ack`.
 - **Gates:** E13's; judder with a craft followed (plane, boat, drone): J and E ≤ 0.5 cm at 60/120/144 Hz and the
   uneven patterns; determinism at two rendering rates, crafts included.
-
-### M4. Render clock and snapshot buffer in the mirror client (M)
-
-- **Do:** `MirrorSimClient` keeps a ring of snapshots by tick and a render clock advanced by the frame's `dt`
-  (section 3); `TrafficMirror` samples between two snapshots instead of applying the latest. A `LagLink` (a
-  `SimLink` wrapper: delay, jitter, loss, burst; seeded) so the buffer is tested without
-  a network, over `ThreadLink` and over the worker.
-- **Gates:** judder by default (in the page's thread, from snapshots) and with `?worker=1`: E ≤ 0.5 cm in every pattern (today 36.9 cm); with `LagLink`
-  at 50 ± 20 ms and 2 % loss: E ≤ 1 cm for followed traffic, no frame without motion; mirror-check; the measured
-  delay shown by `?pace=1`.
 
 ### M5. Input commands: tick, ack, buffer (S–M)
 

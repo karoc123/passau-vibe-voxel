@@ -46,9 +46,8 @@ export interface DriverSnapshot {
 export interface TimeOfDay { hour: number; day: number }
 
 export interface Snapshot {
+  /** the tick whose state this is; what moves is drawn between it and the tick before */
   tick: number;
-  /** s since the last tick: how far between the last two to draw */
-  acc: number;
   /** the world clock (the signals: s) */
   t: number;
   /** the world's time of day and day of the year (the host's: WorldSim.setTime; the page's light follows it) */
