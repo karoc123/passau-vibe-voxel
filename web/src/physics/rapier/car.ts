@@ -42,7 +42,7 @@ export const crashSpeed = (ride: RideTuning = RIDE) => Math.sqrt(2 * 9.81 * ride
 const MAX_STEER = 0.55, STEER_FALL = 14; // rad, m/s (CarBuild tune: steer, steerFall)
 // a bike (CarBuild bike): drawn leaning into its turns, at most LEAN_MAX (rad), eased over LEAN_S; a wheelie of up to
 // WHEELIE (rad) under full throttle from low speed; kept upright on its wheels (bike())
-const LEAN_MAX = 0.7, LEAN_S = 0.12, WHEELIE = 0.16;
+const LEAN_MAX = 0.8, LEAN_S = 0.12, WHEELIE = 0.16;
 const RIGHT_AIR = 0.3; // s: in the air this long a bike is still kept upright (a bump, a kerb's hop)
 const STEP_MIN = 0.25, STEP_MAX = 1.15; // m: risers the wedge helps up
 // m: the wedge's run, its profile in this many planes along a smoothstep (a 1 m step: ~17° at its steepest; shorter
@@ -111,7 +111,8 @@ export class RapierCar {
       this.bars += Math.max(-most, Math.min(most, input.steer - this.bars));
     } else this.bars = input.steer;
     const target = -this.bars * lock;
-    this.steer += (target - this.steer) * Math.min(1, dt * 8);
+    // (the ramp is the bars' easing already: a second lag on it made the bike answer late)
+    this.steer = T?.steerRamp ? target : this.steer + (target - this.steer) * Math.min(1, dt * 8);
     let engine = 0, brake = 0;
     const B = this.build, BRAKE = B.brake;
     if (input.gas > 0) engine = v > -0.5 ? input.gas * B.engine * (v < B.top ? 1 : 0) : 0;

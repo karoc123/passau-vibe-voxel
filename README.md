@@ -467,7 +467,9 @@ the car runs into are shoved away along the hit and tip over flat (a short scrip
 no physics: `view/life.ts`), and lie there until the car is ~35 m away. The traffic recognises the player vehicle in its
 spatial checks. It can jump, flip and land on its roof, where it stays (park it, take
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
-(no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
+(no control for a moment). The motorbike turns on a ~2.7 m circle at walking pace and leans up to ~45° at speed
+(a fast corner wants slowing down), out-accelerates the cars except the coupé, and stops from 50 km/h in ~8 m
+(`tools/vehicles.mjs` `bike_turn`). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
 on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
 (`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded by the host
 in the background at its start (in the sim's Web Worker); the wheel
