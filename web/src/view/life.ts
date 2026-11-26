@@ -7,7 +7,8 @@ import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import type { Car, Kind, Rideable } from '../sim/types';
-import type { Pose, RoadPose } from '../sim/contract/pose';
+import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
+import { FLOAT } from '../nav/swim';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
@@ -238,6 +239,13 @@ export class StreetLife {
       if (C) { // walked by a player (WorldSim enterSeat, a walker's): where they put them, their step's phase this side's
         r = this.entry(this.drawnPeople, p.id, C.x, C.y, C.z);
         r.x = C.x; r.y = C.y; r.z = C.z; r.h = C.h;
+        if (C.swim) {
+          r.ph = (r.ph ?? p.ph) + dt * (C.moving ? 5 : 2);
+          swimming(m, r, r.ph);
+          M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
+          M.torso.setColorAt(i, this.col(p.col));
+          return;
+        }
         if (C.moving) { const ph = (r.ph ?? p.ph) + dt * 9; r.ph = ph; bob = Math.sin(ph); }
       } else {
         // (where the mirror reckons them now)
@@ -290,9 +298,12 @@ export class StreetLife {
       r.frame = this.frame;
       easeAvatar(r, pose, dt);
       let bob = 0;
-      if (av.pose.moving) { r.ph = (r.ph ?? 0) + dt * 9; bob = Math.sin(r.ph); }
-      pos.set(r.x, r.y + 0.05 * Math.abs(bob), r.z);
-      m.compose(pos, q.setFromAxisAngle(up, r.h), one);
+      if (av.pose.swim) { r.ph = (r.ph ?? 0) + dt * (av.pose.moving ? 5 : 2); swimming(m, r, r.ph); }
+      else {
+        if (av.pose.moving) { r.ph = (r.ph ?? 0) + dt * 9; bob = Math.sin(r.ph); }
+        pos.set(r.x, r.y + 0.05 * Math.abs(bob), r.z);
+        m.compose(pos, q.setFromAxisAngle(up, r.h), one);
+      }
       M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
       M.torso.setColorAt(i, this.col(AVATAR_COLS[hashOf(av.player) % AVATAR_COLS.length]));
       i++;
@@ -501,4 +512,20 @@ export class StreetLife {
     if (!best) return null;
     return { ref: { kind, id: best.id }, label: StreetLife.label(best) };
   }
+}
+
+// A swimmer (a walk pose's swim) at r (its soles, FLOAT under the water's top), its stroke's phase ph: the body lying
+// forward along its heading, chest at the top of the water, rolling side to side with each stroke (the crowd's mesh has
+// no arms to move)
+const SWIM_TILT = 1.3, SW = { yaw: new THREE.Quaternion(), tilt: new THREE.Quaternion(), roll: new THREE.Quaternion(), axis: new THREE.Vector3(), at: new THREE.Vector3() };
+function swimming(m: THREE.Matrix4, r: Pick<WalkPose, 'x' | 'y' | 'z' | 'h'>, ph: number) {
+  const { yaw, tilt, roll, axis, at } = SW;
+  yaw.setFromAxisAngle(axis.set(0, 1, 0), r.h);
+  tilt.setFromAxisAngle(axis.set(1, 0, 0), SWIM_TILT);
+  roll.setFromAxisAngle(axis.set(0, 1, 0), 0.35 * Math.sin(ph));
+  const q = yaw.multiply(tilt).multiply(roll);
+  // (the body's middle, 0.85 m up it from the soles, just under the water's top)
+  axis.set(0, 1, 0).applyQuaternion(q);
+  at.set(r.x, r.y + FLOAT - 0.2, r.z).addScaledVector(axis, -0.85);
+  m.compose(at, q, new THREE.Vector3(1, 1, 1));
 }
