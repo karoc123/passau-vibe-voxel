@@ -9,7 +9,7 @@ import type { EntityKind, EntityRef, PlayerId } from '../contract/ids';
 import type { WorldSim } from '../world-sim';
 
 /** how far (m) past the radius a thing already sent is still sent */
-export const HOLD = 50;
+const HOLD = 50;
 /** the default radius beyond the street life's (sim/road-net.ts ACTIVE_R): a long way is simulated wholly when one of
  * its ends or its middle is in a circle, so its agents reach a little out */
 export const SEND_MARGIN = 150;
