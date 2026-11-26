@@ -372,9 +372,15 @@ All run from `web/` with no GPU. `npm` is not on PATH: use `tools/wt.sh` (`setup
 the main checkout's `node_modules` and data). Each tool's header says what it checks and its options.
 
 **Gates: `node tools/gates.mjs`** (`tools/wt.sh gates`). tsc and the headless checks in parallel, a PASS / FAIL table,
-exit code 1 on a failure. `--list` shows every gate, its set and the files it guards; name gates to run only those;
-`--full` adds the slow ones; `--golden FILE` adds the mesher's byte comparison (record it before the change with
-`node tools/mesh-golden.mjs write FILE`); `-v` prints every gate's output. The pipeline's quick gates:
+exit code 1 on a failure. Each gate names the files it guards (`paths` in `GATES`); `--changed [REF]` runs only the
+gates whose paths match what changed since REF (default `main`, from the merge-base; uncommitted and untracked files
+too) and says which gate ran for which file; tsc always runs, a change to a `CORE` file (`src/core/`,
+`sim/contract/`, the tools' shared files, package.json, tsconfig) runs them all. Before a merge `--changed`; the
+whole fast set after a series of merges. `--list` shows every gate, its set, what it guards and its paths, and checks
+that every file of `src/` and `tools/` is in a gate's paths or in `UNGATED` (the gate `gate-coverage`: a new package
+needs a gate or a line there); name gates to run only those; `--full` adds the slow ones; `--golden FILE` adds the
+mesher's byte comparison (record it before the change with `node tools/mesh-golden.mjs write FILE`); `-v` prints
+every gate's output. The pipeline's quick gates:
 `scripts/check.sh` (`--fixture` adds `check.py verify` on the fixture map, minutes; some verify failures exist on main,
 so compare against main).
 

@@ -1,7 +1,9 @@
-// The web gates in one run: tsc and the headless checks of web/tools/, in parallel,
-// with a PASS / FAIL table and their times. Which gate guards which files is the table GATES below: run the gates
-// before a commit, or at least those whose `guards` cover what you changed.
-//   fast set (default, under a minute on 20 cores): tsc and every check that runs in seconds;
+// The web gates in one run: tsc and the headless checks of web/tools/, in parallel, with a PASS / FAIL table and their
+// times. Each gate in GATES below names the files it guards (`paths`); a change to a file of CORE selects every gate.
+//   --changed [REF]: before a merge, only the gates whose paths match what changed since REF (default main; the diff
+//     from the merge-base, REF...HEAD, plus uncommitted and untracked files): which gates and why (the first file each
+//     matched), which skipped. tsc always runs; nothing matched: tsc alone. With --full, the full set's gates too.
+//   fast set (default, under a minute on 20 cores): tsc and every check that runs in seconds; after a series of merges;
 //   full set (--full): also section-check, popin-check, caps-check --all, surface-gap --check against
 //     tools/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE, recorded
 //     before the change with `node tools/mesh-golden.mjs write FILE`).
@@ -10,14 +12,16 @@
 // those tools run when the data is there, so they apply only then). Gates on the real data (`data`) are
 // SKIP without public/data/meta.json (or VOXEL_DATA, tools/data-dir.mjs). Nothing is written; the output of a failed
 // gate is printed after the table (-v: every gate's).
-// usage (in web/): node tools/gates.mjs [--full] [--golden FILE] [-j N] [-v] [--list] [gate ...]
-//   gate ...: only those (by name, from either set); --list: the table, nothing run; -j: gates at once (default: half
-//   the cores, at most 8); exit code 1 if a gate fails
+// usage (in web/): node tools/gates.mjs [--full] [--changed [REF]] [--golden FILE] [-j N] [-v] [--list] [--coverage] [gate ...]
+//   gate ...: only those (by name, from either set); --list: the table with each gate's paths and the coverage check,
+//   nothing run; --coverage: only the check that every file of src/ and tools/ is in a gate's paths, CORE or UNGATED
+//   (the gate gate-coverage: a new package without a gate fails it); -j: gates at once (default: half the cores, at
+//   most 8); exit code 1 if a gate fails
 // pnpm gates / pnpm gates:full run the same.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { web, dataDir } from './data-dir.mjs';
 
 const args = process.argv.slice(2);
@@ -25,49 +29,112 @@ const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : un
 const FULL = args.includes('--full'), VERBOSE = args.includes('-v'), LIST = args.includes('--list');
 const golden = opt('--golden');
 const jobs = Math.max(1, +(opt('-j') ?? Math.min(8, Math.floor(os.availableParallelism() / 2))));
-const named = args.filter((a, i) => !a.startsWith('-') && !['--golden', '-j'].includes(args[i - 1]));
 
 // name, the command (run in web/ with this node), set, real data needed, PASS lines expected (at least), seconds as
-// measured (WSL, 20 cores, alone; for the order: longest first), what it guards
+// measured (WSL, 20 cores, alone; for the order: longest first), what it guards, and `paths`: the files it guards, as
+// globs relative to web/ (`*` within a folder, `**` at any depth; the pipeline is ../scripts/), from its guards and
+// from what the tool imports and reads. tsc has none (it always runs); `wide`: those of its paths that are all of a
+// folder (core-deps reads all of src/): no gate of a file's own (--coverage).
 const tsc = path.join(web, 'node_modules/typescript/bin/tsc');
+// the real data and what makes it: a gate reading public/data/ guards the pipeline and the data format
+const DATA = ['../scripts/**', '../pyproject.toml', '../uv.lock', 'public/data/**', 'tools/real-city.mjs'];
+const MESH = ['src/mesher.worker.ts', 'src/tile-request.ts', 'src/sections.ts', 'src/chamfer.ts', 'src/roofs.ts'];
+const SIM = ['src/sim/*.ts', 'src/sim/server/**', 'src/sim/modes/**', 'src/sim/craft/cores.ts', 'src/sim/craft/core-state.ts',
+  'src/client/sim-client.ts', 'src/host/node.ts', 'src/host/sim-host.ts'];
+const GROUPS = { DATA, MESH, SIM };
 const GATES = [
-  { name: 'tsc', cmd: [tsc, '--noEmit'], set: 'fast', secs: 0.7, guards: 'all of src/ and checks/ (types)' },
-  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, guards: 'src/core/, src/sim/ (with sim/craft/), src/physics/ and their imports: no three.js, no DOM; nothing in src/ imports checks/; all of src/: layer table, no value-import cycle, determinism words, window.__ hooks, sim/contract/ types only (a ratchet: BASELINE in the tool)' },
-  { name: 'bld-ids', cmd: ['tools/bld-ids.mjs'], set: 'fast', secs: 0.4, guards: 'mesher.worker.ts greedy merge, building ids' },
-  { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)' },
-  { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)' },
-  { name: 'tile-roundtrip', cmd: ['tools/tile-roundtrip.mjs'], set: 'fast', secs: 2, guards: 'node file format: scripts/tilefile.py, tiles.py column_runs, tile-data.ts, core/tile-sections.ts (needs uv)' },
-  { name: 'boat', cmd: ['tools/boat.mjs'], set: 'fast', expect: 20, secs: 5.5, guards: 'sim/craft/boat-motion.ts, sim/river.ts, core/safe-trail.ts, core/world.ts waterColumn (the river traffic\'s top at every node level); checks/boat-checks.ts, world.ts' },
-  { name: 'collision', cmd: ['tools/collision.mjs'], set: 'fast', expect: 16, secs: 2.7, guards: 'sim/craft/voxel-collision.ts, the tile format; checks/collision-checks.ts, world.ts' },
-  { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 26, secs: 1.2, guards: 'sim/craft/craft-motion.ts and sim/craft/craft-collision.ts, the craft cores\' wire state (sim/craft/core-state.ts, sim/contract/crafts.ts); checks/world.ts' },
-  { name: 'edge', cmd: ['tools/edge.mjs'], set: 'fast', expect: 7, secs: 1, guards: 'core/built.ts and the map\'s edge at a block not built (meta.json built): sim/craft/voxel-collision.ts sweep and waterColumn, core/world.ts inside, physics/rapier/terrain.ts (its walls), sim/craft/plane-flight.ts edge; checks/edge-checks.ts' },
-  { name: 'world-smoke', cmd: ['tools/world-smoke.mjs'], set: 'fast', data: true, secs: 2.5, guards: 'core/ stack, layers, mesher from columns, rapier terrain.ts' },
-  { name: 'rapier-car', cmd: ['tools/rapier-car.mjs'], set: 'fast', expect: 45, secs: 3.1, guards: 'physics/rapier/ (car.ts, life-phys.ts, player-car.ts, terrain.ts); checks/scenarios.ts, drive-scenarios.ts, world.ts' },
-  { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 36, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts' },
-  { name: 'caps-check', cmd: ['tools/caps-check.mjs'], set: 'fast', data: true, secs: 6, guards: 'core/surface.ts, mesher caps, roofs.ts (20 nodes)' },
-  { name: 'plane', cmd: ['tools/plane.mjs'], set: 'fast', expect: 32, secs: 12.5, guards: 'sim/craft/plane-flight.ts, core/safe-trail.ts; checks/plane-checks.ts, jet-checks.ts, plane-real.ts, world.ts' },
-  { name: 'mirror-check', cmd: ['tools/mirror-check.mjs', '--seconds', '60'], set: 'fast', data: true, secs: 27, guards: 'sim/server/snapshot.ts, client/sim-client.ts, sim/server/sim-server.ts, sim/body-pose.ts, sim/road-net.ts, sim/coaches.ts (agents drawn from snapshots on the render clock, every tick in order; the bodies drawn alike by the sim and from the snapshot of the tick drawn; the protocol: snapshots structured-cloned, commands through JSON, CloneLink), view/life.ts' },
-  { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/world-sim.ts (its commands and seats: sim/commands.ts, walk-bounds.ts; its crafts: sim/craft/cores.ts), traffic.ts, train-traffic.ts, boat-traffic.ts, edit-keeper.ts, physics/rapier/life-phys.ts, core/live-edits.ts, core/world-edits.ts, car.ts; left, events, sessions: through a CloneLink (the protocol); sessions: sim/server/sim-server.ts Session (two clients on one SimServer, the player stamped by the host)' },
-  { name: 'host-smoke', cmd: ['tools/host-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 5, guards: 'host/ (sim-host.ts hostSim, its ports: node.ts; sim.worker.ts handle, step): the one host started in Node, two sessions run twice and through the worker\'s handler alike, the road physics loaded through its ports; the hello (sim/hello.ts, sim/contract/hello.ts) taken or refused (protocol, build, tuning) by the mirror and worker clients' },
-  { name: 'ws-smoke', cmd: ['tools/ws-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 20, guards: 'host/ws.ts, client/sim-worker-link.ts SocketLink: two players over a real WebSocket see each other\'s craft, car and body on foot moving smoothly (the body gone when the walk ends) on their render clocks, and each other\'s edits; sim/traffic.ts circles: street life round two players 3 km apart' },
-  { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections' },
-  { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/traffic.ts (one run with a second player far off), sim/train-traffic.ts, sim/boat-traffic.ts' },
-  { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps' },
-  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', 'tools/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
-  { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)' },
+  { name: 'tsc', cmd: [tsc, '--noEmit'], set: 'fast', secs: 0.7, guards: 'all of src/ and checks/ (types)', paths: [] },
+  { name: 'gate-coverage', cmd: ['tools/gates.mjs', '--coverage'], set: 'fast', secs: 0.1, wide: ['src/**', 'tools/**'], guards: 'every file of src/ and tools/ in a gate\'s paths, CORE or UNGATED (this file)', paths: ['src/**', 'tools/**'] },
+  { name: 'core-deps', cmd: ['tools/core-deps.mjs'], set: 'fast', secs: 0.1, wide: ['src/**'], guards: 'src/core/, src/sim/ (with sim/craft/), src/physics/ and their imports: no three.js, no DOM; nothing in src/ imports checks/; all of src/: layer table, no value-import cycle, determinism words, window.__ hooks, sim/contract/ types only (a ratchet: BASELINE in the tool)', paths: ['src/**', 'tools/core-deps.mjs'] },
+  { name: 'bld-ids', cmd: ['tools/bld-ids.mjs'], set: 'fast', secs: 0.4, guards: 'mesher.worker.ts greedy merge, building ids', paths: [...MESH, 'tools/bld-ids.mjs'] },
+  { name: 'layers', cmd: ['tools/layers.mjs'], set: 'fast', secs: 0.4, guards: 'core/layers.ts (L0/L1/L2, routeOps, deltas)', paths: ['tools/layers.mjs'] },
+  { name: 'edit-roundtrip', cmd: ['tools/edit-roundtrip.mjs'], set: 'fast', data: true, secs: 0.6, guards: 'core/columns.ts (edits, encode)', paths: [...DATA, 'tools/edit-roundtrip.mjs'] },
+  { name: 'tile-roundtrip', cmd: ['tools/tile-roundtrip.mjs'], set: 'fast', secs: 2, guards: 'node file format: scripts/tilefile.py, tiles.py column_runs, tile-data.ts, core/tile-sections.ts (needs uv)', paths: ['../scripts/**', '../pyproject.toml', '../uv.lock', 'src/roofs.ts', 'src/chamfer.ts', 'src/sections.ts', 'tools/tile-roundtrip.mjs'] },
+  { name: 'boat', cmd: ['tools/boat.mjs'], set: 'fast', expect: 20, secs: 5.5, guards: 'sim/craft/boat-motion.ts, sim/river.ts, core/safe-trail.ts, core/world.ts waterColumn (the river traffic\'s top at every node level); checks/boat-checks.ts, world.ts', paths: [...DATA, 'src/sim/craft/boat-motion.ts', 'src/sim/craft/craft-core.ts', 'src/sim/craft/voxel-collision.ts', 'src/sim/craft/sweep.ts', 'src/sim/river.ts', 'src/sim/boat-traffic.ts', 'checks/boat-checks.ts', 'tools/boat.mjs'] },
+  { name: 'collision', cmd: ['tools/collision.mjs'], set: 'fast', expect: 16, secs: 2.7, guards: 'sim/craft/voxel-collision.ts, the tile format, the walker (nav/walk.ts); checks/collision-checks.ts, world.ts', paths: [...DATA, 'src/sim/craft/voxel-collision.ts', 'src/sim/craft/sweep.ts', 'src/nav/walk.ts', 'checks/collision-checks.ts', 'tools/collision.mjs'] },
+  { name: 'craft-motion', cmd: ['tools/craft-motion.mjs'], set: 'fast', expect: 26, secs: 1.2, guards: 'sim/craft/craft-motion.ts and sim/craft/craft-collision.ts, the craft cores\' wire state (sim/craft/core-state.ts, sim/contract/crafts.ts); checks/world.ts', paths: ['src/sim/craft/**', 'src/sim/tuning.ts', 'src/sim/walk-bounds.ts', 'checks/scenarios.ts', 'tools/real-city.mjs', 'tools/craft-motion.mjs'] },
+  { name: 'edge', cmd: ['tools/edge.mjs'], set: 'fast', expect: 7, secs: 1, guards: 'core/built.ts and the map\'s edge at a block not built (meta.json built): sim/craft/voxel-collision.ts sweep and waterColumn, core/world.ts inside, physics/rapier/terrain.ts (its walls), sim/craft/plane-flight.ts edge; checks/edge-checks.ts', paths: ['../scripts/map.json', 'src/sim/craft/voxel-collision.ts', 'src/sim/craft/sweep.ts', 'src/sim/craft/plane-flight.ts', 'src/physics/rapier/terrain.ts', 'src/nav/walk.ts', 'checks/edge-checks.ts', 'checks/collision-checks.ts', 'tools/edge.mjs'] },
+  { name: 'world-smoke', cmd: ['tools/world-smoke.mjs'], set: 'fast', data: true, secs: 2.5, guards: 'core/ stack, layers, mesher from columns, rapier terrain.ts', paths: [...DATA, ...MESH, 'src/physics/rapier/terrain.ts', 'tools/world-smoke.mjs'] },
+  { name: 'rapier-car', cmd: ['tools/rapier-car.mjs'], set: 'fast', expect: 45, secs: 3.1, guards: 'physics/rapier/ (car.ts, life-phys.ts, player-car.ts, terrain.ts); checks/scenarios.ts, drive-scenarios.ts, world.ts', paths: [...DATA, 'src/physics/rapier/**', 'src/sim/vehicles.ts', 'checks/scenarios.ts', 'checks/drive-scenarios.ts', 'tools/rapier-car.mjs'] },
+  { name: 'vehicles', cmd: ['tools/vehicles.mjs'], set: 'fast', expect: 36, secs: 3.2, guards: 'sim/vehicles.ts, physics/rapier/car.ts, physics/rapier/player-car.ts', paths: ['src/sim/vehicles.ts', 'src/physics/rapier/car.ts', 'src/physics/rapier/player-car.ts', 'src/physics/rapier/vehicle.ts', 'checks/scenarios.ts', 'checks/drive-scenarios.ts', 'tools/real-city.mjs', 'tools/vehicles.mjs'] },
+  { name: 'caps-check', cmd: ['tools/caps-check.mjs'], set: 'fast', data: true, secs: 6, guards: 'core/surface.ts, mesher caps, roofs.ts (20 nodes)', paths: [...DATA, ...MESH, 'tools/caps-check.mjs'] },
+  { name: 'plane', cmd: ['tools/plane.mjs'], set: 'fast', expect: 32, secs: 12.5, guards: 'sim/craft/plane-flight.ts, core/safe-trail.ts; checks/plane-checks.ts, jet-checks.ts, plane-real.ts, world.ts', paths: [...DATA, 'src/sim/craft/plane-flight.ts', 'src/sim/craft/plane-core.ts', 'src/sim/craft/voxel-collision.ts', 'src/sim/craft/sweep.ts', 'checks/plane-checks.ts', 'checks/jet-checks.ts', 'checks/plane-real.ts', 'tools/plane.mjs'] },
+  { name: 'mirror-check', cmd: ['tools/mirror-check.mjs', '--seconds', '60'], set: 'fast', data: true, secs: 27, guards: 'sim/server/snapshot.ts, client/sim-client.ts, sim/server/sim-server.ts, sim/body-pose.ts, sim/road-net.ts, sim/coaches.ts (agents drawn from snapshots on the render clock, every tick in order; the bodies drawn alike by the sim and from the snapshot of the tick drawn; the protocol: snapshots structured-cloned, commands through JSON, CloneLink), view/life.ts', paths: [...DATA, ...SIM, 'src/view/**', 'tools/mirror-check.mjs'] },
+  { name: 'life-edit', cmd: ['tools/life-edit.mjs'], set: 'fast', data: true, secs: 15, guards: 'sim/world-sim.ts (its commands and seats: sim/commands.ts, walk-bounds.ts; its crafts: sim/craft/cores.ts), traffic.ts, train-traffic.ts, boat-traffic.ts, edit-keeper.ts, physics/rapier/life-phys.ts, core/live-edits.ts, core/world-edits.ts, car.ts; left, events, sessions: through a CloneLink (the protocol); sessions: sim/server/sim-server.ts Session (two clients on one SimServer, the player stamped by the host)', paths: [...DATA, ...SIM, 'src/physics/rapier/**', 'tools/life-edit.mjs'] },
+  { name: 'host-smoke', cmd: ['tools/host-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 5, guards: 'host/ (sim-host.ts hostSim, its ports: node.ts; sim.worker.ts handle, step): the one host started in Node, two sessions run twice and through the worker\'s handler alike, the road physics loaded through its ports; the hello (sim/hello.ts, sim/contract/hello.ts) taken or refused (protocol, build, tuning) by the mirror and worker clients', paths: [...DATA, ...SIM, 'src/host/**', 'src/client/**', 'tools/host-smoke.mjs'] },
+  { name: 'ws-smoke', cmd: ['tools/ws-smoke.mjs'], set: 'fast', data: true, expect: 1, secs: 20, guards: 'host/ws.ts, client/sim-worker-link.ts SocketLink: two players over a real WebSocket see each other\'s craft, car and body on foot moving smoothly (the body gone when the walk ends) on their render clocks, and each other\'s edits; sim/traffic.ts circles: street life round two players 3 km apart', paths: [...DATA, ...SIM, 'src/host/**', 'src/client/**', 'src/sim/craft/craft-core.ts', 'src/view/life.ts', 'tools/ws-smoke.mjs'] },
+  { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections', paths: [...DATA, ...MESH, 'tools/section-check.mjs'] },
+  { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/traffic.ts (one run with a second player far off), sim/train-traffic.ts, sim/boat-traffic.ts', paths: [...DATA, ...SIM, 'src/view/**', 'tools/popin-check.mjs'] },
+  { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps', paths: [...DATA, ...MESH, 'tools/caps-check.mjs'] },
+  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', 'tools/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)', paths: [...DATA, 'src/physics/rapier/terrain.ts', 'src/physics/rapier/car.ts', 'src/physics/rapier/vehicle.ts', 'tools/surface-gap.mjs', 'tools/surface-gap-baseline.json'] },
+  { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)', paths: [...DATA, ...MESH, 'tools/mesh-golden.mjs'] },
 ];
+// what every gate stands on: a change here selects them all
+const CORE = ['src/core/**', 'src/sim/contract/**', 'src/fetch.ts', 'checks/check.ts', 'checks/world.ts', 'tools/gates.mjs', 'tools/lib.mjs',
+  'tools/data-dir.mjs', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'vite.config.js'];
+// files of src/ and tools/ with no gate of their own, on purpose (tsc and core-deps still read all of src/): the
+// viewer's drawing, input and page (three.js and the DOM: tools/judder.mjs and shoot.mjs, run by hand) and the tools
+// run by hand
+const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs',
+  'tools/lamps.mjs', 'tools/life-phys.mjs', 'tools/life-phys-scan.mjs', 'tools/mesh-profile.mjs', 'tools/remesh-bench.mjs',
+  'tools/rapier-car-bench.mjs', 'tools/serve.mjs', 'tools/tris.mjs'];
 
+const glob = (g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*/g, (m) => (m === '*' ? '[^/]*' : '.*'))}$`);
+const matcher = (globs) => { const res = globs.map(glob); return (f) => res.some((r) => r.test(f)); };
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).split('\n').filter(Boolean);
+
+function coverage() {
+  const covered = matcher([...CORE, ...UNGATED, ...GATES.flatMap((g) => g.paths.filter((p) => !g.wide?.includes(p)))]);
+  const missing = git(web, 'ls-files', '--cached', '--others', '--exclude-standard', 'src', 'tools')
+    .filter((f) => fs.existsSync(path.join(web, f)) && !covered(f));
+  if (missing.length) console.log(`FAIL gate-coverage: in no gate's paths, CORE or UNGATED (tools/gates.mjs):\n  ${missing.join('\n  ')}`);
+  else console.log('PASS gate-coverage: every file of src/ and tools/ is in a gate\'s paths, CORE or UNGATED');
+  return !missing.length;
+}
+if (args.includes('--coverage')) process.exit(coverage() ? 0 : 1);
+
+// the paths as written (the groups by name)
+const show = (paths) => {
+  let rest = [...paths];
+  const out = [];
+  for (const [k, g] of Object.entries(GROUPS)) if (g.every((p) => rest.includes(p))) { out.push(k); rest = rest.filter((p) => !g.includes(p)); }
+  return [...out, ...rest].join(' ');
+};
+if (LIST) {
+  for (const g of GATES) console.log(`${g.name.padEnd(15)} ${g.set.padEnd(5)} ${g.data ? 'data' : '    '} ~${String(g.secs).padStart(4)} s  ${g.guards}\n${''.padEnd(16)}paths: ${g.name === 'tsc' ? '(always runs)' : show(g.paths)}`);
+  console.log(`\nCORE (selects every gate): ${CORE.join(' ')}`);
+  for (const [k, g] of Object.entries(GROUPS)) console.log(`${k}: ${g.join(' ')}`);
+  console.log(`UNGATED: ${UNGATED.join(' ')}\n`);
+  process.exit(coverage() ? 0 : 1);
+}
+
+const ci = args.indexOf('--changed'), isGate = (a) => GATES.some((g) => g.name === a);
+const refArg = ci >= 0 && args[ci + 1] && !args[ci + 1].startsWith('-') && !isGate(args[ci + 1]) ? ci + 1 : -1;
+const named = args.filter((a, i) => !a.startsWith('-') && i !== refArg && !['--golden', '-j'].includes(args[i - 1]));
 const hasData = fs.existsSync(path.join(dataDir, 'meta.json'));
 let gates;
 if (named.length) {
-  const unknown = named.filter((n) => !GATES.some((g) => g.name === n));
+  const unknown = named.filter((n) => !isGate(n));
   if (unknown.length) { console.error(`no gate ${unknown.join(', ')}; gates: ${GATES.map((g) => g.name).join(' ')}`); process.exit(2); }
+  if (ci >= 0) { console.error('--changed or gate names, not both'); process.exit(2); }
   gates = GATES.filter((g) => named.includes(g.name));
 } else gates = GATES.filter((g) => g.set === 'fast' || FULL);
 
-if (LIST) {
-  for (const g of GATES) console.log(`${g.name.padEnd(15)} ${g.set.padEnd(5)} ${g.data ? 'data' : '    '} ~${String(g.secs).padStart(4)} s  ${g.guards}`);
-  process.exit(0);
+if (ci >= 0) {
+  const ref = refArg > 0 ? args[refArg] : 'main', top = git(web, 'rev-parse', '--show-toplevel')[0];
+  const changed = [...new Set([...git(top, 'diff', '--name-only', `${ref}...HEAD`), ...git(top, 'diff', '--name-only', 'HEAD'),
+    ...git(top, 'ls-files', '--others', '--exclude-standard')])].map((f) => path.relative(web, path.join(top, f)));
+  const core = changed.find(matcher(CORE)), why = new Map();
+  for (const g of gates) {
+    const hit = g.name === 'tsc' ? ['(always)'] : core ? [`${core} (CORE)`] : changed.filter(matcher(g.paths));
+    if (hit.length) why.set(g, `${hit[0]}${hit.length > 1 ? ` (+${hit.length - 1})` : ''}`);
+  }
+  console.log(`changed since ${ref} (merge-base), uncommitted and untracked: ${changed.length} file(s)`);
+  const w = Math.max(...gates.map((g) => g.name.length));
+  for (const [g, f] of why) console.log(`  run  ${g.name.padEnd(w)}  ${f}`);
+  const skip = gates.filter((g) => !why.has(g));
+  if (skip.length) console.log(`  skip ${skip.map((g) => g.name).join(' ')}`);
+  gates = gates.filter((g) => why.has(g));
 }
 
 const fmt = (s) => `${s.toFixed(1)} s`;
@@ -100,7 +167,7 @@ function run(g) {
 const queue = [...gates].sort((a, b) => b.secs - a.secs);
 const results = new Map();
 const t0 = performance.now();
-console.log(`gates (${FULL ? 'full' : named.length ? 'named' : 'fast'}): ${gates.length}, ${jobs} at a time`);
+console.log(`gates (${ci >= 0 ? 'changed' : FULL ? 'full' : named.length ? 'named' : 'fast'}): ${gates.length}, ${jobs} at a time`);
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   for (let g; (g = queue.shift()); ) {
     const r = await run(g);
