@@ -126,7 +126,7 @@ const goTo = makeGoTo({ camera, target: controls.target, nav, world: () => world
   follow: followNearest });
 nav.cancelFly = goTo.cancel;
 const modeTools = el('div', 'mode-tools', '', bar.el);
-const walkButton = el('button', 'mode-button', 'Walk', modeTools);
+const walkButton = el('button', 'mode-button walk-button', 'Walk', modeTools);
 walkButton.type = 'button';
 walkButton.disabled = true;
 walkButton.addEventListener('click', e => {
@@ -135,6 +135,16 @@ walkButton.addEventListener('click', e => {
   const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
   void nav.toggleWalk(!touch && !coarsePointer());
 });
+// on a phone the bar open over play hides half the view: leaving the map folds it (style.css: then only the mode's
+// own buttons and status beside the fold button), back on the map it opens again if it was open
+const smallScreen = matchMedia('(max-width: 600px), (max-height: 500px)');
+let openOnMap = false;
+function foldForPlay(fromMap: boolean, toMap: boolean) {
+  if (fromMap && !toMap) {
+    openOnMap = !bar.folded;
+    if (smallScreen.matches) bar.fold(true);
+  } else if (toMap && openOnMap) bar.fold(false);
+}
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -456,7 +466,10 @@ renderer.setAnimationLoop(frameLoop({
     for (const c of crafts) c.place?.(dt);
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
-    if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
+    if (document.body.dataset.nav !== nav.mode) {
+      foldForPlay(document.body.dataset.nav === 'orbit', nav.mode === 'orbit');
+      document.body.dataset.nav = nav.mode;
+    }
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
