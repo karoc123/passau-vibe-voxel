@@ -493,7 +493,6 @@ export class WorldSim {
     V.hold(at, REACH);
   }
 
-  // the voxels and the bodies a shot of the player on `own` meets (their own body left out)
   // whether player may ask for a seat of entity with role from where they are: on foot (their avatar), a vehicle only
   // within Tuning.walk.board of where the host has the walker, not where the page says (a seat the mode gives, a
   // craft made, is the mode's to place)
@@ -511,6 +510,7 @@ export class WorldSim {
     return null;
   }
 
+  // the voxels and the bodies a shot of the player on `own` meets (their own body left out)
   private shotWorld(own: EntityRef): ShotWorld {
     const T = this.traffic, sim = this;
     return {
