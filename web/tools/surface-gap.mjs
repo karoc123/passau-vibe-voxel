@@ -1,7 +1,7 @@
 // The gap between the surface the car drives on (src/physics/rapier/terrain.ts: the wheels' colliders) and the surface
 // drawn (core/surface.ts: the caps as the mesher draws them; terrain.ts groundAt), on the real city (public/data on
 // disk). The gate for one surface shared by the mesher and the car: run it before, keep the JSON, run it after with
-// --check (docs/plans/surface-gap-baseline.json).
+// --check (tools/surface-gap-baseline.json).
 // - scan: over the capped columns of a few fixed areas (Altstadt by the Dom: flat; the hillside west of the
 //   Schanzlbrücke's south end: ramps; the Schanzlbrücke: deck; Spitzberg: slopes), three points a column, a ray with the
 //   wheels' collision groups against the drawn surface there, split by flat / ramp / deck (ramp: the column has a cap;

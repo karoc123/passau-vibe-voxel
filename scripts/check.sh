@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The pipeline's quick gates (docs/plans/code-health.md item 1), run from anywhere; the web's are web/tools/gates.mjs.
+# The pipeline's quick gates, run from anywhere; the web's are web/tools/gates.mjs.
 #   palette     scripts/palette_check.py: the palette registry is append-only against HEAD
 #   overrides   scripts/overrides.py check: every per-object override valid (needs data/raw/osm.json; stale ones are
 #               printed, not failed)

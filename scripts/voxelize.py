@@ -2425,8 +2425,8 @@ def vegetation(ctx):
             if not veg[r, c] and _vd[r, c] <= 2.5:  # the point just off its crown's LiDAR cells: under the nearest one
                 r, c = int(_vr[r, c]), int(_vc[r, c])
             if veg[r, c] and not trunk_ok_db[r, c]:  # mapped onto the road edge: to the kerb side (more than 3 m into
-                if _dbd[r, c] > 3:                     # the carriageway: not drawn, the cars drive there --
-                    t["drawn"] = "none"                # docs/plans/road-clearance.md)
+                if _dbd[r, c] > 3:                     # the carriageway: not drawn, the cars drive there)
+                    t["drawn"] = "none"
                     continue
                 r, c = int(_dbr[r, c]), int(_dbc[r, c])
             if veg[r, c] and trunk_at[max(0, r - 1):r + 2, max(0, c - 1):c + 2].any():  # a trunk beside it already
@@ -2684,8 +2684,8 @@ def vegetation(ctx):
              "(broadleaf in a conifer's cell:", int((_odd & ~_evg0[own]).sum()), ")")
         veg &= ~_odd
     # a crown over a carriageway keeps ROAD_CLEAR m clear of its ground (a street tree is pruned for the traffic; the
-    # sloped caps lift the drawn street up to caps.CLAMP = 60/64 m over its voxel, and a car's body reaches 1.8 m over it:
-    # docs/plans/road-clearance.md); over the trunk's own cell too (none stands on a carriageway)
+    # sloped caps lift the drawn street up to caps.CLAMP = 60/64 m over its voxel, and a car's body reaches 1.8 m over it);
+    # over the trunk's own cell too (none stands on a carriageway)
     ROAD_CLEAR = 3
     _lift = veg & is_road & (crown_bot < ROAD_CLEAR)
     crown_bot[_lift] = ROAD_CLEAR
@@ -3856,7 +3856,7 @@ def height_crop(ctx):
 def _block_median(blk):
     # in a function, not at module level: numpy warns once per all-NaN block (150 000 a region), and each warning,
     # ignored or not, looks up its caller's line -- at the end of this module's body ~90 us each, 460 s summed over
-    # the map's regions (docs/plans/build-speed-2.md F1)
+    # the map's regions
     with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return np.nanmedian(blk, axis=(1, 3))

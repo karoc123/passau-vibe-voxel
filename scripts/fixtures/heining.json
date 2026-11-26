@@ -1,5 +1,5 @@
 {
- "about": "Fixture map for scripts/check.py: 1280 x 1152 m round Heining (project rows -1024 to 128, columns -4096 to -2816; EPSG:25832 x 823275-824555, y 5390372-5391524): the B 8 over the Baderbachl mouth, a carriageway OSM maps as plain road over the stream's culvert in the Kachlet pool (road-defects.md #7, handoff Q2). All but `name`, `map` and `regions` as in scripts/map.json (the rivers' stretches: the Kachlet levels, as kachlet.json).",
+ "about": "Fixture map for scripts/check.py: 1280 x 1152 m round Heining (project rows -1024 to 128, columns -4096 to -2816; EPSG:25832 x 823275-824555, y 5390372-5391524): the B 8 over the Baderbachl mouth, a carriageway OSM maps as plain road over the stream's culvert in the Kachlet pool. All but `name`, `map` and `regions` as in scripts/map.json (the rivers' stretches: the Kachlet levels, as kachlet.json).",
  "name": "Passau Heining (fixture)",
  "crs": 25832,
  "grid": {

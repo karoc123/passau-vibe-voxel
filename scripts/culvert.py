@@ -1,4 +1,4 @@
-"""A way over water that OSM does not tag as a bridge keeps its surface (handoff Q2, road-defects.md #7).
+"""A way over water that OSM does not tag as a bridge keeps its surface (the B 8 at the Baderbachl mouth).
 
 voxelize.py paints the water after the ways, and the water wins: a road OSM maps as plain road over a culvert or an
 untagged short bridge (the B 8 over the Baderbachl mouth, way 73317832 at project col -3048, row -88: the stream is

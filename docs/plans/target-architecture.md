@@ -1,10 +1,10 @@
 # Target architecture: cost follows players, not the city
 
-Status: proposal for the owner (2026-11-26). Nothing here is built. It replaces `architecture-review.md` if accepted.
-Facts are marked by their source (code path or URL); everything under "Judgement" is mine.
+Status: accepted by the owner (2026-11-26, section 6); steps 1 and 2 are being built. Facts are marked by their source
+(code path or URL); everything under "Judgement" is mine.
 
-Goal (owner): a Raspberry Pi 5 hosts 5–20 players on a map of several km² that keeps growing. Not measured now (no
-Pi); the design must make cost depend on players and what they see.
+Goal (owner): a Raspberry Pi 5 hosts 10–50 players (ADR 0008) on a map of several km² that keeps growing. Not
+measured now (no Pi); the design must make cost depend on players and what they see.
 
 ## 1. What the code does today (it differs from the assumption)
 
@@ -116,7 +116,8 @@ by nobody; it is derived. The client owns only what is drawn.
 
 Why this is enough for the Pi goal (judgement, to be measured later): with a 350 m ring, a player costs roughly a
 sixth of today's 900 m circle in road length. Twenty players spread out then cost about three of today's circles,
-and less when they are together. The city's size appears nowhere in the tick.
+fifty about eight, and less when they are together: the budget per player matters. The city's size appears nowhere
+in the tick.
 
 ### How today's pieces map onto it
 
@@ -142,7 +143,7 @@ and less when they are together. The city's size appears nowhere in the tick.
    minus a delay (M4 of `smooth-motion-and-lag.md`). The worker becomes the default; `ThreadLink` is deleted.
 2. **Two browsers.** `host/ws.ts` on Node with a WebSocket link; everyone gets the full snapshot at 10–15 Hz. Two
    players see each other's vehicles. This is the first real test of every abstraction built since ADR 0006. New
-   dependency: `ws` (MIT, npm, by the websockets organisation); the owner's approval is needed.
+   dependency: `ws` (MIT, npm, by the websockets organisation), approved; added in this step.
 3. **Many foci.** The active set is the union of all players' cells, with a budget per player.
 4. **Interest filter.** A session's snapshot holds its cells only; entities enter and leave by id.
 5. **Flow.** Trains from the timetable; far road traffic drawn by the client; the agent ring shrinks from 900 m to
@@ -182,25 +183,12 @@ Judgement on the causes:
 
 ## 5. What to throw away
 
-Nothing was deleted; the owner decides. Risk is what could be lost.
+Risk is what could be lost. Code removals come with steps 1 and 2 (owner, decision 10).
 
 ### Docs
 
-| Item | Reason | Risk |
-|---|---|---|
-| `docs/plans/code-health.md` (290 lines) | A review of commit `6adf465a` with that commit's line numbers; its packages landed. | Low. Two open items move to the to-do list. |
-| `docs/plans/build-speed-2.md` (565 lines) | Its own section 8 says every step is done. | Low. `voxelize.py --just` is in the README. |
-| `docs/plans/entities-and-modes.md` (462 lines) | E10–E14 landed; the rest is on hold and designs a game that is not decided. | Medium. The health and items sketch is lost from view; it stays in git. |
-| `docs/plans/smooth-motion-and-lag.md` (424 lines) | M1 and M3 landed. Keep one page: M4, M5 and the three owner questions. | Low. |
-| `docs/plans/architecture-review.md` | Replaced by this file. | None. |
-| `docs/plans/handoff-refactor-todos.md` | Becomes `todo.md` with open rows only. Its rules repeat `AGENTS.md`; "open points left by landed work" is a list of small defects nobody owns. | Low. |
-| `road-defects.md`, `road-defects-scan.md`, `.json`, `road-clearance.md` | Three documents and a generated report for one subject. One file; the scan's output is not committed. | Low. |
-| `docs/plans/surface-gap-baseline.json` | A gate's baseline in the plans folder. Move beside `web/tools/surface-gap.mjs`. | None. |
-| ADR 0006, 0007, 0008, 0009 | Four overlapping records; 0007 is half a migration plan. One ADR of a page after step 2, without paths. | Low. |
-| `FRAGEN.md` plus the question sections in three plans | Four places for questions to the owner. One. | None. |
-| README "Agent tools" (about 125 lines) | Repeats `gates.mjs --list`. | Low. |
-
-I did not read ADR 0001–0005 closely; they are not on this list for that reason only.
+Done (owner, 2026-11-26): finished plans deleted, the to-do list is `todo.md`, road notes are `roads.md`, owner
+questions in `FRAGEN.md`. ADRs 0006–0009 are merged into one after step 2.
 
 ### Code and tools
 
@@ -210,7 +198,7 @@ I did not read ADR 0001–0005 closely; they are not on this list for that reaso
 | `CloneLink`, `plainData`, `tools/mirror-check.mjs`, `mirror-golden.json` | They prove data survives a clone and matches a deleted path. A real worker and a two-client smoke test prove more. | Low after step 2. |
 | Bit-exact determinism in `tools/life-edit.mjs` (1004 lines), rule R3 in `core-deps.mjs`, the replay claims in ADR 0007 | No consumer. Seeded randomness stays; it is cheap. | Low. Prediction tolerates small differences. |
 | `core-deps.mjs` rules R2, R4, R5 and the baseline ratchet | Eight layers and five rules for 25 000 lines. Two rules suffice: the headless folders import no three.js or DOM; `client/`, `view/`, `nav/` import no domain or server. | Low. |
-| `OBSERVER_VIEW` in `app/session.ts` | A switch kept for an unanswered question (section 6). | None once answered. |
+| `OBSERVER_VIEW` in `app/session.ts` | A switch kept for a question now answered (decision 5). | None. |
 | `PageTime` request counting in `app/session.ts` | An optimistic protocol for the hour slider. | Low. |
 | Parked-car cap in `sim/traffic.ts` | A second rule beside presence. | Low. |
 | `tools/`: `lamps`, `tris`, `shoot`, `real-city`, `mesh-profile`, `remesh-bench`, `rapier-car-bench`, `life-phys-scan` | Not in the gate list. Delete those the owner has not run in two weeks. | Check each; I did not. |
@@ -219,27 +207,19 @@ I did not read ADR 0001–0005 closely; they are not on this list for that reaso
 Keep, although small and unproven: hello, the mode seam, the entity index, seats. They cost little while nobody
 extends them.
 
-### Rules against circles, proposed for `AGENTS.md`
+### Rules against circles
 
-1. No refactor-only branch. Structure changes in the branch of the feature that needs it.
-2. A new abstraction needs two real users in the same commit. "A server will need it" is not a user.
-3. One plan file, `docs/plans/todo.md`, under 100 lines. A feature's plan is one page and is deleted when it lands.
-4. A review ends in at most five findings, not in packages.
-5. An ADR is a decision and its reason in under 40 lines, with no paths or symbols.
-6. A comment gives a reason. It does not describe the file, point at a doc, or say where code used to be.
-7. A gate guards something a player would notice or the data format. One that must be re-recorded after an
-   unrelated change is deleted.
-8. Each week ends with something the owner can play that was not there before.
+Adopted into `AGENTS.md` (owner, 2026-11-26).
 
-## 6. Decisions for the owner
+## 6. Decisions (owner, 2026-11-26)
 
-1. Build steps 1 and 2 now, reversing "architecture first" of 2026-11-24?
-2. Solo play always in a Web Worker, the in-thread mode deleted?
-3. Is far traffic allowed to be a picture? A car seen from a jet is not an individual until its cell is promoted.
-4. Player target 5–20 (this brief) or 10–50 (ADR 0008)? The budget per player follows from it.
-5. Does the free camera count as a presence? Recommended: yes, it costs one interest set like a player.
-6. Kept things on disk? ADR 0008 puts persistence out of scope; the Pi goal makes a restart likely.
-7. Drop the bit-exact determinism requirement?
-8. WebSocket first, WebTransport later? `ws` is a new dependency (MIT).
-9. Trains as pure timetable: accept that they no longer keep distance from each other dynamically?
-10. Which rows of section 5 to delete.
+1. Build steps 1 and 2 now, reversing "architecture first" of 2026-11-24: yes.
+2. Solo play always in a Web Worker, the in-thread mode deleted: yes.
+3. Far traffic may be a picture until its cell is promoted: yes.
+4. Player target: stays 10–50 (ADR 0008).
+5. The free camera counts as a presence: yes.
+6. Kept things on disk: yes, later (step 6).
+7. Drop the bit-exact determinism requirement: yes.
+8. WebSocket first, WebTransport later: yes. `ws` (MIT, npm) is added only in step 2.
+9. Trains as a pure timetable, no dynamic spacing: yes.
+10. Docs cleanup now; code removals with steps 1 and 2.

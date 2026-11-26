@@ -225,7 +225,7 @@ SHIFT = 3.0
 
 
 def place_lanes(p, offs, vol, solid, csolid, W, D, road=None, step=1.0):
-    """A road's path moved sideways where its lanes leave the drawn carriageway (docs/plans/road-clearance.md): the
+    """A road's path moved sideways where its lanes leave the drawn carriageway: the
     mapped centreline along a house's wall, a narrow street where a lane 1.5 m right of the line is in the wall, on the
     kerb or over the step to the pavement. Every `step` m, each lane's footprint (offs: the lanes' offsets, FOOT across
     each) needs a free level near the path's height (a floor under it, 2 m clear of anything a car hits: csolid, poles

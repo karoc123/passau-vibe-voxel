@@ -3,7 +3,7 @@
 Status: accepted (phase A: ground and bridge decks; phase B: roofs, section `roof`, drawn only). Code:
 `scripts/caps.py` (writer, run by `scripts/tile_fields.py`), `web/src/core/surface.ts` (reader; roofs:
 `web/src/roofs.ts` `roofField`, `slopeBase`); checks:
-`web/tools/caps-check.mjs`, `web/tools/surface-gap.mjs` (baseline `docs/plans/surface-gap-baseline.json`),
+`web/tools/caps-check.mjs`, `web/tools/surface-gap.mjs` (with its baseline),
 `web/tools/tile-roundtrip.mjs`, `scripts/check.py verify`.
 
 ## Context
@@ -84,7 +84,7 @@ considered and rejected (data and meshing cost).
 - Data without the section (a build without `data/surface.npz`, or before it) still loads: `caps` is an optional
   section and `meta.json` `world.formatVersion` was not bumped. Its streets are then drawn and driven as voxel stairs.
 - The cap's height is limited to +-60/64 m of its voxel top (`caps.CLAMP`; 56/64 until the carriageways were linked over
-  the terrain model's walls, docs/plans/road-clearance.md) so the voxel below stays a floor for physics. Roofs are
+  the terrain model's walls) so the voxel below stays a floor for physics. Roofs are
   drawn only -- they collide as voxels.
 - Phase B (branch `roofs`, measured on a scratch copy of the committed map data with this `tile_fields`; nothing of the
   map rebuilt but that step): 1.60 M level-1 roof columns with a sloped record (+79 k level ones beside slopes),

@@ -1,9 +1,9 @@
-// The web gates in one run (docs/plans/code-health.md item 1): tsc and the headless checks of web/tools/, in parallel,
+// The web gates in one run: tsc and the headless checks of web/tools/, in parallel,
 // with a PASS / FAIL table and their times. Which gate guards which files is the table GATES below: run the gates
 // before a commit, or at least those whose `guards` cover what you changed.
 //   fast set (default, under a minute on 20 cores): tsc and every check that runs in seconds;
 //   full set (--full): also section-check, popin-check, caps-check --all, surface-gap --check against
-//     docs/plans/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE, recorded
+//     tools/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE, recorded
 //     before the change with `node tools/mesh-golden.mjs write FILE`).
 // A gate passes when its command exits 0 and, where `expect` is set, it printed at least that many PASS lines and no
 // FAIL line (a scenario dropped from a check would otherwise go unnoticed; the counts include the real-data checks
@@ -52,7 +52,7 @@ const GATES = [
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections' },
   { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/train-traffic.ts, sim/boat-traffic.ts' },
   { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps' },
-  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', '../docs/plans/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
+  { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', 'tools/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)' },
   { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)' },
 ];
 

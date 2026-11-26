@@ -38,7 +38,7 @@ Runtime on the Altstadt fixture (WSL, 20 cores, -j 2, measured 2026-11-20 with o
 steps after it 20 s), verify on a built workspace 4 s, covers ~12-16 min (the fixture as one region ~4 min at 4.2 GB),
 windows ~9 min (tiles_lod.py ~4 min a run, the other steps seconds), extent ~6.5 min the first time (the wide
 fixture's 6 regions) then seconds, golden ~5 min. Every command prints its time and peak RAM of a process and exits
-1 if a check fails. (2026-11-21, after build-speed-2 A1, A2, B2: golden --compare ~2 min each, voxelize 50-80 s and
+1 if a check fails. (2026-11-21: golden --compare ~2 min each, voxelize 50-80 s and
 the steps after it, side by side, ~50 s; the three fixtures' goldens have a workspace each and run as three shell jobs
 at once, `cmd & cmd & wait`, in ~2.2 min at ~2.7 GB a process.)
 """
@@ -348,7 +348,7 @@ def surface(ws, fx):
 
 
 def defect_checks(ws, fx):
-    """Check patches from road-defects.md and the fixtures' documented fixes on the built map.
+    """Check patches from fixtures/road-defects.json and the fixtures' documented fixes on the built map.
 
     Boxes are half-open [x0, z0, x1, z1] on the project grid. Road and water heights are metres above
     the map base (a road's: its surface, over a bore or a covered passage the street, not the floor under it,

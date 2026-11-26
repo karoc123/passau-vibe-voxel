@@ -88,8 +88,7 @@ BLEND = 6
 # a carriageway is one surface: two neighbouring cells of it (data/qa_roadmask.bin.gz 1) whose tops differ by a metre at
 # most are linked even where the terrain model shows a wall between them (a kerb, a bank the mask runs over, a scar in
 # the model on a steep street): the riser the cap kept there was a step a car's wheel hit or dropped off (steps of
-# 0.6 m or more under a car's footprint on 0.94 % of the lanes' length, 0.05 % with this and traffic.place_lanes:
-# docs/plans/road-clearance.md)
+# 0.6 m or more under a car's footprint on 0.94 % of the lanes' length, 0.05 % with this and traffic.place_lanes)
 ROAD_WALLS = True
 # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor), 1/16 m over it.
 # (56 until the carriageways were linked over the terrain model's walls, ROAD_WALLS: on the steep streets of the Hals

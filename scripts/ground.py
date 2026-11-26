@@ -14,7 +14,7 @@ short bridge (passage), a carriageway the laser saw no ground under (sag), a bri
 needs data/laser.npz (its ground returns); without it, it does nothing. The sag lift does not subsume the other two
 (the terrain passes over the fixtures with and without them, 2026-11-22): without the tunnel lift 48 cells of the
 b85 fixture stay up to 3 m lower (project col -1012..-978, row 435..486); without the passage lift 27-120 cells per
-fixture (haissengasse: the B 8 over the Donauradweg, road-defects.md #1; gaissa, kachlet, altstadt) stay up to 4 m
+fixture (haissengasse: the B 8 over the Donauradweg; gaissa, kachlet, altstadt) stay up to 4 m
 lower. So all four stay.
 
 None of them lifts in the corridor a railway or a carriageway keeps under a bridge (under_bridge, the first after the
@@ -358,7 +358,7 @@ def under_bridge(ctx):
     """What passes under a bridge stays open. The terrain model leaves the bridge out and spans its gap between the
     embankments: the ground under a deck stands too high, and its edges beside the drawn way (OSM draws a deck
     narrower than it is) looked like an embankment to the lifts -- the bridgehead lift raised a strip at the deck's
-    level across the Rottalbahn under the B 12 (road-defects.md #10). Every railway and carriageway on the ground that
+    level across the Rottalbahn under the B 12. Every railway and carriageway on the ground that
     a bridge way crosses over keeps a clear corridor at its own level: from ub_end m before the deck to ub_end m after
     it (the deck: the surface model at the deck's level at the crossing, and the laser seeing no ground under it, along
     the way), its bed's width and a metre each side, its level the line between its ground at the two ends. The cells
