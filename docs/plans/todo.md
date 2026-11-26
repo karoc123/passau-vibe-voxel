@@ -51,8 +51,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
-- Stelzhamerstraße's underpass below the railway at Auerbach (way 8022045, tunnel=yes layer=-1, grid -1282,1146):
-  the road sinks and there is no passage under the tracks (new block col -2 row 1 since the map's growth).
 - Hans-Hösl-Straße 20 (way 1100616130, grid -2926,432): from the north the north wall is gone and the roof hangs
   down inside (`shoot.mjs --focus bld:1100616130`: f-nw broken, f-sw whole). Mesher (chamfer walls, roof slopes) or
   facing culling; the owner sees more such houses.
