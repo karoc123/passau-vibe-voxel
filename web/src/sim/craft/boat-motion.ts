@@ -153,13 +153,7 @@ export class BoatMotion {
     else {
       // bounced off the shore along its normal (where the water is round the points that met it), then slid on
       const n = this.normal(world, this.x + this.vx * dt, this.z + this.vz * dt, h1);
-      const vn = this.vx * n[0] + this.vz * n[1];
-      if (vn < 0) {
-        const tx = this.vx - vn * n[0], tz = this.vz - vn * n[1];
-        this.vx = tx * B.wallFriction - B.restitution * vn * n[0];
-        this.vz = tz * B.wallFriction - B.restitution * vn * n[1];
-        if (-vn > 1.2 && this.t - this.bumpT > 0.3) { events.push({ kind: 'bump', speed: -vn }); this.bumpT = this.t; }
-      }
+      const vn = this.bounce(n[0], n[1], events);
       // the hull swung round along the shore (the way it was going along it), so that it slides on rather than pushing in
       const along = -n[1] * Math.sin(this.h) + n[0] * Math.cos(this.h) >= 0 ? 1 : -1;
       const toTangent = wrap(Math.atan2(-n[1] * along, n[0] * along) - this.h);
@@ -191,6 +185,31 @@ export class BoatMotion {
     this.roll += (rollTo - this.roll) * (1 - Math.exp(-4 * dt));
     this.t += dt;
     if (this.safe.due(this.t) && fit) this.safe.push(this.pose, this.t);
+    return events;
+  }
+
+  // the speed into a face of normal n turned back by the restitution, the speed along it kept by the wall's friction;
+  // the speed it met it with (-: into it)
+  private bounce(nx: number, nz: number, events: BoatEvent[]) {
+    const B = this.cfg, vn = this.vx * nx + this.vz * nz;
+    if (vn < 0) {
+      const tx = this.vx - vn * nx, tz = this.vz - vn * nz;
+      this.vx = tx * B.wallFriction - B.restitution * vn * nx;
+      this.vz = tz * B.wallFriction - B.restitution * vn * nz;
+      if (-vn > 1.2 && this.t - this.bumpT > 0.3) { events.push({ kind: 'bump', speed: -vn }); this.bumpT = this.t; }
+    }
+    return vn;
+  }
+
+  /** met a solid thing (sim/solids.ts) depth m deep, n (a unit x, z) the way out of it: pushed out as far as the water
+   * lets it (none of the way where the outline would not fit: wedged against a shore, it stays), and bounced off it as
+   * off a shore */
+  meet(nx: number, nz: number, depth: number, world: BoatWorld): BoatEvent[] {
+    const events: BoatEvent[] = [], d = depth + 1e-3;
+    for (const k of [1, 0.5]) {
+      if (this.fits(world, this.x + nx * d * k, this.z + nz * d * k, this.h)) { this.x += nx * d * k; this.z += nz * d * k; break; }
+    }
+    this.bounce(nx, nz, events);
     return events;
   }
 
@@ -309,6 +328,8 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn, Boat
     const a = this.from, b = this.motion.drawn(), t = Math.min(1, Math.max(0, alpha)), l = (u: number, v: number) => u + (v - u) * t;
     return { x: l(a.x, b.x), y: l(a.y, b.y), z: l(a.z, b.z), h: lerpAngle(a.h, b.h, t), pitch: lerpAngle(a.pitch, b.pitch, t), roll: lerpAngle(a.roll, b.roll, t) };
   }
+
+  meet(n: { x: number; z: number }, depth: number, world: BoatWorld) { this.events.push(...this.motion.meet(n.x, n.z, depth, world)); }
 
   unstick(world: BoatWorld) {
     if (!this.motion.unstick(world)) return false;

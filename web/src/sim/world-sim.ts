@@ -39,7 +39,7 @@ import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
 import { Entities, SEATS } from './entities';
 import { vehicleOf } from './vehicles';
-import type { Craft, CraftWorld } from './craft/craft-core';
+import type { Craft, CraftCore, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
@@ -53,6 +53,8 @@ import { besideBox, boundWalk, reaches, type Box } from './walk-bounds';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
+import { carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
+import type { BoatPose } from './contract/agents';
 import { aimDir, EYE, REACH, Trigger, type Body, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
@@ -125,6 +127,7 @@ export class WorldSim {
   /** the player crafts, by craft id */
   readonly crafts: ReadonlyMap<CraftId, Craft> = new Map<CraftId, CraftState>();
   private nextCraft = 1;
+  private readonly carAt = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
   /** the entities (sim/entities.ts): the cars, people and crafts read through their own stores */
   readonly entities: Entities;
   /** the players' own bodies on foot (avatars), by id: their walker */
@@ -165,6 +168,7 @@ export class WorldSim {
     this.keeper = new EditKeeper(this.tuning.presence);
     this.left = new Presence(this.tuning.presence);
     const T = this.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, ahead = { x: 0, y: 0, z: 0 };
+    T.inTheWay = (p, before) => this.inTheWay(p, before);
     const car = (id: number) => T.cars.find((c) => c.id === id) ?? T.detachedCars.find((c) => c.id === id);
     const person = (id: number) => T.people.find((p) => p.id === id) ?? T.riders.find((p) => p.id === id);
     this.entities = new Entities({
@@ -768,6 +772,38 @@ export class WorldSim {
 
   private craft(id: CraftId) { return (this.crafts as Map<CraftId, CraftState>).get(id); }
 
+  // The solid things (sim/solids.ts, ADR 0010) a craft meets in this tick: those whose boxes may come within its own
+  // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
+  // crafts with a shape, the river's vessels, the train coaches. Not the walkers: their walk is their page's, and a
+  // craft shoves them as a car does.
+  private solidsNear(own: Craft, shape: Shape): Solid[] {
+    const T = this.traffic, p = own.core.pose, v = own.core.velocity, out: Solid[] = [];
+    const r = Math.hypot(shape.hx, shape.hz) + Math.abs(shape.fwd ?? 0) + Math.hypot(v.x, v.z) * STEP + 1;
+    const near = (x: number, z: number, R: number) => Math.abs(x - p.x) < r + R && Math.abs(z - p.z) < r + R;
+    for (const list of [T.cars, T.detachedCars]) for (const c of list) {
+      const d = c.detachedPose;
+      if (near(d?.x ?? c.geo.cx, d?.z ?? c.geo.cy, CAR_REACH)) out.push(solidAt(carShape(c), d ?? T.carPose(c, c.s, c.off, this.carAt)));
+    }
+    for (const c of this.crafts.values()) {
+      const s = CRAFT_SHAPES[c.type], q = c.core.pose;
+      if (c !== own && c.placed && s && near(q.x, q.z, CRAFT_REACH)) out.push(solidAt(s, q));
+    }
+    for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
+    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
+    return out;
+  }
+
+  // whether a craft with a shape is in the way of vessel p: in its box, out by the beside m to either side and before m
+  // ahead of its bow
+  private inTheWay(p: BoatPose, before: number) {
+    const s = vesselShape(p), zone = solidAt({ ...s, hx: s.hx + BESIDE, hz: s.hz + before / 2, fwd: before / 2 }, { x: p.x, y: p.y, z: p.z, h: p.heading });
+    for (const c of this.crafts.values()) {
+      const shape = CRAFT_SHAPES[c.type];
+      if (c.placed && shape && overlap(zone, solidAt(shape, c.core.pose)) > 0) return true;
+    }
+    return false;
+  }
+
   // each craft put down: drawn from where it is now (keep), its collision's tiles fetched round it and ahead, then the
   // tick's steps (STEP worth) at its own fixed step with its pilot's input (or the neutral); a step not taken (a tile
   // not in) drops the rest of the tick. Its core's events become the world's (craft), this tick's
@@ -777,7 +813,12 @@ export class WorldSim {
       const core = c.core;
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
-      core.clock.run(STEP, (step) => core.step(c.input, step, c.collision));
+      const shape = CRAFT_SHAPES[c.type], near = shape && core.meet ? this.solidsNear(c, shape) : null;
+      core.clock.run(STEP, (step) => {
+        if (!core.step(c.input, step, c.collision)) return false;
+        if (near?.length) meetSolids(core, shape!, near, c.collision);
+        return true;
+      });
       // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores')
       if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
     }
@@ -785,3 +826,19 @@ export class WorldSim {
 }
 
 const finitePose = (p: WalkPose) => [p.x, p.y, p.z, p.h].every(Number.isFinite);
+
+// how far a solid thing may be from a craft and still be met in a tick (m, from its pose, past the craft's reach): a
+// car's (a bus's half length, the tick its gathered place lags), a craft's (the helicopter's tail and rotor), a coach's
+const CAR_REACH = 12, CRAFT_REACH = 8, COACH_REACH = 12;
+// a vessel gives way to a craft this far (m) beside its hull too: it slows to a stop before it would scrape past
+const BESIDE = 2;
+const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
+
+// after each of a craft's steps: pushed out of each solid thing near it that its box reaches into
+const out = { x: 0, z: 0 };
+function meetSolids(core: CraftCore, shape: Shape, near: readonly Solid[], col: VoxelCollision) {
+  for (const s of near) {
+    const d = overlap(solidAt(shape, core.pose), s, out);
+    if (d > 0) core.meet!(out, d, col);
+  }
+}

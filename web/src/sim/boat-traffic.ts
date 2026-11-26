@@ -21,6 +21,9 @@ import type { BoatPose, BoatView } from './contract/agents';
 // it, else WATER -- never another vessel's top from elsewhere: the reaches above and below the Kachlet differ by 9 m.
 // On a partial map (the check fixtures) any part may be missing: no berths (no cruise ships), an empty tour (no
 // excursion boats) or no fairway (the cruise ships stay moored all day).
+// A vessel under way gives way to the players' crafts (one in its way: ahead of its bow or close beside it, the host's
+// inTheWay): it slows to a stop in STOP s and gathers way again in GO s once the way is clear. Its route and timetable
+// are kept, only later: it runs on its own clock, the river's less the time it lost (lag).
 
 export interface Berth { x: number; y: number; dx: number; dy: number; nx: number; ny: number }
 type XY = [number, number];
@@ -44,6 +47,10 @@ const RUN_OUT = 1000;
 const MORNING = 6 * 3600, LATEST_IN = 9.25 * 3600, EVENING = 18 * 3600, LATEST_OUT = 23.75 * 3600; // s after midnight
 const WATER = 4; // m: the water's top before any is known (no columns given: the node checks)
 const PLACE = 32; // m: the cells the last known tops are kept by
+const STOP = 2, GO = 5; // s: a vessel under way to a stop, and back to its speed
+const LOOK = 15; // m: a vessel looks this far ahead of its bow for a craft in its way
+/** whether something it gives way to is within the vessel at p, or before m ahead of its bow */
+export type InTheWay = (p: BoatPose, before: number) => boolean;
 
 // (a vessel's pose, BoatPose, and what is drawn of them, BoatView: contract/agents.ts)
 
@@ -85,6 +92,8 @@ export class BoatTraffic implements BoatView {
   private readonly tops = new Map<number, number>();
   private readonly placeTops = new Map<number, number>();
   private previousPoses: readonly BoatPose[] = [];
+  // the vessels giving way or gathering way again (keyed as tops): the time each lost (s), its share of its speed now
+  private readonly way = new Map<number, { lag: number; v: number }>();
 
   constructor(data: BoatData, private readonly seed = 0) {
     const fin = (...v: number[]) => v.every(Number.isFinite);
@@ -285,13 +294,15 @@ export class BoatTraffic implements BoatView {
     return w;
   }
 
-  // water: the world's columns the vessels float on (null: none, all at WATER)
-  tick(time: number, hour: number, day: number, water: WaterColumns | null = null) {
+  // water: the world's columns the vessels float on (null: none, all at WATER); inTheWay: what the vessels under way
+  // give way to (none: nothing)
+  tick(time: number, hour: number, day: number, water: WaterColumns | null = null, inTheWay: InTheWay = () => false) {
     const reset = Number.isNaN(this.lastHour) || Math.abs(hour - this.lastHour) > 1e-6;
     if (reset) {
       this.clockSetAt = time;
       this.lastHour = hour;
     }
+    const dt = reset ? 0 : Math.max(0, time - this.clockSetAt - this.elapsedSinceSet);
     this.elapsedSinceSet = time - this.clockSetAt;
     const clock = hour * 3600 + this.elapsedSinceSet;
     const d = Math.round(day);
@@ -301,14 +312,29 @@ export class BoatTraffic implements BoatView {
       this.ships = this.cruiseDay(d);
       this.departures = BoatTraffic.departures(d);
     }
+    if (reset || newDay) this.way.clear();
     const poses: BoatPose[] = [];
+    // a vessel on its own clock: where it is at it (null: not here), slowed and held while something is in its way
+    const run = (key: number, at: (clock: number) => BoatPose | null) => {
+      const w = this.way.get(key), p = at(clock - (w?.lag ?? 0));
+      if (!p?.underway) return p;
+      const W = w ?? { lag: 0, v: 1 };
+      W.v = inTheWay(p, LOOK) ? Math.max(0, W.v - dt / STOP) : Math.min(1, W.v + dt / GO);
+      if (W.v >= 1) return p;
+      this.way.set(key, W);
+      W.lag += dt * (1 - W.v);
+      return at(clock - W.lag);
+    };
 
     // cruise ships: moored, or coming in or leaving
     for (const s of this.ships) {
-      if (s.arr && clock < s.arr.t0) continue; // not here yet
-      if (s.dep && clock > s.dep.t0 + s.dep.dur) continue; // gone
-      const mv = s.arr && clock < s.arr.t0 + s.arr.dur ? s.arr : s.dep && clock > s.dep.t0 ? s.dep : null;
-      poses.push(mv ? this.movingPose(s, mv, clock, water) : this.shipPose(s, s.x, s.y, Math.atan2(s.dx, s.dy), false, water));
+      const p = run(s.k, (clock) => {
+        if (s.arr && clock < s.arr.t0) return null; // not here yet
+        if (s.dep && clock > s.dep.t0 + s.dep.dur) return null; // gone
+        const mv = s.arr && clock < s.arr.t0 + s.arr.dur ? s.arr : s.dep && clock > s.dep.t0 ? s.dep : null;
+        return mv ? this.movingPose(s, mv, clock, water) : this.shipPose(s, s.x, s.y, Math.atan2(s.dx, s.dy), false, water);
+      });
+      if (p) poses.push(p);
     }
 
     // excursion boats
@@ -317,33 +343,25 @@ export class BoatTraffic implements BoatView {
       const every = deps.length > 1 ? deps[1] - deps[0] : 3600;
       const n = Math.min(FLEET, deps.length, Math.ceil((this.T + TURN) / every)); // the boats the timetable needs
       for (let b = 0; b < FLEET; b++) {
-        const tr = b < n ? BoatTraffic.trips(deps, n, b, clock, this.T) : { on: -1, next: Infinity, back: -Infinity };
-        let s = 0, lat = 0;
-        if (tr.on >= 0) {
-          const t = clock - tr.on;
-          s = this.sAt(t);
-          // coming in to its place in the raft
-          lat = this.slot(deps, n, b, tr.on + this.T) * SLOT * smooth(P.L - 170, P.L - 25, s);
-        } else {
-          s = 0;
-          lat = this.slot(deps, n, b, clock) * SLOT;
-        }
-        at(P, s + half * 0.8, 0, at0); at(P, s - half * 0.8, 0, at1);
-        const heading = Math.atan2(at0.x - at1.x, at0.y - at1.y);
-        at(P, s, 0, at0);
-        const lit = tr.on >= 0 || tr.next - clock < BOARD || clock - tr.back < AFTER;
-        const x = at0.x + rx * lat, z = at0.y + ry * lat;
-        poses.push({
-          id: b,
-          kind: 'boat',
-          x,
-          y: this.top(-1 - b, x, z, water),
-          z,
-          heading,
-          len: TOUR_L,
-          lit,
-          underway: tr.on >= 0,
-        });
+        poses.push(run(-1 - b, (clock) => {
+          const tr = b < n ? BoatTraffic.trips(deps, n, b, clock, this.T) : { on: -1, next: Infinity, back: -Infinity };
+          let s = 0, lat = 0;
+          if (tr.on >= 0) {
+            const t = clock - tr.on;
+            s = this.sAt(t);
+            // coming in to its place in the raft
+            lat = this.slot(deps, n, b, tr.on + this.T) * SLOT * smooth(P.L - 170, P.L - 25, s);
+          } else {
+            s = 0;
+            lat = this.slot(deps, n, b, clock) * SLOT;
+          }
+          at(P, s + half * 0.8, 0, at0); at(P, s - half * 0.8, 0, at1);
+          const heading = Math.atan2(at0.x - at1.x, at0.y - at1.y);
+          at(P, s, 0, at0);
+          const lit = tr.on >= 0 || tr.next - clock < BOARD || clock - tr.back < AFTER;
+          const x = at0.x + rx * lat, z = at0.y + ry * lat;
+          return { id: b, kind: 'boat', x, y: this.top(-1 - b, x, z, water), z, heading, len: TOUR_L, lit, underway: tr.on >= 0 };
+        })!);
       }
     }
 
