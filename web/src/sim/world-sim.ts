@@ -32,7 +32,7 @@
 import type { LifePhysics } from '../physics/rapier/life-phys';
 import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
-import { applyNow as applyEdit, type WorldOp } from '../core/world-edits';
+import { applyNow as applyEdit, crater, type WorldOp } from '../core/world-edits';
 import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
@@ -44,7 +44,7 @@ import { CORES, type CoreOf } from './craft/cores';
 import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
-import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId } from './contract/ids';
+import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId, WeaponId } from './contract/ids';
 import { MAX_DT, type FrameTime } from './contract/inputs';
 import { EVENT_TICKS, type SimEvent } from './contract/events';
 import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
@@ -53,7 +53,7 @@ import { boundWalk } from './walk-bounds';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { aimDir, EYE, Trigger, type Body, type ShotWorld, type VoxelRay } from './weapons/weapon';
+import { aimDir, EYE, REACH, Trigger, type Body, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
  * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
@@ -83,8 +83,10 @@ type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> 
 // a command queued: for whom (the host's stamp), and what its sender is told when a seat input of it is taken (the
 // tick it is applied in: a session's ack) or an edit of it applied (the tick, its outcome: the sender's own)
 type Taken = (tick: number, r?: CommandResult) => void;
-// (leave: the host's, not a client's: leave)
-interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' }; taken?: Taken }
+// (leave, damage: the host's, not a client's: leave, damage)
+interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'damage'; op: WorldOp }; taken?: Taken }
+// a projectile in flight: whose, of which weapon, the body it left (it flies through that one), its time aloft (s)
+interface Flying { player: PlayerId; weapon: WeaponId; own: EntityRef; p: Projectile; t: number }
 
 export class WorldSim {
   readonly traffic: Traffic;
@@ -115,6 +117,9 @@ export class WorldSim {
   // dispose ran: a road physics still loading is let go once it is in, none loads again
   private disposed = false;
   private readonly keeper: EditKeeper;
+  private flying: Flying[] = [];
+  // the blasts' craters not yet taken by the host (takeDamage), which holds their nodes in before they are applied
+  private damaged: { player: PlayerId; op: WorldOp }[] = [];
   // the vehicles left ("craft:id", "car:id"): when a player was last near them
   private readonly left: Presence<string>;
   /** the player crafts, by craft id */
@@ -303,12 +308,14 @@ export class WorldSim {
     this.queue = [];
     for (const P of this.players.values()) if (P.walk) P.walk.prev = P.walk.pose;
     for (const cmd of q) this.apply(cmd);
+    this.fly();
     for (const P of this.players.values()) {
       const W = P.walk;
       if (W && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9)
         W.pose = { ...W.pose, x: W.pose.x + W.vx * STEP, z: W.pose.z + W.vz * STEP };
     }
     const now = t0 * STEP, foci = this.foci();
+    this.holdVoxels();
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
     this.stepCrafts();
@@ -430,6 +437,12 @@ export class WorldSim {
         break;
       }
       case 'fire': this.fire(p, cmd.slot, cmd.h, cmd.pitch); break;
+      case 'damage': {
+        // (no mode asked: the blast was the weapon's, fired as the rules allowed)
+        try { applyEdit(cmd.op); this.keeper.last(cmd.op); } catch { /* (no world to edit) */ }
+        taken?.(this.tick + 1);
+        break;
+      }
     }
   }
 
@@ -441,7 +454,37 @@ export class WorldSim {
     if (!(P.trigger ??= new Trigger()).pull(w, this.clock)) return;
     const f = P.walk.pose, from = { x: f.x, y: f.y + EYE, z: f.z };
     const shot = w.fire(this.shotWorld(s.entity), from, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
-    this.due.push({ kind: 'shot', weapon: w.id, player, ...shot });
+    if (!('fly' in shot)) { this.due.push({ kind: 'shot', weapon: w.id, player, ...shot }); return; }
+    this.flying.push({ player, weapon: w.id, own: s.entity, p: shot, t: 0 });
+    this.due.push({ kind: 'launch', weapon: w.id, player, at: { ...shot.at }, v: { ...shot.v } });
+  }
+
+  // the projectiles' flight through this tick; one that bursts: its blast, and its crater for the host to apply
+  private fly() {
+    if (!this.flying.length) return;
+    this.flying = this.flying.filter((f) => {
+      const at = f.p.fly(this.shotWorld(f.own), f.t, f.t += STEP);
+      if (!at) return true;
+      this.due.push({ kind: 'blast', weapon: f.weapon, player: f.player, at: { ...at }, r: f.p.r });
+      try { this.damaged.push({ player: f.player, op: crater(at.x, at.y, at.z, f.p.r) }); } catch { /* (no world to edit) */ }
+      return false;
+    });
+  }
+
+  /** the blasts' craters since the last call, for the host to hold their nodes in and hand back (damage) */
+  takeDamage() { return this.damaged.splice(0); }
+
+  /** a blast's crater (takeDamage), its nodes in the world's TileCache: applied at the start of the next tick, kept
+   * whoever is near (sim/edit-keeper.ts last); done: told once it is */
+  damage(player: PlayerId, op: WorldOp, done?: () => void) { this.queue.push({ player, cmd: { kind: 'damage', op }, taken: done }); }
+
+  // the voxels round each player on foot kept loaded (a ray into a node not loaded would fly through its houses)
+  private holdVoxels() {
+    const V = this.voxels;
+    if (!V?.hold) return;
+    const at: { x: number; z: number }[] = [];
+    for (const P of this.players.values()) if (P.walk && P.seat?.role === 'walker') at.push(P.walk.pose);
+    V.hold(at, REACH);
   }
 
   // the voxels and the bodies a shot of the player on `own` meets (their own body left out)

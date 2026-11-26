@@ -1,4 +1,4 @@
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { SimEvent } from '../../sim/contract/events';
 import type { WeaponId } from '../../sim/contract/ids';
 
@@ -14,4 +14,17 @@ export interface WeaponView {
   /** the page's player pulled the trigger and the host will be asked: drawn at once, from the muzzle along dir */
   fired(muzzle: THREE.Vector3, dir: THREE.Vector3): void;
   update(dt: number): void;
+  /** a new model of the gun in the hand (m): the hand at its origin, the barrel along +z, up +y */
+  model(): THREE.Object3D;
+}
+
+/** a gun of boxes: [colour, centre, size] each */
+export function boxModel(parts: [number, [number, number, number], [number, number, number]][]) {
+  const g = new THREE.Group();
+  for (const [color, [x, y, z], [w, h, d]] of parts) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+    m.position.set(x, y, z);
+    g.add(m);
+  }
+  return g;
 }
