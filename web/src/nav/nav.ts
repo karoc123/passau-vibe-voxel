@@ -460,6 +460,46 @@ export class Nav {
       this.leaveRide(); // (the car driven parked: dropCraft)
       this.glide.stop();
     }
+    this.toCraft(c);
+    return true;
+  }
+
+  /** falling on foot high enough to open a canopy (Foot.canOpen) */
+  get canOpen() { return this.onFoot && this.foot.canOpen; }
+
+  // Out of the fall into a craft that opens over it (the paraglider). The craft's own request moves the player's seat
+  // from the body to it in one command, so the body is not left (no leaveSeat). false: not falling high enough
+  openCanopy(c: PlayerCraft) {
+    if (!this.canOpen || c.view !== 'own') return false;
+    this.body = null;
+    this.releaseMouse();
+    this.glide.stop();
+    this.toCraft(c);
+    return true;
+  }
+
+  /** the feet and velocity of the fall, while on foot (the canopy's spot) */
+  get fallPose() {
+    const f = this.foot;
+    return { x: f.pos.x, y: f.feet, z: f.pos.z, vx: f.carry.x, vy: f.vy, vz: f.carry.z, yaw: f.yaw };
+  }
+
+  // Out of the craft piloted (the paraglider let go) into a free fall on foot from feet at `at` with velocity v,
+  // facing yaw: at once, as the craft is gone this frame; the tiles where it lands asked for meanwhile
+  fall(at: THREE.Vector3, v: THREE.Vector3, yaw: number) {
+    if (!this.craftView || !this.world) return false;
+    this.foot.fallAt(at, v, yaw);
+    this.streamer?.ensure(at.x, at.z, 200).catch(() => {});
+    this.glide.start(250);
+    this.mode = 'walk';
+    this.leaveRide();
+    this.controls.enabled = false;
+    this.dom.style.cursor = 'default';
+    this.onMode(this.mode, null);
+    return true;
+  }
+
+  private toCraft(c: PlayerCraft) {
     this.cancelFly();
     this.keys.clear();
     this.orbit.turned = false;
@@ -468,7 +508,6 @@ export class Nav {
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
-    return true;
   }
 
   // out of the craft (the car's Park): it lets go. One that owns the camera leaves to the map

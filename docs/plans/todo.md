@@ -54,7 +54,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
-- A fall over 80 m/s is slowed by the walk clamp; `walkAs` start height is unbounded.
+- `walkAs` start height is unbounded.
 - Walkers and solid things (ADR 0010): a car does not feel a walker; the host does not check them; the walker cannot
   stand on a car's roof; a car squeezing the walker against a wall leaves it inside the car.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).

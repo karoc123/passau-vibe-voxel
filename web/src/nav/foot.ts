@@ -12,6 +12,11 @@ import { footKeys, STEP, stride, walkFrame } from './walk';
 
 // aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
 const GRAV = 16, WALK_FOV = 65, AIM_FOV = 32;
+// A body's free fall (off the paraglider): a skydiver's belly-down terminal speed, under the host's walk bound (80 m/s,
+// sim/walk-bounds.ts) so a long fall is not clamped; the air takes the speed across at that rate
+const TERMINAL = 55, AIR_DRAG = GRAV / TERMINAL;
+/** m over what is under the feet from which a canopy may open again: higher than a jump goes */
+export const CANOPY_DROP = 4;
 
 /** the left touch stick on foot: [forward, right] in -1..1 */
 export type Stick = [number, number] | null;
@@ -24,6 +29,8 @@ export class Foot {
   pitch = 0;
   feet = 0;
   vy = 0;
+  /** m/s across, carried through the air (a fall from a craft); gone on landing or a wall */
+  readonly carry = { x: 0, z: 0 };
   /** the right mouse button held: the view narrowed */
   aim = false;
   private fovBack: number | null = null;
@@ -49,6 +56,7 @@ export class Foot {
     this.yaw = Math.atan2(f.x, f.z);
     this.pitch = pitch;
     this.vy = 0;
+    this.carry.x = this.carry.z = 0;
     this.aim = false;
     this.fovBack = null;
     if (exact) {
@@ -63,6 +71,24 @@ export class Foot {
     this.pos.y = this.feet + EYE;
   }
 
+  /** falling from the feet at (x, y, z) with velocity v, facing yaw (out of a craft in the air) */
+  fallAt(at: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }, yaw: number) {
+    this.pos.set(at.x, at.y + EYE, at.z);
+    this.feet = at.y;
+    this.vy = Math.max(v.y, -TERMINAL);
+    this.carry.x = v.x; this.carry.z = v.z;
+    this.yaw = yaw;
+    this.pitch = -0.3;
+    this.aim = false;
+    this.fovBack = null;
+  }
+
+  /** in the air high enough over what is under the feet for a canopy (CANOPY_DROP) */
+  get canOpen() {
+    const w = this.world();
+    return !!w && this.feet - w.support(this.pos.x, this.pos.z, this.feet) >= CANOPY_DROP;
+  }
+
   // pushed out of what moved into the walker, then one collision-checked horizontal step (none: null), sliding along
   // walls and cars; true if it stepped
   private stepBy(m: { x: number; z: number } | null) {
@@ -73,11 +99,21 @@ export class Foot {
   private stand(dt: number) {
     const P = this.pos, sup = this.world()!.support(P.x, P.z, this.feet + STEP);
     if (this.vy !== 0 || this.feet > sup + 0.01) {
-      this.vy -= GRAV * dt;
+      this.vy = Math.max(this.vy - GRAV * dt, -TERMINAL);
       this.feet += this.vy * dt;
-      if (this.feet <= sup) { this.feet = sup; this.vy = 0; }
+      // a hard landing is only a landing: there is no health to take
+      if (this.feet <= sup) { this.feet = sup; this.vy = 0; this.carry.x = this.carry.z = 0; }
     } else this.feet = sup > this.feet ? Math.min(sup, this.feet + 6 * dt) : sup;
     P.y = this.feet + EYE;
+  }
+
+  // the speed across carried through the air, slowing; a wall or a solid thing stops it
+  private drift(dt: number) {
+    const C = this.carry;
+    if (!C.x && !C.z) return;
+    const k = Math.exp(-AIR_DRAG * dt);
+    C.x *= k; C.z *= k;
+    if (!this.stepBy({ x: C.x * dt, z: C.z * dt }) || Math.hypot(C.x, C.z) < 0.05) C.x = C.z = 0;
   }
 
   // the arrows turn, Q/E look, W/S walk, A/D step sideways (Shift runs), else the stick
@@ -89,6 +125,7 @@ export class Foot {
       const [f, r] = stick;
       this.stepBy({ x: (Math.sin(this.yaw) * f - Math.cos(this.yaw) * r) * 6 * dt, z: (Math.cos(this.yaw) * f + Math.sin(this.yaw) * r) * 6 * dt });
     } else this.stepBy(null);
+    this.drift(dt);
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
     let fov = WALK_FOV, settle = false;
@@ -106,6 +143,7 @@ export class Foot {
   startAs(p: { x: number; y: number; z: number; h: number }) {
     this.pos.set(p.x, p.y + EYE, p.z);
     this.feet = p.y; this.vy = 0; this.yaw = p.h;
+    this.carry.x = this.carry.z = 0;
   }
 
   /** the walk put back where the sim took it (a pose it clamped: sim/walk-bounds.ts) */
