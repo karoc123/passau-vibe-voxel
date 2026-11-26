@@ -87,6 +87,50 @@ def resample(src, src_res, out_res, order, band=1024, origin=None):
     return out
 
 
+FILL_NEAR = 40  # m: a cell of the terrain model's gap no laser return of ground or water fell in takes the nearest filled one's
+
+
+def fill_dtm(dtm):
+    """DGM1 ends at the Bavarian border (the Inn's Austrian bank above the Innstadt has no terrain model; the surface
+    model, the orthophoto and the laser scan go on): its cells without data take the mean of the laser's ground returns
+    and water (class 2, 9: as DGM1 has the river's surface) in them, then the nearest such cell's within FILL_NEAR m. In place; returns the cells filled and those left"""
+    gap = dtm < -1000
+    if not gap.any():
+        return 0, 0
+    import laspy
+    from aoi import to_grid
+    s, n = np.zeros(dtm.shape), np.zeros(dtm.shape, np.int64)
+    rr, cc = np.nonzero(gap)
+    for p in sorted(glob.glob(f"{RAW}/laser/*.laz")):
+        with laspy.open(p) as f:
+            h = f.header
+            c0, r1 = to_grid(h.mins[0], h.mins[1])
+            c1, r0 = to_grid(h.maxs[0], h.maxs[1])
+            if not ((rr >= r0 - 1) & (rr <= r1 + 1) & (cc >= c0 - 1) & (cc <= c1 + 1)).any():
+                continue
+            pts = f.read()
+        g = np.isin(np.asarray(pts.classification), (2, 9))
+        c, r = to_grid(np.asarray(pts.x)[g], np.asarray(pts.y)[g])
+        r, c, z = np.floor(r).astype(np.int64), np.floor(c).astype(np.int64), np.asarray(pts.z)[g]
+        k = (r >= 0) & (r < dtm.shape[0]) & (c >= 0) & (c < dtm.shape[1])
+        r, c, z = r[k], c[k], z[k]
+        k = gap[r, c]
+        np.add.at(s, (r[k], c[k]), z[k])
+        np.add.at(n, (r[k], c[k]), 1)
+    hit = n > 0
+    dtm[hit] = (s[hit] / n[hit]).astype(dtm.dtype)
+    if hit.any():  # (in the box of the cells filled: the gap beyond the sheets fetched is the map's empty blocks)
+        hr, hc = np.nonzero(hit)
+        ra, rb = max(hr.min() - FILL_NEAR, 0), min(hr.max() + FILL_NEAR + 1, dtm.shape[0])
+        ca, cb = max(hc.min() - FILL_NEAR, 0), min(hc.max() + FILL_NEAR + 1, dtm.shape[1])
+        sub = dtm[ra:rb, ca:cb]
+        left = (gap & ~hit)[ra:rb, ca:cb]
+        dist, (ir, ic) = ndimage.distance_transform_edt(sub < -1000, return_indices=True)
+        near = left & (dist <= FILL_NEAR)
+        sub[near] = sub[ir[near], ic[near]]
+    return int(gap.sum() - (dtm < -1000).sum()), int((dtm < -1000).sum())
+
+
 S = 5  # ortho pixels per cell (0.2 m)
 BAND = 250  # ortho rows a worker samples at once: whole cells (a multiple of S), ~0.6 GB of float64 coordinates
 JOBS = min(8, os.cpu_count() or 1)
@@ -131,6 +175,9 @@ tick("dsm resampled")
 _m, _t = mosaic("dtm_*.tif", 1.0)
 dtm = resample(_m[0].astype(np.float32), 1.0, 1.0, order=1, origin=(_t.c, _t.f))
 tick("dtm mosaic, resampled")
+_f = fill_dtm(dtm)
+if _f[0] or _f[1]:
+    tick(f"dtm: {_f[0]} cells without DGM1 filled from the laser's ground returns, {_f[1]} left without")
 del _m
 for n, a in (("dsm", dsm), ("dtm", dtm)):
     print(n, a.shape, float(a[a > -1000].min()), float(a.max()), int((a < -1000).sum()), "nodata")

@@ -1,10 +1,11 @@
 # Passau in voxels
 
-A 9344 × 3456 m diorama of Passau, the city of three rivers, at 1 m voxels, in the style of MagicaVoxel renders:
+A diorama of Passau (36.5 km² within 9344 × 5504 m), the city of three rivers, at 1 m voxels, in the style of MagicaVoxel renders:
 the Altstadt peninsula between Danube and Inn with the cathedral (Dom St. Stephan), the Dreiflüsseeck where Danube,
 Inn and Ilz meet, Veste Oberhaus and the Ilzstadt, the Innstadt to the south, the Hauptbahnhof and St. Nikola; west up
 the Danube past Hacklberg, Heining and the Kachlet dam to Schalding, both banks; north over Haidenhof, Ries, Grubweg
-and the Ilz valley up to Hals and its loops. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the
+and the Ilz valley up to Hals and its loops; south up the Inn to the Ingling dam (Kraftwerk Passau-Ingling), its
+Austrian bank too. The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the
 extent is set in `scripts/map.json`).
 
 The date, the hour and the weather are sliders; cars, trains, pedestrians and bikes move on the
@@ -82,7 +83,7 @@ sh scripts/build_data.sh
 ```
 
 Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
-the triangle counts run the viewer's mesher). The first run downloads about 4.3 GB of Bavarian rasters (40 sheets of 1 km), 0.5 GB of LoD2 models, 3.5 GB of LiDAR point clouds, 41 MB of ALKIS land use and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
+the triangle counts run the viewer's mesher). The first run downloads about 5.7 GB of Bavarian rasters (54 sheets of 1 km), 0.5 GB of LoD2 models, 4.8 GB of LiDAR point clouds, 41 MB of ALKIS land use and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
 From cached raw data the build takes about 5½ minutes (WSL, 20 cores: prep, lod2, laser 1 min, the volume in 8
 regions of 1024 m, 4 at once, 3½ min, the steps after it 1 min, 45 s of them `tris.mjs`); a region's process peaks
 at ~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 0.8 GB; `data/cache` holds
@@ -109,7 +110,7 @@ labels there, its cells dropped from whatever a cover's core holds of them, `scr
 face like the map's edge and a wall for whatever moves, `web/src/core/built.ts`), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
 box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
-and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; elsewhere 290.921 m;
+and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; the Inn above the Ingling dam at 302.95 m (stepping along its weir) and its first kilometre below it at 291.45 m; elsewhere 290.921 m;
 stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
 across a weir), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
@@ -121,9 +122,9 @@ ground's stones; the lamps' colours), and `?cam=` is in them. The steps:
 | Step | Writes |
 |---|---|
 | `fetch_osm.sh` | `data/raw/osm.json`: OSM cut to the AOI + 100 m, via `uv run --with osmium` (`OVERPASS=1` asks the public Overpass servers instead of Geofabrik). Skipped when `osm.json` exists, unless `OSM_REFRESH=1` |
-| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets under the built blocks and a region's halo (384 m) round them; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`, `tn_09275.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB) and the Landkreis Passau (38 MB; the map's west and north edges reach into it), read by `alkis_tn.py`; `data/raw/laser/*.laz`: the LiDAR point clouds (40 sheets, 3.5 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted); `data/raw/treespecies_2022.tif`, `treespecies_2016.tif`: DLR Tree Species Germany cut to the map's window (EPSG:3035 as published, ~60 kB each; `clip_species.py` under `python -I` reads only the window's tiles of the 530 MB cloud-optimised GeoTIFFs over HTTP ranges, `scripts/species_map.py` puts them on the grid for `voxelize.py`; without them, or with `NO_SPECIES_MAP=1`, the conifers come from OSM and the laser alone). Files already there are not fetched again |
+| `fetch_bayern.sh` | `data/raw/{dsm,dtm,orto}_*.tif`: the 1 km sheets under the built blocks and a region's halo (384 m) round them; `data/raw/lod2/*.gml`: the 2 km LoD2 tiles; `data/raw/tn_09262.zip`, `tn_09275.zip`: ALKIS Tatsächliche Nutzung of the Stadt Passau (3 MB) and the Landkreis Passau (38 MB; the map's west and north edges reach into it), read by `alkis_tn.py`; `data/raw/laser/*.laz`: the LiDAR point clouds (54 sheets, 4.8 GB); `data/raw/baeume_aoi.csv`: the Einzelbäume register cut to the AOI (0.4 MB; the 370 MB GeoPackage is read once by `clip_baeume.py`, with sqlite3 under `python -I`, and deleted); `data/raw/treespecies_2022.tif`, `treespecies_2016.tif`: DLR Tree Species Germany cut to the map's window (EPSG:3035 as published, ~60 kB each; `clip_species.py` under `python -I` reads only the window's tiles of the 530 MB cloud-optimised GeoTIFFs over HTTP ranges, `scripts/species_map.py` puts them on the grid for `voxelize.py`; without them, or with `NO_SPECIES_MAP=1`, the conifers come from OSM and the laser alone). Files already there are not fetched again; the register and the species maps are cut again when the map's bounds changed (`data/raw/cut_bounds.txt`) |
 | `laser.py` | `data/laser.npz`: per 1 m cell vegetation statistics from the point clouds (highest return, lowest tenth, pulses caught in the canopy, single-return pulses, ground returns); optional for `voxelize.py` (`NO_LASER=1` ignores it) |
-| `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, each 1 m cell's colour: the median of its 5 x 5 orthophoto pixels); `data/orto.npy`: the orthophoto at 0.2 m, for `look.py` |
+| `prep.py` | `data/prep.npz`: the rasters mosaicked on the grid (surface 0.5 m, terrain 1 m, each 1 m cell's colour: the median of its 5 x 5 orthophoto pixels; DGM1 stops at the Austrian border, the Inn's far bank above the Innstadt takes the laser's ground and water returns instead); `data/orto.npy`: the orthophoto at 0.2 m, for `look.py` |
 | `lod2.py` | `data/lod2.npz`: LoD2 roof planes, roof types and footprints on the grid |
 | `voxelize.py` | `web/public/data/tiles/`, `meta.json`, `traffic.json` (its polylines packed: `scripts/trafficpack.py`); `data/trees.json` (the tree register, `scripts/trees.py`: OSM and Einzelbäume), `data/qa_roadmask.bin.gz` (both not served: the viewer reads neither), `data/ground.npz`, `data/footprints.npz`, `data/crowns.npz`; region by region, only the regions that changed (`data/cache/regions/`). Stops without `data/lod2.npz` (`NO_LOD2=1` builds from the surface model and OSM alone) |
 | `places.py` | `places.json`: the search index (streets, squares, buildings, stops) |

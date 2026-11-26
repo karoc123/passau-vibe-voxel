@@ -52,7 +52,7 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
-| F11 | Grow the map along the Inn to Ingling (blocks and edge landed) | M | **In progress** (`worktree-agent-a6bc0240c8d913578`, needs a data rebuild) |
+| F11 | Grow the map along the Inn to Ingling | M | **Ready to merge** (`worktree-agent-a6bc0240c8d913578`, then the data rebuild in its section) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
 
 ## Engine packages
@@ -131,19 +131,22 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 ### F11. Grow the map along the Inn to Ingling (M)
 
-- **Landed:** `scripts/map.json` `blocks` names the built 1 km blocks and the pipeline builds only them (identity:
-  `check.py golden --compare` 0 differences; fixture `holes.json`); a block not built is the map's edge in viewer and
-  physics (gate `edge`).
-- **Left:** add the blocks. Branch `worktree-agent-a6bc0240c8d913578` has commit `623f91c2` (WIP): the draft fixture
-  `inn.json` and notes on the plan, with the blocks, coordinates and downloads. Its worktree's `data/raw_new` holds the
-  downloads (14 one-km sheets, 3 LoD2 tiles) and the new `osm.json`. Open: fill the terrain on the Austrian bank,
-  where DGM1 has no data, from the laser's ground points in `prep.py`; set the Inn's level above the weir
-  (`river_levels.py`); label the dam; build and look at `inn.json`.
-- **Measured (OSM):** Kraftwerk Passau-Ingling (way 27661875) spans project cols -309..170, rows 3028..3409, its weir
-  (way 273300967) rows 3109..3204. Blocks: row 1 cols 0..1 whole (the strip's others stay `rows: 384`), rows 2 and 3
-  cols -1..0, `map.rows` 5504. New sheets: 1 km 821..824_5388, 825..828_5387, 825..830_5388, LoD2 824/826/828_5386.
-- **Rebuild:** yes. Cut `osm.json`, `baeume_aoi.csv` and `treespecies_*.tif` again for the new bounds, then run the
-  full rebuild (open data, CC BY 4.0).
+- **On the branch, waiting for the rebuild:** the blocks along the Inn to the Ingling dam are in `scripts/map.json`
+  (fixture `scripts/fixtures/inn.json` built and looked at). The owner's rebuild, from the main checkout:
+  1. `cp -n` the new sheets from the branch worktree's `data/raw` (or let `fetch_bayern.sh` fetch them: ~2.7 GB).
+  2. Cut `osm.json` again for the larger bounds from the same extract (the bbox `fetch_osm.sh` prints):
+     `uv run --with osmium python scripts/osm_pbf.py data/raw/geofabrik/niederbayern-latest.osm.pbf 48.5483,13.3522,48.6044,13.4856 data/raw/osm.json`
+     (or `OSM_REFRESH=1`: a newer extract, the whole map changes).
+  3. `sh scripts/build_data.sh` (it runs `fetch_bayern.sh`, which cuts `baeume_aoi.csv` and `treespecies_*.tif` again
+     because `data/raw/cut_bounds.txt` is new; then every region builds again: the map's config changed). Palette
+     entries it appends go in their own commit; `mirror-check`'s golden is recorded again after a look at the page.
+- **Known spot:** the Ingling dam's forebay, about 150 m upstream of the weir and the river's middle, stands as a sandy
+  pit (293-302 m) under the 302.95 m pool: DGM1 ramps across the weir there, and the Inn's OSM water outline above the
+  dam (way 160959413) does not close within the cut. A curated water body (an override of its level) would fix it.
+  `check.py verify --fixture scripts/fixtures/inn.json` also flags, in the new blocks: the railway bridge decks
+  131994367 (10.8 m sag over 94 m) and 131994370, the dam's service bridge 1282737017 (2.3 m), the tunnels 482662855
+  (blocked 107 m) and 94450270 (a hole), service road 212067382 on water; and the Austrian bank (no OSM, no ALKIS)
+  shows bare ground under part of its forest.
 
 ## Also open (for later)
 

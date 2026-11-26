@@ -44,6 +44,9 @@ PLACES = {
                                             alt="Krankenhaus Klinikum", at=(828055, 5389180), r=30, far=5000),
     "Sankt Anton": dict(kind="church", alt="St. Anton", at=(827710, 5389093), r=12, far=3000),
     "Christi Himmelfahrt": dict(kind="church", at=(827310, 5389328), r=12, far=3000),
+    # up the Inn (OSM way 27661875: the power plant's outline, its weir way 273300967)
+    "Kraftwerk Passau-Ingling": dict(en="Passau-Ingling dam", kind="Inn dam and power plant", alt="Innkraftwerk Ingling Stauwehr",
+                                     at=(827332, 5387341), r=15, far=5000),
     # Ilzstadt, Hals and up the Ilz
     "St. Salvator": dict(kind="church", alt="Salvatorkirche", at=(829895, 5390065), r=12, far=3000),
     "St. Bartholomäus": dict(kind="church", at=(830061, 5390157), r=12, far=3000),

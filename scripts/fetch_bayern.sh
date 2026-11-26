@@ -45,6 +45,8 @@ mkdir -p laser
 for t in $TILES; do
   get https://geodaten.bayern.de/odd_data/laser/$t.laz laser/$t.laz
 done
+# (the tree register and the species maps are cut to the map's bounds: cut again when they changed, e.g. the map grew)
+if [ "$(cat cut_bounds.txt 2>/dev/null)" != "$BOUNDS" ]; then rm -f baeume_aoi.csv treespecies_2022.tif treespecies_2016.tif; fi
 if [ ! -s baeume_aoi.csv ]; then
   mkdir -p baeume_dl  # the download in a directory of its own, read only by the clip (sqlite3, python -I)
   get https://geodaten.bayern.de/odd/m/8/baeume3d/data/124014_baeume.gpkg baeume_dl/124014_baeume.gpkg
@@ -60,3 +62,4 @@ for y in 2022 2016; do
   fi
   ls -la treespecies_$y.tif
 done
+echo "$BOUNDS" > cut_bounds.txt

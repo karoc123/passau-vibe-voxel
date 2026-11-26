@@ -541,7 +541,7 @@ def ground_classes(ctx):
     # (each would need a level of its own: not done); harbour basins 3 400, nearly all the bank strip
     TN_WATER = ("Fließgewässer", "Stehendes Gewässer", "Hafenbecken")
     tn = np.zeros((D, W), np.uint16)
-    tn_water = None  # (None: no cadastre, no gate)
+    tn_water = tn_cover = None  # (None: no cadastre, no gate; tn_cover: the cells of any parcel)
     try:
         import alkis_tn
         from shapely.affinity import affine_transform
@@ -554,6 +554,9 @@ def ground_classes(ctx):
         tn_water = np.zeros((D, W), np.uint16)
         burn(tn_water, [(affine_transform(g_, _tm), 1) for n_, _, g_ in _tnr if n_ in TN_WATER])
         tn_water = tn_water > 0
+        tn_cover = np.zeros((D, W), np.uint16)
+        burn(tn_cover, [(affine_transform(g_, _tm), 1) for _, _, g_ in _tnr])
+        tn_cover = tn_cover > 0
         note("ALKIS water cells:", int(tn_water.sum()))
         del _tnr
     except FileNotFoundError:
@@ -797,6 +800,8 @@ def ground_classes(ctx):
     # standing in it. The cadastre decides where, the terrain still draws the bank
     WATER_GATE = 8  # m
     _wgate = (ndimage.distance_transform_edt(~(_w0 | tn_water)) <= WATER_GATE) if tn_water is not None else np.ones((D, W), bool)
+    if tn_cover is not None:  # (beyond the cadastre, the Bavarian border, there is nothing to ask: the Inn's Austrian half)
+        _wgate |= ~tn_cover
     _flat = (ndimage.maximum_filter(dtm, 5) - ndimage.minimum_filter(dtm, 5) < 0.3) & _near_lv
     # the pools: stretches whose levels differ by WEIR_STEP or more are apart (a weir between them), so a body is cut where
     # one meets the next -- at the Kachlet the weir's openings are water under the plant's deck, and a body across them

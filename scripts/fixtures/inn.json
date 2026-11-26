@@ -6,7 +6,14 @@
  "anchor": {"name": "Dom St. Stephan", "x": 829351, "y": 5389767},
  "map": {"col0": -1024, "row0": 1024, "cols": 3072, "rows": 2432},
  "base": 287,
- "rivers": {"level": 290.921, "stretches": []},
+ "rivers": {"level": 290.921, "stretches": [
+  {"name": "Inn above the Ingling dam (Kraftwerk Passau-Ingling, OSM way 273300967), west of the weir", "box": [826347, 5387000, 827200, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827200, 5387000, 827300, 5387300], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827300, 5387000, 827400, 5387312], "level": 302.95},
+  {"name": "Inn above the Ingling dam, along the weir", "box": [827400, 5387000, 827540, 5387328], "level": 302.95},
+  {"name": "Inn above the Ingling dam, east of the weir", "box": [827540, 5387000, 828400, 5387340], "level": 302.95},
+  {"name": "Inn below the Ingling dam, its first kilometre", "box": [826800, 5387300, 827900, 5388300], "level": 291.45}
+ ]},
  "blocks": [
   {"row": 1, "cols": [-1, -1], "rows": 384},
   {"row": 1, "cols": [0, 1]},
