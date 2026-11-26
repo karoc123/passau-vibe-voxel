@@ -12,7 +12,7 @@ import { TILE_N as T } from './core/tile-data';
 //        nearest relative to its radius, so the shader weighs that one alone
 // Lamps: mapped ones (meta.json lamps), floodlit pitches (floods) and those placed along the streets (streetlamps.ts,
 // data/streetlamps.json, added when they arrive: every page shown is drawn again).
-export const LAMP_COLOURS: [number, number, number][] = [[255, 196, 132], [255, 156, 70], [212, 226, 255]];
+const LAMP_COLOURS: [number, number, number][] = [[255, 196, 132], [255, 156, 70], [212, 226, 255]];
 // (by its place in the project grid: map cells + origin, meta.origin, so a lamp keeps its colour whatever the map's extent)
 export const lampColour = (x: number, y: number, origin: readonly [number, number] = [0, 0]) => {
   const h = hash(Math.floor(x + origin[0]) * 0.1271 + Math.floor(y + origin[1]) * 0.3117);

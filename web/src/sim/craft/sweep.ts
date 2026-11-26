@@ -4,5 +4,5 @@ import type { ImpactKind } from '../contract/crafts';
 
 export type { ImpactKind };
 // Normal as a signed one-based axis index (x, y, z).
-export type Contact = { fraction: number; axis: number };
+type Contact = { fraction: number; axis: number };
 export type Sweep = (Contact & { hit: ImpactKind }) | { fraction: number; hit: null } | 'loading';

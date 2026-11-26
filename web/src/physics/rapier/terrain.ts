@@ -26,7 +26,7 @@ export const CHUNK = 16;
 // WORLD_GROUPS. The terrain's colliders (voxels and caps) are in every group.
 export const G_CAR = 1 << 0, G_CAR_ONLY = 1 << 1;
 export const CAR_GROUPS = (G_CAR << 16) | 0xffff;
-// the wheels' rays: as the car
+/** @alias the wheels' rays: as the car */
 export const WHEEL_GROUPS = CAR_GROUPS;
 export const CAR_ONLY_GROUPS = (G_CAR_ONLY << 16) | G_CAR;
 export const WORLD_GROUPS = ((0xffff & ~(G_CAR | G_CAR_ONLY)) << 16) | 0xffff;

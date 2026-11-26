@@ -17,7 +17,7 @@ export interface FocusView {
   box: [number, number, number, number, number, number];
 }
 
-export function focusKey(q: string): { key: string; id: number } | null {
+function focusKey(q: string): { key: string; id: number } | null {
   const m = /^(bld|building|street):([wr]?)(\d+)$/.exec(q.trim());
   if (!m) return null;
   const id = Number(m[3]);

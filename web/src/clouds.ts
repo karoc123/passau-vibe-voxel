@@ -14,9 +14,9 @@ export const CLOUD_N = 256;
 
 // how much of the sky the cumulus cover, by the weather's cloud (0 clear .. ~0.6 cloudy; past it the overcast deck,
 // sky.ts, closes over them)
-export const coverage = (cloud: number) => 0.14 + 0.5 * smooth(0, 0.6, cloud);
+const coverage = (cloud: number) => 0.14 + 0.5 * smooth(0, 0.6, cloud);
 // how much a cloud's shadow takes from the sun: none under the overcast (the sun is a glow through it) or by night
-export const shadowStrength = (cloud: number, night: number) => 0.82 * (1 - smooth(0.65, 0.95, cloud)) * (1 - night);
+const shadowStrength = (cloud: number, night: number) => 0.82 * (1 - smooth(0.65, 0.95, cloud)) * (1 - night);
 
 function bake() {
   const N = CLOUD_N, v = new Float32Array(N * N);

@@ -9,7 +9,7 @@ import type { WalkOpts } from './nav';
 const TILT = Math.PI * 0.48;
 
 /** a hit on the map under a point of the screen (nav.ts hitAt) */
-export type ScreenHit = { p: THREE.Vector3; axis: number; dir: THREE.Vector3 } | null;
+type ScreenHit = { p: THREE.Vector3; axis: number; dir: THREE.Vector3 } | null;
 
 export interface OrbitHost {
   world(): World | null;

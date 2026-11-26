@@ -13,7 +13,7 @@ const upOf = (x: number, y: number, z: number, w: number) => ({ x: 2 * (x * y - 
 
 /** pose p with what is left (k, 1 .. 0) of a release's difference (BodyDraw's fade) added; body: it has one still (its
  * roll is its own, else the roll is blended out too). A new pose */
-export function fadeOut(p: RoadPose, f: { dx: number; dy: number; dz: number; dh: number }, k: number, body: boolean): RoadPose {
+function fadeOut(p: RoadPose, f: { dx: number; dy: number; dz: number; dh: number }, k: number, body: boolean): RoadPose {
   return { x: p.x + f.dx * k, y: p.y + f.dy * k, z: p.z + f.dz * k, h: (p.h ?? 0) + f.dh * k, pitch: p.pitch,
     roll: body ? p.roll : (p.roll ?? 0) * (1 - k) };
 }
