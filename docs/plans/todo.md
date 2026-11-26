@@ -53,9 +53,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Stelzhamerstraße's underpass below the railway at Auerbach (way 8022045, tunnel=yes layer=-1, grid -1282,1146):
   the road sinks and there is no passage under the tracks (new block col -2 row 1 since the map's growth).
-- Hans-Hösl-Straße 20 (way 1100616130, grid -2926,432): from the north the north wall is gone and the roof hangs
-  down inside (`shoot.mjs --focus bld:1100616130`: f-nw broken, f-sw whole). Mesher (chamfer walls, roof slopes) or
-  facing culling; the owner sees more such houses.
+- Buildings seen through: `tools/see-through.mjs --all` counts 1045 (gate: BASELINE in 4 nodes). ~250 go with roofs.ts
+  eave fills (gone with all fills off: 795), the rest other holes (e.g. 25_19 bld 1708: a cell of roof 1 m over its
+  slope on the eave). Hans-Hösl-Straße 20's NW side is roof voxels from 2 m up (a 35 m roof strip under a 38.8 m
+  eave, caps.py / voxelize data): reads as the roof hanging down, no longer a hole.
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.

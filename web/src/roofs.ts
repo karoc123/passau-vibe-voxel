@@ -175,7 +175,7 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       // it stands above its floor, and nothing under the triangle comes up through it: a street, or a lower roof
       // (what stands above the floor is inside it, behind the fascia)
       const cs = fillCorners(f);
-      if (Math.min(cs[0][0], cs[1][0], cs[2][0]) <= f.floor) continue;
+      if (Math.min(cs[0][0], cs[1][0], cs[2][0]) <= f.floor || !level(f)) continue;
       let ok = true;
       for (let k = 0; k < a && ok; k++) ok = clear(f, cs, X - k * sx, Y);
       for (let k = 1; k < b && ok; k++) ok = clear(f, cs, X, Y - k * sy);
@@ -184,6 +184,19 @@ export function slopeRoofs(N: number, vol: Uint16Array, colTop: Uint16Array, roo
       for (let k = 0; k < a; k++) covered[X - k * sx + S * (Y + sy)] |= 1 << (sy > 0 ? 2 : 3);
       for (let k = 0; k < b; k++) covered[X + sx + S * (Y - k * sy)] |= 1 << (sx > 0 ? 0 : 1);
       floors.set(((px - 1) * 4096 + (py - 1)) * 4 + (sx > 0 ? 1 : 0) + (sy > 0 ? 2 : 0), f.floor);
+    }
+    // whether the cells along its legs meet at every grid point of them (the inner corner, the three round it; between): where two roofs
+    // of different heights meet there (a lower roof beside the step), the fill's edge takes the lower and the higher
+    // cell's side it covers is left open above it -- a hole through the roof's edge
+    function level(f: Fill) {
+      const { X, Y, sx, sy, a, b, px, py } = f;
+      const h = (c: number, gx: number, gy: number) => hq[c * 4 + cornerIdx(c, gx, gy)];
+      const ca = (k: number) => X - k * sx + S * (Y + sy), cb = (k: number) => X + sx + S * (Y - k * sy);
+      const hp = h(ca(0), px, py);
+      if (Math.abs(hp - h(cb(0), px, py)) > MERGE_TOL || Math.abs(hp - h(X + sx + S * (Y + sy), px, py)) > MERGE_TOL) return false;
+      for (let k = 1; k < a; k++) if (Math.abs(h(ca(k - 1), px - k * sx, py) - h(ca(k), px - k * sx, py)) > MERGE_TOL) return false;
+      for (let k = 1; k < b; k++) if (Math.abs(h(cb(k - 1), px, py - k * sy) - h(cb(k), px, py - k * sy)) > MERGE_TOL) return false;
+      return true;
     }
     // whether what is in cell (x, y) (its top; a slope's surface) stays under the fill's triangle where the two
     // overlap: compared at the corners of the triangle clipped to the cell, both being planes there (a slope's cell
