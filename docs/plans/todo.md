@@ -48,7 +48,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - A start menu: alone or a server, the server preselected as the one `./voxel start` serves the page with.
 - Ping shown to the player (with a host).
 - A frame-rate cap, set in the settings: 60 by default, 30 on a phone (the battery).
-- The motorbike: a huge turning circle, little fun to ride.
 - A car hitting a pedestrian: they topple over instead of being thrown ahead.
 - Standing close to a wall it turns see-through and shows what is behind.
 - A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
