@@ -4,7 +4,7 @@ Run `uv run python scripts/check.py verify --fixture scripts/fixtures/haissengas
 from the repository root. Each fixture builds under `data/check/<fixture>/base/`. Its
 `data/debug/report.json` contains human-readable notes and counters keyed by region.
 
-[road-defects.json](road-defects.json) defines the local checks for [the fixed road defects](../../docs/plans/road-defects.md)
+[road-defects.json](road-defects.json) defines the local checks for the fixed road defects
 and the nearby fixture features. Each box covers a half-open rectangle in project
 coordinates, ordered `[x0, z0, x1, z1]`. Road and water heights use the map base.
 Deck heights measure clearance above the water, `bridge` heights a deck's surface over land (map base). A `dry` box

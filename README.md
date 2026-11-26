@@ -347,129 +347,43 @@ Page globals for the console and agent tools (none needed by the viewer): `windo
 
 ## Agent tools (checking a change)
 
-For agents (and people) changing the code. All run from `web/` with no GPU and no extra dependency; in a git
-worktree first `ln -s <main checkout>/web/node_modules web/node_modules` (don't install).
+All run from `web/` with no GPU. `npm` is not on PATH: use `tools/wt.sh` (`setup` first in a git worktree; it links
+the main checkout's `node_modules` and data). Each tool's header says what it checks and its options.
 
-**Gates: `node tools/gates.mjs`** (`pnpm gates`; under a minute, its longest gate `life-edit`). tsc and
-the headless checks below in parallel, a PASS / FAIL table with times, exit code 1 on a failure. Run it before every
-commit. `--full` (`pnpm gates:full`, ~3 min) adds `section-check`, `popin-check`, `caps-check --all`,
-`surface-gap --check docs/plans/surface-gap-baseline.json` and, with `--golden FILE` (recorded before the change by
-`node tools/mesh-golden.mjs write FILE`), `mesh-golden check`; run it for changes to the mesher, the surface, the car
-or the street life. `--list` shows each gate's set and the files it guards; `node tools/gates.mjs plane boat` runs
-those only; `-v` prints every gate's output. The pipeline's quick gates: `scripts/check.sh` (from anywhere:
-`palette_check.py`, `overrides.py check`, `interiors.py --test`; `--fixture` adds `check.py verify` on the fixture
-map, minutes).
+**Gates: `node tools/gates.mjs`** (`tools/wt.sh gates`). tsc and the headless checks in parallel, a PASS / FAIL table,
+exit code 1 on a failure. `--list` shows every gate, its set and the files it guards; name gates to run only those;
+`--full` adds the slow ones; `--golden FILE` adds the mesher's byte comparison (record it before the change with
+`node tools/mesh-golden.mjs write FILE`); `-v` prints every gate's output. The pipeline's quick gates:
+`scripts/check.sh` (`--fixture` adds `check.py verify` on the fixture map, minutes; some verify failures exist on main,
+so compare against main).
 
-The other checks, all `node tools/<name>.mjs` from `web/`, exit code 1 on a failure (details in each file's header):
+Gotcha: `mirror-check`'s golden (`tools/mirror-golden.json`) is of one data build; after a data rebuild check the page,
+then `node tools/mirror-check.mjs --write-golden`. Building ids are 16-bit end to end: the map's stay below 60000
+(`scripts/zones.py` fails there), 60000-65535 are reserved for players' builds.
 
-| tool | checks | set |
-|---|---|---|
-| `core-deps` | `src/core/`, `src/sim/`, `src/physics/` and what they import: no three.js, no DOM (ADR 0001) | fast |
-| `layers` | `core/layers.ts` on a synthetic world: L0 + L1 + L2 edits, two builds, deltas encoded | fast |
-| `edit-roundtrip` | `core/columns.ts` on a real node: thousands of random edits against a dense reference | fast |
-| `tile-roundtrip` | the node file's format end to end, `scripts/tile_roundtrip.py` writes, `core/tile-data.ts` reads (needs `uv`) | fast |
-| `world-smoke` | the client-independent stack on the real data: load, L1/L2 edit, re-mesh, the car in the crater | fast |
-| `vehicles` | each type of the vehicle catalog (`sim/vehicles.ts`) driven: top speed, curves, a steep street; the motorbike | fast |
-| `edge` | the map's edge at a block not built (`core/built.ts`, meta.json `built`): the drone's sweep, the boat's water, the walker, the Rapier car (a wall) and the plane (`EDGE`) kept out of it | fast |
-| `craft-motion` | hovercraft shore crossings, helicopter flight, and paraglider steering and landing with voxel collisions | fast |
-| `caps-check` | the caps as the mesher draws them, bit for bit, and across node borders (`--all`: every node) | fast / full |
-| `life-edit` | the street traffic on an edited city (dig, block, wreck), headless as a server would run it | fast |
-| `mirror-check` | the page's drawing from snapshots against `tools/mirror-golden.json`, and every body's pose from the snapshot against the sim's; the golden is of one data build, so after a rebuild check the page, then `node tools/mirror-check.mjs --write-golden` | fast |
-| `section-check` | sectioned re-meshing of an edited node equals the whole node's mesh | full |
-| `popin-check` | the street life, trains and boats: nothing appears, vanishes or jumps near a moving viewer | full |
-| `surface-gap` | the car's surface against the drawn one on the real city; `--check` against the baseline | full |
-| `mesh-golden` | the mesher's output hashed: `write FILE` before a change, `check FILE` after | full, with `--golden` |
+Not gates: `remesh-bench`, `mesh-profile`, `life-phys`, `life-phys-scan` (where the traffic's paths leave no room for a
+car), `rapier-car-bench`, `judder` (the followed vehicle's judder under emulated frame pacing). `rapier-car.mjs
+--real`, `--road`, `--roads` drive the car in the real city (the benchmark for its feel on real ramps).
 
-Benches and diagnostics (not gates): `remesh-bench` (meshing an edited node from columns: times, and equal buffers),
-`mesh-profile` (where a node's meshing time goes, V8 profiler), `life-phys` (the traffic's bodies near edits: cost,
-lost ghosts), `life-phys-scan` (where the traffic's paths leave no room for a car), `rapier-car-bench`.
+**Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres) loads only the tiles within R m of the camera's first
+target. With `cam=` it frames any spot; Ctrl+C in the viewer copies a `?cam=` link of the spot under the mouse.
 
-**FPV collision: `node tools/collision.mjs`** (~1 s). The drone's `VoxelCollision` (`src/sim/craft/voxel-collision.ts`)
-over a small synthetic world (`checks/collision-checks.ts` on `checks/world.ts`: a ground height per column, boxes for walls and decks,
-written as real node files and served through a stubbed fetch): a sweep before the tiles are in waits, the drone's
-cube falling onto the road and onto a deck, flying into a wall and out of the map, the surface it settles on. Exit
-code 1 on a failure; check any change to `voxel-collision.ts` or the tile format with it.
-
-**Boat: `node tools/boat.mjs`** (~2 s). The player's boat (`src/sim/craft/boat-motion.ts`) on a synthetic channel
-(`checks/boat-checks.ts`, served as `collision.mjs`'s world): speed, turning, drifting, the bank, a pier and a low
-footbridge bounced off, under a bridge, put in and unstuck; then on the real data (skipped without it): put in near
-the Altstadt, a lap, under the Schanzlbrücke, into the bank. Exit code 1 on a failure.
-
-**Plane: `node tools/plane.mjs`** (~6 s). The floatplane's flight (`src/sim/craft/plane-flight.ts`) on a synthetic world of
-boxes (`checks/plane-checks.ts`): level flight, the throttle's range, stall and recovery, climbing costs speed, the
-turn, the map's wall, the ceiling, a water landing with taxi and takeoff, crashes on land and on water and the
-respawn, a skim, a tile not loaded, 10 min of random input; then on the real data (`checks/plane-real.ts`, skipped
-without it): the Danube flown from the west edge to the Altstadt 60 m over its water, and landed on, taxied and taken
-off from. Then the jet (`JET`, `checks/jet-checks.ts`): level top speed, stall, roll rate, a loop, inverted flight,
-a hard turn, smooth pitch (the floatplane's criteria), the map's wall, crash and respawn, a gentle touch of water (a
-splash), 10 min of random input; on the real data a low pass along the Danube and over the Altstadt at ~410 km/h with
-every collision file 1 s late (no wait for a tile once under way). `--type floatplane|jet` runs one; `--set KEY=VALUE`
-changes a number of the types run. Exit code 1 on a failure.
-
-**Building ids: `node tools/bld-ids.mjs`** (~1 s). The mesher (`src/mesher.worker.ts` meshTile) on a synthetic
-slab cut into buildings k, k + 16384 and 65535: every quad keeps its id and ground level exact, faces never merge
-across ids, one id still merges into one top. Ids are 16-bit end to end; the map's stay below 60000 (`scripts/zones.py` fails there), 60000..65535 are reserved for players' builds. Exit
-code 1 on a failure; check any change to the mesher's greedy merge with it.
-
-**Rapier car: `node tools/rapier-car.mjs`** (~2 s). The Rapier car (`src/physics/rapier/`) on synthetic voxel
-terrain (`checks/scenarios.ts`): terraces and platforms up and down, walls, cliffs, the river, paved
-ramps along, across and diagonal, a bridge. Ground and slope cases print how much the car wobbles (`pitchJit`,
-`rollJit`: RMS of the pitch and roll rate less their 0.5 s mean, rad/s; `liftPct`: share of samples with a wheel
-off the ground; `lifts`: how often one left it) and how floaty it is (`vyErr`: RMS of the body's vertical speed less
-the road's under its axles, m/s, 0 for a car glued to the road; `heave`: how far the body bobs over the road, cm;
-`lightPct`: share of the time the wheels carry under half its weight; `airPct`: no wheel down). `crest_50`/`crest_30`
-drive over the top of a 25 % street (`airS`, `hopCm`, `landLoad`, `settleS`), `settle_heave`/`settle_pitch` kick the body
-on level ground (overshoot, settle time, frequency), `steer_step` holds half the steering at 50 km/h (`yawRise`,
-`yawGain`, `latG`, `rollDeg`). `--set stiffness=34,gravity=1.25,...` runs anything with other numbers for the ride
-(`car.ts` RIDE). `--real X,Z,HEADING,KMH,SECS` drives
-straight in the real city, `--road I[,KMH[,REV]]` follows road I of `traffic.json`, `--roads [KMH]` runs the steepest
-ten roads both ways and prints the means (the benchmark for the car's feel on real ramps). The `drive_*` scenarios
-(`checks/drive-scenarios.ts`) run player commands through the shared world on synthetic terrain. They cover
-competing claims, two drivers and a collision with an AI body (`drive_shared_replay`), a car knocked out of traffic
-(`drive_knock`), a person knocked down
-(`drive_person`), into the river and back on the bank ~12 m before its edge (`drive_river_respawn`), parked in the
-river (`drive_park_in_river`), a crash landing that holds the input (`drive_crash_landing`). `node
-tools/rapier-car-bench.mjs`: collider build and step costs along a route.
-
-**Tiny scene: `?crop=R`** (or `?crop=x0,z0,x1,z1` in metres). Only the 128 m tiles within R m of the camera's first
-target are loaded and drawn, no far ground; the rest of the map is empty. With `cam=` it frames any spot; Ctrl+C in the
-viewer copies a `?cam=` link of the spot under the mouse. `crop=192` is a 4 x 4-tile patch: ~16 nodes instead of
-~200-300.
-
-**Screenshots: `node tools/shoot.mjs`**. Builds `dist`, serves it with `vite preview` on port 5194 (`--port`; never
-5173, the dev server's), shoots in headless Chrome with what moves held still (shader clock, clouds, street life
-hidden, shadow drawn whole) and a fixed date/hour/weather (`date=7-15&hour=13&weather=clear` unless the shot sets
-them), so two runs of the same code differ by < 0.02 % of pixels. Typical use:
+**Screenshots: `node tools/shoot.mjs`**. Builds `dist`, serves it on port 5194 (`--port`; never 5173, the owner's dev
+server), shoots in headless Chrome with motion held still and a fixed date, hour and weather, so two runs of the same
+code differ by < 0.02 % of pixels.
 
 ```sh
-# the reference first, before the change (or from a second worktree on the old commit); outputs into a scratch dir
-node tools/shoot.mjs --set quick --out /tmp/…/ref          # tiny-street, tiny-dom: ~15 s a shot
-# … change the code …
-node tools/shoot.mjs --set quick --out /tmp/…/new --compare /tmp/…/ref   # table + /tmp/…/new/diff/*.png (ref | new | |d| x4)
-node tools/shoot.mjs --shots street,oberhaus-night --crop 256 --out …     # named shots, cropped
+node tools/shoot.mjs --set quick --out /tmp/…/ref                         # before the change
+node tools/shoot.mjs --set quick --out /tmp/…/new --compare /tmp/…/ref    # after: table + diff images
 node tools/shoot.mjs --shots 'mine=cam=1600,40,700,1650,20,720&hour=20' --crop 128 --out …   # ad hoc: name=query
-node tools/shoot.mjs --no-shoot --out new --compare ref    # compare two existing sets only
 ```
 
-`--list` shows the named shots (`overview`, `oberhaus`, `dom`, `eck`, `street`, night, autumn, winter, snow, `tiny-*`)
-and sets (`quick`, `default`, `seasons`, `all`). `--q "dist=900&shadow=2048"` adds to every shot's query, `--phone`
-shoots at 412 x 860 with touch, `--eval 'window.__three.city().held'` records any page expression per shot
-(`window.__three` exposes camera, scene, renderer, daylight, city(), setGfx …: `main.ts`). `DIR/shots.json` has per shot: ms to `__ready`, to loaded, total,
-one frame's ms, the nodes shown per level and console errors (look there first). The diff fails (exit 1) above
-`--fail` % (default 0.5) of pixels off by more than 24. The renderer is `--gl llvmpipe` (Mesa through ANGLE's
-Vulkan; falls back to `swiftshader`): compare only sets taken with the same `--gl` and `--size` (the two renderers
-differ by up to ~9 % px on glazing).
+`--list` shows the named shots and sets. Compare only sets taken with the same `--gl` and `--size` (the two renderers
+differ by up to ~9 % of pixels on glazing). `DIR/shots.json` has each shot's times and console errors (look there
+first). A whole-city shot takes 33-77 s, a `crop=192` shot ~15 s.
 
-**One object: `?focus=bld:<id>` / `?focus=street:<id>`** (`bld:r<id>` for a relation) frames that building or street
-(`web/src/focus.ts`; `&az=` the compass bearing the camera stands at, default 200, `&el=` degrees over the horizon,
-`&fit=` a distance factor, `&crop=fit` only the tiles round it). Its box comes from `data/objects/<id % 64>.json`
-(`scripts/objects.py`: every building's and street's box, split by id into 64 small files). `node tools/shoot.mjs
---focus bld:<id> --out DIR` shoots it from four sides, from above and at night (`f-sw`, `f-se`, `f-ne`, `f-nw`,
-`f-top`, `f-night`), ~6 s a shot; `--compare` as above for before and after.
-
-Measured (WSL, 20 cores shared with other agents, 1280 x 800): a whole-city shot 45-77 s under SwiftShader (frames
-of 2-5 s), 33-50 s under llvmpipe; a `crop=192` shot 14-16 s under llvmpipe (~4 s to `__ready`, ~4 s loading, frames of
-0.2-0.5 s, ~2 s the screenshot itself).
+**One object: `?focus=bld:<id>` / `?focus=street:<id>`** frames that building or street (`&az=`, `&el=`, `&fit=`,
+`&crop=fit`). `node tools/shoot.mjs --focus bld:<id> --out DIR` shoots it from four sides, from above and at night.
 
 ## FPV Acro prototype
 

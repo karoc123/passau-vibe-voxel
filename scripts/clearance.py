@@ -1,4 +1,4 @@
-"""The classes of what web/tools/life-phys-scan.mjs --dump found on the carriageways (docs/plans/road-clearance.md):
+"""The classes of what web/tools/life-phys-scan.mjs --dump found on the carriageways:
 per class the metres, stretches and roads, and the longest stretches with their OSM ways. Reads the dump, the data it
 was scanned on (traffic.json, meta.json) and data/ground.npz, surface.npz, raw/osm.json; nothing written.
 
