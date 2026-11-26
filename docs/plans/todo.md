@@ -27,9 +27,12 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Later, in this order of likelihood
 
-- Bandwidth for internet play, phones included (owner 2026-11-26): ~5 MB/s per player is far too much; a plan
-  with measured levers is being made. Cheap first: radius by seat (on foot ~300 m), car fields sent once on entering
-  sight, numbers in arrays.
+- Bandwidth for internet play, phones included (owner 2026-11-26). Measured at the cathedral: ~1.7 MB/s per player
+  after deflate (people and cars ~95 %); an edit sends its whole node, ~4.5 MB to everyone. Target <= 20 kB/s mean,
+  50 kB/s peak. Levers in order (deflate kB/s after each, on foot): edits as ops in sight; radius per kind (cars
+  350 m, people 200 m; a pilot more) 280; rounding 111; arrays, static fields once, what the client can derive left
+  out 47; agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars stay 30 Hz 9; trains/boats as timetables 7.
+  ws.ts `threshold: 1024` leaves small messages uncompressed (~64). Binary only after a Pi measurement.
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
