@@ -292,8 +292,9 @@ async function dig() {
 
 // the focus moved to the moving car with one behind it nearest STREET (within FIND m: the tiles setup decodes reach
 // 400 m): where such a pair is after the warm-up follows from the seeded traffic over the whole network, so it moves
-// whenever the map's roads change (the F11 rebuild left none within 120 m of STREET, the nearest 216 m off)
-const FIND = 300;
+// whenever the map's roads change (the F11 rebuild left none within 120 m of STREET, the nearest 216 m off; the
+// building-passage rebuild none within 300 m)
+const FIND = 400;
 // ok(car): a further test the car must pass (block: nothing else where its block will land)
 function refocus(ctx, minV, ok = () => true) {
   const cands = ctx.T.cars.filter((c) => !c.bus && c.v >= minV && behindOf(ctx, c))

@@ -16,6 +16,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   worker host has none.
 - Bytes with a round at one spot (gate `load`, 16 by the cathedral, a third firing): 20–30 kB/s mean per player,
   over the 20 target; the gate holds 35. The bodies near craters, avatars and cars let go go whole every tick.
+  Half done (paused) on branch `worktree-agent-ac166447049eedf13`: resting ones sent once (PROTOCOL 20); gates not
+  run, the no-growth check in `load` and the 10/16-player numbers still to do.
 
 ## Later, in this order of likelihood
 
@@ -51,13 +53,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
-- Stelzhamerstraße's underpass below the railway at Auerbach (way 8022045, tunnel=yes layer=-1, grid -1282,1146):
-  the road sinks and there is no passage under the tracks (new block col -2 row 1 since the map's growth).
-- Buildings seen through (`tools/see-through.mjs --all --classify`): 27 left. 24 are steep roof caps (caps.py: where
-  a lower roof meets a higher one along a diagonal, the shared corner takes the higher height and the lower cells twist
-  up to it, 2+ m in one cell; e.g. 57_26 bld 82, 24_6 bld 437): the step should keep each plane's own height at the
-  corner (the mesher draws the step's face), a data rebuild. 3 are slivers of 1-2 rays. Hans-Hösl-Straße 20's NW side
-  is roof voxels from 2 m up (a 35 m strip under a 38.8 m eave, caps.py / voxelize): reads as the roof hanging down.
+- Buildings seen through (`tools/see-through.mjs --all --classify`): 8 left. 6 "steep caps" are steep roofs (50 deg
+  and more) where an eave cell without a cap (its voxels off its plane) meets capped ones, e.g. 49_25 bld 301; 2 are
+  slivers of 1-2 rays. Hans-Hösl-Straße 20's NW side is roof voxels from 2 m up (a 35 m strip under a 38.8 m eave,
+  caps.py / voxelize): reads as the roof hanging down.
+- Water-top steps left at the rivers' stretch boxes' edges (map.json): the Ilz at Ilzstadt (box edge N 5390800, a 2 m
+  step to the default level, ~2145,-309) and above the Hals weir (its fall, stepped on the 64 m blocks, ~822,-1410);
+  the edges belong under bridges or at rapids.
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.

@@ -17,6 +17,7 @@ apply across the whole fixture, including areas outside the local defects.
 
 | Fixture | Existing failure |
 |---|---|
+| `auerbach` | 174 of 592 LoD2-matched outlines moved (29.4%, minimum 40%; fixture added for the Stelzhamerstraße under the railway, whose tunnels check it guards) |
 | `dietzing` | 11 of 50 LoD2-matched outlines moved (22.0%, minimum 40%; fixture added with Q8) |
 | `gaissa` | 30 of 93 LoD2-matched outlines moved (32.3%, minimum 40%) |
 | `haissengasse` | Footpaths sunk 2.09% and hovering 2.12% (maximum 1.50% each) |
