@@ -320,6 +320,11 @@ node tools/where.mjs 25,1713                  # what lies at a ?cam=/HUD point (
 One machine hosts the world; every page that names it joins as a player of its own and sees the others on foot, their
 cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed). Without `?server=` the page plays alone with the world in a Web Worker, as before.
 
+To host a game on a box of its own (a Pi, a server in the LAN), from the repository's root: `./voxel start` runs the
+built page (port 8080) and the host (5300) in the background and prints the link to open; `./voxel stop`, `status`,
+`logs`, `restart` (after a pull), `run` (in the foreground). It needs node 22 and pnpm (or corepack); it installs the
+packages and builds the page itself when the commit changed. By hand, for development:
+
 ```sh
 cd web
 pnpm install                                 # once: the host needs ws

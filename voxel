@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# The game on one machine (a Pi, a box in the LAN): the page and the network host together.
+#   ./voxel start     both in the background (installs the packages and builds the page first when needed)
+#   ./voxel stop      both stopped
+#   ./voxel restart   stop, then start (after a git pull)
+#   ./voxel status    what runs, and the link to open
+#   ./voxel logs      both logs, followed
+#   ./voxel run       both in the foreground; Ctrl-C stops them
+# Ports: PAGE_PORT (default 8080), HOST_PORT (default 5300). The host's options (tools/serve.mjs) go after start/run,
+# e.g. ./voxel start 'dig=1'. Development stays with tools/wt.sh in web/.
+set -euo pipefail
+root="$(cd "$(dirname "$0")" && pwd)"
+web="$root/web" run="$root/web/.run"
+PAGE_PORT="${PAGE_PORT:-8080}" HOST_PORT="${HOST_PORT:-5300}"
+mkdir -p "$run"
+
+ip() { hostname -I 2>/dev/null | awk '{print $1}' || true; }
+link() { local a; a="$(ip)"; a="${a:-localhost}"; echo "http://$a:$PAGE_PORT/?server=ws://$a:$HOST_PORT"; }
+alive() { [ -f "$run/$1.pid" ] && kill -0 "$(cat "$run/$1.pid")" 2>/dev/null; }
+pnpm_() { if command -v pnpm >/dev/null; then pnpm "$@"; else corepack pnpm "$@"; fi; }
+
+prepare() {
+  command -v node >/dev/null || { echo "node missing (22 or newer)"; exit 1; }
+  cd "$web"
+  # a fresh checkout or a pull that changed the packages
+  if [ ! -d node_modules ] || [ pnpm-lock.yaml -nt node_modules/.modules.yaml ]; then pnpm_ install --frozen-lockfile; fi
+  local head; head="$(git -C "$root" rev-parse HEAD)"
+  # the page is built per commit; vite alone, without the type check (that is the gates' job, not the server's)
+  if [ "$(cat dist/.commit 2>/dev/null)" != "$head" ] || [ -n "$(git -C "$root" status --porcelain -- web/src web/index.html web/public)" ]; then
+    echo "building the page ..."
+    node node_modules/vite/bin/vite.js build --logLevel warn
+    echo "$head" > dist/.commit
+  fi
+}
+
+page_cmd() { node node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port "$PAGE_PORT" --strictPort; }
+host_cmd() { node tools/serve.mjs --port "$HOST_PORT" "$@"; }
+
+start() {
+  if alive page || alive host; then echo "already running"; status; exit 0; fi
+  prepare
+  cd "$web"
+  setsid node node_modules/vite/bin/vite.js preview --host 0.0.0.0 --port "$PAGE_PORT" --strictPort >"$run/page.log" 2>&1 < /dev/null & echo $! > "$run/page.pid"
+  setsid node tools/serve.mjs --port "$HOST_PORT" "$@" >"$run/host.log" 2>&1 < /dev/null & echo $! > "$run/host.pid"
+  sleep 2
+  if alive page && alive host; then echo "running; open $(link)"; else echo "did not start:"; tail -n 5 "$run"/*.log; stop; exit 1; fi
+}
+
+stop() {
+  for p in page host; do
+    # each was started in its own session: the group takes vite's and node's children with it
+    if alive $p; then kill -- -"$(cat "$run/$p.pid")" 2>/dev/null || kill "$(cat "$run/$p.pid")"; echo "$p stopped"; fi
+    rm -f "$run/$p.pid"
+  done
+}
+
+status() {
+  for p in page host; do if alive $p; then echo "$p: running (pid $(cat "$run/$p.pid"))"; else echo "$p: stopped"; fi; done
+  if alive page && alive host; then echo "open $(link)"; fi
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  start) start "$@" ;;
+  stop) stop ;;
+  restart) stop; start "$@" ;;
+  status) status ;;
+  logs) tail -n 20 -F "$run/page.log" "$run/host.log" ;;
+  run)
+    prepare
+    cd "$web"
+    trap 'kill 0' INT TERM EXIT
+    page_cmd & host_cmd "$@" &
+    sleep 2; echo "open $(link)"
+    wait ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# //'; exit 1 ;;
+esac
