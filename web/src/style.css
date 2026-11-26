@@ -279,3 +279,9 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
 @media (pointer: coarse) and (orientation: landscape) {
   #handbrake-button, #boat-drift-button { width: 68px; height: 68px; right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); }
 }
+/* get in or out (nav/board.ts): over the weapon slots, under the crosshair; a tap on touch */
+#board-button { position: fixed; left: 50%; bottom: calc(64px + var(--sb)); transform: translateX(-50%); z-index: 4; padding: 8px 16px;
+  border: 1px solid rgba(255,255,255,.55); border-radius: 18px; background: rgba(16,17,20,.55); color: #fff;
+  font: 600 14px Inter, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+#board-button[hidden], body.noui #board-button { display: none; }
+#board-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
