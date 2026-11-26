@@ -25,6 +25,9 @@ export interface ServeOptions {
   /** the world's start, as a page's URL gives it to its worker (seed=, dig=1, mode=, ...) */
   query: string;
   log: (line: string) => void;
+  /** what ticks the world (default: the worker's clock, real time); a tool steps it itself, in lockstep with its
+   * clients, so a busy machine slows the run instead of starving the clients of snapshots */
+  clock?: typeof clock;
 }
 
 interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number }
@@ -52,7 +55,7 @@ export function serve(o: ServeOptions) {
   });
 
   let n = 0, ticks = 0, tickMs = 0, sendMs = 0;
-  const stop = clock(() => {
+  const stop = (o.clock ?? clock)(() => {
     const t0 = performance.now();
     server.update(STEP);
     const ms = performance.now() - t0;
