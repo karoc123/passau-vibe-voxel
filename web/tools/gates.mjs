@@ -75,7 +75,7 @@ const CORE = ['src/core/**', 'src/sim/contract/**', 'src/fetch.ts', 'checks/chec
 // files of src/ and tools/ with no gate of their own, on purpose (tsc and core-deps still read all of src/): the
 // viewer's drawing, input and page (three.js and the DOM: tools/judder.mjs and shoot.mjs, run by hand) and the tools
 // run by hand
-const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs',
+const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs', 'tools/where.mjs',
   'tools/lamps.mjs', 'tools/life-phys.mjs', 'tools/life-phys-scan.mjs', 'tools/mesh-profile.mjs', 'tools/remesh-bench.mjs',
   'tools/rapier-car-bench.mjs', 'tools/serve.mjs', 'tools/tris.mjs'];
 
