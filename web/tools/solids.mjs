@@ -14,7 +14,7 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
-const { reach, carShape, solidAt, WALKER_R } = await imp('src/sim/solids.ts');
+const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES } = await imp('src/sim/solids.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
@@ -109,7 +109,8 @@ const hc = A.c.crafts().find((c) => c.type === 'hovercraft');
 P.x = 140; P.z = 60; yaw = Math.PI / 2;
 for (let i = 0; i < 3 / STEP; i++) frame(stride(yaw, 1, 0, 6 * STEP));
 const hp = hc?.core.pose;
-check(hp && P.x < hp.x - 1.5 && P.x > hp.x - 3, `a hovercraft stops the walker (x ${P.x.toFixed(2)}, the craft at ${hp?.x.toFixed(2)})`);
+const hside = hp && hp.x - CRAFT_SHAPES.hovercraft.hx - WALKER_R;
+check(hp && P.x < hside + 0.01 && P.x > hside - 0.4, `a hovercraft stops the walker (x ${P.x.toFixed(2)}, the craft at ${hp?.x.toFixed(2)})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

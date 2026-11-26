@@ -13,12 +13,12 @@ export interface CraftMotionWorld {
 }
 // (what a step did, CraftStep: contract/crafts.ts)
 
-// How much larger the helicopter and the hovercraft are drawn and probed than the box measures they are written in
-// (craft-models.ts, craft-collision.ts): at 1x they read as toys beside the cars, the bus and the houses. The helicopter
-// as a light twin (H135/H145 class: 12 m rotor, 10 m fuselage with the tail, the hub 3.7 m up); the hovercraft as a
-// small passenger craft of 7.8 x 3.4 m. The motion's laws (m/s, m/s²) stay as they are.
-export const CRAFT_SCALE = frozen({ hovercraft: 1.3, helicopter: 1.2, paraglider: 1 });
-export const HOVER_HEIGHT = 0.68 * CRAFT_SCALE.hovercraft; // the origin over the surface: the skirt's foot
+// How much larger the helicopter is drawn and probed than the box measures it is written in: at 1x it read as a toy
+// beside the cars, the bus and the houses (as a light twin, H135/H145 class: 12 m rotor, 10 m fuselage with the tail,
+// the hub 3.7 m up). The hovercraft is written in metres (a 20-seat passenger craft, 12.8 x 5.8 m on its skirt, fit
+// for the rivers and the wider streets). The motion's laws (m/s, m/s²) stay as they are.
+export const CRAFT_SCALE = frozen({ helicopter: 1.2, paraglider: 1 });
+export const HOVER_HEIGHT = 1.0; // the origin over the surface: the skirt's foot
 export const GLIDER_HEIGHT = 0.48;
 const WALKABLE_STEP = 1.15;
 const G = 9.81;
@@ -64,6 +64,7 @@ export class CraftMotion {
   bank = 0; // drawn: + the right side down
   pitch = 0; // drawn: + the nose up
   grounded = false; // the helicopter on its skids
+  throttle = 0; // drawn: the hovercraft's fans, the thrust asked (0..1, either way) eased
   private readonly delta = vec3();
   private readonly raised = vec3();
 
@@ -74,19 +75,20 @@ export class CraftMotion {
 
   /** its state on the wire (contract/crafts.ts); not: delta, raised (the steps') */
   save(): CraftMotionState {
-    const { heading, yaw, bank, pitch, grounded } = this;
-    return { p: { ...this.p }, velocity: { ...this.velocity }, heading, yaw, bank, pitch, grounded };
+    const { heading, yaw, bank, pitch, grounded, throttle } = this;
+    return { p: { ...this.p }, velocity: { ...this.velocity }, heading, yaw, bank, pitch, grounded, throttle };
   }
 
   restore(s: CraftMotionState) {
     copy(this.p, s.p); copy(this.velocity, s.velocity);
     this.heading = s.heading; this.yaw = s.yaw; this.bank = s.bank; this.pitch = s.pitch; this.grounded = s.grounded;
+    this.throttle = s.throttle;
   }
 
   reset(p: Vec3, heading: number, speed = 0) {
     set(this.p, p.x, p.y, p.z);
     this.heading = heading;
-    this.yaw = this.bank = this.pitch = 0;
+    this.yaw = this.bank = this.pitch = this.throttle = 0;
     this.grounded = false;
     set(this.velocity, Math.sin(heading) * speed, 0, Math.cos(heading) * speed);
   }
@@ -175,7 +177,7 @@ export class CraftMotion {
 
     // The skirt follows land and water. Raise it before crossing a small step, with an upward sweep for headroom.
     const dx = v.x * dt, dz = v.z * dt;
-    const reach = Math.sign(vf) * 3.0 * CRAFT_SCALE.hovercraft; // the skirt's end (the probes', CRAFT_RADIUS) and a little
+    const reach = Math.sign(vf) * 6.9; // the skirt's end (the probes', CRAFT_RADIUS) and a little
     const ahead = world.surface(this.p.x + dx + s * reach, this.p.z + dz + c * reach);
     const next = world.surface(this.p.x + dx, this.p.z + dz);
     if (!ahead || !next) return 'loading';
@@ -196,7 +198,8 @@ export class CraftMotion {
       if (down === 'loading') return down;
       this.p.y += drop * (down.hit ? Math.max(0, down.fraction - 0.01) : 1);
     }
-    // drawn: the bow lifts under thrust, the hull leans out of a turn
+    // drawn: the bow lifts under thrust, the hull leans out of a turn, the fans follow the throttle
+    this.throttle = follow(this.throttle, Math.abs(input.drive), 2.5, dt);
     this.pitch = follow(this.pitch, 0.035 * Math.max(0, tf / V.thrust) - 0.02 * Math.max(0, -input.drive), 3, dt);
     this.bank = follow(this.bank, -0.12 * Math.max(-1, Math.min(1, this.yaw * vf / 20)), 3, dt);
     return met.some((a) => Math.abs(a) !== 2) ? 'blocked' : 'moving';

@@ -500,7 +500,7 @@ The same keys, but A/D roll (200°/s; let go and the bank holds, within ~35° of
 W/S pitch about the wings (hold S for a loop); let go and it holds its path, so a turn is bank and pull. ~450 km/h
 level at full throttle (the last 15 % of the lever drawn as the afterburner), ~630 in a dive, up to 7 g; hard pulls
 bleed speed, below ~166 km/h it stalls. Any water is a splash. Its numbers are `JET` in `plane-flight.ts` (the same
-core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
+core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/crafts/jet/`.
 
 ## Paraglider, hovercraft and helicopter
 
@@ -516,7 +516,7 @@ core as the floatplane's, `AEROBATIC` flight law), the model `nav/jet-model.ts`.
 The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch or
 gamepad stick climbs and descends (up/down) and slides sideways; the gamepad triggers climb and descend too.
 Their motion laws and numbers are `CRAFT` in `web/src/sim/craft/craft-motion.ts`, the models (at the walker's and the
-cars' scale) `web/src/nav/craft-models.ts`. **Esc** returns to the map.
+cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc** returns to the map.
 
 ## Walking
 

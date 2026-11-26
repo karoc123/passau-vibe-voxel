@@ -7,8 +7,8 @@ import type { CraftView } from '../client/sim-client';
 import type { PlaneCore, PlaneDrawn } from '../sim/craft/plane-core';
 import { JET, PLANE, type PlaneConfig } from '../sim/craft/plane-flight';
 import type { PlaneInput } from '../sim/contract/inputs';
-import { PlaneModel } from './plane-model';
-import { JetModel } from './jet-model';
+import { craftLook } from '../view/crafts';
+import type { CraftLook } from '../view/crafts/craft-look';
 import { TouchSticks } from '../touch/sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
 import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
@@ -38,14 +38,14 @@ const Z = new THREE.Vector3(0, 0, 1);
 
 // the aircraft: the flight's numbers (plane-flight.ts, the same on a server) and what only the viewer needs
 type Chase = { back: number; up: number; look: number; lag: number; rollLag: number; fov: (v: number) => number };
-interface Aircraft { cfg: PlaneConfig; label: string; model: () => PlaneModel | JetModel; chase: Chase; help: [keys: string, touch: string] }
+interface Aircraft { cfg: PlaneConfig; label: string; model: () => CraftLook<'floatplane'> | CraftLook<'jet'>; chase: Chase; help: [keys: string, touch: string] }
 type AircraftId = 'floatplane' | 'jet';
 const AIRCRAFT: Record<AircraftId, Aircraft> = {
-  floatplane: { cfg: PLANE, label: 'plane', model: () => new PlaneModel(PLANE.FLOAT_H),
+  floatplane: { cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
     help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle. Pinch on the right to zoom.'] },
-  jet: { cfg: JET, label: 'jet', model: () => new JetModel(),
+  jet: { cfg: JET, label: 'jet', model: () => craftLook('jet'),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
     help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
@@ -64,8 +64,8 @@ export class PlaneMode implements PlayerCraft {
   private readonly env: CraftEnv;
   private type: Aircraft = AIRCRAFT.floatplane;
   // per aircraft (made when first flown): its model
-  private readonly made = new Map<Aircraft, PlaneModel | JetModel>();
-  private model!: PlaneModel | JetModel;
+  private readonly made = new Map<Aircraft, CraftLook<'floatplane'> | CraftLook<'jet'>>();
+  private model!: CraftLook<'floatplane'> | CraftLook<'jet'>;
   // the plane in the world sim while the player flies it (its client, its own collision)
   private readonly link: CraftLink<'floatplane' | 'jet'>;
   // the chase camera to be set from the plane once the sim has put it down
@@ -311,7 +311,7 @@ export class PlaneMode implements PlayerCraft {
     this.start = null;
     this.keys.clear();
     this.touch.setActive(false);
-    this.model.group.visible = false;
+    this.model.hide();
     this.rig.end();
   }
 
@@ -359,11 +359,10 @@ export class PlaneMode implements PlayerCraft {
   place(dt: number) {
     const c = this.phase === 'flying' ? this.link.craft : null;
     if (!c) return;
-    const core = c.core, f = core.flight, now = performance.now();
-    this.model.group.visible = f.state !== 'crashed';
-    const d = core.drawn(this.link.alpha);
-    this.model.orient(d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
-    this.model.animate(dt, f.engine, this.env.night(), now);
+    const now = performance.now(), d = c.core.drawn(this.link.alpha);
+    this.model.draw(c, { dt, alpha: this.link.alpha, night: this.env.night(), now });
+    this.fwd.copy(d.fwd);
+    this.up.copy(d.up);
     this.chase(d, dt, now);
   }
 
