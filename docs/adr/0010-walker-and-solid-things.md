@@ -27,5 +27,7 @@ player's car reaches every page in the snapshots, and each page keeps its own wa
 ## Consequences
 
 - What the walker meets is what it sees: a car is met where it is drawn, a tick or so behind the host.
-- The host does not check walkers against things: a modified page could walk through a car. Cars do not feel
-  walkers (they drive through and the walker is shoved). Both change if walkers ever become bodies on the host.
+- The host does not check walkers against things: a modified page could walk through a car. A driven car does not
+  feel walkers (it drives on and the walker is shoved; squeezed against a wall, out past the car's side). The
+  traffic's cars stop for a walker in their lane as for a car ahead, from the walk's poses the host has. Both change
+  if walkers ever become bodies on the host.

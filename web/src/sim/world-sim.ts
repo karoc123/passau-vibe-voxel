@@ -34,7 +34,7 @@ import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { applyNow as applyEdit, crater, type WorldOp } from '../core/world-edits';
 import { EditKeeper, Presence } from './edit-keeper';
-import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground } from './traffic';
+import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground, type WallBox } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
 import { Entities, SEATS } from './entities';
@@ -171,6 +171,7 @@ export class WorldSim {
     this.left = new Presence(this.tuning.presence);
     const T = this.traffic, at = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, ahead = { x: 0, y: 0, z: 0 };
     T.inTheWay = (p, before) => this.inTheWay(p, before);
+    T.walls = () => this.craftWalls();
     const car = (id: number) => T.cars.find((c) => c.id === id) ?? T.detachedCars.find((c) => c.id === id);
     const person = (id: number) => T.people.find((p) => p.id === id) ?? T.riders.find((p) => p.id === id);
     this.entities = new Entities({
@@ -325,6 +326,7 @@ export class WorldSim {
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
     this.stepCrafts();
+    T.walkers = [...this.players.values()].flatMap((P) => (P.walk ? [P.walk.pose] : []));
     traffic();
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
@@ -812,6 +814,17 @@ export class WorldSim {
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
     for (const k of coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
     return out;
+  }
+
+  // the crafts with a shape where they are now, as walls to the road physics' cars (ADR 0012): a driven car stops at a
+  // parked hovercraft as at a train's coach; the craft does not feel it (its own step pushes it out of the cars)
+  private *craftWalls(): Generator<WallBox> {
+    for (const c of this.crafts.values()) {
+      const shape = CRAFT_SHAPES[c.type];
+      if (!c.placed || !shape) continue;
+      const s = solidAt(shape, c.core.pose);
+      yield { id: `craft:${c.id}`, x: s.x, y: s.y, z: s.z, heading: s.h, size: { x: 2 * s.hx, y: s.top, z: 2 * s.hz } };
+    }
   }
 
   // whether a craft with a shape is in the way of vessel p: in its box, out by the beside m to either side and before m

@@ -3,19 +3,24 @@
 // would notice, measured on the host's own poses by the shapes the walker meets (sim/solids.ts). A traffic boat under
 // way stops before a player's boat lying in its way and goes on once it has gone; a player's boat driven at a moored
 // traffic boat and at another player's boat bounces off it and never passes through; a hovercraft driven at a parked
-// car stops at it.
+// car stops at it. A car a player drives (the road physics) at a hovering hovercraft bumps off it, never through it
+// nor shoving it away (the crafts are walls to the road physics); a car of the traffic on a road stops for a player on
+// foot in its lane.
 // usage (in web/): node tools/craft-solids.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 
 const { nodeHost } = await imp('src/host/node.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { carShape, CRAFT_SHAPES, overlap, solidAt, vesselShape } = await imp('src/sim/solids.ts');
+const { carShape, CRAFT_SHAPES, overlap, solidAt, vesselShape, WALKER_R } = await imp('src/sim/solids.ts');
 const { HOVER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const WATER = 4, LAND = 6, SHORE = 160, TOUR_Z = 60;
 const { dir, data } = await synthData({ size: [256, 256], ground: (x, z) => (z < SHORE ? WATER : LAND), surface: (x, z) => (z < SHORE ? 'water' : 'road') });
 data.boats = { berths: [], tour: [[30, TOUR_Z], [230, TOUR_Z]] };
+// a straight one-lane road on the land, east along z ROAD_Z (its points: x, z, height)
+const ROAD_Z = 245;
+data.traffic.roads = [{ a: 0, b: 1, w: 1, lanes: 1, v: 12, c: 1, o0: 0, p: [[10, ROAD_Z, LAND], [246, ROAD_Z, LAND]] }];
 const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 300, time: { hour: 10, day: 190 } }, data);
 const sim = server.sim, T = sim.traffic;
 
@@ -23,7 +28,7 @@ const players = [];
 const player = (name, type, x, z, h, y) => {
   const s = server.connect(name), link = sessionLink(s);
   s.send({ kind: 'view', view: { focus: { x: 128, z: 128 } } });
-  s.send({ kind: 'request', request: { kind: 'craft', type, spot: { x, y, z, h } } });
+  if (type) s.send({ kind: 'request', request: { kind: 'craft', type, spot: { x, y, z, h } } });
   const P = { s, link, type, craft: () => sim.craftOf(s.player) };
   P.input = (input) => s.send({ kind: 'seatInput', role: 'pilot', input });
   P.put = (x, z, h) => s.send({ kind: 'request', request: { kind: 'placeCraft', spot: { x, y, z, h } } });
@@ -97,6 +102,48 @@ await run(6, () => { deep = Math.max(deep, overlap(solidOf(C), carSolid)); vMax 
 const front = C.craft().core.pose.z + CRAFT_SHAPES.hovercraft.hz, back = 220 - carSolid.hx;
 check(deep <= 0.05 && front < back + 0.05 && front > back - 1 && T.detachedCars.includes(car),
   `a hovercraft driven at a parked car (${vMax.toFixed(1)} m/s) stops at it (its bow at z ${front.toFixed(2)}, the car's side at ${back.toFixed(2)}; deepest ${deep.toFixed(3)} m)`);
+
+// D drives car 9001 (east, along +x) at C's hovercraft hovering 40 m ahead, broadside
+C.put(175, 220, 0);
+C.input({ turn: 0, drive: 0, lift: 0, side: 0 });
+const D = player('d', null, 128, 218, 0, LAND);
+D.s.send({ kind: 'request', request: { kind: 'walk', pose: { x: 128, y: LAND, z: 217.5, h: 0, moving: false } } });
+await run(0.5);
+const seat = { kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' };
+D.s.send(seat);
+await run(0.2);
+await sim.loadPhysics({ x: 128, z: 220 });
+D.s.send(seat);
+await run(0.5);
+check(sim.seat(D.s.player)?.role === 'driver', `a player takes the parked car's wheel (the road physics in: ${!!sim.physics})`);
+await run(1);
+const hc0 = { ...C.craft().core.pose };
+D.input = (input) => D.s.send({ kind: 'seatInput', role: 'driver', input });
+D.input({ gas: 1, brake: 0, steer: 0, handbrake: false });
+deep = 0;
+vMax = 0;
+const carNow = () => solidAt(carShape(car), car.detachedPose);
+let x0 = car.detachedPose.x;
+await run(9, () => { deep = Math.max(deep, overlap(carNow(), solidOf(C))); vMax = Math.max(vMax, (car.detachedPose.x - x0) / STEP); x0 = car.detachedPose.x; });
+D.input({ gas: 0, brake: 1, steer: 0, handbrake: false });
+await run(1);
+const hc1 = C.craft().core.pose, moved = Math.hypot(hc1.x - hc0.x, hc1.z - hc0.z);
+check(deep <= 0.3 && moved < 3,
+  `a driven car (${vMax.toFixed(1)} m/s) bumps off a hovering hovercraft, never through nor shoving it away (the craft moved ${moved.toFixed(2)} m; deepest ${deep.toFixed(3)} m)`);
+
+// a car of the traffic on the road, coming at D on foot in its lane 60 m ahead
+D.s.send({ kind: 'leaveSeat' });
+D.s.send({ kind: 'request', request: { kind: 'walk', pose: { x: 150, y: LAND, z: ROAD_Z, h: 0, moving: false } } });
+await run(0.2);
+const road = T.roads[0];
+const tc = { ...structuredClone(car), id: 9002, detachedPose: undefined, e: 0, lane: 0, s: 90, v: 10, off: 0, v0f: 1, ghost: 0, next: -1, boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0, boxTurn: 0 };
+delete tc.detachedPose;
+road.lists[0].push(tc);
+T.cars.push(tc);
+let past = -Infinity;
+await run(10, () => { if (T.cars.includes(tc)) past = Math.max(past, tc.geo.px - 150); });
+check(T.cars.includes(tc) && past < -WALKER_R && tc.v < 0.1 && tc.why === 'walker',
+  `a car of the traffic stops for a player on foot in its lane (its front ${(-past).toFixed(2)} m short of the walker, ${tc.v.toFixed(2)} m/s, waiting for: ${tc.why})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

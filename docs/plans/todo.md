@@ -64,10 +64,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
 - `walkAs` start height is unbounded.
-- Walkers and solid things (ADR 0010): a car does not feel a walker; the host does not check them; the walker cannot
-  stand on a car's roof; a car squeezing the walker against a wall leaves it inside the car.
-- Crafts and solid things (ADR 0012): cars do not feel crafts (a driven car passes through a parked hovercraft:
-  crafts as kinematic bodies in the road physics would fix it); planes, drone and paraglider have no shape.
+- Walkers and solid things (ADR 0010): a driven car does not feel a walker (it shoves it); the host does not check
+  them; the walker cannot stand on a car's roof.
+- Crafts and solid things (ADR 0012): the traffic's cars without a body do not feel crafts; a plane does not meet
+  what it runs into (it has no meet); drone and paraglider have no shape.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
 - The worker decodes nodes the page also decodes.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
