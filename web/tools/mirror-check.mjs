@@ -35,26 +35,33 @@ const mirror = new MirrorSimClient(link, data(), null, mine);
 const lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
-// The cars and people as sent (sim/agent-wire.ts: what changed since the last snapshot, rounded): read back by a
-// client's end, every field the sim's within WIRE_M (ds, dOff worked out by the client) but for ph and wait, which the
-// client works out its own way (a step's phase, a wait it does not draw); each tick, all of the traffic's, so ids
-// coming and going, ways changing and one sent whole again are all crossed. The wire is the protocol: a field lost
-// or misread draws a car in the wrong place.
-const { AgentWire, AgentRead } = await load('sim/agent-wire.ts');
-const WIRE_M = 0.011, wireOut = new AgentWire(), wireIn = new AgentRead((e) => b.sim.traffic.net.roads[e].L);
-let wireN = 0, wireHad = new Set();
+// The cars, people and trains as sent (sim/agent-wire.ts: a sample where the client's reckoning drifts, rounded; gone): read
+// back by a client's end and reckoned on to each tick, every field the sim's (lengths within WIRE_M) but for ph and
+// wait, which the client works out its own way, and its place on its way within DRIFT (+ the rounding) on the ticks a
+// drift is sent, REACH between; each tick, all of the traffic's, so ids coming and going, ways changing and one sent
+// whole again are all crossed. The wire is the protocol: a field lost or misread draws a car in the wrong place.
+const { AgentWire, AgentRead, AGENT_TICKS, DRIFT, reckon } = await load('sim/agent-wire.ts');
+const { STEP } = await load('sim/road-net.ts');
+const WIRE_M = 0.011, REACH = 0.3, wireOut = new AgentWire(), wireIn = new AgentRead((e) => b.sim.traffic.net.roads[e].L);
+let wireN = 0, wireSent = 0, wireHeld = 0, wireMax = 0;
 const wireCheck = () => {
-  const T = b.sim.traffic, tick = b.sim.tick;
+  const T = b.sim.traffic, tick = b.sim.tick, due = tick % AGENT_TICKS === 0;
   // (a tenth of the cars and people left out each tick, so some leave sight and come back)
   const some = (l) => l.filter((o) => (o.id * 7 + tick) % 10);
-  const cars = some(T.cars), walkers = some(T.people), riders = some(T.riders);
-  const gotC = wireIn.readCars(cars.map((c) => wireOut.car(c)), tick);
-  const [gotP, gotR] = wireIn.readPeople(walkers.map((p) => wireOut.person(p)), riders.map((p) => wireOut.person(p)), tick);
-  wireOut.done();
-  const same = (want, got, keys, what) => {
-    if (want.length !== got.length) { fail.push(`wire t=${tick}: ${got.length} ${what} read of ${want.length}`); return; }
-    want.forEach((w, i) => {
-      const g = got[i];
+  const cars = some(T.cars), walkers = some(T.people), riders = some(T.riders), trains = some(T.trains.save());
+  const out = (l, f) => l.map((o) => f(o, tick)).filter((w) => w);
+  const sc = out(cars, (c, t) => wireOut.car(c, t)), sp = out(walkers, (p, t) => wireOut.person(p, t)), sr = out(riders, (p, t) => wireOut.person(p, t));
+  const st = out(trains, (t, k) => wireOut.train(t, k));
+  const [goneC, goneP, goneT] = wireOut.done();
+  const gotC = wireIn.readCars(sc, goneC, tick), [gotP, gotR] = wireIn.readPeople(sp, sr, goneP, tick), gotT = wireIn.readTrains(st, goneT, tick);
+  wireSent += sc.length + sp.length + sr.length + st.length;
+  wireHeld += cars.length + walkers.length + riders.length + trains.length;
+  const same = (want, got, keys, what, place) => {
+    if (want.length !== got.length) { fail.push(`wire t=${tick}: ${got.length} ${what} held of ${want.length}`); return; }
+    const by = new Map(got.map((g) => [g.id, g]));
+    for (const w of want) {
+      const g = by.get(w.id);
+      if (!g) { if (fail.length < 20) fail.push(`wire t=${tick}: ${what} ${w.id} not held`); continue; }
       for (const k of keys) {
         // (none: prev2, next2 -1, prev2Off 0, as sim/road-net.ts reads them)
         const a = w[k] ?? { prev2: -1, next2: -1, prev2Off: 0 }[k], c = g[k];
@@ -62,20 +69,26 @@ const wireCheck = () => {
         if (!ok && fail.length < 20) fail.push(`wire t=${tick}: ${what} ${w.id} ${k} ${a} read as ${c}`);
         wireN++;
       }
-    });
+      const d = Math.abs(place(g) - w.s);
+      wireMax = Math.max(wireMax, d);
+      if (d > (due ? DRIFT + WIRE_M : REACH) && fail.length < 20) fail.push(`wire t=${tick}: ${what} ${w.id} reckoned ${d.toFixed(3)} m off`);
+    }
   };
-  same(cars, gotC, ['id', 'e', 'lane', 's', 'off', 'prev', 'prevOff', 'prev2', 'prev2Off', 'next', 'next2', 'len', 'bus', 'vt', 'col', 'brake', 'v'], 'car');
-  // (ds, dOff: of a car the client had the tick before; one new to it is guessed)
-  const had = cars.map((c) => wireHad.has(c.id));
-  same(cars.filter((_, i) => had[i]), gotC.filter((_, i) => had[i]), ['ds', 'dOff'], 'car');
-  wireHad = new Set(cars.map((c) => c.id));
-  same(walkers, gotP, ['id', 'e', 'dir', 's', 'v', 'lat', 'wait', 'col', 'bike'], 'person');
-  same(riders, gotR, ['id', 'e', 'dir', 's', 'v', 'lat', 'wait', 'col', 'bike'], 'rider');
+  const ways = ['id', 'e', 'lane', 'prev', 'prevOff', 'prev2', 'prev2Off', 'next', 'next2', 'len', 'bus', 'vt', 'col'];
+  same(cars, gotC, due ? [...ways, 'brake', 'off'] : ways, 'car', (g) => reckon(g.s, g.v, g.at, tick));
+  const who = ['id', 'e', 'dir', 'v', 'lat', 'wait', 'col', 'bike'], at = (g) => reckon(g.s, g.v, g.at, tick, g.dir, g.wait);
+  same(walkers, gotP, who, 'person', at);
+  same(riders, gotR, who, 'rider', at);
+  same(trains, gotT, ['id', 'p', 'n', 'express'], 'train', (g) => reckon(g.s, g.ds / STEP, g.at, tick));
 };
 let frames = 0, drawnAgents = 0, acked = true, lastDrawn = -1, maxLead = 0;
 const send = (cmd) => mirror.send(cmd);
 
-let followed = null, walked = null;
+let followed = null, walked = null, lastStep = new Map();
+// The cars are drawn reckoned on from samples sent only when they drift (sim/agent-wire.ts), a correction blended in:
+// how much a car's step from one frame to the next changes, at the 99th percentile (m; measured 0.019 at 30 frames a
+// second)
+const kicks = [], KICK = 0.04;
 for (let f = 0; f < SECONDS * FPS; f++) {
   const t = f / FPS, focus = { x: at.x + Math.max(0, t - 20) * 8, z: at.y };
   // (a player follows a car at 10 s, walks as a person from 30 s to 50 s, lets go at 60 s)
@@ -112,10 +125,23 @@ for (let f = 0; f < SECONDS * FPS; f++) {
   if (f > FPS) maxLead = Math.max(maxLead, mirror.lead);
   const T = mirror.traffic;
   for (const o of [...T.roadVehicles(), ...T.people, ...T.riders]) if (lifeB.drawn(o.kind, o.id)) drawnAgents++;
+  // (each car of the traffic's drawn step from the frame before, and how much it changed)
+  const steps = new Map();
+  for (const c of T.cars) {
+    const d = lifeB.drawn('car', c.id), l = lastStep.get(c.id);
+    if (!d) continue;
+    const st = { x: d.x, z: d.z, dx: l ? d.x - l.x : NaN, dz: l ? d.z - l.z : NaN };
+    if (f > 5 * FPS && l && !Number.isNaN(l.dx)) kicks.push(Math.hypot(st.dx - l.dx, st.dz - l.dz));
+    steps.set(c.id, st);
+  }
+  lastStep = steps;
   if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(mirror.ack()?.seq > 0)) acked = false;
   if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} seat ${JSON.stringify(mirror.seat())} lead ${mirror.lead.toFixed(2)}`);
 }
 if (!drawnAgents) fail.push('nothing drawn');
+kicks.sort((a, b) => a - b);
+const kick = kicks[Math.floor(0.99 * (kicks.length - 1))] ?? Infinity;
+if (!(kick <= KICK)) fail.push(`the cars drawn: a step changes by ${kick.toFixed(3)} m from one frame to the next (99th percentile; at most ${KICK})`);
 if (!acked) fail.push('the walk\'s seat inputs not acked (seq)');
 if (maxLead > 2) fail.push(`the render clock fell ${maxLead.toFixed(2)} ticks behind the newest snapshot`);
 
@@ -193,4 +219,4 @@ async function bodies() {
   return n;
 }
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL mirror-check: ${fail.length} difference(s) in ${frames} frames`); process.exit(1); }
-console.log(`PASS mirror-check: ${frames} frames (${drawnAgents} agents drawn), ${wireN} agents' fields read back from the wire alike, seat input acks, the time of day, every tick drawn in order (at most ${maxLead.toFixed(2)} ticks behind; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike (${BODY_M * 1000} mm, ${BODY_RAD} rad)`);
+console.log(`PASS mirror-check: ${frames} frames (${drawnAgents} agents drawn), ${wireN} agents' fields read back from the wire alike (${(100 * wireSent / wireHeld).toFixed(1)} % of them sent a tick, reckoned within ${wireMax.toFixed(2)} m), the cars drawn smoothly (a step changes by ${kick.toFixed(3)} m at the 99th percentile), seat input acks, the time of day, every tick drawn in order (at most ${maxLead.toFixed(2)} ticks behind; ${link.crossed} messages cloned); bodies: ${bodyCounts.poses} poses of ${bodyCounts.moving} moving, ${bodyCounts.driven} driven, ${bodyCounts.fades} fading in ${bodyCounts.frames} frames alike (${BODY_M * 1000} mm, ${BODY_RAD} rad)`);

@@ -19,8 +19,8 @@ import { EYE, findStreet, openSpot, walkNet } from './spots';
 import { HEAD } from './walk';
 import { FootTouch } from '../touch/foot';
 
-// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
-// arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
+// Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and
+// down, Shift faster; arrows forward, back, turn: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
@@ -92,7 +92,7 @@ export class Nav {
       world: () => this.world, hitAt: (cx, cy) => this.hitAt(cx, cy), flyTo: (v) => this.flyTo(v), land: (opts) => { this.setWalk(opts); },
     });
     dom.style.cursor = 'grab';
-    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world);
+    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world, (near) => this.life?.solids(near) ?? []);
     this.rider = new Rider({
       camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
       changed: (R) => this.onMode(this.mode, R),
@@ -446,6 +446,46 @@ export class Nav {
       this.leaveRide(); // (the car driven parked: dropCraft)
       this.glide.stop();
     }
+    this.toCraft(c);
+    return true;
+  }
+
+  /** falling on foot high enough to open a canopy (Foot.canOpen) */
+  get canOpen() { return this.onFoot && this.foot.canOpen; }
+
+  // Out of the fall into a craft that opens over it (the paraglider). The craft's own request moves the player's seat
+  // from the body to it in one command, so the body is not left (no leaveSeat). false: not falling high enough
+  openCanopy(c: PlayerCraft) {
+    if (!this.canOpen || c.view !== 'own') return false;
+    this.body = null;
+    this.releaseMouse();
+    this.glide.stop();
+    this.toCraft(c);
+    return true;
+  }
+
+  /** the feet and velocity of the fall, while on foot (the canopy's spot) */
+  get fallPose() {
+    const f = this.foot;
+    return { x: f.pos.x, y: f.feet, z: f.pos.z, vx: f.carry.x, vy: f.vy, vz: f.carry.z, yaw: f.yaw };
+  }
+
+  // Out of the craft piloted (the paraglider let go) into a free fall on foot from feet at `at` with velocity v,
+  // facing yaw: at once, as the craft is gone this frame; the tiles where it lands asked for meanwhile
+  fall(at: THREE.Vector3, v: THREE.Vector3, yaw: number) {
+    if (!this.craftView || !this.world) return false;
+    this.foot.fallAt(at, v, yaw);
+    this.streamer?.ensure(at.x, at.z, 200).catch(() => {});
+    this.glide.start(250);
+    this.mode = 'walk';
+    this.leaveRide();
+    this.controls.enabled = false;
+    this.dom.style.cursor = 'default';
+    this.onMode(this.mode, null);
+    return true;
+  }
+
+  private toCraft(c: PlayerCraft) {
     this.cancelFly();
     this.keys.clear();
     this.orbit.turned = false;
@@ -454,7 +494,6 @@ export class Nav {
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
-    return true;
   }
 
   // out of the craft (the car's Park): it lets go. One that owns the camera leaves to the map

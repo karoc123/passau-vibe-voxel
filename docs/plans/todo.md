@@ -5,9 +5,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- The network host sends every tick's snapshot (cars within 350 m, 1 km from an aircraft; people 200 m; the rest
-  ~1 km): the page draws between a tick and the one before, so sending fewer would judder. `?every=2` halves the
-  bytes, but the page then shows motion stopping in a quarter of its frames: it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
   walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
@@ -16,15 +13,14 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Later, in this order of likelihood
 
-- Bandwidth for internet play, phones included (owner 2026-11-26). Target <= 20 kB/s mean, 50 kB/s peak. Now at the
-  cathedral (deflated, per player): ~50 kB/s on foot, ~55 driving, ~130 in the helicopter (350 cars in its 1 km);
-  ws-smoke holds it under 120. Levers left: agents at 10 Hz drawn by dead reckoning, bodies/crafts/avatars at 30 Hz
-  (~9 on foot); trains (~9 kB/s now) and boats as timetables; edits as ops. Binary only after a Pi measurement.
+- Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
+  player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25. What is left
+  is every tick's bodies (~4) and crafts (~4, a helicopter's core whole). Not measured: a busy square, a fight with
+  many craters (each ~90 B, but a late joiner gets a node's whole op list), a phone on 4G. Binary only after a Pi
+  measurement. Trains are still simulated with spacing on the host (step 5: from the timetable).
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
-- An edited node crosses the network host whole (its columns, base64 in JSON; ~1 MB a node, to every player): sending
-  the ops for the page to apply over its own node files would be far smaller.
 
 ## On hold until the game is decided (owner 2026-11-24)
 
@@ -50,14 +46,17 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Stelzhamerstraße's underpass below the railway at Auerbach (way 8022045, tunnel=yes layer=-1, grid -1282,1146):
   the road sinks and there is no passage under the tracks (new block col -2 row 1 since the map's growth).
-- Buildings seen through: `tools/see-through.mjs --all` counts 1045 (gate: BASELINE in 4 nodes). ~250 go with roofs.ts
-  eave fills (gone with all fills off: 795), the rest other holes (e.g. 25_19 bld 1708: a cell of roof 1 m over its
-  slope on the eave). Hans-Hösl-Straße 20's NW side is roof voxels from 2 m up (a 35 m roof strip under a 38.8 m
-  eave, caps.py / voxelize data): reads as the roof hanging down, no longer a hole.
+- Buildings seen through (`tools/see-through.mjs --all --classify`): 27 left. 24 are steep roof caps (caps.py: where
+  a lower roof meets a higher one along a diagonal, the shared corner takes the higher height and the lower cells twist
+  up to it, 2+ m in one cell; e.g. 57_26 bld 82, 24_6 bld 437): the step should keep each plane's own height at the
+  corner (the mesher draws the step's face), a data rebuild. 3 are slivers of 1-2 rays. Hans-Hösl-Straße 20's NW side
+  is roof voxels from 2 m up (a 35 m strip under a 38.8 m eave, caps.py / voxelize): reads as the roof hanging down.
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
-- A fall over 80 m/s is slowed by the walk clamp; `walkAs` start height is unbounded.
+- `walkAs` start height is unbounded.
+- Walkers and solid things (ADR 0010): a car does not feel a walker; the host does not check them; the walker cannot
+  stand on a car's roof; a car squeezing the walker against a wall leaves it inside the car.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
 - The worker decodes nodes the page also decodes.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)

@@ -22,6 +22,15 @@
   #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
   #aim-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
 }
+/* the paraglider's release and, falling, its canopy again: by the right thumb, where nothing else is shown on the wing */
+#canopy-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; min-width: 68px; height: 44px;
+  padding: 0 12px; border: 1px solid rgba(255,255,255,.6); border-radius: 22px; background: rgba(16,17,20,.5); color: #fff;
+  font: 600 14px Inter, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+#canopy-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
+@media (pointer: coarse) { body:not(.noui) #canopy-button.on { display: block; } }
+@media (pointer: coarse) and (orientation: landscape) {
+  #canopy-button { right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
+}
 /* the touch sticks' rings (sticks.ts): faint, never catching a touch */
 .stick-ring { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; box-sizing: border-box; border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }

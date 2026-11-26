@@ -87,7 +87,7 @@ export class OrbitInput {
 
   // A/D/Q/E turn in place; W/S fly along the view, faster higher up; reaching the street lands you on it
   update(dt: number) {
-    const K = this.keys, tr = K.axis('tr', 'tl'), tp = K.axis('tu', 'td');
+    const K = this.keys, tr = K.turn(), tp = K.axis('tu', 'td');
     if (tr || tp) { this.turnInPlace(-tr * (K.shift ? 2.4 : 1.2) * dt, tp * 0.8 * dt); this.turned = true; }
     const go = K.axis('f', 'b'), w = this.host.world();
     if (!go || !w) return;

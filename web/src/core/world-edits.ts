@@ -17,7 +17,7 @@
 import { EditableNode, opBounds, touchedNodes, type NodeColumns } from './columns';
 import { cellToAbsZ, mapToGrid, toCellOp, type Frame, type WorldOp } from './layers';
 import { liveEdits, type LiveNode, type Region } from './live-edits';
-import type { TileCache } from './tile-cache';
+import type { NodeView, TileCache } from './tile-cache';
 import type { Columns } from './tile-data';
 
 export type { WorldOp };
@@ -41,6 +41,9 @@ const theWorld = () => {
   if (!world) throw new Error('world-edits: initWorldEdits first');
   return world;
 };
+
+/** a level-1 node's side in map metres */
+export const nodeMetres = () => theWorld().frame.N;
 
 // the box an op may change, in map metres [x0, y0, x1, y1)
 export function opRegion(f: Frame, op: WorldOp): [number, number, number, number] {
@@ -69,30 +72,38 @@ export function ready(nodes: readonly [number, number][]): Promise<() => void> {
 // is in the TileCache (held: ready); region: the box it changed, for the listeners (default: the op's, opRegion).
 // Returns the level-1 nodes changed (a node not in, its files unread, is left out)
 export function applyNow(op: WorldOp, region?: Region): [number, number][] {
-  const { cache, frame } = theWorld(), cell = toCellOp(frame, op), N = frame.N, box = region ?? opRegion(frame, op);
+  const { cache, frame } = theWorld(), box = region ?? opRegion(frame, op);
   const out: [number, number][] = [];
   for (const [tx, ty] of touched(op)) {
     // (as it is now: its files, or its live edit)
     const v = cache.view(tx, ty);
     if (!v) continue;
-    const e = new EditableNode(N, v.base as NodeColumns, tx, ty);
-    e.apply(cell);
-    // (the columns alone: a file's other sections, decodeTile's fields and extra, are no plain data to send a client,
-    // and the mesher reads them from the file)
-    const { fields: _f, extra: _x, ...cols } = v.base as Columns & { fields?: unknown; extra?: unknown };
-    const enc = e.encode(), base = { ...cols, ...enc };
-    // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs; only what carves takes trees
-    // and grass with it)
-    let foliage: LiveNode['foliage'] = { ...v.foliage, ground: enc.ground };
-    if (cell.id === 0) {
-      const f = new EditableNode(N, foliage as NodeColumns, tx, ty);
-      f.apply(cell);
-      foliage = { ...f.encode(), ground: enc.ground };
-    }
-    liveEdits.set(tx, ty, { base, foliage, ops: [...(liveEdits.get(tx, ty)?.ops ?? []), op] }, box);
+    liveEdits.set(tx, ty, editNode(frame, tx, ty, v, op, liveEdits.get(tx, ty)?.ops ?? []), box);
     out.push([tx, ty]);
   }
   return out;
+}
+
+/** node (tx, ty) as op leaves it, from v (its columns now: its files or its live edit) and ops (the edits that made
+ * v). The one code for the host and a client applying the ops it was sent over its own files, so both end with the
+ * same columns */
+export function editNode(frame: Frame, tx: number, ty: number, v: NodeView, op: WorldOp, ops: readonly WorldOp[]): LiveNode {
+  const cell = toCellOp(frame, op), N = frame.N;
+  const e = new EditableNode(N, v.base as NodeColumns, tx, ty);
+  e.apply(cell);
+  // (the columns alone: a file's other sections, decodeTile's fields and extra, are no plain data to send a client,
+  // and the mesher reads them from the file)
+  const { fields: _f, extra: _x, ...cols } = v.base as Columns & { fields?: unknown; extra?: unknown };
+  const enc = e.encode(), base = { ...cols, ...enc };
+  // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs; only what carves takes trees
+  // and grass with it)
+  let foliage: LiveNode['foliage'] = { ...v.foliage, ground: enc.ground };
+  if (cell.id === 0) {
+    const f = new EditableNode(N, foliage as NodeColumns, tx, ty);
+    f.apply(cell);
+    foliage = { ...f.encode(), ground: enc.ground };
+  }
+  return { base, foliage, ops: [...ops, op] };
 }
 
 // Applies op to the world (after the edits before it), its nodes read first (ready, then applyNow): a tool's edit

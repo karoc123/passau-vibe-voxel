@@ -14,8 +14,10 @@
 // A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
 // what the player held is gone with the old session.
 // No three.js, no DOM. The client never imports the server.
-import type { WorldOp } from '../core/world-edits';
-import { LiveEdits } from '../core/live-edits';
+import { editNode, opRegion, type WorldOp } from '../core/world-edits';
+import { LiveEdits, type LiveNode, type Region } from '../core/live-edits';
+import type { Frame } from '../core/layers';
+import type { NodeView, TileCache } from '../core/tile-cache';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore } from '../sim/craft/craft-core';
 import { CORES } from '../sim/craft/cores';
@@ -25,11 +27,11 @@ import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
 import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
-import type { Ack, AvatarState, DriverSnapshot, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
+import type { Ack, AvatarState, DriverSnapshot, EditNote, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
-import { AgentRead } from '../sim/agent-wire';
-import { RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
+import { AgentRead, reckon, type Sampled } from '../sim/agent-wire';
+import { PH_RIDE, PH_WALK, RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
 import { coachPoses, trainTracks, type CoachPose } from '../sim/coaches';
 import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
@@ -216,12 +218,16 @@ export class MirrorSimClient implements SimClient {
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
+  // the nodes whose edits wait for their files, by "tx_ty": each note after the one before
+  private readonly editing = new Map<string, Promise<unknown>>();
 
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
    * mine: the client's own hello (this code, the build the app loaded); edits: the client's live edits, the snapshots'
-   * edits put into them */
+   * edits applied into them over the node files of tiles (its TileCache over these edits, the world's frame; none:
+   * the edits are not applied) */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
-    readonly edits: LiveEdits = new LiveEdits()) {
+    readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null) {
+    if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
     link.onHello = (h) => this.greet(h);
@@ -315,6 +321,7 @@ export class MirrorSimClient implements SimClient {
     this.alpha = Math.max(0, Math.min(1, this.at - (s.tick - 1)));
     if (s !== this.drawn) this.draw(s);
     this.traffic.acc = this.alpha * STEP;
+    this.traffic.reckon(s.tick - 1 + this.alpha);
   }
 
   // the snapshot drawn from now on: the traffic and the crafts' poses as they were in it
@@ -333,14 +340,20 @@ export class MirrorSimClient implements SimClient {
     if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
     B.push(this.traffic.read(s));
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
-    for (const e of s.edits) this.edits.set(e.tx, e.ty, e.node, e.region);
+    for (const e of s.edits) this.takeEdit(e);
     this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
     const P = s.player;
     for (const r of P.results) {
       const p = r.kind === 'edit' && r.ref !== undefined ? this.pending.get(r.ref) : undefined;
-      if (p) { this.pending.delete(r.ref!); if (r.nodes) p.done(r.nodes); else p.fail(new Error('edit failed')); }
+      if (p) {
+        this.pending.delete(r.ref!);
+        const nodes = r.nodes;
+        // (answered once the page's own nodes show it)
+        if (nodes) void Promise.all(nodes.map(([tx, ty]) => this.editing.get(`${tx}_${ty}`))).then(() => p.done(nodes));
+        else p.fail(new Error('edit failed'));
+      }
       this.outcomes.push(r);
     }
     // (which crafts there are and who pilots them: at once; a new one's pose from here until a snapshot with it is drawn)
@@ -353,6 +366,47 @@ export class MirrorSimClient implements SimClient {
       seen.add(c.id);
     }
     for (const id of L.keys()) if (!seen.has(id)) L.delete(id);
+  }
+
+  // an edit note applied now, or once its node's files are in (after the notes on the node before it)
+  private takeEdit(n: EditNote) {
+    const T = this.tiles;
+    if (!T) return;
+    const k = `${n.tx}_${n.ty}`, before = this.editing.get(k);
+    if (!before && this.applyEdit(n)) return;
+    const { cache } = T;
+    const run = (before ?? Promise.resolve()).then(() => cache.acquire(n.tx, n.ty).then(() => {
+      try { if (!this.applyEdit(n)) console.warn(`sim-client: node ${k} not in for its edit`); } finally { cache.release(n.tx, n.ty); }
+    }, () => console.warn(`sim-client: node ${k}'s files for its edit failed`)));
+    this.editing.set(k, run);
+    void run.then(() => { if (this.editing.get(k) === run) this.editing.delete(k); });
+  }
+
+  // note n applied over the client's copy of its node; false: its columns are not at hand (its files to load first)
+  private applyEdit(n: EditNote): boolean {
+    const { cache, frame } = this.tiles!, E = this.edits, live = E.get(n.tx, n.ty);
+    if (!n.ops) { E.set(n.tx, n.ty, null); return true; }
+    const have = live?.ops ?? [];
+    let ops = n.ops;
+    if (n.from !== have.length) {
+      // (a new session sends a node's ops from its first again: those applied already skipped, unless the history
+      // differs: then from the files)
+      const k = have.length - n.from, same = (a: WorldOp, b: WorldOp) => JSON.stringify(a) === JSON.stringify(b);
+      if (n.from === 0 && k > 0 && ops.length >= k && ops.slice(0, k).every((op, i) => same(op, have[i]))) ops = ops.slice(k);
+      else if (n.from === 0) E.set(n.tx, n.ty, null);
+      else console.warn(`sim-client: node ${n.tx}_${n.ty} sent ops from ${n.from}, ${have.length} applied`);
+    }
+    if (!ops.length) return true;
+    const v = cache.view(n.tx, n.ty);
+    if (!v) return false;
+    let node: LiveNode = { base: v.base, foliage: v.foliage, ops: E.get(n.tx, n.ty)?.ops ?? [] }, region: Region = null;
+    for (const op of ops) {
+      node = editNode(frame, n.tx, n.ty, { base: node.base, foliage: node.foliage as NodeView['foliage'], edited: true }, op, node.ops ?? []);
+      const r = opRegion(frame, op);
+      region = region ? [Math.min(region[0], r[0]), Math.min(region[1], r[1]), Math.max(region[2], r[2]), Math.max(region[3], r[3])] : r;
+    }
+    E.set(n.tx, n.ty, node, region);
+    return true;
   }
 
   eventsSince(tick: number) {
@@ -382,8 +436,24 @@ export class MirrorSimClient implements SimClient {
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
 }
 
-/** a snapshot as the client holds it: its cars and people whole (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders'> & { cars: CarState[]; people: PersonState[]; riders: PersonState[] };
+/** a snapshot as the client holds it: all its cars and people, each as last sampled (TrafficMirror read) */
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null };
+
+// A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
+// in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
+const BLEND_S = 0.3, SNAP = 4;
+const left = (t: number, from: number) => { const u = Math.min(1, (t - from) * STEP / BLEND_S); return 1 - u * u * (3 - 2 * u); };
+interface Reckoned<T> { st: Sampled<T>; old: Sampled<T> | null; es: number; eo: number; from: number }
+// the samples of a list in place of the last (a new one's correction worked out when it is next reckoned)
+function resample<T extends { id: number }>(R: Map<number, Reckoned<T>>, list: readonly Sampled<T>[], seen: { has(id: number): boolean }) {
+  for (const st of list) {
+    const r = R.get(st.id);
+    if (!r) R.set(st.id, { st, old: null, es: 0, eo: 0, from: 0 });
+    else if (r.st !== st) { r.old = r.st; r.st = st; }
+  }
+  if (R.size > list.length) for (const id of R.keys()) if (!seen.has(id)) R.delete(id);
+}
 
 /** the client's copy of the traffic, set from snapshots: what the presentation reads of the traffic (view/life.ts,
  * nav/): the agents between their last two ticks and the path maths that place them (the static roads and footways,
@@ -395,8 +465,12 @@ export class TrafficMirror {
   private readonly carsById = new Map<number, Car>();
   private readonly peopleById = new Map<number, Person>();
   private readonly draws = new Map<number, BodyDraw>();
-  // the cars and people as last sent (a snapshot carries what changed since: sim/agent-wire.ts)
+  // the cars and people as last sent (a snapshot carries what changed since: sim/agent-wire.ts); the samples the cars
+  // and people drawn are reckoned on from, and the corrections being blended out
   private readonly wire: AgentRead;
+  private readonly sampled = new Map<number, Reckoned<CarState>>();
+  private readonly trainSamples = new Map<number, Reckoned<TrainState>>();
+  private readonly walking = new Map<number, Sampled<PersonState>>();
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
@@ -405,9 +479,11 @@ export class TrafficMirror {
   acc = 0;
   private t = 0;
   boats: BoatView | null = null;
-  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the snapshot's trains */
+  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the trains reckoned (back: none) */
   readonly trains: { coaches(back?: number): IterableIterator<CoachPose> };
-  private trainList: readonly TrainState[] = [];
+  // the trains as drawn now (reckoned), by id
+  private readonly trainsById = new Map<number, TrainState>();
+  private trainList: TrainState[] = [];
   /** the people walked by players, by person id */
   readonly walked = new Map<number, WalkPose>();
   /** the players' own bodies on foot (avatarPose: where one is drawn) */
@@ -436,10 +512,12 @@ export class TrafficMirror {
   signal = (ctrl: number, axis: number) => signalAt(this.net.ctrls[ctrl], this.t, axis);
   roadVehicles = (): Car[] => this.detachedCars.length ? [...this.cars, ...this.detachedCars] : this.cars;
 
-  /** snapshot s with its cars and people whole, read in the order the session sent them (each one, as it arrives) */
+  /** snapshot s with all the cars and people held after it, read in the order the session sent them (each one, as it
+   * arrives) */
   read(s: Snapshot): Taken {
-    const [people, riders] = this.wire.readPeople(s.people, s.riders, s.tick);
-    return { ...s, cars: this.wire.readCars(s.cars, s.tick), people, riders };
+    const [people, riders] = this.wire.readPeople(s.people, s.riders, s.gone[1], s.tick);
+    return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders, trains: this.wire.readTrains(s.trains, s.gone[2], s.tick),
+      boats: this.wire.readBoats(s.boats, s.gone[3]) };
   }
 
   /** a new session: what the last one sent of the cars and people forgotten */
@@ -449,9 +527,13 @@ export class TrafficMirror {
   apply(s: Taken) {
     const T = this;
     T.t = s.t;
-    const cars = (list: CarState[], into: Car[], seen: Set<number>) => {
+    // (a car the session took out of the traffic is a detached one from that tick: the traffic's sample of it is
+    // dropped once its gone comes)
+    const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
+    const cars = (list: CarState[], into: Car[], seen: Set<number>, skip: Set<number> | null) => {
       into.length = 0;
       for (const st of list) {
+        if (skip?.has(st.id)) continue;
         let c = this.carsById.get(st.id);
         if (!c) this.carsById.set(st.id, c = { kind: 'car' } as Car);
         Object.assign(c, st);
@@ -460,9 +542,10 @@ export class TrafficMirror {
       }
     };
     const seenCars = new Set<number>();
-    cars(s.cars, T.cars, seenCars);
-    cars(s.detached, T.detachedCars, seenCars);
+    cars(s.cars, T.cars, seenCars, out);
+    cars(s.detached, T.detachedCars, seenCars, null);
     for (const id of this.carsById.keys()) if (!seenCars.has(id)) this.carsById.delete(id);
+    resample(this.sampled, s.cars, seenCars);
     const seenPeople = new Set<number>();
     const people = (list: PersonState[]) => list.map((st) => {
       let p = this.peopleById.get(st.id);
@@ -474,13 +557,65 @@ export class TrafficMirror {
     T.people = people(s.people);
     T.riders = people(s.riders);
     for (const id of this.peopleById.keys()) if (!seenPeople.has(id)) this.peopleById.delete(id);
+    const W = this.walking;
+    W.clear();
+    for (const l of [s.people, s.riders]) for (const st of l) W.set(st.id, st);
     this.draws.clear();
     for (const [id, d] of s.bodies) this.draws.set(id, d);
-    this.trainList = s.trains;
+    const trains = new Set<number>(), TB = this.trainsById;
+    this.trainList = s.trains.map((st) => {
+      let t = TB.get(st.id);
+      if (!t) TB.set(st.id, t = { ...st, ds: 0 });
+      trains.add(st.id);
+      return t;
+    });
+    for (const id of TB.keys()) if (!trains.has(id)) TB.delete(id);
+    resample(this.trainSamples, s.trains, trains);
     this.boats = s.boats;
     this.walked.clear();
     for (const [id, w] of s.walked) this.walked.set(id, w);
     this.avatars = s.avatars;
+  }
+
+  /** the cars, people and trains where they are at render time t (ticks, as a snapshot's tick: its state is that at
+   * t = tick), each reckoned on along its way from its last sample at the speed sent; a car's or train's correction
+   * (where the sample before had it now, less where this one has it) blended out */
+  reckon(t: number) {
+    for (const tr of this.trainList) {
+      const r = this.trainSamples.get(tr.id)!, st = r.st, s = reckon(st.s, st.ds / STEP, st.at, t);
+      if (r.old) {
+        const o = r.old, es = reckon(o.s, o.ds / STEP, o.at, t) + r.es * left(t, r.from) - s;
+        r.es = Math.abs(es) < SNAP ? es : 0;
+        r.from = t;
+        r.old = null;
+      }
+      tr.s = s + r.es * left(t, r.from);
+    }
+    const R = this.sampled, roads = this.net.roads;
+    for (const c of this.cars) {
+      const r = R.get(c.id);
+      if (!r) continue;
+      const st = r.st, s = reckon(st.s, st.v, st.at, t);
+      if (r.old) {
+        const o = r.old, k = left(t, r.from);
+        // (the sample before on the road before this one's: its way less that road's length)
+        const shift = st.e === o.e ? 0 : st.prev === o.e ? -roads[o.e].L : NaN, es = reckon(o.s, o.v, o.at, t) + r.es * k + shift - s;
+        r.es = Math.abs(es) < SNAP ? es : 0;
+        r.eo = st.e === o.e ? o.off + r.eo * k - st.off : 0;
+        r.from = t;
+        r.old = null;
+      }
+      const k = left(t, r.from);
+      c.s = s + r.es * k;
+      c.off = st.off + r.eo * k;
+    }
+    for (const list of [this.people, this.riders]) for (const p of list) {
+      const st = this.walking.get(p.id);
+      if (!st || st.wait) continue;
+      const ds = st.v * (t - st.at) * STEP;
+      p.s = st.s + ds * st.dir;
+      p.ph = st.ph + ds * (st.bike ? PH_RIDE : PH_WALK);
+    }
   }
 
   /** where avatar a is drawn a (0..1) of the way from its tick before to its tick */
