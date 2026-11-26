@@ -43,9 +43,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Owner's next (2026-11-27)
 
 - Esc opens a menu leading to settings; there a player may give a name (optional), shown over their avatar or
-  vehicle and on the map. Esc on foot today flies up: that moves.
+  vehicle and on the map. Esc on foot today flies up: back to orbit mode becomes an entry of that menu.
 - A start menu: alone or a server, the server preselected as the one `./voxel start` serves the page with.
 - Ping shown to the player (with a host).
+- A frame-rate cap, set in the settings: 60 by default, 30 on a phone (the battery).
 - The motorbike: a huge turning circle, little fun to ride.
 - A car hitting a pedestrian: they topple over instead of being thrown ahead.
 - Standing close to a wall it turns see-through and shows what is behind.
