@@ -16,8 +16,9 @@ import type { EntityRef, VehicleId } from '../sim/contract/ids';
 // shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
 // and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).
 
-// the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the active circle's centre (further out a pole is a
-// fraction of a pixel wide)
+// the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the viewer (further out a pole is a fraction of a
+// pixel wide), placed again once it is HEADS_MOVE m from where they were placed
+const HEADS_MOVE = 120;
 const HEADS_OUT = 600;
 // people knocked down by a driven car (WorldSim's events: struck): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
 // per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
@@ -84,7 +85,8 @@ export class StreetLife {
       this.group.add(this.boats.group);
     }
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
-    if (T.active && T.active !== this.headsFor) this.placeHeads(T.active);
+    const H = this.headsFor;
+    if (!H || (H.x - viewer.x) ** 2 + (H.z - viewer.z) ** 2 > HEADS_MOVE * HEADS_MOVE) this.placeHeads({ x: viewer.x, z: viewer.z });
     for (const e of events) {
       const d = e.kind === 'dropped' && this.drawnPeople.get(e.person);
       if (d) this.addFallen(e.col, e.bike, d, d.h, 0, 1, 0, 0);
@@ -97,7 +99,7 @@ export class StreetLife {
     this.render(Math.min(dt, 0.1), night, T.acc);
   }
 
-  // the signal heads near the active circle (and their poles)
+  // the signal heads near the viewer (and their poles)
   private placeHeads(A: { x: number; z: number }) {
     const C = ACTIVE_CELL, HR = ACTIVE_R + HEADS_OUT, { x, z } = A;
     if (!this.headGrid) {

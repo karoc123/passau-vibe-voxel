@@ -14,8 +14,9 @@ export const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
 const LANE_W = 3.0; // m between lane centres: scripts/traffic.py LANE, the lanes it checks and places (scripts/check.sh lanes)
 // how far (m) either side of a junction node a car's path is blended into the next road's
 export const BLEND = 7;
-// the active circle (sim/traffic.ts setActive): ACTIVE_R m round the focus, its roads found by ACTIVE_CELL m cell
-// (activeKey); the page draws the signal heads by the same cells (view/life.ts)
+// the active circles (sim/traffic.ts setActive): by default ACTIVE_R m round each player's focus (a host may set
+// another), their roads found by ACTIVE_CELL m cell (activeKey); the page draws the signal heads by the same cells
+// round its own viewer (view/life.ts)
 export const ACTIVE_R = 900, ACTIVE_CELL = 300;
 export const activeKey = (cx: number, cy: number) => cy * 65536 + cx;
 // Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the

@@ -185,8 +185,8 @@ if (w.last.player.id !== 'p1') fail.push(`the worker's snapshot names ${w.last.p
 // the host's start config from the page's URL (host/start.ts): the parameters as the page had them, the defaults
 const { hostStart } = await load('host/start.ts'), { goldenHour, dayOfDate } = await load('sim/sun.ts');
 {
-  const now = new Date(2026, 10, 26, 9), s = hostStart('seed=7&mode=x&dig=1&lifephys=0&lpnear=50&lpmax=9&date=06-21&hour=13.5', now);
-  const want = { seed: 7, mode: 'x', edits: true, eager: true, physics: { bodies: false, near: 50, maxBodies: 9 }, time: { day: 172, hour: 13.5 } };
+  const now = new Date(2026, 10, 26, 9), s = hostStart('seed=7&mode=x&dig=1&lifephys=0&lpnear=50&lpmax=9&date=06-21&hour=13.5&active=600&every=2', now);
+  const want = { seed: 7, mode: 'x', edits: true, eager: true, physics: { bodies: false, near: 50, maxBodies: 9 }, time: { day: 172, hour: 13.5 }, activeR: 600, every: 2 };
   if (JSON.stringify(s) !== JSON.stringify(want)) fail.push(`hostStart: ${JSON.stringify(s)}`);
   const d = hostStart('', now, () => 0.5), today = dayOfDate(2026, 10, 26);
   if (d.seed !== 2 ** 31 || d.mode !== undefined || d.edits || !d.eager || !d.physics.bodies || d.time.day !== today || d.time.hour !== goldenHour(today, 2026)) fail.push(`hostStart defaults: ${JSON.stringify(d)}`);

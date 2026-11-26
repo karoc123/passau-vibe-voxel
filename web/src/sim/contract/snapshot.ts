@@ -53,7 +53,6 @@ export interface Snapshot {
   /** the world's time of day and day of the year (the host's: WorldSim.setTime; the page's light follows it) */
   hour: number;
   day: number;
-  active: { x: number; z: number } | null;
   cars: CarState[];
   detached: CarState[];
   people: PersonState[];

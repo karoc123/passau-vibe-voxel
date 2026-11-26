@@ -34,7 +34,7 @@ import type { BoatData } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { applyNow as applyEdit, type WorldOp } from '../core/world-edits';
 import { EditKeeper, Presence } from './edit-keeper';
-import { DEFAULT_SEED, STEP, Traffic, type Ground } from './traffic';
+import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
 import { Entities, SEATS } from './entities';
@@ -91,9 +91,8 @@ export class WorldSim {
   private queue: Queued[] = [];
   // the views sent since the last update, by player (the latest: taken at the update's start)
   private views = new Map<PlayerId, View | null>();
-  // the world's time of day and day of the year (setTime); the view the active circle was last round
+  // the world's time of day and day of the year (setTime)
   private hour = 12;
-  private lastView: View | null = null;
   private outcomes: { at: number; player: PlayerId; r: CommandResult }[] = [];
   // the sim's clock (s: the end of the tick being run), what the walks are bounded on; the last update's dt
   private clock = 0;
@@ -136,11 +135,12 @@ export class WorldSim {
   readonly tuning: Tuning;
 
   /** loadPhysics: makes the road physics with the world's tuning (Rapier initialised, its tiles from a cache or a
-   * load); crafts: what the crafts' collisions read (without it, addCraft throws) */
+   * load); crafts: what the crafts' collisions read (without it, addCraft throws); activeR: the radius (m) of the
+   * street life's circle round each player */
   constructor(data: TrafficData, private readonly opts: {
-    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld;
+    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld; activeR?: number;
   } = {}) {
-    this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED);
+    this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED, opts.activeR);
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
     this.keeper = new EditKeeper(this.tuning.presence);
     this.left = new Presence(this.tuning.presence);
@@ -257,21 +257,15 @@ export class WorldSim {
     this.views.clear();
     dt = Math.min(MAX_DT, Math.max(0, dt));
     this.frameDt = dt;
-    // (the active circle round the first player's view; with none, where it was)
-    const view = this.firstView() ?? this.lastView;
-    this.lastView = view;
-    const density = T.frame(hour, view?.focus ?? null, view?.viewer ?? view?.focus);
+    // (an active circle round each player's view; with none, where they were)
+    const views: Focus[] = [];
+    for (const [id, P] of this.players) if (P.view) views.push({ id, focus: P.view.focus, viewer: P.view.viewer });
+    const density = T.frame(hour, views);
     T.acc += dt;
     while (T.acc >= STEP) {
       this.runTick(() => T.tick(density, hour));
       T.acc -= STEP;
     }
-  }
-
-  // the first player's view (in the order they first came), or null
-  private firstView(): View | null {
-    for (const P of this.players.values()) if (P.view) return P.view;
-    return null;
   }
 
   // One world tick (ADR 0007's order): the commands due, the edits and the vehicles left no player is near any more

@@ -376,8 +376,6 @@ export class TrafficMirror {
   readonly detachedCars: Car[] = [];
   people: Person[] = [];
   riders: Person[] = [];
-  /** the middle of the sim's active circle (a new object whenever it moves) */
-  active: { x: number; z: number } | null = null;
   /** how far into the tick drawn the render clock is (s, under STEP) */
   acc = 0;
   private t = 0;
@@ -414,9 +412,6 @@ export class TrafficMirror {
   apply(s: Snapshot) {
     const T = this;
     T.t = s.t;
-    // (a new object only when it moves: the signal heads are placed again then)
-    if (!s.active) T.active = null;
-    else if (!T.active || T.active.x !== s.active.x || T.active.z !== s.active.z) T.active = s.active;
     const cars = (list: CarState[], into: Car[], seen: Set<number>) => {
       into.length = 0;
       for (const st of list) {

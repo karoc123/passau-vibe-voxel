@@ -9,9 +9,10 @@ import { STEP } from '../sim/road-net';
 import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Session } from '../sim/server/sim-server';
 
-// Every tick's snapshot is sent, two ticks to a message: the page draws between a snapshot's tick and the one before,
-// so a snapshot left out would show as a stop and a jump; the batching only halves the messages.
-const EVERY = 2;
+// Every tick's snapshot is sent by default, two ticks to a message: the page draws between a snapshot's tick and the
+// one before, so a snapshot left out shows as a stop and a jump; the batching only halves the messages. ?every=N sends
+// every Nth tick's (fewer bytes, judder until the page draws over the gap), one to a message.
+const BATCH = 2;
 // A socket that has this much unsent gets no snapshots until it drains: a slow phone must not grow the host's memory.
 // The events of the ticks it missed come with its next snapshot.
 const BACKLOG = 4 << 20;
@@ -29,7 +30,8 @@ export interface ServeOptions {
 interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number }
 
 export function serve(o: ServeOptions) {
-  const server = nodeHost(o.dir, { ...hostStart(o.query), world: 'tiles' });
+  const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
+  const server = nodeHost(o.dir, { ...start, world: 'tiles' });
   server.trackEdits();
   const conns = new Set<Conn>();
   const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: 1024 } });
@@ -54,9 +56,9 @@ export function serve(o: ServeOptions) {
     const t0 = performance.now();
     server.update(STEP);
     const ms = performance.now() - t0;
-    for (const c of conns) if (c.ws.bufferedAmount < BACKLOG) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms });
     ticks++;
-    if (++n % EVERY === 0) {
+    if (++n % every === 0) for (const c of conns) if (c.ws.bufferedAmount < BACKLOG) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms });
+    if (n % flush === 0) {
       for (const c of conns) {
         if (!c.out.length) continue;
         const text = JSON.stringify(c.out);
