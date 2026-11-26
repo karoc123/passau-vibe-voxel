@@ -78,7 +78,7 @@ const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 90
 const controls = makeControls();
 const daylight = new Daylight(renderer, scene, gfx.now.shadow || 2048);
 const post = makePost(renderer, scene, camera, daylight.sky);
-const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => goTo.flyTo(v), onMode);
+const nav = new Nav(camera, controls, renderer.domElement, (v) => goTo.flyTo(v), onMode);
 movingActors.add(nav.actors);
 // the player's crafts (nav/craft.ts), one line each; their panels in this order. Loaded once the city is shown (boot)
 const CRAFTS = () => [
@@ -130,7 +130,7 @@ walkButton.addEventListener('click', e => {
   walkButton.blur();
   nav.leaveCraft(); // (the car driven parks; you step out beside it)
   const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
-  void nav.togglePedestrian(!touch && !coarsePointer());
+  void nav.toggleWalk(!touch && !coarsePointer());
 });
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
@@ -308,9 +308,9 @@ async function boot() {
   prepass.add(tileMat, makeVoxelPrepassMaterial(uniforms));
   prepass.enabled = gfx.now.prepass;
   world = nav.world = streamer.world;
-  // the moving casters: street life (the cars and the motorbike driven are its own), and nav.actors' walker, boat,
+  // the moving casters: street life (the cars and the motorbike driven are its own), and nav.actors' boat,
   // floatplane and jet (the FPV drone has no model)
-  daylight.casters(streamer.group, () => life || nav.third || nav.craftView ? movingActors : null);
+  daylight.casters(streamer.group, () => life || nav.craftView ? movingActors : null);
   nav.streamer = streamer;
   nav.origin = meta.origin ?? [0, 0];
   map.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(meta.W, meta.H, meta.D));
@@ -450,7 +450,7 @@ renderer.setAnimationLoop(frameLoop({
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
     if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
-    const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.third ? 'Exit walk' : 'Walk';
+    const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }

@@ -6,7 +6,6 @@ import type { World } from '../core/world';
 import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';
 import type { Ride } from './nav';
-import { Pedestrian } from './pedestrian';
 import { backOff, EYE } from './spots';
 import { STEP, walkStep } from './walk';
 
@@ -15,9 +14,8 @@ const GRAV = 16, WALK_FOV = 65;
 /** the left touch stick on foot: [forward, right] in -1..1 */
 export type Stick = [number, number] | null;
 
-// On foot (nav.ts modes walk and pedestrian, and walking as the person followed): where the feet are, the steps
-// (walk.ts, up kerbs and stairs, sliding along walls), gravity and jumps, click-to-walk with its ring, and the camera:
-// first person (walk) or the walker's figure and chase camera (pedestrian.ts). Nav says which and feeds the input.
+// On foot (nav.ts mode walk, and walking as the person followed): where the feet are, the steps (walk.ts, up kerbs
+// and stairs, sliding along walls), gravity and jumps, and the camera at the eyes. Nav feeds the input.
 export class Foot {
   yaw = 0;
   pitch = 0;
@@ -25,46 +23,19 @@ export class Foot {
   vy = 0;
   /** at the eyes (EYE over the feet) */
   readonly pos = new THREE.Vector3();
-  /** click-to-walk's goal; the ring shows it (and, hovering, where a click would walk) */
-  goal: { x: number; z: number; stuck: number } | null = null;
-  readonly marker: THREE.Mesh;
-  /** the walker's figure and its chase camera (third person), made when first walked */
-  pedestrian: Pedestrian | null = null;
-  private jumpBuffer = 0;
-  private groundGrace = 0;
 
-  constructor(scene: THREE.Scene, private readonly actors: THREE.Group, private readonly camera: THREE.PerspectiveCamera,
-    private readonly controls: OrbitControls, private readonly keys: MoveKeys, private readonly glide: Glide,
-    private readonly world: () => World | null) {
-    this.marker = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 40).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false }));
-    this.marker.renderOrder = 10;
-    this.marker.visible = false;
-    scene.add(this.marker);
+  constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls,
+    private readonly keys: MoveKeys, private readonly glide: Glide, private readonly world: () => World | null) {}
+
+  /** Space: a jump, at once if standing */
+  jump() {
+    if (this.vy === 0) this.vy = 5.2;
   }
 
-  /** Space: third person, a jump asked for a moment (taken once on the ground); first person, at once if standing */
-  jump(third: boolean) {
-    if (third) this.jumpBuffer = 0.14;
-    else if (this.vy === 0) this.vy = 5.2;
+  look(dyaw: number, dpitch: number) {
+    this.yaw += dyaw;
+    this.pitch = clamp(this.pitch + dpitch, -1.4, 1.45);
   }
-
-  look(dyaw: number, dpitch: number, third: boolean) {
-    if (third) this.pedestrian?.look(dyaw, dpitch);
-    else { this.yaw += dyaw; this.pitch = clamp(this.pitch + dpitch, -1.4, 1.45); }
-  }
-
-  /** the third-person walker on, facing the way the walk faced */
-  startPedestrian() {
-    this.pedestrian ??= new Pedestrian(this.actors);
-    this.pedestrian.start(this.yaw);
-    this.jumpBuffer = this.groundGrace = 0;
-  }
-
-  hide() { this.pedestrian?.hide(); }
-
-  /** the goal reached or given up: no ring */
-  stop() { this.goal = null; this.marker.visible = false; }
 
   // down at t (exact: there; else the street spot, backed off a wall), facing f, the nose up by pitch
   setAt(w: World, t: THREE.Vector3, spot: [number, number], exact: boolean | undefined, f: THREE.Vector3, pitch: number) {
@@ -81,12 +52,11 @@ export class Foot {
       this.feet = b.feet;
     }
     this.pos.y = this.feet + EYE;
-    this.stop();
   }
 
   // one collision-checked horizontal step, sliding along walls; true if it moved
-  private stepBy(m: THREE.Vector3, third: boolean) {
-    return walkStep(this.world()!, this.pos, this.feet, m, third);
+  private stepBy(m: THREE.Vector3) {
+    return walkStep(this.world()!, this.pos, this.feet, m);
   }
 
   // on whatever is underfoot: up kerbs and stairs, off ledges, jumps
@@ -100,58 +70,20 @@ export class Foot {
     P.y = this.feet + EYE;
   }
 
-  // first person: A/D/Q/E look, W/S walk (Shift runs), else the stick, else to the goal
+  // A/D/Q/E look, W/S walk (Shift runs), else the stick
   updateWalk(dt: number, stick: Stick) {
     const K = this.keys, tr = K.axis('tr', 'tl'), tp = K.axis('tu', 'td'), go = K.axis('f', 'b');
-    if (tr || tp) this.look(-tr * (K.shift ? 2.6 : 1.8) * dt, tp * dt, false);
-    if (go) this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 20 : 6) * dt), false);
+    if (tr || tp) this.look(-tr * (K.shift ? 2.6 : 1.8) * dt, tp * dt);
+    if (go) this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 20 : 6) * dt));
     else if (stick) {
       const [f, r] = stick, sx = Math.sin(this.yaw), sz = Math.cos(this.yaw);
-      this.stepBy(new THREE.Vector3(sx * f - sz * r, 0, sz * f + sx * r).multiplyScalar(6 * dt), false);
-    } else if (this.goal) this.walkToGoal(dt, false);
+      this.stepBy(new THREE.Vector3(sx * f - sz * r, 0, sz * f + sx * r).multiplyScalar(6 * dt));
+    }
     this.stand(dt);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
     this.glide.place(this.pos, q, WALK_FOV, false, dt);
     const look = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
-  }
-
-  // third person: W/S/A/D walk relative to the camera (Shift runs), Q/E tilt it, Space jumps; the walker's chase camera
-  updatePedestrian(dt: number, stick: Stick) {
-    const pedestrian = this.pedestrian!, world = this.world()!, p = this.pos, K = this.keys;
-    const x = p.x, z = p.z, right = K.axis('tr', 'tl'), forward = K.axis('f', 'b');
-    const pitch = K.axis('td', 'tu');
-    if (pitch) pedestrian.look(0, pitch * dt);
-    const grounded = this.vy === 0 && this.feet <= world.support(x, z, this.feet + STEP) + 0.04;
-    this.groundGrace = grounded ? 0.1 : Math.max(0, this.groundGrace - dt);
-    if (this.jumpBuffer > 0 && this.groundGrace > 0) {
-      this.vy = 6.2;
-      this.jumpBuffer = this.groundGrace = 0;
-    } else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
-    if (right || forward) this.stepBy(pedestrian.move(forward, right, K.shift, dt), true);
-    else if (stick) { // analog: up to a walk, pushed to the rim a run
-      const push = Math.min(1, Math.hypot(...stick));
-      this.stepBy(pedestrian.move(stick[0], stick[1], push > 0.92, dt).multiplyScalar(push > 0.92 ? 1 : Math.max(0.35, push)), true);
-    } else if (this.goal) this.walkToGoal(dt, true, 2.4);
-
-    if (this.vy > 0) {
-      const rise = this.vy * dt + 0.08;
-      if (world.raycast({ x: p.x, y: this.feet + 1.75, z: p.z }, { x: 0, y: 1, z: 0 }, rise) < rise) this.vy = 0;
-    }
-    this.stand(dt);
-    const view = pedestrian.frame(p.x, this.feet, p.z, p.x - x, p.z - z, this.vy !== 0, dt, world);
-    this.glide.place(view.position, view.rotation, view.fov, false, dt);
-    this.controls.target.copy(view.target);
-  }
-
-  // click-to-walk: glide there, faster for far goals, around a post; give up when a wall stops us
-  private walkToGoal(dt: number, third: boolean, maxSpeed = 22) {
-    const G = this.goal!, P = this.pos, d = new THREE.Vector3(G.x - P.x, 0, G.z - P.z), L = d.length();
-    if (L < 0.15) { this.stop(); return; }
-    const step = d.multiplyScalar(Math.min(L, Math.min(L * 2.2, Math.min(maxSpeed, Math.max(4, L * 0.9))) * dt) / L), up = new THREE.Vector3(0, 1, 0);
-    if ([0, 0.6, -0.6, 1.2, -1.2].some((a) => this.stepBy(step.clone().applyAxisAngle(up, a), third))) return;
-    G.stuck += dt;
-    if (G.stuck > 0.4) this.stop();
   }
 
   /** walking as the person followed starts where they stand */
@@ -174,7 +106,7 @@ export class Foot {
     if (tp) R.dpitch = clamp(R.dpitch + tp * dt, -1.2, 1.2);
     this.yaw += R.dyaw;
     R.dyaw = 0;
-    const moving = !!go && this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 7 : 2.2) * dt), false);
+    const moving = !!go && this.stepBy(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(go * (K.shift ? 7 : 2.2) * dt));
     this.stand(dt);
     return { x: P.x, y: this.feet, z: P.z, h: this.yaw, moving };
   }

@@ -21,17 +21,16 @@ import { HEAD } from './walk';
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn, Q/E nose up and down, Shift faster;
 // arrows alike: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
-//   walk:  drag looks, click walks there, wheel steps, Space jumps, Esc flies up
+//   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
-//          drags to look; a tap without a drag still walks there (touch-sticks.ts, as the drive mode's); two fingers
-//          close together pinch to zoom
+//          drags to look (touch-sticks.ts, as the drive mode's); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
 //   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
 //          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
 //
 // Nav is the mode machine and routes the input to the mode on: the map's own input is orbit.ts, on foot foot.ts, the
 // ride and its camera ride.ts (following, walking as the person followed); the crafts are their own (craft.ts).
-export type Mode = 'orbit' | 'walk' | 'ride' | 'pedestrian' | 'craft';
+export type Mode = 'orbit' | 'walk' | 'ride' | 'craft';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
   dyaw: number;
@@ -40,12 +39,11 @@ export interface Ride extends Picked {
   /** how far out the camera is (wheel, pinch): behind, a factor on the chase distance; at the eyes, on the field of view */
   zoom: number;
 }
-export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean; thirdPerson?: boolean }
+export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean }
 
-// On foot the camera stands a step from walls: the walk's side probes keep 0.4 m, the third-person boom 0.32 m (0.22
-// at the least, pedestrian.ts), less in a doorway or a narrow aisle. The map camera's near plane (0.5 m, main.ts) cut
-// into them there; on foot it comes in to WALK_NEAR -- its frustum's corners ~0.33 m out at the walk's field of view --
-// and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
+// On foot the camera stands a step from walls: the walk's side probes keep 0.4 m, less in a doorway or a narrow
+// aisle. The map camera's near plane (0.5 m, main.ts) cut into them there; on foot it comes in to WALK_NEAR -- its
+// frustum's corners ~0.33 m out at the walk's field of view -- and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
 // (near x 2^24), is then 2.5 x coarser than the map camera's, as the drone's has always been.)
 const WALK_NEAR = 0.2;
 
@@ -79,7 +77,7 @@ export class Nav {
   private quietT = 0;
   private wheelBack = 0;
   private wheelBackT = 0;
-  private pedestrianStart: object | null = null;
+  private walkStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
   // touch on foot: left thumb walks, right thumb looks (the drag since the last move)
@@ -87,13 +85,13 @@ export class Nav {
   private lookFrom = { dx: 0, dy: 0 };
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
-    scene: THREE.Scene, private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
+    private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
     this.glide = new Glide(camera);
     this.orbit = new OrbitInput(camera, controls, this.keys, {
       world: () => this.world, hitAt: (cx, cy) => this.hitAt(cx, cy), flyTo: (v) => this.flyTo(v), land: (opts) => { this.setWalk(opts); },
     });
     dom.style.cursor = 'grab';
-    this.foot = new Foot(scene, this.actors, camera, controls, this.keys, this.glide, () => this.world);
+    this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world);
     this.rider = new Rider({
       camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
       changed: (R) => this.onMode(this.mode, R),
@@ -101,22 +99,19 @@ export class Nav {
     this.bindKeys();
     this.bindPointer();
     this.footSticks = new TouchSticks(dom, {
-      onStart: () => { this.lookFrom = { dx: 0, dy: 0 }; this.foot.stop(); this.cancelFly(); },
+      onStart: () => { this.lookFrom = { dx: 0, dy: 0 }; this.cancelFly(); },
       onMove: (side, s) => {
         if (side !== 'right') return;
         const k = 2.4 * (this.camera.fov * Math.PI / 180) / innerHeight;
         this.look((s.dx - this.lookFrom.dx) * k, -(s.dy - this.lookFrom.dy) * k * 0.7);
         this.lookFrom = { dx: s.dx, dy: s.dy };
       },
-      // a short touch that hardly moved: a tap (walk there, as with one finger elsewhere)
+      // a short touch that hardly moved: a tap (follow who is there, as with one finger elsewhere)
       onEnd: (_side, s) => {
         if (Math.hypot(s.dx, s.dy) < 8 && performance.now() - s.t < 600) this.tap(s.startX + s.dx, s.startY - s.dy);
       },
-      // two fingers close together: the third-person camera's distance (the wheel's), in first person the field of view
-      onPinch: (ratio) => {
-        if (this.third) this.foot.pedestrian?.zoom(Math.log(ratio));
-        else this.setFov(this.camera.fov * ratio);
-      },
+      // two fingers close together: the field of view
+      onPinch: (ratio) => this.setFov(this.camera.fov * ratio),
     });
   }
 
@@ -130,7 +125,7 @@ export class Nav {
 
   /** Space on foot (the touch Jump button) */
   jump() {
-    if (this.onFoot) this.foot.jump(this.third);
+    if (this.onFoot) this.foot.jump();
   }
 
 
@@ -140,7 +135,7 @@ export class Nav {
     if (craft) return craft;
     if (this.onFoot) {
       const foot = this.foot, { x, z } = foot.pos;
-      return { x, y: foot.feet, z, h: this.third ? foot.pedestrian?.facing ?? foot.yaw : foot.yaw };
+      return { x, y: foot.feet, z, h: foot.yaw };
     }
     const ride = this.ride;
     const followed = ride && this.life?.pose(ride.ref);
@@ -168,11 +163,9 @@ export class Nav {
 
   /** on the map, the bird's-eye view (OrbitControls) */
   get onMap() { return this.mode === 'orbit'; }
-  /** on foot in the third person (the walker's figure), mode pedestrian */
-  get third() { return this.mode === 'pedestrian'; }
   /** following a person or a vehicle (or driving one) */
   private get riding() { return this.mode === 'ride'; }
-  get onFoot() { return this.mode === 'walk' || this.third; }
+  get onFoot() { return this.mode === 'walk'; }
   private get driving() { return this.craft !== null && this.riding; }
   /** a craft owns the camera and the input */
   get craftView() { return this.mode === 'craft'; }
@@ -183,22 +176,20 @@ export class Nav {
       if (!gameKey(e)) return;
       K.shift = e.shiftKey;
       if (e.code === 'Escape') {
-        if (this.pedestrianStart) this.releasePedestrianMouse();
+        if (this.walkStart) this.releaseMouse();
         if (!this.onMap) this.flyUp();
         return;
       }
       if (this.craftView || this.driving) return;
       if (e.code === 'Space' && (this.onFoot || this.ride?.ref.kind === 'person')) { // following someone: become them, then jump
-        if (this.onFoot) {
-          if (!this.third || !e.repeat) this.foot.jump(this.third);
-        } else this.rider.jumpAsked = true;
+        if (this.onFoot) this.foot.jump();
+        else this.rider.jumpAsked = true;
         e.preventDefault(); return;
       }
       const k = MoveKeys.of(e.code);
       if (!k) return;
       K.add(k);
       if (this.ride && this.ride.ref.kind !== 'person') this.hopOff();
-      this.foot.goal = null;
       this.cancelFly();
       e.preventDefault();
     });
@@ -211,7 +202,7 @@ export class Nav {
     onFocusLoss(() => K.clear());
   }
 
-  private requestPedestrianMouse() {
+  private requestMouse() {
     if (!this.dom.requestPointerLock || document.pointerLockElement) return;
     const request = { locked: false };
     this.mouseLook = request;
@@ -222,8 +213,8 @@ export class Nav {
     } catch { reject(); }
   }
 
-  private releasePedestrianMouse() {
-    this.pedestrianStart = null;
+  private releaseMouse() {
+    this.walkStart = null;
     this.mouseLook = null;
     if (document.pointerLockElement === this.dom) document.exitPointerLock();
   }
@@ -231,7 +222,6 @@ export class Nav {
   private lookWithMouse(e: MouseEvent) {
     const scale = 0.0027;
     this.look(e.movementX * scale, e.movementY * scale * 0.8);
-    this.foot.marker.visible = false;
   }
 
   private bindPointer() {
@@ -244,22 +234,23 @@ export class Nav {
         if (this.mouseLook) this.mouseLook.locked = true;
         else document.exitPointerLock();
       } else if (this.mouseLook?.locked) {
-        this.releasePedestrianMouse();
+        this.releaseMouse();
         // Esc ends the walk; a tab switch or alt-tab also takes the lock, and must not. Focus and visibility settle a
         // moment after the lock goes, hence the wait.
-        setTimeout(() => { if (this.third && document.hasFocus() && !document.hidden) this.flyUp(); }, 150);
+        setTimeout(() => { if (this.onFoot && document.hasFocus() && !document.hidden) this.flyUp(); }, 150);
       }
     });
     document.addEventListener('pointerlockerror', () => {
       if (this.mouseLook && !this.mouseLook.locked) this.mouseLook = null;
     });
     dom.addEventListener('mousemove', e => {
-      if (this.third && document.pointerLockElement === dom) this.lookWithMouse(e);
+      if (this.onFoot && document.pointerLockElement === dom) this.lookWithMouse(e);
     });
     dom.addEventListener('pointerdown', (e) => {
-      if (this.craftView || (this.third && document.pointerLockElement === dom)) return;
-      // back from another tab on foot: a click takes the mouse again
-      if (this.third && e.pointerType === 'mouse') { this.requestPedestrianMouse(); return; }
+      if (this.craftView || (this.onFoot && document.pointerLockElement === dom)) return;
+      // on foot (back from another tab, or landed from the map): a click takes the mouse; its press still picks who
+      // to follow (tap)
+      if (this.onFoot && e.pointerType === 'mouse') this.requestMouse();
       if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -275,13 +266,6 @@ export class Nav {
       if (e.pointerType === 'mouse') this.cursor = { x: e.clientX, y: e.clientY };
       if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
       const p = ptrs.get(e.pointerId);
-      if (this.third && e.pointerType === 'mouse') {
-        if (document.pointerLockElement !== dom) {
-          this.lookWithMouse(e);
-          if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) press.moved = true;
-        }
-        return;
-      }
       if (!p) { this.hover(e.clientX, e.clientY, e.pointerType); return; }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
@@ -297,8 +281,8 @@ export class Nav {
       }
       if (ptrs.size === 2 && pinch0) {
         const [a, b] = two(), d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
-        if (this.third || this.riding) {
-          if (this.riding) this.zoomRide(pinch0.d / d); else this.foot.pedestrian?.zoom(Math.log(pinch0.d / d));
+        if (this.riding) {
+          this.zoomRide(pinch0.d / d);
           pinch0.d = d;
         } else this.setFov(pinch0.fov * pinch0.d / d);
         return;
@@ -306,7 +290,6 @@ export class Nav {
       if (press && !press.moved) return;
       const k = (e.pointerType === 'touch' ? 2.4 : 1.2) * (this.camera.fov * Math.PI / 180) / innerHeight;
       this.look(dx * k, dy * k * 0.7);
-      this.foot.marker.visible = false;
     });
     const up = (e: PointerEvent) => {
       if (!ptrs.delete(e.pointerId)) return;
@@ -318,7 +301,7 @@ export class Nav {
     };
     dom.addEventListener('pointerup', up);
     dom.addEventListener('pointercancel', up);
-    dom.addEventListener('pointerleave', () => { this.foot.marker.visible = false; this.cursor = null; });
+    dom.addEventListener('pointerleave', () => { this.cursor = null; });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
     dom.addEventListener('dblclick', (e) => { if (this.onMap) this.orbit.diveTo(e.clientX, e.clientY); });
@@ -328,18 +311,14 @@ export class Nav {
     if (this.craftView) return;
     if (this.onMap) { this.orbit.zoomT = performance.now(); return; }
     e.preventDefault();
-    if (this.third) { this.foot.pedestrian?.zoom(clamp(e.deltaY * 0.003, -0.4, 0.4)); return; }
     if (this.riding) { this.zoomRide(Math.exp(e.deltaY * 0.004)); return; }
     if (e.ctrlKey) { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
     if (e.deltaY > 0) { // keep scrolling back and you rise to the bird's-eye view
       const now = performance.now();
       this.wheelBack = (now - this.wheelBackT < 600 ? this.wheelBack : 0) + e.deltaY;
       this.wheelBackT = now;
-      if (this.wheelBack > 900) { this.wheelBack = 0; this.flyUp(); return; }
+      if (this.wheelBack > 900) { this.wheelBack = 0; this.flyUp(); }
     }
-    const F = this.foot, from = F.goal ? new THREE.Vector3(F.goal.x, 0, F.goal.z) : F.pos.clone();
-    from.addScaledVector(new THREE.Vector3(Math.sin(F.yaw), 0, Math.cos(F.yaw)), -Math.sign(e.deltaY) * Math.min(4, Math.abs(e.deltaY) / 30));
-    F.goal = { x: from.x, z: from.z, stuck: 0 };
   }
 
   // Ctrl+C over the map: what is under the mouse (or the middle of the view) as text to paste into a note or a
@@ -371,42 +350,23 @@ export class Nav {
     return life.pick(this.camera, cx, cy, px, minPx, (to) => { const L = to.length(); return world.raycast(this.camera.position, to.divideScalar(L), L) >= L - 2.5; }, this.ride?.ref ?? null);
   }
 
-  // what a click would do here: a hand over people and vehicles, a ring on the street where you would walk
+  // what a click would do here: a hand over people and vehicles
   private hover(cx: number, cy: number, type: string) {
     if (this.craftView) return;
     const now = performance.now();
     if (type === 'touch' || now - this.hoverT < 60 || now - this.quietT < 350) return;
     this.hoverT = now;
-    const air = this.onMap, ag = this.third ? null : this.pickAgent(cx, cy, air ? 14 : 3, air ? 7 : 0);
+    const air = this.onMap, ag = this.pickAgent(cx, cy, air ? 14 : 3, air ? 7 : 0);
     this.dom.style.cursor = ag ? 'pointer' : air ? 'grab' : 'default';
-    const g = this.onFoot && !ag ? this.walkTarget(cx, cy) : null, M = this.foot.marker;
-    M.visible = !!g;
-    if (g) M.position.set(g.x, g.y + 0.06, g.z);
   }
 
-  // where a click at street level walks to: that spot, or the foot of the wall clicked
-  private walkTarget(cx: number, cy: number) {
-    const hit = this.hitAt(cx, cy, 250);
-    if (!hit || !this.world) return null;
-    const p = hit.p.clone(), feet = this.foot.feet;
-    if (hit.axis !== 1 || hit.p.y > feet + 3) p.addScaledVector(new THREE.Vector3(hit.dir.x, 0, hit.dir.z).normalize(), -0.8);
-    p.y = this.world.support(p.x, p.z, feet + 3);
-    return p;
-  }
-
-  // a person or vehicle under the click is followed (generous from the air, tight on the street); else walk there
+  // a person or vehicle under the click is followed (generous from the air, tight on the street)
   private tap(cx: number, cy: number) {
     if (this.craftView || this.driving) return;
     const coarse = coarsePointer(), air = this.onMap;
-    const ag = this.third ? null : this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
-    if (ag) { this.startRide(ag); return; }
-    if (this.riding) { this.hopOff(); return; }
-    if (!this.onFoot) return;
-    const g = this.walkTarget(cx, cy);
-    if (!g) return;
-    this.foot.goal = { x: g.x, z: g.z, stuck: 0 };
-    this.foot.marker.position.set(g.x, g.y + 0.06, g.z);
-    this.foot.marker.visible = true;
+    const ag = this.pickAgent(cx, cy, air ? (coarse ? 26 : 16) : coarse ? 24 : 12, air ? 5 : 0);
+    if (ag) this.startRide(ag);
+    else if (this.riding) this.hopOff();
   }
 
   // ------------------------------------------------------------------ the view
@@ -418,7 +378,7 @@ export class Nav {
   }
 
   private look(dyaw: number, dpitch: number) {
-    if (this.onFoot) this.foot.look(dyaw, dpitch, this.third);
+    if (this.onFoot) this.foot.look(dyaw, dpitch);
     else if (this.ride) { const R = this.ride; R.dyaw += dyaw; R.dpitch = clamp(R.dpitch + dpitch, -1.2, 1.2); R.idle = performance.now(); }
   }
 
@@ -443,13 +403,10 @@ export class Nav {
   }
 
   setOrbit() {
-    this.releasePedestrianMouse();
+    this.releaseMouse();
     if (this.onMap) return;
-    if (this.third) { this.keys.clear(); this.keys.shift = false; }
     this.mode = 'orbit';
-    this.foot.hide();
     this.leaveRide();
-    this.foot.marker.visible = false;
     this.controls.enabled = true;
     if (this.orbitFov) this.setFov(this.orbitFov);
     this.controls.target.copy(this.camera.position).add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(30));
@@ -492,7 +449,6 @@ export class Nav {
     this.mode = 'craft';
     this.craft = c;
     this.controls.enabled = false;
-    this.foot.marker.visible = false;
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, null);
     return true;
@@ -513,56 +469,39 @@ export class Nav {
     c.leave();
   }
 
-  async togglePedestrian(captureMouse: boolean) {
-    if (this.third) { this.flyUp(); return; }
+  /** the Walk button: on foot here (beside what is followed), or back up. captureMouse: take the mouse now, as a
+   *  browser grants it only in the click's gesture */
+  async toggleWalk(captureMouse: boolean) {
+    if (this.onFoot) { this.flyUp(); return; }
     if (!this.world || this.walkPending || this.craftView) return;
     const entry = {};
-    this.pedestrianStart = entry;
-    if (captureMouse) this.requestPedestrianMouse();
+    this.walkStart = entry;
+    if (captureMouse) this.requestMouse();
     try {
-      await this.startPedestrian(this.world);
+      await this.startWalk(this.world);
     } finally {
-      if (this.pedestrianStart === entry) this.pedestrianStart = null;
-      if (!this.third) this.releasePedestrianMouse();
+      if (this.walkStart === entry) this.walkStart = null;
+      if (!this.onFoot) this.releaseMouse();
     }
   }
 
-  private async startPedestrian(world: World) {
+  private async startWalk(world: World) {
     this.cancelFly();
-    if (this.onFoot) { // (first person: the figure steps in where you stand)
-      this.glide.start(420);
-      this.enterPedestrian();
-      this.onMode(this.mode, null);
-      return;
-    }
-
     const ride = this.ride, pose = ride && this.life?.pose(ride.ref);
     if (pose) {
       const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
       const at = new THREE.Vector3(pose.x, pose.y, pose.z);
       const side = new THREE.Vector3(-facing.z, 0, facing.x);
-      const room = world;
       const exits = ride.ref.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
       const clear = exits.find(p => {
-        const y = room.support(p.x, p.z, p.y + 1.02);
-        return room.inside(p.x, p.z) && p.y - y < 1.7 && !room.blocked(p.x, p.z, y, y + HEAD);
+        const y = world.support(p.x, p.z, p.y + 1.02);
+        return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, y, y + HEAD);
       });
-      if (clear) {
-        await this.setWalk({ at: clear, exact: true, facing, ms: 540, thirdPerson: true });
-        return;
-      }
-      await this.setWalk({ at, facing, ms: 650, thirdPerson: true });
+      await this.setWalk(clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 });
       return;
     }
     const facing = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
-    await this.setWalk({ deckOK: true, facing: facing.lengthSq() > 1e-6 ? facing : undefined, thirdPerson: true });
-  }
-
-  private enterPedestrian() {
-    this.foot.startPedestrian();
-    this.keys.clear();
-    this.keys.shift = false;
-    this.mode = 'pedestrian';
+    await this.setWalk({ deckOK: true, facing: facing.lengthSq() > 1e-6 ? facing : undefined });
   }
 
   // down to street level at (or facing) a spot; waits for the full-detail tiles there
@@ -570,13 +509,14 @@ export class Nav {
     const w = this.world;
     if (!w || this.walkPending) return;
     const target = opts.at ?? this.controls.target;
-    const t = opts.thirdPerson ? target.clone() : target;
-    const mode = this.mode, ride = this.ride, entry = this.pedestrianStart;
+    const t = target.clone();
+    const mode = this.mode, ride = this.ride, entry = this.walkStart;
     if (this.streamer) {
       this.walkPending = true;
       await this.streamer.ensure(t.x, t.z, 200).finally(() => { this.walkPending = false; });
     }
-    if (opts.thirdPerson && (mode !== this.mode || ride !== this.ride || (entry && entry !== this.pedestrianStart))) return;
+    // (given up while the tiles came: another mode, another ride, or Esc)
+    if (mode !== this.mode || ride !== this.ride || (entry && entry !== this.walkStart)) return;
     if (!opts.exact && opts.deckOK) { const deck = w.deckAt(t.x, t.z); if (deck != null) opts = { ...opts, exact: true, at: new THREE.Vector3(t.x, deck, t.z) }; }
     let spot: [number, number] | null;
     this.landmark = null;
@@ -600,8 +540,7 @@ export class Nav {
     this.rememberSky();
     this.foot.setAt(w, t, spot, opts.exact, f, pitch);
     this.glide.start(opts.ms ?? 900);
-    if (opts.thirdPerson) this.enterPedestrian();
-    else { this.mode = 'walk'; this.foot.hide(); this.releasePedestrianMouse(); }
+    this.mode = 'walk';
     this.leaveRide();
     this.controls.enabled = false;
     this.dom.style.cursor = 'default';
@@ -610,14 +549,12 @@ export class Nav {
 
   startRide(ag: Picked) {
     this.rememberSky();
-    this.releasePedestrianMouse();
-    this.foot.hide();
+    this.releaseMouse();
     this.dropCraft();
     this.rider.start(ag);
     this.glide.start(1100);
     this.mode = 'ride';
     this.controls.enabled = false;
-    this.foot.stop();
     this.dom.style.cursor = 'default';
     this.onMode(this.mode, this.ride);
   }
@@ -637,8 +574,7 @@ export class Nav {
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
-    if (this.third) this.foot.updatePedestrian(dt, this.footStick());
-    else if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
+    if (this.onFoot) this.foot.updateWalk(dt, this.footStick());
     else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
@@ -652,7 +588,7 @@ export class Nav {
     if (!sim) return;
     sim.results('walk');
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
-    const pose = { x, y: f.feet, z, h: this.third ? f.pedestrian?.facing ?? f.yaw : f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3 };
+    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3 };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
     else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
     this.body = { player: sim.player, x, z };

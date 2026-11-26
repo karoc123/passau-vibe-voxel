@@ -19,11 +19,9 @@ const ESC = '<span class="cap">Esc</span>', SPACE = '<span class="cap">Space</sp
 
 const MOUSE: Record<Mode, [string, string, string][]> = {
   orbit: [['l', mouse('l', true), 'move'], ['r', mouse('r', true), 'turn'], ['w', mouse('w'), 'zoom'], ['', PERSON, 'follow']],
-  walk: [['l', mouse('l', true), 'look'], ['', mouse('l'), 'walk'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
+  walk: [['', mouse('', true), 'look'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
   ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
   craft: [],
-  pedestrian: [['', mouse('', true), 'look'], ['Shift', '<span class="cap">Shift</span>', 'sprint'],
-    ['Space', SPACE, 'jump'], ['Escape', ESC, 'map']],
 };
 // (in every mode: main.ts)
 const LABELS: [string, string, string] = ['KeyN', '<span class="cap">N</span>', 'labels'];
@@ -57,12 +55,11 @@ export class Hud {
   /** agent: what the ride follows, as the sim has it now (view/life.ts StreetLife.agent) */
   set(mode: Mode, ride: Ride | null, agent: Readonly<Rideable> | null = null) {
     // (hidden in a craft and while driving: style.css, body[data-mode])
-    this.box.classList.toggle('pedestrian', mode === 'pedestrian');
     const label = agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label;
     $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.ref.kind] : '';
     if (this.touch) {
-      $('.hint', this.box).textContent = mode === 'walk' || mode === 'pedestrian'
-        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Tap: walk there · Pinch: zoom' : '';
+      $('.hint', this.box).textContent = mode === 'walk'
+        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look · Pinch: zoom' : '';
       return;
     }
     const items = [...MOUSE[mode], LABELS];

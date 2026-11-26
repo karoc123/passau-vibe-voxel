@@ -40,7 +40,7 @@ export function makeGoTo({ camera, target, nav, world, labels, views, follow }: 
     const g = w.groundAt(x, y), top = w.top(Math.floor(x), Math.floor(y)), h = Math.max(0, top - g);
     labels()?.pin(pin && { ...pin, x, y, z: Math.max(top, g + 2) });
     if (!nav.onMap) {
-      nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name), thirdPerson: nav.third });
+      nav.setWalk({ at: new THREE.Vector3(x + 0.5, g, y + 0.5), deckOK: onBridge(kind, name) });
       return;
     }
     const t = new THREE.Vector3(x + 0.5, g + Math.min(h * 0.5, 60), y + 0.5);
