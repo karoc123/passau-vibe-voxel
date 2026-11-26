@@ -94,8 +94,6 @@ export interface SimClient {
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first (the craft events of it) */
   craftEvents(): CraftEventOf[];
-  /** the road physics loaded where the sim runs (warm: where the terrain is wanted soon); rejects if it cannot */
-  loadPhysics(warm?: { x: number; z: number }): Promise<void>;
   /** an edit command of the player's whose answer is the level-1 nodes it changed, once applied (in the first tick
    * after the host has its nodes in) */
   edit(op: WorldOp): Promise<[number, number][]>;
@@ -110,7 +108,6 @@ export interface SimClient {
 export interface InThreadSession {
   /** what the host tells the session first (SimServer.hello) */
   readonly hello: Hello;
-  readonly sim: { loadPhysics(warm?: { x: number; z: number }): Promise<unknown> };
   readonly server: { update(dt: number): void };
   send(cmd: SimCommand): void;
   snapshot(): Snapshot;
@@ -127,11 +124,10 @@ class Seqs {
 }
 
 /** how a MirrorSimClient reaches its sim: the host's hello first (onHello, before any snapshot), the frame's dt and
- * commands sent, the snapshots back (onSnapshot), the road physics loaded there; close: the session left (the host
- * refused), nothing more sent or taken */
+ * commands sent, the snapshots back (onSnapshot); close: the session left (the host refused), nothing more sent or
+ * taken */
 export interface SimLink {
   frame(dt: number, commands: SimCommand[]): void;
-  loadPhysics(warm?: { x: number; z: number }): Promise<void>;
   onHello: (h: Hello) => void;
   onSnapshot: (s: Snapshot) => void;
   close(): void;
@@ -153,13 +149,12 @@ export class ThreadLink implements SimLink {
     this.session.server.update(dt);
     this.onSnapshot(this.session.snapshot());
   }
-  loadPhysics(warm?: { x: number; z: number }) { return this.session.sim.loadPhysics(warm).then(() => {}); }
   close() { if (!this.closed) { this.closed = true; this.session.leave(); } }
 }
 
 /** a SimLink whose messages cross as they would to a Web Worker or over a socket (the protocol gate: mirror-check,
  * life-edit's left and events; docs/adr/0009-layers-and-owners.md): each snapshot checked to be plain data and
- * structured-cloned (what postMessage does), the frame's dt and commands and loadPhysics' warm checked and sent
+ * structured-cloned (what postMessage does), the frame's dt and commands checked and sent
  * through JSON (what a socket would). So a snapshot or a command that is not plain data, or that shares an object
  * with the sim or the client, fails the gate that runs through it instead of passing by reference (ThreadLink). */
 export class CloneLink implements SimLink {
@@ -176,7 +171,6 @@ export class CloneLink implements SimLink {
     this.crossed++;
     this.link.frame(m.dt, m.commands);
   }
-  loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm && jsonTrip(warm, 'loadPhysics')); }
   close() { this.link.close(); }
 }
 
@@ -345,7 +339,6 @@ export class MirrorSimClient implements SimClient {
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
   craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
-  loadPhysics(warm?: { x: number; z: number }) { return this.link.loadPhysics(warm); }
 }
 
 /** the client's copy of the traffic, set from snapshots: what the presentation reads of the traffic (view/life.ts,

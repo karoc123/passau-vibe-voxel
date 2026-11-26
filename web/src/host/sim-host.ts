@@ -62,7 +62,8 @@ export interface HostOptions {
   /** the world's time of day and day of the year at the start (without: the sim's default; later a mode's, on a
    * player's setTime request) */
   time?: TimeOfDay;
-  /** the road physics loaded at once (?dig=1: edits to come) */
+  /** the road physics loaded at once, in the background (the page's host: always, host/start.ts); without, when first
+   * wanted: a car's seat asked for (refused while it loads: WorldSim enterSeat) or an edit with bodies */
   eager?: boolean;
   /** the game mode, by id (?mode=; MODES; without, or unknown: the sandbox) */
   mode?: string;
@@ -90,7 +91,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
     sim.edited(node && region ? region : [tx * N, ty * N, tx * N + N, ty * N + N], !node);
     if (node && opts.physics.bodies) sim.loadPhysics().catch(() => {});
   });
-  if (opts.eager && opts.physics.bodies) sim.loadPhysics().catch(() => {});
+  if (opts.eager) sim.loadPhysics().catch(() => {});
   const boats = data.boats;
   if (boats instanceof Promise) boats.then((bd) => sim.setBoats(bd)).catch((e) => ports.log('boats', e));
   else if (boats) sim.setBoats(boats);
@@ -103,8 +104,8 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   return server;
 }
 
-// The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: on the first edit or when the drive mode
-// warms up
+// The road physics (the shared Rapier world), loaded by WorldSim.loadPhysics: at the host's start (eager), else on the
+// first edit or the first car's seat asked for
 async function loadLifePhysics(meta: Meta, tuning: Tuning, opts: HostOptions['physics'], ports: HostPorts) {
   try {
     const { LifePhysics, DEFAULTS } = await ports.physicsLoader();

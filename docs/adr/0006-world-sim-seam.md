@@ -16,7 +16,7 @@ two runs differed.
 ## Decision
 
 - **One host**: `sim/world-sim.ts` `WorldSim` owns the `Traffic` and loads the road physics (`LifePhysics`) through a
-  loader it is given (the viewer: a lazy import of Rapier on the first edit or drive; the tools: tiles from disk). The
+  loader it is given (the viewer: a lazy import of Rapier, which the host loads at its start; the tools: tiles from disk). The
   viewer (`main.ts`), the tools (`life-edit.mjs`, `life-phys.mjs`, `popin-check.mjs`) and later a server create it and
   call `update(dt, { hour, day, focus, viewer })` the same way. In the viewer it is ticked every frame once the traffic is
   loaded, whether or not the street life is drawn yet (`main.ts`; ADR 0008).

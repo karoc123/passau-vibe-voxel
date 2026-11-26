@@ -336,7 +336,7 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `ui=0` | no panels (for screenshots) |
 | `seed=` | the street life's random seed (default: a new one each load) |
 | `autores=1\|0` | measure resolution and detail once even under automation (`1`) or never (`0`; `autores.ts`) |
-| `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch); loads the cars' physics ahead |
+| `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch) |
 | `lifephys=0` | no Rapier bodies for traffic cars near edits (they drive on over a hole; see Driving) |
 | `lpnear=`, `lpmax=` | debug knobs of those bodies: the reach round an edit in m (default 60), the most bodies (default 60) |
 | `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the ⚙ panel), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
@@ -514,8 +514,9 @@ spatial checks. It can jump, flip and land on its roof, where it stays (park it,
 another). Driving into the river ends in a splash and a restart a little way back; a landing from ~8 m is a crash
 (no control for a moment). On the motorbike the rider comes off only when a hit costs ~8 m/s along its heading (head
 on into a wall from ~30 km/h) or something moving shoves it as hard, not on a glancing scrape, and the note says why
-(`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded in the background
-~1.5 s after the city is shown; taking the wheel before that waits for it. Rapier is the only car physics. The mode's
+(`player-car.ts`, `tools/vehicles.mjs` `bike_wall`, `bike_scrape`). Rapier (`@dimforge/rapier3d-compat`, Apache-2.0, ~1.7 MB gzip) is loaded by the host
+in the background at its start (in the page's thread ~1.5 s on, when the page is idle: `host/browser.ts`); the wheel
+asked for before that is refused as loading and `drive.ts` asks again. Rapier is the only car physics. The mode's
 panel and input are `web/src/nav/drive.ts`; it sends the local player's commands to the world sim
 (`web/src/sim/world-sim.ts`, which `main.ts` creates and ticks). The shared road world resolves player commands and contacts, and
 `physics/rapier/player-car.ts` handles crash recovery and saves the recent safe poses. The same code runs headless

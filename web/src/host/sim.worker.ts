@@ -6,8 +6,8 @@
 // host names it, SimServer.connect; the page's commands name none). The page (client/sim-worker-link.ts) sends a frame (dt, the commands: its view among them) and gets its session's snapshot after it
 // (sim/server/snapshot.ts: its player's id among its reads), with the edits since the last for its own live edits.
 // The messages (sim/contract/worker.ts ToWorker, FromWorker):
-//   in:  init { base, query }; frame { dt, commands }; loadPhysics { id, warm }
-//   out: hello (the session's: sim/contract/hello.ts, before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms: the update's and the snapshot's time here }; physics { id, ok, error }
+//   in:  init { base, query }; frame { dt, commands }
+//   out: hello (the session's: sim/contract/hello.ts, before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms: the update's and the snapshot's time here }
 // greet (a session's first message) and handle (one message to a session, its answers to a post given) are exported:
 // tools/host-smoke.mjs drives them in Node.
 import { browserPorts, fetchJson, tileCacheAt } from './browser';
@@ -58,7 +58,7 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
 export function greet(s: Session, post: Post) { post({ kind: 'hello', hello: s.hello }); }
 
 /** one message from the page to session s: a frame (its commands sent, the world updated, the session's snapshot
- * posted with the time it took by now) or a road physics' load (posted when done) */
+ * posted with the time it took by now) */
 export function handle(s: Session, m: ToWorker, post: Post) {
   if (m.kind === 'frame') {
     const t0 = performance.now();
@@ -66,8 +66,5 @@ export function handle(s: Session, m: ToWorker, post: Post) {
     s.server.update(m.dt);
     const snapshot = s.snapshot();
     post({ kind: 'snapshot', snapshot, ms: performance.now() - t0 });
-  } else if (m.kind === 'loadPhysics') {
-    s.sim.loadPhysics(m.warm).then(() => post({ kind: 'physics', id: m.id, ok: true }),
-      (error) => post({ kind: 'physics', id: m.id, ok: false, error: String(error) }));
   }
 }

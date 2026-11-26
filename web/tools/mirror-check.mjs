@@ -106,15 +106,14 @@ const bodyCounts = await bodies();
 async function bodies() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), { worldEdits: WE } = await load('host/node.ts');
   const BRIDGE = { x: 4381, z: 2703 }, wait = () => new Promise((r) => setImmediate(r));
-  const h = nodeHost(DATA, { seed: 5, world: 'tiles', edits: true, physics: { bodies: true } }, { meta, traffic: data(), boats });
+  const h = nodeHost(DATA, { seed: 5, world: 'tiles', edits: true, eager: true, physics: { bodies: true } }, { meta, traffic: data(), boats });
   const lk = new CloneLink(new ThreadLink(h.connect(P))), c = new MirrorSimClient(lk, data(), null, mine), sim = h.sim, T = sim.traffic;
   const n = { frames: 0, poses: 0, moving: 0, driven: 0, fades: 0 };
-  let loaded = false, driven = null, dug = false;
-  c.loadPhysics(BRIDGE).then(() => { loaded = true; }, (e) => fail.push(`bodies: the road physics: ${e.message}`));
+  let driven = null, dug = false;
   const under = { x: 1, y: 2, z: 3, h: 0.5, pitch: 0.1, roll: 0.2 }, num = (q) => [q.x, q.y, q.z, q.h, q.pitch, q.roll];
   for (let f = 0; f < 24 * FPS; f++) {
     c.send({ kind: 'view', view: { focus: BRIDGE, viewer: BRIDGE } });
-    if (loaded && driven === null && f > 5 * FPS) {
+    if (sim.physics && driven === null && f > 5 * FPS) {
       const car = T.cars.find((q) => q.vt === 'moto' && q.v > 1) ?? T.cars.find((q) => q.v > 1 && !q.bus);
       if (car) { driven = car.id; c.send({ kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' }); }
     }

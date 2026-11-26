@@ -4,7 +4,7 @@
 // came of it from its session (the time of day and its player: its snapshots), never sends it.
 //   ?seed=        the traffic's seed (else a new one each start)
 //   ?mode=        the game mode (host/sim-host.ts MODES; else the sandbox)
-//   ?dig=1        the sandbox's edits allowed, the road physics loaded at once
+//   ?dig=1        the sandbox's edits allowed
 //   ?lifephys=0   no traffic bodies near edits (the drive still loads the road physics); ?lpnear=, ?lpmax=: their
 //                 reach and number
 //   ?date=MM-DD, ?hour=   the world's day and hour at the start (else today, at its golden hour: sim/sun.ts)
@@ -18,7 +18,8 @@ export interface HostStart {
   mode?: string;
   /** the sandbox's edits to the world's voxels allowed */
   edits: boolean;
-  /** the road physics loaded at once */
+  /** the road physics loaded at once, in the background (a page's host: always; the page's port defers its code until
+   * the page is idle, host/browser.ts) */
   eager: boolean;
   physics: PhysicsOptions;
   time: TimeOfDay;
@@ -33,7 +34,7 @@ export function hostStart(query: string | URLSearchParams, now = new Date(), ran
   return {
     seed: n('seed') ?? (random() * 2 ** 32) >>> 0,
     mode: qs.get('mode') ?? undefined,
-    edits: dig, eager: dig,
+    edits: dig, eager: true,
     physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') },
     time: { day, hour: qs.get('hour') ? +qs.get('hour')! : goldenHour(day, year) },
   };
