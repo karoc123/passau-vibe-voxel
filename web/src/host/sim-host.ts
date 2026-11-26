@@ -22,6 +22,7 @@ import type { GameMode } from '../sim/mode';
 import { sandbox } from '../sim/modes/sandbox';
 import type { Ground } from '../sim/traffic';
 import type { Tuning } from '../sim/tuning';
+import type { VoxelRay } from '../sim/weapons/weapon';
 import type { TrafficData } from '../sim/types';
 import { WorldSim } from '../sim/world-sim';
 import type { Meta } from '../core/meta';
@@ -58,7 +59,7 @@ export interface HostOptions {
   /** the traffic's seed (without: the traffic's default, sim/traffic.ts DEFAULT_SEED) */
   seed?: number;
   /** what the agents stand on and the boats float on (the viewer: the streamer's World; the worker: tileWorld) */
-  world: (Ground & WaterColumns) | null;
+  world: (Ground & WaterColumns & VoxelRay) | null;
   /** the road physics (sim/contract/worker.ts PhysicsOptions) */
   physics: PhysicsOptions;
   /** the world's time of day and day of the year at the start (without: the sim's default; later a mode's, on a
@@ -89,7 +90,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   const { meta } = data, N = meta.tiles.N, cache = ports.tiles, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
     crafts: { meta, cache, now: ports.now }, activeR: opts.activeR });
-  sim.setWorld(opts.world, opts.world);
+  sim.setWorld(opts.world, opts.world, opts.world);
   if (opts.time) sim.setTime(opts.time.hour, opts.time.day);
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;
   // a node freed is its file again)

@@ -70,6 +70,16 @@ const GATES = [
   { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', 'tools/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)', paths: [...DATA, 'src/physics/rapier/terrain.ts', 'src/physics/rapier/car.ts', 'src/physics/rapier/vehicle.ts', 'tools/surface-gap.mjs', 'tools/surface-gap-baseline.json'] },
   { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)', paths: [...DATA, ...MESH, 'tools/mesh-golden.mjs'] },
 ];
+// Each weapon package's gate (src/sim/weapons/<name>/gate.mjs, on a synthetic world: no data) is found by its folder,
+// so adding or removing a weapon needs no line here. It guards its package (sim and view) and what fires it: the
+// weapons' core and the world sim, not the map.
+const WEAPON_CORE = ['src/sim/weapons/*.ts', 'src/view/weapons/*.ts', ...SIM];
+for (const e of fs.readdirSync(path.join(web, 'src/sim/weapons'), { withFileTypes: true })) {
+  const gate = `src/sim/weapons/${e.name}/gate.mjs`;
+  if (e.isDirectory() && fs.existsSync(path.join(web, gate))) GATES.push({ name: `weapon-${e.name}`, cmd: [gate], set: 'fast', secs: 3,
+    guards: `the weapon ${e.name} (src/sim/weapons/${e.name}/, src/view/weapons/${e.name}/) fired through the host on a synthetic world: shots, hits, rate, on foot only, who is sent them, its view`,
+    paths: [`src/sim/weapons/${e.name}/**`, `src/view/weapons/${e.name}/**`, ...WEAPON_CORE] });
+}
 // what every gate stands on: a change here selects them all
 const CORE = ['src/core/**', 'src/sim/contract/**', 'src/fetch.ts', 'checks/check.ts', 'checks/world.ts', 'tools/gates.mjs', 'tools/lib.mjs',
   'tools/data-dir.mjs', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'vite.config.js'];

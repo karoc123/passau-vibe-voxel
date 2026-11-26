@@ -525,6 +525,11 @@ following. W/S walk, A/D turn, Q/E look up and down, Shift runs and Space jumps;
 it back after a tab switch). On touch screens the left thumb walks, the right thumb looks and a pinch zooms.
 **Esc** releases the mouse and returns to the map.
 
+On foot you carry two weapon slots: **1** the machine gun, **2** (empty for now); 1/2 or the wheel switch (Ctrl+wheel
+zooms). The left button fires (held: about 10 shots a second), the right button aims (a narrower view). On a touch
+screen the Fire button above Jump fires while held. The host decides each shot from your eyes as it has them; the
+others nearby see its flash, tracer and sparks. Nothing breaks and nobody is hurt yet.
+
 ## Known limits
 
 - Windows are procedural, generated in the shader from floor height and material, not real window positions.

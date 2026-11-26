@@ -15,17 +15,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (the free camera is a presence).
 
-## Next: weapons (owner 2026-11-26), after first person only and gates by changed paths
+## Next: weapons (owner 2026-11-26): the grenade launcher
 
-- Two slots: 1 a machine gun, 2 a grenade launcher whose grenade blows a ~3 m crater (the same for all players, kept
-  until the host restarts; later it dies with the round; no collapse, no debris). Unlimited ammunition, a fire rate
-  (MG ~10/s, launcher 1 per 1.5 s); keys 1/2 and the wheel, left fires, right aims; a fire button on the phone.
-- The host decides shots, flight, explosions and hits; the page shows its own muzzle flash at once. No lag
-  compensation yet. MG hits show (sparks), nobody reacts, no health yet, no hit texts; the MG breaks no blocks.
-- Others see muzzle flash, tracers, the grenade in flight and the blast. No sound exists yet.
-- Each weapon a package (its sim, its view, its gate on a small synthetic world) hung in at one list: removing a
-  weapon is deleting its folder and one line. The core gets only slots, the fire command, a shot/blast event and the
-  edit path for damage. Order: the core with the MG, then the launcher as a pure package.
+- The core and the MG landed. Slot 2, a grenade launcher whose grenade blows a ~3 m crater (the same for all players,
+  kept until the host restarts; later it dies with the round; no collapse, no debris), 1 per 1.5 s, as a package:
+  `src/sim/weapons/launcher/` (with its `gate.mjs`, found by tools/gates.mjs), `src/view/weapons/launcher/`, one line
+  in each `index.ts`. The host decides flight and blast; others see the grenade in flight and the blast. Still to
+  build in the core: the edit path for damage (a blast's crater through the world's edits).
 
 ## Later, in this order of likelihood
 

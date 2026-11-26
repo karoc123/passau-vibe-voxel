@@ -1,7 +1,7 @@
 // The contract between the world sim and its clients (docs/adr/0009-layers-and-owners.md, the contract layer): what
 // happened in a tick (WorldSim.eventsSince; a snapshot's events). Types and constants only (tools/core-deps.mjs R5).
 import type { Vec3 } from '../../core/vec';
-import type { EntityRef, PlayerId, Seat } from './ids';
+import type { EntityRef, PlayerId, Seat, WeaponId } from './ids';
 import type { RoadPose } from './pose';
 import type { CraftEventOf } from './crafts';
 
@@ -26,14 +26,19 @@ export interface Fallen { person: number; col: string; bike: boolean }
  *   seated, unseated  a player into a seat or out of it (the tick the command was applied in)
  *   craft             what happened to a craft (craft: its type, e: its core's event of that type, as the shell
  *                     reads it: contract/crafts.ts)
- *   drive             what the driver of a car is to be told (life-phys.ts PlayerCar's note) */
+ *   drive             what the driver of a car is to be told (life-phys.ts PlayerCar's note)
+ *   shot              a player's weapon fired: from at to to, what stopped it there (hit: an entity, 'world' the
+ *                     voxels, null nothing within its range)
+ *   blast             an explosion of a player's weapon at at, radius r (m) */
 export type SimEvent =
   | ({ tick: number; kind: 'struck'; pose: RoadPose; vx: number; vz: number } & Fallen)
   | { tick: number; kind: 'impact'; entity: EntityRef; by?: EntityRef; speed: number; at: Vec3 }
   | ({ tick: number; kind: 'dropped' } & Fallen)
   | { tick: number; kind: 'seated' | 'unseated'; player: PlayerId; seat: Seat }
   | ({ tick: number; kind: 'craft'; entity: EntityRef } & CraftEventOf)
-  | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote };
+  | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote }
+  | { tick: number; kind: 'shot'; weapon: WeaponId; player: PlayerId; at: Vec3; to: Vec3; hit: EntityRef | 'world' | null }
+  | { tick: number; kind: 'blast'; weapon: WeaponId; player: PlayerId; at: Vec3; r: number };
 
 /** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */
 export const EVENT_TICKS = 300;
