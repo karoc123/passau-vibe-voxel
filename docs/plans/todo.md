@@ -4,10 +4,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Step 2, two browsers:** a WebSocket host on Node (`ws`, added in this step); two players see each other.
-- **Steps 3–8** after that, in the order of target-architecture.md.
+- **Steps 3–8** in the order of target-architecture.md.
+- The network host sends every tick's full snapshot (about 110–180 KB of JSON, 3–5 MB/s per player before deflate):
+  the page draws between a tick and the one before, so sending fewer would judder. Interest filter (step 4) and wire
+  compaction (step 8) cut it.
+- A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
-  observer-view switch (the free camera is a presence); edit outcomes go to every session, not only the sender.
+  observer-view switch (the free camera is a presence).
 
 ## Later, in this order of likelihood
 

@@ -178,6 +178,9 @@ importers:
       three:
         specifier: ^0.186.1
         version: 0.186.1
+      ws:
+        specifier: ^8.23.0
+        version: 8.23.0
     devDependencies:
       '@types/three':
         specifier: ^0.186.0
@@ -628,6 +631,18 @@ packages:
       yaml:
         optional: true
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
 snapshots:
 
   '@dimforge/rapier3d-compat@0.12.0': {}
@@ -905,3 +920,5 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       fsevents: 2.3.3
+
+  ws@8.23.0: {}

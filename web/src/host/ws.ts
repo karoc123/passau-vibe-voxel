@@ -1,0 +1,91 @@
+// The host in Node for players over the network: one world on the worker's clock, each WebSocket connection a session
+// with a player of its own. A frame either way is JSON: to the page an array of the worker's messages, from it the
+// worker's commands message.
+import { WebSocketServer, type WebSocket } from 'ws';
+import { nodeHost } from './node';
+import { hostStart } from './start';
+import { clock, handle } from './sim.worker';
+import { STEP } from '../sim/road-net';
+import type { FromWorker, ToWorker } from '../sim/contract/worker';
+import type { Session } from '../sim/server/sim-server';
+
+// Every tick's snapshot is sent, two ticks to a message: the page draws between a snapshot's tick and the one before,
+// so a snapshot left out would show as a stop and a jump; the batching only halves the messages.
+const EVERY = 2;
+// A socket that has this much unsent gets no snapshots until it drains: a slow phone must not grow the host's memory.
+// The events of the ticks it missed come with its next snapshot.
+const BACKLOG = 4 << 20;
+
+export interface ServeOptions {
+  /** the data directory (meta.json, traffic.json, tiles/) */
+  dir: string;
+  host: string;
+  port: number;
+  /** the world's start, as a page's URL gives it to its worker (seed=, dig=1, mode=, ...) */
+  query: string;
+  log: (line: string) => void;
+}
+
+interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number }
+
+export function serve(o: ServeOptions) {
+  const server = nodeHost(o.dir, { ...hostStart(o.query), world: 'tiles' });
+  server.trackEdits();
+  const conns = new Set<Conn>();
+  const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: 1024 } });
+  wss.on('error', (e) => o.log(`ws: ${e.message}`));
+  const port = new Promise<number>((ok) => wss.on('listening', () => ok(wss.address().port)));
+  wss.on('connection', (ws, req) => {
+    const c: Conn = { ws, s: server.connect(), out: [], bytes: 0 };
+    conns.add(c);
+    o.log(`${c.s.player} joined from ${req.socket.remoteAddress}`);
+    ws.send(JSON.stringify([{ kind: 'hello', hello: c.s.hello }, { kind: 'ready' }] satisfies FromWorker[]));
+    ws.on('message', (data) => {
+      let m: ToWorker;
+      try { m = JSON.parse(data.toString()) as ToWorker; } catch { return; }
+      if (m?.kind === 'commands' && Array.isArray(m.commands)) handle(c.s, m);
+    });
+    ws.on('error', () => {});
+    ws.on('close', () => { conns.delete(c); c.s.leave(); o.log(`${c.s.player} left`); });
+  });
+
+  let n = 0, ticks = 0, tickMs = 0, sendMs = 0;
+  const stop = clock(() => {
+    const t0 = performance.now();
+    server.update(STEP);
+    const ms = performance.now() - t0;
+    for (const c of conns) if (c.ws.bufferedAmount < BACKLOG) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms });
+    ticks++;
+    if (++n % EVERY === 0) {
+      for (const c of conns) {
+        if (!c.out.length) continue;
+        const text = JSON.stringify(c.out);
+        c.out = [];
+        c.ws.send(text);
+        c.bytes += text.length;
+      }
+    }
+    tickMs += ms;
+    sendMs += performance.now() - t0 - ms;
+  });
+
+  return {
+    server,
+    /** the port it listens on, once it does (port 0: one the system picked) */
+    port,
+    /** since the last call: the ms per tick (the sim's, the snapshots' and their sending), the bytes sent per player
+     * (before the socket's deflate) */
+    stats() {
+      const out = { ticks, tickMs: tickMs / (ticks || 1), sendMs: sendMs / (ticks || 1), bytes: [...conns].map((c) => [c.s.player, c.bytes] as const) };
+      ticks = 0; tickMs = 0; sendMs = 0;
+      for (const c of conns) c.bytes = 0;
+      return out;
+    },
+    close() {
+      stop();
+      for (const c of conns) c.ws.close();
+      wss.close();
+      server.dispose();
+    },
+  };
+}

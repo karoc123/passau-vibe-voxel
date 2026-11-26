@@ -314,6 +314,24 @@ pnpm build                                   # static site in web/dist
 node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screenshot (see "Agent tools")
 ```
 
+### Two or more players
+
+One machine hosts the world; every page that names it joins as a player of its own and sees the others, their cars
+and crafts. Without `?server=` the page plays alone with the world in a Web Worker, as before.
+
+```sh
+cd web
+pnpm install                                 # once: the host needs ws
+tools/wt.sh serve                            # the host on port 5300, every interface; prints the URL to give pages
+tools/wt.sh serve --port 5300 'dig=1&seed=3' # the world's start as a page's URL would give it (?dig=, ?seed=, ?mode=, ...)
+tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN (a phone)
+```
+
+Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
+port 5300). Each player gets every tick's full snapshot, two to a message; about 3-5 MB/s per player before the
+socket's deflate, about a third of that on the wire. Under WSL2 the LAN reaches the host only with mirrored networking
+or a port forward.
+
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
 and the benches; `lib.mjs` (`imp`: a web/ module through vite's runner; `serveTiles`: the node files from disk to
 `fetch`), `data-dir.mjs` and `real-city.mjs` are shared helpers, not tools. `web/checks/` holds the check harnesses the
@@ -334,6 +352,7 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `crop=R`, `crop=x0,z0,x1,z1`, `crop=fit` | a tiny scene: only the tiles within R m / that box / round the `focus=` object ("Agent tools") |
 | `date=M-D`, `hour=`, `weather=clear\|cloudy\|rain\|snow` | the day, the hour (decimal) and the weather; the viewer writes them back as they change |
 | `ui=0` | no panels (for screenshots) |
+| `server=ws://host:port` | join the world of a network host (`tools/wt.sh serve`) instead of playing alone; bare `server`: this page's machine, port 5300. The world's start (`seed`, `dig`, `mode`, `date`, `hour`, `lifephys`) is then the host's |
 | `seed=` | the street life's random seed (default: a new one each load) |
 | `autores=1\|0` | measure resolution and detail once even under automation (`1`) or never (`0`; `autores.ts`) |
 | `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch) |
