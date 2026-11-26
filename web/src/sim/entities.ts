@@ -1,6 +1,6 @@
 // The world's entities, one index over the kinds' own stores: a car
 // (Traffic, the road physics), a person (Traffic's crowd and riders, a walked one where its walker puts it), a craft
-// (WorldSim.crafts). Each kind keeps its storage and its numbering (Car.id picks the traffic vehicle's type); this
+// (WorldSim.crafts), an avatar (a player's own body: WorldSim, where its walker puts it). Each kind keeps its storage and its numbering (Car.id picks the traffic vehicle's type); this
 // reads them through one adapter per kind. Read only. No three.js, no DOM (tools/core-deps.mjs).
 //   exists(ref)   the entity is in the world
 //   pose(ref)     where it is (map metres, heading h: 0 +z, pi/2 +x), or null: gone, or not put down
@@ -25,10 +25,12 @@ export const SEATS: {
   readonly car: Readonly<Record<VehicleId, readonly SeatSpec[]>>;
   readonly craft: Readonly<Record<CraftType, readonly SeatSpec[]>>;
   readonly person: { readonly foot: readonly SeatSpec[]; readonly bike: readonly SeatSpec[] };
+  readonly avatar: readonly SeatSpec[];
 } = {
   car: { car: DRIVER, coupe: DRIVER, van: DRIVER, pickup: DRIVER, bus: DRIVER, moto: DRIVER, camper: DRIVER },
   craft: { boat: PILOT, hovercraft: PILOT, helicopter: PILOT, paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
   person: { foot: WALKER, bike: NONE },
+  avatar: WALKER,
 };
 
 /** a kind's store, read: what Entities asks of it */

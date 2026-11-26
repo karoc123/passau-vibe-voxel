@@ -316,8 +316,8 @@ node tools/shoot.mjs --shots city=view=city --out /tmp/shots   # headless screen
 
 ### Two or more players
 
-One machine hosts the world; every page that names it joins as a player of its own and sees the others, their cars
-and crafts. Without `?server=` the page plays alone with the world in a Web Worker, as before.
+One machine hosts the world; every page that names it joins as a player of its own and sees the others on foot, their
+cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed). Without `?server=` the page plays alone with the world in a Web Worker, as before.
 
 ```sh
 cd web

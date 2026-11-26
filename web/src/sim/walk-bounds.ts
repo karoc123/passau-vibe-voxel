@@ -4,10 +4,11 @@ import { frozen } from '../core/frozen';
 import type { WalkPose } from './contract/pose';
 
 /** m/s across (speed), up (climb) and down (fall) between two poses, plus slack m on each (an uneven frame, a kerb);
- * take: how far (m, across) from where the sim has a person a walker's enterSeat may start. foot.ts walks at 2.2 m/s, runs at 7,
- * rises 6 m/s up a step and jumps at 5.2; falls at 16 m/s² (60 m/s off a 110 m tower). */
+ * take: how far (m, across) from where the sim has a person a walker's enterSeat may start. foot.ts walks as a person
+ * at 2.2 m/s, runs at 7; on foot (an avatar) first person at 6, with Shift 20, click-to-walk up to 22; rises 6 m/s up
+ * a step and jumps at 5.2; falls at 16 m/s² (60 m/s off a 110 m tower). */
 export interface WalkBounds { readonly speed: number; readonly climb: number; readonly fall: number; readonly slack: number; readonly take: number }
-export const WALK_BOUNDS: WalkBounds = frozen({ speed: 12, climb: 10, fall: 80, slack: 0.5, take: 5 });
+export const WALK_BOUNDS: WalkBounds = frozen({ speed: 25, climb: 10, fall: 80, slack: 0.5, take: 5 });
 
 /** pose kept within reach of from after t s: moved back towards from across and up or down as far as it went past; the
  * same object when within */

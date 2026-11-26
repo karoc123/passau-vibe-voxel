@@ -4,7 +4,7 @@
 // TrafficMirror.
 //   takeSnapshot(sim, player, since)   the sim side (sim/server/sim-server.ts Session): the traffic's agents as they
 //                                      are after the update (enough for the client's own path maths: Traffic.carPose,
-//                                      personPoint), the bodies' drawn poses, trains, boats, the walked people, the
+//                                      personPoint), the bodies' drawn poses, trains, boats, the walked people, the avatars, the
 //                                      crafts (their cores' state), the events since (the crafts' and the drivers'
 //                                      among them), the session's player's reads (id, seat, car, results, ack)
 // No three.js, no DOM (tools/core-deps.mjs).
@@ -13,7 +13,7 @@ import type { BodyDraw, CarState, Person, PersonState } from '../contract/agents
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
 import type { WalkPose } from '../contract/pose';
-import type { Ack, CraftState, EditNote, Snapshot } from '../contract/snapshot';
+import type { Ack, AvatarState, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 
 // what a client's path maths and drawing read of a car, a person (the contract's CarState, which Car extends, and
@@ -35,6 +35,11 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   if (B?.drawState) for (const c of T.roadVehicles()) { const d = B.drawState(c); if (d) bodies.push([c.id, d]); }
   const walked: [number, WalkPose][] = [];
   for (const p of T.people) { const w = sim.walkedPose(p.id); if (w) walked.push([p.id, { ...w }]); }
+  const avatars: AvatarState[] = [];
+  for (const [id, player] of sim.avatars) {
+    const w = sim.players.get(player)?.walk;
+    if (w) avatars.push({ id, player, pose: { ...w.pose }, prev: { ...w.prev } });
+  }
   const boats = T.boats, crafts: CraftState[] = [];
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) if (c.placed) crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
@@ -44,7 +49,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     people: T.people.map(personState), riders: T.riders.map(personState),
     bodies, trains: T.trains.save(),
     boats: boats && { poses: boats.poses.map((p) => ({ ...p })), previous: boats.previous.map((p) => ({ ...p })), elapsed: boats.elapsed, day: boats.day },
-    walked, crafts, events: sim.eventsSince(since),
+    walked, avatars, crafts, events: sim.eventsSince(since),
     player: { id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } },
     edits,
   };

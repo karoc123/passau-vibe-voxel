@@ -16,6 +16,10 @@ import type { RoadPose, WalkPose } from './pose';
 export type CraftState<K extends CraftType = CraftType> =
   { [T in K]: { id: CraftId; type: T; pilot: PlayerId | null; placed: boolean; core: CraftStates[T] } }[K];
 
+/** a player's own body on foot (an avatar: contract/ids.ts): its id, its player, where its walker put it at the tick
+ * and at the tick before (drawn between them) */
+export interface AvatarState { id: number; player: PlayerId; pose: WalkPose; prev: WalkPose }
+
 /** a level-1 node edited (its columns now) or given its files again (null) since the last snapshot (a worker's: the
  * page's live edits follow the world's) */
 export interface EditNote { tx: number; ty: number; node: LiveNode | null; region: Region }
@@ -63,6 +67,8 @@ export interface Snapshot {
   boats: BoatView | null;
   /** the people walked by players: their pose, by person id */
   walked: [number, WalkPose][];
+  /** the players' own bodies on foot */
+  avatars: AvatarState[];
   /** the crafts put down, piloted or left */
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */

@@ -1,8 +1,8 @@
 // Two players over a real WebSocket (src/host/ws.ts on a free port, the page's own client and SocketLink, Node's
 // WebSocket) in one world by the cathedral, on the host's clock and the clients' render clocks in real time. The first
-// flies a helicopter, the second drives a car of the traffic and makes an edit; each must see the other's player
-// (their own id each), the other's craft or car moving smoothly (drawn somewhere new in nearly every frame), and the
-// other's edit in its own live edits. A third player stands by the Ingling dam, 3 km off: each of the first and the
+// flies a helicopter, the second drives a car of the traffic and makes an edit, then the first walks on foot; each
+// must see the other's player (their own id each), the other's craft, car or body moving smoothly (drawn somewhere new
+// in nearly every frame), the body gone when its walk ends, and the other's edit in its own live edits. A third player stands by the Ingling dam, 3 km off: each of the first and the
 // third must have cars of the street life around them.
 // usage (in web/): node tools/ws-smoke.mjs [-v] [--every N] (the host's ?every=); prints PASS with the numbers, or FAIL
 import { DATA, hasData, load } from './real-city.mjs';
@@ -16,6 +16,7 @@ const { SocketLink } = await load('client/sim-worker-link.ts');
 const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts');
 const { STEP } = await load('sim/road-net.ts');
+const { easeAvatar } = await load('view/life.ts');
 
 const data = readHostData(DATA), spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const focus = { x: spot.x, z: spot.y }, dam = data.meta.labels.find((l) => /Ingling/.test(l.name)) ?? { x: 6105, y: 5207 };
@@ -26,9 +27,12 @@ const A = client(), B = client(), C = client(), view = { kind: 'view', view: { f
 const far = { kind: 'view', view: { focus: { x: dam.x, z: dam.y } } };
 
 // the frames: both clients' commands sent and their render clocks moved on, at about 60 fps in real time
-let frames = 0;
+// (each client's render clock on the real time between frames, as a page's on its frames' times)
+let frames = 0, t0 = performance.now();
 const frame = () => new Promise((r) => setTimeout(() => {
-  for (const c of [A, B, C]) { c.send(c === C ? far : view); c.update(1 / 60); }
+  const now = performance.now(), dt = (now - t0) / 1000;
+  t0 = now;
+  for (const c of [A, B, C]) { c.send(c === C ? far : view); c.update(dt); }
   frames++;
   r();
 }, 1000 / 60));
@@ -93,6 +97,33 @@ let nodes = null;
 B.edit(op).then((n) => { nodes = n; }, (e) => fail.push(`B's edit: ${e.message}`));
 if (await until('B\'s edit made', () => nodes, 10)) await until('A has B\'s edit', () => nodes.every(([tx, ty]) => A.edits.get(tx, ty)), 3);
 
+// A on foot (the commands the Walk button sends: nav.ts walkBody): put down by the cathedral, then walking east at
+// 5 m/s; B draws A's body (as view/life.ts: between its ticks, eased) moving smoothly on its render clock, and no
+// more once A stops walking
+const g0 = ground(), body = () => B.traffic.avatars.find((a) => a.player === A.player);
+let walk = null, gone = false, wx = focus.x;
+const walkPose = (moving) => ({ x: wx, y: g0, z: focus.z, h: Math.PI / 2, moving });
+A.send({ kind: 'request', request: { kind: 'walk', pose: walkPose(false) } });
+let drawn = null;
+const drawnA = () => {
+  const a = body(), to = a && B.traffic.avatarPose(a, B.time.alpha, { x: 0, y: 0, z: 0, h: 0 });
+  drawn = to && (drawn ? easeAvatar(drawn, to, B.time.dt) : to);
+  return drawn && { ...drawn };
+};
+if (await until('B sees A on foot', () => body(), 5)) {
+  const step = () => { wx += 5 / 60; A.send({ kind: 'seatInput', role: 'walker', input: walkPose(true) }); };
+  // (measured once the first steps can have reached B's render clock: the host and B's lead between)
+  await smooth(drawnA, 0.5, step);
+  walk = await smooth(drawnA, 2, step);
+  if (A.seat()?.entity.kind !== 'avatar') fail.push(`A's seat on foot: ${JSON.stringify(A.seat())}`);
+  // (standing: where A stopped, facing east)
+  await smooth(drawnA, 0.7, () => A.send({ kind: 'seatInput', role: 'walker', input: walkPose(false) }));
+  const a = drawnA();
+  if (!a || Math.abs(a.x - wx) > 0.3 || Math.abs(a.z - focus.z) > 0.5 || Math.abs(a.h - Math.PI / 2) > 0.1) fail.push(`A's body drawn by B at ${a && [a.x, a.z, a.h].map((v) => v.toFixed(1))}, A stopped at x ${wx.toFixed(1)} facing east`);
+  A.send({ kind: 'leaveSeat' });
+  gone = await until('A\'s body gone for B once A stops walking', () => !drawnA(), 3);
+}
+
 // the street life round the first player and round the third, as the third's client draws it
 const P = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
 const carsNear = (x, z) => C.traffic.cars.filter((c) => (C.traffic.carPose(c, c.s, c.off, P), Math.hypot(P.x - x, P.z - z) < 400)).length;
@@ -104,8 +135,9 @@ host.close();
 const ok = (m, what) => { if (!m) return; if (m.share < 0.9 || m.dist < 1) fail.push(`${what}: drawn somewhere new in ${(m.share * 100).toFixed(0)}% of frames, ${m.dist.toFixed(1)} m in 3 s`); };
 ok(fly, 'A\'s helicopter as B draws it');
 ok(drive, 'B\'s car as A draws it');
+if (walk && (walk.share < 0.9 || walk.dist < 5)) fail.push(`A's body as B draws it: drawn somewhere new in ${(walk.share * 100).toFixed(0)}% of frames, ${walk.dist.toFixed(1)} m in 2 s`);
 const kb = stats.bytes.map(([, b]) => b / 1024 / (stats.ticks * STEP));
-const line = `3 players over a WebSocket (${life[0]} cars within 400 m of the cathedral, ${life[1]} of the dam 3 km off): A's helicopter seen by B (moved in ${((fly?.share ?? 0) * 100).toFixed(0)}% of frames, ${fly?.dist.toFixed(0)} m), B's car seen by A (${((drive?.share ?? 0) * 100).toFixed(0)}%, ${drive?.dist.toFixed(0)} m), B's edit in A's edits (${nodes?.length ?? 0} node(s)); host ${stats.tickMs.toFixed(2)} ms/tick + ${stats.sendMs.toFixed(2)} ms snapshots, ${kb.map((k) => k.toFixed(0)).join(' / ')} kB/s per player before deflate`;
+const line = `3 players over a WebSocket (${life[0]} cars within 400 m of the cathedral, ${life[1]} of the dam 3 km off): A's helicopter seen by B (moved in ${((fly?.share ?? 0) * 100).toFixed(0)}% of frames, ${fly?.dist.toFixed(0)} m), B's car seen by A (${((drive?.share ?? 0) * 100).toFixed(0)}%, ${drive?.dist.toFixed(0)} m), B's edit in A's edits (${nodes?.length ?? 0} node(s)), A on foot seen by B (${((walk?.share ?? 0) * 100).toFixed(0)}%, ${walk?.dist.toFixed(0)} m${gone ? ', gone when A stopped' : ''}); host ${stats.tickMs.toFixed(2)} ms/tick + ${stats.sendMs.toFixed(2)} ms snapshots, ${kb.map((k) => k.toFixed(0)).join(' / ')} kB/s per player before deflate`;
 if (fail.length) { console.log(fail.join('\n')); console.log(`FAIL ws-smoke: ${line}`); process.exit(1); }
 console.log(`PASS ws-smoke: ${line}`);
 process.exit(0);

@@ -10,6 +10,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   compaction (step 8) cut it. `?every=2` halves the bytes, but the page then shows motion stopping in a quarter of
   its frames (ws-smoke: 75 % moved): it would have to draw across the gap.
 - A player on the free camera has no body: another sees nothing of them until they walk, drive or fly.
+- A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
+  walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (the free camera is a presence).
 

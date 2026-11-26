@@ -48,29 +48,54 @@ function receive(link: WorkerLink | SocketLink, m: FromWorker) {
   }
 }
 
-/** a SimLink to a host over a WebSocket (host/ws.ts): the worker's messages, several to a frame */
+/** how a SocketLink's connection is: up (a host answered), or down (none yet: never reached; or lost) and trying again
+ * every RETRY_MS */
+export type LinkStatus = { up: true } | { up: false; lost: boolean };
+
+/** how often a SocketLink tries again to reach its host, ms */
+export const RETRY_MS = 3000;
+
+/** a SimLink to a host over a WebSocket (host/ws.ts): the worker's messages, several to a frame. A host not reached,
+ * or lost, is tried again every RETRY_MS: the host's hello then starts a new session (MirrorSimClient) */
 export class SocketLink implements SimLink {
   onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
+  /** the connection came up or went down (the page says so) */
+  onStatus: (s: LinkStatus) => void = () => {};
   private closed = false;
-  private readonly ws: WebSocket;
-  // (commands sent before the socket is open: a one-off one, e.g. a seat asked for at once, must not be lost)
+  private ws!: WebSocket;
+  private ever = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  // (commands sent while the socket opens: a one-off one, e.g. a seat asked for at once, must not be lost; a try
+  // that fails drops them, they were the old session's)
   private early: SimCommand[] = [];
   readonly times: number[] = [];
 
-  constructor(url: string) {
-    this.ws = new WebSocket(url);
-    this.ws.onopen = () => { if (this.early.length) this.send(this.early.splice(0)); };
-    this.ws.onmessage = (e: MessageEvent<string>) => {
+  constructor(readonly url: string) { this.open(); }
+
+  private open() {
+    const ws = this.ws = new WebSocket(this.url);
+    ws.onopen = () => {
+      this.ever = true;
+      this.onStatus({ up: true });
+      if (this.early.length) this.send(this.early.splice(0));
+    };
+    ws.onmessage = (e: MessageEvent<string>) => {
       if (this.closed) return;
       for (const m of JSON.parse(e.data) as FromWorker[]) receive(this, m);
     };
-    this.ws.onclose = () => { if (!this.closed) console.error(`sim host ${url}: connection closed`); };
+    ws.onclose = () => {
+      if (this.closed || ws !== this.ws) return;
+      this.early = [];
+      this.onStatus({ up: false, lost: this.ever });
+      this.timer = setTimeout(() => { this.timer = null; if (!this.closed) this.open(); }, RETRY_MS);
+    };
   }
 
   close() {
     if (this.closed) return;
     this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
     this.ws.close();
   }
 

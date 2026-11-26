@@ -37,7 +37,7 @@ import { AUTO_KEYS, DIST_MAX, type Gfx, gpuName, prepassPays, Settings } from '.
 import { AutoRes } from './autores';
 import { focusView } from './focus';
 import { ViewDistance } from './view-distance';
-import { toast } from './ui/toast';
+import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
@@ -45,6 +45,7 @@ import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
 import { openSession, pageView, PageTime, sessionOptions } from './app/session';
+import { RETRY_MS, SocketLink } from './client/sim-worker-link';
 import { LiveEdits } from './core/live-edits';
 import './style.css';
 
@@ -353,6 +354,12 @@ async function boot() {
       text.textContent = e.message;
       $('#loading').classList.remove('hidden');
     });
+    if (link instanceof SocketLink) {
+      const retry = `trying again every ${RETRY_MS / 1000} s`;
+      link.onStatus = (s) => banner(s.up ? null : s.lost
+        ? `Lost the server at ${link.url}: ${retry} (start it with tools/wt.sh serve)`
+        : `No server at ${link.url}: start it with tools/wt.sh serve (${retry})`);
+    }
     hook('__simLink', link);
     sim = client;
     pageTime = new PageTime(client);

@@ -9,6 +9,7 @@ import type { WorldOp } from '../core/layers';
 import type { CraftSpot, ModeRequest } from './contract/commands';
 import type { CraftId, CraftType, PlayerId, Seat } from './contract/ids';
 import type { Craft } from './craft/craft-core';
+import type { WalkPose } from './contract/pose';
 
 // (what a player asks of the rules, ModeRequest: contract/commands.ts)
 
@@ -26,6 +27,9 @@ export interface ModeWorld {
   removeCraft(id: CraftId): void;
   /** the player into seat as enterSeat takes it (free, the one held left first, mayEnter asked); false: not */
   sit(player: PlayerId, seat: Seat): boolean;
+  /** the player on foot: their avatar put down at pose, the player its walker (one held: put down there again);
+   * false: not (the seat held could not be left) */
+  walk(player: PlayerId, pose: WalkPose): boolean;
   /** the world's time of day (hour) and day of the year (without: kept), the same for every player */
   setTime(hour: number, day?: number): void;
   /** the player's car back on the road; false: they drive none */
