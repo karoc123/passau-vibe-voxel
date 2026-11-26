@@ -1,8 +1,10 @@
-// The traffic's cars and people as a snapshot carries them (contract/agents.ts CarWire, PersonWire): the sim's end
-// (AgentWire, one per session) and the client's (AgentRead), each keeping by id what the other was last sent, so a
-// tick carries only what moved. Over the internet cars and people were ~95 % of a snapshot's bytes: named keys and
-// 18-digit numbers for state that is mostly the same as the tick before. No three.js, no DOM.
-import type { BodyDraw, BodyPose, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
+// The traffic's cars, people and trains as a snapshot carries them (contract/agents.ts CarWire, PersonWire, TrainWire): the sim's end
+// (AgentWire, one per session) and the client's (AgentRead), each keeping by id what the other was last sent. The
+// client draws each one on from its last sample at the speed sent (reckoned: dead reckoning along its way), so a
+// sample is sent only when that drifts: a way changed or one new comes at once, a drift past DRIFT m only on every
+// AGENT_TICKS-th tick (10 a second), one past URGENT m (a car stopped short) at once. A car cruising or standing, a person walking a footway, is not sent at all
+// between. Over the internet cars and people were ~95 % of a snapshot's bytes. No three.js, no DOM.
+import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, CarState, CarWire, PersonState, PersonWire, TrainState, TrainWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose } from './contract/pose';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
@@ -13,119 +15,229 @@ const CM = 100, MM = 1000;
 // a quaternion's parts and an angle in rad: 1e-5 turns a body 5 m long by under 0.1 mm
 const Q = 1e5, RAD = 1e4;
 
+/** the ticks between the drifts sent (a way changed, one new or gone: at once) */
+export const AGENT_TICKS = 3;
+/** how far (m) the client's reckoning may drift from the sim before a sample is sent: its own position now, plus its
+ * speed's error over the ticks to the next chance. The client blends a correction in, so this is what a car or a
+ * person may stray by, never a jump */
+export const DRIFT = 0.1;
+/** how far (m) it may drift by the next tick before it is sent whatever the tick */
+export const URGENT = 0.25;
+// the speed's error counts over the ticks until the next sample can go
+const AHEAD = AGENT_TICKS * STEP;
+
+/** a car's or person's way position at tick, reckoned from its sample (s at tick at, at v; dir: a person's along their
+ * way; wait: standing) */
+export const reckon = (s: number, v: number, at: number, tick: number, dir = 1, wait = false) => wait ? s : s + v * dir * (tick - at) * STEP;
+
 interface CarSent {
-  gen: number; off: number; e: number; lane: number; prev: number; prevOff: number; prev2: number; prev2Off: number;
-  next: number; next2: number; len: number; bus: boolean; vt: VehicleId | undefined; col: string;
+  gen: number; s: number; v: number; brake: number; tick: number; off: number; e: number; lane: number; prev: number;
+  prevOff: number; prev2: number; prev2Off: number; next: number; next2: number; len: number; bus: boolean;
+  vt: VehicleId | undefined; col: string;
 }
-interface PersonSent { gen: number; e: number; dir: number; wait: boolean; v: number; lat: number; col: string }
+interface PersonSent { gen: number; s: number; tick: number; e: number; dir: number; wait: boolean; v: number; lat: number; col: string }
+interface TrainSent { gen: number; s: number; v: number; tick: number; p: number; n: number; express: boolean }
+
+// whether a sample (s, v) is due at tick against the last one sent (h): it drifts past URGENT by the next tick, or past
+// DRIFT by the next chance on a tick that is one
+const drifts = (h: { s: number; v: number; tick: number }, s: number, v: number, tick: number) => {
+  const now = Math.abs(reckon(h.s, h.v, h.tick, tick) - s), dv = Math.abs(v - h.v);
+  return now + dv * STEP > URGENT || (tick % AGENT_TICKS === 0 && now + dv * AHEAD > DRIFT);
+};
 
 /** what one session was sent of the traffic's cars and people: car and person give each one's wire form against it
- * (what changed since, all of it when new to the session), done ends the snapshot (the ones not in it forgotten, so
- * one coming back is sent whole) */
+ * at tick, or null when the client's reckoning of it holds (all of it when new to the session); done ends the
+ * snapshot: the ones not in it forgotten (sent whole when they come back), their ids returned as gone */
 export class AgentWire {
   private readonly cars = new Map<number, CarSent>();
   private readonly people = new Map<number, PersonSent>();
+  private readonly trains = new Map<number, TrainSent>();
+  private readonly boats = new Map<number, { gen: number; pose: BoatPose }>();
   private gen = 0;
 
-  car(c: CarState): CarWire {
-    const off = round(c.off, CM), prevOff = round(c.prevOff, CM), prev2Off = round(c.prev2Off ?? 0, CM), len = round(c.len, CM);
-    const prev2 = c.prev2 ?? -1, next2 = c.next2 ?? -1, h = this.cars.get(c.id);
-    const base: CarWire = [c.id, round(c.s, CM), round(c.v, CM), c.brake];
+  car(c: CarState, tick: number): CarWire | null {
+    const s = round(c.s, CM), v = round(c.v, CM), off = round(c.off, CM), prevOff = round(c.prevOff, CM), prev2Off = round(c.prev2Off ?? 0, CM);
+    const len = round(c.len, CM), prev2 = c.prev2 ?? -1, next2 = c.next2 ?? -1, h = this.cars.get(c.id);
     const known = h && h.len === len && h.bus === c.bus && h.vt === c.vt && h.col === c.col;
     const way = known && h.e === c.e && h.lane === c.lane && h.prev === c.prev && h.prevOff === prevOff && h.prev2 === prev2
       && h.prev2Off === prev2Off && h.next === c.next && h.next2 === next2;
+    const base: CarWire = [c.id, s, v, c.brake];
     if (h && known && way) {
       h.gen = this.gen;
+      if (!drifts(h, s, v, tick) && (tick % AGENT_TICKS !== 0 || (h.brake === c.brake && h.off === off))) return null;
+      h.s = s; h.v = v; h.brake = c.brake; h.tick = tick;
       if (h.off === off) return base;
       h.off = off;
       return [...base, off];
     }
-    this.cars.set(c.id, { gen: this.gen, off, e: c.e, lane: c.lane, prev: c.prev, prevOff, prev2, prev2Off, next: c.next, next2, len,
-      bus: c.bus, vt: c.vt, col: c.col });
+    this.cars.set(c.id, { gen: this.gen, s, v, brake: c.brake, tick, off, e: c.e, lane: c.lane, prev: c.prev, prevOff, prev2, prev2Off,
+      next: c.next, next2, len, bus: c.bus, vt: c.vt, col: c.col });
     const route = [...base, off, c.e, c.lane, c.prev, prevOff, prev2, prev2Off, c.next, next2] as const;
     return known ? [...route] : [...route, len, c.bus ? 1 : 0, c.vt ?? 0, c.col];
   }
 
-  person(p: PersonState): PersonWire {
+  person(p: PersonState, tick: number): PersonWire | null {
     const v = round(p.v, CM), lat = round(p.lat, CM), h = this.people.get(p.id), s = round(p.s, CM);
     const known = h && h.v === v && h.lat === lat && h.col === p.col;
-    if (h && known && h.e === p.e && h.dir === p.dir && h.wait === p.wait) { h.gen = this.gen; return [p.id, s]; }
-    this.people.set(p.id, { gen: this.gen, e: p.e, dir: p.dir, wait: p.wait, v, lat, col: p.col });
+    if (h && known && h.e === p.e && h.dir === p.dir && h.wait === p.wait) {
+      h.gen = this.gen;
+      if (tick % AGENT_TICKS !== 0 || Math.abs(reckon(h.s, v, h.tick, tick, h.dir, h.wait) - s) <= DRIFT) return null;
+      h.s = s; h.tick = tick;
+      return [p.id, s];
+    }
+    this.people.set(p.id, { gen: this.gen, s, tick, e: p.e, dir: p.dir, wait: p.wait, v, lat, col: p.col });
     const way = [p.id, s, p.e, p.dir, p.wait ? 1 : 0] as const;
     return known ? [...way] : [...way, v, lat, round(p.ph, 100), p.col];
   }
 
-  done() {
-    for (const M of [this.cars, this.people] as Map<number, { gen: number }>[]) for (const [id, h] of M) if (h.gen !== this.gen) M.delete(id);
+  train(t: TrainState, tick: number): TrainWire | null {
+    const s = round(t.s, CM), v = round(t.ds / STEP, CM), h = this.trains.get(t.id);
+    if (h && h.p === t.p && h.n === t.n && h.express === t.express) {
+      h.gen = this.gen;
+      if (!drifts(h, s, v, tick)) return null;
+      h.s = s; h.v = v; h.tick = tick;
+      return [t.id, s, v];
+    }
+    this.trains.set(t.id, { gen: this.gen, s, v, tick, p: t.p, n: t.n, express: t.express });
+    return [t.id, s, v, t.p, t.n, t.express ? 1 : 0];
+  }
+
+  /** the boats' poses that changed since the last (rounded: mm, 1e-4 rad) */
+  boatsOf(b: BoatView): BoatsWire {
+    const poses: BoatPose[] = [];
+    for (const p of b.poses) {
+      const q = { ...p, x: round(p.x, MM), y: round(p.y, MM), z: round(p.z, MM), heading: round(p.heading, RAD) }, k = boatKey(p), h = this.boats.get(k);
+      if (h && sameBoat(h.pose, q)) { h.gen = this.gen; continue; }
+      this.boats.set(k, { gen: this.gen, pose: q });
+      poses.push(q);
+    }
+    return { poses, elapsed: round(b.elapsed, MM), day: b.day };
+  }
+
+  /** the snapshot's end: the ids of the cars, people, trains and boats it no longer holds */
+  done(): [number[], number[], number[], number[]] {
+    const gone: [number[], number[], number[], number[]] = [[], [], [], []];
+    [this.cars, this.people, this.trains, this.boats].forEach((M: Map<number, { gen: number }>, i) => {
+      for (const [id, h] of M) if (h.gen !== this.gen) { M.delete(id); gone[i].push(id); }
+    });
     this.gen++;
+    return gone;
   }
 }
 
-interface CarHeld { state: CarState; tick: number }
-interface PersonHeld { state: PersonState; tick: number }
+// a boat's id on the wire: a ship's id, -1 - an excursion boat's
+const boatKey = (p: BoatPose) => p.kind === 'ship' ? p.id : -1 - p.id;
+const sameBoat = (a: BoatPose, b: BoatPose) => a.x === b.x && a.y === b.y && a.z === b.z && a.heading === b.heading && a.len === b.len
+  && a.lit === b.lit && a.underway === b.underway;
 
-/** the client's end: each snapshot's cars and people made whole again from what was sent before (AgentWire), in the
- * order sent; L: a road's length (a car's ds across onto its next road) */
+/** a car or person as the client holds it: its last sample, taken at tick at (the client reckons it on from there) */
+export type Sampled<T> = T & { at: number };
+
+/** the client's end: the cars and people a session holds, each snapshot's samples taken into them (AgentWire); L: a
+ * road's length (a car's way across onto its next road) */
 export class AgentRead {
-  private cars = new Map<number, CarHeld>();
-  private people = new Map<number, PersonHeld>();
+  private readonly cars = new Map<number, Sampled<CarState>>();
+  private readonly people = new Map<number, Sampled<PersonState>>();
+  private readonly trains = new Map<number, Sampled<TrainState>>();
+  private carList: Sampled<CarState>[] = [];
+  private trainList: Sampled<TrainState>[] = [];
+  private readonly boats = new Map<number, BoatPose>();
+  private boatList: BoatPose[] = [];
+  private lists: [Sampled<PersonState>[], Sampled<PersonState>[]] = [[], []];
 
   constructor(private readonly L: (road: number) => number) {}
 
   /** a new session: nothing of the last one's known */
-  clear() { this.cars.clear(); this.people.clear(); }
+  clear() {
+    this.cars.clear(); this.people.clear(); this.trains.clear(); this.boats.clear();
+    this.carList = []; this.lists = [[], []]; this.trainList = []; this.boatList = [];
+  }
 
-  /** the cars of the snapshot of tick (one unknown or cut short is left out: it cannot be drawn) */
-  readCars(list: CarWire[], tick: number): CarState[] {
-    const out: CarState[] = [], was = this.cars, now = new Map<number, CarHeld>();
+  /** the cars after the snapshot of tick: its samples (one unknown or cut short is left out: it cannot be drawn) and
+   * gone; the list held before when neither changed it */
+  readCars(list: CarWire[], gone: readonly number[], tick: number): Sampled<CarState>[] {
+    const M = this.cars;
+    let changed = false;
+    for (const id of gone) changed = M.delete(id) || changed;
     for (const w of list) {
-      const id = w[0], s = w[1], v = w[2], h = was.get(id), o = h?.state;
+      const id = w[0], s = w[1], v = w[2], o = M.get(id);
       if (w.length < 13 && !o) continue;
       const off = w.length > 4 ? w[4]! : o!.off;
-      let c: CarState;
+      let c: Sampled<CarState>;
       if (w.length >= 13) {
         const x = w as Extract<CarWire, { length: 13 | 17 }>;
         const st = w.length === 17 ? (w as Extract<CarWire, { length: 17 }>) : null;
         if (!st && !o) continue;
         c = { id, e: x[5], lane: x[6], s, ds: 0, off, dOff: 0, prev: x[7], prevOff: x[8], prev2: x[9], prev2Off: x[10], next: x[11],
           next2: x[12], len: st ? st[13] : o!.len, bus: st ? st[14] === 1 : o!.bus, vt: st ? st[15] || undefined : o!.vt,
-          col: st ? st[16] : o!.col, brake: w[3], v, wait: 0, detachedPose: undefined };
-      } else c = { ...o!, s, off, brake: w[3], v };
-      // (as the sim moves it on: sim/traffic.ts; one new to the client was moving at v)
-      const dt = h ? (tick - h.tick) * STEP : STEP;
+          col: st ? st[16] : o!.col, brake: w[3], v, wait: 0, detachedPose: undefined, at: tick };
+      } else c = { ...o!, s, off, brake: w[3], v, at: tick };
+      // (the way since the last sample: across onto its next road too; the time stood still)
       c.ds = !o ? v * STEP : o.e === c.e ? s - o.s : o.e === c.prev ? s + this.L(o.e) - o.s : 0;
       c.dOff = o && o.e === c.e ? off - o.off : 0;
-      c.wait = v < 0.3 ? (o?.wait ?? 0) + dt : 0;
-      now.set(id, { state: c, tick });
-      out.push(c);
+      c.wait = v < 0.3 ? (o?.wait ?? 0) + (o ? (tick - o.at) * STEP : 0) : 0;
+      M.set(id, c);
+      changed = true;
     }
-    this.cars = now;
-    return out;
+    if (changed) this.carList = [...M.values()];
+    return this.carList;
   }
 
-  /** the people of the snapshot of tick, its riders (bike) in a list of their own: one read keeps both lists */
-  readPeople(walkers: PersonWire[], riders: PersonWire[], tick: number): [PersonState[], PersonState[]] {
-    const was = this.people, now = new Map<number, PersonHeld>();
+  /** the boats after a snapshot (its poses changed, and gone), and as they were after the one before */
+  readBoats(w: BoatsWire | null, gone: readonly number[]): BoatView | null {
+    if (!w) return null;
+    const M = this.boats, previous = this.boatList;
+    for (const k of gone) M.delete(k);
+    for (const p of w.poses) M.set(boatKey(p), p);
+    if (gone.length || w.poses.length) this.boatList = [...M.values()];
+    return { poses: this.boatList, previous, elapsed: w.elapsed, day: w.day };
+  }
+
+  /** the trains after the snapshot of tick (ds: the way a tick at the speed sent) */
+  readTrains(list: TrainWire[], gone: readonly number[], tick: number): Sampled<TrainState>[] {
+    const M = this.trains;
+    let changed = false;
+    for (const id of gone) changed = M.delete(id) || changed;
+    for (const w of list) {
+      const o = M.get(w[0]);
+      if (w.length === 6) M.set(w[0], { id: w[0], s: w[1], ds: w[2] * STEP, p: w[3], n: w[4], express: w[5] === 1, at: tick });
+      else if (o) M.set(w[0], { ...o, s: w[1], ds: w[2] * STEP, at: tick });
+      else continue;
+      changed = true;
+    }
+    if (changed) this.trainList = [...M.values()];
+    return this.trainList;
+  }
+
+  /** the people after the snapshot of tick (its riders, bikes, in a list of their own): its samples and gone; the
+   * lists held before when neither changed them */
+  readPeople(walkers: PersonWire[], riders: PersonWire[], gone: readonly number[], tick: number): [Sampled<PersonState>[], Sampled<PersonState>[]] {
+    const M = this.people;
+    let changed = false;
+    for (const id of gone) changed = M.delete(id) || changed;
     const read = (list: PersonWire[], bike: boolean) => {
-      const out: PersonState[] = [];
       for (const w of list) {
-        const id = w[0], s = w[1], h = was.get(id), o = h?.state;
-        let p: PersonState;
-        if (w.length === 9) p = { id, e: w[2], dir: w[3], s, v: w[5], lat: w[6], ph: w[7], wait: w[4] === 1, col: w[8], bike: bike || undefined };
+        const id = w[0], s = w[1], o = M.get(id);
+        let p: Sampled<PersonState>;
+        if (w.length === 9) p = { id, e: w[2], dir: w[3], s, v: w[5], lat: w[6], ph: w[7], wait: w[4] === 1, col: w[8], bike: bike || undefined, at: tick };
         else if (!o) continue;
         else {
-          p = w.length === 5 ? { ...o, e: w[2], dir: w[3], s, wait: w[4] === 1 } : { ...o, s };
+          p = w.length === 5 ? { ...o, e: w[2], dir: w[3], s, wait: w[4] === 1, at: tick } : { ...o, s, at: tick };
           // (the step's phase turns with the way walked: sim/traffic.ts stepPeople)
-          if (s !== o.s || p.e !== o.e) p.ph = o.ph + p.v * (tick - h.tick) * STEP * (bike ? PH_RIDE : PH_WALK);
+          if (!o.wait) p.ph = o.ph + o.v * (tick - o.at) * STEP * (bike ? PH_RIDE : PH_WALK);
         }
-        now.set(id, { state: p, tick });
-        out.push(p);
+        M.set(id, p);
+        changed = true;
       }
-      return out;
     };
-    const both: [PersonState[], PersonState[]] = [read(walkers, false), read(riders, true)];
-    this.people = now;
-    return both;
+    read(walkers, false);
+    read(riders, true);
+    if (changed) {
+      const walking: Sampled<PersonState>[] = [], riding: Sampled<PersonState>[] = [];
+      for (const p of M.values()) (p.bike ? riding : walking).push(p);
+      this.lists = [walking, riding];
+    }
+    return this.lists;
   }
 }
 

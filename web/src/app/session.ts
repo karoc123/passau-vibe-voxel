@@ -9,6 +9,8 @@ import { MirrorSimClient, type SimClient } from '../client/sim-client';
 import { SocketLink, WorkerLink } from '../client/sim-worker-link';
 import { checkBuild } from '../core/data-contract';
 import type { LiveEdits } from '../core/live-edits';
+import { frameOf } from '../core/layers';
+import { viewerTileCache } from '../viewer-tiles';
 import type { Meta } from '../core/meta';
 import type { World } from '../core/world';
 import { hostStart, type HostStart } from '../host/start';
@@ -48,7 +50,9 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
   // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
   const mine = hello(checkBuild(meta, () => {}));
   const link = o.server ? new SocketLink(o.server) : new WorkerLink(o.query);
-  return { client: new MirrorSimClient(link, traffic, world, mine, edits), link };
+  // (the edits are sent as ops, applied over the page's own node files)
+  const tiles = { cache: viewerTileCache(meta.tiles.N, edits), frame: frameOf(meta) };
+  return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles), link };
 }
 
 /** Whether the page's camera is a presence in the world while its player holds no seat (an observer: the orbit, free

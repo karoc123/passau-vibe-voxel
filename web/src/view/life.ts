@@ -136,14 +136,15 @@ export class StreetLife {
   }
 
   // ------------------------------------------------------------------ drawing
-  // positions between the last two ticks (lead: time since the last one), so motion is smooth at any frame rate
+  // trains, boats and avatars between their last two ticks (lead: time since the last one), the cars and people where
+  // the mirror reckons them now, so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
     this.frame++;
     this.drawCars(lead / STEP, night, dt);
     const back = 1 - lead / STEP;
     this.trains.render(this.traffic.trains.coaches(back), night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
-    let n = this.drawPeople(dt, lead) + this.drawRiders(dt, lead, this.people.length);
+    let n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
     n += this.drawAvatars(dt, lead / STEP, n);
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
@@ -162,7 +163,7 @@ export class StreetLife {
   private drawCars(a: number, night: number, dt: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
     const tailOff = new THREE.Color(0.55, 0.06, 0.05), tailOn = new THREE.Color(2.2, 0.15, 0.1), tail = new THREE.Color();
-    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, back = 1 - a, B = this.traffic.bodies;
+    const eu = new THREE.Euler(0, 0, 0, 'YXZ'), T = this.traffic, B = this.traffic.bodies;
     const pose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
     const before = pt(), middle = pt(), after = pt(), ease = 1 - Math.exp(-dt / LEAN_S);
     const laneLean = (c: Car, s: number, off: number) => {
@@ -191,7 +192,8 @@ export class StreetLife {
       V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
     for (const c of T.cars) {
-      const s = c.s - c.ds * back, off = c.off - c.dOff * back;
+      // (where the mirror reckons it now)
+      const s = c.s, off = c.off;
       T.carPose(c, s, off, pose);
       const d = this.entry(this.drawnCars, c.id, pose.x, pose.y, pose.z);
       d.x = pose.x; d.y = pose.y; d.z = pose.z;
@@ -218,7 +220,7 @@ export class StreetLife {
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
 
-  private drawPeople(dt: number, lead: number) {
+  private drawPeople(dt: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), T = this.traffic;
     this.people.forEach((p, i) => {
@@ -230,11 +232,11 @@ export class StreetLife {
         r.x = C.x; r.y = C.y; r.z = C.z; r.h = C.h;
         if (C.moving) { const ph = (r.ph ?? p.ph) + dt * 9; r.ph = ph; bob = Math.sin(ph); }
       } else {
-        const ds = p.wait ? 0 : p.v * lead;
-        T.personPoint(p, ds, A);
-        T.personPoint(p, ds + 0.5, B);
+        // (where the mirror reckons them now)
+        T.personPoint(p, 0, A);
+        T.personPoint(p, 0.5, B);
         r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 6, k);
-        if (!p.wait) bob = Math.sin(p.ph + ds * 4.2);
+        if (!p.wait) bob = Math.sin(p.ph);
       }
       pos.set(r.x, r.y, r.z);
       pos.y += 0.05 * Math.abs(bob);
@@ -246,14 +248,13 @@ export class StreetLife {
   }
 
   // a rider on a bike: the person sits 0.45 m up, keeping right of the way's line; the bike under them
-  private drawRiders(dt: number, lead: number, i0: number) {
+  private drawRiders(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), sit = new THREE.Vector3(1, 0.82, 1);
     const one = new THREE.Vector3(1, 1, 1), T = this.traffic;
     this.riders.forEach((p, i) => {
-      const ds = p.wait ? 0 : p.v * lead;
-      T.personPoint(p, ds, A);
-      T.personPoint(p, ds + 1, B);
+      T.personPoint(p, 0, A);
+      T.personPoint(p, 1, B);
       const r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 8, k);
       q.setFromAxisAngle(up, r.h);
       pos.set(r.x, r.y, r.z);

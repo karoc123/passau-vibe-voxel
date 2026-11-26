@@ -17,7 +17,8 @@ if (!hasData()) { console.log(`SKIP ws-smoke: no ${DATA}meta.json / traffic.json
 const verbose = process.argv.includes('-v');
 const arg = (k) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? `&${k}=${process.argv[i + 1]}` : ''; };
 const { serve } = await load('host/ws.ts');
-const { readHostData } = await load('host/node.ts');
+const { readHostData, nodeTileCache } = await load('host/node.ts');
+const { LiveEdits } = await load('core/live-edits.ts');
 const { MirrorSimClient } = await load('client/sim-client.ts');
 const { SocketLink } = await load('client/sim-worker-link.ts');
 const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
@@ -36,7 +37,9 @@ const connect = host.server.connect.bind(host.server);
 host.server.connect = (...a) => { const s = connect(...a), send = s.send.bind(s); s.send = (c) => { taken++; send(c); }; return s; };
 const port = await host.port, mine = hello(checkBuild(data.meta, () => {})), fail = [];
 const client = () => {
-  const link = new SocketLink(`ws://127.0.0.1:${port}`), c = new MirrorSimClient(link, structuredClone(data.traffic), null, mine);
+  // (the edits' ops applied over the client's own node files, as the page's over its TileCache)
+  const link = new SocketLink(`ws://127.0.0.1:${port}`), edits = new LiveEdits();
+  const c = new MirrorSimClient(link, structuredClone(data.traffic), null, mine, edits, { cache: nodeTileCache(DATA, data.meta.tiles.N, edits), frame: frameOf(data.meta) });
   const send = link.send.bind(link), take = link.onSnapshot;
   link.send = (cmds) => { sent += cmds.length; send(cmds); };
   link.onSnapshot = (s) => { c.snapshots++; take(s); };
@@ -129,7 +132,6 @@ if (await until('B\'s edit made', () => nodes, 10)) await until('A has B\'s edit
 // A on foot (the commands the Walk button sends: nav.ts walkBody): put down by the cathedral, then walking east at
 // 5 m/s; B draws A's body (as view/life.ts: between its ticks, eased) moving smoothly on its render clock, and no
 // more once A stops walking
-// (the bytes from here on: the edit's nodes, sent whole to everyone, are not what this measures)
 host.stats();
 const g0 = ground(), body = () => B.traffic.avatars.find((a) => a.player === A.player);
 let walk = null, gone = false, wx = focus.x;
@@ -174,9 +176,10 @@ if (walk && (walk.share < 0.9 || walk.dist < 5)) fail.push(`A's body as B draws 
 // The bytes each player's socket wrote (deflated, as over the internet) from A's walk on, kB a second of the world's
 // time: A on foot, B driving by the cathedral, C by the dam. A busy machine skips a backed-up socket's snapshots, which
 // only lowers it, so the budget holds under load. Measured 2026-11-26 (players by the cathedral, cars sent within
-// 350 m, people 200 m, compact cars and people): ~45-60 kB/s on foot or driving there, ~20 by the dam; before, 1.7 MB/s.
+// 350 m, people 200 m; cars, people and trains sent when the page's reckoning drifts, boats when they move, edits as
+// ops): ~12-15 kB/s on foot or driving there, ~2 by the dam; the target is 20 mean, 50 peak.
 // --interest 100000 for the bytes unfiltered (no budget then).
-const BUDGET = 120;
+const BUDGET = 25;
 const perS = (list) => { const m = new Map(list.map(([p, b]) => [p, b / 1024 / (stats.ticks * STEP)])); return [A, B, C].map((X) => m.get(X.player) ?? 0); };
 const kb = perS(stats.bytes), wire = perS(stats.wire);
 if (!arg('interest') && wire.some((k) => k > BUDGET)) fail.push(`sent over the socket (deflated): ${wire.map((k) => k.toFixed(0)).join(' / ')} kB/s to A / B / C, over the budget of ${BUDGET}`);

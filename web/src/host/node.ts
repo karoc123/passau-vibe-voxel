@@ -26,8 +26,9 @@ const zlib = () => process.getBuiltinModule('node:zlib') as NodeZlib;
 const at = (dir: string, p: string) => `${dir.replace(/\/+$/, '')}/${p}`;
 const json = <T>(dir: string, p: string) => JSON.parse(fs().readFileSync(at(dir, p), 'utf8')) as T;
 
-/** a TileCache over <dir>/tiles/ (a node file that is not there: rejected), seen through the world's live edits */
-export const nodeTileCache = (dir: string, N: number) => new TileCache({ N, edits: liveEdits, keep: 9, load: async (p) => {
+/** a TileCache over <dir>/tiles/ (a node file that is not there: rejected), seen through edits (default: the world's live
+ * edits; a tool's client: its own) */
+export const nodeTileCache = (dir: string, N: number, edits = liveEdits) => new TileCache({ N, edits, keep: 9, load: async (p) => {
   const b = zlib().gunzipSync(fs().readFileSync(at(dir, `${HOST_FILES.tiles}${p}`)));
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 } });
