@@ -51,24 +51,9 @@ gone into "Ready". For a partially completed package, remove the landed item and
 | M3–M10 | Render clock, snapshot buffer, input seq/ack, prediction, wire, lag compensation ([plan](smooth-motion-and-lag.md); M3 = E13, M6–M8 = E17–E19) | S–L | Later |
 | E15, E16, E21 | Health/items, spawn, avatar | S–M each | On hold until the game's vision is clear |
 | E17–E20 | Prediction, worker by default, probe mode ([plan](entities-and-modes.md)) | M–L | Later (owner: worker not urgent) |
-| R6 | The rest of `voxelize.py`'s stages: the class raster | S–M | **Ready** (needs a data rebuild) |
 | F2 | Walk to a vehicle and get in | M | **Set aside** (owner, ADR 0008) |
-| F11 | The map as a set of 1 km blocks: grow along the Inn to Ingling | M | **Ready** (needs a data rebuild) |
+| F11 | Grow the map along the Inn to Ingling (blocks and edge landed) | M | **In progress** (`worktree-agent-a6bc0240c8d913578`, needs a data rebuild) |
 | Q7 | Spot fixes the general rules leave (low priority) | S each | **Ready** (data rebuild for Q8 first) |
-
-## Packages
-
-### R6. The rest of `voxelize.py`'s stages (code-health 18, S–M)
-
-Landed (merges of `r6`, `r6b`): `voxelize.py` runs as `STAGES`, 20 `def stage(ctx)` functions over a `Ctx`
-(SimpleNamespace) with plain field names, the bridges' decks and bridgeheads a `bridges` stage of their own (timed as
-"bridge decks, bridgeheads"); `scripts/constants.py`; `tunnels.plan/build`, `underpass.build` return their results;
-`traffic.build(open_cut=..., bored=(floor, ids), walked=underpass.Walked)`, no module globals in tunnels/underpass.
-Left:
-
-- **Class raster (code-health 18):** `caps.py` still finds steps by `ground.npz` rgb and paved ids by colour (the
-  colours now come from `constants.py`, so a colour change follows). A class raster written by `voxelize.py` changes
-  the outputs: golden differs by design, and it needs a data rebuild.
 
 ## Engine packages
 
@@ -105,7 +90,6 @@ Rules for all of them, on top of the rules above:
   `voxelize.py --just x=COL,y=ROW` on a fixture or one region and say in the report that the rebuild is due.
 - Add a guard for each rule to `check.py verify` (a patch in `scripts/fixtures/road-defects.json` or a new counter
   in the build report), so the spot cannot come back unnoticed.
-- R6 moves the same code in `voxelize.py`. Do not run a Q package in parallel with the R6 stage that holds its block.
 
 Q1 landed with its data (`e414b3ba`, rebuild `12eb1e87`: 22 053 terrain water cells dropped, boat and plane gates
 green). ALKIS ponds OSM does not map (23 000 cells) stay land; drawing them is a possible later package.
@@ -145,31 +129,21 @@ These add behaviour, so they are judged in the browser as well as by the gates. 
 
 - Set aside by the owner (ADR 0008). If it returns: F2a road vehicles via `takeWheel` after E2, F2b crafts after E4.
 
-### F11. The map as a set of 1 km blocks: grow along the Inn to Ingling (M)
+### F11. Grow the map along the Inn to Ingling (M)
 
-- **Today:** the map is one rectangle (`scripts/map.json` `map`: 9,344 x 3,456 m, corner on 1,024 m blocks). Each
-  1,024 m block is already built as its own region (`scripts/regions.py`, `window.cover`). The Klinikum lies just
-  south of the map's edge, Ingling roughly 1.2 km beyond it (estimated from approximate coordinates; check).
-- **Why not just a bigger rectangle:** 2 km more to the south over the full width is about 19 km2 of mostly
-  irrelevant land; following the Inn is about 4–6 km2.
-- **Do:** let `map.json` name the built blocks (the rectangle stays the bounding box; a block not listed is empty).
-  Adapt what assumes a full rectangle: `scripts/fetch_bayern.sh` (downloads the rectangle's 1 km tiles), the
-  region cover, `mapstore.py`'s assembly and the whole-map passes (labels, traffic, flood, boats), the viewer's
-  tile index (empty tiles already exist), and the map's edge at a missing block (what the player sees and that
-  vehicles cannot leave).
-- **Do:** then add the blocks along the Inn from the Innstadt to Ingling (Kraftwerk Passau-Ingling).
-- **Rebuild:** yes, plus the downloads for the new blocks (open data, CC BY 4.0, as today).
-- **WIP (2026-11-26):** steps 1 (blocks in `map.json`, pipeline) and 2 (edge in viewer and physics, gate `edge`) are
-  committed. Open, step 3: measured in OSM, Kraftwerk Passau-Ingling (way 27661875) spans project cols -309..170, rows
-  3028..3409, its weir (way 273300967) rows 3109..3204; the Inn runs from there north-east into the map at row 1408,
-  col ~1360. Blocks to add: row 1 cols 0..1 whole (the old strip's other blocks stay `rows: 384`), rows 2 and 3 cols
-  -1..0; `map.rows` 5504 (to project row 3456). New sheets (fetched into the worktree's `data/raw_new`, 2.8 GB):
-  1 km 821..824_5388, 825..828_5387, 825..830_5388 (with the halo of the old strip), LoD2 824/826/828_5386. DGM1 has
-  no data on the Austrian bank (827_5387 east, 828_5387): fill it in `prep.py` from the laser's ground returns (they
-  and DOM/DOP cover Austria). The Niederbayern OSM extract has next to nothing there (Geofabrik has no Upper Austria
-  extract). Still to do: the fill, the Inn's level above the weir (`river_levels.py`, a stretch box), a label for the
-  dam, `baeume_aoi.csv`/`treespecies_*.tif` cut again for the larger bounds, `osm.json` cut again (same extract:
-  `osm_pbf.py` with the new bbox), the fixture `scripts/fixtures/inn.json` built and looked at.
+- **Landed:** `scripts/map.json` `blocks` names the built 1 km blocks and the pipeline builds only them (identity:
+  `check.py golden --compare` 0 differences; fixture `holes.json`); a block not built is the map's edge in viewer and
+  physics (gate `edge`).
+- **Left:** add the blocks. Branch `worktree-agent-a6bc0240c8d913578` has commit `623f91c2` (WIP): the draft fixture
+  `inn.json` and notes on the plan, with the blocks, coordinates and downloads. Its worktree's `data/raw_new` holds the
+  downloads (14 one-km sheets, 3 LoD2 tiles) and the new `osm.json`. Open: fill the terrain on the Austrian bank,
+  where DGM1 has no data, from the laser's ground points in `prep.py`; set the Inn's level above the weir
+  (`river_levels.py`); label the dam; build and look at `inn.json`.
+- **Measured (OSM):** Kraftwerk Passau-Ingling (way 27661875) spans project cols -309..170, rows 3028..3409, its weir
+  (way 273300967) rows 3109..3204. Blocks: row 1 cols 0..1 whole (the strip's others stay `rows: 384`), rows 2 and 3
+  cols -1..0, `map.rows` 5504. New sheets: 1 km 821..824_5388, 825..828_5387, 825..830_5388, LoD2 824/826/828_5386.
+- **Rebuild:** yes. Cut `osm.json`, `baeume_aoi.csv` and `treespecies_*.tif` again for the new bounds, then run the
+  full rebuild (open data, CC BY 4.0).
 
 ## Also open (for later)
 

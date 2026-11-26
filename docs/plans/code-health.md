@@ -242,14 +242,6 @@ another craft, another road-height fix, or any server work.
   `__boat`, `__drive`, `__plane`, `__rapierLoadMs`, `__rapierLoad`, `__rapierDrive`, `__lifephys` are read by no tool.
 - **Fix:** delete; keep one documented `?debug=` table in the README.
 
-### 18. Semantics by colour between pipeline steps — M
-
-- **Where:** `caps.py:395-396` finds steps by `rgb == quantised("#a8a296")`, paved and deck cells by hex
-  (`:108-110, 118-135`); material ids as bare ints in `regions.py:530, 535`, `check.py:290`, `caps.py:107, 126, 515`.
-- **Why:** a colour tweak in `voxelize.C` silently removes caps. The paved colours are at least tested against
-  `core/materials.ts` by `tile-roundtrip.mjs:116-122`.
-- **Fix:** a class raster or palette flags written by `voxelize.py`; one `scripts/constants.py`.
-
 ### 19. `nav.ts`, `traffic.build`, silent excepts, build time — M each
 
 - **`class Nav`** is 782 lines (`nav.ts:52-833`): mode machine, gestures, orbit helpers, walk physics, ride camera,
@@ -295,4 +287,4 @@ Notes on conflicts:
   (`Vector3` to plain), N2 the input and camera code. Run C1 first or give both to one agent.
 - **N1 before N2/N3** (it is small and edits `nav.ts`, `main.ts`).
 - **T1 first of all**: every other package is then verified by `pnpm gates`. The CI change needs the owner's consent.
-- **Item 15** is design work for the server plan, not a package here. **Item 18** goes with P4.
+- **Item 15** is design work for the server plan, not a package here.

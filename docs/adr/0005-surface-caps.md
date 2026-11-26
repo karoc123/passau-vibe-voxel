@@ -79,7 +79,8 @@ considered and rejected (data and meshing cost).
   trimesh, the top voxels only the other bodies met, `NOT_CAR_GROUPS`), `caps-mode.ts`, the `PAL_GROUND` palette bit.
   Kept: `chamfer.ts` (walls at an angle in plan), the roofs' emitters (`roofs.ts` `emitTops`, `emitEdge`, the eaves'
   filled steps, the node-border skirt), `plns` (lighting), the car's step wedges (real steps, `G_CAR_ONLY`), `SEM.PAVED` (the paved ids, checked
-  against `caps.py` by `tile-roundtrip.mjs`).
+  against voxelize.py's ground classes by `tile-roundtrip.mjs`). `caps.py` reads which cells are paved, steps or a
+  bare deck from `data/ground.npz` `cls`, the class raster `voxelize.py` writes, not from colours.
 - Data without the section (a build without `data/surface.npz`, or before it) still loads: `caps` is an optional
   section and `meta.json` `world.formatVersion` was not bumped. Its streets are then drawn and driven as voxel stairs.
 - The cap's height is limited to +-60/64 m of its voxel top (`caps.CLAMP`; 56/64 until the carriageways were linked over

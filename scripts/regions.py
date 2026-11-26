@@ -424,7 +424,8 @@ def main(argv):
         return (D_ // scale, W_ // scale) + tuple(tail), dtype, (b_ for _, b_ in r.bands())
 
     mapstore.write_npz("data/ground.npz", dict(g=npz_entry("g", np.int16), rgb=npz_entry("rgb", np.uint8, (3,)),
-                                               water=npz_entry("water", bool), b=npz_entry("b", np.int16)))
+                                               water=npz_entry("water", bool), b=npz_entry("b", np.int16),
+                                               cls=npz_entry("cls", np.uint8)))
     mapstore.write_npz("data/footprints.npz", dict(oid=npz_entry("oid", np.int64)))
     # the continuous surfaces under the voxels, for the sloped caps (caps.py, run by tile_fields.py)
     mapstore.write_npz("data/surface.npz", dict(gt=npz_entry("gt", np.int16), deck=npz_entry("deck", np.float32),

@@ -36,7 +36,7 @@ from scipy.spatial import cKDTree
 
 from aoi import BASE, C0, CX, CY, D, MAP_D, MAP_W, MC0, MR0, R0, RIVER_LEVEL, RIVER_STRETCHES, W, river_level
 from aoi import BOXES as _BOXES, CORE as _RCORE
-import constants as K  # (the ground colours caps.py reads a meaning from)
+import constants as K  # (the ground colours, the ground classes)
 from constants import (M_BRONZE, M_CAR, M_CLASSIC, M_CLOCK, M_CONCRETE, M_FLOODLIT, M_GLASS, M_GRASS, M_JET, M_LAMP,
                        M_LEAF, M_MARK, M_METAL, M_ROOF, M_SIGN, M_SOIL, M_SOLID, M_TENEMENT, M_WALL, M_WATER, M_WOOD)
 import culvert
@@ -218,6 +218,11 @@ C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "shore": pal("#9d9585"),  # a river bank's rip-rap and gravel: grey-brown stones, darker than any paving
 }
 WOOD_IDS = [C["trunk"], C["twig"]]
+# what the ground is where these entries are its top voxel (by name, not by colour): ground.npz cls (ground_rgb), the
+# class raster caps.py reads. (An entry is its colour and material: a key of C given another's would take its class.)
+GROUND_CLASS = {C[k]: cls for k, cls in K.GROUND_CLASSES.items()}
+assert all(C[k] == pal(getattr(K, k.upper()), M_CONCRETE if k == "deck" else M_SOLID) for k in K.GROUND_CLASSES)
+assert len(set(C.values())) == len(C), "two keys of C share a palette entry"
 # masonry of retaining walls and quays: rough granite and limestone blocks, a few tones voxel by voxel
 STONE = [pal(c) for c in ["#8f897e", "#9b9488", "#857f75", "#a39b8d", "#938a7c"]]
 PERENNIALS = [pal(c, M_LEAF) for c in ["#8e6fae", "#a690c4", "#6f9a4f", "#8aa27a", "#5f8a49", "#7c9c5a", "#c98fb0"]]
@@ -3898,6 +3903,10 @@ def ground_rgb(ctx):
     _lut = np.array([e[:3] for e in pal.entries], np.uint8)
     _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
     CORE_OUT = dict(g=tunnels.surface(g, bored.lowered).astype(np.int16), rgb=_lut[_ids], water=water_mask, b=np.where(bmask, topi, 0).astype(np.int16))  # (b: building height above ground, photo-pose tools)
+    # what the ground is (the class raster: GROUND_CLASS, any marking): steps, the paved kinds, a bare deck (caps.py)
+    _cls = np.array([K.CLS_MARK if e[3] == M_MARK else K.CLS_NONE for e in pal.entries], np.uint8)
+    _cls[list(GROUND_CLASS)] = list(GROUND_CLASS.values())
+    CORE_OUT["cls"] = _cls[_ids]
     # the buildings' footprints as drawn (OSM outlines moved onto LoD2's, align_to_lod2): the OSM id of the outline each
     # building cell belongs to, for zones.py and windows.py
     _fp = np.zeros((D, W), np.int64)
