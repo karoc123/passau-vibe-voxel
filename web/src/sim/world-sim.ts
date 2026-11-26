@@ -49,7 +49,7 @@ import { MAX_DT, type FrameTime } from './contract/inputs';
 import { EVENT_TICKS, type SimEvent } from './contract/events';
 import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
-import { boundWalk } from './walk-bounds';
+import { besideBox, boundWalk, reaches, type Box } from './walk-bounds';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
@@ -412,7 +412,7 @@ export class WorldSim {
       case 'view': break; // (taken at the update's start: send)
       case 'follow': this.follow(p, cmd.entity); break;
       case 'enterSeat': {
-        const r = this.enterSeat(p, cmd);
+        const r = this.reaches(p, cmd.entity, cmd.role) ? this.enterSeat(p, cmd) : 'far';
         this.result(p, cmd.kind, r === true, cmd.role ?? this.entities.seat(cmd.entity)?.role, typeof r === 'string' ? r : undefined);
         break;
       }
@@ -425,7 +425,13 @@ export class WorldSim {
         break;
       }
       case 'request': this.result(p, cmd.request.kind, !!this.mode?.request(this.face, p, cmd.request)); break;
-      case 'leaveSeat': this.leaveSeat(p); break;
+      case 'leaveSeat': {
+        // (out onto foot: put down beside what was left, in the same tick, so no tick shows neither)
+        const s = this.seat(p), box = s && s.role !== 'walker' && cmd.pose && finitePose(cmd.pose) ? this.boxOf(s.entity) : null;
+        this.leaveSeat(p);
+        if (box) this.walk(p, besideBox({ ...cmd.pose!, moving: false }, box, this.tuning.walk.board));
+        break;
+      }
       case 'leave': this.leaveSeat(p); (this.players as Map<PlayerId, PlayerState>).delete(p); this.held(); break;
       case 'edit': {
         const r: CommandResult = { tick: this.tick, kind: 'edit', ok: false, ref: cmd.ref ?? 0 };
@@ -488,6 +494,23 @@ export class WorldSim {
   }
 
   // the voxels and the bodies a shot of the player on `own` meets (their own body left out)
+  // whether player may ask for a seat of entity with role from where they are: on foot (their avatar), a vehicle only
+  // within Tuning.walk.board of where the host has the walker, not where the page says (a seat the mode gives, a
+  // craft made, is the mode's to place)
+  private reaches(player: PlayerId, entity: EntityRef, role?: Role) {
+    const held = this.seat(player), W = this.players.get(player)?.walk;
+    if (held?.entity.kind !== 'avatar' || !W || (role ?? this.entities.seat(entity)?.role) === 'walker' || !this.entities.exists(entity)) return true;
+    const box = this.boxOf(entity);
+    return !!box && reaches(W.pose, box, this.tuning.walk.board);
+  }
+
+  // entity's footprint as a shot meets it, or null: not in the world
+  private boxOf(entity: EntityRef): Box | null {
+    const none: EntityRef = { kind: entity.kind === 'avatar' ? 'car' : 'avatar', id: -1 };
+    for (const b of this.shotWorld(none).bodies()) if (b.entity.kind === entity.kind && b.entity.id === entity.id) return { ...b };
+    return null;
+  }
+
   private shotWorld(own: EntityRef): ShotWorld {
     const T = this.traffic, sim = this;
     return {
@@ -576,7 +599,8 @@ export class WorldSim {
     if (!seat) return false;
     const by = this.occupants.get(seatKey(seat));
     if (by === player) return true;
-    if (by !== undefined || (this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat))) return false;
+    if (by !== undefined) return 'taken';
+    if (this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat)) return false;
     const id = seat.entity.id;
     if (seat.role === 'walker') {
       let start: WalkPose;
@@ -759,3 +783,5 @@ export class WorldSim {
     }
   }
 }
+
+const finitePose = (p: WalkPose) => [p.x, p.y, p.z, p.h].every(Number.isFinite);

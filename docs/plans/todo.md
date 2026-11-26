@@ -29,8 +29,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - E15 health and items, E16 spawn/despawn/keep, E21 the player's avatar (owner: on foot always an avatar of its own,
   never one of the crowd).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
-- F2 walk to a vehicle and get in (set aside, ADR 0008). Debug spawning of crafts and car type stays client-trusted
-  until placed vehicles replace it.
+- Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
 ## Pipeline and city
 
@@ -62,4 +61,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
   removes it. The world keeps ticking while the tab is hidden.
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
+- Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
+  a car is got into at any speed (no stopping it first); the host's reach uses rough boxes (a car 2.2 m, a craft 3 m half-length).
 - Minimap: click for a waypoint, a full-screen map, other players on it.

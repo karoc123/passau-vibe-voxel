@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Picked, StreetLife } from '../view/life';
 import type { SimClient } from '../client/sim-client';
-import type { Pose } from '../sim/contract/pose';
+import type { Pose, WalkPose } from '../sim/contract/pose';
 import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
@@ -74,6 +74,9 @@ export class Nav {
   private walkPending = false;
   // the avatar asked for on foot (walkBody): for which session's player, where the walk put it last
   private body: { player: string | null; x: number; z: number } | null = null;
+  /** while a vehicle is being got out of (getOut): where its shell asks the host to put the player down on foot, in
+   * the same command that leaves the seat (leaveSeat's pose) */
+  stepOut: WalkPose | null = null;
   /** the weapons on foot */
   readonly arms = new Arms();
   private hoverT = 0;
@@ -454,7 +457,9 @@ export class Nav {
       this.craft = c;
       return true;
     }
-    if (!this.canStartCraft) return false;
+    // (from foot: got in walking up to it, the seat already the host's: board.ts)
+    if (!this.canStartCraft && !this.onFoot) return false;
+    if (this.onFoot) this.releaseMouse();
     this.rememberSky();
     if (this.riding) {
       this.leaveRide(); // (the car driven parked: dropCraft)
@@ -545,15 +550,7 @@ export class Nav {
     this.cancelFly();
     const ride = this.ride, pose = ride && this.life?.pose(ride.ref);
     if (pose) {
-      const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
-      const at = new THREE.Vector3(pose.x, pose.y, pose.z);
-      const side = new THREE.Vector3(-facing.z, 0, facing.x);
-      const exits = ride.ref.kind === 'person' ? [at] : [at.clone().addScaledVector(side, 2), at.clone().addScaledVector(side, -2)];
-      const clear = exits.find(p => {
-        const y = world.support(p.x, p.z, p.y + 1.02);
-        return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, y, y + HEAD);
-      });
-      await this.setWalk(clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 });
+      await this.setWalk(exitFrom(world, pose, ride.ref.kind === 'person' ? 0 : 2));
       return;
     }
     const facing = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
@@ -603,7 +600,26 @@ export class Nav {
     this.onMode(this.mode, null);
   }
 
+  /** out of the vehicle driven or the craft piloted onto foot beside it, the host putting the body down there as the
+   * seat is left (stepOut), so the others see the player step out; false: in none */
+  getOut() {
+    const w = this.world, c = this.craft, ride = this.driving ? this.ride : null;
+    const pose = c && (ride ? this.life?.pose(ride.ref) : c.mapPose);
+    if (!w || !c || !pose || this.walkPending) return false;
+    const opts = exitFrom(w, pose, ride ? 2 : 3), at = opts.at!;
+    this.stepOut = { x: at.x, y: at.y, z: at.z, h: Math.atan2(opts.facing!.x, opts.facing!.z), moving: false };
+    this.dropCraft();
+    this.stepOut = null;
+    void this.setWalk(opts);
+    return true;
+  }
+
+  /** the host has moved the player from their body on foot into a seat (board.ts): the body is not to be left again */
+  tookSeat() { this.body = null; }
+
   startRide(ag: Picked) {
+    // (the body on foot left before the ride's own seat is asked for: a seat taken from foot is the host's to reach)
+    if (this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
     this.rememberSky();
     this.releaseMouse();
     this.dropCraft();
@@ -675,4 +691,19 @@ export class Nav {
     if (next === 'off') this.hopOff();
     else if (next) { const { view, zoom } = this.ride!; this.startRide(next); Object.assign(this.ride!, { view, zoom }); }
   }
+}
+
+// where to step out of what stands at pose: a side free to stand on (side m out from its middle, either side), else
+// where it is (side 0: a person's place)
+function exitFrom(world: World, pose: Pose, side: number): WalkOpts {
+  const facing = new THREE.Vector3(Math.sin(pose.h), 0, Math.cos(pose.h));
+  const at = new THREE.Vector3(pose.x, pose.y, pose.z);
+  const out = new THREE.Vector3(-facing.z, 0, facing.x);
+  const exits = side ? [at.clone().addScaledVector(out, side), at.clone().addScaledVector(out, -side)] : [at];
+  const clear = exits.find(p => {
+    const y = world.support(p.x, p.z, p.y + 1.02);
+    // (from the voxel over the one stood on: a road's cap stands within its voxel, which is solid)
+    return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, Math.ceil(y - 0.01), y + HEAD);
+  });
+  return clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 };
 }
