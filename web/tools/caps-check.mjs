@@ -20,6 +20,14 @@ globalThis.self ??= globalThis;
 const mesher = await imp('src/mesher.worker.ts'), req = await imp('src/tile-request.ts');
 const TD = await imp('src/core/tile-data.ts'), SF = await imp('src/core/surface.ts'), RF = await imp('src/roofs.ts');
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+// (a block not built, meta.json built: across a border where one side's own cell is not built nothing meets -- that
+// side has no column, and the other's apron there is the cut, empty or not: not compared)
+const built = new (await imp('src/core/built.ts')).Built(meta);
+const meets = (s, tx, ty, ex, ey, k) => {
+  const L = N * s, along = (k - 1) * s + s / 2;
+  return ex ? built.at((tx + 1) * L - s / 2, ty * L + along) && built.at((tx + 1) * L + s / 2, ty * L + along)
+    : built.at(tx * L + along, (ty + 1) * L - s / 2) && built.at(tx * L + along, (ty + 1) * L + s / 2);
+};
 const N = meta.tiles.N, S = N + 2, ctx = { N, W: meta.W, D: meta.D, ...req.paletteFlags(meta.palette) };
 const raw = (f) => { const b = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'tiles', `${f}.bin`))); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
 const load = async (f) => raw(f);
@@ -100,6 +108,7 @@ for (const [tx, ty] of nodes) {
     const e = field(dec(tx + ex, ty + ey));
     if (!e) continue;
     for (let k = 0; k < S; k++) for (const [ia, ib] of [[N, 0], [N + 1, 1]]) {
+      if (!meets(1, tx, ty, ex, ey, k)) continue;
       // (a's column ia across the shared border is b's column ib)
       const ca = ex ? ia + S * k : k + S * ia, cb = ex ? ib + S * k : k + S * ib;
       for (let s = 0; s < 2; s++) {
@@ -123,6 +132,7 @@ for (const lv of meta.tiles.levels) {
       const e = get(tx + ex, ty + ey);
       if (!e) continue;
       for (let k = 0; k < S; k++) for (const [ia, ib] of [[N, 0], [N + 1, 1]]) {
+        if (!meets(s, tx, ty, ex, ey, k)) continue;
         const ca = ex ? ia + S * k : k + S * ia, cb = ex ? ib + S * k : k + S * ib;
         if (f.z[ca] !== e.z[cb]) { fail(`roof ${s}/${tx}_${ty} / +${ex},${ey}: column ${k}: z ${f.z[ca]} != ${e.z[cb]}`); continue; }
         if (f.z[ca]) for (let q = 0; q < 4; q++) if (f.q[4 * ca + q] !== e.q[4 * cb + q]) fail(`roof ${s}/${tx}_${ty} / +${ex},${ey}: column ${k} corner ${q} differs`);
