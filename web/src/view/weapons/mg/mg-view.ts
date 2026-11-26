@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { WeaponEvent, WeaponView } from '../weapon-view';
+import { boxModel, type WeaponEvent, type WeaponView } from '../weapon-view';
 
 // A tracer is drawn slower than a bullet flies: at 900 m/s it would cross a street in a frame and never be seen.
 const TRACER_V = 350, TRACER_L = 3, TRACER_W = 0.05, TRACERS = 48;
@@ -107,5 +107,13 @@ export function mgView(): WeaponView {
       geo.setDrawRange(0, n);
       geo.attributes.position.needsUpdate = true;
     },
+    // a long thin barrel on a dark body, a box magazine under it and a stock behind
+    model: () => boxModel([
+      [0x2a2c30, [0, 0, 0.05], [0.07, 0.09, 0.42]],
+      [0x1a1b1e, [0, 0.01, 0.46], [0.03, 0.03, 0.42]],
+      [0x3a3326, [0, -0.1, 0.12], [0.05, 0.14, 0.07]],
+      [0x1a1b1e, [0, -0.08, -0.06], [0.04, 0.11, 0.05]],
+      [0x3a3326, [0, -0.02, -0.3], [0.06, 0.1, 0.24]],
+    ]),
   };
 }

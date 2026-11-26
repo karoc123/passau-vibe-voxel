@@ -13,6 +13,20 @@ export function makeFireButton(hold: (down: boolean) => void) {
   return b;
 }
 
+/** on foot on a touch screen, beside Fire and Jump: the next slot, and aim (a tap narrows the view, another widens it) */
+export function makeTouchArms(next: () => void, aim: () => boolean) {
+  const slot = el('button', 'arms-touch', '<span aria-hidden="true">⇄</span>');
+  slot.id = 'slot-button';
+  slot.setAttribute('aria-label', 'Next weapon');
+  const sight = el('button', 'arms-touch', '<span aria-hidden="true">◎</span>');
+  sight.id = 'aim-button';
+  sight.setAttribute('aria-label', 'Aim');
+  for (const b of [slot, sight]) b.type = 'button';
+  slot.addEventListener('click', next);
+  sight.addEventListener('click', () => sight.classList.toggle('on', aim()));
+  return { set(aiming: boolean) { if (sight.classList.contains('on') !== aiming) sight.classList.toggle('on', aiming); } };
+}
+
 /** on foot: the crosshair and the slots, the one in hand marked */
 export function makeArmsHud() {
   const box = el('div', '');

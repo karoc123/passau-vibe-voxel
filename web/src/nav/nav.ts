@@ -170,6 +170,9 @@ export class Nav {
   /** following a person or a vehicle (or driving one) */
   private get riding() { return this.mode === 'ride'; }
   get onFoot() { return this.mode === 'walk'; }
+  /** aiming on foot (the right mouse button; on touch the aim button: toggleAim) */
+  get aiming() { return this.foot.aim; }
+  toggleAim() { return this.foot.aim = this.onFoot && !this.foot.aim; }
   private get driving() { return this.craft !== null && this.riding; }
   /** a craft owns the camera and the input */
   get craftView() { return this.mode === 'craft'; }
@@ -605,7 +608,7 @@ export class Nav {
     if (!sim) return;
     sim.results('walk');
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
-    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3 };
+    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
     else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
     this.body = { player: sim.player, x, z };

@@ -44,8 +44,13 @@ export class Presence<K> {
 export class EditKeeper {
   // per edited node ("tx_ty")
   private readonly presence: Presence<string>;
+  // the ops kept whoever is near (a blast's crater: until the host restarts)
+  private readonly lasting = new WeakSet<WorldOp>();
 
   constructor(keeping: PresenceTuning = PRESENCE, private readonly N = TILE_N) { this.presence = new Presence(keeping); }
+
+  /** op's nodes kept from now on, near or not */
+  last(op: WorldOp) { this.lasting.add(op); }
 
   // at world time `now` (s), the players' foci (map metres: x east, z south); returns the nodes dropped
   update(now: number, foci: Foci): number {
@@ -65,7 +70,9 @@ export class EditKeeper {
       }
     });
     const keep = new Set<number>();
-    nodes.forEach(([tx, ty], i) => { if (!P.due(keys[i], now, near(tx, ty))) keep.add(root(i)); });
+    nodes.forEach(([tx, ty, n], i) => {
+      if (!P.due(keys[i], now, near(tx, ty)) || n.ops?.some((op) => this.lasting.has(op))) keep.add(root(i));
+    });
     let dropped = 0;
     nodes.forEach(([tx, ty], i) => { if (!keep.has(root(i))) { drop(tx, ty); P.forget(keys[i]); dropped++; } });
     return dropped;

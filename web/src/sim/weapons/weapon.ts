@@ -9,9 +9,16 @@ export const SLOTS = 2;
 /** the eyes over the feet (m): the first-person camera's, so a shot leaves where the player looks from */
 export const EYE = 1.7;
 
+/** how far (m) round a player on foot the host keeps the voxels loaded: a ray into a node not loaded meets nothing,
+ * so this is at least the longest ray a weapon casts */
+export const REACH = 300;
+
 /** the world's voxels as a ray sees them: the distance along unit d from o to the first solid voxel (Infinity: none
- * within max) */
-export interface VoxelRay { raycast(o: Vec3, d: Vec3, max: number): number }
+ * within max); hold: the voxels within r m of these points (map x, z) kept loaded, those of the call before let go */
+export interface VoxelRay {
+  raycast(o: Vec3, d: Vec3, max: number): number;
+  hold?(around: readonly { x: number; z: number }[], r: number): void;
+}
 
 /** something a shot can hit: an upright box standing on (x, y, z), turned to heading h; r its half width, l its half
  * length (along h), ht its height */
@@ -23,6 +30,17 @@ export interface ShotWorld { voxels: VoxelRay | null; bodies(): Iterable<Body> }
 /** what a shot did: from at to to, what stopped it (null: nothing within its range) */
 export interface Shot { at: Vec3; to: Vec3; hit: EntityRef | 'world' | null }
 
+/** what a weapon lets go to fly (its fire that is not a ray): the host flies it each tick until it bursts */
+export interface Projectile {
+  /** where it left and its velocity then (m/s): what the others draw its flight from */
+  at: Vec3;
+  v: Vec3;
+  /** its blast's radius (m): the crater it leaves */
+  r: number;
+  /** its flight from t0 to t1 s after it left, through world: where it burst, or null while it flies on */
+  fly(world: ShotWorld, t0: number, t1: number): Vec3 | null;
+}
+
 export interface Weapon {
   id: WeaponId;
   /** the slot it is in (1..SLOTS) */
@@ -31,8 +49,8 @@ export interface Weapon {
   name: string;
   /** shots a second at most: the host's limit and a held trigger's pace */
   rate: number;
-  /** fired from `from` along unit `dir` */
-  fire(world: ShotWorld, from: Vec3, dir: Vec3): Shot;
+  /** fired from `from` along unit `dir`: a shot at once, or a projectile let go */
+  fire(world: ShotWorld, from: Vec3, dir: Vec3): Shot | Projectile;
 }
 
 /** the unit direction of heading h (0: +z, pi/2: +x) and pitch (up) */
@@ -78,19 +96,22 @@ function boxHit(o: Vec3, d: Vec3, b: Body): number {
   return t0;
 }
 
-/** a player's triggers: how many shots each weapon has in hand. A weapon's rate refills them, up to BURST, so commands
- * that reach the host bunched (a page's frames, the network) are not refused while the rate over a second holds */
+/** a player's triggers: how many shots each weapon has in hand. A weapon's rate refills them, up to one and what SLACK
+ * s of its rate give, so commands that reach the host bunched (a page's frames, the network) are not refused while the
+ * rate over a while holds */
 export class Trigger {
   private readonly held = new Map<WeaponId, { n: number; at: number }>();
   /** whether w may fire at clock now (s); it is then spent */
   pull(w: Weapon, now: number) {
     let s = this.held.get(w.id);
-    if (!s) this.held.set(w.id, s = { n: BURST, at: now });
-    s.n = Math.min(BURST, s.n + (now - s.at) * w.rate);
+    const most = 1 + SLACK * w.rate;
+    if (!s) this.held.set(w.id, s = { n: most, at: now });
+    s.n = Math.min(most, s.n + (now - s.at) * w.rate);
     s.at = now;
     if (s.n < 1) return false;
     s.n--;
     return true;
   }
 }
-const BURST = 2;
+// (the MG's 10 a second: two in hand; a slow weapon's command taken up to this early)
+const SLACK = 0.1;

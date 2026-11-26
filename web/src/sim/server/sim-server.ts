@@ -74,7 +74,8 @@ export class SimServer {
    * ...); its commands are the player's, its client learns it from its snapshots (Snapshot player) */
   connect(player: PlayerId = this.newPlayer()): Session {
     const s = new Session(this, player);
-    if (this.tracking) s.edits = [];
+    // (one joining late is sent the world's edits as they are: the craters made before it came)
+    if (this.tracking) s.edits = [...liveEdits.entries()].map(([tx, ty, node]) => ({ tx, ty, node, region: null }));
     this.sessions.add(s);
     return s;
   }
@@ -103,22 +104,31 @@ export class SimServer {
     this.disposers.push(liveEdits.listen((tx, ty, node, region) => { for (const s of this.sessions) s.edits?.push({ tx, ty, node, region }); }));
   }
 
-  /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first) */
-  update(dt: number) { this.sim.update(dt); }
+  /** the sim's update (the views sent, then the ticks due after dt s, each with the commands due first); the blasts'
+   * craters held as the edits are, then applied by the sim */
+  update(dt: number) {
+    this.sim.update(dt);
+    for (const { player, op } of this.sim.takeDamage()) this.hold(op, (release) => this.sim.damage(player, op, release));
+  }
+
+  // after the edits and craters held before: op's nodes held in the world's TileCache, then handed their release
+  private hold(op: WorldOp, then: (release: () => void) => void) {
+    let nodes: [number, number][] = [];
+    try { nodes = this.tiles.nodes(op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
+    const ready = nodes.length ? this.tiles.ready(nodes).catch(() => () => {}) : Promise.resolve(() => {});
+    this.held = this.held.then(() => ready).then(then);
+  }
 
   /** (Session.send) an edit held until its nodes are in (after the edits sent before it), then sent on to the sim for
    * its next tick; its outcome the session's (Session.edited), its nodes let go once it is applied. One the mode
    * refuses now (WorldSim.mayEdit) holds no nodes: the sim refuses it in its tick, its outcome the same way */
   holdEdit(from: Session, cmd: Edit) {
-    let nodes: [number, number][] = [];
-    if (this.sim.mayEdit(from.player, cmd.op)) {
-      try { nodes = this.tiles.nodes(cmd.op); } catch { /* (no world to edit: the sim refuses or fails it) */ }
-    }
-    const ready = nodes.length ? this.tiles.ready(nodes).catch(() => () => {}) : Promise.resolve(() => {});
-    this.held = this.held.then(() => ready).then((release) => {
+    const send = (release: () => void) => {
       if (!this.sessions.has(from)) { release(); return; }
       this.sim.send(from.player, cmd, (_tick, r) => { release(); if (r) from.edited(r); });
-    });
+    };
+    if (this.sim.mayEdit(from.player, cmd.op)) this.hold(cmd.op, send);
+    else this.held = this.held.then(() => send(() => {}));
   }
 
   /** f done on dispose (the host's listeners on the world) */

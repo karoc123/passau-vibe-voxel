@@ -40,7 +40,7 @@ import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { makeJumpButton } from './ui/jump';
-import { makeArmsHud, makeFireButton } from './ui/arms';
+import { makeArmsHud, makeFireButton, makeTouchArms } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
@@ -169,6 +169,7 @@ makeCredits();
 makeJumpButton(() => nav.jump());
 makeFireButton((down) => { nav.arms.trigger = down; });
 const armsHud = makeArmsHud();
+const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -458,7 +459,7 @@ renderer.setAnimationLoop(frameLoop({
   poses: (_now, dt) => {
     if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
     craftsView?.update(sim, dt, daylight.night);
-    weapons?.update(dt);
+    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
   cameras: (_now, dt) => {
@@ -473,6 +474,7 @@ renderer.setAnimationLoop(frameLoop({
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    touchArms.set(nav.aiming);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },
@@ -508,6 +510,7 @@ renderer.setAnimationLoop(frameLoop({
     if (autoRes?.done) autoRes = null;
     autoRes?.begin();
     post.composer.render();
+    if (nav.onFoot) weapons?.drawHeld(renderer, camera, nav.arms.slot, daylight.night);
     if (daylight.redraws + daylight.patches !== redraws) busy = true;
     autoRes?.end(now, { ready: !!city?.complete && city.settled && !!streamer?.idle && !stillDue && !document.hidden, disturbed: busy });
     busy = false;
