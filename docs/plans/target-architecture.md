@@ -6,6 +6,26 @@ Status: accepted by the owner (2026-11-26, section 6); steps 1 and 2 are being b
 Goal (owner): a Raspberry Pi 5 hosts 10–50 players (ADR 0008) on a map of several km² that keeps growing. Not
 measured now (no Pi); the design must make cost depend on players and what they see.
 
+## 0. The game (owner, 2026-11-26; a direction, not a spec)
+
+- **Round-based co-op survival shooter in a living city** (in the spirit of PUBG, Rust, DayZ). Fun for three first;
+  PvP between squads later, in the same structure.
+- **One server, one round:** 10–50 players in squads of about 3; a round lasts 30–45 min.
+- **A round:** squads are dropped scattered by paraglider, find each other, scavenge equipment, survive; missions on
+  the side. The end is open; a timed evacuation is the best idea so far. No rising flood.
+- **Threats:** armed hostile groups amid the city's normal life; civilians react simply (flee, can be hit).
+- **Combat:** firearms are the core; vehicles have seats with roles (pilot, gunner, passenger), e.g. a military
+  helicopter flown by one and fired from by another.
+- **Down, not out:** a hit player goes down and squadmates can revive them; a squad all down is out of the round.
+- **Vehicles stand in the world and are found;** spawning one on demand is a sandbox/debug tool only.
+- **Changes:** one edit mechanism, two targets. In a round, an overlay that dies with the round (destruction makes
+  holes; no structural collapse). In the creative mode (free movement), changes are written into the map; that is
+  how Passau will be maintained, the import pipeline then only makes new maps.
+- **Fun beats realism.** The phone stays a full client (touch, aim assist).
+- **Later ideas, not goals now:** a simple slot inventory, loot by building type (needs building function in the
+  data), enterable buildings (generated, then hand-built for key places).
+- **Now:** multiplayer must work (steps 1 and 2 below) before any of the above.
+
 ## 1. What the code does today (it differs from the assumption)
 
 The brief says the host simulates the whole city. The code does not:
