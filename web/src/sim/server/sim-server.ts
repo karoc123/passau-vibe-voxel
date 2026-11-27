@@ -11,7 +11,8 @@
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names
 //              one), and what the connection has read: the events (its last snapshot's tick), the outcomes of its
 //              player's commands (each taken once; its edits' its own), the seat events taken (craftEvents,
-//              driverNotes), its last seat input taken (ack), the world's edits' ops it was sent (EditFeed), what it was sent
+//              driverNotes), its seat inputs held for their ticks (InputBuffer) and the last taken (ack), the world's
+//              edits' ops it was sent (EditFeed), what it was sent
 //              (its sight: what is near its player). Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
 //              and drops the player from the world sim, unless the host holds the player for their coming back
@@ -36,6 +37,7 @@ import { sandbox } from '../modes/sandbox';
 import type { WorldSim } from '../world-sim';
 
 type Edit = Extract<SimCommand, { kind: 'edit' }>;
+type SeatInputCmd = Extract<SimCommand, { kind: 'seatInput' }>;
 
 /** the host's tiles for the edits (the port; by default the world's, core/world-edits.ts touched, ready): the level-1
  * nodes an op touches (throws: none known), and those nodes held in the world's TileCache, resolved once each is in
@@ -76,6 +78,8 @@ export class SimServer {
     private readonly tiles: EditTiles = WORLD_TILES) {
     sim.mode = mode;
     this.hello = hello(build, sim.tuning);
+    sim.beforeTick = (tick) => { for (const s of this.sessions) s.due(tick); };
+    this.disposers.push(() => { sim.beforeTick = null; });
   }
 
   /** a connection for player (the host names it: a client never does; without, a new id no session holds: p1, p2,
@@ -187,6 +191,7 @@ export class Session {
   // the seat events taken (craftEvents, driverNotes)
   private readonly reads = new SeatReads();
   private acked: Ack | null = null;
+  private readonly inputs = new InputBuffer();
   private readonly sight: Sight | null;
   // what it was sent of the traffic's cars and people (a snapshot carries what changed since)
   private readonly wire = new AgentWire();
@@ -205,14 +210,30 @@ export class Session {
   /** what the host tells this connection first (SimServer.hello): its client compares it with its own */
   get hello(): Hello { return this.server.hello; }
 
-  /** a command, the session's player's: to the world sim (a seat input's ack the session's), an edit once its nodes
-   * are in (SimServer.holdEdit; its outcome the session's). Whatever player a command claims (none on the wire), it
-   * is this session's that acts */
+  /** a command, the session's player's: to the world sim (a seat input's ack the session's; a driver's or pilot's
+   * stamped with its page tick held for the host's tick that falls on: InputBuffer), an edit once its nodes are in
+   * (SimServer.holdEdit; its outcome the session's). Whatever player a command claims (none on the wire), it is this
+   * session's that acts */
   send(cmd: SimCommand) {
     if (cmd.kind === 'edit') { this.server.holdEdit(this, cmd); return; }
     if (cmd.kind === 'name') { this.server.setName(this.player, cmd.name); return; }
+    // (a walker's pose is where the page has them, not a control to integrate: held, it would only come later)
+    if (cmd.kind === 'seatInput' && cmd.role !== 'walker' && cmd.seq !== undefined && Number.isInteger(cmd.tick)) {
+      this.inputs.add(cmd, this.sim.tick + 1);
+      return;
+    }
+    this.take(cmd);
+  }
+
+  private take(cmd: SimCommand) {
     const seq = cmd.kind === 'seatInput' ? cmd.seq : undefined;
     this.sim.send(this.player, cmd, seq === undefined ? undefined : (tick) => { this.acked = { seq, tick }; });
+  }
+
+  /** (SimServer, at the start of tick, before its commands) the seat input held for tick sent on */
+  due(tick: number) {
+    const c = this.inputs.due(tick);
+    if (c) this.take(c);
   }
 
   /** out: no more commands or reads (SimServer.disconnect; hold: the player kept for their coming back) */
@@ -265,6 +286,55 @@ export class Session {
     const n = this.server.namesSince(this.namesSeen);
     if (n) { s.names = n.names; this.namesSeen = n.seen; }
     return s;
+  }
+}
+
+// the ticks the latest arrival is watched over before the buffer is shortened (a second); the most inputs held
+const SHORTEN_TICKS = 30, HOLD_MAX = 120;
+
+/** a session's driver's or pilot's inputs held for the host tick each is meant for: its page tick + lead, lead being
+ * how far the host's ticks run ahead of the page's at the latest arrival. So each tick takes its own input whatever
+ * the network bunched: one that arrives after its tick moves the timeline (lead raised: it and those after on time);
+ * a tick none is held for keeps the last (the seat holds it); several for one tick, the newest. Arriving early by two
+ * ticks or more for a whole second, the lead is shortened by half that (some page ticks' inputs folded into one), so
+ * one spike's delay does not stay */
+class InputBuffer {
+  private held: { p: number; cmd: SeatInputCmd }[] = [];
+  private lead: number | null = null;
+  // the latest arrival this second (the largest next tick - page tick seen), the page tick last taken
+  private latest = -Infinity;
+  private taken = -Infinity;
+
+  /** cmd (stamped with its page tick) arrived before the host's tick next */
+  add(cmd: SeatInputCmd, next: number) {
+    const p = cmd.tick!, a = next - p;
+    this.latest = Math.max(this.latest, a);
+    if (this.lead === null || a > this.lead) this.lead = a;
+    // (one for a page tick before the one last taken comes too late; one for that same tick, after it, is taken in
+    // the next tick: the page stepped that tick again with it)
+    if (p < this.taken) return;
+    const H = this.held;
+    let i = H.length;
+    while (i > 0 && H[i - 1].p > p) i--;
+    if (i > 0 && H[i - 1].p === p) H[i - 1] = { p, cmd };
+    else H.splice(i, 0, { p, cmd });
+    if (H.length > HOLD_MAX) H.shift();
+  }
+
+  /** the input for the host's tick (the newest held for its page tick or before), or null: the last one stays */
+  due(tick: number): SeatInputCmd | null {
+    if (this.lead === null) return null;
+    if (tick % SHORTEN_TICKS === 0) {
+      const early = this.lead - this.latest;
+      if (early >= 2 && Number.isFinite(early)) this.lead -= Math.floor(early / 2);
+      this.latest = -Infinity;
+    }
+    const H = this.held, p = tick - this.lead;
+    let out: { p: number; cmd: SeatInputCmd } | null = null;
+    while (H.length && H[0].p <= p) out = H.shift()!;
+    if (!out) return null;
+    this.taken = out.p;
+    return out.cmd;
   }
 }
 

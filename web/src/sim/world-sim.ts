@@ -105,6 +105,9 @@ export class WorldSim {
   // the commands sent, applied at the start of the next tick; their outcomes of the last EVENT_TICKS ticks (at: the
   // tick that produced it, as an event's tick)
   private queue: Queued[] = [];
+  /** called at each tick's start with that tick, before its commands are taken: the host sends then what it held
+   * for it (sim/server/sim-server.ts, the seat inputs by tick) */
+  beforeTick: ((tick: number) => void) | null = null;
   // the views sent since the last update, by player (the latest: taken at the update's start)
   private views = new Map<PlayerId, View | null>();
   // the world's time of day and day of the year (setTime)
@@ -310,6 +313,7 @@ export class WorldSim {
   private runTick(traffic: () => void) {
     const T = this.traffic, t0 = this.tick;
     this.clock = (t0 + 1) * STEP;
+    this.beforeTick?.(t0 + 1);
     const q = this.queue;
     this.queue = [];
     for (const P of this.players.values()) if (P.walk) P.walk.prev = P.walk.pose;

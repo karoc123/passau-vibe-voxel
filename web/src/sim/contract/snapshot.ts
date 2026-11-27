@@ -28,8 +28,8 @@ export type AvatarWire = Omit<AvatarState, 'prev'> & { prev?: WalkPose };
  * files again */
 export interface EditNote { tx: number; ty: number; from: number; ops: WorldOp[] | null }
 
-/** the last seat input a session sent that its player's seat took: its seq (the client's number), the tick it was
- * first applied in */
+/** the last seat input a session sent that its player's seat took: its seq (the client's number), the host's tick it
+ * was first applied in (less the input's page tick: how far the host's timeline runs behind the page's) */
 export interface Ack { seq: number; tick: number }
 
 /** how long (ms) a driver's car sinks, is shaken by a crash, falls before it is reset (physics/rapier/player-car.ts) */

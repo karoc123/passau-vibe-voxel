@@ -4,8 +4,9 @@
 // inputs they had (rewind and replay). What then differs from what was drawn a moment before is blended out; a
 // difference too big to blend (a reset, a crash, a craft met) is shown at once.
 // Which tick of the page's a snapshot's tick is: an input's seq was sent in the page's tick p and first applied in the
-// host's tick ta (the ack), so the host runs ta - p ticks behind; the least of that over the last seconds, so a late
-// packet does not move the page's timeline (it only makes the host use an input a tick later, a correction).
+// host's tick ta (the ack), so the host runs ta - p ticks behind. The host holds each input for its tick (sim-server.ts
+// Session), so that number changes only when the host moves its timeline (a packet later than any before it): the
+// newest ack's is taken.
 // No three.js, no DOM.
 import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
 import type { CraftId, CraftType } from '../sim/contract/ids';
@@ -18,8 +19,8 @@ import { STEP } from '../sim/road-net';
 
 // a correction is blended out over BLEND_S s; beyond SNAP m (or TURN rad) it is shown at once
 const BLEND_S = 0.25, SNAP = 4, TURN = 0.6;
-// the most ticks run ahead of the newest snapshot (a ping of 2 s); the seconds the host's lag is the least of
-const AHEAD = 60, WINDOW = 2;
+// the most ticks run ahead of the newest snapshot (a ping of 2 s)
+const AHEAD = 60;
 
 interface Tick { p: number; seq: number; input: PilotInput; key: string; before: unknown }
 
@@ -29,12 +30,12 @@ export class Prediction {
   private id: CraftId | null = null;
   private col: VoxelCollision | null = null;
   private readonly ticks: Tick[] = [];
-  // the page's tick in progress, and the time since it began
+  // the page's tick last run, and the time since the one in progress began (the client's clock)
   private p = 0;
   private acc = 0;
-  private clock = 0;
   private readonly sent: [seq: number, p: number][] = [];
-  private readonly lags: [at: number, lag: number][] = [];
+  // the host's tick less the page's (null: not known yet)
+  private lag: number | null = null;
   private input: { seq: number; input: PilotInput } | null = null;
   private seen = -1;
   private acked = -1;
@@ -49,23 +50,23 @@ export class Prediction {
   /** how far into its tick in progress the craft is drawn */
   get alpha() { return this.acc / STEP; }
 
-  /** a pilot's input sent (stamped) */
-  sentInput(seq: number, input: PilotInput) {
+  /** a pilot's input sent (stamped for the page's tick p) */
+  sentInput(seq: number, input: PilotInput, p: number) {
     this.input = { seq, input };
-    this.sent.push([seq, this.p]);
+    this.sent.push([seq, p]);
     if (this.sent.length > 4 * AHEAD) this.sent.splice(0, this.sent.length - 4 * AHEAD);
   }
 
-  /** a frame: the craft piloted (none: let go) and the newest snapshot's word on it (its tick, its state, the ack) */
-  update(dt: number, craft: { id: CraftId; type: CraftType; placed: boolean } | null, tick: number, state: CraftState | null, ack: Ack | null) {
+  /** a frame: the page's clock (its tick in progress, the time into it), the craft piloted (none: let go) and the
+   * newest snapshot's word on it (its tick, its state, the ack) */
+  update(dt: number, page: number, acc: number, craft: { id: CraftId; type: CraftType; placed: boolean } | null, tick: number, state: CraftState | null, ack: Ack | null) {
     // (one not put down is not stepped by the host either)
     if (!craft?.placed || !state || state.id !== craft.id) { this.drop(); return; }
-    this.clock += dt;
     for (const e of this.errs) e.since += dt;
     if (this.errs.length && this.errs[0].since >= BLEND_S) this.errs = this.errs.filter((e) => e.since < BLEND_S);
     // (a new session counts its ticks anew)
-    if (tick < this.seen) { this.lags.length = 0; this.seen = -1; }
-    if (craft.id !== this.id || !this.core) { this.open(craft.id, craft.type, state, tick); return; }
+    if (tick < this.seen) { this.lag = null; this.seen = -1; }
+    if (craft.id !== this.id || !this.core) { this.open(craft.id, craft.type, state, tick, page, acc); return; }
     const core = this.core, last = this.ticks[this.ticks.length - 1], now = this.input;
     // (the input changed in the tick in progress: that tick stepped again with it, so it shows this frame)
     if (last && now && now.seq !== last.seq) {
@@ -73,9 +74,8 @@ export class Prediction {
       if (key !== last.key) { core.load(last.before as never); this.run(last, now.input, key); }
       last.seq = now.seq;
     }
-    this.acc += dt;
-    while (this.acc >= STEP) {
-      this.acc -= STEP;
+    this.acc = acc;
+    while (this.p < page) {
       this.p++;
       const t: Tick = { p: this.p, seq: now?.seq ?? 0, input: now ? now.input : core.neutral as PilotInput, key: '', before: null };
       this.run(t, t.input, JSON.stringify(t.input));
@@ -101,16 +101,13 @@ export class Prediction {
   // the newest snapshot's state taken for its tick and the page's ticks after it stepped again
   private take(tick: number, state: CraftState, ack: Ack | null) {
     this.seen = tick;
-    const core = this.core!, L = this.lags;
+    const core = this.core!;
     const sent = ack && ack.seq !== this.acked ? this.sent.find(([seq]) => seq === ack.seq) : undefined;
-    if (sent) { this.acked = ack!.seq; L.push([this.clock, ack!.tick - sent[1]]); }
-    while (L.length > 1 && L[0][0] < this.clock - WINDOW) L.shift();
+    if (sent) { this.acked = ack!.seq; this.lag = ack!.tick - sent[1]; }
     const shown = copy(core.drawn(this.alpha) as Leaf);
     core.load(state.core as never);
-    let lag = Infinity;
-    for (const [, l] of L) lag = Math.min(lag, l);
     // (the page's tick the snapshot's is; not known yet: none run ahead)
-    const at = lag === Infinity ? Infinity : tick - lag, T = this.ticks;
+    const at = this.lag === null ? Infinity : tick - this.lag, T = this.ticks;
     let i = 0;
     while (i < T.length && T[i].p <= at) i++;
     T.splice(0, i);
@@ -121,8 +118,10 @@ export class Prediction {
     else if (most(e) > 1e-4) this.errs.push({ e, since: 0 });
   }
 
-  private open(id: CraftId, type: CraftType, state: CraftState, tick: number) {
+  private open(id: CraftId, type: CraftType, state: CraftState, tick: number, page: number, acc: number) {
     this.drop();
+    this.p = page;
+    this.acc = acc;
     const core = this.core = CORES[type](DEFAULT_TUNING) as CraftCore;
     this.id = id;
     this.col = new VoxelCollision(this.world.meta, this.world.cache, this.world.now, core.reach);

@@ -5,7 +5,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Step 8** of target-architecture.md; the car's prediction waits for the owner (FRAGEN 17).
-- With steps 1–2: input commands by tick with ack and buffer (M5).
 
 - Overload (target-architecture.md): all three steps built (host/overload.ts), but the third cuts a whole session's
   snapshots to every second tick (not for a player in a vehicle or firing), not the others' agents inside one: that

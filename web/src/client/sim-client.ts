@@ -8,8 +8,9 @@
 // never show as a stop and a jump. What the player must learn at once (seat, results, events, edits, the time of day)
 // is read from the newest snapshot as it arrives; what is drawn (agents, bodies, the crafts' poses) from the one the
 // render clock is in, but the player's own craft where the client predicts it (run ahead from the player's input,
-// predict.ts). A seat input gets its seq and the tick it is meant for (the tick seen + 1); the session answers
-// with ack (the last one taken).
+// predict.ts). A seat input gets its seq and the page's tick it is meant for (the page's own 30 Hz clock: its frames'
+// time); the host holds it for the tick that page tick falls on there, so the ticks' inputs keep their spacing however
+// the network bunches them, and the session answers with ack (the last one taken, and the host's tick it took it in).
 // The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
 // differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
 // A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
@@ -116,12 +117,12 @@ export interface SimClient {
   setName(name: string): void;
 }
 
-/** a client's seat inputs' numbers: each one sent gets the next seq and the tick it is meant for */
+/** a client's seat inputs' numbers: each one sent gets the next seq and the page's tick it is meant for */
 class Seqs {
   private last = 0;
   stamp(cmd: SimCommand, tick: number): SimCommand {
     if (cmd.kind !== 'seatInput') return cmd;
-    return { ...cmd, seq: ++this.last, tick: tick + 1 };
+    return { ...cmd, seq: ++this.last, tick };
   }
 }
 
@@ -219,6 +220,10 @@ export class MirrorSimClient implements SimClient {
   private readonly seqs = new Seqs();
   private last: Snapshot & { player: PlayerReads } | null = null;
   private dt = 0;
+  // the page's tick in progress and the time into it (s): its frames' time in ticks, never reset (a new session's host
+  // learns its offset afresh)
+  private page = 0;
+  private pageAcc = 0;
   // the snapshots not yet drawn past, oldest first (one per tick); the one drawn and how far into its tick; the render
   // clock (ticks; null until the first snapshot); the frames' own clock (s) and the leads seen on it
   private readonly buffer: Taken[] = [];
@@ -309,8 +314,8 @@ export class MirrorSimClient implements SimClient {
 
   send(cmd: SimCommand) {
     if (this.refused) return;
-    const c = this.seqs.stamp(cmd, this.tick);
-    if (c.kind === 'seatInput' && c.role === 'pilot') this.prediction?.sentInput(c.seq!, c.input);
+    const c = this.seqs.stamp(cmd, this.page);
+    if (c.kind === 'seatInput' && c.role === 'pilot') this.prediction?.sentInput(c.seq!, c.input, this.page);
     this.queue.push(c);
   }
 
@@ -337,11 +342,13 @@ export class MirrorSimClient implements SimClient {
     this.queue = [];
     if (q.length) this.link.send(q);
     this.dt = Math.min(dt, 0.1);
+    this.pageAcc += this.dt;
+    while (this.pageAcc >= STEP) { this.pageAcc -= STEP; this.page++; }
     this.advance(this.dt);
     const P = this.prediction, s = this.last;
     if (P) {
       const c = this.craftOf(true);
-      P.update(this.dt, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack());
+      P.update(this.dt, this.page, this.pageAcc, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack());
     }
   }
 
