@@ -27,6 +27,10 @@ import { AVATAR_SHAPE, carShape, COACH_SHAPE, craftSolids, solidAt, vesselShape,
 // they were placed
 const FAR_R = 1500;
 const HEADS_MOVE = 120;
+// a far road's cars left out where the camera cannot see them, the view widened by VIEW_SLACK of the distance (~9°:
+// the camera is last frame's and turns on before this one is drawn; a car's shadow reaching in at a low sun): on a
+// phone the far traffic was most of the street life's time, and most of it behind or beside the view
+const VIEW_SLACK = 0.15;
 // people knocked down by a driven car (WorldSim's events: struck) are thrown: off at THROW of the car's speed along it and
 // LIFT of it upwards, their middle (MID m up the body) on a ballistic arc, turning over backwards to lie flat (their
 // middle LIE m up) as they come down, keeping LAND_KEEP of their speed on landing and sliding to a stop at SLIDE m/s^2.
@@ -68,6 +72,11 @@ export class StreetLife {
   // the signal heads drawn (their indices)
   private headAct: number[] = [];
   private viewer: { x: number; z: number; y?: number } = { x: 0, z: 0 };
+  private readonly view = new THREE.Frustum();
+  private readonly viewMat = new THREE.Matrix4();
+  private readonly viewAt = new THREE.Vector3();
+  // the far traffic drawn only within view (the camera this frame was given), else all round
+  private viewOn = false;
   private readonly cols = new Map<string, THREE.Color>();
   // the agents as drawn, by id: the cars (in the traffic and out of it), the people (on foot and riders)
   private readonly drawnCars = new Map<number, Drawn>();
@@ -98,8 +107,9 @@ export class StreetLife {
   private get riders() { return this.traffic.riders; }
 
   // the sim as it is after its update this frame (WorldSim.update; its events since the last drawn), drawn; viewer:
-  // where it is seen from (the camera), what the people knocked down are gone far from
-  update(dt: number, night: number, viewer: { x: number; z: number; y?: number }) {
+  // where it is seen from (the camera), what the people knocked down are gone far from; camera: what it sees (the far
+  // traffic only drawn there), none: all round
+  update(dt: number, night: number, viewer: { x: number; z: number; y?: number }, camera?: THREE.Camera) {
     const T = this.traffic, events = this.client.eventsSince(this.seen);
     this.seen = this.client.tick;
     if (T.boats && !this.boats) {
@@ -107,6 +117,12 @@ export class StreetLife {
       this.group.add(this.boats.group);
     }
     this.viewer = { x: viewer.x, z: viewer.z, y: viewer.y };
+    this.viewOn = !!camera;
+    if (camera) {
+      camera.updateMatrixWorld();
+      this.view.setFromProjectionMatrix(this.viewMat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      this.viewAt.setFromMatrixPosition(camera.matrixWorld);
+    }
     const H = this.headsFor;
     if (!H || (H.x - viewer.x) ** 2 + (H.z - viewer.z) ** 2 > HEADS_MOVE * HEADS_MOVE) this.placeHeads({ x: viewer.x, z: viewer.z });
     for (const e of events) {
@@ -140,6 +156,14 @@ export class StreetLife {
     this.M.poles(this.heads, this.headAct);
     this.headsFor = A;
   }
+
+  // whether a sphere (centre x, y, z, radius r) is within the view widened by VIEW_SLACK
+  private readonly inView = (x: number, y: number, z: number, r: number) => {
+    const c = this.viewPt.set(x, y, z), s = -(r + VIEW_SLACK * c.distanceTo(this.viewAt));
+    for (const p of this.view.planes) if (p.distanceToPoint(c) < s) return false;
+    return true;
+  };
+  private readonly viewPt = new THREE.Vector3();
 
   private far(x: number, y: number, z: number, r: number) { return farFrom(this.viewer, x, y, z, r); }
 
@@ -241,7 +265,7 @@ export class StreetLife {
       V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
       V.body.setColorAt(i, this.col(f.col));
       V.tail.setColorAt(i, tail.copy(tailOff).multiplyScalar(0.4 + 1.2 * night));
-    });
+    }, this.viewOn ? this.inView : undefined);
     for (const id of VEHICLE_IDS) {
       const V = M.vehicles[id], O = M.open[id];
       setCount(n[id], V.body, V.dark, V.head, V.tail);

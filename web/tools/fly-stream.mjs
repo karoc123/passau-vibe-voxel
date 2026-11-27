@@ -9,7 +9,8 @@
 // few seconds at speed (a coarse node's tiles' occluders all built in one update); then a frame over 50 ms about every
 // 2.5 s held up by the stream (a coarse node's pages' lamp light painted and its occluders built in the update they
 // came); and no ground missing ahead. Frames over 50 ms the stream did not cause (the town's life, the throttled
-// CPU shared with the host) are left out: they vary with the machine's load.
+// CPU shared with the host) are left out: they vary with the machine's load. The street life's own work per frame was
+// ~7 ms of a ~16 ms frame (the far traffic posed all round, behind the camera too).
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,7 +77,9 @@ try {
     };
     const D = []; for (let d = -128; d <= 1536; d += 32) D.push(d);
     // the page's time in the stream's update and in taking the workers' meshes, per frame
-    const acc = { u: 0, r: 0 }, u0 = S.update, r0 = S.onReply.bind(S);
+    // and in the street life's (view/life.ts; it is drawn once the city is complete)
+    const acc = { u: 0, r: 0, l: 0, ln: 0 }, u0 = S.update, r0 = S.onReply.bind(S), L = window.__life, l0 = L?.update.bind(L);
+    if (L) L.update = (...a) => { const t = performance.now(); l0(...a); acc.l += performance.now() - t; acc.ln++; };
     S.update = (c) => { const t = performance.now(); u0(c); acc.u += performance.now() - t; };
     S.onReply = (m, p) => { const t = performance.now(); r0(m, p); acc.r += performance.now() - t; };
     const loop = () => {
@@ -84,8 +87,8 @@ try {
       if (c?.core?.flight) {
         const f = c.core.flight, p = f.p, h = f.heading ?? Math.PI / 2, dx = Math.sin(h), dz = Math.cos(h);
         out.push({ t: performance.now(), x: p.x, y: p.y, z: p.z, v: f.v, st: f.state, lv: D.map((d) => lvl(p.x + dx * d, p.z + dz * d)),
-          q: S.queue.length, inf: S.inflight, pend: city.lod.pending, u: acc.u, r: acc.r });
-        acc.u = acc.r = 0;
+          q: S.queue.length, inf: S.inflight, pend: city.lod.pending, u: acc.u, r: acc.r, l: acc.ln ? acc.l : -1 });
+        acc.u = acc.r = acc.l = acc.ln = 0;
       }
       if (!window.__flyStop) requestAnimationFrame(loop);
     };
@@ -139,6 +142,8 @@ for (let i = 1; i < n; i++) {
 const long = []; for (let i = 1; i < n; i++) { const dt = out[i].t - out[i - 1].t; if (dt > 50) long.push([dt, out[i].u + out[i].r]); }
 const fr = out.slice(1).map((s, i) => s.t - out[i].t).sort((a, b) => a - b), us = out.map((s) => s.u + s.r).sort((a, b) => a - b);
 console.log(`frames: median ${fr[n >> 1].toFixed(1)} ms, p99 ${fr[Math.floor(n * 0.99)].toFixed(0)}, max ${fr.at(-1).toFixed(0)}, ${long.length} over 50 ms (${(long.length / dur * 60).toFixed(0)} a minute; of them the stream's work over half: ${long.filter(([a, b]) => b > a / 2).length}); the stream's work per frame median ${us[n >> 1].toFixed(2)} ms, p99 ${us[Math.floor(n * 0.99)].toFixed(1)}, max ${us.at(-1).toFixed(0)}`);
+const lifeMs = out.filter((s) => s.l >= 0).map((s) => s.l).sort((a, b) => a - b), lifeMed = lifeMs.length ? lifeMs[lifeMs.length >> 1] : -1;
+console.log(`the street life's work per frame it is drawn in (${lifeMs.length}): median ${lifeMed.toFixed(2)} ms, p99 ${(lifeMs[Math.floor(lifeMs.length * 0.99)] ?? -1).toFixed(1)}`);
 console.log(`stalls > 0.1 s: ${still}, longest ${worst.toFixed(2)} s`);
 const pct = (k) => (100 * k / n).toFixed(1) + '%';
 const under = (pred, lo, hi) => out.filter((s) => s.lv.slice(D.indexOf(lo), D.indexOf(hi) + 1).some(pred)).length;
@@ -163,6 +168,8 @@ const checks = [
   [`no stall over 0.15 s (longest ${worst.toFixed(2)} s)`, worst <= 0.15],
   [`the stream's work in no frame over 150 ms (max ${longStream.toFixed(0)})`, longStream <= 150],
   [`frames over 50 ms with the stream's work over half: at most 12 a minute (${perMin.toFixed(0)})`, perMin <= 12],
+  // (against the frame, as the machine's load slows both alike: the far traffic drawn all round was ~45%, in view ~28%)
+  [`the street life's work in a frame at most 38% of a frame (median ${lifeMed.toFixed(1)} of ${fr[n >> 1].toFixed(1)} ms)`, lifeMed >= 0 && lifeMed <= 0.38 * fr[n >> 1]],
   [`no ground missing within 512 m ahead (${holes} frames)`, holes === 0],
   [`no page errors (${pageErrors})`, pageErrors === 0],
 ];
