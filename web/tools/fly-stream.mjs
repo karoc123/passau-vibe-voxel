@@ -8,9 +8,10 @@
 // The gate (fly-stream, --phone --secs 30) guards what a player notices: before, a phone froze for 0.2 to 0.4 s every
 // few seconds at speed (a coarse node's tiles' occluders all built in one update); then a frame over 50 ms about every
 // 2.5 s held up by the stream (a coarse node's pages' lamp light painted and its occluders built in the update they
-// came); and no ground missing ahead. Frames over 50 ms the stream did not cause (the town's life, the throttled
-// CPU shared with the host) are left out: they vary with the machine's load. The street life's own work per frame was
-// ~7 ms of a ~16 ms frame (the far traffic posed all round, behind the camera too).
+// came); no ground missing ahead; and the full detail popping in close (the 1 m tiles ended ~192 m ahead, 2 m beyond).
+// Frames over 50 ms the stream did not cause (the town's life, the throttled CPU shared with the host) are left out:
+// they vary with the machine's load. The street life's own work per frame was ~7 ms of a ~16 ms frame (the far
+// traffic posed all round, behind the camera too).
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -157,6 +158,7 @@ for (const [name, pred] of [['1 m', (l) => l === 1 || l === -1], ['<= 2 m', (l) 
   const r = reach(pred);
   console.log(`  ${name} unbroken ahead: min ${r[0]}, p5 ${q(r, 0.05)}, median ${q(r, 0.5)} m`);
 }
+const reach1 = reach((l) => l === 1 || l === -1);
 const qs = out.map((s) => s.q).sort((a, b) => a - b);
 console.log(`  stream queue: median ${q(qs, 0.5)}, p95 ${q(qs, 0.95)}, max ${qs.at(-1)}; chosen not shown: median ${q(out.map((s) => s.pend).sort((a, b) => a - b), 0.5)}`);
 
@@ -171,6 +173,8 @@ const checks = [
   // (against the frame, as the machine's load slows both alike: the far traffic drawn all round was ~45%, in view ~28%)
   [`the street life's work in a frame at most 38% of a frame (median ${lifeMed.toFixed(1)} of ${fr[n >> 1].toFixed(1)} ms)`, lifeMed >= 0 && lifeMed <= 0.38 * fr[n >> 1]],
   [`no ground missing within 512 m ahead (${holes} frames)`, holes === 0],
+  // (the full detail popping in close ahead: a phone's budget was spent around the camera, half of it behind, ~192 m)
+  [`the 1 m tiles unbroken ahead: median at least 256 m, p5 at least 96 m (${q(reach1, 0.5)}, ${q(reach1, 0.05)})`, q(reach1, 0.5) >= 256 && q(reach1, 0.05) >= 96],
   [`no page errors (${pageErrors})`, pageErrors === 0],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);

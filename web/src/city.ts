@@ -244,6 +244,23 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
   // splits as if OUT_FAR times as far -- not one split last time (finer): turned away from, a node stays as fine as it
   // is, its tiles not freed only to be loaded again on turning back
   const OUT_M = 400, OUT_FAR = 2;
+  // A moving camera's splits are ordered by where it will be in LEAD_S s (its speed over the ground, smoothed over the
+  // updates), not where it is: a phone's budget held 1 m only ~200 m ahead of a floatplane at 240 km/h, half of it
+  // spent behind, which only goes further away. A jump over JUMP_MS (a teleport, a flyTo) is no speed
+  const LEAD_S = 2, LEAD_MAX = 300, JUMP_MS = 400;
+  const vel = new THREE.Vector2(), lead = new THREE.Vector2(), eyeWas = new THREE.Vector3();
+  let eyeAt = 0;
+  const track = () => {
+    const now = performance.now(), dt = (now - eyeAt) / 1000;
+    eyeAt = now;
+    if (dt > 0 && dt < 1) {
+      const vx = (eye.x - eyeWas.x) / dt, vz = (eye.z - eyeWas.z) / dt;
+      if (Math.hypot(vx, vz) > JUMP_MS) vel.set(0, 0); else vel.lerp(new THREE.Vector2(vx, vz), 0.3);
+    } else vel.set(0, 0);
+    eyeWas.copy(eye);
+    lead.copy(vel).multiplyScalar(LEAD_S);
+    if (lead.length() > LEAD_MAX) lead.setLength(LEAD_MAX);
+  };
   let lodOn = false, pxCoarse = 1.2, pxFine = 1.5, lodMin = 1;
   const setLod = (l: { mode: Lod; px: number }) => {
     lodOn = lods.length > 1 && l.mode !== 'off';
@@ -325,6 +342,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     const add = (n: LNode) => { chosen.set(n.key, n); };
     if (!lodOn) { for (const i of rangeList) add(lnode(1, i % d.nx, Math.floor(i / d.nx))); return; }
     eye.setFromMatrixPosition(camera.matrixWorld);
+    track();
+    const ex = eye.x + lead.x, ez = eye.z + lead.y;
     const cam = camera as THREE.PerspectiveCamera;
     const focal = pixelsHigh() / 2 / Math.tan((cam.fov * Math.PI) / 360) * (cam.zoom || 1);
     const next = new Set<string>(), B = budget();
@@ -336,7 +355,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
       sum += cost(n);
       if (k === 0 || n.s <= lodMin) { add(n); return; }
       const dist = Math.hypot(Math.max(n.x0 * T - eye.x, 0, eye.x - n.x1 * T), Math.max(-eye.y, 0, eye.y - meta.H), Math.max(n.y0 * T - eye.z, 0, eye.z - n.y1 * T));
-      const was = finer.has(n.key), px = (focal * lods[k - 1]) / Math.max(dist, 1), inView = nodeSeen(n);
+      const ahead = Math.hypot(Math.max(n.x0 * T - ex, 0, ex - n.x1 * T), Math.max(-eye.y, 0, eye.y - meta.H), Math.max(n.y0 * T - ez, 0, ez - n.y1 * T));
+      const was = finer.has(n.key), px = (focal * lods[k - 1]) / Math.max(ahead, 1), inView = nodeSeen(n);
       const w = px * (was ? 1.25 : 1) * (inView ? 1 : 0.5);
       const floor = n.s > FLOOR_S && dist <= FLOOR_M;
       const pxSplit = !was && !inView && dist > OUT_M ? px / OUT_FAR : px;
