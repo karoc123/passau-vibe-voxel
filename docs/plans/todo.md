@@ -33,9 +33,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
 - Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
-## Owner's next (2026-11-27)
-
-
 ## Pipeline and city
 
 - The buildings' looks before landmark work (the painted windows land on broken blocks and do not carry walkable,
