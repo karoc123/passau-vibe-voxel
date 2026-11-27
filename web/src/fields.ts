@@ -59,6 +59,8 @@ export class FieldPages {
   private readonly free: number[] = [];
   private readonly slot = new Map<string, { slot: number; s: number; tx: number; ty: number }>();
   private readonly dirty = new Set<number>();
+  // the pages shown whose lamp light is not painted yet
+  private readonly dark = new Set<string>();
   private idxDirty = false;
   private grown = false;
   // the most layers the GPU takes
@@ -96,9 +98,15 @@ export class FieldPages {
     // the page into its quarter of the layer, row by row
     for (let r = 0; r < N; r++) this.f.set(fields.cell.subarray(r * N * 4, (r + 1) * N * 4), layer * F_LAYER + ((qy * N + r) * F_W + qx * N) * 4);
     for (let r = 0; r < M; r++) this.s.set(fields.spill.subarray(r * M * 2, (r + 1) * M * 2), layer * S_LAYER + ((qy * M + r) * S_W + qx * M) * 2);
-    this.paint(k, s, tx, ty);
-    this.dirty.add(layer);
     this.slot.set(key, { slot: k, s, tx, ty });
+    // (a coarser page's lamp light in flush, within its budget: dark until then, not a page's light it held before)
+    if (s === 1) this.paint(k, s, tx, ty);
+    else {
+      const o = layer * L_LAYER + ((qy * L) * L_W + qx * L) * 4;
+      for (let r = 0; r < L; r++) this.l.fill(0, o + r * L_W * 4, o + r * L_W * 4 + L * 4);
+      this.dark.add(key);
+    }
+    this.dirty.add(layer);
     this.mark(s, tx, ty, k);
   }
 
@@ -111,6 +119,7 @@ export class FieldPages {
     const p = this.slot.get(key);
     if (!p) return;
     this.slot.delete(key);
+    this.dark.delete(key);
     this.free.push(p.slot);
     this.mark(p.s, p.tx, p.ty, p.slot, true);
   }
@@ -126,12 +135,23 @@ export class FieldPages {
     this.idxDirty = true;
   }
 
-  // the changes to the GPU (before the frame is drawn)
-  flush() {
-    // (lamps added: every page shown drawn again)
+  // the changes to the GPU (before the frame is drawn); ms: the most time for painting the lamp light of the coarser
+  // pages shown (finest first, at least one; a 1 m page's always, near the player, where its light missing would show
+  // at night). Painting a phone's pages all in the update they showed held up one frame in a second over 50 ms at speed
+  flush(ms = Infinity) {
+    // (lamps added: every page shown drawn again, its old light kept until then)
     if (this.lamps && this.lamps.version !== this.lampsAt) {
-      if (this.lampsAt >= 0) for (const p of this.slot.values()) { this.paint(p.slot, p.s, p.tx, p.ty); this.dirty.add(p.slot >> 2); }
+      if (this.lampsAt >= 0) for (const k of this.slot.keys()) this.dark.add(k);
       this.lampsAt = this.lamps.version;
+    }
+    if (this.dark.size) {
+      const t0 = performance.now(), todo = [...this.dark].map((k) => [k, this.slot.get(k)!] as const).sort((a, b) => a[1].s - b[1].s);
+      for (const [i, [k, p]] of todo.entries()) {
+        if (p.s > 1 && i > 0 && performance.now() - t0 > ms) break;
+        this.paint(p.slot, p.s, p.tx, p.ty);
+        this.dirty.add(p.slot >> 2);
+        this.dark.delete(k);
+      }
     }
     if (this.idxDirty) { this.idxTex.needsUpdate = true; this.idxDirty = false; }
     if (this.grown) {

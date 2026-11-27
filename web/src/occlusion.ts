@@ -46,6 +46,8 @@ export class Occlusion {
   private gx0 = 0; private gy0 = 0; private gw = 0; private gh = 0;
   private gridDirty = false;
   private readonly colH: Uint8Array;
+  // per source of the tile being built: its cells' column heights
+  private readonly cellH: Int16Array[] = [];
   // per frame
   private readonly key = new Float64Array(32);
   private built = false;
@@ -105,14 +107,29 @@ export class Occlusion {
   private pyramid(o0: number, tx: number, ty: number, sources: ColumnData[], rooms: boolean) {
     const T = this.T, x0 = tx * T, y0 = ty * T, S = T + 2, colH = this.colH;
     const P = this.pool.subarray(o0, o0 + PYR);
-    // the tile's columns and one all round (from the sources' aprons)
+    // the tile's columns and one all round (from the sources' aprons). Each source's column heights once per cell of
+    // it (-1: outside its data), not once per metre: a coarse level's cell under all of its s^2 metres made a tile from
+    // four levels cost a phone ~10 ms
+    const cells = sources.map((d, k) => {
+      const cx0 = Math.floor((x0 - 1 - d.x0) / d.s) + 1, cy0 = Math.floor((y0 - 1 - d.y0) / d.s) + 1;
+      const w = Math.floor((x0 + T - d.x0) / d.s) + 2 - cx0, h = Math.floor((y0 + T - d.y0) / d.s) + 2 - cy0;
+      if ((this.cellH[k]?.length ?? 0) < w * h) this.cellH[k] = new Int16Array(w * h);
+      const a = this.cellH[k];
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+        const cx = cx0 + i, cy = cy0 + j;
+        a[j * w + i] = cx < 0 || cy < 0 || cx >= d.S || cy >= d.S ? -1 : this.column(d, cx + d.S * cy, rooms);
+      }
+      // (per column and row of the tile, its cell's place in a)
+      const ci = new Int32Array(S), ri = new Int32Array(S);
+      for (let c = 0; c < S; c++) { ci[c] = Math.floor((x0 + c - 1 - d.x0) / d.s) + 1 - cx0; ri[c] = (Math.floor((y0 + c - 1 - d.y0) / d.s) + 1 - cy0) * w; }
+      return { a, ci, ri };
+    });
     for (let r = 0; r < S; r++) for (let c = 0; c < S; c++) {
-      const X = x0 + c - 1, Y = y0 + r - 1;
       let h = 255;
-      for (const d of sources) {
-        const cx = Math.floor((X - d.x0) / d.s) + 1, cy = Math.floor((Y - d.y0) / d.s) + 1;
-        if (cx < 0 || cy < 0 || cx >= d.S || cy >= d.S) { h = 0; break; }
-        h = Math.min(h, this.column(d, cx + d.S * cy, rooms));
+      for (let k = 0; k < cells.length; k++) {
+        const q = cells[k], v = q.a[q.ri[r] + q.ci[c]];
+        if (v < 0) { h = 0; break; }
+        if (v < h) h = v;
       }
       colH[r * S + c] = h === 255 ? 0 : h;
     }

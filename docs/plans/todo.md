@@ -66,6 +66,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Prediction: a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never has (a
   crash a car moved out of) stays told.
 - Floatplane at 240 km/h low over the city (tools/fly-stream.mjs): no ground missing, queue empty, the host's collision
-  tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond), and ~1 frame/s over
-  50 ms, up to ~70 ms, half of them the stream's taking in meshes (pages.show). Not measured: the GPU's uploads, the
-  workers on a slow CPU (CDP throttles only the main thread).
+  tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond); ~35 frames a
+  minute over 50 ms (up to ~80 ms), now mostly the town's life (life.ts farCars ~4 ms a frame) on top of a ~16 ms frame,
+  the stream's share ~6 a minute. Not measured: the GPU's uploads, the workers on a slow CPU (CDP throttles only the
+  main thread), one ~600 ms frame a few seconds into every profiled run (not the stream).

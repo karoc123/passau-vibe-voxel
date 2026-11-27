@@ -66,6 +66,8 @@ export class LampLight {
   version = 0;
   // 2 m samples (rgb, float) of the page being drawn
   private acc = new Float32Array(0);
+  // per cell of that page: some pool reaches its samples
+  private lit = new Uint8Array(0);
 
   constructor(private readonly meta: Meta) {
     for (const [x, y] of meta.lamps) this.add(x + 0.5, y + 0.5, 18, lampColour(x, y, meta.origin), LAMP_STOPS);
@@ -90,18 +92,26 @@ export class LampLight {
     const r = 2 * s, n = (T * s) / r, side = n + 2, sub = r / 2, ns = side * sub;
     // the page's first cell's corner (metres), and its 2 m samples
     const X0 = tx * T * s - r, Y0 = ty * T * s - r;
+    // (acc is all 0 between paints: only the cells a pool reaches (lit) are read, and zeroed as they are. A coarse
+    // page holds (66 s)^2 samples, nearly all dark: going over all of them cost a phone frame ~15 ms at speed)
     if (this.acc.length < ns * ns * 3) this.acc = new Float32Array(ns * ns * 3);
-    const acc = this.acc;
-    acc.fill(0, 0, ns * ns * 3);
+    if (this.lit.length < side * side) this.lit = new Uint8Array(side * side);
+    const acc = this.acc, lit = this.lit;
     const t0x = Math.floor((X0 - this.reach) / T), t1x = Math.floor((X0 + side * r + this.reach) / T);
     const t0y = Math.floor((Y0 - this.reach) / T), t1y = Math.floor((Y0 + side * r + this.reach) / T);
     for (let ty2 = t0y; ty2 <= t1y; ty2++) for (let tx2 = t0x; tx2 <= t1x; tx2++) for (const p of this.pools.get(ty2 * 65536 + tx2) ?? []) {
       // (the samples whose middle is within its radius: 2 m apart, the middles at odd metres, as the old lamp texture's texels)
       const i0 = Math.max(0, Math.ceil((p.x - p.R - X0 - 1) / 2)), i1 = Math.min(ns - 1, Math.floor((p.x + p.R - X0 - 1) / 2));
       const j0 = Math.max(0, Math.ceil((p.y - p.R - Y0 - 1) / 2)), j1 = Math.min(ns - 1, Math.floor((p.y + p.R - Y0 - 1) / 2));
-      const st = p.stops, [cr, cg, cb] = p.c;
+      if (i0 > i1 || j0 > j1) continue;
+      for (let cj = Math.floor(j0 / sub); cj <= Math.floor(j1 / sub); cj++) lit.fill(1, cj * side + Math.floor(i0 / sub), cj * side + Math.floor(i1 / sub) + 1);
+      const st = p.stops, [cr, cg, cb] = p.c, R2 = p.R * p.R;
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-        const t = Math.hypot(X0 + 2 * i + 1 - p.x, Y0 + 2 * j + 1 - p.y) / p.R;
+        const dx = X0 + 2 * i + 1 - p.x, dy = Y0 + 2 * j + 1 - p.y;
+        // (not Math.hypot: several times slower here, and every page of the map came out the same byte for byte)
+        const d2 = dx * dx + dy * dy;
+        if (d2 > R2) continue;
+        const t = Math.sqrt(d2) / p.R;
         if (t >= 1) continue;
         let k = 1;
         while (st[k][0] < t) k++;
@@ -118,9 +128,13 @@ export class LampLight {
     const anyCap = near.some(Boolean);
     for (let j = 0; j < side; j++) for (let i = 0; i < side; i++) {
       let sr = 0, sg = 0, sb = 0;
-      for (let v = 0; v < sub; v++) for (let u = 0; u < sub; u++) {
-        const q = ((j * sub + v) * ns + i * sub + u) * 3;
-        sr += Math.min(255, Math.round(acc[q])); sg += Math.min(255, Math.round(acc[q + 1])); sb += Math.min(255, Math.round(acc[q + 2]));
+      if (lit[j * side + i]) {
+        lit[j * side + i] = 0;
+        for (let v = 0; v < sub; v++) for (let u = 0; u < sub; u++) {
+          const q = ((j * sub + v) * ns + i * sub + u) * 3;
+          sr += Math.min(255, Math.round(acc[q])); sg += Math.min(255, Math.round(acc[q + 1])); sb += Math.min(255, Math.round(acc[q + 2]));
+          acc[q] = acc[q + 1] = acc[q + 2] = 0;
+        }
       }
       const d = o + j * stride + i * 4, nn = sub * sub;
       out[d] = Math.round(sr / nn); out[d + 1] = Math.round(sg / nn); out[d + 2] = Math.round(sb / nn);

@@ -36,10 +36,13 @@ const FIRST_M = 2500;
 // landmarks go first only in view or within this (ground distance from the camera): Kachlet 4 km behind the overview
 // would otherwise go before every tile in view
 const LM_M = 2000;
-// ms of occluders (occlusion.ts setTile, a 128 m tile up to ~10 ms on a 4x throttled CPU) built per update at most: a plane at
+// ms of occluders (occlusion.ts setTile, a 128 m tile up to ~5 ms on a 4x throttled CPU) built per update at most: a plane at
 // 245 km/h brings in a coarse node's 4 to 64 tiles at once, all of them built in one update stalled a phone's frame
-// for up to 0.4 s
-const OCC_MS = 8;
+// for up to 0.4 s; 8 left a frame over 50 ms about every 3 s at speed, 4 let the backlog grow
+const OCC_MS = 6;
+// ms of the coarser pages' lamp light (fields.ts flush) painted per update at most once the city is in: a coarse
+// node's pages shown at once took a phone's frame over 50 ms about once a second at speed (by day for nothing)
+const LAMP_MS = 4;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
 
 // The city at 1 m and its distance levels (2, 4, 8 m), as fine as the budget allows (triangles drawn by the tiles,
@@ -592,7 +595,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     if (stage === 3 && folNow === wanted) stage = 4;
     far.on = !!cut && !ct;
     far.flush(camAt);
-    pages.flush();
+    pages.flush(stage >= 4 ? LAMP_MS : Infinity);
     if (changed) shownTex.needsUpdate = true;
     // queued jobs no longer chosen (with the distance levels)
     if (lodOn) S.dropQueued((n) => n.pinned > now || chosen.has(n.foliage ? S.key(1, n.tx, n.ty) : n.key));
