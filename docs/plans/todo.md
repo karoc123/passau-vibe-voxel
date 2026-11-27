@@ -14,7 +14,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   found on a walkable grid made round them (craters count; no pipeline nav data); today's passers-by may go. An NPC
   boards with a player's commands and fires a player's weapons; once aboard, a vehicle's own AI may steer instead.
   Perception (sight lines, noise) built in small steps. A helicopter lands only where there is room (from the data).
-  Wind and weather noted for later.
+  Wind and weather noted for later. "Only on foot" needs no block: it follows from landing room and vehicles' size.
+  Order (the owner leaves it to us): damage model and health; placed vehicles; the walk on the host with way finding;
+  NPCs on foot (patrol, attack, sight; hearing after); NPCs in vehicles; zones (landing room, air defence); fuel; seat
+  tools.
 - Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
   slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
   budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast

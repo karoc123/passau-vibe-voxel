@@ -11,7 +11,7 @@
 ## Docs
 
 - Decisions in force: `docs/adr/` (decision and reason, under 40 lines, no paths or symbols). Open work: one file,
-  `docs/plans/todo.md`, under 100 lines. A feature's plan is at most one page and is deleted when it lands. Questions
+  `docs/plans/todo.md`, under 150 lines. A feature's plan is at most one page and is deleted when it lands. Questions
   to the owner: `FRAGEN.md`. How to run things: README. Names of things: `docs/GLOSSARY.md` (one name per thing).
 - When work lands, delete its line or plan; `git log` holds the history.
 - Write down only what the code, config or `--help` cannot tell: the reason, the convention, the gotcha.
