@@ -1,4 +1,4 @@
-// A network host's kept things on disk (docs/plans/target-architecture.md step 6), so a restart of the box keeps what
+// A network host's kept things on disk, so a restart of the box keeps what
 // players left: the world's edits (each edited node's ops), the cars out of the traffic (parked, wrecks) and the crafts
 // put down. One JSON file per 256 m cell (<dir>/<cx>_<cz>.json), written whole to a temp file and renamed over the old
 // one, so a kill at any moment leaves each cell as it was or as it became. Read back at the host's start; from then
@@ -14,8 +14,8 @@ import type { RoadPose } from '../sim/contract/pose';
 import type { CraftType, VehicleId } from '../sim/contract/ids';
 import type { WorldSim } from '../sim/world-sim';
 
-/** the files' format; another is set aside at the start */
-export const WORLD_VERSION = 1;
+// the files' format; another is set aside at the start
+const WORLD_VERSION = 1;
 // the cell's side (m)
 const CELL = 256;
 
