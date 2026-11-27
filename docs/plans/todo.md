@@ -54,8 +54,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- Walkers and solid things (ADR 0010): a driven car does not feel a walker (it shoves it); the host does not check
-  them; the walker cannot stand on a car's roof.
 - Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a traffic car waits
   behind a craft left in its lane until it goes; a drone and a paraglider pass through each other.
 - The parked-car cap (8/24) sits beside presence, not per cell.

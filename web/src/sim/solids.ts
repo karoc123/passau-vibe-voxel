@@ -14,15 +14,18 @@ import { VEHICLE_IDS, VEHICLES, vehicleOf } from './vehicles';
 
 /** a box upright on a pose: half its width (hx) and length (hz, along the heading; its middle fwd m ahead of the
  * pose), from y0 to top m over the pose's y */
-export interface Shape { hx: number; hz: number; fwd?: number; y0?: number; top: number }
-/** a shape placed: its middle x, z, heading h, from y to y + top */
-export interface Solid { x: number; y: number; z: number; h: number; hx: number; hz: number; top: number }
+export interface Shape { hx: number; hz: number; fwd?: number; y0?: number; top: number; roof?: false }
+/** a shape placed: its middle x, z, heading h, from y to y + top; id: the same thing from frame to frame (what a
+ * walker on its roof rides on); roof false: never stood on */
+export interface Solid { x: number; y: number; z: number; h: number; hx: number; hz: number; top: number; id?: string; roof?: false }
 
-/** the walker: a circle of WALKER_R from the soles to WALKER_HEAD over them */
-export const WALKER_R = 0.3, WALKER_HEAD = 1.9;
+/** the walker: a circle of WALKER_R from the soles to WALKER_HEAD over them, climbing WALKER_STEP in a stride (a kerb,
+ * a stair; a car's roof with a jump) */
+export const WALKER_R = 0.3, WALKER_HEAD = 1.9, WALKER_STEP = 1.05;
 
-/** another player on foot: as solid as the walker, so two walkers push each other apart */
-export const AVATAR_SHAPE: Shape = { hx: WALKER_R, hz: WALKER_R, top: WALKER_HEAD };
+/** another player on foot: as solid as the walker, so two walkers push each other apart; a head is not stood on (a
+ * jump from a car's roof would reach it) */
+export const AVATAR_SHAPE: Shape = { hx: WALKER_R, hz: WALKER_R, top: WALKER_HEAD, roof: false };
 export const COACH_SHAPE: Shape = { hx: COACH_WIDTH / 2, hz: COACH_LENGTH / 2, y0: -0.1, top: 4 };
 
 // a vehicle type's box: round its model's parts (x across, y up from the ground, z along)
@@ -66,11 +69,12 @@ export function meetShapes(type: CraftType): readonly Shape[] {
   return MEETS[type] ??= LIGHT[type] ?? [CRAFT_SHAPES[type], WINGS[type]].filter((s): s is Shape => !!s);
 }
 
-/** the solid things a craft of type is to others at pose p, pushed onto out (none for a light craft) */
-export function craftSolids(type: CraftType, p: Pose, out: Solid[] = []) {
+/** the solid things a craft of type is to others at pose p, pushed onto out (none for a light craft); id: the body's
+ * (its wings' id + 'w'), so a walker on it is carried by the same one the next tick */
+export function craftSolids(type: CraftType, p: Pose, out: Solid[] = [], id?: string) {
   const s = CRAFT_SHAPES[type], w = WINGS[type];
-  if (s) out.push(solidAt(s, p));
-  if (w) out.push(solidAt(w, p));
+  if (s) out.push(solidAt(s, p, id));
+  if (w) out.push(solidAt(w, p, id === undefined ? undefined : `${id}w`));
   return out;
 }
 
@@ -91,10 +95,34 @@ export function craftBox(type: CraftType, p: Pose) {
   return { x: s.x, y: s.y, z: s.z, h: s.h, r: s.hx, l: s.hz, ht: s.top };
 }
 
-/** shape s placed on pose p */
-export function solidAt(s: Shape, p: Pose): Solid {
+/** shape s placed on pose p (id: see Solid) */
+export function solidAt(s: Shape, p: Pose, id?: string): Solid {
   const f = s.fwd ?? 0;
-  return { x: p.x + Math.sin(p.h) * f, y: p.y + (s.y0 ?? 0), z: p.z + Math.cos(p.h) * f, h: p.h, hx: s.hx, hz: s.hz, top: s.top - (s.y0 ?? 0) };
+  const o: Solid = { x: p.x + Math.sin(p.h) * f, y: p.y + (s.y0 ?? 0), z: p.z + Math.cos(p.h) * f, h: p.h, hx: s.hx, hz: s.hz, top: s.top - (s.y0 ?? 0) };
+  if (id !== undefined) o.id = id;
+  if (s.roof === false) o.roof = false;
+  return o;
+}
+
+/** the highest roof of solids no higher than below that the walker at x, z stands on (its circle over the roof, out
+ * by margin), and the solid; null: none */
+export function roofUnder(solids: readonly Solid[], x: number, z: number, below: number, margin = WALKER_R): Solid | null {
+  let best: Solid | null = null;
+  for (const s of solids) {
+    const t = s.y + s.top;
+    if (s.roof === false || t > below || (best && t <= best.y + best.top)) continue;
+    const c = Math.cos(s.h), n = Math.sin(s.h), dx = x - s.x, dz = z - s.z;
+    if (Math.abs(dx * c - dz * n) <= s.hx + margin && Math.abs(dx * n + dz * c) <= s.hz + margin) best = s;
+  }
+  return best;
+}
+
+/** where P, on the roof of a as it was, is on b (the same thing moved and turned since): x, z, and the rise dy and the
+ * turn dh to add */
+export function carried(a: Solid, b: Solid, P: { x: number; z: number }) {
+  const ca = Math.cos(a.h), na = Math.sin(a.h), dx = P.x - a.x, dz = P.z - a.z;
+  const v = dx * ca - dz * na, u = dx * na + dz * ca, cb = Math.cos(b.h), nb = Math.sin(b.h);
+  return { x: b.x + v * cb + u * nb, z: b.z - v * nb + u * cb, dy: b.y + b.top - a.y - a.top, dh: Math.atan2(Math.sin(b.h - a.h), Math.cos(b.h - a.h)) };
 }
 
 /** how far the walker at x, z (its soles at feet) reaches into s (m; 0 or less: clear of it), and which way out (a

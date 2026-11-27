@@ -5,9 +5,9 @@ import type { World } from '../core/world';
 import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';
 import { backOff, EYE } from './spots';
-import type { Solid } from '../sim/solids';
+import { roofUnder, type Solid } from '../sim/solids';
 import { CLIMB_OUT, FLOAT, SWIM_DEPTH, Wet } from './swim';
-import { footKeys, STEP, stride, walkFrame } from './walk';
+import { footKeys, ride, STEP, stride, walkFrame, withRoofs } from './walk';
 
 // aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
 const GRAV = 16, WALK_FOV = 65, AIM_FOV = 32;
@@ -50,6 +50,11 @@ export class Foot {
   // this frame's step up and the most ground climbed (out of the water: to CLIMB_OUT over it)
   private step = STEP;
   private top = Infinity;
+  // the solid things near this frame; the one whose roof the feet stood on at the end of the last frame (as it was
+  // then), and how fast it went (m/s across: taken along when the walker leaves it)
+  private near: readonly Solid[] = [];
+  private on: Solid | null = null;
+  private readonly onV = { x: 0, z: 0 };
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls,
     private readonly keys: MoveKeys, private readonly glide: Glide, private readonly world: () => World | null,
@@ -72,6 +77,7 @@ export class Foot {
     this.yaw = Math.atan2(f.x, f.z);
     this.pitch = pitch;
     this.vy = 0;
+    this.on = null;
     this.carry.x = this.carry.z = 0;
     this.aim = false;
     this.fovBack = null;
@@ -91,6 +97,7 @@ export class Foot {
   fallAt(at: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }, yaw: number) {
     this.pos.set(at.x, at.y + EYE, at.z);
     this.feet = at.y;
+    this.on = null;
     this.vy = Math.max(v.y, -TERMINAL);
     this.carry.x = v.x; this.carry.z = v.z;
     this.yaw = yaw;
@@ -108,7 +115,26 @@ export class Foot {
   // pushed out of what moved into the walker, then one collision-checked horizontal step (none: null), sliding along
   // walls and cars; true if it stepped
   private stepBy(m: { x: number; z: number } | null) {
-    return walkFrame(this.wet, this.pos, this.feet, m, this.solids(this.pos), this.step, this.top);
+    return walkFrame(this.wet, this.pos, this.feet, m, this.near, this.step, this.top);
+  }
+
+  // on a roof: carried along with what it is on (a car driving off with the walker on top), turned with it
+  private ride(dt: number) {
+    const a = this.on, to = a && ride(this.wet, this.pos, this.feet, a, this.near);
+    this.onV.x = this.onV.z = 0;
+    if (!to) return;
+    this.onV.x = (to.x - this.pos.x) / dt; this.onV.z = (to.z - this.pos.z) / dt;
+    this.pos.x = to.x; this.pos.z = to.z;
+    this.feet += to.dy;
+    this.yaw += to.dh;
+  }
+
+  // what the feet stand on now among the solids (null: the voxels, or the air); leaving it, its speed is kept as a jump
+  // off a moving car's would be
+  private landed() {
+    const was = this.on, r = this.vy === 0 && !this.swimming ? roofUnder(this.near, this.pos.x, this.pos.z, this.feet + 0.02) : null;
+    this.on = r && r.y + r.top > this.feet - 0.02 ? r : null;
+    if (was && !this.on) { this.carry.x += this.onV.x; this.carry.z += this.onV.z; }
   }
 
   // in water (its top over the soles): a bank up to CLIMB_OUT over it climbed out onto, no higher; the pace's share
@@ -123,7 +149,7 @@ export class Foot {
 
   // on whatever is underfoot: up kerbs and stairs (and out of the water), off ledges, jumps; afloat in deep water
   private stand(dt: number) {
-    const P = this.pos, sup = this.wet.support(P.x, P.z, this.feet + this.step), top = this.wet.surface(P.x, P.z);
+    const P = this.pos, sup = withRoofs(this.wet, this.near).support(P.x, P.z, this.feet + this.step), top = this.wet.surface(P.x, P.z);
     const water = top !== null && top > sup ? top : null, was = this.swimming;
     this.swimming = water !== null && water - sup > SWIM_DEPTH && this.feet < water;
     // (out of the deep water the float's bob is no jump: up a bank it climbs)
@@ -161,6 +187,8 @@ export class Foot {
   updateWalk(dt: number, stick: Stick) {
     const K = this.keys, { go, side, turn } = footKeys(K), tp = K.axis('tu', 'td');
     if (turn || tp) this.look(-turn * (K.shift ? 2.6 : 1.8) * dt, tp * dt);
+    this.near = this.solids(this.pos);
+    this.ride(dt);
     const pace = this.wade(K.shift ? 20 : 6) * dt;
     if (go || side) this.stepBy(stride(this.yaw, go, side, pace));
     else if (stick) {
@@ -169,6 +197,7 @@ export class Foot {
     } else this.stepBy(null);
     this.drift(dt);
     this.stand(dt);
+    this.landed();
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
     let fov = WALK_FOV, settle = false;
     if (this.aim) { this.fovBack ??= this.camera.fov; fov = AIM_FOV; settle = true; }
