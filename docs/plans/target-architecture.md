@@ -220,14 +220,15 @@ questions in `FRAGEN.md`. ADRs 0006–0009 are merged into one after step 2.
 
 | Item | Reason | Risk |
 |---|---|---|
-| `CloneLink`, `plainData`, `tools/mirror-check.mjs` | They prove data survives a clone and matches a deleted path. A real worker and a two-client smoke test prove more. | Low after step 2. |
-| Bit-exact determinism in `tools/life-edit.mjs` (1004 lines), rule R3 in `core-deps.mjs`, the replay claims in ADR 0007 | No consumer. Seeded randomness stays; it is cheap. | Low. Prediction tolerates small differences. |
+| `CloneLink`, `plainData` | They prove data survives a clone. Since step 2 a dozen gates connect through `CloneLink`; `mirror-check` no longer has a golden and guards the wire with tolerances, so it stays. | Low; needs another link for those gates. |
 | `core-deps.mjs` rules R2, R4, R5 and the baseline ratchet | Eight layers and five rules for 25 000 lines. Two rules suffice: the headless folders import no three.js or DOM; `client/`, `view/`, `nav/` import no domain or server. | Low. |
-| `OBSERVER_VIEW` in `app/session.ts` | A switch kept for a question now answered (decision 5). | None. |
 | `PageTime` request counting in `app/session.ts` | An optimistic protocol for the hour slider. | Low. |
 | Parked-car cap in `sim/traffic.ts` | A second rule beside presence. | Low. |
 | `tools/`: `lamps`, `tris`, `shoot`, `real-city`, `mesh-profile`, `remesh-bench`, `rapier-car-bench`, `life-phys-scan` | Not in the gate list. Delete those the owner has not run in two weeks. | Check each; I did not. |
 | File-header comments that restate the module (`sim/world-sim.ts` has 33 lines) and comments that say where code moved | About a fifth of `sim/` is comment lines; they must be edited on every move. | Low. |
+
+Done (2026-11-27): bit-exact determinism (the second dig and its hash, transit and craft runs compared bit for bit:
+now within 1 cm, a host run twice, rule R3, the replay claims in ADRs 0006 and 0007) and the observer-view switch.
 
 Keep, although small and unproven: hello, the mode seam, the entity index, seats. They cost little while nobody
 extends them.

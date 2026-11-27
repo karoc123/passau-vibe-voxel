@@ -2,7 +2,7 @@
 //
 // Part of the world sim (sim/traffic.ts): no three.js, no DOM, no camera (tools/core-deps.mjs); stepped in the
 // traffic's fixed tick (TrafficBodies.tick, SUB physics steps a tick), its colliders built a fixed number of chunks a
-// tick, so the same inputs give the same bodies (tools/life-edit.mjs checks two runs bit for bit).
+// tick, so a tick's cost stays bounded.
 //
 // The traffic stays what it is (IDM, lanes, signals, junction boxes, all kinematic). A car within NEAR m of an edited
 // box (at most MAX_BODIES, nearest the edits first) also gets a body: the player's car's chassis and raycast wheels

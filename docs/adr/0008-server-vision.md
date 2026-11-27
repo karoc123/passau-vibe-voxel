@@ -32,7 +32,7 @@ and there is no hurry for one: the engine is to be cleanly decoupled first, so t
   at most one player and takes that role's input; `takeWheel` is the driver's seat of that model. On foot the game is
   first-person.
 - **Creative mode stays** for checking and developing the world (orbit camera, free flight, teleport, debug views). In
-  the server model it is a client without authority over others (an observer or a local-only session). It must not
+  the server model it is a client without authority over others (orbit mode: a presence the others do not see). It must not
   leak into the sim; if keeping it turns into a code smell, it is negotiable. Game clients are consistently the game.
 - **Out of scope for now:** persistence across sessions (built houses that outlive their builder, money, owned
   vehicles, mission progress) and player accounts. Likely later; do not design them in yet.

@@ -2,7 +2,7 @@
 
 Status: accepted. World sim: `web/src/sim/world-sim.ts` (`WorldSim`, its host), `web/src/sim/traffic.ts`, `web/src/sim/train-traffic.ts`,
 `web/src/sim/boat-traffic.ts` and `web/src/physics/rapier/life-phys.ts` (`LifePhysics`). Presentation: `web/src/view/life.ts` (`StreetLife`). Checks:
-`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run, determinism).
+`web/tools/core-deps.mjs` (imports), `web/tools/life-edit.mjs` (headless run).
 
 ## Context
 
@@ -29,12 +29,11 @@ two runs differed.
   (`TrafficBodies.tick`, 2 Rapier steps of 1/60 s). Trains and river traffic advance in those same ticks. The train
   sim owns routes, coach spacing and station stops. The boat sim samples the timetable with the tick's hour and day,
   and floats each vessel on the world's water top there (`sim/river.ts`). Both derive their schedules from the world seed.
-- **Deterministic budgets**: colliders are built a number of chunks per tick (`terrain.ts` `budgetChunks`), never
+- **Budgets by count**: colliders are built a number of chunks per tick (`terrain.ts` `budgetChunks`), never
   within a number of milliseconds; chunks age by the sim's clock. Wall-clock time is measured for stats only.
 - **Seeded randomness**: road traffic draws from `core/num.ts` `rng(seed)`. Rail and river schedules use seeded
-  hashes. `tools/life-edit.mjs`
-  makes `Math.random` throw while the sim runs and checks two runs from one seed bit for bit (same process, same
-  build of Rapier; across machines would need Rapier's enhanced-determinism build, not tried).
+  hashes. Runs are not required to be bit-identical (owner, 2026-11-26): nothing replays them, and prediction
+  tolerates small differences.
 - **Inputs** (all through `WorldSim`): the hour and day, the focus (what is simulated) and the viewer (where agents may
   come and go unseen), the edited boxes (`WorldSim.edited`, from `core/live-edits.ts` in `main.ts`), the ground and
   water (`WorldSim.setWorld`: `core/world.ts` World), the tiles (injected loader or cache), and the players' commands

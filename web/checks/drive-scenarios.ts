@@ -94,7 +94,7 @@ function kinematicBodies(d: Drive) {
   return bodies;
 }
 
-function sharedReplay() {
+function sharedDrive() {
   const map = synthMap(2, street);
   const physics = new LifePhysics(map.meta, { chunksPerTick: 3 }, { load: () => Promise.reject(null) });
   for (const t of map.tiles) physics.terrain.setTile(t.tx, t.tz, t.tile);
@@ -118,23 +118,20 @@ function sharedReplay() {
   const won = claimed && refused && physics.driverSnapshot('first')?.entityId === a.id && !physics.driverSnapshot('second');
   physics.takeWheel(traffic, 'second', b.id);
   const input = { gas: 1, brake: 0, steer: 0, handbrake: false };
-  const snapshots = [];
-  const sample = () => [physics.driverSnapshot('first'), physics.driverSnapshot('second'), { ...ai.detachedPose }];
   for (let i = 0; i < 115; i++) {
     physics.input('first', { ...input, gas: Number((physics.driverSnapshot('first')?.kmh ?? 0) < 40) });
     physics.input('second', { ...input, gas: Number((physics.driverSnapshot('second')?.kmh ?? 0) < 20) });
     tick();
-    snapshots.push(sample());
   }
   const collision = physics.log.some((e) => e.id === ai.id && e.kind === 'lost' && e.why === 'player contact');
   const reusedAI = !!existing && physics.bodies.get(ai.id) === existing;
   const firstBody = physics.bodies.get(a.id), bBefore = b.detachedPose!.z;
   physics.releaseWheel('first');
-  for (let i = 0; i < 30; i++) { tick(); snapshots.push(sample()); }
+  for (let i = 0; i < 30; i++) tick();
   const released = !physics.driverSnapshot('first') && physics.bodies.get(a.id) === firstBody;
   const droveOn = b.detachedPose!.z > bBefore + 2 && physics.driverSnapshot('second')?.entityId === b.id;
   physics.dispose();
-  return { physicalBefore, won, collision, reusedAI, released, droveOn, snapshots };
+  return { physicalBefore, won, collision, reusedAI, released, droveOn };
 }
 
 export const DRIVE_SCENARIOS: Record<string, () => Check> = {
@@ -177,10 +174,9 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
     d.physics.dispose();
     return { name: 'drive_moving_coach_bike', pass: detail.fell && detail.movedM > 5 && detail.sameCoach, detail };
   },
-  drive_shared_replay() {
-    const { snapshots, ...checks } = sharedReplay();
-    const identical = JSON.stringify(snapshots) === JSON.stringify(sharedReplay().snapshots);
-    return { name: 'drive_shared_replay', pass: identical && Object.values(checks).every(Boolean), detail: { ...checks, identical } };
+  drive_shared() {
+    const checks = sharedDrive();
+    return { name: 'drive_shared', pass: Object.values(checks).every(Boolean), detail: checks };
   },
   // a traffic car standing in the lane, run into at 40 km/h: knocked out of the traffic (takeWheel) and away (its Car
   // drawn where its body lies)
