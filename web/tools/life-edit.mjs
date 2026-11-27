@@ -442,8 +442,7 @@ function transit() {
   }
   const a = replay(1, SEED), b = replay(2, SEED), c = replay(1, SEED + 1);
   check(JSON.stringify(a) === JSON.stringify(b), 'train and boat snapshots are bit-identical at two frame rates');
-  check(JSON.stringify(a[0].coaches) !== JSON.stringify(c[0].coaches)
-    && JSON.stringify(a[0].vessels) !== JSON.stringify(c[0].vessels), 'the world seed changes rail and river traffic');
+  check(JSON.stringify(a[0].vessels) !== JSON.stringify(c[0].vessels), 'the world seed changes river traffic');
   const rail = a[0].coaches.find((p) => a[1].coaches.some((q) => p.id === q.id && Math.hypot(p.x - q.x, p.z - q.z) > 1));
   check(rail && rail.y > 0, 'the train publishes moving coach poses at rail height');
   const tour = a[0].vessels.find((p) => p.kind === 'boat' && p.underway);

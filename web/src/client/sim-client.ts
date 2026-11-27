@@ -31,10 +31,12 @@ import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
 import type { Ack, AvatarState, DriverSnapshot, EditNote, PlayerReads, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
 import type { Pose, RoadPose } from '../sim/contract/pose';
-import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
+import type { BodyDraw, BoatView, CarState, Person, PersonState } from '../sim/contract/agents';
 import { AgentRead, reckon, type Sampled } from '../sim/agent-wire';
-import { PH_RIDE, PH_WALK, RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
-import { coachPoses, trainTracks, type CoachPose } from '../sim/coaches';
+import { ACTIVE_R, laneOffset, PH_RIDE, PH_WALK, RoadNet, signalAt, STEP, type CarPose, type Ground } from '../sim/road-net';
+import { carsAt, Flow, type FlowCar } from '../sim/flow';
+import { VEHICLES } from '../sim/vehicles';
+import { Timetable, type CoachPose } from '../sim/coaches';
 import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
 import { checkHello } from '../sim/hello';
@@ -472,8 +474,8 @@ export class MirrorSimClient implements SimClient {
 
 /** a snapshot as the client holds it: all its cars and people, each as last sampled, and all the cars out of the
  * traffic, bodies and avatars it holds (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'trains' | 'boats' | 'avatars' | 'bodies'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
-  riders: Sampled<PersonState>[]; trains: Sampled<TrainState>[]; boats: BoatView | null; avatars: AvatarState[]; bodies: [number, BodyDraw][] };
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'boats' | 'avatars' | 'bodies'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; boats: BoatView | null; avatars: AvatarState[]; bodies: [number, BodyDraw][] };
 
 // A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
@@ -504,7 +506,6 @@ export class TrafficMirror {
   // and people drawn are reckoned on from, and the corrections being blended out
   private readonly wire: AgentRead;
   private readonly sampled = new Map<number, Reckoned<CarState>>();
-  private readonly trainSamples = new Map<number, Reckoned<TrainState>>();
   private readonly walking = new Map<number, Sampled<PersonState>>();
   readonly cars: Car[] = [];
   readonly detachedCars: Car[] = [];
@@ -514,11 +515,12 @@ export class TrafficMirror {
   acc = 0;
   private t = 0;
   boats: BoatView | null = null;
-  /** the trains' coaches as drawn (sim/coaches.ts: the sim's own code), from the trains reckoned (back: none) */
-  readonly trains: { coaches(back?: number): IterableIterator<CoachPose> };
-  // the trains as drawn now (reckoned), by id
-  private readonly trainsById = new Map<number, TrainState>();
-  private trainList: TrainState[] = [];
+  /** the trains' coaches at the render clock: the host's timetable worked out here */
+  readonly trains: { coaches(): IterableIterator<CoachPose> };
+  // the snapshot's tick and hour, and the world clock (s) at the render clock
+  private tick = 0;
+  private hour = 12;
+  private clock = 0;
   /** the players' own bodies on foot (avatarPose: where one is drawn) */
   avatars: AvatarState[] = [];
   readonly bodies = {
@@ -531,8 +533,34 @@ export class TrafficMirror {
     this.net = new RoadNet(data);
     this.net.ground = ground;
     this.wire = new AgentRead((e) => this.net.roads[e].L);
-    const tracks = trainTracks(data.trains ?? []);
-    this.trains = { coaches: (back = 0) => coachPoses(tracks, this.trainList, back) };
+    const table = new Timetable(data.trains ?? []);
+    this.trains = { coaches: () => table.coaches(this.clock, this.hour) };
+    this.flow = new Flow(this.net.roads);
+  }
+
+  private readonly flow: Flow;
+  private readonly flowCar: FlowCar = { lane: 0, s: 0, bus: false, col: '' };
+  private readonly flowStub = { kind: 'car', e: 0, lane: 0, len: 0, prev: -1, next: -1, prevOff: 0, off: 0 } as unknown as Car;
+  private readonly flowPose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+
+  /** the far traffic at the render clock round (x, z): the flow cars from the agents' circle (ACTIVE_R) out to far m,
+   * on the roads none of whose cars the host sends (their cars are the agents); each with its pose and look */
+  farCars(x: number, z: number, far: number, each: (pose: CarPose, car: FlowCar, len: number) => void) {
+    const sent = new Set<number>(), d = carsAt(this.hour), P = this.flowPose, c = this.flowStub, f = this.flowCar, near2 = ACTIVE_R * ACTIVE_R;
+    for (const car of this.cars) sent.add(car.e);
+    this.net.roads.forEach((e, i) => {
+      if (sent.has(i)) return;
+      const m = e.p[e.p.length >> 1];
+      if (Math.hypot(m[0] - x, m[1] - z) - e.L / 2 > far) return;
+      for (let j = 0, n = this.flow.count(i, d); j < n; j++) {
+        this.flow.car(i, j, n, this.clock, f);
+        const len = f.bus ? 12 : VEHICLES[f.vt ?? 'car'].len;
+        c.e = i; c.lane = f.lane; c.len = len; c.off = laneOffset(e, f.lane);
+        this.net.carPose(c, f.s, c.off, P);
+        const d2 = (P.x - x) ** 2 + (P.z - z) ** 2;
+        if (d2 > near2 && d2 < far * far) each(P, f, len);
+      }
+    });
   }
 
   get heads() { return this.net.heads; }
@@ -549,8 +577,8 @@ export class TrafficMirror {
    * arrives) */
   read(s: Snapshot): Taken {
     const [people, riders] = this.wire.readPeople(s.people, s.riders, s.gone[1], s.tick);
-    return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders, trains: this.wire.readTrains(s.trains, s.gone[2], s.tick),
-      boats: this.wire.readBoats(s.boats, s.gone[3]), ...this.wire.readHeld(s) };
+    return { ...s, cars: this.wire.readCars(s.cars, s.gone[0], s.tick), people, riders,
+      boats: this.wire.readBoats(s.boats, s.gone[2]), ...this.wire.readHeld(s) };
   }
 
   /** a new session: what the last one sent of the cars and people forgotten */
@@ -559,7 +587,7 @@ export class TrafficMirror {
   /** the snapshot's agents in place of the last (one object per id) */
   apply(s: Taken) {
     const T = this;
-    T.t = s.t;
+    T.t = s.t; T.tick = s.tick; T.hour = s.hour;
     // (a car the session took out of the traffic is a detached one from that tick: the traffic's sample of it is
     // dropped once its gone comes)
     const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
@@ -595,33 +623,15 @@ export class TrafficMirror {
     for (const l of [s.people, s.riders]) for (const st of l) W.set(st.id, st);
     this.draws.clear();
     for (const [id, d] of s.bodies) this.draws.set(id, d);
-    const trains = new Set<number>(), TB = this.trainsById;
-    this.trainList = s.trains.map((st) => {
-      let t = TB.get(st.id);
-      if (!t) TB.set(st.id, t = { ...st, ds: 0 });
-      trains.add(st.id);
-      return t;
-    });
-    for (const id of TB.keys()) if (!trains.has(id)) TB.delete(id);
-    resample(this.trainSamples, s.trains, trains);
     this.boats = s.boats;
     this.avatars = s.avatars;
   }
 
-  /** the cars, people and trains where they are at render time t (ticks, as a snapshot's tick: its state is that at
-   * t = tick), each reckoned on along its way from its last sample at the speed sent; a car's or train's correction
-   * (where the sample before had it now, less where this one has it) blended out */
+  /** the cars and people where they are at render time t (ticks, as a snapshot's tick: its state is that at
+   * t = tick), each reckoned on along its way from its last sample at the speed sent; a car's correction (where the
+   * sample before had it now, less where this one has it) blended out; the trains' clock set to t */
   reckon(t: number) {
-    for (const tr of this.trainList) {
-      const r = this.trainSamples.get(tr.id)!, st = r.st, s = reckon(st.s, st.ds / STEP, st.at, t);
-      if (r.old) {
-        const o = r.old, es = reckon(o.s, o.ds / STEP, o.at, t) + r.es * left(t, r.from) - s;
-        r.es = Math.abs(es) < SNAP ? es : 0;
-        r.from = t;
-        r.old = null;
-      }
-      tr.s = s + r.es * left(t, r.from);
-    }
+    this.clock = this.t + (t - this.tick) * STEP;
     const R = this.sampled, roads = this.net.roads;
     for (const c of this.cars) {
       const r = R.get(c.id);

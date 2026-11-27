@@ -13,7 +13,7 @@
 // the run is the same every time.
 // The train and boat sim poses (--transit, on traffic.json's tracks and boats.json) the same way,
 // for viewers standing at each track's ends and stations, the fairway's ends, the berths and the pier: the trains
-// over TRAIN_S s at 30 ticks/s (one run per viewer: their coming and going depends on where the viewer is), the boats over
+// over TRAIN_S s at 30 ticks/s (one run per viewer), the boats over
 // a spring and a summer day at 2 fps (theirs does not: one run a day, all the viewers). R: TRAIN_R, SHIP_R; a jump is more than JUMP m
 // beyond what they may move in the frame.
 // usage (in web/): node tools/popin-check.mjs [-v] [--street | --transit] [--mirror] [--seconds S] [--seed N] [--jump M]; both
@@ -194,7 +194,7 @@ function transit() {
     const trains = new TrainTraffic(td.trains ?? []), check = follow([v], { train: TRAIN_R }, { train: JUMP + 17 * dt });
     for (let f = 1, F = Math.round(TRAIN_S / dt); f <= F; f++) {
       const t = f * dt;
-      trains.tick(t, dt, H0 + t / 3600, [v]);
+      trains.tick(t, H0 + t / 3600);
       check(new Map(Array.from(trains.coaches(), ({ id, x, z }) => [id, ['train', x, z]])), t);
     }
   }

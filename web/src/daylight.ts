@@ -76,7 +76,7 @@ const REST_MS = 400;
 // pixel and the haze closes in. (Passau's widest view, 'Whole map' 2.5 km up, asks for it: as before, when the cap
 // was three quarters of the map's size.)
 const SHADOW_R = 2400;
-// What moves (traffic, people, boats) is simulated within 900 m of a centre that trails the focus by up to 120 m
+// What moves (traffic, people, boats) is simulated within 350 m (the far traffic beyond as flow) of a centre that trails the focus by up to 120 m
 // (view/life.ts): its map covers no more than that, at no more than 2048² (at the overview finer than the city's).
 const TWIN_R = 1050, TWIN_MAX = 2048;
 // the fastest of them (m/s: a car at 50 km/h, a train), and its map drawn at least every TWIN_EVERY-th frame

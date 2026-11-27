@@ -19,15 +19,16 @@ const SEND_MARGIN = 150;
 export interface Radii { car: number; air: number; person: number; other: number }
 // Cars and people are most of the bytes, so they get the least radius the page cannot tell from the sim's own: the
 // street life spawns and drops them no nearer than CAR_POP_R (300 m) and PED_POP_R (150 m) from the viewer anyway
-// (sim/road-net.ts), so one coming into sight at 350 m, 200 m is no new pop. From the air the streets are seen far
-// off; the street life ends at ACTIVE_R (900 m) besides.
-const CAR_R = 350, AIR_CAR_R = 1000, PERSON_R = 200;
+// (sim/road-net.ts), so one coming into sight at 400 m, 200 m is no new pop. Past the street life's circle (ACTIVE_R,
+// 350 m) the page draws the far traffic itself (sim/flow.ts); a long way's agents reach a little past it, so cars
+// are sent a little further. The rest (crafts, avatars, bodies, events) is seen from further off than any agent.
+const CAR_R = 400, AIR_CAR_R = 1000, PERSON_R = 200, OTHER_R = 1050;
 const AIRCRAFT = new Set<CraftType>(['helicopter', 'paraglider', 'drone', 'floatplane', 'jet']);
 
 /** the radii of a host whose street life reaches activeR m; one number (a tool's, ?interest=): that for everything */
 export function radii(activeR: number, one?: number): Radii {
   if (one) return { car: one, air: one, person: one, other: one };
-  return { car: CAR_R, air: Math.max(CAR_R, Math.min(AIR_CAR_R, activeR + SEND_MARGIN)), person: PERSON_R, other: activeR + SEND_MARGIN };
+  return { car: CAR_R, air: Math.max(CAR_R, Math.min(AIR_CAR_R, activeR + SEND_MARGIN)), person: PERSON_R, other: Math.max(OTHER_R, activeR + SEND_MARGIN) };
 }
 
 interface Places { tick: number; n: number; cars: Float64Array; people: Float64Array }

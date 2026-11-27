@@ -172,8 +172,8 @@ in the tick.
 3. **Many foci.** Landed 2026-11-26 (a circle per player, overlaps counted once, a count budget per circle).
 4. **Interest filter.** Landed 2026-11-26 (a radius round the player's view and seat, not cells yet: `?interest=`,
    default the street life's + 150 m; trains and boats still go to all, they become flow in step 5).
-5. **Flow.** Trains from the timetable; far road traffic drawn by the client; the agent ring shrinks from 900 m to
-   about 350 m; a promoted cell is filled from the flow.
+5. **Flow.** Landed 2026-11-27 (trains a timetable every page works out, none sent; far road traffic drawn by the
+   page out to 1.5 km; the agent ring 350 m, cars sent to 400 m; agents spawned on the flow's cars).
 6. **Kept things on disk**, per cell, so a restart of the Pi keeps what players left.
 7. **Prediction** of the player's own craft, then the decision on cars.
 8. **Measure on a Pi.** Only then compact the wire (typed arrays, deltas) or move a hot part to Rust.

@@ -35,7 +35,7 @@ const mirror = new MirrorSimClient(link, data(), null, mine);
 const lifeB = new StreetLife(new THREE.Scene(), mirror);
 
 const fail = [];
-// The cars, people and trains as sent (sim/agent-wire.ts: a sample where the client's reckoning drifts, rounded; gone): read
+// The cars and people as sent (sim/agent-wire.ts: a sample where the client's reckoning drifts, rounded; gone): read
 // back by a client's end and reckoned on to each tick, every field the sim's (lengths within WIRE_M) but for ph and
 // wait, which the client works out its own way, and its place on its way within DRIFT (+ the rounding) on the ticks a
 // drift is sent, REACH between; each tick, all of the traffic's, so ids coming and going, ways changing and one sent
@@ -48,14 +48,13 @@ const wireCheck = () => {
   const T = b.sim.traffic, tick = b.sim.tick, due = tick % AGENT_TICKS === 0;
   // (a tenth of the cars and people left out each tick, so some leave sight and come back)
   const some = (l) => l.filter((o) => (o.id * 7 + tick) % 10);
-  const cars = some(T.cars), walkers = some(T.people), riders = some(T.riders), trains = some(T.trains.save());
+  const cars = some(T.cars), walkers = some(T.people), riders = some(T.riders);
   const out = (l, f) => l.map((o) => f(o, tick)).filter((w) => w);
   const sc = out(cars, (c, t) => wireOut.car(c, t)), sp = out(walkers, (p, t) => wireOut.person(p, t)), sr = out(riders, (p, t) => wireOut.person(p, t));
-  const st = out(trains, (t, k) => wireOut.train(t, k));
-  const [goneC, goneP, goneT] = wireOut.done();
-  const gotC = wireIn.readCars(sc, goneC, tick), [gotP, gotR] = wireIn.readPeople(sp, sr, goneP, tick), gotT = wireIn.readTrains(st, goneT, tick);
-  wireSent += sc.length + sp.length + sr.length + st.length;
-  wireHeld += cars.length + walkers.length + riders.length + trains.length;
+  const [goneC, goneP] = wireOut.done();
+  const gotC = wireIn.readCars(sc, goneC, tick), [gotP, gotR] = wireIn.readPeople(sp, sr, goneP, tick);
+  wireSent += sc.length + sp.length + sr.length;
+  wireHeld += cars.length + walkers.length + riders.length;
   const same = (want, got, keys, what, place) => {
     if (want.length !== got.length) { fail.push(`wire t=${tick}: ${got.length} ${what} held of ${want.length}`); return; }
     const by = new Map(got.map((g) => [g.id, g]));
@@ -79,7 +78,6 @@ const wireCheck = () => {
   const who = ['id', 'e', 'dir', 'v', 'lat', 'wait', 'col', 'bike'], at = (g) => reckon(g.s, g.v, g.at, tick, g.dir, g.wait);
   same(walkers, gotP, who, 'person', at);
   same(riders, gotR, who, 'rider', at);
-  same(trains, gotT, ['id', 'p', 'n', 'express'], 'train', (g) => reckon(g.s, g.ds / STEP, g.at, tick));
 };
 let frames = 0, drawnAgents = 0, acked = true, lastDrawn = -1, maxLead = 0;
 const send = (cmd) => mirror.send(cmd);

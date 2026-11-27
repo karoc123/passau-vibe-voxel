@@ -116,6 +116,8 @@ else {
   await P.tick(30);
   for (let i = 0; i < 6000 && !host.sim.physics; i++) await settle();
   const T = host.sim.traffic;
+  // (one standing, at a light or in a queue: the street life spawns its cars on the move)
+  for (let i = 0; i < 60 && !T.cars.some((c) => !c.bus && c.v < 0.1); i++) await P.tick(10);
   const car = T.cars.filter((c) => !c.bus).sort((a, b) => a.v - b.v)[0];
   check(!!host.sim.physics && !!car, `the road physics in, a car to get into (${car?.v.toFixed(1)} m/s)`);
   const ref = { kind: 'car', id: car.id };

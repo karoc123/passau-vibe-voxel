@@ -4,7 +4,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Steps 5–8** in the order of target-architecture.md.
+- **Steps 6–8** in the order of target-architecture.md.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (orbit mode is a presence, unseen: GLOSSARY.md).
 
@@ -19,7 +19,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   16 at the cathedral 13–16 (`load` holds 20). What is left is every tick's moving bodies (~5 kB/s raw each: the
   traffic within 60 m of a crater) and crafts (~4, a helicopter's core whole, a parked one too). Not measured: a busy
   square, a late joiner after many craters (a node's whole op list), a phone on 4G. Binary only after a Pi
-  measurement. Trains are still simulated with spacing on the host (step 5: from the timetable).
+  measurement. A driver's peak is higher since step 5 (a cell coming into the circle is filled and sent at once).
 - E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).

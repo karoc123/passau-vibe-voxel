@@ -29,7 +29,7 @@ const client = () => {
   ws.on('message', (data) => {
     for (const m of JSON.parse(data.toString())) if (m.kind === 'snapshot') {
       const s = m.snapshot;
-      for (const id of s.gone[4]) held.delete(id);
+      for (const id of s.gone[3]) held.delete(id);
       for (const d of s.detached) held.add(d.id);
       if (s.player) seat = s.player.seat;
       c.got.push({ tick: s.tick, t: s.t, seat, detached: [...held] });

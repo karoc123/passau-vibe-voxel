@@ -4,7 +4,7 @@
 // as it is (later, quantised, to a network client); the gates check that (CloneLink). Types and constants only
 // (tools/core-deps.mjs R5).
 import type { WorldOp } from '../../core/layers';
-import type { BodyWire, BoatsWire, CarState, CarWire, PersonWire, TrainWire } from './agents';
+import type { BodyWire, BoatsWire, CarState, CarWire, PersonWire } from './agents';
 import type { CommandResult } from './commands';
 import type { CraftStates } from './crafts';
 import type { SimEvent } from './events';
@@ -76,13 +76,11 @@ export interface Snapshot {
   detached: CarState[];
   people: PersonWire[];
   riders: PersonWire[];
-  /** the cars, the people and riders, the trains, the boats (a ship's id, -1 - a boat's), the cars out of the traffic,
-   * the bodies (by car id), the avatars, by id, gone from the session's sight (or from the world) */
-  gone: [cars: number[], people: number[], trains: number[], boats: number[], detached: number[], bodies: number[], avatars: number[]];
+  /** the cars, the people and riders, the boats (a ship's id, -1 - a boat's), the cars out of the traffic, the bodies
+   * (by car id), the avatars, by id, gone from the session's sight (or from the world) */
+  gone: [cars: number[], people: number[], boats: number[], detached: number[], bodies: number[], avatars: number[]];
   /** the cars with a body (or its fade), by car id, whose draw changed (one at rest: once, its p0 its p1) */
   bodies: [number, BodyWire][];
-  /** the trains: the samples since the session's last snapshot (contract/agents.ts TrainWire) */
-  trains: TrainWire[];
   boats: BoatsWire | null;
   /** the players' own bodies on foot that moved */
   avatars: AvatarWire[];
