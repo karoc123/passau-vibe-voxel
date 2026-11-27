@@ -39,7 +39,8 @@ import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
 import { Entities } from './entities';
 import { SEATS } from './seats';
-import { vehicleOf } from './vehicles';
+import { vehicleOf, VEHICLES } from './vehicles';
+import { Stands } from './stands';
 import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { CEILING, VoxelCollision } from './craft/voxel-collision';
@@ -81,7 +82,8 @@ export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: numb
 const GUESS_S = 0.1;
 
 // (a player craft, Craft: sim/craft/craft-core.ts)
-type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown };
+// (asleep: a stand's, untouched: not stepped, its collision let go, until a seat is taken or it is harmed)
+type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown; asleep?: boolean };
 
 // (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, View, TimeOfDay, FrameTime, MAX_DT, SimEvent,
 // EVENT_TICKS: sim/contract/; CraftWorld: sim/craft/craft-core.ts)
@@ -150,6 +152,10 @@ export class WorldSim {
   // the vehicles at 0 the mode let be wrecks ("car:12", "craft:3"); the last place each player stood on the ground
   private readonly wrecks = new Set<string>();
   private readonly safe = new Map<PlayerId, WalkPose>();
+  // the stands' cars' ids: far past any the traffic reaches, so stocking a car never shifts the traffic's own
+  private nextStandCar = STAND_CARS;
+  /** the stands of placed vehicles (sim/stands.ts), when the host asked for them */
+  readonly stands: Stands | null = null;
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -176,9 +182,9 @@ export class WorldSim {
 
   /** loadPhysics: makes the road physics with the world's tuning (Rapier initialised, its tiles from a cache or a
    * load); crafts: what the crafts' collisions read (without it, addCraft throws); activeR: the radius (m) of the
-   * street life's circle round each player */
+   * street life's circle round each player; stands: vehicles placed for the taking round the players (needs crafts) */
   constructor(data: TrafficData, private readonly opts: {
-    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld; activeR?: number;
+    seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld; activeR?: number; stands?: boolean;
   } = {}) {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED, opts.activeR);
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
@@ -233,6 +239,7 @@ export class WorldSim {
         seats: () => SEATS.avatar,
       },
     });
+    if (opts.stands && opts.crafts) this.stands = this.makeStands(opts.crafts);
   }
 
   /** the road physics, once loaded (loadPhysics) */
@@ -249,7 +256,10 @@ export class WorldSim {
     this.traffic.water = water;
   }
 
-  setBoats(data: BoatData) { this.traffic.setBoats(data); }
+  setBoats(data: BoatData) {
+    this.traffic.setBoats(data);
+    if (this.stands) this.stands.berths = data.berths;
+  }
 
   /** box (map metres [x0, z0, x1, z1)) was edited, or, cleared, is its files' again */
   edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
@@ -277,6 +287,8 @@ export class WorldSim {
    * is in): a host done with its world (host/sim-host.ts hostSim, SimServer.dispose) */
   dispose() {
     this.disposed = true;
+    this.stands?.dispose();
+    for (const c of this.crafts.values()) c.collision.release();
     this.phys?.dispose();
     this.phys = null;
     this.loading = null;
@@ -340,6 +352,7 @@ export class WorldSim {
     this.holdVoxels();
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
+    this.stands?.update(now, foci);
     this.stepCrafts();
     T.walkers = [...this.players.values()].flatMap((P) => (P.walk ? [P.walk.pose] : []));
     const crafts: Solid[] = [];
@@ -642,6 +655,7 @@ export class WorldSim {
     this.occupants.set(seatKey(seat), player);
     if (seat.role === 'pilot') this.craft(seat.entity.id)!.pilot = player;
     if (seat.role === 'passenger') this.held();
+    this.stands?.seated(seat.entity, seat.role);
     this.due.push({ kind: 'seated', player, seat });
   }
 
@@ -1068,6 +1082,37 @@ export class WorldSim {
 
   private craft(id: CraftId) { return (this.crafts as Map<CraftId, CraftState>).get(id); }
 
+  // what the stands act through: their crafts made asleep, their cars parked, both let go as any left vehicle
+  private makeStands(env: CraftWorld) {
+    const T = this.traffic, key = (v: EntityRef) => lifeKey(v as Life);
+    return new Stands({
+      meta: env.meta, cache: env.cache, now: env.now, tuning: this.tuning, roads: T.net.roads,
+      stockCraft: (type, spot) => {
+        const c = this.addCraft(type) as unknown as CraftState;
+        this.placeCraft(c.id, spot);
+        c.asleep = true;
+        c.collision.release();
+        return c.id;
+      },
+      stockCar: (type, col, spot) => T.parkAgain({ len: VEHICLES[type].len, bus: false, vt: type, col }, { ...spot, pitch: 0, roll: 0 }, this.nextStandCar++)?.id ?? null,
+      pose: (v) => this.entities.pose(v),
+      harmed: (v) => this.lives.hp(key(v)) !== undefined || this.wrecks.has(key(v)),
+      remove: (v) => {
+        if (v.kind === 'craft') this.removeCraft(v.id);
+        else { const c = this.carById(v.id); if (c) T.dropParked(c); }
+      },
+      wake: (v) => { const c = this.craft(v.id); if (c) c.asleep = false; },
+      place: (id, spot) => this.placeCraft(id, spot),
+      clear: (x, z, r) => {
+        const near = (p: { x: number; z: number }, R: number) => (p.x - x) ** 2 + (p.z - z) ** 2 < (r + R) ** 2;
+        for (const c of this.crafts.values()) if (c.placed && near(c.core.pose, CRAFT_REACH)) return false;
+        for (const c of T.detachedCars) if (near(c.detachedPose!, CAR_REACH / 2)) return false;
+        for (const P of this.players.values()) if (P.walk && near(P.walk.pose, 1)) return false;
+        return true;
+      },
+    });
+  }
+
   // The solid things (sim/solids.ts, ADR 0010) a craft meets in this tick: those whose boxes may come within its own
   // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
   // crafts with a shape (the light ones only to a light one: sim/solids.ts lightSolids), the river's vessels, the train
@@ -1118,7 +1163,7 @@ export class WorldSim {
   // not in) drops the rest of the tick. Its core's events become the world's (craft), this tick's
   private stepCrafts() {
     for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
-      if (!c.placed) continue;
+      if (!c.placed || c.asleep) continue;
       const core = c.core;
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
@@ -1163,6 +1208,8 @@ const FIRE_WAIT = 15;
 const BESIDE = 2;
 // how far (m) past a blast's reach a body's foot may be and its box still be in reach (a bus's half length)
 const BODY_FAR = 7;
+// the first id of the stands' cars (the traffic numbers its cars from 0, a few thousand an hour)
+const STAND_CARS = 1 << 28;
 // a wreck's paint
 const WRECK_COL = '#1d1a18';
 // a fall: the ticks without going lower that end it, the pace (m/s) a walk down steps never makes; m/s²

@@ -421,7 +421,10 @@ export class MirrorSimClient implements SimClient {
     const B = this.buffer;
     // (a snapshot of a tick already held is the newer word on it)
     if (B.length && B[B.length - 1].tick >= s.tick) B.pop();
-    B.push(this.traffic.read(s));
+    const t = this.traffic.read(s);
+    B.push(t);
+    // (the wire carries a craft only when it changed: those held stand for the rest)
+    s.crafts = t.crafts;
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.takeEdit(e);
     if (w.names) this.names = new Map(w.names);

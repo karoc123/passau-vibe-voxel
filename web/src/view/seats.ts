@@ -32,8 +32,10 @@ const CARS: Record<VehicleId, SeatPlace[]> = {
 
 // the hovercraft's cabin: five rows of four between its window pillars, the hips under the window band so that the
 // chest and head are in it and under its roof; the helicopter's three behind its door windows, low enough for the head
-// to stay under the cabin's roof, the middle one a little back so that the shoulders do not meet
+// to stay under the cabin's roof, the middle one a little back so that the shoulders do not meet; the speedboat's
+// beside its pilot
 const CRAFTS: Partial<Record<CraftType, SeatPlace[]>> = {
+  boat: [at(0.45, 1.05, -0.2, 1.1)],
   hovercraft: rows(20, [1.55, 0.85, -0.85, -1.55], 1.0, 3.55, 0.82),
   helicopter: scaled(CRAFT_SCALE.helicopter, [at(0.45, 0.05, 0.3), at(-0.45, 0.05, 0.3), at(0, 0.05, -0.1)]),
 };

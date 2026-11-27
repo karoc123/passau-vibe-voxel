@@ -12,6 +12,8 @@
 //   the one default kept here: its code, sim/edit-keeper.ts, is the domain's): WorldSim, EditKeeper, Presence
 // - walk: how far a client's walk may move the person it walks as (sim/walk-bounds.ts WALK_BOUNDS): WorldSim
 // - health: each type's health and what harms it (sim/health.ts HEALTH): WorldSim
+// - stands: where placed vehicles are stocked and when they refill (STANDS below, kept here as presence: its code,
+//   sim/stands.ts, is the domain's): Stands
 // A tool that varies tuning builds a copy ({ ...RIDE, stiffness: 40 }) and passes it, as tools/rapier-car.mjs --set
 // and tools/plane.mjs --set do.
 import { frozen } from '../core/frozen';
@@ -28,6 +30,13 @@ import { HEALTH, type HealthTuning } from './health';
 export interface PresenceTuning { readonly radius: number; readonly after: number }
 export const PRESENCE: PresenceTuning = frozen({ radius: 600, after: 120 });
 
+/** wake: m from a player within which a stand is stocked; keep: m past wake an untouched vehicle stays; refill: s after
+ * its vehicle was used that a stand is stocked again; unseen: m no player may be within for that (a vehicle appearing
+ * in front of someone would look like a cheat); giveUp: s a block's nodes may take to come in before it is left bare */
+interface StandTuning { readonly wake: number; readonly keep: number; readonly refill: number; readonly unseen: number; readonly giveUp: number }
+// The wake radius is the cars' send radius (sim/server/interest.ts), so a stand stocked is one a player can be sent.
+const STANDS: StandTuning = frozen({ wake: 400, keep: 120, refill: 300, unseen: 150, giveUp: 20 });
+
 export interface Tuning {
   readonly ride: RideTuning;
   readonly boat: BoatTuning;
@@ -38,8 +47,9 @@ export interface Tuning {
   readonly presence: PresenceTuning;
   readonly walk: WalkBounds;
   readonly health: HealthTuning;
+  readonly stands: StandTuning;
 }
 
 export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, drone: DRONE,
-  presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH });
+  presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS });
 

@@ -20,6 +20,22 @@ import type { WorldSim } from '../world-sim';
 import type { Sight } from './interest';
 import { lifeKey } from '../health';
 
+// the crafts' wire states at the sim's tick, shared by its sessions (a core of its type's state: sim/craft/cores.ts
+// asserts the contract's are the cores')
+const craftsAt = new WeakMap<WorldSim, { tick: number; m: Map<number, { state: CraftState; key: string }> }>();
+function craftStates(sim: WorldSim) {
+  let C = craftsAt.get(sim);
+  if (C?.tick === sim.tick) return C.m;
+  const m = new Map<number, { state: CraftState; key: string }>();
+  for (const c of sim.crafts.values()) {
+    if (!c.placed) continue;
+    const core = wireCore(c.core.save()), key = `${c.pilot} ${JSON.stringify(core)}`;
+    m.set(c.id, { state: { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core } as CraftState, key });
+  }
+  craftsAt.set(sim, C = { tick: sim.tick, m });
+  return m;
+}
+
 function* hurtLives(sim: WorldSim) { for (const h of sim.lives.values()) yield { key: lifeKey(h.life), hp: h.hp, max: h.max }; }
 
 // what a client's path maths and drawing read of a car left out of the traffic (the contract's CarState, which Car
@@ -64,13 +80,13 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const seat = sim.seat(id);
     if (seat?.role === 'driver' && (!S || S.has('car', seat.entity.id))) drivers.push([seat.entity.id, id]);
   }
-  const gone = wire.done();
-  const crafts: CraftState[] = [];
-  // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
+  const crafts: CraftState[] = [], states = craftStates(sim);
   for (const c of sim.crafts.values()) {
-    if (c.placed && (!S || S.sees('craft', c.id, c.core.pose.x, c.core.pose.z)))
-      crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: wireCore(c.core.save()) } as CraftState);
+    if (!c.placed || (S && !S.sees('craft', c.id, c.core.pose.x, c.core.pose.z))) continue;
+    const s = states.get(c.id)!, w = wire.craft(s.state, s.key);
+    if (w) crafts.push(w);
   }
+  const gone = wire.done();
   const passengers: [kind: 'car' | 'craft', id: number, player: PlayerId, seat: number][] = [];
   for (const [id, P] of sim.players) {
     const s = P.seat?.role === 'passenger' ? P.seat : null, e = s?.entity;

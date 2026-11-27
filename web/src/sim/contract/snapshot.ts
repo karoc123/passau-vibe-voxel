@@ -78,7 +78,7 @@ export interface PlayerReads { id: PlayerId; seat: Seat | null; driver: DriverSn
 /** a session's world after a tick: the traffic's cars, people, trains and boats, the cars out of the traffic, the
  * bodies and the avatars as what changed for the session since its last snapshot (sim/agent-wire.ts: the client
  * keeps the rest; gone: those it holds no more), the rest whole. Its cars, people, bodies, avatars, crafts and events
- * are those near the session's player only (its own seat's entity always): a craft missing is gone for it */
+ * are those near the session's player only (its own seat's entity always) */
 export interface Snapshot {
   /** the tick whose state this is; what moves is drawn between it and the tick before */
   tick: number;
@@ -95,7 +95,7 @@ export interface Snapshot {
   riders: PersonWire[];
   /** the cars, the people and riders, the boats (a ship's id, -1 - a boat's), the cars out of the traffic, the bodies
    * (by car id), the avatars, by id, gone from the session's sight (or from the world) */
-  gone: [cars: number[], people: number[], boats: number[], detached: number[], bodies: number[], avatars: number[]];
+  gone: [cars: number[], people: number[], boats: number[], detached: number[], bodies: number[], avatars: number[], crafts: number[]];
   /** the cars with a body (or its fade), by car id, whose draw changed (one at rest: once, its p0 its p1) */
   bodies: [number, BodyWire][];
   boats: BoatsWire | null;
@@ -106,7 +106,7 @@ export interface Snapshot {
   /** the players riding along in a car or a craft sent, by the passenger's seat they hold (its free seats, its riders
    * drawn in their seats and not on foot, map markers) */
   passengers: [kind: 'car' | 'craft', id: number, player: PlayerId, seat: number][];
-  /** the crafts put down, piloted or left */
+  /** the crafts put down, piloted or left, that changed */
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];

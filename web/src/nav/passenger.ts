@@ -24,6 +24,7 @@ const CS = CRAFT_SCALE.helicopter, UP = new THREE.Vector3(0, 1, 0);
 const VIEW: Record<string, { back: number; up: number; look: number }> = {
   hovercraft: { back: 22, up: 7.5, look: 1.8 },
   helicopter: { back: 17 * CS, up: 6 * CS, look: 1.2 * CS },
+  boat: { back: 9.5, up: 3.4, look: 1 },
 };
 // the seat not seen held for this long after boarding: refused late or lost before the first snapshot
 const SEAT_MS = 2500;
