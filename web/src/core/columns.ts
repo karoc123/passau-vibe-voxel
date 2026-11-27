@@ -189,25 +189,32 @@ export class EditableNode {
   // The node's columns in canonical runs (unedited columns as they came; edited ones canonical by construction) and
   // the ground: the base's where a column is unedited, else recomputeGround's capped by the base's.
   encode(): NodeColumns {
-    const C = this.S * this.S, counts = new Uint16Array(C);
+    const C = this.S * this.S, counts = new Uint16Array(C), cols = [...this.edited.keys()].sort((a, b) => a - b);
+    counts.set(this.base.counts);
     let n = this.base.runs.length;
     for (const [c, r] of this.edited) n += r.length - (this.off[c + 1] - this.off[c]) * 3;
-    const runs = new Uint16Array(n), ground = new Uint8Array(this.base.ground);
-    for (let c = 0, at = 0; c < C; c++) {
-      const e = this.edited.get(c);
-      if (e) {
-        if (e.length / 3 > 0xffff) throw new Error(`EditableNode: column ${c} has ${e.length / 3} runs`);
-        runs.set(e, at);
-        counts[c] = e.length / 3;
-        let top = 0;
-        for (let k = 0; k < e.length; k += 3) if (e[k] === top) top += e[k + 1];
-        ground[c] = Math.min(top, this.base.ground[c]);
-      } else {
-        runs.set(this.base.runs.subarray(this.off[c] * 3, this.off[c + 1] * 3), at);
-        counts[c] = this.base.counts[c];
-      }
-      at += counts[c] * 3;
+    const runs = new Uint16Array(n), ground = new Uint8Array(this.base.ground), base = this.base.runs;
+    // (the unedited columns between two edited ones copied in one go: a crater edits a few dozen of a node's ~17000
+    // columns, and a copy each made every crater's edit cost ~2 ms a node, a volley of them a stutter on the host)
+    let at = 0, from = 0;
+    const copy = (to: number) => {
+      const a = this.off[from] * 3, b = this.off[to] * 3;
+      runs.set(base.subarray(a, b), at);
+      at += b - a;
+    };
+    for (const c of cols) {
+      const e = this.edited.get(c)!;
+      if (e.length / 3 > 0xffff) throw new Error(`EditableNode: column ${c} has ${e.length / 3} runs`);
+      copy(c);
+      runs.set(e, at);
+      at += e.length;
+      counts[c] = e.length / 3;
+      let top = 0;
+      for (let k = 0; k < e.length; k += 3) if (e[k] === top) top += e[k + 1];
+      ground[c] = Math.min(top, this.base.ground[c]);
+      from = c + 1;
     }
+    copy(C);
     return { counts, runs, ground };
   }
 }

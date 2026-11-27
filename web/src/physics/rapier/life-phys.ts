@@ -27,6 +27,7 @@ import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/ve
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
 import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies, type WallBox } from '../../sim/traffic';
+import { EditBoxes } from '../../sim/edit-boxes';
 import type { BodyDraw, BodyPose } from '../../sim/contract/agents';
 import { bodyPoseAt, drawnBodyPose } from '../../sim/body-pose';
 import type { Car } from '../../sim/types';
@@ -124,7 +125,7 @@ export class LifePhysics implements TrafficBodies {
   private readonly coachBodies = new Map<string, CoachBody>();
   private readonly coachColliders = new Set<number>();
   private readonly cool = new Map<Car, number>();
-  private edits: [number, number, number, number][] = [];
+  private edits = new EditBoxes();
   t = 0;
   readonly stats: LifePhysStats = { bodies: 0, tracking: 0, wrecks: 0, resting: 0, held: 0, spawned: 0, released: 0, lost: 0, resynced: 0, notReady: 0,
     tickMs: 0, stepMs: 0, terrainMs: 0, releasePop: 0 };
@@ -277,16 +278,12 @@ export class LifePhysics implements TrafficBodies {
     body.drive.ride = body.cur.ride;
   }
 
-  // m from world (x, z) to the nearest edited box (0 inside one; Infinity: none)
-  editDist(x: number, z: number) {
-    let d = Infinity;
-    for (const e of this.edits) d = Math.min(d, Math.hypot(Math.max(e[0] - x, 0, x - e[2]), Math.max(e[1] - z, 0, z - e[3])));
-    return d;
-  }
+  // m from world (x, z) to the nearest edited box (0 inside one) where that is at most max; else more than max
+  editDist(x: number, z: number, max: number) { return this.edits.dist(x, z, max); }
 
   // One traffic tick (after the cars and trains moved)
   tick(dt: number, T: Traffic) {
-    this.edits = T.edits;
+    this.edits = T.editBoxes;
     const st = this.stats;
     if (!this.edits.length && !this.drivers.size && !this.bodies.size && !this.coachBodies.size &&
         !this.fades.size && !this.terrain.stats.chunks) {
@@ -300,7 +297,7 @@ export class LifePhysics implements TrafficBodies {
     const near: { c: Car; d: number }[] = [];
     const paths = new Map<Car, RoadPose>();
     for (const c of T.cars) {
-      const b = this.bodies.get(c.id), d = this.editDist(c.geo.cx, c.geo.cy);
+      const b = this.bodies.get(c.id), d = this.editDist(c.geo.cx, c.geo.cy, o.near * HYST);
       if (o.near > 0 && d < (b?.state === 'track' ? o.near * HYST : o.near) && (this.cool.get(c) ?? -1) <= this.t) {
         near.push({ c, d });
       }
@@ -321,7 +318,7 @@ export class LifePhysics implements TrafficBodies {
         else if (!want.has(c)) this.release(b, T);
       } else if (b.state === 'path') {
         if (!paths.has(c) || want.has(c)) this.remove(b);
-      } else if (!parked.has(c) || (b.state === 'rest' && !paths.has(c) && this.editDist(c.detachedPose!.x, c.detachedPose!.z) > o.near * HYST)) {
+      } else if (!parked.has(c) || (b.state === 'rest' && !paths.has(c) && this.editDist(c.detachedPose!.x, c.detachedPose!.z, o.near * HYST) > o.near * HYST)) {
         this.remove(b);
       }
     }
@@ -646,7 +643,7 @@ export class LifePhysics implements TrafficBodies {
       undefined, WORLD_GROUPS, b.chassis, b.body);
     if (!hit || Math.abs(hit.normal1.y) > 0.6) return Infinity;
     const d = hit.time_of_impact + b.build.half.z;
-    b.held = this.byCollider.has(hit.collider.handle) || this.editDist(p.x + this.origin.x + fx * d, p.z + this.origin.z + fz * d) < 2;
+    b.held = this.byCollider.has(hit.collider.handle) || this.editDist(p.x + this.origin.x + fx * d, p.z + this.origin.z + fz * d, 2) < 2;
     return hit.time_of_impact;
   }
 
@@ -813,7 +810,7 @@ export class LifePhysics implements TrafficBodies {
     else if (up < LOST_UP) why = `up ${up.toFixed(2)}`;
     else if (b.water) why = 'water';
     if (!why) return false;
-    const x = p.x + this.origin.x, z = p.z + this.origin.z, at: [number, number, number] = [x, p.y, z], d = this.editDist(x, z);
+    const x = p.x + this.origin.x, z = p.z + this.origin.z, at: [number, number, number] = [x, p.y, z], d = this.editDist(x, z, 2 * RESYNC_R);
     if (d > RESYNC_R) {
       this.release(b, T, 'resync');
       this.cool.set(c, this.t + (d > 2 * RESYNC_R ? COOL_S : COOL_NEAR_S));
