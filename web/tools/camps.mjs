@@ -12,7 +12,7 @@ import { imp, sessionLink, synthData } from './lib.mjs';
 const { nodeHost } = await imp('src/host/node.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { EYE } = await imp('src/sim/weapons/weapon.ts');
+const { CHEST, EYE } = await imp('src/sim/figure.ts');
 const { DEFAULT_TUNING } = await imp('src/sim/tuning.ts');
 
 const fail = [], check = (ok, s) => (ok ? console.log(`PASS ${s}`) : (console.log(`FAIL ${s}`), fail.push(s)));
@@ -139,7 +139,7 @@ walk(A, guard.pose.x - 80, guard.pose.z, Math.PI / 2);
 await tick(5);
 let hit = false;
 for (let i = 0; i < 40 && !hit; i++) {
-  fireAt(A, 1, guard.pose.x, G + 1.2, guard.pose.z);
+  fireAt(A, 1, guard.pose.x, G + CHEST, guard.pose.z);
   await tick(1);
   hit = guard.mind.target === 'a';
 }
