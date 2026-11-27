@@ -33,6 +33,14 @@ export interface Walls { blocked(x: number, z: number, y0: number, y1: number): 
  * alike) */
 export const headroom = (w: Walls, x: number, z: number, feet: number) => !w.blocked(x, z, feet + 0.05, feet + WALKER_HEAD);
 
+/** whether the walker's body at x, z, its soles at feet, clears the voxels from a step up (or the ground there, if
+ * higher) to its head, at its middle and 0.4 m to each side: where the walk may stride to (the host's guess between a
+ * page's poses too) */
+export function bodyClear(w: Walls & { support(x: number, z: number, top: number): number }, x: number, z: number, feet: number, step = WALKER_STEP) {
+  const clear = (x: number, z: number) => !w.blocked(x, z, Math.max(w.support(x, z, feet + step), feet + step), feet + WALKER_HEAD);
+  return clear(x, z) && clear(x + 0.4, z) && clear(x - 0.4, z) && clear(x, z + 0.4) && clear(x, z - 0.4);
+}
+
 /** another player on foot: as solid as the walker, so two walkers push each other apart; a head is not stood on (a
  * jump from a car's roof would reach it) */
 export const AVATAR_SHAPE: Shape = { hx: WALKER_R, hz: WALKER_R, top: WALKER_HEAD, roof: false };
