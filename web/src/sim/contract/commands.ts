@@ -20,7 +20,7 @@ export type SimCommand = PlayerCommand;
  *                 (no presence). Kept in the player's state until the next; taken at the start of the next update,
  *                 before its ticks (it decides what they simulate), not in tick order with the other commands
  *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
- *   enterSeat     a seat of an entity (sim/entities.ts SEATS: role, index; without, its first): the driver's of a car (as
+ *   enterSeat     a seat of an entity (sim/seats.ts SEATS: role, index; without, its first): the driver's of a car (as
  *                 type choice), the pilot's of a craft (an avatar's walker seat is the mode's walk's); refused: gone,
  *                 no such seat, held by another ('taken'), from foot (the player's avatar) a vehicle beyond Tuning.walk.board of where the
  *                 sim has the walker ('far'), not allowed (the game mode's mayEnter: sim/mode.ts), or (a car) no road

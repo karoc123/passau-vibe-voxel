@@ -6,7 +6,8 @@ import { ACTIVE_CELL, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/ro
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
-import { Avatars } from './avatars';
+import { Avatars, HIPS, type Seated } from './avatars';
+import { seatPlace } from './seats';
 import type { Car, Kind, Rideable } from '../sim/types';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
@@ -37,6 +38,7 @@ const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 const G = 9.81, LANDED_S = 2;
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
+const SEAT_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 
 // a person (and their bike) fallen: where they are (their feet; thrown: their middle), which way they were shoved (unit
 // dx, dz) how fast, for how long (vy: vertical speed, thrown or falling into an edited hole; land: when it met the ground)
@@ -158,7 +160,7 @@ export class StreetLife {
     const C = this.client, seated = new Set<string>(C.drivers().map(([, p]) => p));
     for (const c of C.crafts()) if (c.pilot !== null) seated.add(c.pilot);
     for (const [, , p] of C.passengers()) seated.add(p);
-    this.avatars.update(this.traffic.avatars, C.player, seated, lead / STEP, dt, (av, a, out) => this.traffic.avatarPose(av, a, out));
+    this.avatars.update(this.traffic.avatars, C.player, seated, lead / STEP, dt, (av, a, out) => this.traffic.avatarPose(av, a, out), this.sitting());
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
     for (const m of [this.drawnCars, this.drawnPeople]) for (const [id, d] of m) if (d.frame !== this.frame) m.delete(id);
@@ -281,6 +283,42 @@ export class StreetLife {
     setCount(this.riders.length, M.bike);
     return this.riders.length;
   }
+
+  // the other players riding along, each in their seat in the car or craft as drawn this frame (a car after drawCars)
+  private sitting(): readonly Seated[] {
+    const C = this.client, out = this.seatedNow;
+    out.length = 0;
+    for (const [kind, id, player, index] of C.passengers()) {
+      if (player === C.player) continue;
+      const e = SEAT_EULER, pos = new THREE.Vector3(), q = new THREE.Quaternion();
+      let place, along = 1;
+      if (kind === 'car') {
+        const c = this.agent({ kind: 'car', id }) as Car | null, d = this.drawnCars.get(id);
+        if (!c || !d || d.frame !== this.frame) continue;
+        const t = vehicleOf(c);
+        place = seatPlace('car', t.id, index);
+        along = c.len / t.len;
+        pos.set(d.x, d.y, d.z);
+        e.set(-(d.pitch ?? 0), d.h ?? 0, (d.roll ?? 0) + (d.lean ?? 0));
+      } else {
+        const c = C.crafts().find((o) => o.id === id);
+        if (!c) continue;
+        place = seatPlace('craft', c.type, index);
+        const d = c.core.drawn(C.time.alpha) as { x: number; y: number; z: number; h: number; pitch?: number; bank?: number };
+        pos.set(d.x, d.y, d.z);
+        e.set(-(d.pitch ?? 0), d.h, d.bank ?? 0);
+      }
+      if (!place) continue;
+      q.setFromEuler(e);
+      out.push({ player, q, legs: place.legs, at: new THREE.Vector3(place.x, place.y - HIPS, place.z * along).applyQuaternion(q).add(pos) });
+    }
+    return out;
+  }
+  private readonly seatedNow: Seated[] = [];
+
+  /** the other players riding along as drawn in their seats this frame (their feet's point as if standing), for the
+   * name tags and the maps */
+  seatedDrawn(): readonly Seated[] { return this.seatedNow; }
 
   /** where the other players on foot are drawn (their avatars, by player; arm: the slot in their hand), for their guns
    * (view/weapons/weapons-view.ts) and the maps */

@@ -8,6 +8,8 @@ import { parts, placeYXZ, type CraftFrame, type CraftLook, type Part } from '../
 // size (10 / 8.4 / 3.1) and drawn CRAFT_SCALE times that, as its collision probes are; the origin over the skids,
 // their feet SPAWN_HEIGHT under it.
 
+const PANE = new THREE.MeshStandardMaterial({ color: 0x2a4250, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false });
+
 class HelicopterLook implements CraftLook<'helicopter'> {
   readonly group = new THREE.Group();
   private readonly rotor: THREE.Group;
@@ -42,12 +44,17 @@ function helicopter(group: THREE.Group, part: Part) {
     part(group, METAL, [0.1, 0.1, 0.35], x, -0.98, 1.78).rotation.x = -0.6;
     for (const z of [-0.5, 1.0]) part(group, METAL, [0.08, 0.62, 0.08], x * 0.85, -0.72, z).rotation.z = x > 0 ? -0.35 : 0.35;
   }
-  // the cabin: a belly, the body, the glass over the front seats and the doors' windows, the engine on the roof
+  // the cabin: a belly, the body round the doors' windows, the glass over the front seats, the engine on the roof.
+  // The doors' windows are seen through, onto who rides along (view/seats.ts); the front glass is not, as the pilot
+  // is not drawn
   part(group, WHITE, [1.4, 0.3, 3.0], 0, -0.3, 0.2);
-  part(group, PAINT, [1.5, 1.05, 2.6], 0, 0.35, -0.05);
+  part(group, PAINT, [1.5, 0.475, 2.6], 0, 0.0625, -0.05);
+  part(group, PAINT, [1.5, 0.075, 2.6], 0, 0.8375, -0.05);
+  part(group, PAINT, [1.5, 0.5, 1.05], 0, 0.55, -0.825);
+  part(group, PAINT, [1.5, 0.5, 0.35], 0, 0.55, 1.075);
   part(group, GLASS, [1.42, 1.0, 1.0], 0, 0.42, 1.55);
   part(group, GLASS, [1.2, 0.5, 0.25], 0, 0.1, 2.1);
-  part(group, GLASS, [1.52, 0.5, 1.2], 0, 0.55, 0.3);
+  part(group, GLASS, [1.52, 0.5, 1.2], 0, 0.55, 0.3).material = PANE;
   part(group, PAINT, [1.3, 0.2, 1.0], 0, 0.98, 1.45);
   part(group, PAINT, [1.0, 0.5, 1.9], 0, 1.12, -0.6);
   part(group, DARK, [0.2, 0.6, 0.2], 0, 1.65, 0);

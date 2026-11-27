@@ -166,6 +166,8 @@ export class Nav {
   get aiming() { return this.foot.aim; }
   toggleAim() { return this.foot.aim = this.onFoot && !this.foot.aim; }
   private get driving() { return this.craft !== null && this.riding; }
+  // a touch on the screen is the drive's sticks' (drive.ts), but a passenger's: their seat has none, so it looks round
+  private get onSticks() { return this.driving && this.craft?.id !== 'passenger'; }
   /** a craft owns the camera and the input */
   get craftView() { return this.mode === 'craft'; }
 
@@ -257,7 +259,7 @@ export class Nav {
       // on foot (back from another tab, or landed from the map): a click takes the mouse; its press still picks who
       // to follow (tap)
       if (this.onFoot && e.pointerType === 'mouse') this.requestMouse();
-      if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
+      if ((this.onSticks || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.onMap && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.orbit.pivotAt(e.clientX, e.clientY);
@@ -270,7 +272,7 @@ export class Nav {
     });
     dom.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') this.cursor = { x: e.clientX, y: e.clientY };
-      if ((this.driving || this.onFoot) && e.pointerType === 'touch') return;
+      if ((this.onSticks || this.onFoot) && e.pointerType === 'touch') return;
       const p = ptrs.get(e.pointerId);
       if (!p) { this.hover(e.clientX, e.clientY, e.pointerType); return; }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;

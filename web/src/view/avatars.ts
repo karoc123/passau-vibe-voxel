@@ -111,8 +111,27 @@ class Figure {
     this.hand.rotation.x = -ar.rotation.x;
   }
 
+  /** seated at s: feet as if standing there, turned as q; the legs reaching forward legs rad from hanging, the hands on
+   * the knees */
+  sit(s: Seated) {
+    const G = this.group, [l, r] = this.legs, [al, ar] = this.arms;
+    G.position.copy(s.at);
+    G.quaternion.copy(s.q);
+    this.body.rotation.set(0, 0, 0);
+    l.rotation.x = r.rotation.x = -s.legs;
+    al.rotation.x = ar.rotation.x = -0.6;
+    al.rotation.z = 0;
+    this.hand.rotation.x = -ar.rotation.x;
+  }
+
   dispose() { for (const m of this.mats) m.dispose(); }
 }
+
+/** a player drawn sitting in a vehicle (view/seats.ts): their feet's point as if standing (the hips HIP over it), the
+ * vehicle's turn, the legs' reach forward (rad) */
+export interface Seated { player: string; at: THREE.Vector3; q: THREE.Quaternion; legs: number }
+/** the hips' height over a figure's feet */
+export const HIPS = HIP;
 const SWIM_TILT = 1.3, SW = { e: new THREE.Euler(), v: new THREE.Vector3() };
 
 /** how far (rad) the legs swing either way at v m/s: none standing, WALK_SWING at a walk, RUN_SWING at a run */
@@ -120,7 +139,8 @@ function swingAt(v: number) {
   return v <= WALK ? WALK_SWING * Math.min(1, v / WALK) : WALK_SWING + (RUN_SWING - WALK_SWING) * Math.min(1, (v - WALK) / (RUN - WALK));
 }
 
-/** the other players on foot: a figure each, by player, at their avatar's pose */
+/** the other players on foot, a figure each by player at their avatar's pose, and those riding along, sitting in their
+ * seats */
 export class Avatars {
   readonly group = new THREE.Group();
   private readonly figures = new Map<string, Figure>();
@@ -130,10 +150,17 @@ export class Avatars {
   /** the frame's drawing of avatars (all but me's and those of seated, the players in a vehicle), a (0..1) of the way
    * from their tick before to their tick; at: where an avatar is between its ticks (TrafficMirror avatarPose). The
    * avatars are drawn on the render clock, a tick or two behind who sits in which vehicle (the newest snapshot's): a
-   * player got in is the vehicle only from its first frame, never a figure beside it too */
-  update(avatars: readonly AvatarState[], me: string | null, seated: ReadonlySet<string>, a: number, dt: number, at: (av: AvatarState, a: number, out: Pose) => Pose) {
+   * player got in is the vehicle only from its first frame, never a figure beside it too. sitting: the passengers in
+   * their seats this frame */
+  update(avatars: readonly AvatarState[], me: string | null, seated: ReadonlySet<string>, a: number, dt: number, at: (av: AvatarState, a: number, out: Pose) => Pose,
+    sitting: readonly Seated[] = []) {
     this.frame++;
     const to = { x: 0, y: 0, z: 0, h: 0 }, here = new Set<string>();
+    for (const s of sitting) {
+      if (s.player === me || here.has(s.player)) continue;
+      this.figureOf(s.player).sit(s);
+      here.add(s.player);
+    }
     for (const av of avatars) {
       if (av.player === me || seated.has(av.player)) continue;
       at(av, a, to);
@@ -148,13 +175,17 @@ export class Avatars {
       const p = av.pose, q = av.prev, step = Math.hypot(p.x - q.x, p.z - q.z) / STEP;
       d.v += ((p.moving && step < V_MAX ? step : 0) - d.v) * (1 - Math.exp(-dt / V_S));
       d.ph += dt * (av.pose.swim ? (p.moving ? 5 : 2) : 2 * Math.PI * d.v / (2 * (STEP_M + STEP_V * d.v)));
-      let f = this.figures.get(av.player);
-      if (!f) { f = new Figure(lookOf(av.player)); this.figures.set(av.player, f); this.group.add(f.group); }
-      f.pose(d, !!p.swim, d.arm !== undefined && !!weaponIn(d.arm));
+      this.figureOf(av.player).pose(d, !!p.swim, d.arm !== undefined && !!weaponIn(d.arm));
       here.add(av.player);
     }
     for (const [id, d] of this.drawnBy) if (d.frame !== this.frame) this.drawnBy.delete(id);
     for (const [player, f] of this.figures) if (!here.has(player)) { this.group.remove(f.group); f.dispose(); this.figures.delete(player); }
+  }
+
+  private figureOf(player: string) {
+    let f = this.figures.get(player);
+    if (!f) { f = new Figure(lookOf(player)); this.figures.set(player, f); this.group.add(f.group); }
+    return f;
   }
 
   /** player's figure drawn this frame (its label: where a name hangs over it; its hand: where a gun is held), or

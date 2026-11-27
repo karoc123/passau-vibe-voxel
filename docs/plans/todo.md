@@ -54,7 +54,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
+- Empty crafts' events are published.
 - `walkAs` start height is unbounded.
 - Walkers and solid things (ADR 0010): a driven car does not feel a walker (it shoves it); the host does not check
   them; the walker cannot stand on a car's roof.
@@ -71,5 +71,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
   a car is got into at any speed (no stopping it first); the host's reach uses a rough box for a car (2.2 m half-length).
-- Passengers are not drawn sitting in the craft or car (only their body on foot hidden); a car passenger on a touch
-  screen cannot look round (Nav leaves touch to the drive's sticks); a full craft or car is still offered (the host says it is full).
+- Seated players: a car's windows are opaque, so its passengers are seen only on a motorbike's pillion (the name tag
+  hangs over the seat); drivers and pilots are not drawn; passengers of the player's own craft sit at the snapshot's
+  pose, not the shell's (apart once step 7 predicts it).
