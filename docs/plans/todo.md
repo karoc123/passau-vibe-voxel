@@ -54,7 +54,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   junction (new path maths and wire).
 - The parked-car cap (8/24) sits beside presence, not per cell.
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
-  not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
+  not; wrecks are kept as cars.
 - Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
   files; 4x CPU throttle): the worker's decoding ~30 ms and its gunzip off the page's thread, its first snapshot 6-8 s
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
