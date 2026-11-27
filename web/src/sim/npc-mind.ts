@@ -2,18 +2,18 @@
 // flanking come later. No three.js, no DOM (tools/core-deps.mjs).
 import type { Vec3 } from '../core/vec';
 import type { PlayerId } from './contract/ids';
-import { CHEST } from './figure';
 import type { NpcTuning } from './tuning';
 
-/** what an NPC does at its post: a guard stands at (x, z) facing h; a patrol walks its loop's points in turn */
-export type Duty = { kind: 'guard'; x: number; z: number; h: number } | { kind: 'patrol'; loop: readonly { x: number; z: number }[] };
+/** what an NPC does at its post: a guard stands at (x, z) facing h, a lookout too (with its own numbers,
+ * Tuning.lookout); a patrol walks its loop's points in turn */
+export type Duty = { kind: 'guard' | 'lookout'; x: number; z: number; h: number } | { kind: 'patrol'; loop: readonly { x: number; z: number }[] };
 
 /** post: on its duty; attack: a player in sight; search: walking to where it last saw them; back: to its post */
 type MindState = 'post' | 'attack' | 'search' | 'back';
 
 export interface Mind {
   readonly duty: Duty;
-  /** its own numbers (Tuning.npc) */
+  /** its own numbers (Tuning.npc, a lookout's Tuning.lookout) */
   readonly k: NpcTuning;
   /** the camp whose squad it is in (null: none, a debug NPC) */
   readonly squad: number | null;
@@ -23,7 +23,7 @@ export interface Mind {
   state: MindState;
   /** the player it attacks or searches for */
   target: PlayerId | null;
-  /** where the target last stood when seen (its feet), and when (s) */
+  /** where the target was when last seen (the point it aims at: a chest, a vehicle's middle), and when (s) */
   seen: Vec3 | null;
   seenAt: number;
   /** when the state began; the patrol's point walked to; when it may first fire at the target; the burst's shots
@@ -36,11 +36,12 @@ export interface Mind {
   there: number;
 }
 
-/** what an NPC perceives (its host's: the players on foot and the voxels between) */
+/** what an NPC perceives (its host's: the players, on foot or in a vehicle, and the voxels between); a player is
+ * where it aims at them */
 export interface Senses {
   /** the nearest player it sees, or null */
   nearest(): { player: PlayerId; at: Vec3 } | null;
-  /** where player stands if it sees them now, else null (down or gone: null too) */
+  /** where player is if it sees them now, else null (down or gone: null too) */
   sees(player: PlayerId): Vec3 | null;
 }
 
@@ -99,7 +100,7 @@ export function think(m: Mind, me: Me, s: Senses, now: number, rate: number): Ac
       const act: Act = { goal: to && Math.hypot(to.x - me.x, to.z - me.z) > 1 ? to : null, speed: RUN, face: Math.atan2(seen.x - me.x, seen.z - me.z) };
       // (a shot only at a target seen at the last look: none into the wall it went behind)
       if (now - m.seenAt < LOOK * 1.5 && now >= m.ready) {
-        act.fire = { x: seen.x, y: seen.y + CHEST, z: seen.z };
+        act.fire = { x: seen.x, y: seen.y, z: seen.z };
         if (--m.burst > 0) m.ready = now + 1 / rate - 1e-9;
         else { m.burst = m.k.burst; m.ready = now + m.k.pause; }
       }
@@ -117,7 +118,7 @@ export function think(m: Mind, me: Me, s: Senses, now: number, rate: number): Ac
   }
   // back: to the post (a patrol: its nearest point, walked on from there)
   const D = m.duty;
-  let to: { x: number; z: number } = D.kind === 'guard' ? D : D.loop[m.leg];
+  let to: { x: number; z: number } = D.kind !== 'patrol' ? D : D.loop[m.leg];
   if (D.kind === 'patrol' && m.state === 'back' && now === m.since) {
     m.leg = nearestIndex(D.loop, me);
     to = D.loop[m.leg];
@@ -126,11 +127,11 @@ export function think(m: Mind, me: Me, s: Senses, now: number, rate: number): Ac
   return { goal: { x: to.x, z: to.z }, speed: RUN };
 }
 
-// on its duty: a guard back on its spot and facing its way; a patrol on to its next point when one is reached (or
-// given up)
+// on its duty: a guard (a lookout) back on its spot and facing its way; a patrol on to its next point when one is
+// reached (or given up)
 function post(m: Mind, me: Me): Act {
   const D = m.duty;
-  if (D.kind === 'guard') {
+  if (D.kind !== 'patrol') {
     const far = Math.hypot(D.x - me.x, D.z - me.z) > 1;
     return far && !me.walking ? { goal: { x: D.x, z: D.z }, speed: STROLL } : { speed: STROLL, face: D.h, ...(far ? {} : { goal: null }) };
   }
@@ -142,7 +143,7 @@ function post(m: Mind, me: Me): Act {
 function leashed(m: Mind, p: { x: number; z: number }) {
   const D = m.duty, L = m.k.leash;
   let ax = 0, az = 0;
-  if (D.kind === 'guard') { ax = D.x; az = D.z; } else { for (const q of D.loop) { ax += q.x / D.loop.length; az += q.z / D.loop.length; } }
+  if (D.kind !== 'patrol') { ax = D.x; az = D.z; } else { for (const q of D.loop) { ax += q.x / D.loop.length; az += q.z / D.loop.length; } }
   const d = Math.hypot(p.x - ax, p.z - az);
   return d <= L ? { x: p.x, z: p.z } : { x: ax + (p.x - ax) * L / d, z: az + (p.z - az) * L / d };
 }

@@ -95,9 +95,9 @@ check(visited.size >= 5 && pn.mind.state === 'post', `a patrol walks its loop's 
 
 // the debug request: a guard and a patrol put down ahead of A
 const before = new Set(N.all.keys());
-A.c.send({ kind: 'request', request: { kind: 'npc', patrol: false } });
+A.c.send({ kind: 'request', request: { kind: 'npc', duty: 'guard' } });
 await tick(2);
-A.c.send({ kind: 'request', request: { kind: 'npc', patrol: true } });
+A.c.send({ kind: 'request', request: { kind: 'npc', duty: 'patrol' } });
 await tick(2);
 const made = [...N.all.values()].filter((n) => !before.has(n.id)), aw = sim.players.get('a').walk.pose;
 check(made.length === 2 && made[0].mind.duty.kind === 'guard' && made[1].mind.duty.kind === 'patrol' && made.every((n) => Math.hypot(n.pose.x - aw.x, n.pose.z - aw.z) < 5)
