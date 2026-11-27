@@ -2,16 +2,30 @@
 
 Open work only. When something lands, delete its line. Owner questions are in `FRAGEN.md`.
 
+## Next, in this order (owner 2026-11-27)
+
+- Extraction concepts: 3-5 for Passau, co-op 1-4 players against AI enemies first (Escape from Duckov as the
+  reference: playable alone), PvP of teams of 1-4 later; the owner picks or mixes. The other genres are dropped.
+- Roads by algorithm, for any map: bumps at junctions and joins, steep ramps and edges, sometimes curves too tight
+  for their speed. Measured first (drive the main roads), then fixed less realistically; one full rebuild allowed
+  once a cut-out is better and the gates pass.
+- Roofs probe (after the roads: both change the pipeline): small, simple houses a rule-based roof (gable, hip, flat
+  along the long side, even steps), large and special ones their surveyed roof tidied; landmarks untouched. Not
+  smoothed.
+- 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
+
+Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes
+only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
+
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Step 8** of target-architecture.md; the car's prediction waits for the owner (FRAGEN 17).
 
+## Later, in this order of likelihood
+
 - Overload (target-architecture.md): all three steps built (host/overload.ts), but the third cuts a whole session's
   snapshots to every second tick (not for a player in a vehicle or firing), not the others' agents inside one: that
   needs AgentWire to keep what a snapshot leaves out. Cars given back refill slowly (from sources).
-
-## Later, in this order of likelihood
-
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
   player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
   16 at the cathedral 13–16 (`load` holds 20). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
@@ -32,8 +46,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## On hold until the game is decided (owner 2026-11-24)
 
-- Concepts to choose from later (concepts-and-scale.md): manhunt, courier/rally, bridgehead PvP, extraction (§0),
-  flood rescue. Open: genre, round length, PvP. Decided: a lobby later.
+- Once a concept is picked: player building and destruction (FRAGEN 7, 8), round length. Decided: a lobby later.
 - Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
   in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
 - E15 health and items, E16 spawn/despawn/keep.
@@ -55,9 +68,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - The edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- Getting past something standing on a road where no turn fits (one-way, a bus on a narrow street): one in sight
-  waits until out of sight. Backing to the junction behind and taking another road needs a drawn reverse leg over a
-  junction (new path maths and wire).
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last, until the host
   restarts); wrecks are kept as cars.
 - Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
