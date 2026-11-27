@@ -5,7 +5,7 @@
 // sim, which applies it in its next tick if the mode allows it (WorldSim.apply, mayEdit). Run in a Web Worker on its
 // own clock, or by a Node tool. No three.js, no DOM (tools/core-deps.mjs).
 //   SimServer  the world's: hello (what each session is told first: sim/contract/hello.ts; the protocol, the data build
-//              the host loaded, the tuning's hash); connect(player) a session for a player the host names (or a new id); update (the
+//              the host loaded, the tuning a page runs with); connect(player) a session for a player the host names (or a new id); update (the
 //              world sim's update); trackEdits (the world's edits go with every session's snapshots); dispose (its
 //              listeners and the host's removed: onDispose)
 //   Session    a connection's: its player (the host's, stamped on every command sent through it: a client never names

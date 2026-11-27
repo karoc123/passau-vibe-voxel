@@ -18,10 +18,11 @@ import type { RoadPose } from '../sim/contract/pose';
 import type { Ack, CarBody, DriverSnapshot } from '../sim/contract/snapshot';
 import { bodyPoseAt } from '../sim/body-pose';
 import { STEP } from '../sim/road-net';
+import type { ClientTuning } from '../sim/tuning';
 
 /** the car as the page runs it (physics/rapier/own-car.ts OwnCar) */
 export interface OwnCar {
-  put(c: CarKind, b: CarBody): void;
+  put(c: CarKind, b: CarBody, t: Pick<ClientTuning, 'ride' | 'fuel'>): void;
   save(): CarBody;
   load(b: CarBody): void;
   tick(input: CarInput): boolean;
@@ -68,8 +69,8 @@ export class CarPrediction {
   // drawn while no tick is run ahead: the host's body
   private still: CarBody | null = null;
 
-  /** make: the car's world, loaded when first driven */
-  constructor(private readonly make: () => Promise<OwnCar>) {}
+  /** make: the car's world, loaded when first driven; tuning: the host's (the client's, once its hello is taken) */
+  constructor(private readonly make: () => Promise<OwnCar>, private readonly tuning: () => ClientTuning) {}
 
   /** a driver's input sent (stamped for the page's tick p) */
   sentInput(seq: number, input: CarInput, p: number) {
@@ -167,7 +168,7 @@ export class CarPrediction {
     this.acc = acc;
     this.seen = d.tick;
     this.input = null;
-    this.car!.put(kind, d.body!);
+    this.car!.put(kind, d.body!, this.tuning());
     this.still = d.body!;
   }
 

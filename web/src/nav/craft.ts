@@ -7,7 +7,6 @@ import type { PilotInput } from '../sim/contract/inputs';
 import type { CraftWorld } from '../sim/craft/craft-core';
 import { CORES, type CoreOf } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
-import { DEFAULT_TUNING } from '../sim/tuning';
 import type { Meta } from '../core/meta';
 import type { Pose } from '../sim/contract/pose';
 import type { Nav } from './nav';
@@ -97,12 +96,12 @@ export class CraftLink<K extends CraftType> {
     void ctx.sim.then((s) => { this.sim = s; });
   }
 
-  /** in: the shell's collision made, for a craft of type (default: the link's) */
+  /** in (the sim loaded): the shell's collision made, for a craft of type (default: the link's) */
   open(type: K = this.type) {
     this.close();
     this.type = type;
     const t = this.ctx.tiles;
-    this.col = new VoxelCollision(t.meta, t.cache, t.now, CORES[type](DEFAULT_TUNING).reach);
+    this.col = new VoxelCollision(t.meta, t.cache, t.now, CORES[type](this.sim!.tuning).reach);
     return this.col;
   }
 

@@ -6,7 +6,6 @@ import type { Pose } from '../sim/contract/pose';
 import { CORES } from '../sim/craft/cores';
 import { CRAFT_SCALE, type CraftKind } from '../sim/craft/craft-motion';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
-import { DEFAULT_TUNING } from '../sim/tuning';
 import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import type { CraftContext, PlayerCraft } from './craft';
 import { gameKey } from './input';
@@ -150,7 +149,7 @@ export class PassengerMode implements PlayerCraft {
     this.gun = null;
     if (ref.kind === 'craft') {
       const t = this.ctx.tiles;
-      this.col = new VoxelCollision(t.meta, t.cache, t.now, CORES[type as CraftKind](DEFAULT_TUNING).reach);
+      this.col = new VoxelCollision(t.meta, t.cache, t.now, CORES[type as CraftKind](this.sim!.tuning).reach);
       this.rig.begin(450);
     }
     this.panel.silence();

@@ -3,7 +3,6 @@ import type { Meta } from '../core/meta';
 import { clamp } from '../util';
 import { findSpawn, NO_BOAT_INPUT, type BoatDrawn } from '../sim/craft/boat-motion';
 import type { BoatInput } from '../sim/contract/inputs';
-import { DEFAULT_TUNING } from '../sim/tuning';
 import { craftLook } from '../view/crafts';
 import type { CraftLook } from '../view/crafts/craft-look';
 import type { Nav } from './nav';
@@ -169,7 +168,7 @@ export class BoatMode implements PlayerCraft {
       if (now - s.t0 > GIVE_UP_MS) { this.panel.say('No water found near here.', 2500); this.nav.flyUp(); }
       return;
     }
-    const at = findSpawn(col, s.x, s.z, s.h, SPAWN_REACH, DEFAULT_TUNING.boat);
+    const at = findSpawn(col, s.x, s.z, s.h, SPAWN_REACH, this.link.sim!.tuning.boat);
     if (!at) { this.panel.say('No open water near here.', 2500); this.nav.flyUp(); return; }
     this.link.spawn(at);
     this.go(at.h, at.y);

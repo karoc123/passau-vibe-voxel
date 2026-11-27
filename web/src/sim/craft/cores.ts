@@ -1,6 +1,6 @@
 // The player crafts WorldSim makes (sim/world-sim.ts addCraft), by type: each core (craft-core.ts) made with its part
 // of the world's tuning (sim/tuning.ts). No three.js, no DOM (tools/core-deps.mjs).
-import type { Tuning } from '../tuning';
+import type { ClientTuning } from '../tuning';
 import type { CraftEvents, CraftStates } from '../contract/crafts';
 import type { CraftType } from '../contract/ids';
 import type { PilotInput } from '../contract/inputs';
@@ -11,14 +11,14 @@ import { DroneCore } from './drone-core';
 import { PlaneCore } from './plane-core';
 
 export const CORES = {
-  boat: (t: Tuning) => new BoatCore(t.boat, t.fuel.boat),
-  hovercraft: (t: Tuning) => new SpecialCore('hovercraft', t.craft, t.fuel.hovercraft),
-  helicopter: (t: Tuning) => new SpecialCore('helicopter', t.craft, t.fuel.helicopter),
-  paraglider: (t: Tuning) => new SpecialCore('paraglider', t.craft),
-  drone: (t: Tuning) => new DroneCore(t.drone),
-  floatplane: (t: Tuning) => new PlaneCore(t.plane, t.fuel.floatplane),
-  jet: (t: Tuning) => new PlaneCore(t.jet, t.fuel.jet),
-} satisfies Record<CraftType, (t: Tuning) => CraftCore>;
+  boat: (t: ClientTuning) => new BoatCore(t.boat, t.fuel.boat),
+  hovercraft: (t: ClientTuning) => new SpecialCore('hovercraft', t.craft, t.fuel.hovercraft),
+  helicopter: (t: ClientTuning) => new SpecialCore('helicopter', t.craft, t.fuel.helicopter),
+  paraglider: (t: ClientTuning) => new SpecialCore('paraglider', t.craft),
+  drone: (t: ClientTuning) => new DroneCore(t.drone),
+  floatplane: (t: ClientTuning) => new PlaneCore(t.plane, t.fuel.floatplane),
+  jet: (t: ClientTuning) => new PlaneCore(t.jet, t.fuel.jet),
+} satisfies Record<CraftType, (t: ClientTuning) => CraftCore>;
 
 /** the core of a craft of type K */
 export type CoreOf<K extends CraftType> = ReturnType<(typeof CORES)[K]>;

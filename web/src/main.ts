@@ -147,7 +147,7 @@ let minimap: Minimap | null = null, fullmap: FullMap | null = null;
 // the page's own waypoint (waypoint.ts), set from the maps
 const waypoint = new Waypoint(scene);
 // the world sim's client (client/sim-client.ts: the page reaches the sim only through it) and its presentation, once the
-// traffic is loaded (the crafts wait for it: simReady)
+// traffic is loaded (the crafts wait for it and for the host's hello, whose tuning their cores are made with: simReady)
 let weapons: WeaponsView | null = null;
 let sim: SimClient | null = null, pageTime: PageTime | null = null, life: StreetLife | null = null, fountains: Fountains | null = null;
 // the rivers' points (flood.json `river`, sim/river.ts) for the boat and the floatplane: null until loaded, [] if none
@@ -454,7 +454,7 @@ async function boot() {
     scene.add(wreckSmoke.mesh);
     hook('__life', life);
     hook('__sim', client);
-    simLoaded(client);
+    void client.hello.then(() => simLoaded(client), () => {});
   });
   $('#loading').classList.add('hidden');
   hook('__streamer', streamer);

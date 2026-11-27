@@ -70,9 +70,8 @@ const meta = readMeta(), N = meta.tiles.N;
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 // (a world sim's sessions: a host's, SimServer.connect, with no game mode unless asked; sessions('A', 'B') -> { A, B })
 const { SimServer } = await load('sim/server/sim-server.ts'), { sandbox } = await load('sim/modes/sandbox.ts');
-// (a client's own hello for a bare SimServer: no build, as the server says none; the sim's tuning, so a scenario that
-// tunes its world gives its client the same)
-const { hello } = await load('sim/hello.ts'), mineFor = (sim) => hello(null, sim.tuning);
+// (a client's own hello for a bare SimServer: no build, as the server says none)
+const { hello } = await load('sim/hello.ts'), ownHello = hello(null);
 const sessionsOf = (sim, ...players) => { const server = new SimServer(sim, null); return Object.fromEntries(players.map((p) => [p, server.connect(p)])); };
 const LP = await load('physics/rapier/life-phys.ts'), VH = await load('sim/vehicles.ts');
 const WE = LP.worldEdits, LY = await load('core/layers.ts'), TC = await load('core/tile-cache.ts');
@@ -799,7 +798,7 @@ async function left() {
   if (!w) return;
   const { sim, crafts: [boat, heli], tick } = w, server = new SimServer(sim), A = server.connect('A'), C = server.connect('C');
   const link = sessionLink(server.connect('B'));
-  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
+  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, ownHello);
   // (every frame: player B's commands through the client, the others' through their sessions on the server; the
   // world's update, its snapshot to the client; the crafts' poses kept by tick, for the client's drawn tick)
   const poses = new Map();
@@ -880,7 +879,7 @@ async function craftEvents() {
   const holds = [], tiles = { nodes: () => [[0, 0]], ready: (nodes) => { holds.push(nodes.length); return Promise.resolve(() => {}); } };
   const { sim, crafts: [drone], tick } = w, server = new SimServer(sim, undefined, null, tiles), B = server.connect('B'), B2 = server.connect('B'), C = server.connect('C');
   const link = sessionLink(B);
-  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, mineFor(sim));
+  const client = new MirrorSimClient(new CloneLink(link), unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8'))), null, ownHello);
   const via = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => { look(sim, input); client.update(dt); server.update(dt); link.deliver(); } };
   const cut = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
   Math.random = noRandom;
@@ -960,7 +959,7 @@ async function sessions() {
   // (the host advances the world once a frame and each session's snapshot goes to its client; then the clients' frames,
   // their commands for the next)
   const la = sessionLink(sA), lb = sessionLink(sB), traffic = () => unpackTraffic(JSON.parse(fs.readFileSync(`${DATA}traffic.json`, 'utf8')));
-  const ca = new MirrorSimClient(new CloneLink(la), traffic(), null, mineFor(sim)), cb = new MirrorSimClient(new CloneLink(lb), traffic(), null, mineFor(sim));
+  const ca = new MirrorSimClient(new CloneLink(la), traffic(), null, ownHello), cb = new MirrorSimClient(new CloneLink(lb), traffic(), null, ownHello);
   let clients = [[ca, la], [cb, lb]];
   const frame = { focus: { x: STREET.x, z: STREET.y }, run: (dt, input) => {
     look(sim, input); server.update(dt);

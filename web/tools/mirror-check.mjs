@@ -28,7 +28,7 @@ const at = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771
 
 // (started as a server starts it: src/host/node.ts, hostSim; no ground, no road physics)
 const b = nodeHost(DATA, { seed: 5, world: null, physics: { bodies: false } }, { meta, traffic: data(), boats });
-// (the client's own hello: this code, the build read, the default tuning; the host's must match it)
+// (the client's own hello: this code, the build read; the host's must match it)
 const mine = hello(checkBuild(meta, () => {}));
 const P = 'p1', session = sessionLink(b.connect(P)), link = new CloneLink(session);
 const mirror = new MirrorSimClient(link, data(), null, mine);
