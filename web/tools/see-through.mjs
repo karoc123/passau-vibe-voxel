@@ -8,9 +8,10 @@
 // Default: a few fixed nodes (Hans-Hösl-Straße's, and one of each kind of hole fixed so far), PASS if the count is at
 // most BASELINE (a ratchet: real data, so a data rebuild can move it).
 // --all: every level-1 node (in --jobs K processes, default min(16, cpus - 2); ~1.5 min on 20 cores), the count and
-// the worst; -v: each node's; --classify [FILE.json]: the holes by cause, the worst of each (and all, to the file).
-// usage (in web/): node tools/see-through.mjs [tx_ty ...] [--all] [--jobs K] [-v] [--classify [FILE]]; exit code 1
-// above BASELINE
+// the worst; -v: each node's; --classify [FILE.json]: the holes by cause, the worst of each (and all, to the file);
+// --max N: PASS if the count of the nodes asked for is at most N (with --all, the gate see-through-all).
+// usage (in web/): node tools/see-through.mjs [tx_ty ...] [--all] [--jobs K] [-v] [--classify [FILE]] [--max N]; exit
+// code 1 above BASELINE (or N)
 // (VOXEL_DATA: other data, tools/data-dir.mjs)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -158,7 +159,7 @@ if (argv.includes('--worker')) {
   const t0 = performance.now();
   if (!fs.existsSync(path.join(dir, 'meta.json'))) { console.log(`SKIP see-through: no data (${dir})`); process.exit(0); }
   const all = argv.includes('--all');
-  const named = argv.filter((a, i) => /^\d+_\d+$/.test(a) && argv[i - 1] !== '--jobs');
+  const named = argv.filter((a, i) => /^\d+_\d+$/.test(a) && argv[i - 1] !== '--jobs' && argv[i - 1] !== '--max');
   const keys = all ? fs.readdirSync(path.join(dir, 'tiles/1')).filter((f) => f.endsWith('.bin')).map((f) => f.slice(0, -4))
     : (named.length ? named : NODES).filter((k) => fs.existsSync(path.join(dir, 'tiles/1', `${k}.bin`)));
   let res = [];
@@ -194,8 +195,9 @@ if (argv.includes('--worker')) {
   }
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   console.log(`${count} buildings seen through in ${keys.length} nodes (${secs} s); worst (rays, node, bld): ${worst.slice(0, 5).map((w) => w.join(' ')).join(', ') || 'none'}`);
-  if (all || named.length) process.exit(0);
-  const ok = count <= BASELINE;
-  console.log(`${ok ? 'PASS' : 'FAIL'} see-through: ${count} buildings seen through in ${NODES.join(' ')}, baseline ${BASELINE}`);
+  const max = opt('--max');
+  if ((all || named.length) && max === undefined) process.exit(0);
+  const ok = count <= (max === undefined ? BASELINE : +max);
+  console.log(`${ok ? 'PASS' : 'FAIL'} see-through: ${count} buildings seen through in ${all ? 'every node' : keys.join(' ')}, at most ${max ?? BASELINE}`);
   process.exit(ok ? 0 : 1);
 }
