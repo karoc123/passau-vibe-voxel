@@ -51,3 +51,9 @@ The words the owner and the code use for the same thing. One name per thing; use
   stood on the ground).
 - **Wreck**: a vehicle at 0: its driver's or pilot's controls dead, that seat refused; those in it are not harmed by
   that. A car wreck is charred. Not "destroyed".
+- **Placed vehicle**: a vehicle the host put in the world for anyone to take (not spawned from the debug menu).
+- **Stand**: where a placed vehicle of one class stands, found by the host from the map's voxels and roads; **stocked**
+  while a player is near, empty past that; **used** once its vehicle is taken, moved, harmed or wrecked (the vehicle
+  then a left one like any other), **refilled** a while later out of sight.
+- **Landing room**: level, dry, open ground round a point, wide enough to set a craft down on.
+- **Asleep**: a placed craft not yet touched: not stepped, sent once.

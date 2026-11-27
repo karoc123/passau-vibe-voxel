@@ -22,6 +22,7 @@ import type { Nav } from './nav';
 const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
 const E_TAKEN = new Set(['fpv', 'helicopter', 'hovercraft', 'paraglider']);
+// (no getting out of a wing in the air; one is got into only where the host placed it, before its flight)
 const NOT_BOARDED = 'paraglider';
 /** the keys that get in (E) and out (E where free, X anywhere) */
 export type BoardKey = 'KeyE' | 'KeyX';
@@ -132,7 +133,7 @@ export class Boarding {
     }
     for (const c of sim.crafts()) {
       const p = c.core.pose, flown = c.pilot !== null && c.pilot !== sim.player;
-      if (c.type === NOT_BOARDED) continue;
+      if (c.type === NOT_BOARDED && (c.pilot !== null || (c.core as { ended?: boolean }).ended)) continue;
       // (one another flies: beside them)
       if (flown ? !this.passenger() || !free('craft', c.id, SEATS.craft[c.type]) : c.pilot !== null || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
       consider(craftBox(c.type, p), { ref: { kind: 'craft', id: c.id }, role: flown ? 'passenger' : 'pilot', label: c.type, craft: c });

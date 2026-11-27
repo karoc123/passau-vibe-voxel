@@ -16,7 +16,8 @@ import './special-craft.css';
 // The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
 // Here: the panel, the input, the chase camera. Out of focus the input is hands off (input.ts). Left, the
-// helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes.
+// helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes. A
+// paraglider the host placed on high ground is boarded as they are: the host launches it over its drop.
 
 const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE']);
 // the chase camera: back and up from the craft (m), at what it looks (m over the model's origin); the feet `drop` m
@@ -59,7 +60,7 @@ class SpecialCraft implements PlayerCraft {
   constructor(protected readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
     this.link = new CraftLink(ctx, id);
-    this.boards = id === 'paraglider' ? [] : [id];
+    this.boards = [id];
     this.model = craftLook(id);
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);

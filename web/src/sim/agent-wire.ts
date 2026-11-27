@@ -5,11 +5,12 @@
 // AGENT_TICKS-th tick (10 a second), one past URGENT m (a car stopped short) at once. A car cruising or standing, a person walking a footway, is not sent at all
 // between. Over the internet cars and people were ~95 % of a snapshot's bytes. The cars out of the traffic, the bodies
 // and the avatars are sent when they change, a body come to rest once (else every shot's bodies and wrecks were sent
-// whole every tick for as long as they lay near: 7 bodies were 57 kB/s). No three.js, no DOM.
+// whole every tick for as long as they lay near: 7 bodies were 57 kB/s). A craft likewise: one standing where the host
+// placed it would otherwise cost its whole state every tick to everyone near. No three.js, no DOM.
 import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { AvatarState, AvatarWire, CarBody, HealthWire, PlayerReads, Snapshot } from './contract/snapshot';
+import type { AvatarState, AvatarWire, CarBody, CraftState, HealthWire, PlayerReads, Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
@@ -69,6 +70,7 @@ export class AgentWire {
   private readonly detached = new Map<number, { gen: number; key: string }>();
   private readonly bodies = new Map<number, BodySent>();
   private readonly avatars = new Map<number, { gen: number; player: string; pose: WalkPose; prev: WalkPose }>();
+  private readonly crafts = new Map<number, { gen: number; key: string }>();
   private gen = 0;
   private playerKey = '';
   // the health sent of each life the client holds below its max, by key
@@ -79,6 +81,14 @@ export class AgentWire {
     const key = JSON.stringify(c), h = this.detached.get(c.id);
     if (h?.key === key) { h.gen = this.gen; return null; }
     this.detached.set(c.id, { gen: this.gen, key });
+    return c;
+  }
+
+  /** a craft as sent (key: its state's string), or null when unchanged */
+  craft(c: CraftState, key: string): CraftState | null {
+    const h = this.crafts.get(c.id);
+    if (h?.key === key) { h.gen = this.gen; return null; }
+    this.crafts.set(c.id, { gen: this.gen, key });
     return c;
   }
 
@@ -186,11 +196,11 @@ export class AgentWire {
     return { poses, elapsed: round(b.elapsed, MM), day: b.day };
   }
 
-  /** the snapshot's end: the ids of the cars, people, boats, cars out of the traffic, bodies and avatars it no
+  /** the snapshot's end: the ids of the cars, people, boats, cars out of the traffic, bodies, avatars and crafts it no
    * longer holds */
   done(): Snapshot['gone'] {
-    const gone: Snapshot['gone'] = [[], [], [], [], [], []];
-    [this.cars, this.people, this.boats, this.detached, this.bodies, this.avatars].forEach((M: Map<number, { gen: number }>, i) => {
+    const gone: Snapshot['gone'] = [[], [], [], [], [], [], []];
+    [this.cars, this.people, this.boats, this.detached, this.bodies, this.avatars, this.crafts].forEach((M: Map<number, { gen: number }>, i) => {
       for (const [id, h] of M) if (h.gen !== this.gen) { M.delete(id); gone[i].push(id); }
     });
     this.gen++;
@@ -222,7 +232,7 @@ export class AgentRead {
 
   constructor(private readonly L: (road: number) => number) {}
 
-  private readonly held = { detached: new Held<CarState>(), avatars: new Held<AvatarState>() };
+  private readonly held = { detached: new Held<CarState>(), avatars: new Held<AvatarState>(), crafts: new Held<CraftState>() };
   // the bodies as sent, by car id, with the tick of the snapshot that sent each (a fade's t runs on from it)
   private readonly bodies = new Map<number, { d: BodyDraw; at: number }>();
   private bodyList: [number, BodyDraw][] = [];
@@ -236,14 +246,16 @@ export class AgentRead {
     this.bodies.clear(); this.bodyList = []; this.fades = 0;
   }
 
-  /** the cars out of the traffic, the bodies and the avatars after a snapshot (s: its changed ones and gone) */
-  readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[] } {
+  /** the cars out of the traffic, the bodies, the avatars and the crafts after a snapshot (s: its changed ones and gone) */
+  readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'crafts' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[];
+    crafts: CraftState[] } {
     const H = this.held, A = H.avatars;
     return {
       detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[3]),
       bodies: this.readBodies(s.bodies, s.gone[4], s.tick),
       // (prev left out: the pose sent before)
       avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[5]),
+      crafts: H.crafts.read(s.crafts.map((c) => [c.id, c]), s.gone[6]),
     };
   }
 

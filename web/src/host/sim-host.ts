@@ -77,6 +77,10 @@ export interface HostOptions {
   /** the radius (m) round each player in which they are sent all the world's things (?interest=; without: by kind,
    * sim/server/interest.ts radii) */
   interest?: number;
+  /** vehicles placed for the taking round the players (sim/stands.ts; without: true) */
+  stands?: boolean;
+  /** the world's tuning (without: the default; a tool's own numbers, its stands' times shortened) */
+  tuning?: Tuning;
 }
 
 /** the game modes a host can make, by id */
@@ -89,7 +93,8 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   const build = checkBuild(data.meta, (w) => ports.log(w));
   const { meta } = data, N = meta.tiles.N, cache = ports.tiles, level = meta.tiles.levels.find((l) => l.s === 1)!;
   const sim = new WorldSim(data.traffic, { seed: opts.seed, loadPhysics: (tuning) => loadLifePhysics(meta, tuning, opts.physics, ports),
-    crafts: { meta, cache, now: ports.now }, activeR: opts.activeR });
+    crafts: { meta, cache, now: ports.now }, activeR: opts.activeR,
+    stands: opts.stands ?? true, tuning: opts.tuning });
   sim.setWorld(opts.world, opts.world, opts.world);
   if (opts.time) sim.setTime(opts.time.hour, opts.time.day);
   // (the world's edits: through the one TileCache; the people over a hole in them fall, the cars near them are bodies;

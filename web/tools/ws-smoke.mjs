@@ -164,7 +164,7 @@ const carsNear = (X, x, z) => X.traffic.cars.filter((c) => (X.traffic.carPose(c,
 const peopleNear = (X, x, z) => X.traffic.people.filter((p) => (X.traffic.personPoint(p, 0, P), Math.hypot(P.x - x, P.y - z) < 400)).length;
 const life = [carsNear(A, focus.x, focus.z), carsNear(C, dam.x, dam.y)];
 if (life.some((n) => n < 3)) fail.push(`cars within 400 m: ${life[0]} by the cathedral (A), ${life[1]} by the dam (C)`);
-const strange = [carsNear(C, focus.x, focus.z) + peopleNear(C, focus.x, focus.z) + C.crafts().length, carsNear(A, dam.x, dam.y) + peopleNear(A, dam.x, dam.y)];
+const strange = [carsNear(C, focus.x, focus.z) + peopleNear(C, focus.x, focus.z) + C.crafts().filter((k) => Math.hypot(k.core.pose.x - focus.x, k.core.pose.z - focus.z) < 400).length, carsNear(A, dam.x, dam.y) + peopleNear(A, dam.x, dam.y)];
 if (!arg('interest') && strange.some((n) => n > 0)) fail.push(`sent of the other's place: C ${strange[0]} cars, people and crafts by the cathedral, A ${strange[1]} by the dam`);
 
 const stats = host.stats();

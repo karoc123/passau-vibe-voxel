@@ -159,7 +159,8 @@ const bodyCounts = await bodies();
 async function bodies() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), { worldEdits: WE } = await load('host/node.ts');
   const BRIDGE = { x: 4381, z: 2703 }, wait = () => new Promise((r) => setImmediate(r));
-  const h = nodeHost(DATA, { seed: 5, world: 'tiles', edits: true, eager: true, physics: { bodies: true } }, { meta, traffic: data(), boats });
+  // (no stands: their parked cars take traffic ids, and the car driven and the one dug under are picked by the seed's)
+  const h = nodeHost(DATA, { seed: 5, world: 'tiles', edits: true, eager: true, physics: { bodies: true }, stands: false }, { meta, traffic: data(), boats });
   const sl = sessionLink(h.connect(P)), lk = new CloneLink(sl), c = new MirrorSimClient(lk, data(), null, mine), sim = h.sim, T = sim.traffic;
   const n = { frames: 0, poses: 0, moving: 0, driven: 0, fades: 0 };
   const under = { x: 1, y: 2, z: 3, h: 0.5, pitch: 0.1, roll: 0.2 }, num = (q) => [q.x, q.y, q.z, q.h, q.pitch, q.roll], K = [0, 0.5, 1];
