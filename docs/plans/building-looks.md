@@ -55,6 +55,5 @@ facade's painted axes. Hand-built landmark interiors (interiors.py ROOMS) stay p
 
 ## How to repeat
 
-`uv run python scripts/halls.py --out DIR [--min-area 150] [--doors-only]` (old town, into DIR/data: links to the
-committed data but the 9 rewritten nodes and meta.json), `node tools/tris.mjs DIR/data`, then
-`node tools/halls-probe.mjs --public DIR --halls DIR/halls.json --phone [--occ]`.
+The probe's script and tool were taken out with this verdict: `git log -- scripts/halls.py` (the last version has the
+options above), restored into a branch to run again.

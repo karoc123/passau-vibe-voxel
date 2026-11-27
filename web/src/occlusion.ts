@@ -39,7 +39,7 @@ export class Occlusion {
   // rooms left open, which the grid takes within a tile of the camera's (cx, cy)
   private readonly tiles = new Map<number, number>();
   private readonly hollow = new Map<number, number>();
-  private cx = -1e9; private cy = -1e9; private indoors = false;
+  private cx = -1e9; private cy = -1e9;
   private pool = new Uint8Array(0);
   private readonly free: number[] = [];
   private grid = new Int32Array(0);
@@ -63,11 +63,7 @@ export class Occlusion {
 
   // opaque: per palette entry, 1 where its voxels hide what is behind them
   // nx: the map's tiles in a row (the tiles' index)
-  // roomsFromInside (?halls=1, the hollow ground floors' probe): the rooms are left open only while the eye is in one
-  // (or in its door), not within a tile of it: with every ground floor hollow, the open pyramids round the camera hid
-  // almost nothing from the street and the triangles in view rose 2-4x
-  constructor(private readonly nx: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = TILE_N,
-    private readonly roomsFromInside = false) {
+  constructor(private readonly nx: number, private readonly opaque: Uint8Array, private readonly maxY: number, private readonly T = TILE_N) {
     this.colH = new Uint8Array((T + 2) * (T + 2));
   }
 
@@ -168,8 +164,7 @@ export class Occlusion {
     this.grid = new Int32Array(this.gw * this.gh).fill(-1);
     for (const [k, o] of this.tiles) {
       const x = k % this.nx, y = Math.floor(k / this.nx), h = this.hollow.get(k);
-      const open = h !== undefined && Math.abs(x - this.cx) <= 1 && Math.abs(y - this.cy) <= 1 && (!this.roomsFromInside || this.indoors);
-      this.grid[(y - y0) * this.gw + x - x0] = open ? h : o;
+      this.grid[(y - y0) * this.gw + x - x0] = h !== undefined && Math.abs(x - this.cx) <= 1 && Math.abs(y - this.cy) <= 1 ? h : o;
     }
   }
 
@@ -246,13 +241,6 @@ export class Occlusion {
     // grid again when the camera moved to another tile and some tile has rooms: their pyramids near it are open)
     const T = this.T, ctx = Math.floor(ex / T), cty = Math.floor(ez / T);
     if (ctx !== this.cx || cty !== this.cy) { this.cx = ctx; this.cy = cty; if (this.hollow.size) this.gridDirty = true; }
-    if (this.roomsFromInside) {
-      // in a room: its 2 m cell solid over the eye as the building was, open under it as the voxels are
-      const k = cty * this.nx + ctx, o = this.tiles.get(k), h = this.hollow.get(k);
-      const c = (((Math.floor(ez / 2) & 63) << 6) | (Math.floor(ex / 2) & 63));
-      const inside = o !== undefined && h !== undefined && this.pool[o + c] > ey - 0.5 && this.pool[h + c] <= ey - 0.5;
-      if (inside !== this.indoors) { this.indoors = inside; this.gridDirty = true; }
-    }
     this.regrid();
     const gx0 = this.gx0 * T, gx1 = (this.gx0 + this.gw) * T, gz0 = this.gy0 * T, gz1 = (this.gy0 + this.gh) * T;
     const far = this.gw ? Math.min(camera.far, Math.hypot(Math.max(ex - gx0, gx1 - ex), Math.max(ez - gz0, gz1 - ez)) + 1) : 0;
