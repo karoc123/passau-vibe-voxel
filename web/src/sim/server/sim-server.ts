@@ -236,6 +236,13 @@ export class Session {
     if (c) this.take(c);
   }
 
+  /** the page hidden (ToWorker away): hands off, as a held player (WorldSim.handsOff), and its inputs held for the
+   * ticks to come dropped, else one due after would take up the key it held again */
+  handsOff() {
+    this.inputs.clear();
+    this.sim.handsOff(this.player);
+  }
+
   /** out: no more commands or reads (SimServer.disconnect; hold: the player kept for their coming back) */
   leave(hold = false) { this.server.disconnect(this, hold); }
 
@@ -320,6 +327,8 @@ class InputBuffer {
     else H.splice(i, 0, { p, cmd });
     if (H.length > HOLD_MAX) H.shift();
   }
+
+  clear() { this.held = []; }
 
   /** the input for the host's tick (the newest held for its page tick or before), or null: the last one stays */
   due(tick: number): SeatInputCmd | null {

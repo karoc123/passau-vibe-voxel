@@ -3,9 +3,10 @@
 // the road physics, and runs a SimServer with the start config it reads from the page's URL, with one session: the
 // page's player. It ticks every STEP whether or not the page draws, and posts the session's snapshot after each tick
 // (with the edits since the last, for the page's own live edits); the page's commands are taken as they come and
-// applied at the start of the next tick.
+// applied at the start of the next tick. While the page is hidden (away) the world waits: a game left in a background
+// tab neither runs on without its player nor spends a phone's battery; shown again, it goes on from where it was.
 // The messages:
-//   in:  init { base, query }; commands { commands }
+//   in:  init { base, query }; commands { commands }; away { away }
 //   out: hello (before anything else; the page refuses a host that differs); ready; snapshot { snapshot, ms }
 // greet, handle and step are exported: the Node tools drive them without a clock; the WebSocket host (host/ws.ts)
 // shares the clock and the handler.
@@ -35,12 +36,21 @@ const scope = typeof self !== 'undefined' && typeof (self as { importScripts?: u
   ? self as unknown as { postMessage(m: FromWorker): void; onmessage: ((e: MessageEvent<ToWorker>) => void) | null } : null;
 let session: Session | null = null;
 const early: ToWorker[] = [];
+// the world's tick once it is loaded; the clock's stop while it runs
+let run: (() => void) | null = null, stop: (() => void) | null = null, away = false;
+// (started afresh on coming back: the time hidden is not caught up)
+function ticking() {
+  const on = !!run && !away;
+  if (on && !stop) stop = clock(run!);
+  else if (!on && stop) { stop(); stop = null; }
+}
 
 if (scope) {
   const post: Post = (m) => scope.postMessage(m);
   scope.onmessage = (e: MessageEvent<ToWorker>) => {
     const m = e.data;
     if (m.kind === 'init') { void init(m, post); return; }
+    if (m.kind === 'away') { away = m.away; if (away) session?.handsOff(); ticking(); return; }
     if (!session) { early.push(m); return; }
     handle(session, m);
   };
@@ -59,7 +69,8 @@ async function init(m: Extract<ToWorker, { kind: 'init' }>, post: Post) {
   for (const q of early.splice(0)) handle(s, q);
   // (the page's own host sends to no one else: of the overload's steps only the crowd's)
   const load = new Overload(server.sim.traffic, 1, Math.round(1 / STEP), STEP * 1000);
-  clock(() => load.tick(step(s, post)));
+  run = () => load.tick(step(s, post));
+  ticking();
 }
 
 /** the host's clock: tick() each STEP when it is due (a timer to the next one), until the stop it returns */

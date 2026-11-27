@@ -59,7 +59,7 @@ export interface ServeOptions {
   world?: { dir: string; max?: number };
 }
 
-interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number; turn: number; fired: number; token: string }
+interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number; turn: number; fired: number; token: string; away: boolean }
 
 export function serve(o: ServeOptions) {
   const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
@@ -95,7 +95,7 @@ export function serve(o: ServeOptions) {
     const back = was !== undefined && (server.isAway(was) || live.length > 0);
     const s = back ? server.connect(was) : server.connect();
     if (back) { const a = away.get(was); if (a) away.delete(was); }
-    const c: Conn = { ws, s, out: [], bytes: 0, sock: req.socket, wire: req.socket.bytesWritten, turn: joined++, fired: -Infinity, token: newToken() };
+    const c: Conn = { ws, s, out: [], bytes: 0, sock: req.socket, wire: req.socket.bytesWritten, turn: joined++, fired: -Infinity, token: newToken(), away: false };
     tokens.set(c.token, s.player);
     conns.add(c);
     for (const old of live) { tokens.delete(old.token); old.ws.terminate(); }
@@ -111,7 +111,11 @@ export function serve(o: ServeOptions) {
     if (last) { away.set(c.s.player, { until: n + GRACE * per, token: c.token }); o.log(`${c.s.player} lost, held ${GRACE} s`); }
     else tokens.delete(c.token);
   };
+  // (a page hidden stays connected, its seat its own as long as it likes, but its vehicle hands off and it is sent
+  // nothing: a phone in a pocket spends no radio on a world it does not draw; shown again, its next snapshot carries
+  // what changed meanwhile, as one after a backlog does)
   const take = (c: Conn, m: ToWorker) => {
+    if (m?.kind === 'away') { c.away = m.away === true; if (c.away) c.s.handsOff(); return; }
     if (m?.kind !== 'commands' || !Array.isArray(m.commands)) return;
     if (m.commands.some((x) => x?.kind === 'fire')) c.fired = n;
     handle(c.s, m);
@@ -148,7 +152,7 @@ export function serve(o: ServeOptions) {
     ticks++;
     // (ms to 0.1: its 15 digits were ~0.7 kB/s a player)
     const ms10 = Math.round(ms * 10) / 10;
-    if (++n % every === 0) for (const c of conns) if (c.ws.bufferedAmount < BACKLOG && full(c)) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms: ms10 });
+    if (++n % every === 0) for (const c of conns) if (!c.away && c.ws.bufferedAmount < BACKLOG && full(c)) c.out.push({ kind: 'snapshot', snapshot: c.s.snapshot(), ms: ms10 });
     if (n % flush === 0) {
       for (const c of conns) {
         if (!c.out.length) continue;
