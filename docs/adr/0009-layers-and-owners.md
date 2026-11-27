@@ -39,7 +39,7 @@ One owner per piece of state:
   domain object.
 - **View state** (camera, graphics settings, weather look): presentation and app.
 
-Every client checks the host's hello (protocol, data build, tuning hash) before it sends or draws anything.
+Every client checks the host's hello (protocol, data build) before it sends or draws anything; its tuning is the host's.
 
 Owner answers that stand: the host owns the time of day, the same for everyone; the page draws from snapshots in
 every mode (a body's pose crosses as quaternions); edits cross as columns, not ops, so the client needs no

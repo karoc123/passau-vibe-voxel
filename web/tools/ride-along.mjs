@@ -2,7 +2,9 @@
 // of its own; the host, src/host/ws.ts on the real data, and the driver's client, Node's WebSocket, in this process).
 // D takes the wheel of a car of the traffic standing by the cathedral; P walks up beside it, is offered a seat
 // (nav/board.ts) and taps the button to ride along; a finger dragged across the screen turns P's view round the car
-// (nav/nav.ts: a passenger has no drive sticks), as dragging does in a craft.
+// (nav/nav.ts: a passenger has no drive sticks), as dragging does in a craft. The seat switch's button (nav/board.ts
+// swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
+// tap on it moves P to the gun, another back to the wheel.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -104,6 +106,25 @@ await touch('touchEnd');
 const after = await P.evaluate(() => window.__three.nav.ride?.dyaw ?? null);
 log(`dyaw ${before} -> ${after}`);
 check(before !== null && after !== null && Math.abs(after - before) > 0.3, `a finger dragged across the screen turns P's view round the car (${before?.toFixed(2)} -> ${after?.toFixed(2)} rad)`);
+
+// the seat switch: none in a car (it has no gun); in the speedboat, from the wheel to the gun and back
+const seatButton = () => P.evaluate(() => { const b = document.querySelector('#seat-button'); return b && getComputedStyle(b).display !== 'none' ? b.textContent : null; });
+check(aboard && await seatButton() === null, 'riding along in the car: no seat switch shown');
+const BOAT = { x: 8160.5, z: 2880.5, h: 1.8 };
+await P.tap('#board-button').catch(() => {});
+await P.waitForFunction(() => window.__three.nav.onFoot, null, { timeout: 30000 }).catch(() => {});
+await P.evaluate((at) => window.__crafts.find((c) => c.id === 'boat').enter(at), BOAT);
+const piloting = () => P.waitForFunction(() => window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'boat' && window.__sim.craftOf().placed, null, { timeout: 60000 }).then(() => true, () => false);
+const atWheel = await piloting();
+const toGun = atWheel && await P.waitForFunction(() => { const b = document.querySelector('#seat-button'); return b && getComputedStyle(b).display !== 'none' && b.textContent; }, null, { timeout: 10000 })
+  .then((h) => h.jsonValue(), () => null);
+check(toGun === 'To the gun', `at the speedboat's wheel the seat switch is shown: ${JSON.stringify(toGun)} (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))})`);
+await P.tap('#seat-button').catch(() => {});
+const gunner = await P.waitForFunction(() => window.__sim.seat()?.role === 'passenger' && window.__three.nav.craft?.id === 'passenger', null, { timeout: 15000 }).then(() => true, () => false);
+const toWheel = gunner && await until(async () => (await seatButton()) === 'To the wheel', 10000);
+check(gunner && toWheel, `a tap on it: P at the gun, the button saying To the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))}, ${JSON.stringify(await seatButton())})`);
+await P.tap('#seat-button').catch(() => {});
+check(await piloting(), `another tap: P back at the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))})`);
 
 await browser.close();
 link.close?.();

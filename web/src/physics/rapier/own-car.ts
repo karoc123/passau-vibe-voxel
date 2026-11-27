@@ -11,7 +11,7 @@ import type { CarInput } from '../../sim/contract/inputs';
 import type { CarBody } from '../../sim/contract/snapshot';
 import { STEP as TICK } from '../../sim/road-net';
 import { buildOf } from '../../sim/vehicles';
-import { DEFAULT_TUNING } from '../../sim/tuning';
+import type { ClientTuning } from '../../sim/tuning';
 import { RapierCar } from './car';
 import { Tank } from '../../sim/tank';
 import { mapOrigin, SUB } from './life-phys';
@@ -26,8 +26,10 @@ export class OwnCar {
   private readonly terrain: RapierTerrain;
   private readonly origin: { x: number; z: number };
   private car: RapierCar | null = null;
-  // which build the car's body is of (a type and length)
+  // which build the car's body is of (a type and length), and the tuning it was made with (a host connected again may
+  // run with other numbers)
   private kind = '';
+  private tuning: Pick<ClientTuning, 'ride' | 'fuel'> | null = null;
   // the clock the terrain's chunks age by (ms): a tick each step, replays too
   private clock = 0;
 
@@ -46,16 +48,18 @@ export class OwnCar {
     return new OwnCar(meta, cache, edits, terrain);
   }
 
-  /** the car of c's type at body b: a new body when the type differs from the one before */
-  put(c: { vt?: string; bus: boolean; len: number }, b: CarBody) {
+  /** the car of c's type at body b, run with the host's tuning t: a new body when the type or t differs from the one
+   * before */
+  put(c: { vt?: string; bus: boolean; len: number }, b: CarBody, t: Pick<ClientTuning, 'ride' | 'fuel'>) {
     const kind = `${c.vt ?? ''}|${c.bus}|${c.len}`;
-    if (kind !== this.kind || !this.car) {
+    if (kind !== this.kind || t !== this.tuning || !this.car) {
       this.drop();
-      const build = buildOf(c as Parameters<typeof buildOf>[0]), ride = DEFAULT_TUNING.ride;
+      const build = buildOf(c as Parameters<typeof buildOf>[0]), ride = t.ride;
       const v = createVehicle(RAPIER, this.world, { x: b.p[0] - this.origin.x, y: b.p[1], z: b.p[2] - this.origin.z }, { x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] }, build, true, ride);
       this.car = new RapierCar(RAPIER, this.world, v.body.translation(), v.body.rotation(), this.terrain, undefined, build, v, ride);
-      this.car.tank = new Tank(DEFAULT_TUNING.fuel.car);
+      this.car.tank = new Tank(t.fuel.car);
       this.kind = kind;
+      this.tuning = t;
     }
     this.load(b);
   }

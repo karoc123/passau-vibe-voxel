@@ -34,7 +34,7 @@ import { AGENT_TICKS, reckon, type Sampled } from '../sim/agent-wire';
 import { carShape, COACH_SHAPE, craftAhead, craftMeets, craftSolids, lightSolids, meetShapes, meetSolids, overlap, solidAt, vesselShape, type CraftPose, type Solid } from '../sim/solids';
 import { CORES } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
-import { DEFAULT_TUNING } from '../sim/tuning';
+import type { ClientTuning } from '../sim/tuning';
 import { carAcc, STEP, stopShort } from '../sim/road-net';
 
 // a correction is blended out over BLEND_S s; beyond SNAP m (or TURN rad) it is shown at once
@@ -97,6 +97,8 @@ export class Prediction {
   private clockAt: number | null = null;
   private hour = 12;
   private readonly cores = new Map<CraftType, CraftCore>();
+  // the tuning the cores were made with (a host connected again may run with other numbers)
+  private coresOf: ClientTuning | null = null;
   private readonly carAt: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
   private readonly mine: Solid[] = [];
   private readonly room = { ext: 0, need: 0 };
@@ -108,7 +110,8 @@ export class Prediction {
   private toldTo = 0;
   private fresh: unknown[] = [];
 
-  constructor(private readonly world: CraftWorld, private readonly carPose: CarAt, private readonly coaches: CoachesAt = () => []) {}
+  /** tuning: the host's (the client's, once its hello is taken) */
+  constructor(private readonly world: CraftWorld, private readonly tuning: () => ClientTuning, private readonly carPose: CarAt, private readonly coaches: CoachesAt = () => []) {}
 
   /** the core run ahead of craft id (null: not that one's) */
   coreOf(id: CraftId) { return id === this.id ? this.core : null; }
@@ -301,8 +304,10 @@ export class Prediction {
     const H = new Map<CraftId, [number, number]>();
     for (const c of s.crafts) {
       if (c.id === this.id || !c.placed) continue;
+      const t = this.tuning();
+      if (t !== this.coresOf) { this.cores.clear(); this.coresOf = t; }
       let k = this.cores.get(c.type);
-      if (!k) this.cores.set(c.type, k = CORES[c.type](DEFAULT_TUNING) as CraftCore);
+      if (!k) this.cores.set(c.type, k = CORES[c.type](t) as CraftCore);
       k.load(c.core as never);
       const q = k.pose as CraftPose, v = k.velocity, was = this.headings.get(c.id);
       H.set(c.id, [tick, q.h]);
@@ -341,7 +346,7 @@ export class Prediction {
     this.drop();
     this.p = page;
     this.acc = acc;
-    const core = this.core = CORES[type](DEFAULT_TUNING) as CraftCore;
+    const core = this.core = CORES[type](this.tuning()) as CraftCore;
     core.ahead = true;
     this.id = id;
     this.type = type;

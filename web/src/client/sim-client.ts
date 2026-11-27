@@ -11,8 +11,8 @@
 // predict.ts). A seat input gets its seq and the page's tick it is meant for (the page's own 30 Hz clock: its frames'
 // time); the host holds it for the tick that page tick falls on there, so the ticks' inputs keep their spacing however
 // the network bunches them, and the session answers with ack (the last one taken, and the host's tick it took it in).
-// The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
-// differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
+// The client first takes its host's hello (the protocol, the data build, the tuning the page runs with) and refuses a
+// host of other code or data: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
 // A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
 // what the player held is gone with the old session, unless the host says the session came back as its player
 // (Hello resume): then the player's reads (id, seat, car, crafts) are kept until the new session's first snapshot, so
@@ -27,7 +27,6 @@ import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
 import { Prediction } from './predict';
 import { CarPrediction, type OwnCar } from './predict-car';
 import { CORES } from '../sim/craft/cores';
-import { DEFAULT_TUNING } from '../sim/tuning';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
 import type { CraftEventOf } from '../sim/contract/crafts';
 import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/ids';
@@ -44,6 +43,7 @@ import { Timetable, type CoachPose } from '../sim/coaches';
 import { drawnBodyPose } from '../sim/body-pose';
 import { SeatReads } from '../sim/seat-reads';
 import { checkHello } from '../sim/hello';
+import type { ClientTuning } from '../sim/tuning';
 import type { Hello } from '../sim/contract/hello';
 
 // (what the page sends, SimCommand, and what it reads: sim/contract/; TrafficMirror: below)
@@ -66,6 +66,9 @@ export interface SimClient {
   /** the host's hello once it is taken (it matched the client's own); rejects with what differs if the host is refused
    * (the client is then out of the session: it sends, runs and takes nothing more) */
   readonly hello: Promise<Hello>;
+  /** the tuning the host's sim runs with, the parts the page runs too (its hello's; the crafts' cores, the own car are
+   * made with it): read once the hello is taken */
+  readonly tuning: ClientTuning;
   /** the player whose commands this client sends and whose reads it holds: its session's (the host names it; null
    * until the first snapshot) */
   readonly player: PlayerId | null;
@@ -261,11 +264,11 @@ export class MirrorSimClient implements SimClient {
    * the edits are not applied); predict: the world the craft the player pilots is run ahead in (none: drawn as the
    * snapshots have it); car: the world the car the player drives is run ahead in, loaded when first driven (none:
    * drawn as the snapshots have it) */
-  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
+  constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Pick<Hello, 'protocol' | 'build'>,
     readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null,
     predict?: CraftWorld, car?: () => Promise<OwnCar>) {
-    this.prediction = predict ? new Prediction(predict, (c, s, off, out) => this.traffic.carPose(c, s, off, out), (t, hour) => this.traffic.trains.at(t, hour)) : null;
-    this.carPrediction = car ? new CarPrediction(car) : null;
+    this.prediction = predict ? new Prediction(predict, () => this.tuning, (c, s, off, out) => this.traffic.carPose(c, s, off, out), (t, hour) => this.traffic.trains.at(t, hour)) : null;
+    this.carPrediction = car ? new CarPrediction(car, () => this.tuning) : null;
     if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     const C = this.carPrediction;
@@ -280,8 +283,9 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     const e = checkHello(h, this.mine);
     if (e) { this.refuse(e); return; }
-    if (this.greeted) { this.restart(!!h.resume?.resumed); return; }
+    const again = this.greeted;
     this.greeted = h;
+    if (again) { this.restart(!!h.resume?.resumed); return; }
     // (one sent before a first try that failed was dropped with it)
     if (this.myName) this.send({ kind: 'name', name: this.myName });
     // (a page loaded again comes back as its player but starts on the map: the seat it holds nothing of let go)
@@ -318,6 +322,12 @@ export class MirrorSimClient implements SimClient {
     this.queue = [];
     this.link.close();
     this.settle.fail(e);
+  }
+
+  get tuning(): ClientTuning {
+    if (!this.greeted) throw new Error('sim-client: the tuning read before the host\'s hello');
+    // (the protocol matched: the host's hello carries a ClientTuning)
+    return this.greeted.tuning as ClientTuning;
   }
 
   get player(): PlayerId | null { return this.last?.player.id ?? null; }
@@ -452,7 +462,7 @@ export class MirrorSimClient implements SimClient {
     const L = this.craftList, seen = new Set<CraftId>();
     for (const c of s.crafts) {
       let m = L.get(c.id);
-      if (!m) { L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, wreck: false, core: CORES[c.type](DEFAULT_TUNING) }); m.core.load(c.core); }
+      if (!m) { L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, wreck: false, core: CORES[c.type](this.tuning) }); m.core.load(c.core); }
       m.pilot = c.pilot;
       m.placed = c.placed;
       m.wreck = this.lives.get(`craft:${c.id}`)?.hp === 0;

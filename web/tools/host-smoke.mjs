@@ -11,9 +11,9 @@
 // Then the hello (docs/adr/0009-layers-and-owners.md; sim/hello.ts): a MirrorSimClient over each transport (a
 // CloneLink of a session this tool ticks; WorkerLink, its Worker a stand-in whose messages go
 // through sim.worker.ts greet, handle and step) takes the host's hello when it matches its own, and refuses it (client.hello
-// rejects naming what differs; the session left, no snapshot taken) when the protocol, the data build or the tuning
-// differ; the tuning's hash is the same for a copy of the tuning with its keys in another order or another host-only
-// number (the edits' keeping), another for one craft number. Then the host's own: the players it names
+// rejects naming what differs; the session left, no snapshot taken) when the protocol or the data build differ; a client
+// whose own tuning differs takes the host's (client.tuning: the hello's), and the hello carries only the tuning's
+// parts a page runs (under HELLO_BYTES as JSON). Then the host's own: the players it names
 // (SimServer.connect: new ids), its start config read from a page's query (host/start.ts hostStart: the parameters,
 // the defaults), and the worker's init carrying nothing but the page's query.
 // usage (in web/): node tools/host-smoke.mjs [-v]; prints PASS with the counts, or FAIL
@@ -193,18 +193,18 @@ const { hostStart } = await load('host/start.ts'), { goldenHour, dayOfDate } = a
 }
 
 // the hello, through every transport
-const { hello, tuningHash } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
+const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const { DEFAULT_TUNING } = await load('sim/tuning.ts');
 const { MirrorSimClient, CloneLink } = await load('client/sim-client.ts');
 const { WorkerLink } = await load('client/sim-worker-link.ts');
 const host = r1.server, build = checkBuild(data.meta, () => {}), mine = hello(build);
 if (!build) fail.push('hello: the data has no build (meta.json world)');
 if (JSON.stringify(host.hello) !== JSON.stringify(mine)) fail.push(`hello: the host's ${JSON.stringify(host.hello)}, the client's ${JSON.stringify(mine)}`);
-const reversed = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).reverse().map(([k, v]) => [k, reversed(v)])) : o);
-if (tuningHash(reversed(DEFAULT_TUNING)) !== mine.tuning) fail.push('hello: the tuning\'s hash depends on its keys\' order');
+// (a page's hello, sent each time a page connects: the tuning's client parts are about 4 KB of JSON)
+const HELLO_BYTES = 6000, helloBytes = JSON.stringify(host.hello).length;
+if (helloBytes > HELLO_BYTES) fail.push(`hello: ${helloBytes} bytes of JSON, over ${HELLO_BYTES}`);
+for (const k of ['presence', 'walk', 'health', 'stands']) if (k in host.hello.tuning) fail.push(`hello: carries the host's own tuning ${k}`);
 const heli = { ...DEFAULT_TUNING.craft.helicopter, accel: DEFAULT_TUNING.craft.helicopter.accel + 1 }, craft = { ...DEFAULT_TUNING.craft, helicopter: heli };
-if (tuningHash({ ...DEFAULT_TUNING, craft }) === mine.tuning) fail.push('hello: the tuning\'s hash misses craft.helicopter.accel');
-if (tuningHash({ ...DEFAULT_TUNING, edits: { ...DEFAULT_TUNING.edits, after: 1 } }) !== mine.tuning) fail.push('hello: the tuning\'s hash has the host\'s own edits keeping');
 // (a stand-in for the Web Worker: its messages cloned and answered a turn later, through greet and handle)
 globalThis.location ??= { href: 'http://localhost/' };
 // (its clock: tick(), once a frame here)
@@ -232,7 +232,7 @@ const transports = {
 };
 const cases = [['matching', mine, null], ['protocol', { ...mine, protocol: mine.protocol + 1 }, 'protocol'],
   ['build', { ...mine, build: { ...build, buildId: `${build?.buildId}-other` } }, 'data build'], ['no build', { ...mine, build: null }, 'data build'],
-  ['tuning', { ...mine, tuning: tuningHash({ ...DEFAULT_TUNING, craft }) }, 'tuning']];
+  ['other tuning', hello(build, { ...DEFAULT_TUNING, craft }), null]];
 let helloChecks = 0;
 for (const [tn, make] of Object.entries(transports)) {
   for (const [cn, h, word] of cases) {
@@ -246,6 +246,7 @@ for (const [tn, make] of Object.entries(transports)) {
       if (got.error) fail.push(`${what}: refused: ${got.error.message}`);
       else if (JSON.stringify(got.ok) !== JSON.stringify(host.hello)) fail.push(`${what}: took ${JSON.stringify(got.ok)}`);
       else if (client.tick <= 0) fail.push(`${what}: no snapshot taken`);
+      else if (JSON.stringify(client.tuning) !== JSON.stringify(host.hello.tuning)) fail.push(`${what}: the client runs with a tuning not the host's`);
       session.leave();
     } else {
       if (!got.error) fail.push(`${what}: taken, not refused`);

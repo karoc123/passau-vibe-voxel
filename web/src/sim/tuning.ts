@@ -53,6 +53,11 @@ export interface Tuning {
   readonly fuel: FuelTuning;
 }
 
+/** the parts the page runs as the host does, so the host sends them in its hello: the crafts' motion laws and tanks
+ * (a mirror's and a prediction's cores are made with them) and the cars' ride and tank (the driver's own car run
+ * ahead). Not the host's own (presence, walk, health, stands): they would only lengthen every hello */
+export type ClientTuning = Pick<Tuning, 'ride' | 'boat' | 'plane' | 'jet' | 'craft' | 'drone' | 'fuel'>;
+
 export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, drone: DRONE,
   presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS, fuel: FUEL });
 

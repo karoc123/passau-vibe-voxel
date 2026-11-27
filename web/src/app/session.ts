@@ -3,8 +3,8 @@
 // (its seed, game mode, edits, road physics, time of day) is the host's: the worker reads it from the page's URL,
 // which the page hands it, a network host from its own command line; the page learns the world's time and its player
 // from its snapshots.
-// Each client compares its host's hello with its own (this code, the build of the page's meta.json, the tuning) and
-// refuses a host that differs (client.hello rejects: main.ts shows it).
+// Each client compares its host's hello with its own (this code, the build of the page's meta.json) and refuses a host
+// that differs (client.hello rejects: main.ts shows it); the tuning the page runs with is the host's, from its hello.
 import { MirrorSimClient, type SimClient } from '../client/sim-client';
 import { SocketLink, WorkerLink } from '../client/sim-worker-link';
 import { checkBuild } from '../core/data-contract';
@@ -47,7 +47,7 @@ export const HOST_PORT = 5300;
 
 // the client, and its link (for the tools)
 export function openSession(o: SessionOptions, { meta, edits, traffic, world }: SessionData): { client: SimClient; link: WorkerLink | SocketLink } {
-  // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
+  // the page's own hello: this code, the build it loaded (checked and warned of at boot)
   const mine = hello(checkBuild(meta, () => {}));
   const link = o.server ? new SocketLink(o.server) : new WorkerLink(o.query);
   // (the held keys are let go on the page's side too: nav/input.ts onFocusLoss; its frames, which send them, stop)

@@ -51,6 +51,23 @@ export function makeCanopyButton(press: () => void) {
   };
 }
 
+/** in a craft with a gun: from the controls to the gun or back (the C key's, nav/board.ts swap); shown on a touch
+ *  screen only while there is a seat to switch to */
+export function makeSeatButton(press: () => void) {
+  const b = button('seat-button');
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); press(); });
+  let shown: string | null = null;
+  return {
+    /** what it says; null: hidden */
+    show(label: string | null) {
+      if (label === shown) return;
+      shown = label;
+      b.classList.toggle('on', !!label);
+      if (label) b.textContent = label;
+    },
+  };
+}
+
 /** near a vehicle on foot, or in one: get in or out (the E key's, as a button to tap or click; nav/board.ts) */
 export function makeBoardButton(press: () => void) {
   const b = button('board-button');

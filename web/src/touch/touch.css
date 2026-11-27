@@ -40,6 +40,12 @@
 #board-button[hidden], body.noui #board-button { display: none; }
 #board-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
 @media (pointer: coarse) { #board-button { left: calc(12px + var(--sl)); top: 50%; bottom: auto; transform: translateY(-50%); min-height: 44px; } }
+/* the seat switch (nav/board.ts swap): under Get in/out on the left edge, as far from the thumbs */
+#seat-button { display: none; position: fixed; left: calc(12px + var(--sl)); top: calc(50% + 34px); z-index: 4; min-height: 44px;
+  padding: 8px 16px; border: 1px solid rgba(255,255,255,.55); border-radius: 18px; background: rgba(16,17,20,.55); color: #fff;
+  font: 600 14px Inter, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+#seat-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
+@media (pointer: coarse) { body:not(.noui) #seat-button.on { display: block; } }
 /* the touch sticks' rings (sticks.ts): faint, never catching a touch */
 .stick-ring { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; box-sizing: border-box; border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
