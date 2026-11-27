@@ -36,7 +36,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
   left of it: cars at the mapped car parks too, a crater under an asleep craft, the draw cost of a dozen standing
-  crafts on the phone, the numbers (wake 400 m, refill 300 s) tried in play.
+  crafts on the phone, the numbers (wake 400 m, refill 300 s) tried in play. A helicopter stands on a vessel's deck
+  (carried by the host; the page's run ahead sets it down but does not carry it: corrected each snapshot); the other
+  crafts meet a deck as a wall.
 - Roads by algorithm, for any map: measured (`road-drive`); the caps take holes and verges of the carriageway and
   slabs over passages under it (rebuilt 2026-11-27: bumps 93 -> 69, edges 113 -> 76, steep 100 -> 99, tight 296,
   p99 1.97 -> 1.85, p99.9 6.19 -> 4.98 m/s^2). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
@@ -117,3 +119,5 @@ only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
   ~80 ms) on a ~15 ms frame, the stream's share ~6, the town's life ~4 ms a frame (far traffic ~1.4 ms, posing the
   cars in view). Not measured: the GPU's uploads, the workers on a slow CPU (CDP throttles only the main thread). (A
   profiled run's one ~600 ms frame is the CDP profiler starting, not the page.)
+- The motorbike's rider is part of its model, at a grown-up's size beside the figure (passers-by and players at three
+  quarters, owner 2026-11-27); the road physics' hit test of a passer-by still takes a grown-up's middle (0.9 m).

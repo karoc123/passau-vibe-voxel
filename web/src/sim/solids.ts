@@ -125,14 +125,23 @@ export function craftAhead(g: { px: number; py: number; z: number; fx: number; f
 }
 
 /** after each of a craft's steps (the host's and the page's run ahead alike, so both meet the same): pushed out of
- * each of near that one of its boxes reaches into; met: told each such one (its index in near) and the way out of it */
+ * each of near that one of its boxes reaches into, or set down on its roof (CraftCore.stand); met: told each pushed
+ * out of (its index in near) and the way out of it. The index of the one stood on, or -1 */
 export function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision, met?: (i: number, n: { x: number; z: number }) => void) {
   MINE.length = 0;
+  let on = -1;
   for (const a of craftMeets(type, core.pose, MINE)) for (let i = 0; i < near.length; i++) {
-    const d = overlap(a, near[i], OUT);
-    if (d > 0) { met?.(i, OUT); core.meet!(OUT, d, col); }
+    const b = near[i], d = overlap(a, b, OUT);
+    if (d <= 0) continue;
+    // (come onto its roof from over it: stood on, as the ground; a craft that stands on none meets it as a wall)
+    const rise = b.y + b.top - a.y;
+    if (b.roof !== false && rise <= STAND_ON && core.stand?.(rise)) { on = i; continue; }
+    met?.(i, OUT); core.meet!(OUT, d, col);
   }
+  return on;
 }
+// m a craft's bottom may be under a roof and still come onto it: a step's sink at a helicopter's let-down, and more
+const STAND_ON = 0.4;
 const OUT = { x: 0, z: 0 }, MINE: Solid[] = [];
 
 /** a craft's pose; bank (rad, > 0 its right wing down): a plane's, what its wings are to the solid things */

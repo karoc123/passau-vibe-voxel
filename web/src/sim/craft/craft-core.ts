@@ -75,6 +75,11 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   /** met a solid thing (sim/solids.ts; the craft's type has a shape there) depth m deep, n (a unit x, z) the way out
    * of it: pushed out as far as its own collision lets it, its speed into it turned back or lost as at a wall */
   meet?(n: { x: number; z: number }, depth: number, world: VoxelCollision): void;
+  /** come down onto a solid thing's roof rise m over its bottom: set down on it as on the ground; false: it does not
+   * stand on one (it is met as a wall) */
+  stand?(rise: number): boolean;
+  /** carried by what it stands on: moved by d, turned by dh */
+  carry?(d: Vec3, dh: number): void;
   /** back to a safe spot nearby (T); false: not now */
   unstick?(world: VoxelCollision): boolean;
 }

@@ -22,15 +22,18 @@ const merge = (gs: THREE.BufferGeometry[]) => mergeGeometries(gs);
 
 const WHITE = 0xf2f1ec, OFF = 0xdcdad3, SKIRT = 0x1b2330, DECK = 0x7f97a3, TURF = 0x4f7d48, GLASS = 0x22303b;
 
-// a stepped (voxel) bow: the hull narrows over its last metres
-function bow(B: number, y0: number, h: number, z0: number, len: number, hex: number, steps = 3) {
+// a stepped (voxel) bow: the hull narrows over its last metres; over: m each step stands out of its ends (a band round
+// the hull: its ends in the hull's own would flicker)
+function bow(B: number, y0: number, h: number, z0: number, len: number, hex: number, steps = 3, over = 0) {
   const gs: THREE.BufferGeometry[] = [];
   for (let k = 0; k < steps; k++) {
     const w = B * (1 - (k + 1) / (steps + 1)), l = len / steps;
-    gs.push(box(w, h, l, 0, y0, z0 + l * (k + 0.5), hex));
+    gs.push(box(w, h, l + 2 * over, 0, y0, z0 + l * (k + 0.5), hex));
   }
   return gs;
 }
+// m a band stands out of the hull it is round, at its sides and its ends alike
+const BAND = 0.03;
 
 // local frame: x across (beam), y up from the waterline, z along, +z the bow
 function cruiseShip() {
@@ -52,7 +55,7 @@ function cruiseShip() {
     box(6.4, 2.3, 4.2, 0, 7.4, L / 2 - 22, WHITE), // wheelhouse (it can be lowered for the bridges)
   ];
   const accent = [
-    box(B + 0.06, 0.3, hl, 0, 1.75, zc, 0xffffff), ...bow(B + 0.06, 1.75, 0.3, L / 2 - nose, nose, 0xffffff),
+    box(B + 2 * BAND, 0.3, hl + 2 * BAND, 0, 1.75, zc, 0xffffff), ...bow(B + 2 * BAND, 1.75, 0.3, L / 2 - nose, nose, 0xffffff, 3, BAND),
     box(6.6, 0.25, 4.4, 0, 9.7, L / 2 - 22, 0xffffff), // wheelhouse roof
     box(8.4, 0.15, 16, 0, 9.6, -12, 0xffffff), // awning over the sun deck bar
     box(0.15, 2.2, 0.15, 3.9, 7.4, -19.5, 0xffffff), box(0.15, 2.2, 0.15, -3.9, 7.4, -19.5, 0xffffff),
@@ -89,7 +92,7 @@ function tourBoat() {
   }
   const accent = [
     box(B + 0.02, 1.4, hl, 0, -1.0, zc, 0xffffff), ...bow(B + 0.02, -1.0, 1.4, L / 2 - nose, nose, 0xffffff),
-    box(B + 0.06, 0.25, hl, 0, 1.15, zc, 0xffffff), box(3.6, 0.2, 3.2, 0, 5.55, L / 2 - 10.5, 0xffffff),
+    box(B + 2 * BAND, 0.22, hl + 2 * BAND, 0, 1.15, zc, 0xffffff), box(3.6, 0.2, 3.2, 0, 5.55, L / 2 - 10.5, 0xffffff),
   ];
   const win: THREE.BufferGeometry[] = [];
   for (let z = -L / 2 + 7; z < L / 2 - 9; z += 2.5) win.push(box(B - 0.52, 1.3, 2.0, 0, 2.0, z, GLASS));

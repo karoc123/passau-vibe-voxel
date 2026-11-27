@@ -8,7 +8,8 @@
 // foot in its lane, and for a hovercraft let down in it. A floatplane and a jet flown at a parked car crash on it, one
 // passing it close crashes on it with a wing, a wing tip clipping a pillar crashes it; a banked floatplane crashes on a
 // car under its lowered wing tip and passes a bus under its raised wing; a drone bounces off a parked car and a
-// paraglider stops at one, none passes through; a paraglider gliding at a drone shoves it along and glides on.
+// paraglider stops at one, none passes through; a paraglider gliding at a drone shoves it along and glides on. A
+// helicopter let down onto each kind of the river's vessels stands on its deck, carried along.
 // usage (in web/): node tools/craft-solids.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 
@@ -466,6 +467,47 @@ server.dispose?.();
   const lc = Math.max(changed.get(stand) ?? Infinity, changed.get(roll) ?? Infinity);
   check(lc <= 20 && slide <= 0.01 && jump <= 0.6 && swing <= 0.2,
     `cars change lanes as they roll, from a standstill too, and go round a craft over a junction drawn moving on: no jump, no slide sideways (in the other lane by ${lc.toFixed(1)} s; at most ${jump.toFixed(2)} m, ${swing.toFixed(3)} rad, rear axle across more than along ${slide.toFixed(3)} m of 0.01)`);
+  host.dispose?.();
+}
+
+// The decks, on a fourth synthetic world (a wide lake, an excursion boat's tour and two cruise ships' berths on it, at
+// 10:00 in July): a helicopter let down over each kind of vessel the river traffic has sets down on its deck and stays
+// on it, carried along as it goes (the excursion boat under way: not stopped by the craft on its deck). Every vessel
+// kind is taken, so a new one cannot be left without.
+{
+  const { dir: dir4, data: data4 } = await synthData({ size: [512, 256], ground: (x, z) => (z < 220 ? WATER : LAND), surface: (x, z) => (z < 220 ? 'water' : 'earth') });
+  data4.boats = { berths: [{ x: 250, y: 40, dx: 1, dy: 0, nx: 0, ny: 1 }, { x: 250, y: 90, dx: 1, dy: 0, nx: 0, ny: 1 }], tour: [[30, 170], [480, 170]] };
+  const host = nodeHost(dir4, { world: 'tiles', physics: { bodies: false }, interest: 400, time: { hour: 10, day: 190 } }, data4), T4 = host.sim.traffic;
+  const s = host.connect('d'), link = sessionLink(s), CS = CRAFT_SHAPES.helicopter;
+  s.send({ kind: 'view', view: { focus: { x: 256, z: 128 } } });
+  const step = async (secs) => { for (let i = 0; i < secs / STEP; i++) { host.update(STEP); link.deliver(); await new Promise((r) => setImmediate(r)); } };
+  await step(1);
+  const kinds = [...new Set(T4.boats.poses.map((b) => b.kind))];
+  const deckOf = (b) => { const v = solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading }); return { v, top: v.y + v.top }; };
+  const out = [];
+  for (const kind of ['ship', 'boat']) {
+    const b0 = T4.boats.poses.find((b) => b.kind === kind && (kind !== 'boat' || b.underway));
+    if (!b0) { out.push(`${kind}: none`); continue; }
+    const id = b0.id, at = () => T4.boats.poses.find((b) => b.kind === kind && b.id === id);
+    s.send({ kind: 'request', request: { kind: 'craft', type: 'helicopter', spot: { x: b0.x, y: deckOf(b0).top + 2 - CS.y0, z: b0.z, h: b0.heading } } });
+    await step(0.3);
+    const heli = () => host.sim.craftOf(s.player);
+    s.send({ kind: 'seatInput', role: 'pilot', input: { turn: 0, drive: 0, lift: -1, side: 0 } });
+    await step(1.5);
+    s.send({ kind: 'seatInput', role: 'pilot', input: { turn: 0, drive: 0, lift: 0, side: 0 } });
+    await step(0.5);
+    // (where on the deck it stands: across and along the vessel from its middle)
+    const local = () => { const b = at(), p = heli().core.pose, c = Math.cos(b.heading), n = Math.sin(b.heading), dx = p.x - b.x, dz = p.z - b.z; return { v: dx * c - dz * n, u: dx * n + dz * c }; };
+    const l0 = local(), x0 = at().x, z0 = at().z;
+    await step(8);
+    const b1 = at(), p1 = heli().core.pose, l1 = local(), gap = p1.y + CS.y0 - deckOf(b1).top, slid = Math.hypot(l1.v - l0.v, l1.u - l0.u);
+    const went = Math.hypot(b1.x - x0, b1.z - z0), sh = vesselShape(b1), onDeck = Math.abs(l1.v) < sh.hx && Math.abs(l1.u) < sh.hz;
+    out.push(`${kind} ${Math.abs(gap) < 0.15 && slid < 0.5 && onDeck && (kind !== 'boat' || went > 5) ? 'on' : 'NOT on'} its deck (${gap.toFixed(2)} m over it, slid ${slid.toFixed(2)} m, the vessel went ${went.toFixed(1)} m)`);
+    s.send({ kind: 'request', request: { kind: 'dropCraft' } });
+    await step(0.3);
+  }
+  check(kinds.every((k) => ['ship', 'boat'].includes(k)) && out.every((o) => !o.includes('NOT') && !o.includes('none')),
+    `a helicopter let down over each kind of vessel (${kinds.join(', ')}) sets down on its deck and is carried along: ${out.join('; ')}`);
   host.dispose?.();
 }
 

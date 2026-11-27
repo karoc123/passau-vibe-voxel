@@ -33,6 +33,7 @@ const STEER_CURVE = 1.7;
 export class DriveMode implements PlayerCraft {
   readonly id = 'drive';
   readonly view = 'ride';
+  get mouse() { return this.driving !== null || this.pending !== null; }
   private readonly nav: Nav;
   private readonly focus: Vector3;
   private readonly touch: TouchSticks;

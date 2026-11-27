@@ -11,8 +11,9 @@ import type { CraftSpot } from './contract/commands';
 import type { CraftType, EntityRef, VehicleId } from './contract/ids';
 import type { Pose } from './contract/pose';
 import type { Berth } from './boat-traffic';
-import { findSpawn } from './craft/boat-motion';
-import { SPAWN_HEIGHT } from './craft/craft-collision';
+import { findSpawn, type BoatPose } from './craft/boat-motion';
+import { craftWorld, SPAWN_HEIGHT } from './craft/craft-collision';
+import type { CraftKind } from './craft/craft-motion';
 import { FIGHTER, PLANE } from './craft/plane-flight';
 import { VoxelCollision } from './craft/voxel-collision';
 import { CAR_COLOURS } from './flow';
@@ -295,16 +296,39 @@ export class Stands {
     const dirs = Array.from({ length: 8 }, (_, k) => k * Math.PI / 4);
     let near: ReturnType<Stands['roadsIn']> | null = null;
     const offRoad = (x: number, z: number, r: number) => (near ??= this.roadsIn(box))(x, z, r);
-    const wet = (x: number, z: number) => { const q = C.at(x, z); return !!q && q.water >= 0; };
-    const dry = (x: number, z: number) => { const q = C.at(x, z); return !!q && q.water < 0; };
+    // open water: none with a quay wall or a pier standing in it (a boat put beside one faced into it)
+    const wet = (x: number, z: number) => { const q = C.at(x, z); return !!q && q.water >= 0 && q.top <= q.water + OPEN; };
+    const dry = (x: number, z: number) => C.at(x, z) !== null && !wet(x, z);
+    // The craft's height: what its own probes rest on, swept down from over the ground found. The columns' tops are
+    // the sloped caps as drawn, up to a metre under the voxels' the craft collides with; set down at a cap, its skids
+    // stood inside the voxels and every sweep out of them met them at once (it could not lift off). null: no room.
+    const settle = (kind: CraftKind, x: number, z: number, h: number, top: number) => {
+      // (its probes kept within the block's nodes, which its collision holds)
+      if (Math.min(x - x0, z - z0, x1 - x, z1 - z) < CRAFT_REACH) return null;
+      const from = top + SPAWN_HEIGHT[kind] + SETTLE, hit = craftWorld(kind, col).sweep({ x, y: from, z }, { x: 0, y: -2 * SETTLE, z: 0 }, h, h);
+      if (hit === 'loading') throw NOT_IN;
+      return hit.hit && hit.fraction > 0 ? from - 2 * SETTLE * hit.fraction + GAP : null;
+    };
 
-    // speedboats: on open water off a bank, along it; beside a landing stage first
+    // speedboats: on open water off a bank, along it; beside a landing stage first; with open water ahead (along the
+    // bank either way), so that it can be driven off
     const boats: Cand[] = [];
+    const open = (p: BoatPose) => {
+      const sx = Math.sin(p.h), sz = Math.cos(p.h);
+      for (let d = 2; d <= BOAT_RUN; d += 2) for (const a of [-BOAT_SIDE, 0, BOAT_SIDE])
+        if (!wet(p.x + sx * d + sz * a, p.z + sz * d - sx * a)) return false;
+      return true;
+    };
+    const boat = (p: BoatPose | null, score: number) => {
+      if (!p || !C.at(p.x, p.z)) return;
+      const back = open(p) ? p : findSpawn(col, p.x, p.z, p.h + Math.PI, 0, this.w.tuning.boat);
+      if (back && open(back)) boats.push({ spot: { x: back.x, y: back.y, z: back.z, h: back.h }, score });
+    };
     for (const b of this.berths) {
       if (b.x < x0 || b.y < z0 || b.x >= x1 || b.y >= z1) continue;
       for (const d of [30, -30]) {
         const h = Math.atan2(b.dx, b.dy), p = findSpawn(col, b.x + b.dx * d, b.y + b.dy * d, h, 8, this.w.tuning.boat);
-        if (p && C.at(p.x, p.z)) boats.push({ spot: { x: p.x, y: p.y, z: p.z, h: p.h }, score: -1 });
+        boat(p, -1);
       }
     }
     for (const [x, z] of grid(12)) {
@@ -318,7 +342,7 @@ export class Stands {
       }
       if (land > BANK) continue;
       const p = findSpawn(col, x, z, Math.atan2(ax, az) + Math.PI / 2, 2, this.w.tuning.boat);
-      if (p && C.at(p.x, p.z)) boats.push({ spot: { x: p.x, y: p.y, z: p.z, h: p.h }, score: land });
+      boat(p, land);
     }
     pick('craft', 'boat', boats);
     yield;
@@ -348,8 +372,8 @@ export class Stands {
       let water = Infinity, to = 0;
       for (const h of dirs) for (let d = HOVER_ROOM + 2; d <= SHORE && d < water; d += 3) if (wet(x + Math.sin(h) * d, z + Math.cos(h) * d)) { water = d; to = h; }
       if (water > SHORE) continue;
-      const y = offRoad(x, z, HOVER_ROOM) ? landingRoom(C, x, z, HOVER_ROOM) : null;
-      if (y !== null) hovers.push({ spot: { x, y: y + SPAWN_HEIGHT.hovercraft, z, h: to }, score: water });
+      const top = offRoad(x, z, HOVER_ROOM) ? landingRoom(C, x, z, HOVER_ROOM) : null, y = top === null ? null : settle('hovercraft', x, z, to, top);
+      if (y !== null) hovers.push({ spot: { x, y, z, h: to }, score: water });
     }
     pick('craft', 'hovercraft', hovers);
     yield;
@@ -357,10 +381,11 @@ export class Stands {
     // the helicopter: landing room, the more the better
     const helis: Cand[] = [];
     for (const [x, z] of grid(12)) {
-      const y = offRoad(x, z, HELI_ROOM) ? landingRoom(C, x, z, HELI_ROOM) : null;
+      const top = offRoad(x, z, HELI_ROOM) ? landingRoom(C, x, z, HELI_ROOM) : null, h = 2 * Math.PI * hash(x * 7 + z);
+      const y = top === null ? null : settle('helicopter', x, z, h, top);
       if (y === null) continue;
       const big = landingRoom(C, x, z, HELI_BIG) !== null;
-      helis.push({ spot: { x, y: y + SPAWN_HEIGHT.helicopter, z, h: 2 * Math.PI * hash(x * 7 + z) }, score: big ? 0 : 1 });
+      helis.push({ spot: { x, y, z, h }, score: big ? 0 : 1 });
     }
     pick('craft', 'helicopter', helis);
     yield;
@@ -383,7 +408,8 @@ export class Stands {
           ok = !!q && q.top <= y - 1 - GLIDE * (d - BACK);
           if (q) end = y - q.top;
         }
-        if (ok && end >= DROP) gliders.push({ spot: { x, y: y + SPAWN_HEIGHT.paraglider, z, h }, score: -end });
+        const at = ok && end >= DROP ? settle('paraglider', x, z, h, y) : null;
+        if (at !== null) gliders.push({ spot: { x, y: at, z, h }, score: -end });
       }
     }
     pick('craft', 'paraglider', gliders);
@@ -413,6 +439,13 @@ export class Stands {
 
 // a stand's vehicle this far (m) from its spot has been moved: used
 const MOVED = 2;
+// a craft's settling sweep starts this far (m) over the ground found (past the caps' metre and a level room's step),
+// and is set down this far over what it met (a sweep from a touching face would meet it at once)
+const SETTLE = 1.5, GAP = 0.02;
+// a speedboat's open water ahead (m) and either side of its keel (its beam and a margin)
+const BOAT_RUN = 24, BOAT_SIDE = 2.5;
+// the farthest a special craft's probes reach from its middle (m: the helicopter's tail cube)
+const CRAFT_REACH = 8;
 // the roads sampled every ROAD_STEP m into cells of ROAD_CELL m, out to ROAD_REACH m past a block (a stand's room
 // and a road's half width fit in a cell and its neighbours); a lane's width (sim/road-net.ts); a car's half width
 const ROAD_STEP = 3, ROAD_CELL = 32, ROAD_REACH = 32, LANE = 3, CAR_HALF = 0.9 + 1;

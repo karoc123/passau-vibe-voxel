@@ -10,7 +10,7 @@ import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type Playe
 import type { CraftView } from '../client/sim-client';
 import { TouchSticks } from '../touch/sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
-import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
+import { ChaseRig, clearShare, follow, followAngle, MouseLook, shake } from './chase-rig';
 import { HoldButton, ModePanel } from './mode-panel';
 import { downstream, nearestRiver } from '../sim/river';
 import './boat.css';
@@ -54,6 +54,7 @@ export class BoatMode implements PlayerCraft {
   private start: { x: number; z: number; h: number; t0: number } | null = null;
   private zoom = 1;
   private camYaw = 0;
+  private readonly mouseLook = new MouseLook();
   private camY = 0;
   private shakeUntil = 0;
   private shakeA = 0;
@@ -89,6 +90,9 @@ export class BoatMode implements PlayerCraft {
   }
 
   private get craft() { return this.phase === 'on' ? this.link.craft : null; }
+
+  get mouse() { return this.phase === 'on'; }
+  turnView(dx: number, dy: number) { this.mouseLook.move(dx, dy); }
   get pose() { return this.craft?.core.pose ?? null; }
   get mapPose() { return this.pose; }
 
@@ -222,7 +226,7 @@ export class BoatMode implements PlayerCraft {
     this.camY += (m.y - this.camY) * follow(3, dt);
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY;
     const eye = new THREE.Vector3(d.x, base + 1.6, d.z);
-    const off = new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom);
+    const off = this.mouseLook.swing(new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom), dt);
     const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.link.col!.sweep(eye, off), off, 0.25, 0.4));
     if (now < this.shakeUntil) shake(pos, this.shakeA * (this.shakeUntil - now) / 450, now);
     const at = new THREE.Vector3(d.x + Math.sin(d.h) * AHEAD, base + 1.2, d.z + Math.cos(d.h) * AHEAD);

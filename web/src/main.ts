@@ -478,11 +478,11 @@ async function boot() {
     import('./view/crafts/crafts-view')]);
   const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
-    deployGlider: (source, at) => wing.deploy(source, at),
     sim: simReady,
     tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
   };
   const wing = glider = new ParagliderMode(ctx);
+  nav.bailOut = (source, at) => wing.deploy(source, at);
   crafts = [...modes.map((C) => new C(ctx)), wing];
   hook('__crafts', crafts); // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);

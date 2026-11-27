@@ -6,7 +6,8 @@
 // player rides along in the speedboat beside its pilot, a third finds its seat taken; the paraglider's pilot is
 // launched off its cliff. With every player gone far, the untouched vehicles go at once and the used ones once the
 // keeping has run out. On the real data (when there): cars and crafts stocked round the cathedral, off the roads (no
-// car of the traffic stops for one), a car taken from its stand, nothing sent again of what stands.
+// car of the traffic stops for one), a car taken from its stand, nothing sent again of what stands; every craft
+// type taken from a stand there and round the Veste Oberhaus moves off it, the ones stocked on land clear of the voxels.
 // usage (in web/): node tools/stands.mjs [-v]; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 import { DATA, hasData } from './real-city.mjs';
@@ -16,7 +17,7 @@ const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { DEFAULT_TUNING } = await imp('src/sim/tuning.ts');
 const { craftBox, carShape } = await imp('src/sim/solids.ts');
-const { SPAWN_HEIGHT } = await imp('src/sim/craft/craft-collision.ts');
+const { SPAWN_HEIGHT, craftWorld } = await imp('src/sim/craft/craft-collision.ts');
 
 const verbose = process.argv.includes('-v');
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
@@ -47,6 +48,10 @@ const walk = (p, x, y, z, h = 0) => {
 // 1 m off the left side of a footprint
 const beside = (b, d = 1) => ({ x: b.x + Math.cos(b.h) * (b.r + d), z: b.z - Math.sin(b.h) * (b.r + d) });
 const sum = (a) => a.reduce((s, n) => s + n, 0);
+// the craft types a stand stocks, and each one's input to be off (full ahead, climbing)
+const STAND_CRAFTS = ['helicopter', 'boat', 'hovercraft', 'floatplane', 'fighter', 'paraglider'];
+const GO = { helicopter: { turn: 0, drive: 0, lift: 1, side: 0 }, hovercraft: { turn: 0, drive: 1, lift: 0, side: 0 }, paraglider: { turn: 0, drive: 0, lift: 0, side: 0 },
+  boat: { throttle: 1, steer: 0, drift: false }, floatplane: { turn: 0, pitch: 0, throttle: 1 }, fighter: { turn: 0, pitch: 0, throttle: 1 } };
 
 {
   const G = 6, rough = (x) => x >= 768, river = (x, z) => !rough(x) && z >= 200 && z < 290, cliff = (x, z) => x >= 400 && x < 520 && z >= 300;
@@ -61,7 +66,7 @@ const sum = (a) => a.reduce((s, n) => s + n, 0);
   await P.tick(90);
   const stands = [...sim.stands.all()], stocked = (type) => stands.find((s) => s.type === type && s.vehicle !== null);
   if (verbose) for (const s of stands) console.log(s.type, s.spot.x.toFixed(1), s.spot.z.toFixed(1), s.vehicle);
-  const types = ['helicopter', 'boat', 'hovercraft', 'floatplane', 'fighter', 'paraglider'];
+  const types = STAND_CRAFTS;
   check(types.every(stocked), `stocked near a player on foot: ${types.map((t) => `${t} ${stocked(t) ? 'yes' : 'no'}`).join(', ')}`);
   const seen = new Set(A.c.crafts().map((c) => c.type));
   check(types.every((t) => seen.has(t)), `the player's page has them (${[...seen].join(', ')})`);
@@ -137,7 +142,13 @@ else {
   const P = players(host, () => structuredClone(raw)), A = P.add('a');
   walk(A, spot.x, 0, spot.y);
   for (let i = 0; i < 40 && !sim.physics; i++) await P.tick(10);
-  await P.tick(60);
+  // (a block's finder starts again when a node it reads is not in yet: until none is stocked any more)
+  for (let i = 0, n = -1; i < 20; i++) {
+    await P.tick(30);
+    const m = [...sim.stands.all()].filter((s) => s.vehicle !== null).length;
+    if (m === n) break;
+    n = m;
+  }
   const stands = [...sim.stands.all()], near = stands.filter((s) => s.vehicle !== null);
   const cars = near.filter((s) => s.kind === 'car'), crafts = near.filter((s) => s.kind === 'craft');
   if (verbose) for (const s of near) console.log(s.type, s.spot.x.toFixed(0), s.spot.z.toFixed(0), s.spot.y.toFixed(1));
@@ -161,6 +172,43 @@ else {
   await P.tick(30);
   check(A.c.seat()?.role === 'driver' && A.c.seat()?.entity.id === id && cs.vehicle === null,
     `a ${cs.type} taken from its stand ${Math.hypot(cs.spot.x - spot.x, cs.spot.z - spot.y).toFixed(0)} m from the cathedral (${JSON.stringify(A.c.results('enterSeat'))})`);
+
+  // Every craft type a stand stocks, taken on the real data (round the cathedral and the Veste Oberhaus, whose yard
+  // slopes: the caps drawn lie under the voxels a craft collides with) and given its go: each moves off its stand,
+  // and every one stocked on land stands clear of the voxels (a sweep up from it is free)
+  const ober = data.meta.labels.find((l) => l.name === 'Veste Oberhaus') ?? { x: 8509, y: 2365 };
+  const B = P.add('b');
+  walk(B, spot.x, 0, spot.y);
+  A.c.send({ kind: 'leaveSeat' });
+  walk(A, ober.x, 110, ober.y);
+  await P.tick(150);
+  const sweepUp = (s) => {
+    const c = sim.crafts.get(s.vehicle), p = c.core.pose;
+    c.collision.prefetch(p, { x: 0, y: 0, z: 0 });
+    return craftWorld(s.type, c.collision).sweep(p, { x: 0, y: 0.3, z: 0 }, p.h, p.h);
+  };
+  const stocked = [...sim.stands.all()].filter((s) => s.kind === 'craft' && s.vehicle !== null);
+  const landed = stocked.filter((s) => s.type in SPAWN_HEIGHT);
+  // (an asleep craft's collision let go: its nodes fetched again for the look)
+  for (let i = 0; i < 40 && landed.some((s) => sweepUp(s) === 'loading'); i++) await P.tick(5);
+  const stuck = landed.filter((s) => { const up = sweepUp(s); return up === 'loading' || up.hit; });
+  check(landed.length > 0 && stuck.length === 0, `${landed.length} helicopters, hovercraft and paragliders stocked stand clear of the voxels (${stuck.map((s) => `${s.type} at ${s.spot.x}, ${s.spot.z}`).join('; ') || 'none stuck'})`);
+  const moved = [];
+  for (const type of STAND_CRAFTS) {
+    const s = stocked.filter((t) => t.type === type && sim.crafts.get(t.vehicle))
+      .sort((a, b) => Math.hypot(a.spot.x - ober.x, a.spot.z - ober.y) - Math.hypot(b.spot.x - ober.x, b.spot.z - ober.y))[0];
+    if (!s) { moved.push(`${type} none stocked`); continue; }
+    const id = s.vehicle, p0 = { ...sim.crafts.get(id).core.pose }, q = beside(craftBox(type, p0));
+    A.c.send({ kind: 'leaveSeat' });
+    walk(A, q.x, p0.y, q.z);
+    await P.tick(5);
+    A.c.send({ kind: 'enterSeat', entity: { kind: 'craft', id }, role: 'pilot' });
+    await P.tick(3);
+    for (let i = 0; i < 90; i++) { A.c.send({ kind: 'seatInput', role: 'pilot', input: GO[type] }); await P.tick(1); }
+    const p1 = sim.crafts.get(id)?.core.pose, d = p1 ? Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z) : 0;
+    moved.push(`${type} ${A.c.seat()?.entity.id === id && d > 8 ? '' : 'NOT '}off, ${d.toFixed(0)} m`); if (verbose) console.log(type, JSON.stringify(s.spot), JSON.stringify(p1), JSON.stringify(A.c.seat()), JSON.stringify(sim.crafts.get(id)?.core.save?.()).slice(0, 600));
+  }
+  check(moved.every((m) => !m.includes('NOT') && !m.includes('none')), `every craft type taken from its stand moves off it in 3 s (${moved.join(', ')})`);
   host.dispose();
 }
 

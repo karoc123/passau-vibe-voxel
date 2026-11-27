@@ -58,7 +58,7 @@ import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
-import { BODY_HEAD, BODY_R, CHEST, EYE } from './figure';
+import { BODY_HEAD, BODY_R, CHEST, EYE, RIDER_TOP } from './figure';
 import { aimFrom, cue, newMind, think, type Duty, type Senses } from './npc-mind';
 import { Camps } from './camps';
 import { Built } from '../core/built';
@@ -91,8 +91,9 @@ export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: numb
 const GUESS_S = 0.1;
 
 // (a player craft, Craft: sim/craft/craft-core.ts)
-// (asleep: a stand's, untouched: not stepped, its collision let go, until a seat is taken or it is harmed)
-type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown; asleep?: boolean };
+// (asleep: a stand's, untouched: not stepped, its collision let go, until a seat is taken or it is harmed; on: the solid
+// thing it stands on as it was at the last step, carried with it)
+type CraftState = { -readonly [K in keyof Craft]: Craft[K] } & { input: unknown; asleep?: boolean; on?: Solid | null };
 
 // (what crosses to a client: PlayerId, CraftId, Seat, PilotInput, View, TimeOfDay, FrameTime, MAX_DT, SimEvent,
 // EVENT_TICKS: sim/contract/; CraftWorld: sim/craft/craft-core.ts)
@@ -687,8 +688,8 @@ export class WorldSim {
 
   // whether player may ask for a seat of entity with role from where they are (true), else why not: on foot (their
   // avatar), a vehicle only within Tuning.walk.board of where the host has the walker, not where the page says (a seat
-  // the mode gives, a craft made, is the mode's to place), and a car only while it goes no faster than
-  // Tuning.walk.boardSpeed; a passenger's only from foot or from another seat of the same vehicle (a player alone
+  // the mode gives, a craft made, is the mode's to place), and a car (of the traffic or another's) only while it
+  // goes no faster than Tuning.walk.boardSpeed, moving or not; a passenger's only from foot or from another seat of the same vehicle (a player alone
   // goes from the wheel to its gun), not from the map
   private mayBoard(player: PlayerId, entity: EntityRef, role?: Role): boolean | Refusal {
     const held = this.seat(player), W = this.players.get(player)?.walk;
@@ -734,7 +735,7 @@ export class WorldSim {
           if (out(T.personPoint(p, 0, pt, true).x, pt.y)) continue;
           const q = T.personPoint(p, 0, pt);
           // (personPoint: x, z on the map as x, y; the height as z)
-          yield { entity: { kind: 'person', id: p.id }, x: q.x, y: q.z, z: q.y, h: 0, r: 0.3, l: p.bike ? 0.9 : 0.3, ht: 1.8 };
+          yield { entity: { kind: 'person', id: p.id }, x: q.x, y: q.z, z: q.y, h: 0, r: BODY_R, l: p.bike ? 0.9 : BODY_R, ht: p.bike ? RIDER_TOP : BODY_HEAD };
         }
         for (const [id, by] of sim.avatars) {
           const w = sim.players.get(by)?.walk?.pose;
@@ -1405,14 +1406,14 @@ export class WorldSim {
     const near = (x: number, z: number, R: number) => Math.abs(x - p.x) < r + R && Math.abs(z - p.z) < r + R;
     for (const list of [T.cars, T.detachedCars]) for (const c of list) {
       const d = c.detachedPose;
-      if (near(d?.x ?? c.geo.cx, d?.z ?? c.geo.cy, CAR_REACH)) out.push(solidAt(carShape(c), d ?? T.carPose(c, c.s, c.off, this.carAt)));
+      if (near(d?.x ?? c.geo.cx, d?.z ?? c.geo.cy, CAR_REACH)) out.push(solidAt(carShape(c), d ?? T.carPose(c, c.s, c.off, this.carAt), `car${c.id}`));
     }
     for (const c of this.crafts.values()) {
       const q = c.core.pose;
-      if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) lightSolids(own.type, c.type, q, craftSolids(c.type, q, out));
+      if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) lightSolids(own.type, c.type, q, craftSolids(c.type, q, out, `craft${c.id}`));
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
-    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
+    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }, `coach${k.id}`));
     return out;
   }
 
@@ -1432,8 +1433,9 @@ export class WorldSim {
   // ahead of its bow
   private inTheWay(p: BoatPose, before: number) {
     const s = vesselShape(p), zone = solidAt({ ...s, hx: s.hx + BESIDE, hz: s.hz + before / 2, fwd: before / 2 }, { x: p.x, y: p.y, z: p.z, h: p.heading });
-    for (const c of this.crafts.values()) {
-      if (c.placed && craftSolids(c.type, c.core.pose).some((s) => overlap(zone, s) > 0)) return true;
+    for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
+      // (one on its deck rides along)
+      if (c.placed && c.on?.id !== `${p.kind}${p.id}` && craftSolids(c.type, c.core.pose).some((s) => overlap(zone, s) > 0)) return true;
     }
     return false;
   }
@@ -1448,12 +1450,17 @@ export class WorldSim {
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
       const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes) : null;
+      // (on a deck: carried where it has gone since and turned with it, as a walker on a roof)
+      const was = c.on, now = was && near?.find((s) => s.id === was.id);
+      if (was && now && core.carry) { const p = core.pose, to = carried(was, now, p); core.carry({ x: to.x - p.x, y: to.dy, z: to.z - p.z }, to.dh); }
       const v0 = core.velocity, vx = v0.x, vy = v0.y, vz = v0.z;
+      let on = -1;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
-        if (near?.length) meetSolids(c.type, core, near, c.collision);
+        if (near?.length) on = meetSolids(c.type, core, near, c.collision);
         return true;
       });
+      c.on = on >= 0 ? near![on] : null;
       // A crash is the velocity a tick lost or turned, the same rule for every craft; a plane's crash freezes its
       // velocity (its own speed counts) and its putting back moves it at once (no crash)
       const v1 = core.velocity;
@@ -1501,5 +1508,5 @@ const CAMP_TOP = 1e4;
 // m a goal may move before an NPC walking to it finds its way again (a search each time)
 const REGOAL = 2;
 const to = (v: Vec3, k: number) => ({ x: Math.round(v.x * k) / k, y: Math.round(v.y * k) / k, z: Math.round(v.z * k) / k });
-const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
+const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading }, `${b.kind}${b.id}`);
 

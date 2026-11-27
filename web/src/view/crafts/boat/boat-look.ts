@@ -20,9 +20,10 @@ function box(w: number, h: number, l: number, x: number, y: number, z: number, h
   return g;
 }
 
-// a stepped (voxel) bow: the hull narrowing over its front metres
-function bow(B: number, y0: number, h: number, z0: number, len: number, hex: number, steps = 4) {
-  return Array.from({ length: steps }, (_, k) => box(B * (1 - (k + 1) / (steps + 1.5)), h, len / steps, 0, y0, z0 + len / steps * (k + 0.5), hex));
+// a stepped (voxel) bow: the hull narrowing over its front metres; over: m each step stands out of its ends (the
+// stripe round the hull: its ends in the hull's own would flicker)
+function bow(B: number, y0: number, h: number, z0: number, len: number, hex: number, steps = 4, over = 0) {
+  return Array.from({ length: steps }, (_, k) => box(B * (1 - (k + 1) / (steps + 1.5)), h, len / steps + 2 * over, 0, y0, z0 + len / steps * (k + 0.5), hex));
 }
 
 function hull() {
@@ -30,7 +31,7 @@ function hull() {
   return mergeGeometries([
     box(B - 0.3, 0.45, hl, 0, -0.45, zc, HULL), ...bow(B - 0.3, -0.45, 0.45, hl / 2 + zc, nose, HULL),
     box(B, 0.55, hl, 0, 0, zc, WHITE), ...bow(B, 0, 0.55, hl / 2 + zc, nose, WHITE),
-    box(B + 0.04, 0.12, hl, 0, 0.3, zc, STRIPE), ...bow(B + 0.04, 0.3, 0.12, hl / 2 + zc, nose, STRIPE),
+    box(B + 0.04, 0.12, hl + 0.04, 0, 0.3, zc, STRIPE), ...bow(B + 0.04, 0.3, 0.12, hl / 2 + zc, nose, STRIPE, 4, 0.02),
     box(B - 0.2, 0.06, hl - 0.2, 0, 0.55, zc, TEAK), // the deck
     box(B, 0.25, 0.12, 0, 0.55, -L / 2 + 0.06, WHITE), // the transom's rim
     box(0.12, 0.25, hl - 1.6, B / 2 - 0.06, 0.55, zc - 0.6, WHITE), box(0.12, 0.25, hl - 1.6, -B / 2 + 0.06, 0.55, zc - 0.6, WHITE), // gunwales
