@@ -55,21 +55,41 @@ try {
       }
       return out;
     };
+    // W held for ms of the game's own clock: the frames' dt as the frame loop counts it (app/frame.ts, at most 0.1 s a
+    // frame), so a loaded machine drawing a few frames a second walks as far as an idle one; pressed and let go here,
+    // in a frame, not a round trip from the tool later. With `to`, let go once the walker stops nearing it for 0.2 s:
+    // walked diagonally into an outer corner it either stops there or slides on along a face, as the frames fall
+    const key = (type) => dispatchEvent(new KeyboardEvent(type, { code: 'KeyW', key: 'w' }));
+    const frames = (ms, each) => new Promise((done) => {
+      let t = 0, last = null;
+      const tick = (now) => {
+        if (last !== null) t += Math.min(0.1, (now - last) / 1000);
+        last = now;
+        if (t * 1000 >= ms || each?.(t)) done(); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    window.__walk = async (ms, to) => {
+      const f = window.__three.nav.foot, far = () => Math.hypot(f.pos.x - to.x, f.pos.z - to.z);
+      let best = Infinity, since = 0;
+      await frames(300);
+      key('keydown');
+      await frames(ms, to && ((t) => { const d = far(); if (d < best - 0.01) { best = d; since = t; } return t - since > 0.2; }));
+      key('keyup');
+      await frames(300);
+    };
   });
   const world = (fn, a) => page.evaluate(fn, a);
-  // on foot at (x, z) facing yaw, then W held for ms; the walker's eyes and the view's distances
-  const walkInto = async (at, yaw, ms) => {
+  // on foot at (x, z) facing yaw, then W held for ms of game time (or until it stops nearing `to`); the walker's eyes
+  // and the view's distances
+  const walkInto = async (at, yaw, ms, to) => {
     await world(async ([at, yaw]) => {
       const nav = window.__three.nav, V = window.__three.camera.position.constructor;
       if (!nav.onFoot) await nav.setWalk({ at: new V(at.x, nav.world.support(at.x, at.z, 60), at.z), exact: true, ms: 1 });
       const f = nav.foot;
       f.pos.x = at.x; f.pos.z = at.z; f.feet = nav.world.support(at.x, at.z, f.feet + 3); f.yaw = yaw; f.pitch = 0;
     }, [at, yaw]);
-    await page.waitForTimeout(300);
-    await page.keyboard.down('KeyW');
-    await page.waitForTimeout(ms);
-    await page.keyboard.up('KeyW');
-    await page.waitForTimeout(300);
+    await world(([ms, to]) => window.__walk(ms, to), [ms, to]);
     return world(() => ({ eye: window.__three.camera.position.toArray().map((v) => +v.toFixed(2)), view: window.__wallView() }));
   };
   const blocked = (v) => Math.max(...v.view) <= WALL;
@@ -102,7 +122,7 @@ try {
         if (corner) break;
         let ok = w.blocked(X, Z, y + 1, y + 5) && solid(X - sx, Z) && solid(X, Z - sz);
         for (let a = 0; a <= 4 && ok; a++) for (let b = 0; b <= 4 && ok; b++) if (a || b) ok = !w.blocked(X + sx * a, Z + sz * b, y - 1 + 0.5, y + 2);
-        if (ok) corner = { x: X + 0.5 + sx * 3, z: Z + 0.5 + sz * 3, yaw: Math.atan2(-sx, -sz) };
+        if (ok) corner = { x: X + 0.5 + sx * 3, z: Z + 0.5 + sz * 3, yaw: Math.atan2(-sx, -sz), at: { x: X + 0.5 + sx * 0.5, z: Z + 0.5 + sz * 0.5 } };
       }
     }
     return { flat, corner };
@@ -111,7 +131,7 @@ try {
   else {
     const f = await walkInto(found.flat, found.flat.yaw, 2000);
     check('flat_wall', blocked(f), { ...f, from: found.flat });
-    const c = await walkInto(found.corner, found.corner.yaw, 2500);
+    const c = await walkInto(found.corner, found.corner.yaw, 2500, found.corner.at);
     check('outer_corner', blocked(c), { ...c, from: found.corner });
     // a car backed up to the flat wall (its tail 0.3 m off it), the chase camera as the ride puts it
     const car = await world((at) => {

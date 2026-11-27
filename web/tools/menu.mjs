@@ -89,7 +89,8 @@ const page = async (name, q, hide = false) => {
   const p = await (await browser.newContext({ viewport: { width: 960, height: 640 } })).newPage();
   if (hide) await p.addInitScript(HIDE);
   p.on('pageerror', (e) => console.log(`  ${name} page error: ${e.message}`));
-  await p.goto(`http://127.0.0.1:${vitePort}/?${q}`);
+  // (the dev server's modules, served to pages of every gate at once, can take longer than playwright's 30 s)
+  await p.goto(`http://127.0.0.1:${vitePort}/?${q}`, { timeout: 300000 });
   return p;
 };
 const loaded = (p) => p.waitForFunction(() => window.__map && window.__sim?.player && window.__crafts && window.__life?.group.visible, null, { timeout: 300000 });
@@ -156,7 +157,18 @@ const lookFrom = async (c) => {
     T.controls.target.set(a.x, a.y + 1.5, a.z);
     T.controls.update();
   }, { c, a: spots.a });
-  await B.waitForTimeout(1500);
+  // the camera at rest after the map's own clamps, then a frame drawn there (the tags are set in the frame: headless
+  // under load draws a few a second, and a fixed wait read them from where the camera was before)
+  await B.evaluate(() => new Promise((done) => {
+    const c = window.__three.camera.position, was = c.clone();
+    let still = 0, n = 0;
+    const frame = () => {
+      still = c.distanceTo(was) < 1e-3 ? still + 1 : 0;
+      was.copy(c);
+      if (still >= 3 || ++n > 90) done(); else requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }));
   // (where the camera is after the map's own clamps, and what lies between it and the tag from there)
   return B.evaluate(({ who, a }) => {
     const T = window.__three, w = T.nav.world, c = T.camera.position;
@@ -175,7 +187,9 @@ const shown = (p) => p.waitForFunction(() => /^\d+ ms ping$/.test(document.query
   .then((h) => h.jsonValue()).then((t) => +t.split(' ')[0]).catch(() => null);
 await B.waitForTimeout(10000);
 const [pingA, pingB] = await Promise.all([shown(A), shown(B)]);
-check(pingA !== null && pingB !== null && pingA < 40 && pingB - pingA >= 2 * LAG - 5 && pingB - pingA <= 2 * LAG + 30,
+// (B's lower bound its own link's, not A's plus it: each page's ping carries its own busy frames, A's under load ~30 ms
+// one run and B's ~10, and a difference of the two failed a ping that held the whole link)
+check(pingA !== null && pingB !== null && pingA < 40 && pingB >= 2 * LAG - 5 && pingB - pingA <= 2 * LAG + 30,
   `the ping shown is the socket's round trip: B over a link of ${2 * LAG} ms more shows ${pingB} ms, A ${pingA} ms`);
 const C = await page('C', `play&${Q}`, true);
 const alone = await C.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 60000 }).then((h) => h.jsonValue()).catch(() => null);
