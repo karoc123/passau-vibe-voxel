@@ -72,6 +72,14 @@ if (!isMainThread) {
   const until = async (ok, what, ms = 30000) => {
     for (const t0 = performance.now(); !ok(); await new Promise((r) => setTimeout(r, 50))) if (performance.now() - t0 > ms) throw new Error(`${what} within ${ms / 1000} s`);
   };
+  // the warm-up counted in the host's ticks, not in seconds: on a busy machine it runs fewer of them
+  const ticked = (sim, n) => { const end = sim.tick + n; return until(() => sim.tick >= end, `${n} host ticks`, 60000); };
+  // then until the world round the players is in, a second of ticks without a node loaded (at most a minute): on a
+  // busy machine 11-35 nodes still came in the window, the ticks' CPU p95 ~60 ms, ~20 with none
+  const settle = async (sim, tiles, n) => {
+    await ticked(sim, n);
+    for (let l = -1, t0 = performance.now(); l !== (tiles?.loads ?? 0) && performance.now() - t0 < 60000; ) { l = tiles?.loads ?? 0; await ticked(sim, 30); }
+  };
 
   // The budgets. Ticks: p95 of the best run under the 33 ms tick (CPU alone here ~13 at 16 players, wall ~15; ~28 CPU
   // with a busy loop on every core: two threads on a core share it), p99 under two ticks, at least RATE of the world's
@@ -106,16 +114,14 @@ if (!isMainThread) {
       if (role === 'walk') for (let k = 0; k < 20; k++) { const px = x + Math.sin(h) * k, pz = z + Math.cos(h) * k; path.push({ x: px, y: ground(px, pz), z: pz }); }
       plans.push({ role, x, y: ground(x, z), z, h, path, slot: (i >> 1) % 2 ? 2 : 1 });
     }
-    // (the warm-up counted in the host's ticks, not in seconds: on a busy machine it runs fewer of them; the players'
-    // worker outlasts it and is ended after the window)
+    // (the players' worker outlasts the warm-up, which is in host ticks, and is ended after the window)
     const w = new Worker(new URL(import.meta.url), { workerData: { port, plans, seconds: 10 * (warm + seconds) } });
-    const ticked = (n) => { const end = sim.tick + n; return until(() => sim.tick >= end, `${n} host ticks`, 60000); };
-    await ticked(warm * 15);
+    await ticked(sim, warm * 15);
     const at = { x: 0, y: 0, z: 0, h: 0, pitch: 0, roll: 0 }, cars = [];
     await until(() => cars.push(...sim.traffic.cars.filter((c) => !c.bus && c.v > 1 && (sim.traffic.carPose(c, c.s, c.off, at), Math.hypot(at.x - spot.x, at.z - spot.y) < 300))),
       'no car of the traffic moving within 300 m of the cathedral');
     w.postMessage(cars.map((c) => c.id));
-    await ticked(warm * 15);
+    await settle(sim, tiles, warm * 15);
     host.stats();
     const loads0 = tiles?.loads ?? 0, perSec = [];
     measuring = true;
@@ -208,10 +214,10 @@ if (!isMainThread) {
       const a = (i / players) * 2 * Math.PI, x = spot.x + Math.cos(a) * 25, z = spot.y + Math.sin(a) * 25;
       plans.push({ role: 'fire', x, y: ground(x, z), z, h: a + Math.PI, path: [], slot: 2 });
     }
-    const w = new Worker(new URL(import.meta.url), { workerData: { port, plans, seconds: 120 } });
+    const w = new Worker(new URL(import.meta.url), { workerData: { port, plans, seconds: 600 } });
     const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
     const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
-    await wait(warm);
+    await settle(sim, host.tiles, warm * 30);
     ticks = [];
     await wait(WINDOW);
     const before = q(ticks, 0.5);
