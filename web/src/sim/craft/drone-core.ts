@@ -10,6 +10,7 @@ import type { CraftSpot } from '../contract/commands';
 import type { DroneCoreState, DroneEvent, ImpactKind } from '../contract/crafts';
 import type { DroneInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
+import { Tank } from '../tank';
 import { DRONE, FpvFlight, type DroneTuning } from './fpv-flight';
 import type { Sweep } from './sweep';
 import type { VoxelCollision } from './voxel-collision';
@@ -24,6 +25,7 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
   readonly reach = {};
   readonly neutral: DroneInput = Object.freeze({ roll: 0, pitch: 0, yaw: 0, throttle: 0 });
   readonly events: DroneEvent[] = [];
+  readonly tank = new Tank();
   /** the last step waited for a tile */
   waiting = false;
   private col: VoxelCollision | null = null;
@@ -49,18 +51,20 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
   }
 
   step(input: DroneInput, dt: number, col: VoxelCollision) {
+    if (!this.tank.power) input = this.neutral;
     if (!input) return false;
     this.col = col;
     return this.flight.step(input, dt, this.move);
   }
 
   save(): DroneCoreState {
-    return { flight: this.flight.save(), waiting: this.waiting, from: { position: { ...this.from.position }, attitude: { ...this.from.attitude } } };
+    return { flight: this.flight.save(), waiting: this.waiting, from: { position: { ...this.from.position }, attitude: { ...this.from.attitude } }, ...this.tank.save() };
   }
 
   load(s: DroneCoreState) {
     this.flight.restore(s.flight);
     this.waiting = s.waiting;
+    this.tank.load(s);
     copy(this.from.position, s.from.position);
     copyQuat(this.from.attitude, s.from.attitude);
   }

@@ -15,7 +15,7 @@ import { CRAFT_SCALE } from './craft/craft-motion';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
 /** the parts of the tuning a client runs as the host does (sim/craft/cores.ts: the cores a mirror loads) */
-export const CLIENT_TUNING = ['boat', 'plane', 'jet', 'craft', 'drone'] as const satisfies readonly (keyof Tuning)[];
+export const CLIENT_TUNING = ['boat', 'plane', 'jet', 'craft', 'drone', 'fuel'] as const satisfies readonly (keyof Tuning)[];
 
 const hashes = new WeakMap<Tuning, string>();
 

@@ -12,6 +12,7 @@ import type { CraftSpot } from '../contract/commands';
 import type { PlaneCoreState, PlaneEvent } from '../contract/crafts';
 import type { PlaneInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
+import { Tank, type TankTuning } from '../tank';
 import { collisionWorld, PLANE, PlaneFlight, type PlaneConfig, type PlaneWorld } from './plane-flight';
 import type { VoxelCollision } from './voxel-collision';
 
@@ -24,6 +25,7 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
   readonly clock: FixedStep;
   readonly reach: { radius: number; horizon: number };
   readonly events: PlaneEvent[];
+  readonly tank: Tank;
   private worlds = new WeakMap<VoxelCollision, PlaneWorld>();
   private readonly v = vec3();
   // drawn: where it was at the world tick's start (and how often it had jumped then), now, and between
@@ -33,7 +35,9 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
   private readonly qa = quat();
   private readonly qb = quat();
 
-  constructor(readonly cfg: PlaneConfig = PLANE) {
+  // fuel: its tank's numbers
+  constructor(readonly cfg: PlaneConfig = PLANE, fuel: TankTuning | null = null) {
+    this.tank = new Tank(fuel);
     this.flight = new PlaneFlight(cfg);
     this.clock = new FixedStep(cfg.STEP, cfg.MAX_STEPS);
     this.reach = { radius: cfg.RADIUS, horizon: cfg.HORIZON };
@@ -74,17 +78,21 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
   }
 
   step(input: PlaneInput, dt: number, col: VoxelCollision) {
+    if (!this.tank.power) input = this.neutral;
+    // (the engine as it is, not the lever: it spools down after the lever)
+    else if (input !== this.neutral) this.tank.burn(this.flight.engine, dt);
     if (input === this.neutral && this.flight.state === 'crashed') return false;
     return this.flight.step(input, dt, this.world(col));
   }
 
   save(): PlaneCoreState {
     const { p, fwd, up, heading, gamma, bank, jumps } = this.from;
-    return { flight: this.flight.save(), from: { p: { ...p }, fwd: { ...fwd }, up: { ...up }, heading, gamma, bank, jumps } };
+    return { flight: this.flight.save(), from: { p: { ...p }, fwd: { ...fwd }, up: { ...up }, heading, gamma, bank, jumps }, ...this.tank.save() };
   }
 
   load(s: PlaneCoreState) {
     this.flight.restore(s.flight);
+    this.tank.load(s);
     const f = this.from, o = s.from;
     copy(f.p, o.p); copy(f.fwd, o.fwd); copy(f.up, o.up);
     f.heading = o.heading; f.gamma = o.gamma; f.bank = o.bank; f.jumps = o.jumps;

@@ -1,5 +1,6 @@
 import type { Path, PathData } from './path';
 import type { CarState, Person } from './contract/agents';
+import type { Tank } from './tank';
 
 interface SignalRef { ctrl: number; axis: number }
 export interface Controller { x: number; y: number; off: number }
@@ -42,6 +43,8 @@ interface Blocked {
 // a car of the traffic: what a snapshot carries of it (the contract's CarState: contract/agents.ts) and the traffic's own
 export interface Car extends Blocked, CarState {
   kind: 'car';
+  /** its tank once a player drove it (WorldSim) */
+  tank?: Tank;
   lcTo?: number;
   v0f: number;
   ghost: number;

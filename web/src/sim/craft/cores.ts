@@ -11,13 +11,13 @@ import { DroneCore } from './drone-core';
 import { PlaneCore } from './plane-core';
 
 export const CORES = {
-  boat: (t: Tuning) => new BoatCore(t.boat),
-  hovercraft: (t: Tuning) => new SpecialCore('hovercraft', t.craft),
-  helicopter: (t: Tuning) => new SpecialCore('helicopter', t.craft),
+  boat: (t: Tuning) => new BoatCore(t.boat, t.fuel.boat),
+  hovercraft: (t: Tuning) => new SpecialCore('hovercraft', t.craft, t.fuel.hovercraft),
+  helicopter: (t: Tuning) => new SpecialCore('helicopter', t.craft, t.fuel.helicopter),
   paraglider: (t: Tuning) => new SpecialCore('paraglider', t.craft),
   drone: (t: Tuning) => new DroneCore(t.drone),
-  floatplane: (t: Tuning) => new PlaneCore(t.plane),
-  jet: (t: Tuning) => new PlaneCore(t.jet),
+  floatplane: (t: Tuning) => new PlaneCore(t.plane, t.fuel.floatplane),
+  jet: (t: Tuning) => new PlaneCore(t.jet, t.fuel.jet),
 } satisfies Record<CraftType, (t: Tuning) => CraftCore>;
 
 /** the core of a craft of type K */

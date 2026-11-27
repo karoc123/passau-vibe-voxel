@@ -286,6 +286,7 @@ body[data-nav=orbit] #health, body.noui #health { display: none; }
 #health .bar { height: 5px; border-radius: 3px; background: rgba(16,17,20,.5); overflow: hidden; }
 #health .bar i { display: block; height: 100%; width: 100%; background: #e8ece9; }
 #health .row.low .bar i { background: #e0533f; }
+#health .row.fuel .bar i { background: #d9b45a; }
 #health.down .row:first-child .name::after { content: ' · down'; color: #e0533f; }
 #health-tint { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
   background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%); }

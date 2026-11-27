@@ -10,11 +10,14 @@ import type { CraftSpot } from '../contract/commands';
 import type { CraftStep, SpecialCoreState, SpecialEvent } from '../contract/crafts';
 import type { CraftInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
+import { Tank, type TankTuning } from '../tank';
 import { craftWorld, CRAFT_RADIUS } from './craft-collision';
 import { CRAFT, CraftMotion, type CraftKind, type CraftMotionWorld, type CraftTuning } from './craft-motion';
 import type { VoxelCollision } from './voxel-collision';
 
 export const NO_CRAFT_INPUT: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: 0, side: 0 });
+// the load of a helicopter holding itself in the air (of its full climb's)
+const HOVER = 0.6;
 const LET_DOWN: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: -1, side: 0 });
 // (its events, SpecialEvent: contract/crafts.ts)
 /** as drawn: the motion's point (the paraglider's: the pilot's middle), its heading, pitch (+: nose up), bank (+: the
@@ -27,13 +30,16 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
   readonly reach: { radius: number };
   readonly neutral: CraftInput;
   readonly events: SpecialEvent[] = [];
+  readonly tank: Tank;
   /** what the last step did ('blocked': met a wall; 'loading': waited for a tile) */
   result: CraftStep = 'moving';
   private worlds = new WeakMap<VoxelCollision, CraftMotionWorld>();
   // drawn: where it was at the world tick's start
   private readonly from: SpecialDrawn = { x: 0, y: 0, z: 0, h: 0, pitch: 0, bank: 0 };
 
-  constructor(readonly kind: CraftKind, cfg: CraftTuning = CRAFT) {
+  // fuel: its tank's numbers (none: it has none, the paraglider)
+  constructor(readonly kind: CraftKind, cfg: CraftTuning = CRAFT, fuel: TankTuning | null = null) {
+    this.tank = new Tank(fuel);
     this.motion = new CraftMotion(kind, cfg);
     this.reach = { radius: CRAFT_RADIUS[kind] };
     this.neutral = kind === 'helicopter' ? LET_DOWN : NO_CRAFT_INPUT;
@@ -62,6 +68,9 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
 
   step(input: CraftInput, dt: number, col: VoxelCollision) {
     if (this.ended) return false;
+    if (!this.tank.power) input = this.neutral;
+    // (an empty seat is the engine off; a helicopter off its skids works to hold itself up)
+    else if (input !== this.neutral) this.tank.burn(Math.max(Math.abs(input.drive), Math.abs(input.side), Math.abs(input.lift), this.kind === 'helicopter' && !this.motion.grounded ? HOVER : 0), dt);
     this.result = this.motion.step(input, dt, this.world(col));
     if (this.result === 'landed' || this.result === 'splash') { this.events.push(this.result); return false; }
     return this.result !== 'loading';
@@ -79,10 +88,11 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     if (vn < 0) { v.x -= vn * n.x; v.z -= vn * n.z; }
   }
 
-  save(): SpecialCoreState { return { motion: this.motion.save(), result: this.result, from: { ...this.from } }; }
+  save(): SpecialCoreState { return { motion: this.motion.save(), result: this.result, from: { ...this.from }, ...this.tank.save() }; }
   load(s: SpecialCoreState) {
     this.motion.restore(s.motion);
     this.result = s.result;
+    this.tank.load(s);
     Object.assign(this.from, s.from);
   }
 

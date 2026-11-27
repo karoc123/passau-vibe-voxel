@@ -303,6 +303,7 @@ export class LifePhysics implements TrafficBodies {
     body.chassis.setRestitution(0);
     body.chassis.setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min);
     body.drive.ride = body.cur.ride;
+    if (driver.car.tank) body.drive.tank = driver.car.tank;
   }
 
   // m from world (x, z) to the nearest edited box (0 inside one) where that is at most max; else more than max

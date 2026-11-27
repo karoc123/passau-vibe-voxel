@@ -15,7 +15,10 @@ const SKIP = new Set(['events', 'worlds', 'col']);
 const COMMON = [
   'clock', // the steps' (the server's; a client's copy is never stepped)
   'reach', 'neutral', // its collision's cube, its empty seat's input: from its type and tuning (the same on both sides)
+  'tank.burnt', // each side's own below a whole step (only whole steps cross: fuel goes down slowly)
 ];
+// (no tank: its level never moves)
+const TANKLESS = 'tank.level';
 export const NOT_ON_THE_WIRE: Record<CraftType, readonly string[]> = (() => {
   const boat = [...COMMON, 'motion.accel', 'motion.bumpT', // the steps' (the thrust followed, a bump's pause)
     'motion.safe', 'motion.outline']; // unstick's trail (the server's); the hull, from its tuning
@@ -26,8 +29,8 @@ export const NOT_ON_THE_WIRE: Record<CraftType, readonly string[]> = (() => {
     'flight.d', 'flight.q', // the steps' scratch
     'flight.ahead']; // whether this copy runs ahead on a page (the copy's own, not the craft's)
   return {
-    boat, hovercraft: special, helicopter: special, paraglider: special, floatplane: plane, jet: plane,
-    drone: [...COMMON, 'next', 'glide', 'out', // the steps', drawn()'s scratch
+    boat, hovercraft: special, helicopter: special, paraglider: [...special, TANKLESS], floatplane: plane, jet: plane,
+    drone: [...COMMON, TANKLESS, 'next', 'glide', 'out', // the steps', drawn()'s scratch
       'flight.rotationAxis', 'flight.rotationDelta', 'flight.acceleration', 'flight.displacement', 'flight.impactNormal',
       'flight.priorAttitude', 'flight.priorVelocity', // the steps' scratch
       'flight.impactSpin'], // the spin after a hit, decaying in the steps (the server's)

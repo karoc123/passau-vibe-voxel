@@ -49,6 +49,7 @@ import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
+import { LEVELS } from './sim/tank';
 import { shake } from './nav/chase-rig';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { wreckSmoke } from './view/wreck-smoke';
@@ -481,9 +482,12 @@ function feelHealth(now: number) {
   const S = sim, me = S?.player;
   if (!S || !me) return;
   const s = S.seat(), e = s && s.role !== 'walker' ? s.entity : null, key = e ? `${e.kind}:${e.id}` : '';
-  const type = e?.kind === 'craft' ? S.crafts().find((c) => c.id === e.id)?.type ?? 'craft' : 'car';
+  const craft = e?.kind === 'craft' ? S.crafts().find((c) => c.id === e.id) : undefined, type = craft?.type ?? (e?.kind === 'craft' ? 'craft' : 'car');
   const own = S.health(`player:${me}`);
-  const k = healthHud.set(own, e ? { key, name: type[0].toUpperCase() + type.slice(1), h: S.health(key) } : null, now);
+  // (the host's word, not the copy run ahead: the gauge reads as the host's tank)
+  const body = s?.role === 'driver' ? S.driver()?.body : null, tank = s?.role === 'pilot' ? craft?.core.tank.share ?? null
+    : body ? (body.fuel ?? LEVELS) / LEVELS : null;
+  const k = healthHud.set(own, e ? { key, name: type[0].toUpperCase() + type.slice(1), h: S.health(key) } : null, tank, now);
   if (k > 0 && !nav.onMap) {
     shaken.copy(camera.position);
     shake(camera.position, 0.12 * k, now);
