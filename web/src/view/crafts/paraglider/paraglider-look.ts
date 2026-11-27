@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CraftView } from '../../../client/sim-client';
 import type { CoreOf } from '../../../sim/craft/cores';
 import { GLIDER_HEIGHT } from '../../../sim/craft/craft-motion';
+import { FIGURE_SCALE } from '../../../sim/figure';
 import { parts, placeYXZ, type CraftFrame, type CraftLook, type Part } from '../craft-look';
 
 // A pilot seated in the harness under a 10 m arc of wing, its lines 6-7 m long. The model's origin is at the feet, the
@@ -43,8 +44,12 @@ function bars(part: Part) {
 function paraglider(group: THREE.Group, part: Part): THREE.Group {
   const bar = bars(part);
   const SUIT = 0x2c4a63, HARNESS = 0x2b2f33, SKIN = 0xd9a27c, HELMET = 0xf0f0ea;
-  // the harness, and a pilot seated in it: legs hanging forward, hands up on the brakes (as tall as the walker)
-  const pilot = new THREE.Group();
+  // the harness, and a pilot seated in it: legs hanging forward, hands up on the brakes; written at a grown-up's size
+  // and drawn at the figure's (sim/figure.ts) like every other one, the hips kept on the harness's seat
+  const pilot = new THREE.Group(), HIPS = new THREE.Vector3(0, 0.88, -0.05);
+  pilot.name = 'figure'; // (tools/looks.mjs measures it)
+  pilot.scale.setScalar(FIGURE_SCALE);
+  pilot.position.copy(HIPS).multiplyScalar(1 - FIGURE_SCALE);
   group.add(pilot);
   part(group, HARNESS, [0.5, 0.32, 0.7], 0, 0.72, -0.05);
   part(group, HARNESS, [0.46, 0.55, 0.22], 0, 1.0, -0.38);

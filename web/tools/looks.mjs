@@ -6,6 +6,9 @@
 // - Every vehicle type of the traffic shows its glass from each side as much as the one a player sits in (opened):
 //   rays from ahead, behind and both sides meet glass first about as often.
 // - The passers-by and the riders are as tall as sim/figure.ts says (the players' and the NPCs' figure).
+// - Every figure drawn as part of a look is the figure's size: a vehicle's rider (its clothes, sim/vehicles.ts WEAR) no
+//   longer and no wider than the passer-by's torso and no taller than its shoulders, a craft's own pilot (a group named
+//   'figure') no taller than the figure.
 // Prints the traffic's triangles and meshes a type (its draw cost).
 // usage (in web/): node tools/looks.mjs [-v]; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
@@ -14,7 +17,7 @@ import { imp } from './lib.mjs';
 const { LifeMeshes } = await imp('src/view/meshes.ts');
 const { Boats } = await imp('src/view/boats.ts');
 const { craftLook } = await imp('src/view/crafts/index.ts');
-const { VEHICLE_IDS, VEHICLES, PALETTE } = await imp('src/sim/vehicles.ts');
+const { VEHICLE_IDS, VEHICLES, PALETTE, WEAR } = await imp('src/sim/vehicles.ts');
 const { SEATS } = await imp('src/sim/seats.ts');
 const CRAFT_TYPES = Object.keys(SEATS.craft);
 const { FIGURE_TOP, RIDE_SIT, RIDE_UP, RIDER_TOP } = await imp('src/sim/figure.ts');
@@ -163,6 +166,25 @@ const crowd = Math.max(top(M.legs), top(M.torso));
 check(Math.abs(crowd - FIGURE_TOP) < 0.03, `a passer-by drawn ${crowd.toFixed(3)} m tall (the figure's ${FIGURE_TOP.toFixed(3)})`);
 const rider = RIDE_UP + crowd * RIDE_SIT;
 check(Math.abs(rider - RIDER_TOP) < 0.03, `a rider's head ${rider.toFixed(3)} m up (a shot meets it to ${RIDER_TOP.toFixed(3)})`);
+// a figure in a model: a grown-up's (the motorbike's rider before 2026-11-27) was a third bigger than these allow
+const torso = (M.torso.geometry.computeBoundingBox(), M.torso.geometry.boundingBox), torsoW = torso.max.x - torso.min.x, torsoH = torso.max.y - torso.min.y;
+const SLACK = 1.03;
+for (const id of VEHICLE_IDS) {
+  const worn = VEHICLES[id].model.filter((p) => WEAR.includes(p[6]));
+  if (!worn.length) continue;
+  const big = worn.filter(([w, h]) => w > torsoW * SLACK || h > torsoH * SLACK);
+  const span = Math.max(...worn.map((p) => p[4] + p[1])) - Math.min(...worn.map((p) => p[4]));
+  check(!big.length && span < torso.max.y * SLACK, `a ${id}'s rider at the figure's size: its clothes ${span.toFixed(3)} m from the soles up (a passer-by's shoulders ${torso.max.y.toFixed(3)}), none wider or longer than its torso (${torsoW.toFixed(3)} x ${torsoH.toFixed(3)} m)${big.length ? `: ${big.map((p) => `${p[0]} x ${p[1]}`).join(', ')}` : ''}`);
+}
+for (const type of CRAFT_TYPES) {
+  const figures = [];
+  craftLook(type).group.traverse((o) => { if (o.name === 'figure') figures.push(o); });
+  for (const f of figures) {
+    f.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(f), tall = b.max.y - b.min.y;
+    check(tall < FIGURE_TOP * SLACK, `a ${type}'s own pilot ${tall.toFixed(3)} m from the soles up (the figure ${FIGURE_TOP.toFixed(3)})`);
+  }
+}
 
 // the draw cost: the traffic's triangles and meshes a type, closed (as most of it is drawn) and opened
 const tris = (m) => (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position?.count ?? 0) / 3;

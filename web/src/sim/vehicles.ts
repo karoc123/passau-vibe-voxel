@@ -5,6 +5,7 @@
 // x left, y up from the ground, z forward; drawn by view/meshes.ts). README "Driving": the mix.
 import { frozen } from '../core/frozen';
 import type { VehicleId } from './contract/ids';
+import { FIGURE_SCALE } from './figure';
 
 // The chassis and its drive: half extents of the chassis' box (m; its bottom 0.45 m under the body's origin), mass
 // (kg), wheels (chassis space; the front ones steer, the rear ones are driven), the engine's force per driven wheel
@@ -47,11 +48,25 @@ export type RideTuning = typeof RIDE;
 
 // A model part: a box w x h x l (m), its bottom centre at (x, y, z), and its colour: 'paint' (the vehicle's own,
 // per instance), 'head' or 'tail' (its lamps: lit at night, the tail lamps brighter when braking), or a colour of
-// PALETTE
-export type Part = [w: number, h: number, l: number, x: number, y: number, z: number, colour: 'paint' | 'head' | 'tail' | keyof typeof PALETTE];
+// PALETTE. A figure's clothes are only the type Worn, which seated() alone gives: a rider written into a model on its
+// own, at a size of its own, does not compile.
+export type Part = [w: number, h: number, l: number, x: number, y: number, z: number, colour: 'paint' | 'head' | 'tail' | Exclude<keyof typeof PALETTE, Wear> | Worn];
 export const PALETTE = {
   tyre: '#161616', glass: '#1d2329', trim: '#2b2b2b', steel: '#8c8f93', jeans: '#2b3240', jacket: '#26292e', skin: '#e0b48f',
 };
+export const WEAR = ['jeans', 'jacket', 'skin'] as const;
+type Wear = (typeof WEAR)[number];
+declare const sized: unique symbol;
+type Worn = Wear & { readonly [sized]: true };
+type FigurePart = [w: number, h: number, l: number, x: number, y: number, z: number, colour: 'paint' | 'glass' | Wear];
+
+// a figure seated on a vehicle, written at a grown-up's size, drawn at the figure's (sim/figure.ts) like every other
+// one: shrunk towards at (y, z), the point that stays where the grown-up's was (the hips on the seat, the hands on the
+// grips)
+function seated(at: { y: number; z: number }, parts: FigurePart[]): Part[] {
+  const S = FIGURE_SCALE;
+  return parts.map(([w, h, l, x, y, z, c]) => [w * S, h * S, l * S, x * S, at.y + (y - at.y) * S, at.z + (z - at.z) * S, c as Part[6]]);
+}
 
 export interface VehicleType {
   id: VehicleId;
@@ -190,10 +205,13 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
       [0.06, 0.62, 0.06, -0.1, 0.32, 0.66, 'steel'], [0.06, 0.62, 0.06, 0.1, 0.32, 0.66, 'steel'],
       [0.4, 0.32, 0.22, 0, 0.78, 0.6, 'paint'], [0.72, 0.05, 0.05, 0, 1.0, 0.46, 'trim'],
       [0.18, 0.12, 0.06, 0, 0.86, 0.72, 'head'], [0.16, 0.08, 0.06, 0, 0.78, -0.93, 'tail'],
-      // the rider: legs along the tank, torso leaning on the bars, arms to the grips, a helmet in the bike's colour
-      [0.38, 0.2, 0.62, 0, 0.84, -0.12, 'jeans'], [0.12, 0.42, 0.18, -0.21, 0.42, 0.06, 'jeans'], [0.12, 0.42, 0.18, 0.21, 0.42, 0.06, 'jeans'],
-      [0.44, 0.56, 0.3, 0, 1.0, -0.22, 'jacket'], [0.1, 0.1, 0.62, -0.25, 1.24, 0.12, 'jacket'], [0.1, 0.1, 0.62, 0.25, 1.24, 0.12, 'jacket'],
-      [0.3, 0.3, 0.32, 0, 1.56, -0.12, 'paint'], [0.26, 0.1, 0.06, 0, 1.64, 0.05, 'glass'],
+      // the rider: legs along the tank, torso leaning on the bars, arms to the grips, a helmet in the bike's colour; its
+      // hips kept on the saddle and its hands on the grips, so a smaller one sits further forward
+      ...seated({ y: 0.84, z: 0.43 }, [
+        [0.38, 0.2, 0.62, 0, 0.84, -0.12, 'jeans'], [0.12, 0.42, 0.18, -0.21, 0.42, 0.06, 'jeans'], [0.12, 0.42, 0.18, 0.21, 0.42, 0.06, 'jeans'],
+        [0.44, 0.56, 0.3, 0, 1.0, -0.22, 'jacket'], [0.1, 0.1, 0.62, -0.25, 1.24, 0.12, 'jacket'], [0.1, 0.1, 0.62, 0.25, 1.24, 0.12, 'jacket'],
+        [0.3, 0.3, 0.32, 0, 1.56, -0.12, 'paint'], [0.26, 0.1, 0.06, 0, 1.64, 0.05, 'glass'],
+      ]),
     ],
   },
 };
