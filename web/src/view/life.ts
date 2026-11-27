@@ -15,6 +15,7 @@ import type { CraftType, EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
 import { MAX_CARS, WRECK_COL } from '../sim/contract/agents';
 import { wreckSmoke } from './wreck-smoke';
+import { CHEST, FIGURE_SCALE as S, FIGURE_TOP, RIDE_SIT, RIDE_UP } from '../sim/figure';
 import { AVATAR_SHAPE, carShape, COACH_SHAPE, craftSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
@@ -37,12 +38,15 @@ const VIEW_SLACK = 0.15;
 // middle LIE m up) as they come down, keeping LAND_KEEP of their speed on landing and sliding to a stop at SLIDE m/s^2.
 // Roughly a real forward throw: ~6 m at 30 km/h, ~15 m at 50. Their bike slides along the hit (at most FALL_V m/s,
 // slowing at FALL_DRAG per s). At most MAX_FALLEN at once, each gone after FALLEN_S s once PED_POP_R from the viewer.
-const THROW = 0.85, LIFT = 0.35, MID = 0.9, LIE = 0.12, LAND_KEEP = 0.5, SLIDE = 7;
+const THROW = 0.85, LIFT = 0.35, MID = 0.9 * S, LIE = 0.12 * S, LAND_KEEP = 0.5, SLIDE = 7;
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 // fallen into a hole (WorldSim's events: dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
 const G = 9.81, LANDED_S = 2;
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
+// a passer-by's bob: BOB m at each step, a step of a grown-up's stride shortened to the figure's (the sim's phase
+// counts a grown-up's steps)
+const BOB = 0.05 * S;
 const SEAT_EULER = new THREE.Euler(0, 0, 0, 'YXZ'), SEAT_BASIS = new THREE.Matrix4(), SEAT_LEFT = new THREE.Vector3();
 
 // a person (and their bike) fallen: where they are (their feet; thrown: their middle), which way they were shoved (unit
@@ -288,9 +292,9 @@ export class StreetLife {
       T.personPoint(p, 0, A);
       T.personPoint(p, 0.5, B);
       const r = this.follow(p.id, A, Math.atan2(B.x - A.x, B.y - A.y), 6, k);
-      if (!p.wait) bob = Math.sin(p.ph);
+      if (!p.wait) bob = Math.sin(p.ph / S);
       pos.set(r.x, r.y, r.z);
-      pos.y += 0.05 * Math.abs(bob);
+      pos.y += BOB * Math.abs(bob);
       m.compose(pos, q.setFromAxisAngle(up, r.h), one);
       M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
       M.torso.setColorAt(i, this.col(p.col));
@@ -298,10 +302,10 @@ export class StreetLife {
     return this.people.length;
   }
 
-  // a rider on a bike: the person sits 0.45 m up, keeping right of the way's line; the bike under them
+  // a rider on a bike: the person sits RIDE_UP m up, keeping right of the way's line; the bike under them
   private drawRiders(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-    const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), sit = new THREE.Vector3(1, 0.82, 1);
+    const A = pt(), B = pt(), pos = new THREE.Vector3(), k = 1 - Math.exp(-dt * 10), sit = new THREE.Vector3(1, RIDE_SIT, 1);
     const one = new THREE.Vector3(1, 1, 1), T = this.traffic;
     this.riders.forEach((p, i) => {
       T.personPoint(p, 0, A);
@@ -310,7 +314,7 @@ export class StreetLife {
       q.setFromAxisAngle(up, r.h);
       pos.set(r.x, r.y, r.z);
       M.bike.setMatrixAt(i, m.compose(pos, q, one));
-      pos.y += 0.45;
+      pos.y += RIDE_UP;
       m.compose(pos, q, sit);
       M.legs.setMatrixAt(i0 + i, m); M.torso.setMatrixAt(i0 + i, m);
       M.torso.setColorAt(i0 + i, this.col(p.col));
@@ -441,7 +445,7 @@ export class StreetLife {
       tip.setFromAxisAngle(axis.set(f.dz, 0, -f.dx), a);
       q.setFromAxisAngle(up, f.h).premultiply(tip);
       pos.copy(f.at);
-      pos.y += Math.sin(Math.PI * k) * 0.3 + 0.12 * Math.sin(a);
+      pos.y += Math.sin(Math.PI * k) * 0.3 + LIE * Math.sin(a);
       m.compose(pos, q, one);
       M.legs.setMatrixAt(i0 + i, m); M.torso.setMatrixAt(i0 + i, m);
       M.torso.setColorAt(i0 + i, f.col);
@@ -545,7 +549,7 @@ export class StreetLife {
     }
     for (const p of this.people) {
       const d = this.drawnPeople.get(p.id);
-      if (d) test('person', p, d.x, d.y + 0.9, d.z, 1.6, 'person');
+      if (d) test('person', p, d.x, d.y + CHEST, d.z, FIGURE_TOP, 'person');
     }
     cand.sort((a, b) => a.score - b.score);
     const best = cand.slice(0, 6).find((c) => visible(c.at.clone().sub(camera.position)));

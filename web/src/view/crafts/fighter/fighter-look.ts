@@ -32,8 +32,8 @@ class FighterLook implements CraftLook<'fighter'> {
       box(1.04, 0.99, 0.25, 0, y0 + 0.55, 3.1, YELLOW),
       box(1.02, 0.3, 5.0, 0, y0 + 0.12, 0.3, GREY), // the grey belly
       box(0.82, 0.12, 0.5, 0, y0 + 0.7, -1.3, WHITE), // the band round the rear
-      // the canopy's frame (its glass: below) and the headrest behind it
-      box(0.66, 0.08, 1.3, 0, y0 + 1.55, 0.25, DARK),
+      // the canopy's frame (its glass: below, the frame's ends standing out of the glass's) and the headrest behind it
+      box(0.66, 0.08, 1.32, 0, y0 + 1.55, 0.25, DARK),
       box(0.4, 0.4, 0.8, 0, y0 + 1.2, -0.75, OLIVE),
       // the two MG barrels over the cowling, the mount's point at their muzzles (sim/seats.ts)
       box(0.08, 0.08, 1.0, 0.18, y0 + 1.15, 3.1, METAL),

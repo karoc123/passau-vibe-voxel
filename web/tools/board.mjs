@@ -6,8 +6,8 @@
 // craft's events). A walk asked for far over the crafts' ceiling, under the ground or at no number starts within the
 // world's height or not at all. A parked camper is reached from off its nose by its real length, a motorbike not from
 // as far. Then on the real data (when there): the same as the helicopter's for a car of the traffic, its seat taken
-// with the road physics, and the car left parked with the walker beside it; a car going faster than a walk is refused
-// as moving.
+// with the road physics, and the car left parked with the walker beside it; a car rolling slower than one runs got into
+// from beside it, rolling on under its new driver; one going faster refused as moving.
 // usage (in web/): node tools/board.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 import { DATA, hasData } from './real-city.mjs';
@@ -16,7 +16,7 @@ const { nodeHost, readHostData } = await imp('src/host/node.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { DEFAULT_TUNING } = await imp('src/sim/tuning.ts');
-const BOARD = DEFAULT_TUNING.walk.board;
+const BOARD = DEFAULT_TUNING.walk.board, BOARD_V = DEFAULT_TUNING.walk.boardSpeed;
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const settle = () => new Promise((r) => setImmediate(r));
@@ -183,19 +183,33 @@ else {
   const box = () => { const p = host.sim.entities.pose(ref), s = carShape(car); return { ...p, r: s.hx, l: s.hz }; };
   await scenario('car', host, P, ref, 'driver', box, 30);
 
-  // (beside one going faster than a walk, 1 m off its side as the host has it; the walk and the seat asked together)
-  const runner = P.add('runner');
-  walk(runner, spot.x + 30, 0, spot.y);
-  await P.tick(3);
-  for (let i = 0; i < 60 && !T.cars.some((c) => !c.bus && c.v > 6); i++) await P.tick(5);
-  const fast = T.cars.filter((c) => !c.bus).sort((a, b) => b.v - a.v)[0], p = host.sim.entities.pose({ kind: 'car', id: fast.id });
-  const side = carShape(fast).hx + 1, v = fast.v;
-  runner.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: p.x + Math.cos(p.h) * side, y: p.y, z: p.z - Math.sin(p.h) * side, h: 0, moving: false } } });
-  runner.c.send({ kind: 'enterSeat', entity: { kind: 'car', id: fast.id }, role: 'driver' });
-  await P.tick(30);
-  const r = runner.c.results('enterSeat');
-  check(r.length === 1 && !r[0].ok && r[0].reason === 'moving' && runner.c.seat()?.role === 'walker',
-    `a car going ${v.toFixed(1)} m/s is refused as moving, the walker beside it still on foot (${JSON.stringify(r)})`);
+  // (beside one moving, 1 m off its side as the host has it; the walk and the seat asked together)
+  const beside = async (name, moving) => {
+    const runner = P.add(name);
+    walk(runner, spot.x + 30, 0, spot.y);
+    await P.tick(3);
+    const pick = () => T.cars.find((c) => !c.bus && moving(c.v));
+    for (let i = 0; i < 300 && !pick(); i++) await P.tick(1);
+    const car = pick();
+    if (!car) return { car: null, v: 0, r: [], runner };
+    const p = host.sim.entities.pose({ kind: 'car', id: car.id }), side = carShape(car).hx + 1, v = car.v;
+    runner.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: p.x + Math.cos(p.h) * side, y: p.y, z: p.z - Math.sin(p.h) * side, h: 0, moving: true } } });
+    runner.c.send({ kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' });
+    await P.tick(30);
+    return { car, v, r: runner.c.results('enterSeat'), runner };
+  };
+  const slow = await beside('catcher', (v) => v > 2 && v < BOARD_V - 1);
+  check(!!slow.car && slow.r.length === 1 && slow.r[0].ok && slow.runner.c.seat()?.role === 'driver' && slow.car.v > 0.5,
+    `a car rolling at ${slow.v.toFixed(1)} m/s got into from beside it, rolling on at ${slow.car?.v.toFixed(1)} m/s under its new driver (${JSON.stringify(slow.r)})`);
+  const fast = await beside('runner', (v) => v > BOARD_V + 1);
+  check(!!fast.car && fast.r.length === 1 && !fast.r[0].ok && fast.r[0].reason === 'moving' && fast.runner.c.seat()?.role === 'walker',
+    `a car going ${fast.v.toFixed(1)} m/s (over ${BOARD_V}) is refused as moving, the walker beside it still on foot (${JSON.stringify(fast.r)})`);
+  // the crowd as a shot meets it: a passer-by's and a rider's box as tall as the figure drawn (sim/figure.ts)
+  const { BODY_HEAD, RIDER_TOP } = await imp('src/sim/figure.ts');
+  const crowd = [...host.sim.shotWorld({ kind: 'car', id: -1 }).bodies()].filter((b) => b.entity.kind === 'person');
+  const riders = new Set(T.riders.map((p) => p.id)), tall = (b) => (riders.has(b.entity.id) ? RIDER_TOP : BODY_HEAD);
+  check(crowd.length > 0 && crowd.every((b) => b.ht === tall(b)),
+    `the crowd's ${crowd.length} bodies as tall as the figure (${BODY_HEAD.toFixed(3)} m, a rider's head ${RIDER_TOP.toFixed(3)} m)`);
   host.dispose();
 }
 

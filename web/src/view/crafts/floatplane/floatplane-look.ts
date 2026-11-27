@@ -73,7 +73,7 @@ class FloatplaneLook implements CraftLook<'floatplane'> {
     };
     lamp(0xff2a1a, 4.48, y0 + 1.5, 0.9);
     lamp(0x22ff55, -4.48, y0 + 1.5, 0.9);
-    lamp(0xffffff, 0, y0 + 0.85, -3.62);
+    lamp(0xffffff, 0, y0 + 0.85, -3.63); // (out of the stabiliser's trailing edge, not in its face)
     lamp(0xffffff, 0, y0 + 2.2, -3.62, true);
     this.group.visible = false;
   }

@@ -7,12 +7,14 @@ import type { WalkPose } from './contract/pose';
  * board: how far (m, across,
  * from its sides) a vehicle's seat may be taken from on foot, and a player getting out is put down from it (the page
  * offers it from 3 m: a step of slack for the walk the host has not yet taken); boardSpeed: m/s a car may go and still
- * be got into from foot (a walk beside one creeping in a queue, not a leap into traffic). foot.ts walks as a person
+ * be got into from foot: as fast as one runs beside it (a car rolling off from a light, slowing for a turn), not one
+ * passing at the town's speed (13 m/s); at a run the host's car is a step or two ahead of the one the page drew, inside
+ * the reach along its side. foot.ts walks as a person
  * at 2.2 m/s, runs at 7; on foot (an avatar) first person at 6, with Shift 20, click-to-walk up to 22; rises 6 m/s up
  * a step (and out of the water) and jumps at 5.2; falls at 16 m/s² (60 m/s off a 110 m tower); swims at 1.8, bobbing up
  * after a fall into the water at a few m/s. */
 export interface WalkBounds { readonly speed: number; readonly climb: number; readonly fall: number; readonly slack: number; readonly board: number; readonly boardSpeed: number }
-export const WALK_BOUNDS: WalkBounds = frozen({ speed: 25, climb: 10, fall: 80, slack: 0.5, board: 4, boardSpeed: 2.5 });
+export const WALK_BOUNDS: WalkBounds = frozen({ speed: 25, climb: 10, fall: 80, slack: 0.5, board: 4, boardSpeed: 7 });
 
 /** pose kept within reach of from after t s: moved back towards from across and up or down as far as it went past; the
  * same object when within */

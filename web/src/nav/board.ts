@@ -120,7 +120,7 @@ export class Boarding {
     const nav = this.nav, no = r.find((x) => !x.ok);
     if (!r.some((x) => x.ok)) {
       this.say(no?.reason === 'taken' ? (t.role === 'passenger' ? `No free seat in that ${t.label}` : `Someone is in that ${t.label}`) : no?.reason === 'far' ? `Too far from the ${t.label}`
-        : no?.reason === 'moving' ? `That ${t.label} is moving: wait till it stops` : no?.reason === 'loading' ? 'Road physics still loading' : `Cannot get into that ${t.label}`);
+        : no?.reason === 'moving' ? `That ${t.label} is going too fast to get into` : no?.reason === 'loading' ? 'Road physics still loading' : `Cannot get into that ${t.label}`);
       return;
     }
     if (!nav.onFoot) return;

@@ -58,7 +58,7 @@ import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
-import { BODY_HEAD, BODY_R, CHEST, EYE } from './figure';
+import { BODY_HEAD, BODY_R, CHEST, EYE, RIDER_TOP } from './figure';
 import { aimFrom, cue, newMind, think, type Duty, type Senses } from './npc-mind';
 import { Camps } from './camps';
 import type { Vec3 } from '../core/vec';
@@ -673,8 +673,8 @@ export class WorldSim {
 
   // whether player may ask for a seat of entity with role from where they are (true), else why not: on foot (their
   // avatar), a vehicle only within Tuning.walk.board of where the host has the walker, not where the page says (a seat
-  // the mode gives, a craft made, is the mode's to place), and a car only while it goes no faster than
-  // Tuning.walk.boardSpeed; a passenger's only from foot or from another seat of the same vehicle (a player alone
+  // the mode gives, a craft made, is the mode's to place), and a car (of the traffic or another's) only while it
+  // goes no faster than Tuning.walk.boardSpeed, moving or not; a passenger's only from foot or from another seat of the same vehicle (a player alone
   // goes from the wheel to its gun), not from the map
   private mayBoard(player: PlayerId, entity: EntityRef, role?: Role): boolean | Refusal {
     const held = this.seat(player), W = this.players.get(player)?.walk;
@@ -720,7 +720,7 @@ export class WorldSim {
           if (out(T.personPoint(p, 0, pt, true).x, pt.y)) continue;
           const q = T.personPoint(p, 0, pt);
           // (personPoint: x, z on the map as x, y; the height as z)
-          yield { entity: { kind: 'person', id: p.id }, x: q.x, y: q.z, z: q.y, h: 0, r: 0.3, l: p.bike ? 0.9 : 0.3, ht: 1.8 };
+          yield { entity: { kind: 'person', id: p.id }, x: q.x, y: q.z, z: q.y, h: 0, r: BODY_R, l: p.bike ? 0.9 : BODY_R, ht: p.bike ? RIDER_TOP : BODY_HEAD };
         }
         for (const [id, by] of sim.avatars) {
           const w = sim.players.get(by)?.walk?.pose;

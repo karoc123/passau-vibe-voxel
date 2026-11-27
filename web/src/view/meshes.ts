@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from '../sim/contract/agents';
 import { PALETTE, VEHICLE_IDS, VEHICLES, type Part } from '../sim/vehicles';
 import type { VehicleId } from '../sim/contract/ids';
+import { FIGURE_SCALE } from '../sim/figure';
 export { MAX_BIKES, MAX_PEOPLE };
 
 function box(w: number, h: number, l: number, x: number, y: number, z: number, hex?: number) {
@@ -101,6 +102,32 @@ function opened(model: readonly Part[]): { parts: Part[]; panes: Part[] } {
   return { parts: parts.filter((p) => !free.includes(p)), panes: [...panes, ...free] };
 }
 
+// The solid cabin shows a windscreen and a rear window where the opened one has them (a thin end beside a side
+// window): the side window's glass drawn on through that end, standing out of it as it stands out of the sides. Else
+// the traffic's cars looked windowless until one was got into.
+function closed(model: readonly Part[]): Part[] {
+  return model.map((g) => {
+    const q = model.find((q) => wraps(g, q));
+    if (!q) return g;
+    const q0 = q[5] - q[2] / 2, q1 = q[5] + q[2] / 2, out = (g[0] - q[0]) / 2;
+    // (an end with a window of its own keeps it)
+    const bare = (face: number) => !model.some((e) => e !== g && e[6] === 'glass' && e[2] < END && Math.abs(e[5] - face) < e[2]);
+    let a = g[5] - g[2] / 2, b = g[5] + g[2] / 2;
+    if (a > q0 && a - q0 < END && bare(q0)) a = q0 - out;
+    if (q1 > b && q1 - b < END && bare(q1)) b = q1 + out;
+    return [g[0], g[1], b - a, g[3], g[4], (a + b) / 2, g[6]];
+  });
+}
+
+// a pane without its top and bottom, its sides PANE_IN m inside its box: they lie on the sill and the lintel that the
+// opening leaves, on the walls of a hollowed end and beside them, and a see-through face at the same depth as a solid
+// one flickers (BoxGeometry's faces: +x, -x, +y, -y, +z, -z, six indices each)
+const PANE_IN = 0.005;
+function paneBox([w, h, l, x, y, z]: Part) {
+  const g = box(w - 2 * PANE_IN, h, l - 2 * PANE_IN, x, y, z), i = g.index!.array;
+  return g.setIndex([...i.slice(0, 12), ...i.slice(24, 36)]);
+}
+
 // instanced meshes for every car (of each type), person, bike and signal head; the simulation writes their matrices
 export class LifeMeshes {
   readonly group = new THREE.Group();
@@ -121,18 +148,20 @@ export class LifeMeshes {
 
   constructor(scene: THREE.Scene, heads: [number, number, number, number, ...number[]][]) {
     const mats = { body: std({ color: 0xffffff }), dark: std({ vertexColors: true, roughness: 0.15, metalness: 0.5 }), head: this.headMat, tail: new THREE.MeshBasicMaterial({ color: 0xffffff }) };
-    for (const id of VEHICLE_IDS) this.vehicles[id] = vehicleMeshes(VEHICLES[id].model, MAX_CARS, mats);
+    for (const id of VEHICLE_IDS) this.vehicles[id] = vehicleMeshes(closed(VEHICLES[id].model), MAX_CARS, mats);
     const pane = std({ color: PALETTE.glass, roughness: 0.15, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
     for (const id of VEHICLE_IDS) {
       const { parts, panes } = opened(VEHICLES[id].model);
-      const glass = panes.length ? merge(...panes.map((p) => partBox(p, false))) : new THREE.BufferGeometry();
+      const glass = panes.length ? merge(...panes.map(paneBox)) : new THREE.BufferGeometry();
       this.open[id] = { ...vehicleMeshes(parts, OPEN_CARS, mats), pane: instanced(glass, pane, OPEN_CARS) };
     }
     ({ body: this.body, dark: this.dark, head: this.head, tail: this.tail } = this.vehicles.car);
     const P = MAX_PEOPLE + MAX_BIKES;
+    // (a grown-up's figure drawn at the figure's size, as the players' and the NPCs')
+    const S = FIGURE_SCALE;
     this.legs = instanced(merge(box(0.18, 0.85, 0.22, -0.1, 0, 0, 0x2b3240), box(0.18, 0.85, 0.22, 0.1, 0, 0, 0x2b3240),
-      box(0.3, 0.3, 0.3, 0, 1.45, 0, 0xe0b48f), box(0.32, 0.1, 0.32, 0, 1.72, 0, 0x3a2a20)), std({ vertexColors: true, roughness: 0.9, metalness: 0 }), P);
-    this.torso = instanced(box(0.46, 0.62, 0.3, 0, 0.85, 0), std({ color: 0xffffff, roughness: 0.9, metalness: 0 }), P, { color: true });
+      box(0.3, 0.3, 0.28, 0, 1.45, 0, 0xe0b48f), box(0.32, 0.1, 0.32, 0, 1.72, 0, 0x3a2a20)).scale(S, S, S), std({ vertexColors: true, roughness: 0.9, metalness: 0 }), P);
+    this.torso = instanced(box(0.46, 0.62, 0.3, 0, 0.85, 0).scale(S, S, S), std({ color: 0xffffff, roughness: 0.9, metalness: 0 }), P, { color: true });
     this.legs.castShadow = this.torso.castShadow = true;
     const wheelB = (z: number) => box(0.07, 0.68, 0.68, 0, 0, z, 0x1a1a1a);
     this.bike = instanced(merge(wheelB(-0.55), wheelB(0.55), box(0.06, 0.07, 1.05, 0, 0.62, 0, 0x8c8f93), box(0.06, 0.5, 0.06, 0, 0.3, -0.18, 0x8c8f93),

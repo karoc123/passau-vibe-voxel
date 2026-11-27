@@ -117,3 +117,5 @@ only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
   ~80 ms) on a ~15 ms frame, the stream's share ~6, the town's life ~4 ms a frame (far traffic ~1.4 ms, posing the
   cars in view). Not measured: the GPU's uploads, the workers on a slow CPU (CDP throttles only the main thread). (A
   profiled run's one ~600 ms frame is the CDP profiler starting, not the page.)
+- The motorbike's rider is part of its model, at a grown-up's size beside the figure (passers-by and players at three
+  quarters, owner 2026-11-27); the road physics' hit test of a passer-by still takes a grown-up's middle (0.9 m).

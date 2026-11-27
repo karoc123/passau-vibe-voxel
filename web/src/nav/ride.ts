@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Pose } from '../sim/contract/pose';
 import { vehicleOf } from '../sim/vehicles';
+import { EYE } from '../sim/figure';
 import type { SimClient } from '../client/sim-client';
 import type { Rideable } from '../sim/types';
 import type { Picked, StreetLife } from '../view/life';
@@ -99,7 +100,7 @@ class RideCamera {
 
 // where the camera sits: at the eyes (first person) or behind and above (chase)
 const RIG = {
-  person: { eye: [1.62, 0.2], back: 4.5, up: 2.2, fov: 65 },
+  person: { eye: [EYE, 0.2], back: 4.5, up: 2.2, fov: 65 }, // (a passer-by's eyes: the figure's)
   car: { eye: [1.3, 2.45], fov: 62 }, // dashcam just past the bonnet
 };
 
