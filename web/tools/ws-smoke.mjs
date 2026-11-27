@@ -29,7 +29,7 @@ const { easeAvatar } = await load('view/avatars.ts');
 const data = readHostData(DATA), spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const focus = { x: spot.x, z: spot.y }, dam = data.meta.labels.find((l) => /Ingling/.test(l.name)) ?? { x: 6105, y: 5207 };
 let tick = null;
-const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: `seed=3&dig=1${arg('every')}${arg('interest')}`, log: (l) => { if (verbose) console.log(`  host: ${l}`); },
+const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: `seed=3&dig=1&camps=0${arg('every')}${arg('interest')}`, log: (l) => { if (verbose) console.log(`  host: ${l}`); },
   clock: (t) => { tick = t; return () => {}; } });
 // the commands sent by the clients and taken by the host's sessions, the snapshots each client got
 let sent = 0, taken = 0;

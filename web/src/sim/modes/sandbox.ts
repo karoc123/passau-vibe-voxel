@@ -1,15 +1,22 @@
 // The sandbox: the viewer's behaviour as a mode. Every request granted as
 // asked (a craft made where the client's shell found a spot, the player its pilot; put down again, reset, dropped; a
 // car reset; the player put on foot where their walk is; the world's time of day set: the hour bar), every seat may be taken, edits to the world's voxels only
-// when the host was started with them (?dig=1). No three.js, no DOM (tools/core-deps.mjs).
+// when the host was started with them (?dig=1); its enemy camps. No three.js, no DOM (tools/core-deps.mjs).
 import type { ModeRequest } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
 import type { GameMode, ModeWorld } from '../mode';
+import type { CampPlace } from '../camps';
 
-export function sandbox(opts: { edits?: boolean } = {}): GameMode {
+// The owner chose the places (one for now, not spread over the map). Veste Oberhaus: its inner courtyard, ~30 x 40 m
+// open and level at 94 m, walled round; the guard watches the old town.
+const CAMPS: readonly CampPlace[] = [{ name: 'Veste Oberhaus', x: 8474.5, z: 2385.5, h: -0.76 }];
+
+/** edits: the world's voxels may be edited (?dig=1); camps: the enemy camps (without: the sandbox's own; none: []) */
+export function sandbox(opts: { edits?: boolean; camps?: readonly CampPlace[] } = {}): GameMode {
   const edits = !!opts.edits;
   return {
     id: 'sandbox',
+    camps: opts.camps ?? CAMPS,
     mayEnter: () => true,
     mayEdit: () => edits,
     request(w: ModeWorld, player: PlayerId, r: ModeRequest) {

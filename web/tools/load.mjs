@@ -75,7 +75,7 @@ if (!isMainThread) {
     // (each tick's time: the sim's and the snapshots' with their sending, as the clock runs it)
     const ticks = [], sims = [];
     let measuring = false;
-    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => { if (verbose) console.log(`  host: ${l}`); },
+    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: (l) => { if (verbose) console.log(`  host: ${l}`); },
       clock: (tick) => clock(() => { const t0 = performance.now(); tick(); if (measuring) ticks.push(performance.now() - t0); }) });
     const update = host.server.update.bind(host.server);
     host.server.update = (dt) => { const t0 = performance.now(); update(dt); if (measuring) sims.push(performance.now() - t0); };
@@ -132,7 +132,7 @@ if (!isMainThread) {
   const FIRE = 24, LAST = 8, BASE = 18, PER_MOVING = 6;
   async function firing() {
     const { default: WebSocket } = await import('ws');
-    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: () => {} });
+    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: () => {} });
     const port = await host.port, sim = host.server.sim, T = sim.traffic;
     const ground = (x, z) => T.ground?.support(x, z, 1000) ?? 0;
     for (const t0 = performance.now(); !(ground(spot.x, spot.y) > 0 && sim.physics); await new Promise((r) => setTimeout(r, 50)))
@@ -179,7 +179,7 @@ if (!isMainThread) {
   async function sustained() {
     const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), frame = frameOf(meta);
     let ticks = [];
-    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: () => {},
+    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: () => {},
       clock: (tick) => clock(() => { const t0 = performance.now(); tick(); ticks.push(performance.now() - t0); }) });
     const port = await host.port, sim = host.server.sim, T = sim.traffic;
     const ground = (x, z) => T.ground?.support(x, z, 1000) ?? 0;
