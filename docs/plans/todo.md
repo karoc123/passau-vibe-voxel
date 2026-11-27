@@ -4,10 +4,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Next, in this order (owner 2026-11-27)
 
-- Extraction concepts: 3-5 for Passau, co-op 1-4 players against AI enemies first (Escape from Duckov as the
-  reference: playable alone), PvP of teams of 1-4 later; the owner picks or mixes. The other genres are dropped.
-  The first four (old town raid, crash site, river run, holding the castle) rejected: the whole map, not house and
-  alley fights; the game is moving by air, water and land.
+- Game building blocks (owner 2026-11-27): a stable framework first, the game later; blocks that combine so concepts
+  are tried fast. Direction: the whole map, moving by air, water and land (a squad's chain: helicopter, paraglider, on
+  foot, speedboat), no house or alley fights. Open: why one leaves a vehicle (fuel, air defence?), how enemies fit in,
+  a co-pilot's jobs (not only firing). The speedboat gets two seats. Loot and routes: not yet.
 - Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
   slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
   budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
