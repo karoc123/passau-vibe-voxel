@@ -12,7 +12,8 @@
 // the host, and a walker dropped onto a coach's roof is carried off with the train, on the host too. A page over a
 // lagged link (~133 ms) riding a driven car's roof and a coach's by the gap behind it is seen by the others where it
 // stands on it (its input names the spot on the roof, the host puts it there on the thing as the host has it), and a
-// spot it names far along the roof is walked to within the walk's bound.
+// spot it names far along the roof is walked to within the walk's bound. A walker on a car's roof driven under a
+// footbridge too low for it is swept off in front of the deck, on the page and on the host.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -23,14 +24,18 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
-const { reach, carShape, solidAt, roofUnder, WALKER_R, CRAFT_SHAPES, TOUR_B, COACH_SHAPE } = await imp('src/sim/solids.ts');
+const { reach, carShape, solidAt, roofUnder, WALKER_R, WALKER_HEAD, CRAFT_SHAPES, TOUR_B, COACH_SHAPE } = await imp('src/sim/solids.ts');
 const { Foot } = await imp('src/nav/foot.ts');
 const { WALK_BOUNDS } = await imp('src/sim/walk-bounds.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
-const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth' });
+// a footbridge's deck across z 10..30 at x 180..184, its underside DECK0 over the ground: a car passes under it, a
+// walker standing on the car's roof does not
+const DECK0 = G + 3, DECK = { x0: 180, x1: 184, z0: 10, z1: 30, y0: DECK0, y1: DECK0 + 1, mat: 'wall' };
+const inDeck = (x, z) => x >= DECK.x0 && x < DECK.x1 && z >= DECK.z0 && z < DECK.z1;
+const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth', boxes: [DECK] });
 // an excursion boat lying at its pier (x 181..219, its side at z 216: the tour's start)
 data.boats = { berths: [], tour: [[200, 220], [250, 220]] };
 // a track along x at z RAIL with a station at x 128: its train of four coaches stands there, from x 96.5 to 159.5,
@@ -39,9 +44,10 @@ const RAIL = 240, ARRIVED = 1736, trains = () => [{ p: [[0, RAIL, G], [256, RAIL
 data.traffic.trains = trains();
 const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 120 }, data);
 // the walk's world: flat ground, nothing in the way but a wall west of x 22 for z 90..110 (the voxels are
-// tools/collision.mjs's)
+// tools/collision.mjs's) and the deck
 const WALL = 22, wall = (x, z) => x < WALL && z > 90 && z < 110;
-const ground = { support: () => G, blocked: (x, z) => wall(x, z) };
+const ground = { support: (x, z, top) => (inDeck(x, z) && top >= DECK.y1 ? DECK.y1 : G),
+  blocked: (x, z, y0, y1) => wall(x, z) || (inDeck(x, z) && y0 < DECK.y1 && y1 > DECK.y0) };
 
 // a link holding each command UP ticks and each snapshot DOWN (with the tick a command waits for the host's next
 // update: a ping of 4 ticks, ~133 ms)
@@ -385,6 +391,31 @@ const rode = foot.pos.x - rideFrom, lastW = hostWalk();
 // (the host's walker within two ticks of the train's way at full speed of the page's: the page sees the train late)
 check(upFirst && rode > 100 && pageOff === 0 && hostOffTrain === 0 && Math.hypot(lastW.x - foot.pos.x, lastW.z - foot.pos.z) < 32 * STEP,
   `a walker on a coach's roof rides off with the train (carried ${rode.toFixed(1)} m; off its roof ${pageOff} of ${ticks} frames, the host's walker ${hostOffTrain} ticks, ${Math.hypot(lastW.x - foot.pos.x, lastW.z - foot.pos.z).toFixed(2)} m from the page's at the end)`);
+
+// C dropped onto a car's roof, the car then driven along +x at 20 m/s under the footbridge's deck (low enough for the
+// car, not for the walker standing on it): the walker is swept off its roof in front of the deck, on the page and on
+// the host (as the others see it), never carried into the deck or through it
+const car3 = { ...car, id: 9003, detachedPose: { x: 150, y: G, z: 20, h: Math.PI / 2, pitch: 0, roll: 0 } };
+server.sim.traffic.detachedCars.push(car3);
+dropC(150, G + carShape(car3).top + 0.5, 20);
+for (let i = 0; i < 40; i++) { fframe(null); await new Promise((r) => setImmediate(r)); }
+const hostWorld = server.sim.ground, inWall = (q) => hostWorld.blocked(q.x, q.z, q.y + 0.05, q.y + WALKER_HEAD);
+const rodeOn = Math.abs(footC.feet - G - carShape(car3).top) < 0.05;
+let hostIn = 0, pageIn = 0, past = 0;
+for (let x = 150; x < 230; ) {
+  x += 20 * STEP;
+  car3.detachedPose = { ...car3.detachedPose, x };
+  fframe(null);
+  const q = hostWalkOf(C);
+  if (inWall(q)) hostIn++;
+  if (ground.blocked(footC.pos.x, footC.pos.z, footC.feet + 0.05, footC.feet + WALKER_HEAD)) pageIn++;
+  if (q.x > DECK.x0 || footC.pos.x > DECK.x0) past++;
+}
+for (let i = 0; i < 30; i++) fframe(null);
+server.sim.traffic.detachedCars.splice(server.sim.traffic.detachedCars.indexOf(car3), 1);
+const qC = hostWalkOf(C), known = hostWorld.blocked(181, 20, DECK0, DECK0 + 1);
+check(known && rodeOn && hostIn === 0 && pageIn === 0 && past === 0 && Math.abs(footC.feet - G) < 0.05 && Math.abs(qC.y - G) < 0.05 && footC.pos.x > DECK.x0 - 2 && Math.hypot(qC.x - footC.pos.x, qC.z - footC.pos.z) < 0.5,
+  `a walker on a car's roof driven under a footbridge too low for it is swept off in front of the deck (the page at x ${footC.pos.x.toFixed(2)}, feet ${(footC.feet - G).toFixed(2)} m up; the host's ${qC.x.toFixed(2)}, ${(qC.y - G).toFixed(2)} m up; in the deck: the host's ${hostIn} ticks, the page's ${pageIn}; past its front ${past} ticks${known ? '' : '; the host has no deck'})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);
