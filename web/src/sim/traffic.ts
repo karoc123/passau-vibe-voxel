@@ -35,9 +35,11 @@ const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-
 // 900 m, more than a circle of 350 m holds (so a player alone is never cut), well under the meshes' caps (MAX_CARS, ...), which bound all players
 // together; more players than those fit get thinner streets each (populate), never more agents.
 const BUDGET = { cars: 700, peds: 800, bikes: 80 };
-// the cars parked by the player (detachCar) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
-// never more than PARKED_MAX
-const PARKED = 8, PARKED_MAX = 24;
+// The cars out of the traffic (parked, wrecks: detachCar) kept by place, so parking in one square never takes away
+// another player's car elsewhere: of more than PARKED in one ACTIVE_CELL cell the oldest goes once CAR_POP_R from
+// every viewer. PARKED_MAX bounds them all for the host's tick (eight for each of sixteen players spread out); over
+// it the fullest cell gives up its oldest, in sight or not.
+const PARKED = 8, PARKED_MAX = 128;
 // Player edits (core/live-edits.ts, told by edited()): the paths' heights are baked (scripts/traffic.py), so only
 // where the city was edited is the ground under a person looked at (Ground.support): more than HOLE m under their
 // path's height and they fall (dropped: drawn falling, view/life.ts). The cars there are bodies (life-phys.ts): theirs fall.
@@ -1208,18 +1210,23 @@ export class Traffic {
     if (i >= 0) this.detachedCars.splice(i, 1);
   }
 
-  // Keep recent player-parked cars around and leave ample room for the traffic fleet: of more than PARKED the oldest
-  // out of sight goes (never the one driven or followed); more than PARKED_MAX, the oldest anyway.
   private trimParked() {
     const D = this.detachedCars;
     if (D.length <= PARKED) return;
     const canTrim = (c: Car) => !this.held.car.has(c.id) && !this.bodies?.controlled?.(c);
-    let i = D.findIndex((c) => {
+    // (oldest first: D is in the order they left the traffic)
+    const cells = new Map<number, Car[]>();
+    for (const c of D) {
       const p = c.detachedPose!;
-      return canTrim(c) && this.far(p.x, p.z, p.y, CAR_POP_R);
-    });
-    if (i < 0 && D.length > PARKED_MAX) i = D.findIndex(canTrim);
-    if (i >= 0) D.splice(i, 1);
+      pushTo(cells, activeKey(Math.floor(p.x / ACTIVE_CELL), Math.floor(p.z / ACTIVE_CELL)), c);
+    }
+    let drop: Car | undefined, most: Car[] = [];
+    for (const cell of cells.values()) {
+      if (cell.length > most.length) most = cell;
+      if (!drop && cell.length > PARKED) drop = cell.find((c) => { const p = c.detachedPose!; return canTrim(c) && this.far(p.x, p.z, p.y, CAR_POP_R); });
+    }
+    if (!drop && D.length > PARKED_MAX) drop = most.find(canTrim) ?? D.find(canTrim);
+    if (drop) D.splice(D.indexOf(drop), 1);
   }
 
 }
