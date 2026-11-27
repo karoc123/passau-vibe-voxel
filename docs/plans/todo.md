@@ -7,21 +7,23 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Game building blocks (owner 2026-11-27): a stable framework first, the game later; blocks that combine so concepts
   are tried fast. Direction: the whole map, moving by air, water and land (a squad's chain: helicopter, paraglider, on
   foot, speedboat), no house or alley fights. Decided: leaving a vehicle has several causes, each its own block (fuel,
-  vehicle damage, zones such as air defence; maybe more); one damage model for players, vehicles and enemies; enemies
+  vehicle damage, fire from guns such as air defence; maybe more); one damage model for players, vehicles and enemies; enemies
   are NPCs on foot that also use vehicles (stationary guns besides); a seat may carry a tool (a co-pilot's job, not
   only firing), modular, not every seat; the speedboat gets two seats. No mode-as-data layer: a concept that carries
   comes later and turns the framework into a game. Loot and routes: not yet. NPCs: the walk run by the host too, ways
   found on a walkable grid made round them (craters count; no pipeline nav data); today's passers-by may go. An NPC
   boards with a player's commands and fires a player's weapons; once aboard, a vehicle's own AI may steer instead.
-  Perception (sight lines, noise) built in small steps. A helicopter lands only where there is room (from the data).
-  Wind and weather noted for later. "Only on foot" needs no block: it follows from landing room and vehicles' size.
+  Perception (sight lines, noise) built in small steps. A helicopter lands anywhere: that stays (owner 2026-11-27).
+  Wind and weather noted for later. "Only on foot" needs no block.
   Order (the owner leaves it to us): NPCs on foot (built, ADR 0017, 0018: guard or patrol, sight, MG, search, lives,
   their samples; left: hearing, cover, a field of view, players in vehicles as targets, where a mode puts them, the
-  numbers tried in play); a fuel tank (built, ADR 0020; left: refuelling, the minutes tried in play, a car's roll-out
+  numbers tried in play); a fuel tank (built, ADR 0020; the minutes halved again after play; left: refuelling, the minutes tried in play, a car's roll-out
   without engine braking); the gunner built (ADR 0019; left: the swing's numbers tried in play; a military helicopter
   with door guns is a new craft, not yet), no scout; a grappling hook as an item noted for later; NPCs in vehicles
   only once enemies on foot have been seen and played;
-  zones: the concept to be talked through first (a helicopter lands anywhere today). Health and
+  air defence (owner 2026-11-27): no zones, a gun with a sight line, manned by an NPC, a player may take a gun won,
+  it fires at whatever its mount can aim at, a reaction time and tracers warn (concept in the scratchpad's
+  konzept-geschuetze-flugabwehr.md; first step: an NPC post that fires at vehicles, then the gun). Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
@@ -33,7 +35,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   roads (`roads.md`, "How the main roads drive").
 - Roofs: rule buildings (`scripts/roofs.py`), the owner picked the look `slopes` (2026-11-27), on in the map config
   and in the committed map (rebuilt 2026-11-27); for the owner to look at in the viewer. Not smoothed.
-- 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
+- 0.5 m blocks: not pursued (owner 2026-11-27: little gain for 3x the cost). But the walker in the half-size world
+  felt better proportioned: the figure's size against the city is open.
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes
 only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
