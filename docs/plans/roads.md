@@ -37,8 +37,9 @@ Industriestraße 125812800 (-4775, -1267; 20 cells), Innstraße 98905800 (1266, 
 
 `web/tools/road-drive.mjs` (gate `road-drive`, budgets in the tool) drives the main roads at their speed and lists
 bumps, edges under a wheel, grades over 12 % and curves over 0.5 g, worst first; `--near X,Z,R` for a cut-out,
-`--trace X,Z` for the wheels at a spot. On the committed map (2026-11-27): bumps 93 spots, edges 113, steep 100,
-tight 296. What the caps cannot take (a cap stays within 60/64 m of its voxel), by cause, the voxels' to fix in
+`--trace X,Z` for the wheels at a spot. On the committed map (rebuilt with the caps over holes, verges and
+slabs, 2026-11-27; before it): bumps 69 spots (93), edges 76 (113), steep 99 (100), tight 296 (296); the body's
+vertical acceleration p99 1.85 m/s^2 (1.97), p99.9 4.98 (6.19). What the caps cannot take (a cap stays within 60/64 m of its voxel), by cause, the voxels' to fix in
 `voxelize.py`:
 
 - A deck's end metres off the road: 6368, 4945 (way 96354683, 4 m up onto the deck in 5 m); 3515, 4012 (way

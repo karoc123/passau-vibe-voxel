@@ -27,9 +27,8 @@ const EDGE = 0.12; // m
 const STEEP = 0.12;
 // m/s^2 sideways at the road's speed: 0.5 g, where a car on the road's speed limit starts to slide
 const TIGHT = 5;
-// spots of each kind on the map as built, a few over (the committed tiles; a rebuild with the caps of this code takes
-// some of each away: then lower them)
-const BUDGET = { bump: 96, edge: 116, steep: 103, tight: 300 };
+// spots of each kind on the map as built, a few over (the committed tiles): lower them when a rebuild takes some away
+const BUDGET = { bump: 72, edge: 79, steep: 102, tight: 300 };
 const KINDS = Object.keys(BUDGET);
 
 const N = readMeta().tiles.N, roads = await trafficRoads(), { prepPath, at } = await load('sim/path.ts');

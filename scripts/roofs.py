@@ -120,7 +120,14 @@ class Frame:
     (rounded, so every region computes the same cells), perp across; u, v of a cell's centre from an integer origin"""
 
     def __init__(self, f, R0, C0):
-        ring = np.asarray(f["geom"].minimum_rotated_rectangle.exterior.coords)[:4]
+        import shapely
+        self.o = (int(f["cc"].min()) + C0, int(f["rr"].min()) + R0)
+        # the outline from its own origin, snapped: in the region's coordinates it carries float noise of the region's
+        # origin, enough to flip the smallest rectangle between two near-equal ones or a cell's centre on its edge to
+        # either side, and two regions built the building differently
+        d = np.array([C0 - self.o[0], R0 - self.o[1]], float)
+        self.g = shapely.transform(f["geom"], lambda xy: np.round(xy + d, 6))
+        ring = np.asarray(self.g.minimum_rotated_rectangle.exterior.coords)[:4]
         e = [ring[1] - ring[0], ring[2] - ring[1]]
         a = max(e, key=lambda v: np.hypot(*v))
         a = a / np.hypot(*a)
@@ -130,7 +137,6 @@ class Frame:
         self.ax = a / np.hypot(*a)
         self.perp = np.array([-self.ax[1], self.ax[0]])
         self.R0, self.C0 = R0, C0
-        self.o = (int(f["cc"].min()) + C0, int(f["rr"].min()) + R0)
 
     def uv(self, rr, cc):
         x, y = cc + self.C0 + 0.5 - self.o[0], rr + self.R0 + 0.5 - self.o[1]
@@ -141,13 +147,14 @@ def rectangles(f, R0, C0):
     """(frame, [(u0, u1, v0, v1)]): the one or two rectangles (whole frame cells) that cover the outline, or None"""
     import rasterio.features
     from affine import Affine
+    import shapely
     from shapely import affinity
     fr = Frame(f, R0, C0)
     # the outline itself in the frame, rasterized on its whole metres (the cells' centres turned into the frame leave
     # holes and ragged edges on its grid)
     a, b = fr.ax, fr.perp
-    g = affinity.affine_transform(f["geom"], [a[0], a[1], b[0], b[1], (C0 - fr.o[0]) * a[0] + (R0 - fr.o[1]) * a[1],
-                                              (C0 - fr.o[0]) * b[0] + (R0 - fr.o[1]) * b[1]])
+    # (snapped again: a cell's centre can lie on the turned outline, a stair of whole cells at 45 degrees)
+    g = shapely.transform(affinity.affine_transform(fr.g, [a[0], a[1], b[0], b[1], 0, 0]), lambda xy: np.round(xy, 6))
     minx, miny, maxx, maxy = g.bounds
     u0, v0 = int(np.floor(minx)) - 1, int(np.floor(miny)) - 1
     shp = (int(np.ceil(maxy)) - v0 + 2, int(np.ceil(maxx)) - u0 + 2)
@@ -218,6 +225,10 @@ def simplify_outlines(render, street, nd_max_b, lod2, sites, labels, own, R0, C0
             r_, c_ = np.clip(br + dy, 0, D - 1), np.clip(bc + dx, 0, W - 1)
             nb_other |= other[r_, c_]
         keep = (inn & (mine | free)) | (mine & ~inn & nb_other)
+        if not keep.any():  # its cells all another's and its rectangles under others or a street: nothing to build
+            if incore:
+                skip["nothing left"] = skip.get("nothing left", 0) + 1
+            continue
         add, drop = keep & ~mine, mine & ~keep
         owner[br[add], bc[add]] = i
         owner[br[drop], bc[drop]] = 0
