@@ -534,7 +534,7 @@ renderer.setAnimationLoop(frameLoop({
   poses: (_now, dt) => {
     if (sim && life && life.group.visible) {
       life.ownEyes = nav.ride?.view === 'eyes' || !!nav.craft?.inSeat;
-      life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
+      life.update(dt, daylight.night, camera.position, camera); // (the viewer: last frame's camera)
     }
     craftsView?.update(sim, dt, daylight.night, nav.craftView);
     weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);

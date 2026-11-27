@@ -67,7 +67,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   away within a round trip) stays told: tint, shake, message, the plane snapped back. Left: rare, a crafts' meet tells
   none, and taking it back runs through the client, the craft link and the plane's nav.
 - Floatplane at 240 km/h low over the city (tools/fly-stream.mjs): no ground missing, queue empty, the host's collision
-  tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond); ~35 frames a
-  minute over 50 ms (up to ~80 ms), now mostly the town's life (life.ts farCars ~4 ms a frame) on top of a ~16 ms frame,
-  the stream's share ~6 a minute. Not measured: the GPU's uploads, the workers on a slow CPU (CDP throttles only the
-  main thread), one ~600 ms frame a few seconds into every profiled run (not the stream).
+  tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond); ~16-20 frames a
+  minute over 50 ms (up to ~80 ms) on a ~15 ms frame, the stream's share ~6, the town's life ~4 ms a frame (far traffic
+  ~1.4 ms, posing the cars in view). Not measured: the GPU's uploads, the workers on a slow CPU (CDP throttles only the
+  main thread). (A profiled run's one ~600 ms frame is the CDP profiler starting, not the page.)

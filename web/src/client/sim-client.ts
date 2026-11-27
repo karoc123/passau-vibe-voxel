@@ -519,6 +519,8 @@ export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'boats' | 'ava
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not
 const BLEND_S = 0.3, SNAP = 4;
 const left = (t: number, from: number) => { const u = Math.min(1, (t - from) * STEP / BLEND_S); return 1 - u * u * (3 - 2 * u); };
+// the far traffic's roads listed round a place, again once the viewer is FAR_MOVE m from it
+const FAR_MOVE = 100;
 interface Reckoned<T> { st: Sampled<T>; old: Sampled<T> | null; es: number; eo: number; from: number }
 // the samples of a list in place of the last (a new one's correction worked out when it is next reckoned)
 function resample<T extends { id: number }>(R: Map<number, Reckoned<T>>, list: readonly Sampled<T>[], seen: { has(id: number): boolean }) {
@@ -580,16 +582,28 @@ export class TrafficMirror {
   private readonly flowCar: FlowCar = { lane: 0, s: 0, bus: false, col: '' };
   private readonly flowStub = { kind: 'car', e: 0, lane: 0, len: 0, prev: -1, next: -1, prevOff: 0, off: 0 } as unknown as Car;
   private readonly flowPose: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+  private readonly sentRoads = new Set<number>();
 
   /** the far traffic at the render clock round (x, z): the flow cars from the agents' circle (ACTIVE_R) out to far m,
-   * on the roads none of whose cars the host sends (their cars are the agents); each with its pose and look */
-  farCars(x: number, z: number, far: number, each: (pose: CarPose, car: FlowCar, len: number) => void) {
-    const sent = new Set<number>(), d = carsAt(this.hour), P = this.flowPose, c = this.flowStub, f = this.flowCar, near2 = ACTIVE_R * ACTIVE_R;
+   * on the roads none of whose cars the host sends (their cars are the agents); each with its pose and look. seen: whether
+   * a road's cars may be seen (a sphere round all of it: x, height, z across, radius), the others left out */
+  farCars(x: number, z: number, far: number, each: (pose: CarPose, car: FlowCar, len: number) => void, seen?: (x: number, y: number, z: number, r: number) => boolean) {
+    const sent = this.sentRoads, d = carsAt(this.hour), P = this.flowPose, c = this.flowStub, f = this.flowCar, near2 = ACTIVE_R * ACTIVE_R;
+    const roads = this.net.roads;
+    sent.clear();
     for (const car of this.cars) sent.add(car.e);
-    this.net.roads.forEach((e, i) => {
-      if (sent.has(i)) return;
-      const m = e.p[e.p.length >> 1];
-      if (Math.hypot(m[0] - x, m[1] - z) - e.L / 2 > far) return;
+    const R = this.farRoads;
+    if (R.far !== far || (R.x - x) ** 2 + (R.z - z) ** 2 > FAR_MOVE * FAR_MOVE) {
+      R.x = x; R.z = z; R.far = far; R.list.length = 0;
+      roads.forEach((e, i) => { const m = e.p[e.p.length >> 1]; if (Math.sqrt((m[0] - x) ** 2 + (m[1] - z) ** 2) - e.L / 2 <= far + FAR_MOVE) R.list.push(i); });
+    }
+    for (const i of R.list) {
+      if (sent.has(i)) continue;
+      const e = roads[i], m = e.p[e.p.length >> 1], r = Math.sqrt((m[0] - x) ** 2 + (m[1] - z) ** 2);
+      // (the middle point need not be halfway along: every point is within L of it; a road all inside the agents'
+      // circle has none of its flow cars drawn)
+      if (r - e.L / 2 > far || r + e.L < ACTIVE_R) continue;
+      if (seen && !seen(m[0], m[2], m[1], e.L)) continue;
       for (let j = 0, n = this.flow.count(i, d); j < n; j++) {
         this.flow.car(i, j, n, this.clock, f);
         const len = f.bus ? 12 : VEHICLES[f.vt ?? 'car'].len;
@@ -598,8 +612,10 @@ export class TrafficMirror {
         const d2 = (P.x - x) ** 2 + (P.z - z) ** 2;
         if (d2 > near2 && d2 < far * far) each(P, f, len);
       }
-    });
+    }
   }
+  // the roads that may have far traffic round (x, z)
+  private readonly farRoads = { x: 0, z: 0, far: -1, list: [] as number[] };
 
   get heads() { return this.net.heads; }
   get peds() { return this.net.peds; }
