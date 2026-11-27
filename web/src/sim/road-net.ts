@@ -123,27 +123,35 @@ export class RoadNet {
   // weighted by how far the car is from each node (smooth over BLEND either side of it), each pull added on, so
   // that on a road shorter than 2 BLEND the car is drawn between both, and across a road shorter than BLEND the road
   // beyond it pulls too (prev2, next2). Where the car moves onto the next road the sum is the same on either side.
+  // One moving across (a shift) is so on the roads either side too, by as much as it is out of its lane, so that its
+  // way out beside something and back may run on over a junction (the traffic carries the shift onto the next road).
   carPoint(car: Car, s: number, out: Pt, off = car.off) {
     if (car.turn) return this.turnPoint(car, s, out);
-    if (car.shift) off = shiftOff(car.shift, s);
-    const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z, Q = this.tmp, R = this.tmp2;
+    const e = this.roads[car.e];
+    let dev = 0, moved = 0;
+    if (car.shift) {
+      off = shiftOff(car.shift, s);
+      dev = off - laneOffset(e, car.lane);
+      moved = off - shiftOff(car.shift, 0);
+    }
+    const P = at(e, s, off, out), x = P.x, y = P.y, z = P.z, Q = this.tmp, R = this.tmp2;
     // (P moved by w times the way from (ax, ay, az) to B)
     const pull = (ax: number, ay: number, az: number, B: Pt, w: number) => { P.x += (B.x - ax) * w; P.y += (B.y - ay) * w; P.z += (B.z - az) * w; };
     if (s < BLEND && car.prev >= 0) {
       const pe = this.roads[car.prev];
-      at(pe, pe.L + s, car.prevOff, Q);
+      at(pe, pe.L + s, car.prevOff + moved, Q);
       pull(x, y, z, Q, 1 - smooth(-BLEND, BLEND, s));
       const p2 = car.prev2 ?? -1;
       if (p2 >= 0 && s + pe.L < BLEND) { const pp = this.roads[p2]; pull(Q.x, Q.y, Q.z, at(pp, pp.L + pe.L + s, car.prev2Off ?? 0, R), 1 - smooth(-BLEND, BLEND, s + pe.L)); }
     }
     if (s > e.L - BLEND && car.next >= 0) {
       const n = this.roads[car.next], lane = landingLane(turnOf(e, n), car.lane, n.lanes);
-      at(n, s - e.L, laneOffset(n, lane), Q);
+      at(n, s - e.L, laneOffset(n, lane) + dev, Q);
       pull(x, y, z, Q, smooth(-BLEND, BLEND, s - e.L));
       const n2 = car.next2 ?? -1;
       if (n2 >= 0 && s - e.L - n.L > -BLEND) {
         const nn = this.roads[n2], lane2 = landingLane(turnOf(n, nn), lane, nn.lanes);
-        pull(Q.x, Q.y, Q.z, at(nn, s - e.L - n.L, laneOffset(nn, lane2), R), smooth(-BLEND, BLEND, s - e.L - n.L));
+        pull(Q.x, Q.y, Q.z, at(nn, s - e.L - n.L, laneOffset(nn, lane2) + dev, R), smooth(-BLEND, BLEND, s - e.L - n.L));
       }
     }
     return P;

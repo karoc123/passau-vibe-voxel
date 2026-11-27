@@ -372,5 +372,102 @@ server.dispose?.();
   host.dispose?.();
 }
 
+// Getting past across a junction, on a third synthetic world of land: two straight two-way roads of a lane each way,
+// each cut in two by a junction in the middle (the cars are put, told to go straight on): on one a hovercraft hovers
+// in the eastbound lane just past the junction, on the other just short of it (near the first road's end); two cars
+// come at each from behind. And a two-lane one-way road forking at its end: a car standing in the lane away from the
+// fork it is told to take, and another rolling so. What a player sees: they go round the craft over the junction
+// rather than turn round, and change lanes as they roll, never sliding sideways at a standstill; drawn tick by tick
+// over the junction too.
+{
+  const { at, pt } = await imp('src/sim/path.ts');
+  const { dir: dir3, data: data3 } = await synthData({ size: [256, 256], ground: () => LAND, surface: () => 'road' });
+  const NEAR = 60, SHORT = 200, FORK = 130, line = (z, x0, x1) => [[x0, z, LAND], [x1, z, LAND]];
+  const half = (a, b, w, z, x0, x1) => [{ a, b, w, lanes: 1, v: 12, c: 1, o0: 1.5, p: line(z, x0, x1) },
+    { a: b, b: a, w, lanes: 1, v: 12, c: 1, o0: 1.5, p: line(z, x1, x0) }];
+  data3.traffic.roads = [...half(10, 11, 1, NEAR, 20, 120), ...half(11, 12, 1, NEAR, 120, 236),
+    ...half(20, 21, 2, SHORT, 20, 120), ...half(21, 22, 2, SHORT, 120, 236),
+    { a: 30, b: 31, w: 3, lanes: 2, v: 12, c: 1, o0: -1.5, p: line(FORK, 20, 150) },
+    { a: 31, b: 32, w: 4, lanes: 1, v: 12, c: 1, o0: 0, p: [[150, FORK, LAND], [175, FORK - 25, LAND]] },
+    { a: 31, b: 33, w: 5, lanes: 1, v: 12, c: 1, o0: 0, p: [[150, FORK, LAND], [175, FORK + 25, LAND]] }];
+  const host = nodeHost(dir3, { world: 'tiles', physics: { bodies: false }, interest: 300, time: { hour: 10, day: 190 } }, data3);
+  const T3 = host.sim.traffic, ps = [];
+  T3.carShare = 0;
+  const hover = (name, P) => {
+    const s = host.connect(name), link = sessionLink(s);
+    s.send({ kind: 'view', view: { focus: { x: 128, z: 128 } } });
+    s.send({ kind: 'request', request: { kind: 'craft', type: 'hovercraft', spot: { x: P.x, y: LAND + HOVER_HEIGHT, z: P.y, h: Math.PI / 2, speed: 0 } } });
+    s.send({ kind: 'seatInput', role: 'pilot', input: { turn: 0, drive: 0, lift: 0, side: 0 } });
+    ps.push({ link });
+    return () => { const c = host.sim.craftOf(s.player); return solidAt(CRAFT_SHAPES[c.type], c.core.pose); };
+  };
+  const step = async (secs, each) => {
+    for (let i = 0; i < secs / STEP; i++) {
+      host.update(STEP);
+      for (const p of ps) p.link.deliver();
+      await new Promise((r) => setImmediate(r));
+      each();
+    }
+  };
+  const hA = hover('h3', at(T3.roads[2], 6, 1.5, pt())), hB = hover('h4', at(T3.roads[4], 94, 1.5, pt()));
+  await step(1, () => {});
+  let id = 9600;
+  const put = (e, lane, s, v, next) => {
+    const r = T3.roads[e], c = { kind: 'car', id: id++, e, lane, s, v, len: 4.6, bus: false, prev: -1, prevOff: 0, next, next2: -1, v0f: 1, col: '#888888',
+      off: r.o0 + lane * 3, brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null, boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0,
+      boxTurn: 0, block: null, geo: { px: 0, py: 0, cx: 0, cy: 0, z: LAND, fx: 1, fy: 0 } };
+    r.lists[lane].push(c);
+    T3.cars.push(c);
+    return c;
+  };
+  const pose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 }, B = pt();
+  const solidOfCar = (c) => solidAt(carShape(c), T3.carPose(c, c.s, c.off, pose, true));
+  // drawn tick by tick while on the way east (over the junction), or on the forking road and the fork after it
+  const last = new Map();
+  let jump = 0, swing = 0, slide = 0;
+  const follow = (c, on) => {
+    if (!T3.cars.includes(c) || !on(c)) { last.delete(c); return; }
+    T3.carPose(c, c.s, c.off, pose, true);
+    T3.carPoint(c, c.s - (c.len - 1.2), B);
+    const now = { x: pose.x, z: pose.z, h: pose.h, bx: B.x, by: B.y }, l = last.get(c);
+    last.set(c, now);
+    if (!l) return;
+    jump = Math.max(jump, Math.hypot(now.x - l.x, now.z - l.z));
+    swing = Math.max(swing, Math.abs(Math.atan2(Math.sin(now.h - l.h), Math.cos(now.h - l.h))));
+    const dx = now.bx - l.bx, dy = now.by - l.by, fx = Math.sin(now.h), fy = Math.cos(now.h);
+    slide = Math.max(slide, Math.abs(dx * fy - dy * fx) - Math.abs(dx * fx + dy * fy));
+  };
+  const east = (c) => (c.e === 0 || c.e === 2 || c.e === 4 || c.e === 6) && !c.turn && !(c.e % 4 === 2 && c.s > 60);
+  const A = [put(0, 0, 70, 8, 2), put(0, 0, 58, 8, 2)], Bs = [put(4, 0, 70, 8, 6), put(4, 0, 58, 8, 6)];
+  // (the fork a car on the forking road is sent to lane 0 for)
+  const fork = T3.roads[8], to = T3.desiredLane({ next: 9, lane: 1 }, fork) === 0 ? 9 : 10;
+  const stand = put(8, 1, 20, 0, to), roll = put(8, 1, 40, 10, to);
+  const past = new Map(), turned = new Set(), changed = new Map();
+  let deep = 0, t = 0;
+  await step(30, () => {
+    t += STEP;
+    for (const [cars, craft] of [[A, hA()], [Bs, hB()]]) for (const c of cars) {
+      follow(c, east);
+      if (!T3.cars.includes(c)) continue;
+      if (c.turn || c.e % 2 === 1) { if (!past.has(c)) turned.add(c); continue; }
+      const sc = solidOfCar(c);
+      deep = Math.max(deep, overlap(sc, craft));
+      for (const o of cars) if (o !== c && T3.cars.includes(o) && !o.turn) deep = Math.max(deep, overlap(sc, solidOfCar(o)));
+      if (sc.x - sc.hz > craft.x + craft.hz && !past.has(c)) past.set(c, t);
+    }
+    for (const c of [stand, roll]) {
+      follow(c, (k) => k.e === 8 || k.e === to);
+      if (T3.cars.includes(c) && c.lane === 0 && !changed.has(c)) changed.set(c, t);
+    }
+  });
+  const by = (cs) => Math.max(...cs.map((c) => past.get(c) ?? Infinity));
+  check(by(A) <= 20 && by(Bs) <= 20 && turned.size === 0 && deep <= 0.05,
+    `cars held up by a hovercraft just past a junction, or near the end of their road, go round it over the junction, none turns round (past by ${by(A).toFixed(1)} s and ${by(Bs).toFixed(1)} s; ${turned.size} turned; deepest ${deep.toFixed(3)} m)`);
+  const lc = Math.max(changed.get(stand) ?? Infinity, changed.get(roll) ?? Infinity);
+  check(lc <= 20 && slide <= 0.01 && jump <= 0.6 && swing <= 0.2,
+    `cars change lanes as they roll, from a standstill too, and go round a craft over a junction drawn moving on: no jump, no slide sideways (in the other lane by ${lc.toFixed(1)} s; at most ${jump.toFixed(2)} m, ${swing.toFixed(3)} rad, rear axle across more than along ${slide.toFixed(3)} m of 0.01)`);
+  host.dispose?.();
+}
+
 for (const f of fail) console.log(`FAIL ${f}`);
 process.exit(fail.length ? 1 : 0);
