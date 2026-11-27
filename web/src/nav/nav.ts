@@ -16,7 +16,7 @@ import { MoveKeys } from './move-keys';
 import { OrbitInput } from './orbit';
 import { Rider } from './ride';
 import { EYE, findStreet, openSpot, walkNet } from './spots';
-import { HEAD } from './walk';
+import { HEAD } from '../sim/walk';
 import { FootTouch } from '../touch/foot';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and

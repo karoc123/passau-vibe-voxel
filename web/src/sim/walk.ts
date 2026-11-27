@@ -1,19 +1,14 @@
 import { MAX_LEG } from '../chamfer';
 import type { World } from '../core/world';
-import { bodyClear, carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
-import type { MoveKeys } from './move-keys';
-import { EYE } from './spots';
+import { bodyClear, carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from './solids';
+import { EYE } from './weapons/weapon';
 
 /** what the walk asks of the voxels: what to stand on under a height, whether a span of a column is solid */
 export type Ground = Pick<World, 'support' | 'blocked'>;
 
-// On foot (nav.ts: the walk): what is climbed in a stride (a kerb, a stair) and the
+// On foot: what is climbed in a stride (a kerb, a stair) and the
 // headroom kept over the soles (the walker's height among the solids too)
 export const STEP = WALKER_STEP, HEAD = WALKER_HEAD;
-
-/** the keys on foot: W/S forward and back, A/D a step sideways (right +1), the arrows left and right turn (the mouse
- * turns too, but a keyboard alone still can) */
-export const footKeys = (K: MoveKeys) => ({ go: K.axis('f', 'b'), side: K.axis('sr', 'sl'), turn: K.axis('tr', 'tl') });
 
 /** the stride (x, z) of dist m facing yaw: forward and right (-1..1 each; both at once no further than one) */
 export function stride(yaw: number, forward: number, right: number, dist: number) {

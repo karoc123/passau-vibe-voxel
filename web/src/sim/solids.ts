@@ -1,5 +1,5 @@
 // The solid things the walker and the crafts meet besides the voxels: each kind declares its shape here, an upright
-// box on its pose. The walk (nav/walk.ts) is blocked and pushed by all of them alike, a craft with a shape is pushed
+// box on its pose. The walk (sim/walk.ts) is blocked and pushed by all of them alike, a craft with a shape is pushed
 // out of them (sim/world-sim.ts stepCrafts) and the river's vessels give way to the crafts. A new kind becomes solid by
 // a shape here and a line where its poses are gathered (the page's: view/life.ts solids; the host's: WorldSim
 // solidsNear), never by collision code of its own. No three.js, no DOM.

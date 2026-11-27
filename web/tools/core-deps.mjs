@@ -168,7 +168,8 @@ const LAYERS = [
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
   ['sim/agent-wire.ts', 'shared'], // (the cars and people as sent: a session's and a mirror's)
   ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], ['sim/flow.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
-  ['sim/solids.ts', 'shared'], // (the shapes the page's walk meets)
+  ['sim/solids.ts', 'shared'], // (the shapes the walk meets)
+  ['sim/walk.ts', 'shared'], ['sim/swim.ts', 'shared'], ['sim/walker.ts', 'shared'], // (the walk: the page's player's and the host's NPCs')
   ['sim/seats.ts', 'shared'], // (a model's seats: the host holds them, the page offers and draws them)
   ['sim/player-name.ts', 'shared'], // (a chosen name cleaned: by the page and by the host)
   ['sim/health.ts', 'shared'], // (each type's health as data, in the tuning; what a weapon does is its package's)
@@ -181,6 +182,7 @@ const LAYERS = [
   ['view/', 'presentation'], ['nav/', 'presentation'], ['ui/', 'presentation'], // (ui/: the page's small widgets)
   ['touch/', 'touch'], // (the fingers as sticks, taps and holds: knows no mode; R6)
   ['main.ts', 'app'], ['app/', 'app'], // (the composition: main.ts; app/: the session, the frame's phases, the debug hooks)
+  ['chamfer.ts', 'shared'], ['sections.ts', 'shared'], // (pure: the walk keeps the eyes off the walls they draw)
   ['*', 'presentation'], // the rest of the root: render modules, UI (A2 moved the headless data modules to core/)
 ];
 const ALLOWED = {

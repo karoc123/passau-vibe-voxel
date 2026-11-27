@@ -1,5 +1,5 @@
 // The walker among the solid things, on a synthetic world (flat ground, no roads: tools/lib.mjs synthData, a real host
-// in Node, host/node.ts nodeHost, a few seconds): the page's walk (nav/walk.ts walkFrame) against what its street life
+// in Node, host/node.ts nodeHost, a few seconds): the page's walk (sim/walk.ts walkFrame) against what its street life
 // draws (view/life.ts solids, three.js in Node, no renderer) of the host's world as its snapshots bring it. A car the
 // host holds out of the traffic (as one parked or driven by another player is) stops the walker walking at it and
 // strafing into it; moved into the walker it shoves it ahead, never through, and squeezing it against a wall pushes it
@@ -23,10 +23,10 @@ const { nodeHost } = await imp('src/host/node.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
-const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
+const { walkFrame, stride } = await imp('src/sim/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
 const { reach, carShape, solidAt, roofUnder, WALKER_R, WALKER_HEAD, CRAFT_SHAPES, TOUR_B, COACH_SHAPE } = await imp('src/sim/solids.ts');
-const { Foot } = await imp('src/nav/foot.ts');
+const { Foot, footKeys } = await imp('src/nav/foot.ts');
 const { WALK_BOUNDS } = await imp('src/sim/walk-bounds.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 

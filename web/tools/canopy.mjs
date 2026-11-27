@@ -20,7 +20,8 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { GLIDER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts');
 const { WALK_BOUNDS, boundWalk } = await imp('src/sim/walk-bounds.ts');
 const { CraftLink } = await imp('src/nav/craft.ts');
-const { Foot, CANOPY_DROP } = await imp('src/nav/foot.ts');
+const { Foot } = await imp('src/nav/foot.ts');
+const { CANOPY_DROP } = await imp('src/sim/walker.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
 
