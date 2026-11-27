@@ -71,7 +71,9 @@ log(`A is ${pa}, B is ${pb}`);
 
 const pose = (page) => page.evaluate(() => { const p = window.__three.nav.mapPose(); return { x: p.x, z: p.z }; });
 const wp = (page) => page.evaluate(() => window.__map.waypoint.at);
-const chip = (page) => page.evaluate(() => { const c = document.querySelector('#waypoint-chip'); return c && !c.hidden ? c.querySelector('.d').textContent : null; });
+// (the chip is set in the next frame drawn: a headless GPU's frame may take longer than the waits after a click)
+const chipNow = (page) => page.evaluate(() => { const c = document.querySelector('#waypoint-chip'); return c && !c.hidden ? c.querySelector('.d').textContent : null; });
+const chip = async (page) => { await page.waitForFunction(() => !document.querySelector('#waypoint-chip')?.hidden, null, { timeout: 2000 }).catch(() => {}); await page.waitForTimeout(150); return chipNow(page); };
 const metres = (t) => (t?.endsWith(' km') ? parseFloat(t) * 1000 : parseFloat(t));
 const off = (a, b) => (a && b ? Math.hypot(a.x - b.x, a.z - b.z) : Infinity);
 const box = (page, sel) => page.locator(sel).boundingBox();
@@ -94,7 +96,7 @@ check(d !== null && metres(d) < 5, `the distance shown: ${d}`);
 // dragged by (-220, -130) px: A's marker there; a click on it: the waypoint on A again (first cleared: it is there)
 await A.keyboard.press('Backspace');
 await A.waitForTimeout(200);
-check(!(await wp(A)) && (await chip(A)) === null, 'Backspace clears the waypoint (and its distance)');
+check(!(await wp(A)) && (await chipNow(A)) === null, 'Backspace clears the waypoint (and its distance)');
 await A.mouse.move(mid.x, mid.y);
 await A.mouse.down();
 await A.mouse.move(mid.x - 110, mid.y - 65, { steps: 5 });

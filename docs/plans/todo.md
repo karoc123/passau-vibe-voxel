@@ -56,7 +56,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
-- Gate `maps` failed twice in a busy parallel run (16/18), passes alone: a timing assumption to find.
 
 - Buildings seen through (`tools/see-through.mjs --all --classify`): 8 left. 6 "steep caps" are steep roofs (50 deg
   and more) where an eave cell without a cap (its voxels off its plane) meets capped ones, e.g. 49_25 bld 301; 2 are
