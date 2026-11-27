@@ -83,17 +83,19 @@ export class AgentWire {
   // the health sent of each life the client holds below its max, by key
   private readonly lives = new Map<string, number>();
 
-  /** a car out of the traffic (as sent: sim/server/snapshot.ts carState): whole when new to the client, then only
-   * what changed (a driven car's pose: its whole state every tick was ~1 kB/s more a player), or null */
-  detachedCar(c: CarState): DetachedWire | null {
+  /** a car out of the traffic (as sent: sim/server/snapshot.ts carState) at tick: whole when new to the client, then
+   * only what changed (a driven car's whole state every tick was ~1 kB/s more a player), or null. One drawn from its
+   * moving body (moving) has its pose and speed sent only every AGENT_TICKS-th tick, as a car of the traffic's sample
+   * is: what reads them then is a page's prediction meeting it, and its pose beside its body's was ~1.5 kB/s more */
+  detachedCar(c: CarState, tick: number, moving = false): DetachedWire | null {
     const h = this.detached.get(c.id), now = c as unknown as Record<string, unknown>;
     if (!h) { this.detached.set(c.id, { gen: this.gen, sent: { ...now } }); return c; }
     h.gen = this.gen;
-    const out: Record<string, unknown> = { id: c.id }, was = h.sent;
+    const out: Record<string, unknown> = { id: c.id }, was = h.sent, later = moving && tick % AGENT_TICKS !== 0;
     let n = 0;
     for (const k in now) {
       const v = now[k], w = was[k];
-      if (v === w || (typeof v === 'object' && v && w && JSON.stringify(v) === JSON.stringify(w))) continue;
+      if (v === w || (later && UNDER_WAY.has(k)) || (typeof v === 'object' && v && w && JSON.stringify(v) === JSON.stringify(w))) continue;
       out[k] = v ?? null;
       was[k] = v;
       n++;
@@ -419,6 +421,9 @@ const npcPose = (w: NpcWire, ticks: number): WalkPose => {
   return { x: (w[1] + w[5] * t) / CM, y: w[2] / CM, z: (w[3] + w[6] * t) / CM, h: w[4] / 1000, moving: !!(f & NPC_MOVING),
     ...(f & NPC_SWIM ? { swim: true } : {}), ...(f & NPC_DOWN ? { down: true } : {}), ...(f & NPC_ARMED ? { arm: NPC_ARM } : {}) };
 };
+
+// what of a car out of the traffic changes as it goes (sent less often while its body is drawn)
+const UNDER_WAY = new Set(['detachedPose', 'v', 'brake', 's', 'ds', 'off', 'dOff', 'wait']);
 
 const merged = (was: CarState | undefined, d: DetachedWire): CarState => {
   const c = { ...was, ...d } as Record<string, unknown>;

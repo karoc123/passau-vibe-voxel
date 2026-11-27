@@ -62,7 +62,11 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   let i = 0;
   const tick = sim.tick;
   for (const c of T.cars) if (!S || S.car(c.id, i++)) { const w = wire.car(c, tick); if (w) cars.push(w); }
-  for (const c of T.detachedCars) if (!S || S.car(c.id, i++)) { const w = wire.detachedCar(carState(c)); if (w) detached.push(w); }
+  for (const c of T.detachedCars) if (!S || S.car(c.id, i++)) {
+    const d = B?.drawState?.(c), p = d?.p1, q = d?.p0, moving = !!p && !!q && !d.fade && (p.x !== q.x || p.y !== q.y || p.z !== q.z);
+    const w = wire.detachedCar(carState(c), tick, moving);
+    if (w) detached.push(w);
+  }
   i = 0;
   for (const p of T.people) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) people.push(w); }
   for (const p of T.riders) if (!S || S.person(p.id, i++)) { const w = wire.person(p, tick); if (w) riders.push(w); }

@@ -45,10 +45,10 @@ only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
   needs AgentWire to keep what a snapshot leaves out. Cars given back refill slowly (from sources).
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
   player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
-  16 at the cathedral ~15 after the 1500 craters of its sustained run (`load` holds 20; it had crept to 18–19.5). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
+  16 at the cathedral 13–15 after the 1500 craters of its sustained run (`load` holds 20; it had crept to 18–19.5). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
   the city 5–6 with a worst second of 8–11 (`drive-bytes` holds 20 / 50); a cell coming into the circle shows no peak.
-  What is left is every tick's moving bodies (the most of a round's bytes: the traffic within 60 m of a crater) and
-  a driven car's pose every tick (a car out of the traffic now crosses with only what changed). Not measured: a busy square, a late joiner after many
+  What is left is every tick's moving bodies (the most of a round's bytes: the traffic within 60 m of a crater and
+  the driven cars). Not measured: a busy square, a late joiner after many
   craters (a node's whole op list), a phone on 4G. Binary only after a Pi measurement.
 - Host tick under sustained fire (16 launchers by the cathedral, 150 s): p50 ~6, p95 ~13, p99 ~16 ms. What is left
   of it is the shots' flight and traces (~2 ms a tick) and deflating the snapshots (~6 s of the 150); measured on a
