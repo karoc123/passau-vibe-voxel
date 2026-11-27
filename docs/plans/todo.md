@@ -6,9 +6,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Extraction concepts: 3-5 for Passau, co-op 1-4 players against AI enemies first (Escape from Duckov as the
   reference: playable alone), PvP of teams of 1-4 later; the owner picks or mixes. The other genres are dropped.
-- Roads by algorithm, for any map: bumps at junctions and joins, steep ramps and edges, sometimes curves too tight
-  for their speed. Measured first (drive the main roads), then fixed less realistically; one full rebuild allowed
-  once a cut-out is better and the gates pass.
+- Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
+  slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
+  budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
+  roads (`roads.md`, "How the main roads drive").
 - Roofs probe (after the roads: both change the pipeline): small, simple houses a rule-based roof (gable, hip, flat
   along the long side, even steps), large and special ones their surveyed roof tidied; landmarks untouched. Not
   smoothed.
