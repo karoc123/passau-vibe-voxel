@@ -54,8 +54,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a traffic car waits
-  behind a craft left in its lane until it goes; a drone and a paraglider pass through each other.
+- Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a drone and a paraglider
+  pass through each other.
+- Getting past something standing on a road: a car turning round jumps round in place; it slides out sideways while
+  stopped; one held up beyond a junction or within a few metres of a road's end turns round instead of going round
+  it; on a one-way road with no room, one in sight waits until out of sight. Measured in a synthetic gate only.
 - The parked-car cap (8/24) sits beside presence, not per cell.
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
   not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
