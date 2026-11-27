@@ -30,7 +30,7 @@ const f2 = (x) => x.toFixed(2);
 for (const [near, max] of configs) {
   const { W } = await nodeWorld();
   const focus = { x: AX, z: AZ };
-  const { sim } = nodeHost(DATA, { seed: 7, world: W, physics: { bodies: true, near, maxBodies: max, look }, time: { hour: HOUR, day: 180 } }, { meta, traffic: td });
+  const { sim } = nodeHost(DATA, { seed: 7, world: W, physics: { bodies: true, near, maxBodies: max, look }, camps: [], time: { hour: HOUR, day: 180 } }, { meta, traffic: td });
   const T = sim.traffic;
   const view = { kind: 'view', view: { focus } };
   for (let i = 0; i < WARM / STEP; i++) { sim.send('benchmark', view); sim.update(STEP); }

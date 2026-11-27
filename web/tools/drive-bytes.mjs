@@ -20,7 +20,7 @@ const { default: WebSocket } = await import('ws');
 const MEAN_KB = 20, PEAK_KB = 50, SECS = 20, SPEED = 25;
 const data = readHostData(DATA), spot = data.meta.labels.find((l) => /Hauptbahnhof/.test(l.name)) ?? { x: 7230, y: 2725 };
 let tick = null;
-const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: () => {}, clock: (t) => { tick = t; return () => {}; } });
+const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: () => {}, clock: (t) => { tick = t; return () => {}; } });
 const port = await host.port, sim = host.server.sim, T = sim.traffic, fail = [];
 const ws = new WebSocket(`ws://127.0.0.1:${port}`, { perMessageDeflate: true });
 let got = 0, cars = new Set();

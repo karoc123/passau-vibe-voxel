@@ -16,17 +16,15 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   Perception (sight lines, noise) built in small steps. A helicopter lands anywhere: that stays (owner 2026-11-27).
   Wind and weather noted for later. "Only on foot" needs no block.
   Order (the owner leaves it to us): NPCs on foot (built, ADR 0017, 0018: guard or patrol, sight, MG, search, lives,
-  their samples; left: hearing, cover, a field of view, players in vehicles as targets, where a mode puts them, the
-  numbers tried in play); a fuel tank (built, ADR 0020; the minutes halved again after play; left: refuelling, the minutes tried in play, a car's roll-out
+  their samples; enemy camps built, ADR 0022: one at the Oberhaus, hits, hearing, alarms, leash; left: cover,
+  flanking, a field of view, players in vehicles as targets, more camps, the numbers tried in play); a fuel tank (built, ADR 0020; the minutes halved again after play; left: refuelling, the minutes tried in play, a car's roll-out
   without engine braking); the gunner built (ADR 0019; left: the swing's numbers tried in play; a military helicopter
   with door guns is a new craft, not yet), no scout; a grappling hook as an item noted for later; NPCs in vehicles
   only once enemies on foot have been seen and played;
   air defence (owner 2026-11-27): no zones, a gun with a sight line, manned by an NPC, a player may take a gun won,
   it fires at whatever its mount can aim at, a reaction time and tracers warn (concept in the scratchpad's
   konzept-geschuetze-flugabwehr.md; first step: an NPC post that fires at vehicles, then the gun; owner: at a chosen place such as the Feste
-  Oberhaus, not spread over the map). An enemy camp (owner 2026-11-27: one, at the Oberhaus,
-  a guard and a patrol, refilled out of sight; its numbers and the NPCs' in the tuning, not hard-coded; NPCs react to
-  hits and shots and alert the squad): being built. The combat plane built for a player (ADR 0021; left: its numbers
+  Oberhaus, not spread over the map). The combat plane built for a player (ADR 0021; left: its numbers
   and the swing tried in play; next its NPC pilot, after the air defence's first step: players in vehicles as targets,
   an NPC on a seat; dogfights later, not ruled out; bombs and rockets not yet). Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the

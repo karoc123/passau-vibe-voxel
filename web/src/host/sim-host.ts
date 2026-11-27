@@ -19,6 +19,7 @@ import { SimServer } from '../sim/server/sim-server';
 import { radii } from '../sim/server/interest';
 import { ACTIVE_R } from '../sim/road-net';
 import type { GameMode } from '../sim/mode';
+import type { CampPlace } from '../sim/camps';
 import { sandbox } from '../sim/modes/sandbox';
 import type { Ground } from '../sim/traffic';
 import type { Tuning } from '../sim/tuning';
@@ -79,12 +80,15 @@ export interface HostOptions {
   interest?: number;
   /** vehicles placed for the taking round the players (sim/stands.ts; without: true) */
   stands?: boolean;
+  /** the enemy camps (?camps=0: none; without: the mode's own). A tool that measures goes without, so its numbers stay
+   * comparable */
+  camps?: readonly CampPlace[];
   /** the world's tuning (without: the default; a tool's own numbers, its stands' times shortened) */
   tuning?: Tuning;
 }
 
 /** the game modes a host can make, by id */
-const MODES: Record<string, (opts: { edits: boolean }) => GameMode> = { sandbox };
+const MODES: Record<string, (opts: { edits: boolean; camps?: readonly CampPlace[] }) => GameMode> = { sandbox };
 
 /** the world sim and its server (sim/server/sim-server.ts: the commands, the snapshots; dispose: the host's listener on
  * the world's edits removed, the road physics let go: WorldSim.dispose) */
@@ -112,7 +116,7 @@ export function hostSim(data: HostData, ports: HostPorts, opts: HostOptions) {
   if (!make) { ports.log(`no game mode ${opts.mode}; the sandbox`); make = MODES.sandbox; }
   // (the build goes into the hello each session is told: SimServer.hello; the edits' nodes made ready in the world's
   // TileCache: SimServer's default EditTiles; the listener and the road physics gone with the server, SimServer.dispose)
-  const server = new SimServer(sim, make({ edits: !!opts.edits }), build);
+  const server = new SimServer(sim, make({ edits: !!opts.edits, camps: opts.camps }), build);
   server.interest = radii(opts.activeR ?? ACTIVE_R, opts.interest);
   server.onDispose(() => { unlisten(); sim.dispose(); });
   return server;

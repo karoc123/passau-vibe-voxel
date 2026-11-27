@@ -79,6 +79,11 @@ The words the owner and the code use for the same thing. One name per thing; use
   with each shot; the host aims at it from the mount where it has the vehicle.
 - **Gunsight**: the combat plane's dot, where its nose points at the MG's range.
 - **Seat switch**: one key (or, on a touch screen, one button) from the wheel of the own vehicle to its gun, or back.
+- **Enemy camp** (code: camp): a chosen place where a **squad** of enemy NPCs keeps watch; **manned** when a player
+  comes near (never in front of one), **stood down** once all are far, **cleared** when its squad is dead, **refilled** a
+  while after its first loss. Not "outpost", "base" or "spawner".
+- **Leash**: how far an NPC follows or searches from its post. **Alarm**: an NPC that notices a player telling its
+  squad.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.
 - **Dead**: an NPC at 0: lies where it fell, no target and no body to shots, taken away after a while. A player is
   down, never dead.

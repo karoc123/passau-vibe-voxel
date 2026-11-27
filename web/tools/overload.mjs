@@ -16,7 +16,7 @@ const meta = readHostData(DATA).meta, spot = meta.labels.find((l) => l.kind === 
 const focus = { x: spot.x, z: spot.y }, FLOOR = 0.2, PER = Math.round(1 / STEP), fail = [];
 
 let tick = null;
-const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => { if (verbose) console.log(`  host: ${l}`); },
+const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: (l) => { if (verbose) console.log(`  host: ${l}`); },
   clock: (t) => { tick = t; return () => {}; } });
 const port = await host.port, sim = host.server.sim, T = sim.traffic;
 

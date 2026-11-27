@@ -56,7 +56,7 @@ if (!isMainThread) {
   const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 
   const { serve } = await imp('src/host/ws.ts');
-  const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => log(`host: ${l}`) });
+  const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3&camps=0', log: (l) => log(`host: ${l}`) });
   const hostPort = await host.port, sim = host.server.sim;
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'volley-gate-'));
   const vitePort = await freePort();

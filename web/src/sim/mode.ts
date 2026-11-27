@@ -11,6 +11,7 @@ import type { CraftSpot, ModeRequest } from './contract/commands';
 import type { CraftId, CraftType, EntityRef, PlayerId, Seat } from './contract/ids';
 import type { Craft } from './craft/craft-core';
 import type { WalkPose } from './contract/pose';
+import type { CampPlace } from './camps';
 
 // (what a player asks of the rules, ModeRequest: contract/commands.ts)
 
@@ -42,6 +43,8 @@ export interface ModeWorld {
 
 export interface GameMode {
   readonly id: string;
+  /** the enemy camps it mans (without: none) */
+  readonly camps?: readonly CampPlace[];
   /** a player's request, granted (true: done) or refused */
   request(w: ModeWorld, player: PlayerId, r: ModeRequest): boolean;
   /** whether player may take seat, asked once it is found free (without: always) */

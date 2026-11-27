@@ -58,7 +58,8 @@ import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
-import { aimFrom, CHEST, newMind, RANGE, think, type Duty, type Senses } from './npc-mind';
+import { aimFrom, CHEST, cue, newMind, think, type Duty, type Senses } from './npc-mind';
+import { Camps } from './camps';
 import type { Vec3 } from '../core/vec';
 import { Tank } from './tank';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
@@ -163,6 +164,8 @@ export class WorldSim {
   readonly stands: Stands | null = null;
   /** the NPCs on foot (sim/npcs.ts), drawn as avatars */
   readonly npcs = new Npcs();
+  /** the enemy camps the mode lists (sim/camps.ts), made on the first tick with a mode */
+  camps: Camps | null = null;
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -287,9 +290,9 @@ export class WorldSim {
 
   /** an NPC on foot put down standing at (x, y, z) (y: its soles), walking at speed m/s; with a duty, an enemy that
    * keeps it (sim/npc-mind.ts), else one that only walks where it is sent; its avatar's id */
-  addNpc(at: { x: number; y: number; z: number }, speed?: number, duty?: Duty) {
+  addNpc(at: { x: number; y: number; z: number }, speed?: number, duty?: Duty, squad: number | null = null) {
     const id = this.nextAvatar++;
-    this.npcs.add(id, at, speed, duty ? newMind(duty, this.clock) : null);
+    this.npcs.add(id, at, speed, duty ? newMind(duty, this.clock, this.tuning.npc, squad) : null);
     return id;
   }
 
@@ -382,6 +385,7 @@ export class WorldSim {
     this.keeper.update(now, foci);
     this.dropLeft(now, foci);
     this.stands?.update(now, foci);
+    this.manCamps(now);
     this.stepCrafts();
     T.walkers = [...this.players.values()].flatMap((P) => (P.walk ? [P.walk.pose] : []));
     const crafts: Solid[] = [];
@@ -588,6 +592,10 @@ export class WorldSim {
       this.due.push({ kind: 'shot', weapon: w.id, player: by, at: to(shot.at, 100), to: to(shot.to, 100), hit: shot.hit });
       const life = shot.hit && shot.hit !== 'world' ? this.lifeOf(shot.hit) : null;
       if (life) this.hurt(life, w.damage.kind, w.damage.points);
+      // (an NPC hit from beyond its sight turns to where the shot came from, however far: no free shots from afar)
+      const m = life?.kind === 'npc' && this.players.has(by) ? this.npcs.all.get(life.id)?.mind : null;
+      if (m) cue(m, { ...from }, by);
+      this.heard(by, from);
       return;
     }
     this.flying.push({ player: by, weapon: w.id, damage: w.damage, own, p: shot, t: 0 });
@@ -602,9 +610,46 @@ export class WorldSim {
       if (!at) return true;
       this.due.push({ kind: 'blast', weapon: f.weapon, player: f.player, at: { ...at }, r: f.p.r });
       this.blast(at, f.damage);
+      this.heard(f.player, at);
       try { this.damaged.push({ player: f.player, op: crater(at.x, at.y, at.z, f.p.r) }); } catch { /* (no world to edit) */ }
       return false;
     });
+  }
+
+  // a player's shot or blast at `at`: the NPCs within their hearing go to look (their own shots alarm no one: the
+  // squad is told otherwise)
+  private heard(by: PlayerId, at: Vec3) {
+    if (!this.players.has(by)) return;
+    for (const n of this.npcs.all.values()) {
+      const m = n.mind;
+      if (m && !m.cue && n.dead === null && Math.hypot(n.pose.x - at.x, n.pose.z - at.z) <= m.k.hear) cue(m, { x: at.x, y: at.y, z: at.z });
+    }
+  }
+
+  // the camps the mode lists manned and let sleep, each player counted once where they are (their body or vehicle,
+  // else where they look)
+  private manCamps(now: number) {
+    const places = this.mode?.camps;
+    if (!places?.length) return;
+    if (this.camps?.places !== places) {
+      const N = this.npcs;
+      for (const [id, n] of N.all) if (n.mind && n.mind.squad !== null) N.all.delete(id);
+      this.camps = new Camps({
+        man: (x, z, duty, squad) => {
+          const w = N.world;
+          if (!w?.waterColumn(x, z)) return null;
+          return this.addNpc({ x, y: w.support(x, z, CAMP_TOP), z }, undefined, duty, squad);
+        },
+        alive: (id) => N.all.get(id)?.dead === null,
+        remove: (id) => { N.all.delete(id); },
+      }, places, this.tuning.camps);
+    }
+    const at: { x: number; z: number }[] = [];
+    for (const P of this.players.values()) {
+      const p = P.seat ? this.entities.pose(P.seat.entity) : null;
+      if (p) at.push(p); else if (P.view) at.push(P.view.focus);
+    }
+    this.camps.update(now, at);
   }
 
   /** the blasts' craters since the last call, for the host to hold their nodes in and hand back (damage) */
@@ -621,6 +666,7 @@ export class WorldSim {
     const at: { x: number; z: number }[] = [];
     for (const P of this.players.values()) if (P.walk && P.seat?.role === 'walker') at.push(P.walk.pose);
     for (const n of this.npcs.all.values()) at.push(n.pose);
+    if (this.camps) at.push(...this.camps.awake());
     V.hold(at, REACH);
   }
 
@@ -1102,10 +1148,10 @@ export class WorldSim {
       const m = n.mind;
       if (!m || n.dead !== null) continue;
       const me = n.pose, eyes = { x: me.x, y: me.y + EYE, z: me.z };
-      // (a clear line from its eyes to their chest within RANGE: the weapons' voxel ray)
+      // (a clear line from its eyes to their chest within its sight: the weapons' voxel ray)
       const clear = (at: WalkPose) => {
         const d = { x: at.x - eyes.x, y: at.y + CHEST - eyes.y, z: at.z - eyes.z }, L = Math.hypot(d.x, d.y, d.z);
-        if (L > RANGE) return false;
+        if (L > m.k.sight) return false;
         if (!V || L < 1e-6) return true;
         d.x /= L; d.y /= L; d.z /= L;
         // (voxels not yet loaded are no clear line: a ray through them meets nothing)
@@ -1123,13 +1169,17 @@ export class WorldSim {
         },
         sees: (player) => { const q = prey.find((r) => r.player === player); return q && clear(q.at) ? where(q.at) : null; },
       };
-      const act = think(m, { x: me.x, y: me.y, z: me.z, walking: n.goal !== null }, senses, this.clock, MG?.rate ?? 10);
+      const was = m.state, act = think(m, { x: me.x, y: me.y, z: me.z, walking: n.goal !== null }, senses, this.clock, MG?.rate ?? 10);
+      // (one that notices a player alarms its squad: the fight comes from several sides)
+      if (was !== 'attack' && m.state === 'attack' && m.squad !== null && m.seen) {
+        for (const o of N.all.values()) if (o !== n && o.dead === null && o.mind?.squad === m.squad) cue(o.mind, m.seen, m.target);
+      }
       n.speed = act.speed;
       n.face = act.face ?? null;
       const g = act.goal;
       if (g === null && n.goal) N.goTo(n.id, null);
       else if (g && (!n.goal || Math.hypot(g.x - n.goal.x, g.z - n.goal.z) > REGOAL)) N.goTo(n.id, g);
-      if (act.fire && MG && n.trigger.pull(MG, this.clock)) this.shoot(`npc${n.id}`, { kind: 'avatar', id: n.id }, MG, eyes, aimFrom(eyes, act.fire, this.rnd));
+      if (act.fire && MG && n.trigger.pull(MG, this.clock)) this.shoot(`npc${n.id}`, { kind: 'avatar', id: n.id }, MG, eyes, aimFrom(eyes, act.fire, this.rnd, m.k));
     }
   }
 
@@ -1338,6 +1388,8 @@ const FALL_QUIET = 6, FALL_PACE = 3, GRAVITY = 9.81;
 const FORGET_TICKS = 30;
 // m ahead of the player an NPC asked for is put down; the half side of its patrol's square
 const NPC_AHEAD = 4, NPC_LOOP = 8;
+// m over which a camp's NPC is put down on the highest ground (above any roof the map has)
+const CAMP_TOP = 1e4;
 // m a goal may move before an NPC walking to it finds its way again (a search each time)
 const REGOAL = 2;
 const to = (v: Vec3, k: number) => ({ x: Math.round(v.x * k) / k, y: Math.round(v.y * k) / k, z: Math.round(v.z * k) / k });

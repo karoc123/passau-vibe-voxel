@@ -25,7 +25,7 @@ const boxes = [
   { x0: 120, x1: 126, z0: 110, z1: 140, y0: G, y1: G + 8, mat: 'wall' },
 ];
 const { dir, data } = await synthData({ size: [384, 256], ground: () => G, surface: () => 'earth', boxes });
-const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false } }, data), sim = host.sim, N = sim.npcs;
+const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, camps: [] }, data), sim = host.sim, N = sim.npcs;
 const all = [];
 const add = (name) => {
   const link = sessionLink(host.connect(name)), c = new MirrorSimClient(new CloneLink(link), { roads: [], peds: [], ctrls: [] }, null, host.hello);

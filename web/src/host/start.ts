@@ -5,6 +5,7 @@
 //   ?seed=        the traffic's seed (else a new one each start)
 //   ?mode=        the game mode (host/sim-host.ts MODES; else the sandbox)
 //   ?dig=1        the sandbox's edits allowed
+//   ?camps=0      no enemy camps (a tool measuring the host's tick or bytes)
 //   ?lifephys=0   no traffic bodies near edits (the drive still loads the road physics); ?lpnear=, ?lpmax=: their
 //                 reach and number
 //   ?date=MM-DD, ?hour=   the world's day and hour at the start (else today, at its golden hour: sim/sun.ts)
@@ -14,6 +15,7 @@
 //   ?every=       a network host sends every Nth tick's snapshot (else every one: host/ws.ts)
 import type { PhysicsOptions } from '../sim/contract/worker';
 import type { TimeOfDay } from '../sim/contract/snapshot';
+import type { CampPlace } from '../sim/camps';
 import { dayOfDate, goldenHour } from '../sim/sun';
 
 export interface HostStart {
@@ -30,6 +32,8 @@ export interface HostStart {
   activeR?: number;
   interest?: number;
   every?: number;
+  /** none: no enemy camps (without: the mode's) */
+  camps?: readonly CampPlace[];
 }
 
 const positive = (v: number | undefined) => (v !== undefined && v > 0 ? v : undefined);
@@ -47,5 +51,6 @@ export function hostStart(query: string | URLSearchParams, now = new Date(), ran
     physics: { bodies: qs.get('lifephys') !== '0', near: n('lpnear'), maxBodies: n('lpmax') },
     time: { day, hour: qs.get('hour') ? +qs.get('hour')! : goldenHour(day, year) },
     activeR: positive(n('active')), interest: positive(n('interest')), every: positive(n('every')),
+    ...(qs.get('camps') === '0' ? { camps: [] } : {}),
   };
 }
