@@ -6,7 +6,6 @@
 #   ./voxel status    what runs, and the link to open
 #   ./voxel logs      both logs, followed
 #   ./voxel run       both in the foreground; Ctrl-C stops them
-#   ./voxel reset     the world's kept things wiped (craters, parked cars, crafts left: web/.run/world); host stopped first
 # Ports: PAGE_PORT (default 8080), HOST_PORT (default 5300). The host's options (tools/serve.mjs) go after start/run,
 # e.g. ./voxel start 'dig=1'. Development stays with tools/wt.sh in web/.
 set -euo pipefail
@@ -53,7 +52,7 @@ stop() {
     # each was started in its own session: the group takes vite's and node's children with it
     if alive $p; then
       kill -- -"$(cat "$run/$p.pid")" 2>/dev/null || kill "$(cat "$run/$p.pid")"
-      # (the host writes the world's kept things on SIGTERM: a restart waits for that, and for its port)
+      # (a restart waits for the old one's port)
       for _ in $(seq 50); do alive $p || break; sleep 0.2; done
       echo "$p stopped"
     fi
@@ -72,9 +71,6 @@ case "$cmd" in
   stop) stop ;;
   restart) stop; start "$@" ;;
   status) status ;;
-  reset)
-    if alive host; then echo "the host runs: ./voxel stop first (it writes the world when it stops)"; exit 1; fi
-    rm -rf "$run/world"; echo "world wiped: the next start begins with the map as built" ;;
   logs) tail -n 20 -F "$run/page.log" "$run/host.log" ;;
   run)
     prepare
@@ -83,5 +79,5 @@ case "$cmd" in
     page_cmd & host_cmd "$@" &
     sleep 2; echo "open $(link)"
     wait ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# //'; exit 1 ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# //'; exit 1 ;;
 esac

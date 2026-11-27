@@ -44,16 +44,13 @@ export class Presence<K> {
 export class EditKeeper {
   // per edited node ("tx_ty")
   private readonly presence: Presence<string>;
-  // the ops kept whoever is near (a blast's crater: for good on a host that keeps its world on disk, else until it restarts)
+  // the ops kept whoever is near (a blast's crater: until the host restarts)
   private readonly lasting = new WeakSet<WorldOp>();
 
   constructor(keeping: PresenceTuning = PRESENCE, private readonly N = TILE_N) { this.presence = new Presence(keeping); }
 
   /** op's nodes kept from now on, near or not */
   last(op: WorldOp) { this.lasting.add(op); }
-
-  /** whether op's nodes are kept near or not (last) */
-  lasts(op: WorldOp) { return this.lasting.has(op); }
 
   // at world time `now` (s), the players' foci (map metres: x east, z south); returns the nodes dropped
   update(now: number, foci: Foci): number {

@@ -59,8 +59,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Getting past something standing on a road where no turn fits (one-way, a bus on a narrow street): one in sight
   waits until out of sight. Backing to the junction behind and taking another road needs a drawn reverse leg over a
   junction (new path maths and wire).
-- Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
-  not; wrecks are kept as cars.
+- Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last, until the host
+  restarts); wrecks are kept as cars.
 - Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
   files; 4x CPU throttle): the worker's decoding ~30 ms and its gunzip off the page's thread, its first snapshot 6-8 s
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
