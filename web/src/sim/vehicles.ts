@@ -173,13 +173,14 @@ export const VEHICLES: Record<VehicleId, VehicleType> = {
   },
   // a motorbike: four wheels under it (hidden, a narrow track: car.ts keeps it upright), two drawn; nimble, quick,
   // leaning into its turns (drawn: car.ts lean). Its steering: a ~2.7 m circle at walking pace (a real bike's ~2.5-3),
-  // at speed no tighter than ~45° of lean (latG 1), the turn there within a quarter second (tools/vehicles.mjs bike_turn)
+  // at speed well inside the car's circle (latG 3.5, the grip to hold it: at a real bike's 1 g it drew full lean on a
+  // circle wider than a car's from 25 km/h on), the turn within a quarter second (tools/vehicles.mjs bike_turn)
   moto: {
     id: 'moto', name: 'Motorbike', len: 2.2,
     chase: { back: 6.5, up: 2.6 },
     build: {
       half: { x: 0.32, y: 0.5, z: 1.0 }, mass: 260, wheels: wheels4(0.3, 0.72, -0.72), engine: 1100, brake: 13, top: 39, ride: 0.84,
-      tune: { gripFront: 1.9, gripRear: 1.8, com: 0.62, steer: 0.6, steerFall: 22, latG: 1.0, steerRamp: 0.25, downforce: 0.3 },
+      tune: { gripFront: 2.4, gripRear: 2.3, com: 0.62, steer: 0.6, steerFall: 22, latG: 3.5, steerRamp: 0.25, downforce: 0.3 },
       bike: true,
     },
     model: [
