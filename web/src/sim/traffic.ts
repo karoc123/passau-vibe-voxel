@@ -822,6 +822,20 @@ export class Traffic {
     return true;
   }
 
+  /** a car out of the traffic (parked, a wreck) put back where it was left: a host's kept things read back after a
+   * restart (a new id; on no road). null: PARKED_MAX already out of the traffic */
+  parkAgain(k: Pick<Car, 'len' | 'bus' | 'vt' | 'col'>, pose: RoadPose): Car | null {
+    if (this.detachedCars.length >= PARKED_MAX) return null;
+    const car: Car = {
+      kind: 'car', id: this.idSeq++, e: 0, lane: 0, s: 0, v: 0, len: k.len, bus: k.bus, prev: -1, prevOff: 0, next: -1, v0f: 1, col: k.col,
+      off: 0, brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null, boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0,
+      boxTurn: 0, block: null, geo: { px: 0, py: 0, cx: pose.x, cy: pose.z, z: pose.y, fx: 0, fy: 1 }, detachedPose: { ...pose },
+    };
+    if (k.vt) car.vt = k.vt;
+    this.detachedCars.push(car);
+    return car;
+  }
+
   /** a parked car (or a wreck) taken out of the world (WorldSim: no player near it) */
   dropParked(car: Car) {
     const i = this.detachedCars.indexOf(car);

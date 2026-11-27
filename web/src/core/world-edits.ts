@@ -106,6 +106,20 @@ export function editNode(frame: Frame, tx: number, ty: number, v: NodeView, op: 
   return { base, foliage, ops: [...ops, op] };
 }
 
+/** node (tx, ty) made again from its files and ops in order (a host's kept edits read back), the node held in the
+ * TileCache (ready); each op applied to this node alone, so a node whose files changed under its ops is left out by
+ * the caller without touching its neighbours. false: the node is not in */
+export function restoreNow(tx: number, ty: number, ops: readonly WorldOp[]): boolean {
+  const { cache, frame } = theWorld();
+  drop(tx, ty);
+  for (const op of ops) {
+    const v = cache.view(tx, ty);
+    if (!v) return false;
+    liveEdits.set(tx, ty, editNode(frame, tx, ty, v, op, liveEdits.get(tx, ty)?.ops ?? []), opRegion(frame, op));
+  }
+  return true;
+}
+
 // Applies op to the world (after the edits before it), its nodes read first (ready, then applyNow): a tool's edit
 // without a world sim. Resolves to the level-1 nodes changed (a node whose files cannot be read is left out).
 export function apply(op: WorldOp, region?: Region): Promise<[number, number][]> {

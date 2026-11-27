@@ -4,7 +4,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Steps 6–8** in the order of target-architecture.md.
+- **Steps 7–8** in the order of target-architecture.md.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (orbit mode is a presence, unseen: GLOSSARY.md).
 
@@ -65,7 +65,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   them; the walker cannot stand on a car's roof.
 - Crafts and solid things (ADR 0012): the traffic's cars without a body do not feel crafts; a plane does not meet
   what it runs into (it has no meet); drone and paraglider have no shape.
-- The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
+- The parked-car cap (8/24) sits beside presence, not per cell.
+- Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
+  not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
 - The worker decodes nodes the page also decodes.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
   removes it. The world keeps ticking while the tab is hidden.
