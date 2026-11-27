@@ -8,6 +8,7 @@ import { helicopterLook } from './helicopter/helicopter-look';
 import { hovercraftLook } from './hovercraft/hovercraft-look';
 import { jetLook } from './jet/jet-look';
 import { paragliderLook } from './paraglider/paraglider-look';
+import { wrecked } from './wreck';
 
 const LOOKS: { readonly [K in CraftType]: () => CraftLook<K> } = {
   boat: boatLook,
@@ -20,4 +21,4 @@ const LOOKS: { readonly [K in CraftType]: () => CraftLook<K> } = {
 };
 
 /** a new look of a craft of type */
-export const craftLook = <K extends CraftType>(type: K): CraftLook<K> => LOOKS[type]();
+export const craftLook = <K extends CraftType>(type: K): CraftLook<K> => wrecked(type, LOOKS[type]());

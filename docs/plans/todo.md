@@ -21,7 +21,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   seat as today with a weapon in its data, no gunner role; the door gunners blind fore and aft; a craft with no pilot
   sinks as today), no scout; a grappling hook as an item noted for later; NPCs in vehicles only once enemies on foot have been seen and played;
   zones: the concept to be talked through first (a helicopter lands anywhere today). Health and
-  damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
+  damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
   left of it: cars at the mapped car parks too, a crater under an asleep craft, the draw cost of a dozen standing

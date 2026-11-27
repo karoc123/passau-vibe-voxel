@@ -25,8 +25,8 @@ class HelicopterLook implements CraftLook<'helicopter'> {
     const core = c.core;
     placeYXZ(this.group, core.drawn(alpha));
     this.group.visible = true;
-    // still on the skids of one left; idling under a pilot on them
-    const spin = core.motion.grounded ? (c.pilot === null ? 0 : 9) : 24;
+    // still on the skids of one left and on a wreck; idling under a pilot on them
+    const spin = c.wreck ? 0 : core.motion.grounded ? (c.pilot === null ? 0 : 9) : 24;
     this.rotor.rotation.y = (this.rotor.rotation.y + spin * dt) % (2 * Math.PI);
     this.tailRotor.rotation.x = (this.tailRotor.rotation.x + 4 * spin * dt) % (2 * Math.PI);
   }

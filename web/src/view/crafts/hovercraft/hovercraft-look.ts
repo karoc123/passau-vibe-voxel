@@ -129,8 +129,8 @@ class HovercraftLook implements CraftLook<'hovercraft'> {
     const m = c.core.motion;
     placeYXZ(this.group, c.core.drawn(alpha));
     this.group.visible = true;
-    // the engine runs while someone is in it: the fans idle and wind up with the throttle, and run down once left
-    const on = c.pilot !== null, a = this.fan.step(on ? 9 + 55 * m.throttle : 0, 1.2, dt);
+    // the engine runs while someone is in it (not in a wreck): the fans idle and wind up with the throttle, and run down once left
+    const on = c.pilot !== null && !c.wreck, a = this.fan.step(on ? 9 + 55 * m.throttle : 0, 1.2, dt);
     this.fans[0].rotation.z = a;
     this.fans[1].rotation.z = -a;
     this.blur.opacity = Math.min(0.3, this.fan.rate / 120);

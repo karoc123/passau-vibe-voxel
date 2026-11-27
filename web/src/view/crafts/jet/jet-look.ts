@@ -91,7 +91,8 @@ class JetLook implements CraftLook<'jet'> {
     const d = c.core.drawn(alpha);
     this.group.visible = c.core.flight.state !== 'crashed';
     orient(this.group, d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
-    this.animate(c.core.flight.engine, night, now);
+    // (a wreck's engine dead: no exhaust)
+    this.animate(c.wreck ? 0 : c.core.flight.engine, night, now);
   }
 
   hide() { this.group.visible = false; }

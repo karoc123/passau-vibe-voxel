@@ -3,7 +3,8 @@
 // health and a helicopter's (its pilot takes a share), and the pages see it; quiet ticks send no health at all; two
 // grenades wreck the helicopter (its pilot hurt, not killed; the pilot's climb no more taken; its seat refused once
 // left); a player shot to 0 is down (their walk not taken), then back at full health where they stood, told by the
-// event; a fall of 20 m on foot hurts, one of 2 m does not.
+// event; a fall of 20 m on foot hurts, one of 2 m does not. The pages see the wreck as one (CraftView.wreck) and draw
+// it so (view/crafts/wreck.ts): charred, its rotors still, smoke over it, one draw call more for any number of wrecks.
 // usage (in web/): node tools/health.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 
@@ -14,6 +15,11 @@ const { craftBox } = await imp('src/sim/solids.ts');
 const { SPAWN_HEIGHT } = await imp('src/sim/craft/craft-collision.ts');
 const { EYE } = await imp('src/sim/weapons/weapon.ts');
 const { HEALTH } = await imp('src/sim/health.ts');
+const THREE = await import('three');
+const { craftLook, wreckSmoke } = await imp('checks/wreck-checks.ts');
+const { CORES } = await imp('src/sim/craft/cores.ts');
+const { DEFAULT_TUNING } = await imp('src/sim/tuning.ts');
+const { WRECK_COL } = await imp('src/sim/contract/agents.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const settle = () => new Promise((r) => setImmediate(r));
@@ -65,6 +71,8 @@ let box = craftBox('helicopter', heli.core.pose);
 fireAt(A, 1, box.x, box.y + box.ht / 2, box.z);
 await tick(3);
 const H = HEALTH.craft.helicopter, pilotTook = 10 * H.take.bullet * H.through;
+const seen = (p) => p.c.crafts().find((c) => c.id === heli.id);
+check(seen(A).wreck === false && seen(P).wreck === false, 'a hurt helicopter is no wreck on the pages');
 check(hp(A.c, craft) === H.max - 10 * H.take.bullet && hp(P.c, 'player:p') === Math.ceil(100 - pilotTook),
   `an MG hit on the helicopter: ${hp(A.c, craft)}/${H.max} on A's page, its pilot ${hp(P.c, 'player:p')} on theirs`);
 
@@ -84,6 +92,7 @@ for (let i = 0; i < 2; i++) {
 }
 const y0 = heli.core.pose.y;
 check(sim.wrecked({ kind: 'craft', id: heli.id }) && hp(A.c, craft) === 0 && hp(P.c, craft) === 0, `two grenades wreck the helicopter (${hp(A.c, craft)} on A's page)`);
+check(seen(A).wreck === true && seen(P).wreck === true, 'both pages see the helicopter a wreck');
 const pilotHp = hp(P.c, 'player:p');
 check(pilotHp > 0 && pilotHp < 100 && !sim.isDown('p'), `its pilot is hurt, not killed (${pilotHp})`);
 for (let i = 0; i < 30; i++) { P.c.send({ kind: 'seatInput', role: 'pilot', input: { turn: 0, drive: 0, lift: 1, side: 0 } }); await tick(); }
@@ -127,6 +136,57 @@ check(sim.lives.hp('player:b') === undefined, 'a 2 m drop on foot does not hurt'
 await fallFrom(B, 60, 20);
 const fell = hp(B.c, 'player:b'), want = 100 - (Math.sqrt(2 * 9.81 * 20) - HEALTH.player.safe) * HEALTH.perMs;
 check(fell !== null && Math.abs(fell - want) < 6, `a 20 m fall on foot hurts (${fell}, ~${Math.round(want)})`);
+
+// the wreck as A's page draws it: charred, its rotors still, a smoke column over it; the same look given a whole craft
+// again drawn as it was
+{
+  const look = craftLook('helicopter'), inner = look.look, c = seen(A), frame = { dt: 0.1, alpha: 1, night: 0, now: 0 };
+  const paints = () => { const out = []; look.group.traverse((o) => { if (o.isMesh) out.push(o.material.color.getHex()); }); return out; };
+  // (with a pilot at the controls: a whole one's rotor turns then, on the ground too)
+  look.draw({ ...c, pilot: 'p', wreck: false }, frame);
+  const before = paints(), spun = inner.rotor.rotation.y;
+  look.draw({ ...c, pilot: 'p', wreck: false }, frame);
+  const turning = inner.rotor.rotation.y !== spun;
+  look.draw({ ...c, pilot: 'p' }, frame);
+  const r0 = inner.rotor.rotation.y;
+  look.draw({ ...c, pilot: 'p' }, frame);
+  wreckSmoke.update(0.016, { x: 0, y: 0, z: 0 });
+  const after = paints(), char = new THREE.Color(WRECK_COL).getHex();
+  check(turning && inner.rotor.rotation.y === r0, `a wreck's rotor stands (it turned before: ${turning})`);
+  check(after.every((h) => h === char), `the wreck is drawn charred (${new Set(after).size} paint, ${after.length} parts)`);
+  check(wreckSmoke.mesh.count > 0 && wreckSmoke.mesh.visible, `smoke rises over it (${wreckSmoke.mesh.count} puffs)`);
+  look.draw({ ...c, wreck: false }, frame);
+  wreckSmoke.update(0.016, { x: 0, y: 0, z: 0 });
+  check(paints().join() === before.join() && wreckSmoke.mesh.count === 0, 'the look given a whole craft again: its paint back, no smoke');
+  // every craft's wreck charred and smoking
+  const types = Object.keys(CORES), bad = [];
+  for (const type of types) {
+    const l = craftLook(type), core = CORES[type](DEFAULT_TUNING), lit = [];
+    l.draw({ id: 500, type, pilot: null, placed: true, wreck: true, core }, frame);
+    wreckSmoke.update(0.016, { x: 0, y: 0, z: 0 });
+    // (a vertex-coloured model's paint is its colours times the material's: a dark one)
+    const charred = (m) => m.blending === THREE.AdditiveBlending || m.color.getHex() === char || (m.vertexColors && Math.max(m.color.r, m.color.g, m.color.b) < 0.05);
+    l.group.traverse((o) => { if (o.isMesh && !charred(o.material)) lit.push(o.material.color.getHexString()); });
+    if (lit.length || !wreckSmoke.mesh.count) bad.push(`${type}: ${lit.length} not charred, ${wreckSmoke.mesh.count} puffs`);
+  }
+  check(!bad.length, `every craft's wreck charred and smoking (${types.join(', ')}) ${bad.join('; ')}`);
+  // the cost: 10 wrecked helicopters and 10 whole ones, the draw calls (meshes drawn) and the CPU time a frame
+  const scene = new THREE.Scene(), looks = Array.from({ length: 10 }, () => craftLook('helicopter'));
+  for (const l of looks) scene.add(l.group);
+  scene.add(wreckSmoke.mesh);
+  const calls = () => { let n = 0; scene.traverseVisible((o) => { if (o.isMesh && (!o.isInstancedMesh || o.count > 0)) n++; }); return n; };
+  const run = (wreck) => {
+    const t0 = performance.now();
+    for (let f = 0; f < 200; f++) {
+      looks.forEach((l, i) => l.draw({ ...c, id: 1000 + i, wreck }, frame));
+      wreckSmoke.update(0.016, { x: 0, y: 0, z: 0 });
+    }
+    return [calls(), (performance.now() - t0) / 200];
+  };
+  run(true); run(false);
+  const [whole, wholeMs] = run(false), [wrecks, wrecksMs] = run(true);
+  check(wrecks === whole + 1, `10 wrecks in view: ${wrecks} draw calls, ${whole} whole (the smoke one more); CPU ${wrecksMs.toFixed(3)} ms a frame, ${wholeMs.toFixed(3)} whole`);
+}
 
 host.dispose();
 if (fail.length) { for (const f of fail) console.log(`FAIL ${f}`); process.exit(1); }

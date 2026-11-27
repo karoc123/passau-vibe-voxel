@@ -13,6 +13,8 @@ export interface CraftFrame { dt: number; alpha: number; night: number; now: num
 export interface CraftLook<K extends CraftType = CraftType> {
   /** what the look adds to the scene (hidden until drawn) */
   readonly group: THREE.Object3D;
+  /** what is placed where the craft is, when that is not the group (which then stays at the origin) */
+  readonly anchor?: THREE.Object3D;
   /** placed where the craft is drawn this frame and animated from its state (its pilot, its core), shown */
   draw(c: CraftView<CoreOf<K>>, f: CraftFrame): void;
   /** out of sight (left by its shell, or gone): what trails behind it let go of */

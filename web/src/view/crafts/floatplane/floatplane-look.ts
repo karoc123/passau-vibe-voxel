@@ -83,8 +83,8 @@ class FloatplaneLook implements CraftLook<'floatplane'> {
     const f = c.core.flight, d = c.core.drawn(alpha);
     this.group.visible = f.state !== 'crashed';
     orient(this.group, d.p, this.fwd.copy(d.fwd), this.up.copy(d.up));
-    // the propeller by the engine (0..1), the lamps by the night
-    this.spin += (14 + 40 * f.engine) * dt;
+    // the propeller by the engine (0..1; a wreck's stands), the lamps by the night
+    if (!c.wreck) this.spin += (14 + 40 * f.engine) * dt;
     this.prop.rotation.z = this.spin;
     const k = 1 + 3 * night;
     for (const l of this.lamps) {

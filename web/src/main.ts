@@ -51,6 +51,7 @@ import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
 import { shake } from './nav/chase-rig';
 import { WeaponsView } from './view/weapons/weapons-view';
+import { wreckSmoke } from './view/wreck-smoke';
 import { makeDayWeather } from './ui/day-weather';
 import { Graphics } from './ui/graphics';
 import { makeGoTo } from './ui/go-to';
@@ -449,6 +450,7 @@ async function boot() {
     nav.arms.view = weapons = new WeaponsView(scene, client);
     nav.sim = client;
     movingActors.add(life.group);
+    scene.add(wreckSmoke.mesh);
     hook('__life', life);
     hook('__sim', client);
     simLoaded(client);
@@ -608,7 +610,7 @@ renderer.setAnimationLoop(frameLoop({
   },
   // what reads the camera: the view distance, the fog, the far plane, the animated uniforms, the tiles streamed, the
   // shadow's fit and its redraw
-  cameraReaders: (now) => {
+  cameraReaders: (now, dt) => {
     const above = camera.position.y - (world ? world.groundAt(camera.position.x, camera.position.z) : 18) + 3;
     post.setHeight(above, gfx.now.tilt && !nav.craftView, camera.position.distanceTo(controls.target));
     viewDist = camera.position.distanceTo(controls.target);
@@ -623,6 +625,7 @@ renderer.setAnimationLoop(frameLoop({
     if (lampHeads) { lampHeads.night = daylight.night; lampHeads.update(camera); }
     waypoint.update(camera, nav.mapPose(), world);
     const cp = camera.position;
+    wreckSmoke.update(dt, cp);
     precip.update(t, cp, daylight.weather, daylight.night, world?.inRoom(cp.x, cp.z, cp.y) ?? false);
     if (city?.complete) document.body.classList.remove('loading');
     daylight.sky.mesh.position.copy(camera.position);

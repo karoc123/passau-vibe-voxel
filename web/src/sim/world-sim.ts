@@ -61,7 +61,7 @@ import { aimFrom, CHEST, newMind, RANGE, think, type Duty, type Senses } from '.
 import type { Vec3 } from '../core/vec';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
-import type { BoatPose } from './contract/agents';
+import { WRECK_COL, type BoatPose } from './contract/agents';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay, type Weapon } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
@@ -1308,8 +1308,6 @@ const BESIDE = 2;
 const BODY_FAR = 7;
 // the first id of the stands' cars (the traffic numbers its cars from 0, a few thousand an hour)
 const STAND_CARS = 1 << 28;
-// a wreck's paint
-const WRECK_COL = '#1d1a18';
 // a fall: the ticks without going lower that end it, the pace (m/s) a walk down steps never makes; m/s²
 const FALL_QUIET = 6, FALL_PACE = 3, GRAVITY = 9.81;
 // the ticks between forgetting the lives of what left the world
