@@ -19,6 +19,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
 import type { CarInput } from '../../sim/contract/inputs';
+import type { CarBody } from '../../sim/contract/snapshot';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
 import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild, type RideTuning } from './vehicle';
 
@@ -472,6 +473,24 @@ export class RapierCar {
     let n = 0;
     for (let i = 0, k = this.controller.numWheels(); i < k; i++) if (this.controller.wheelIsInContact(i)) n++;
     return n;
+  }
+
+  /** its body and what it keeps between steps, o: the physics' origin (map metres) */
+  save(o: { x: number; z: number }): CarBody {
+    const b = this.body, p = b.translation(), q = b.rotation(), v = b.linvel(), w = b.angvel();
+    return { p: [p.x + o.x, p.y, p.z + o.z], q: [q.x, q.y, q.z, q.w], v: [v.x, v.y, v.z], w: [w.x, w.y, w.z],
+      steer: this.steer, bars: this.bars, air: this.airTime, ride: this.ride, lean: this.lean, wheelie: this.wheelie, water: this.status === 'water' };
+  }
+
+  /** put back as s had it (save) */
+  load(s: CarBody, o: { x: number; z: number }) {
+    const b = this.body, [x, y, z] = s.p, [qx, qy, qz, qw] = s.q, n = Math.hypot(qx, qy, qz, qw);
+    b.setTranslation({ x: x - o.x, y, z: z - o.z }, false);
+    b.setRotation({ x: qx / n, y: qy / n, z: qz / n, w: qw / n }, false);
+    b.setLinvel({ x: s.v[0], y: s.v[1], z: s.v[2] }, false);
+    b.setAngvel({ x: s.w[0], y: s.w[1], z: s.w[2] }, true);
+    this.steer = s.steer; this.bars = s.bars; this.airTime = s.air; this.ride = s.ride; this.lean = s.lean ?? 0; this.wheelie = s.wheelie ?? 0;
+    this.status = s.water ? 'water' : 'ok';
   }
 
   clearWedges() {

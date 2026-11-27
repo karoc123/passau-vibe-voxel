@@ -57,7 +57,10 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
   if (document.hidden) told();
   // (the edits are sent as ops, applied over the page's own node files)
   const tiles = { cache: viewerTileCache(meta.tiles.N, edits), frame: frameOf(meta) };
-  return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles, { meta, cache: tiles.cache, now: () => performance.now() }), link };
+  // (the own car run ahead only over a network: the page's own worker answers within a frame or two, and a second
+  // Rapier world would step on a phone's main thread for that)
+  const car = o.server ? () => import('../physics/rapier/own-car').then((m) => m.OwnCar.load(meta, tiles.cache, edits)) : undefined;
+  return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles, { meta, cache: tiles.cache, now: () => performance.now() }, car), link };
 }
 
 /** the page's view command for this frame: where it looks (focus: the orbit's target or the camera) and sees from (the

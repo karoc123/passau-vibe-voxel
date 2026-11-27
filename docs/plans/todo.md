@@ -4,7 +4,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Step 8** of target-architecture.md; the car's prediction waits for the owner (FRAGEN 17).
+- **Step 8** of target-architecture.md.
 
 - Overload (target-architecture.md): all three steps built (host/overload.ts), but the third cuts a whole session's
   snapshots to every second tick (not for a player in a vehicle or firing), not the others' agents inside one: that
@@ -26,7 +26,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   ~1.5, sent to the mesher ~1), 16 shooters ~30 ms/s and no frame held up by them, 32 ~60 ms/s with the worst frame's
   edits 26–50 ms. Next if it shows: the columns made in the mesher worker instead of on the page (they are copied
   there anyway), not before a real phone shows hitches.
-- E18: the car's prediction (one-body world), if the owner says so (FRAGEN 17).
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M7–M10: wire compaction, lag compensation for hits (with the first weapon).
 
@@ -63,8 +62,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
   files; 4x CPU throttle): the worker's decoding ~30 ms and its gunzip off the page's thread, its first snapshot 6-8 s
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
-- The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
-  network (no prediction for it yet).
+- The own car answers ~15–30 ms later in solo since step 1 (render clock ~0.5 tick behind): its prediction runs only
+  over a network. Its page world has the terrain alone, so the traffic, other players' cars and coaches come as a
+  correction (the traffic does not brake for the car run ahead as it does for a craft); pushing along a wall the two
+  worlds part more often (a third of the snapshots stepped again). Rapier on the page: 1.7 MB gzipped loaded on the
+  first drive, ~20 MB to instantiate, its memory ~100 MB more with the city's terrain round the car (Node's RSS).
 - Prediction: an event told ahead that the host then never has (a plane's crash on a craft or car that turned or braked
   away within a round trip) stays told: tint, shake, message, the plane snapped back. Left: rare, a crafts' meet tells
   none, and taking it back runs through the client, the craft link and the plane's nav.

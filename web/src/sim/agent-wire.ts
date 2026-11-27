@@ -9,7 +9,7 @@
 import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { AvatarState, AvatarWire, PlayerReads, Snapshot } from './contract/snapshot';
+import type { AvatarState, AvatarWire, CarBody, PlayerReads, Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
@@ -350,6 +350,19 @@ export function wireBody(d: BodyDraw): BodyDraw {
  * the difference out (under its 1e-4 it is none), and the digits past it cannot deflate: a helicopter's whole core
  * every tick was ~5 kB/s */
 export const wireCore = <T>(s: T): T => JSON.parse(JSON.stringify(s), (_, v) => typeof v === 'number' ? round(v, 1e4) : v) as T;
+
+/** a driven car's body as sent to its driver: to the mm (and mm/s, 1e-4 rad), what a car has not (a bike's lean, the
+ * water) left out. The page takes it within a cm as its own (client/predict-car.ts); sent to 1e-4 every tick, its
+ * digits that do not deflate put the load gate's mean player at its 20 kB/s */
+export const wireCarBody = (b: CarBody): CarBody => {
+  const v3 = (a: number[], k: number) => a.map((x) => round(x, k)) as [number, number, number];
+  const o: CarBody = { p: v3(b.p, MM), q: b.q.map((x) => round(x, RAD)) as CarBody['q'], v: v3(b.v, MM), w: v3(b.w, MM),
+    steer: round(b.steer, RAD), bars: round(b.bars, MM), air: round(b.air, MM), ride: round(b.ride, MM) };
+  if (b.lean) o.lean = round(b.lean, RAD);
+  if (b.wheelie) o.wheelie = round(b.wheelie, RAD);
+  if (b.water) o.water = true;
+  return o;
+};
 
 /** a pose out of the traffic as sent (a left car's): to the mm, its angles to 1e-4 rad */
 export const wirePose = (p: RoadPose): RoadPose => ({ x: round(p.x, MM), y: round(p.y, MM), z: round(p.z, MM),

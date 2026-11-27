@@ -177,7 +177,8 @@ in the tick.
 6. ~~Kept things on disk.~~ Dropped by the owner 2026-11-27: a host restart need not keep the game (landed the same
    day, then removed).
 7. **Prediction** of the player's own craft. Landed 2026-11-27 for the crafts (rewound to each snapshot and stepped
-   again with the inputs since, corrections blended out); the car waits for the owner (FRAGEN 17). The host holds a
+   again with the inputs since, corrections blended out), for the own car over a network the same day (the host's
+   Rapier car and terrain in a world of the page's own, the traffic and other cars left to corrections). The host holds a
    driver's or pilot's input for the tick it is meant for (ADR 0014), so a jittery link neither loses nor doubles
    steering and the prediction lines up (landed 2026-11-27).
 8. **Measure on a Pi.** Only then compact the wire (typed arrays, deltas) or move a hot part to Rust.
