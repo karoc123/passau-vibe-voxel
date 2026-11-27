@@ -49,7 +49,8 @@ import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { WeaponsView } from './view/weapons/weapons-view';
-import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
+import { makeDayWeather } from './ui/day-weather';
+import { Graphics } from './ui/graphics';
 import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
@@ -62,7 +63,7 @@ const TODAY = dayOfYear(new Date());
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
 
 const qs = new URLSearchParams(location.search);
-// the graphics settings (settings.ts, the ⚙ panel), the resolution and the detail among them: set by the visitor, else
+// the graphics settings (settings.ts, the menu's Graphics), the resolution and the detail among them: set by the visitor, else
 // chosen once (autores.ts), then fixed for the session
 const phone = Math.min(screen.width, screen.height) < 600;
 const gpu = gpuName();
@@ -110,10 +111,18 @@ let crafts: PlayerCraft[] = [];
 // the world's crafts the local player does not fly (left by their pilots, or other players')
 let craftsView: CraftsView | null = null;
 let glider: ParagliderMode | null = null;
-const bar = new Bar({ days: DAYS, weathers: WEATHER_NAMES, onDay: (d) => dayWeather.onDay(d), onDayEnd: () => dayWeather.onDayEnd(),
-  onHour: (h) => dayWeather.onHour(h), onWeather: (w) => dayWeather.onWeather(w) });
-// the bar's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
-const dayWeather = makeDayWeather({ bar, daylight, ask: (h, d) => pageTime?.ask(h, d) });
+const bar = new Bar();
+const menu = makeMenu(prefs, {
+  paused: pause,
+  resumed: (mouse) => { if (mouse) nav.resumeMouse(); },
+  canOrbit: () => !nav.onMap,
+  toOrbit: () => nav.flyUp(),
+  changed: (p) => sim?.setName(p.name),
+});
+const gfxSection = menu.section('Graphics');
+// the menu's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
+const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
+void serverChoice.then((s) => { dayWeather.online = s !== null; });
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
@@ -164,7 +173,7 @@ function foldForPlay(fromMap: boolean, toMap: boolean) {
   } else if (toMap && openOnMap) bar.fold(false);
 }
 const maxShadow = renderer.capabilities.maxTextureSize;
-const gfxPanel = bar.graphics(gfx, applyGfx, maxShadow);
+const gfxPanel = new Graphics(gfxSection.box, gfxSection.mark, gfx, applyGfx, maxShadow);
 gfx.writeUrl();
 // the resolution and the detail measured once if nothing set them (autores.ts). Not under automation (screenshots,
 // benchmarks keep theirs) unless autores=1; autores=0 never.
@@ -184,13 +193,6 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
 }
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 makeCredits();
-const menu = makeMenu(prefs, {
-  paused: pause,
-  resumed: (mouse) => { if (mouse) nav.resumeMouse(); },
-  canOrbit: () => !nav.onMap,
-  toOrbit: () => nav.flyUp(),
-  changed: (p) => sim?.setName(p.name),
-});
 nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
@@ -345,7 +347,7 @@ async function boot() {
   applyGfx(gfx.now);
   uniforms = makeUniforms(meta);
   const foliage = loadFoliage(uniforms), windows = loadWindows(uniforms);
-  foliage.then(({ city }) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
+  foliage.then(({ city }) => dayWeather.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall }))
     .catch((e) => console.warn('foliage', e));
   windows.then(({ set }) => { setWindows = set; }).catch((e) => console.warn('windows', e));
   // the light on the ground at night, drawn into the pages of the nodes shown (lamplight.ts, fields.ts)

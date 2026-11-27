@@ -1,6 +1,6 @@
 import { clamp } from './util';
 
-// The graphics settings (the ⚙ panel, bar.ts): each also a query parameter, so a link or a screenshot tool can set it,
+// The graphics settings (the menu's Graphics, ui/graphics.ts): each also a query parameter, so a link or a screenshot tool can set it,
 // and remembered in localStorage, only those the visitor changed: a new default (the code's, or a device's like the
 // pre-pass's) still reaches them for the rest. On load the URL wins over what is remembered, which wins over the
 // defaults; only what differs from the defaults is written into the URL. All of them apply live.
