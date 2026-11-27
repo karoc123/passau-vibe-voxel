@@ -6,6 +6,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Extraction concepts: 3-5 for Passau, co-op 1-4 players against AI enemies first (Escape from Duckov as the
   reference: playable alone), PvP of teams of 1-4 later; the owner picks or mixes. The other genres are dropped.
+  The first four (old town raid, crash site, river run, holding the castle) rejected: the whole map, not house and
+  alley fights; the game is moving by air, water and land.
 - Roads by algorithm, for any map: bumps at junctions and joins, steep ramps and edges, sometimes curves too tight
   for their speed. Measured first (drive the main roads), then fixed less realistically; one full rebuild allowed
   once a cut-out is better and the gates pass.
