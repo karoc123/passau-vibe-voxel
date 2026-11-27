@@ -36,7 +36,21 @@ const tick = async () => { B.update(STEP); server.update(STEP); link.deliver(); 
 
 // the searches timed (grid and A*), the walk's ticks timed
 const N = sim.npcs, search = N.search.bind(N), searches = [];
-N.search = (n) => { const t = performance.now(); search(n); searches.push({ ms: performance.now() - t, cells: n.grid?.cells ?? 0, way: n.way.length }); };
+N.search = (n) => {
+  const from = { pos: { ...n.body.pos }, feet: n.body.feet, goal: n.goal && { ...n.goal }, tries: n.tries }, t = performance.now();
+  search(n);
+  searches.push({ ms: performance.now() - t, cells: n.grid?.cells ?? 0, way: n.way.length, from });
+};
+// a search made again from where it was made, the fastest of a few: what it costs a host tick without the machine's
+// other load (a regression in the grid or A* slows every one of them)
+const redo = ({ from }, k = 9) => {
+  let best = Infinity;
+  for (let i = 0; i < k; i++) {
+    const n = { body: { pos: from.pos, feet: from.feet }, goal: from.goal, tries: from.tries };
+    const t = performance.now(); search(n); best = Math.min(best, performance.now() - t);
+  }
+  return best;
+};
 
 const id = sim.addNpc({ x: 30, y: G, z: 128 });
 N.goTo(id, { x: 105.5, z: 128.5 });
@@ -109,7 +123,13 @@ console.log(`cost: the walk ${walkUs.toFixed(1)} µs per NPC and tick (${nAll} N
   `a search (grid and A*) ${(search0 / s0).toFixed(2)} ms mean over ${s0}, the largest ${big[0].ms.toFixed(2)} ms (${big[0].cells} cells); ` +
   `round the building and through the gap ${hard.ms.toFixed(2)} ms (${hard.cells} cells read, ${hard.way} points); one walking NPC ~${(walkBytes / 1000).toFixed(1)} kB/s in a snapshot (raw JSON)`);
 check(walkUs < 200, `the walk under 200 µs per NPC and tick (${walkUs.toFixed(1)})`);
-check(big[0].ms < 50, `a search under 50 ms (the largest ${big[0].ms.toFixed(2)})`);
+// the slowest few and the one reading most cells made again, warm (the first search's JIT warm-up is a one-off): a host
+// tick at 30 Hz is 33 ms and may make two searches (sim/npcs.ts SEARCHES); under 20 ms two hold it up a tick at most
+// (warm a search round the building is ~4 ms, ~10 ms the fastest of 9 with 24 such runs on 20 cores)
+const judged = [...new Set([...big.slice(0, 3), searches.toSorted((a, b) => b.cells - a.cells)[0]])].map((r) => ({ ...r, best: redo(r) }));
+const worstAgain = judged.reduce((a, b) => (b.best > a.best ? b : a));
+console.log(`made again: ${judged.map((r) => `${r.ms.toFixed(2)} -> ${r.best.toFixed(2)} ms (${r.cells} cells)`).join(', ')}`);
+check(worstAgain.best < 20, `a search under 20 ms (the slowest made again ${worstAgain.best.toFixed(2)}, ${worstAgain.cells} cells; first ${worstAgain.ms.toFixed(2)})`);
 
 server.dispose();
 if (fail.length) { console.log(`FAIL ${fail.length}`); process.exit(1); }
