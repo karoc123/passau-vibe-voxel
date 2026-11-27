@@ -75,6 +75,10 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const w = sim.players.get(player)?.walk, a = w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z)) && wire.avatar({ id, player, pose: w.pose, prev: w.prev });
     if (a) avatars.push(a);
   }
+  for (const [id, n] of sim.npcs.all) {
+    const a = (!S || S.sees('avatar', id, n.pose.x, n.pose.z)) && wire.avatar({ id, player: `npc${id}`, pose: n.pose, prev: n.prev });
+    if (a) avatars.push(a);
+  }
   const drivers: [number, PlayerId][] = [];
   for (const id of sim.players.keys()) {
     const seat = sim.seat(id);

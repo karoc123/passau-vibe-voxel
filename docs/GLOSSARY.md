@@ -57,3 +57,7 @@ The words the owner and the code use for the same thing. One name per thing; use
   then a left one like any other), **refilled** a while later out of sight.
 - **Landing room**: level, dry, open ground round a point, wide enough to set a craft down on.
 - **Asleep**: a placed craft not yet touched: not stepped, sent once.
+- **NPC**: a body on foot the host runs (no player behind it), by the players' walk; seen as an avatar. Not "bot".
+- **Walkable grid**: the host's cells, a metre each, round an NPC, each with the floor a walker stands on there (or
+  none), read from the voxels as a search reaches them; **stale** once an edit touches it.
+- **Way**: the points an NPC walks to in turn, found on a walkable grid. Not "path" (a road's or footpath's line).

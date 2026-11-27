@@ -56,6 +56,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
+import { Npcs } from './npcs';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import type { BoatPose } from './contract/agents';
@@ -156,6 +157,8 @@ export class WorldSim {
   private nextStandCar = STAND_CARS;
   /** the stands of placed vehicles (sim/stands.ts), when the host asked for them */
   readonly stands: Stands | null = null;
+  /** the NPCs on foot (sim/npcs.ts), drawn as avatars */
+  readonly npcs = new Npcs();
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -254,6 +257,9 @@ export class WorldSim {
     this.walls = ground?.blocked ? ground as Walls & Ground : null;
     this.traffic.ground = ground;
     this.traffic.water = water;
+    const walls = this.walls;
+    this.npcs.world = walls && water ? { support: (x, z, top) => walls.support(x, z, top), blocked: (x, z, y0, y1) => walls.blocked(x, z, y0, y1),
+      waterColumn: (x, z) => water.waterColumn(x, z, 0, 0) } : null;
   }
 
   setBoats(data: BoatData) {
@@ -262,7 +268,14 @@ export class WorldSim {
   }
 
   /** box (map metres [x0, z0, x1, z1)) was edited, or, cleared, is its files' again */
-  edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); }
+  edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); this.npcs.edited(box); }
+
+  /** an NPC on foot put down standing at (x, y, z) (y: its soles), walking at speed m/s; its avatar's id */
+  addNpc(at: { x: number; y: number; z: number }, speed?: number) {
+    const id = this.nextAvatar++;
+    this.npcs.add(id, at, speed);
+    return id;
+  }
 
   /** the road physics loaded (once; again after a failure) and attached to the traffic; warm: where the terrain's
    * colliders are wanted soon (a drive about to start). The host's to call (host/sim-host.ts: at its start, on an
@@ -360,6 +373,7 @@ export class WorldSim {
     T.crafts = crafts;
     traffic();
     for (const P of this.players.values()) if (P.walk?.on) this.carryOn(P.walk);
+    if (this.npcs.all.size) this.npcs.tick(STEP, (x, z) => this.walkSolids(x, z));
     this.harm();
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
@@ -568,6 +582,7 @@ export class WorldSim {
     if (!V?.hold) return;
     const at: { x: number; z: number }[] = [];
     for (const P of this.players.values()) if (P.walk && P.seat?.role === 'walker') at.push(P.walk.pose);
+    for (const n of this.npcs.all.values()) at.push(n.pose);
     V.hold(at, REACH);
   }
 

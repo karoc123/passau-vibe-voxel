@@ -15,8 +15,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   boards with a player's commands and fires a player's weapons; once aboard, a vehicle's own AI may steer instead.
   Perception (sight lines, noise) built in small steps. A helicopter lands only where there is room (from the data).
   Wind and weather noted for later. "Only on foot" needs no block: it follows from landing room and vehicles' size.
-  Order (the owner leaves it to us): the walk on the host with way finding; NPCs on foot (patrol,
-  attack, sight; hearing after); NPCs in vehicles; zones (landing room, air defence); fuel; seat tools. Health and
+  Order (the owner leaves it to us): NPCs on foot (patrol, attack, sight; hearing after; the walk on the host and
+  way finding built, ADR 0017: left a way to place one in play, NPCs as lives, their bytes, ~4.5 kB/s raw each
+  walking); NPCs in vehicles; zones (landing room, air defence); fuel; seat tools. Health and
   damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
