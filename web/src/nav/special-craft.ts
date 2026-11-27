@@ -25,9 +25,9 @@ const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'A
 const CS = CRAFT_SCALE.helicopter;
 const CONFIG = {
   hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
-    help: ['W/S thrust and reverse · A/D steer (it drifts) · Esc exit', 'Left stick: thrust, reverse and steer.'] },
+    help: ['W/S thrust and reverse · A/D steer (it drifts) · X get out · Esc exit', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
-    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · Esc exit',
+    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
     help: ['A/D steer · W speed bar · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',

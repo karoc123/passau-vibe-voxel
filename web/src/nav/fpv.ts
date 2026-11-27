@@ -307,7 +307,7 @@ export class FpvMode implements PlayerCraft {
     if (!active) return;
 
     const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll, pinch to zoom.' :
-      'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Esc exit';
+      'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · X get out · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       flying && this.craft?.core.waiting ? 'Waiting for the next collision tile…' :
       flying ? (this.impact?.message ?? '') :

@@ -73,8 +73,8 @@ export interface CommandResult {
 }
 
 /** why a seat was refused although it may be taken later: a car's while the host's road physics loads (ask again), or
- * after its last load failed (the host tries again); another player's ('taken'); too far from the walker ('far') */
-export type Refusal = 'loading' | 'failed' | 'taken' | 'far';
+ * after its last load failed (the host tries again); another player's ('taken'); too far from the walker ('far'); a car going faster than one walks ('moving') */
+export type Refusal = 'loading' | 'failed' | 'taken' | 'far' | 'moving';
 
 /** what a player asks of the rules (a request command; its outcome is a result of the request's kind; the game mode,
  * sim/mode.ts, grants or refuses it):

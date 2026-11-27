@@ -2,7 +2,7 @@ import type { CraftView } from '../client/sim-client';
 import type { CommandResult } from '../sim/contract/commands';
 import type { EntityRef, Role } from '../sim/contract/ids';
 import { SEATS } from '../sim/seats';
-import { craftBox } from '../sim/solids';
+import { carShape, craftBox } from '../sim/solids';
 import { vehicleOf } from '../sim/vehicles';
 import { fromBox, type Box } from '../sim/walk-bounds';
 import type { Picked } from '../view/life';
@@ -16,13 +16,15 @@ import type { Nav } from './nav';
 // controls (riding along: passenger.ts). The seat is asked of the host from foot first (it checks the reach from where it has the
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
-// keys leave E free.
+// keys leave E free; X gets out of any (the one key no vehicle's own keys have, so a craft flying on E is left too).
 
 // m from its sides: a step inside the host's Tuning.walk.board, so a walk the host has not yet taken is no refusal
 const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
 const E_TAKEN = new Set(['fpv', 'helicopter', 'hovercraft', 'paraglider']);
 const NOT_BOARDED = 'paraglider';
+/** the keys that get in (E) and out (E where free, X anywhere) */
+export type BoardKey = 'KeyE' | 'KeyX';
 
 /** what is within reach: its entity, the seat's role, what to call it, and what its shell takes over from */
 export interface Target { ref: EntityRef; role: Role; label: string; picked?: Picked; craft?: CraftView }
@@ -37,7 +39,7 @@ export class Boarding {
     private readonly passenger: () => PassengerMode | null) {
     // (before Nav's own: on foot E is also a look key, and a craft's keys must not see the E that left it)
     addEventListener('keydown', (e) => {
-      if (e.code !== 'KeyE' || !gameKey(e) || e.repeat || !this.press(true)) return;
+      if ((e.code !== 'KeyE' && e.code !== 'KeyX') || !gameKey(e) || e.repeat || !this.press(e.code)) return;
       e.preventDefault();
       e.stopPropagation();
     }, { capture: true });
@@ -47,15 +49,15 @@ export class Boarding {
   label(key: boolean) {
     const t = this.target, along = t?.role === 'passenger';
     if (this.nav.onFoot) return t ? `${key ? 'E: ' : ''}${along ? (key ? 'ride' : 'Ride') + ' along in' : (key ? 'get' : 'Get') + ' in'} ${t.label}` : this.pending ? 'Getting in…' : null;
-    return !this.canGetOut(false) ? null : key && this.canGetOut(true) ? 'E: get out' : 'Get out';
+    return !this.canGetOut() ? null : !key ? 'Get out' : this.canGetOut('KeyE') ? 'E: get out' : 'X: get out';
   }
 
-  /** E or the button: in (on foot), or out; false: neither */
-  press(key = false) {
+  /** a key or (none) the button: in (on foot: E), or out; false: neither */
+  press(key?: BoardKey) {
     const nav = this.nav, sim = nav.sim;
     if (!nav.onFoot) return this.canGetOut(key) && nav.getOut();
     const t = this.target;
-    if (!t || !sim || this.pending) return false;
+    if (key === 'KeyX' || !t || !sim || this.pending) return false;
     sim.results('enterSeat', t.role);
     sim.send({ kind: 'enterSeat', entity: t.ref, role: t.role });
     this.pending = { t, at: performance.now() };
@@ -74,9 +76,9 @@ export class Boarding {
     this.target = nav.onFoot && !this.pending ? this.find() : null;
   }
 
-  private canGetOut(key: boolean) {
+  private canGetOut(key?: BoardKey) {
     const c = this.nav.craft;
-    return !!c && (this.nav.craftView || this.nav.mode === 'ride') && c.id !== NOT_BOARDED && !(key && E_TAKEN.has(c.id));
+    return !!c && (this.nav.craftView || this.nav.mode === 'ride') && c.id !== NOT_BOARDED && !(key === 'KeyE' && E_TAKEN.has(c.id));
   }
 
   // the seat taken: the vehicle's shell takes over (Nav off foot without leaving the body: the host moved the player
@@ -85,7 +87,7 @@ export class Boarding {
     const nav = this.nav, no = r.find((x) => !x.ok);
     if (!r.some((x) => x.ok)) {
       this.say(no?.reason === 'taken' ? (t.role === 'passenger' ? `No free seat in that ${t.label}` : `Someone is in that ${t.label}`) : no?.reason === 'far' ? `Too far from the ${t.label}`
-        : no?.reason === 'loading' ? 'Road physics still loading' : `Cannot get into that ${t.label}`);
+        : no?.reason === 'moving' ? `That ${t.label} is moving: wait till it stops` : no?.reason === 'loading' ? 'Road physics still loading' : `Cannot get into that ${t.label}`);
       return;
     }
     if (!nav.onFoot) return;
@@ -125,7 +127,8 @@ export class Boarding {
       const id = picked.ref.id, by = driven.get(id);
       // (a car another player drives: beside them)
       if (by === sim.player || (by && !free('car', id, SEATS.car[vehicleOf(agent).id]))) continue;
-      consider({ ...pose, r: 0.9, l: agent.len / 2 }, { ref: { kind: 'car', id }, role: by ? 'passenger' : 'driver', label: picked.label, picked });
+      const shape = carShape(agent);
+      consider({ ...pose, r: shape.hx, l: shape.hz }, { ref: { kind: 'car', id }, role: by ? 'passenger' : 'driver', label: picked.label, picked });
     }
     for (const c of sim.crafts()) {
       const p = c.core.pose, flown = c.pilot !== null && c.pilot !== sim.player;

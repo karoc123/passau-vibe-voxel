@@ -11,6 +11,8 @@ import { Built } from '../../core/built';
 const RADIUS = 0.35, HORIZON = 2.2;
 export interface CollisionOptions { radius?: number; horizon?: number }
 const CONCURRENT_LOADS = 4;
+/** m over the map's height (meta.H) that no craft rises past */
+export const CEILING = 600;
 type Runs = { offsets: Uint32Array; data: Uint16Array };
 // caps: the node's sloped surfaces (core/surface.ts), what surface() reads -- the sweep keeps the voxels (a cap lies
 // within caps.CLAMP, 60/64 m, of its voxel's top; a craft is no ground vehicle)
@@ -92,7 +94,7 @@ export class VoxelCollision {
     this.horizon = horizon;
     this.width = meta.W;
     this.depth = meta.D;
-    this.ceiling = meta.H + 600;
+    this.ceiling = meta.H + CEILING;
     this.height = meta.H;
     this.tileSide = meta.tiles.N;
     this.row = this.tileSide + 2;
