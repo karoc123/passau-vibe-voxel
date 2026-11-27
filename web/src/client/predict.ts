@@ -4,8 +4,9 @@
 // inputs they had (rewind and replay). What then differs from what was drawn a moment before is blended out; a
 // difference too big to blend (a reset, a crash, a craft met) is shown at once.
 // The craft run ahead meets the solid things the newest snapshot has round it as the host's meets them (the same code,
-// sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars reckoned on along their ways and
-// the crafts at their speed (a parked one stays put), so running into one is not undone a round trip later. Its events
+// sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars reckoned on along their ways,
+// the crafts at their speed (a parked one stays put) and the coaches by the timetable at the host's clock then (the
+// snapshot's world clock gone on by the ticks since), so running into one is not undone a round trip later. Its events
 // are told when it first runs a tick (not when stepped again); the host's word on each comes a round trip later and is
 // then not told again (heard): one of the same kind due within HEAR ticks of the host's.
 // Which tick of the page's a snapshot's tick is: an input's seq was sent in the page's tick p and first applied in the
@@ -20,9 +21,10 @@ import type { Ack, CraftState } from '../sim/contract/snapshot';
 import type { CraftEventOf } from '../sim/contract/crafts';
 import type { BoatView, CarState } from '../sim/contract/agents';
 import type { Car } from '../sim/types';
+import type { CoachPose } from '../sim/coaches';
 import type { CarPose } from '../sim/road-net';
 import { reckon, type Sampled } from '../sim/agent-wire';
-import { carShape, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
+import { carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
 import { CORES } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
@@ -41,11 +43,13 @@ const SEE = 20, CAR_V = 25;
 
 /** where a car of the traffic is at arc length s, lane offset off (the page's road maths, the host's own) */
 export type CarAt = (c: Car, s: number, off: number, out: CarPose) => CarPose;
+/** the coaches at world time t (s) when the hour is hour (the page's timetable, the host's own) */
+type CoachesAt = (t: number, hour: number) => Iterable<CoachPose>;
 // a thing of the snapshot round the craft: a car of the traffic (where it is reckoned to be in a tick), or boxes as at
 // the snapshot's tick going on at a speed (vx, vz m/s)
 type Seen = { car: Sampled<CarState> } | { boxes: Solid[]; vx: number; vz: number };
 // what of a snapshot as held the craft may meet (the client's held snapshot is one)
-type Taken = { tick: number; cars: readonly Sampled<CarState>[]; detached: readonly CarState[]; crafts: readonly CraftState[]; boats: BoatView | null };
+type Taken = { tick: number; t: number; hour: number; cars: readonly Sampled<CarState>[]; detached: readonly CarState[]; crafts: readonly CraftState[]; boats: BoatView | null };
 
 interface Tick { p: number; seq: number; input: PilotInput; key: string; before: unknown }
 
@@ -70,6 +74,9 @@ export class Prediction {
   // the newest snapshot's things round the craft, and its tick
   private things: Seen[] = [];
   private thingsAt = 0;
+  // the newest snapshot's world clock (s) and hour: where the coaches are reckoned from (null: none seen yet)
+  private clockAt: number | null = null;
+  private hour = 12;
   private readonly cores = new Map<CraftType, CraftCore>();
   private readonly carAt: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
   // the events told ahead, each by the host's tick it is due in, not yet heard from the host; the page's tick told up
@@ -78,7 +85,7 @@ export class Prediction {
   private toldTo = 0;
   private fresh: unknown[] = [];
 
-  constructor(private readonly world: CraftWorld, private readonly carPose: CarAt) {}
+  constructor(private readonly world: CraftWorld, private readonly carPose: CarAt, private readonly coaches: CoachesAt = () => []) {}
 
   /** the core run ahead of craft id (null: not that one's) */
   coreOf(id: CraftId) { return id === this.id ? this.core : null; }
@@ -144,7 +151,7 @@ export class Prediction {
     col.prefetch(core.pose, core.velocity);
     // (the host's tick this one is; not known yet: the snapshot's)
     const at = this.lag === null ? this.thingsAt : t.p + this.lag;
-    const near = core.meet && this.things.length ? this.near(at) : null;
+    const near = core.meet && this.clockAt !== null ? this.near(at) : null;
     core.clock.run(STEP, (s) => {
       if (!core.step(input, s, col)) return false;
       if (near?.length) meetSolids(type, core, near, col);
@@ -172,6 +179,7 @@ export class Prediction {
         keep(solidAt(carShape(c), this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, at - 1), c.off, this.carAt)));
       } else for (const b of o.boxes) keep(dt ? { ...b, x: b.x + o.vx * dt, z: b.z + o.vz * dt } : b);
     }
+    for (const k of this.coaches(this.clockAt! + dt, this.hour)) keep(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
     return out;
   }
 
@@ -181,6 +189,8 @@ export class Prediction {
     const R = SEE + (Math.hypot(v.x, v.z) + CAR_V) * ahead, by = (x: number, z: number, b = 0) => Math.abs(x - p.x) < R + b && Math.abs(z - p.z) < R + b;
     T.length = 0;
     this.thingsAt = tick;
+    this.clockAt = s.t;
+    this.hour = s.hour;
     // (a car the session took out of the traffic is a detached one from that tick)
     const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
     for (const c of s.detached) if (c.detachedPose && by(c.detachedPose.x, c.detachedPose.z)) T.push({ boxes: [solidAt(carShape(c), c.detachedPose)], vx: 0, vz: 0 });
@@ -254,6 +264,7 @@ export class Prediction {
     this.errs = [];
     this.type = null;
     this.things = [];
+    this.clockAt = null;
     this.told = [];
     this.fresh = [];
   }

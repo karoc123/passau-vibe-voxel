@@ -8,6 +8,8 @@
 // (the heading kept) and the arrows turn. A car's roof is jumped onto, walked across and down off, and ridden on when
 // the car drives off faster than a walk (the host's walker riding along too); a page walking through a parked car is
 // kept out of it on the host; a car another player drives (the road physics) stops at a player on foot and nudges them.
+// A train standing at its station stops the walker at its side, a page walking through a coach is kept out of it on
+// the host, and a walker dropped onto a coach's roof is carried off with the train, on the host too.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -18,7 +20,7 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
-const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES, TOUR_B } = await imp('src/sim/solids.ts');
+const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES, TOUR_B, COACH_SHAPE } = await imp('src/sim/solids.ts');
 const { Foot } = await imp('src/nav/foot.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 
@@ -27,6 +29,10 @@ const G = 5;
 const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth' });
 // an excursion boat lying at its pier (x 181..219, its side at z 216: the tour's start)
 data.boats = { berths: [], tour: [[200, 220], [250, 220]] };
+// a track along x at z RAIL with a station at x 128: its train of four coaches stands there, from x 96.5 to 159.5,
+// from ARRIVED s of the world clock on for 25 s
+const RAIL = 240, ARRIVED = 1736, trains = () => [{ p: [[0, RAIL, G], [256, RAIL, G]], svc: [{ ref: 'RB 1', op: 'synthetic', stops: [128] }] }];
+data.traffic.trains = trains();
 const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 120 }, data);
 // the walk's world: flat ground, nothing in the way but a wall west of x 22 for z 90..110 (the voxels are
 // tools/collision.mjs's)
@@ -35,7 +41,7 @@ const ground = { support: () => G, blocked: (x, z) => wall(x, z) };
 
 const player = (name, x, z) => {
   const s = server.connect(name), link = sessionLink(s);
-  const c = new MirrorSimClient(new CloneLink(link), { roads: [], peds: [], ctrls: [] }, null, server.hello);
+  const c = new MirrorSimClient(new CloneLink(link), { roads: [], peds: [], ctrls: [], trains: trains() }, null, server.hello);
   c.send({ kind: 'view', view: { focus: { x, z } } });
   c.send({ kind: 'request', request: { kind: 'walk', pose: { x, y: G, z, h: 0, moving: false } } });
   return { c, link, s };
@@ -234,6 +240,51 @@ for (let i = 0; i < 6 / STEP; i++) {
 }
 check(driving && vTop > 5 && vNear < 2.5 && !through && startA - P.x > 1,
   `a driven car (up to ${vTop.toFixed(1)} m/s) stops at a player on foot and nudges them along (at most ${vNear.toFixed(1)} m/s touching them; shoved ${(startA - P.x).toFixed(1)} m${through ? ', passed through' : ''})`);
+
+// The train standing at its station (the world clock put just after it came in): walked at across the track from
+// the south at x 133 (a coach's middle third), the walker stops at its side on the page and on the host
+server.sim.traffic.t = ARRIVED + 1;
+const coachAt = (k, q) => reach(solidAt({ ...COACH_SHAPE, top: 9 }, { x: k.x, y: k.y, z: k.z, h: k.heading }), q.x, q.z, k.y);
+const hostCoaches = () => server.sim.traffic.trains.coaches();
+foot.setAt(ground, new THREE.Vector3(133, G, RAIL - 8), [133, RAIL - 8], true, new THREE.Vector3(0, 0, 1), 0);
+// (the host's walker brought over from the last scene within its walk bound)
+for (let i = 0; i < 90; i++) fframe(null);
+for (let i = 0; i < 2 / STEP; i++) fframe([1, 0]);
+const railSide = RAIL - COACH_SHAPE.hx - WALKER_R, hw = hostWalk();
+check(foot.pos.z < railSide + 0.01 && foot.pos.z > railSide - 0.4 && Math.abs(hw.z - foot.pos.z) < 0.05,
+  `a train standing at its station stops the walker at its side (z ${foot.pos.z.toFixed(2)}, the host's ${hw.z.toFixed(2)}, its side ${railSide.toFixed(2)})`);
+// a page walking through a standing coach (no solids in its walk), across at 3 m/s: kept out of it by the host
+deepest = -1;
+let wz = RAIL - 6;
+for (let i = 0; i < 4 / STEP; i++) {
+  wz += 3 * STEP;
+  A.c.send({ kind: 'seatInput', role: 'walker', input: { x: 133, y: G, z: wz, h: 0, moving: true } });
+  for (const p of all) p.c.update(STEP);
+  server.update(STEP);
+  for (const p of all) p.link.deliver();
+  const q = hostWalk();
+  for (const k of hostCoaches()) deepest = Math.max(deepest, reach(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }), q.x, q.z, q.y));
+}
+check(deepest <= 0.01, `a page walking through a train's coach is kept out of it by the host (its walker at most ${deepest.toFixed(3)} m in it)`);
+// dropped onto the coach's roof (as off a bridge) and the train left to go: carried along on the page and on the host,
+// till it is well on its way (at 20 s past its leaving: ~16 m/s)
+foot.fallAt({ x: 133, y: G + 6, z: RAIL }, { x: 0, y: 0, z: 0 }, Math.PI / 2);
+for (let i = 0; i < 30; i++) fframe(null);
+// (over a coach, its feet on the roof)
+const onCoach = (q, feet, list) => list.some((k) => coachAt(k, q) > 0 && Math.abs(feet - k.y - COACH_SHAPE.top) < 0.1);
+const rideFrom = foot.pos.x, upFirst = onCoach(foot.pos, foot.feet, [...A.c.traffic.trains.coaches()]);
+let pageOff = 0, hostOffTrain = 0, ticks = 0;
+while (server.sim.traffic.t < ARRIVED + 45) {
+  fframe(null);
+  ticks++;
+  if (!onCoach(foot.pos, foot.feet, [...A.c.traffic.trains.coaches()])) pageOff++;
+  const q = hostWalk();
+  if (!onCoach(q, q.y, hostCoaches())) hostOffTrain++;
+}
+const rode = foot.pos.x - rideFrom, lastW = hostWalk();
+// (the host's walker within two ticks of the train's way at full speed of the page's: the page sees the train late)
+check(upFirst && rode > 100 && pageOff === 0 && hostOffTrain === 0 && Math.hypot(lastW.x - foot.pos.x, lastW.z - foot.pos.z) < 32 * STEP,
+  `a walker on a coach's roof rides off with the train (carried ${rode.toFixed(1)} m; off its roof ${pageOff} of ${ticks} frames, the host's walker ${hostOffTrain} ticks, ${Math.hypot(lastW.x - foot.pos.x, lastW.z - foot.pos.z).toFixed(2)} m from the page's at the end)`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

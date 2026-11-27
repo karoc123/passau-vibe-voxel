@@ -60,7 +60,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
 - The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
-- Prediction meets the snapshot's cars, crafts and vessels, not the train coaches (their timetable at the host's
-  tick is not at hand); a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never
-  has (a crash a car moved out of) stays told.
+- Prediction: a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never has (a
+  crash a car moved out of) stays told.
+- A walker riding a coach's roof (or a car's) is taken by the host where its page saw the train, a round trip late:
+  others see it up to ~2 m back along the roof at speed (off a coach's end into the gap). Unmeasured over a real link.
 - Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
