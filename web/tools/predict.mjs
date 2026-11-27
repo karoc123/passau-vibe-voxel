@@ -29,7 +29,10 @@ const log = process.argv.includes('--log');
 const fail = [], check = (ok, s) => (ok ? console.log(`PASS ${s}`) : (console.log(`FAIL ${s}`), fail.push(s)));
 
 const G = 10, { meta } = await makeWorld({ size: [256, 256], ground: () => G });
-const tiles = () => new TileCache({ N: meta.tiles.N, load: (p) => fetchGzip(`data/tiles/${p}`) });
+// (the tile files read counted: each warm frame waits for those asked for, so what is in when hangs on no machine's load)
+let reading = 0;
+const tiles = () => new TileCache({ N: meta.tiles.N, load: (p) => (reading++, fetchGzip(`data/tiles/${p}`).finally(() => reading--)) });
+const settle = async () => { do await new Promise((r) => setImmediate(r)); while (reading); };
 // a track along x at z 65 with a station at x 128: its train of four coaches comes in at 1736 s of the world clock and
 // stands there 25 s, from x 96.5 to 159.5 (no train on the map before 1714 s)
 const RAIL = 65, ARRIVED = 1736;
@@ -46,28 +49,32 @@ const rand = seeded(7);
 // link0: each message's delay each way (s; default about 60-75 ms); corrections: each one the page's prediction makes
 // pushed (the script's frame, its size); t: the world clock (s) it starts at; roads: the traffic's; place: called once
 // the own craft is in, before the warm frames (what it places has its tiles in too); others: the host's pose each tick
-// of the second craft, else of the traffic's first car
+// of the second craft, else of the traffic's first car; first: called before the own craft is asked for
 async function fly(type, spot, script, hook = () => {}, link0 = {}) {
   const upDelay = link0.up ?? (() => UP + rand() * JITTER), downDelay = link0.down ?? (() => DOWN + rand() * JITTER);
-  const sim = new WorldSim(traffic(link0.roads), { crafts: { meta, cache: tiles(), now: () => performance.now() } });
+  // (the clock the collisions pace their tile fetches by: the simulated one, ms)
+  let t = 0;
+  const now = () => t * 1000;
+  const sim = new WorldSim(traffic(link0.roads), { crafts: { meta, cache: tiles(), now } });
   sim.traffic.t = link0.t ?? 0;
   const server = new SimServer(sim, sandbox(), null, { nodes: () => [], ready: async () => () => {} });
   server.interest = 400;
   const session = server.connect('a'), cache = tiles();
-  let t = 0, hostT = 0, nextTick = 0, lastUp = 0, lastDown = 0;
+  let hostT = 0, nextTick = 0, lastUp = 0, lastDown = 0;
   const up = [], down = [];
   const link = {
     onHello() {}, onSnapshot() {},
     send(commands) { lastUp = Math.max(lastUp, t + upDelay()); up.push([lastUp, JSON.parse(JSON.stringify(commands))]); },
     close() {},
   };
-  const client = new MirrorSimClient(link, traffic(link0.roads), null, hello(null), undefined, null, { meta, cache, now: () => performance.now() });
+  const client = new MirrorSimClient(link, traffic(link0.roads), null, hello(null), undefined, null, { meta, cache, now });
   link.onHello(session.hello);
-  const ctx = { sim: Promise.resolve(client), tiles: { meta, cache, now: () => performance.now() }, nav: { stepOut: null } };
+  const ctx = { sim: Promise.resolve(client), tiles: { meta, cache, now }, nav: { stepOut: null } };
   const craft = new CraftLink(ctx, type);
   await null;
   client.send({ kind: 'view', view: { focus: { x: spot.x, z: spot.z } } });
   craft.open();
+  link0.first?.(server);
   craft.spawn(spot);
   const host = [], drawn = [];
   // the host's side up to the time t: commands in as they arrive, a tick each STEP, its snapshot on its way back
@@ -78,9 +85,9 @@ async function fly(type, spot, script, hook = () => {}, link0 = {}) {
       if (hostT >= nextTick) {
         nextTick += STEP;
         server.update(STEP);
-        const [c, o] = sim.crafts.values(), car = sim.traffic.cars[0];
+        const [x, y] = sim.crafts.values(), [c, o] = link0.first ? [y, x] : [x, y], car = sim.traffic.cars[0];
         if (c) host.push({ ...c.core.pose });
-        if (o) link0.others?.push({ ...o.core.pose });
+        if (c && o) link0.others?.push({ ...o.core.pose });
         else if (car) link0.others?.push(sim.traffic.carPose(car, car.s, car.off, { x: 0, y: 0, z: 0, h: 0, pitch: 0 }));
         lastDown = Math.max(lastDown, hostT + downDelay());
         down.push([lastDown, structuredClone(session.snapshot())]);
@@ -98,13 +105,13 @@ async function fly(type, spot, script, hook = () => {}, link0 = {}) {
     if (link0.events) for (const e of craft.events()) link0.events.push([drawn.length, e]);
     return c ? structuredClone(c.core.drawn(craft.alpha)) : null;
   };
-  // in, and the tiles round it loaded (real time for their files)
+  // in, and the tiles round it loaded (each frame's asked for in before the next)
   let placed = !link0.place;
   for (let i = 0; i < 600; i++) {
     if (!placed && sim.crafts.size) { placed = true; link0.place(sim, server); }
     const d = frame(script[0][1]);
     if (d && i > 30 && [...sim.crafts.values()].every((c) => !c.placed || c.collision.surface(c.core.pose.x, c.core.pose.z) !== null)) break;
-    await new Promise((r) => setTimeout(r, 2));
+    await settle();
   }
   for (const [n, input] of script) for (let i = 0; i < n; i++) { hook(drawn.length, sim, server); drawn.push(frame(input)); }
   return { drawn, host };
@@ -273,33 +280,38 @@ const MOVED = 0.3, OFF = 0.8, V = 12, DRIVE = { turn: 0, drive: 1, lift: 0, side
 const BRAKES = 0.05;
 const ROAD = 128, CROSS = { x: 100, y: G + 1, z: 95, h: Math.PI / 2, speed: V };
 const MOVING = [
-  { what: 'another player\'s hovercraft coming head-on', at: { x: 0, z: 70, h: Math.PI }, stick: () => DRIVE },
+  { what: 'another player\'s hovercraft coming head-on', at: { x: 0, z: 70, h: Math.PI }, stick: () => DRIVE, phases: [0, 0.2, 0.4, 0.6] },
   { what: 'another player\'s hovercraft crossing its way', at: { x: -30, z: 40, h: Math.PI / 2 }, stick: () => DRIVE },
   { what: 'another player\'s hovercraft turning in front of it', at: { x: -6, z: 55, h: Math.PI }, stick: (i) => ({ ...DRIVE, turn: i > 40 ? -1 : 0 }) },
   { what: 'a car of the traffic driving across its way', brakes: BRAKES, spot: CROSS, roads: [{ p: [[ROAD, 250, G], [ROAD, 6, G]], a: 0, b: 1, w: 1, lanes: 1, v: V, c: 1, o0: 0 }] },
 ];
 for (const K of MOVING) {
-  let b = null;
-  const fixes = [], others = [];
-  const place = K.at && ((sim, server) => {
-    const p = [...sim.crafts.values()][0].core.pose;
-    b = server.connect('b');
-    b.send({ kind: 'request', request: { kind: 'craft', type: 'hovercraft', spot: { x: p.x + K.at.x, y: G + 1, z: p.z + K.at.z, h: K.at.h, speed: V } } });
-  });
-  const { drawn, host } = await fly('hovercraft', K.spot ?? { x: 128, y: G + 1, z: 40, h: 0, speed: V }, [[300, DRIVE], [30, DRIVE]], (i) => {
-    if (b && i > 1) b.send({ kind: 'seatInput', role: 'pilot', input: K.stick(i) });
-  }, { place, roads: K.roads, corrections: fixes, others });
-  drawn.length -= 30;
-  // (how near the host had them: they met; how far the other went: it moved)
-  let near = Infinity;
-  for (let i = 0; i < host.length && i < others.length; i++) near = Math.min(near, Math.hypot(host[i].x - others[i].x, host[i].z - others[i].z));
-  const went = others.length ? Math.hypot(others.at(-1).x - others[0].x, others.at(-1).z - others[0].z) : 0;
-  const fix = Math.max(0, ...fixes.filter(([f]) => f > 10).map(([, e]) => e));
-  let off = 0;
-  for (let i = 10; i < drawn.length; i++) off = Math.max(off, offPath(pos(drawn[i]), host));
-  if (log) console.log(K.what, 'near', near.toFixed(2), 'went', went.toFixed(1), 'fix', fix.toFixed(3), 'off', off.toFixed(3), JSON.stringify(fixes.filter(([f, e]) => f > 10 && e > 0.01).map(([f, e]) => [f, +e.toFixed(2)])));
+  // (meeting at each phase of a tick: where in the tick the gap closes decides which of the two the host meets first)
+  // (and the other there before the craft or after it: the host steps its crafts in the order they came)
+  let fix = 0, off = 0, near = Infinity, went = 0;
+  const spot = K.spot ?? { x: 128, y: G + 1, z: 40, h: 0, speed: V };
+  for (const first of K.phases ? [false, true] : [false]) for (const dz of K.phases ?? [0]) {
+    let b = null;
+    const fixes = [], others = [];
+    const other = K.at && ((server) => {
+      b = server.connect('b');
+      b.send({ kind: 'request', request: { kind: 'craft', type: 'hovercraft', spot: { x: spot.x + K.at.x, y: G + 1, z: spot.z + K.at.z + dz, h: K.at.h, speed: V } } });
+    });
+    const { drawn, host } = await fly('hovercraft', spot, [[300, DRIVE], [30, DRIVE]], (i) => {
+      if (b && i > 1) b.send({ kind: 'seatInput', role: 'pilot', input: K.stick(i) });
+    }, { place: other && !first ? (sim, server) => other(server) : undefined, first: other && first ? other : undefined, roads: K.roads, corrections: fixes, others });
+    drawn.length -= 30;
+    // (how near the host had them: they met; how far the other went: it moved)
+    for (let i = 0; i < host.length && i < others.length; i++) near = Math.min(near, Math.hypot(host[i].x - others[i].x, host[i].z - others[i].z));
+    went = Math.max(went, others.length ? Math.hypot(others.at(-1).x - others[0].x, others.at(-1).z - others[0].z) : 0);
+    const f = Math.max(0, ...fixes.filter(([f]) => f > 10).map(([, e]) => e));
+    fix = Math.max(fix, f);
+    for (let i = 10; i < drawn.length; i++) off = Math.max(off, offPath(pos(drawn[i]), host));
+    if (log) console.log(K.what, first ? 'there first' : '', dz, 'near', near.toFixed(2), 'went', went.toFixed(1), 'fix', f.toFixed(3), 'off', off.toFixed(3), JSON.stringify(fixes.filter(([f, e]) => f > 10 && e > 0.01).map(([f, e]) => [f, +e.toFixed(2)])));
+  }
+  const at = K.phases ? `; met at ${K.phases.length} phases of a tick, there before it and after` : '';
   if (K.brakes) check(fix < K.brakes, `driven at ${K.what}, the car braking for the craft as the host has it: the page's largest correction ${fix.toFixed(3)} m (under ${K.brakes})`);
-  check(fix < MOVED && off < OFF, `driven at ${K.what} (${went.toFixed(0)} m driven, ${near.toFixed(1)} m between them at the nearest): the page's largest correction ${fix.toFixed(2)} m (under ${MOVED}), the drawn craft ${off.toFixed(2)} m off the host's path (under ${OFF})`);
+  check(fix < MOVED && off < OFF, `driven at ${K.what} (${went.toFixed(0)} m driven, ${near.toFixed(1)} m between them at the nearest${at}): the page's largest correction ${fix.toFixed(2)} m (under ${MOVED}), the drawn craft ${off.toFixed(2)} m off the host's path (under ${OFF})`);
 }
 
 if (fail.length) process.exit(1);
