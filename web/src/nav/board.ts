@@ -17,7 +17,8 @@ import type { Nav } from './nav';
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
 // keys leave E free; X gets out of any (the one key no vehicle's own keys have, so a craft flying on E is left too).
-// C switches seats in a craft with a gun (from the controls to the gun and back), so one player alone can man both.
+// C switches seats in a craft with a gun (from the controls to the gun and back), so one player alone can man both;
+// on a touch screen a button does (touch/buttons.ts), shown only while there is a seat to switch to.
 
 // m from its sides: a step inside the host's Tuning.walk.board, so a walk the host has not yet taken is no refusal
 const REACH = 3;
@@ -79,19 +80,33 @@ export class Boarding {
     this.target = nav.onFoot && !this.pending ? this.find() : null;
   }
 
-  /** from the controls of the craft the player is in to its gun, or from the gun back to its free controls (C);
-   * false: not in such a craft. The host decides; the shell of the seat taken takes over (answered) */
+  /** what the seat switch's button says, or null: hidden (not in a craft with a gun, or its other seat taken) */
+  swapLabel() {
+    const to = this.swapTo();
+    return to && (to.role === 'passenger' ? 'To the gun' : 'To the wheel');
+  }
+
+  /** from the controls of the craft the player is in to its gun, or from the gun back to its free controls (C, the
+   * seat switch's button); false: not in such a craft. The host decides; the shell of the seat taken takes over
+   * (answered) */
   swap() {
-    const nav = this.nav, sim = nav.sim, s = sim?.seat();
-    if (!sim || !s || s.entity.kind !== 'craft' || this.pending || !nav.craft) return false;
-    const c = sim.crafts().find((q) => q.id === s.entity.id), seats = c && SEATS.craft[c.type];
-    if (!c || !seats?.some((q) => q.mount)) return false;
-    const role = s.role === 'pilot' ? 'passenger' : s.role === 'passenger' && c.pilot === null ? 'pilot' : null;
-    if (!role) return false;
+    const to = this.swapTo();
+    if (!to) return false;
+    const { sim, c, role } = to;
     sim.results('enterSeat', role);
     sim.send({ kind: 'enterSeat', entity: { kind: 'craft', id: c.id }, role });
     this.pending = { t: { ref: { kind: 'craft', id: c.id }, role, label: c.type, craft: c }, at: performance.now(), swap: true };
     return true;
+  }
+
+  // the seat a switch would take in the craft the player is in, or null: none
+  private swapTo() {
+    const nav = this.nav, sim = nav.sim, s = sim?.seat();
+    if (!sim || !s || s.entity.kind !== 'craft' || this.pending || !nav.craft) return null;
+    const c = sim.crafts().find((q) => q.id === s.entity.id), seats = c && SEATS.craft[c.type];
+    if (!c || !seats?.some((q) => q.mount)) return null;
+    const role = s.role === 'pilot' ? 'passenger' : s.role === 'passenger' && c.pilot === null ? 'pilot' : null;
+    return role && { sim, c, role } as const;
   }
 
   private canGetOut(key?: BoardKey) {

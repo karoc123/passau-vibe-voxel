@@ -75,7 +75,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Gunner**: a passenger at a mount; no role of its own. Not "co-pilot".
 - **Aim point**: the world point under a gunner's crosshair as their page sees it, sent with each shot; the host aims
   at it from the mount where it has the vehicle.
-- **Seat switch**: one key from the wheel of the own vehicle to its gun, or back.
+- **Seat switch**: one key (or, on a touch screen, one button) from the wheel of the own vehicle to its gun, or back.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.
 - **Dead**: an NPC at 0: lies where it fell, no target and no body to shots, taken away after a while. A player is
   down, never dead.
