@@ -174,14 +174,14 @@ export class VoxelCollision {
     return { ground: surfaceAt(tile.caps, i, tile.ground[i], fx, fz), top: surfaceAt(tile.caps, i, top, fx, fz) };
   }
 
-  // The drone's cube from p moved by d: how far it gets (fraction of d) and what it hits first
-  sweep(p: Vec3, d: Vec3): Sweep {
+  // The drone's cube (half side R) from p moved by d: how far it gets (fraction of d) and what it hits first
+  sweep(p: Vec3, d: Vec3, R = this.radius): Sweep {
     let fraction = 1;
     let hit: ImpactKind | null = null, normalAxis = 0;
     const result = (): Sweep => hit ? { fraction, hit, axis: normalAxis } : { fraction, hit: null };
     // Reserve room for the drone at the edges of the model.
     for (const [axis, extent] of [[0, this.width], [1, this.ceiling], [2, this.depth]]) {
-      const r = this.radius;
+      const r = R;
       const start = component(p, axis), move = component(d, axis), end = start + move;
       if (end >= r && end <= extent - r) continue;
       const limit = (end < r ? r : extent - r);
@@ -193,7 +193,6 @@ export class VoxelCollision {
       }
     }
 
-    const R = this.radius;
     const minX = Math.max(0, Math.floor(Math.min(p.x, p.x + d.x * fraction) - R));
     const maxX = Math.min(this.width - 1, Math.floor(Math.max(p.x, p.x + d.x * fraction) + R));
     const minZ = Math.max(0, Math.floor(Math.min(p.z, p.z + d.z * fraction) - R));

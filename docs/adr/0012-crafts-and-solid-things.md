@@ -19,7 +19,10 @@ at its own fixed step through its own collision; cars are road physics bodies th
   train coaches. Not the walkers: their walk is their page's, and they are shoved as by a car.
 - The river's vessels give way: one under way slows to a stop when a craft is ahead of its bow or close beside it,
   and goes on once the way is clear, later by what it lost. Its route and timetable stay as they are.
-- The vessels are solid to the walker too, where the page draws them.
+- The vessels are solid to the walker too, where the page draws them. The planes meet solid things as a
+  wall: in the air they crash, afloat they bump. Their wings are a second box, and a few small cubes along each wing
+  against the voxels. The drone and the paraglider are light: they meet solid things but stop nothing. The
+  traffic's cars without a body stop for a craft in their lane, as for a walker, and never push it.
 
 ## Why not the physics engine
 
@@ -30,9 +33,7 @@ costs about 50 µs a craft a tick and works for every craft alike.
 ## Consequences
 
 - To the road physics' cars (a driven car) the crafts with a shape are walls it does not move, as a train's coaches
-  are: a car bumps off a hovercraft and does not shove it. The traffic's cars without a body still do not feel crafts,
-  and a craft wedged against a shore by a moving thing is passed through.
-- The planes have a shape (the fuselage, not the wings) but no meet: solid to others, they do not feel what they run
-  into. The drone and the paraglider have none: light, they would be walls to what meets them.
-- A held vessel may come in late; a ship rafted outside it is not held back with it.
+  are: a car bumps off a hovercraft and does not shove it. A craft wedged against a shore by a moving thing is passed
+  through. A craft left on a road holds up its traffic until it goes. A held vessel may come in late; a ship rafted
+  outside it is not held back with it. The page's run ahead learns of a plane's crash a round trip later.
 - Shapes are upright boxes: a helicopter let down onto a car is pushed off sideways, it does not land on the roof.

@@ -5,18 +5,24 @@
 // traffic boat and at another player's boat bounces off it and never passes through; a hovercraft driven at a parked
 // car stops at it. A car a player drives (the road physics) at a hovering hovercraft bumps off it, never through it
 // nor shoving it away (the crafts are walls to the road physics); a car of the traffic on a road stops for a player on
-// foot in its lane.
+// foot in its lane, and for a hovercraft let down in it. A floatplane and a jet flown at a parked car crash on it, one
+// passing it close crashes on it with a wing, a wing tip clipping a pillar crashes it; a drone bounces off a parked
+// car and a paraglider stops at one, none passes through.
 // usage (in web/): node tools/craft-solids.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 
 const { nodeHost } = await imp('src/host/node.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { carShape, CRAFT_SHAPES, overlap, solidAt, vesselShape, WALKER_R } = await imp('src/sim/solids.ts');
+const { carShape, CRAFT_SHAPES, meetShapes, overlap, solidAt, vesselShape, WALKER_R } = await imp('src/sim/solids.ts');
 const { HOVER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts');
+const { DRONE } = await imp('src/sim/craft/fpv-flight.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const WATER = 4, LAND = 6, SHORE = 160, TOUR_Z = 60;
-const { dir, data } = await synthData({ size: [256, 256], ground: (x, z) => (z < SHORE ? WATER : LAND), surface: (x, z) => (z < SHORE ? 'water' : 'road') });
+// (a pillar on the land a plane's wing tip clips)
+const PILLAR = { x0: 200, x1: 202, z0: 198, z1: 204 };
+const { dir, data } = await synthData({ size: [256, 256], ground: (x, z) => (z < SHORE ? WATER : LAND), surface: (x, z) => (z < SHORE ? 'water' : 'road'),
+  boxes: [{ ...PILLAR, y0: LAND, y1: LAND + 14, mat: 'wall' }] });
 data.boats = { berths: [], tour: [[30, TOUR_Z], [230, TOUR_Z]] };
 // a straight one-lane road on the land, east along z ROAD_Z (its points: x, z, height)
 const ROAD_Z = 245;
@@ -25,10 +31,10 @@ const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, inter
 const sim = server.sim, T = sim.traffic;
 
 const players = [];
-const player = (name, type, x, z, h, y) => {
+const player = (name, type, x, z, h, y, speed) => {
   const s = server.connect(name), link = sessionLink(s);
   s.send({ kind: 'view', view: { focus: { x: 128, z: 128 } } });
-  if (type) s.send({ kind: 'request', request: { kind: 'craft', type, spot: { x, y, z, h } } });
+  if (type) s.send({ kind: 'request', request: { kind: 'craft', type, spot: { x, y, z, h, speed } } });
   const P = { s, link, type, craft: () => sim.craftOf(s.player) };
   P.input = (input) => s.send({ kind: 'seatInput', role: 'pilot', input });
   P.put = (x, z, h) => s.send({ kind: 'request', request: { kind: 'placeCraft', spot: { x, y, z, h } } });
@@ -144,6 +150,73 @@ let past = -Infinity;
 await run(10, () => { if (T.cars.includes(tc)) past = Math.max(past, tc.geo.px - 150); });
 check(T.cars.includes(tc) && past < -WALKER_R && tc.v < 0.1 && tc.why === 'walker',
   `a car of the traffic stops for a player on foot in its lane (its front ${(-past).toFixed(2)} m short of the walker, ${tc.v.toFixed(2)} m/s, waiting for: ${tc.why})`);
+
+// the light crafts and the planes, each flown along +x at a car parked across its way (or a pillar) on the land: met by
+// all its boxes (the planes' wings too), never reached into further than a hair
+const parked = (id, x, z) => {
+  const c = { ...structuredClone(car), id, geo: { ...car.geo, cx: x, cy: z }, detachedPose: { x, y: LAND, z, h: 0, pitch: 0, roll: 0 } };
+  T.detachedCars.push(c);
+  return solidAt(carShape(c), c.detachedPose);
+};
+const deepest = (P, solid) => Math.max(...meetShapes(P.type).map((sh) => overlap(solidAt(sh, P.craft().core.pose), solid)));
+const fly = async (P, solid, s, input, each = () => {}) => {
+  let d = 0, x = -Infinity;
+  if (input) P.input(input);
+  await run(s, () => { if (P.craft()?.placed) { d = Math.max(d, deepest(P, solid)); x = Math.max(x, P.craft().core.pose.x); each(); } });
+  P.s.send({ kind: 'request', request: { kind: 'dropCraft' } });
+  return { d, x };
+};
+const crashed = (P) => () => { if (P.craft().core.flight.state === 'crashed') P.crashed = true; };
+const LEVEL = { turn: 0, pitch: 0, throttle: 0.6 };
+
+// a floatplane flown low (its floats 0.1 m over the road) at a parked car, nose on
+const car1 = parked(9101, 110, 190);
+const E = player('e', 'floatplane', 40, 190, Math.PI / 2, LAND + 1.7, 45);
+let r = await fly(E, car1, 3, LEVEL, crashed(E));
+check(E.crashed && r.d <= 0.05 && r.x < car1.x,
+  `a floatplane flown at a parked car crashes on it, never through (its furthest x ${r.x.toFixed(1)}, the car at ${car1.x}; deepest ${r.d.toFixed(3)} m)`);
+
+// a jet flown past a parked car with only its low wing over it
+const car2 = parked(9102, 110, 172);
+const jz = 172 + carShape(car).hz + CRAFT_SHAPES.jet.hx + 0.5;
+const F = player('f', 'jet', 30, jz, Math.PI / 2, LAND + 1.5, 80);
+r = await fly(F, car2, 3, { ...LEVEL, throttle: 1 }, crashed(F));
+check(F.crashed && r.d <= 0.05 && r.x < car2.x + car2.hx,
+  `a jet flown past a parked car (its fuselage ${(jz - 172 - carShape(car).hz - CRAFT_SHAPES.jet.hx).toFixed(1)} m clear of it) crashes on it with its wing (furthest x ${r.x.toFixed(1)}; deepest ${r.d.toFixed(3)} m)`);
+
+// a floatplane flown past a pillar its fuselage clears by 1.5 m, its wing tip over the pillar
+const G = player('g', 'floatplane', 130, PILLAR.z1 + 3, Math.PI / 2, LAND + 1.7, 45);
+r = await fly(G, { x: 0, y: 0, z: 0, h: 0, hx: 0, hz: 0, top: 0 }, 3, LEVEL, crashed(G));
+check(G.crashed && r.x < PILLAR.x0 && r.x > PILLAR.x0 - 5,
+  `a floatplane flown past a pillar (its fuselage clear, its wing tip not) crashes on it (furthest x ${r.x.toFixed(1)}, the pillar from ${PILLAR.x0})`);
+
+// a drone hovering a little under a parked car's roof 3 m short of its side, sent at it at 8 m/s
+const car3 = parked(9103, 60, 205);
+const H = player('h', 'drone', car3.x - car3.hx - 3, 205, Math.PI / 2, LAND + car3.top * 0.8);
+H.input({ roll: 0, pitch: 0, yaw: 0, throttle: DRONE.hover });
+await run(0.5);
+Object.assign(H.craft().core.flight.velocity, { x: 8, y: 0, z: 0 });
+r = await fly(H, car3, 1.5);
+check(r.d <= 0.05 && r.x < car3.x - car3.hx,
+  `a drone flown at a parked car bounces off it, never through (its furthest x ${r.x.toFixed(2)}, the car's side at ${(car3.x - car3.hx).toFixed(2)}; deepest ${r.d.toFixed(3)} m)`);
+
+// a paraglider gliding in low at a parked car
+const car4 = parked(9104, 60, 175);
+const I = player('i', 'paraglider', 48, 175, Math.PI / 2, LAND + 1.4, 9);
+r = await fly(I, car4, 3, { turn: 0, drive: 0, lift: 0, side: 0 });
+check(r.d <= 0.05 && r.x < car4.x - car4.hx,
+  `a paraglider gliding at a parked car stops at it, never through (its furthest x ${r.x.toFixed(2)}, the car's side at ${(car4.x - car4.hx).toFixed(2)}; deepest ${r.d.toFixed(3)} m)`);
+
+// the car of the traffic that stopped for D goes on once D has left its lane, at C's hovercraft let down in it
+C.put(200, ROAD_Z, Math.PI / 2);
+C.input({ turn: 0, drive: 0, lift: 0, side: 0 });
+D.s.send({ kind: 'request', request: { kind: 'walk', pose: { x: 150, y: LAND, z: 230, h: 0, moving: false } } });
+await run(0.2);
+const hc = solidOf(C);
+past = -Infinity;
+await run(16, () => { if (T.cars.includes(tc)) past = Math.max(past, tc.geo.px - (hc.x - hc.hz)); });
+check(T.cars.includes(tc) && past < 0 && tc.v < 0.1 && tc.why === 'craft',
+  `a car of the traffic stops for a hovercraft in its lane (its front ${(-past).toFixed(2)} m short, ${tc.v.toFixed(2)} m/s, waiting for: ${tc.why})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);
