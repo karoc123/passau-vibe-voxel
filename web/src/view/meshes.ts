@@ -56,22 +56,29 @@ export const OPEN_CARS = 16;
 const spans = (a: Part, b: Part) => a[4] < b[4] + b[1] && b[4] < a[4] + a[1] && Math.abs(a[5] - b[5]) < (a[2] + b[2]) / 2;
 // a side window: glass at least as wide as a part of the body it wraps (a windscreen or a visor is narrower and stays)
 const wraps = (g: Part, q: Part) => g[6] === 'glass' && q[6] !== 'glass' && q[0] <= g[0] && spans(q, g);
-// q without the slab across it at g's height and length: what is below and above it, and before and after it
-function carve(q: Part, g: Part): Part[] {
+// an end wall this thin beside a side window is the windscreen or the rear window: glass too, so who sits in the car
+// shows from ahead and from behind
+const END = 0.3;
+// q without the slab across it at g's height and length: what is below and above it, and before and after it (an
+// end wall thinner than END goes to the glass)
+function carve(q: Part, g: Part, panes: Part[]): Part[] {
   const [w, h, l, x, y, z, c] = q, top = y + h, g0 = g[5] - g[2] / 2, g1 = g[5] + g[2] / 2, q0 = z - l / 2, q1 = z + l / 2;
   const lo = Math.max(y, g[4]), hi = Math.min(top, g[4] + g[1]), out: Part[] = [];
   if (lo > y) out.push([w, lo - y, l, x, y, z, c]);
   if (top > hi) out.push([w, top - hi, l, x, hi, z, c]);
-  if (g0 > q0) out.push([w, hi - lo, g0 - q0, x, lo, (q0 + g0) / 2, c]);
-  if (q1 > g1) out.push([w, hi - lo, q1 - g1, x, lo, (g1 + q1) / 2, c]);
+  if (g0 > q0) (g0 - q0 < END ? panes : out).push([w, hi - lo, g0 - q0, x, lo, (q0 + g0) / 2, c]);
+  if (q1 > g1) (q1 - g1 < END ? panes : out).push([w, hi - lo, q1 - g1, x, lo, (g1 + q1) / 2, c]);
   return out;
 }
-/** a model's parts with its side windows cut out of the body behind them, and those windows */
+const inside = (a: Part, b: Part) => Math.abs(a[3] - b[3]) < (a[0] + b[0]) / 2 && spans(a, b);
+/** a model's parts with its side windows cut out of the body behind them, and the glass: those windows, the end
+ * walls beside them, and any glass with no body behind it any more (a windscreen before an opened end, a bus's band) */
 function opened(model: readonly Part[]): { parts: Part[]; panes: Part[] } {
-  const panes = model.filter((g) => model.some((q) => wraps(g, q)));
-  let parts = model.filter((p) => !panes.includes(p));
-  for (const g of panes) parts = parts.flatMap((q) => (wraps(g, q) ? carve(q, g) : [q]));
-  return { parts, panes };
+  const sides = model.filter((g) => model.some((q) => wraps(g, q))), panes = [...sides];
+  let parts = model.filter((p) => !sides.includes(p));
+  for (const g of sides) parts = parts.flatMap((q) => (wraps(g, q) ? carve(q, g, panes) : [q]));
+  const free = parts.filter((g) => g[6] === 'glass' && !parts.some((q) => q[6] !== 'glass' && inside(g, q)));
+  return { parts: parts.filter((p) => !free.includes(p)), panes: [...panes, ...free] };
 }
 
 // instanced meshes for every car (of each type), person, bike and signal head; the simulation writes their matrices

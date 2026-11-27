@@ -11,6 +11,7 @@ import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import type { CraftContext, PlayerCraft } from './craft';
 import { gameKey } from './input';
 import { ModePanel } from './mode-panel';
+import { SEAT_NEAR, seatEye, seatPlace } from '../view/seats';
 import './special-craft.css';
 
 // Riding along in another player's car or craft (a passenger's seat, taken from foot: board.ts). The input steers
@@ -18,11 +19,11 @@ import './special-craft.css';
 // the seat's, looked round by dragging); in a car Nav's ride camera follows the car. The seat lost under it (the craft
 // taken away: the host has put the player on foot beside it) ends the ride on foot there.
 
-const CS = CRAFT_SCALE.helicopter;
-// the chase camera's distances as the pilot's (special-craft.ts), and the eyes' height in the cabin over the origin
-const VIEW: Record<string, { back: number; up: number; look: number; eye: number }> = {
-  hovercraft: { back: 22, up: 7.5, look: 1.8, eye: 1.9 },
-  helicopter: { back: 17 * CS, up: 6 * CS, look: 1.2 * CS, eye: 0.5 * CS },
+const CS = CRAFT_SCALE.helicopter, UP = new THREE.Vector3(0, 1, 0);
+// the chase camera's distances as the pilot's (special-craft.ts)
+const VIEW: Record<string, { back: number; up: number; look: number }> = {
+  hovercraft: { back: 22, up: 7.5, look: 1.8 },
+  helicopter: { back: 17 * CS, up: 6 * CS, look: 1.2 * CS },
 };
 // the seat not seen held for this long after boarding: refused late or lost before the first snapshot
 const SEAT_MS = 2500;
@@ -41,6 +42,8 @@ export class PassengerMode implements PlayerCraft {
   private col: VoxelCollision | null = null;
   private last: Pose | null = null;
   private seatView = false;
+  // the camera's near plane before the seat view shortened it
+  private savedNear: number | null = null;
   private yaw = 0;
   private dyaw = 0;
   private dpitch = 0;
@@ -91,6 +94,11 @@ export class PassengerMode implements PlayerCraft {
   /** in a car Nav's ride camera follows it; in a craft this shell's own */
   get view(): 'own' | 'ride' { return this.riding?.ref.kind === 'car' ? 'ride' : 'own'; }
 
+  get inSeat() {
+    const R = this.riding;
+    return !!R && !this.out && (R.ref.kind === 'craft' ? this.seatView : this.ctx.nav.ride?.view === 'eyes');
+  }
+
   private get ownsCamera() { return !!this.riding && this.riding.ref.kind === 'craft' && !this.out; }
 
   get mapPose(): Pose | null { return this.riding ? this.last : null; }
@@ -131,6 +139,7 @@ export class PassengerMode implements PlayerCraft {
     this.col?.release();
     this.col = null;
     if (R.ref.kind === 'craft') this.rig.end();
+    this.near(false);
     this.draw();
   }
 
@@ -153,8 +162,13 @@ export class PassengerMode implements PlayerCraft {
     this.yaw = followAngle(this.yaw, p.h, 4, dt);
     const yaw = this.yaw + this.dyaw, dir = this.off.set(Math.sin(yaw) * Math.cos(this.dpitch), Math.sin(this.dpitch), Math.cos(yaw) * Math.cos(this.dpitch));
     let fov = 58;
+    const seat = this.sim?.passengers().find(([kind, id, player]) => kind === 'craft' && id === R.ref.id && player === this.sim?.player);
+    const place = seat ? seatPlace('craft', R.type, seat[3]) : null;
+    this.near(this.seatView);
     if (this.seatView) {
-      this.pos.set(p.x, p.y + v.eye, p.z);
+      // (at the own seat's eyes, turned with the craft's heading)
+      const e = place ? seatEye(place) : { x: 0, y: v.look, z: 0 };
+      this.pos.set(e.x, e.y, e.z).applyAxisAngle(UP, p.h).add(this.at.set(p.x, p.y, p.z));
       this.at.copy(this.pos).add(dir);
       fov = clamp(70 * this.zoom, 40, 90);
     } else {
@@ -166,6 +180,16 @@ export class PassengerMode implements PlayerCraft {
     }
     const cam = this.rig.place(this.pos, this.rig.look(this.pos, this.at), fov, dt);
     this.ctx.target.copy(cam.position).addScaledVector(cam.getWorldDirection(this.off), 10);
+  }
+
+  // the seat view's near plane (seats.ts SEAT_NEAR) while on, the camera's own back once off
+  private near(on: boolean) {
+    const cam = this.ctx.camera;
+    if (on && this.savedNear === null) this.savedNear = cam.near;
+    else if (on || this.savedNear === null) return;
+    cam.near = on ? SEAT_NEAR : this.savedNear;
+    if (!on) this.savedNear = null;
+    cam.updateProjectionMatrix();
   }
 
   // whether the host still has the player in R's passenger seat
@@ -188,6 +212,7 @@ export class PassengerMode implements PlayerCraft {
   // the seat gone: on foot on the ground near where it was last (the host has put the body there already)
   private putOut(R: Riding) {
     this.out = true;
+    this.near(false);
     const nav = this.ctx.nav, p = this.last;
     this.panel.say(`Out of the ${R.label}: it is gone.`, 3000);
     if (!p) { nav.flyUp(); return; }

@@ -34,8 +34,10 @@ function body() {
     g.push(box(0.04, 1.8, 0.9, x, 1.45, -1.95, LIVERY), box(0.05, 0.45, 0.5, x * 1.005, 1.85, -1.95, GLASS),
       box(0.05, 0.08, 0.2, x * 1.005, 1.35, -1.62, METAL), box(0.06, 0.5, 0.5, x * 1.01, 0.95, 3.3, ORANGE));
   }
-  g.push(box(2.2, 0.7, 1.4, 0, 2.95, 3.1, HULL), box(2.22, 0.35, 1.42, 0, 3.02, 3.1, GLASS), box(2.3, 0.08, 1.5, 0, 3.34, 3.1, ROOF),
-    box(0.1, 0.36, 1.44, 0, 3.02, 3.1, HULL), box(0.08, 0.7, 0.08, 0, 3.7, 2.8, METAL));
+  // (the wheelhouse's glass band a pane of its own, onto its pilot; a ceiling under the cabin's roof hides the pilot's
+  // legs, which reach down into it, from who rides along)
+  g.push(box(2.2, 0.245, 1.4, 0, 2.7225, 3.1, HULL), box(2.2, 0.105, 1.4, 0, 3.2475, 3.1, HULL), box(2.3, 0.08, 1.5, 0, 3.34, 3.1, ROOF),
+    box(0.1, 0.36, 1.44, 0, 3.02, 3.1, HULL), box(0.08, 0.7, 0.08, 0, 3.7, 2.8, METAL), box(4.16, 0.02, 6.56, 0, 2.03, 0.7, ROOF));
   // the foredeck: rails on posts, a bow door, bollards
   for (const x of [-2.2, 2.2]) {
     g.push(box(0.04, 0.04, 1.4, x, 1.35, 4.9, METAL), box(0.18, 0.25, 0.18, x * 0.75, 0.63, 4.5, DARK));
@@ -75,9 +77,10 @@ class HovercraftLook implements CraftLook<'hovercraft'> {
   constructor() {
     const hull = new THREE.Mesh(body(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1 }));
     hull.castShadow = hull.receiveShadow = true;
-    // (the cabin's window band seen through, onto who rides along: view/seats.ts)
-    const pane = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.75, 6.6).translate(0, 1.675, 0.7),
-      new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false }));
+    // (the cabin's window band and the wheelhouse's seen through, onto who rides along and the pilot: view/seats.ts)
+    const glass = new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false });
+    const pane = new THREE.Mesh(mergeGeometries([new THREE.BoxGeometry(4.2, 0.75, 6.6).translate(0, 1.675, 0.7),
+      new THREE.BoxGeometry(2.22, 0.35, 1.42).translate(0, 3.02, 3.1)]), glass);
     this.group.add(hull, pane);
     const part = parts();
     // the fans: a hub and five pitched blades each, and a faint disc so that they read as turning at any frame rate

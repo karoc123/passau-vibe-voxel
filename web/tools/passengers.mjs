@@ -12,7 +12,11 @@
 // pilot's page draws the craft in every frame after getting out of it (view/crafts/crafts-view.ts). Over a link that
 // holds each message 70 ms, the pilot's page (prediction on) keeps the passenger within 3 cm of their seat on the craft
 // as it draws it, every frame of a flight, while the snapshot's craft lies metres off. A page beside a parked car sees
-// its passenger and its driver through the side windows (a ray meets their figure first), an empty car stays closed.
+// its passenger and its driver through the side windows (a ray meets their figure first), from behind and ahead through
+// its rear window and windscreen, an empty car stays closed; the driver's own page draws them in it from the chase
+// view, not from their own eyes. Another page sees each craft's pilot through its glass (the drone has none); a
+// passenger's page draws the pilot and the others, itself only from the chase view; from each seat's eyes no other
+// figure is within the camera's near plane.
 // Out by key: X out of any vehicle (the helicopter, hovercraft and drone keep E for themselves), E where it is free.
 // usage (in web/): node tools/passengers.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
@@ -32,7 +36,7 @@ const { StreetLife } = await imp('src/view/life.ts');
 const { HIPS } = await imp('src/view/avatars.ts');
 const { CraftsView } = await imp('src/view/crafts/crafts-view.ts');
 const { Boarding } = await imp('src/nav/board.ts');
-const { seatPlace } = await imp('src/view/seats.ts');
+const { seatPlace, seatEye, pilotPlace, SEAT_NEAR } = await imp('src/view/seats.ts');
 const { TileCache } = await imp('src/core/tile-cache.ts');
 const { fetchGzip } = await imp('src/fetch.ts');
 const { CRAFT_SCALE } = await imp('src/sim/craft/craft-motion.ts');
@@ -42,10 +46,12 @@ const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok 
 const settle = () => new Promise((r) => setImmediate(r));
 
 const G = 5;
-const { dir, data } = await synthData({ size: [512, 256], ground: () => G, boxes: [] });
+// (a pond in a corner for the boat)
+const pond = (x, z) => x >= 420 && z < 60;
+const { dir, data } = await synthData({ size: [512, 256], ground: (x, z) => (pond(x, z) ? G - 1 : G), surface: (x, z) => (pond(x, z) ? 'water' : 'road'), boxes: [] });
 const host = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, interest: 30 }, data);
 const traffic = () => ({ roads: [], peds: [], ctrls: [] });
-const all = [], lives = [];
+const all = [], lives = [], views = [];
 const add = (name) => {
   const link = sessionLink(host.connect(name)), c = new MirrorSimClient(new CloneLink(link), traffic(), null, host.hello);
   const p = { c, link, name };
@@ -58,14 +64,45 @@ const tick = async (n = 1) => {
     host.update(STEP);
     for (const p of all) p.link.deliver();
     for (const l of lives) l.update(STEP, 0, { x: 0, z: 0 });
+    for (const [v, c] of views) v.update(c, STEP, 0, false);
     await settle();
   }
 };
-// a page's street life drawn as its frames go (in a scene of its own)
+// a page's street life drawn as its frames go (in a scene of its own), and the crafts other players fly
 const watch = (p) => {
-  const scene = new THREE.Scene(), life = new StreetLife(scene, p.c);
+  const scene = new THREE.Scene(), life = new StreetLife(scene, p.c), crafts = new THREE.Group();
+  scene.add(crafts);
   lives.push(life);
+  views.push([new CraftsView(crafts), p.c]);
   return { scene, life };
+};
+// what a ray from `from` to `to` meets first in page W's scene that is drawn and not glass seen through
+const ray = new THREE.Raycaster();
+const firstSeen = (W, from, to) => {
+  W.scene.updateMatrixWorld(true);
+  W.scene.traverse((o) => { if (o.isInstancedMesh) o.boundingSphere = null; });
+  ray.set(from, to.clone().sub(from).normalize());
+  ray.far = from.distanceTo(to) + 1;
+  const shown = (o) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; };
+  return ray.intersectObject(W.scene, true).find((h) => shown(h.object) && !h.object.material.transparent)?.object ?? null;
+};
+// player name's figure as page W draws it, if it does
+const shownFigure = (W, name) => {
+  const f = W.life.avatars.figure(name);
+  for (let o = f?.group; o; o = o.parent) if (!o.visible) return null;
+  return f?.group.parent ? f : null;
+};
+const of = (f, o) => { for (let p = o; p; p = p.parent) if (p === f.group) return true; return false; };
+// whether page W sees name's head from m metres off along its own figure's direction (x left, y up, z ahead), or what it
+// meets first
+const seesHead = (W, name, dir, m = 5) => {
+  const f = shownFigure(W, name);
+  if (!f) return 'not drawn';
+  W.scene.updateMatrixWorld(true);
+  const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0));
+  const from = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0).addScaledVector(new THREE.Vector3(...dir).normalize(), m));
+  const hit = firstSeen(W, from, head);
+  return of(f, hit) ? null : `${hit?.name || hit?.type || 'nothing'} met first`;
 };
 // player name's figure as page W draws it, sitting: its hips and the top of its head in craft id's frame as W draws
 // the craft (metres of its look: s its scale), its legs' angle, its name's place over the hips (m), on foot or not
@@ -212,7 +249,7 @@ const spawn = async (p, type, x, z, h) => {
 
 // the helicopter: three passengers, not four; one without a body is refused
 {
-  const P = add('P'), riders = ['R1', 'R2', 'R3', 'R4'].map(add), O = add('O'), W = watch(O);
+  const P = add('P'), riders = ['R1', 'R2', 'R3', 'R4'].map(add), O = add('O'), W = watch(O), W1 = watch(riders[0]);
   const heli = await spawn(P, 'helicopter', 350, 120, 0);
   check(heli?.type === 'helicopter', 'a helicopter made');
   const id = heli.id;
@@ -234,6 +271,31 @@ const spawn = async (p, type, x, z, h) => {
   const inside = three.every((t) => t && Math.abs(t.hips.x) < 0.75 && t.hips.z > -1.35 && t.hips.z < 1.25 && t.top.y < 0.875 && t.legs < -1 && !t.onFoot);
   const apart = three.every((t, i) => three.every((u, j) => i === j || (t && u && t.hips.distanceTo(u.hips) > 0.35)));
   check(inside && apart, `another page draws the three sitting in its cabin under its roof, each in a seat of their own (hips, head's top: ${three.map((t) => t && `${[t.hips.x, t.hips.y, t.hips.z].map((v) => v.toFixed(2))} ${t.top.y.toFixed(2)}`).join('; ')})`);
+  // a passenger's own page: the pilot at the front and the two others in their seats; themself too while the camera
+  // follows the craft, not from their own seat's eyes
+  const others = ['P', 'R2', 'R3'].map((n) => [n, sitting(W1, riders[0], n, id, S)]);
+  const chased = !!shownFigure(W1, 'R1');
+  W1.life.ownEyes = true;
+  await tick(1);
+  const fromSeat = { own: !!shownFigure(W1, 'R1'), others: ['P', 'R2', 'R3'].filter((n) => shownFigure(W1, n)).length };
+  W1.life.ownEyes = false;
+  const pilot = pilotPlace('helicopter'), atWheel = others[0][1]?.hips.distanceTo(new THREE.Vector3(pilot.x, pilot.y, pilot.z).divideScalar(S));
+  check(others.every(([, t]) => t && !t.onFoot) && atWheel < 0.05 && chased && !fromSeat.own && fromSeat.others === 3,
+    `a passenger's page draws the pilot at the controls (${atWheel?.toFixed(2)} m off its seat) and the others in their seats; itself in the chase view (${chased}), not from its seat's eyes (${fromSeat.own ? 'drawn' : 'not drawn'}, the others ${fromSeat.others} of 3)`);
+  // the seat view's eyes (nav/passenger.ts): no one else's figure within the camera's near plane of them
+  W.scene.updateMatrixWorld(true);
+  const c = O.c.crafts().find((o) => o.id === id), dr = c.core.drawn(O.c.time.alpha);
+  const turn = new THREE.Quaternion().setFromEuler(new THREE.Euler(-dr.pitch, dr.h, dr.bank, 'YXZ'));
+  const near = O.c.passengers().filter(([k, cid]) => k === 'craft' && cid === id).map(([, , who, i]) => {
+    const e = seatEye(seatPlace('craft', 'helicopter', i)), eye = new THREE.Vector3(e.x, e.y, e.z).applyQuaternion(turn).add(new THREE.Vector3(dr.x, dr.y, dr.z));
+    let d = Infinity;
+    for (const n of ['P', 'R1', 'R2', 'R3']) {
+      if (n === who) continue;
+      W.life.avatars.figure(n)?.group.traverse((m) => { if (m.isMesh) d = Math.min(d, new THREE.Box3().setFromObject(m).distanceToPoint(eye)); });
+    }
+    return d;
+  });
+  check(near.length === 3 && near.every((d) => d > SEAT_NEAR), `from each seat's eyes no other figure nearer than the near plane (${near.map((d) => d.toFixed(2))} m; ${SEAT_NEAR} m)`);
   const r = await board(O, id);
   check(r.length === 1 && !r[0].ok && seatOf(O) === null, `a player without a body (orbit mode) refused (${JSON.stringify(r)})`);
 }
@@ -321,7 +383,7 @@ const spawn = async (p, type, x, z, h) => {
     detachedPose: { x, y: G, z: Z, h: H, pitch: 0, roll: 0 } });
   const car = parked(9001, X), empty = parked(9002, X + 12);
   host.sim.traffic.detachedCars.push(car, empty);
-  const D = add('D'), E = add('E'), V = add('V'), W = watch(V);
+  const D = add('D'), E = add('E'), V = add('V'), W = watch(V), WD = watch(D);
   walk(D, X, Z - 1.6);
   walk(E, X, Z + 1.6);
   walk(V, X + 6, Z - 8);
@@ -332,28 +394,57 @@ const spawn = async (p, type, x, z, h) => {
   E.c.send({ kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'passenger' });
   await tick(10);
   check(seatOf(D)?.role === 'driver' && seatOf(E)?.role === 'passenger', `one at the wheel of a parked car, another beside them (${JSON.stringify([seatOf(D), seatOf(E)])})`);
-  // what a ray from 4 m off the car's side at a seated figure's head meets first that is not glass seen through
-  const ray = new THREE.Raycaster();
-  const firstSeen = (from, to) => {
-    W.scene.updateMatrixWorld(true);
-    W.scene.traverse((o) => { if (o.isInstancedMesh) o.boundingSphere = null; });
-    const dir = to.clone().sub(from).normalize();
-    ray.set(from, dir);
-    ray.far = from.distanceTo(to) + 1;
-    const shown = (o) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; };
-    return ray.intersectObject(W.scene, true).find((h) => shown(h.object) && !h.object.material.transparent)?.object ?? null;
-  };
-  const of = (f, o) => { for (let p = o; p; p = p.parent) if (p === f.group) return true; return false; };
   const d = W.life.drawn('car', car.id), side = new THREE.Vector3(Math.cos(H), 0, -Math.sin(H));
   const looks = [['E', -1, 'the passenger'], ['D', 1, 'the driver']].map(([name, s, who]) => {
     const f = W.life.avatars.figure(name);
     if (!f || !d) return `${who}: not drawn`;
-    const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0)), hit = firstSeen(head.clone().addScaledVector(side, 4 * s), head);
+    const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0)), hit = firstSeen(W, head.clone().addScaledVector(side, 4 * s), head);
     return of(f, hit) ? null : `${who}: ${hit?.type ?? 'nothing'} met first`;
   });
   check(looks.every((l) => l === null), `a page beside the car sees the passenger and the driver through its side windows (${looks.filter(Boolean).join('; ') || 'both'})`);
-  const at = new THREE.Vector3(X + 12, G + 1.3, Z), hit = firstSeen(at.clone().addScaledVector(side, -4), at);
+  const at = new THREE.Vector3(X + 12, G + 1.3, Z), hit = firstSeen(W, at.clone().addScaledVector(side, -4), at);
   check(hit?.isInstancedMesh && !hit.material.transparent, `a car nobody sits in keeps its solid cabin (a ray at its windows meets ${hit?.type ?? 'nothing'})`);
+  // from behind, through the rear window; from ahead, through the windscreen
+  const ends = [['V', 'E', [0, 0, -1]], ['V', 'D', [0, 0, 1]]].map(([, who, dir]) => [who, dir[2] < 0 ? 'behind' : 'ahead', seesHead(W, who, dir, 6)]);
+  check(ends.every(([, , l]) => l === null), `a page sees who sits in the car from behind and from ahead, through its rear window and windscreen (${JSON.stringify(ends)})`);
+  // the driver's own page: themself in the car from the chase view behind it; from the driver's eyes no own figure,
+  // the passenger still beside them
+  const chase = seesHead(WD, 'D', [0, 0.1, -1], 8);
+  WD.life.ownEyes = true;
+  await tick(2);
+  const eyes = { own: !!shownFigure(WD, 'D'), passenger: seesHead(WD, 'E', [-1, 0, 0], 4) };
+  WD.life.ownEyes = false;
+  check(chase === null && !eyes.own && eyes.passenger === null,
+    `the driver's own page draws them in the car seen from behind (${chase ?? 'seen'}), not from their own eyes (${eyes.own ? 'drawn' : 'not drawn'}), the passenger there either way (${eyes.passenger ?? 'seen'})`);
+}
+
+// the crafts' pilots seen by another page through the glass round them: the helicopter's front glass, the hovercraft's
+// wheelhouse, the boat's, the floatplane's and the jet's cockpits, the paraglider's harness; none in a drone
+{
+  const V = add('PV'), W = watch(V), seen = [];
+  const flights = [
+    ['helicopter', 60, 220, G + SPAWN_HEIGHT.helicopter, 0, [[0, 0, 1]]],
+    ['hovercraft', 120, 220, G + SPAWN_HEIGHT.hovercraft, 0, [[0, 0, 1], [1, 0, 0]]],
+    ['boat', 470, 30, G - 1, 0, [[1, 0.3, 0]]],
+    ['floatplane', 200, 230, G + 20, 0, [[1, 0, 0]]],
+    ['jet', 260, 230, G + 20, 0, [[1, 0.3, 0]]],
+    ['paraglider', 320, 230, G + 60, 0, [[0, 0, 1]]],
+  ];
+  for (const [type, x, z, y, h, dirs] of flights) {
+    const P = add(`F${seen.length}`);
+    walk(P, x - 15, z);
+    await tick(3);
+    P.c.send({ kind: 'request', request: { kind: 'craft', type, spot: { x, y, z, h } } });
+    V.c.send({ kind: 'view', view: { focus: { x, z } } });
+    await tick(30);
+    const c = P.c.craftOf();
+    if (c) { const q = c.core.pose; V.c.send({ kind: 'view', view: { focus: { x: q.x, z: q.z } } }); }
+    await tick(3);
+    seen.push([type, c ? dirs.map((d) => seesHead(W, P.name, d)).find((l) => l === null) ?? seesHead(W, P.name, dirs[0]) : 'no craft']);
+    if (c) host.sim.removeCraft(c.id);
+  }
+  check(seen.every(([, l]) => l === null) && pilotPlace('drone') === null,
+    `another page sees each craft's pilot through its glass, none in a drone (${seen.map(([t, l]) => `${t}: ${l ?? 'seen'}`).join('; ')})`);
 }
 
 // getting out by key (nav/board.ts): X out of any vehicle, E only out of one whose own keys leave it free

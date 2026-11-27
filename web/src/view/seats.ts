@@ -1,5 +1,5 @@
 import type { CraftType, VehicleId } from '../sim/contract/ids';
-import { CRAFT_SCALE } from '../sim/craft/craft-motion';
+import { CRAFT_SCALE, GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { SEATS } from '../sim/seats';
 
 // Where a passenger sits in each vehicle's look: the hips' point in its frame (x to its left, y up from its origin, z
@@ -38,6 +38,20 @@ const CRAFTS: Partial<Record<CraftType, SeatPlace[]>> = {
   helicopter: scaled(CRAFT_SCALE.helicopter, [at(0.45, 0.05, 0.3), at(-0.45, 0.05, 0.3), at(0, 0.05, -0.1)]),
 };
 
+// The pilots: the helicopter's front right under its front glass; the hovercraft's in the wheelhouse on the cabin's
+// roof, starboard of its middle mullion, the legs bent level so that the shoes stay over the cabin's ceiling; the
+// speedboat's at its wheel; the floatplane's in the left seat, the shoulders inside the cabin's sides; the jet's in
+// the front seat, low enough for the head alone to be in the canopy and the shoes over the belly; the paraglider's in
+// its harness (the motion's point is the pilot's middle, GLIDER_HEIGHT over the feet). A drone is flown from afar.
+const PILOTS: Partial<Record<CraftType, SeatPlace>> = {
+  helicopter: scaled(CRAFT_SCALE.helicopter, [at(-0.4, 0.03, 1.4)])[0],
+  hovercraft: at(-0.5, 2.3, 3.0, 1.45),
+  boat: at(-0.45, 1.05, -0.2, 1.1),
+  floatplane: at(0.2, 0.2, 1.2),
+  jet: at(0, -0.3, 1.9, 1.5),
+  paraglider: at(0, 0.87 - GLIDER_HEIGHT, -0.05),
+};
+
 // the driver's beside the front passenger's (left-hand drive); a motorbike's rider is part of its model
 const DRIVERS: Partial<Record<VehicleId, SeatPlace>> = {
   car: at(0.4, 0.55, 0.15), coupe: at(0.38, 0.25, -0.5), van: at(0.55, 0.9, 1.4), pickup: at(0.4, 0.6, 0.6),
@@ -46,6 +60,16 @@ const DRIVERS: Partial<Record<VehicleId, SeatPlace>> = {
 
 /** the driver's seat in a car of type id, or null: its look has its own rider */
 export function driverPlace(id: VehicleId): SeatPlace | null { return DRIVERS[id] ?? null; }
+
+/** the pilot's seat in a craft of type, or null: none sits in it */
+export function pilotPlace(type: CraftType): SeatPlace | null { return PILOTS[type] ?? null; }
+
+// The seat view's eyes: a little over the middle of the head and ahead of its face, so that the own head (not drawn
+// then) would not be in the way; the near plane there short enough that a neighbour's shoulder (~0.4 m off) is not cut
+/** where a player sitting at p looks from (the same frame as p) */
+export const seatEye = (p: SeatPlace) => ({ x: p.x, y: p.y + 0.75, z: p.z + 0.16 });
+/** the camera's near plane (m) at the seat view's eyes */
+export const SEAT_NEAR = 0.15;
 
 /** passenger seat index's place in a car of type id or a craft of type, or null: its look has none */
 export function seatPlace(kind: 'car' | 'craft', type: string, index: number): SeatPlace | null {

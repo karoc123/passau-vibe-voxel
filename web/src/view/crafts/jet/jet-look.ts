@@ -32,10 +32,8 @@ class JetLook implements CraftLook<'jet'> {
       box(0.86, 0.86, 1.6, 0, 0.02, -2.6, WHITE),
       box(0.64, 0.66, 0.8, 0, 0.04, -3.75, RED),
       box(0.5, 0.12, 6.0, 0, -0.47, 0.2, RED), // the belly stripe
-      // canopy: glass on a dark frame, two seats in tandem
-      box(0.66, 0.5, 2.3, 0, 0.62, 1.7, GLASS),
+      // the canopy's dark frame (its glass: below), two seats in tandem
       box(0.7, 0.08, 2.4, 0, 0.42, 1.7, DARK),
-      box(0.62, 0.42, 0.12, 0, 0.6, 2.88, GLASS, -0.7),
       // intakes either side of the cockpit
       box(0.3, 0.55, 1.5, 0.62, -0.05, 0.7, WHITE),
       box(0.3, 0.55, 1.5, -0.62, -0.05, 0.7, WHITE),
@@ -54,10 +52,13 @@ class JetLook implements CraftLook<'jet'> {
     ];
     // the wings' sweep: the halves' boxes turned about y (built straight, merged turned)
     const sweep = (g: THREE.BufferGeometry, a: number, x: number) => g.translate(-x, 0, 0).rotateY(a).translate(x, 0, 0);
-    sweep(parts[14], 0.32, 0.5); sweep(parts[15], -0.32, -0.5);
+    sweep(parts[12], 0.32, 0.5); sweep(parts[13], -0.32, -0.5);
     const body = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.2 }));
     body.castShadow = body.receiveShadow = true;
-    this.group.add(body);
+    // the canopy seen through, onto the pilot (view/seats.ts)
+    const canopy = new THREE.Mesh(mergeGeometries([box(0.66, 0.5, 2.3, 0, 0.62, 1.7, GLASS), box(0.62, 0.42, 0.12, 0, 0.6, 2.88, GLASS, -0.7)]),
+      new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.1, transparent: true, opacity: 0.35, depthWrite: false }));
+    this.group.add(body, canopy);
     // the exhaust: a faint glow in the nozzle, and the flame (an outer and a core cone, their tips back along -z, scaled
     // by length)
     const add = (color: number, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending });

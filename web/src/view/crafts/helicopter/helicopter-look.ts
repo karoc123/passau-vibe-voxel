@@ -45,15 +45,14 @@ function helicopter(group: THREE.Group, part: Part) {
     for (const z of [-0.5, 1.0]) part(group, METAL, [0.08, 0.62, 0.08], x * 0.85, -0.72, z).rotation.z = x > 0 ? -0.35 : 0.35;
   }
   // the cabin: a belly, the body round the doors' windows, the glass over the front seats, the engine on the roof.
-  // The doors' windows are seen through, onto who rides along (view/seats.ts); the front glass is not, as the pilot
-  // is not drawn
+  // The doors' windows and the front glass are seen through, onto who rides along and the pilot (view/seats.ts)
   part(group, WHITE, [1.4, 0.3, 3.0], 0, -0.3, 0.2);
   part(group, PAINT, [1.5, 0.475, 2.6], 0, 0.0625, -0.05);
   part(group, PAINT, [1.5, 0.075, 2.6], 0, 0.8375, -0.05);
   part(group, PAINT, [1.5, 0.5, 1.05], 0, 0.55, -0.825);
   part(group, PAINT, [1.5, 0.5, 0.35], 0, 0.55, 1.075);
-  part(group, GLASS, [1.42, 1.0, 1.0], 0, 0.42, 1.55);
-  part(group, GLASS, [1.2, 0.5, 0.25], 0, 0.1, 2.1);
+  part(group, GLASS, [1.42, 1.0, 1.0], 0, 0.42, 1.55).material = PANE;
+  part(group, GLASS, [1.2, 0.5, 0.25], 0, 0.1, 2.1).material = PANE;
   part(group, GLASS, [1.52, 0.5, 1.2], 0, 0.55, 0.3).material = PANE;
   part(group, PAINT, [1.3, 0.2, 1.0], 0, 0.98, 1.45);
   part(group, PAINT, [1.0, 0.5, 1.9], 0, 1.12, -0.6);
