@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp } from '../core/num';
-import { ChaseRig, clearShare, followAngle } from './chase-rig';
+import { ChaseRig, clearShare, followAngle, MouseLook } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
@@ -28,7 +28,7 @@ const CONFIG = {
   hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
     help: ['W/S thrust and reverse · A/D steer (it drifts) · X get out · Esc exit', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
-    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out · Esc exit',
+    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · mouse: look round · X get out (high up: under a paraglider) · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
     help: ['A/D steer · W dive · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
@@ -55,6 +55,7 @@ class SpecialCraft implements PlayerCraft {
   private phase: 'off' | 'finding' | 'on' | 'landing' = 'off';
   private start: (CraftSpot & { deadline: number }) | null = null;
   private camYaw = 0;
+  private readonly mouseLook = new MouseLook();
   private zoom = 1;
 
   constructor(protected readonly ctx: CraftContext, readonly id: CraftKind) {
@@ -150,6 +151,9 @@ class SpecialCraft implements PlayerCraft {
   }
 
   private get craft() { return this.phase === 'on' || this.phase === 'landing' ? this.link.craft : null; }
+
+  get mouse() { return this.phase === 'on'; }
+  turnView(dx: number, dy: number) { this.mouseLook.move(dx, dy); }
 
   // (before the sim's update, main.ts: the input sent, what happened to it; the frame it is put down it is not in yet)
   update(_dt: number) {
@@ -249,7 +253,7 @@ class SpecialCraft implements PlayerCraft {
     const c = this.craft!, collision = this.link.col!, m = c.core.drawn(this.link.alpha), cfg = CONFIG[this.id], group = this.model.group;
     this.model.draw(c, { dt, alpha: this.link.alpha, night: this.ctx.env.night(), now: performance.now() });
     this.camYaw = followAngle(this.camYaw, m.h, 4, dt);
-    this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom);
+    this.mouseLook.swing(this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom), dt);
     const eye = this.pos.copy(group.position);
     eye.y += cfg.look;
     eye.addScaledVector(this.offset, clearShare(collision.sweep(eye, this.offset), this.offset, 0.12, 0.25));
@@ -293,7 +297,7 @@ export class HelicopterMode extends SpecialCraft {
 export class ParagliderMode extends SpecialCraft {
   constructor(ctx: CraftContext) {
     super(ctx, 'paraglider');
-    // (after the plane's G, which deploys this wing and marks the key used: not let go of in the same press)
+    // (a key another handler used is not this wing's)
     addEventListener('keydown', (e) => {
       if (e.code === 'KeyG' && !e.repeat && !e.defaultPrevented && gameKey(e) && this.canopy()) e.preventDefault();
     });

@@ -30,6 +30,8 @@ export class FpvMode implements PlayerCraft {
   readonly id = 'fpv';
   readonly view = 'own';
   readonly boards = ['drone'] as const;
+  // (flown from afar: its camera is its nose, the sticks turn it)
+  readonly mouse = false;
   private readonly nav: Nav;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly target: THREE.Vector3;

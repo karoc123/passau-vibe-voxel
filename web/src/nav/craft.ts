@@ -35,8 +35,12 @@ export interface PlayerCraft {
   readonly mapPose?: Pose | null;
   /** its camera at the player's eyes in their seat (their own figure not drawn: StreetLife ownEyes) */
   readonly inSeat?: boolean;
-  /** it aims with the mouse taken, as on foot (a gun): Nav takes it back after the menu */
-  readonly mouse?: boolean;
+  /** it takes the mouse now (Nav takes it, and again after the menu): its moves turn the view (turnView; a 'ride'
+   * craft's are Nav's ride look) or aim a gun. Every craft a player sits in says so (owner 2026-11-27: a vehicle that
+   * leaves the mouse free felt broken); not one a player flies from afar */
+  readonly mouse: boolean;
+  /** the mouse taken moved by dx, dy px (right, down +): the chase or seat view turned, or the gun aimed */
+  turnView?(dx: number, dy: number): void;
   /** get in: at a spot (tools; later F2, walking up to it) or, without one, where the view is. false: not now */
   enter(at?: CraftSpot): boolean;
   /** the types of the world's crafts it flies (board) */
@@ -78,8 +82,22 @@ export interface CraftContext {
   /** what a shell's own collision reads (sim/craft/voxel-collision.ts: its spawn search, its camera, its panel): the
    * map, the viewer's TileCache, the page's clock */
   tiles: CraftWorld;
-  deployGlider: (source: PlayerCraft, at: CraftSpot) => boolean;
 }
+
+// Whether a craft of each type is in the air with the player in one of its seats: X there opens a paraglider over
+// them (Nav.getOut). Every type says, so a new one cannot forget it. null: no seat in it is ever in the air (on the
+// water or the ground; the drone is flown from afar; the paraglider is the canopy itself)
+const ALOFT: { [K in CraftType]: ((core: CoreOf<K>) => boolean) | null } = {
+  boat: null, hovercraft: null, paraglider: null, drone: null,
+  helicopter: (c) => !c.motion.grounded,
+  floatplane: (c) => c.flight.state === 'air',
+  jet: (c) => c.flight.state === 'air',
+  fighter: (c) => c.flight.state === 'air',
+};
+/** the types a player sits in in the air (a gate takes each) */
+export const AIRCRAFT = (Object.keys(ALOFT) as CraftType[]).filter((t) => ALOFT[t] !== null);
+/** craft c in the air (ALOFT) */
+export const aloft = (c: CraftView) => (ALOFT[c.type] as ((core: CraftView['core']) => boolean) | null)?.(c.core) ?? false;
 
 /** A shell's hold on its craft in the world sim, the local player its pilot, through the sim's client: the commands
  * (spawn: made and put down at a spot; board: the seat of one in the world; place: put down again; input; reset; close:

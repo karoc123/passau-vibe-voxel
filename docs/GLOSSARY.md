@@ -15,6 +15,10 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Combat plane**: the craft on the floatplane's flight with its own numbers and an MG fixed in its nose; its pilot
   aims by flying. `fighter` in code. Not "warplane" or "armed floatplane".
 - **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
+- **Bail out**: getting out (X) of an aircraft high in the air, pilot or passenger: the player hangs under an open
+  paraglider, the aircraft flies on empty. Low over the ground X gets out onto foot. Not "eject" or "deploy".
+- **Mouse look**: in every vehicle the player sits in, the mouse is taken and swings the chase or seat view as a
+  drag does (a pilot's swings back behind after a moment); at a gun it aims.
 - **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Debug, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.

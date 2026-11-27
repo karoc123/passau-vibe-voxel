@@ -11,6 +11,9 @@ const GRAV = 16;
 const TERMINAL = 55, AIR_DRAG = GRAV / TERMINAL;
 /** m over what is under the feet from which a canopy may open again: higher than a jump goes */
 export const CANOPY_DROP = 4;
+/** feet at (x, feet, z) high enough over what is under them for a canopy to open (CANOPY_DROP): falling on foot, and
+ * getting out of an aircraft in the air */
+export const canopyOpens = (w: Pick<World, 'support'>, x: number, z: number, feet: number) => feet - w.support(x, z, feet) >= CANOPY_DROP;
 // Afloat the water holds the body at FLOAT (a spring of BUOY per s², damped by DAMP per s) and brakes a fall into it
 // as the square of its speed (DRAG per m): from a paraglider's 55 m/s it is down to a swimmer's in about 2 m, the eyes
 // a little under, and back up in a second or two
@@ -69,7 +72,7 @@ export class Walker<P extends { x: number; y: number; z: number } = { x: number;
   /** in the air high enough over what is under the feet for a canopy (CANOPY_DROP) */
   get canOpen() {
     const w = this.world();
-    return !!w && this.feet - w.support(this.pos.x, this.pos.z, this.feet) >= CANOPY_DROP;
+    return !!w && canopyOpens(w, this.pos.x, this.pos.z, this.feet);
   }
 
   /** the spot on the roof of the solid thing the feet stand on (the host puts the walker there on the thing as it has

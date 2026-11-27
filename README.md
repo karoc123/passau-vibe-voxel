@@ -540,7 +540,8 @@ core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/craft
 
 ## Paraglider, hovercraft and helicopter
 
-- In the floatplane or jet, press **G** or click **Deploy paraglider** at least 35 m above the surface.
+- Get out (**X**) of a helicopter, plane or jet high in the air, as pilot or passenger: you hang under an open
+  paraglider; the empty aircraft flies on unpiloted.
   Steer with A/D, W is the speed bar, S brakes (flare before touching down). Hands up it glides about 8:1 at 40 km/h.
   Land on dry ground to continue on foot.
 - Click **Hovercraft** in the map toolbar to start near the view on land or water. W thrust, S brakes then backs,
