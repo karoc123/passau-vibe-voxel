@@ -18,7 +18,6 @@ import { EditableNode, opBounds, touchedNodes, type NodeColumns } from './column
 import { cellToAbsZ, mapToGrid, toCellOp, type Frame, type WorldOp } from './layers';
 import { liveEdits, type LiveNode, type Region } from './live-edits';
 import type { NodeView, TileCache } from './tile-cache';
-import type { Columns } from './tile-data';
 
 export type { WorldOp };
 export { liveEdits };
@@ -91,10 +90,7 @@ export function editNode(frame: Frame, tx: number, ty: number, v: NodeView, op: 
   const cell = toCellOp(frame, op), N = frame.N;
   const e = new EditableNode(N, v.base as NodeColumns, tx, ty);
   e.apply(cell);
-  // (the columns alone: a file's other sections, decodeTile's fields and extra, are no plain data to send a client,
-  // and the mesher reads them from the file)
-  const { fields: _f, extra: _x, ...cols } = v.base as Columns & { fields?: unknown; extra?: unknown };
-  const enc = e.encode(), base = { ...cols, ...enc };
+  const enc = e.encode(), base = { ...v.base, ...enc };
   // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs; only what carves takes trees
   // and grass with it)
   let foliage: LiveNode['foliage'] = { ...v.foliage, ground: enc.ground };

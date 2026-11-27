@@ -30,7 +30,7 @@ const zlib = () => process.getBuiltinModule('node:zlib') as NodeZlib;
 const at = (dir: string, p: string) => `${dir.replace(/\/+$/, '')}/${p}`;
 const json = <T>(dir: string, p: string) => JSON.parse(fs().readFileSync(at(dir, p), 'utf8')) as T;
 
-// The host's nodes nobody holds kept for a reader coming back, ~1 MB each decoded: the crowd's ground is asked for round
+// The host's nodes nobody holds kept for a reader coming back, ~0.55 MB each decoded: the crowd's ground is asked for round
 // each player out to the street life's radius (~200 nodes at one spot), and a node dropped and asked again is decoded
 // again on the tick (with 9 kept, 10 players firing by the cathedral decoded ~12 nodes a tick).
 const HOST_KEEP = 256;

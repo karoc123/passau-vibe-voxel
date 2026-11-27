@@ -62,7 +62,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - The parked-car cap (8/24) sits beside presence, not per cell.
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
   not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
-- The worker decodes nodes the page also decodes.
+- Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
+  files; 4x CPU throttle): the worker's decoding ~30 ms and its gunzip off the page's thread, its first snapshot 6-8 s
+  before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
 - The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
 - The own craft run ahead (prediction) does not feel solid things (cars, other crafts) nor tell its own events: the
