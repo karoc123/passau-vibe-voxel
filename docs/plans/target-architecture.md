@@ -174,7 +174,8 @@ in the tick.
    default the street life's + 150 m; trains and boats still go to all, they become flow in step 5).
 5. **Flow.** Landed 2026-11-27 (trains a timetable every page works out, none sent; far road traffic drawn by the
    page out to 1.5 km; the agent ring 350 m, cars sent to 400 m; agents spawned on the flow's cars).
-6. **Kept things on disk**, per cell, so a restart of the Pi keeps what players left.
+6. **Kept things on disk.** Landed 2026-11-27 (the network host's craters, edits, parked cars and crafts left, a file
+   per cell under `web/.run/world/`, written every 5 s and on SIGTERM; kept by presence as before).
 7. **Prediction** of the player's own craft, then the decision on cars.
 8. **Measure on a Pi.** Only then compact the wire (typed arrays, deltas) or move a hot part to Rust.
 

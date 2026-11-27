@@ -502,6 +502,12 @@ export class WorldSim {
     });
   }
 
+  /** whether op is kept whoever is near (a blast's crater); last: from now on (a host's kept things read back) */
+  lasts(op: WorldOp, last = false) {
+    if (last) this.keeper.last(op);
+    return this.keeper.lasts(op);
+  }
+
   /** the blasts' craters since the last call, for the host to hold their nodes in and hand back (damage) */
   takeDamage() { return this.damaged.splice(0); }
 
