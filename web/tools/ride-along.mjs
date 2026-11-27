@@ -197,6 +197,9 @@ const underCanopy = () => P.waitForFunction(() => window.__three.nav.craft?.id =
 for (const type of AIRCRAFT) {
   await P.evaluate(() => window.__three.nav.setOrbit());
   await wait(800);
+  // (the map's view back over the cathedral's square, where a helicopter finds land to start on, wherever the last
+  // aircraft flew)
+  await P.evaluate((d) => { const T = window.__three; T.controls.target.set(d.x, d.y, d.z); T.camera.position.set(d.x, d.y + 60, d.z + 60); T.camera.lookAt(T.controls.target); }, { x: dom.x, y: dom.z ?? 20, z: dom.y });
   await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
   if (ENTER[type]) await P.locator('button', { hasText: ENTER[type] }).click({ timeout: 10000 }).catch((e) => log(`${type} button: ${e.message}`));
   const inIt = await P.waitForFunction((t) => window.__sim.craftOf()?.type === t && window.__sim.craftOf().placed && window.__three.nav.craft?.mouse === true, type, { timeout: 30000 }).then(() => true, () => false);
