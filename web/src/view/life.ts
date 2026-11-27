@@ -17,16 +17,19 @@ import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, client/sim-client.ts TrafficMirror, ticked by main.ts) drawn between its last two ticks with instanced
 // meshes, the trains and the boats, the people knocked down or fallen into a hole (its events, drawn as an effect:
-// shoved, tipping over, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
+// thrown or dropped, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
 // and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).
 
 // the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the viewer (further out a pole is a fraction of a
 // pixel wide), placed again once it is HEADS_MOVE m from where they were placed
 const HEADS_MOVE = 120;
 const HEADS_OUT = 600;
-// people knocked down by a driven car (WorldSim's events: struck): shoved along the hit (at most FALL_V m/s, slowing at FALL_DRAG
-// per s), tipping over flat in FALL_S s, then lying there; at most MAX_FALLEN at once, each gone after FALLEN_S s once
-// PED_POP_R from the viewer
+// people knocked down by a driven car (WorldSim's events: struck) are thrown: off at THROW of the car's speed along it and
+// LIFT of it upwards, their middle (MID m up the body) on a ballistic arc, turning over backwards to lie flat (their
+// middle LIE m up) as they come down, keeping LAND_KEEP of their speed on landing and sliding to a stop at SLIDE m/s^2.
+// Roughly a real forward throw: ~6 m at 30 km/h, ~15 m at 50. Their bike slides along the hit (at most FALL_V m/s,
+// slowing at FALL_DRAG per s). At most MAX_FALLEN at once, each gone after FALLEN_S s once PED_POP_R from the viewer.
+const THROW = 0.85, LIFT = 0.35, MID = 0.9, LIE = 0.12, LAND_KEEP = 0.5, SLIDE = 7;
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 // fallen into a hole (WorldSim's events: dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
 const G = 9.81, LANDED_S = 2;
@@ -44,9 +47,12 @@ export function easeAvatar(d: Pose, to: Pose, dt: number) {
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
 
-// a person (and their bike) knocked down: where they are, which way they were shoved (unit dx, dz) how fast, for how long
-// (vy: falling into an edited hole, its vertical speed; land: when it met the ground)
-interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null; vy?: number; land?: number }
+// a person (and their bike) fallen: where they are (their feet; thrown: their middle), which way they were shoved (unit
+// dx, dz) how fast, for how long (vy: vertical speed, thrown or falling into an edited hole; land: when it met the ground)
+interface Fallen { col: THREE.Color; bike: boolean; at: THREE.Vector3; h: number; dx: number; dz: number; v: number; t: number; bikeAt: THREE.Vector3 | null; vy?: number; land?: number; thrown?: Thrown }
+// a person thrown: turned over backwards by a rad, turning at spin rad/s until flat; their bike's speed; g0: where they
+// were hit, the ground without a Ground
+interface Thrown { a: number; spin: number; bv: number; g0: number }
 
 /** an agent of the street life: a car (Car.id) or a person (Person.id) */
 export interface AgentRef extends EntityRef { kind: Kind }
@@ -114,7 +120,11 @@ export class StreetLife {
     for (const e of events) {
       if (e.kind !== 'struck') continue;
       const { col, bike, pose, vx, vz } = e, v = Math.hypot(vx, vz) || 1;
-      this.addFallen(col, bike, pose, pose.h, vx / v, vz / v, Math.min(FALL_V, v * 0.6));
+      this.addFallen(col, bike, pose, pose.h, vx / v, vz / v, 0);
+      const f = this.fallen.at(-1)!, vy = LIFT * v;
+      f.at.y += MID; f.v = THROW * v; f.vy = vy;
+      // (flat when the middle is down at LIE: the time to there from MID at vy)
+      f.thrown = { a: 0, spin: Math.PI / 2 * G / (vy + Math.sqrt(vy * vy + 2 * G * (MID - LIE))), bv: Math.min(FALL_V, v * 0.6), g0: pose.y };
     }
     this.render(Math.min(dt, 0.1), night, T.acc);
   }
@@ -346,18 +356,19 @@ export class StreetLife {
     this.fallen = this.fallen.filter((f) => Math.hypot(f.at.x - x, f.at.z - z) <= r || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R));
   }
 
-  // the people knocked down, drawn from instance i0 on: sliding along the shove, tipping over towards it (about the
+  // the people fallen, drawn from instance i0 on (thrown: drawThrown): sliding along the shove, tipping over towards it (about the
   // horizontal axis across it, at their feet) until flat on the ground, a little hop as they go; a bike on its side
   // where it was hit, sliding half as far
   private drawFallen(dt: number, i0: number) {
     const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
     const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), pos = new THREE.Vector3(), ground = this.traffic.ground;
-    this.fallen = this.fallen.filter((f) => (f.land === undefined || f.t - f.land <= LANDED_S) && (f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R)));
+    this.fallen = this.fallen.filter((f) => (f.thrown || f.land === undefined || f.t - f.land <= LANDED_S) && (f.t < FALLEN_S || !this.far(f.at.x, f.at.z, f.at.y, PED_POP_R)));
     const n = Math.min(this.fallen.length, MAX_PEOPLE + MAX_BIKES - i0);
     let bikes = 0;
     for (let i = 0; i < n; i++) {
       const f = this.fallen[i];
       f.t += dt;
+      if (f.thrown) { bikes = this.drawThrown(f, f.thrown, dt, i0 + i, bikes); continue; }
       const step = f.v * dt;
       f.at.x += f.dx * step; f.at.z += f.dz * step;
       if (f.bikeAt) { f.bikeAt.x += f.dx * step * 0.5; f.bikeAt.z += f.dz * step * 0.5; }
@@ -388,6 +399,43 @@ export class StreetLife {
     }
     if (bikes) setCount(this.riders.length + bikes, M.bike);
     return n;
+  }
+
+  // a person thrown (f, its middle at f.at), drawn as instance i, its bike as the bikes-th of the fallen: along the arc
+  // until their middle is down, then sliding to a stop; returns the fallen bikes drawn
+  private drawThrown(f: Fallen, w: Thrown, dt: number, i: number, bikes: number) {
+    const M = this.M, ground = this.traffic.ground, at = f.at, m = new THREE.Matrix4(), q = new THREE.Quaternion(), tip = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+    if (f.land === undefined) {
+      f.vy! -= G * dt;
+      at.y += f.vy! * dt;
+      w.a = Math.min(Math.PI / 2, w.a + w.spin * dt);
+    } else f.v = Math.max(0, f.v - SLIDE * dt);
+    at.x += f.dx * f.v * dt; at.z += f.dz * f.v * dt;
+    const g = ground ? (f.land === undefined ? ground.support(at.x, at.z, at.y) : ground.surface(at.x, at.z, at.y - LIE)) : w.g0;
+    // (the middle's lowest as the body turns: MID up standing, LIE lying)
+    const low = g + LIE + (MID - LIE) * Math.cos(w.a);
+    if (f.land === undefined && f.vy! < 0 && at.y <= low) { f.land = f.t; w.a = Math.PI / 2; f.v *= LAND_KEEP; }
+    if (f.land !== undefined) at.y = g + LIE;
+    // (over backwards: about shove x up, the feet swept ahead)
+    tip.setFromAxisAngle(axis.set(-f.dz, 0, f.dx), w.a);
+    q.setFromAxisAngle(up, f.h).premultiply(tip);
+    const feet = axis.set(0, -MID, 0).applyQuaternion(tip).add(at);
+    m.compose(feet, q, one);
+    M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
+    M.torso.setColorAt(i, f.col);
+    if (f.bikeAt) {
+      const step = w.bv * dt;
+      f.bikeAt.x += f.dx * step; f.bikeAt.z += f.dz * step;
+      w.bv *= Math.exp(-FALL_DRAG * dt);
+      if (ground) f.bikeAt.y = ground.surface(f.bikeAt.x, f.bikeAt.z, f.bikeAt.y);
+      if (this.riders.length + bikes < MAX_BIKES) {
+        const k = Math.min(1, f.t / FALL_S);
+        q.setFromAxisAngle(up, f.h).multiply(tip.setFromAxisAngle(axis.set(0, 0, 1), k * k * Math.PI / 2));
+        M.bike.setMatrixAt(this.riders.length + bikes++, m.compose(f.bikeAt, q, one));
+      }
+    }
+    return bikes;
   }
 
   private drawSignals() {
