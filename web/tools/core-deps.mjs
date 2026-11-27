@@ -170,6 +170,7 @@ const LAYERS = [
   ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], ['sim/flow.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
   ['sim/solids.ts', 'shared'], // (the shapes the walk meets)
   ['sim/walk.ts', 'shared'], ['sim/swim.ts', 'shared'], ['sim/walker.ts', 'shared'], // (the walk: the page's player's and the host's NPCs')
+  ['sim/hook.ts', 'shared'], // (the grappling hook's reel: in the page's walk and in the paraglider's motion, both ends')
   ['sim/figure.ts', 'shared'], // (the figure's size: drawn by the page, walked and shot at on the host)
   ['sim/seats.ts', 'shared'], // (a model's seats: the host holds them, the page offers and draws them)
   ['sim/player-name.ts', 'shared'], // (a chosen name cleaned: by the page and by the host)

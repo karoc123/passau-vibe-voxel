@@ -7,7 +7,8 @@ import type { MoveKeys } from './move-keys';
 import { EYE } from '../sim/figure';
 import { backOff } from './spots';
 import type { Solid } from '../sim/solids';
-import { stride } from '../sim/walk';
+import { HEAD, stride } from '../sim/walk';
+import { HOOK, hookFeet, hookPoint } from '../sim/hook';
 import { Walker } from '../sim/walker';
 
 // aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
@@ -27,6 +28,8 @@ export class Foot extends Walker<THREE.Vector3> {
   /** the right mouse button held: the view narrowed */
   aim = false;
   private fovBack: number | null = null;
+  /** where the hook holds while its line is out (Walker.hook is where the feet are reeled to) */
+  anchor: { x: number; y: number; z: number } | null = null;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls,
     private readonly keys: MoveKeys, private readonly glide: Glide, world: () => World | null,
@@ -39,6 +42,16 @@ export class Foot extends Walker<THREE.Vector3> {
     this.pitch = clamp(this.pitch + dpitch, -1.4, 1.45);
   }
 
+  /** the grappling hook fired from the eyes at what is looked at: a voxel within its range holds it and the walk
+   * reels there. With the line out: onto a new point, or let go (nothing aimed at, or the point held again) */
+  hookShot(w: World) {
+    const c = Math.cos(this.pitch), dir = { x: Math.sin(this.yaw) * c, y: Math.sin(this.pitch), z: Math.cos(this.yaw) * c };
+    const at = hookPoint(w, this.pos, dir), A = this.hook && this.anchor;
+    if (!at || (A && Math.hypot(at.x - A.x, at.y - A.y, at.z - A.z) < HOOK.min)) { this.unhook(); return; }
+    this.anchor = at;
+    this.hookTo(hookFeet(w, at, dir, HEAD));
+  }
+
   // down at t (exact: there; else the street spot, backed off a wall), facing f, the nose up by pitch
   setAt(w: World, t: THREE.Vector3, spot: [number, number], exact: boolean | undefined, f: THREE.Vector3, pitch: number) {
     this.yaw = Math.atan2(f.x, f.z);
@@ -46,6 +59,7 @@ export class Foot extends Walker<THREE.Vector3> {
     this.vy = 0;
     this.on = null;
     this.carry.x = this.carry.z = 0;
+    this.hook = null;
     this.aim = false;
     this.fovBack = null;
     if (exact) {
