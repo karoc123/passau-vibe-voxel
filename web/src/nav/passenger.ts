@@ -71,7 +71,7 @@ export class PassengerMode implements PlayerCraft {
     this.panel.el.classList.add('special-craft');
     this.help = this.panel.help('Drag: look around · Wheel: zoom · V: seat or chase view · E: get out · Esc: menu',
       'Drag to look around, pinch to zoom; the Get out button leaves.');
-    this.gunHelp = this.panel.help('Click: take the mouse · Mouse: aim · Left button: fire · C: to the wheel · E: get out',
+    this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: to the wheel · E: get out',
       'Drag to aim, tap to fire; the Get out button leaves.');
     addEventListener('keydown', (e) => {
       if (!this.riding || e.code !== 'KeyV' || e.repeat || !gameKey(e)) return;
@@ -83,10 +83,10 @@ export class PassengerMode implements PlayerCraft {
     });
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.ownsCamera || this.drag) return;
-      // (at a gun the mouse is taken, as on foot: a click takes it, then it aims and its left button fires)
+      // (at a gun the mouse is taken, as on foot: a click not yet locked takes it and still fires)
       if (this.gun && e.pointerType === 'mouse') {
-        if (document.pointerLockElement !== canvas) void canvas.requestPointerLock?.();
-        else if (e.button === 0) this.trigger = true;
+        if (document.pointerLockElement !== canvas) this.ctx.nav.takeMouse();
+        if (e.button === 0) this.trigger = true;
         return;
       }
       this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
@@ -126,6 +126,8 @@ export class PassengerMode implements PlayerCraft {
     const R = this.riding;
     return !!R && !this.out && (R.ref.kind === 'craft' ? this.seatView || !!this.gun : this.ctx.nav.ride?.view === 'eyes');
   }
+
+  get mouse() { return !!this.gun; }
 
   private get ownsCamera() { return !!this.riding && this.riding.ref.kind === 'craft' && !this.out; }
 
@@ -199,7 +201,10 @@ export class PassengerMode implements PlayerCraft {
     this.gun = m;
     this.trigger = false;
     if (m && this.last) this.aim.reset(m, this.last.h);
-    if (!m && document.pointerLockElement === this.ctx.canvas) document.exitPointerLock();
+    // (taken in the key press that brought the player here, C or E; given back where the view no longer aims, but
+    // not on the way out onto foot, which aims with it too: Nav.getOut)
+    if (m) this.ctx.nav.takeMouse();
+    else if (this.ctx.nav.craft === this) this.ctx.nav.releaseMouse();
     document.body.classList.toggle('gunner', !!m);
     if (!m) document.body.classList.remove('gun-stop');
   }
