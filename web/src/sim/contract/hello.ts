@@ -10,7 +10,7 @@ import type { DataBuild } from '../../core/data-contract';
  * differently; or the sim's code a mirror re-runs: the path maths behind CarState, a core's load), so that a client
  * and a host of different code refuse each other instead of drawing nonsense. Not for the data (that is build) nor
  * for the tuning's numbers (that is tuning) */
-export const PROTOCOL = 26;
+export const PROTOCOL = 27;
 
 /** what a host says when a session connects (SimServer.hello; the worker's FromWorker 'hello') */
 export interface Hello {
@@ -20,4 +20,8 @@ export interface Hello {
   build: DataBuild | null;
   /** a hash of the tuning the host's sim runs with (sim/hello.ts tuningHash) */
   tuning: string;
+  /** a network host's (host/ws.ts): the token this session's page joins with again after its connection drops, to
+   * come back as the same player, and whether this session is such a coming back (the player's seat and name kept).
+   * The page's own worker gives none: its connection does not drop */
+  resume?: { token: string; resumed: boolean };
 }

@@ -9,6 +9,7 @@ import { STEP } from '../sim/road-net';
 import { Overload } from './overload';
 import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Session } from '../sim/server/sim-server';
+import type { PlayerId } from '../sim/contract/ids';
 
 // Every tick's snapshot is sent by default, two ticks to a message: the page draws between a snapshot's tick and the
 // one before, so a snapshot left out shows as a stop and a jump; the batching only halves the messages. ?every=N sends
@@ -27,6 +28,17 @@ const DEFLATE_FROM = 64;
 // events and the agents' drift of the tick left out come with the next.
 const FIRED = 1;
 
+// A page whose connection drops (a phone changing networks, a gap in the Wi-Fi, a tab woken up) comes back as its
+// player within GRACE s: their seat, name and place kept meanwhile, the vehicle hands off, no one else let into the
+// seat. Longer than the page's retries (every 3 s) through a short outage; short enough that a car left by a page that
+// is gone for good does not stand there long. Counted in ticks, so a tool stepping the host counts it too.
+const GRACE = 30;
+// The page's first message says whom it comes back as (ToWorker join); a client that never sends one is a new player
+// after this long. The token goes in a message, not the URL, as URLs end up in a proxy's logs.
+const JOIN_MS = 2000;
+// 128 bits from the system's random source: not to be guessed by another page that wants the seat
+const newToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
 export interface ServeOptions {
   /** the data directory (meta.json, traffic.json, tiles/) */
   dir: string;
@@ -40,33 +52,66 @@ export interface ServeOptions {
   clock?: typeof clock;
 }
 
-interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number; turn: number; fired: number }
+interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number; turn: number; fired: number; token: string }
 
 export function serve(o: ServeOptions) {
   const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
   const server = nodeHost(o.dir, { ...start, world: 'tiles', offThread: true });
   server.trackEdits();
   const conns = new Set<Conn>();
+  // the tokens a page may come back with, each its player's (one use each: the hello gives a new one); the players
+  // held for their coming back, until the tick n they are let go at
+  const tokens = new Map<string, PlayerId>(), away = new Map<PlayerId, { until: number; token: string }>();
   let joined = 0, n = 0;
   const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: DEFLATE_FROM } });
   wss.on('error', (e) => o.log(`ws: ${e.message}`));
   const port = new Promise<number>((ok) => wss.on('listening', () => ok(wss.address().port)));
-  wss.on('connection', (ws, req) => {
-    const c: Conn = { ws, s: server.connect(), out: [], bytes: 0, sock: req.socket, wire: req.socket.bytesWritten, turn: joined++, fired: -Infinity };
+  // a session for the page on ws: its player's again if token names one held or still connected (a socket the host
+  // has not yet seen drop: that one closed), else a new player
+  const join = (ws: WebSocket, req: { socket: Conn['sock'] & { remoteAddress?: string } }, token: string | null): Conn => {
+    const was = token !== null ? tokens.get(token) : undefined;
+    if (token !== null) tokens.delete(token);
+    const live = [...conns].filter((c) => c.s.player === was);
+    const back = was !== undefined && (server.isAway(was) || live.length > 0);
+    const s = back ? server.connect(was) : server.connect();
+    if (back) { const a = away.get(was); if (a) away.delete(was); }
+    const c: Conn = { ws, s, out: [], bytes: 0, sock: req.socket, wire: req.socket.bytesWritten, turn: joined++, fired: -Infinity, token: newToken() };
+    tokens.set(c.token, s.player);
     conns.add(c);
-    o.log(`${c.s.player} joined from ${req.socket.remoteAddress}`);
-    ws.send(JSON.stringify([{ kind: 'hello', hello: c.s.hello }, { kind: 'ready' }] satisfies FromWorker[]));
+    for (const old of live) { tokens.delete(old.token); old.ws.terminate(); }
+    o.log(`${s.player} ${back ? 'came back' : 'joined'} from ${req.socket.remoteAddress}`);
+    ws.send(JSON.stringify([{ kind: 'hello', hello: { ...s.hello, resume: { token: c.token, resumed: back } } }, { kind: 'ready' }] satisfies FromWorker[]));
+    return c;
+  };
+  // the connection gone: its player held for GRACE s if it was their last
+  const lost = (c: Conn) => {
+    conns.delete(c);
+    const last = ![...conns].some((x) => x.s.player === c.s.player);
+    c.s.leave(last);
+    if (last) { away.set(c.s.player, { until: n + GRACE * per, token: c.token }); o.log(`${c.s.player} lost, held ${GRACE} s`); }
+    else tokens.delete(c.token);
+  };
+  const take = (c: Conn, m: ToWorker) => {
+    if (m?.kind !== 'commands' || !Array.isArray(m.commands)) return;
+    if (m.commands.some((x) => x?.kind === 'fire')) c.fired = n;
+    handle(c.s, m);
+  };
+  wss.on('connection', (ws, req) => {
+    let c: Conn | null = null, gone = false;
+    const timer = setTimeout(() => { if (!c && !gone) c = join(ws, req, null); }, JOIN_MS);
     ws.on('message', (data) => {
       let m: ToWorker;
       try { m = JSON.parse(data.toString()) as ToWorker; } catch { return; }
       // (answered at once, outside the tick's batch: the round trip the page shows is the network's, not the tick's)
-      if (m?.kind === 'ping') { if (Number.isFinite(m.t)) ws.send(JSON.stringify([{ kind: 'pong', t: m.t }] satisfies FromWorker[])); return; }
-      if (m?.kind !== 'commands' || !Array.isArray(m.commands)) return;
-      if (m.commands.some((x) => x?.kind === 'fire')) c.fired = n;
-      handle(c.s, m);
+      if (m?.kind === 'ping') { if (Number.isFinite(m.t)) ws.send(JSON.stringify([{ kind: 'pong', t: m.t }] satisfies FromWorker[])); }
+      if (!c) {
+        clearTimeout(timer);
+        c = join(ws, req, m?.kind === 'join' && typeof m.token === 'string' ? m.token : null);
+      }
+      take(c, m);
     });
     ws.on('error', () => {});
-    ws.on('close', () => { conns.delete(c); c.s.leave(); o.log(`${c.s.player} left`); });
+    ws.on('close', () => { gone = true; clearTimeout(timer); if (c) lost(c); });
   });
 
   let ticks = 0, tickMs = 0, sendMs = 0;
@@ -77,6 +122,7 @@ export function serve(o: ServeOptions) {
     || (server.sim.seat(c.s.player)?.role ?? 'walker') !== 'walker';
   const stop = (o.clock ?? clock)(() => {
     const t0 = performance.now();
+    for (const [p, a] of away) if (n >= a.until) { away.delete(p); tokens.delete(a.token); server.free(p); o.log(`${p} left`); }
     server.update(STEP);
     const ms = performance.now() - t0;
     ticks++;
