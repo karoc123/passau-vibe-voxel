@@ -7,8 +7,9 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Orbit mode**: the map view the page starts in; the city dragged, turned and zoomed from above, a double-click
   flies there. The player has no body in it and is seen by nobody (owner 2026-11-27). Not "free camera".
 - **Walk**: on foot, first person (walker, avatar). Swims in deep water.
-- **Figure**: the body on foot as drawn and as it meets the world (a player's avatar, an NPC): three quarters of a
-  grown-up, about 1.4 m, the eyes at about 1.28 m (owner 2026-11-27); it climbs a block's step all the same.
+- **Figure**: the body on foot as drawn and as it meets the world (a player's avatar, an NPC, a **passer-by** of the
+  street life, a **rider** on a bike): three quarters of a grown-up, about 1.4 m, the eyes at about 1.28 m (owner
+  2026-11-27); it climbs a block's step all the same.
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, military helicopter,
   floatplane, jet, combat plane, paraglider.
@@ -19,6 +20,9 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Combat plane**: the craft on the floatplane's flight with its own numbers and an MG fixed in its nose; its pilot
   aims by flying. `fighter` in code. Not "warplane" or "armed floatplane".
 - **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
+- **Opened car**: a car drawn with someone in it: its windows see-through (**panes**), its cabin hollowed. Every other
+  car keeps a solid cabin with dark glass in the same places.
+- **Boarding**: getting into a vehicle from foot beside it; a car may be rolling, up to running speed.
 - **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Debug, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.

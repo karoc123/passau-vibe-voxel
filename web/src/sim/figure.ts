@@ -15,3 +15,8 @@ export const CHEST = 1.2 * FIGURE_SCALE;
 export const BODY_R = 0.3 * FIGURE_SCALE;
 /** the body's height (m) as the walker meets a ceiling and as a shot meets it */
 export const BODY_HEAD = 1.9 * FIGURE_SCALE;
+/** a rider of a bike in the street: their legs drawn RIDE_SIT of their length, their feet RIDE_UP m up (the hips on
+ * the saddle where a grown-up's were), the top of their head RIDER_TOP m over the ground */
+export const RIDE_SIT = 0.82;
+export const RIDE_UP = 0.45 + 0.85 * RIDE_SIT * (1 - FIGURE_SCALE);
+export const RIDER_TOP = RIDE_UP + 1.82 * FIGURE_SCALE * RIDE_SIT;

@@ -79,7 +79,8 @@ class HovercraftLook implements CraftLook<'hovercraft'> {
     hull.castShadow = hull.receiveShadow = true;
     // (the cabin's window band and the wheelhouse's seen through, onto who rides along and the pilot: view/seats.ts)
     const glass = new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false });
-    const pane = new THREE.Mesh(mergeGeometries([new THREE.BoxGeometry(4.2, 0.75, 6.6).translate(0, 1.675, 0.7),
+    // (its ends a little inside the window frames' faces: on them, the frames flickered through it)
+    const pane = new THREE.Mesh(mergeGeometries([new THREE.BoxGeometry(4.2, 0.75, 6.58).translate(0, 1.675, 0.7),
       new THREE.BoxGeometry(2.22, 0.35, 1.42).translate(0, 3.02, 3.1)]), glass);
     this.group.add(hull, pane);
     const part = parts();
@@ -103,7 +104,8 @@ class HovercraftLook implements CraftLook<'hovercraft'> {
         const vane = new THREE.Group();
         vane.position.set(cx + dx, FAN_Y, FAN_Z - DUCT_D / 2 - 0.08);
         part(vane, HULL, [0.06, 1.8, 0.6], 0, 0, -0.3);
-        part(vane, STRIPE, [0.07, 0.3, 0.6], 0, 0.75, -0.3);
+        // (the stripe standing out of the vane's top and edges, not on them)
+        part(vane, STRIPE, [0.07, 0.32, 0.62], 0, 0.76, -0.3);
         this.rudders.push(vane);
         this.group.add(vane);
       }
