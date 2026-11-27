@@ -98,10 +98,10 @@ sh scripts/build_data.sh
 
 Needs [uv](https://docs.astral.sh/uv/), `curl`, and Node with `web/node_modules` installed (`cd web && pnpm install`:
 the triangle counts run the viewer's mesher). The first run downloads about 6.6 GB of Bavarian rasters (62 sheets of 1 km), 0.5 GB of LoD2 models, 6.0 GB of LiDAR point clouds, 41 MB of ALKIS land use and the 0.37 GB single-tree GeoPackage (cut and deleted), the Geofabrik extract and 0.7 GB of DWD tables into `data/raw` (git-ignored, reused afterwards).
-From cached raw data the build takes about 5½ minutes (WSL, 20 cores: prep, lod2, laser 1 min, the volume in 8
-regions of 1024 m, 4 at once, 3½ min, the steps after it 1 min, 45 s of them `tris.mjs`); a region's process peaks
-at ~4 GB of RAM (the Altstadt's, 1024 m and its halo), the steps after the regions at 0.8 GB; `data/cache` holds
-0.2 GB. Given the same `data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on
+From cached raw data the build takes about 31 minutes (WSL, 20 cores, 2026-11-27: prep 5 min, then laser 4 min with
+lod2 alongside, the volume in 48 regions of 1024 m, 16 at once, 17 min, the steps after it 4½ min, 2 of them
+`tile_fields.py` and 1 `tris.mjs`); a region's process peaks at ~3.5 GB of RAM, the steps after the regions at 2 GB;
+`data/` holds 11 GB afterwards (6 GB of it `data/cache`, 3.8 GB `data/orto.npy`). Given the same `data/raw`, it reproduces the committed `web/public/data` byte for byte (checked on
 2026-11-20; the gzip files are written with `mtime=0`).
 
 **Incremental.** A rerun does only what changed: each step runs when what it reads or writes changed since it last ran

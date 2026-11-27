@@ -23,12 +23,12 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   the owner, expect changes);
   left of it: cars at the mapped car parks too, a crater under an asleep craft, the draw cost of a dozen standing
   crafts on the phone, the numbers (wake 400 m, refill 300 s) tried in play.
-- Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
-  slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
-  budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
+- Roads by algorithm, for any map: measured (`road-drive`); the caps take holes and verges of the carriageway and
+  slabs over passages under it (rebuilt 2026-11-27: bumps 93 -> 69, edges 113 -> 76, steep 100 -> 99, tight 296,
+  p99 1.97 -> 1.85, p99.9 6.19 -> 4.98 m/s^2). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
   roads (`roads.md`, "How the main roads drive").
-- Roofs: rule buildings (`scripts/roofs.py`), the owner picked the look `slopes` (2026-11-27), on in the map config;
-  seen once the map is rebuilt in full (with the roads' caps). Not smoothed.
+- Roofs: rule buildings (`scripts/roofs.py`), the owner picked the look `slopes` (2026-11-27), on in the map config
+  and in the committed map (rebuilt 2026-11-27); for the owner to look at in the viewer. Not smoothed.
 - 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes
