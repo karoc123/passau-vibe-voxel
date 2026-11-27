@@ -35,6 +35,8 @@ export interface PlayerCraft {
   readonly mapPose?: Pose | null;
   /** its camera at the player's eyes in their seat (their own figure not drawn: StreetLife ownEyes) */
   readonly inSeat?: boolean;
+  /** it aims with the mouse taken, as on foot (a gun): Nav takes it back after the menu */
+  readonly mouse?: boolean;
   /** get in: at a spot (tools; later F2, walking up to it) or, without one, where the view is. false: not now */
   enter(at?: CraftSpot): boolean;
   /** the types of the world's crafts it flies (board) */
