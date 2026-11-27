@@ -4,7 +4,7 @@ import { ChaseRig, clearShare, followAngle } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
 import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
-import { CRAFT_SCALE, GLIDER_HEIGHT, type CraftKind } from '../sim/craft/craft-motion';
+import { CRAFT_SCALE, GLIDER_HEIGHT, rotorcraft, type CraftKind } from '../sim/craft/craft-motion';
 import { craftLook } from '../view/crafts';
 import type { CraftInput } from '../sim/contract/inputs';
 import { NO_CRAFT_INPUT } from '../sim/craft/special-core';
@@ -13,7 +13,7 @@ import { ModePanel } from './mode-panel';
 import { TouchSticks } from '../touch/sticks';
 import './special-craft.css';
 
-// The helicopter, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
+// The helicopters, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
 // Here: the panel, the input, the chase camera. Out of focus the input is hands off (input.ts). Left, the
 // helicopter and the hovercraft stay in the world (board: back in); the paraglider, once landed or left, goes. A
@@ -30,6 +30,10 @@ const CONFIG = {
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
+  // (no hover hold: its pilot flies for its door gunners, who ride along; C goes round its seats)
+  gunship: { name: 'Military helicopter', back: 22, up: 7.5, look: 1.5, drop: 0,
+    help: ['W/S nose down and up · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · C: next seat (left gun, right gun, bench, controls) · X get out · Esc exit',
+      'Left stick: forward, back and turn. Right stick: climb, descend, slide. The seat button goes round the seats.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
     help: ['A/D steer · W dive · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
       'Left stick: turn, dive and brake. Release: let go of the wing; falling, Open canopy.'] },
@@ -65,7 +69,7 @@ class SpecialCraft implements PlayerCraft {
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
-      camera: id === 'helicopter' ? undefined : 'right',
+      camera: rotorcraft(id) ? undefined : 'right',
       onPinch: (ratio) => { this.zoom = clamp(this.zoom * ratio, 0.65, 2); },
     });
     this.panel = new ModePanel(host, id, cfg.name);
@@ -119,9 +123,9 @@ class SpecialCraft implements PlayerCraft {
     this.link.close(this.id === 'paraglider');
   }
 
-  // into one left in the world
-  board(craft: CraftView) {
-    if (!this.boards.includes(craft.type as CraftKind) || this.phase !== 'off' || !this.link.sim || !this.ctx.nav.enterCraft(this)) return false;
+  // into one left in the world, or from a seat of its own (from: that seat's shell)
+  board(craft: CraftView, from?: PlayerCraft) {
+    if (!this.boards.includes(craft.type as CraftKind) || this.phase !== 'off' || !this.link.sim || !this.ctx.nav.enterCraft(this, from)) return false;
     this.link.open();
     this.link.board(craft.id);
     this.activate(craft.core.pose.h);
@@ -189,7 +193,7 @@ class SpecialCraft implements PlayerCraft {
         if (x < 5 || z < 5 || x >= collision.width - 5 || z >= collision.depth - 5) continue;
         const surface = world.surface(x, z);
         if (!surface) { waiting = true; continue; }
-        if (this.id === 'helicopter' && surface.water) continue;
+        if (rotorcraft(this.id) && surface.water) continue;
         const y = surface.height + SPAWN_HEIGHT[this.id];
         const clear = world.sweep({ x, y, z }, { x: 0, y: 1, z: 0 }, s.h, s.h);
         if (clear === 'loading') { waiting = true; continue; }
@@ -273,7 +277,7 @@ class SpecialCraft implements PlayerCraft {
       this.phase === 'landing' ? 'Landing…' : on && !inFocus() ? PAUSED :
       on && result === 'loading' ? 'Loading collision tiles…' :
       on && result === 'blocked' ? 'Obstacle ahead' :
-      on && this.id === 'helicopter' && core?.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
+      on && rotorcraft(this.id) && core?.motion.grounded ? 'On the skids: Space to take off' : this.panel.saying);
     if (!on || !core) return;
     const { p, speed } = core.motion;
     const height = this.id === 'hovercraft' ? null : this.link.col?.surface(p.x, p.z)?.top;
@@ -288,6 +292,10 @@ export class HovercraftMode extends SpecialCraft {
 
 export class HelicopterMode extends SpecialCraft {
   constructor(ctx: CraftContext) { super(ctx, 'helicopter'); }
+}
+
+export class GunshipMode extends SpecialCraft {
+  constructor(ctx: CraftContext) { super(ctx, 'gunship'); }
 }
 
 export class ParagliderMode extends SpecialCraft {

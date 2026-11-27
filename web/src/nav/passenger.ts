@@ -28,6 +28,7 @@ const CS = CRAFT_SCALE.helicopter, UP = new THREE.Vector3(0, 1, 0);
 const VIEW: Record<string, { back: number; up: number; look: number }> = {
   hovercraft: { back: 22, up: 7.5, look: 1.8 },
   helicopter: { back: 17 * CS, up: 6 * CS, look: 1.2 * CS },
+  gunship: { back: 22, up: 7.5, look: 1.5 },
   boat: { back: 9.5, up: 3.4, look: 1 },
 };
 // the seat not seen held for this long after boarding: refused late or lost before the first snapshot
@@ -71,7 +72,7 @@ export class PassengerMode implements PlayerCraft {
     this.panel.el.classList.add('special-craft');
     this.help = this.panel.help('Drag: look around · Wheel: zoom · V: seat or chase view · E: get out · Esc: menu',
       'Drag to look around, pinch to zoom; the Get out button leaves.');
-    this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: to the wheel · E: get out',
+    this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E: get out',
       'Drag to aim, tap to fire; the Get out button leaves.');
     addEventListener('keydown', (e) => {
       if (!this.riding || e.code !== 'KeyV' || e.repeat || !gameKey(e)) return;

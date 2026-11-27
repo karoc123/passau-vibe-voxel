@@ -12,7 +12,8 @@ export interface TankTuning { readonly full: number; readonly idle: number }
 export type FuelTuning = Readonly<Record<Exclude<CraftType, 'paraglider' | 'drone'> | 'car', TankTuning>>;
 
 // The owner's starting points under load (halved again after play): a helicopter ~2 min, a boat ~3, a car ~5. A
-// hovercraft between boat and car; a floatplane flies far, a jet burns fast.
+// hovercraft between boat and car; a floatplane flies far, a jet burns fast; the
+// military helicopter's bigger tanks hold out a little longer over a fight than the light one's.
 export const FUEL: FuelTuning = frozen({
   car: frozen({ full: 300, idle: 0.1 }),
   boat: frozen({ full: 180, idle: 0.1 }),
@@ -21,6 +22,7 @@ export const FUEL: FuelTuning = frozen({
   floatplane: frozen({ full: 240, idle: 0.1 }),
   jet: frozen({ full: 150, idle: 0.1 }),
   fighter: frozen({ full: 240, idle: 0.1 }),
+  gunship: frozen({ full: 150, idle: 0.1 }),
 });
 
 /** the tank's steps from empty to full: only a whole step crosses the wire (fuel goes down slowly; 0.5 % is finer than

@@ -8,7 +8,7 @@ import { imp } from './lib.mjs';
 
 const { makeWorld, fetchedCollision } = await imp('checks/world.ts');
 const { craftWorld, CRAFT_RADIUS, SPAWN_HEIGHT } = await load('sim/craft/craft-collision.ts');
-const { CraftMotion } = await load('sim/craft/craft-motion.ts');
+const { CraftMotion, CRAFT } = await load('sim/craft/craft-motion.ts');
 const { meta } = await makeWorld({
   size: [128, 128],
   ground: (_x, z) => z < 40 ? 5 : 6,
@@ -58,37 +58,40 @@ hover.motion.reset({ x: 64, y: 5 + SPAWN_HEIGHT.hovercraft, z: 8 }, 0, 20);
 const glideResult = run(hover, 1);
 check('hovercraft glides on with the throttle let go', glideResult === 'moving' && hover.motion.speed > 15 && hover.motion.speed < 19);
 
-const heli = await craft('helicopter');
-heli.motion.reset({ x: 64, y: 6 + SPAWN_HEIGHT.helicopter, z: 50 }, 0);
-run(heli, 2.5, { lift: 1 });
-const altitude = heli.motion.p.y;
-check('helicopter takes off vertically', altitude > 20 && heli.motion.p.x === 64 && heli.motion.p.z === 50);
-run(heli, 4);
-const hoverY = heli.motion.p.y;
-run(heli, 2);
-check('helicopter holds a steady hover', Math.abs(heli.motion.p.y - hoverY) < 0.01 && heli.motion.speed < 0.01);
-run(heli, 1.1, { drive: 1 });
-check('helicopter flies forward above the wall height, nose down', heli.motion.p.z > 53 && heli.motion.p.y > 20 &&
-  heli.motion.pitch < -0.1);
-run(heli, 3, { drive: 1 });
-const fast = heli.motion.speed;
-check('helicopter gathers speed over seconds, not at once', fast > 20 && fast < 35);
-run(heli, 6);
-check('helicopter settles into a hover with the stick let go', heli.motion.speed < 1);
-run(heli, 1, { turn: 1 });
-check('helicopter turns right on D (the heading falls)', heli.motion.heading < -0.5);
-heli.motion.reset({ x: 64, y: 22, z: 50 }, 0);
-run(heli, 2, { side: 1 });
-check('helicopter slides sideways to the right on E (toward -x at heading 0)', heli.motion.p.x < 58 && heli.motion.bank > 0.05);
-heli.motion.reset({ x: 64, y: heli.motion.p.y, z: 65 }, 0);
-run(heli, 12, { lift: -1 });
-check('helicopter lands and remains supported', Math.abs(heli.motion.p.y - (6 + SPAWN_HEIGHT.helicopter)) < 0.05 && heli.motion.grounded);
-const parked = { ...heli.motion.p };
-run(heli, 2, { drive: 1, turn: 1 });
-check('helicopter does not taxi or turn on its skids', Math.hypot(heli.motion.p.x - parked.x, heli.motion.p.z - parked.z) < 0.01 &&
-  heli.motion.heading === 0);
-run(heli, 3, { lift: 1 });
-check('helicopter can take off again', heli.motion.p.y > 20);
+// (each kind on the helicopter's law, from the height it is put down at: its skids on the ground, not in it)
+for (const kind of ['helicopter', 'gunship']) {
+  const heli = await craft(kind), H = CRAFT[kind], top = H.accel / H.drag;
+  heli.motion.reset({ x: 64, y: 6 + SPAWN_HEIGHT[kind], z: 50 }, 0);
+  run(heli, 2.5, { lift: 1 });
+  const altitude = heli.motion.p.y;
+  check(`${kind} takes off vertically`, altitude > 6 + SPAWN_HEIGHT[kind] + 0.6 * H.climb * 2.5 && heli.motion.p.x === 64 && heli.motion.p.z === 50);
+  run(heli, 5);
+  const hoverY = heli.motion.p.y;
+  run(heli, 2);
+  check(`${kind} holds a steady hover`, Math.abs(heli.motion.p.y - hoverY) < 0.01 && heli.motion.speed < 0.01);
+  run(heli, 1.1, { drive: 1 });
+  check(`${kind} flies forward above the wall height, nose down`, heli.motion.p.z > 53 && heli.motion.p.y > 20 &&
+    heli.motion.pitch < -0.1);
+  run(heli, 3, { drive: 1 });
+  const fast = heli.motion.speed;
+  check(`${kind} gathers speed over seconds, not at once`, fast > 0.45 * top && fast < 0.85 * top);
+  run(heli, 6);
+  check(`${kind} settles into a hover with the stick let go`, heli.motion.speed < 1);
+  run(heli, 1, { turn: 1 });
+  check(`${kind} turns right on D (the heading falls)`, heli.motion.heading < -0.5);
+  heli.motion.reset({ x: 64, y: 22, z: 50 }, 0);
+  run(heli, 2, { side: 1 });
+  check(`${kind} slides sideways to the right on E (toward -x at heading 0)`, heli.motion.p.x < 58 && heli.motion.bank > 0.05);
+  heli.motion.reset({ x: 64, y: heli.motion.p.y, z: 65 }, 0);
+  run(heli, 12, { lift: -1 });
+  check(`${kind} lands and remains supported`, Math.abs(heli.motion.p.y - (6 + SPAWN_HEIGHT[kind])) < 0.05 && heli.motion.grounded);
+  const parked = { ...heli.motion.p };
+  run(heli, 2, { drive: 1, turn: 1 });
+  check(`${kind} does not taxi or turn on its skids`, Math.hypot(heli.motion.p.x - parked.x, heli.motion.p.z - parked.z) < 0.01 &&
+    heli.motion.heading === 0);
+  run(heli, 3, { lift: 1 });
+  check(`${kind} can take off again`, heli.motion.p.y > 20);
+}
 
 const glider = await craft('paraglider');
 glider.motion.reset({ x: 70, y: 23, z: 45 }, 0, 13);

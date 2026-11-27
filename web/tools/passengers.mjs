@@ -250,9 +250,9 @@ const spawn = async (p, type, x, z, h) => {
     `taken away: its passengers on foot beside where it was, on the ground (${ds.map((x) => x.toFixed(2))} m)`);
 }
 
-// the helicopter: three passengers, not four; one without a body is refused
+// the helicopter: one passenger, not two; one without a body is refused
 {
-  const P = add('P'), riders = ['R1', 'R2', 'R3', 'R4'].map(add), O = add('O'), W = watch(O), W1 = watch(riders[0]);
+  const P = add('P'), riders = ['R1', 'R2'].map(add), O = add('O'), W = watch(O), W1 = watch(riders[0]);
   const heli = await spawn(P, 'helicopter', 350, 120, 0);
   check(heli?.type === 'helicopter', 'a helicopter made');
   const id = heli.id;
@@ -260,31 +260,31 @@ const spawn = async (p, type, x, z, h) => {
   O.c.send({ kind: 'view', view: { focus: { x: 350, z: 120 } } });
   await tick(3);
   const spot = (i) => { const s = beside(id, i % 2 ? -1 : 1, 1, i < 2 ? -1 : 1); return { x: s.x, y: G, z: s.z, h: 0 }; };
-  const before = offer(riders[3], spot(3));
+  const before = offer(riders[1], spot(1));
   const answers = [];
   for (const p of riders) answers.push(await board(p, id));
-  const ok = riders.filter((p) => aboard(p, id)).length, last = answers[3];
-  check(ok === 3 && last.length === 1 && !last[0].ok && last[0].reason === 'taken' && seatOf(riders[3])?.role === 'walker',
-    `three passengers aboard, the fourth refused as taken (${JSON.stringify(last)})`);
-  const full = offer(riders[3], spot(3));
+  const ok = riders.filter((p) => aboard(p, id)).length, last = answers[1];
+  check(ok === 1 && last.length === 1 && !last[0].ok && last[0].reason === 'taken' && seatOf(riders[1])?.role === 'walker',
+    `one passenger aboard, the second refused as taken (${JSON.stringify(last)})`);
+  const full = offer(riders[1], spot(1));
   check(before === 'Ride along in helicopter' && full === null, `beside it the seat offered while one is free (${before}), not once it is full (${full})`);
   await tick(2);
-  const S = CRAFT_SCALE.helicopter, three = riders.slice(0, 3).map((p) => sitting(W, O, p.name, id, S));
+  const S = CRAFT_SCALE.helicopter, three = riders.slice(0, 1).map((p) => sitting(W, O, p.name, id, S));
   // (inside its body: 1.5 m across, 1.35 m aft and 1.25 m forward of the origin, the roof 0.875 m up, before the scale)
   const inside = three.every((t) => t && Math.abs(t.hips.x) < 0.75 && t.hips.z > -1.35 && t.hips.z < 1.25 && t.top.y < 0.875 && t.legs < -1 && !t.onFoot);
   const apart = three.every((t, i) => three.every((u, j) => i === j || (t && u && t.hips.distanceTo(u.hips) > 0.35)));
-  check(inside && apart, `another page draws the three sitting in its cabin under its roof, each in a seat of their own (hips, head's top: ${three.map((t) => t && `${[t.hips.x, t.hips.y, t.hips.z].map((v) => v.toFixed(2))} ${t.top.y.toFixed(2)}`).join('; ')})`);
-  // a passenger's own page: the pilot at the front and the two others in their seats; themself too while the camera
-  // follows the craft, not from their own seat's eyes
-  const others = ['P', 'R2', 'R3'].map((n) => [n, sitting(W1, riders[0], n, id, S)]);
+  check(inside && apart, `another page draws the passenger sitting in its cabin under its roof (hips, head's top: ${three.map((t) => t && `${[t.hips.x, t.hips.y, t.hips.z].map((v) => v.toFixed(2))} ${t.top.y.toFixed(2)}`).join('; ')})`);
+  // a passenger's own page: the pilot at the front; themself too while the camera follows the craft, not from their
+  // own seat's eyes
+  const others = ['P'].map((n) => [n, sitting(W1, riders[0], n, id, S)]);
   const chased = !!shownFigure(W1, 'R1');
   W1.life.ownEyes = true;
   await tick(1);
-  const fromSeat = { own: !!shownFigure(W1, 'R1'), others: ['P', 'R2', 'R3'].filter((n) => shownFigure(W1, n)).length };
+  const fromSeat = { own: !!shownFigure(W1, 'R1'), others: ['P'].filter((n) => shownFigure(W1, n)).length };
   W1.life.ownEyes = false;
   const pilot = pilotPlace('helicopter'), atWheel = others[0][1]?.hips.distanceTo(new THREE.Vector3(pilot.x, pilot.y, pilot.z).divideScalar(S));
-  check(others.every(([, t]) => t && !t.onFoot) && atWheel < 0.05 && chased && !fromSeat.own && fromSeat.others === 3,
-    `a passenger's page draws the pilot at the controls (${atWheel?.toFixed(2)} m off its seat) and the others in their seats; itself in the chase view (${chased}), not from its seat's eyes (${fromSeat.own ? 'drawn' : 'not drawn'}, the others ${fromSeat.others} of 3)`);
+  check(others.every(([, t]) => t && !t.onFoot) && atWheel < 0.05 && chased && !fromSeat.own && fromSeat.others === 1,
+    `a passenger's page draws the pilot at the controls (${atWheel?.toFixed(2)} m off its seat); itself in the chase view (${chased}), not from its seat's eyes (${fromSeat.own ? 'drawn' : 'not drawn'}, the pilot ${fromSeat.others ? 'drawn' : 'not drawn'})`);
   // the seat view's eyes (nav/passenger.ts): no one else's figure within the camera's near plane of them
   W.scene.updateMatrixWorld(true);
   const c = O.c.crafts().find((o) => o.id === id), dr = c.core.drawn(O.c.time.alpha);
@@ -292,13 +292,13 @@ const spawn = async (p, type, x, z, h) => {
   const near = O.c.passengers().filter(([k, cid]) => k === 'craft' && cid === id).map(([, , who, i]) => {
     const e = seatEye(seatPlace('craft', 'helicopter', i)), eye = new THREE.Vector3(e.x, e.y, e.z).applyQuaternion(turn).add(new THREE.Vector3(dr.x, dr.y, dr.z));
     let d = Infinity;
-    for (const n of ['P', 'R1', 'R2', 'R3']) {
+    for (const n of ['P', 'R1']) {
       if (n === who) continue;
       W.life.avatars.figure(n)?.group.traverse((m) => { if (m.isMesh) d = Math.min(d, new THREE.Box3().setFromObject(m).distanceToPoint(eye)); });
     }
     return d;
   });
-  check(near.length === 3 && near.every((d) => d > SEAT_NEAR), `from each seat's eyes no other figure nearer than the near plane (${near.map((d) => d.toFixed(2))} m; ${SEAT_NEAR} m)`);
+  check(near.length === 1 && near.every((d) => d > SEAT_NEAR), `from each seat's eyes no other figure nearer than the near plane (${near.map((d) => d.toFixed(2))} m; ${SEAT_NEAR} m)`);
   const r = await board(O, id);
   check(r.length === 1 && !r[0].ok && seatOf(O) === null, `a player without a body (orbit mode) refused (${JSON.stringify(r)})`);
 }
@@ -456,6 +456,7 @@ for (const [vt, len, X] of [['van', 5.4, 340], ['camper', 6.6, 380]]) {
     ['floatplane', 200, 230, G + 20, 0, [[1, 0, 0]]],
     ['jet', 260, 230, G + 20, 0, [[1, 0.3, 0]]],
     ['fighter', 380, 230, G + 20, 0, [[1, 0.3, 0], [0, 1, 0]]],
+    ['gunship', 440, 225, G + SPAWN_HEIGHT.gunship, 0, [[1, 0, 0], [0, 0, 1]]],
     ['paraglider', 320, 230, G + 60, 0, [[0, 0, 1]]],
   ];
   for (const [type, x, z, y, h, dirs] of flights) {
@@ -473,6 +474,25 @@ for (const [vt, len, X] of [['van', 5.4, 340], ['camper', 6.6, 380]]) {
   }
   check(seen.every(([, l]) => l === null) && pilotPlace('drone') === null,
     `another page sees each craft's pilot through its glass, none in a drone (${seen.map(([t, l]) => `${t}: ${l ?? 'seen'}`).join('; ')})`);
+}
+
+// every craft type, as its seats' table has them: each passenger's seat a place of its own in its look, within its box,
+// and a pilot's place in every craft flown from inside it (a type added without them would seat its riders on top of
+// each other, or fly with nobody at the controls)
+{
+  const { SEATS } = await imp('src/sim/seats.ts'), bad = [];
+  for (const [type, seats] of Object.entries(SEATS.craft)) {
+    const box = craftBox(type, { x: 0, y: 0, z: 0, h: 0 }), places = [];
+    for (const q of seats) {
+      if (q.role === 'pilot') { if (type !== 'drone' && !pilotPlace(type)) bad.push(`${type}: no pilot's place`); continue; }
+      const pl = seatPlace('craft', type, q.index);
+      if (!pl) { bad.push(`${type} ${q.index}: no place`); continue; }
+      if (places.some((o) => Math.hypot(o.x - pl.x, o.z - pl.z) < 0.4)) bad.push(`${type} ${q.index}: on another's place`);
+      if (Math.abs(pl.x) > box.r + 0.05 || pl.z < box.z - box.l || pl.z > box.z + box.l) bad.push(`${type} ${q.index}: outside its box`);
+      places.push(pl);
+    }
+  }
+  check(bad.length === 0, `every craft type's passengers each have a seat of their own in its look, its pilot a place at the controls (${bad.join('; ') || 'all'})`);
 }
 
 // getting out by key (nav/board.ts): X out of any vehicle, E only out of one whose own keys leave it free
