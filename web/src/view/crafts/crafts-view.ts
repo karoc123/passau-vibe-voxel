@@ -17,11 +17,12 @@ export class CraftsView {
 
   constructor(private readonly parent: THREE.Object3D) {}
 
-  /** every frame: the crafts the client sees, but the one the local player pilots */
-  update(sim: SimClient | null, dt: number, night: number) {
+  /** every frame: the crafts the client sees, but the one the local player pilots while its shell flies it (flying:
+   * a shell has the view). Left, the snapshot still names the player its pilot for a tick or two: drawn here then */
+  update(sim: SimClient | null, dt: number, night: number, flying = false) {
     const seen = new Set<CraftId>(), frame = { dt, night, now: performance.now(), alpha: sim?.time.alpha ?? 1 };
     for (const c of sim?.crafts() ?? []) {
-      if (c.pilot !== null && c.pilot === sim?.player) continue;
+      if (flying && c.pilot !== null && c.pilot === sim?.player) continue;
       let s = this.shown.get(c.id);
       if (!s) {
         const i = this.free.findIndex((f) => f.type === c.type);

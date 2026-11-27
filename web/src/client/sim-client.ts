@@ -93,7 +93,7 @@ export interface SimClient {
   /** the cars driven by players near this one (its own among them), by car id with its driver */
   drivers(): readonly [number, PlayerId][];
   /** the players riding along in a car or a craft near the player (theirs too) */
-  passengers(): readonly [kind: 'car' | 'craft', id: number, player: PlayerId][];
+  passengers(): readonly [kind: 'car' | 'craft', id: number, player: PlayerId, seat: number][];
   /** the crafts put down in the world, piloted or left (any player may enter one left: enterSeat) */
   crafts(): readonly CraftView[];
   /** what happened to the player's craft since the last call, oldest first (the craft events of it) */

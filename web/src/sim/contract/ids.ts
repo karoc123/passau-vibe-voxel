@@ -22,7 +22,7 @@ export interface EntityRef { kind: EntityKind; id: number }
  * input: the driver's or pilot's goes on steering) */
 export type Role = 'driver' | 'pilot' | 'walker' | 'passenger';
 
-/** a player's place on an entity (ADR 0008: control per seat): one of the seats of its model (sim/entities.ts SEATS).
+/** a player's place on an entity (ADR 0008: control per seat): one of the seats of its model (sim/seats.ts SEATS).
  * A seat holds at most one player, a player at most one seat (the seat table: WorldSim seat) */
 export interface Seat { entity: EntityRef; role: Role; index: number }
 

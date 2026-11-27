@@ -466,8 +466,12 @@ function otherPlayers(): readonly MapMark[] {
     const d = player !== me && life.drawn('car', car);
     if (d) others.push({ player, label: label(player), ...xyz(d) });
   }
+  // (one in a seat its look has no place for is marked at the vehicle)
+  const sat = life.seatedDrawn();
+  for (const s of sat) others.push({ player: s.player, label: label(s.player), ...xyz(s.at) });
   for (const [kind, id, player] of sim.passengers()) {
-    const d = player === me ? null : kind === 'car' ? life.drawn('car', id) : sim.crafts().find((c) => c.id === id)?.core.pose;
+    if (player === me || sat.some((s) => s.player === player)) continue;
+    const d = kind === 'car' ? life.drawn('car', id) : sim.crafts().find((c) => c.id === id)?.core.pose;
     if (d) others.push({ player, label: label(player), ...xyz(d) });
   }
   return others;
@@ -527,7 +531,7 @@ renderer.setAnimationLoop(frameLoop({
   // this frame's poses drawn
   poses: (_now, dt) => {
     if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
-    craftsView?.update(sim, dt, daylight.night);
+    craftsView?.update(sim, dt, daylight.night, nav.craftView);
     weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown

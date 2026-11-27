@@ -1,7 +1,9 @@
 import type { CraftView } from '../client/sim-client';
 import type { CommandResult } from '../sim/contract/commands';
 import type { EntityRef, Role } from '../sim/contract/ids';
+import { SEATS } from '../sim/seats';
 import { craftBox } from '../sim/solids';
+import { vehicleOf } from '../sim/vehicles';
 import { fromBox, type Box } from '../sim/walk-bounds';
 import type { Picked } from '../view/life';
 import type { PlayerCraft } from './craft';
@@ -21,8 +23,6 @@ const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
 const E_TAKEN = new Set(['fpv', 'helicopter', 'hovercraft', 'paraglider']);
 const NOT_BOARDED = 'paraglider';
-// the crafts with passengers' seats (the host's SEATS)
-const ALONG = new Set(['hovercraft', 'helicopter']);
 
 /** what is within reach: its entity, the seat's role, what to call it, and what its shell takes over from */
 export interface Target { ref: EntityRef; role: Role; label: string; picked?: Picked; craft?: CraftView }
@@ -114,19 +114,24 @@ export class Boarding {
       const look = Math.atan2(box.x - me.x, box.z - me.z) - me.h, s = d + 2 * (1 - Math.cos(look));
       if (s < bs) { bs = s; best = t; }
     };
-    const driven = new Map(sim.drivers());
+    const driven = new Map(sim.drivers()), aboard = new Map<string, number>();
+    for (const [kind, id] of sim.passengers()) aboard.set(`${kind} ${id}`, (aboard.get(`${kind} ${id}`) ?? 0) + 1);
+    // (a seat beside another player only while one is free: the snapshot says who holds them, so a full one is not
+    // offered to be refused; the host still decides)
+    const free = (kind: 'car' | 'craft', id: number, seats: readonly { role: string }[]) =>
+      seats.filter((s) => s.role === 'passenger').length > (aboard.get(`${kind} ${id}`) ?? 0);
     for (const { picked, pose, agent } of life?.near('car', me, 20) ?? []) {
       if (agent.kind !== 'car') continue;
       const id = picked.ref.id, by = driven.get(id);
-      // (a car another player drives: beside them; the host says whether a seat is free)
-      if (by === sim.player) continue;
+      // (a car another player drives: beside them)
+      if (by === sim.player || (by && !free('car', id, SEATS.car[vehicleOf(agent).id]))) continue;
       consider({ ...pose, r: 0.9, l: agent.len / 2 }, { ref: { kind: 'car', id }, role: by ? 'passenger' : 'driver', label: picked.label, picked });
     }
     for (const c of sim.crafts()) {
       const p = c.core.pose, flown = c.pilot !== null && c.pilot !== sim.player;
       if (c.type === NOT_BOARDED) continue;
-      // (one another flies: beside them, where the host says whether a seat is free)
-      if (flown ? !this.passenger() || !ALONG.has(c.type) : c.pilot !== null || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
+      // (one another flies: beside them)
+      if (flown ? !this.passenger() || !free('craft', c.id, SEATS.craft[c.type]) : c.pilot !== null || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
       consider(craftBox(c.type, p), { ref: { kind: 'craft', id: c.id }, role: flown ? 'passenger' : 'pilot', label: c.type, craft: c });
     }
     return best;

@@ -37,7 +37,8 @@ import { EditKeeper, Presence } from './edit-keeper';
 import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground, type WallBox } from './traffic';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
-import { Entities, SEATS } from './entities';
+import { Entities } from './entities';
+import { SEATS } from './seats';
 import { vehicleOf } from './vehicles';
 import type { Craft, CraftCore, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
@@ -371,7 +372,7 @@ export class WorldSim {
 
   // ------------------------------------------------------------------ the players (ADR 0007), keyed by player id
   // A player holds at most one seat on an entity (ADR 0008: control per seat, Seat; the seats of each entity's model:
-  // sim/entities.ts SEATS): the driver's of a car, the walker's of the player's avatar, the pilot's of a craft. Taking a
+  // sim/seats.ts SEATS): the driver's of a car, the walker's of the player's avatar, the pilot's of a craft. Taking a
   // seat (enterSeat) checks it first (the entity there, the seat in its model and free, mayEnter) and, if it may be
   // taken, leaves the one held: one command switches seats, with no tick in between where the player holds none;
   // refused, the player keeps theirs. A seat's input (seatInput) is its role's. Following carries no rights. Only

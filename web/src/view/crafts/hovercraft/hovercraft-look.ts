@@ -26,7 +26,7 @@ function body() {
     box(4.6, 0.02, 1.8, 0, 0.51, 4.9, DECK), box(5.0, 0.02, 3.6, 0, 0.51, -4.4, DECK));
   for (const x of [-2.35, 2.35]) g.push(box(0.5, 0.02, 6.6, x, 0.51, 0.7, DECK));
   // the cabin: a blue band under a row of windows, a door aft each side, the roof; the wheelhouse forward on it
-  g.push(box(4.2, 0.8, 6.6, 0, 0.9, 0.7, HULL), box(4.22, 0.18, 6.62, 0, 1.2, 0.7, LIVERY), box(4.2, 0.75, 6.6, 0, 1.675, 0.7, GLASS),
+  g.push(box(4.2, 0.8, 6.6, 0, 0.9, 0.7, HULL), box(4.22, 0.18, 6.62, 0, 1.2, 0.7, LIVERY),
     box(4.2, 0.55, 6.6, 0, 2.325, 0.7, HULL), box(4.22, 0.08, 6.62, 0, 2.1, 0.7, LIVERY), box(4.0, 0.12, 6.4, 0, 2.66, 0.7, ROOF));
   for (const z of [-2.53, -1.0, -0.15, 0.7, 1.55, 2.4, 3.25, 3.93]) g.push(box(4.24, 0.75, 0.14, 0, 1.675, z, HULL));
   for (const x of [-2.03, -1.0, 0, 1.0, 2.03]) g.push(box(0.14, 0.75, 0.04, x, 1.675, 4.01, HULL));
@@ -75,7 +75,10 @@ class HovercraftLook implements CraftLook<'hovercraft'> {
   constructor() {
     const hull = new THREE.Mesh(body(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1 }));
     hull.castShadow = hull.receiveShadow = true;
-    this.group.add(hull);
+    // (the cabin's window band seen through, onto who rides along: view/seats.ts)
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.75, 6.6).translate(0, 1.675, 0.7),
+      new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false }));
+    this.group.add(hull, pane);
     const part = parts();
     // the fans: a hub and five pitched blades each, and a faint disc so that they read as turning at any frame rate
     this.blur = new THREE.MeshBasicMaterial({ color: 0x202426, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
