@@ -3,7 +3,8 @@
 // round it, applied to the node and its east neighbour as touchedNodes routes them and to a dense voxel array of the
 // node's window as the reference: get() agrees along the way, encode() equals the dense array's canonical runs (a port
 // of scripts/tiles.py column_runs) and ground (min of the base's and the stack from z = 0), re-encoding the encoded node
-// changes nothing, and the two nodes' shared margin columns agree. The edits are synthetic; nothing is written.
+// changes nothing, and the two nodes' shared margin columns agree; blocks placed in its trees take their foliage. The
+// edits are synthetic; nothing is written.
 // usage: node tools/edit-roundtrip.mjs [SEED] [OPS]; exit code 1 on a mismatch
 import { imp } from './lib.mjs';
 import { fileURLToPath } from 'node:url';
@@ -121,9 +122,48 @@ for (let y = -1; y <= N; y++) {
   }
 }
 
+// 4. a block placed in a tree (core/world-edits.ts editNode, the one code of host and client): the tree's foliage
+// (tiles/1f: leaves, trunk, grass) in the cells the block fills is gone, outside it as it was; a box painting only
+// what is solid leaves the foliage in the air be. Each box of BW x BW x BH cells round a tree's foliage, from its ground up.
+const WE = await imp('src/core/world-edits.ts'), LA = await imp('src/core/layers.ts');
+const frame = LA.frameOf(meta);
+const loadF = (tx, ty) => {
+  const b = zlib.gunzipSync(fs.readFileSync(`${D}tiles/1f/${tx}_${ty}.bin`));
+  const t = TD.decodeTile(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), N);
+  return { counts: t.counts, runs: t.runs, ground: A.ground };
+};
+const F = loadF(TX, TY), BW = 3, BH = 6;
+const fol = new CO.EditableNode(N, F, TX, TY), base0 = new CO.EditableNode(N, A, TX, TY);
+// trees: columns whose foliage stands 2 cells over their ground (not grass alone), 3 cells apart or more
+const trees = [];
+for (let y = 2; y < N - BW - 2 && trees.length < 40; y++) for (let x = 2; x < N - BW - 2 && trees.length < 40; x++) {
+  const g = A.ground[(y + 1) * S + x + 1];
+  if (fol.get(x, y, g + 2) && !base0.get(x, y, g + 2) && trees.every(([a, b]) => Math.abs(a - x) + Math.abs(b - y) >= 3)) trees.push([x, y, g]);
+}
+if (trees.length < 10) fail(`trees: ${trees.length} found round ${TX}_${TY}, 10 wanted`);
+let cleared = 0, kept = 0;
+for (const [x, y, g] of trees) {
+  for (const [replace, colour, clears] of [[CO.REPLACE_ALL, ids[1], true], [CO.REPLACE_AIR, ids[1], true], [CO.REPLACE_SOLID, ids[1], false], [CO.REPLACE_ALL, 0, true]]) {
+    const [col, row] = LA.mapToGrid(frame, TX * N + x - 1, TY * N + y - 1);
+    const op = { kind: 'box', col, row, z: LA.cellToAbsZ(frame, g), w: BW, d: BW, h: BH, colour, replace };
+    const got = WE.editNode(frame, TX, TY, { base: A, foliage: F, edited: false }, op, []);
+    const after = new CO.EditableNode(N, { ...got.foliage, ground: got.foliage.ground }, TX, TY);
+    for (let yy = y - 3; yy < y + BW + 2; yy++) for (let xx = x - 3; xx < x + BW + 2; xx++) for (let z = g - 2; z < g + BH + 3; z++) {
+      const inside = xx >= x - 1 && xx < x - 1 + BW && yy >= y - 1 && yy < y - 1 + BW && z >= g && z < g + BH;
+      const was = fol.get(xx, yy, z), now = after.get(xx, yy, z);
+      // (the base's own solid cells in the block, the grass on its top: either way, the block hides or repaints them)
+      if (inside && base0.get(xx, yy, z)) continue;
+      if (inside && clears) { if (now) fail(`foliage ${now} at (${xx}, ${yy}, ${z}) inside a block (replace ${replace}, colour ${colour})`); else if (was) cleared++; }
+      else if (now !== was) fail(`foliage at (${xx}, ${yy}, ${z}) ${was} -> ${now} (replace ${replace}, colour ${colour}, ${inside ? 'painted' : 'outside'})`);
+      else if (was) kept++;
+    }
+  }
+}
+
 let changed = 0;
 for (let c = 0; c < S * S; c++) if (colRuns(e, c) !== colRuns(A, c)) changed++;
 if (bad.length) { console.log(`edit round trip: ${bad.length} mismatches`); process.exit(1); }
 console.log(`edit round trip: ok (node ${TX}_${TY}: ${A.runs.length / 3} runs unedited, re-encoded byte-identical; ${NOPS} ops ` +
   `(${counts.set} set, ${counts.box} box, ${counts.sphere} sphere; ${counts.a} on it, ${counts.b} on ${TX + 1}_${TY}), ` +
-  `${changed} columns changed, ${e.runs.length / 3} runs, equal to the dense reference; margins shared)`);
+  `${changed} columns changed, ${e.runs.length / 3} runs, equal to the dense reference; margins shared; blocks in ${trees.length} ` +
+  `trees: ${cleared} foliage cells cleared, ${kept} kept)`);

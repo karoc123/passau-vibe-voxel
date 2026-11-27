@@ -60,7 +60,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Water-top steps left at the rivers' stretch boxes' edges (map.json): the Ilz at Ilzstadt (box edge N 5390800, a 2 m
   step to the default level, ~2145,-309) and above the Hals weir (its fall, stepped on the 64 m blocks, ~822,-1410);
   the edges belong under bridges or at rapids.
-- A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
+- The edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.
 - `walkAs` start height is unbounded.
