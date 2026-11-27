@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
+import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, OPEN_CARS, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
 import { lerp, wrapAngle } from '../util';
 import { ACTIVE_CELL, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
@@ -7,7 +7,7 @@ import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import { Avatars, HIPS, type Seated } from './avatars';
-import { seatPlace } from './seats';
+import { driverPlace, seatPlace, type SeatPlace } from './seats';
 import type { Car, Kind, Rideable } from '../sim/types';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
@@ -151,6 +151,7 @@ export class StreetLife {
   // the mirror reckons them now, so motion is smooth at any frame rate
   private render(dt: number, night: number, lead: number) {
     this.frame++;
+    this.openCars();
     this.drawCars(lead / STEP, night, dt);
     const back = this.back = 1 - lead / STEP;
     this.coaches = [...this.traffic.trains.coaches()];
@@ -195,14 +196,16 @@ export class StreetLife {
       return THREE.MathUtils.clamp(Math.atan(c.v * c.v * turn / (G * distance)), -LEAN_MAX, LEAN_MAX);
     };
     // (each type its own meshes, its instances counted)
-    const n = {} as Record<VehicleId, number>;
-    for (const id of VEHICLE_IDS) n[id] = 0;
+    const n = {} as Record<VehicleId, number>, no = {} as Record<VehicleId, number>;
+    for (const id of VEHICLE_IDS) n[id] = no[id] = 0;
     const draw = (c: Car, d: Drawn, lean = 0) => {
       const p = B?.pose(c, a, d);
       if (p && p !== d) { d.x = p.x; d.y = p.y; d.z = p.z; d.h = p.h; d.pitch = p.pitch; d.roll = p.roll; }
-      const t = vehicleOf(c), V = M.vehicles[t.id], i = n[t.id]++;
+      const t = vehicleOf(c), open = this.opened.has(c.id) && no[t.id] < OPEN_CARS;
+      const V = open ? M.open[t.id] : M.vehicles[t.id], i = open ? no[t.id]++ : n[t.id]++;
       m.compose(pos.set(d.x, d.y, d.z), q.setFromEuler(eu.set(-(d.pitch ?? 0), d.h ?? 0, (d.roll ?? 0) + lean)), sc.set(1, 1, c.len / t.len));
       V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
+      if (open) M.open[t.id].pane.setMatrixAt(i, m);
       V.body.setColorAt(i, this.col(c.col));
       V.tail.setColorAt(i, tail.copy(c.brake ? tailOn : tailOff).multiplyScalar(c.brake ? 1 : 0.4 + 1.2 * night));
     };
@@ -237,9 +240,11 @@ export class StreetLife {
       V.tail.setColorAt(i, tail.copy(tailOff).multiplyScalar(0.4 + 1.2 * night));
     });
     for (const id of VEHICLE_IDS) {
-      const V = M.vehicles[id];
+      const V = M.vehicles[id], O = M.open[id];
       setCount(n[id], V.body, V.dark, V.head, V.tail);
       V.body.visible = V.dark.visible = V.head.visible = V.tail.visible = n[id] > 0;
+      setCount(no[id], O.body, O.dark, O.head, O.tail, O.pane);
+      O.body.visible = O.dark.visible = O.head.visible = O.tail.visible = O.pane.visible = no[id] > 0;
     }
     M.headMat.color.setRGB(0.85 + 2.2 * night, 0.82 + 2.0 * night, 0.72 + 1.6 * night);
   }
@@ -284,39 +289,51 @@ export class StreetLife {
     return this.riders.length;
   }
 
-  // the other players riding along, each in their seat in the car or craft as drawn this frame (a car after drawCars)
+  // the cars another player is drawn sitting in (their cabins opened: meshes.ts)
+  private openCars() {
+    const C = this.client, O = this.opened;
+    O.clear();
+    for (const [car, player] of C.drivers()) if (player !== C.player) O.add(car);
+    for (const [kind, id, player] of C.passengers()) if (kind === 'car' && player !== C.player) O.add(id);
+  }
+  private readonly opened = new Set<number>();
+
+  // the other players riding along or at the wheel of a car, each in their seat in the car or craft as drawn this frame
+  // (a car after drawCars; the craft the player pilots as its shell draws it, run ahead of the snapshots)
   private sitting(): readonly Seated[] {
-    const C = this.client, out = this.seatedNow;
+    const C = this.client, out = this.seatedNow, own = C.craftOf();
     out.length = 0;
-    for (const [kind, id, player, index] of C.passengers()) {
-      if (player === C.player) continue;
+    const sit = (kind: 'car' | 'craft', id: number, player: string, place: (type: string) => SeatPlace | null) => {
+      if (player === C.player) return;
       const e = SEAT_EULER, pos = new THREE.Vector3(), q = new THREE.Quaternion();
-      let place, along = 1;
+      let p, along = 1;
       if (kind === 'car') {
         const c = this.agent({ kind: 'car', id }) as Car | null, d = this.drawnCars.get(id);
-        if (!c || !d || d.frame !== this.frame) continue;
+        if (!c || !d || d.frame !== this.frame) return;
         const t = vehicleOf(c);
-        place = seatPlace('car', t.id, index);
+        p = place(t.id);
         along = c.len / t.len;
         pos.set(d.x, d.y, d.z);
         e.set(-(d.pitch ?? 0), d.h ?? 0, (d.roll ?? 0) + (d.lean ?? 0));
       } else {
-        const c = C.crafts().find((o) => o.id === id);
-        if (!c) continue;
-        place = seatPlace('craft', c.type, index);
-        const d = c.core.drawn(C.time.alpha) as { x: number; y: number; z: number; h: number; pitch?: number; bank?: number };
+        const mine = own?.id === id, c = mine ? own : C.crafts().find((o) => o.id === id);
+        if (!c) return;
+        p = place(c.type);
+        const d = c.core.drawn(mine ? C.ownAlpha : C.time.alpha) as { x: number; y: number; z: number; h: number; pitch?: number; bank?: number };
         pos.set(d.x, d.y, d.z);
         e.set(-(d.pitch ?? 0), d.h, d.bank ?? 0);
       }
-      if (!place) continue;
+      if (!p) return;
       q.setFromEuler(e);
-      out.push({ player, q, legs: place.legs, at: new THREE.Vector3(place.x, place.y - HIPS, place.z * along).applyQuaternion(q).add(pos) });
-    }
+      out.push({ player, q, legs: p.legs, at: new THREE.Vector3(p.x, p.y - HIPS, p.z * along).applyQuaternion(q).add(pos) });
+    };
+    for (const [kind, id, player, index] of C.passengers()) sit(kind, id, player, (type) => seatPlace(kind, type, index));
+    for (const [car, player] of C.drivers()) sit('car', car, player, (type) => driverPlace(type as VehicleId));
     return out;
   }
   private readonly seatedNow: Seated[] = [];
 
-  /** the other players riding along as drawn in their seats this frame (their feet's point as if standing), for the
+  /** the other players riding along or driving as drawn in their seats this frame (their feet's point as if standing), for the
    * name tags and the maps */
   seatedDrawn(): readonly Seated[] { return this.seatedNow; }
 
