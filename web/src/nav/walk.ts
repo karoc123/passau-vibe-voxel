@@ -1,6 +1,6 @@
 import { MAX_LEG } from '../chamfer';
 import type { World } from '../core/world';
-import { deeper, pushOut, WALKER_HEAD, type Solid } from '../sim/solids';
+import { carried, deeper, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
 import type { MoveKeys } from './move-keys';
 import { EYE } from './spots';
 
@@ -9,7 +9,7 @@ export type Ground = Pick<World, 'support' | 'blocked'>;
 
 // On foot (nav.ts: the walk): what is climbed in a stride (a kerb, a stair) and the
 // headroom kept over the soles (the walker's height among the solids too)
-export const STEP = 1.05, HEAD = WALKER_HEAD;
+export const STEP = WALKER_STEP, HEAD = WALKER_HEAD;
 
 /** the keys on foot: W/S forward and back, A/D a step sideways (right +1), the arrows left and right turn (the mouse
  * turns too, but a keyboard alone still can) */
@@ -32,7 +32,7 @@ export function walkStep(w: Ground, P: { x: number; z: number }, feet: number, m
     if (!sx && !sz) continue;
     const nx = P.x + sx, nz = P.z + sz, ax = nx + Math.sign(sx) * 0.3, az = nz + Math.sign(sz) * 0.3;
     const sup = w.support(ax, az, feet + step);
-    if (sup <= top && !w.blocked(ax, az, Math.max(sup, feet + step), sup + HEAD) && bodyClear(w, nx, nz, feet, step) && !deeper(solids, P.x, P.z, nx, nz, feet)) {
+    if (sup <= top && !w.blocked(ax, az, Math.max(sup, feet + step), sup + HEAD) && bodyClear(w, nx, nz, feet, step) && !deeper(solids, P.x, P.z, nx, nz, Math.max(feet, sup))) {
       // (eyes already nearer a wall than EYE_R: put there, or shoved by a car; they may go along it or away)
       const room = eyeRoom(w, nx, nz, feet + EYE);
       if (room < EYE_R && room < (here ??= eyeRoom(w, P.x, P.z, feet + EYE)) - 1e-6) continue;
@@ -128,9 +128,30 @@ function bodyClear(w: Ground, x: number, z: number, feet: number, step = STEP) {
   return clear(x, z) && clear(x + 0.4, z) && clear(x - 0.4, z) && clear(x, z + 0.4) && clear(x, z - 0.4);
 }
 
+/** the voxels with the roofs of solids to stand on (a car's is a step up from a jump) */
+export function withRoofs(w: Ground, solids: readonly Solid[]): Ground {
+  if (!solids.length) return w;
+  return {
+    support: (x, z, top) => { const r = roofUnder(solids, x, z, top), s = w.support(x, z, top); return r ? Math.max(s, r.y + r.top) : s; },
+    blocked: (x, z, y0, y1) => w.blocked(x, z, y0, y1),
+  };
+}
+
 /** a frame of the walk: P first pushed out of what solid moved into it (a car driven into the walker shoves it; never
- * into a wall), then the stride m taken; whether the stride was */
+ * into a wall), then the stride m taken, the roofs of solids stood on as ground; whether the stride was */
 export function walkFrame(w: Ground, P: { x: number; z: number }, feet: number, m: { x: number; z: number } | null, solids: readonly Solid[], step = STEP, top = Infinity) {
-  if (solids.length) pushOut(solids, P, feet, (x, z) => bodyClear(w, x, z, feet, step));
-  return !!m && walkStep(w, P, feet, m, solids, step, top);
+  const g = withRoofs(w, solids);
+  // (on a roof or stepping up onto it: not pushed off what it stands on)
+  const on = roofUnder(solids, P.x, P.z, feet + step), f = on ? Math.max(feet, on.y + on.top) : feet;
+  if (solids.length) pushOut(solids, P, f, (x, z) => bodyClear(g, x, z, feet, step));
+  return !!m && walkStep(g, P, feet, m, solids, step, top);
+}
+
+/** P on the roof of a as it was last frame, carried with it to where solids have it now (moved, turned) unless a wall
+ * is in the way (a bridge's deck sweeps it off); the move (x, z, dy, dh), or null: not carried */
+export function ride(w: Ground, P: { x: number; z: number }, feet: number, a: Solid, solids: readonly Solid[]) {
+  const b = a.id === undefined ? undefined : solids.find((s) => s.id === a.id);
+  if (!b) return null;
+  const to = carried(a, b, P);
+  return w.blocked(to.x, to.z, feet + to.dy + 0.05, feet + to.dy + HEAD) ? null : to;
 }

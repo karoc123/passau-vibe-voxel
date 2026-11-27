@@ -524,21 +524,21 @@ export class StreetLife {
     const out: Solid[] = [], by = (x: number, z: number) => Math.abs(x - near.x) < r && Math.abs(z - near.z) < r;
     for (const c of this.traffic.roadVehicles()) {
       const d = this.drawnCars.get(c.id);
-      if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d));
+      if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d, `car${c.id}`));
     }
     for (const { pose: d } of this.avatars.drawn()) if (by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
-    for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }));
+    for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }, `coach${c.id}`));
     // (the river's vessels where view/boats.ts draws them: a walker on a jetty meets the boat alongside)
     const B = this.traffic.boats, back = this.back;
     for (const p of B?.poses ?? []) {
       if (Math.abs(p.x - near.x) > r + p.len / 2 || Math.abs(p.z - near.z) > r + p.len / 2) continue;
       const q = B!.previous.find((o) => o.kind === p.kind && o.id === p.id) ?? p;
-      out.push(solidAt(vesselShape(p), { x: lerp(p.x, q.x, back), y: lerp(p.y, q.y, back), z: lerp(p.z, q.z, back), h: p.heading + wrapAngle(q.heading - p.heading) * back }));
+      out.push(solidAt(vesselShape(p), { x: lerp(p.x, q.x, back), y: lerp(p.y, q.y, back), z: lerp(p.z, q.z, back), h: p.heading + wrapAngle(q.heading - p.heading) * back }, `${p.kind}${p.id}`));
     }
     const me = this.client.player;
     for (const c of this.client.crafts()) {
       const shape = CRAFT_SHAPES[c.type], p = c.core.pose;
-      if (shape && c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) out.push(solidAt(shape, p));
+      if (shape && c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) out.push(solidAt(shape, p, `craft${c.id}`));
     }
     return out;
   }

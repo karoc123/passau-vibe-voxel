@@ -5,7 +5,9 @@
 // strafing into it; moved into the walker it shoves it ahead, never through, and squeezing it against a wall pushes it
 // out past its side, never leaves it in the car. Another player on foot stops it; a
 // hovercraft another player sits in stops it, and so does a traffic boat lying at its pier. On foot A/D step sideways
-// (the heading kept) and the arrows turn.
+// (the heading kept) and the arrows turn. A car's roof is jumped onto, walked across and down off, and ridden on when
+// the car drives off faster than a walk (the host's walker riding along too); a page walking through a parked car is
+// kept out of it on the host; a car another player drives (the road physics) stops at a player on foot and nudges them.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -17,6 +19,8 @@ const { StreetLife } = await imp('src/view/life.ts');
 const { walkFrame, footKeys, stride } = await imp('src/nav/walk.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
 const { reach, carShape, solidAt, WALKER_R, CRAFT_SHAPES, TOUR_B } = await imp('src/sim/solids.ts');
+const { Foot } = await imp('src/nav/foot.ts');
+const { Glide } = await imp('src/nav/glide.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
@@ -34,7 +38,7 @@ const player = (name, x, z) => {
   const c = new MirrorSimClient(new CloneLink(link), { roads: [], peds: [], ctrls: [] }, null, server.hello);
   c.send({ kind: 'view', view: { focus: { x, z } } });
   c.send({ kind: 'request', request: { kind: 'walk', pose: { x, y: G, z, h: 0, moving: false } } });
-  return { c, link };
+  return { c, link, s };
 };
 const A = player('a', 40, 128), B = player('b', 90, 160), all = [A, B];
 const life = new StreetLife(new THREE.Scene(), A.c);
@@ -134,6 +138,102 @@ cx = WALL + 12;
 for (let i = 0; i < 4 / STEP; i++) { cx = Math.max(WALL + hz, cx - 4 * STEP); putCar(cx, 100, -Math.PI / 2); frame(null); }
 for (let i = 0; i < 10; i++) frame(null);
 check(inCar() <= 0.01 && !wall(P.x, P.z), `a car driven at the walker against a wall squeezes it out past its side (walker ${P.x.toFixed(2)}, ${P.z.toFixed(2)}; the car's front at ${(cx - hz).toFixed(2)}, the wall at ${WALL}; in it ${Math.max(0, inCar()).toFixed(2)} m)`);
+
+// The walker on a car's roof, on foot as the page walks (nav/foot.ts Foot: the stride, the jump, gravity) among what
+// the street life draws: the car parked along x at (60, 40), its roof TOP over the ground
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+const foot = new Foot(camera, { target: new THREE.Vector3() }, new MoveKeys(), new Glide(camera), () => ground, (near) => life.solids(near));
+const TOP = carShape(car).top, HX = carShape(car).hx, HZ = carShape(car).hz;
+const onRoof = () => Math.abs(foot.feet - G - TOP) < 0.05 && reach(solidAt({ ...carShape(car), top: 9 }, car.detachedPose), foot.pos.x, foot.pos.z, G) > 0;
+const fframe = (stick) => {
+  for (const p of all) p.c.update(STEP);
+  server.update(STEP);
+  for (const p of all) p.link.deliver();
+  life.update(STEP, 0, foot.pos);
+  foot.updateWalk(STEP, stick);
+  A.c.send({ kind: 'seatInput', role: 'walker', input: { x: foot.pos.x, y: foot.feet, z: foot.pos.z, h: foot.yaw, moving: !!stick } });
+};
+putCar(60, 40, Math.PI / 2);
+foot.setAt(ground, new THREE.Vector3(52, G, 40), [52, 40], true, new THREE.Vector3(1, 0, 0), 0);
+for (let i = 0; i < 10; i++) fframe(null);
+for (let i = 0; i < 1 / STEP; i++) fframe([1, 0]);
+const atSide = foot.pos.x;
+foot.jump();
+let up = false, across = -Infinity;
+for (let i = 0; i < 0.5 / STEP; i++) { fframe([1, 0]); if (onRoof()) { up = true; across = Math.max(across, foot.pos.x - 60); } }
+for (let i = 0; i < 1 / STEP; i++) { fframe([1, 0]); if (onRoof()) across = Math.max(across, foot.pos.x - 60); }
+for (let i = 0; i < 20; i++) fframe(null);
+check(atSide < 60 - HZ && up && across > HZ - 0.5 && foot.pos.x > 60 + HZ && Math.abs(foot.feet - G) < 0.01,
+  `the walker jumps onto a parked car's roof (stopped at its end at x ${atSide.toFixed(2)} first), walks across it to ${across.toFixed(2)} m past its middle and down off its far end (x ${foot.pos.x.toFixed(2)}, feet ${(foot.feet - G).toFixed(2)} m up)`);
+
+// back up onto it, standing on its middle; the car then driven off with the walker on top: 30 m/s for 2 s turning 0.3 rad
+// a second (faster than any walk the host takes), then stopped
+foot.yaw = -Math.PI / 2;
+foot.jump();
+for (let i = 0; i < 0.5 / STEP; i++) fframe([1, 0]);
+for (let i = 0; i < 40 && Math.abs(foot.pos.x - 60) > 0.3; i++) fframe([Math.sign(foot.pos.x - 60), 0]);
+for (let i = 0; i < 10; i++) fframe(null);
+const rode0 = { x: foot.pos.x - 60, z: foot.pos.z - 40 }, wasOn = onRoof();
+let h = Math.PI / 2, rx = 60, rz = 40, off = 0, hostOff = 0;
+const hostWalk = () => server.sim.players.get(A.s.player).walk.pose;
+for (let i = 0; i < 2 / STEP; i++) {
+  h += 0.3 * STEP; rx += Math.sin(h) * 30 * STEP; rz += Math.cos(h) * 30 * STEP;
+  putCar(rx, rz, h);
+  fframe(null);
+  if (!onRoof()) off++;
+  // (the host's walker on the host's car: its roof under it but for the tick or two the page sees the car late)
+  const w = hostWalk(), d = Math.hypot(w.x - rx, w.z - rz);
+  if (d > HZ + 30 * STEP * 3 || Math.abs(w.y - G - TOP) > 0.1) hostOff++;
+}
+for (let i = 0; i < 20; i++) fframe(null);
+const w = hostWalk(), moved = Math.hypot(foot.pos.x - 60, foot.pos.z - 40);
+check(wasOn && off <= 2 && onRoof() && moved > 50 && hostOff === 0 && Math.hypot(w.x - foot.pos.x, w.z - foot.pos.z) < 0.5,
+  `a car driven off with the walker on its roof carries it along, turning (carried ${moved.toFixed(1)} m, off the roof ${off} frames; the host's walker off its car ${hostOff} ticks, ${Math.hypot(w.x - foot.pos.x, w.z - foot.pos.z).toFixed(2)} m from the page's at the end)`);
+
+// a page that walks through a parked car (a modified one: no solids in its walk), along x at 3 m/s: the host keeps its
+// walker out of the car
+putCar(60, 40, Math.PI / 2);
+for (let i = 0; i < 10; i++) frame(null);
+let deepest = -1, hx = 52;
+for (let i = 0; i < 5 / STEP; i++) {
+  hx += 3 * STEP;
+  A.c.send({ kind: 'seatInput', role: 'walker', input: { x: hx, y: G, z: 40, h: Math.PI / 2, moving: true } });
+  for (const p of all) p.c.update(STEP);
+  server.update(STEP);
+  for (const p of all) p.link.deliver();
+  const q = hostWalk();
+  deepest = Math.max(deepest, reach(solidAt(carShape(car), car.detachedPose), q.x, q.z, q.y));
+}
+check(deepest <= 0.01, `a page walking through a parked car is kept out of it by the host (its walker at most ${deepest.toFixed(3)} m in it)`);
+
+// B drives the car at A standing still 15 m ahead of it (the road physics in): the car stops at A and only nudges it
+// along, never runs through
+P.x = 85; P.z = 100; yaw = Math.PI / 2;
+putCar(100, 100, -Math.PI / 2);
+B.s.send({ kind: 'request', request: { kind: 'walk', pose: { x: 100, y: G, z: 102, h: 0, moving: false } } });
+for (let i = 0; i < 10; i++) frame(null);
+const wheel = { kind: 'enterSeat', entity: { kind: 'car', id: car.id }, role: 'driver' };
+B.s.send(wheel);
+for (let i = 0; i < 6; i++) frame(null);
+await server.sim.loadPhysics({ x: 100, z: 100 });
+B.s.send(wheel);
+for (let i = 0; i < 30; i++) { frame(null); await new Promise((r) => setImmediate(r)); }
+const driving = server.sim.seat(B.s.player)?.role === 'driver';
+B.s.send({ kind: 'seatInput', role: 'driver', input: { gas: 1, brake: 0, steer: 0, handbrake: false } });
+let vTop = 0, vNear = 0, was = car.detachedPose.x, through = false;
+const startA = P.x;
+for (let i = 0; i < 6 / STEP; i++) {
+  frame(null);
+  await new Promise((r) => setImmediate(r));
+  const cx = car.detachedPose.x, v = (was - cx) / STEP;
+  was = cx;
+  vTop = Math.max(vTop, v);
+  const gap = cx - carShape(car).hz - P.x;
+  if (gap < 0.3 && i * STEP > 0.5) vNear = Math.max(vNear, v);
+  if (P.x > cx) through = true;
+}
+check(driving && vTop > 5 && vNear < 2.5 && !through && startA - P.x > 1,
+  `a driven car (up to ${vTop.toFixed(1)} m/s) stops at a player on foot and nudges them along (at most ${vNear.toFixed(1)} m/s touching them; shoved ${(startA - P.x).toFixed(1)} m${through ? ', passed through' : ''})`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
+import { carried, carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
@@ -69,7 +69,9 @@ export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; wal
  * last of an earlier update: from, fromAt), the one at the end of the tick before (prev: what is drawn from) and the
  * walk's velocity across (m/s, between the last two ticks a pose was taken in, sent: the last one's place and time:
  * what a tick without one goes on at) */
-export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number; prev: WalkPose; vx: number; vz: number; sent: { x: number; z: number; at: number } }
+export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number; prev: WalkPose; vx: number; vz: number; sent: { x: number; z: number; at: number };
+  /** the solid whose roof pose (from) stands on, as it was then */
+  on?: Solid | null; fromOn?: Solid | null }
 
 // A walker's poses reach the host as their page's frames send them, unevenly: a tick none reached would stand still
 // and the next jump, which the other players see as a stutter. Moving, such a tick goes on at the walk's velocity, for
@@ -697,13 +699,41 @@ export class WorldSim {
   private walkPose(player: PlayerId, pose: WalkPose) {
     const W = this.players.get(player)?.walk;
     if (!W) return true;
-    if (W.at !== this.clock) { W.from = W.pose; W.fromAt = W.at; }
-    const taken = boundWalk(W.from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
+    if (W.at !== this.clock) { W.from = W.pose; W.fromAt = W.at; W.fromOn = W.on; }
+    // (on a car's roof: bounded from where the car has carried the last pose since, so a ride is not taken for a run)
+    const near = this.walkSolids(pose.x, pose.z), a = W.fromOn, b = a && near.find((q) => q.id === a.id);
+    const to = a && b ? carried(a, b, W.from) : null;
+    const from = to ? { ...W.from, x: to.x, z: to.z, y: W.from.y + to.dy } : W.from;
+    const bound = boundWalk(from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
+    // Kept out of the solid things as the host has them (a page walking through a parked car is seen beside it, shoots
+    // and boards from there); not told: a fair page is only ever in one by the tick or two it sees a moving car late,
+    // and its own walk pushes it out in its next frame. A roof within a step is stood on, or being climbed
+    const roof = roofUnder(near, bound.x, bound.z, bound.y + WALKER_STEP), P = { x: bound.x, z: bound.z };
+    const taken = pushOut(near, P, roof ? Math.max(bound.y, roof.y + roof.top) : bound.y, () => true) ? { ...bound, x: P.x, z: P.z } : bound;
+    // (a moving car is a tick or two ahead of where the page saw it: met further out)
+    const on = roofUnder(near, taken.x, taken.z, taken.y + 0.5, 4);
+    W.on = on && on.y + on.top > taken.y - 0.5 ? on : null;
     W.pose = { ...taken };
     W.at = this.clock;
     if (dt > 0) { W.vx = (taken.x - S.x) / dt; W.vz = (taken.z - S.z) / dt; W.sent = { x: taken.x, z: taken.z, at: this.clock }; }
     else { S.x = taken.x; S.z = taken.z; }
-    return taken === pose;
+    return bound === pose;
+  }
+
+  // the solid things a walker at x, z may be in or on, as the host has them now: the cars, the crafts with a shape, the
+  // river's vessels (not the coaches: a tick's trains worked out for every pose is not cheap; not the other walkers)
+  private walkSolids(x: number, z: number): Solid[] {
+    const T = this.traffic, out: Solid[] = [], near = (px: number, pz: number, R: number) => Math.abs(px - x) < R && Math.abs(pz - z) < R;
+    for (const list of [T.cars, T.detachedCars]) for (const c of list) {
+      const d = c.detachedPose;
+      if (near(d?.x ?? c.geo.cx, d?.z ?? c.geo.cy, CAR_REACH)) out.push(solidAt(carShape(c), d ?? T.carPose(c, c.s, c.off, this.carAt), `car${c.id}`));
+    }
+    for (const c of this.crafts.values()) {
+      const s = CRAFT_SHAPES[c.type], q = c.core.pose;
+      if (c.placed && s && near(q.x, q.z, CRAFT_REACH)) out.push(solidAt(s, q, `craft${c.id}`));
+    }
+    for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading }, `${b.kind}${b.id}`));
+    return out;
   }
 
   // the player on foot (a mode's walk): their avatar put down at pose (one held: there again, nothing drawn between);

@@ -470,10 +470,11 @@ export class Traffic {
       for (const o of nextRoad.lists[nextLane]) if (o.v < 2 && o.s - o.len < room) { room = o.s - o.len; rb = o; }
       if (room < car.len + 2 && nextRoad.L > car.len + 4 && rb !== ig) stop(e.L - BOX_IN - car.s, 'no-room-exit', rb);
     }
-    // a player on foot in the way (ahead within its width, at its height): stopped for, assertive or not
+    // a player on foot in the way (ahead within its width, at its height): stopped for, assertive or not; one higher
+    // than a low car's roof is on a roof (its own: driven on with the walker on top) or a bridge
     const g = car.geo;
     for (const w of this.walkers) {
-      if (Math.abs(w.y - g.z) > 2) continue;
+      if (w.y - g.z > 1.2 || g.z - w.y > 2) continue;
       const rx = w.x - g.px, ry = w.z - g.py, along = rx * g.fx + ry * g.fy;
       if (along > -1 && along < 40 && Math.abs(rx * g.fy - ry * g.fx) < WALKER_LAT) stop(along - WALKER_R, 'walker', null);
     }

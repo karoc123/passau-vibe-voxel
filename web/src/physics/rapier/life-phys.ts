@@ -30,6 +30,7 @@ import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies, t
 import type { BodyDraw, BodyPose } from '../../sim/contract/agents';
 import { bodyPoseAt, drawnBodyPose } from '../../sim/body-pose';
 import type { Car } from '../../sim/types';
+import { carShape, WALKER_HEAD, WALKER_R } from '../../sim/solids';
 import type { RoadPose } from '../../sim/contract/pose';
 import type { Meta } from '../../core/meta';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, CHUNK, RapierTerrain, WORLD_GROUPS, chunkShapes, type TerrainOptions } from './terrain';
@@ -58,6 +59,8 @@ const RESYNC_R = 12; // m: lost further than this from an edit: put back on its 
 const COOL_S = 8, COOL_NEAR_S = 1; // ... and no body for this long (within 2 RESYNC_R of an edit: COOL_NEAR_S)
 const FADE_MIN = 0.6, FADE_MAX = 2, FADE_V = 4; // s, s, m/s: a body's drawn pose blended back to its ghost's
 const WRECK_REST_S = 1.2, WRECK_MAX_S = 15;
+// m/s: the most a driven car closes on a player on foot (a walk's pace: it nudges them along)
+const PUSH = 1.5;
 const DRIVE_RADIUS = 40, KNOCK = 4, HIT_SPEED = 2.5;
 const AI_STEER = 0.65; // the front wheels' most angle for the AI controller (the player's: 0.55, less at speed)
 const LOOK_UP = 0.7; // m: look() sees what stands this much over a body's bottom (not a kerb or a step)
@@ -392,6 +395,7 @@ export class LifePhysics implements TrafficBodies {
           if (driver) {
             b.car.brake = input.brake > 0 || input.handbrake ? 1 : 0;
             this.hitPeople(b, T);
+            this.feelWalkers(b, T);
           }
         } else this.drive(b, cmds.get(b) ?? WRECK_CMD);
         if (driving.length) velocities.set(b, b.body.linvel());
@@ -709,6 +713,30 @@ export class LifePhysics implements TrafficBodies {
       if (g !== null && Math.abs(g - pose.y) < 1 && this.terrain.waterAt(pose.x, pose.z) < 0)
         driver.safe.push({ ...pose, pitch: 0, roll: 0 }, now);
     }
+  }
+
+  // A player on foot ahead of or behind the driven car, at its height: the car's speed towards them held to PUSH, so it
+  // stops as at a wall and then nudges them along (their page shoves its walker out of the car). It does not run them
+  // over as it does the crowd (hitPeople): the walk is their page's, the host cannot throw them, and a car seen driving
+  // through a player is worse than one stopped. Their pose is a tick or so old: the reach ahead covers this substep's.
+  private feelWalkers(b: Body, T: Traffic) {
+    const c = b.car, at = c.detachedPose;
+    if (!T.walkers.length || !at) return;
+    const s = carShape(c), p = b.body.translation(), r = b.body.rotation(), inv = quat(-r.x, -r.y, -r.z, r.w);
+    const v = b.body.linvel(), l = rotate(vec3(v.x, v.y, v.z), inv), reach = Math.abs(l.z) * STEP + 0.3;
+    let cut = 0;
+    for (const w of T.walkers) {
+      // (one on the roof rides along)
+      
+      if (w.y > at.y + s.top - 0.5 || w.y + WALKER_HEAD < at.y) continue;
+      const q = rotate(vec3(w.x - this.origin.x - p.x, 0, w.z - this.origin.z - p.z), inv);
+      if (Math.abs(q.x) > s.hx + WALKER_R || Math.abs(q.z) > s.hz + WALKER_R + reach || Math.abs(q.z) < s.hz / 2) continue;
+      const lim = q.z > 0 ? PUSH : -PUSH;
+      if ((q.z > 0 && l.z > lim) || (q.z < 0 && l.z < lim)) { cut = Math.max(cut, Math.abs(l.z - lim)); l.z = lim; }
+    }
+    if (!cut) return;
+    b.body.setLinvel(rotate(l, r), true);
+    if (cut > 3) b.driver!.note(T.tickNumber, 'Ouch!', 600);
   }
 
   private hitPeople(b: Body, T: Traffic) {
