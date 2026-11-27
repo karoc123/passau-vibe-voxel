@@ -344,7 +344,7 @@ cars and crafts. A page that cannot reach its host says so at the top and tries 
 To host a game on a box of its own (a Pi, a server in the LAN), from the repository's root: `./voxel start` runs the
 built page (port 8080) and the host (5300) in the background and prints the link to open (its start menu offers that
 host first: the page is built for its port); `./voxel stop`, `status`,
-`logs`, `restart` (after a pull), `run` (in the foreground), `reset` (the kept world wiped; the host stopped first). It needs node 22 and pnpm (or corepack); it installs the
+`logs`, `restart` (after a pull), `run` (in the foreground). It needs node 22 and pnpm (or corepack); it installs the
 packages and builds the page itself when the commit changed. By hand, for development:
 
 ```sh
@@ -364,11 +364,8 @@ what lies near them, two to a message: the crafts whole, the bodies, avatars and
 rest once), the cars and people only when the page's reckoning of them drifts (never the trains: every page works out their timetable), edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
 
-The host keeps what players leave over a restart: craters and other edits, parked cars, crafts put down, in a file per
-256 m cell under `web/.run/world/` (`--world DIR`, or `--world none`; at most `--world-max` MB, 64 by default: over it
-the cells changed longest ago are not kept, with a warning). Written every 5 s and on Ctrl-C or `./voxel stop`. A file
-of another format is moved to `aside/`; after a data rebuild the edits of the nodes whose files changed are dropped.
-To start afresh: `./voxel reset` (or delete the directory). Solo play keeps nothing.
+The host keeps what players leave (craters, parked cars, crafts put down) only while it runs: a restart starts the
+world afresh.
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)
 and the benches; `lib.mjs` (`imp`: a web/ module through vite's runner; `serveTiles`: the node files from disk to

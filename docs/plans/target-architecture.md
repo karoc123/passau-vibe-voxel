@@ -108,8 +108,8 @@ Five concepts. Nothing else is needed for the goal.
    - **Agents** (state, path-following with signals and following distance): today's `Traffic`, in the cells of
      some player's agent ring, under a count budget per player.
    - **Bodies** (Rapier): today's `LifePhysics`, near drivers and edits.
-4. **Kept things.** Edits, vehicles players left, wrecks, later built houses. They live in their cell, are kept by
-   presence, and are the only world state written to disk.
+4. **Kept things.** Edits, vehicles players left, wrecks, later built houses. They live in their cell and are kept by
+   presence, in memory: a host restart starts the world afresh.
 5. **Authoritative server on its own clock.** It ticks at 30 Hz whether or not anyone draws. Clients send inputs
    and their view; each receives only its send ring.
 
@@ -174,8 +174,8 @@ in the tick.
    default the street life's + 150 m; trains and boats still go to all, they become flow in step 5).
 5. **Flow.** Landed 2026-11-27 (trains a timetable every page works out, none sent; far road traffic drawn by the
    page out to 1.5 km; the agent ring 350 m, cars sent to 400 m; agents spawned on the flow's cars).
-6. **Kept things on disk.** Landed 2026-11-27 (the network host's craters, edits, parked cars and crafts left, a file
-   per cell under `web/.run/world/`, written every 5 s and on SIGTERM; kept by presence as before).
+6. ~~Kept things on disk.~~ Dropped by the owner 2026-11-27: a host restart need not keep the game (landed the same
+   day, then removed).
 7. **Prediction** of the player's own craft. Landed 2026-11-27 for the crafts (rewound to each snapshot and stepped
    again with the inputs since, corrections blended out); the car waits for the owner (FRAGEN 17). The host holds a
    driver's or pilot's input for the tick it is meant for (ADR 0014), so a jittery link neither loses nor doubles
@@ -248,7 +248,7 @@ Adopted into `AGENTS.md` (owner, 2026-11-26).
 3. Far traffic may be a picture until its cell is promoted: yes.
 4. Player target: stays 10–50 (ADR 0008).
 5. Orbit mode counts as a presence: yes (unseen by the others).
-6. Kept things on disk: yes, later (step 6).
+6. Kept things on disk: yes, later (step 6); dropped 2026-11-27, a restart need not keep the game.
 7. Drop the bit-exact determinism requirement: yes.
 8. WebSocket first, WebTransport later: yes. `ws` (MIT, npm) is added only in step 2.
 9. Trains as a pure timetable, no dynamic spacing: yes.

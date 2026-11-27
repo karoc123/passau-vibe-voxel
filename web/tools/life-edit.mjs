@@ -14,7 +14,7 @@
 //   moto   a moving motorbike gets its catalogue body near an edit, then returns to lane tracking when it clears.
 //   keep   the world keeps an edit while a player's focus is near it (sim/edit-keeper.ts): a crater over a node's edge
 //          (two nodes) stays while one focus of several is near either node, and both go together once none has been
-//          for the delay.
+//          for the delay; a blast's crater stays with no focus near.
 // In every one, every tick: nothing drawn in an edited box stands more than 1 m over the ground there without coming
 // down for more than HOVER_S s (cars: their kinematic pose, or their body's; people: on their path); no body tracks a
 // car further than NEAR * 1.15 from an edit. Before the edit (WARM s): no body, no collider, nothing stepped (zero cost).
@@ -1035,6 +1035,12 @@ async function keep() {
     return `${n}/${live.size}`;
   });
   check(live.size === 0, `keep: every edit dropped in the end (${live.size} left)`);
+  // a blast's crater (last) stays with no one near, as long as the host runs
+  const blast = { kind: 'sphere', col, row, z: LY.cellToAbsZ(frame, 20), r: 3, colour: 0 };
+  await WE2.apply(blast);
+  K.last(blast);
+  const held = live.size, gone = K.update(50, [far]) + K.update(200, [far]);
+  check(held > 0 && gone === 0 && live.size === held, `keep: a blast's crater stays with no focus near (${live.size} of ${held} node(s), ${gone} dropped)`);
   log(`keep: a crater over nodes ${tx - 1}/${tx}_${Math.floor(BRIDGE.y / N)}: dropped/left ${steps.join(' ')}`);
   results.keep = { steps: steps.join(' ') };
 }

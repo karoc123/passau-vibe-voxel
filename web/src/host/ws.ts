@@ -7,7 +7,6 @@ import { hostStart } from './start';
 import { clock, handle } from './sim.worker';
 import { STEP } from '../sim/road-net';
 import { Overload } from './overload';
-import { worldStore } from './world-store';
 import type { FromWorker, ToWorker } from '../sim/contract/worker';
 import type { Session } from '../sim/server/sim-server';
 import type { PlayerId } from '../sim/contract/ids';
@@ -38,9 +37,6 @@ const GRACE = 30;
 // after this long. The token goes in a message, not the URL, as URLs end up in a proxy's logs.
 const JOIN_MS = 2000;
 // 128 bits from the system's random source: not to be guessed by another page that wants the seat
-// The kept things written every SAVE s (the cells that changed): what a kill -9 or a power cut loses at most.
-const SAVE = 5;
-
 const newToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 export interface ServeOptions {
@@ -54,9 +50,6 @@ export interface ServeOptions {
   /** what ticks the world (default: the worker's clock, real time); a tool steps it itself, in lockstep with its
    * clients, so a busy machine slows the run instead of starving the clients of snapshots */
   clock?: typeof clock;
-  /** where the kept things live on disk (host/world-store.ts), read back before the host listens; max: the most bytes
-   * there (default 64 MB). Without: nothing is kept beyond the process */
-  world?: { dir: string; max?: number };
 }
 
 interface Conn { ws: WebSocket; s: Session; out: FromWorker[]; bytes: number; sock: { bytesWritten: number }; wire: number; turn: number; fired: number; token: string; away: boolean }
@@ -65,27 +58,14 @@ export function serve(o: ServeOptions) {
   const start = hostStart(o.query), every = Math.round(start.every ?? 1), flush = Math.max(BATCH, every);
   const server = nodeHost(o.dir, { ...start, world: 'tiles', offThread: true });
   server.trackEdits();
-  const store = o.world ? worldStore({ dir: o.world.dir, data: o.dir, sim: server.sim, N: server.cache.N, log: o.log, max: o.world.max ?? 64 << 20 }) : null;
-  let loaded = !store;
-  const save = () => {
-    if (!store || !loaded) return;
-    try { store.save(); } catch (e) { o.log(`world: not saved: ${(e as Error).message}`); }
-  };
   const conns = new Set<Conn>();
   // the tokens a page may come back with, each its player's (one use each: the hello gives a new one); the players
   // held for their coming back, until the tick n they are let go at
   const tokens = new Map<string, PlayerId>(), away = new Map<PlayerId, { until: number; token: string }>();
   let joined = 0, n = 0;
-  let wss: WebSocketServer | null = null, closed = false;
-  // (no page let in before the kept things are back: it would be sent a world without them)
-  const port = (store ? store.load().catch((e) => o.log(`world: not read back: ${(e as Error).message}`)) : Promise.resolve()).then(() => new Promise<number>((ok, no) => {
-    loaded = true;
-    if (closed) { no(new Error('closed')); return; }
-    const w = wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: DEFLATE_FROM } });
-    w.on('error', (e) => o.log(`ws: ${e.message}`));
-    w.on('listening', () => ok(w.address().port));
-    w.on('connection', connected);
-  }));
+  const wss = new WebSocketServer({ host: o.host, port: o.port, perMessageDeflate: { zlibDeflateOptions: { level: 1 }, threshold: DEFLATE_FROM } });
+  wss.on('error', (e) => o.log(`ws: ${e.message}`));
+  const port = new Promise<number>((ok) => wss.on('listening', () => ok(wss.address().port)));
   // a session for the page on ws: its player's again if token names one held or still connected (a socket the host
   // has not yet seen drop: that one closed), else a new player
   const join = (ws: WebSocket, req: { socket: Conn['sock'] & { remoteAddress?: string } }, token: string | null): Conn => {
@@ -120,7 +100,7 @@ export function serve(o: ServeOptions) {
     if (m.commands.some((x) => x?.kind === 'fire')) c.fired = n;
     handle(c.s, m);
   };
-  function connected(ws: WebSocket, req: { socket: Conn['sock'] & { remoteAddress?: string } }) {
+  wss.on('connection', (ws, req) => {
     let c: Conn | null = null, gone = false;
     const timer = setTimeout(() => { if (!c && !gone) c = join(ws, req, null); }, JOIN_MS);
     ws.on('message', (data) => {
@@ -136,7 +116,7 @@ export function serve(o: ServeOptions) {
     });
     ws.on('error', () => {});
     ws.on('close', () => { gone = true; clearTimeout(timer); if (c) lost(c); });
-  }
+  });
 
   let ticks = 0, tickMs = 0, sendMs = 0;
   const per = Math.round(1 / STEP), load = new Overload(server.sim.traffic, 3, per, STEP * 1000);
@@ -165,7 +145,6 @@ export function serve(o: ServeOptions) {
     tickMs += ms;
     sendMs += performance.now() - t0 - ms;
     load.tick(performance.now() - t0);
-    if (n % (SAVE * per) === 0) save();
   });
 
   return {
@@ -186,15 +165,10 @@ export function serve(o: ServeOptions) {
       for (const c of conns) { c.bytes = 0; c.wire = c.sock.bytesWritten; }
       return out;
     },
-    /** the kept things written now (the cells that changed) */
-    save,
-    /** stopped; the kept things written first */
     close() {
       stop();
-      save();
-      closed = true;
       for (const c of conns) c.ws.close();
-      wss?.close();
+      wss.close();
       server.dispose();
     },
   };

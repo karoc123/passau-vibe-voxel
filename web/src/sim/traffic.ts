@@ -1190,8 +1190,8 @@ export class Traffic {
     return true;
   }
 
-  /** a car out of the traffic (parked, a wreck) put back where it was left: a host's kept things read back after a
-   * restart (a new id; on no road). null: PARKED_MAX already out of the traffic */
+  /** a car put out of the traffic (parked) at pose, on no road, as a tool sets up a world. null: PARKED_MAX already
+   * out of the traffic */
   parkAgain(k: Pick<Car, 'len' | 'bus' | 'vt' | 'col'>, pose: RoadPose): Car | null {
     if (this.detachedCars.length >= PARKED_MAX) return null;
     const car: Car = {

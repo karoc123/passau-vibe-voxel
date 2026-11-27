@@ -1,29 +1,23 @@
 // The world as a network host (src/host/ws.ts) for pages opened with ?server=ws://<this machine>:<port>. Bound to every
 // interface by default, so a phone on the LAN reaches it. Every 10 s: the players, the ms per tick, the kB/s per player,
 // what the host gives way to over its tick (crowd and cars: their share; send: every Nth tick to those on foot).
-// The kept things (craters, parked cars, crafts left) live in --world (default web/.run/world; 'none': not kept),
-// at most --world-max MB; written every few seconds and on SIGINT/SIGTERM. Wiping them is the owner's: ./voxel reset.
-// usage (in web/): node tools/serve.mjs [--port 5300] [--host 0.0.0.0] [--world DIR|none] [--world-max MB] [query, e.g. 'dig=1&seed=3']
+// usage (in web/): node tools/serve.mjs [--port 5300] [--host 0.0.0.0] [query, e.g. 'dig=1&seed=3']
 import os from 'node:os';
-import path from 'node:path';
 import { imp } from './lib.mjs';
-import { dataDir, web } from './data-dir.mjs';
+import { dataDir } from './data-dir.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args.splice(i, 2)[1] : d; };
-const port = +opt('--port', 5300), host = opt('--host', '0.0.0.0');
-const worldDir = opt('--world', path.join(web, '.run/world')), worldMax = +opt('--world-max', 64), query = args[0] ?? '';
+const port = +opt('--port', 5300), host = opt('--host', '0.0.0.0'), query = args[0] ?? '';
 const { serve } = await imp('src/host/ws.ts');
-const world = worldDir === 'none' ? undefined : { dir: path.resolve(worldDir), max: worldMax * 1048576 };
-const h = serve({ dir: dataDir, host, port, query, world, log: (l) => console.log(l) });
+const h = serve({ dir: dataDir, host, port, query, log: (l) => console.log(l) });
 const bound = await h.port;
 const lan = Object.values(os.networkInterfaces()).flat().filter((a) => a?.family === 'IPv4' && !a.internal).map((a) => a.address);
-console.log(`host on ws://${host}:${bound} (data ${dataDir}${query ? `, ${query}` : ''}; world ${world?.dir ?? 'not kept'}); open the page with ?server=ws://${lan[0] ?? 'localhost'}:${bound}`);
+console.log(`host on ws://${host}:${bound} (data ${dataDir}${query ? `, ${query}` : ''}); open the page with ?server=ws://${lan[0] ?? 'localhost'}:${bound}`);
 setInterval(() => {
   const s = h.stats();
   if (!s.bytes.length) return;
   const per = s.bytes.map(([p, b]) => `${p} ${(b / 10240).toFixed(0)} kB/s`).join(', ');
   console.log(`${s.bytes.length} player(s): tick ${s.tickMs.toFixed(2)} ms + snapshots ${s.sendMs.toFixed(2)} ms; ${per} (before deflate); crowd ${s.crowd.toFixed(2)} cars ${s.cars.toFixed(2)} send 1/${s.every}`);
 }, 10000);
-// (./voxel stop sends SIGTERM to the process group: the kept things written before the exit)
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { h.close(); console.log(`stopped (${sig})`); process.exit(0); });
+process.on('SIGINT', () => { h.close(); process.exit(0); });

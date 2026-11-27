@@ -119,20 +119,6 @@ export function editNodeOps(frame: Frame, tx: number, ty: number, v: NodeView, o
   return { base: { ...v.base, ...enc }, foliage: { ...f.encode(), ground: enc.ground }, ops: [...before, ...ops] };
 }
 
-/** node (tx, ty) made again from its files and ops in order (a host's kept edits read back), the node held in the
- * TileCache (ready); each op applied to this node alone, so a node whose files changed under its ops is left out by
- * the caller without touching its neighbours. false: the node is not in */
-export function restoreNow(tx: number, ty: number, ops: readonly WorldOp[]): boolean {
-  const { cache, frame } = theWorld();
-  drop(tx, ty);
-  for (const op of ops) {
-    const v = cache.view(tx, ty);
-    if (!v) return false;
-    liveEdits.set(tx, ty, editNode(frame, tx, ty, v, op, liveEdits.get(tx, ty)?.ops ?? []), opRegion(frame, op));
-  }
-  return true;
-}
-
 // foliage f cleared in op's cells where the base went from before to a new solid id in after; whether any was
 function clearUnderBlock(f: EditableNode, before: EditableNode, after: EditableNode, op: CellOp) {
   const b = opBounds(op), ox = f.tx * f.N, oy = f.ty * f.N, z0 = Math.max(0, b.z0), z1 = Math.min(Z_MAX, b.z1);
