@@ -95,7 +95,8 @@ check(d !== null && metres(d) < 5, `the distance shown: ${d}`);
 
 // dragged by (-220, -130) px: A's marker there; a click on it: the waypoint on A again (first cleared: it is there)
 await A.keyboard.press('Backspace');
-await A.waitForTimeout(200);
+// headless under load draws at ~4 fps: the chip hides on the next frame, not within a fixed wait
+await A.waitForFunction(() => !window.__map.waypoint.at && (document.querySelector('#waypoint-chip')?.hidden ?? true), null, { timeout: 3000 }).catch(() => {});
 check(!(await wp(A)) && (await chipNow(A)) === null, 'Backspace clears the waypoint (and its distance)');
 await A.mouse.move(mid.x, mid.y);
 await A.mouse.down();
