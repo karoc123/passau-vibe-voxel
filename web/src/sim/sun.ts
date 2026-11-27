@@ -1,6 +1,6 @@
 // The sun over Passau (shared: the page's light, sun.ts, and the host's start time, host/start.ts): where it stands at
 // a day of the year and a local hour, and when it crosses an elevation. The year is given (it sets the summer time's
-// dates): no clock here (tools/core-deps.mjs R3).
+// dates): no clock here, so the host and a test may pick the day.
 const RAD = Math.PI / 180, LAT = 48.574 * RAD;
 export const LON = 13.466;
 

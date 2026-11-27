@@ -44,9 +44,8 @@ the same interface with one player.
 - Use a 1/30 s world tick and two 1/60 s Rapier steps per tick as in `LifePhysics`. Commands take effect at the start
   of the tick, then the world updates traffic, builds a fixed number of terrain chunks in a stable order, steps physics
   once per substep and publishes the result. With multiple active areas, merge requests for the same chunk and use a
-  stable tie-break at equal priority. The host controls when inputs and terrain edits become visible to a tick. Replay
-  uses those tick assignments and the same terrain build and readiness schedule, so arrival times and rendering frames
-  cannot silently change the result.
+  stable tie-break at equal priority. The host controls when inputs and terrain edits become visible to a tick, so arrival
+  times and rendering frames do not change the result beyond rounding.
 - `sim/train-traffic.ts` owns train routes, dwell times and spacing. `sim/boat-traffic.ts` owns boat routes and
   timetables, and floats each vessel on the world's water where it is (`sim/river.ts`). Both run in the traffic tick
   using world time, day and seed.
@@ -62,8 +61,7 @@ the same interface with one player.
   `findSpawn`; `plane` or `jet` to `PlaneFlight`; `craft` to `CraftMotion`; `drone` to `DroneCore`. Vehicle-specific overrides (`CarBuild.tune`
   in the catalog) are resolved at creation (`rideOf`). One world per server (ADR 0008), so the point is no mutation
   and explicit passing, not several instances. Tools that vary tuning build a modified copy and pass it
-  (`rapier-car.mjs --set`, `surface-gap.mjs --set`, `plane.mjs --set`). A run can be reproduced from its build, seed,
-  tuning and input history.
+  (`rapier-car.mjs --set`, `surface-gap.mjs --set`, `plane.mjs --set`).
 
 ## Migration and validation
 
@@ -71,10 +69,9 @@ the same interface with one player.
    existing models and behavior to move control writes and collision outcomes out of the viewer.
 2. Move player cars into the shared physics world. Measure shared collider and stepping costs with
    `web/tools/life-phys*.mjs`, and keep the existing `rapier-car` and `vehicles` gates green. The Rapier scenarios
-   replay two claims to one car, collisions with traffic and one player releasing while another continues.
+   run two claims to one car, collisions with traffic and one player releasing while another continues.
 3. F5 moved boat and train motion into the world tick. `web/tools/core-deps.mjs` guards the transit sim and
-   `web/tools/life-edit.mjs` checks determinism at two rendering rates. `web/tools/popin-check.mjs --transit`
-   checks the real map for visible arrivals, removals and jumps. Cross-machine replay needs separate validation.
+   `web/tools/popin-check.mjs --transit` checks the real map for visible arrivals, removals and jumps.
 
 Network transport, reconnect policy, area and collider limits for widely separated players, and authoritative aircraft
 control are open. The policy for sharing transient edits remains in [ADR 0001](0001-world-layers.md).

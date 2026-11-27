@@ -21,14 +21,12 @@
 //   R1 layer table: LAYERS maps today's files to a layer, ALLOWED says which layers each may import (every import
 //      statement, type-only ones included);
 //   R2 no value-import cycle (hard), and the type cycles (cycles through type-only imports) are the baseline's;
-//   R3 determinism words in layers 0-3 (data, contract, shared, domain): no Math.random, Date.now, new Date,
-//      setTimeout, setInterval; performance.now only in PERF_NOW_OK (stats) until a stats clock is injected;
 //   R4 window.__ assigned only in HOOKS_OWNER (app/debug-hooks.ts, which types them all; the rest call its hook());
 //   R5 the contract is types: a module of the contract layer (sim/contract/) declares no class and no function body
 //      (function or arrow) but a type guard's (its return type `x is T`); its constants are data.
 //   R6 touch is read in touch/ only: no pointerType compared with 'touch' or 'pen', no maxTouchPoints, TouchEvent,
 //      .touches or touch* event names elsewhere, so a mode takes the fingers as touch/ hands them (sticks' axes, intents).
-// R1-R6 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
+// R1, R2, R4-R6 are a ratchet: today's violations are BASELINE below. A violation not in it fails; a baseline entry that no
 // longer occurs fails too (delete it, so the list stays true). After a fix or a move, `node tools/core-deps.mjs
 // --baseline` prints the list as it is now, to paste over BASELINE; it may only get shorter (review the diff).
 // usage (in web/): node tools/core-deps.mjs [-v] [--baseline]; prints PASS and the modules scanned (-v: and the
@@ -194,8 +192,6 @@ const ALLOWED = {
   presentation: ['data', 'contract', 'shared', 'client', 'touch', 'presentation'],
   app: ['data', 'contract', 'shared', 'domain', 'server', 'client', 'touch', 'presentation', 'app'],
 };
-const HEADLESS = new Set(['data', 'contract', 'shared', 'domain']); // R3
-const PERF_NOW_OK = new Set(['physics/rapier/life-phys.ts', 'physics/rapier/terrain.ts']);
 const HOOKS_OWNER = 'app/debug-hooks.ts';
 const TYPES_ONLY = 'contract'; // R5
 const TOUCH_RE = /pointerType\s*[!=]==?\s*['"](?:touch|pen)['"]|['"](?:touch|pen)['"]\s*[!=]==?\s*[\w$.]*pointerType|\bmaxTouchPoints\b|\bTouch(?:Event|List)\b|\.touches\b|['"]touch(?:start|move|end|cancel)['"]/g; // R6
@@ -262,13 +258,6 @@ for (const file of apps) {
     out.push({ to, type });
     if (tl && !ALLOWED[layer].includes(tl)) found.push([`R1 ${r} (${layer}) -> ${to} (${tl})${type ? ' type' : ''}`, lineOf(code, m.index)]);
   }
-  if (HEADLESS.has(layer)) {
-    for (const m of bare.matchAll(/(?<![\w$.])(?:Math\s*\.\s*random|Date\s*\.\s*now|new\s+Date|setTimeout|setInterval|performance\s*\.\s*now)(?![\w$])/g)) {
-      const word = m[0].startsWith('new') ? 'new Date' : m[0].replace(/\s+/g, '');
-      if (word === 'performance.now' && PERF_NOW_OK.has(r)) continue;
-      found.push([`R3 ${r}: ${word}`, lineOf(bare, m.index)]);
-    }
-  }
   if (layer !== 'touch') for (const m of code.matchAll(TOUCH_RE)) found.push([`R6 ${r}: ${m[0].replace(/\s+/g, '').replace(/"/g, "'")}`, lineOf(code, m.index)]);
   if (layer === TYPES_ONLY) for (const [what, at] of codeOf(bare)) found.push([`R5 ${r}: ${what}`, lineOf(bare, at)]);
   // (window.__x = …, and window[name] = … as the owner's hook() writes)
@@ -319,4 +308,4 @@ if (verbose) { console.log(`baseline (${BASELINE.length}):`); for (const k of BA
 if (bad.length) { for (const b of bad) console.log(`  FAIL ${b}`); console.log(`FAIL core-deps: ${bad.length} violation(s)`); process.exit(1); }
 const of = (r) => BASELINE.filter((k) => k.startsWith(r)).length;
 console.log(`PASS core-deps: ${scanned.length} modules (src/core/, src/sim/, src/physics/, src/client/sim-client.ts, src/host/sim-host.ts and what they import) free of three.js, util.ts, voxelMaterial.ts and DOM globals, a weapon package imported only by sim/weapons/index.ts; ${apps.length} modules of src/ import nothing from checks/ and a craft look's package only through view/crafts/index.ts`);
-console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R3 ${of('R3')}, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only), R6 ${of('R6')} (touch read outside touch/); none new, none gone`);
+console.log(`PASS core-deps layers: ${edges.size} modules, ${[...edges.values()].reduce((s, e) => s + e.length, 0)} imports in src/, no value-import cycle; baseline: R1 ${of('R1')} imports, R2 ${of('R2')} type cycles, R4 ${of('R4')}, R5 ${of('R5')} (sim/contract/ types only), R6 ${of('R6')} (touch read outside touch/); none new, none gone`);

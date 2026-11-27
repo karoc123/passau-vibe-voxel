@@ -25,8 +25,7 @@ Layers, innermost first. A module imports its own layer and the layers above it 
 | presentation | `view/`, `nav/`, `ui/`, the root's render modules | three.js, DOM, input; never imports domain or server |
 | app | `main.ts`, `app/` | composition, frame order, debug hooks; the only place that builds server and client together |
 
-Rules (`core-deps`): R1 the layer table; R2 no value-import cycle; R3 no `Math.random`, `Date`, timers in the
-headless layers (time is the tick, randomness the seed); R4 `window.__*` only in `app/debug-hooks.ts`; R5 the contract
+Rules (`core-deps`): R1 the layer table; R2 no value-import cycle; R4 `window.__*` only in `app/debug-hooks.ts`; R5 the contract
 declares no class or function body; R6 touch is read only in `touch/`, so a mode never parses fingers. Today's
 violations are a baseline that may only shrink.
 
