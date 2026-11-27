@@ -2314,9 +2314,15 @@ def natural_ground(ctx):
     core_m[cells_of(CORE)] = True
     mats_of_ids = np.array([e[3] for e in pal.entries] + [0] * 256)
     n_rs = 0
+    gx0, gy0 = ctx.ROOF_GX, ctx.ROOF_GY
     for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
         nb_t = region.shift2(zt, (dr, dc)); nb_b = region.shift2(bmask, (dr, dc))
+        # only a step the roof's slope (its own or the lower cell's, falling that way) accounts for: a near flat eave 4 m
+        # over a lower wing had hung its tiles down to 2 m over the street (Hans-Hösl-Straße 20). Where no plane is
+        # known, every step as before
+        fall = np.fmax(gx0 * dc + gy0 * dr, region.shift2(gx0, (dr, dc)) * dc + region.shift2(gy0, (dr, dc)) * dr)
         step = bmask & nb_b & (core_m | pitched_m) & ~green_roof & (zt - nb_t >= 2) & (zt - nb_t <= 4)
+        step &= ~(zt - nb_t > fall + 2.5)
         for k in (2, 3, 4):
             m = step & (zt - nb_t >= k)
             rr_, cc_ = np.nonzero(m)
@@ -4041,24 +4047,65 @@ def support_floating(ctx):
 
 
 def roof_planes(ctx):
-    """The roof plane of each column's top face, coded for the tiles."""
-    EXPORT_IDS, ROOF_GX, ROOF_GY, bmask, vol, zt = ctx.EXPORT_IDS, ctx.ROOF_GX, ctx.ROOF_GY, ctx.bmask, ctx.vol, ctx.zt
+    """Lintels under roofs over windows; the roof plane of each column's top face, coded for the tiles."""
+    EXPORT_IDS, ROOF_GX, ROOF_GY, bmask, g, vol, zt = ctx.EXPORT_IDS, ctx.ROOF_GX, ctx.ROOF_GY, ctx.bmask, ctx.g, ctx.vol, ctx.zt
+    fol = np.zeros(65536, bool)
+    fol[sorted(EXPORT_IDS["fol_ids"] | EXPORT_IDS["grass_ids"])] = True
+    mat = np.array([e[3] for e in pal.entries] + [0] * (65536 - len(pal.entries)))
+    roofm = mat == M_ROOF
+    ztop = np.full((D, W), -1, np.int32)
+    tv = np.zeros((D, W), np.uint16)
+    for z in range(vol.shape[0]):
+        v = vol[z]
+        k = (v != 0) & ~fol[v]
+        ztop[k] = z
+        tv[k] = v[k]
+
+    def lintels():
+        """The mesher draws a capped roof's side as one face from the lowest cap beside it (its own, dipping under its
+        top voxel on a steep roof, or a lower roof's next to it) up to the slope, and hides the voxels' faces behind it.
+        A window cut up to the eaves (a church's, an override's) left air there: through the window, from the street,
+        that face and the top voxel's bottom were seen from behind (see-through.mjs). Such a gap under the roof's top
+        run is closed from that lowest cap up, in the wall's material from below the window: a lintel."""
+        wallish = np.zeros(65536, bool)
+        wallish[np.isin(mat, K.WALL_MATS + (M_ROOF,))] = True
+        plain = wallish & ~np.isin(mat, (K.M_WINDOW, M_GLASS))
+        capped = bmask & roofm[tv] & (ztop > g)
+        rr, cc = np.nonzero(capped)
+        g_ = g[rr, cc]
+        zb = ztop[rr, cc].copy()  # (the bottom of the top run)
+        act = np.arange(len(rr))
+        while len(act):
+            z_ = zb[act] - 1
+            v = vol[np.maximum(z_, 0), rr[act], cc[act]]
+            act = act[(z_ >= g_[act]) & (v != 0) & ~fol[v]]
+            zb[act] -= 1
+        lo = ztop[rr, cc] - 2  # (a steep cap dips under its top voxel, at most ~0.7 m under the run's bottom)
+        top1 = np.where(capped, ztop + 1, 0)
+        for d in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            nt = region.shift2(top1, d)[rr, cc] - 1
+            lo = np.where((nt >= 0) & (nt < ztop[rr, cc]), np.minimum(lo, nt - 1), lo)
+        n = nv = 0
+        for i in np.nonzero((lo < zb) & (zb > g_))[0]:
+            r, c, b = rr[i], cc[i], zb[i]
+            col = vol[g_[i]:b, r, c]
+            nz = np.nonzero((col != 0) & ~fol[col])[0]
+            if not len(nz) or len(col) - nz[-1] > 9 or not wallish[col[nz[-1]]]:
+                continue  # (over a passage, a canopy, a tall hall: no window)
+            lo_ = max(lo[i], g_[i] + nz[-1] + 1)
+            ok = nz[plain[col[nz]]]
+            vol[lo_:b, r, c] = col[ok[-1]] if len(ok) else col[nz[-1]]
+            n += 1
+            nv += b - lo_
+        note("lintels under roofs over windows:", n, "columns,", nv, "voxels")
+
+    lintels()
+
     def plane_codes():
         """Per column, the roof plane its top face lies in (ROOF_GX/GY), coded as mesher.worker.ts lights a roof: 1 + slope
         (2.5 degree steps, 10 to 75) x 64 + downhill direction (64 steps); 0 where flat, not known, or the column's top is
         not that roof's voxel any more (a landmark rebuilt over it, a rooftop structure, a canopy). The viewer estimated the
         plane from the voxel steps, which a slope rounded to whole metres turns into noise."""
-        fol = np.zeros(65536, bool)
-        fol[sorted(EXPORT_IDS["fol_ids"] | EXPORT_IDS["grass_ids"])] = True
-        roofm = np.zeros(65536, bool)
-        roofm[[i for i, e in enumerate(pal.entries) if e[3] == M_ROOF]] = True
-        ztop = np.full((D, W), -1, np.int32)
-        tv = np.zeros((D, W), np.uint16)
-        for z in range(vol.shape[0]):
-            v = vol[z]
-            k = (v != 0) & ~fol[v]
-            ztop[k] = z
-            tv[k] = v[k]
         ok = bmask & (ztop == zt - 1) & roofm[tv] & np.isfinite(ROOF_GX) & np.isfinite(ROOF_GY)
         gx_, gy_ = np.nan_to_num(ROOF_GX), np.nan_to_num(ROOF_GY)
         k = np.minimum(30, np.floor(np.arctan(np.hypot(gx_, gy_)) / (np.pi / 72) + 0.5)).astype(np.int32)
