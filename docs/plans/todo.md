@@ -18,7 +18,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   Order (the owner leaves it to us): NPCs on foot (built, ADR 0017, 0018: guard or patrol, sight, MG, search, lives,
   their samples; enemy camps built, ADR 0022: one at the Oberhaus, hits, hearing, alarms, leash; left: cover,
   flanking, a field of view, more camps, the numbers tried in play); a fuel tank (built, ADR 0020; the minutes halved again after play; left: refuelling, the minutes tried in play, a car's roll-out
-  without engine braking); the gunner built (ADR 0019; left: the swing's numbers tried in play), no scout; the grappling hook built (ADR 0028; left: a touch button, the line drawn for the other players, hooking vehicles, the numbers and the tap-or-hold right button tried in play); NPCs in vehicles
+  without engine braking); the gunner built (ADR 0019; left: the swing's numbers tried in play), no scout; the grappling hook built (ADR 0029; left: a touch button, the line drawn for the other players, hooking vehicles, the numbers and the tap-or-hold right button tried in play); NPCs in vehicles
   only once enemies on foot have been seen and played;
   air defence (owner 2026-11-27): no zones, a gun with a sight line, manned by an NPC, a player may take a gun won,
   it fires at whatever its mount can aim at, a reaction time and tracers warn (concept in the scratchpad's
