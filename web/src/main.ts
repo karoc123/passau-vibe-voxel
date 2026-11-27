@@ -518,7 +518,7 @@ renderer.setAnimationLoop(frameLoop({
   // light follows the world's time
   sim: (_now, dt) => {
     if (!sim || !life) return;
-    sim.send(pageView(sim, focus(), camera.position));
+    sim.send(pageView(focus(), camera.position));
     sim.update(dt);
     const t = pageTime?.follow();
     if (t) dayWeather.show(t);

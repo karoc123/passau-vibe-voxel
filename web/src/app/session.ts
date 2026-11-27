@@ -55,15 +55,9 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
   return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles), link };
 }
 
-/** Whether the page's camera is a presence in the world while its player holds no seat (an observer: the orbit, free
- * flight): the world simulated round where it looks (today's behaviour), or only round the players' seats. The owner's
- * open question; one switch so either answer stays cheap. */
-const OBSERVER_VIEW = true;
-
 /** the page's view command for this frame: where it looks (focus: the orbit's target or the camera) and sees from (the
- * camera); none (no presence) for an observer while OBSERVER_VIEW is off */
-export function pageView(client: SimClient, focus: { x: number; z: number }, viewer: { x: number; y: number; z: number }): SimCommand {
-  if (!OBSERVER_VIEW && !client.seat()) return { kind: 'view', view: null };
+ * camera). Sent in orbit mode too: the world lives where the player looks, unseen by the others (owner 2026-11-27). */
+export function pageView(focus: { x: number; z: number }, viewer: { x: number; y: number; z: number }): SimCommand {
   return { kind: 'view', view: { focus: { x: focus.x, z: focus.z }, viewer: { x: viewer.x, z: viewer.z, y: viewer.y } } };
 }
 

@@ -376,7 +376,7 @@ export class WorldSim {
   // taken, leaves the one held: one command switches seats, with no tick in between where the player holds none;
   // refused, the player keeps theirs. A seat's input (seatInput) is its role's. Following carries no rights. Only
   // players with sim authority come here: a creative camera (orbit, free flight) is the client's and only moves the
-  // focus and the viewer (its view; whether it has presence: app/session.ts OBSERVER_VIEW).
+  // focus and the viewer (its view: a presence, unseen by the others).
 
   /** what the game mode acts through (SimServer asks it about edits with it) */
   get modeWorld() { return this.face; }
