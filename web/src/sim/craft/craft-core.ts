@@ -61,6 +61,9 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   readonly pose: Pose & { bank?: number };
   /** m/s, where its collision fetches ahead */
   readonly velocity: Vec3;
+  /** run ahead on a page (client/predict.ts): it is not put back where only the host knows the place (a crashed
+   * plane's respawn reads the safe poses the host kept); it waits for the host's word */
+  ahead?: boolean;
   drawn(alpha: number): D;
   /** its state on the wire: plain data, objects of its own (none of the core's) */
   save(): S;

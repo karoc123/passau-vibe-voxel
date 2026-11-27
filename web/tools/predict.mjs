@@ -6,7 +6,9 @@
 // flight it moves on without a jump (each frame's step like the one before). The host's craft put a little aside, the
 // drawn one eases over; put far aside, it is shown there at once. Over a jittery link (each message 40 to 200 ms, in
 // order, so they bunch) a hovercraft and a helicopter flown by a scripted stick end where the same script ends over the
-// steady link (the host takes each tick's input for its tick), and the page's corrections stay few and small.
+// steady link (the host takes each tick's input for its tick), and the page's corrections stay few and small. Driven
+// at a parked car and at another player's hovercraft, a hovercraft drawn stops at it and is not pulled back out of it a
+// round trip later; a floatplane flown low at a parked car is drawn crashing on it, the crash told at once and once.
 // usage (in web/): node tools/predict.mjs [--log]; prints PASS lines, or FAIL and exit 1
 import { imp } from './lib.mjs';
 
@@ -83,6 +85,7 @@ async function fly(type, spot, script, hook = () => {}, link0 = {}) {
     client.update(FRAME);
     for (const e of client.prediction?.errs ?? []) if (e.since === 0) link0.corrections?.push([drawn.length, most(e.e)]);
     const c = craft.frame();
+    if (link0.events) for (const e of craft.events()) link0.events.push([drawn.length, e]);
     return c ? structuredClone(c.core.drawn(craft.alpha)) : null;
   };
   // in, and the tiles round it loaded (real time for their files)
@@ -91,7 +94,7 @@ async function fly(type, spot, script, hook = () => {}, link0 = {}) {
     if (d && i > 30) break;
     await new Promise((r) => setTimeout(r, 2));
   }
-  for (const [n, input] of script) for (let i = 0; i < n; i++) { hook(drawn.length, sim); drawn.push(frame(input)); }
+  for (const [n, input] of script) for (let i = 0; i < n; i++) { hook(drawn.length, sim, server); drawn.push(frame(input)); }
   return { drawn, host };
 }
 
@@ -196,6 +199,53 @@ for (const [by, small] of [[1, true], [12, false]]) {
     check(off < 0.3 && dh < 0.01, `${K.type} over a jittery link (40-200 ms): the host's craft ends ${off.toFixed(2)} m, ${dh.toFixed(3)} rad across from the steady link's (under 0.3 m, 0.01 rad)`);
     check(big.length <= 2 && Math.max(0, ...jittery) < 0.05, `${K.type} over a jittery link, the stick moving: the page corrected ${jittery.length} times, ${big.length} over 1 cm (at most 2), the largest ${Math.max(0, ...jittery).toFixed(3)} (under 0.05)`);
   }
+}
+
+// the pilot runs the craft into a solid thing the page knows from its snapshots, AHEAD m before it (a car parked
+// across its way, another player's hovercraft): the craft drawn stops at it (its bow into it no further than MEET_IN m),
+// is not pulled back out of it a round trip later (no frame's step back over BACK m), and a crash shows within a few
+// frames of the craft drawn reaching it
+const PARKED = { kind: 'car', id: 9001, e: 0, lane: 0, s: 0, ds: 0, off: 0, dOff: 0, prev: -1, prevOff: 0, next: -1, len: 4.6, bus: false,
+  col: '#888888', brake: 0, v: 0, wait: 0, why: 'free', by: null, block: null, geo: { px: 0, py: 0, cx: 0, cy: 0, z: G, fx: 0, fy: 1 } };
+const MEET_IN = 0.3, BACK = 0.05, FIX = 0.1, TELL = 3;
+const MEETS = [
+  { what: 'a hovercraft driven at a parked car', type: 'hovercraft', spot: { x: 128, y: G + 1, z: 40, h: 0 }, input: { turn: 0, drive: 1, lift: 0, side: 0 }, ahead: 25, thing: 'car' },
+  { what: 'a hovercraft driven at another player\'s hovercraft', type: 'hovercraft', spot: { x: 128, y: G + 1, z: 40, h: 0 }, input: { turn: 0, drive: 1, lift: 0, side: 0 }, ahead: 25, thing: 'hovercraft' },
+  { what: 'a floatplane flown low at a parked car', type: 'floatplane', spot: { x: 128, y: G + 1.7, z: 20, h: 0, speed: 45 }, input: { turn: 0, pitch: 0, throttle: 0.6 }, ahead: 60, thing: 'car', crash: true },
+];
+const { CRAFT_SHAPES, carShape } = await imp('src/sim/solids.ts');
+for (const K of MEETS) {
+  let side = Infinity;
+  const events = [], fixes = [];
+  const { drawn } = await fly(K.type, K.spot, [[K.crash ? 150 : 240, K.input]], (i, sim, server) => {
+    if (i !== 0) return;
+    const p = [...sim.crafts.values()][0].core.pose, z = p.z + K.ahead;
+    if (K.thing === 'car') {
+      sim.traffic.detachedCars.push({ ...structuredClone(PARKED), geo: { ...PARKED.geo, cx: p.x, cy: z }, detachedPose: { x: p.x, y: G, z, h: Math.PI / 2, pitch: 0, roll: 0 } });
+      side = z - carShape(PARKED).hx;
+    } else {
+      const b = server.connect('b');
+      b.send({ kind: 'request', request: { kind: 'craft', type: K.thing, spot: { x: p.x, y: G + 1, z, h: Math.PI / 2 } } });
+      side = z - CRAFT_SHAPES[K.thing].hx;
+    }
+  }, { events, corrections: fixes });
+  const nose = CRAFT_SHAPES[K.type].hz + (CRAFT_SHAPES[K.type].fwd ?? 0);
+  // (judged till the crashed plane is put back elsewhere)
+  let runIn = -Infinity, back = 0, reached = -1;
+  for (let i = 1; i < drawn.length; i++) {
+    const z = pos(drawn[i]).z + nose - side, step = pos(drawn[i - 1]).z - pos(drawn[i]).z;
+    if (K.crash && step > 4) break;
+    runIn = Math.max(runIn, z);
+    if (reached < 0 && z > -0.05) reached = i;
+    back = Math.max(back, step);
+  }
+  const told = events.filter(([, e]) => e.type === 'crash'), crash = told[0]?.[0] ?? -1;
+  const fix = Math.max(0, ...fixes.filter(([f]) => f >= reached - 30).map(([, e]) => e));
+  if (log) console.log(K.what, 'run-in', runIn.toFixed(2), 'back', back.toFixed(2), 'fix', fix.toFixed(2), 'reached', reached, events.map(([f, e]) => `${f}:${e.type ?? e.kind ?? e}`).join(' '));
+  check(reached >= 0 && runIn < MEET_IN, `${K.what}: drawn into it ${Math.max(0, runIn).toFixed(2)} m at most (under ${MEET_IN}; ${reached < 0 ? 'never reached it' : `reached at frame ${reached}`})`);
+  check(back < BACK && fix < FIX, `${K.what}: not pulled back out of it a round trip later (the page's largest correction ${fix.toFixed(2)} m, under ${FIX}; the largest step back in a frame ${back.toFixed(2)} m, under ${BACK})`);
+  if (K.crash) check(crash >= 0 && Math.abs(crash - reached) <= TELL && told.length === 1,
+    `${K.what}: the crash told ${crash < 0 ? 'never' : `${crash - reached} frame(s)`} from the frame it is drawn reaching the car (at most ${TELL}), once (${told.length})`);
 }
 
 if (fail.length) process.exit(1);

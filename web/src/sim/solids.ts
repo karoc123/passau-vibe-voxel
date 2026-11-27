@@ -11,6 +11,8 @@ import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
 import { JET, PLANE } from './craft/plane-flight';
 import { VEHICLE_IDS, VEHICLES, vehicleOf } from './vehicles';
+import type { CraftCore } from './craft/craft-core';
+import type { VoxelCollision } from './craft/voxel-collision';
 
 /** a box upright on a pose: half its width (hx) and length (hz, along the heading; its middle fwd m ahead of the
  * pose), from y0 to top m over the pose's y */
@@ -83,6 +85,17 @@ export function lightSolids(own: CraftType, type: CraftType, p: Pose, out: Solid
   if (l && (type === 'paraglider' || own === 'drone')) for (const s of l) out.push(solidAt(s, p));
   return out;
 }
+
+/** after each of a craft's steps (the host's and the page's run ahead alike, so both meet the same): pushed out of
+ * each of near that one of its boxes reaches into */
+export function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision) {
+  MINE.length = 0;
+  for (const a of craftMeets(type, core.pose, MINE)) for (const s of near) {
+    const d = overlap(a, s, OUT);
+    if (d > 0) core.meet!(OUT, d, col);
+  }
+}
+const OUT = { x: 0, z: 0 }, MINE: Solid[] = [];
 
 /** a craft's pose; bank (rad, > 0 its right wing down): a plane's, what its wings are to the solid things */
 export type CraftPose = Pose & { bank?: number };

@@ -82,7 +82,8 @@ export interface DroneCoreState {
 }
 
 /** the plane's flight (sim/craft/plane-flight.ts PlaneFlight): its pose and attitude (fw, lu: the aerobatic law's path
- * and lift directions), rates, airspeed, engine, state, what its panel shows, its clock, how often it jumped */
+ * and lift directions), rates, airspeed, engine, state, what its panel shows, its clock, how often it jumped; crashed:
+ * the time left till it is put back and its clock at the crash (a page running it ahead counts the same down) */
 export interface PlaneFlightState {
   p: Vec3;
   heading: number; gamma: number; bank: number;
@@ -92,6 +93,7 @@ export interface PlaneFlightState {
   load: number; stalled: boolean; atEdge: boolean; waiting: boolean;
   t: number; jumps: number;
   fw: Vec3; lu: Vec3;
+  crashLeft: number; crashAt: number;
 }
 /** the floatplane's and the jet's core (sim/craft/plane-core.ts): the flight, as drawn at the world tick's start */
 export interface PlaneCoreState {

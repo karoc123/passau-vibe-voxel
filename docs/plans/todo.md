@@ -64,8 +64,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
 - The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
-- The own craft run ahead (prediction) does not feel solid things (cars, other crafts) nor tell its own events: the
-  host's correction and its events come a round trip later.
+- Prediction meets the snapshot's cars, crafts and vessels, not the train coaches (their timetable at the host's
+  tick is not at hand); a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never
+  has (a crash a car moved out of) stays told.
 - Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Seated players: a car is opened only while a player sits in it (16 per type); the van's ends and the camper's
   back stay solid (thick walls, not glass).

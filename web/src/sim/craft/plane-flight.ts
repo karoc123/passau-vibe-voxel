@@ -196,6 +196,8 @@ export class PlaneFlight {
   /** how often it was put somewhere at once (reset, respawn): not drawn moving there (plane-core.ts drawn) */
   jumps = 0;
   readonly events: PlaneEvent[] = [];
+  /** run ahead on a page: crashed, it waits for the host's respawn (CraftCore ahead) */
+  ahead = false;
   private crashLeft = 0;
   private crashAt = 0;
   private readonly clock: FixedStep;
@@ -215,9 +217,9 @@ export class PlaneFlight {
   /** its state on the wire (contract/crafts.ts); not: the crash's countdown, the safe trail and the start (respawn),
    * the clock (the steps), the steps' scratch */
   save(): PlaneFlightState {
-    const { heading, gamma, bank, pitchRate, roll, aoa, v, engine, state, load, stalled, atEdge, waiting, t, jumps } = this;
+    const { heading, gamma, bank, pitchRate, roll, aoa, v, engine, state, load, stalled, atEdge, waiting, t, jumps, crashLeft, crashAt } = this;
     return { p: { ...this.p }, heading, gamma, bank, pitchRate, roll, aoa, v, engine, state, load, stalled, atEdge, waiting, t, jumps,
-      fw: { ...this.fw }, lu: { ...this.lu } };
+      fw: { ...this.fw }, lu: { ...this.lu }, crashLeft, crashAt };
   }
 
   restore(s: PlaneFlightState) {
@@ -226,6 +228,7 @@ export class PlaneFlight {
     this.aoa = s.aoa; this.v = s.v; this.engine = s.engine; this.state = s.state; this.load = s.load; this.stalled = s.stalled;
     this.atEdge = s.atEdge; this.waiting = s.waiting; this.t = s.t; this.jumps = s.jumps;
     copy(this.fw, s.fw); copy(this.lu, s.lu);
+    this.crashLeft = s.crashLeft; this.crashAt = s.crashAt;
   }
 
   reset(pose: PlanePose) {
@@ -302,7 +305,7 @@ export class PlaneFlight {
     const c = this.cfg;
     if (this.state === 'crashed') {
       this.crashLeft -= dt;
-      if (this.crashLeft <= 0) this.respawn(w);
+      if (this.crashLeft <= 0 && !this.ahead) this.respawn(w);
       this.t += dt;
       return true;
     }

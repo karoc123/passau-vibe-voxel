@@ -40,7 +40,7 @@ import type { TrafficData } from './types';
 import { Entities } from './entities';
 import { SEATS } from './seats';
 import { vehicleOf } from './vehicles';
-import type { Craft, CraftCore, CraftWorld } from './craft/craft-core';
+import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
 import { CEILING, VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carried, carShape, COACH_SHAPE, craftMeets, craftSolids, lightSolids, meetShapes, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
+import { carried, carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
@@ -965,12 +965,3 @@ const FIRE_WAIT = 15;
 const BESIDE = 2;
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
 
-// after each of a craft's steps: pushed out of each solid thing near it that one of its boxes reaches into
-const out = { x: 0, z: 0 }, own: Solid[] = [];
-function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision) {
-  own.length = 0;
-  for (const a of craftMeets(type, core.pose, own)) for (const s of near) {
-    const d = overlap(a, s, out);
-    if (d > 0) core.meet!(out, d, col);
-  }
-}

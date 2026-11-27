@@ -253,7 +253,7 @@ export class MirrorSimClient implements SimClient {
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
     readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null,
     predict?: CraftWorld) {
-    this.prediction = predict ? new Prediction(predict) : null;
+    this.prediction = predict ? new Prediction(predict, (c, s, off, out) => this.traffic.carPose(c, s, off, out)) : null;
     if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
@@ -348,7 +348,7 @@ export class MirrorSimClient implements SimClient {
     const P = this.prediction, s = this.last;
     if (P) {
       const c = this.craftOf(true);
-      P.update(this.dt, this.page, this.pageAcc, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack());
+      P.update(this.dt, this.page, this.pageAcc, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack(), this.buffer[this.buffer.length - 1] ?? null);
     }
   }
 
@@ -500,7 +500,14 @@ export class MirrorSimClient implements SimClient {
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
   drivers(): readonly [number, PlayerId][] { return this.last?.drivers ?? []; }
   passengers() { return this.last?.passengers ?? []; }
-  craftEvents() { return this.last ? this.reads.crafts(this.events, this.last.player.id, this.seat(), this.tick) : []; }
+  // (the craft run ahead tells its own a round trip before the host's word on them: those then not told again)
+  craftEvents(): CraftEventOf[] {
+    if (!this.last) return [];
+    const P = this.prediction, c = this.craftOf(true), ahead = c && P?.coreOf(c.id) ? P : null;
+    const host = this.reads.take(this.events, this.last.player.id, this.seat(), 'craft', this.tick);
+    const out = (ahead ? host.filter((x) => !ahead.heard(x.e, x.tick)) : host).map((x) => ({ craft: x.craft, e: x.e }) as CraftEventOf);
+    return ahead ? out.concat(ahead.tell()) : out;
+  }
 }
 
 /** a snapshot as the client holds it: all its cars and people, each as last sampled, and all the cars out of the
