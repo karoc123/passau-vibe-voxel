@@ -19,6 +19,7 @@ import { liveEdits } from '../../core/live-edits';
 import { nodeMetres, ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
 import { hello } from '../hello';
+import { cleanName } from '../player-name';
 import type { Hello } from '../contract/hello';
 import { takeSnapshot } from './snapshot';
 import { radii, Sight, type Radii } from './interest';
@@ -54,6 +55,9 @@ export class SimServer {
   private readonly disposers: (() => void)[] = [];
   // the player ids connect has made
   private players = 0;
+  // the names the players chose; changed counts their changes (a session sends them all again when it differs)
+  private readonly names = new Map<PlayerId, string>();
+  private changed = 0;
 
   /** the radii (m) round its player a session is sent the world's things in, by kind (sim/server/interest.ts Sight;
    * one number: that for all; null: all of them), for the sessions connected after it is set */
@@ -95,6 +99,20 @@ export class SimServer {
     for (const s of this.sessions) if (s.player === session.player) return;
     this.sim.send(session.player, { kind: 'view', view: null });
     this.sim.leave(session.player);
+    if (this.names.delete(session.player)) this.changed++;
+  }
+
+  /** (Session.send) player's name, cleaned here: a page of other code sends anything */
+  setName(player: PlayerId, name: unknown) {
+    const n = cleanName(name);
+    if ((this.names.get(player) ?? '') === n) return;
+    if (n) this.names.set(player, n); else this.names.delete(player);
+    this.changed++;
+  }
+
+  /** the players' names, when they changed since a session's (seen: the count it last took; null: unchanged) */
+  namesSince(seen: number): { names: [PlayerId, string][]; seen: number } | null {
+    return seen === this.changed ? null : { names: [...this.names], seen: this.changed };
   }
 
   /** the world's edits go with every session's snapshots (a client with live edits of its own: another thread) */
@@ -156,6 +174,8 @@ export class Session {
   private readonly wire = new AgentWire();
   /** the world's edits it was sent, when tracked (SimServer.trackEdits) */
   edits: EditFeed | null = null;
+  // the server's names count this session's snapshots carried (none yet: a joiner is sent them whatever they are)
+  private namesSeen = -1;
 
   /** (made by SimServer.connect) */
   constructor(readonly server: SimServer, readonly player: PlayerId) {
@@ -172,6 +192,7 @@ export class Session {
    * is this session's that acts */
   send(cmd: SimCommand) {
     if (cmd.kind === 'edit') { this.server.holdEdit(this, cmd); return; }
+    if (cmd.kind === 'name') { this.server.setName(this.player, cmd.name); return; }
     const seq = cmd.kind === 'seatInput' ? cmd.seq : undefined;
     this.sim.send(this.player, cmd, seq === undefined ? undefined : (tick) => { this.acked = { seq, tick }; });
   }
@@ -223,6 +244,8 @@ export class Session {
     const s = takeSnapshot(this.sim, this.player, since, this.results(), [], this.acked, this.sight, this.wire);
     const S = this.sight;
     if (this.edits) s.edits = this.edits.take(S?.somewhere ? (x, z, d) => S.near(x, z, S.r.other + d) : null);
+    const n = this.server.namesSince(this.namesSeen);
+    if (n) { s.names = n.names; this.namesSeen = n.seen; }
     return s;
   }
 }

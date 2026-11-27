@@ -115,7 +115,37 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   font: 12px/1.5 Inter, system-ui, sans-serif; }
 #credits > div + div { margin-top: 8px; }
 #credits a { color: #fff; text-underline-offset: 2px; }
-.noui :is(#bar, #credits-button, #credits), .loading #credits-button { display: none; }
+.noui :is(#bar, #credits-button, #credits, #menu-button, #name-tags), .loading :is(#credits-button, #menu-button) { display: none; }
+
+/* the Esc menu (and its ☰ button beside the credits', for touch) and the start menu over the loading city */
+#menu-button { position: fixed; right: calc(52px + var(--sr)); bottom: calc(8px + var(--sb)); z-index: 4; width: 44px; height: 44px;
+  display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer;
+  font: 600 14px Inter, system-ui, sans-serif; }
+#menu-button span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(16,17,20,.75); }
+#menu-button:is(:hover, :focus-visible) span { background: #2d3036; }
+.menu { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: calc(16px + var(--st)) calc(16px + var(--sr)) calc(16px + var(--sb)) calc(16px + var(--sl));
+  background: rgba(10,11,13,.45); font: 13px/1.4 Inter, system-ui, sans-serif; color: #eee; }
+.menu[hidden] { display: none; }
+.start-menu { z-index: 30; background: rgba(10,11,13,.25); }
+.menu-card { display: flex; flex-direction: column; gap: 8px; width: min(320px, 100%); max-height: 100%; overflow: auto; padding: 16px;
+  border: 1px solid rgba(255,255,255,.22); border-radius: 8px; background: #202226; }
+.menu-card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.menu-entry { min-height: 40px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; background: #2d3036;
+  color: #fff; font: inherit; text-align: left; cursor: pointer; }
+.menu-entry:is(:hover, :focus-visible), .menu-entry.preselected { background: #3b5f8a; border-color: #6d9bd1; }
+.menu-entry[hidden], .menu-note[hidden] { display: none; }
+.menu-note { color: rgba(255,255,255,.62); font-size: 12px; }
+.menu-more summary { padding: 8px 12px; cursor: pointer; border-radius: 6px; background: #2d3036; }
+.menu-settings { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 0; }
+.menu-settings label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.menu input, .menu select { min-width: 0; flex: 1 1 auto; max-width: 190px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.22);
+  border-radius: 4px; background: #15171a; color: #fff; font: inherit; }
+.menu .menu-addr { max-width: none; }
+
+/* the other players' names over them */
+#name-tags { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+.name-tag { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 4px; background: rgba(16,17,20,.6); color: #fff;
+  font: 600 12px Inter, system-ui, sans-serif; white-space: nowrap; }
 
 /* walk mode: no centre dot any more (you look by dragging, not by aiming) */
 

@@ -16,7 +16,7 @@ const { chromium } = require('playwright-core');
 const args = process.argv.slice(2), opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const WALL = 2.5;
 // the scene (?cam= in the project grid) and, in world metres, a spot in the street before the curved facade
-const Q = 'cam=2006,22,687,2060,23,696&crop=192&ui=0&autores=0&weather=clear&date=7-15&hour=13&taa=0';
+const Q = 'play&cam=2006,22,687,2060,23,696&crop=192&ui=0&autores=0&weather=clear&date=7-15&hour=13&taa=0';
 const SPOT = { x: 8244.5, z: 2760.5 };
 
 const server = await createServer({ root: web, logLevel: 'error', server: { host: '127.0.0.1', port: +opt('--port', 5250) } });

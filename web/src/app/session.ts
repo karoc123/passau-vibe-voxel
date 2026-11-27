@@ -43,7 +43,7 @@ export interface SessionData {
 }
 
 /** host/ws.ts's default port (tools/serve.mjs) */
-const HOST_PORT = 5300;
+export const HOST_PORT = 5300;
 
 // the client, and its link (for the tools)
 export function openSession(o: SessionOptions, { meta, edits, traffic, world }: SessionData): { client: SimClient; link: WorkerLink | SocketLink } {

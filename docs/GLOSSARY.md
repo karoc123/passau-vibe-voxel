@@ -10,12 +10,17 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
   paraglider.
+- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Back to orbit mode, Full screen, Start menu.
+  Not "pause menu": the world goes on.
+- **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 
 ## World and multiplayer
 
 - **Host**: the one place the world is simulated (in a browser's worker alone, or `serve` for several players).
 - **Page**: the browser side of a player: draws and takes input; its walk is its own, the rest the host's.
 - **Session**: one player's connection to a host.
+- **Player name**: the name a player chose for the others (optional; else their id, p1, p2, ...); the host cleans it.
+- **Ping**: the page's round trip to a host on the network, ms.
 - **Tick**: one step of the host's simulation (30 a second); the budget is its 33 ms.
 - **Snapshot**: what a host sends a session each tick about what lies near that player.
 - **Presence**: a place the host keeps living (street life, traffic) because a player is there.

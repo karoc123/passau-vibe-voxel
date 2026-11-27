@@ -19,8 +19,8 @@ const ESC = '<span class="cap">Esc</span>', SPACE = '<span class="cap">Space</sp
 
 const MOUSE: Record<Mode, [string, string, string][]> = {
   orbit: [['l', mouse('l', true), 'move'], ['r', mouse('r', true), 'turn'], ['w', mouse('w'), 'zoom'], ['', PERSON, 'follow']],
-  walk: [['', mouse('', true), 'look'], ['', PERSON, 'follow'], ['Escape', ESC, 'fly up']],
-  ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'fly up']],
+  walk: [['', mouse('', true), 'look'], ['', PERSON, 'follow'], ['Escape', ESC, 'menu']],
+  ride: [['l', mouse('l', true), 'look'], ['Escape', ESC, 'menu']],
   craft: [],
 };
 // (in every mode: main.ts)

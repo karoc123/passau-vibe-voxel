@@ -1,13 +1,17 @@
 import type { Rect } from './hud';
 import { $, el } from './util';
 
-// top right: frames per second and triangles drawn (the resolution and the detail are in the ⚙ panel, settings.ts)
+// top right: frames per second, triangles drawn, and the round trip to a host on the network (the resolution and the detail are in the ⚙ panel, settings.ts)
 export class Perf {
   rects: Rect[] = [];
   private readonly box = el('div', '', '<div class="fps"></div>');
-  private readonly fps = $('.fps', this.box);
+  private readonly fpsBox = $('.fps', this.box);
   private n = 0;
   private t0 = 0;
+  /** the frames a second last shown (0: none yet) */
+  fps = 0;
+  /** the round trip to the host, ms (null: none, the page's own worker) */
+  ping: () => number | null = () => null;
 
   constructor() {
     this.box.id = 'perf';
@@ -22,7 +26,10 @@ export class Perf {
     this.n++;
     if (now - this.t0 < 500) return;
     if (this.t0) {
-      this.fps.innerHTML = `${Math.round((this.n * 1000) / (now - this.t0))} fps<span class="mark">${(triangles / 1e6).toFixed(1)} M triangles</span>`;
+      this.fps = Math.round((this.n * 1000) / (now - this.t0));
+      const ping = this.ping();
+      this.fpsBox.innerHTML = `${this.fps} fps<span class="mark">${(triangles / 1e6).toFixed(1)} M triangles</span>`
+        + (ping === null ? '' : `<span class="mark ping">${Math.round(ping)} ms ping</span>`);
     }
     this.n = 0;
     this.t0 = now;

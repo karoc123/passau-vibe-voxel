@@ -15,7 +15,8 @@ PAGE_PORT="${PAGE_PORT:-8080}" HOST_PORT="${HOST_PORT:-5300}"
 mkdir -p "$run"
 
 ip() { hostname -I 2>/dev/null | awk '{print $1}' || true; }
-link() { local a; a="$(ip)"; a="${a:-localhost}"; echo "http://$a:$PAGE_PORT/?server=ws://$a:$HOST_PORT"; }
+# (the page's start menu offers this host first: the build carries its port, VITE_HOST_PORT)
+link() { local a; a="$(ip)"; a="${a:-localhost}"; echo "http://$a:$PAGE_PORT/"; }
 alive() { [ -f "$run/$1.pid" ] && kill -0 "$(cat "$run/$1.pid")" 2>/dev/null; }
 pnpm_() { if command -v pnpm >/dev/null; then pnpm "$@"; else corepack pnpm "$@"; fi; }
 
@@ -24,11 +25,11 @@ prepare() {
   cd "$web"
   # a fresh checkout or a pull that changed the packages
   if [ ! -d node_modules ] || [ pnpm-lock.yaml -nt node_modules/.modules.yaml ]; then pnpm_ install --frozen-lockfile; fi
-  local head; head="$(git -C "$root" rev-parse HEAD)"
-  # the page is built per commit; vite alone, without the type check (that is the gates' job, not the server's)
+  local head; head="$(git -C "$root" rev-parse HEAD) port $HOST_PORT"
+  # the page is built per commit and host port; vite alone, without the type check (that is the gates' job, not the server's)
   if [ "$(cat dist/.commit 2>/dev/null)" != "$head" ] || [ -n "$(git -C "$root" status --porcelain -- web/src web/index.html web/public)" ]; then
     echo "building the page ..."
-    node node_modules/vite/bin/vite.js build --logLevel warn
+    VITE_HOST_PORT="$HOST_PORT" node node_modules/vite/bin/vite.js build --logLevel warn
     echo "$head" > dist/.commit
   fi
 }
