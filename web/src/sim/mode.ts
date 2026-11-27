@@ -3,11 +3,12 @@
 // (SimServer; host/sim-host.ts: ?mode=, default sandbox) and kept on the WorldSim (WorldSim.mode), which asks it while it
 // applies the players' commands (each tick, in order). Today's only mode is the sandbox (sim/modes/sandbox.ts:
 // everything granted as asked). Kept to what that needs: whether a seat may be taken (mayEnter), whether an edit to
-// the world's voxels may be made (mayEdit), and the players' requests (request: among them the world's time of day). No three.js, no DOM
-// (tools/core-deps.mjs).
+// the world's voxels may be made (mayEdit), and the players' requests (request: among them the world's time of day). What health at 0 does
+// (downFor, backAt, wrecks) is the sim's own unless a mode says otherwise: the owner wants a game to change it without
+// a mode-as-data layer. No three.js, no DOM (tools/core-deps.mjs).
 import type { WorldOp } from '../core/layers';
 import type { CraftSpot, ModeRequest } from './contract/commands';
-import type { CraftId, CraftType, PlayerId, Seat } from './contract/ids';
+import type { CraftId, CraftType, EntityRef, PlayerId, Seat } from './contract/ids';
 import type { Craft } from './craft/craft-core';
 import type { WalkPose } from './contract/pose';
 
@@ -45,4 +46,10 @@ export interface GameMode {
   /** whether player may make an edit to the world's voxels (without: never); asked when the host gets the edit (a
    * refused one's nodes are not loaded) and again when it is applied, so a plain answer, no state changed */
   mayEdit?(w: ModeWorld, player: PlayerId, op: WorldOp): boolean;
+  /** a player's health at 0: ms until they are back (null: not on their own; without: Tuning.health.downMs) */
+  downFor?(w: ModeWorld, player: PlayerId): number | null;
+  /** where a player down comes back on foot (at: the last place the host saw them stand; without: there) */
+  backAt?(w: ModeWorld, player: PlayerId, at: WalkPose): WalkPose;
+  /** whether a vehicle at 0 is wrecked (without: it is) */
+  wrecks?(w: ModeWorld, vehicle: EntityRef): boolean;
 }

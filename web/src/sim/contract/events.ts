@@ -2,7 +2,7 @@
 // happened in a tick (WorldSim.eventsSince; a snapshot's events). Types and constants only (tools/core-deps.mjs R5).
 import type { Vec3 } from '../../core/vec';
 import type { EntityRef, PlayerId, Seat, WeaponId } from './ids';
-import type { RoadPose } from './pose';
+import type { RoadPose, WalkPose } from './pose';
 import type { CraftEventOf } from './crafts';
 
 /** why a rider came off a motorbike (physics/rapier/player-car.ts PlayerCar.fall): running into the world (wall: a
@@ -32,7 +32,9 @@ export interface Fallen { person: number; col: string; bike: boolean }
  *   launch            a player's weapon let go a projectile at at with velocity v (m/s): it flies as its weapon's
  *                     package says until its blast
  *   blast             an explosion of a player's weapon at at, radius r (m): the crater it leaves follows as an
- *                     edit of the world's */
+ *                     edit of the world's
+ *   back              a player who was down (their health at 0) back at full health, put on foot at to: their page
+ *                     puts its walk there */
 export type SimEvent =
   | ({ tick: number; kind: 'struck'; pose: RoadPose; vx: number; vz: number } & Fallen)
   | { tick: number; kind: 'impact'; entity: EntityRef; by?: EntityRef; speed: number; at: Vec3 }
@@ -42,7 +44,8 @@ export type SimEvent =
   | { tick: number; kind: 'drive'; entity: EntityRef; note: DriveNote }
   | { tick: number; kind: 'shot'; weapon: WeaponId; player: PlayerId; at: Vec3; to: Vec3; hit: EntityRef | 'world' | null }
   | { tick: number; kind: 'launch'; weapon: WeaponId; player: PlayerId; at: Vec3; v: Vec3 }
-  | { tick: number; kind: 'blast'; weapon: WeaponId; player: PlayerId; at: Vec3; r: number };
+  | { tick: number; kind: 'blast'; weapon: WeaponId; player: PlayerId; at: Vec3; r: number }
+  | { tick: number; kind: 'back'; player: PlayerId; to: WalkPose };
 
 /** the events kept for readers (ticks: 10 s); a reader further behind misses the older ones */
 export const EVENT_TICKS = 300;

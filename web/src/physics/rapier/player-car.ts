@@ -30,6 +30,8 @@ export class PlayerCar {
   fallUntil = 0;
   fallSide = 1;
   waiting = true;
+  /** the hardest contact (m/s) since it was last taken (LifePhysics.driverHit): the host's damage reads it */
+  hardest = 0;
 
   constructor(readonly car: Car, start: RoadPose, now: number) {
     this.safe.push({ ...start, pitch: 0, roll: 0 }, now);
@@ -65,6 +67,7 @@ export class PlayerCar {
 
   contact(tick: number, now: number, event: CarEvent | Hit, bike: boolean, lean: number) {
     const { kind, speed } = event;
+    if (kind !== 'step') this.hardest = Math.max(this.hardest, speed);
     if (bike && this.fallUntil) return; // (the fall's note stays)
     if (bike && kind === 'landing' && event.crash) this.fall(tick, now, lean, { kind: 'landing', speed });
     else if (bike && kind !== 'landing' && kind !== 'step' && ((event.head ?? 0) >= FALL_HEAD || ('shove' in event && event.shove >= FALL_SHOVE)))

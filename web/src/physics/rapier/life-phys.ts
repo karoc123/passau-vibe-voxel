@@ -237,6 +237,32 @@ export class LifePhysics implements TrafficBodies {
 
   driverNotes(player: string) { return this.players.get(player)?.notes.splice(0) ?? []; }
 
+  /** the hardest contact of the player's car (m/s: a wall's speed lost, a landing's, a knock's or a coach's closing
+   * speed) since the last call; 0: none */
+  driverHit(player: string) {
+    const d = this.players.get(player);
+    if (!d) return 0;
+    const h = d.hardest;
+    d.hardest = 0;
+    return h;
+  }
+
+  /** car c of the traffic a wreck where it is (its body, if it has one, left to come to rest); false: it has no body
+   * here to wreck (the caller puts it out of the traffic itself) */
+  wreckCar(c: Car, T: Traffic) {
+    const b = this.bodies.get(c.id);
+    if (b?.state === 'track') return this.wreck(c, T, 'disabled');
+    if (b?.state !== 'path') return false;
+    b.cur = this.read(b);
+    const p = this.poseAt(b, 1);
+    this.remove(b);
+    if (!T.detachCar(c, p)) return false;
+    this.place(c, p, 0, 'wreck');
+    c.v = 0;
+    c.brake = 1;
+    return true;
+  }
+
   private tickNumber = 0;
   get lastTick() { return this.tickNumber; }
 

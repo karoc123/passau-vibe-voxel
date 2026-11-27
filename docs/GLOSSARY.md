@@ -38,3 +38,16 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Gate**: an automated check guarding what a player would notice (`web/tools/gates.mjs`).
 - **Cap**: a 1 m column's top drawn as a sloped quad (four corner heights) instead of its voxel's flat top: what
   wheels and feet stand on.
+
+## Game building blocks
+
+- **Life**: what has health: a player (wherever they are: on foot, at a wheel, along for the ride), a car, a craft;
+  later an NPC. Not "entity": a player's avatar is an entity, their health stays with the player.
+- **Health**: a life's points, 0 to its type's max; the host's alone, pages are told.
+- **Damage kind**: bullet, blast, crash, fall; each type takes each kind by a factor of its own.
+- **Toughness**: a type's health as data: max, the factor per damage kind, the share passed to those in a vehicle
+  (through), the speed a crash or a fall is taken at without harm (safe).
+- **Down**: a player at 0: steers, walks and fires nothing until **back** (full health, on foot where they last
+  stood on the ground).
+- **Wreck**: a vehicle at 0: its driver's or pilot's controls dead, that seat refused; those in it are not harmed by
+  that. A car wreck is charred. Not "destroyed".

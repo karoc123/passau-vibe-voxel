@@ -61,6 +61,11 @@ export interface CarBody {
   steer: number; bars: number; air: number; ride: number; lean?: number; wheelie?: number; water?: boolean;
 }
 
+/** a life's health as a snapshot carries it (sim/health.ts Life): its key ("player:p1", "car:12", "craft:3"), its
+ * points (whole, rounded up: one hurt is never shown at 0) and its type's max; hp -1: at full health again, or gone
+ * (the client forgets it) */
+export type HealthWire = [life: string, hp: number, max: number];
+
 /** the world's time of day (hour 0..24) and day of the year (1..365): world state the host sets, the same for every
  * player */
 export interface TimeOfDay { hour: number; day: number }
@@ -107,6 +112,9 @@ export interface Snapshot {
   events: SimEvent[];
   /** the names the players chose, all of them (one without none), when they changed since the session's last snapshot */
   names?: [player: PlayerId, name: string][];
+  /** the lives whose health changed since the session's last snapshot that it sees (its own player always); left out
+   * when none did. One never sent is at full health */
+  health?: HealthWire[];
   /** the session's player and its reads, left out when they are those sent before and there are no results */
   player?: PlayerReads;
   edits: EditNote[];

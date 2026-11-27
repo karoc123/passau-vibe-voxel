@@ -55,9 +55,10 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
+import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import type { BoatPose } from './contract/agents';
-import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
+import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay, type Weapon } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
  * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
@@ -70,7 +71,9 @@ export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; wal
  * what a tick without one goes on at) */
 export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number; prev: WalkPose; vx: number; vz: number; sent: { x: number; z: number; at: number };
   /** the solid whose roof pose (from) stands on, as it was then */
-  on?: Solid | null; fromOn?: Solid | null }
+  on?: Solid | null; fromOn?: Solid | null;
+  /** a descent under way: the height it began at, its ticks so far, the ticks since the walker last went down */
+  fall?: { top: number; ticks: number; quiet: number } }
 
 // A walker's poses reach the host as their page's frames send them, unevenly: a tick none reached would stand still
 // and the next jump, which the other players see as a stutter. Moving, such a tick goes on at the walk's velocity, for
@@ -92,7 +95,7 @@ type Taken = (tick: number, r?: CommandResult) => void;
 // (leave, handsOff, damage: the host's, not a client's: leave, handsOff, damage)
 interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'handsOff' } | { kind: 'damage'; op: WorldOp }; taken?: Taken; waited?: number }
 // a projectile in flight: whose, of which weapon, the body it left (it flies through that one), its time aloft (s)
-interface Flying { player: PlayerId; weapon: WeaponId; own: EntityRef; p: Projectile; t: number }
+interface Flying { player: PlayerId; weapon: WeaponId; damage: Weapon['damage']; own: EntityRef; p: Projectile; t: number }
 
 export class WorldSim {
   readonly traffic: Traffic;
@@ -142,6 +145,11 @@ export class WorldSim {
   /** the players' own bodies on foot (avatars), by id: their walker */
   readonly avatars: ReadonlyMap<number, PlayerId> = new Map<number, PlayerId>();
   private nextAvatar = 1;
+  /** the lives below full health and the players down (sim/health.ts) */
+  readonly lives = new Lives();
+  // the vehicles at 0 the mode let be wrecks ("car:12", "craft:3"); the last place each player stood on the ground
+  private readonly wrecks = new Set<string>();
+  private readonly safe = new Map<PlayerId, WalkPose>();
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -339,6 +347,7 @@ export class WorldSim {
     T.crafts = crafts;
     traffic();
     for (const P of this.players.values()) if (P.walk?.on) this.carryOn(P.walk);
+    this.harm();
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
     if (T.dropped.length || T.struck.length) {
@@ -436,22 +445,34 @@ export class WorldSim {
         break;
       }
       case 'seatInput': {
-        if (this.seat(p)?.role !== cmd.role) break;
+        const s = this.seat(p);
+        if (s?.role !== cmd.role) break;
         if (cmd.seq !== undefined) taken?.(this.tick + 1);
+        // (one down, or at the wheel of a wreck, steers nothing: handsOff and wreck let go of the controls once)
+        if (this.lives.down.has(p) || (s.role !== 'walker' && this.wrecks.has(lifeKey(s.entity as Life)))) break;
         if (cmd.role === 'driver') this.phys?.input(p, cmd.input);
         else if (cmd.role === 'pilot') (this.craftOf(p) as CraftState).input = cmd.input;
         else if (!this.walkPose(p, cmd.input)) this.result(p, cmd.kind, false, 'walker');
         break;
       }
-      case 'request': this.result(p, cmd.request.kind, !!this.mode?.request(this.face, p, cmd.request)); break;
+      case 'request': this.result(p, cmd.request.kind, !this.lives.down.has(p) && !!this.mode?.request(this.face, p, cmd.request)); break;
       case 'leaveSeat': {
+        if (this.lives.down.has(p)) break;
         // (out onto foot: put down beside what was left, in the same tick, so no tick shows neither)
         const s = this.seat(p), box = s && s.role !== 'walker' && cmd.pose && finitePose(cmd.pose) ? this.boxOf(s.entity) : null;
         this.leaveSeat(p);
         if (box) this.walk(p, besideBox({ ...cmd.pose!, moving: false }, box, this.tuning.walk.board));
         break;
       }
-      case 'leave': this.leaveSeat(p); (this.players as Map<PlayerId, PlayerState>).delete(p); this.held(); break;
+      case 'leave': {
+        this.leaveSeat(p);
+        (this.players as Map<PlayerId, PlayerState>).delete(p);
+        this.held();
+        this.lives.heal(lifeKey({ kind: 'player', id: p }));
+        this.lives.down.delete(p);
+        this.safe.delete(p);
+        break;
+      }
       case 'handsOff': {
         const role = this.seat(p)?.role, W = this.players.get(p)?.walk;
         if (role === 'driver') this.phys?.input(p, PARK);
@@ -494,12 +515,17 @@ export class WorldSim {
   // weapon in slot is ready
   private fire(player: PlayerId, slot: number, h: number, pitch: number) {
     const P = this.players.get(player) as PlayerState | undefined, s = P && this.seat(player), w = weaponIn(slot);
-    if (!P?.walk || s?.role !== 'walker' || !w || !Number.isFinite(h) || !Number.isFinite(pitch)) return;
+    if (!P?.walk || s?.role !== 'walker' || !w || !Number.isFinite(h) || !Number.isFinite(pitch) || this.lives.down.has(player)) return;
     if (!(P.trigger ??= new Trigger()).pull(w, this.clock)) return;
     const f = P.walk.pose, from = { x: f.x, y: f.y + EYE, z: f.z };
     const shot = w.fire(this.shotWorld(s.entity), from, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
-    if (!('fly' in shot)) { this.due.push({ kind: 'shot', weapon: w.id, player, ...shot }); return; }
-    this.flying.push({ player, weapon: w.id, own: s.entity, p: shot, t: 0 });
+    if (!('fly' in shot)) {
+      this.due.push({ kind: 'shot', weapon: w.id, player, ...shot });
+      const life = shot.hit && shot.hit !== 'world' ? this.lifeOf(shot.hit) : null;
+      if (life) this.hurt(life, w.damage.kind, w.damage.points);
+      return;
+    }
+    this.flying.push({ player, weapon: w.id, damage: w.damage, own: s.entity, p: shot, t: 0 });
     this.due.push({ kind: 'launch', weapon: w.id, player, at: { ...shot.at }, v: { ...shot.v } });
   }
 
@@ -510,6 +536,7 @@ export class WorldSim {
       const at = f.p.fly(this.shotWorld(f.own), f.t, f.t += STEP);
       if (!at) return true;
       this.due.push({ kind: 'blast', weapon: f.weapon, player: f.player, at: { ...at }, r: f.p.r });
+      this.blast(at, f.damage);
       try { this.damaged.push({ player: f.player, op: crater(at.x, at.y, at.z, f.p.r) }); } catch { /* (no world to edit) */ }
       return false;
     });
@@ -653,6 +680,8 @@ export class WorldSim {
     const by = this.occupants.get(seatKey(seat));
     if (by === player) return true;
     if (by !== undefined) return 'taken';
+    if (this.lives.down.has(player)) return false;
+    if ((seat.role === 'driver' || seat.role === 'pilot') && this.wrecks.has(lifeKey(seat.entity as Life))) return false;
     if (this.mode?.mayEnter && !this.mode.mayEnter(this.face, player, seat)) return false;
     const id = seat.entity.id;
     if (seat.role === 'walker') {
@@ -775,7 +804,7 @@ export class WorldSim {
     const pose = this.inHeight(asked);
     if (s?.entity.kind === 'avatar' && W) {
       const at = { ...pose }, t = this.clock - STEP;
-      Object.assign(W, { pose: at, at: t, from: at, fromAt: t, prev: at, vx: 0, vz: 0, sent: { x: at.x, z: at.z, at: t } });
+      Object.assign(W, { pose: at, at: t, from: at, fromAt: t, prev: at, vx: 0, vz: 0, sent: { x: at.x, z: at.z, at: t }, fall: undefined });
       return true;
     }
     const id = this.nextAvatar++, avatars = this.avatars as Map<number, PlayerId>;
@@ -841,6 +870,140 @@ export class WorldSim {
       if (P.follow?.kind === 'car' || P.follow?.kind === 'person') held[P.follow.kind].add(P.follow.id);
       if (P.seat?.role === 'passenger' && P.seat.entity.kind === 'car') held.car.add(P.seat.entity.id);
     }
+  }
+
+  // ------------------------------------------------------------------ health (sim/health.ts)
+  // One model for every life: damage of a kind times the type's factor; a vehicle passes its share on to those in it.
+  // The host alone decides it, from what it has itself (a shot's ray, a blast, the road physics' contacts, a craft's
+  // velocity, a walker's poses): a page's word on its own harm would be a cheat's.
+
+  /** whether player is down (their health at 0, not yet back) */
+  isDown(player: PlayerId) { return this.lives.down.has(player); }
+
+  /** whether a car or craft is a wreck (its health at 0: its driver's or pilot's input no more taken) */
+  wrecked(e: EntityRef) { return this.wrecks.has(lifeKey(e as Life)); }
+
+  // the life an entity is (an avatar: its walker), or null: none (a person of the crowd)
+  private lifeOf(e: EntityRef): Life | null {
+    if (e.kind === 'avatar') { const p = this.avatars.get(e.id); return p === undefined ? null : { kind: 'player', id: p }; }
+    return e.kind === 'person' ? null : { kind: e.kind, id: e.id };
+  }
+
+  // life's type's toughness (Tuning.health), or null: not in the world
+  private toughness(life: Life): Toughness | null {
+    const H = this.tuning.health;
+    if (life.kind === 'player') return this.players.has(life.id) ? H.player : null;
+    if (life.kind === 'car') { const c = this.carById(life.id); return c ? H.car[vehicleOf(c).id] : null; }
+    const c = this.crafts.get(life.id);
+    return c ? H.craft[c.type] : null;
+  }
+
+  // points of a kind off life; at 0 a vehicle is wrecked, a player down (one down takes no more)
+  private hurt(life: Life, kind: DamageKind, points: number) {
+    if (life.kind === 'player' && this.lives.down.has(life.id)) return;
+    const t = this.toughness(life), d = t ? points * t.take[kind] : 0;
+    if (!t || !(d > 0)) return;
+    const { was, hp } = this.lives.take(life, t.max, d);
+    if (life.kind !== 'player' && t.through > 0) {
+      for (const [p, P] of this.players) {
+        const e = P.seat?.entity;
+        if (e?.kind === life.kind && e.id === life.id) this.hurt({ kind: 'player', id: p }, kind, d * t.through);
+      }
+    }
+    if (was > 0 && hp === 0) {
+      if (life.kind === 'player') this.goDown(life.id);
+      else this.wreck(life);
+    }
+  }
+
+  // a crash or a fall at speed (m/s) into life: harmless up to its type's safe speed
+  private crash(life: Life, kind: DamageKind, speed: number) {
+    const t = this.toughness(life);
+    if (t && speed > t.safe) this.hurt(life, kind, (speed - t.safe) * this.tuning.health.perMs);
+  }
+
+  // a blast at `at`: every body within its reach hurt, less the further its box is from it
+  private blast(at: { x: number; y: number; z: number }, damage: Weapon['damage']) {
+    const R = damage.reach ?? 0, m = R + BODY_FAR;
+    if (!(R > 0)) return;
+    for (const b of this.shotWorld({ kind: 'person', id: -1 }).bodies([at.x - m, at.z - m, at.x + m, at.z + m])) {
+      const life = this.lifeOf(b.entity);
+      if (!life) continue;
+      const s = Math.sin(b.h), c = Math.cos(b.h), px = at.x - b.x, pz = at.z - b.z;
+      const du = Math.max(0, Math.abs(px * s + pz * c) - b.l), dv = Math.max(0, Math.abs(px * c - pz * s) - b.r);
+      const d = Math.hypot(du, dv, Math.max(0, b.y - at.y, at.y - b.y - b.ht));
+      if (d < R) this.hurt(life, damage.kind, damage.points * (1 - d / R));
+    }
+  }
+
+  // a vehicle at 0 a wreck, unless the mode keeps it going: its controls let go, nobody takes them again; a car of
+  // the traffic put out of it where it is, charred. Those in it stay: only what reaches them harms them
+  private wreck(v: Life & { kind: 'car' | 'craft' }) {
+    if (this.mode?.wrecks && !this.mode.wrecks(this.face, v)) return;
+    this.wrecks.add(lifeKey(v));
+    if (v.kind === 'craft') { const c = this.craft(v.id); if (c) c.input = c.core.neutral; return; }
+    const c = this.carById(v.id), T = this.traffic;
+    if (!c) return;
+    c.col = WRECK_COL;
+    for (const [p, P] of this.players) if (P.seat?.role === 'driver' && P.seat.entity.id === v.id) this.phys?.input(p, PARK);
+    if (c.detachedPose || this.phys?.wreckCar(c, T)) return;
+    const at = T.carPose(c, c.s, c.off, { x: 0, y: 0, z: 0, h: 0, pitch: 0 });
+    if (T.detachCar(c, { x: at.x, y: at.y, z: at.z, h: at.h, pitch: at.pitch, roll: 0 })) { c.v = 0; c.brake = 1; }
+  }
+
+  // a player down: their controls let go (as a connection lost), back after the mode's time
+  private goDown(player: PlayerId) {
+    const ms = this.mode?.downFor ? this.mode.downFor(this.face, player) : this.tuning.health.downMs;
+    this.lives.down.set(player, ms === null ? Infinity : this.clock + ms / 1000);
+    this.apply({ player, cmd: { kind: 'handsOff' } });
+  }
+
+  // a player down back at full health, on foot where they last stood (or the mode says); out of a seat held first
+  private comeBack(player: PlayerId) {
+    this.lives.down.delete(player);
+    this.lives.heal(lifeKey({ kind: 'player', id: player }));
+    const P = this.players.get(player), s = this.seat(player), e = s && this.entities.pose(s.entity);
+    let at: WalkPose | null = this.safe.get(player) ?? P?.walk?.pose ?? (e ? { ...e, moving: false } : null);
+    if (!at) return;
+    if (this.mode?.backAt) at = this.mode.backAt(this.face, player, at);
+    at = { x: at.x, y: at.y, z: at.z, h: at.h, moving: false };
+    if (s && s.role !== 'walker') this.leaveSeat(player);
+    if (this.walk(player, at)) this.due.push({ kind: 'back', player, to: { ...this.players.get(player)!.walk!.pose } });
+  }
+
+  // the tick's harm the host finds itself (the drivers' contacts, the walkers' falls), the players due back, the
+  // lives of what left the world forgotten
+  private harm() {
+    for (const [p, P] of this.players) {
+      const s = P.seat;
+      if (s?.role === 'driver' && this.phys) { const v = this.phys.driverHit(p); if (v) this.crash({ kind: 'car', id: s.entity.id }, 'crash', v); }
+      if (s?.role === 'walker' && P.walk) this.fall(p, P.walk);
+    }
+    for (const [p, at] of this.lives.down) if (at <= this.clock + 1e-9) this.comeBack(p);
+    if (this.tick % FORGET_TICKS) return;
+    for (const { life } of [...this.lives.values()]) {
+      const gone = life.kind === 'player' ? !this.players.has(life.id) : !this.entities.exists(life);
+      if (gone) { this.lives.heal(lifeKey(life)); this.wrecks.delete(lifeKey(life)); }
+    }
+    for (const k of this.wrecks) if (this.lives.hp(k) === undefined) this.wrecks.delete(k);
+  }
+
+  // A fall on foot, from the walk's poses (the walk is the page's: its own landing is never its word on harm): a
+  // descent ends once the walker has gone no lower for FALL_QUIET ticks (a page's poses come unevenly), and hurts by
+  // the speed of a drop from its height if it went faster than a walk down steps can. None into the water, or riding
+  // a roof. Standing on the ground, the walker's pose is the place they come back to
+  private fall(player: PlayerId, W: Walk) {
+    const F = W.fall, y = W.pose.y;
+    if (W.pose.swim || W.on) W.fall = undefined;
+    else if (y < W.prev.y - 0.01) {
+      if (F) { F.ticks += F.quiet + 1; F.quiet = 0; } else W.fall = { top: W.prev.y, ticks: 1, quiet: 0 };
+    } else if (F && ++F.quiet >= FALL_QUIET) {
+      W.fall = undefined;
+      const h = F.top - y;
+      if (h / (F.ticks * STEP) > FALL_PACE) this.crash({ kind: 'player', id: player }, 'fall', Math.sqrt(2 * GRAVITY * h));
+    }
+    const p = W.pose, under = this.ground?.support(p.x, p.z, p.y + 0.5);
+    if (!W.fall && !p.swim && !W.on && !this.lives.down.has(player) && (under === undefined || Math.abs(p.y - under) < 0.5)) this.safe.set(player, p);
   }
 
   // The driver's car: the road physics' (loadPhysics)
@@ -960,11 +1123,21 @@ export class WorldSim {
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
       const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes) : null;
+      const v0 = core.velocity, vx = v0.x, vy = v0.y, vz = v0.z;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
         if (near?.length) meetSolids(c.type, core, near, c.collision);
         return true;
       });
+      // A crash is the velocity a tick lost or turned, the same rule for every craft; a plane's crash freezes its
+      // velocity (its own speed counts) and its putting back moves it at once (no crash)
+      const v1 = core.velocity;
+      let hit = Math.hypot(v1.x - vx, v1.y - vy, v1.z - vz);
+      for (const e of core.events as { type?: string; kmh?: number }[]) {
+        if (e?.type === 'crash') hit = Math.max(hit, (e.kmh ?? 0) / 3.6);
+        else if (e?.type === 'respawn') hit = 0;
+      }
+      this.crash({ kind: 'craft', id: c.id }, 'crash', hit);
       // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores'; only its pilot reads
       // them, so an empty craft's are not sent)
       if (core.events.length) for (const e of core.events.splice(0)) if (c.pilot !== null) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
@@ -988,5 +1161,13 @@ const CAR_REACH = 12, CRAFT_REACH = 8, COACH_REACH = 12;
 const FIRE_WAIT = 15;
 // a vessel gives way to a craft this far (m) beside its hull too: it slows to a stop before it would scrape past
 const BESIDE = 2;
+// how far (m) past a blast's reach a body's foot may be and its box still be in reach (a bus's half length)
+const BODY_FAR = 7;
+// a wreck's paint
+const WRECK_COL = '#1d1a18';
+// a fall: the ticks without going lower that end it, the pace (m/s) a walk down steps never makes; m/s²
+const FALL_QUIET = 6, FALL_PACE = 3, GRAVITY = 9.81;
+// the ticks between forgetting the lives of what left the world
+const FORGET_TICKS = 30;
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
 

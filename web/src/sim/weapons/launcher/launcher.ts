@@ -31,8 +31,9 @@ function grenade(from: Vec3, dir: Vec3): Projectile {
   };
 }
 
-/** the grenade launcher: a grenade every 1.5 s that bursts where it lands and leaves a crater */
+/** the grenade launcher: a grenade every 1.5 s that bursts where it lands and leaves a crater; it harms twice as far
+ * as the crater reaches (one at its rim is hurt, not killed) */
 export const launcher: Weapon = {
-  id: 'launcher', slot: 2, name: 'Launcher', rate: 1 / 1.5,
+  id: 'launcher', slot: 2, name: 'Launcher', rate: 1 / 1.5, damage: { kind: 'blast', points: 120, reach: 2 * BLAST_R },
   fire: (_world, from, dir) => grenade(from, dir),
 };

@@ -5,7 +5,7 @@
 //   takeSnapshot(sim, player, since)   the sim side (sim/server/sim-server.ts Session): the traffic's agents as they
 //                                      are after the update (enough for the client's own path maths: Traffic.carPose,
 //                                      personPoint), the bodies' drawn poses, boats, the avatars, the
-//                                      crafts (their cores' state), the events since (the crafts' and the drivers'
+//                                      crafts (their cores' state), the health of the lives it sees that changed, the events since (the crafts' and the drivers'
 //                                      among them), the session's player's reads (id, seat, car, results, ack);
 //                                      what is far from the player left out (its sight: interest.ts), what the
 //                                      session holds already of the agents, bodies and avatars too (wire)
@@ -18,6 +18,9 @@ import type { PlayerId } from '../contract/ids';
 import type { Ack, AvatarWire, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 import type { Sight } from './interest';
+import { lifeKey } from '../health';
+
+function* hurtLives(sim: WorldSim) { for (const h of sim.lives.values()) yield { key: lifeKey(h.life), hp: h.hp, max: h.max }; }
 
 // what a client's path maths and drawing read of a car left out of the traffic (the contract's CarState, which Car
 // extends): every key, an optional one undefined too (a car's object is reused by id: TrafficMirror apply).
@@ -73,6 +76,15 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const s = P.seat?.role === 'passenger' ? P.seat : null, e = s?.entity;
     if (s && (e?.kind === 'car' || e?.kind === 'craft') && sim.entities.exists(e) && (!S || S.has(e.kind, e.id))) passengers.push([e.kind, e.id, id, s.index]);
   }
+  // (a player's health is seen with what they are in or walk as; the session's own always)
+  const lifeSeen = (key: string) => {
+    if (!S) return true;
+    const i = key.indexOf(':'), kind = key.slice(0, i), id = key.slice(i + 1);
+    if (kind !== 'player') return S.has(kind as 'car' | 'craft', +id);
+    const e = id === player ? null : sim.seat(id)?.entity;
+    return !e || S.has(e.kind, e.id);
+  };
+  const health = wire.health(hurtLives(sim), lifeSeen);
   let events = sim.eventsSince(since);
   if (S) { events = events.filter((e) => S.event(e)); S.done(); }
   // (rounded: the camera follows the body drawn, the page takes from these only where the fallen are cleared and the
@@ -84,6 +96,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     bodies,
     boats,
     avatars, drivers, passengers, crafts, events,
+    ...(health.length ? { health } : {}),
     player: wire.player({ id: player, seat: sim.seat(player), driver, results, ack: ack && { ...ack } }),
     edits,
   };
