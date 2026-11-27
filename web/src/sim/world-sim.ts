@@ -61,6 +61,8 @@ import { Npcs } from './npcs';
 import { BODY_HEAD, BODY_R, CHEST, EYE, RIDER_TOP } from './figure';
 import { aimFrom, cue, newMind, think, type Duty, type Senses } from './npc-mind';
 import { Camps } from './camps';
+import { Built } from '../core/built';
+import { newPilot, think as fly, type Pilot } from './pilot-mind';
 import type { Vec3 } from '../core/vec';
 import { Tank } from './tank';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
@@ -168,6 +170,9 @@ export class WorldSim {
   readonly npcs = new Npcs();
   /** the enemy camps the mode lists (sim/camps.ts), made on the first tick with a mode */
   camps: Camps | null = null;
+  /** the enemy planes (sim/pilot-mind.ts), by craft id: their pilot's name (an NPC's, never a player's: none of the
+   * players' presence, sight or bytes counts it), mind and trigger; 'lost': shot down or crashed, till its wreck goes */
+  readonly enemies = new Map<CraftId, { name: PlayerId; mind: Pilot; trigger: Trigger } | 'lost'>();
 
   /** the game mode (sim/mode.ts; the host's: SimServer), asked while the commands are applied; null: none (every
    * seat may be taken, every request refused) */
@@ -183,6 +188,10 @@ export class WorldSim {
     sit: (player, seat) => this.enterSeat(player, seat) === true,
     setTime: (hour, day) => this.setTime(hour, day),
     addNpc: (player, kind) => {
+      if (kind === 'pilot') {
+        const s = this.seat(player), at = s ? this.entities.pose(s.entity) : this.players.get(player)?.view?.focus;
+        return !!at && this.callPlane(at) !== null;
+      }
       const W = this.players.get(player)?.walk;
       if (this.seat(player)?.role !== 'walker' || !W) return false;
       const p = W.pose, x = p.x + Math.sin(p.h) * NPC_AHEAD, z = p.z + Math.cos(p.h) * NPC_AHEAD;
@@ -388,6 +397,7 @@ export class WorldSim {
     this.dropLeft(now, foci);
     this.stands?.update(now, foci);
     this.manCamps(now);
+    if (this.enemies.size) this.pilots();
     this.stepCrafts();
     T.walkers = [...this.players.values()].flatMap((P) => (P.walk ? [P.walk.pose] : []));
     const crafts: Solid[] = [];
@@ -644,6 +654,8 @@ export class WorldSim {
         },
         alive: (id) => N.all.get(id)?.dead === null,
         remove: (id) => { N.all.delete(id); },
+        fly: (x, z) => this.callPlane({ x, z }),
+        plane: (id) => { const e = this.enemies.get(id); return e === undefined ? 'gone' : e === 'lost' ? 'lost' : 'up'; },
       }, places, this.tuning.camps);
     }
     const at: { x: number; z: number }[] = [];
@@ -669,6 +681,8 @@ export class WorldSim {
     for (const P of this.players.values()) if (P.walk && P.seat?.role === 'walker') at.push(P.walk.pose);
     for (const n of this.npcs.all.values()) at.push(n.pose);
     if (this.camps) at.push(...this.camps.awake());
+    // (an enemy plane up: round every player it may attack, so its sight and its shots meet their cover)
+    if ([...this.enemies.values()].some((e) => e !== 'lost')) for (const q of this.prey()) if (!this.players.get(q.player)?.walk) at.push(q.at);
     V.hold(at, REACH);
   }
 
@@ -1142,17 +1156,7 @@ export class WorldSim {
   // or in a vehicle, as this sim has them, the voxels between), what it fires is a player's MG fired as theirs is.
 
   private minds() {
-    const MG = weaponById('mg'), N = this.npcs, V = this.voxels;
-    // (the players it may attack, not down, where it aims at them: a chest on foot, else the middle of the vehicle's
-    // body, which a hit harms and whose share reaches those in it)
-    const prey: { player: PlayerId; at: Vec3 }[] = [];
-    for (const [p, P] of this.players) {
-      if (this.lives.down.has(p) || !P.seat) continue;
-      if (P.seat.role === 'walker') { if (P.walk) prey.push({ player: p, at: { x: P.walk.pose.x, y: P.walk.pose.y + CHEST, z: P.walk.pose.z } }); continue; }
-      const e = P.seat.entity, c = e.kind === 'craft' ? this.crafts.get(e.id) : null;
-      const b = c ? (c.placed ? craftBox(c.type, c.core.pose) : null) : this.boxOf(e);
-      if (b) prey.push({ player: p, at: { x: b.x, y: b.y + b.ht / 2, z: b.z } });
-    }
+    const MG = weaponById('mg'), N = this.npcs, V = this.voxels, prey = this.prey();
     for (const n of N.all.values()) {
       const m = n.mind;
       if (!m || n.dead !== null) continue;
@@ -1180,6 +1184,7 @@ export class WorldSim {
       const was = m.state, act = think(m, { x: me.x, y: me.y, z: me.z, walking: n.goal !== null }, senses, this.clock, MG?.rate ?? 10);
       // (one that notices a player alarms its squad: the fight comes from several sides)
       if (was !== 'attack' && m.state === 'attack' && m.squad !== null && m.seen) {
+        this.camps?.alarm(m.squad, this.clock);
         for (const o of N.all.values()) if (o !== n && o.dead === null && o.mind?.squad === m.squad) cue(o.mind, m.seen, m.target);
       }
       n.speed = act.speed;
@@ -1188,6 +1193,101 @@ export class WorldSim {
       if (g === null && n.goal) N.goTo(n.id, null);
       else if (g && (!n.goal || Math.hypot(g.x - n.goal.x, g.z - n.goal.z) > REGOAL)) N.goTo(n.id, g);
       if (act.fire && MG && n.trigger.pull(MG, this.clock)) this.shoot(`npc${n.id}`, { kind: 'avatar', id: n.id }, MG, eyes, aimFrom(eyes, act.fire, this.rnd, m.k));
+    }
+  }
+
+  // the players an enemy may attack, not down, where it aims at them: a chest on foot, else the middle of the vehicle's
+  // body, which a hit harms and whose share reaches those in it
+  private prey() {
+    const prey: { player: PlayerId; at: Vec3 }[] = [];
+    for (const [p, P] of this.players) {
+      if (this.lives.down.has(p) || !P.seat) continue;
+      if (P.seat.role === 'walker') { if (P.walk) prey.push({ player: p, at: { x: P.walk.pose.x, y: P.walk.pose.y + CHEST, z: P.walk.pose.z } }); continue; }
+      const e = P.seat.entity, c = e.kind === 'craft' ? this.crafts.get(e.id) : null;
+      const b = c ? (c.placed ? craftBox(c.type, c.core.pose) : null) : this.boxOf(e);
+      if (b) prey.push({ player: p, at: { x: b.x, y: b.y + b.ht / 2, z: b.z } });
+    }
+    return prey;
+  }
+
+  // ------------------------------------------------------------------ the enemy planes (sim/pilot-mind.ts, ADR 0027)
+  // A combat plane flown by an NPC with a player's input and trigger: its gun is the pilot's seat's nose mount. Its
+  // pilot holds the seat (no player takes it) but is no player. Shot down or crashed, the pilot dies with it: the
+  // controls let go for good, so its flight never puts it back up, and the wreck is left as any.
+
+  /** an enemy plane called to guard home: put down flying out of every player's sight (Tuning.pilot.appear) towards
+   * home, high over everything; its craft id, or null: no such place on the map now, or no craft world */
+  callPlane(home: { x: number; z: number }): CraftId | null {
+    const env = this.opts.crafts, k = this.tuning.pilot;
+    if (!env) return null;
+    const foci = this.foci(), M = env.meta, B = new Built(M), edge = 200;
+    let best: { x: number; z: number; d: number } | null = null;
+    for (const r of [k.appear + 300, k.appear + 700]) for (let i = 0; i < 16; i++) {
+      const a = i * Math.PI / 8, x = home.x + Math.sin(a) * r, z = home.z + Math.cos(a) * r;
+      // (on the map well inside what is built: a block not built has no tiles to fly through, and is a wall)
+      if (!B.all(x - edge, z - edge, x + edge, z + edge)) continue;
+      const d = Math.min(Infinity, ...foci.map((f) => Math.hypot(f.x - x, f.z - z)));
+      if (d >= k.appear && (!best || d > best.d)) best = { x, z, d };
+    }
+    if (!best) return null;
+    const plane = this.addCraft('fighter'), c = this.craft(plane.id)!, seat: Seat = { entity: { kind: 'craft', id: c.id }, role: 'pilot', index: 0 };
+    this.placeCraft(c.id, { x: best.x, y: M.H + 40, z: best.z, h: Math.atan2(home.x - best.x, home.z - best.z), speed: plane.core.cfg.RESPAWN_SPEED });
+    const name = `npc${this.nextAvatar++}`;
+    c.pilot = name;
+    this.occupants.set(seatKey(seat), name);
+    this.enemies.set(c.id, { name, mind: newPilot(home, this.clock, k), trigger: new Trigger() });
+    return c.id;
+  }
+
+  // each enemy plane's pilot's tick: its input for the crafts' steps, its shot; down, it dies with its plane; gone off
+  // out of every player's sight, the plane is taken away
+  private pilots() {
+    const V = this.voxels, k = this.tuning.pilot;
+    let prey: { player: PlayerId; at: Vec3 }[] | null = null;
+    for (const [id, e] of [...this.enemies]) {
+      const c = this.craft(id);
+      if (!c) { this.enemies.delete(id); continue; }
+      if (e === 'lost') continue;
+      const core = c.core as PlaneCore, seat: Seat = { entity: { kind: 'craft', id }, role: 'pilot', index: 0 }, key = lifeKey(seat.entity as Life);
+      if (this.wrecks.has(key) || core.flight.state === 'crashed') {
+        if (!this.wrecks.has(key)) this.hurt({ kind: 'craft', id }, 'crash', Infinity);
+        this.occupants.delete(seatKey(seat));
+        c.pilot = null;
+        c.input = core.neutral;
+        this.enemies.set(id, 'lost');
+        continue;
+      }
+      const f = core.flight, p = f.p, nose = core.nose;
+      if (e.mind.state === 'leave' && this.foci().every((q) => Math.hypot(q.x - p.x, q.z - p.z) >= k.appear)) { this.removeCraft(id); continue; }
+      prey ??= this.prey();
+      // (a clear line within its sight, read from the target out as far as a shot reaches: the cover is round the
+      // target, and the voxels held are there)
+      const clear = (at: Vec3) => {
+        const d = { x: p.x - at.x, y: p.y - at.y, z: p.z - at.z }, L = Math.hypot(d.x, d.y, d.z), R = Math.min(L, REACH - 1);
+        if (L > k.sight) return false;
+        if (!V || L < 1e-6) return true;
+        d.x /= L; d.y /= L; d.z /= L;
+        const from = { x: at.x + d.x * 0.5, y: at.y + d.y * 0.5, z: at.z + d.z * 0.5 };
+        return (!V.ready || V.ready(from, d, R)) && V.raycast(from, d, R) >= R - 0.6;
+      };
+      const all = prey, act = fly(e.mind, { x: p.x, y: p.y, z: p.z, h: f.heading, gamma: f.gamma, v: f.v, nose, fuel: core.tank.share }, {
+        nearest: (ok) => {
+          let best: { player: PlayerId; at: Vec3 } | null = null, bd = Infinity;
+          for (const q of all) {
+            const d = Math.hypot(q.at.x - p.x, q.at.z - p.z);
+            if (d < bd && ok(q.at) && clear(q.at)) { bd = d; best = { player: q.player, at: { ...q.at } }; }
+          }
+          return best;
+        },
+        sees: (player) => { const q = all.find((r) => r.player === player); return q && clear(q.at) ? { ...q.at } : null; },
+        top: (x, z) => c.collision.surface(x, z)?.top ?? null,
+      }, this.clock);
+      c.input = act.input;
+      const m = mountOf(SEATS.craft.fighter, seat), w = m && weaponById(m.weapon);
+      if (!act.fire || !m || !w || !e.trigger.pull(w, this.clock)) continue;
+      // (its stray first, then the gun's swing: no shot leaves the nose's line further than a player's could)
+      const from = mountPoint(m, nose), d = aimFrom(from, act.fire, this.rnd, k), a = inArc(m, nose.h, Math.atan2(d.x, d.z), Math.asin(d.y), nose.pitch);
+      this.shoot(e.name, seat.entity, w, from, aimDir(a.h, a.pitch));
     }
   }
 
@@ -1238,6 +1338,7 @@ export class WorldSim {
     const c = this.craft(id);
     if (!c) return;
     if (c.pilot !== null) this.leaveSeat(c.pilot);
+    if (this.enemies.delete(id)) this.occupants.delete(seatKey({ entity: { kind: 'craft', id }, role: 'pilot', index: 0 }));
     const box = c.placed ? craftBox(c.type, c.core.pose) : null;
     let n = 0;
     for (const [p, P] of this.players) {
@@ -1370,8 +1471,8 @@ export class WorldSim {
       }
       this.crash({ kind: 'craft', id: c.id }, 'crash', hit);
       // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores'; only its pilot reads
-      // them, so an empty craft's are not sent)
-      if (core.events.length) for (const e of core.events.splice(0)) if (c.pilot !== null) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
+      // them, so those of a craft no player pilots are not sent)
+      if (core.events.length) for (const e of core.events.splice(0)) if (c.pilot !== null && this.players.has(c.pilot)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
     }
   }
 }

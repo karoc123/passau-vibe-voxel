@@ -156,7 +156,7 @@ const nearestIndex = (pts: readonly { x: number; z: number }[], p: { x: number; 
 
 /** the unit direction from `from` towards `to`, strayed by k's spread, which grows with the distance (rnd: 0..1
  * numbers, seeded by the host so a run repeats) */
-export function aimFrom(from: Vec3, to: Vec3, rnd: () => number, k: NpcTuning): Vec3 {
+export function aimFrom(from: Vec3, to: Vec3, rnd: () => number, k: Pick<NpcTuning, 'spread' | 'spreadPerM'>): Vec3 {
   const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
   const spread = k.spread + k.spreadPerM * d, a = rnd() * 2 * Math.PI, r = spread * Math.sqrt(rnd());
   const h = Math.atan2(dx, dz) + r * Math.cos(a), p = Math.asin(dy / d) + r * Math.sin(a);

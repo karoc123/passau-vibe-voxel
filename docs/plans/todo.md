@@ -25,11 +25,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   konzept-geschuetze-flugabwehr.md; owner: at a chosen place such as the Feste Oberhaus, not spread over the map;
   first step built, ADR 0023: the Oberhaus camp's lookout fires at players in vehicles; left: its numbers tried in
   play, then the gun as a thing, a standing vehicle with a mount and an NPC gunner born on it). The combat plane built
-  for a player (ADR 0021; left: its numbers and the swing tried in play; next its NPC pilot: an NPC on a seat;
-  dogfights later, not ruled out; bombs and rockets not yet; the NPC pilot decided (owner 2026-11-27, kept small, it
-  will change): comes on the camp's alarm, appears flying out of sight (boarding at the shore later), dies with the
-  plane (later: the plane crashes and the pilot bails out on a paraglider), attacks every player, the paraglider too,
-  one at the Oberhaus even for four). The military helicopter built (ADR 0024: bigger, four seats, two
+  for a player (ADR 0021; left: its numbers and the swing tried in play; dogfights later, not ruled out; bombs and rockets not yet). The enemy plane built (ADR 0027: the Oberhaus camp's
+  alarm calls one, it passes at every player; left: its numbers and its feel tried in play at the Oberhaus, boarding
+  a moored plane at the shore, the pilot bailing out on a paraglider, a lead on moving targets, an NPC on a seat as a
+  body of its own). The military helicopter built (ADR 0024: bigger, four seats, two
   door guns, no pilot's gun, no hover hold, a co-op craft, debug menu only; today's helicopter a two-seater; left: its
   numbers, the swing and the drawn tilt against the level mount tried in play, firing from a pass at speed, a place on
   the map such as the Oberhaus once the camp is cleared, NPC door gunners later). Health and

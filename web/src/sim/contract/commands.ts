@@ -92,7 +92,8 @@ export type Refusal = 'loading' | 'failed' | 'taken' | 'far' | 'moving';
  *   setTime      the world's time of day (hour 0..24) and day of the year (without: the day kept), the same for
  *                every player (docs/adr/0009-layers-and-owners.md: the host owns it)
  *   npc          an NPC enemy put down a few metres ahead of the player on foot (where the host has them): a guard
- *                or a lookout facing them, or a patrol walking a loop round the spot (the menu's Debug) */
+ *                or a lookout facing them, or a patrol walking a loop round the spot; or, pilot, wherever the player
+ *                is, an enemy plane called to guard that place (the menu's Debug) */
 export type ModeRequest =
   | { kind: 'craft'; type: CraftType; spot: CraftSpot }
   | { kind: 'placeCraft'; spot: CraftSpot }
@@ -101,7 +102,7 @@ export type ModeRequest =
   | { kind: 'dropCraft' }
   | { kind: 'walk'; pose: WalkPose }
   | { kind: 'setTime'; hour: number; day?: number }
-  | { kind: 'npc'; duty: 'guard' | 'patrol' | 'lookout' };
+  | { kind: 'npc'; duty: 'guard' | 'patrol' | 'lookout' | 'pilot' };
 
 /** where a craft is put down: x, z, heading h, a height for one that starts in the air or afloat, a speed along h for
  * one that starts moving, water: afloat (the floatplane) */

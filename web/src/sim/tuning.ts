@@ -17,7 +17,8 @@
 // - fuel: how long each vehicle's tank lasts (sim/tank.ts FUEL): the cores, WorldSim (a car's)
 // - npc: an enemy's own numbers (NPC below, kept here as stands: its code, sim/npc-mind.ts, is the domain's): WorldSim
 // - lookout: a lookout's (LOOKOUT below, likewise): WorldSim
-// - camps: when an enemy camp is manned, how big its squad, when it is refilled (CAMPS below, likewise): Camps
+// - camps: when an enemy camp is manned, how big its squad, when it is refilled, its planes (CAMPS below, likewise): Camps
+// - pilot: an enemy plane's pilot's (PILOT below, likewise; its code: sim/pilot-mind.ts): WorldSim
 // A tool that varies tuning builds a copy ({ ...RIDE, stiffness: 40 }) and passes it, as tools/rapier-car.mjs --set
 // and tools/plane.mjs --set do.
 import { frozen } from '../core/frozen';
@@ -62,14 +63,36 @@ const LOOKOUT: NpcTuning = frozen({ sight: 250, react: 2, burst: 4, pause: 2, sp
 
 /** wake: m from a player within which a camp is manned; sleep: m no player may be within for its NPCs to be taken
  * away (their number kept); unseen: m no player may be within for one to be put down; refill: s after its first loss
- * that a camp is at full strength again; squad: its size by the players within wake (1, 2, ...; more: the last);
- * loop: m, the half side of its patrol's square */
+ * that a camp is at full strength again (its planes too); squad: its size by the players within wake (1, 2, ...;
+ * more: the last); loop: m, the half side of its patrol's square; planes: the enemy planes its alarm calls, however
+ * many players; call: s from the alarm until one is called */
 export interface CampTuning {
   readonly wake: number; readonly sleep: number; readonly unseen: number; readonly refill: number;
-  readonly squad: readonly number[]; readonly loop: number;
+  readonly squad: readonly number[]; readonly loop: number; readonly planes: number; readonly call: number;
 }
-// (alone a camp must stay winnable; clearing one should pay off longer than taking a vehicle, whose stand refills in 300 s)
-const CAMPS: CampTuning = frozen({ wake: 300, sleep: 400, unseen: 200, refill: 600, squad: frozen([2, 3, 4, 4]), loop: 8 });
+// (alone a camp must stay winnable; clearing one should pay off longer than taking a vehicle, whose stand refills in
+// 300 s. One plane even for four players (owner 2026-11-27); it shows ~25 s after the call: time to take cover)
+const CAMPS: CampTuning = frozen({ wake: 300, sleep: 400, unseen: 200, refill: 600, squad: frozen([2, 3, 4, 4]), loop: 8, planes: 1, call: 5 });
+
+/** an enemy plane's pilot's: sight: m within which it sees a player; leash: m from its home a target may be;
+ * appear: m no player may be within where it appears or is taken away; circle: m, the radius it circles home at;
+ * cruise: m over the ground it circles and leaves at, runIn: that of its turn in; setup: m from the target it turns in
+ * at; fireFrom: m from the target it may fire within; fireFor: s it fires a pass at most; breakAt: m from the target it
+ * pulls out at; climb: rad, the path it pulls out on, climbFor: s; clear: m over the ground it keeps, attackClear: in a
+ * pass; lost: s without its target before it circles; leaveAfter: s without one before it leaves; fuelLeave: the tank's
+ * share it leaves at; spread, spreadPerM: its aim's stray (as an NPC's) */
+export interface PilotTuning {
+  readonly sight: number; readonly leash: number; readonly appear: number; readonly circle: number; readonly cruise: number;
+  readonly runIn: number; readonly setup: number; readonly fireFrom: number; readonly fireFor: number; readonly breakAt: number;
+  readonly climb: number; readonly climbFor: number; readonly clear: number; readonly attackClear: number; readonly lost: number;
+  readonly leaveAfter: number; readonly fuelLeave: number; readonly spread: number; readonly spreadPerM: number;
+}
+// A pass is ~25-35 s, ~3 s of it fire: the pause is the player's chance. It appears past the crafts' send radius
+// (1050 m) so no page sees it pop in. (Its stray is up to ~1.4 m at 200 m: a man in the open takes two to four hits
+// a pass)
+const PILOT: PilotTuning = frozen({ sight: 900, leash: 900, appear: 1100, circle: 400, cruise: 150, runIn: 110, setup: 650,
+  fireFrom: 300, fireFor: 3, breakAt: 120, climb: 0.3, climbFor: 7, clear: 40, attackClear: 12, lost: 20, leaveAfter: 60,
+  fuelLeave: 0.25, spread: 0.005, spreadPerM: 0.00001 });
 
 export interface Tuning {
   readonly ride: RideTuning;
@@ -87,14 +110,15 @@ export interface Tuning {
   readonly npc: NpcTuning;
   readonly lookout: NpcTuning;
   readonly camps: CampTuning;
+  readonly pilot: PilotTuning;
 }
 
 /** the parts the page runs as the host does, so the host sends them in its hello: the crafts' motion laws and tanks
  * (a mirror's and a prediction's cores are made with them) and the cars' ride and tank (the driver's own car run
- * ahead). Not the host's own (presence, walk, health, stands, npc, lookout, camps): they would only lengthen every hello */
+ * ahead). Not the host's own (presence, walk, health, stands, npc, lookout, camps, pilot): they would only lengthen every hello */
 export type ClientTuning = Pick<Tuning, 'ride' | 'boat' | 'plane' | 'jet' | 'fighter' | 'craft' | 'drone' | 'fuel'>;
 
 export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, fighter: FIGHTER, craft: CRAFT, drone: DRONE,
   presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS, fuel: FUEL,
-  npc: NPC, lookout: LOOKOUT, camps: CAMPS });
+  npc: NPC, lookout: LOOKOUT, camps: CAMPS, pilot: PILOT });
 

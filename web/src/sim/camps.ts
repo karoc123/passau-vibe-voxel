@@ -1,6 +1,7 @@
 // Enemy camps: a place a mode lists where a squad of NPCs keeps watch, and a lookout where it has one. Manned only near
 // players and never in front of one; stood down (its NPCs taken away, their number kept) once all are far; a squad cut
-// down stays so until the refill is due. No three.js, no DOM (tools/core-deps.mjs).
+// down stays so until the refill is due. Its alarm calls its planes, if it has any left. No three.js, no DOM
+// (tools/core-deps.mjs).
 import type { Duty } from './npc-mind';
 import type { CampTuning } from './tuning';
 
@@ -19,6 +20,10 @@ export interface CampWorld {
   alive(id: number): boolean;
   /** NPC id taken out of the world */
   remove(id: number): void;
+  /** an enemy plane called to guard (x, z), appearing out of every player's sight; its craft id, or null: not now */
+  fly(x: number, z: number): number | null;
+  /** enemy plane id: flying, shot down or crashed (lost), or flown off and taken away (gone) */
+  plane(id: number): 'up' | 'lost' | 'gone';
 }
 
 interface Camp {
@@ -32,22 +37,48 @@ interface Camp {
   /** how many it has (null: not yet woken); when it is full again (Infinity: none lost) */
   strength: number | null;
   due: number;
+  /** its planes up; how many it lost (none again till the refill: planeDue); when its alarm's call is answered
+   * (Infinity: no call) */
+  planes: number[];
+  planesLost: number;
+  planeDue: number;
+  call: number;
 }
 
 export class Camps {
   private readonly camps: Camp[];
 
   constructor(private readonly w: CampWorld, readonly places: readonly CampPlace[], private readonly T: CampTuning) {
-    this.camps = places.map((place) => ({ place, awake: false, npcs: [], lookout: null, lookoutLost: false, strength: null, due: Infinity }));
+    this.camps = places.map((place) => ({ place, awake: false, npcs: [], lookout: null, lookoutLost: false, strength: null, due: Infinity,
+      planes: [], planesLost: 0, planeDue: Infinity, call: Infinity }));
   }
 
   /** the places of the camps awake (the host keeps their voxels in) */
   awake() { return this.camps.filter((c) => c.awake).map((c) => c.place); }
 
+  /** camp squad's alarm at now (s): one of its NPCs noticed a player; it calls a plane if it has one left */
+  alarm(squad: number, now: number) {
+    const c = this.camps[squad];
+    if (c && c.call === Infinity && c.planes.length < this.T.planes - c.planesLost) c.call = now + this.T.call;
+  }
+
   /** a tick at now (s) with the players where they are (one point each) */
   update(now: number, players: readonly { x: number; z: number }[]) {
     const T = this.T;
     this.camps.forEach((c, squad) => {
+      // (a plane is not the camp's ground: it goes on, and is let go, whether the camp sleeps or not)
+      c.planes = c.planes.filter((id) => {
+        const s = this.w.plane(id);
+        if (s === 'lost') { c.planesLost++; if (c.planeDue === Infinity) c.planeDue = now + T.refill; }
+        return s === 'up';
+      });
+      if (now >= c.planeDue) { c.planesLost = 0; c.planeDue = Infinity; }
+      while (now >= c.call && c.planes.length < T.planes - c.planesLost) {
+        const id = this.w.fly(c.place.x, c.place.z);
+        if (id === null) break;
+        c.planes.push(id);
+      }
+      if (c.planes.length >= T.planes - c.planesLost) c.call = Infinity;
       const P = c.place, near = (r: number) => players.filter((p) => (p.x - P.x) ** 2 + (p.z - P.z) ** 2 <= r * r).length;
       const lost = c.npcs.filter((id) => !this.w.alive(id)).length;
       if (lost) {
