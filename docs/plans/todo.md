@@ -17,8 +17,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   Wind and weather noted for later. "Only on foot" needs no block: it follows from landing room and vehicles' size.
   Order (the owner leaves it to us): NPCs on foot (built, ADR 0017, 0018: guard or patrol, sight, MG, search, lives,
   their samples; left: hearing, cover, a field of view, players in vehicles as targets, where a mode puts them, the
-  numbers tried in play); then (owner 2026-11-27) a fuel tank (no refuelling yet); seat tools: a gunner, its concept
-  first (no scout: anyone can mark already); NPCs in vehicles only once enemies on foot have been seen and played;
+  numbers tried in play); then (owner 2026-11-27) a fuel tank (no refuelling yet); seat tools: a gunner (concept done; owner: a
+  seat as today with a weapon in its data, no gunner role; the door gunners blind fore and aft; a craft with no pilot
+  sinks as today), no scout; a grappling hook as an item noted for later; NPCs in vehicles only once enemies on foot have been seen and played;
   zones: the concept to be talked through first (a helicopter lands anywhere today). Health and
   damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
