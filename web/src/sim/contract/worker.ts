@@ -19,7 +19,10 @@ export type ToWorker =
   // its player; null: a new player. A first message of another kind is a new player too)
   | { kind: 'join'; token: string | null }
   // (a network host answers at once with a pong of the same t: the page's round trip; the page's own worker gets none)
-  | { kind: 'ping'; t: number };
+  | { kind: 'ping'; t: number }
+  // (the page hidden, or shown again: hidden, its player's vehicle hands off and it is sent no snapshots, its own
+  // worker's world waits; shown, the next snapshot is the present's)
+  | { kind: 'away'; away: boolean };
 export type FromWorker =
   | { kind: 'hello'; hello: Hello } // (first, once the session is connected: before ready and any snapshot)
   | { kind: 'ready' }

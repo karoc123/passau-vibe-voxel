@@ -34,6 +34,9 @@ export class WorkerLink implements SimLink {
 
   send(commands: SimCommand[]) { this.post({ kind: 'commands', commands }); }
 
+  /** the page hidden (the world waits) or shown again */
+  away(on: boolean) { this.post({ kind: 'away', away: on }); }
+
   private receive(m: FromWorker) {
     if (!this.closed) receive(this, m);
   }
@@ -87,6 +90,8 @@ export class SocketLink implements SimLink {
 
   // the token of the host's last hello (never logged: it is the player's seat)
   private token: string | null = null;
+  // the page hidden: told to each connection, which then sends no pings
+  private hidden = false;
 
   constructor(readonly url: string) {
     try { this.token = sessionStorage.getItem(STORE + url); } catch { /* (no storage: a tool, a private window) */ }
@@ -100,7 +105,7 @@ export class SocketLink implements SimLink {
   }
 
   private ping() {
-    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ kind: 'ping', t: performance.now() } satisfies ToWorker));
+    if (this.ws.readyState === WebSocket.OPEN && !this.hidden) this.ws.send(JSON.stringify({ kind: 'ping', t: performance.now() } satisfies ToWorker));
   }
 
   /** (receive) a host's answer to a ping */
@@ -116,6 +121,7 @@ export class SocketLink implements SimLink {
     const ws = this.ws = new WebSocket(this.url);
     ws.onopen = () => {
       ws.send(JSON.stringify({ kind: 'join', token: this.token } satisfies ToWorker));
+      if (this.hidden) ws.send(JSON.stringify({ kind: 'away', away: true } satisfies ToWorker));
       this.ever = true;
       this.onStatus({ up: true });
       this.ping();
@@ -142,6 +148,14 @@ export class SocketLink implements SimLink {
     if (this.timer) clearTimeout(this.timer);
     if (this.pinger) clearInterval(this.pinger);
     this.ws.close();
+  }
+
+  /** the page hidden (its vehicle hands off, no snapshots sent) or shown again (the present sent) */
+  away(on: boolean) {
+    if (this.hidden === on) return;
+    this.hidden = on;
+    if (!this.closed && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ kind: 'away', away: on } satisfies ToWorker));
+    if (!on) this.ping();
   }
 
   send(commands: SimCommand[]) {

@@ -50,6 +50,11 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
   // the page's own hello: this code, the build it loaded (checked and warned of at boot), the default tuning
   const mine = hello(checkBuild(meta, () => {}));
   const link = o.server ? new SocketLink(o.server) : new WorkerLink(o.query);
+  // (the held keys are let go on the page's side too: nav/input.ts onFocusLoss; its frames, which send them, stop)
+  const told = () => link.away(document.hidden);
+  document.addEventListener('visibilitychange', told);
+  // (a page opened in a background tab)
+  if (document.hidden) told();
   // (the edits are sent as ops, applied over the page's own node files)
   const tiles = { cache: viewerTileCache(meta.tiles.N, edits), frame: frameOf(meta) };
   return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles, { meta, cache: tiles.cache, now: () => performance.now() }), link };

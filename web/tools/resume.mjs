@@ -3,7 +3,8 @@
 // flies a hovercraft, P rides along, B stands beside it. A's and P's sockets cut: the craft hands off, its pilot's
 // and P's seats still theirs, B refused both. Both back within the grace period: the same players, A at the controls
 // (steering again, still named), P aboard. A cut for longer than it: the seat free, B takes it, A back as a new player
-// on no seat. P back with a token not the host's: a new player, not aboard.
+// on no seat. A's page hidden while flying: hands off, no snapshots, connected; shown, the present at once. P back
+// with a token not the host's: a new player, not aboard.
 // usage (in web/): node tools/resume.mjs [-v]; prints PASS lines, or FAIL and exit 1
 import { imp, synthData } from './lib.mjs';
 
@@ -126,6 +127,21 @@ const x0 = { ...craft().core.pose };
 for (let i = 0; i < 45; i++) { fly(A, 1); await step(); }
 const moved = Math.hypot(craft().core.pose.x - x0.x, craft().core.pose.z - x0.z);
 check(moved > 2, `A steers it again (${moved.toFixed(1)} m)`);
+
+// A's page hidden with the throttle held (its frames, which send the input, stop with it): the craft hands off at
+// once, A gets no snapshots but stays connected and aboard; shown again, the next snapshot is the present's
+fly(A, 1);
+await step();
+A.link.away(true);
+await step(3);
+const got = A.link.times.length, t0 = A.c.tick, h = craft();
+check(h?.pilot === a0 && JSON.stringify(h.input) === JSON.stringify(h.core.neutral), `A's page hidden: the craft hands off at once (input ${JSON.stringify(h?.input)})`);
+await step(60);
+check(A.link.times.length - got <= 1 && A.c.tick - t0 <= 2 && A.link.ws.readyState === 1 && !host.server.isAway?.(a0) && craft().pilot === a0,
+  `and A is sent no snapshots for 2 s (${A.link.times.length - got}), still connected, still the pilot`);
+A.link.away(false);
+await until(() => sim.tick - A.c.tick <= 2, 10);
+check(sim.tick - A.c.tick <= 2, `shown again, A's next snapshot is the present's (A at ${A.c.tick}, the host at ${sim.tick})`);
 fly(A, 0);
 
 // A cut past the grace period: the seat free, B takes it; A back a new player

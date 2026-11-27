@@ -4,7 +4,9 @@
 // a name there and plays on the server. B comes with ?server= (no start menu). A walks by the cathedral: Esc opens the
 // menu and A stays on foot; B sees A's name on both maps and over A, not through a building; B, whose link holds each
 // message LAG ms each way, shows a ping of that round trip, A one near none, a page alone none at all; B's frame cap at
-// 30 holds the frames near 30; A's menu's Back to orbit mode takes A up to orbit mode.
+// 30 holds the frames near 30; A's menu's Back to orbit mode takes A up to orbit mode. A page alone, hidden (its tab
+// in the background, emulated: headless Chrome keeps every page shown), holds its world still and goes on from there
+// when shown again.
 // usage (in web/): node tools/menu.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -69,9 +71,23 @@ lagged.on('connection', (down) => {
 });
 await new Promise((ok) => lagged.on('listening', ok));
 const bServer = `ws://127.0.0.1:${lagged.address().port}`;
-const page = async (name, q) => {
+// (the page's side of a hidden tab: document.hidden and visibilitychange, no frames)
+const HIDE = () => {
+  let hidden = false;
+  const raf = window.requestAnimationFrame.bind(window), held = [];
+  window.requestAnimationFrame = (f) => (hidden ? (held.push(f), 0) : raf(f));
+  window.__hide = (on) => {
+    hidden = on;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => on });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (on ? 'hidden' : 'visible') });
+    document.dispatchEvent(new Event('visibilitychange'));
+    if (!on) for (const f of held.splice(0)) raf(f);
+  };
+};
+const page = async (name, q, hide = false) => {
   // (each its own context: its own storage, as two people's browsers)
   const p = await (await browser.newContext({ viewport: { width: 960, height: 640 } })).newPage();
+  if (hide) await p.addInitScript(HIDE);
   p.on('pageerror', (e) => console.log(`  ${name} page error: ${e.message}`));
   await p.goto(`http://127.0.0.1:${vitePort}/?${q}`);
   return p;
@@ -161,9 +177,24 @@ await B.waitForTimeout(10000);
 const [pingA, pingB] = await Promise.all([shown(A), shown(B)]);
 check(pingA !== null && pingB !== null && pingA < 40 && pingB - pingA >= 2 * LAG - 5 && pingB - pingA <= 2 * LAG + 30,
   `the ping shown is the socket's round trip: B over a link of ${2 * LAG} ms more shows ${pingB} ms, A ${pingA} ms`);
-const C = await page('C', `play&${Q}`);
+const C = await page('C', `play&${Q}`, true);
 const alone = await C.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 60000 }).then((h) => h.jsonValue()).catch(() => null);
 check(alone === 'alone, no ping', `a page alone shows no number: ${alone}`);
+// hidden 2 s: the world's ticks (30 a second) stop; shown 1 s: about 30 more from there (how far behind the page
+// draws them is its frame rate's: a few frames a second under the other gates)
+await C.waitForFunction(() => window.__sim?.tick > 30, null, { timeout: 60000 }).catch(() => {});
+const ticks = () => C.evaluate(() => ({ tick: window.__sim.tick }));
+await C.evaluate(() => window.__hide(true));
+await C.waitForTimeout(300);
+const h0 = await ticks();
+await C.waitForTimeout(2000);
+const h1 = await ticks();
+await C.evaluate(() => window.__hide(false));
+await C.waitForTimeout(1000);
+const h2 = await ticks();
+log(`C hidden: ${JSON.stringify([h0, h1, h2])}`);
+check(h1.tick - h0.tick <= 1 && h2.tick - h1.tick >= 15 && h2.tick - h1.tick <= 45,
+  `a page alone, hidden 2 s, holds its world (${h1.tick - h0.tick} ticks) and goes on when shown (${h2.tick - h1.tick} ticks in 1 s)`);
 await C.context().close();
 
 // the frame cap in the loop itself (app/frame.ts), with a display's frames made up: a headless GPU draws too few
