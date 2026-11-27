@@ -34,6 +34,8 @@ export interface PlayerCraft {
   readonly view: 'own' | 'ride';
   /** simulation position and heading while active (the ride itself supplies a drive's pose) */
   readonly mapPose?: Pose | null;
+  /** its camera at the player's eyes in their seat (their own figure not drawn: StreetLife ownEyes) */
+  readonly inSeat?: boolean;
   /** get in: at a spot (tools; later F2, walking up to it) or, without one, where the view is. false: not now */
   enter(at?: CraftSpot): boolean;
   /** the types of the world's crafts it flies (board) */

@@ -150,14 +150,14 @@ export class Avatars {
   /** the frame's drawing of avatars (all but me's and those of seated, the players in a vehicle), a (0..1) of the way
    * from their tick before to their tick; at: where an avatar is between its ticks (TrafficMirror avatarPose). The
    * avatars are drawn on the render clock, a tick or two behind who sits in which vehicle (the newest snapshot's): a
-   * player got in is the vehicle only from its first frame, never a figure beside it too. sitting: the passengers in
-   * their seats this frame */
+   * player got in is the vehicle only from its first frame, never a figure beside it too. sitting: the players in their
+   * seats this frame (me among them when seen from outside: StreetLife decides) */
   update(avatars: readonly AvatarState[], me: string | null, seated: ReadonlySet<string>, a: number, dt: number, at: (av: AvatarState, a: number, out: Pose) => Pose,
     sitting: readonly Seated[] = []) {
     this.frame++;
     const to = { x: 0, y: 0, z: 0, h: 0 }, here = new Set<string>();
     for (const s of sitting) {
-      if (s.player === me || here.has(s.player)) continue;
+      if (here.has(s.player)) continue;
       this.figureOf(s.player).sit(s);
       here.add(s.player);
     }

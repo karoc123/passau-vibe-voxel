@@ -3,8 +3,8 @@
 // in Node, no renderer) of the host's world as its snapshots bring it. A walking in is a figure of its own at A's
 // pose, not one of the crowd (the crowd's meshes and the crowd as many as before); its legs still standing, swinging
 // at a walk and further and faster at a run; another player in another outfit; a place over its head for a name. A
-// back in orbit mode is not seen at all; A in a craft is the craft alone, in no frame a figure beside it, and getting
-// out A is a figure again beside it. A with a gun in hand: the gun in its figure's hand, standing and walking.
+// back in orbit mode is not seen at all; A in a craft is the craft with A seated at its controls, in no frame a figure
+// on foot beside it, and getting out A is a figure again beside it. A with a gun in hand: the gun in its figure's hand, standing and walking.
 // usage (in web/): node tools/avatar.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -14,6 +14,8 @@ const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { WeaponsView } = await imp('src/view/weapons/weapons-view.ts');
+const { HIPS } = await imp('src/view/avatars.ts');
+const { pilotPlace } = await imp('src/view/seats.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
@@ -122,19 +124,28 @@ run(1);
 check(!figureOf(A) && !drawnOf(A) && !B.c.traffic.avatars.some((a) => a.player === A.c.player) && figureOf(C),
   `A in orbit mode is not seen (figure ${!!figureOf(A)}, avatar sent ${B.c.traffic.avatars.some((a) => a.player === A.c.player)}); C still is`);
 
-// A on foot again, then into a craft at its feet: the craft only, in every frame; out again: a figure beside it
+// A on foot again, then into a craft at its feet: the craft with A in its pilot's seat, in every frame; out again: a
+// figure beside it
 A.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: ax, y: G, z: az, h: 0, moving: false } } });
 run(1, () => step(0));
 const back = !!figureOf(A);
 A.c.send({ kind: 'request', request: { kind: 'craft', type: 'hovercraft', spot: { x: ax, y: G + 1, z: az, h: 0 } } });
-let both = 0, crafted = 0;
+let both = 0, crafted = 0, worst = 0;
+const seat = pilotPlace('hovercraft');
 run(2, () => {
-  const craft = B.c.crafts().some((c) => c.pilot === A.c.player);
-  if (craft) crafted++;
-  if (craft && (figureOf(A) || drawnOf(A))) both++;
+  const craft = B.c.crafts().find((c) => c.pilot === A.c.player);
+  if (!craft) return;
+  crafted++;
+  const f = figureOf(A);
+  if (drawnOf(A) || !f) { both++; return; }
+  scene.updateMatrixWorld(true);
+  const d = craft.core.drawn(B.c.time.alpha), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-d.pitch, d.h, d.bank, 'YXZ')).invert();
+  const hips = f.group.localToWorld(new THREE.Vector3(0, HIPS, 0)).sub(new THREE.Vector3(d.x, d.y, d.z)).applyQuaternion(q);
+  worst = Math.max(worst, hips.distanceTo(new THREE.Vector3(seat.x, seat.y, seat.z)));
 });
 const hc = B.c.crafts().find((c) => c.pilot === A.c.player);
-check(back && hc && crafted > 0 && both === 0 && !figureOf(A), `A in a craft: B sees the craft and no figure (${crafted} frames with A's craft, ${both} with a figure too)`);
+check(back && hc && crafted > 0 && both === 0 && worst < 0.05,
+  `A in a craft: B sees the craft with A seated at its controls, never on foot beside it (${crafted} frames with A's craft, ${both} not seated in it; at most ${worst.toFixed(2)} m off the seat)`);
 const at = hc?.core.pose ?? { x: ax, z: az };
 A.c.send({ kind: 'leaveSeat', pose: { x: at.x + 5, y: G, z: at.z, h: 0, moving: false } });
 run(1);

@@ -7,11 +7,11 @@ import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
 import { Avatars, HIPS, type Seated } from './avatars';
-import { driverPlace, seatPlace, type SeatPlace } from './seats';
+import { driverPlace, pilotPlace, seatPlace, type SeatPlace } from './seats';
 import type { Car, Kind, Rideable } from '../sim/types';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
-import type { EntityRef, VehicleId } from '../sim/contract/ids';
+import type { CraftType, EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
 import { MAX_CARS } from '../sim/contract/agents';
 import { AVATAR_SHAPE, carShape, COACH_SHAPE, craftSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
@@ -38,7 +38,7 @@ const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 const G = 9.81, LANDED_S = 2;
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
-const SEAT_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
+const SEAT_EULER = new THREE.Euler(0, 0, 0, 'YXZ'), SEAT_BASIS = new THREE.Matrix4(), SEAT_LEFT = new THREE.Vector3();
 
 // a person (and their bike) fallen: where they are (their feet; thrown: their middle), which way they were shoved (unit
 // dx, dz) how fast, for how long (vy: vertical speed, thrown or falling into an edited hole; land: when it met the ground)
@@ -74,6 +74,9 @@ export class StreetLife {
   private readonly drawnPeople = new Map<number, Drawn>();
   /** the other players on foot, a figure each (never the crowd's) */
   readonly avatars = new Avatars();
+  /** the camera at the player's own eyes in their seat (a car's dashcam, a passenger's seat view): their own figure not
+   * drawn, the others in the vehicle are; elsewhere (a chase view) the player is drawn in their seat too */
+  ownEyes = false;
   private frame = 0;
   // the train coaches drawn this frame (solids)
   private coaches: CoachPose[] = [];
@@ -289,22 +292,25 @@ export class StreetLife {
     return this.riders.length;
   }
 
-  // the cars another player is drawn sitting in (their cabins opened: meshes.ts)
+  // whether player is drawn in their seat: another always, the player themself unless the camera is at their eyes
+  private drawnSeated(player: string) { return player !== this.client.player || !this.ownEyes; }
+
+  // the cars a player is drawn sitting in (their cabins opened: meshes.ts)
   private openCars() {
     const C = this.client, O = this.opened;
     O.clear();
-    for (const [car, player] of C.drivers()) if (player !== C.player) O.add(car);
-    for (const [kind, id, player] of C.passengers()) if (kind === 'car' && player !== C.player) O.add(id);
+    for (const [car, player] of C.drivers()) if (this.drawnSeated(player)) O.add(car);
+    for (const [kind, id, player] of C.passengers()) if (kind === 'car' && this.drawnSeated(player)) O.add(id);
   }
   private readonly opened = new Set<number>();
 
-  // the other players riding along or at the wheel of a car, each in their seat in the car or craft as drawn this frame
-  // (a car after drawCars; the craft the player pilots as its shell draws it, run ahead of the snapshots)
+  // the players riding along, at the wheel of a car or flying a craft, each in their seat in the car or craft as drawn
+  // this frame (a car after drawCars; the craft the player pilots as its shell draws it, run ahead of the snapshots)
   private sitting(): readonly Seated[] {
     const C = this.client, out = this.seatedNow, own = C.craftOf();
     out.length = 0;
     const sit = (kind: 'car' | 'craft', id: number, player: string, place: (type: string) => SeatPlace | null) => {
-      if (player === C.player) return;
+      if (!this.drawnSeated(player)) return;
       const e = SEAT_EULER, pos = new THREE.Vector3(), q = new THREE.Quaternion();
       let p, along = 1;
       if (kind === 'car') {
@@ -317,18 +323,27 @@ export class StreetLife {
         e.set(-(d.pitch ?? 0), d.h ?? 0, (d.roll ?? 0) + (d.lean ?? 0));
       } else {
         const mine = own?.id === id, c = mine ? own : C.crafts().find((o) => o.id === id);
-        if (!c) return;
+        // (a crashed plane's look is hidden until it is put back)
+        if (!c || (c.core as { flight?: { state: string } }).flight?.state === 'crashed') return;
         p = place(c.type);
-        const d = c.core.drawn(mine ? C.ownAlpha : C.time.alpha) as { x: number; y: number; z: number; h: number; pitch?: number; bank?: number };
-        pos.set(d.x, d.y, d.z);
-        e.set(-(d.pitch ?? 0), d.h, d.bank ?? 0);
+        // (a plane's is its nose and its up; the others' a heading, a pitch and a bank, a boat's roll)
+        type Drawn = { x: number; y: number; z: number; h: number; pitch?: number; bank?: number; roll?: number; p?: THREE.Vector3; fwd?: THREE.Vector3; up?: THREE.Vector3 };
+        const d = c.core.drawn(mine ? C.ownAlpha : C.time.alpha) as Drawn;
+        if (d.p && d.fwd && d.up) {
+          pos.copy(d.p);
+          q.setFromRotationMatrix(SEAT_BASIS.makeBasis(SEAT_LEFT.crossVectors(d.up, d.fwd), d.up, d.fwd));
+        } else {
+          pos.set(d.x, d.y, d.z);
+          q.setFromEuler(e.set(-(d.pitch ?? 0), d.h, d.bank ?? d.roll ?? 0));
+        }
       }
       if (!p) return;
-      q.setFromEuler(e);
+      if (kind === 'car') q.setFromEuler(e);
       out.push({ player, q, legs: p.legs, at: new THREE.Vector3(p.x, p.y - HIPS, p.z * along).applyQuaternion(q).add(pos) });
     };
     for (const [kind, id, player, index] of C.passengers()) sit(kind, id, player, (type) => seatPlace(kind, type, index));
     for (const [car, player] of C.drivers()) sit('car', car, player, (type) => driverPlace(type as VehicleId));
+    for (const c of C.crafts()) if (c.pilot !== null) sit('craft', c.id, c.pilot, (type) => pilotPlace(type as CraftType));
     return out;
   }
   private readonly seatedNow: Seated[] = [];

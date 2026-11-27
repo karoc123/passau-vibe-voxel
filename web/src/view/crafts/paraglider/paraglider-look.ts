@@ -9,14 +9,18 @@ import { parts, placeYXZ, type CraftFrame, type CraftLook, type Part } from '../
 
 class ParagliderLook implements CraftLook<'paraglider'> {
   readonly group = new THREE.Group();
+  private readonly pilot: THREE.Group;
 
   constructor() {
     this.group.visible = false;
-    paraglider(this.group, parts());
+    this.pilot = paraglider(this.group, parts());
   }
 
+  // (a player flying it is drawn in the harness as their own figure: view/seats.ts; the harness's own pilot only
+  // while it is flown by no one)
   draw(c: CraftView<CoreOf<'paraglider'>>, { alpha }: CraftFrame) {
     placeYXZ(this.group, c.core.drawn(alpha), GLIDER_HEIGHT);
+    this.pilot.visible = c.pilot === null;
     this.group.visible = true;
   }
 
@@ -36,20 +40,22 @@ function bars(part: Part) {
   };
 }
 
-function paraglider(group: THREE.Group, part: Part) {
+function paraglider(group: THREE.Group, part: Part): THREE.Group {
   const bar = bars(part);
   const SUIT = 0x2c4a63, HARNESS = 0x2b2f33, SKIN = 0xd9a27c, HELMET = 0xf0f0ea;
-  // the pilot, seated in the harness: legs hanging forward, hands up on the brakes (as tall as the walker)
+  // the harness, and a pilot seated in it: legs hanging forward, hands up on the brakes (as tall as the walker)
+  const pilot = new THREE.Group();
+  group.add(pilot);
   part(group, HARNESS, [0.5, 0.32, 0.7], 0, 0.72, -0.05);
   part(group, HARNESS, [0.46, 0.55, 0.22], 0, 1.0, -0.38);
-  part(group, SUIT, [0.42, 0.55, 0.28], 0, 1.14, -0.12).rotation.x = -0.2;
-  part(group, SKIN, [0.24, 0.26, 0.24], 0, 1.55, -0.08);
-  part(group, HELMET, [0.28, 0.17, 0.3], 0, 1.68, -0.08);
+  part(pilot, SUIT, [0.42, 0.55, 0.28], 0, 1.14, -0.12).rotation.x = -0.2;
+  part(pilot, SKIN, [0.24, 0.26, 0.24], 0, 1.55, -0.08);
+  part(pilot, HELMET, [0.28, 0.17, 0.3], 0, 1.68, -0.08);
   for (const sign of [-1, 1]) {
-    part(group, SUIT, [0.17, 0.5, 0.19], sign * 0.12, 0.66, 0.38).rotation.x = 1.25;
-    part(group, SUIT, [0.16, 0.48, 0.17], sign * 0.12, 0.32, 0.66).rotation.x = 0.1;
-    part(group, HARNESS, [0.17, 0.1, 0.27], sign * 0.12, 0.06, 0.72);
-    part(group, SUIT, [0.12, 0.55, 0.13], sign * 0.3, 1.5, -0.08).rotation.z = -sign * 0.25;
+    part(pilot, SUIT, [0.17, 0.5, 0.19], sign * 0.12, 0.66, 0.38).rotation.x = 1.25;
+    part(pilot, SUIT, [0.16, 0.48, 0.17], sign * 0.12, 0.32, 0.66).rotation.x = 0.1;
+    part(pilot, HARNESS, [0.17, 0.1, 0.27], sign * 0.12, 0.06, 0.72);
+    part(pilot, SUIT, [0.12, 0.55, 0.13], sign * 0.3, 1.5, -0.08).rotation.z = -sign * 0.25;
   }
   // the wing: nine cells on an arc round the pilot (radius 6 m, 10 m from tip to tip, 7.6 m over the feet in the
   // middle), the chord 2.6 m tapering to 1.5 at the tips; its lines fan out to the risers at the shoulders
@@ -66,4 +72,5 @@ function paraglider(group: THREE.Group, part: Part) {
       bar(group, 0x4d5e63, riser, under(-0.35));
     }
   }
+  return pilot;
 }

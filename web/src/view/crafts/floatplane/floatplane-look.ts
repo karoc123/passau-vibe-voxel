@@ -23,15 +23,13 @@ class FloatplaneLook implements CraftLook<'floatplane'> {
   constructor() {
     const floatH = PLANE.FLOAT_H, y0 = -floatH + 1.55; // the fuselage's floor over the floats' bottoms
     const parts = [
-      // fuselage: cabin, rear in two tapering boxes, cowling
-      box(1.15, 1.25, 2.4, 0, y0 + 0.62, 0.9, WHITE),
+      // fuselage: cabin (under its glass, and the wall behind the seats), rear in two tapering boxes, cowling
+      box(1.15, 0.755, 2.4, 0, y0 + 0.3725, 0.9, WHITE),
+      box(1.15, 0.495, 0.55, 0, y0 + 0.9975, -0.025, WHITE),
       box(1.0, 1.0, 1.6, 0, y0 + 0.68, -1.1, WHITE),
       box(0.7, 0.7, 1.7, 0, y0 + 0.8, -2.7, WHITE),
       box(1.05, 0.95, 0.9, 0, y0 + 0.6, 2.5, WHITE),
       box(1.17, 0.18, 4.6, 0, y0 + 0.55, 0.2, BLUE), // the stripe
-      // canopy glass: windscreen and side windows
-      box(1.0, 0.55, 0.12, 0, y0 + 1.15, 1.95, GLASS, -0.5),
-      box(1.18, 0.5, 1.5, 0, y0 + 1.0, 1.0, GLASS),
       // the high wing (two halves, a little dihedral) on the cabin's roof, struts down to the fuselage
       box(4.4, 0.16, 1.45, 2.3, y0 + 1.36, 0.9, WHITE, 0, 0.035),
       box(4.4, 0.16, 1.45, -2.3, y0 + 1.36, 0.9, WHITE, 0, -0.035),
@@ -55,7 +53,10 @@ class FloatplaneLook implements CraftLook<'floatplane'> {
     ];
     this.body = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.15 }));
     this.body.castShadow = this.body.receiveShadow = true;
-    this.group.add(this.body);
+    // the windscreen and the side windows seen through, onto the pilot (view/seats.ts)
+    const glass = new THREE.Mesh(mergeGeometries([box(1.0, 0.55, 0.12, 0, y0 + 1.15, 1.95, GLASS, -0.5), box(1.18, 0.5, 1.85, 0, y0 + 1.0, 1.175, GLASS)]),
+      new THREE.MeshStandardMaterial({ color: GLASS, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false }));
+    this.group.add(this.body, glass);
     // the propeller: two blades and a spinner, and a faint disc so that it reads as spinning at any frame rate
     const blades = new THREE.Mesh(mergeGeometries([box(0.14, 1.85, 0.05, 0, 0, 0, DARK), box(0.24, 0.24, 0.35, 0, 0, 0.12, WHITE)]),
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }));

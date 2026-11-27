@@ -461,10 +461,12 @@ function otherPlayers(): readonly MapMark[] {
   if (!sim || !life) return others;
   const S = sim, label = (p: string) => S.nameOf(p) || p;
   for (const a of life.avatarsDrawn()) if (a.player !== me) others.push({ player: a.player, label: label(a.player), ...xyz(a.pose) });
-  for (const c of sim.crafts()) if (c.pilot && c.pilot !== me) others.push({ player: c.pilot, label: label(c.pilot), ...xyz(c.core.pose) });
   // (one in a seat its look has no place for is marked at the vehicle)
   const sat = life.seatedDrawn();
-  for (const s of sat) others.push({ player: s.player, label: label(s.player), ...xyz(s.at) });
+  for (const s of sat) if (s.player !== me) others.push({ player: s.player, label: label(s.player), ...xyz(s.at) });
+  for (const c of sim.crafts()) {
+    if (c.pilot && c.pilot !== me && !sat.some((s) => s.player === c.pilot)) others.push({ player: c.pilot, label: label(c.pilot), ...xyz(c.core.pose) });
+  }
   for (const [car, player] of sim.drivers()) {
     const d = player !== me && !sat.some((s) => s.player === player) && life.drawn('car', car);
     if (d) others.push({ player, label: label(player), ...xyz(d) });
@@ -530,7 +532,10 @@ renderer.setAnimationLoop(frameLoop({
   },
   // this frame's poses drawn
   poses: (_now, dt) => {
-    if (sim && life && life.group.visible) life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
+    if (sim && life && life.group.visible) {
+      life.ownEyes = nav.ride?.view === 'eyes' || !!nav.craft?.inSeat;
+      life.update(dt, daylight.night, camera.position); // (the viewer: last frame's camera)
+    }
     craftsView?.update(sim, dt, daylight.night, nav.craftView);
     weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
   },
