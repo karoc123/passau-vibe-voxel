@@ -10,8 +10,9 @@ export class Perf {
   private t0 = 0;
   /** the frames a second last shown (0: none yet) */
   fps = 0;
-  /** the round trip to the host, ms (null: none, the page's own worker) */
-  ping: () => number | null = () => null;
+  /** the round trip to the host, ms (null: none measured yet); null itself: no host, the page's own worker;
+   * undefined: not known yet (the start menu) */
+  ping: (() => number | null) | null | undefined;
 
   constructor() {
     this.box.id = 'perf';
@@ -27,9 +28,9 @@ export class Perf {
     if (now - this.t0 < 500) return;
     if (this.t0) {
       this.fps = Math.round((this.n * 1000) / (now - this.t0));
-      const ping = this.ping();
+      const ping = this.ping?.();
       this.fpsBox.innerHTML = `${this.fps} fps<span class="mark">${(triangles / 1e6).toFixed(1)} M triangles</span>`
-        + (ping === null ? '' : `<span class="mark ping">${Math.round(ping)} ms ping</span>`);
+        + (this.ping === undefined ? '' : `<span class="mark ping">${this.ping === null ? 'alone, no ping' : ping == null ? '– ms ping' : `${Math.round(ping)} ms ping`}</span>`);
     }
     this.n = 0;
     this.t0 = now;

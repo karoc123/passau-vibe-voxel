@@ -411,7 +411,7 @@ async function boot() {
     // the world sim's client, the sim in a Web Worker on its own clock
     const { client, link } = openSession({ ...session, server: await serverChoice }, { meta, edits, traffic: td, world });
     client.setName(prefs.name);
-    if (link instanceof SocketLink) perf.ping = () => link.rtt;
+    perf.ping = link instanceof SocketLink ? () => link.rtt : null;
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
       console.error(e.message);

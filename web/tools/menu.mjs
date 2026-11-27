@@ -2,8 +2,9 @@
 // page from a vite dev server of its own, built as `./voxel start` builds it: VITE_HOST_PORT, the host's port; the
 // host, src/host/ws.ts, in this process). A opens the page bare: the start menu shows, the server preselected; A gives
 // a name there and plays on the server. B comes with ?server= (no start menu). A walks by the cathedral: Esc opens the
-// menu and A stays on foot; B sees A's name on both maps and over A, not through a building; B's ping is shown; B's frame cap at 30 holds the
-// frames near 30; A's menu's Back to orbit mode takes A up to orbit mode.
+// menu and A stays on foot; B sees A's name on both maps and over A, not through a building; B, whose link holds each
+// message LAG ms each way, shows a ping of that round trip, A one near none, a page alone none at all; B's frame cap at
+// 30 holds the frames near 30; A's menu's Back to orbit mode takes A up to orbit mode.
 // usage (in web/): node tools/menu.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -23,6 +24,9 @@ const check = (ok, what) => { results.push(!!ok); console.log(`${ok ? 'PASS' : '
 // (a made-up name: no one's)
 const NAME = 'Testerin 7';
 
+// each way, ms: B's round trip 2 LAG more than A's
+const LAG = 60;
+
 const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const { serve } = await imp('src/host/ws.ts');
 const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => log(`host: ${l}`) });
@@ -35,7 +39,8 @@ let viteLog = '';
 vite.stdout.on('data', (d) => (viteLog += d));
 vite.stderr.on('data', (d) => (viteLog += d));
 process.on('exit', () => { vite.kill(); fs.rmSync(cache, { recursive: true, force: true }); });
-const done = (code) => { host.close(); process.exit(code); };
+let lagged = null;
+const done = (code) => { host.close(); lagged?.close(); process.exit(code); };
 for (let i = 0; ; i++) {
   if (await fetch(`http://127.0.0.1:${vitePort}/`).then((r) => r.ok, () => false)) break;
   if (i > 300 || vite.exitCode !== null) { console.log(`FAIL menu: vite did not start\n${viteLog}`); done(1); }
@@ -48,6 +53,22 @@ const dom = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 277
 const cam = `${dom.x - 40 + ox},70,${dom.y - 10 + oz + 60},${dom.x - 40 + ox},14,${dom.y - 10 + oz}`;
 const Q = `cam=${cam}&crop=256&res=0.5&shadow=0&ao=0&bloom=0&taa=0&refl=0&weather=clear&hour=13`;
 const server = `ws://127.0.0.1:${hostPort}`;
+// B's link: each message held LAG ms, in order, both ways
+const { WebSocketServer, WebSocket } = createRequire(path.join(web, 'package.json'))('ws');
+lagged = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+lagged.on('connection', (down) => {
+  const up = new WebSocket(server), early = [];
+  const later = (to, d) => setTimeout(() => { if (to.readyState === WebSocket.OPEN) to.send(d.toString()); else if (to === up) early.push(d); }, LAG);
+  up.on('open', () => { for (const d of early.splice(0)) up.send(d.toString()); });
+  up.on('message', (d) => later(down, d));
+  down.on('message', (d) => later(up, d));
+  up.on('close', () => setTimeout(() => down.close(), LAG));
+  down.on('close', () => setTimeout(() => up.close(), LAG));
+  up.on('error', () => {});
+  down.on('error', () => {});
+});
+await new Promise((ok) => lagged.on('listening', ok));
+const bServer = `ws://127.0.0.1:${lagged.address().port}`;
 const page = async (name, q) => {
   // (each its own context: its own storage, as two people's browsers)
   const p = await (await browser.newContext({ viewport: { width: 960, height: 640 } })).newPage();
@@ -68,7 +89,7 @@ check(start.pre === 'Play on the server' && start.addr === server, `the start me
 await A.fill('#start-menu input[name=name]', `  ${NAME}‮  `);
 await A.locator('#start-menu input[name=name]').dispatchEvent('change');
 await A.click('#start-menu [data-preselected]');
-const B = await page('B', `server=${server}&${Q}`);
+const B = await page('B', `server=${bServer}&${Q}`);
 check(!(await B.$('#start-menu')), 'with ?server= the start menu is skipped');
 await Promise.all([loaded(A), loaded(B)]);
 const [pa, pb] = await Promise.all([A, B].map((p) => p.evaluate(() => window.__sim.player)));
@@ -132,9 +153,18 @@ log(`tag behind ${JSON.stringify(behind)}, in the open ${JSON.stringify(open)}`)
 check(behind && open && behind.hit < behind.L - 5 && !behind.shown && open.hit >= open.L - 1 && open.shown,
   `A's name hidden behind a building (${behind && `a voxel ${(behind.L - behind.hit).toFixed(0)} m before the tag, shown ${behind.shown}`}), shown in the open (${open?.shown})`);
 
-// B's ping
-const ping = await B.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
-check(/^\d+ ms ping$/.test(ping ?? ''), `B, on a host, shows its ping: ${ping}`);
+// the pings shown: B's the round trip its link holds the messages (and A's), A's near none; read after 5 pings each
+// (the median shown) and some seconds of play
+const shown = (p) => p.waitForFunction(() => /^\d+ ms ping$/.test(document.querySelector('#perf .ping')?.textContent ?? '') && document.querySelector('#perf .ping').textContent, null, { timeout: 15000 })
+  .then((h) => h.jsonValue()).then((t) => +t.split(' ')[0]).catch(() => null);
+await B.waitForTimeout(10000);
+const [pingA, pingB] = await Promise.all([shown(A), shown(B)]);
+check(pingA !== null && pingB !== null && pingA < 40 && pingB - pingA >= 2 * LAG - 5 && pingB - pingA <= 2 * LAG + 30,
+  `the ping shown is the socket's round trip: B over a link of ${2 * LAG} ms more shows ${pingB} ms, A ${pingA} ms`);
+const C = await page('C', `play&${Q}`);
+const alone = await C.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 60000 }).then((h) => h.jsonValue()).catch(() => null);
+check(alone === 'alone, no ping', `a page alone shows no number: ${alone}`);
+await C.context().close();
 
 // the frame cap in the loop itself (app/frame.ts), with a display's frames made up: a headless GPU draws too few
 // frames to show it on the page

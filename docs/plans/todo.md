@@ -35,7 +35,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Owner's next (2026-11-27)
 
-- The ping is the socket's round trip, not the snapshot's age.
 
 ## Pipeline and city
 
