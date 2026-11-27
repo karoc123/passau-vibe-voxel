@@ -6,7 +6,10 @@
 // usage (in web/): node tools/fly-stream.mjs [--port 5262] [--phone] [--jet] [--secs 60] [--json out.json]
 //   --phone: a phone's screen (the 2 M triangle budget) and the CPU throttled 4x
 // The gate (fly-stream, --phone --secs 30) guards what a player notices: before, a phone froze for 0.2 to 0.4 s every
-// few seconds at speed (a coarse node's tiles' occluders all built in one update); and no ground missing ahead.
+// few seconds at speed (a coarse node's tiles' occluders all built in one update); then a frame over 50 ms about every
+// 2.5 s held up by the stream (a coarse node's pages' lamp light painted and its occluders built in the update they
+// came); and no ground missing ahead. Frames over 50 ms the stream did not cause (the town's life, the throttled
+// CPU shared with the host) are left out: they vary with the machine's load.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -135,7 +138,7 @@ for (let i = 1; i < n; i++) {
 }
 const long = []; for (let i = 1; i < n; i++) { const dt = out[i].t - out[i - 1].t; if (dt > 50) long.push([dt, out[i].u + out[i].r]); }
 const fr = out.slice(1).map((s, i) => s.t - out[i].t).sort((a, b) => a - b), us = out.map((s) => s.u + s.r).sort((a, b) => a - b);
-console.log(`frames: median ${fr[n >> 1].toFixed(1)} ms, p99 ${fr[Math.floor(n * 0.99)].toFixed(0)}, ${long.length} over 50 ms (of them the stream's work over half: ${long.filter(([a, b]) => b > a / 2).length}); the stream's work per frame median ${us[n >> 1].toFixed(2)} ms, p99 ${us[Math.floor(n * 0.99)].toFixed(1)}, max ${us.at(-1).toFixed(0)}`);
+console.log(`frames: median ${fr[n >> 1].toFixed(1)} ms, p99 ${fr[Math.floor(n * 0.99)].toFixed(0)}, max ${fr.at(-1).toFixed(0)}, ${long.length} over 50 ms (${(long.length / dur * 60).toFixed(0)} a minute; of them the stream's work over half: ${long.filter(([a, b]) => b > a / 2).length}); the stream's work per frame median ${us[n >> 1].toFixed(2)} ms, p99 ${us[Math.floor(n * 0.99)].toFixed(1)}, max ${us.at(-1).toFixed(0)}`);
 console.log(`stalls > 0.1 s: ${still}, longest ${worst.toFixed(2)} s`);
 const pct = (k) => (100 * k / n).toFixed(1) + '%';
 const under = (pred, lo, hi) => out.filter((s) => s.lv.slice(D.indexOf(lo), D.indexOf(hi) + 1).some(pred)).length;
@@ -154,10 +157,12 @@ console.log(`  stream queue: median ${q(qs, 0.5)}, p95 ${q(qs, 0.95)}, max ${qs.
 
 // the checks (a player's: the plane never drawn still, no frame held up long by the stream, no ground missing ahead)
 const longStream = us.at(-1), holes = under((l) => l === 0, 0, 512);
+const byStream = long.filter(([a, b]) => b > a / 2).length, perMin = byStream / dur * 60;
 const checks = [
   [`flew at its top speed (${(dist / dur * 3.6).toFixed(0)} km/h, crashed frames ${crashed})`, dist / dur > 0.85 * SPEED && crashed === 0],
   [`no stall over 0.15 s (longest ${worst.toFixed(2)} s)`, worst <= 0.15],
   [`the stream's work in no frame over 150 ms (max ${longStream.toFixed(0)})`, longStream <= 150],
+  [`frames over 50 ms with the stream's work over half: at most 12 a minute (${perMin.toFixed(0)})`, perMin <= 12],
   [`no ground missing within 512 m ahead (${holes} frames)`, holes === 0],
   [`no page errors (${pageErrors})`, pageErrors === 0],
 ];
