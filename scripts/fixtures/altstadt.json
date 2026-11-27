@@ -7,5 +7,6 @@
  "map": {"col0": 1024, "row0": 0, "cols": 2048, "rows": 1152},
  "base": 287,
  "rivers": {"level": 290.921, "stretches": []},
- "regions": {"size": 1024, "jobs": 2}
+ "regions": {"size": 1024, "jobs": 2},
+ "roofs": {"rules": true, "look": "slopes"}
 }
