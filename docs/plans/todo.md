@@ -37,11 +37,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Owner's next (2026-11-27)
 
 - The ping is the socket's round trip, not the snapshot's age.
-- A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
-  carry walkable, differing houses.
 
 ## Pipeline and city
 
+- The buildings' looks before landmark work (the painted windows land on broken blocks and do not carry walkable,
+  differing houses): `building-looks.md`, waiting for the owner's answers there.
 - Q7: the Wels-Passau railway's Inn bridge near Ingling (ways 131994367, 131994370) is a through truss; the deck is
   right, the truss is not drawn.
 - Q5 leftover at -1102,1292: a 1–2 m strip 10 m over LoD2 where the surface model's step lies a cell off LoD2's.
@@ -57,9 +57,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   and more) where an eave cell without a cap (its voxels off its plane) meets capped ones, e.g. 49_25 bld 301; 2 are
   slivers of 1-2 rays. Hans-Hösl-Straße 20's NW side is roof voxels from 2 m up (a 35 m strip under a 38.8 m eave,
   caps.py / voxelize): reads as the roof hanging down.
-- Water-top steps left at the rivers' stretch boxes' edges (map.json): the Ilz at Ilzstadt (box edge N 5390800, a 2 m
-  step to the default level, ~2145,-309) and above the Hals weir (its fall, stepped on the 64 m blocks, ~822,-1410);
-  the edges belong under bridges or at rapids.
 - A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - On leaving a seat, 1–2 frames where nobody draws the craft; empty crafts' events are published.

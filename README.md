@@ -119,12 +119,21 @@ committing data.
 size, the bounding box of the blocks), the blocks built (`blocks`: runs of the project grid's 1024 m blocks, each whole
 or only its first rows; a block not listed is empty, as beyond the map: no region, node files, terrain, traffic or
 labels there, its cells dropped from whatever a cover's core holds of them, `scripts/window.py`; in the viewer a cut
-face like the map's edge and a wall for whatever moves, `web/src/core/built.ts`), the volume's floor, the rivers' level (one, or per stretch: boxes in EPSG:25832, each with its own level;
+face like the map's edge and a wall for whatever moves, `web/src/core/built.ts`), the volume's floor, the rivers' level (one, or per stretch: boxes or polygons in EPSG:25832, each with its own level;
 `uv run python scripts/river_levels.py` measures them along the rivers' OSM lines from the terrain model; the first
-box that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its boxes stepping along the weir
-and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir, the loop below it (its boxes stepping along the weir, OSM way 440171244) and the river past Hals; the Inn above the Ingling dam at 302.95 m (stepping along its weir) and its first kilometre below it at 291.45 m; elsewhere 290.921 m;
-stretches 2 m or more apart are pools apart: voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
-across a weir), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan). `MAP_CONFIG=path` picks another file. The project grid
+box or polygon that holds a cell is its stretch: the Danube above the Kachlet dam at 299.75 m, its edge along the
+walkway over the weir and on to the lock's upper gates, the Danube below it, the Ilz above the Hals weir at 301.4 m; the Inn above
+the Ingling dam at 302.95 m (stepping along its weir) and its first kilometre below it at 291.45 m; elsewhere 290.921 m.
+A river body stands at its stretch's level cell by cell, so where two stretches' levels come to different voxels the
+water steps on their edge: a falling river's stretches are polygons whose edges lie under bridges, along weirs or
+across a rapid of our choosing, never a box's edge across open water (the Ilz from below the Hals weir to the Ilzsteg falls
+7 m in 1 m steps: `river_levels.py --cuts` lists a river's bridges and weirs with the water's level between them,
+`--split NAME A,B,.. --voxels K1,K2,..` makes the polygons between cuts at those distances down its line);
+`scripts/water_steps.py` counts the steps left in the water's top. Stretches 2 m or more apart are pools apart:
+voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
+across a weir; the pools split the sorted levels at gaps of 2 m or more, so a falling river's stretches must leave
+such a gap somewhere: the Ilz's loop at 297.7 m stays 2.05 m under the Danube's 299.75 m above the Kachlet, else every
+level is one pool and the Kachlet's weir stands in a block at a median), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
 cells, the project grid's less the map's corner (`meta.json` `origin`). The viewer's shaders hash and pattern by the
