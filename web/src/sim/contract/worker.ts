@@ -14,9 +14,12 @@ export type ToWorker =
   // (base: where the data is; query: the page's URL's search, which the host reads its start config from:
   // host/start.ts hostStart)
   | { kind: 'init'; base: string; query: string }
-  | { kind: 'commands'; commands: SimCommand[] };
+  | { kind: 'commands'; commands: SimCommand[] }
+  // (a network host answers at once with a pong of the same t: the page's round trip; the page's own worker gets none)
+  | { kind: 'ping'; t: number };
 export type FromWorker =
   | { kind: 'hello'; hello: Hello } // (first, once the session is connected: before ready and any snapshot)
   | { kind: 'ready' }
   // (one per tick, on the worker's own clock; ms: the tick's and the snapshot's time there)
-  | { kind: 'snapshot'; snapshot: Snapshot; ms: number };
+  | { kind: 'snapshot'; snapshot: Snapshot; ms: number }
+  | { kind: 'pong'; t: number };

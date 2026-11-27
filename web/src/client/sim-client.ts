@@ -100,6 +100,10 @@ export interface SimClient {
   /** the world's edited nodes as this client sees them, filled from the snapshots: what the page's streamer and
    * TileCache read */
   readonly edits: LiveEdits;
+  /** the name player chose, as the host passed it on ('' none) */
+  nameOf(player: PlayerId): string;
+  /** the name this client's player goes by for the others ('' none), sent again to each new session */
+  setName(name: string): void;
 }
 
 /** a client's seat inputs' numbers: each one sent gets the next seq and the tick it is meant for */
@@ -219,6 +223,8 @@ export class MirrorSimClient implements SimClient {
   // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
+  private names = new Map<PlayerId, string>();
+  private myName = '';
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
   // the nodes whose edits wait for their files, by "tx_ty": each note after the one before
   private readonly editing = new Map<string, Promise<unknown>>();
@@ -243,6 +249,8 @@ export class MirrorSimClient implements SimClient {
     if (e) { this.refuse(e); return; }
     if (this.greeted) { this.restart(); return; }
     this.greeted = h;
+    // (one sent before a first try that failed was dropped with it)
+    if (this.myName) this.send({ kind: 'name', name: this.myName });
     this.settle.ok(h);
   }
 
@@ -257,7 +265,9 @@ export class MirrorSimClient implements SimClient {
     this.outcomes = [];
     this.reads = new SeatReads();
     this.craftList.clear();
+    this.names.clear();
     this.traffic.forget();
+    if (this.myName) this.send({ kind: 'name', name: this.myName });
     for (const p of this.pending.values()) p.fail(new Error('edit lost: the host connection was lost'));
     this.pending.clear();
   }
@@ -278,6 +288,14 @@ export class MirrorSimClient implements SimClient {
   get timeOfDay(): TimeOfDay | null { return this.last && { hour: this.last.hour, day: this.last.day }; }
 
   send(cmd: SimCommand) { if (!this.refused) this.queue.push(this.seqs.stamp(cmd, this.tick)); }
+
+  nameOf(player: PlayerId) { return this.names.get(player) ?? ''; }
+
+  setName(name: string) {
+    if (name === this.myName) return;
+    this.myName = name;
+    this.send({ kind: 'name', name });
+  }
 
   edit(op: WorldOp) {
     if (this.refused) return Promise.reject(this.refused);
@@ -346,6 +364,7 @@ export class MirrorSimClient implements SimClient {
     B.push(this.traffic.read(s));
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.takeEdit(e);
+    if (w.names) this.names = new Map(w.names);
     this.events.push(...s.events);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);

@@ -59,6 +59,8 @@ export function serve(o: ServeOptions) {
     ws.on('message', (data) => {
       let m: ToWorker;
       try { m = JSON.parse(data.toString()) as ToWorker; } catch { return; }
+      // (answered at once, outside the tick's batch: the round trip the page shows is the network's, not the tick's)
+      if (m?.kind === 'ping') { if (Number.isFinite(m.t)) ws.send(JSON.stringify([{ kind: 'pong', t: m.t }] satisfies FromWorker[])); return; }
       if (m?.kind !== 'commands' || !Array.isArray(m.commands)) return;
       if (m.commands.some((x) => x?.kind === 'fire')) c.fired = n;
       handle(c.s, m);

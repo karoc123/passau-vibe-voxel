@@ -95,6 +95,8 @@ export interface Snapshot {
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */
   events: SimEvent[];
+  /** the names the players chose, all of them (one without none), when they changed since the session's last snapshot */
+  names?: [player: PlayerId, name: string][];
   /** the session's player and its reads, left out when they are those sent before and there are no results */
   player?: PlayerReads;
   edits: EditNote[];

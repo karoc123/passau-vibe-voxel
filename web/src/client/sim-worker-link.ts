@@ -41,6 +41,7 @@ export class WorkerLink implements SimLink {
 
 function receive(link: WorkerLink | SocketLink, m: FromWorker) {
   if (m.kind === 'hello') link.onHello(m.hello);
+  else if (m.kind === 'pong') { if (link instanceof SocketLink) link.pong(m.t); }
   else if (m.kind === 'snapshot') {
     link.times.push(m.ms);
     if (link.times.length > 600) link.times.splice(0, 300);
@@ -54,6 +55,8 @@ export type LinkStatus = { up: true } | { up: false; lost: boolean };
 
 /** how often a SocketLink tries again to reach its host, ms */
 export const RETRY_MS = 3000;
+// how often it measures the round trip, ms
+const PING_MS = 2000;
 
 /** a SimLink to a host over a WebSocket (host/ws.ts): the worker's messages, several to a frame. A host not reached,
  * or lost, is tried again every RETRY_MS: the host's hello then starts a new session (MirrorSimClient) */
@@ -70,14 +73,26 @@ export class SocketLink implements SimLink {
   // that fails drops them, they were the old session's)
   private early: SimCommand[] = [];
   readonly times: number[] = [];
+  /** the last round trip to the host, ms (null: none measured on this connection yet) */
+  rtt: number | null = null;
+  private pinger: ReturnType<typeof setInterval> | null = null;
 
   constructor(readonly url: string) { this.open(); }
+
+  private ping() {
+    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ kind: 'ping', t: performance.now() } satisfies ToWorker));
+  }
+
+  /** (receive) a host's answer to a ping */
+  pong(t: number) { if (Number.isFinite(t)) this.rtt = Math.max(0, performance.now() - t); }
 
   private open() {
     const ws = this.ws = new WebSocket(this.url);
     ws.onopen = () => {
       this.ever = true;
       this.onStatus({ up: true });
+      this.ping();
+      this.pinger ??= setInterval(() => this.ping(), PING_MS);
       if (this.early.length) this.send(this.early.splice(0));
     };
     ws.onmessage = (e: MessageEvent<string>) => {
@@ -87,6 +102,7 @@ export class SocketLink implements SimLink {
     ws.onclose = () => {
       if (this.closed || ws !== this.ws) return;
       this.early = [];
+      this.rtt = null;
       this.onStatus({ up: false, lost: this.ever });
       this.timer = setTimeout(() => { this.timer = null; if (!this.closed) this.open(); }, RETRY_MS);
     };
@@ -96,6 +112,7 @@ export class SocketLink implements SimLink {
     if (this.closed) return;
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.pinger) clearInterval(this.pinger);
     this.ws.close();
   }
 
