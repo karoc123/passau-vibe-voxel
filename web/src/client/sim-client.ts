@@ -662,7 +662,7 @@ export class TrafficMirror {
    * t = tick), each reckoned on along its way from its last sample at the speed sent; a car's correction (where the
    * sample before had it now, less where this one has it) blended out; the trains' clock set to t */
   reckon(t: number) {
-    this.clock = this.t + (t - this.tick) * STEP;
+    this.net.clock = this.clock = this.t + (t - this.tick) * STEP;
     const R = this.sampled, roads = this.net.roads;
     for (const c of this.cars) {
       const r = R.get(c.id);

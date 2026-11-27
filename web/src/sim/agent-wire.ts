@@ -35,7 +35,7 @@ export const reckon = (s: number, v: number, at: number, tick: number, dir = 1, 
 
 interface CarSent {
   gen: number; s: number; v: number; brake: number; tick: number; off: number; e: number; lane: number; prev: number;
-  prevOff: number; prev2: number; prev2Off: number; next: number; next2: number; len: number; bus: boolean;
+  prevOff: number; prev2: number; prev2Off: number; next: number; next2: number; move: string; len: number; bus: boolean;
   vt: VehicleId | undefined; col: string;
 }
 interface PersonSent { gen: number; s: number; tick: number; e: number; dir: number; wait: boolean; v: number; lat: number; col: string }
@@ -122,10 +122,10 @@ export class AgentWire {
 
   car(c: CarState, tick: number): CarWire | null {
     const s = round(c.s, CM), v = round(c.v, CM), off = round(c.off, CM), prevOff = round(c.prevOff, CM), prev2Off = round(c.prev2Off ?? 0, CM);
-    const len = round(c.len, CM), prev2 = c.prev2 ?? -1, next2 = c.next2 ?? -1, h = this.cars.get(c.id);
+    const len = round(c.len, CM), prev2 = c.prev2 ?? -1, next2 = c.next2 ?? -1, h = this.cars.get(c.id), move = `${c.shift ?? ''}/${c.turn ?? ''}`;
     const known = h && h.len === len && h.bus === c.bus && h.vt === c.vt && h.col === c.col;
     const way = known && h.e === c.e && h.lane === c.lane && h.prev === c.prev && h.prevOff === prevOff && h.prev2 === prev2
-      && h.prev2Off === prev2Off && h.next === c.next && h.next2 === next2;
+      && h.prev2Off === prev2Off && h.next === c.next && h.next2 === next2 && h.move === move;
     const base: CarWire = [c.id, s, v, c.brake];
     if (h && known && way) {
       h.gen = this.gen;
@@ -136,8 +136,8 @@ export class AgentWire {
       return [...base, off];
     }
     this.cars.set(c.id, { gen: this.gen, s, v, brake: c.brake, tick, off, e: c.e, lane: c.lane, prev: c.prev, prevOff, prev2, prev2Off,
-      next: c.next, next2, len, bus: c.bus, vt: c.vt, col: c.col });
-    const route = [...base, off, c.e, c.lane, c.prev, prevOff, prev2, prev2Off, c.next, next2] as const;
+      next: c.next, next2, move, len, bus: c.bus, vt: c.vt, col: c.col });
+    const route = [...base, off, c.e, c.lane, c.prev, prevOff, prev2, prev2Off, c.next, next2, c.shift ?? 0, c.turn ?? 0] as const;
     return known ? [...route] : [...route, len, c.bus ? 1 : 0, c.vt ?? 0, c.col];
   }
 
@@ -252,16 +252,16 @@ export class AgentRead {
     for (const id of gone) changed = M.delete(id) || changed;
     for (const w of list) {
       const id = w[0], s = w[1], v = w[2], o = M.get(id);
-      if (w.length < 13 && !o) continue;
+      if (w.length < 15 && !o) continue;
       const off = w.length > 4 ? w[4]! : o!.off;
       let c: Sampled<CarState>;
-      if (w.length >= 13) {
-        const x = w as Extract<CarWire, { length: 13 | 17 }>;
-        const st = w.length === 17 ? (w as Extract<CarWire, { length: 17 }>) : null;
+      if (w.length >= 15) {
+        const x = w as Extract<CarWire, { length: 15 | 19 }>;
+        const st = w.length === 19 ? (w as Extract<CarWire, { length: 19 }>) : null;
         if (!st && !o) continue;
         c = { id, e: x[5], lane: x[6], s, ds: 0, off, dOff: 0, prev: x[7], prevOff: x[8], prev2: x[9], prev2Off: x[10], next: x[11],
-          next2: x[12], len: st ? st[13] : o!.len, bus: st ? st[14] === 1 : o!.bus, vt: st ? st[15] || undefined : o!.vt,
-          col: st ? st[16] : o!.col, brake: w[3], v, wait: 0, detachedPose: undefined, at: tick };
+          next2: x[12], shift: x[13] || undefined, turn: x[14] || undefined, len: st ? st[15] : o!.len, bus: st ? st[16] === 1 : o!.bus,
+          vt: st ? st[17] || undefined : o!.vt, col: st ? st[18] : o!.col, brake: w[3], v, wait: 0, detachedPose: undefined, at: tick };
       } else c = { ...o!, s, off, brake: w[3], v, at: tick };
       // (the way since the last sample: across onto its next road too; the time stood still)
       c.ds = !o ? v * STEP : o.e === c.e ? s - o.s : o.e === c.prev ? s + this.L(o.e) - o.s : 0;

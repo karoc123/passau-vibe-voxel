@@ -56,8 +56,9 @@ export interface Car extends Blocked, CarState {
   // what standing in its way it stopped for: its middle on the map, its reach along the car's line, the room the car
   // needs across it (null: none)
   stand?: { x: number; z: number; ext: number; need: number } | null;
-  // getting past it: the offset driven at until its rear is past far (s on its road; near: where it begins)
-  pass?: { off: number; near: number; far: number };
+  // getting past it: the offset driven at until its rear is past far (s on its road; near: where it begins); back:
+  // moving back into its lane
+  pass?: { off: number; near: number; far: number; need: number; back?: boolean };
 }
 
 export type Agent = Car;

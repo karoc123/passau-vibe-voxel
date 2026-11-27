@@ -22,8 +22,8 @@ The crafts move on the host, each at its own fixed step; cars are road physics b
   the air they crash, afloat they bump. Their wings are boxes (banked, a stair of them along the span) and small
   cubes against the voxels. The light drone and paraglider stop nothing but each other; a drone stops no paraglider.
 - The traffic's cars without a body stop for a craft in their lane, as for a walker, and never push it. After a
-  short wait they pass anything standing where the road has room and nothing comes (the oncoming lane too, its cars
-  waiting); with no room they turn round, and that road is left out of routes for a while.
+  short wait they roll out past anything standing where there is room and nothing comes (oncoming cars wait), else
+  turn round within the road, a U-turn or three-point turn as drawn; that road is left out of routes a while.
 
 ## Why not the physics engine
 

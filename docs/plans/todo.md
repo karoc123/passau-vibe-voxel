@@ -53,9 +53,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - The edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- Getting past something standing on a road: a car turning round jumps round in place; it slides out sideways while
-  stopped; one held up beyond a junction or within a few metres of a road's end turns round instead of going round
-  it; on a one-way road with no room, one in sight waits until out of sight. Measured in a synthetic gate only.
+- Getting past something standing on a road: one held up just past a junction or near a road's end turns round
+  instead of going round it; where no turn fits (one-way, a bus on a narrow street), one in sight waits until out of
+  sight; a lane change still slides sideways at a standstill.
 - The parked-car cap (8/24) sits beside presence, not per cell.
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
   not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
