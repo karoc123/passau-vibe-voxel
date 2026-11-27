@@ -38,8 +38,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Owner's next (2026-11-27)
 
 - The ping is the socket's round trip, not the snapshot's age.
-- A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
-  carry walkable, differing houses.
 
 ## Pipeline and city
 
