@@ -4,7 +4,7 @@
 // pose, not one of the crowd (the crowd's meshes and the crowd as many as before); its legs still standing, swinging
 // at a walk and further and faster at a run; another player in another outfit; a place over its head for a name. A
 // back in orbit mode is not seen at all; A in a craft is the craft alone, in no frame a figure beside it, and getting
-// out A is a figure again beside it.
+// out A is a figure again beside it. A with a gun in hand: the gun in its figure's hand, standing and walking.
 // usage (in web/): node tools/avatar.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -13,6 +13,7 @@ const { nodeHost } = await imp('src/host/node.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { StreetLife } = await imp('src/view/life.ts');
+const { WeaponsView } = await imp('src/view/weapons/weapons-view.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
@@ -52,7 +53,8 @@ const before = crowd();
 let ax = 90, az = 128;
 const A = player(ax, az, true);
 all.push(A);
-const step = (v, moving = v > 0) => { ax += v * STEP; A.c.send({ kind: 'seatInput', role: 'walker', input: { x: ax, y: G, z: az, h: Math.PI / 2, moving } }); };
+let arm; // (the slot in A's hand)
+const step = (v, moving = v > 0) => { ax += v * STEP; A.c.send({ kind: 'seatInput', role: 'walker', input: { x: ax, y: G, z: az, h: Math.PI / 2, moving, arm } }); };
 run(1, () => step(0));
 const fA = figureOf(A), dA = drawnOf(A), after = crowd();
 check(B.c.traffic.avatars.some((a) => a.player === A.c.player) && fA && dA && Math.hypot(dA.pose.x - ax, dA.pose.z - az) < 0.05 && Math.abs(dA.pose.h - Math.PI / 2) < 0.05
@@ -86,6 +88,33 @@ run(1, () => step(0));
 const fC = figureOf(C), shirt = (f) => f?.body.children.find((o) => o.isMesh)?.material.color.getHexString();
 check(fA && fC && fA !== fC && shirt(fA) !== shirt(fC),
   `two players are told apart: A's shirt #${shirt(fA)}, C's #${shirt(fC)}`);
+
+// A with the MG in hand (slot 1), standing and walking: B sees the gun in the figure's right hand (the end of its arm
+// within GRIP_M m of the gun), its barrel ahead along A's heading, the arm reaching forward to hold it
+const weapons = new WeaponsView(scene, B.c), GRIP_M = 0.05;
+arm = 1;
+let gripOff = 0, aimed = Infinity, ahead = Infinity, held = 0;
+const hand = new THREE.Vector3(), shoulder = new THREE.Vector3(), barrel = new THREE.Vector3();
+const holding = () => {
+  weapons.update(STEP, life.avatarsDrawn());
+  scene.updateMatrixWorld(true);
+  const f = figureOf(A), gun = weapons.carried?.get(A.c.player)?.obj;
+  if (!f || !gun) { gripOff = Infinity; return; }
+  held++;
+  f.arms[1].localToWorld(hand.set(0, -0.6, 0));
+  f.arms[1].getWorldPosition(shoulder);
+  gripOff = Math.max(gripOff, new THREE.Box3().setFromObject(gun).distanceToPoint(hand));
+  // (A faces +x: the hand ahead of the shoulder along x, the barrel along +x)
+  aimed = Math.min(aimed, hand.x - shoulder.x);
+  barrel.set(0, 0, 1).transformDirection(gun.matrixWorld);
+  ahead = Math.min(ahead, barrel.x);
+};
+run(1, (i) => { step(0); if (i > 15) holding(); });
+run(2, () => { step(2.2); holding(); });
+check(held > 60 && gripOff < GRIP_M && aimed > 0.3 && ahead > 0.95,
+  `A's gun is in A's figure's hand standing and walking (${held} frames: at most ${gripOff.toFixed(2)} m from the hand; the hand ${aimed.toFixed(2)} m ahead of the shoulder; the barrel ahead ${ahead.toFixed(2)})`);
+arm = undefined;
+run(0.5, () => step(0));
 
 // A back in orbit mode (nav.ts: off foot the body is left): no body at all
 A.c.send({ kind: 'leaveSeat' });

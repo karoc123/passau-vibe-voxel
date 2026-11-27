@@ -2,7 +2,7 @@
 // (started by the host, src/host/node.ts) from one seed on the real traffic data, ticked by this tool at a viewer that
 // stands, then drives along a road, drawn by StreetLife through MirrorSimClient over a CloneLink (the snapshots
 // structured-cloned and the commands sent through JSON as to a Web Worker or a socket: the protocol gate); a player
-// follows a car, walks as a person and lets go on the way (the walk's seat inputs acked). Agents must be drawn, the
+// follows a car, walks on foot and lets go on the way (the walk's seat inputs acked). Agents must be drawn, the
 // time of day must be the host's, and the render clock must draw every tick in order, never more than a few ticks
 // behind the newest snapshot.
 // Then the bodies (below): drawn alike by the sim and from its snapshots at the tick drawn, within what the snapshot's
@@ -84,26 +84,26 @@ const wireCheck = () => {
 let frames = 0, drawnAgents = 0, acked = true, lastDrawn = -1, maxLead = 0;
 const send = (cmd) => mirror.send(cmd);
 
-let followed = null, walked = null, lastStep = new Map();
+let followed = null, walk = null, lastStep = new Map();
 // The cars are drawn reckoned on from samples sent only when they drift (sim/agent-wire.ts), a correction blended in:
 // how much a car's step from one frame to the next changes, at the 99th percentile (m; measured 0.019 at 30 frames a
 // second)
 const kicks = [], KICK = 0.04;
 for (let f = 0; f < SECONDS * FPS; f++) {
   const t = f / FPS, focus = { x: at.x + Math.max(0, t - 20) * 8, z: at.y };
-  // (a player follows a car at 10 s, walks as a person from 30 s to 50 s, lets go at 60 s)
+  // (a player follows a car at 10 s, walks on foot by a person followed from 30 s to 50 s, lets go at 60 s)
   if (f === 10 * FPS && mirror.traffic.cars.length) { followed = mirror.traffic.cars[0].id; send({ kind: 'follow', entity: { kind: 'car', id: followed } }); }
   if (f === 30 * FPS) {
     const p = mirror.traffic.people.find((q) => lifeB.drawn('person', q.id)), d = p && lifeB.drawn('person', p.id);
     if (p) {
-      walked = p.id;
-      send({ kind: 'follow', entity: { kind: 'person', id: walked } });
-      send({ kind: 'enterSeat', entity: { kind: 'person', id: walked }, role: 'walker', pose: { x: d.x, y: d.y, z: d.z, h: d.h ?? 0, moving: false } });
+      walk = { x: d.x, y: d.y, z: d.z, h: d.h ?? 0, moving: false };
+      send({ kind: 'follow', entity: { kind: 'person', id: p.id } });
+      send({ kind: 'request', request: { kind: 'walk', pose: walk } });
     }
   }
-  if (walked !== null && f > 30 * FPS && f < 50 * FPS) {
-    const w = mirror.walkedPose(walked);
-    if (w) send({ kind: 'seatInput', role: 'walker', input: { ...w, x: w.x + 1.2 / FPS, moving: true } });
+  if (walk && f > 30 * FPS && f < 50 * FPS) {
+    walk = { ...walk, x: walk.x + 1.2 / FPS, moving: true };
+    send({ kind: 'seatInput', role: 'walker', input: walk });
   }
   if (f === 50 * FPS) send({ kind: 'leaveSeat' });
   if (f === 60 * FPS) send({ kind: 'follow', entity: null });
@@ -135,7 +135,7 @@ for (let f = 0; f < SECONDS * FPS; f++) {
     steps.set(c.id, st);
   }
   lastStep = steps;
-  if (walked !== null && f > 31 * FPS && f < 50 * FPS && !(mirror.ack()?.seq > 0)) acked = false;
+  if (walk && f > 31 * FPS && f < 50 * FPS && !(mirror.ack()?.seq > 0)) acked = false;
   if (verbose && f % (FPS * 10) === 0) console.log(`  t=${t} seat ${JSON.stringify(mirror.seat())} lead ${mirror.lead.toFixed(2)}`);
 }
 if (!drawnAgents) fail.push('nothing drawn');

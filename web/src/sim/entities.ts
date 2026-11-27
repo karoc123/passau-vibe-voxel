@@ -1,5 +1,5 @@
 // The world's entities, one index over the kinds' own stores: a car
-// (Traffic, the road physics), a person (Traffic's crowd and riders, a walked one where its walker puts it), a craft
+// (Traffic, the road physics), a person (Traffic's crowd and riders), a craft
 // (WorldSim.crafts), an avatar (a player's own body: WorldSim, where its walker puts it). Each kind keeps its storage and its numbering (Car.id picks the traffic vehicle's type); this
 // reads them through one adapter per kind. Read only. No three.js, no DOM (tools/core-deps.mjs).
 //   exists(ref)   the entity is in the world
@@ -18,8 +18,8 @@ const DRIVER = one('driver'), PILOT = one('pilot'), WALKER = one('walker'), NONE
 const withPassengers = (first: readonly SeatSpec[], n: number): readonly SeatSpec[] =>
   Object.freeze([...first, ...Array.from({ length: n }, (_, index) => Object.freeze({ role: 'passenger' as const, index }))]);
 /** the seats of each kind's model, by type: a vehicle's driver's or pilot's and its passengers' (the hovercraft's
- * cabin, the helicopter's bench, a car's front and back seats; a craft flown alone has none), a walker's on a person
- * on foot (none on a bike) */
+ * cabin, the helicopter's bench, a car's front and back seats; a craft flown alone has none), a walker's on a player's
+ * avatar (none on a person of the crowd: a player on foot is a body of their own) */
 export const SEATS: {
   readonly car: Readonly<Record<VehicleId, readonly SeatSpec[]>>;
   readonly craft: Readonly<Record<CraftType, readonly SeatSpec[]>>;
@@ -29,7 +29,7 @@ export const SEATS: {
   car: { car: withPassengers(DRIVER, 3), coupe: withPassengers(DRIVER, 1), van: withPassengers(DRIVER, 2), pickup: withPassengers(DRIVER, 1),
     bus: withPassengers(DRIVER, 30), moto: withPassengers(DRIVER, 1), camper: withPassengers(DRIVER, 3) },
   craft: { boat: PILOT, hovercraft: withPassengers(PILOT, 20), helicopter: withPassengers(PILOT, 3), paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
-  person: { foot: WALKER, bike: NONE },
+  person: { foot: NONE, bike: NONE },
   avatar: WALKER,
 };
 

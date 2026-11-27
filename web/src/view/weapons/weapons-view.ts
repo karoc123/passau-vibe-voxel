@@ -12,11 +12,12 @@ const RIGHT = 0.22, DOWN = 0.2, AHEAD = 0.6;
 const HELD_SCALE = 0.55, HAND_AHEAD = 0.25;
 // the kick of a shot (m back, rad up), gone at RECOIL_BACK per s
 const KICK_BACK = 0.05, KICK_UP = 0.12, RECOIL_BACK = 14;
-// where an avatar holds its gun (m from its feet, in its frame: -x is its right, +z ahead)
-const AVATAR_HAND = new THREE.Vector3(-0.22, 1.15, 0.25);
+// the gun in a figure's hand (view/avatars.ts Figure hand), set back so its pistol grip, not its middle, is in the fist
+const GRIP = new THREE.Vector3(0, 0.1, -0.1);
 
-/** another player on foot as drawn (view/life.ts avatarsDrawn): arm, the slot in their hand */
-export interface ArmedAvatar { player: string; pose: Readonly<Pose>; arm?: number }
+/** another player on foot as drawn (view/life.ts avatarsDrawn): arm, the slot in their hand; hand, their figure's
+ * grip (none: not drawn as a figure, no gun) */
+export interface ArmedAvatar { player: string; pose: Readonly<Pose>; arm?: number; hand?: THREE.Object3D }
 
 /** the weapons' events drawn by their packages' views, the page's own trigger at once, the gun in the page's player's
  * hand and in the others' */
@@ -33,9 +34,8 @@ export class WeaponsView {
   private readonly sun = new THREE.DirectionalLight(0xffffff, 1.6);
   private readonly sky = new THREE.HemisphereLight(0xdde8ff, 0x605848, 1.2);
   private kick = 0;
-  // the others' guns, by player
+  // the others' guns, by player, each in its figure's hand
   private readonly carried = new Map<string, { weapon: WeaponId; obj: THREE.Object3D }>();
-  private readonly avatarGuns = new THREE.Group();
 
   constructor(scene: THREE.Scene, private readonly client: SimClient) {
     for (const make of WEAPON_VIEWS) { const v = make(); this.views.set(v.id, v); scene.add(v.group); }
@@ -45,7 +45,6 @@ export class WeaponsView {
     this.hand.scale.setScalar(HELD_SCALE);
     this.sun.position.set(0.4, 1, 0.6);
     this.heldScene.add(this.hand, this.sun, this.sky);
-    scene.add(this.avatarGuns);
   }
 
   /** the page's player fired weapon, looking as camera does */
@@ -79,21 +78,18 @@ export class WeaponsView {
     const here = new Set<string>();
     for (const a of avatars) {
       const id = a.arm === undefined ? null : weaponIn(a.arm)?.id ?? null, v = id && this.views.get(id);
-      if (!v) continue;
+      if (!v || !a.hand) continue;
       here.add(a.player);
       let c = this.carried.get(a.player);
       if (c?.weapon !== id) {
-        if (c) this.avatarGuns.remove(c.obj);
-        const obj = new THREE.Group(), m = v.model();
-        m.position.copy(AVATAR_HAND);
-        obj.add(m);
-        this.avatarGuns.add(obj);
+        c?.obj.removeFromParent();
+        const obj = v.model();
+        obj.position.copy(GRIP);
         this.carried.set(a.player, c = { weapon: id, obj });
       }
-      c.obj.position.set(a.pose.x, a.pose.y, a.pose.z);
-      c.obj.rotation.y = a.pose.h;
+      if (c.obj.parent !== a.hand) a.hand.add(c.obj);
     }
-    for (const [p, c] of this.carried) if (!here.has(p)) { this.avatarGuns.remove(c.obj); this.carried.delete(p); }
+    for (const [p, c] of this.carried) if (!here.has(p)) { c.obj.removeFromParent(); this.carried.delete(p); }
   }
 
   /** after the frame is drawn: the gun of slot in the page's player's hand over it (0, or an empty slot: none) */

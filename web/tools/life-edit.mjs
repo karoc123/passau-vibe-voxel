@@ -21,19 +21,19 @@
 // The dig is run twice: the bodies and the cars bit-identical. Transit is replayed with two frame rates.
 //   players  two players by id, each through a session (sim/server/sim-server.ts SimServer.connect: the host stamps the player
 //          on its commands; follow, enterSeat, seatInput, leaveSeat; no physics): the commands wait for
-//          the next update; the person walked stands where the walk's poses put them, holds one player, and is kept
-//          with the car followed when the focus moves away; a walk pose 100 m off is taken clamped (Tuning.walk) and
+//          the next update; a player on foot is an avatar of their own (the sandbox's walk), held by them
+//          alone, where the walk's poses put it; the person and the car followed are kept when the focus moves away; a walk pose 100 m off is taken clamped (Tuning.walk) and
 //          the walk told, a run's step from there is not; the seat taken and left as events (seated, unseated); let go,
-//          both leave with the circle. Over a hole the others fall and the one walked stands; two readers of the events
+//          both leave with the circle. Over a hole the people fall; two readers of the events
 //          (WorldSim.eventsSince) at different rates get the same ones, each with its tick. A car's seat before the road physics is in refused as loading (its load started; one that fails: as failed), taken once it is in. With the road physics: a car holds one driver (another's enterSeat refused);
-//          the driver walking as a person leaves the wheel first, back at the wheel leaves the person; leaveSeat; a seat
+//          the driver out on foot leaves the car parked, back at the wheel leaves the avatar; leaveSeat; a seat
 //          the game mode does not allow (WorldSim.mode: a test mode's mayEnter) refused.
 //   crafts two players, each the pilot of a craft of the world sim's (a boat, a helicopter; WorldSim addCraft,
 //          placeCraft; enterSeat, seatInput, leaveSeat; its collision over the node files, on the world's clock): a
 //          seat holds one pilot (another's enterSeat refused, the refused keeps their own), each craft takes its own
 //          pilot's input, and each moves exactly as it does alone in the world (nothing assumes one local player); a
-//          pilot counts as a focus (the edits near them kept); left, a craft goes on with hands off; a pilot walking as
-//          a person leaves the craft first, back in it leaves the person; a craft followed is an entity (sim/entities.ts)
+//          pilot counts as a focus (the edits near them kept); left, a craft goes on with hands off; a pilot out on foot
+//          beside it leaves the craft, back in it leaves the avatar; a craft followed is an entity (sim/entities.ts)
 //          where its core is, and a focus.
 //   rates  the crafts at three frame rates (one tick a frame, two, uneven under one): a boat, a helicopter, a drone
 //          and a floatplane bit-identical at every tick (WorldSim steps them in its ticks with each tick's input).
@@ -70,7 +70,7 @@ const BRIDGE = { x: 4381, y: 2703 }, STREET = { x: 6500, y: 2600 }, WARM = 30, H
 const meta = readMeta(), N = meta.tiles.N;
 const { STEP } = await load('sim/traffic.ts'), { WorldSim } = await load('sim/world-sim.ts'), { unpackTraffic } = await load('sim/traffic-pack.ts');
 // (a world sim's sessions: a host's, SimServer.connect, with no game mode unless asked; sessions('A', 'B') -> { A, B })
-const { SimServer } = await load('sim/server/sim-server.ts');
+const { SimServer } = await load('sim/server/sim-server.ts'), { sandbox } = await load('sim/modes/sandbox.ts');
 // (a client's own hello for a bare SimServer: no build, as the server says none; the sim's tuning, so a scenario that
 // tunes its world gives its client the same)
 const { hello } = await load('sim/hello.ts'), mineFor = (sim) => hello(null, sim.tuning);
@@ -484,58 +484,60 @@ async function players() {
     if (!check(p && c, 'a walking person and a moving car near the bridge')) return;
     const other = T.people.find((q) => q !== p && !q.wait), o0 = other?.s;
     const P0 = T.personPoint(p, 0, { x: 0, y: 0, z: 0 }), at = { x: P0.x, y: P0.z, z: P0.y, h: 0, moving: false };
+    // (A on foot as the sandbox puts a player: their own avatar, by the person A follows)
+    sim.mode = sandbox();
     send('follow', 'A', { entity: { kind: 'person', id: p.id } });
     send('follow', 'B', { entity: { kind: 'car', id: c.id } });
-    send('enterSeat', 'A', { entity: { kind: 'person', id: p.id }, role: 'walker', pose: at });
-    send('enterSeat', 'B', { entity: { kind: 'person', id: p.id }, role: 'walker', pose: at });
+    send('request', 'A', { request: { kind: 'walk', pose: at } });
     const before = sim.seat('A') === null && !T.held.person.size;
     tick(STEP);
-    const okA = S.A.results('enterSeat', 'walker'), okB = S.B.results('enterSeat', 'walker');
-    check(before && okA.length === 1 && okA[0].ok && okB.length === 1 && !okB[0].ok,
-      'the commands wait for the next update; the person walked holds one player: another\'s enterSeat is refused');
-    check(sim.seat('A')?.role === 'walker' && sim.seat('A').entity.id === p.id && sim.seat('B') === null, 'the walker holds the person\'s seat, the follower none');
-    const s0 = p.s, e0 = p.e;
+    const mine = sim.seat('A'), avatar = mine?.entity;
+    send('enterSeat', 'B', { entity: avatar ?? { kind: 'avatar', id: -1 }, role: 'walker', pose: at });
+    tick(STEP);
+    const okB = S.B.results('enterSeat', 'walker');
+    check(before && S.A.results('walk')[0]?.ok && mine?.role === 'walker' && avatar?.kind === 'avatar' && okB.length === 1 && !okB[0].ok && okB[0].reason === 'taken',
+      'the commands wait for the next update; A on foot is an avatar of their own, held by A alone: another\'s enterSeat is refused');
+    check(sim.seat('B') === null && T.held.person.has(p.id) && T.held.person.size === 1, 'the follower holds no seat; the person followed is held, not walked');
+    const pose = (pl) => sim.players.get(pl)?.walk?.pose ?? null, s0 = p.s;
     let last = at;
     tick(3, focus, (i) => { last = { ...at, x: at.x + (i + 1) * 0.04, h: 0.5, moving: true }; send('seatInput', 'A', { role: 'walker', input: last }); });
-    check(p.s === s0 && p.e === e0 && sim.walkedPose(p.id)?.x === last.x && !S.A.results('seatInput', 'walker').length,
-      'the person walked stands where the walk puts them, off their way');
+    check(pose('A')?.x === last.x && !S.A.results('seatInput', 'walker').length && (p.wait || p.s !== s0),
+      'the avatar stands where the walk puts it; the person followed goes on their way');
     check(other && other.s !== o0, 'the crowd walks on meanwhile');
     // a walk pose out of reach (100 m across, 50 m up in a frame) is taken clamped, and the walk is told; a run's
     // step (7 m/s) from there is taken as it is
     send('seatInput', 'A', { role: 'walker', input: { ...last, x: last.x + 100, y: last.y + 50 } });
     tick(STEP);
-    const w = sim.walkedPose(p.id), B = sim.tuning.walk, clamped = S.A.results('seatInput', 'walker');
+    const w = pose('A'), B = sim.tuning.walk, clamped = S.A.results('seatInput', 'walker');
     const across = w.x - last.x, up = w.y - last.y;
     send('seatInput', 'A', { role: 'walker', input: { ...w, x: w.x + 7 * STEP } });
     tick(STEP);
     check(clamped.length === 1 && !clamped[0].ok && across > 0 && across <= B.speed * STEP + B.slack + 1e-9 && up > 0 && up <= B.climb * STEP + B.slack + 1e-9 &&
-      sim.walkedPose(p.id).x === w.x + 7 * STEP && !S.A.results('seatInput', 'walker').length,
+      pose('A').x === w.x + 7 * STEP && !S.A.results('seatInput', 'walker').length,
       `a teleporting walk pose is clamped (${across.toFixed(2)} m across, ${up.toFixed(2)} m up), a run from there is not`);
     const far = { x: focus.x + 3000, z: focus.z };
     tick(1, far);
     const kept = T.people.includes(p) && T.cars.includes(c);
-    check(kept, 'the person walked and the car followed are kept when the focus moves 3 km away');
+    check(kept, 'the person and the car followed are kept when the focus moves 3 km away');
     send('leaveSeat', 'A');
     send('follow', 'A', { entity: null });
     send('follow', 'B', { entity: null });
     tick(STEP, far);
-    check(sim.walkedPose(p.id) === null && sim.seat('A') === null && !T.held.person.size && !T.held.car.size, 'left and unfollowed: nothing held');
+    check(pose('A') === null && sim.seat('A') === null && !sim.avatars.size && !T.held.person.size && !T.held.car.size, 'left and unfollowed: nothing held, the avatar gone');
     // the seat taken and left as events (sim/entities.ts Seat: role, index), each at the first tick after its command
     const seats = sim.eventsSince(-1).filter((e) => e.kind === 'seated' || e.kind === 'unseated');
     check(JSON.stringify(seats.map((e) => [e.kind, e.player, e.seat])) ===
-      JSON.stringify([['seated', 'A', { entity: { kind: 'person', id: p.id }, role: 'walker', index: 0 }], ['unseated', 'A', { entity: { kind: 'person', id: p.id }, role: 'walker', index: 0 }]]) &&
+      JSON.stringify([['seated', 'A', { entity: avatar, role: 'walker', index: 0 }], ['unseated', 'A', { entity: avatar, role: 'walker', index: 0 }]]) &&
       seats[1].tick === sim.tick, `the seat taken and left as events, the refused none (${seats.map((e) => `${e.kind}@${e.tick}`).join(' ')})`);
     tick(1, { x: far.x + 200, z: far.z });
     const gone = !T.people.includes(p) && !T.cars.includes(c);
     check(gone, 'let go, they leave with the circle');
-    // a hole (a ground with nothing under the street round a person walked): the others there fall, the one walked
-    // stands; two readers of the events, one every tick, one every 2 s, get the same ones with their ticks
+    // a hole (a ground with nothing under the street round a person): the people there fall; two readers of the events, one every tick, one every 2 s, get the same ones with their ticks
     const sim2 = new WorldSim(td, { seed: SEED }), T2 = sim2.traffic;
     const tick2 = (seconds, each) => { for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) { update(sim2, STEP, { hour: HOUR, focus }); each?.(i); } };
     tick2(5);
     const q = T2.people.find((r) => !r.wait), Q = q && T2.personPoint(q, 0, { x: 0, y: 0, z: 0 });
     if (!check(q, 'a person near the bridge')) return;
-    sim2.send('A', { kind: 'enterSeat', entity: { kind: 'person', id: q.id }, role: 'walker', pose: { x: Q.x, y: Q.z, z: Q.y, h: 0, moving: false } });
     const near = (x, z) => Math.hypot(x - Q.x, z - Q.y) < 40;
     sim2.setWorld({ surface: (x, z, y) => y, support: (x, z, top) => (near(x, z) ? -1000 : top) });
     sim2.edited([Q.x - 40, Q.y - 40, Q.x + 40, Q.y + 40]);
@@ -547,7 +549,7 @@ async function players() {
       if (i % 60 === 59) { slow.push(...sim2.eventsSince(slowSeen)); slowSeen = sim2.tick; }
     });
     const drops = every.filter((e) => e.kind === 'dropped');
-    check(drops.length > 0 && drops.every((e) => e.person !== q) && T2.people.includes(q), `the people over the hole fall (${drops.length}), the one walked stands`);
+    check(drops.length > 0, `the people over the hole fall (${drops.length})`);
     check(JSON.stringify(every.map((e) => [e.tick, e.kind, e.person?.id])) === JSON.stringify(slow.map((e) => [e.tick, e.kind, e.person?.id]))
       && every.every((e, k) => e.tick > from && (k === 0 || e.tick >= every[k - 1].tick)),
     'two readers of the events at different rates get the same ones, in tick order');
@@ -560,8 +562,8 @@ async function players() {
 
 // The driver's seat in the seat table (with the road physics): asked for before the road physics is in, refused
 // ('loading', the load started by it: the host's), taken once it is in; a load that fails refused as 'failed'; one
-// player a car, another's enterSeat refused; the driver walking as a person leaves the wheel first (the car parked
-// where it is), taking the wheel again leaves the person; leaveSeat leaves whatever is held
+// player a car, another's enterSeat refused; the driver out on foot beside it (the car parked where it is), taking
+// the wheel again from there leaves the avatar; leaveSeat leaves whatever is held
 async function driverSeat() {
   const sim = new WorldSim(td, { seed: SEED, loadPhysics: (tuning) => LP.LifePhysics.load(meta, {}, { load: async (p) => raw(p) }, tuning.ride) });
   const T = sim.traffic, focus = { x: BRIDGE.x, z: BRIDGE.y };
@@ -605,12 +607,13 @@ async function driverSeat() {
       JSON.stringify([impact.entity, impact.by, impact.speed, impact.at]) ===
       JSON.stringify([{ kind: 'person', id: p.id }, { kind: 'car', id: c.id }, 5, { x: hit.x, y: hit.y, z: hit.z }]),
     `seats: a person struck by the driven car an impact event of the person, by the car (${hits.map((e) => e.kind).join(', ')})`);
-    S.A.send({ kind: 'enterSeat', entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
+    const C = sim.entities.pose({ kind: 'car', id: c.id });
+    S.A.send({ kind: 'leaveSeat', pose: { x: C.x, y: C.y, z: C.z, h: 0, moving: false } });
     tick(STEP);
-    const switched = sim.seat('A')?.role === 'walker' && sim.driverSnapshot('A') === null && T.detachedCars.includes(c) && !phys.controlled(c);
+    const switched = sim.seat('A')?.role === 'walker' && sim.seat('A').entity.kind === 'avatar' && sim.driverSnapshot('A') === null && T.detachedCars.includes(c) && !phys.controlled(c);
     S.A.send({ kind: 'enterSeat', entity: { kind: 'car', id: c.id }, role: 'driver' });
     tick(STEP);
-    const back = S.A.results('enterSeat', 'driver')[0]?.ok && sim.seat('A')?.role === 'driver' && sim.walkedPose(p.id) === null && !T.walked.size;
+    const back = S.A.results('enterSeat', 'driver')[0]?.ok && sim.seat('A')?.role === 'driver' && !sim.avatars.size;
     S.A.send({ kind: 'leaveSeat' });
     tick(STEP);
     // a seat the game mode does not allow (its mayEnter): refused, nothing held
@@ -622,7 +625,7 @@ async function driverSeat() {
       'seats: a seat the mode does not allow (mayEnter) is refused');
     sim.mode = null;
     check(switched && back && sim.seat('A') === null && sim.driverSnapshot('A') === null && !phys.controlled(c),
-      `seats: a driver walking as a person leaves the wheel first (${switched}), back at the wheel leaves the person (${back}); leaveSeat leaves the car`);
+      `seats: a driver out on foot leaves the car parked (${switched}), back at the wheel leaves the avatar (${back}); leaveSeat leaves the car`);
     results.players.seats = 'one';
   } finally {
     Math.random = realRandom;
@@ -726,17 +729,16 @@ async function crafts() {
     tick(2);
     check(sim.seat('A') === null && a.pilot === null && Math.abs(a.core.motion.speed) < v0 && sim.seat('B')?.entity.id === b.id,
       'crafts: left, the craft goes on hands off; the other pilot keeps theirs');
-    // one seat a player: B, the helicopter's pilot, walks as a person (the helicopter left first), then takes the
-    // helicopter again (the person left first)
-    const T = sim.traffic, p = T.people.find((q) => !q.wait), P = p && T.personPoint(p, 0, { x: 0, y: 0, z: 0 });
-    if (!check(p, 'crafts: a person near the bridge')) return;
-    send('enterSeat', 'B', { entity: { kind: 'person', id: p.id }, role: 'walker', pose: { x: P.x, y: P.z, z: P.y, h: 0, moving: false } });
+    // one seat a player: B, the helicopter's pilot, out on foot beside it (the helicopter left), then takes the
+    // helicopter again (the avatar left)
+    const H = b.core.pose;
+    send('leaveSeat', 'B', { pose: { x: H.x, y: H.y, z: H.z, h: 0, moving: false } });
     tick(STEP);
-    const walking = sim.seat('B')?.role === 'walker' && b.pilot === null && sim.craftOf('B') === null && T.walked.has(p.id);
+    const walking = sim.seat('B')?.role === 'walker' && sim.seat('B').entity.kind === 'avatar' && b.pilot === null && sim.craftOf('B') === null;
     send('enterSeat', 'B', { entity: { kind: 'craft', id: b.id }, role: 'pilot' });
     tick(STEP);
-    check(walking && sim.seat('B')?.role === 'pilot' && b.pilot === 'B' && sim.walkedPose(p.id) === null && !T.walked.size,
-      `crafts: a pilot walking as a person leaves the craft first (${walking}), back in the craft leaves the person`);
+    check(walking && sim.seat('B')?.role === 'pilot' && b.pilot === 'B' && ![...sim.avatars.values()].includes('B'),
+      `crafts: a pilot out on foot leaves the craft (${walking}), back in the craft leaves the avatar`);
     sim.removeCraft(b.id);
     check(sim.seat('B') === null && !sim.crafts.has(b.id), 'crafts: a craft taken away leaves its pilot seatless');
     results.crafts = { pilots: 2, alone: 'same', moved: moved.map((m) => m.toFixed(1)).join('/') };

@@ -100,8 +100,6 @@ export class Traffic {
   // the entities players follow or control (sim/world-sim.ts WorldSim: follow, enterSeat), by id: kept in the sim
   // wherever they are (not removed out of the circle, trimmed, dropped into a hole or knocked down)
   readonly held = { car: new Set<number>(), person: new Set<number>() };
-  // the people a player walks as (WorldSim enterSeat, a walker's; among held): where the player puts them, off their way
-  readonly walked = new Set<number>();
   bodies: TrafficBodies | null = null;
   readonly roads: Road[];
   readonly peds: PedEdge[];
@@ -581,7 +579,7 @@ export class Traffic {
     R.forEach((r, f) => { for (let k = 0, K = n(r, 40, tPeds[f]); k < K && r.people < tPeds[f]; k++) if (this.spawnPed(r)) r.people++; });
     R.forEach((r, f) => { for (let k = 0, K = n(r, 10, tBikes[f]); k < K && r.riders < tBikes[f]; k++) if (this.spawnRider(r)) r.riders++; });
     for (const r of R) r.warm = false;
-    // (the person followed or walked stays in the crowd)
+    // (the person followed stays in the crowd)
     const over = (count: (r: Region) => number, t: number[]) => R.map((r, f) => count(r) - t[f]);
     const oRiders = over((r) => r.riders, tBikes), oPeople = over((r) => r.people, tPeds);
     if (oRiders.some((o) => o > 0)) this.riders = this.trim(this.riders, oRiders);
@@ -711,7 +709,7 @@ export class Traffic {
   }
 
   // the list cut by over[f] in each region f, the newest out of sight PED_POP_R from the viewers first; none closer,
-  // nor kept or walked
+  // nor kept
   private trim(list: Person[], over: number[]) {
     const gone = new Set<Person>(), P = this.pA;
     let left = over.reduce((a, o) => a + Math.max(0, o), 0);
@@ -726,7 +724,6 @@ export class Traffic {
 
   private stepPeople(dt: number) {
     for (const pe of this.people) {
-      if (this.walked.has(pe.id)) continue;
       const e = this.peds[pe.e];
       if (pe.wait) {
         if (!e.x || !pedGreen(this.ctrls[e.x.ctrl], this.t, e.x.axis)) continue;

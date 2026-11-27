@@ -28,7 +28,7 @@ import type { CraftId, CraftType, PlayerId, Role, Seat } from '../sim/contract/i
 import type { FrameTime } from '../sim/contract/inputs';
 import { EVENT_TICKS, type DriveNote, type SimEvent } from '../sim/contract/events';
 import type { Ack, AvatarState, DriverSnapshot, EditNote, PlayerReads, Snapshot, TimeOfDay } from '../sim/contract/snapshot';
-import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
+import type { Pose, RoadPose } from '../sim/contract/pose';
 import type { BodyDraw, BoatView, CarState, Person, PersonState, TrainState } from '../sim/contract/agents';
 import { AgentRead, reckon, type Sampled } from '../sim/agent-wire';
 import { PH_RIDE, PH_WALK, RoadNet, signalAt, STEP, type Ground } from '../sim/road-net';
@@ -80,8 +80,6 @@ export interface SimClient {
   seat(): Seat | null;
   /** the last seat input of this client's the sim took (seq, the tick it was applied in), or null */
   ack(): Ack | null;
-  /** where person personId is put by the player walking as them, or null while none does */
-  walkedPose(personId: number): WalkPose | null;
   /** the player's car, or null while they drive none */
   driver(): DriverSnapshot | null;
   /** what the driver is to be told since the last call (the drive events of their car) */
@@ -451,7 +449,6 @@ export class MirrorSimClient implements SimClient {
 
   seat() { return this.last?.player.seat ?? null; }
   ack() { return this.last?.player.ack ?? null; }
-  walkedPose(personId: number) { return this.traffic.walked.get(personId) ?? null; }
   driver() { return this.last?.player.driver ?? null; }
   driverNotes() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'drive', this.tick).map((e) => e.note) : []; }
   craftOf(): CraftView | null {
@@ -513,8 +510,6 @@ export class TrafficMirror {
   // the trains as drawn now (reckoned), by id
   private readonly trainsById = new Map<number, TrainState>();
   private trainList: TrainState[] = [];
-  /** the people walked by players, by person id */
-  readonly walked = new Map<number, WalkPose>();
   /** the players' own bodies on foot (avatarPose: where one is drawn) */
   avatars: AvatarState[] = [];
   readonly bodies = {
@@ -601,8 +596,6 @@ export class TrafficMirror {
     for (const id of TB.keys()) if (!trains.has(id)) TB.delete(id);
     resample(this.trainSamples, s.trains, trains);
     this.boats = s.boats;
-    this.walked.clear();
-    for (const [id, w] of s.walked) this.walked.set(id, w);
     this.avatars = s.avatars;
   }
 
