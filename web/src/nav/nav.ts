@@ -71,6 +71,9 @@ export class Nav {
   takeMouse() { if (this.mouseLast) this.requestMouse(); }
   // on foot or at a gun: the mouse aims
   private get wantsMouse() { return this.onFoot || !!this.craft?.mouse; }
+  // a craft's view that aims with the mouse, as last seen: here alone the lock follows it, so a craft only says
+  // whether it aims (PlayerCraft.mouse) and none takes or gives back the mouse itself
+  private craftMouse = false;
   private lifeRef: StreetLife | null = null;
   private simRef: SimClient | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
@@ -268,6 +271,8 @@ export class Nav {
       if (this.onFoot && document.pointerLockElement === dom) this.lookWithMouse(e);
     });
     dom.addEventListener('pointerdown', (e) => {
+      // (in a craft that aims with the mouse: a click not yet locked takes it, the craft's own handler still fires)
+      if (this.craftView && this.craft?.mouse && e.pointerType === 'mouse' && document.pointerLockElement !== dom) this.requestMouse();
       if (this.craftView || (this.onFoot && document.pointerLockElement === dom)) return;
       // on foot (back from another tab, or the lock refused): a click takes the mouse and is not lost: its button
       // fires or aims at once
@@ -662,9 +667,20 @@ export class Nav {
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
     this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);
+    this.followCraftMouse();
     // (after the walk's pose: the host fires from where it has just put the body)
     if (this.onFoot && !this.held) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
     else { this.arms.trigger = false; this.foot.aim = false; }
+  }
+
+  // (taken on the frame a craft starts aiming, still within the key press or click that brought it there; given
+  // back when it stops, but not on the way out onto foot, which aims with it too: getOut)
+  private followCraftMouse() {
+    const m = this.craftView && !!this.craft?.mouse;
+    if (m === this.craftMouse) return;
+    this.craftMouse = m;
+    if (m) this.takeMouse();
+    else if (!this.onFoot && !this.walkStart) this.releaseMouse();
   }
 
   // On foot the player is a body the world knows (an avatar: the others see it walk), moved by this walk: put down

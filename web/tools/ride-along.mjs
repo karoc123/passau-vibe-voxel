@@ -5,7 +5,7 @@
 // (nav/nav.ts: a passenger has no drive sticks), as dragging does in a craft. The seat switch's button (nav/board.ts
 // swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
 // tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
-// at the gun and on foot (out with X) firing shots the host records.
+// at the gun and on foot (out with X) firing shots the host records; last the combat plane from the map, the mouse taken.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -169,6 +169,19 @@ await wait(400);
 const footMouse = await locked();
 check(onFoot && await crosshair() && footMouse, `X: P out of the boat on foot, the crosshair shown, the mouse taken (${footMouse})`);
 check(onFoot && await firesOnClick(), 'a click on foot fires a shot the host records');
+
+// up to the map and into the combat plane by its button: flying, the mouse taken as at the gun (Nav follows any craft
+// that aims with the mouse; the plane was missed once), else the first click takes it; a click fires its MG
+await P.evaluate(() => window.__three.nav.setOrbit());
+await wait(800);
+await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
+await P.locator('button', { hasText: /^Combat plane$/ }).click({ timeout: 10000 }).catch((e) => log(`combat plane button: ${e.message}`));
+const flying = await P.waitForFunction(() => window.__three.nav.craft?.mouse === true, null, { timeout: 30000 }).then(() => true, () => false);
+await wait(400);
+let planeMouse = await locked();
+if (flying && !planeMouse) { await P.mouse.click(480, 320); await wait(300); planeMouse = await locked(); }
+check(flying && planeMouse, `the combat plane flying: the mouse taken (${planeMouse})`);
+check(flying && await firesOnClick(), 'a click in the combat plane fires a shot the host records');
 
 await browser.close();
 link.close?.();

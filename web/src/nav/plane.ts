@@ -91,6 +91,8 @@ export class PlaneMode implements PlayerCraft {
   // the combat plane's gun: its mount, the trigger held (the mouse's, the touch button's), the gunsight's dot and the
   // touch button
   private gun: Mount | null = null;
+  /** flying a plane with a gun: the mouse taken (Nav), its left button fires */
+  get mouse() { return !!this.gun && this.phase === 'flying'; }
   private trigger = false;
   private readonly sight = el('div', 'plane-sight');
   private readonly fireButton = el('button', 'plane-fire', 'Fire');

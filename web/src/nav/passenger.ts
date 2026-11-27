@@ -83,9 +83,8 @@ export class PassengerMode implements PlayerCraft {
     });
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.ownsCamera || this.drag) return;
-      // (at a gun the mouse is taken, as on foot: a click not yet locked takes it and still fires)
+      // (at a gun a click fires, also the one that takes the mouse: Nav)
       if (this.gun && e.pointerType === 'mouse') {
-        if (document.pointerLockElement !== canvas) this.ctx.nav.takeMouse();
         if (e.button === 0) this.trigger = true;
         return;
       }
@@ -201,10 +200,6 @@ export class PassengerMode implements PlayerCraft {
     this.gun = m;
     this.trigger = false;
     if (m && this.last) this.aim.reset(m, this.last.h);
-    // (taken in the key press that brought the player here, C or E; given back where the view no longer aims, but
-    // not on the way out onto foot, which aims with it too: Nav.getOut)
-    if (m) this.ctx.nav.takeMouse();
-    else if (this.ctx.nav.craft === this) this.ctx.nav.releaseMouse();
     document.body.classList.toggle('gunner', !!m);
     if (!m) document.body.classList.remove('gun-stop');
   }
