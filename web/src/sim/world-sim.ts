@@ -53,6 +53,7 @@ import { EVENT_TICKS, type SimEvent } from './contract/events';
 import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
 import { besideBox, boundWalk, reaches, type Box } from './walk-bounds';
+import { HOOK, reelTo } from './hook';
 import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
@@ -82,6 +83,8 @@ export interface PlayerState { view?: View; follow?: EntityRef; seat?: Seat; wal
 export interface Walk { pose: WalkPose; at: number; from: WalkPose; fromAt: number; prev: WalkPose; vx: number; vz: number; sent: { x: number; z: number; at: number };
   /** the solid whose roof pose (from) stands on, as it was then */
   on?: Solid | null; fromOn?: Solid | null;
+  /** on the grappling hook's line at the last pose taken (no fall counted) */
+  hooked?: boolean;
   /** a descent under way: the height it began at, its ticks so far, the ticks since the walker last went down */
   fall?: { top: number; ticks: number; quiet: number } }
 
@@ -868,7 +871,7 @@ export class WorldSim {
     const W = this.players.get(player)?.walk;
     if (!W) return true;
     if (W.at !== this.clock) { W.from = W.pose; W.fromAt = W.at; W.fromOn = W.on; }
-    const near = this.walkSolids(asked.x, asked.z), { roof: spot, ...pose } = asked;
+    const near = this.walkSolids(asked.x, asked.z), { roof: spot, hook, ...pose } = asked;
     // (on a roof: its page saw the thing a round trip late; the spot put on it as it is now, so others see the walker
     // where its page has it on the roof, not that far back along it)
     const r = spot && typeof spot.id === 'string' ? near.find((q) => q.id === spot.id) : undefined, at = r && onRoof(r, spot!);
@@ -877,7 +880,10 @@ export class WorldSim {
     const a = W.fromOn, b = a && near.find((q) => q.id === a.id);
     const to = a && b ? carried(a, b, W.from) : null, gone = to && this.clear(to.x, to.z, W.from.y + to.dy) ? to : null;
     const from = gone ? { ...W.from, x: gone.x, z: gone.z, y: W.from.y + gone.dy } : W.from;
-    const bound = boundWalk(from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
+    // (on the hook's line, a point within its reach of the pose before: the reel's speed any way, a little over)
+    W.hooked = !!reelTo(W.from, hook);
+    const reel = HOOK.speed * 1.2, B = this.tuning.walk;
+    const bound = boundWalk(from, pose, this.clock - W.fromAt, W.hooked ? { ...B, speed: Math.max(B.speed, reel), climb: Math.max(B.climb, reel) } : B), S = W.sent, dt = this.clock - S.at;
     // Kept out of the solid things as the host has them (a page walking through a parked car is seen beside it, shoots
     // and boards from there); not told: a fair page is only ever in one by the tick or two it sees a moving car late,
     // and its own walk pushes it out in its next frame. A roof within a step is stood on, or being climbed
@@ -1139,7 +1145,7 @@ export class WorldSim {
   // a roof. Standing on the ground, the walker's pose is the place they come back to
   private fall(player: PlayerId, W: Walk) {
     const F = W.fall, y = W.pose.y;
-    if (W.pose.swim || W.on) W.fall = undefined;
+    if (W.pose.swim || W.on || W.hooked) W.fall = undefined;
     else if (y < W.prev.y - 0.01) {
       if (F) { F.ticks += F.quiet + 1; F.quiet = 0; } else W.fall = { top: W.prev.y, ticks: 1, quiet: 0 };
     } else if (F && ++F.quiet >= FALL_QUIET) {

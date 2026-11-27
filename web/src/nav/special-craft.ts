@@ -12,6 +12,7 @@ import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } fro
 import { ModePanel } from './mode-panel';
 import { TouchSticks } from '../touch/sticks';
 import './special-craft.css';
+import { HOOK, hookPoint } from '../sim/hook';
 
 // The helicopters, the hovercraft and the paraglider: crafts of the world sim's (CraftLink: their core,
 // sim/craft/special-core.ts, stepped on the world's clock with its collision), the local player in the pilot's seat.
@@ -35,7 +36,7 @@ const CONFIG = {
     help: ['W/S nose down and up · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · C: next seat (left gun, right gun, bench, controls) · X get out · Esc exit',
       'Left stick: forward, back and turn. Right stick: climb, descend, slide. The seat button goes round the seats.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
-    help: ['A/D steer · W dive · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
+    help: ['A/D steer · W dive · S brake (flare to land) · right mouse button: grappling hook at the middle of the view (again: let go) · G release (falling: G opens a canopy again) · Esc exit',
       'Left stick: turn, dive and brake. Release: let go of the wing; falling, Open canopy.'] },
 } as const;
 
@@ -50,7 +51,7 @@ class SpecialCraft implements PlayerCraft {
   private readonly rig: ChaseRig;
   private readonly touch: TouchSticks;
   // the craft in the world sim while the player is in it (its client, its own collision)
-  private readonly link: CraftLink<CraftKind>;
+  protected readonly link: CraftLink<CraftKind>;
   private readonly keys = new HeldKeys(KEYS);
   private readonly pos = new THREE.Vector3();
   private readonly offset = new THREE.Vector3();
@@ -61,6 +62,8 @@ class SpecialCraft implements PlayerCraft {
   private camYaw = 0;
   private readonly mouseLook = new MouseLook();
   private zoom = 1;
+  /** the point the grappling hook holds (the paraglider's), sent with the input while the wing is reeled there */
+  protected hook: { x: number; y: number; z: number } | null = null;
 
   constructor(protected readonly ctx: CraftContext, readonly id: CraftKind) {
     const { canvas, host, camera, nav } = ctx, cfg = CONFIG[id];
@@ -116,6 +119,8 @@ class SpecialCraft implements PlayerCraft {
 
   leave() {
     this.phase = 'off';
+    this.hook = null;
+    this.ctx.nav.hookLine.show(null);
     this.start = null;
     this.model.hide();
     this.touch.setActive(false);
@@ -167,6 +172,9 @@ class SpecialCraft implements PlayerCraft {
       this.ctx.nav.flyUp();
     }
     if (this.phase === 'on') {
+      // (the line let go once the wing is there, or stopped at what is between)
+      const m = this.hook && this.craft?.core, to = m ? m.motion.p : null;
+      if (to && (Math.hypot(this.hook!.x - to.x, this.hook!.y - to.y, this.hook!.z - to.z) < HOOK.near || m!.result === 'blocked')) this.hook = null;
       this.link.input(inFocus() ? this.input() : NO_CRAFT_INPUT);
       this.link.frame();
       for (const e of this.link.events()) {
@@ -218,6 +226,7 @@ class SpecialCraft implements PlayerCraft {
   private activate(heading: number) {
     this.start = null;
     this.phase = 'on';
+    this.hook = null;
     this.camYaw = heading;
     this.zoom = 1;
     this.panel.silence();
@@ -250,6 +259,7 @@ class SpecialCraft implements PlayerCraft {
         (pad?.buttons[6]?.value ?? 0) - padAxis(pad?.axes[3]) + (right?.y ?? 0), -1, 1),
       side: clamp(keys.any('KeyE') - keys.any('KeyQ') + padAxis(pad?.axes[2]) +
         (right?.x ?? 0), -1, 1),
+      ...(this.hook ? { hook: this.hook } : {}),
     };
   }
 
@@ -264,6 +274,7 @@ class SpecialCraft implements PlayerCraft {
     this.look.copy(group.position);
     this.look.y += cfg.look;
     const cam = this.rig.place(eye, this.rig.look(eye, this.look), 58, dt);
+    this.ctx.nav.hookLine.show(this.hook ? group.position : null, this.hook);
     this.ctx.target.copy(cam.position).addScaledVector(cam.getWorldDirection(this.look), 10);
   }
 
@@ -309,6 +320,19 @@ export class ParagliderMode extends SpecialCraft {
     addEventListener('keydown', (e) => {
       if (e.code === 'KeyG' && !e.repeat && !e.defaultPrevented && gameKey(e) && this.canopy()) e.preventDefault();
     });
+    ctx.canvas.addEventListener('mousedown', (e) => { if (e.button === 2 && this.on) this.hookShot(); });
+  }
+
+  // The right button: the hook fired along the middle of the view from beside the pilot (the camera is behind them:
+  // what stands between the two is not aimed at) at a voxel within the line's range of the pilot; with the line out,
+  // or at nothing, it lets go
+  private hookShot() {
+    const c = this.link.craft, w = this.ctx.nav.world;
+    if (this.hook || !c || !w) { this.hook = null; return; }
+    const cam = this.ctx.camera, d = cam.getWorldDirection(new THREE.Vector3()), p = c.core.motion.p;
+    const from = cam.position.clone().addScaledVector(d, Math.max(0, d.dot(new THREE.Vector3(p.x - cam.position.x, p.y - cam.position.y, p.z - cam.position.z))));
+    const at = hookPoint(w, from, d, HOOK.range + from.distanceTo(p as THREE.Vector3));
+    if (at && Math.hypot(at.x - p.x, at.y - p.y, at.z - p.z) <= HOOK.range) this.hook = { x: at.x, y: at.y, z: at.z };
   }
 
   /** the touch button's: as G */

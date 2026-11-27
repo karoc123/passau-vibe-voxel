@@ -3,6 +3,7 @@ import { copy, set, vec3, type Vec3 } from '../../core/vec';
 import type { CraftMotionState, CraftStep } from '../contract/crafts';
 import type { CraftInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
+import { HOOK, reelTo } from '../hook';
 
 export type CraftKind = 'hovercraft' | 'helicopter' | 'gunship' | 'paraglider';
 /** whether kind flies by the helicopter's law (the light one and the military one, each with its own numbers) */
@@ -221,14 +222,21 @@ export class CraftMotion {
   }
 
   private paraglider(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    const P = this.cfg.paraglider, v = this.velocity;
-    if (this.turn(input.turn * P.yaw, P.yawResponse, dt, world) === 'loading') return 'loading';
+    const P = this.cfg.paraglider, v = this.velocity, reel = reelTo(this.p, input.hook);
+    // on the hook's line the wing swings round to where it is pulled: let go, it glides on that way with the speed
+    // gained (a steep line's climb carries it up before the sink is back)
+    const off = reel && Math.hypot(reel.x, reel.z) > 0.2 ? Math.atan2(reel.x, reel.z) - this.heading : 0;
+    const swing = Math.max(-HOOK.swing, Math.min(HOOK.swing, -3 * Math.atan2(Math.sin(off), Math.cos(off))));
+    if (this.turn(reel ? swing : input.turn * P.yaw, reel ? HOOK.pull * 2 : P.yawResponse, dt, world) === 'loading') return 'loading';
     const bar = Math.max(0, input.drive), brake = Math.max(0, -input.drive);
-    const speed = P.trim + P.bar * bar - P.brake * brake;
-    const sink = P.sink + P.barSink * bar + P.brakeSink * brake + P.turnSink * Math.abs(input.turn);
-    // the wing flies where it points: the speed turns with the heading, its size follows the bar and the brakes
-    const now = Math.max(0, follow(Math.hypot(v.x, v.z), speed, P.response, dt));
-    set(v, Math.sin(this.heading) * now, follow(v.y, -sink, P.response, dt), Math.cos(this.heading) * now);
+    if (reel) set(v, follow(v.x, reel.x * HOOK.glide, HOOK.pull, dt), follow(v.y, reel.y * HOOK.glide, HOOK.pull, dt), follow(v.z, reel.z * HOOK.glide, HOOK.pull, dt));
+    else {
+      const speed = P.trim + P.bar * bar - P.brake * brake;
+      const sink = P.sink + P.barSink * bar + P.brakeSink * brake + P.turnSink * Math.abs(input.turn);
+      // the wing flies where it points: the speed turns with the heading, its size follows the bar and the brakes
+      const now = Math.max(0, follow(Math.hypot(v.x, v.z), speed, P.response, dt));
+      set(v, Math.sin(this.heading) * now, follow(v.y, -sink, P.response, dt), Math.cos(this.heading) * now);
+    }
     const met = this.slide(world, dt);
     if (met === 'loading') return met;
     const { x, y, z } = this.p;

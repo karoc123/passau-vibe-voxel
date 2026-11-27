@@ -19,7 +19,9 @@ export interface BoatInput {
 /** the hovercraft's, the helicopter's, the paraglider's (sim/craft/craft-motion.ts): turn +1: right (the heading falls,
  * as the cars' and the boat's); drive +1: forward; lift +1: climb (helicopter); side +1: sideways to the right
  * (helicopter) */
-export interface CraftInput { turn: number; drive: number; lift: number; side: number }
+export interface CraftInput { turn: number; drive: number; lift: number; side: number;
+  /** the paraglider's: the point its grappling hook holds, which it is reeled to while this is sent (sim/hook.ts) */
+  hook?: { x: number; y: number; z: number } }
 
 /** the FPV drone's sticks (sim/craft/fpv-flight.ts) */
 export interface FlightInput {

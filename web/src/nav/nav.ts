@@ -22,12 +22,14 @@ import { canopyOpens } from '../sim/walker';
 import { craftSolids, meetShapes } from '../sim/solids';
 import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { FootTouch } from '../touch/foot';
+import { HookLine } from './hook-line';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and
 // down, Shift faster; arrows forward, back, turn: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
-//          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
+//          wheel choose a weapon, the left button fires (held: again at its rate), the right held aims (arms.ts),
+//          tapped fires the grappling hook (foot.ts hookShot)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
 //          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys step off onto foot (off a person: where they stood)
@@ -54,6 +56,9 @@ export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.
 const WALK_NEAR = 0.2;
 // m between a craft left in the air and the top of the paraglider opened under it
 const CANOPY_CLEAR = 0.5;
+// ms the right button is down before it aims: let go sooner, it was a tap, the grappling hook's (both on one button,
+// as the owner asked for the hook there and the aim was there first; a tap is over in ~100 ms)
+const TAP_MS = 180;
 
 export class Nav {
   mode: Mode = 'orbit';
@@ -112,6 +117,10 @@ export class Nav {
   private mouseLast = true;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
   private readonly footTouch: FootTouch;
+  /** the grappling hook's line, drawn for the walk here and for the paraglider by its shell */
+  readonly hookLine = new HookLine();
+  // when the right button went down on foot (null: up)
+  private rightAt: number | null = null;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -124,6 +133,7 @@ export class Nav {
     this.rider = new Rider({
       camera, controls, glide: this.glide, life: () => this.life, sim: () => this.sim, world: () => this.world,
     });
+    this.actors.add(this.hookLine.mesh);
     this.bindKeys();
     this.bindPointer();
     this.footTouch = new FootTouch(dom, {
@@ -143,6 +153,11 @@ export class Nav {
   /** Space on foot (the touch Jump button) */
   jump() {
     if (this.onFoot) this.foot.jump();
+  }
+
+  /** the grappling hook fired on foot (the right button's tap) */
+  hookShot() {
+    if (this.onFoot && !this.held && this.world) this.foot.hookShot(this.world);
   }
 
 
@@ -217,7 +232,7 @@ export class Nav {
       if (k) K.delete(k);
       if (this.orbit.turned && !K.turning) { this.orbit.turned = false; if (this.onMap) this.orbit.retarget(); }
     });
-    onFocusLoss(() => { K.clear(); this.arms.trigger = false; this.foot.aim = false; });
+    onFocusLoss(() => { K.clear(); this.arms.trigger = false; this.foot.aim = false; this.rightAt = null; });
   }
 
   private requestMouse() {
@@ -271,11 +286,15 @@ export class Nav {
     dom.addEventListener('mousedown', (e) => {
       if (!this.onFoot || document.pointerLockElement !== dom) return;
       if (e.button === 0) this.arms.trigger = true;
-      else if (e.button === 2) this.foot.aim = true;
+      else if (e.button === 2) this.rightAt = performance.now();
     });
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.arms.trigger = false;
-      else if (e.button === 2) this.foot.aim = false;
+      else if (e.button === 2) {
+        if (this.rightAt !== null && performance.now() - this.rightAt <= TAP_MS) this.hookShot();
+        this.rightAt = null;
+        this.foot.aim = false;
+      }
     });
     dom.addEventListener('mousemove', e => {
       if (document.pointerLockElement !== dom) return;
@@ -296,7 +315,7 @@ export class Nav {
       if (this.onFoot && e.pointerType === 'mouse') {
         this.requestMouse();
         if (e.button === 0) this.arms.trigger = true;
-        else if (e.button === 2) this.foot.aim = true;
+        else if (e.button === 2) this.rightAt = performance.now();
         return;
       }
       if ((this.onSticks || this.onFoot) && e.pointerType === 'touch') return;
@@ -688,14 +707,24 @@ export class Nav {
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
+    if (this.rightAt !== null && this.onFoot && performance.now() - this.rightAt > TAP_MS) this.foot.aim = true;
+    // (down: the line lets go)
+    if (this.held) this.foot.unhook();
     if (this.onFoot && !this.held) this.foot.updateWalk(dt, this.footTouch.move);
     else if (this.onMap) this.orbit.update(dt);
+    if (!this.craftView) this.hookLine.show(this.onFoot && this.foot.hook ? this.hand() : null, this.foot.anchor);
     if (this.onFoot) this.walkBody();
     this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);
     this.followCraftMouse();
     // (after the walk's pose: the host fires from where it has just put the body)
     if (this.onFoot && !this.held) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
-    else { this.arms.trigger = false; this.foot.aim = false; }
+    else { this.arms.trigger = false; this.foot.aim = false; this.rightAt = null; }
+  }
+
+  // where the line leaves the player on foot: low and right of the eyes, out of the crosshair's way
+  private hand() {
+    const cam = this.camera, dir = cam.getWorldDirection(new THREE.Vector3()), right = new THREE.Vector3().crossVectors(dir, cam.up).normalize();
+    return cam.position.clone().addScaledVector(right, 0.25).addScaledVector(dir, 0.4).addScaledVector(new THREE.Vector3().crossVectors(right, dir), -0.3);
   }
 
   // (taken on the frame a vehicle takes it, still within the key press or click that brought it there, kept from
@@ -716,7 +745,7 @@ export class Nav {
     if (!sim) return;
     sim.results('walk');
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
-    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot, ...(f.swimming ? { swim: true } : {}) };
+    const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot, ...(f.swimming ? { swim: true } : {}), ...(f.hook ? { hook: f.hook } : {}) };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
     else {
       const roof = f.roof();

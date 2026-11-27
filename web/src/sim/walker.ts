@@ -2,8 +2,9 @@ import type { World } from '../core/world';
 import type { RoofSpot } from './contract/pose';
 import { roofSpot, roofUnder, type Solid } from './solids';
 import { CLIMB_OUT, FLOAT, SWIM_DEPTH, Wet } from './swim';
-import { ride, STEP, walkFrame, withRoofs, type Ground } from './walk';
+import { HEAD, ride, STEP, walkFrame, withRoofs, type Ground } from './walk';
 import { EYE } from './figure';
+import { HOOK } from './hook';
 
 const GRAV = 16;
 // A body's free fall (off the paraglider): a skydiver's belly-down terminal speed, under the host's walk bound (80 m/s,
@@ -49,14 +50,40 @@ export class Walker<P extends { x: number; y: number; z: number } = { x: number;
   private near: readonly Solid[] = [];
   protected on: Solid | null = null;
   private readonly onV = { x: 0, z: 0 };
+  /** where the grappling hook reels the feet to (hookTo), null: no line out */
+  hook: { x: number; y: number; z: number } | null = null;
+  // the reel: s on the line, s it has made no way, its last frame's velocity (kept when the line is let go in flight)
+  private reelT = 0;
+  private stall = 0;
+  private readonly reelV = { x: 0, y: 0, z: 0 };
 
   constructor(readonly pos: P, protected readonly world: () => WalkWorld | null) {
     this.wet = new Wet(world);
   }
 
-  /** a jump, at once if standing (afloat there is nothing to push off) */
+  /** a jump, at once if standing (afloat there is nothing to push off); on the hook's line: off it, with a kick up
+   * from a hang */
   jump() {
-    if (this.vy === 0 && !this.swimming) this.vy = 5.2;
+    if (this.hook) { this.unhook(); this.vy = Math.max(this.vy, 5.2); } else if (this.vy === 0 && !this.swimming) this.vy = 5.2;
+  }
+
+  /** the hook's line out: the feet reeled to `feet` (sim/hook.ts hookFeet) from the next frame */
+  hookTo(feet: { x: number; y: number; z: number }) {
+    this.hook = { x: feet.x, y: feet.y, z: feet.z };
+    this.reelT = this.stall = 0;
+    this.reelV.x = this.reelV.y = this.reelV.z = 0;
+    this.vy = this.carry.x = this.carry.z = 0;
+    this.on = null;
+  }
+
+  /** the line let go: in flight the body flies on with the reel's speed (HOOK.fling), hanging it falls */
+  unhook() {
+    if (!this.hook) return;
+    const v = this.reelV, across = Math.hypot(v.x, v.z), k = across > HOOK.fling ? HOOK.fling / across : 1;
+    this.hook = null;
+    this.carry.x = v.x * k; this.carry.z = v.z * k;
+    // (never 0 in the air: 0 is standing)
+    this.vy = Math.min(v.y, HOOK.flingUp) || -0.01;
   }
 
   /** falling from the feet at (x, y, z) with velocity v, facing yaw (out of a craft in the air; put down: v 0) */
@@ -64,6 +91,7 @@ export class Walker<P extends { x: number; y: number; z: number } = { x: number;
     this.pos.x = at.x; this.pos.y = at.y + EYE; this.pos.z = at.z;
     this.feet = at.y;
     this.on = null;
+    this.hook = null;
     this.vy = Math.max(v.y, -TERMINAL);
     this.carry.x = v.x; this.carry.z = v.z;
     this.yaw = yaw;
@@ -86,12 +114,45 @@ export class Walker<P extends { x: number; y: number; z: number } = { x: number;
    * (m/s on land; in water slower), the speed carried through the air, then stood on what is under the feet */
   move(dt: number, near: readonly Solid[], speed: number, want: Want) {
     this.near = near;
+    if (this.hook) { this.reel(dt); return; }
     this.ride(dt);
     const pace = this.wade(speed) * dt;
     this.stepBy(want(this.yaw, pace));
     this.drift(dt);
     this.stand(dt);
     this.landed();
+  }
+
+  // On the hook's line: the feet straight at its point in steps short enough for the walk's own checks (a long one
+  // would skip a thin wall), up and down kept between the ceiling and the floor, across as a stride (sliding along a
+  // wall, up onto a ledge within a step). There, or making no way: let go where the ground is near, else hanging
+  private reel(dt: number) {
+    const H = this.hook!, P = this.pos, w = withRoofs(this.wet, this.near), x0 = P.x, y0 = this.feet, z0 = P.z;
+    this.step = STEP; this.top = Infinity;
+    this.swimming = false;
+    this.reelT += dt;
+    const want = HOOK.speed * Math.min(1, HOOK.start + (1 - HOOK.start) * this.reelT / HOOK.ramp) * dt;
+    let left = want, there = false;
+    while (left > 1e-6) {
+      const dx = H.x - P.x, dy = H.y - this.feet, dz = H.z - P.z, L = Math.hypot(dx, dy, dz);
+      if (L < HOOK.arrive) { there = true; break; }
+      const s = Math.min(left, 0.5, L), k = s / L, up = dy * k;
+      left -= s;
+      if (up > 0) { if (!w.blocked(P.x, P.z, this.feet + HEAD, this.feet + HEAD + up)) this.feet += up; }
+      else this.feet = Math.max(this.feet + up, Math.min(this.feet, w.support(P.x, P.z, this.feet + 0.01)));
+      this.stepBy({ x: dx * k, z: dz * k });
+      const sup = w.support(P.x, P.z, this.feet + STEP);
+      if (sup > this.feet) this.feet = sup;
+    }
+    const v = this.reelV, made = Math.hypot(P.x - x0, this.feet - y0, P.z - z0);
+    v.x = (P.x - x0) / dt; v.y = (this.feet - y0) / dt; v.z = (P.z - z0) / dt;
+    this.stall = made < 0.25 * want ? this.stall + dt : 0;
+    P.y = this.feet + EYE;
+    const water = this.wet.surface(P.x, P.z);
+    this.under = water !== null && P.y < water;
+    if (!there && this.stall < HOOK.stall) return;
+    v.x = v.y = v.z = 0;
+    if (this.feet - w.support(P.x, P.z, this.feet + 0.01) < HOOK.drop) this.unhook();
   }
 
   // pushed out of what moved into the walker, then one collision-checked horizontal step (none: null), sliding along
