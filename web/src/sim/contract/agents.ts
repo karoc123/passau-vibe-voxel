@@ -28,6 +28,16 @@ export interface Person {
 /** what a client's path maths and drawing read of a person (sim/server/snapshot.ts personState) */
 export type PersonState = Pick<Person, 'id' | 'e' | 'dir' | 's' | 'v' | 'lat' | 'ph' | 'wait' | 'col' | 'bike'>;
 
+/** a car moving across its road as it rolls on (pulling out beside something standing, back into its lane): its
+ * offset eased from o0 at s0 to o1 at s1, by where on its road each point of it is (s), so it moves sideways only
+ * while it moves on */
+export type Shift = [s0: number, s1: number, o0: number, o1: number];
+/** a car turning round onto its way back (its road now, s where its front ends up), drawn by the world's clock from
+ * t0: x m on, then a turn on its rear axle of radius r across d m (a U-turn where the road is 2 r wide, else a
+ * three-point turn), from its rear axle u0 along the road and v0 across it; (ax, ay), (bx, by) where its front and rear
+ * axle were drawn at the start less where the turn has them, blended out */
+type CarTurn = [t0: number, r: number, d: number, x: number, u0: number, v0: number, ax: number, ay: number, bx: number, by: number];
+
 /** what a client's path maths and drawing read of a car (sim/types.ts Car extends it; sim/server/snapshot.ts carState) */
 export interface CarState {
   id: number;
@@ -53,19 +63,22 @@ export interface CarState {
   v: number;
   wait: number;
   detachedPose?: RoadPose; // its pose out of the traffic: authoritative, independent of drawing
+  shift?: Shift;
+  turn?: CarTurn;
 }
 
 /** a car of the traffic as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts),
  * by length: [id, s, v, brake] while nothing else changed since the sample before; then its lane offset (off); then its way (e, lane, prev, prevOff, prev2,
- * prev2Off, next, next2; -1 none); then what it is (len, bus 1/0, vt or 0, col), sent when it comes into sight or
+ * prev2Off, next, next2; -1 none; its shift and turn, 0 none); then what it is (len, bus 1/0, vt or 0, col), sent when it comes into sight or
  * changes. ds, dOff and wait are the client's to work out. Lengths cm, speeds cm/s */
 export type CarWire =
   | [id: number, s: number, v: number, brake: number]
   | [id: number, s: number, v: number, brake: number, off: number]
   | [id: number, s: number, v: number, brake: number, off: number, e: number, lane: number, prev: number, prevOff: number,
-    prev2: number, prev2Off: number, next: number, next2: number]
+    prev2: number, prev2Off: number, next: number, next2: number, shift: Shift | 0, turn: CarTurn | 0]
   | [id: number, s: number, v: number, brake: number, off: number, e: number, lane: number, prev: number, prevOff: number,
-    prev2: number, prev2Off: number, next: number, next2: number, len: number, bus: number, vt: VehicleId | 0, col: string];
+    prev2: number, prev2Off: number, next: number, next2: number, shift: Shift | 0, turn: CarTurn | 0, len: number, bus: number,
+    vt: VehicleId | 0, col: string];
 
 /** a person of the crowd as a snapshot carries a sample of them (sim/agent-wire.ts), by length: [id, s]; then their way (e, dir,
  * wait 1/0) when it changed; then who they are (v, lat, ph, col), sent when they come into sight or change. A rider

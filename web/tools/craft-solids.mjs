@@ -223,7 +223,9 @@ server.dispose?.();
 // Getting past a craft left in the lane, on a second synthetic world of land with two two-way roads of a lane each
 // way (no traffic of its own: the cars are put): on a through road a hovercraft hovers in the eastbound lane, three
 // cars come at it from behind and one from ahead; on a dead end a hovercraft stands across the whole road, three cars
-// come at it. Measured on the traffic's own poses by the shapes the walker meets.
+// come at it. Measured on the traffic's own poses by the shapes the walker meets; and as drawn, tick by tick: no car
+// jumps (in place or heading) or slides sideways (its rear axle moving across its heading more than along it) while
+// it gets past or turns round.
 {
   const { at, pt } = await imp('src/sim/path.ts');
   const { dir: dir2, data: data2 } = await synthData({ size: [256, 256], ground: () => LAND, surface: () => 'road' });
@@ -268,12 +270,32 @@ server.dispose?.();
   };
   const pose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
   const solidOfCar = (c) => solidAt(carShape(c), T2.carPose(c, c.s, c.off, pose, true));
+  // (followed on the road it starts on and, turned round, on its way back: not through the junction at a road's end)
+  const JUMP = 0.6, TURN = 0.2, drawn = new Map(), B = pt();
+  let jump = 0, swing = 0, slide = 0;
+  const follow = (c) => {
+    const k = drawn.get(c) ?? { e0: c.e, ok: true, last: null };
+    drawn.set(c, k);
+    const L = T2.roads[c.e].L;
+    k.ok &&= (c.e === k.e0 || (c.e === k.e0 + 1 && k.e0 === 2)) && c.s < L - 10;
+    if (!k.ok) return;
+    T2.carPose(c, c.s, c.off, pose, true);
+    T2.carPoint(c, c.s - (c.len - 1.2), B);
+    const now = { x: pose.x, z: pose.z, h: pose.h, bx: B.x, by: B.y }, l = k.last;
+    k.last = now;
+    if (!l) return;
+    jump = Math.max(jump, Math.hypot(now.x - l.x, now.z - l.z));
+    swing = Math.max(swing, Math.abs(Math.atan2(Math.sin(now.h - l.h), Math.cos(now.h - l.h))));
+    const dx = now.bx - l.bx, dy = now.by - l.by, fx = Math.sin(now.h), fy = Math.cos(now.h);
+    slide = Math.max(slide, Math.abs(dx * fy - dy * fx) - Math.abs(dx * fx + dy * fy));
+  };
   const behind = [put(0, 76, 8), put(0, 64, 8), put(0, 52, 8)], ahead = put(1, 40, 10), thru = [...behind, ahead];
   const dead = [put(2, 100, 8), put(2, 88, 8), put(2, 76, 8)];
   const h1 = H1.solid(), h2 = H2.solid(), past = new Map(), turned = new Map();
-  let deepCraft = 0, deepCars = 0, t = 0;
-  await step(30, () => {
+  let deepCraft = 0, deepCars = 0, deadCars = 0, t = 0;
+  await step(40, () => {
     t += STEP;
+    for (const c of [...thru, ...dead]) if (T2.cars.includes(c)) follow(c);
     for (const c of thru) {
       if (!T2.cars.includes(c)) continue;
       const sc = solidOfCar(c);
@@ -284,7 +306,9 @@ server.dispose?.();
     }
     for (const c of dead) {
       if (!T2.cars.includes(c)) continue;
-      deepCraft = Math.max(deepCraft, overlap(solidOfCar(c), h2));
+      const sc = solidOfCar(c);
+      deepCraft = Math.max(deepCraft, overlap(sc, h2));
+      for (const o of dead) if (o !== c && T2.cars.includes(o)) deadCars = Math.max(deadCars, overlap(sc, solidOfCar(o)));
       if (c.e === 3 && !turned.has(c)) turned.set(c, t);
     }
   });
@@ -292,8 +316,11 @@ server.dispose?.();
   check(latest <= 20 && back <= 30 && deepCraft <= 0.05 && deepCars <= 0.05,
     `cars held up by a hovercraft left in their lane of a two-lane road get past it beside it, three from behind by 20 s and one from ahead (behind past by ${latest.toFixed(1)} s, ahead by ${back.toFixed(1)} s; deepest into the craft ${deepCraft.toFixed(3)} m, into each other ${deepCars.toFixed(3)} m)`);
   const waiting = T2.cars.filter((c) => c.e === 2 && c.wait > 10).length, lastTurn = Math.max(...dead.map((c) => turned.get(c) ?? Infinity));
-  check(lastTurn <= 28 && waiting === 0,
-    `cars at a hovercraft standing across a dead end turn round, none waits on (the third turned by ${lastTurn.toFixed(1)} s; ${waiting} waiting over 10 s at the end)`);
+  // (each turn takes a few seconds, and the next waits for it to drive off past it)
+  check(lastTurn <= 34 && waiting === 0 && deepCraft <= 0.05 && deadCars <= 0.05,
+    `cars at a hovercraft standing across a dead end turn round, none waits on (the third turned by ${lastTurn.toFixed(1)} s; ${waiting} waiting over 10 s at the end; deepest into the craft ${deepCraft.toFixed(3)} m, into each other ${deadCars.toFixed(3)} m)`);
+  check(jump <= JUMP && swing <= TURN && slide <= 0.01,
+    `cars getting past it and turning round are drawn moving on, a tick at a time: no jump, no slide sideways (at most ${jump.toFixed(2)} m of ${JUMP}, ${swing.toFixed(3)} rad of ${TURN}, rear axle across more than along ${slide.toFixed(3)} m of 0.01)`);
   host.dispose?.();
 }
 

@@ -6,14 +6,14 @@
 // Model per lane, turn lanes, OSM turn restrictions and junction "box" locks; people on footpaths, waiting for green
 // at signalled crossings. Density follows the hour. Near player edits some cars are physical bodies (`bodies`:
 // physics/rapier/life-phys.ts, stepped in the tick), and the people over a hole fall (`dropped`: drawn falling).
-import { pushTo, rng, type Rng } from '../core/num';
+import { clamp, pushTo, rng, type Rng } from '../core/num';
 import { BoatTraffic, type BoatData, type InTheWay } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { BUS_COLOUR, CAR_COLOURS, carsAt, Flow, PACE, type FlowCar } from './flow';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, turnRear, turnTime, type CarPose, type Ground } from './road-net';
 import { WALKER_R, type Solid } from './solids';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
@@ -49,12 +49,23 @@ const WALKER_LAT = 0.9 + WALKER_R + 0.3;
 const CRAFT_LAT = 0.9 + 0.3, CRAFT_UNDER = 3;
 // Something standing in a car's way (a craft, a player on foot, a car out of the traffic) is got past: after PASS_WAIT s
 // still behind it the car drives beside it where the road has room (up to PASS_EDGE m beyond its outer lanes' middles,
-// the oncoming lanes too) and nothing comes, moving across at PASS_SIDE m/s; with no room it turns round after TURN_WAIT
-// s, with room but never clear after GIVE_UP s (a way with none back: it leaves once out of sight). Its way is then
-// avoided by the routes for BLOCKED s, so the queue behind it does not grow.
-const PASS_WAIT = 1.5, PASS_EDGE = 1.2, PASS_SIDE = 2, TURN_WAIT = 4, GIVE_UP = 15, BLOCKED = 30;
+// the oncoming lanes too) and nothing comes; with no room it turns round after TURN_WAIT s, with room but never clear
+// after GIVE_UP s (a way with none back, or a road too narrow for its turn: it leaves once out of sight). Its way is
+// then avoided by the routes for BLOCKED s, so the queue behind it does not grow.
+const PASS_WAIT = 1.5, PASS_EDGE = 1.2, TURN_WAIT = 4, GIVE_UP = 15, BLOCKED = 30;
 // how far on a car that got past needs, at speed, to be back in its lane (kept free by those coming the other way)
 const PASS_BACK = 8;
+// A car moves across (out beside something, back into its lane) as it rolls on, over SHIFT_K m of road a metre
+// across (about 30 degrees at the steepest), at least SHIFT_MIN m: a driver's lane change, never a slide while
+// standing. So it stops that much further short of something standing, with room to pull out.
+const SHIFT_K = 1.9, SHIFT_MIN = 3;
+const shiftLen = (d: number) => Math.max(SHIFT_MIN, SHIFT_K * Math.abs(d));
+// A car turns round within the road: its body at most TURN_EDGE m beyond the outer lanes' middles (half a lane and a
+// verge; else up onto the pavement, as a longer car does on a narrow street), on as wide a circle as fits (TURN_R m)
+const TURN_EDGE = [3, 4.5], TURN_R = [6, 5, 4.5, 4, 3.5, 3];
+// how far across from its lane a car turned round clears those queued in it (two half widths and a little)
+const TURN_CLEAR = 2.1;
+const mm = (v: number) => Math.round(v * 1000) / 1000 + 0, cm = (v: number) => Math.round(v * 100) / 100 + 0;
 
 export const DEFAULT_SEED = 1;
 
@@ -179,6 +190,10 @@ export class Traffic {
   // the roads and footways by ACTIVE_CELL m cell of their ends and middle, for setActive (built on its first call)
   private wayGrid: { roads: Map<number, number[]>; peds: Map<number, number[]> } | null = null;
   private carGrid = new Map<number, Car[]>();
+  // the cars turning round this tick, each with the stretch its turn sweeps (s on its road, and on its way it came by)
+  private turning: Car[] = [];
+  private readonly zones = new Map<Car, { R: number; lo: number; hi: number; e: number; elo: number; ehi: number }>();
+  private readonly sweeps = new Map<string, { ulo: number; uhi: number; vlo: number; vhi: number }>();
   private idSeq = 1;
   // the people's and riders' ids (apart from the cars', whose ids pick their type: trafficType)
   private personSeq = 1;
@@ -468,7 +483,11 @@ export class Traffic {
     const stop = (d: number, reason: string, who: Agent | null, speed = 0) => { if (d < gap) { gap = Math.max(d, 0.01); lv = speed; why = reason; by = who; } };
     // the nearest thing standing in the way stopped for: its middle, its reach along the car's line, the room it needs across
     let standGap = -1, sx = 0, sz = 0, sExt = 0, sNeed = 0;
-    const standStop = (d: number, reason: string, x: number, z: number, ext: number, need: number, who: Agent | null = null) => {
+    // (short of it by the road it takes to pull out beside it)
+    // (not the one it is out beside, clear of it across the road: on a bend its line ahead would cut it)
+    const standStop = (d0: number, reason: string, x: number, z: number, ext: number, need: number, who: Agent | null = null) => {
+      if (car.pass && this.besideClear(car, e, car.s + d0 + ext, x, z)) return;
+      const d = d0 - shiftLen(need) - 0.5;
       if (d >= gap) return;
       stop(d, reason, who);
       standGap = gap; sx = x; sz = z; sExt = ext; sNeed = need;
@@ -487,6 +506,15 @@ export class Traffic {
       if ((l === nextLane || o.lcTo === nextLane) && o.s < 30) lead(o, e.L - car.s + o.s - o.len);
     }
     if (!nextRoad && e.L - car.s < 40 && !this.mayLeave(car, e)) stop(e.L - car.s - 0.5, 'dead-end', null);
+    // a car turning round: kept out of the stretch it sweeps, on this road or the next
+    for (const o of this.turning) {
+      const z = this.zones.get(o);
+      if (!z || o === car) continue;
+      const k = z.R === e.i ? 0 : z.e === e.i ? 1 : z.R === nextRoad?.i ? 2 : z.e === nextRoad?.i ? 3 : -1;
+      if (k < 0) continue;
+      const lo = (k & 1 ? z.elo : z.lo) + (k > 1 ? e.L : 0), hi = (k & 1 ? z.ehi : z.hi) + (k > 1 ? e.L : 0);
+      if (car.s < lo + 0.5 && car.s - car.len < hi) stop(lo - 1 - car.s, 'turning', o);
+    }
     const sg = e.sig;
     if (sg && car.s < sg.s + 0.3) {
       const st = signalAt(this.ctrls[sg.ctrl], this.t, sg.axis), d = sg.s - car.s;
@@ -572,6 +600,7 @@ export class Traffic {
   // ------------------------------------------------------------------ one tick
   private step(dt: number, density: Density, hour: number) {
     this.t += dt;
+    this.net.clock = this.t;
     this.tickNumber++;
     this.bodies?.beforeTick?.(this);
     this.half = ((this.t / 0.5) | 0) !== (((this.t - dt) / 0.5) | 0);
@@ -662,8 +691,12 @@ export class Traffic {
   private snapshot() {
     const G = 8;
     this.carGrid = new Map();
+    this.turning = this.cars.filter((c) => c.turn);
+    if (this.zones.size > this.turning.length) for (const c of [...this.zones.keys()]) if (!c.turn || !this.turning.includes(c)) this.zones.delete(c);
     for (const c of this.cars) {
-      const P = this.carPoint(c, c.s, this.sP), F = this.carPoint(c, c.s + 1, this.sF), C = this.carPoint(c, c.s - c.len / 2, this.sC);
+      // (one moving across looks for what is in its way from where it is going)
+      const e = this.roads[c.e], P = c.shift ? at(e, c.s, c.off, this.sP) : this.carPoint(c, c.s, this.sP);
+      const F = c.shift ? at(e, c.s + 1, c.off, this.sF) : this.carPoint(c, c.s + 1, this.sF), C = this.carPoint(c, c.s - c.len / 2, this.sC);
       const l = Math.hypot(F.x - P.x, F.y - P.y) || 1, g = c.geo;
       g.px = P.x; g.py = P.y; g.cx = C.x; g.cy = C.y; g.z = P.z; g.fx = (F.x - P.x) / l; g.fy = (F.y - P.y) / l;
       c.block = null;
@@ -701,8 +734,17 @@ export class Traffic {
     const removed = new Set<Car>();
     for (const car of this.cars) {
       const e = this.roads[car.e], s0 = car.s, off0 = car.off, e0 = car.e;
-      // (one behind a car pulling out to get past something follows it straight away, while there is room behind it)
-      if (this.half && !car.pass && (car.wait > PASS_WAIT || (car.v < 3 && (car.by as Car | null)?.pass))) {
+      if (car.turn) {
+        car.ds = 0; car.dOff = 0;
+        if (this.t - car.turn[0] < turnTime(car.turn[1], car.turn[2], car.turn[3])) continue;
+        car.turn = undefined;
+        this.zones.delete(car);
+        const to = laneOffset(e, car.lane);
+        if (Math.abs(to - car.off) > 0.01) this.shift(car, to, shiftLen(to - car.off));
+      }
+      // (one behind a car pulling out to get past something follows it straight away, while there is room behind it;
+      // one stopped on a road cars turned round on lately does not wait to turn round too)
+      if (this.half && !car.pass && (car.wait > PASS_WAIT || (car.v < 3 && (car.by as Car | null)?.pass) || (car.v < 0.3 && this.blockedUntil[e.i] > this.t))) {
         const r = this.getPast(car, e);
         if (r === 'gone') { removed.add(car); continue; }
         if (r === 'turned') continue;
@@ -722,8 +764,14 @@ export class Traffic {
       if (car.ghost <= 0 && !car.pass && !car.stand && ((car.wait > 15 && SOFT.slice(0, 4).includes(car.why)) || (car.wait > 25 && SOFT.slice(4).includes(car.why)))) { car.ghost = 8; car.wait = 0; }
       if (car.ghost > 0) { car.ghost -= car.v * dt; if (car.v < 1.5 && gap > 3) car.v = 1.5; }
       car.s += car.v * dt;
-      // past what it drove beside: back into its lane; held up beside it before reaching it: back behind it
-      if (car.pass && (car.s - car.len > car.pass.far + 1 || (car.wait > 8 && car.s < car.pass.near - 0.5))) car.pass = undefined;
+      // past what it drove beside: back into its lane (before the road's end, getPast); done once its rear axle is
+      const p = car.pass;
+      if (p && !p.back && car.s - car.len > p.far + 1) {
+        const o = laneOffset(e, car.lane);
+        this.shift(car, o, Math.max(SHIFT_MIN * 0.5, Math.min(PASS_BACK, shiftLen(o - car.off), e.L - 0.5 - (car.len - 1.2) - car.s)));
+        p.back = true;
+      }
+      if (car.shift && car.s - (car.len - 1.2) > car.shift[1]) { car.shift = undefined; if (p?.back) car.pass = undefined; }
       if (car.next >= 0 && car.boxNode !== e.b && e.L - car.s < BOX_IN) { this.boxLeave(car); this.boxEnter(car, e, e.b); }
       if (car.s > e.L && !this.enterNext(car, e, s0)) { removed.add(car); continue; }
       if (car.boxNode >= 0 && car.e !== car.boxFrom && car.s > BOX_OUT) this.boxLeave(car);
@@ -734,7 +782,7 @@ export class Traffic {
   }
 
   private changeLane(car: Car, e: Road, dt: number) {
-    if (car.pass) { const d = car.pass.off - car.off; car.off += Math.sign(d) * Math.min(Math.abs(d), PASS_SIDE * dt); return; }
+    if (car.pass || car.shift) return;
     const want = this.desiredLane(car, e);
     if (want !== car.lane && car.lcTo === undefined && car.s > 4 && e.L - car.s > 15) {
       const step = want > car.lane ? 1 : -1;
@@ -770,19 +818,19 @@ export class Traffic {
     const L = car.by as Car | null, queued = (car.why === 'leader' || car.why === 'spatial') && L?.e === car.e && L.lane === car.lane;
     if (queued && L.pass) {
       const end = L.pass.far + car.len + 2;
-      if (end < e.L - BLEND && this.clearFor(car, e, L.pass.off, end)) this.startPass(car, L.pass.off, L.pass.near, L.pass.far);
+      if (this.passFits(car, e, L.pass.off, L.pass.near, L.pass.far) && this.clearFor(car, e, L.pass.off, end)) this.startPass(car, L.pass.off, L.pass.near, L.pass.far, L.pass.need);
       return null;
     }
-    // (a queue on a road something standing turned a car round on lately: turned round too)
-    if (queued && L.v < 0.3 && this.blockedUntil[e.i] > this.t) return this.turnAround(car, e);
+    // (a queue on a road something standing turned a car round on lately, or one waiting for a car turning round
+    // there: turned round too, from where it is)
+    if ((queued ? L.v < 0.3 : car.why === 'turning' && car.v < 0.3) && this.blockedUntil[e.i] > this.t) return this.turnAround(car, e);
     const o = car.stand;
     if (!o || car.why === 'oncoming') return null;
     if (this.blockedUntil[e.i] > this.t) return this.turnAround(car, e);
     const g = car.geo, along = (o.x - g.px) * g.fx + (o.z - g.py) * g.fy;
     const near = car.s + along - o.ext, far = car.s + along + o.ext, end = far + car.len + 2;
     let room = false;
-    // (only clear of the road's ends: there a car is drawn blended into the roads either side, at their lanes)
-    if (car.s - car.len > BLEND && end < e.L - BLEND) {
+    if (far < e.L) {
       const so = car.s + along, A = at(e, so, 0, this.tmp), ax = A.x, ay = A.y, B = at(e, so, 1, this.tmp);
       const nx = B.x - ax, ny = B.y - ay, mid = ((o.x - ax) * nx + (o.z - ay) * ny) / (nx * nx + ny * ny || 1);
       const bi = this.back(e), R = bi >= 0 ? this.roads[bi] : null;
@@ -791,17 +839,42 @@ export class Traffic {
       const sides = [mid - o.need - 0.05, mid + o.need + 0.05].filter((c) => c >= lo && c <= hi)
         .sort((a, b) => Math.abs(a - car.off) - Math.abs(b - car.off));
       for (const c of sides) {
+        if (!this.passFits(car, e, c, near, far)) continue;
         room = true;
-        if (this.clearFor(car, e, c, end)) { this.startPass(car, c, near, far); return null; }
+        if (this.clearFor(car, e, c, end)) { this.startPass(car, c, near, far, o.need); return null; }
       }
     }
     return car.wait < (room ? GIVE_UP : TURN_WAIT) ? null : this.turnAround(car, e);
   }
 
-  private startPass(car: Car, off: number, near: number, far: number) {
-    car.pass = { off, near, far };
+  // is there room on road e for a car to pull out to offset off before near, and back into its lane past far? (Beside
+  // it, its rear too, clear of the road's start, where a car is drawn blended into the road before at its lane; the
+  // way back done before the road's end)
+  private passFits(car: Car, e: Road, off: number, near: number, far: number) {
+    return near - car.len > BLEND && near - 1 - car.s >= Math.min(shiftLen(off - car.off), 0.6 * shiftLen(off - car.off) + 1)
+      && far + 1 + car.len + SHIFT_MIN + (car.len - 1.2) < e.L - 0.5;
+  }
+
+  // is a car out to get past something across the road from it by its offset (the thing at x, z, about s along the
+  // road: as far across as when it pulled out; what it needs across seen along the car's own line changes as that
+  // turns)?
+  private besideClear(car: Car, e: Road, s: number, x: number, z: number) {
+    const p = car.pass!, so = clamp(s, p.near - 1, p.far + 1), A = at(e, so, 0, this.tmp), ax = A.x, ay = A.y, B = at(e, so, 1, this.tmp);
+    const nx = B.x - ax, ny = B.y - ay, mid = ((x - ax) * nx + (z - ay) * ny) / (nx * nx + ny * ny || 1);
+    return Math.abs(mid - car.off) >= p.need - 0.05;
+  }
+
+  private startPass(car: Car, off: number, near: number, far: number, need: number) {
+    this.shift(car, off, Math.min(shiftLen(off - car.off), near - 1 - car.s));
+    car.pass = { off: car.off, near, far, need };
     car.lcTo = undefined;
     car.wait = 0;
+  }
+
+  // the car moves across to offset off over the next len m it rolls (its offset that already: what it is drawn to)
+  private shift(car: Car, off: number, len: number) {
+    car.shift = [mm(car.s), mm(car.s + len), mm(car.off), mm(off)];
+    car.off = car.shift[3];
   }
 
   // is the stretch a car on e would drive beside something, at offset off with its front up to end, free of the other
@@ -833,27 +906,91 @@ export class Traffic {
     return true;
   }
 
-  // A car that cannot get past turns round onto its way back where there is a gap (its rear where its front was; a
-  // turn in place, drawn as a jump); on a one-way road it leaves once out of sight. Its road is avoided by the routes
-  // for a while
+  // A car that cannot get past turns round onto its way back, within the road, where the stretch its turn sweeps is
+  // free (a U-turn, else a three-point turn: drawn over a few seconds, nobody comes into that stretch meanwhile); on a
+  // one-way road, or one too narrow for it, it leaves once out of sight. Its road is avoided by the routes for a while
   private turnAround(car: Car, e: Road): 'gone' | 'turned' | null {
     if (this.bodies?.owns(car)) return null;
     const bi = this.back(e);
     if (bi >= 0 && this.roadOn[bi]) {
-      const R = this.roads[bi], s = Math.min(R.L - 0.5, Math.max(car.len, R.L - (car.s - car.len)));
-      if (R.lists[0].some((o) => o.s > s - car.len - 5 - o.v * 3 && o.s - o.len < s + 7)) return null;
-      this.removeCar(car);
-      Object.assign(car, { e: bi, lane: 0, s, v: 0, off: laneOffset(R, 0), prev: -1, prev2: -1, lcTo: undefined, pass: undefined, stand: null,
-        wait: 0, ghost: 0, why: 'free', by: null, ds: 0, dOff: 0 });
-      R.lists[0].push(car);
-      this.setNext(car, this.chooseNext(R));
-      this.blockedUntil[e.i] = this.t + BLOCKED;
-      return 'turned';
+      const plan = this.turnPlan(car, e, this.roads[bi]);
+      if (plan === 'wait') return null;
+      if (plan) {
+        const A = { ...this.carPoint(car, car.s, this.sP) }, B = { ...this.carPoint(car, car.s - (car.len - 1.2), this.sF) };
+        this.removeCar(car);
+        const R = this.roads[bi];
+        Object.assign(car, { e: bi, lane: 0, s: plan.s, v: 0, off: plan.off, prev: -1, prev2: -1, lcTo: undefined, pass: undefined, shift: undefined,
+          stand: null, wait: 0, ghost: 0, why: 'turning', by: null, ds: 0, dOff: 0, turn: [this.t, plan.r, plan.d, plan.x, plan.u0, plan.v0, 0, 0, 0, 0] });
+        R.lists[0].push(car);
+        this.setNext(car, this.chooseNext(R));
+        // (where the turn has it at its start less where it was drawn: blended out over the turn's first part)
+        const A0 = this.carPoint(car, car.s, this.sP), ax = A.x - A0.x, ay = A.y - A0.y, B0 = this.carPoint(car, car.s - (car.len - 1.2), this.sF);
+        const k = car.turn!;
+        k[6] = mm(ax); k[7] = mm(ay); k[8] = mm(B.x - B0.x); k[9] = mm(B.y - B0.y);
+        this.zones.set(car, { R: bi, lo: plan.lo, hi: plan.hi, e: e.i, elo: R.L - plan.hi, ehi: R.L - plan.lo });
+        this.blockedUntil[e.i] = this.t + BLOCKED;
+        return 'turned';
+      }
     }
     if (this.held.car.has(car.id) || !this.far(car.geo.px, car.geo.py, car.geo.z, CAR_POP_R)) return null;
     this.blockedUntil[e.i] = this.t + BLOCKED;
     this.removeCar(car);
     return 'gone';
+  }
+
+  // How a car on road e turns round onto R (its way back, s there R.L - s here, offsets mirrored): the widest circle
+  // whose sweep stays within the road's width and short of what it stands for, from its rear axle where it is (on as
+  // far as its reversing would otherwise reach back into one queued behind) to its front at s in R's first lane, or
+  // short of it if its front would swing out beyond the road (it moves over as it drives off); lo, hi: the stretch of
+  // R its body sweeps. 'wait': the stretch is not free; null: no turn fits
+  private turnPlan(car: Car, e: Road, R: Road) {
+    const wb = car.len - 1.2, u0 = cm(R.L - car.s + wb), v0 = cm(-car.off), d0 = cm(laneOffset(R, 0) - v0);
+    if (d0 < 0.5) return null;
+    let vlo = Infinity, vhi = -Infinity;
+    for (let l = 0; l < R.lanes; l++) { vlo = Math.min(vlo, laneOffset(R, l)); vhi = Math.max(vhi, laneOffset(R, l)); }
+    for (let l = 0; l < e.lanes; l++) { vlo = Math.min(vlo, -laneOffset(e, l)); vhi = Math.max(vhi, -laneOffset(e, l)); }
+    const o = car.stand, g = car.geo, ahead = o ? (o.x - g.px) * g.fx + (o.z - g.py) * g.fy - o.ext : Infinity;
+    let back = R.L - 0.5;
+    for (const l of e.lists) for (const c of l) if (c !== car && c.s <= car.s) back = Math.min(back, R.L - c.s - 1);
+    for (const edge of TURN_EDGE) for (let d = d0; d >= Math.max(0.5, d0 - 2); d = cm(d - 0.25)) for (const r of TURN_R) {
+      const w = this.sweep(r, d, wb);
+      if (v0 + w.vlo < vlo - edge || v0 + w.vhi > vhi + edge) continue;
+      // (ended short of its lane beside the queue: on far enough to be in it before it drives past them)
+      const x = cm(Math.max(0, u0 + w.uhi - back, d < TURN_CLEAR ? u0 + 2 * wb + shiftLen(d0 - d) - back : 0));
+      const ulo = u0 - x + w.ulo, uhi = u0 - x + w.uhi, s = cm(u0 - x + wb);
+      // (short of what it stands for: R.L - (car.s + ahead) on R; its end clear of the blend into R's next road, which
+      // a turn does not draw)
+      if (ulo < R.L - car.s - ahead + 0.3 || ulo < 0.5 || s > R.L - BLEND || s - 2 * wb < 0.5) continue;
+      const lo = ulo - 1, hi = uhi + 1, stopIn = (v: number) => 1.5 * v + (v * v) / IDM.b;
+      for (const l of R.lists) for (const c of l) if (c.s > lo - stopIn(c.v) - 2 && c.s - c.len < hi) return 'wait';
+      // (those standing queued behind it are behind its sweep already)
+      for (const l of e.lists) for (const c of l) if (c !== car && c.s > R.L - hi - (c.v > 0.3 ? stopIn(c.v) + 2 : -1) && c.s - c.len < R.L - lo) return 'wait';
+      for (const [w, from] of [[R, lo], [e, R.L - hi]] as const) for (const j of this.ins.get(w.a) ?? []) {
+        const p = this.roads[j];
+        for (const l of p.lists) for (const c of l) if (c.next === w.i && p.L - c.s + from < stopIn(c.v) + 5) return 'wait';
+      }
+      return { r, d, x, u0, v0, s, off: cm(v0 + d), lo, hi };
+    }
+    return null;
+  }
+
+  // the box a turn round (radius r across d m, wheelbase wb) sweeps, about its rear axle's start: u along the road, v
+  // across it (the same few for every car: kept)
+  private sweep(r: number, d: number, wb: number) {
+    const key = `${r}/${d}/${wb}`, had = this.sweeps.get(key);
+    if (had) return had;
+    const q = { u: 0, w: 0, th: 0 }, n = 24, T = turnTime(r, d, 0), out = { ulo: Infinity, uhi: -Infinity, vlo: Infinity, vhi: -Infinity };
+    for (let i = 0; i <= n; i++) {
+      turnRear(r, d, 0, (T * i) / n, q);
+      const c = Math.cos(q.th), sn = Math.sin(q.th);
+      for (const [f, l] of [[wb + 0.6, 0.95], [wb + 0.6, -0.95], [-0.6, 0.95], [-0.6, -0.95]]) {
+        const u = q.u + c * f - sn * l, v = -(q.w + sn * f + c * l);
+        out.ulo = Math.min(out.ulo, u); out.uhi = Math.max(out.uhi, u); out.vlo = Math.min(out.vlo, v); out.vhi = Math.max(out.vhi, v);
+      }
+    }
+    if (this.sweeps.size > 2000) this.sweeps.clear();
+    this.sweeps.set(key, out);
+    return out;
   }
 
   // may a car leave the street at the end of road e (out of sight: CAR_POP_R from the viewer)?
@@ -865,7 +1002,7 @@ export class Traffic {
     const lst = e.lists[car.lane];
     lst.splice(lst.indexOf(car), 1);
     car.lcTo = undefined;
-    car.pass = undefined;
+    car.pass = car.shift = undefined;
     const r = this.regions[this.roadOwner[e.i]], over = !!r && r.cars > r.targetCars + 4 && !this.held.car.has(car.id) && !this.bodies?.owns(car);
     if ((car.next < 0 || over) && this.mayLeave(car, e)) { this.boxLeave(car); return false; }
     if (car.next < 0) {
@@ -990,6 +1127,7 @@ export class Traffic {
     car.detachedPose = { ...pose };
     this.removeCar(car);
     this.cars.splice(i, 1);
+    car.turn = car.shift = car.pass = undefined;
     car.block = null;
     car.by = null;
     car.why = 'free';

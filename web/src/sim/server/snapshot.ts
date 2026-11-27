@@ -27,7 +27,7 @@ type Every<T> = { [K in keyof Required<T>]: T[K] };
 const carState = (c: Car) => ({ id: c.id, e: c.e, lane: c.lane, s: round(c.s, 100), ds: round(c.ds, 100), off: round(c.off, 100),
   dOff: round(c.dOff, 100), prev: c.prev, prevOff: round(c.prevOff, 100), prev2: c.prev2, prev2Off: c.prev2Off, next: c.next,
   next2: c.next2, len: c.len, bus: c.bus, vt: c.vt, col: c.col, brake: c.brake, v: round(c.v, 100), wait: round(c.wait, 100),
-  detachedPose: c.detachedPose && wirePose(c.detachedPose) }) satisfies Every<CarState>;
+  detachedPose: c.detachedPose && wirePose(c.detachedPose), shift: c.shift, turn: c.turn }) satisfies Every<CarState>;
 
 /** the sim's state after its update for a session of player; since: the tick of the session's last snapshot (its events
  * after it); results: the player's command outcomes since; edits: the nodes changed since; ack: the session's last seat

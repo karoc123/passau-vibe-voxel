@@ -2,10 +2,10 @@
 // a car's blended path and pose, a person's point, a signal's light. Shared (docs/adr/0009-layers-and-owners.md): the
 // sim's traffic (sim/traffic.ts Traffic) and the client's copy of it (client/sim-client.ts TrafficMirror) each hold
 // one over their own TrafficData, so both place what they draw with the same code.
-import { hash, smooth } from '../core/num';
+import { clamp, hash, smooth } from '../core/num';
 import { at, landingLane, prepPath, pt, turnOf, type Pt } from './path';
 import type { Car, Controller, PedEdge, Road, TrafficData } from './types';
-import type { Person } from './contract/agents';
+import type { Person, Shift } from './contract/agents';
 
 // the tick (s): the traffic's, and the bodies' (two physics steps of it); what the drawn agents interpolate over
 export const STEP = 1 / 30;
@@ -50,6 +50,51 @@ export const pedGreen = (ctrl: Controller, t: number, axis: number) => phase(ctr
 /** the offset (m, right of the road's line) of a lane's centre */
 export const laneOffset = (e: Road, lane: number) => e.o0 + lane * LANE_W;
 
+/** a car's offset at s while it moves across (contract/agents.ts Shift) */
+export const shiftOff = (h: Shift, s: number) => h[2] + (h[3] - h[2]) * smooth(h[0], h[1], s);
+
+// A turn round (contract/agents.ts CarTurn) is worked on the rear axle, in the frame of its start (u along the road,
+// w = -v so that turning left turns the heading th up from PI, facing back along the road): strokes of
+// [forward 1 or back -1, arc 1 or straight 0, the arc's angle or the straight's length], after x m straight on (out of
+// the way of those queued behind it: its reversing never reaches back past its rear). Those one way are driven as
+// one leg, eased from standing to standing: at most TURN_V m/s on average, at least TURN_LEG s.
+const TURN_V = 3.5, TURN_LEG = 0.9;
+type Stroke = [dir: number, arc: number, amount: number];
+const strokes = (r: number, d: number, x: number): Stroke[] => {
+  if (d >= 2 * r) return [[1, 0, x], [1, 1, Math.PI / 2], [1, 0, d - 2 * r], [1, 1, Math.PI / 2]];
+  const a = Math.acos(clamp((1 - d / (2 * r)) / 2, -1, 1));
+  return [[1, 0, x], [1, 1, a], [-1, 1, Math.PI - 2 * a], [1, 1, a]];
+};
+const legs = (r: number, d: number, x: number) => {
+  const out: { strokes: Stroke[]; L: number; T: number }[] = [];
+  for (const k of strokes(r, d, x)) {
+    const L = k[1] ? r * k[2] : k[2], last = out.at(-1);
+    if (last && last.strokes[0][0] === k[0]) { last.strokes.push(k); last.L += L; } else out.push({ strokes: [k], L, T: 0 });
+  }
+  for (const l of out) l.T = Math.max(TURN_LEG, l.L / TURN_V);
+  return out;
+};
+/** how long (s) a turn round (x m on, of radius r across d m) takes */
+export const turnTime = (r: number, d: number, x: number) => legs(r, d, x).reduce((t, l) => t + l.T, 0);
+/** the rear axle of a turn round (x m on, of radius r across d m) tau s into it, in the frame of its start (out: u, w,
+ * th) */
+export function turnRear(r: number, d: number, x: number, tau: number, out: { u: number; w: number; th: number }) {
+  let u = 0, w = 0, th = Math.PI, t = tau;
+  for (const leg of legs(r, d, x)) {
+    let left = leg.L * smooth(0, leg.T, t);
+    t -= leg.T;
+    for (const [dir, arc, amount] of leg.strokes) {
+      if (left <= 0) break;
+      const g = Math.min(left, arc ? r * amount : amount);
+      left -= g;
+      if (arc) { const th1 = th + g / r; u += dir * r * (Math.sin(th1) - Math.sin(th)); w -= dir * r * (Math.cos(th1) - Math.cos(th)); th = th1; }
+      else { u += dir * g * Math.cos(th); w += dir * g * Math.sin(th); }
+    }
+  }
+  out.u = u; out.w = w; out.th = th;
+  return out;
+}
+
 export class RoadNet {
   ground: Ground | null = null;
   readonly roads: Road[];
@@ -62,6 +107,9 @@ export class RoadNet {
   private readonly tmp2 = pt();
   private readonly pA = pt();
   private readonly pB = pt();
+  private readonly rear = { u: 0, w: 0, th: 0 };
+  /** the world's clock (s) the turns round are drawn at (the traffic's time; the client's render clock) */
+  clock = 0;
 
   /** data: prepared in place (its paths: prepPath), so never another RoadNet's */
   constructor(data: TrafficData) {
@@ -76,6 +124,8 @@ export class RoadNet {
   // that on a road shorter than 2 BLEND the car is drawn between both, and across a road shorter than BLEND the road
   // beyond it pulls too (prev2, next2). Where the car moves onto the next road the sum is the same on either side.
   carPoint(car: Car, s: number, out: Pt, off = car.off) {
+    if (car.turn) return this.turnPoint(car, s, out);
+    if (car.shift) off = shiftOff(car.shift, s);
     const e = this.roads[car.e], P = at(e, s, off, out), x = P.x, y = P.y, z = P.z, Q = this.tmp, R = this.tmp2;
     // (P moved by w times the way from (ax, ay, az) to B)
     const pull = (ax: number, ay: number, az: number, B: Pt, w: number) => { P.x += (B.x - ax) * w; P.y += (B.y - ay) * w; P.z += (B.z - az) * w; };
@@ -97,6 +147,19 @@ export class RoadNet {
       }
     }
     return P;
+  }
+
+  // A car turning round: its line through its front and rear axles where the turn has them now, s on it as on its
+  // road (its front at car.s)
+  private turnPoint(car: Car, s: number, out: Pt) {
+    const [t0, r, d, x, u0, v0, ax, ay, bx, by] = car.turn!, e = this.roads[car.e], T = turnTime(r, d, x), tau = clamp(this.clock - t0, 0, T);
+    const q = turnRear(r, d, x, tau, this.rear), wb = car.len - 1.2, k = 1 - smooth(0, T * 0.35, tau);
+    const B = at(e, u0 + q.u, v0 - q.w, this.tmp2), bX = B.x + bx * k, bY = B.y + by * k, bZ = B.z;
+    const A = at(e, u0 + q.u + wb * Math.cos(q.th), v0 - q.w - wb * Math.sin(q.th), out);
+    A.x += ax * k; A.y += ay * k;
+    const f = (s - car.s) / wb;
+    A.x += (A.x - bX) * f; A.y += (A.y - bY) * f; A.z += (A.z - bZ) * f;
+    return A;
   }
 
   // A car's kinematic pose with its front at arc length s, lane offset off: both axles on the blended path, the body
