@@ -24,7 +24,7 @@ const { SocketLink } = await load('client/sim-worker-link.ts');
 const { hello } = await load('sim/hello.ts'), { checkBuild } = await load('core/data-contract.ts');
 const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts');
 const { STEP } = await load('sim/road-net.ts');
-const { easeAvatar } = await load('view/life.ts');
+const { easeAvatar } = await load('view/avatars.ts');
 
 const data = readHostData(DATA), spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const focus = { x: spot.x, z: spot.y }, dam = data.meta.labels.find((l) => /Ingling/.test(l.name)) ?? { x: 6105, y: 5207 };

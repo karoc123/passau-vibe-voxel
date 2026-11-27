@@ -78,7 +78,7 @@ const ahead = [1, 0];
 const face = (h) => { foot.yaw = h; };
 
 // on the bank facing the water (+x), walking in (slowly: the shallows are a step wide)
-foot.startAs({ x: 50, y: BANK, z: 128, h: Math.PI / 2 });
+foot.fallAt({ x: 50, y: BANK, z: 128 }, { x: 0, y: 0, z: 0 }, Math.PI / 2);
 let waded = false, swamAt = null;
 for (let i = 0; i < 30 / STEP && foot.pos.x < 85; i++) {
   frame(foot.pos.x < 59 || foot.pos.x > 63 ? ahead : [0.2, 0]);
@@ -126,7 +126,7 @@ const fall = (what, frames, stick) => {
     `${what}: into the water without landing on it, sank to ${(WATER - low).toFixed(1)} m (eyes under for ${(under * STEP).toFixed(2)} s), afloat again (eyes ${e.toFixed(2)} m over it)`);
 };
 // walked off the footbridge 8 m over the water
-foot.startAs({ x: 85, y: DECK, z: 152, h: 0 });
+foot.fallAt({ x: 85, y: DECK, z: 152 }, { x: 0, y: 0, z: 0 }, 0);
 body = false;
 for (let i = 0; i < 5; i++) frame(null);
 check(foot.feet === DECK, `on the footbridge (${foot.feet})`);

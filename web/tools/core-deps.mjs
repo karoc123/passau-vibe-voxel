@@ -225,7 +225,7 @@ function codeOf(bare) {
 // Today's violations (docs/adr/0009-layers-and-owners.md). Only shrinks.
 const BASELINE = [
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
-  "R2 type cycle: nav/craft.ts, nav/foot.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
+  "R2 type cycle: nav/craft.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
   "R6 main.ts: pointerType==='pen'",
   "R6 main.ts: pointerType==='touch'",
   "R6 nav/nav.ts: pointerType==='touch'",

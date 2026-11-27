@@ -6,6 +6,7 @@ import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from 
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
+import { Avatars } from './avatars';
 import type { Car, Kind, Rideable } from '../sim/types';
 import type { Pose, RoadPose, WalkPose } from '../sim/contract/pose';
 import { FLOAT } from '../nav/swim';
@@ -33,17 +34,6 @@ const THROW = 0.85, LIFT = 0.35, MID = 0.9, LIE = 0.12, LAND_KEEP = 0.5, SLIDE =
 const FALL_V = 7, FALL_DRAG = 3.5, FALL_S = 0.45, MAX_FALLEN = 8, FALLEN_S = 40;
 // fallen into a hole (WorldSim's events: dropped): down at G m/s^2 until the ground (World.support), gone LANDED_S s after
 const G = 9.81, LANDED_S = 2;
-// the other players' shirts, picked by their id: brighter than the crowd's, so a player stands out
-const AVATAR_COLS = ['#ff4b3e', '#2f9bff', '#ffd23f', '#3fdc6b', '#c45bff', '#ff8a1f'];
-const hashOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; };
-/** an avatar's drawn pose d eased dt s towards where it is between its ticks (a tick its walker's input missed
- * stands still: this keeps it walking on) */
-export function easeAvatar(d: Pose, to: Pose, dt: number) {
-  const k = 1 - Math.exp(-dt * 10);
-  d.x += (to.x - d.x) * k; d.y += (to.y - d.y) * k; d.z += (to.z - d.z) * k;
-  d.h += Math.atan2(Math.sin(to.h - d.h), Math.cos(to.h - d.h)) * k;
-  return d;
-}
 // the drawn lean of a motorbike tracking its lane
 const LEAN_SAMPLE = 2, LEAN_MAX = 0.7, LEAN_S = 0.12;
 
@@ -80,7 +70,8 @@ export class StreetLife {
   // the agents as drawn, by id: the cars (in the traffic and out of it), the people (on foot and riders)
   private readonly drawnCars = new Map<number, Drawn>();
   private readonly drawnPeople = new Map<number, Drawn>();
-  private readonly drawnAvatars = new Map<number, Drawn>();
+  /** the other players on foot, a figure each (never the crowd's) */
+  readonly avatars = new Avatars();
   private frame = 0;
   // the train coaches drawn this frame (solids)
   private coaches: CoachPose[] = [];
@@ -93,7 +84,7 @@ export class StreetLife {
     this.heads = client.traffic.heads;
     this.seen = client.tick;
     this.M = new LifeMeshes(scene, this.heads);
-    this.M.group.add(this.trains.group);
+    this.M.group.add(this.trains.group, this.avatars.group);
   }
 
   get group() { return this.M.group; }
@@ -163,11 +154,13 @@ export class StreetLife {
     this.coaches = [...this.traffic.trains.coaches(back)];
     this.trains.render(this.coaches, night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
-    let n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
-    n += this.drawAvatars(dt, lead / STEP, n);
+    const n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
+    const C = this.client, seated = new Set<string>(C.drivers().map(([, p]) => p));
+    for (const c of C.crafts()) if (c.pilot !== null) seated.add(c.pilot);
+    this.avatars.update(this.traffic.avatars, C.player, seated, lead / STEP, dt, (av, a, out) => this.traffic.avatarPose(av, a, out));
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
-    for (const m of [this.drawnCars, this.drawnPeople, this.drawnAvatars]) for (const [id, d] of m) if (d.frame !== this.frame) m.delete(id);
+    for (const m of [this.drawnCars, this.drawnPeople]) for (const [id, d] of m) if (d.frame !== this.frame) m.delete(id);
   }
 
   // agent id's entry in m, marked drawn this frame (a new one at x, y, z if it has none)
@@ -294,40 +287,9 @@ export class StreetLife {
     return this.riders.length;
   }
 
-  // the other players on foot (their avatars; the own one is the walk's: nav/foot.ts), from instance i0 on: between
-  // their last two ticks (a: how far), eased, as walking input reaches the host unevenly; a shirt colour by player
-  private drawAvatars(dt: number, a: number, i0: number) {
-    const M = this.M, m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-    const pose = { x: 0, y: 0, z: 0, h: 0 }, pos = new THREE.Vector3(), me = this.client.player;
-    let i = i0;
-    for (const av of this.traffic.avatars) {
-      if (av.player === me || i >= MAX_PEOPLE + MAX_BIKES) continue;
-      this.traffic.avatarPose(av, a, pose);
-      let r = this.drawnAvatars.get(av.id);
-      if (!r || Math.hypot(r.x - pose.x, r.z - pose.z) > 6) { r = this.entry(this.drawnAvatars, av.id, pose.x, pose.y, pose.z); Object.assign(r, pose); }
-      r.frame = this.frame;
-      easeAvatar(r, pose, dt);
-      let bob = 0;
-      if (av.pose.swim) { r.ph = (r.ph ?? 0) + dt * (av.pose.moving ? 5 : 2); swimming(m, r, r.ph); }
-      else {
-        if (av.pose.moving) { r.ph = (r.ph ?? 0) + dt * 9; bob = Math.sin(r.ph); }
-        pos.set(r.x, r.y + 0.05 * Math.abs(bob), r.z);
-        m.compose(pos, q.setFromAxisAngle(up, r.h), one);
-      }
-      M.legs.setMatrixAt(i, m); M.torso.setMatrixAt(i, m);
-      M.torso.setColorAt(i, this.col(AVATAR_COLS[hashOf(av.player) % AVATAR_COLS.length]));
-      i++;
-    }
-    return i - i0;
-  }
-
   /** where the other players on foot are drawn (their avatars, by player; arm: the slot in their hand), for their guns
-   * (view/weapons/weapons-view.ts) and the tools */
-  avatarsDrawn(): { player: string; pose: Readonly<RoadPose>; arm?: number }[] {
-    const out: { player: string; pose: Readonly<RoadPose>; arm?: number }[] = [];
-    for (const av of this.traffic.avatars) { const d = this.drawnAvatars.get(av.id); if (d && d.frame === this.frame) out.push({ player: av.player, pose: d, arm: av.pose.arm }); }
-    return out;
-  }
+   * (view/weapons/weapons-view.ts) and the maps */
+  avatarsDrawn() { return this.avatars.drawn(); }
 
   // person id drawn on their way's point A (x, z across, ground y: sim/path.ts pt), heading h, eased in by k this
   // frame; put on it when further than jump m (or not drawn before)
@@ -514,7 +476,7 @@ export class StreetLife {
       const d = this.drawnCars.get(c.id);
       if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d));
     }
-    for (const d of this.drawnAvatars.values()) if (d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
+    for (const { pose: d } of this.avatars.drawn()) if (by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
     for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }));
     // (the river's vessels where view/boats.ts draws them: a walker on a jetty meets the boat alongside)
     const B = this.traffic.boats, back = this.back;

@@ -56,14 +56,14 @@ export class Hud {
   set(mode: Mode, ride: Ride | null, agent: Readonly<Rideable> | null = null) {
     // (hidden in a craft and while driving: style.css, body[data-mode])
     const label = agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label;
-    $('.who', this.box).textContent = mode === 'ride' && ride && ride.label !== 'you' && label ? WHO[label] ?? WHO[ride.ref.kind] : '';
+    $('.who', this.box).textContent = mode === 'ride' && ride && label ? WHO[label] ?? WHO[ride.ref.kind] : '';
     if (this.touch) {
       $('.hint', this.box).textContent = mode === 'walk'
         ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look, tap to fire, hold to keep firing · Pinch: zoom' : '';
       return;
     }
     const items = [...MOUSE[mode], LABELS];
-    if (mode === 'walk' || ride?.ref.kind === 'person') items.splice(items.length - 2, 0, ['Space', SPACE, 'jump']);
+    if (mode === 'walk') items.splice(items.length - 2, 0, ['Space', SPACE, 'jump']);
     $('.mouse', this.box).innerHTML = items.map(([k, icon, word]) => `<figure data-k="${k}">${icon}<figcaption>${word}</figcaption></figure>`).join('');
   }
 }
