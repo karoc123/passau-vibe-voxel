@@ -65,8 +65,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
 - Prediction: a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never has (a
   crash a car moved out of) stays told.
-- A walker riding a coach's roof (or a car's) is taken by the host where its page saw the train, a round trip late:
-  others see it up to ~2 m back along the roof at speed (off a coach's end into the gap). Unmeasured over a real link.
 - Floatplane at 240 km/h low over the city (tools/fly-stream.mjs): no ground missing, queue empty, the host's collision
   tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond), and ~1 frame/s over
   50 ms, up to ~70 ms, half of them the stream's taking in meshes (pages.show). Not measured: the GPU's uploads, the

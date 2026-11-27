@@ -650,7 +650,10 @@ export class Nav {
     const f = this.foot, B = this.body, x = f.pos.x, z = f.pos.z;
     const pose = { x, y: f.feet, z, h: f.yaw, moving: !!B && Math.hypot(x - B.x, z - B.z) > 1e-3, arm: this.arms.slot, ...(f.swimming ? { swim: true } : {}) };
     if (!B || B.player !== sim.player || Math.hypot(x - B.x, z - B.z) > 5) sim.send({ kind: 'request', request: { kind: 'walk', pose } });
-    else sim.send({ kind: 'seatInput', role: 'walker', input: pose });
+    else {
+      const roof = f.roof();
+      sim.send({ kind: 'seatInput', role: 'walker', input: roof ? { ...pose, roof } : pose });
+    }
     this.body = { player: sim.player, x, z };
   }
 

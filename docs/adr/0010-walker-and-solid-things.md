@@ -29,10 +29,11 @@ player's car reaches every page in the snapshots, and each page keeps its own wa
 - What the walker meets is what it sees: a car is met where it is drawn, a tick or so behind the host.
 - A roof is ground: a car's is jumped onto (no kerb's step reaches it) and ridden, carried and turned with the car as
   drawn, its speed kept when the walker jumps off. Another walker's head is not stood on.
-- The host keeps its copy of a walker out of the cars, crafts and vessels it has (not the coaches: not cheap per
-  pose) and does not tell the page: a fair page is only in one by the tick it sees a moving car late, and its own walk
-  pushes it out next frame. What others see, shoot and board from is the host's copy. On a roof the host bounds the
-  walk from where the car has carried it, so a ride is not taken for a run.
+- The host keeps its copy of a walker out of the cars, crafts, vessels and coaches it has and does not tell the page:
+  a fair page is only in one by the tick it sees a moving car late, and its own walk pushes it out next frame. What
+  others see, shoot and board from is the host's copy. On a roof the page names the thing and its spot on it (it sees
+  the thing a round trip late: its world pose would show the rider metres back), the host puts the walker there on the
+  thing as it has it and carries it through each tick, bounded from where the thing carried the last pose.
 - A driven car closes on a walker ahead or behind at a walk's pace at most: it stops as at a wall, then nudges them
   along; it never runs a player over as it does the crowd, whose fall the host owns. The traffic's cars stop for a
   walker in their lane as for a car ahead. A walker squeezed against a wall leaves past the car's side.

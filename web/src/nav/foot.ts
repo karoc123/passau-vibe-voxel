@@ -5,7 +5,8 @@ import type { World } from '../core/world';
 import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';
 import { backOff, EYE } from './spots';
-import { roofUnder, type Solid } from '../sim/solids';
+import { roofSpot, roofUnder, type Solid } from '../sim/solids';
+import type { RoofSpot } from '../sim/contract/pose';
 import { CLIMB_OUT, FLOAT, SWIM_DEPTH, Wet } from './swim';
 import { footKeys, ride, STEP, stride, walkFrame, withRoofs } from './walk';
 
@@ -127,6 +128,13 @@ export class Foot {
     this.pos.x = to.x; this.pos.z = to.z;
     this.feet += to.dy;
     this.yaw += to.dh;
+  }
+
+  /** the spot on the roof of the solid thing the feet stand on (the host puts the walker there on the thing as it has
+   * it), or null: on the voxels, in the air, or on something without an id */
+  roof(): RoofSpot | null {
+    const s = this.on;
+    return s && s.id !== undefined ? roofSpot(s as Solid & { id: string }, this.pos, this.feet) : null;
   }
 
   // what the feet stand on now among the solids (null: the voxels, or the air); leaving it, its speed is kept as a jump
