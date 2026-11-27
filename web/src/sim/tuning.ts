@@ -88,10 +88,11 @@ export interface PilotTuning {
   readonly leaveAfter: number; readonly fuelLeave: number; readonly spread: number; readonly spreadPerM: number;
 }
 // A pass is ~25-35 s, ~3 s of it fire: the pause is the player's chance. It appears past the crafts' send radius
-// (1050 m) so no page sees it pop in. (Its stray is ~1 m at 200 m: a man in the open takes about three hits a pass)
+// (1050 m) so no page sees it pop in. (Its stray is up to ~1.4 m at 200 m: a man in the open takes two to four hits
+// a pass)
 const PILOT: PilotTuning = frozen({ sight: 900, leash: 900, appear: 1100, circle: 400, cruise: 150, runIn: 110, setup: 650,
   fireFrom: 300, fireFor: 3, breakAt: 120, climb: 0.3, climbFor: 7, clear: 40, attackClear: 12, lost: 20, leaveAfter: 60,
-  fuelLeave: 0.25, spread: 0.004, spreadPerM: 0.000006 });
+  fuelLeave: 0.25, spread: 0.005, spreadPerM: 0.00001 });
 
 export interface Tuning {
   readonly ride: RideTuning;
