@@ -1305,6 +1305,15 @@ def buildings(ctx):
 
     close_slots()
 
+    if roofs.enabled():  # (straight walls for the buildings the rule takes: before anything reads their cells)
+        RULE_SITES = roofs.sites_of(osm.areas)
+        _street = np.zeros((D, W), np.uint8)
+        burn(_street, [(l_.buffer(way_width(t_) / 2, cap_style="flat"), 1) for _, t_, l_ in osm.lines
+                       if t_.get("highway") and not underground(t_) and not on_bridge(t_) and t_.get("area") != "yes"
+                       and way_width(t_) > 0])
+        roofs.simplify_outlines(render, _street, nd_max_b, LOD2, RULE_SITES, set(landmarks.LABELS), overrides._own, R0, C0,
+                                core_slice, note, report)
+
     bmask = np.zeros((D, W), bool)
     for f in render:
         bmask[f["rr"], f["cc"]] = True
@@ -1697,14 +1706,14 @@ def buildings(ctx):
     overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note)  # (scripts/overrides/building)
     RULE_PLANE = None
     if roofs.enabled():  # (a probe: off unless the map config turns it on)
-        RULE_PLANE = roofs.apply(render, osm.areas, top, dtm, bmask, LOD2, LOD2_USE, cell_maxh, ROOF_GX, ROOF_GY,
-                                 pitched_m, R0, C0, overrides._own, set(landmarks.LABELS), core_slice, note, report)
+        RULE_PLANE, _ = roofs.apply(render, top, dtm, BASE, LOD2, LOD2_USE, cell_maxh, ROOF_GX, ROOF_GY, pitched_m, R0, C0,
+                                    RULE_SITES, set(landmarks.LABELS), overrides._own, core_slice, note, report)
     # the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
     # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
     # contour lines of the street below across every flat roof and plane of LoD2
     topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
     roof_exact = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
-    if RULE_PLANE is not None:  # (a rule roof's voxels step along its plane: the caps draw the plane)
+    if RULE_PLANE is not None:  # (the caps draw a rule roof's plane, not the heights its voxels were rounded from)
         roof_exact = np.where(bmask & np.isfinite(RULE_PLANE), RULE_PLANE - BASE, roof_exact).astype(np.float32)
     # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
     # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
