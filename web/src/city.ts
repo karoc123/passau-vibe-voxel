@@ -36,6 +36,10 @@ const FIRST_M = 2500;
 // landmarks go first only in view or within this (ground distance from the camera): Kachlet 4 km behind the overview
 // would otherwise go before every tile in view
 const LM_M = 2000;
+// ms of occluders (occlusion.ts setTile, a 128 m tile up to ~10 ms on a 4x throttled CPU) built per update at most: a plane at
+// 245 km/h brings in a coarse node's 4 to 64 tiles at once, all of them built in one update stalled a phone's frame
+// for up to 0.4 s
+const OCC_MS = 8;
 const RINGS: [string, number][] = [['Buildings in view', 0], ['Buildings within 1 km', 1000], ['Buildings within 2 km', 2000], ['Buildings to the edge', Infinity]];
 
 // The city at 1 m and its distance levels (2, 4, 8 m), as fine as the budget allows (triangles drawn by the tiles,
@@ -577,7 +581,7 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     occluders();
     let pending = 0;
     for (const k of chosen.keys()) if (!shownN.has(k)) pending++;
-    settled = tilesNow === wanted && pending === 0;
+    settled = tilesNow === wanted && pending === 0 && !occDirty.size;
     // (the landmarks wanted: those beyond the view distance never come, those neither in view nor near come in turn)
     if (stage === 1 && (lmShown === landmarks.length || landmarks.every((b) => shown[b + 1] || tilesOf[b].some((k) => !inRange[k]) || !tilesOf[b].some(lmNear)))) toStage2();
     if (stage === 2 && tilesNow === wanted) stage = U.uStage.value = 3;
@@ -631,8 +635,12 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
     occStats.ms = performance.now() - t0; occStats.meshes = kids.length; occStats.hidden = hidden;
   };
   scene.onBeforeRender = (...a) => { cull(a[2]); before(...a); };
-  // (the tiles marked since the last time only, occDirty)
+  // (the tiles marked since the last time only, occDirty. Once the city is complete at most OCC_MS of building per
+  // update, the rest left marked for the next ones and meanwhile blocking nothing: an occluder left as it was could
+  // hide what newly came in. While loading all at once: the start's whole range spread out so would leave a phone's
+  // culling short, and the city unsettled, ~8 s longer)
   function occluders() {
+    const t0 = performance.now(), budget = stage >= 4 ? OCC_MS : Infinity;
     for (const i of occDirty) {
       const tx = i % d.nx, ty = Math.floor(i / d.nx), src: ColumnData[] = [];
       if (stage >= 2 && inTile[i] && bldsOn(i).every((b) => shown[b + 1])) for (const s of lods) {
@@ -642,11 +650,15 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
         if (nd?.data) src.push(nd.data);
       }
       const was = occSrc.get(i) ?? [];
-      if (was.length === src.length && was.every((c, k) => c === src[k])) continue;
+      if (was.length === src.length && was.every((c, k) => c === src[k])) { occDirty.delete(i); continue; }
+      if (src.length && performance.now() - t0 > budget) {
+        if (was.length) { occSrc.delete(i); occ.setTile(tx, ty, []); }
+        continue;
+      }
+      occDirty.delete(i);
       if (src.length) occSrc.set(i, src); else occSrc.delete(i);
       occ.setTile(tx, ty, src);
     }
-    occDirty.clear();
   }
 
   const labelled = new Map(meta.labels.map((l, i) => [`${l.x + 0.5},${l.y + 0.5}`, labelBld[i]]));
