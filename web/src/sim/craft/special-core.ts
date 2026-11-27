@@ -88,6 +88,22 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     if (vn < 0) { v.x -= vn * n.x; v.z -= vn * n.z; }
   }
 
+  // (the helicopter alone: a skid's step onto a deck; the hovercraft and the paraglider meet a deck as a wall)
+  stand(rise: number) {
+    if (this.kind !== 'helicopter' || this.ended) return false;
+    const m = this.motion;
+    m.p.y += rise;
+    if (m.velocity.y < 0) m.velocity.y = 0;
+    m.grounded = true;
+    return true;
+  }
+
+  carry(d: Vec3, dh: number) {
+    const m = this.motion;
+    m.p.x += d.x; m.p.y += d.y; m.p.z += d.z;
+    m.heading += dh;
+  }
+
   save(): SpecialCoreState { return { motion: this.motion.save(), result: this.result, from: { ...this.from }, ...this.tank.save() }; }
   load(s: SpecialCoreState) {
     this.motion.restore(s.motion);
