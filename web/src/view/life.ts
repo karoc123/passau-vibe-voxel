@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { LifeMeshes, MAX_BIKES, MAX_PEOPLE, setCount } from './meshes';
 import { farFrom, pt } from '../sim/path';
 import { lerp, wrapAngle } from '../util';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
+import { ACTIVE_CELL, activeKey, PED_POP_R, STEP, type CarPose } from '../sim/road-net';
 import type { SimClient } from '../client/sim-client';
 import { Trains } from './trains';
 import { Boats } from './boats';
@@ -12,6 +12,7 @@ import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
+import { MAX_CARS } from '../sim/contract/agents';
 import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
@@ -20,10 +21,11 @@ import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape
 // thrown or dropped, no physics), picking an agent on screen. It only draws: nothing here feeds back into the sim,
 // and nothing is written into the sim's objects: where an agent is drawn is kept here, by id (Drawn).
 
-// the traffic signals drawn: those within ACTIVE_R + HEADS_OUT of the viewer (further out a pole is a fraction of a
-// pixel wide), placed again once it is HEADS_MOVE m from where they were placed
+// the road traffic drawn as flow out to FAR_R beyond the agents' circle (further out a car is a pixel), and the traffic
+// signals as far (further out a pole is a fraction of a pixel wide), placed again once it is HEADS_MOVE m from where
+// they were placed
+const FAR_R = 1500;
 const HEADS_MOVE = 120;
-const HEADS_OUT = 600;
 // people knocked down by a driven car (WorldSim's events: struck) are thrown: off at THROW of the car's speed along it and
 // LIFT of it upwards, their middle (MID m up the body) on a ballistic arc, turning over backwards to lie flat (their
 // middle LIE m up) as they come down, keeping LAND_KEEP of their speed on landing and sliding to a stop at SLIDE m/s^2.
@@ -120,7 +122,7 @@ export class StreetLife {
 
   // the signal heads near the viewer (and their poles)
   private placeHeads(A: { x: number; z: number }) {
-    const C = ACTIVE_CELL, HR = ACTIVE_R + HEADS_OUT, { x, z } = A;
+    const C = ACTIVE_CELL, HR = FAR_R, { x, z } = A;
     if (!this.headGrid) {
       this.headGrid = new Map();
       this.heads.forEach(([hx, hy], i) => { const k = activeKey(Math.floor(hx / C), Math.floor(hy / C)); const l = this.headGrid!.get(k); if (l) l.push(i); else this.headGrid!.set(k, [i]); });
@@ -149,7 +151,7 @@ export class StreetLife {
     this.frame++;
     this.drawCars(lead / STEP, night, dt);
     const back = this.back = 1 - lead / STEP;
-    this.coaches = [...this.traffic.trains.coaches(back)];
+    this.coaches = [...this.traffic.trains.coaches()];
     this.trains.render(this.coaches, night);
     if (this.traffic.boats) this.boats?.render(this.traffic.boats, back, night);
     const n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
@@ -223,6 +225,15 @@ export class StreetLife {
       const at = c.detachedPose ?? { x: 0, y: 0, z: 0 };
       draw(c, this.entry(this.drawnCars, c.id, at.x, at.y, at.z));
     }
+    T.farCars(this.viewer.x, this.viewer.z, FAR_R, (p, f, len) => {
+      const t = vehicleOf(f), V = M.vehicles[t.id];
+      if (n[t.id] >= MAX_CARS) return;
+      const i = n[t.id]++;
+      m.compose(pos.set(p.x, p.y, p.z), q.setFromEuler(eu.set(-p.pitch, p.h, 0)), sc.set(1, 1, len / t.len));
+      V.body.setMatrixAt(i, m); V.dark.setMatrixAt(i, m); V.head.setMatrixAt(i, m); V.tail.setMatrixAt(i, m);
+      V.body.setColorAt(i, this.col(f.col));
+      V.tail.setColorAt(i, tail.copy(tailOff).multiplyScalar(0.4 + 1.2 * night));
+    });
     for (const id of VEHICLE_IDS) {
       const V = M.vehicles[id];
       setCount(n[id], V.body, V.dark, V.head, V.tail);

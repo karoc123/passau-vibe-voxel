@@ -2,6 +2,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { STEP, Traffic } from '../src/sim/traffic';
 import type { Car, TrainPathData } from '../src/sim/types';
+import type { CoachBox } from '../src/sim/train-traffic';
 import type { VehicleId } from '../src/sim/contract/ids';
 import type { RoadPose } from '../src/sim/contract/pose';
 import { type CarInput, PARK } from '../src/sim/contract/inputs';
@@ -77,6 +78,16 @@ const street = (): Col => ({ g: 10, mat: 1 });
 const testTrack = (start: number, stops: number[]): TrainPathData[] =>
   [{ p: [[start, 50, 10], [start + 1200, 50, 10]], svc: [{ ref: 'R', op: '', stops }] }];
 
+// the traffic's clock set to the first time the head coach of the trains' timetable (and it 10 s on) is as wanted
+function clockWhen(d: Drive, ok: (head: CoachBox, later: CoachBox) => boolean) {
+  const T = d.traffic, head = (t: number) => { T.trains.tick(t, 10); return T.trains.coachBoxes().next().value; };
+  for (let t = 0; t < 7200; t += 0.25) {
+    const k = head(t), later = head(t + 10);
+    if (k && later && k.id === later.id && ok(k, later)) { T.t = t; T.trains.tick(t, 10); return; }
+  }
+  throw new Error('no such time in the timetable');
+}
+
 function kinematicBodies(d: Drive) {
   const bodies: RAPIER.RigidBody[] = [];
   d.physics.world.forEachRigidBody((body) => { if (body.isKinematic()) bodies.push(body); });
@@ -129,9 +140,8 @@ function sharedReplay() {
 export const DRIVE_SCENARIOS: Record<string, () => Check> = {
   drive_standing_coach() {
     const d = takeOver(street, 64, 25, 50, [], false, 'car', testTrack(-1100, [1134.5]));
-    const viewer = { x: 64, z: 50 };
-    // Let the scheduled train brake and dwell across the test street before the driver takes the wheel.
-    for (let i = 1; i <= 20 / STEP; i++) d.traffic.trains.tick(i * STEP, STEP, 12, [viewer]);
+    // (the clock at the timetabled train's stop across the test street, standing for the next 10 s)
+    clockWhen(d, (k, later) => Math.abs(k.x - 66) < 0.5 && later.x === k.x);
     const start = d.traffic.trains.coachBoxes().next().value!;
     let approachKmh = 0;
     const throttle = cruise(50);
@@ -157,6 +167,8 @@ export const DRIVE_SCENARIOS: Record<string, () => Check> = {
   },
   drive_moving_coach_bike() {
     const d = takeOver(street, 64, 50, 0, [], false, 'moto', testTrack(-1020, []));
+    // (the clock with the timetabled train's head about 30 m short of the bike, coming on)
+    clockWhen(d, (k, later) => Math.abs(k.x - 34) < 2.5 && later.x > k.x);
     const start = d.traffic.trains.coachBoxes().next().value!;
     run(d, 4, () => PARK, (drive) => !!drive.snapshot?.fallMs);
     const coach = d.traffic.trains.coachBoxes().next().value!;

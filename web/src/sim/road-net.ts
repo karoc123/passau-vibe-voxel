@@ -17,7 +17,7 @@ export const BLEND = 7;
 // the active circles (sim/traffic.ts setActive): by default ACTIVE_R m round each player's focus (a host may set
 // another), their roads found by ACTIVE_CELL m cell (activeKey); the page draws the signal heads by the same cells
 // round its own viewer (view/life.ts)
-export const ACTIVE_R = 900, ACTIVE_CELL = 300;
+export const ACTIVE_R = 350, ACTIVE_CELL = 300;
 export const activeKey = (cx: number, cy: number) => cy * 65536 + cx;
 // Agents come and go only this far from the viewer (the focus) or further: spawned there, removed there (over the
 // hour's number, off the network, a dead end, the parked cars, the people knocked down), never in plain view. Closer

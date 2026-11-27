@@ -169,7 +169,7 @@ const LAYERS = [
   ['sim/sun.ts', 'shared'], // (the sun's maths: the page's light, the host's start time)
   ['sim/body-pose.ts', 'shared'], // (a body's drawn pose: the sim's and a mirror's; A11)
   ['sim/agent-wire.ts', 'shared'], // (the cars and people as sent: a session's and a mirror's)
-  ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
+  ['sim/road-net.ts', 'shared'], ['sim/coaches.ts', 'shared'], ['sim/flow.ts', 'shared'], // (where the traffic and the trains are drawn: the sim's and a mirror's)
   ['sim/solids.ts', 'shared'], // (the shapes the page's walk meets)
   ['sim/player-name.ts', 'shared'], // (a chosen name cleaned: by the page and by the host)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)

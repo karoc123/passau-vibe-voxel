@@ -1,4 +1,4 @@
-// The traffic's cars, people and trains as a snapshot carries them (contract/agents.ts CarWire, PersonWire, TrainWire): the sim's end
+// The traffic's cars and people as a snapshot carries them (contract/agents.ts CarWire, PersonWire): the sim's end
 // (AgentWire, one per session) and the client's (AgentRead), each keeping by id what the other was last sent. The
 // client draws each one on from its last sample at the speed sent (reckoned: dead reckoning along its way), so a
 // sample is sent only when that drifts: a way changed or one new comes at once, a drift past DRIFT m only on every
@@ -6,7 +6,7 @@
 // between. Over the internet cars and people were ~95 % of a snapshot's bytes. The cars out of the traffic, the bodies
 // and the avatars are sent when they change, a body come to rest once (else every shot's bodies and wrecks were sent
 // whole every tick for as long as they lay near: 7 bodies were 57 kB/s). No three.js, no DOM.
-import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire, TrainState, TrainWire } from './contract/agents';
+import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
 import type { AvatarState, AvatarWire, PlayerReads, Snapshot } from './contract/snapshot';
@@ -39,7 +39,6 @@ interface CarSent {
   vt: VehicleId | undefined; col: string;
 }
 interface PersonSent { gen: number; s: number; tick: number; e: number; dir: number; wait: boolean; v: number; lat: number; col: string }
-interface TrainSent { gen: number; s: number; v: number; tick: number; p: number; n: number; express: boolean }
 
 // whether a sample (s, v) is due at tick against the last one sent (h): it drifts past URGENT by the next tick, or past
 // DRIFT by the next chance on a tick that is one
@@ -66,7 +65,6 @@ interface BodySent { gen: number; key: string; rest: BodyPose | null; p1: BodyPo
 export class AgentWire {
   private readonly cars = new Map<number, CarSent>();
   private readonly people = new Map<number, PersonSent>();
-  private readonly trains = new Map<number, TrainSent>();
   private readonly boats = new Map<number, { gen: number; pose: BoatPose }>();
   private readonly detached = new Map<number, { gen: number; key: string }>();
   private readonly bodies = new Map<number, BodySent>();
@@ -157,18 +155,6 @@ export class AgentWire {
     return known ? [...way] : [...way, v, lat, round(p.ph, 100), p.col];
   }
 
-  train(t: TrainState, tick: number): TrainWire | null {
-    const s = round(t.s, CM), v = round(t.ds / STEP, CM), h = this.trains.get(t.id);
-    if (h && h.p === t.p && h.n === t.n && h.express === t.express) {
-      h.gen = this.gen;
-      if (!drifts(h, s, v, tick)) return null;
-      h.s = s; h.v = v; h.tick = tick;
-      return [t.id, s, v];
-    }
-    this.trains.set(t.id, { gen: this.gen, s, v, tick, p: t.p, n: t.n, express: t.express });
-    return [t.id, s, v, t.p, t.n, t.express ? 1 : 0];
-  }
-
   /** the boats' poses that changed since the last (rounded: mm, 1e-4 rad) */
   boatsOf(b: BoatView): BoatsWire {
     const poses: BoatPose[] = [];
@@ -181,11 +167,11 @@ export class AgentWire {
     return { poses, elapsed: round(b.elapsed, MM), day: b.day };
   }
 
-  /** the snapshot's end: the ids of the cars, people, trains, boats, cars out of the traffic, bodies and avatars it no
+  /** the snapshot's end: the ids of the cars, people, boats, cars out of the traffic, bodies and avatars it no
    * longer holds */
   done(): Snapshot['gone'] {
-    const gone: Snapshot['gone'] = [[], [], [], [], [], [], []];
-    [this.cars, this.people, this.trains, this.boats, this.detached, this.bodies, this.avatars].forEach((M: Map<number, { gen: number }>, i) => {
+    const gone: Snapshot['gone'] = [[], [], [], [], [], []];
+    [this.cars, this.people, this.boats, this.detached, this.bodies, this.avatars].forEach((M: Map<number, { gen: number }>, i) => {
       for (const [id, h] of M) if (h.gen !== this.gen) { M.delete(id); gone[i].push(id); }
     });
     this.gen++;
@@ -210,9 +196,7 @@ export type Sampled<T> = T & { at: number };
 export class AgentRead {
   private readonly cars = new Map<number, Sampled<CarState>>();
   private readonly people = new Map<number, Sampled<PersonState>>();
-  private readonly trains = new Map<number, Sampled<TrainState>>();
   private carList: Sampled<CarState>[] = [];
-  private trainList: Sampled<TrainState>[] = [];
   private readonly boats = new Map<number, BoatPose>();
   private boatList: BoatPose[] = [];
   private lists: [Sampled<PersonState>[], Sampled<PersonState>[]] = [[], []];
@@ -227,8 +211,8 @@ export class AgentRead {
 
   /** a new session: nothing of the last one's known */
   clear() {
-    this.cars.clear(); this.people.clear(); this.trains.clear(); this.boats.clear();
-    this.carList = []; this.lists = [[], []]; this.trainList = []; this.boatList = [];
+    this.cars.clear(); this.people.clear(); this.boats.clear();
+    this.carList = []; this.lists = [[], []]; this.boatList = [];
     for (const h of Object.values(this.held)) h.clear();
     this.bodies.clear(); this.bodyList = []; this.fades = 0;
   }
@@ -237,10 +221,10 @@ export class AgentRead {
   readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[] } {
     const H = this.held, A = H.avatars;
     return {
-      detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[4]),
-      bodies: this.readBodies(s.bodies, s.gone[5], s.tick),
+      detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[3]),
+      bodies: this.readBodies(s.bodies, s.gone[4], s.tick),
       // (prev left out: the pose sent before)
-      avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[6]),
+      avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[5]),
     };
   }
 
@@ -300,22 +284,6 @@ export class AgentRead {
     return { poses: this.boatList, previous, elapsed: w.elapsed, day: w.day };
   }
 
-  /** the trains after the snapshot of tick (ds: the way a tick at the speed sent) */
-  readTrains(list: TrainWire[], gone: readonly number[], tick: number): Sampled<TrainState>[] {
-    const M = this.trains;
-    let changed = false;
-    for (const id of gone) changed = M.delete(id) || changed;
-    for (const w of list) {
-      const o = M.get(w[0]);
-      if (w.length === 6) M.set(w[0], { id: w[0], s: w[1], ds: w[2] * STEP, p: w[3], n: w[4], express: w[5] === 1, at: tick });
-      else if (o) M.set(w[0], { ...o, s: w[1], ds: w[2] * STEP, at: tick });
-      else continue;
-      changed = true;
-    }
-    if (changed) this.trainList = [...M.values()];
-    return this.trainList;
-  }
-
   /** the people after the snapshot of tick (its riders, bikes, in a list of their own): its samples and gone; the
    * lists held before when neither changed them */
   readPeople(walkers: PersonWire[], riders: PersonWire[], gone: readonly number[], tick: number): [Sampled<PersonState>[], Sampled<PersonState>[]] {
@@ -367,13 +335,14 @@ const roundPose = (p: BodyPose): BodyPose => ({ x: round(p.x, MM), y: round(p.y,
   ...(p.lean !== undefined && { lean: round(p.lean, RAD) }), ...(p.wheelie !== undefined && { wheelie: round(p.wheelie, RAD) }) });
 
 /** a body's draw state as sent: positions to mm, its rotation to 1e-5 of a quaternion's parts, angles to 1e-4 rad
- * (a client draws it within a mm or so of where the sim does) */
+ * (a client draws it within a mm or so of where the sim does); a fade's t whole (a ms off is a mm and 1e-3 rad off at
+ * the start of a fast fade) */
 export function wireBody(d: BodyDraw): BodyDraw {
   const f = d.fade;
   return {
     owns: d.owns, body: d.body, p0: d.p0 && roundPose(d.p0), p1: d.p1 && roundPose(d.p1),
     drive: d.drive && { wheelZ: round(d.drive.wheelZ, MM), fall: d.drive.fall && { ...d.drive.fall } },
-    fade: f && { dx: round(f.dx, MM), dy: round(f.dy, MM), dz: round(f.dz, MM), dh: round(f.dh, RAD), t: round(f.t, MM), dur: f.dur },
+    fade: f && { dx: round(f.dx, MM), dy: round(f.dy, MM), dz: round(f.dz, MM), dh: round(f.dh, RAD), t: f.t, dur: f.dur },
   };
 }
 

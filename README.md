@@ -325,7 +325,7 @@ window light on the street: `scripts/tile_fields.py`); the nodes shown hold page
 brings their caps, the corner heights of those columns' tops, which the mesher, the walkers, the car and the drone all
 take as the one surface (`web/src/core/surface.ts`, docs/adr/0005-surface-caps.md); a node of any level with pitched
 roofs brings their caps likewise (section `roof`), drawn as the roofs' slopes only (`web/src/roofs.ts`; the roofs
-collide as voxels); everything else is its voxels. Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~900 m of the camera.
+collide as voxels); everything else is its voxels. Tiles are meshed in workers; the traffic simulation (`web/src/sim/`) runs within ~350 m of each player; further out the page draws the road traffic as flow and the trains from their timetable itself.
 
 ```sh
 cd web
@@ -352,7 +352,7 @@ cd web
 pnpm install                                 # once: the host needs ws
 tools/wt.sh serve                            # the host on port 5300, every interface; prints the URL to give pages
 tools/wt.sh serve --port 5300 'dig=1&seed=3' # the world's start as a page's URL would give it (?dig=, ?seed=, ?mode=, ...)
-tools/wt.sh serve 'active=600'               # the street life's radius round each player in m (default 900)
+tools/wt.sh serve 'active=600'               # the street life's radius round each player in m (default 350)
 tools/wt.sh serve 'interest=1500'            # what each player is sent: the agents, crafts, bodies, events within m (default active + 150)
 tools/wt.sh serve 'every=2'                  # every 2nd tick's snapshot: half the bytes, but drawn motion stops every few frames
 tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN (a phone)
@@ -361,7 +361,7 @@ tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN 
 Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
 port 5300), or the page bare and the server's address in its start menu. Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
 what lies near them, two to a message: the crafts whole, the bodies, avatars and cars let go when they change (one at
-rest once), the cars, people and trains only when the page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
+rest once), the cars and people only when the page's reckoning of them drifts (never the trains: every page works out their timetable), edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
 
 `web/tools/` holds the build's Node steps (`tris.mjs`, `lamps.mjs`), the agent checks below (the gates, `shoot.mjs`)

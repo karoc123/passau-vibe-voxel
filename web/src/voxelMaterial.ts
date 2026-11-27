@@ -816,7 +816,7 @@ if (!THREE.ShaderChunk.shadowmap_vertex.includes(SHADOW_NORMAL_FALLBACK)) throw 
 
 // far: the distance levels' tiles (city.ts), where a
 // metre is a pixel or less: without the moving things' shadow map (daylight.ts NO_MOVING_SHADOW) -- a car there is two
-// pixels and its shadow less, and traffic is only simulated within ~900 m of the focus anyway. What it costs is in the
+// pixels and its shadow less, and traffic is only drawn within 1.5 km of the focus anyway. What it costs is in the
 // program, not in the lookup: on an Iris Xe skipping it beyond 1 km, or taking one tap instead of five, saved nothing,
 // while a program without it drew the scene ~20 % faster at the overview, ~40 % over the whole map
 export function makeVoxelMaterial(uniforms: VoxelUniforms, { far = false } = {}) {

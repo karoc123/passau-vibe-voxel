@@ -18,7 +18,7 @@ interface PedData extends PathData { a: number; b: number; w: number; x?: Signal
 export interface PedEdge extends PedData, Path { i: number }
 
 // a railway track and the routes on it (view/trains.ts)
-export interface TrainService { ref: string; op: string; stops: number[] }
+interface TrainService { ref: string; op: string; stops: number[] }
 export interface TrainPathData extends PathData { svc: TrainService[] }
 
 export interface TrafficData {

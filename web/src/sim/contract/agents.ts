@@ -96,14 +96,6 @@ export interface BodyDraw {
  * body's last pose); a fade's t is that at the snapshot's tick, sent again only when it does not run on with the ticks */
 export type BodyWire = Omit<BodyDraw, 'p0'> & { p0?: BodyPose | null };
 
-/** a train as saved and loaded (sim/train-traffic.ts TrainTraffic save, load) */
-export interface TrainState { id: number; p: number; s: number; ds: number; n: number; express: boolean }
-
-/** a train as a snapshot carries a sample of it (sim/agent-wire.ts: when the client's reckoning drifts), by length:
- * [id, s, v]; then what it is (its track p, coaches n, express 1/0), sent when it comes into sight. Lengths cm,
- * speeds cm/s */
-export type TrainWire = [id: number, s: number, v: number] | [id: number, s: number, v: number, p: number, n: number, express: number];
-
 /** a ship or a boat on the river (sim/boat-traffic.ts) */
 export interface BoatPose {
   // IDs are stable by berth slot for cruise ships and by fleet slot for excursion boats.

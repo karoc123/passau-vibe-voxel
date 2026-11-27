@@ -11,6 +11,7 @@ import { BoatTraffic, type BoatData, type InTheWay } from './boat-traffic';
 import type { WaterColumns } from './river';
 import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
+import { BUS_COLOUR, CAR_COLOURS, carsAt, Flow, PACE, type FlowCar } from './flow';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
 import { WALKER_R } from './solids';
@@ -28,11 +29,10 @@ const BOX_IN = 7, BOX_OUT = 9;
 const JUMP_F = 0.5;
 // a focus moved this far (m) from where its circle was placed: the circles are placed anew
 const MOVE_R = 120;
-const CAR_COLOURS = ['#f0f0ee', '#e9e9e7', '#1c1c1e', '#2a2c30', '#8e9399', '#b9bcc0', '#5d6670', '#9b2a24', '#24467a', '#3d5a3a', '#c9b48e', '#6e1f2a'];
 const SHIRTS = ['#c8553d', '#3d6fa8', '#e8e3d6', '#2f2f33', '#7a9a5b', '#d9a441', '#8b5fa8', '#5a8fa3', '#b03a48', '#f0f0f0', '#45505c', '#c97f5d'];
 const SOFT = ['spatial', 'box-busy', 'no-room-exit', 'hold-at-line', 'next-edge-car'];
 // What one player's circle may hold at most: above what the busiest circle of the map wants at its peak hour at
-// 900 m (so a player alone is never cut), well under the meshes' caps (MAX_CARS, ...), which bound all players
+// 900 m, more than a circle of 350 m holds (so a player alone is never cut), well under the meshes' caps (MAX_CARS, ...), which bound all players
 // together; more players than those fit get thinner streets each (populate), never more agents.
 const BUDGET = { cars: 700, peds: 800, bikes: 80 };
 // the cars parked by the player (detachCar) kept: the oldest of more than PARKED goes once CAR_POP_R from the viewer,
@@ -93,6 +93,10 @@ interface Region {
 export class Traffic {
   // the roads, footways and signals, and where on them the agents are drawn (shared with the client's mirror)
   readonly net: RoadNet;
+  // the far traffic (the page's to draw), where cars are spawned; its density: the hour's, before any overload cut
+  private readonly flow: Flow;
+  private flowDensity = 1;
+  private readonly flowCar: FlowCar = { lane: 0, s: 0, bus: false, col: '' };
   get ground() { return this.net.ground; }
   set ground(g: Ground | null) { this.net.ground = g; }
   // the world's water columns the boats float on (sim/river.ts; world.ts World); null: none, at a fixed top
@@ -170,9 +174,9 @@ export class Traffic {
   /** activeR: the radius (m) of each player's circle */
   constructor(data: TrafficData, private readonly seed = DEFAULT_SEED, readonly activeR = ACTIVE_R) {
     this.rand = rng(seed);
-    // At the default seed, keep the original train and boat timetables.
-    this.trains = new TrainTraffic(data.trains ?? [], (seed >>> 0) - DEFAULT_SEED);
+    this.trains = new TrainTraffic(data.trains ?? []);
     this.net = new RoadNet(data);
+    this.flow = new Flow(this.net.roads);
     ({ roads: this.roads, peds: this.peds, ctrls: this.ctrls, heads: this.heads } = this.net);
     this.roads.forEach((e, i) => { pushTo(this.outs, e.a, i); pushTo(this.ins, e.b, i); });
     this.peds.forEach((e, i) => { pushTo(this.padj, e.a, [i, 0]); pushTo(this.padj, e.b, [i, 1]); });
@@ -228,7 +232,7 @@ export class Traffic {
     const hh = ((hour % 24) + 24) % 24;
     const bell = (c: number, w: number) => Math.exp(-(((hh - c) / w) ** 2));
     const density = {
-      cars: Math.min(1, 0.18 + 0.55 * bell(8, 2.2) + 0.5 * bell(17, 2.6) + 0.45 * bell(13, 5)) * this.carShare,
+      cars: (this.flowDensity = carsAt(hour)) * this.carShare,
       peds: Math.min(1, 0.08 + 0.4 * bell(8.5, 1.8) + 0.85 * bell(16, 4.5) + 0.25 * bell(21, 2)) * this.crowd,
       // the counters' day: the commute to work and home, a lunch hump, little at night; a fifth of July's in January
       bikes: (0.03 + 0.85 * bell(8, 1.4) + 1.0 * bell(17, 2.0) + 0.35 * bell(13, 3))
@@ -309,22 +313,30 @@ export class Traffic {
     return this.far(x, y, z, R, r.warm ? this.settled : this.viewers);
   }
 
+  // a car where one of a road's flow cars is now (the same look), so it comes in where the page drew that one: on a
+  // road into the circle (fromSource) or anywhere in it; one with no flow car on it now, anywhere along it
   private spawnCar(r: Region, fromSource: boolean) {
     const ei = fromSource && r.sources.length ? this.anyOf(r.sources) : r.roadAct[this.pick(r.roadW)];
-    const e = this.roads[ei], lane = (this.rand() * e.lanes) | 0;
-    const s = fromSource ? 0 : 10 + this.rand() * Math.max(0, e.L - 20 - BOX_IN - 12);
+    const e = this.roads[ei], n = this.flow.count(ei, this.flowDensity);
+    let f: FlowCar;
+    if (n > 0) f = this.flow.car(ei, (this.rand() * n) | 0, n, this.t, this.flowCar);
+    else {
+      const bus = e.c >= 2 && this.rand() < 0.06, vt = bus ? undefined : trafficType(this.idSeq);
+      f = { lane: (this.rand() * e.lanes) | 0, s: 10 + this.rand() * Math.max(0, e.L - 20 - BOX_IN - 12), bus, vt, col: bus ? BUS_COLOUR : this.anyOf(CAR_COLOURS) };
+    }
+    const { lane, s, bus, vt } = f;
     if (s > e.L - BOX_IN - 12 || !this.laneGapOK(e, lane, s, null)) return false;
     const P = at(e, s, 0, this.tmp);
     if (!this.mayAppear(r, P.x, P.y, P.z, CAR_POP_R)) return false;
-    const bus = e.c >= 2 && this.rand() < 0.06, id = this.idSeq++, vt = bus ? undefined : trafficType(id);
+    const id = this.idSeq++;
     const car: Car = {
-      kind: 'car', id, e: ei, lane, s, v: e.v * 0.6, len: bus ? 12 : VEHICLES[vt!].len, bus, prev: -1, prevOff: 0, next: -1,
-      v0f: 0.85 + this.rand() * 0.25, col: bus ? '#f2c230' : this.anyOf(CAR_COLOURS),
+      kind: 'car', id, e: ei, lane, s, v: e.v * PACE, len: bus ? 12 : VEHICLES[vt ?? 'car'].len, bus, prev: -1, prevOff: 0, next: -1,
+      v0f: 0.85 + this.rand() * 0.25, col: f.col,
       off: laneOffset(e, lane), brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null,
       boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0, boxTurn: 0, block: null,
       geo: { px: 0, py: 0, cx: 0, cy: 0, z: 0, fx: 0, fy: 0 },
     };
-    if (vt !== 'car') car.vt = vt;
+    if (vt && vt !== 'car') car.vt = vt;
     this.setNext(car, this.chooseNext(e));
     e.lists[lane].push(car);
     this.cars.push(car);
@@ -510,7 +522,7 @@ export class Traffic {
     this.stepCars(dt);
     this.stepPeople(dt);
     this.stepRiders(dt);
-    this.trains.tick(this.t, dt, hour, this.viewers);
+    this.trains.tick(this.t, hour);
     this.bodies?.tick(dt, this);
     this.boatTraffic?.tick(this.t, hour, this.day, this.water, this.inTheWay);
   }

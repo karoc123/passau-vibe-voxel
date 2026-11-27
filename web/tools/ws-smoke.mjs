@@ -176,7 +176,7 @@ if (walk && (walk.share < 0.9 || walk.dist < 5)) fail.push(`A's body as B draws 
 // The bytes each player's socket wrote (deflated, as over the internet) from A's walk on, kB a second of the world's
 // time: A on foot, B driving by the cathedral, C by the dam. A busy machine skips a backed-up socket's snapshots, which
 // only lowers it, so the budget holds under load. Measured 2026-11-26 (players by the cathedral, cars sent within
-// 350 m, people 200 m; cars, people and trains sent when the page's reckoning drifts, boats when they move, edits as
+// 350 m, people 200 m; cars and people sent when the page's reckoning drifts, trains never, boats when they move, edits as
 // ops): ~12-15 kB/s on foot or driving there, ~2 by the dam; the target is 20 mean, 50 peak.
 // --interest 100000 for the bytes unfiltered (no budget then).
 const BUDGET = 25;

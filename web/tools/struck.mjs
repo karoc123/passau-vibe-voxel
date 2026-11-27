@@ -35,8 +35,9 @@ function strike(kmh) {
 function draw(d, e) {
   const traffic = d.traffic;
   traffic.ground = { surface: () => GROUND, support: () => GROUND };
-  // (the sim has no other players; the mirror lists them)
+  // (the sim has no other players and no far traffic; the mirror lists them, draws it)
   traffic.avatars ??= [];
+  traffic.farCars ??= () => {};
   let tick = 0;
   const client = { get tick() { return tick; }, traffic, eventsSince: (t) => (t < e.tick && tick >= e.tick ? [e] : []), avatars: () => [], drivers: () => [], passengers: () => [], crafts: () => [], player: null };
   // (the torso's instances: the people walking first, none here, so the person knocked down is the first)
