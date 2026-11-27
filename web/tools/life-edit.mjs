@@ -849,8 +849,9 @@ async function left() {
     const g = heli.core.pose.y;
     tick(2, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 1, drive: 0, turn: 0, side: 0 } }), near);
     client.update(0);
-    const p = poses.get(client.time.tick)?.get(heli.id), q = client.craftOf().core.pose;
-    check(heli.core.pose.y > g + 5 && p && p.x === q.x && p.y === q.y && p.z === q.z && p.h === q.h,
+    // (within the core's rounding on the wire, sim/agent-wire.ts wireCore: a tick off is decimetres)
+    const p = poses.get(client.time.tick)?.get(heli.id), q = client.craftOf().core.pose, near1 = (a, b) => Math.abs(a - b) <= 1e-4;
+    check(heli.core.pose.y > g + 5 && p && near1(p.x, q.x) && near1(p.y, q.y) && near1(p.z, q.z) && near1(p.h, q.h),
       `left: B flies it up (${(heli.core.pose.y - g).toFixed(1)} m); the client's copy is where the sim's was in the tick it draws`);
     // the viewer's focus away: B in the helicopter keeps the car by it; once B has left it too, both go after the delay
     tick(keeping.after + 1, () => client.send({ kind: 'seatInput', role: 'pilot', input: { lift: 0, drive: 0, turn: 0, side: 0 } }), away);

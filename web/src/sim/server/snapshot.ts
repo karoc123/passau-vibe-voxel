@@ -12,7 +12,7 @@
 // No three.js, no DOM (tools/core-deps.mjs).
 import type { Car } from '../types';
 import type { BodyWire, CarState, CarWire, PersonWire } from '../contract/agents';
-import { AgentWire, round, wireBody, wirePose } from '../agent-wire';
+import { AgentWire, round, wireBody, wireCore, wirePose } from '../agent-wire';
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
 import type { Ack, AvatarWire, CraftState, EditNote, Snapshot } from '../contract/snapshot';
@@ -66,7 +66,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   // (a core of its type's state: sim/craft/cores.ts asserts the contract's are the cores')
   for (const c of sim.crafts.values()) {
     if (c.placed && (!S || S.sees('craft', c.id, c.core.pose.x, c.core.pose.z)))
-      crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
+      crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: wireCore(c.core.save()) } as CraftState);
   }
   const passengers: [kind: 'car' | 'craft', id: number, player: PlayerId][] = [];
   for (const [id, P] of sim.players) {
@@ -75,13 +75,16 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
   }
   let events = sim.eventsSince(since);
   if (S) { events = events.filter((e) => S.event(e)); S.done(); }
+  // (rounded: the camera follows the body drawn, the page takes from these only where the fallen are cleared and the
+  // speed shown in whole km/h; every tick's 15 places did not deflate)
+  const d = sim.driverSnapshot(player), driver = d && { ...d, pose: wirePose(d.pose), kmh: round(d.kmh, 10) };
   return {
     tick: sim.tick, t: T.t, hour: sim.timeOfDay.hour, day: T.day,
     cars, detached, people, riders, gone,
     bodies,
     boats,
     avatars, drivers, passengers, crafts, events,
-    player: wire.player({ id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } }),
+    player: wire.player({ id: player, seat: sim.seat(player), driver, results, ack: ack && { ...ack } }),
     edits,
   };
 }
