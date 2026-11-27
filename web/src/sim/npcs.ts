@@ -66,7 +66,7 @@ export class Npcs {
 
   /** box [x0, z0, x1, z1) of the voxels was edited: the grids over it are stale */
   edited(box: readonly [number, number, number, number]) {
-    for (const n of this.all.values()) if (n.grid?.touches(box)) n.grid.stale = true;
+    for (const n of this.all.values()) if (n.grid?.covers(box)) n.grid.stale = true;
   }
 
   /** a world tick of dt s: each NPC stepped among the solid things near it (solids) */

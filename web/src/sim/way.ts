@@ -2,7 +2,7 @@ import { WALKER_HEAD } from './solids';
 import { STEP, type Ground } from './walk';
 
 /** m an NPC's way may drop from one cell to the next (a wall or a ledge higher is a way down it never takes) */
-export const DROP = 3;
+const DROP = 3;
 // a square window of cells at most this many a side (160 m: 25 600 cells), its margin round the start and the goal
 const MAX_SIDE = 160, MARGIN = 16;
 // a cell's cost: across, the diagonal, a step up on top, water (slow, wading or swimming)
@@ -57,7 +57,7 @@ export class WalkGrid {
   }
 
   /** whether the window covers any of box [x0, z0, x1, z1) */
-  touches(b: readonly [number, number, number, number]) {
+  covers(b: readonly [number, number, number, number]) {
     return b[0] < this.x0 + this.n && b[2] > this.x0 && b[1] < this.z0 + this.n && b[3] > this.z0;
   }
 
