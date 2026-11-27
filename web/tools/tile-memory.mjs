@@ -24,16 +24,28 @@ const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts');
 const { STEP } = await load('sim/road-net.ts');
 const data = readHostData(DATA), N = data.meta.tiles.N, spot = data.meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 2771 };
 const fail = [];
+// the array buffers held, once collected: gc() returns before V8's sweeper has freed the dead ones off the main thread,
+// and on a loaded machine they are still counted then (seen: 1184 kB a node, 550 a moment later); so again until two
+// readings agree
+const held = async () => {
+  let was = NaN;
+  for (let i = 0; i < 50; i++) {
+    gc();
+    const now = process.memoryUsage().arrayBuffers;
+    if (now === was) return now;
+    was = now;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return was;
+};
 
 // 1.
 const nodes = [];
 for (let ty = Math.floor((spot.y - R) / N); ty <= Math.floor((spot.y + R) / N); ty++)
   for (let tx = Math.floor((spot.x - R) / N); tx <= Math.floor((spot.x + R) / N); tx++) nodes.push([tx, ty]);
-gc();
-const before = process.memoryUsage().arrayBuffers, cache = nodeTileCache(DATA, N, new LiveEdits(), 0);
+const before = await held(), cache = nodeTileCache(DATA, N, new LiveEdits(), 0);
 const got = (await Promise.all(nodes.map(([tx, ty]) => cache.acquire(tx, ty).then(() => 1, () => 0)))).reduce((a, b) => a + b, 0);
-gc();
-const perNode = (process.memoryUsage().arrayBuffers - before) / got;
+const perNode = (await held() - before) / got;
 if (!(got > 20)) fail.push(`only ${got} nodes read round the cathedral`);
 if (!(perNode <= BOUND)) fail.push(`${(perNode / 1e3).toFixed(0)} kB held per node, over ${BOUND / 1e3}`);
 
