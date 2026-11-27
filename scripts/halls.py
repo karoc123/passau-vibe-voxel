@@ -32,7 +32,7 @@ from scipy import ndimage
 import interiors
 import tilefile
 import tiles
-from constants import M_INTERIOR
+from constants import M_INTERIOR, M_INTERIOR_GLASS
 
 N = tilefile.N
 S = N + 2
@@ -41,11 +41,19 @@ DOOR_H = 3  # the walker is 1.9 m (web/src/sim/solids.ts WALKER_HEAD): a metre o
 # floor too (the door then STEP m higher: the walker on the sloped street stands up to half a metre over its voxel)
 LARGE = 120  # m^2 of hall from which it is 5 m high, has 3 m doors and pillars
 PARTITION = 300  # m^2 of hall from which a partition crosses it
+TALL = 0  # --height: the hall up to this many m under its roof instead (a low ceiling walks like a cave)
+COVER = True  # --no-cover: no pillars
+HOLES = False  # --holes: windows open through the wall to the street
+RECT = False  # --rect: the hall the largest rectangle in the footprint
+LANE = SHELL + 3  # cells a door may cut through (--rect: a rectangle leaves thicker walls)
+LIGHT = False  # --light: windows of the day's light in the walls, skylights in the ceiling
+WIDE = 0  # --wide: m the narrowest part of a hall may be
+DOOR_TOP = 4  # --door-h: m of door over the floor
 STEP = 1  # m the street before a door may lie over the floor (a step down in); not under it: the sloped street
 # surface (caps) lies up to half a metre under its voxel, more than the walker steps up (1.05 m) from there
 # the interior colours (material M_INTERIOR): plaster on walls and ceiling, a stone floor, pillars and partitions
 INTERIOR = {"plaster": [214, 206, 190, M_INTERIOR], "floor": [126, 110, 92, M_INTERIOR],
-            "pillar": [176, 164, 146, M_INTERIOR]}
+            "pillar": [176, 164, 146, M_INTERIOR], "glass": [150, 175, 190, M_INTERIOR_GLASS]}
 
 
 def load(src, nodes):
@@ -79,6 +87,28 @@ def load(src, nodes):
     return vol, g, bld, secs
 
 
+def largest_rect(m):
+    """the largest axis-aligned rectangle of True cells in m, as a mask"""
+    D, W = m.shape
+    hgt = np.zeros(W, int)
+    best, box = 0, None
+    for r in range(D):
+        hgt = np.where(m[r], hgt + 1, 0)
+        st = []
+        for c in range(W + 1):
+            hc = hgt[c] if c < W else 0
+            s0 = c
+            while st and st[-1][1] >= hc:
+                s0, sh = st.pop()
+                if sh * (c - s0) > best:
+                    best, box = sh * (c - s0), (r - sh + 1, r + 1, s0, c)
+            st.append((s0, hc))
+    out = np.zeros_like(m)
+    if box:
+        out[box[0]:box[1], box[2]:box[3]] = True
+    return out
+
+
 def plan_hall(vol, g, bld, sl, b, margin, min_area):
     """building b's hall in the box sl of the volume: ((z of the floor, height, hall, pillars, doors), the doors'
     street cells and outward steps), the cells boolean masks over the box; or why it gets none"""
@@ -102,7 +132,7 @@ def plan_hall(vol, g, bld, sl, b, margin, min_area):
         return "no street"
     zf = int(np.median(gs[around]))
     area = int(hall0.sum())
-    h = 5 if area >= LARGE else 4
+    h = TALL or (5 if area >= LARGE else 4)
     # under most of the roof (a lower annex or eave is left out of the hall below); every column of the hall and its
     # shell solid from under the floor to over the ceiling (two voxels: the ceiling's inner one interior, the roof's
     # outer one as it was)
@@ -112,13 +142,21 @@ def plan_hall(vol, g, bld, sl, b, margin, min_area):
     full = sub_b & (solid[zf - 1:zf + h + 2].all(0))
     hall = ndimage.binary_erosion(full, cross, SHELL, border_value=0) & hall0
     hall = ndimage.binary_opening(hall, cross)  # (no 1 m slivers)
+    if WIDE:
+        # (no arm narrower than WIDE m: a footprint's narrow wings walk like shafts; the largest piece left is the hall)
+        hall = ndimage.binary_opening(hall, np.ones((WIDE, WIDE), bool))
+        lab, n = ndimage.label(hall, cross)
+        if n > 1:
+            hall = lab == 1 + int(np.argmax(ndimage.sum(hall, lab, range(1, n + 1))))
+    if RECT:
+        hall = largest_rect(hall)  # (straight walls: a footprint's own outline, carved, looked dug)
     area = int(hall.sum())
     if area < max(9, min_area):  # (3 x 3 m: room to turn and to stand out of the door)
         return "small"
     # doors: from a hall cell straight out through k = SHELL..SHELL+2 shell cells of the building to a street cell
     # (no building, its ground 0..STEP over the floor, open for the door's height)
     zz = np.arange(H)[:, None, None]
-    above = (zz >= gs) & (zz < zf + DOOR_H + STEP)
+    above = (zz >= gs) & (zz < zf + DOOR_TOP)
     street = (bld[sl] == 0) & (gs >= zf) & (gs - zf <= min(STEP, h - DOOR_H)) & ~(solid & above).any(0)
     D, W = hall.shape
     def lane(r, c, dr, dc):
@@ -126,7 +164,7 @@ def plan_hall(vol, g, bld, sl, b, margin, min_area):
         while 0 <= r < D and 0 <= c < W and hall[r, c]:
             r, c = r + dr, c + dc
         out = []
-        for _ in range(SHELL + 3):
+        for _ in range(LANE):
             if not (0 <= r < D and 0 <= c < W) or not full[r, c] or hall[r, c]:
                 break
             out.append((r, c))
@@ -154,7 +192,7 @@ def plan_hall(vol, g, bld, sl, b, margin, min_area):
         return "no street door"
     cy, cx = np.mean(np.nonzero(hall), axis=1)
     # the first door nearest the hall's middle, then each the farthest from those chosen, at least 6 m apart
-    fits.sort(key=lambda f: (f[0][0] - cy) ** 2 + (f[0][1] - cx) ** 2)
+    fits.sort(key=lambda f: (len(f[1]) // width if RECT else 0, (f[0][0] - cy) ** 2 + (f[0][1] - cx) ** 2))
     chosen = [fits[0]]
     while len(chosen) < n_doors:
         best, bd = None, 36
@@ -187,7 +225,7 @@ def plan_hall(vol, g, bld, sl, b, margin, min_area):
             gm = int(np.median(mid))
             line[lr[np.abs(mid - gm) <= 1], lc[np.abs(mid - gm) <= 1]] = False
         keep |= line
-    if min(np.ptp(rr), np.ptp(cc)) >= 8:
+    if COVER and min(np.ptp(rr), np.ptp(cc)) >= 8:
         grid = np.zeros_like(hall)
         r0, c0 = rr.min() + 3, cc.min() + 3
         for a in range(r0, rr.max() - 2, 7):
@@ -203,19 +241,37 @@ def stamp(vol, rows, cols, zf, h, hall, keep, doors, ids, doors_only=False):
     box = vol[:, rows, cols]
     if doors_only:  # (what a house with its hall's faces hidden costs seen from outside: the door recesses alone)
         rr, cc = np.nonzero(doors)
-        interiors.carve(vol, rr + rows.start, cc + cols.start, zf, zf + min(DOOR_H + STEP, h))
+        interiors.carve(vol, rr + rows.start, cc + cols.start, zf, zf + min(DOOR_TOP, h))
         return
     cross = ndimage.generate_binary_structure(2, 1)
     lining = ndimage.binary_dilation(hall, cross) & ~hall & ~doors
-    box[zf:zf + h][:, lining] = ids["plaster"]
+    if SHELL > 1:  # (a one-block wall is the facade itself: painted, the street would see plaster)
+        box[zf:zf + h][:, lining] = ids["plaster"]
+    if HOLES:
+        # windows open to the street: 2 m wide every 4 m in the walls with street beyond, two rows in a tall hall
+        street = ndimage.binary_dilation(box[zf + 3] == 0, cross) & ~hall
+        rr, cc = np.nonzero(lining & street)
+        w = (rr + cc) % 4 < 2
+        bands = [(2, 5), (6, 9)] if h >= 10 else [(2, h - 1)]
+        for a, b_ in bands:
+            interiors.carve(vol, rr[w] + rows.start, cc[w] + cols.start, zf + a, zf + b_)
     box[zf + h][hall] = ids["plaster"]
     box[zf - 1][hall] = ids["floor"]
     box[zf:zf + h][:, keep] = ids["pillar"]
+    if LIGHT:
+        # (no sun reaches a hall: windows of the day's light, M_INTERIOR_GLASS, 1 m wide every 3 m along the walls from
+        # 2.5 m to a metre under the ceiling, and a skylight strip every 5 m across the ceiling)
+        rr, cc = np.nonzero(lining)
+        win = ((rr + cc) % 3 == 0)
+        box[zf + 2:zf + h - 1][:, rr[win], cc[win]] = ids["glass"]
+        hr, hc = np.nonzero(hall & ~keep)
+        sky = (hr % 5 == 2) if np.ptp(hr) <= np.ptp(hc) else (hc % 5 == 2)
+        box[zf + h][hr[sky], hc[sky]] = ids["glass"]
     open_ = hall & ~keep
     rr, cc = np.nonzero(open_)
     interiors.carve(vol, rr + rows.start, cc + cols.start, zf, zf + h)
     rr, cc = np.nonzero(doors)
-    interiors.carve(vol, rr + rows.start, cc + cols.start, zf, zf + min(DOOR_H + STEP, h))
+    interiors.carve(vol, rr + rows.start, cc + cols.start, zf, zf + min(DOOR_TOP, h))
 
 
 def link_tree(src, out):
@@ -243,7 +299,23 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--min-area", type=int, default=0)
     ap.add_argument("--doors-only", action="store_true")
+    ap.add_argument("--height", type=int, default=0)
+    ap.add_argument("--door-h", type=int, default=4)
+    ap.add_argument("--wide", type=int, default=0)
+    ap.add_argument("--no-partition", action="store_true")
+    ap.add_argument("--rect", action="store_true")
+    ap.add_argument("--no-cover", action="store_true")
+    ap.add_argument("--holes", action="store_true")
+    ap.add_argument("--shell", type=int, default=2)
+    ap.add_argument("--light", action="store_true")
     a = ap.parse_args()
+    global TALL, DOOR_TOP, WIDE, PARTITION, RECT, LANE, LIGHT, COVER, HOLES, SHELL
+    COVER, HOLES, SHELL = not a.no_cover, a.holes, a.shell
+    TALL, DOOR_TOP, WIDE, RECT, LIGHT = a.height, a.door_h, a.wide, a.rect, a.light
+    if RECT:
+        LANE = 12
+    if a.no_partition:
+        PARTITION = 10 ** 9
     src, out = Path(a.src), Path(a.out)
     t0 = time.time()
     cx, cy = map(int, a.node.split("_"))

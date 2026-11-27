@@ -1,4 +1,4 @@
-# Enterable houses: a hollow ground floor (hall) in every building
+# Enterable houses: a hollow ground floor (hall) in every building (on hold)
 
 Owner's decision (2026-11-27), replacing the earlier windows-first concept: houses become enterable, gameplay first,
 not realism. Step 1: every building gets a hollow ground floor (a hall), the house above stays solid. Later the halls
@@ -43,30 +43,18 @@ absent, standing in for a hall whose inside is drawn only while the camera is in
   the 7 failures start stuck at a spot 1.5 m before the door. Traffic follows the road net and the road cells are
   unchanged; a player's car fits through a 3 m door (not tested).
 
-## Recommendation
+## Owner's verdict (2026-11-27): on hold
 
-All buildings, but only with two page changes; without them no hall should ship, because "all" costs +15-23 % in
-view even with the occlusion fixed, and chosen ones still +8 %.
-
-1. Occlusion: rooms count as solid unless the eye is in one (probed, behind `?halls=1`; becomes the default).
-2. Hall faces drawn only near: the mesher puts the faces of interior-material voxels in their own index range per
-   node, ordered by building; the page draws the range of the hall the camera is in or within ~10 m of a door
-   (+1 draw call). Then the outside cost is the "doors only" column: +2.4-4.0 % in view, under the threshold.
-3. A smaller room record (a box and height per hall instead of spans per column): the record is 60 % of the bytes.
-
-If 2 turns out dearer than it looks, fall back to chosen halls (≥150 m²) with 1 and 2: +1.2-1.6 %.
-
-Full rebuild with halls in the pipeline (rooms through interiors.py, the coarser levels unchanged): est. +1 min on
-the ~5½ min build. Map, extrapolated from 196 halls (est. ~11 k halls): level 1 +6 MB (44.9 → ~51 MB) with
-today's record, ~+2.5 MB with a box record; level-1 triangles +9 M (+16 %) as probed, +1.5 M (+2.6 %) with 2.
+Walked in, not good, "not this way": low halls felt like caves, carved footprints like a mole's tunnels, pillars out
+of place, and even tall straight halls with window holes stayed dark and oppressive. Tried after the measurements
+(`halls.py` options): only halls over 150 m^2, 10 m ceilings, 6 m doors, no arm under 8 m, the largest rectangle in
+the footprint, a one-block wall, window holes, no pillars or partition. What a later try would need first (an analysis,
+not built): a face's material by the room beside it (one-block walls: facade outside, plaster inside), light indoors
+(the sky's share raised, a block grid; or Minecraft-like light per voxel baked into the mesh), window holes on the
+facade's painted axes. Hand-built landmark interiors (interiors.py ROOMS) stay possible on their own.
 
 ## How to repeat
 
 `uv run python scripts/halls.py --out DIR [--min-area 150] [--doors-only]` (old town, into DIR/data: links to the
 committed data but the 9 rewritten nodes and meta.json), `node tools/tris.mjs DIR/data`, then
 `node tools/halls-probe.mjs --public DIR --halls DIR/halls.json --phone [--occ]`.
-
-## Owner's questions
-
-1. All buildings with steps 1-3 first, or chosen ones (≥150 m², a quarter of the houses) sooner?
-2. May the rebuild be planned once 1-3 pass the threshold on the probe region?

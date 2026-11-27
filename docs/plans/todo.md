@@ -37,13 +37,12 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
   in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
 - E15 health and items, E16 spawn/despawn/keep.
+- Enterable houses: probed, on hold (owner 2026-11-27, `building-looks.md`).
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
 - Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
 ## Pipeline and city
 
-- Enterable houses, a hall on every ground floor: probed and costed in `building-looks.md`, waiting for the owner's
-  answers there.
 - Q7: the Wels-Passau railway's Inn bridge near Ingling (ways 131994367, 131994370) is a through truss; the deck is
   right, the truss is not drawn.
 - Q5 leftover at -1102,1292: a 1–2 m strip 10 m over LoD2 where the surface model's step lies a cell off LoD2's.
