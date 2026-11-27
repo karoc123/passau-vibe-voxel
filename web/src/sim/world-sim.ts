@@ -57,7 +57,6 @@ import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
 import { carried, carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
-import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
@@ -724,7 +723,7 @@ export class WorldSim {
   }
 
   // the solid things a walker at x, z may be in or on, as the host has them now: the cars, the crafts with a shape, the
-  // river's vessels (not the coaches: a tick's trains worked out for every pose is not cheap; not the other walkers)
+  // river's vessels, the coaches (not the other walkers)
   private walkSolids(x: number, z: number): Solid[] {
     const T = this.traffic, out: Solid[] = [], near = (px: number, pz: number, R: number) => Math.abs(px - x) < R && Math.abs(pz - z) < R;
     for (const list of [T.cars, T.detachedCars]) for (const c of list) {
@@ -736,6 +735,7 @@ export class WorldSim {
       if (c.placed && near(q.x, q.z, CRAFT_REACH)) craftSolids(c.type, q, out, `craft${c.id}`);
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading }, `${b.kind}${b.id}`));
+    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }, `coach${k.id}`));
     return out;
   }
 
@@ -881,7 +881,7 @@ export class WorldSim {
   // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
   // crafts with a shape (the light ones only to a light one: sim/solids.ts lightSolids), the river's vessels, the train
   // coaches. Not the walkers: their walk is their page's, and a craft shoves them as a car does.
-  private solidsNear(own: Craft, shapes: readonly Shape[], coaches: () => readonly CoachPose[]): Solid[] {
+  private solidsNear(own: Craft, shapes: readonly Shape[]): Solid[] {
     const T = this.traffic, p = own.core.pose, v = own.core.velocity, out: Solid[] = [];
     let r = 0;
     for (const s of shapes) r = Math.max(r, Math.hypot(s.hx, s.hz) + Math.abs(s.fwd ?? 0));
@@ -896,7 +896,7 @@ export class WorldSim {
       if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) lightSolids(own.type, c.type, q, craftSolids(c.type, q, out));
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
-    for (const k of coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
+    for (const k of T.trains.coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
     return out;
   }
 
@@ -926,15 +926,12 @@ export class WorldSim {
   // tick's steps (STEP worth) at its own fixed step with its pilot's input (or the neutral); a step not taken (a tile
   // not in) drops the rest of the tick. Its core's events become the world's (craft), this tick's
   private stepCrafts() {
-    // (the coaches' poses, all the trains', worked out once a tick if a craft wants them)
-    let coaches: CoachPose[] | null = null;
-    const trains = () => (coaches ??= [...this.traffic.trains.coaches()]);
     for (const c of (this.crafts as Map<CraftId, CraftState>).values()) {
       if (!c.placed) continue;
       const core = c.core;
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
-      const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes, trains) : null;
+      const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes) : null;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
         if (near?.length) meetSolids(c.type, core, near, c.collision);

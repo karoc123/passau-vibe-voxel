@@ -253,7 +253,7 @@ export class MirrorSimClient implements SimClient {
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
     readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null,
     predict?: CraftWorld) {
-    this.prediction = predict ? new Prediction(predict, (c, s, off, out) => this.traffic.carPose(c, s, off, out)) : null;
+    this.prediction = predict ? new Prediction(predict, (c, s, off, out) => this.traffic.carPose(c, s, off, out), (t, hour) => this.traffic.trains.at(t, hour)) : null;
     if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
@@ -553,8 +553,8 @@ export class TrafficMirror {
   acc = 0;
   private t = 0;
   boats: BoatView | null = null;
-  /** the trains' coaches at the render clock: the host's timetable worked out here */
-  readonly trains: { coaches(): IterableIterator<CoachPose> };
+  /** the trains' coaches at the render clock, or at world time t (s) and hour: the host's timetable worked out here */
+  readonly trains: { coaches(): IterableIterator<CoachPose>; at(t: number, hour: number): IterableIterator<CoachPose> };
   // the snapshot's tick and hour, and the world clock (s) at the render clock
   private tick = 0;
   private hour = 12;
@@ -572,7 +572,7 @@ export class TrafficMirror {
     this.net.ground = ground;
     this.wire = new AgentRead((e) => this.net.roads[e].L);
     const table = new Timetable(data.trains ?? []);
-    this.trains = { coaches: () => table.coaches(this.clock, this.hour) };
+    this.trains = { coaches: () => table.coaches(this.clock, this.hour), at: (t, hour) => table.coaches(t, hour) };
     this.flow = new Flow(this.net.roads);
   }
 

@@ -7,8 +7,8 @@
 // drawn one eases over; put far aside, it is shown there at once. Over a jittery link (each message 40 to 200 ms, in
 // order, so they bunch) a hovercraft and a helicopter flown by a scripted stick end where the same script ends over the
 // steady link (the host takes each tick's input for its tick), and the page's corrections stay few and small. Driven
-// at a parked car and at another player's hovercraft, a hovercraft drawn stops at it and is not pulled back out of it a
-// round trip later; a floatplane flown low at a parked car is drawn crashing on it, the crash told at once and once.
+// at a parked car, at another player's hovercraft and at a train standing at its station, a hovercraft drawn stops at
+// it and is not pulled back out of it a round trip later; a floatplane flown low at a parked car is drawn crashing on it, the crash told at once and once.
 // usage (in web/): node tools/predict.mjs [--log]; prints PASS lines, or FAIL and exit 1
 import { imp } from './lib.mjs';
 
@@ -28,7 +28,10 @@ const fail = [], check = (ok, s) => (ok ? console.log(`PASS ${s}`) : (console.lo
 
 const G = 10, { meta } = await makeWorld({ size: [256, 256], ground: () => G });
 const tiles = () => new TileCache({ N: meta.tiles.N, load: (p) => fetchGzip(`data/tiles/${p}`) });
-const traffic = () => ({ roads: [], peds: [], ctrls: [] });
+// a track along x at z 65 with a station at x 128: its train of four coaches comes in at 1736 s of the world clock and
+// stands there 25 s, from x 96.5 to 159.5 (no train on the map before 1714 s)
+const RAIL = 65, ARRIVED = 1736;
+const traffic = () => ({ roads: [], peds: [], ctrls: [], trains: [{ p: [[0, RAIL, G], [256, RAIL, G]], svc: [{ ref: 'RB 1', op: 'synthetic', stops: [128] }] }] });
 const FRAME = 1 / 60, UP = 0.06, DOWN = 0.06, JITTER = 0.015;
 
 // a seeded jitter (the same every run)
@@ -39,10 +42,11 @@ const rand = seeded(7);
 // [frames, input] in turn. The world's time is simulated: frames of 1/60 s, the host's ticks every STEP, each message
 // on the link held its delay. Returns what was drawn each frame and the host's poses each tick.
 // link0: each message's delay each way (s; default about 60-75 ms); corrections: each one the page's prediction makes
-// pushed (the script's frame, its size)
+// pushed (the script's frame, its size); t: the world clock (s) it starts at
 async function fly(type, spot, script, hook = () => {}, link0 = {}) {
   const upDelay = link0.up ?? (() => UP + rand() * JITTER), downDelay = link0.down ?? (() => DOWN + rand() * JITTER);
   const sim = new WorldSim(traffic(), { crafts: { meta, cache: tiles(), now: () => performance.now() } });
+  sim.traffic.t = link0.t ?? 0;
   const server = new SimServer(sim, sandbox(), null, { nodes: () => [], ready: async () => () => {} });
   server.interest = 400;
   const session = server.connect('a'), cache = tiles();
@@ -211,14 +215,16 @@ const MEET_IN = 0.3, BACK = 0.05, FIX = 0.1, TELL = 3;
 const MEETS = [
   { what: 'a hovercraft driven at a parked car', type: 'hovercraft', spot: { x: 128, y: G + 1, z: 40, h: 0 }, input: { turn: 0, drive: 1, lift: 0, side: 0 }, ahead: 25, thing: 'car' },
   { what: 'a hovercraft driven at another player\'s hovercraft', type: 'hovercraft', spot: { x: 128, y: G + 1, z: 40, h: 0 }, input: { turn: 0, drive: 1, lift: 0, side: 0 }, ahead: 25, thing: 'hovercraft' },
+  { what: 'a hovercraft driven at a train standing at its station', type: 'hovercraft', spot: { x: 133, y: G + 1, z: 40, h: 0 }, input: { turn: 0, drive: 1, lift: 0, side: 0 }, thing: 'train', t: ARRIVED },
   { what: 'a floatplane flown low at a parked car', type: 'floatplane', spot: { x: 128, y: G + 1.7, z: 20, h: 0, speed: 45 }, input: { turn: 0, pitch: 0, throttle: 0.6 }, ahead: 60, thing: 'car', crash: true },
 ];
-const { CRAFT_SHAPES, carShape } = await imp('src/sim/solids.ts');
+const { CRAFT_SHAPES, COACH_SHAPE, carShape } = await imp('src/sim/solids.ts');
 for (const K of MEETS) {
   let side = Infinity;
   const events = [], fixes = [];
   const { drawn } = await fly(K.type, K.spot, [[K.crash ? 150 : 240, K.input]], (i, sim, server) => {
     if (i !== 0) return;
+    if (K.thing === 'train') { side = RAIL - COACH_SHAPE.hx; return; }
     const p = [...sim.crafts.values()][0].core.pose, z = p.z + K.ahead;
     if (K.thing === 'car') {
       sim.traffic.detachedCars.push({ ...structuredClone(PARKED), geo: { ...PARKED.geo, cx: p.x, cy: z }, detachedPose: { x: p.x, y: G, z, h: Math.PI / 2, pitch: 0, roll: 0 } });
@@ -228,7 +234,7 @@ for (const K of MEETS) {
       b.send({ kind: 'request', request: { kind: 'craft', type: K.thing, spot: { x: p.x, y: G + 1, z, h: Math.PI / 2 } } });
       side = z - CRAFT_SHAPES[K.thing].hx;
     }
-  }, { events, corrections: fixes });
+  }, { events, corrections: fixes, t: K.t });
   const nose = CRAFT_SHAPES[K.type].hz + (CRAFT_SHAPES[K.type].fwd ?? 0);
   // (judged till the crashed plane is put back elsewhere)
   let runIn = -Infinity, back = 0, reached = -1;
