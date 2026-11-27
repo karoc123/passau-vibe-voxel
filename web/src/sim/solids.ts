@@ -64,18 +64,53 @@ const LIGHT: Partial<Record<CraftType, readonly Shape[]>> = {
   paraglider: [{ hx: 0.45, hz: 0.6, y0: -GLIDER_HEIGHT, top: 0.9 }, { hx: 5, hz: 1.3, fwd: 0.15, y0: 4.2, top: 7.5 }],
 };
 const MEETS: Partial<Record<CraftType, readonly Shape[]>> = {};
-/** the boxes a craft of type meets the solid things with (none: it meets none) */
+/** the boxes a craft of type meets the solid things with (none: it meets none), level */
 export function meetShapes(type: CraftType): readonly Shape[] {
   return MEETS[type] ??= LIGHT[type] ?? [CRAFT_SHAPES[type], WINGS[type]].filter((s): s is Shape => !!s);
 }
+/** meetShapes placed on pose p (a plane's wings banked as it is), onto out */
+export function craftMeets(type: CraftType, p: CraftPose, out: Solid[] = []) {
+  const l = LIGHT[type];
+  if (!l) return craftSolids(type, p, out);
+  for (const s of l) out.push(solidAt(s, p));
+  return out;
+}
+/** a light craft of type at pose p as another light craft (own) meets it, onto out: a paraglider is solid to a drone
+ * and to another paraglider, a drone only to another drone (it would stop a paraglider dead in the air; it is the one
+ * shoved aside) */
+export function lightSolids(own: CraftType, type: CraftType, p: Pose, out: Solid[]) {
+  const l = LIGHT[own] && LIGHT[type];
+  if (l && (type === 'paraglider' || own === 'drone')) for (const s of l) out.push(solidAt(s, p));
+  return out;
+}
 
+/** a craft's pose; bank (rad, > 0 its right wing down): a plane's, what its wings are to the solid things */
+export type CraftPose = Pose & { bank?: number };
 /** the solid things a craft of type is to others at pose p, pushed onto out (none for a light craft); id: the body's
- * (its wings' id + 'w'), so a walker on it is carried by the same one the next tick */
-export function craftSolids(type: CraftType, p: Pose, out: Solid[] = [], id?: string) {
+ * (its wings' id + 'w', banked + the box's number), so a walker on it is carried by the same one the next tick */
+export function craftSolids(type: CraftType, p: CraftPose, out: Solid[] = [], id?: string) {
   const s = CRAFT_SHAPES[type], w = WINGS[type];
   if (s) out.push(solidAt(s, p, id));
-  if (w) out.push(solidAt(w, p, id === undefined ? undefined : `${id}w`));
+  if (w) wingSolids(w, p, out, id === undefined ? undefined : `${id}w`);
   return out;
+}
+
+// Banked, a wing is a stair of ROLLED boxes a side, each round its stretch of the rolled span: the boxes stay upright
+// as every solid thing does, and a step (a metre at full bank) is little more than a wing's thickness to a car under
+// it. Within a few degrees of level (or upside down) one box spans both wings.
+const ROLLED = 4;
+function wingSolids(w: Shape, p: CraftPose, out: Solid[], id?: string) {
+  const b = p.bank ?? 0, cb = Math.cos(b), sb = Math.sin(b), n = Math.abs(sb) < 0.05 ? 1 : 2 * ROLLED;
+  const y0 = w.y0 ?? 0, u = (y0 + w.top) / 2, t = (w.top - y0) / 2, half = w.hx / n;
+  const ch = Math.cos(p.h), sh = Math.sin(p.h), f = w.fwd ?? 0;
+  const hx = half * Math.abs(cb) + t * Math.abs(sb), hy = half * Math.abs(sb) + t * Math.abs(cb);
+  for (let k = 0; k < n; k++) {
+    // (a: along the span towards the left wing, the one a bank > 0 lifts)
+    const a = -w.hx + (2 * k + 1) * half, x = a * cb - u * sb, y = a * sb + u * cb;
+    const o: Solid = { x: p.x + ch * x + sh * f, y: p.y + y - hy, z: p.z - sh * x + ch * f, h: p.h, hx, hz: w.hz, top: 2 * hy };
+    if (id !== undefined) o.id = n === 1 ? id : `${id}${k}`;
+    out.push(o);
+  }
 }
 
 /** the river's vessels' measures (m): a cruise ship's longest length and its beam, an excursion boat's */

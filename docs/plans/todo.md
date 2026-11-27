@@ -53,8 +53,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - The edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
-- Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a drone and a paraglider
-  pass through each other.
 - Getting past something standing on a road: a car turning round jumps round in place; it slides out sideways while
   stopped; one held up beyond a junction or within a few metres of a road's end turns round instead of going round
   it; on a one-way road with no room, one in sight waits until out of sight. Measured in a synthetic gate only.

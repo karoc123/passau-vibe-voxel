@@ -57,7 +57,8 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   /** a world tick starts: what drawn(alpha) blends from (alpha 0) is its drawn state now */
   keep(): void;
   step(input: I, dt: number, world: VoxelCollision): boolean;
-  readonly pose: Pose;
+  /** (a plane's with its bank: its wings to the solid things, sim/solids.ts craftSolids) */
+  readonly pose: Pose & { bank?: number };
   /** m/s, where its collision fetches ahead */
   readonly velocity: Vec3;
   drawn(alpha: number): D;
