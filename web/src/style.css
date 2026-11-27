@@ -288,5 +288,11 @@ body[data-nav=orbit] #health, body.noui #health { display: none; }
 #health .row.low .bar i { background: #e0533f; }
 #health .row.fuel .bar i { background: #d9b45a; }
 #health.down .row:first-child .name::after { content: ' · down'; color: #e0533f; }
+/* where fire comes from (ui/incoming.ts): arcs of a ring round the middle, each turned towards its shooter */
+#incoming { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+body[data-nav=orbit] #incoming, body.noui #incoming { display: none; }
+#incoming i { position: absolute; left: 50%; top: 50%; width: min(64vmin, 520px); aspect-ratio: 1; box-sizing: border-box; border-radius: 50%;
+  border: 3px solid transparent; border-top-color: #ffe2b0; opacity: 0; filter: drop-shadow(0 0 3px rgba(0,0,0,.6)); }
+#incoming i.hit { border-width: 12px; border-top-color: #e8402a; }
 #health-tint { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
   background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%); }

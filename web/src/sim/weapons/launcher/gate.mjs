@@ -184,19 +184,20 @@ const THREE = await imp('node_modules/three/build/three.module.js');
 const { WeaponsView } = await imp('src/view/weapons/weapons-view.ts');
 const { WEAPON_VIEWS } = await imp('src/view/weapons/index.ts');
 const scene = new THREE.Scene(), v = new WeaponsView(scene, B.c);
+const EYE = new THREE.Vector3();
 const shown = () => { let k = 0; scene.traverse((o) => { if (o.visible && o.isMesh) k++; }); return k; };
-v.update(1 / 30);
+v.update(1 / 30, [], EYE);
 const idle = shown();
 fire(0.3);
-await tick(3); v.update(3 / 30);
+await tick(3); v.update(3 / 30, [], EYE);
 const flying = shown();
 let burst = 0;
-for (let i = 0; i < 60; i++) { await tick(); v.update(1 / 30); burst = Math.max(burst, shown()); }
-for (let i = 0; i < 60; i++) v.update(1 / 30);
+for (let i = 0; i < 60; i++) { await tick(); v.update(1 / 30, [], EYE); burst = Math.max(burst, shown()); }
+for (let i = 0; i < 60; i++) v.update(1 / 30, [], EYE);
 check(flying > idle && burst > idle && shown() === idle, `the view draws the grenade in flight and its blast (${flying - idle}, ${burst - idle} things shown) and lets them go`);
 // (a figure's hand: a gun is drawn only in one)
 const hand = new THREE.Group(); scene.add(hand);
-const guns = (arm) => { const before = shown(); v.update(0, arm === null ? [] : [{ player: 'x', pose: { x: 0, y: G, z: 0, h: 0 }, arm, hand }]); return shown() - before; };
+const guns = (arm) => { const before = shown(); v.update(0, arm === null ? [] : [{ player: 'x', pose: { x: 0, y: G, z: 0, h: 0 }, arm, hand }], EYE); return shown() - before; };
 const held = () => v.carried.get('x')?.weapon ?? null;
 const g2 = guns(2), w2 = held(), g1 = guns(1), w1 = held(), g0 = guns(null);
 check(g2 > 0 && w2 === 'launcher' && w1 === 'mg' && g0 === -g2 - g1 && held() === null,
