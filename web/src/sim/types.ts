@@ -53,6 +53,11 @@ export interface Car extends Blocked, CarState {
   boxTurn: number;
   geo: { px: number; py: number; cx: number; cy: number; z: number; fx: number; fy: number };
   block: { o: Car; gap: number } | null;
+  // what standing in its way it stopped for: its middle on the map, its reach along the car's line, the room the car
+  // needs across it (null: none)
+  stand?: { x: number; z: number; ext: number; need: number } | null;
+  // getting past it: the offset driven at until its rear is past far (s on its road; near: where it begins)
+  pass?: { off: number; near: number; far: number };
 }
 
 export type Agent = Car;

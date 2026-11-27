@@ -219,5 +219,83 @@ check(T.cars.includes(tc) && past < 0 && tc.v < 0.1 && tc.why === 'craft',
   `a car of the traffic stops for a hovercraft in its lane (its front ${(-past).toFixed(2)} m short, ${tc.v.toFixed(2)} m/s, waiting for: ${tc.why})`);
 
 server.dispose?.();
+
+// Getting past a craft left in the lane, on a second synthetic world of land with two two-way roads of a lane each
+// way (no traffic of its own: the cars are put): on a through road a hovercraft hovers in the eastbound lane, three
+// cars come at it from behind and one from ahead; on a dead end a hovercraft stands across the whole road, three cars
+// come at it. Measured on the traffic's own poses by the shapes the walker meets.
+{
+  const { at, pt } = await imp('src/sim/path.ts');
+  const { dir: dir2, data: data2 } = await synthData({ size: [256, 256], ground: () => LAND, surface: () => 'road' });
+  const THRU = 60, DEAD = 180, line = (z, x0, x1) => [[x0, z, LAND], [x1, z, LAND]];
+  const way = (a, b, w, z, x0, x1) => [{ a, b, w, lanes: 1, v: 12, c: 1, o0: 1.5, p: line(z, x0, x1) },
+    { a: b, b: a, w, lanes: 1, v: 12, c: 1, o0: 1.5, p: line(z, x1, x0) }];
+  data2.traffic.roads = [...way(10, 11, 1, THRU, 10, 246), ...way(20, 21, 2, DEAD, 20, 200)];
+  const host = nodeHost(dir2, { world: 'tiles', physics: { bodies: false }, interest: 300, time: { hour: 10, day: 190 } }, data2);
+  const T2 = host.sim.traffic, ps = [];
+  T2.carShare = 0;
+  const hover = (name, x, z, h) => {
+    const s = host.connect(name), link = sessionLink(s);
+    s.send({ kind: 'view', view: { focus: { x: 128, z: 128 } } });
+    s.send({ kind: 'request', request: { kind: 'craft', type: 'hovercraft', spot: { x, y: LAND + HOVER_HEIGHT, z, h, speed: 0 } } });
+    s.send({ kind: 'seatInput', role: 'pilot', input: { turn: 0, drive: 0, lift: 0, side: 0 } });
+    const P = { s, link, solid: () => { const c = host.sim.craftOf(s.player); return solidAt(CRAFT_SHAPES[c.type], c.core.pose); } };
+    ps.push(P);
+    return P;
+  };
+  const step = async (secs, each) => {
+    for (let i = 0; i < secs / STEP; i++) {
+      host.update(STEP);
+      for (const p of ps) p.link.deliver();
+      await new Promise((r) => setImmediate(r));
+      each();
+    }
+  };
+  // the eastbound lane's middle at x
+  const lane0 = (x) => at(T2.roads[0], x - 10, 1.5, pt());
+  const mid = lane0(110);
+  const H1 = hover('h1', mid.x, mid.y, Math.PI / 2);
+  const H2 = hover('h2', 150, DEAD, 0);
+  await step(1, () => {});
+  let id = 9500;
+  const put = (e, s, v) => {
+    const r = T2.roads[e], c = { kind: 'car', id: id++, e, lane: 0, s, v, len: 4.6, bus: false, prev: -1, prevOff: 0, next: -1, v0f: 1, col: '#888888',
+      off: 1.5, brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null, boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0,
+      boxTurn: 0, block: null, geo: { px: 0, py: 0, cx: 0, cy: 0, z: LAND, fx: 1, fy: 0 } };
+    r.lists[0].push(c);
+    T2.cars.push(c);
+    return c;
+  };
+  const pose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+  const solidOfCar = (c) => solidAt(carShape(c), T2.carPose(c, c.s, c.off, pose, true));
+  const behind = [put(0, 76, 8), put(0, 64, 8), put(0, 52, 8)], ahead = put(1, 40, 10), thru = [...behind, ahead];
+  const dead = [put(2, 100, 8), put(2, 88, 8), put(2, 76, 8)];
+  const h1 = H1.solid(), h2 = H2.solid(), past = new Map(), turned = new Map();
+  let deepCraft = 0, deepCars = 0, t = 0;
+  await step(30, () => {
+    t += STEP;
+    for (const c of thru) {
+      if (!T2.cars.includes(c)) continue;
+      const sc = solidOfCar(c);
+      deepCraft = Math.max(deepCraft, overlap(sc, h1));
+      for (const o of thru) if (o !== c && T2.cars.includes(o)) deepCars = Math.max(deepCars, overlap(sc, solidOfCar(o)));
+      const rear = c.e === 0 ? sc.x - sc.hz > h1.x + h1.hz : c.e === 1 ? sc.x + sc.hz < h1.x - h1.hz : true;
+      if (rear && !past.has(c)) past.set(c, t);
+    }
+    for (const c of dead) {
+      if (!T2.cars.includes(c)) continue;
+      deepCraft = Math.max(deepCraft, overlap(solidOfCar(c), h2));
+      if (c.e === 3 && !turned.has(c)) turned.set(c, t);
+    }
+  });
+  const latest = Math.max(...behind.map((c) => past.get(c) ?? Infinity)), back = past.get(ahead) ?? Infinity;
+  check(latest <= 20 && back <= 30 && deepCraft <= 0.05 && deepCars <= 0.05,
+    `cars held up by a hovercraft left in their lane of a two-lane road get past it beside it, three from behind by 20 s and one from ahead (behind past by ${latest.toFixed(1)} s, ahead by ${back.toFixed(1)} s; deepest into the craft ${deepCraft.toFixed(3)} m, into each other ${deepCars.toFixed(3)} m)`);
+  const waiting = T2.cars.filter((c) => c.e === 2 && c.wait > 10).length, lastTurn = Math.max(...dead.map((c) => turned.get(c) ?? Infinity));
+  check(lastTurn <= 28 && waiting === 0,
+    `cars at a hovercraft standing across a dead end turn round, none waits on (the third turned by ${lastTurn.toFixed(1)} s; ${waiting} waiting over 10 s at the end)`);
+  host.dispose?.();
+}
+
 for (const f of fail) console.log(`FAIL ${f}`);
 process.exit(fail.length ? 1 : 0);
