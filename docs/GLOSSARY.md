@@ -8,8 +8,8 @@ The words the owner and the code use for the same thing. One name per thing; use
   flies there. The player has no body in it and is seen by nobody (owner 2026-11-27). Not "free camera".
 - **Walk**: on foot, first person (walker, avatar). Swims in deep water.
 - **Figure**: the body on foot as drawn and as it meets the world (a player's avatar, an NPC, a **passer-by** of the
-  street life, a **rider** on a bike): three quarters of a grown-up, about 1.4 m, the eyes at about 1.28 m (owner
-  2026-11-27); it climbs a block's step all the same.
+  street life, a **rider** on a bike or a motorbike, a craft's own pilot): three quarters of a grown-up, about 1.4 m,
+  the eyes at about 1.28 m (owner 2026-11-27); it climbs a block's step all the same.
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, military helicopter,
   floatplane, jet, combat plane, paraglider.

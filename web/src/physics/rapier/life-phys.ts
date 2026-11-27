@@ -26,6 +26,7 @@ import { wrapAngle } from '../../core/num';
 import { axisAngle, quat, quatMul, rotate, vec3, type Vec3 } from '../../core/vec';
 import { liveEdits } from '../../core/live-edits';
 import { pt } from '../../sim/path';
+import { FIGURE_TOP, RIDER_TOP } from '../../sim/figure';
 import { fallen, STEP as TICK, type CarPose, type Traffic, type TrafficBodies, type WallBox } from '../../sim/traffic';
 import { EditBoxes } from '../../sim/edit-boxes';
 import type { BodyDraw, BodyPose } from '../../sim/contract/agents';
@@ -771,13 +772,14 @@ export class LifePhysics implements TrafficBodies {
     const x = p.x + this.origin.x, z = p.z + this.origin.z;
     const half = b.build.half, reach = speed * STEP + 0.3, fwd = rotate({ ...v }, inv).z >= 0;
     const zlo = -half.z - (fwd ? 0.3 : reach), zhi = half.z + (fwd ? reach : 0.3);
-    const hit = (person: Traffic['people'][number]) => {
+    // (met at their middle: a passer-by's half the figure, a rider's half of theirs on the bike)
+    const hit = (person: Traffic['people'][number], mid: number) => {
       if (T.held.person.has(person.id)) return;
       const q = T.peds[person.e];
       if (!q || (Math.abs(q.p[0][0] - x) > q.L + 15 || Math.abs(q.p[0][1] - z) > q.L + 15)) return;
       const w = T.personPoint(person, 0, this.A);
       if (Math.abs(w.x - x) > 12 || Math.abs(w.y - z) > 12) return;
-      const l = rotate(vec3(w.x - x, w.z + 0.9 - p.y, w.y - z), inv);
+      const l = rotate(vec3(w.x - x, w.z + mid - p.y, w.y - z), inv);
       if (Math.abs(l.x) > half.x + 0.35 || l.z < zlo || l.z > zhi || l.y < -1.6 || l.y > 2 * half.y + 0.5) return;
       const ahead = T.personPoint(person, 0.4, this.B);
       const pose = { x: w.x, y: w.z, z: w.y, h: Math.atan2(ahead.x - w.x, ahead.y - w.y), pitch: 0, roll: 0 };
@@ -787,7 +789,7 @@ export class LifePhysics implements TrafficBodies {
       b.driver!.note(T.tickNumber, 'Ouch!', 600);
     };
     // A hit removes an agent from the lists.
-    for (const list of [T.people, T.riders]) for (let i = list.length - 1; i >= 0; i--) hit(list[i]);
+    for (const [list, mid] of [[T.people, FIGURE_TOP / 2], [T.riders, RIDER_TOP / 2]] as const) for (let i = list.length - 1; i >= 0; i--) hit(list[i], mid);
   }
 
   private hitTraffic(player: Body, velocities: Map<Body, Vec3>, T: Traffic, now: number) {
