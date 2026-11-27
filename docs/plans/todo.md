@@ -31,15 +31,13 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   flood rescue. Open: genre, round length, PvP. Decided: a lobby later.
 - Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
   in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
-- E15 health and items, E16 spawn/despawn/keep. E21 (the avatar, view/avatars.ts) left: the host still offers a
-  person's walker seat no page asks for (gone: the wire's walked, PROTOCOL); a gun not in the figure's hand.
+- E15 health and items, E16 spawn/despawn/keep.
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
 - Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
 ## Owner's next (2026-11-27)
 
-- Names over the others are not hidden behind walls (a DOM tag within 150 m); the ping is the socket's round trip,
-  not the snapshot's age.
+- The ping is the socket's round trip, not the snapshot's age.
 - A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
   carry walkable, differing houses.
 

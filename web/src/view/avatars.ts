@@ -3,6 +3,7 @@ import type { AvatarState } from '../sim/contract/snapshot';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { STEP } from '../sim/road-net';
 import { FLOAT } from '../nav/swim';
+import { weaponIn } from '../sim/weapons';
 
 // The other players on foot, each a figure of its own (owner: on foot always an avatar of its own, never one of the
 // crowd): limbs that swing with its speed and an outfit by player, so two players are told apart and neither is
@@ -11,7 +12,7 @@ import { FLOAT } from '../nav/swim';
 
 /** where a player's figure is drawn (its feet, heading) and what it carries from frame to frame: its gait's phase,
  * its speed eased (input reaches the host unevenly: a tick without a step would stop the legs), its last frame drawn */
-interface Drawn extends RoadPose { ph: number; v: number; frame: number }
+interface Drawn extends RoadPose { ph: number; v: number; frame: number; arm?: number }
 
 /** an avatar's drawn pose d eased dt s towards where it is between its ticks (a tick its walker's input missed
  * stands still: this keeps it walking on) */
@@ -45,18 +46,21 @@ const STEP_M = 0.55, STEP_V = 0.12, WALK = 2.2, RUN = 6.5, WALK_SWING = 0.5, RUN
 // a speed past this (m/s) between two ticks is a jump of the walk (put down elsewhere), not a gait
 const V_MAX = 12;
 // the figure's frame: its feet at 0, +z ahead; the hips, shoulders, the top of the head (where a name hangs over it)
-const HIP = 0.85, SHOULDER = 1.42, TOP = 1.85, LABEL_UP = 0.35;
+const HIP = 0.85, SHOULDER = 1.42, TOP = 1.85, LABEL_UP = 0.35, ARM = 0.6;
+// a gun held: the right arm reaching ahead and down to its grip (AIM rad up from hanging), the left under its fore-end
+const AIM = 1.2, AIM_LEFT = 1.0;
 
 const box = (w: number, h: number, l: number, x: number, y: number, z: number) => new THREE.BoxGeometry(w, h, l).translate(x, y + h / 2, z);
 // shared by every figure (a limb hangs from its pivot: its geometry below 0)
 const GEO = {
   leg: box(0.17, HIP, 0.2, 0, -HIP, 0), shoe: box(0.18, 0.1, 0.28, 0, -HIP, 0.04), torso: box(0.44, 0.6, 0.26, 0, HIP, 0),
-  arm: box(0.12, 0.6, 0.14, 0, -0.6, 0), head: box(0.28, 0.28, 0.28, 0, SHOULDER + 0.04, 0),
+  arm: box(0.12, ARM, 0.14, 0, -ARM, 0), head: box(0.28, 0.28, 0.28, 0, SHOULDER + 0.04, 0),
   hair: box(0.3, 0.08, 0.3, 0, SHOULDER + 0.32, 0), cap: box(0.31, 0.1, 0.31, 0, SHOULDER + 0.32, 0), peak: box(0.26, 0.03, 0.16, 0, SHOULDER + 0.32, 0.22),
 };
 const SHOES = new THREE.MeshStandardMaterial({ color: '#202020', roughness: 0.9 });
 
-/** one player's figure: limbs pivoting at the hips and shoulders; label: where a name hangs over it */
+/** one player's figure: limbs pivoting at the hips and shoulders; label: where a name hangs over it; hand: where its
+ * gun is held */
 class Figure {
   readonly group = new THREE.Group();
   /** over the head, turning with the figure: a name label added here hangs over the player */
@@ -64,6 +68,9 @@ class Figure {
   readonly legs: [THREE.Group, THREE.Group];
   readonly arms: [THREE.Group, THREE.Group];
   readonly body = new THREE.Group();
+  /** the right hand's grip, at the end of the right arm, kept level ahead whatever the arm does: a gun added here is
+   * held, its barrel along +z */
+  readonly hand = new THREE.Group();
   private readonly mats: THREE.Material[];
 
   constructor(readonly look: Look) {
@@ -74,14 +81,16 @@ class Figure {
     const limb = (x: number, y: number, parts: THREE.Mesh[]) => { const p = new THREE.Group(); p.position.set(x, y, 0); p.add(...parts); this.body.add(p); return p; };
     this.legs = [limb(0.1, HIP, [mesh(GEO.leg, trousers), mesh(GEO.shoe, SHOES)]), limb(-0.1, HIP, [mesh(GEO.leg, trousers), mesh(GEO.shoe, SHOES)])];
     this.arms = [limb(0.29, SHOULDER, [mesh(GEO.arm, shirt)]), limb(-0.29, SHOULDER, [mesh(GEO.arm, shirt)])];
+    this.hand.position.y = -ARM;
+    this.arms[1].add(this.hand);
     this.body.add(mesh(GEO.torso, shirt), mesh(GEO.head, skin), cap ? mesh(GEO.cap, cap) : mesh(GEO.hair, hair));
     if (cap) this.body.add(mesh(GEO.peak, cap));
     this.label.position.y = TOP + LABEL_UP;
     this.group.add(this.body, this.label);
   }
 
-  /** at d (eased speed d.v, gait phase d.ph), walking or swimming */
-  pose(d: Drawn, swim: boolean) {
+  /** at d (eased speed d.v, gait phase d.ph, armed: d.arm a slot with a gun), walking or swimming */
+  pose(d: Drawn, swim: boolean, armed: boolean) {
     const G = this.group, B = this.body, [l, r] = this.legs, [al, ar] = this.arms;
     if (swim) { // lying forward along its heading, the chest at the water's top, the arms in turn over the head, the legs kicking
       const q = G.quaternion.setFromEuler(SW.e.set(SWIM_TILT, d.h, 0, 'YXZ')), up = SW.v.set(0, 1, 0).applyQuaternion(q);
@@ -89,6 +98,7 @@ class Figure {
       B.rotation.set(0, 0, 0);
       al.rotation.x = -Math.PI + Math.sin(d.ph) * 1.2; ar.rotation.x = -Math.PI - Math.sin(d.ph) * 1.2;
       l.rotation.x = 0.25 * Math.sin(d.ph * 3); r.rotation.x = -l.rotation.x;
+      this.hand.rotation.x = -ar.rotation.x;
       return;
     }
     const run = Math.min(1, Math.max(0, (d.v - WALK) / (RUN - WALK))), swing = swingAt(d.v), s = Math.sin(d.ph);
@@ -96,7 +106,9 @@ class Figure {
     G.rotation.set(0, d.h, 0);
     B.rotation.set(LEAN * run, 0, 0);
     l.rotation.x = swing * s; r.rotation.x = -swing * s;
-    al.rotation.x = -0.8 * swing * s; ar.rotation.x = 0.8 * swing * s;
+    al.rotation.x = armed ? -AIM_LEFT : -0.8 * swing * s; ar.rotation.x = armed ? -AIM : 0.8 * swing * s;
+    al.rotation.z = armed ? -0.35 : 0;
+    this.hand.rotation.x = -ar.rotation.x;
   }
 
   dispose() { for (const m of this.mats) m.dispose(); }
@@ -112,7 +124,7 @@ function swingAt(v: number) {
 export class Avatars {
   readonly group = new THREE.Group();
   private readonly figures = new Map<string, Figure>();
-  private readonly drawnBy = new Map<number, Drawn & { player: string; arm?: number }>();
+  private readonly drawnBy = new Map<number, Drawn & { player: string }>();
   private frame = 0;
 
   /** the frame's drawing of avatars (all but me's and those of seated, the players in a vehicle), a (0..1) of the way
@@ -138,18 +150,20 @@ export class Avatars {
       d.ph += dt * (av.pose.swim ? (p.moving ? 5 : 2) : 2 * Math.PI * d.v / (2 * (STEP_M + STEP_V * d.v)));
       let f = this.figures.get(av.player);
       if (!f) { f = new Figure(lookOf(av.player)); this.figures.set(av.player, f); this.group.add(f.group); }
-      f.pose(d, !!p.swim);
+      f.pose(d, !!p.swim, d.arm !== undefined && !!weaponIn(d.arm));
       here.add(av.player);
     }
     for (const [id, d] of this.drawnBy) if (d.frame !== this.frame) this.drawnBy.delete(id);
     for (const [player, f] of this.figures) if (!here.has(player)) { this.group.remove(f.group); f.dispose(); this.figures.delete(player); }
   }
 
-  /** player's figure drawn this frame (its label: where a name hangs over it), or undefined */
+  /** player's figure drawn this frame (its label: where a name hangs over it; its hand: where a gun is held), or
+   * undefined */
   figure(player: string): Figure | undefined { return this.figures.get(player); }
 
-  /** where the other players on foot are drawn this frame (by player; arm: the slot in their hand) */
-  drawn(): { player: string; pose: Readonly<Drawn>; arm?: number }[] {
-    return [...this.drawnBy.values()].map((d) => ({ player: d.player, pose: d, arm: d.arm }));
+  /** where the other players on foot are drawn this frame (by player; arm: the slot in their hand; hand: their figure's
+   * grip) */
+  drawn(): { player: string; pose: Readonly<Drawn>; arm?: number; hand?: THREE.Object3D }[] {
+    return [...this.drawnBy.values()].map((d) => ({ player: d.player, pose: d, arm: d.arm, hand: this.figures.get(d.player)?.hand }));
   }
 }

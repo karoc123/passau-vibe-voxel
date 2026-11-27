@@ -60,9 +60,8 @@ export interface PlayerReads { id: PlayerId; seat: Seat | null; driver: DriverSn
 
 /** a session's world after a tick: the traffic's cars, people, trains and boats, the cars out of the traffic, the
  * bodies and the avatars as what changed for the session since its last snapshot (sim/agent-wire.ts: the client
- * keeps the rest; gone: those it holds no more), the rest whole. Its cars, people, bodies, walked, avatars, crafts
- * and events are those near the session's player only (its own seat's entity always): a thing missing from walked or
- * crafts is gone for it */
+ * keeps the rest; gone: those it holds no more), the rest whole. Its cars, people, bodies, avatars, crafts and events
+ * are those near the session's player only (its own seat's entity always): a craft missing is gone for it */
 export interface Snapshot {
   /** the tick whose state this is; what moves is drawn between it and the tick before */
   tick: number;
@@ -85,8 +84,6 @@ export interface Snapshot {
   /** the trains: the samples since the session's last snapshot (contract/agents.ts TrainWire) */
   trains: TrainWire[];
   boats: BoatsWire | null;
-  /** the people walked by players: their pose, by person id */
-  walked: [number, WalkPose][];
   /** the players' own bodies on foot that moved */
   avatars: AvatarWire[];
   /** the cars driven by players, by car id with its driver (for a map's markers) */

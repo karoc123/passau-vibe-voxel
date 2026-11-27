@@ -4,7 +4,7 @@
 // TrafficMirror.
 //   takeSnapshot(sim, player, since)   the sim side (sim/server/sim-server.ts Session): the traffic's agents as they
 //                                      are after the update (enough for the client's own path maths: Traffic.carPose,
-//                                      personPoint), the bodies' drawn poses, trains, boats, the walked people, the avatars, the
+//                                      personPoint), the bodies' drawn poses, trains, boats, the avatars, the
 //                                      crafts (their cores' state), the events since (the crafts' and the drivers'
 //                                      among them), the session's player's reads (id, seat, car, results, ack);
 //                                      what is far from the player left out (its sight: interest.ts), what the
@@ -15,7 +15,6 @@ import type { BodyWire, CarState, CarWire, PersonWire, TrainWire } from '../cont
 import { AgentWire, round, wireBody, wirePose } from '../agent-wire';
 import type { CommandResult } from '../contract/commands';
 import type { PlayerId } from '../contract/ids';
-import type { WalkPose } from '../contract/pose';
 import type { Ack, AvatarWire, CraftState, EditNote, Snapshot } from '../contract/snapshot';
 import type { WorldSim } from '../world-sim';
 import type { Sight } from './interest';
@@ -54,8 +53,6 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     const d = B.drawState(c), w = d && wire.body(c.id, wireBody(d), tick);
     if (w) bodies.push([c.id, w]);
   }
-  const walked: [number, WalkPose][] = [];
-  for (const p of T.people) { const w = (!S || S.has('person', p.id)) && sim.walkedPose(p.id); if (w) walked.push([p.id, { ...w }]); }
   const avatars: AvatarWire[] = [];
   for (const [id, player] of sim.avatars) {
     const w = sim.players.get(player)?.walk, a = w && (!S || S.sees('avatar', id, w.pose.x, w.pose.z)) && wire.avatar({ id, player, pose: w.pose, prev: w.prev });
@@ -80,7 +77,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     cars, detached, people, riders, gone,
     bodies, trains,
     boats,
-    walked, avatars, drivers, crafts, events,
+    avatars, drivers, crafts, events,
     player: wire.player({ id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } }),
     edits,
   };

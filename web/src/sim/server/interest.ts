@@ -15,7 +15,7 @@ const HOLD = 50;
 const SEND_MARGIN = 150;
 
 /** the radius (m) each kind is sent in: cars (air: while the player pilots an aircraft), people, the rest (bodies go
- * with their cars, walked people with theirs) */
+ * with their cars) */
 export interface Radii { car: number; air: number; person: number; other: number }
 // Cars and people are most of the bytes, so they get the least radius the page cannot tell from the sim's own: the
 // street life spawns and drops them no nearer than CAR_POP_R (300 m) and PED_POP_R (150 m) from the viewer anyway
