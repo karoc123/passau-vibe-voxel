@@ -27,8 +27,9 @@ export type SimCommand = PlayerCommand;
  *                 physics. The one held is left first
  *   seatInput     the controls of the seat held, until the next: a driver's CarInput, a pilot's their craft's type's
  *                 input, a walker's pose (the walk is the client's), bounded against the last one taken (Tuning.walk:
- *                 clamped, refused); ignored for a role not held. seq: the client's number for it (increasing per client; its session's ack: the last taken), tick: the world tick it was
- *                 sent for (the client's tick + 1; it is applied at the next tick run)
+ *                 clamped, refused); ignored for a role not held. seq: the client's number for it (increasing per client; its session's ack: the last taken), tick: the page's
+ *                 own tick it is meant for (its 30 Hz clock); a driver's or pilot's is held by the session for the host's
+ *                 tick that page tick falls on (sim/server/sim-server.ts InputBuffer), a walker's applied at the next tick run
  *   leaveSeat     out of the seat held: the avatar gone, the car parked where it is, the craft left where it is,
  *                 hands off (its core's neutral); with pose (a vehicle's
  *                 seat left), out on foot there in the same tick: the player's avatar put down at pose, kept within

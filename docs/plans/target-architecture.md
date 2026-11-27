@@ -177,7 +177,9 @@ in the tick.
 6. **Kept things on disk.** Landed 2026-11-27 (the network host's craters, edits, parked cars and crafts left, a file
    per cell under `web/.run/world/`, written every 5 s and on SIGTERM; kept by presence as before).
 7. **Prediction** of the player's own craft. Landed 2026-11-27 for the crafts (rewound to each snapshot and stepped
-   again with the inputs since, corrections blended out); the car waits for the owner (FRAGEN 17).
+   again with the inputs since, corrections blended out); the car waits for the owner (FRAGEN 17). The host holds a
+   driver's or pilot's input for the tick it is meant for (ADR 0014), so a jittery link neither loses nor doubles
+   steering and the prediction lines up (landed 2026-11-27).
 8. **Measure on a Pi.** Only then compact the wire (typed arrays, deltas) or move a hot part to Rust.
 
 Steps 1 and 2 come first on purpose: they end the preparation and give every later step a user.
