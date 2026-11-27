@@ -13,7 +13,8 @@
 // lagged link (~133 ms) riding a driven car's roof and a coach's by the gap behind it is seen by the others where it
 // stands on it (its input names the spot on the roof, the host puts it there on the thing as the host has it), and a
 // spot it names far along the roof is walked to within the walk's bound. A walker on a car's roof driven under a
-// footbridge too low for it is swept off in front of the deck, on the page and on the host.
+// footbridge too low for it is swept off in front of the deck, on the page and on the host. A page running at a wall
+// whose poses reach the host unevenly is stopped at it on the host too, and runs on through an open door.
 // usage (in web/): node tools/solids.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -35,7 +36,12 @@ const G = 5;
 // walker standing on the car's roof does not
 const DECK0 = G + 3, DECK = { x0: 180, x1: 184, z0: 10, z1: 30, y0: DECK0, y1: DECK0 + 1, mat: 'wall' };
 const inDeck = (x, z) => x >= DECK.x0 && x < DECK.x1 && z >= DECK.z0 && z < DECK.z1;
-const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth', boxes: [DECK] });
+// a house's wall 1 m thick across z 150..170 at x 120, a door through it at z 159..161 under a lintel DOOR over the
+// ground
+const DOOR = G + 2.5, HOUSE = [{ x0: 120, x1: 121, z0: 150, z1: 159, y0: G, y1: G + 4, mat: 'wall' },
+  { x0: 120, x1: 121, z0: 161, z1: 170, y0: G, y1: G + 4, mat: 'wall' }, { x0: 120, x1: 121, z0: 159, z1: 161, y0: DOOR, y1: G + 4, mat: 'wall' }];
+const inBox = (b, x, z, y0, y1) => x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1 && y0 < b.y1 && y1 > b.y0;
+const { dir, data } = await synthData({ size: [256, 256], ground: () => G, surface: () => 'earth', boxes: [DECK, ...HOUSE] });
 // an excursion boat lying at its pier (x 181..219, its side at z 216: the tour's start)
 data.boats = { berths: [], tour: [[200, 220], [250, 220]] };
 // a track along x at z RAIL with a station at x 128: its train of four coaches stands there, from x 96.5 to 159.5,
@@ -47,7 +53,7 @@ const server = nodeHost(dir, { world: 'tiles', physics: { bodies: false }, inter
 // tools/collision.mjs's) and the deck
 const WALL = 22, wall = (x, z) => x < WALL && z > 90 && z < 110;
 const ground = { support: (x, z, top) => (inDeck(x, z) && top >= DECK.y1 ? DECK.y1 : G),
-  blocked: (x, z, y0, y1) => wall(x, z) || (inDeck(x, z) && y0 < DECK.y1 && y1 > DECK.y0) };
+  blocked: (x, z, y0, y1) => wall(x, z) || [DECK, ...HOUSE].some((b) => inBox(b, x, z, y0, y1)) };
 
 // a link holding each command UP ticks and each snapshot DOWN (with the tick a command waits for the host's next
 // update: a ping of 4 ticks, ~133 ms)
@@ -416,6 +422,40 @@ server.sim.traffic.detachedCars.splice(server.sim.traffic.detachedCars.indexOf(c
 const qC = hostWalkOf(C), known = hostWorld.blocked(181, 20, DECK0, DECK0 + 1);
 check(known && rodeOn && hostIn === 0 && pageIn === 0 && past === 0 && Math.abs(footC.feet - G) < 0.05 && Math.abs(qC.y - G) < 0.05 && footC.pos.x > DECK.x0 - 2 && Math.hypot(qC.x - footC.pos.x, qC.z - footC.pos.z) < 0.5,
   `a walker on a car's roof driven under a footbridge too low for it is swept off in front of the deck (the page at x ${footC.pos.x.toFixed(2)}, feet ${(footC.feet - G).toFixed(2)} m up; the host's ${qC.x.toFixed(2)}, ${(qC.y - G).toFixed(2)} m up; in the deck: the host's ${hostIn} ticks, the page's ${pageIn}; past its front ${past} ticks${known ? '' : '; the host has no deck'})`);
+
+// A page running (20 m/s) whose poses reach the host every third tick (its frames uneven), the host guessing the
+// ticks between: run at the house's wall, stopped at it on the page; and through its door. Ticks the host's walker
+// (as the others see it, shoot and board from it) is in the wall while the page's is not, and how far past the
+// page's furthest it got (no further than the page's walk could: its body 0.4 m short of the wall); through the door:
+// the ticks it stood there while the page ran
+const inHouse = (q) => hostWorld.blocked(q.x, q.z, q.y + 0.05, q.y + WALKER_HEAD);
+const run = async (z) => {
+  P.x = 110; P.z = z;
+  A.c.send({ kind: 'view', view: { focus: { x: 115, z } } });
+  A.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: P.x, y: G, z, h: Math.PI / 2, moving: false } } });
+  let inside = 0, past = 0, stood = 0, far = -Infinity, was = -Infinity;
+  for (let i = 0; i < 40 + 1.5 / STEP; i++) {
+    for (const p of all) p.c.update(STEP);
+    server.update(STEP);
+    for (const p of all) p.link.deliver();
+    await new Promise((r) => setImmediate(r));
+    const moved = i >= 40 && walkFrame(ground, P, G, stride(Math.PI / 2, 1, 0, 20 * STEP), []);
+    if (i < 40 || i % 3 === 0) A.c.send({ kind: 'seatInput', role: 'walker', input: { x: P.x, y: G, z: P.z, h: Math.PI / 2, moving: moved } });
+    if (i <= 40) continue;
+    const q = hostWalk();
+    far = Math.max(far, P.x);
+    if (inHouse(q) && !ground.blocked(P.x, P.z, G + 0.05, G + WALKER_HEAD)) inside++;
+    past = Math.max(past, q.x - far);
+    if (moved && q.x <= was + 1e-6 && q.x > 115 && q.x < 125) stood++;
+    was = q.x;
+  }
+  return { inside, past, stood, end: P.x, host: hostWalk(), most: far + past };
+};
+const atWall = await run(155), atDoor = await run(160), knownHouse = hostWorld.blocked(120.5, 155, G + 1, G + 2);
+check(knownHouse && atWall.end < 120 && atWall.inside === 0 && atWall.most <= 120 - 0.4 + 1e-6,
+  `a running page's walker guessed on between its poses stops at a wall on the host as on the page (in it ${atWall.inside} ticks the page is not, at most ${atWall.past.toFixed(2)} m past the page's furthest; the page stopped at x ${atWall.end.toFixed(2)})`);
+check(atDoor.end > 135 && atDoor.inside === 0 && atDoor.stood === 0 && Math.abs(atDoor.host.x - atDoor.end) < 1,
+  `and runs on through an open door (the page to x ${atDoor.end.toFixed(1)}, the host's ${atDoor.host.x.toFixed(1)}; stood ${atDoor.stood} ticks the page ran)`);
 
 server.dispose?.();
 for (const f of fail) console.log(`FAIL ${f}`);

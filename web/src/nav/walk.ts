@@ -1,6 +1,6 @@
 import { MAX_LEG } from '../chamfer';
 import type { World } from '../core/world';
-import { carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
+import { bodyClear, carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
 import type { MoveKeys } from './move-keys';
 import { EYE } from './spots';
 
@@ -121,11 +121,6 @@ function triRoom(x: number, z: number, px: number, pz: number, qx: number, qz: n
 function segRoom(x: number, z: number, ax: number, az: number, bx: number, bz: number) {
   const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
   return Math.hypot(x - ax - t * dx, z - az - t * dz);
-}
-
-function bodyClear(w: Ground, x: number, z: number, feet: number, step = STEP) {
-  const clear = (x: number, z: number) => !w.blocked(x, z, Math.max(w.support(x, z, feet + step), feet + step), feet + HEAD);
-  return clear(x, z) && clear(x + 0.4, z) && clear(x - 0.4, z) && clear(x, z + 0.4) && clear(x, z - 0.4);
 }
 
 /** the voxels with the roofs of solids to stand on (a car's is a step up from a jump) */

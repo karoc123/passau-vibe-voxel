@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
+import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import type { BoatPose } from './contract/agents';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
@@ -121,7 +121,7 @@ export class WorldSim {
   // what a shot flies through (setWorld)
   private voxels: VoxelRay | null = null;
   // what a walker carried on a roof is kept out of (setWorld; none: carried anywhere)
-  private walls: Walls | null = null;
+  private walls: (Walls & Ground) | null = null;
   private loading: Promise<LifePhysics> | null = null;
   // the last load of the road physics failed (a car's seat refused as 'failed' until one is in)
   private physFailed = false;
@@ -236,7 +236,7 @@ export class WorldSim {
   /** the world the agents stand on and the boats float on (world.ts World) */
   setWorld(ground: (Ground & Partial<Walls>) | null, water: WaterColumns | null = null, voxels: VoxelRay | null = null) {
     this.voxels = voxels;
-    this.walls = ground?.blocked ? ground as Walls : null;
+    this.walls = ground?.blocked ? ground as Walls & Ground : null;
     this.traffic.ground = ground;
     this.traffic.water = water;
   }
@@ -326,8 +326,7 @@ export class WorldSim {
     for (const P of this.players.values()) {
       const W = P.walk;
       // (one on a roof is carried with it after the step instead)
-      if (W && !W.on && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9)
-        W.pose = { ...W.pose, x: W.pose.x + W.vx * STEP, z: W.pose.z + W.vz * STEP };
+      if (W && !W.on && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9) this.guess(W);
     }
     const now = t0 * STEP, foci = this.foci();
     this.holdVoxels();
@@ -742,6 +741,17 @@ export class WorldSim {
     if (!this.clear(at.x, at.z, at.y)) { W.on = null; return; }
     W.pose = { ...W.pose, ...at, h: W.pose.h + Math.atan2(Math.sin(b.h - a.h), Math.cos(b.h - a.h)) };
     W.on = b;
+  }
+
+  // a tick of the walk's velocity, stopped at a wall or slid along it as its page's walk is (nav/walk.ts walkStep):
+  // else the others see a walker running at one inside or beyond it, shoot it and board from there, till its next pose
+  private guess(W: Walk) {
+    const p = W.pose, dx = W.vx * STEP, dz = W.vz * STEP;
+    for (const [sx, sz] of [[dx, dz], [dx, 0], [0, dz]]) {
+      if ((!sx && !sz) || (this.walls && !bodyClear(this.walls, p.x + sx, p.z + sz, p.y))) continue;
+      W.pose = { ...p, x: p.x + sx, z: p.z + sz };
+      return;
+    }
   }
 
   private clear(x: number, z: number, feet: number) { return !this.walls || headroom(this.walls, x, z, feet); }
