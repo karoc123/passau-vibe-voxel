@@ -92,6 +92,9 @@ The words the owner and the code use for the same thing. One name per thing; use
   while after its first loss. Not "outpost", "base" or "spawner".
 - **Lookout**: an enemy NPC that guards a high place of a camp with numbers of its own (a long sight, a tight
   spread, no leash) and fires at players in vehicles as on foot; air defence's first step. Not "flak" or "sniper".
+- **Enemy plane**: a combat plane flown by an NPC **pilot** with a player's input and trigger; a camp's alarm calls
+  it, it appears and goes out of sight, makes **passes** at a player (turn in, a shallow dive with a few seconds of
+  fire, pull out, climb away) with pauses between, and its pilot dies with it. Not "bot", "AI plane" or "bomber".
 - **Leash**: how far an NPC follows or searches from its post. **Alarm**: an NPC that notices a player telling its
   squad.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.

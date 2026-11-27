@@ -9,7 +9,7 @@ import type { PilotTuning } from './tuning';
 
 /** circle: round its home, looking; setup: away from the target to turn in; attack: the pass, nose on the target;
  * break: pulling up and away after it; leave: off for good (its host takes it away out of sight) */
-export type PilotState = 'circle' | 'setup' | 'attack' | 'break' | 'leave';
+type PilotState = 'circle' | 'setup' | 'attack' | 'break' | 'leave';
 
 export interface Pilot {
   /** the place it guards (its camp's): it attacks only players within its leash of it */
@@ -23,17 +23,17 @@ export interface Pilot {
   target: PlayerId | null;
   /** where the target was when last seen (the point it aims at) */
   seen: Vec3 | null;
-  /** setup: turning in now; attack: when it first fired (-1: not yet); the side it flies out to, and how far round
-   * from the last pass's line (rad) */
+  /** setup: turning in now, and the bearing from the target of the point it turns in at (null: not chosen yet);
+   * attack: when it first fired (-1: not yet); the side it flies out to, changed each pass */
   turning: boolean;
-  skew: number;
+  line: number | null;
   fired: number;
   side: number;
   /** the passes begun */
   passes: number;
 }
 
-/** where its plane is: its place, heading, path angle and bank (rad), airspeed (m/s), where its nose points (its gun
+/** where its plane is: its place, heading and path angle (rad), airspeed (m/s), where its nose points (its gun
  * with it), its tank (0..1; null: none) */
 export interface PilotMe { x: number; y: number; z: number; h: number; gamma: number; v: number; nose: { h: number; pitch: number }; fuel: number | null }
 
@@ -51,11 +51,12 @@ export interface PilotAct { input: PlaneInput; fire?: Vec3 }
 // A look every LOOK s (a ray a player). Aim within AIM rad of the target before a shot (the gun swings 2°); a dive no
 // steeper than DIVE. The ground's lookahead (s along the path) and its sideways spread (rad).
 // In a pass it looks PULL s ahead: what its pull-out needs, the elevator's lag with it.
-const LOOK = 0.3, AIM = 2.5 * Math.PI / 180, DIVE = 0.45, AHEAD = [0, 1, 2, 3.5], SIDE = 0.35, PULL = 1.2;
+// TURN: m from its turn-in point it turns in at; TRY: rad round the target a line is moved that had no way out.
+const LOOK = 0.3, AIM = 2.5 * Math.PI / 180, DIVE = 0.45, AHEAD = [0, 1, 2, 3.5], SIDE = 0.35, PULL = 1.2, TURN = 60, TRY = 1.2;
 
 export function newPilot(home: { x: number; z: number }, now: number, k: PilotTuning): Pilot {
   return { home: { x: home.x, z: home.z }, k, state: 'circle', since: now, looked: -Infinity, seenAt: now, target: null, seen: null,
-    turning: false, skew: 0, fired: -1, side: 1, passes: 0 };
+    turning: false, line: null, fired: -1, side: 1, passes: 0 };
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -89,19 +90,36 @@ export function think(m: Pilot, me: PilotMe, s: PilotSenses, now: number): Pilot
     }
     case 'setup': {
       if (!seen || !to || lost > k.lost) { go('circle'); return think(m, me, s, now); }
-      // (out past its run-in, or at its leash's end: turn in, the target ahead before the pass begins)
-      if (to.d >= k.setup || Math.hypot(me.x - m.home.x, me.z - m.home.z) > k.leash) m.turning = true;
-      if (m.turning && (Math.abs(wrap(to.h - me.h)) < 0.25 || now - m.since > 30)) { go('attack'); m.passes++; return think(m, me, s, now); }
+      // (out to a point its run-in off the target, on from where it is, a little to one side, and from there in; or
+      // in at once from beyond its leash)
+      m.line ??= Math.atan2(me.x - seen.x, me.z - seen.z) + m.side * 0.4;
+      const px = seen.x + Math.sin(m.line) * k.setup, pz = seen.z + Math.cos(m.line) * k.setup;
+      if (Math.hypot(px - me.x, pz - me.z) < TURN || Math.hypot(me.x - m.home.x, me.z - m.home.z) > k.leash + k.setup || now - m.since > 40) m.turning = true;
+      // (no pass at a target not seen now: it may have gone under cover)
+      if (m.turning && lost < 1 && (Math.abs(wrap(to.h - me.h)) < 0.25 || now - m.since > 30)) {
+        // (no pass without a way out past the target: else out again on another line)
+        if (exit(seen, to.h, s, k)) { go('attack'); m.passes++; return think(m, me, s, now); }
+        m.line = Math.atan2(me.x - seen.x, me.z - seen.z) + TRY;
+        m.turning = false;
+        m.since = now;
+      }
       // (its height over the target's, not the ground's: a target up a slope is dived at as steeply as one below it)
-      want = { h: m.turning ? to.h : to.h + Math.PI + m.side * 0.4, alt: seen.y + k.runIn, throttle: 0.9 };
+      want = { h: m.turning ? to.h : Math.atan2(px - me.x, pz - me.z), alt: seen.y + k.runIn, throttle: 0.9 };
       break;
     }
     case 'attack': {
-      if (!seen || !to) { go('circle'); break; }
+      if (!seen || !to) { go('circle'); return think(m, me, s, now); }
       const dy = seen.y - me.y, wantP = Math.atan2(dy, to.d), eh = wrap(to.h - me.nose.h), ep = wantP - me.nose.pitch;
       // (pulled out: close, its burst fired, the target gone a while, too steep, or the ground before it)
       const done = to.d < k.breakAt || (m.fired >= 0 && now - m.fired > k.fireFor) || lost > 1 || wantP < -DIVE;
-      if (done || ground(me, s, k.attackClear, me.v * PULL) > me.gamma + 0.05) { m.side = -m.side; go('break'); return think(m, me, s, now); }
+      const low = ground(me, s, k.attackClear, me.v * PULL) > me.gamma + 0.05;
+      if (done || low) {
+        // (a line the ground cut short before a shot is not flown again)
+        m.line = m.fired < 0 && low ? Math.atan2(me.x - seen.x, me.z - seen.z) + TRY : null;
+        m.side = -m.side;
+        go('break');
+        return think(m, me, s, now);
+      }
       const act: PilotAct = { input: { turn: clamp(-eh * 6, -1, 1), pitch: clamp(ep * 8, -1, 1), throttle: 0.8 } };
       // (a shot only at a target seen at the last look: none into the roof it went under)
       if (to.d <= k.fireFrom && Math.abs(eh) < AIM && Math.abs(ep) < AIM && lost < LOOK * 1.5) {
@@ -152,7 +170,7 @@ function steer(me: PilotMe, s: PilotSenses, w: Want, k: PilotTuning): PlaneInput
 function exit(at: Vec3, h: number, s: PilotSenses, k: PilotTuning) {
   for (let e = 0; e <= k.breakAt * 3; e += 30) {
     const top = s.top(at.x + Math.sin(h) * e, at.z + Math.cos(h) * e);
-    if (top !== null && top + k.attackClear > at.y + k.attackClear + (e + k.breakAt) * Math.tan(k.climb) * 0.5) return false;
+    if (top !== null && top > at.y + (e + k.breakAt) * Math.tan(k.climb) * 0.8) return false;
   }
   return true;
 }

@@ -141,6 +141,19 @@ for (const duty of ['guard', 'patrol', 'lookout'] as const) {
   });
   debugBox.append(b);
 }
+{
+  // (an enemy plane comes from out of sight, ~20 s off: from wherever the player is, flying too)
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'menu-entry';
+  b.textContent = 'Enemy plane here';
+  b.addEventListener('click', () => {
+    if (!sim) return;
+    sim.send({ kind: 'request', request: { kind: 'npc', duty: 'pilot' } });
+    toast('Enemy plane called: it comes from out of sight');
+  });
+  debugBox.append(b);
+}
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
