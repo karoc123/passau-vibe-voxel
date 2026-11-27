@@ -24,12 +24,12 @@ export const NOT_ON_THE_WIRE: Record<CraftType, readonly string[]> = (() => {
     'motion.safe', 'motion.outline']; // unstick's trail (the server's); the hull, from its tuning
   const special = [...COMMON, 'kind', 'motion.kind', // its type (the client makes its copy by type)
     'motion.delta', 'motion.raised']; // the steps' scratch
-  const plane = [...COMMON, 'v', 'now', 'out', 'qa', 'qb', // drawn(), velocity's scratch
+  const plane = [...COMMON, 'v', 'up', 'now', 'out', 'qa', 'qb', // drawn(), velocity's and nose's scratch
     'flight.crashLeft', 'flight.crashAt', 'flight.safe', 'flight.start', 'flight.clock', // the respawn's (the server's)
     'flight.d', 'flight.q', // the steps' scratch
     'flight.ahead']; // whether this copy runs ahead on a page (the copy's own, not the craft's)
   return {
-    boat, hovercraft: special, helicopter: special, paraglider: [...special, TANKLESS], floatplane: plane, jet: plane,
+    boat, hovercraft: special, helicopter: special, paraglider: [...special, TANKLESS], floatplane: plane, jet: plane, fighter: plane,
     drone: [...COMMON, TANKLESS, 'next', 'glide', 'out', // the steps', drawn()'s scratch
       'flight.rotationAxis', 'flight.rotationDelta', 'flight.acceleration', 'flight.displacement', 'flight.impactNormal',
       'flight.priorAttitude', 'flight.priorVelocity', // the steps' scratch

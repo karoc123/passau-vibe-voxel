@@ -1,6 +1,6 @@
 // Placed vehicles (sim/stands.ts), through the real host (host/node.ts nodeHost, a client per player over a CloneLink).
 // On a synthetic world (a flat field, a river with banks, a cliff over it, a rough far end with no room for anything):
-// a player on foot finds a helicopter, speedboat, hovercraft, floatplane and paraglider stocked near them, each sent
+// a player on foot finds a helicopter, speedboat, hovercraft, floatplane, combat plane and paraglider stocked near them, each sent
 // once and then not again while it stands; a player 1.35 km off is sent none, and none is stocked near them. The
 // helicopter is boarded, flown off and left: it stays, and its stand refills out of the player's sight; a second
 // player rides along in the speedboat beside its pilot, a third finds its seat taken; the paraglider's pilot is
@@ -61,7 +61,7 @@ const sum = (a) => a.reduce((s, n) => s + n, 0);
   await P.tick(90);
   const stands = [...sim.stands.all()], stocked = (type) => stands.find((s) => s.type === type && s.vehicle !== null);
   if (verbose) for (const s of stands) console.log(s.type, s.spot.x.toFixed(1), s.spot.z.toFixed(1), s.vehicle);
-  const types = ['helicopter', 'boat', 'hovercraft', 'floatplane', 'paraglider'];
+  const types = ['helicopter', 'boat', 'hovercraft', 'floatplane', 'fighter', 'paraglider'];
   check(types.every(stocked), `stocked near a player on foot: ${types.map((t) => `${t} ${stocked(t) ? 'yes' : 'no'}`).join(', ')}`);
   const seen = new Set(A.c.crafts().map((c) => c.type));
   check(types.every((t) => seen.has(t)), `the player's page has them (${[...seen].join(', ')})`);

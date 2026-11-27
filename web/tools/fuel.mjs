@@ -1,6 +1,6 @@
 // The fuel tank as a player meets it: through the real host and a client over a link of a ~140 ms ping (as
 // predict.mjs, predict-car.mjs) on a small synthetic world. A hovercraft burns little standing with its engine running
-// and a full load's share under drive (the tuning's minutes); a helicopter flown on drains its tank and the page's gauge
+// and a full load's share under drive (the tuning's minutes), a combat plane flown flat out too; a helicopter flown on drains its tank and the page's gauge
 // reads the host's tank all along. A helicopter whose tank runs dry while hovering sinks on the host and as its page
 // predicts it (the copy run ahead loses its power too: no correction pulling it back down a round trip later), and its
 // pilot can still get out. A car driven with the gas held whose tank runs dry rolls out on the host and on the page,
@@ -103,6 +103,18 @@ const NONE = { turn: 0, drive: 0, lift: 0, side: 0 }, DRIVE = { ...NONE, drive: 
   const idle = rate(NONE, 180), load = rate(DRIVE, 180), full = 1 / FUEL.hovercraft.full;
   check(Math.abs(load / full - 1) < 0.1 && idle < 0.2 * load && idle > 0,
     `a hovercraft burns ${(idle * 6000).toFixed(2)} % a minute idling, ${(load * 6000).toFixed(1)} % driven flat out (a full tank ${(1 / load / 60).toFixed(1)} min under load, the tuning's ${(FUEL.hovercraft.full / 60).toFixed(1)})`);
+}
+
+// a combat plane circling at full throttle: its engine spooled up, it burns a full load's share (the tuning's minutes)
+{
+  const FULL = { turn: 1, pitch: 0, throttle: 1 };
+  const { host, frame } = await fly('fighter', { x: 200, y: G + 100, z: 128, h: 0, speed: 50 }, FULL);
+  for (let i = 0; i < 90; i++) frame(FULL);
+  const a = fill(host.core.tank);
+  for (let i = 0; i < 240; i++) frame(FULL);
+  const load = (a - fill(host.core.tank)) / (240 * FRAME), full = 1 / FUEL.fighter.full;
+  check(Math.abs(load / full - 1) < 0.1 && host.core.flight.state === 'air',
+    `a combat plane flown flat out burns ${(load * 6000).toFixed(1)} % a minute (a full tank ${(1 / load / 60).toFixed(1)} min, the tuning's ${(FUEL.fighter.full / 60).toFixed(1)})`);
 }
 
 // a helicopter flown on: its tank drains, the gauge reads the host's

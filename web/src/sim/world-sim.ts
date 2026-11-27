@@ -43,6 +43,7 @@ import { vehicleOf, VEHICLES } from './vehicles';
 import { Stands } from './stands';
 import type { Craft, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
+import { PlaneCore } from './craft/plane-core';
 import { CEILING, VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
@@ -562,13 +563,14 @@ export class WorldSim {
     const c = s.entity.kind === 'craft' ? this.crafts.get(s.entity.id) : undefined, m = c && mountOf(SEATS.craft[c.type], s);
     const w = m && weaponById(m.weapon);
     if (!c || !m || !w) return null;
-    const from = mountPoint(m, c.core.pose), t = cmd.to;
+    // (a nose mount from the nose as the host has it: heading and pitch)
+    const base = m.nose && c.core instanceof PlaneCore ? c.core.nose : c.core.pose, from = mountPoint(m, base), t = cmd.to;
     let { h, pitch } = cmd;
     if (t && Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z) && Math.hypot(t.x - from.x, t.z - from.z) > 1) {
       h = Math.atan2(t.x - from.x, t.z - from.z);
       pitch = Math.atan2(t.y - from.y, Math.hypot(t.x - from.x, t.z - from.z));
     }
-    const k = inArc(m, c.core.pose.h, h, pitch);
+    const k = inArc(m, base.h, h, pitch, 'pitch' in base ? base.pitch : 0);
     return { w, own: s.entity, from, dir: aimDir(k.h, k.pitch) };
   }
 

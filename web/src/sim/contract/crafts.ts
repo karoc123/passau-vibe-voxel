@@ -17,7 +17,7 @@ export type BoatEvent = { kind: 'bump'; speed: number };
 export type SpecialEvent = 'landed' | 'splash';
 /** the drone's (sim/craft/drone-core.ts): a hit at speed (m/s into what it met) */
 export interface DroneEvent { kind: 'impact'; hit: ImpactKind; speed: number }
-/** the floatplane's and the jet's (sim/craft/plane-flight.ts) */
+/** the floatplane's, the jet's and the combat plane's (sim/craft/plane-flight.ts) */
 export type PlaneEvent =
   | { type: 'skim' | 'touchdown' | 'takeoff' | 'bump' }
   | { type: 'crash'; what: string; kmh: number }
@@ -32,6 +32,7 @@ export interface CraftEvents {
   drone: DroneEvent;
   floatplane: PlaneEvent;
   jet: PlaneEvent;
+  fighter: PlaneEvent;
 }
 
 /** an event of a craft of type K (one of them): its type and its core's event (SimEvent 'craft') */
@@ -99,7 +100,7 @@ export interface PlaneFlightState {
   fw: Vec3; lu: Vec3;
   crashLeft: number; crashAt: number;
 }
-/** the floatplane's and the jet's core (sim/craft/plane-core.ts): the flight, as drawn at the world tick's start */
+/** the floatplane's, the jet's and the combat plane's core (sim/craft/plane-core.ts): the flight, as drawn at the world tick's start */
 export interface PlaneCoreState extends PowerState {
   flight: PlaneFlightState;
   from: { p: Vec3; fwd: Vec3; up: Vec3; heading: number; gamma: number; bank: number; jumps: number };
@@ -114,4 +115,5 @@ export interface CraftStates {
   drone: DroneCoreState;
   floatplane: PlaneCoreState;
   jet: PlaneCoreState;
+  fighter: PlaneCoreState;
 }

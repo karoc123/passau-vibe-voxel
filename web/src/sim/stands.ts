@@ -13,7 +13,7 @@ import type { Pose } from './contract/pose';
 import type { Berth } from './boat-traffic';
 import { findSpawn } from './craft/boat-motion';
 import { SPAWN_HEIGHT } from './craft/craft-collision';
-import { PLANE } from './craft/plane-flight';
+import { FIGHTER, PLANE } from './craft/plane-flight';
 import { VoxelCollision } from './craft/voxel-collision';
 import { CAR_COLOURS } from './flow';
 import { at } from './path';
@@ -78,8 +78,8 @@ export interface Stand {
 // What a block holds at most, and how far apart (m, between spots) two stands are kept. One craft of a class a block
 // is a few in sight of a player (a wake radius reaches over several blocks); a squad of four finds a second speedboat
 // in the next block along the river.
-const CAP: Record<string, number> = { boat: 1, floatplane: 1, hovercraft: 1, helicopter: 1, paraglider: 1, car: 3 };
-const ROOM: Record<string, number> = { boat: 6, floatplane: 16, hovercraft: 8, helicopter: 9, paraglider: 4, car: 4 };
+const CAP: Record<string, number> = { boat: 1, floatplane: 1, fighter: 1, hovercraft: 1, helicopter: 1, paraglider: 1, car: 3 };
+const ROOM: Record<string, number> = { boat: 6, floatplane: 16, fighter: 16, hovercraft: 8, helicopter: 9, paraglider: 4, car: 4 };
 // Each class's finder: the probes' spacing (m), and its numbers. The helicopter's room is the rotor's reach and a
 // margin; a hovercraft's its skirt's half length and a margin, with water within SHORE m; a speedboat within BANK m
 // of land; a floatplane's run (m) and room either side; a paraglider's drop: the ground under a 1 in 4 glide over
@@ -323,7 +323,7 @@ export class Stands {
     pick('craft', 'boat', boats);
     yield;
 
-    // the floatplane: the longest straight run of open water with room either side
+    // the floatplane and the combat plane: the longest straight run of open water with room either side
     const planes: Cand[] = [];
     for (const [x, z] of grid(24)) {
       const q = C.at(x, z);
@@ -338,6 +338,8 @@ export class Stands {
       }
     }
     pick('craft', 'floatplane', planes);
+    // (the combat plane on the same water, its own stand clear of the floatplane's)
+    pick('craft', 'fighter', planes.map((c) => ({ ...c, spot: { ...c.spot, y: c.spot.y - PLANE.FLOAT_H + FIGHTER.FLOAT_H } })));
     yield;
 
     // the hovercraft: room on the bank, facing the water nearest

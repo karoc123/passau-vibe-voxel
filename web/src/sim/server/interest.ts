@@ -23,7 +23,7 @@ export interface Radii { car: number; air: number; person: number; other: number
 // 350 m) the page draws the far traffic itself (sim/flow.ts); a long way's agents reach a little past it, so cars
 // are sent a little further. The rest (crafts, avatars, bodies, events) is seen from further off than any agent.
 const CAR_R = 400, AIR_CAR_R = 1000, PERSON_R = 200, OTHER_R = 1050;
-const AIRCRAFT = new Set<CraftType>(['helicopter', 'paraglider', 'drone', 'floatplane', 'jet']);
+const AIRCRAFT = new Set<CraftType>(['helicopter', 'paraglider', 'drone', 'floatplane', 'jet', 'fighter']);
 
 /** the radii of a host whose street life reaches activeR m; one number (a tool's, ?interest=): that for everything */
 export function radii(activeR: number, one?: number): Radii {

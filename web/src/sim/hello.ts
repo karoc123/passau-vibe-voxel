@@ -11,7 +11,7 @@ import { DEFAULT_TUNING, type ClientTuning, type Tuning } from './tuning';
 
 /** a hello of this code: its protocol, the build given (core/data-contract.ts checkBuild), the tuning's client parts */
 export function hello(build: DataBuild | null, t: Tuning = DEFAULT_TUNING): Hello & { tuning: ClientTuning } {
-  const tuning: ClientTuning = { ride: t.ride, boat: t.boat, plane: t.plane, jet: t.jet, craft: t.craft, drone: t.drone, fuel: t.fuel };
+  const tuning: ClientTuning = { ride: t.ride, boat: t.boat, plane: t.plane, jet: t.jet, fighter: t.fighter, craft: t.craft, drone: t.drone, fuel: t.fuel };
   return { protocol: PROTOCOL, build: build && { formatVersion: build.formatVersion, buildId: build.buildId }, tuning };
 }
 
