@@ -1,4 +1,4 @@
-// The helicopter, the hovercraft and the paraglider as WorldSim steps them (craft-core.ts): their motion
+// The helicopters, the hovercraft and the paraglider as WorldSim steps them (craft-core.ts): their motion
 // (craft-motion.ts CraftMotion) at 1/60 s (two a world tick), through their probes (craft-collision.ts
 // craftWorld). A landing on foot or on the water (the paraglider's) ends it: it steps no more, and its pilot hears of it
 // (events: 'landed', 'splash'). An empty seat: hands off (the helicopter let down onto its skids). Drawn between the
@@ -12,7 +12,7 @@ import type { CraftInput } from '../contract/inputs';
 import type { CraftCore } from './craft-core';
 import { Tank, type TankTuning } from '../tank';
 import { craftWorld, CRAFT_RADIUS } from './craft-collision';
-import { CRAFT, CraftMotion, type CraftKind, type CraftMotionWorld, type CraftTuning } from './craft-motion';
+import { CRAFT, CraftMotion, rotorcraft, type CraftKind, type CraftMotionWorld, type CraftTuning } from './craft-motion';
 import type { VoxelCollision } from './voxel-collision';
 
 export const NO_CRAFT_INPUT: CraftInput = Object.freeze({ turn: 0, drive: 0, lift: 0, side: 0 });
@@ -42,7 +42,7 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     this.tank = new Tank(fuel);
     this.motion = new CraftMotion(kind, cfg);
     this.reach = { radius: CRAFT_RADIUS[kind] };
-    this.neutral = kind === 'helicopter' ? LET_DOWN : NO_CRAFT_INPUT;
+    this.neutral = rotorcraft(kind) ? LET_DOWN : NO_CRAFT_INPUT;
   }
 
   /** the craft's view of the collision (its probes, the surface under it) */
@@ -70,7 +70,7 @@ export class SpecialCore implements CraftCore<CraftInput, SpecialEvent, SpecialD
     if (this.ended) return false;
     if (!this.tank.power) input = this.neutral;
     // (an empty seat is the engine off; a helicopter off its skids works to hold itself up)
-    else if (input !== this.neutral) this.tank.burn(Math.max(Math.abs(input.drive), Math.abs(input.side), Math.abs(input.lift), this.kind === 'helicopter' && !this.motion.grounded ? HOVER : 0), dt);
+    else if (input !== this.neutral) this.tank.burn(Math.max(Math.abs(input.drive), Math.abs(input.side), Math.abs(input.lift), rotorcraft(this.kind) && !this.motion.grounded ? HOVER : 0), dt);
     this.result = this.motion.step(input, dt, this.world(col));
     if (this.result === 'landed' || this.result === 'splash') { this.events.push(this.result); return false; }
     return this.result !== 'loading';

@@ -4,7 +4,9 @@ import type { CraftMotionState, CraftStep } from '../contract/crafts';
 import type { CraftInput } from '../contract/inputs';
 import type { Sweep } from './sweep';
 
-export type CraftKind = 'hovercraft' | 'helicopter' | 'paraglider';
+export type CraftKind = 'hovercraft' | 'helicopter' | 'gunship' | 'paraglider';
+/** whether kind flies by the helicopter's law (the light one and the military one, each with its own numbers) */
+export const rotorcraft = (kind: CraftKind): kind is 'helicopter' | 'gunship' => kind === 'helicopter' || kind === 'gunship';
 // (its input, CraftInput: contract/inputs.ts)
 export interface CraftMotionWorld {
   surface(x: number, z: number): { height: number; water: boolean } | null;
@@ -36,6 +38,17 @@ export const CRAFT = frozen({
     climb: 8, sink: 6, liftResponse: 1.6, // m/s, /s
     tilt: 0.5, maxTilt: 0.45, // drawn: the disc tilts with the stick's thrust (share of atan(a/g)), at most rad
   }),
+  // the military helicopter (a medium twin, 15 m rotor, written in metres): heavier, so slower to gather speed and
+  // to turn, a lower top speed (38 m/s, 137 km/h); its door guns want a steady platform more than a quick one
+  gunship: frozen({
+    yaw: 0.9, yawResponse: 2.5,
+    accel: 6.5, backAccel: 3.5, sideAccel: 5,
+    drag: 0.17,
+    hoverBrake: 0.8,
+    sideDamp: 0.6,
+    climb: 7, sink: 6, liftResponse: 1.3,
+    tilt: 0.5, maxTilt: 0.4,
+  }),
   hovercraft: frozen({
     yaw: 1.1, yawResponse: 2.5,
     thrust: 5.5, reverse: 4, // m/s² (the fans' louvres turned back)
@@ -65,7 +78,7 @@ export class CraftMotion {
   yaw = 0; // rad/s, + turning right (the heading falls)
   bank = 0; // drawn: + the right side down
   pitch = 0; // drawn: + the nose up
-  grounded = false; // the helicopter on its skids
+  grounded = false; // a helicopter on its skids
   throttle = 0; // drawn: the hovercraft's fans, the thrust asked (0..1, either way) eased
   private readonly delta = vec3();
   private readonly raised = vec3();
@@ -96,7 +109,7 @@ export class CraftMotion {
   }
 
   step(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    if (this.kind === 'helicopter') return this.helicopter(input, dt, world);
+    if (rotorcraft(this.kind)) return this.helicopter(input, dt, world);
     if (this.kind === 'hovercraft') return this.hovercraft(input, dt, world);
     return this.paraglider(input, dt, world);
   }
@@ -133,7 +146,7 @@ export class CraftMotion {
   }
 
   private helicopter(input: CraftInput, dt: number, world: CraftMotionWorld): CraftStep {
-    const H = this.cfg.helicopter, v = this.velocity;
+    const H = this.cfg[this.kind as 'helicopter' | 'gunship'], v = this.velocity;
     const onSkids = this.grounded && input.lift <= 0;
     if (this.turn(onSkids ? 0 : input.turn * H.yaw, H.yawResponse, dt, world) === 'loading') return 'loading';
     const s = Math.sin(this.heading), c = Math.cos(this.heading);

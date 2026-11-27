@@ -29,7 +29,7 @@ export const NOT_ON_THE_WIRE: Record<CraftType, readonly string[]> = (() => {
     'flight.d', 'flight.q', // the steps' scratch
     'flight.ahead']; // whether this copy runs ahead on a page (the copy's own, not the craft's)
   return {
-    boat, hovercraft: special, helicopter: special, paraglider: [...special, TANKLESS], floatplane: plane, jet: plane, fighter: plane,
+    boat, hovercraft: special, helicopter: special, gunship: special, paraglider: [...special, TANKLESS], floatplane: plane, jet: plane, fighter: plane,
     drone: [...COMMON, TANKLESS, 'next', 'glide', 'out', // the steps', drawn()'s scratch
       'flight.rotationAxis', 'flight.rotationDelta', 'flight.acceleration', 'flight.displacement', 'flight.impactNormal',
       'flight.priorAttitude', 'flight.priorVelocity', // the steps' scratch

@@ -23,7 +23,9 @@ export interface Radii { car: number; air: number; person: number; other: number
 // 350 m) the page draws the far traffic itself (sim/flow.ts); a long way's agents reach a little past it, so cars
 // are sent a little further. The rest (crafts, avatars, bodies, events) is seen from further off than any agent.
 const CAR_R = 400, AIR_CAR_R = 1000, PERSON_R = 200, OTHER_R = 1050;
-const AIRCRAFT = new Set<CraftType>(['helicopter', 'paraglider', 'drone', 'floatplane', 'jet', 'fighter']);
+// (each type said: one forgotten would be seen from afar with the street's cars cut short under it)
+const AIRCRAFT: Record<CraftType, boolean> = { boat: false, hovercraft: false, helicopter: true, gunship: true, paraglider: true, drone: true,
+  floatplane: true, jet: true, fighter: true };
 
 /** the radii of a host whose street life reaches activeR m; one number (a tool's, ?interest=): that for everything */
 export function radii(activeR: number, one?: number): Radii {
@@ -75,7 +77,7 @@ export class Sight {
     xs.length = zs.length = 0;
     this.own = P?.seat?.entity ?? null;
     const craft = this.own?.kind === 'craft' ? sim.crafts.get(this.own.id) : null;
-    this.carR = craft && AIRCRAFT.has(craft.type) ? this.r.air : this.r.car;
+    this.carR = craft && AIRCRAFT[craft.type] ? this.r.air : this.r.car;
     if (P?.view) {
       xs.push(P.view.focus.x); zs.push(P.view.focus.z);
       if (P.view.viewer) { xs.push(P.view.viewer.x); zs.push(P.view.viewer.z); }

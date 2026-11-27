@@ -13,7 +13,7 @@ export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ce
 
 /** the boat's (sim/craft/boat-motion.ts): it met the bank or a wall at speed */
 export type BoatEvent = { kind: 'bump'; speed: number };
-/** the hovercraft's, the helicopter's, the paraglider's (sim/craft/special-core.ts): landed on foot or on the water */
+/** the hovercraft's, the helicopters', the paraglider's (sim/craft/special-core.ts): landed on foot or on the water */
 export type SpecialEvent = 'landed' | 'splash';
 /** the drone's (sim/craft/drone-core.ts): a hit at speed (m/s into what it met) */
 export interface DroneEvent { kind: 'impact'; hit: ImpactKind; speed: number }
@@ -33,6 +33,7 @@ export interface CraftEvents {
   floatplane: PlaneEvent;
   jet: PlaneEvent;
   fighter: PlaneEvent;
+  gunship: SpecialEvent;
 }
 
 /** an event of a craft of type K (one of them): its type and its core's event (SimEvent 'craft') */
@@ -116,4 +117,5 @@ export interface CraftStates {
   floatplane: PlaneCoreState;
   jet: PlaneCoreState;
   fighter: PlaneCoreState;
+  gunship: SpecialCoreState;
 }

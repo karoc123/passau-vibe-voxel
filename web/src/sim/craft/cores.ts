@@ -15,6 +15,7 @@ export const CORES = {
   hovercraft: (t: ClientTuning) => new SpecialCore('hovercraft', t.craft, t.fuel.hovercraft),
   helicopter: (t: ClientTuning) => new SpecialCore('helicopter', t.craft, t.fuel.helicopter),
   paraglider: (t: ClientTuning) => new SpecialCore('paraglider', t.craft),
+  gunship: (t: ClientTuning) => new SpecialCore('gunship', t.craft, t.fuel.gunship),
   drone: (t: ClientTuning) => new DroneCore(t.drone),
   floatplane: (t: ClientTuning) => new PlaneCore(t.plane, t.fuel.floatplane),
   jet: (t: ClientTuning) => new PlaneCore(t.jet, t.fuel.jet),
