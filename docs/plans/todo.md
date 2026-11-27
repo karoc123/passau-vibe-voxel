@@ -68,5 +68,3 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   tick is not at hand); a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never
   has (a crash a car moved out of) stays told.
 - Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
-- Seated players: a car is opened only while a player sits in it (16 per type); the van's ends and the camper's
-  back stay solid (thick walls, not glass).

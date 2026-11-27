@@ -13,7 +13,7 @@
 // holds each message 70 ms, the pilot's page (prediction on) keeps the passenger within 3 cm of their seat on the craft
 // as it draws it, every frame of a flight, while the snapshot's craft lies metres off. A page beside a parked car sees
 // its passenger and its driver through the side windows (a ray meets their figure first), from behind and ahead through
-// its rear window and windscreen, an empty car stays closed; the driver's own page draws them in it from the chase
+// its rear window and windscreen, an empty car stays closed; a van's and a camper's the same; the driver's own page draws them in it from the chase
 // view, not from their own eyes. Another page sees each craft's pilot through its glass (the drone has none); a
 // passenger's page draws the pilot and the others, itself only from the chase view; from each seat's eyes no other
 // figure is within the camera's near plane.
@@ -416,6 +416,30 @@ const spawn = async (p, type, x, z, h) => {
   WD.life.ownEyes = false;
   check(chase === null && !eyes.own && eyes.passenger === null,
     `the driver's own page draws them in the car seen from behind (${chase ?? 'seen'}), not from their own eyes (${eyes.own ? 'drawn' : 'not drawn'}), the passenger there either way (${eyes.passenger ?? 'seen'})`);
+}
+
+// the van and the camper van the same: their load space and living box no wall in the way from behind, the van's
+// windscreen none from ahead (the camper's front passenger sits in its cab, the whole box behind them)
+for (const [vt, len, X] of [['van', 5.4, 340], ['camper', 6.6, 380]]) {
+  const Z = 200, H = Math.PI / 2, id = vt === 'van' ? 9003 : 9004;
+  const car = { kind: 'car', id, vt, e: 0, lane: 0, s: 0, ds: 0, off: 0, dOff: 0, prev: -1, prevOff: 0, next: -1, len, bus: false,
+    col: '#888888', brake: 0, v: 0, wait: 0, why: 'free', by: null, block: null, geo: { px: 0, py: 0, cx: X, cy: Z, z: G, fx: 0, fy: 1 },
+    detachedPose: { x: X, y: G, z: Z, h: H, pitch: 0, roll: 0 } };
+  host.sim.traffic.detachedCars.push(car);
+  const [d, e] = [`D-${vt}`, `E-${vt}`], D = add(d), E = add(e), V = add(`V-${vt}`), W = watch(V);
+  walk(D, X, Z - 1.6);
+  walk(E, X, Z + 1.6);
+  walk(V, X + 6, Z - 8);
+  await tick(5);
+  await host.sim.loadPhysics({ x: X, z: Z });
+  D.c.send({ kind: 'enterSeat', entity: { kind: 'car', id }, role: 'driver' });
+  await tick(5);
+  E.c.send({ kind: 'enterSeat', entity: { kind: 'car', id }, role: 'passenger' });
+  await tick(10);
+  const seen = { seated: seatOf(D)?.role === 'driver' && seatOf(E)?.role === 'passenger' ? null : 'not seated',
+    side: [seesHead(W, e, [-1, 0, 0], 4), seesHead(W, d, [1, 0, 0], 4)].find(Boolean) ?? null,
+    behind: seesHead(W, e, [0, 0, -1], 9), ahead: seesHead(W, d, [0, 0, 1], 9) };
+  check(Object.values(seen).every((l) => l === null), `a page sees who sits in a ${vt} through its side windows, from behind through its rear window and from ahead through its windscreen (${JSON.stringify(seen)})`);
 }
 
 // the crafts' pilots seen by another page through the glass round them: the helicopter's front glass, the hovercraft's
