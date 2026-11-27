@@ -11,7 +11,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
   paraglider.
 - **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
-- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Back to orbit mode, Full screen, Start menu.
+- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Debug, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 
@@ -46,8 +46,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 
 ## Game building blocks
 
-- **Life**: what has health: a player (wherever they are: on foot, at a wheel, along for the ride), a car, a craft;
-  later an NPC. Not "entity": a player's avatar is an entity, their health stays with the player.
+- **Life**: what has health: a player (wherever they are: on foot, at a wheel, along for the ride), a car, a craft,
+  an NPC. Not "entity": a player's avatar is an entity, their health stays with the player.
 - **Health**: a life's points, 0 to its type's max; the host's alone, pages are told.
 - **Damage kind**: bullet, blast, crash, fall; each type takes each kind by a factor of its own.
 - **Toughness**: a type's health as data: max, the factor per damage kind, the share passed to those in a vehicle
@@ -62,7 +62,13 @@ The words the owner and the code use for the same thing. One name per thing; use
   then a left one like any other), **refilled** a while later out of sight.
 - **Landing room**: level, dry, open ground round a point, wide enough to set a craft down on.
 - **Asleep**: a placed craft not yet touched: not stepped, sent once.
-- **NPC**: a body on foot the host runs (no player behind it), by the players' walk; seen as an avatar. Not "bot".
+- **NPC**: a body on foot the host runs (no player behind it), by the players' walk; drawn as an avatar. Not "bot".
+  An enemy NPC keeps a **duty**: a **guard** stands at its **post** facing one way, a **patrol** walks its **loop**.
+- **Mind**: an enemy NPC's state machine: **post**, **attack** (a player noticed by a clear sight line: fires, follows
+  a little), **search** (walks to where it last saw them, looks round), **back** (to its post). Not "AI".
+- **Spread**: how far an NPC's aim strays from where it aims, more the further off.
+- **Dead**: an NPC at 0: lies where it fell, no target and no body to shots, taken away after a while. A player is
+  down, never dead.
 - **Walkable grid**: the host's cells, a metre each, round an NPC, each with the floor a walker stands on there (or
   none), read from the voxels as a search reaches them; **stale** once an edit touches it.
 - **Way**: the points an NPC walks to in turn, found on a walkable grid. Not "path" (a road's or footpath's line).

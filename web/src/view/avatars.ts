@@ -12,7 +12,7 @@ import { weaponIn } from '../sim/weapons';
 
 /** where a player's figure is drawn (its feet, heading) and what it carries from frame to frame: its gait's phase,
  * its speed eased (input reaches the host unevenly: a tick without a step would stop the legs), its last frame drawn */
-interface Drawn extends RoadPose { ph: number; v: number; frame: number; arm?: number }
+interface Drawn extends RoadPose { ph: number; v: number; frame: number; arm?: number; down?: boolean }
 
 /** an avatar's drawn pose d eased dt s towards where it is between its ticks (a tick its walker's input missed
  * stands still: this keeps it walking on) */
@@ -32,7 +32,11 @@ const SKIN = ['#e0b48f', '#c68e62', '#8d5a3b', '#f1c9a5'];
 const hashOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; };
 /** a player's outfit (colours as #rrggbb; cap: the cap's colour or none) */
 interface Look { shirt: string; trousers: string; hair: string; skin: string; cap: string | null }
+// An NPC (the host names its avatar npc<id>): a dark vest, olive trousers and a dark cap, apart from every player's
+// bright shirt at a glance
+const ENEMY: Look = { shirt: '#24271f', trousers: '#4d5236', hair: '#151515', skin: '#c68e62', cap: '#1c1f18' };
 function lookOf(player: string): Look {
+  if (player.startsWith('npc')) return ENEMY;
   const m = /^p(\d+)$/.exec(player), n = m ? +m[1] : hashOf(player);
   return {
     shirt: SHIRTS[n % SHIRTS.length], trousers: TROUSERS[(n * 3) % TROUSERS.length], hair: HAIR[(n * 7 + 1) % HAIR.length],
@@ -90,8 +94,18 @@ class Figure {
   }
 
   /** at d (eased speed d.v, gait phase d.ph, armed: d.arm a slot with a gun), walking or swimming */
-  pose(d: Drawn, swim: boolean, armed: boolean) {
+  pose(d: Drawn, swim: boolean, armed: boolean, down = false) {
     const G = this.group, B = this.body, [l, r] = this.legs, [al, ar] = this.arms;
+    if (down) { // on its back along its heading, the limbs splayed
+      G.position.set(d.x, d.y + 0.15, d.z);
+      G.quaternion.setFromEuler(SW.e.set(-Math.PI / 2, d.h, 0, 'YXZ'));
+      B.rotation.set(0, 0, 0);
+      l.rotation.x = r.rotation.x = 0; l.rotation.z = 0.2; r.rotation.z = -0.2;
+      al.rotation.x = ar.rotation.x = -2.6; al.rotation.z = 0;
+      this.hand.rotation.x = -ar.rotation.x;
+      return;
+    }
+    l.rotation.z = r.rotation.z = 0;
     if (swim) { // lying forward along its heading, the chest at the water's top, the arms in turn over the head, the legs kicking
       const q = G.quaternion.setFromEuler(SW.e.set(SWIM_TILT, d.h, 0, 'YXZ')), up = SW.v.set(0, 1, 0).applyQuaternion(q);
       G.position.set(d.x, d.y + FLOAT - 0.2, d.z).addScaledVector(up, -HIP);
@@ -171,11 +185,12 @@ export class Avatars {
       }
       d.frame = this.frame;
       d.arm = av.pose.arm;
+      d.down = av.pose.down;
       easeAvatar(d, to, dt);
       const p = av.pose, q = av.prev, step = Math.hypot(p.x - q.x, p.z - q.z) / STEP;
       d.v += ((p.moving && step < V_MAX ? step : 0) - d.v) * (1 - Math.exp(-dt / V_S));
       d.ph += dt * (av.pose.swim ? (p.moving ? 5 : 2) : 2 * Math.PI * d.v / (2 * (STEP_M + STEP_V * d.v)));
-      this.figureOf(av.player).pose(d, !!p.swim, d.arm !== undefined && !!weaponIn(d.arm));
+      this.figureOf(av.player).pose(d, !!p.swim, d.arm !== undefined && !!weaponIn(d.arm), !!p.down);
       here.add(av.player);
     }
     for (const [id, d] of this.drawnBy) if (d.frame !== this.frame) this.drawnBy.delete(id);

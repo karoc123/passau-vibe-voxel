@@ -23,6 +23,16 @@ export interface AvatarState { id: number; player: PlayerId; pose: WalkPose; pre
  * is the pose sent before */
 export type AvatarWire = Omit<AvatarState, 'prev'> & { prev?: WalkPose };
 
+/** an NPC as a snapshot carries a sample of it, which the page reckons on at its velocity (sim/agent-wire.ts): its
+ * avatar's id, its feet (cm), heading (1e-3 rad), velocity on the map (cm/s), what it does (NPC_* bits) */
+export type NpcWire = [id: number, x: number, y: number, z: number, h: number, vx: number, vz: number, flags: number];
+/** an NPC's flags: walking, swimming, lying dead, armed (the weapon in slot NPC_ARM drawn in its hand) */
+export const NPC_MOVING = 1, NPC_SWIM = 2, NPC_DOWN = 4, NPC_ARMED = 8, NPC_ARM = 1;
+
+/** a car out of the traffic as a snapshot carries it: whole when new to the session, then its id and the keys that
+ * changed (null: one it has no more) */
+export type DetachedWire = { id: number } & { [K in keyof CarState]?: CarState[K] | null };
+
 /** a level-1 node's edits since the last snapshot: the ops from its from-th on, which the client applies in order over
  * its own copy of the node (core/world-edits.ts editNode: the same columns as the host's); ops null: the node is its
  * files again */
@@ -90,17 +100,19 @@ export interface Snapshot {
   /** the traffic's cars, people and riders: the samples since the session's last snapshot (contract/agents.ts CarWire) */
   cars: CarWire[];
   /** the cars out of the traffic (left, parked, a wreck) that changed */
-  detached: CarState[];
+  detached: DetachedWire[];
   people: PersonWire[];
   riders: PersonWire[];
   /** the cars, the people and riders, the boats (a ship's id, -1 - a boat's), the cars out of the traffic, the bodies
-   * (by car id), the avatars, by id, gone from the session's sight (or from the world) */
-  gone: [cars: number[], people: number[], boats: number[], detached: number[], bodies: number[], avatars: number[], crafts: number[]];
+   * (by car id), the avatars, the crafts, the NPCs, by id, gone from the session's sight (or from the world) */
+  gone: [cars: number[], people: number[], boats: number[], detached: number[], bodies: number[], avatars: number[], crafts: number[], npcs: number[]];
   /** the cars with a body (or its fade), by car id, whose draw changed (one at rest: once, its p0 its p1) */
   bodies: [number, BodyWire][];
   boats: BoatsWire | null;
   /** the players' own bodies on foot that moved */
   avatars: AvatarWire[];
+  /** the NPCs whose sample changed (none: left out); drawn as avatars */
+  npcs?: NpcWire[];
   /** the cars driven by players, by car id with its driver (for a map's markers) */
   drivers: [car: number, player: PlayerId][];
   /** the players riding along in a car or a craft sent, by the passenger's seat they hold (its free seats, its riders

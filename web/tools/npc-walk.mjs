@@ -32,7 +32,7 @@ const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const B = new MirrorSimClient(new CloneLink(link), { roads: [], peds: [], ctrls: [] }, null, server.hello);
 B.send({ kind: 'view', view: { focus: { x: 90, z: 128 } } });
 let bytes = 0;
-const tick = async () => { B.update(STEP); server.update(STEP); link.deliver(); bytes += JSON.stringify(s.snapshot().avatars).length; await new Promise(setImmediate); };
+const tick = async () => { B.update(STEP); server.update(STEP); link.deliver(); bytes += JSON.stringify(s.snapshot().npcs ?? []).length; await new Promise(setImmediate); };
 
 // the searches timed (grid and A*), the walk's ticks timed
 const N = sim.npcs, search = N.search.bind(N), searches = [];

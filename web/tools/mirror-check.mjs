@@ -148,16 +148,16 @@ if (maxLead > 2) fail.push(`the render clock fell ${maxLead.toFixed(2)} ticks be
 // driven body: lean, wheelie) and digs a hole under a car nearby (bodies falling, wrecks, fades). Every frame every
 // car with a body is drawn alike by the sim (LifePhysics.pose, kept per tick) and from the snapshot of the tick the
 // client draws (TrafficMirror bodies.pose) at three alphas, alike within BODY_M m and BODY_RAD rad: a snapshot carries
-// positions to the mm and a body's rotation to 1e-5 (sim/agent-wire.ts wireBody), so its x, y, z may be a mm or two off
+// positions to the mm and a body's rotation to 1e-4 (sim/agent-wire.ts wireBody), so its x, y, z may be a mm or two off
 // (the ride too), its angles far less; the same code drawing both is what is checked, not the bits. A body sent at
 // rest (its p0 its p1) is drawn where it was sent until it strays by STILL_M, a quaternion's part by STILL_Q: so much
 // more (its origin also swung by the rotation's error over its ride).
-// A heading is read off the quaternion: with the nose near straight up or down (a motorbike on its tail) the quaternion's
-// rounding turns it by up to its 1e-5 over the pitch's cosine (3.8e-3 rad at 89.7 degrees), though the body drawn is
-// the same within that rounding: the heading's leeway grows so.
+// A heading and a roll are read off the quaternion: with the nose near straight up or down (a motorbike on its tail)
+// the quaternion's rounding turns them by up to its 1e-4 over the pitch's cosine, though the body drawn is the same
+// within that rounding: their leeway grows so.
 const BODY_M = 0.002, BODY_RAD = 0.0005;
 const alike = (x, y, rest) => x.every((v, j) => Math.abs(j < 3 ? v - y[j] : Math.atan2(Math.sin(v - y[j]), Math.cos(v - y[j])))
-  <= (j < 3 ? BODY_M + (rest ? 2 * STILL_M : 0) : (BODY_RAD + (rest ? 4 * STILL_Q : 0)) / (j === 3 ? Math.max(Math.abs(Math.cos(x[4])), 0.01) : 1)));
+  <= (j < 3 ? BODY_M + (rest ? 2 * STILL_M : 0) : (BODY_RAD + (rest ? 4 * STILL_Q : 0)) / (j === 3 || j === 5 ? Math.max(Math.abs(Math.cos(x[4])), 0.01) : 1)));
 const bodyCounts = await bodies();
 async function bodies() {
   const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), { worldEdits: WE } = await load('host/node.ts');

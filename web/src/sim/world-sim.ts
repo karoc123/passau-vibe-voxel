@@ -55,8 +55,10 @@ import { besideBox, boundWalk, reaches, type Box } from './walk-bounds';
 import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
-import { weaponIn } from './weapons';
+import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
+import { aimFrom, CHEST, newMind, RANGE, think, type Duty, type Senses } from './npc-mind';
+import type { Vec3 } from '../core/vec';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import type { BoatPose } from './contract/agents';
@@ -173,6 +175,16 @@ export class WorldSim {
     walk: (player, pose) => this.walk(player, pose),
     sit: (player, seat) => this.enterSeat(player, seat) === true,
     setTime: (hour, day) => this.setTime(hour, day),
+    addNpc: (player, patrol) => {
+      const W = this.players.get(player)?.walk;
+      if (this.seat(player)?.role !== 'walker' || !W) return false;
+      const p = W.pose, x = p.x + Math.sin(p.h) * NPC_AHEAD, z = p.z + Math.cos(p.h) * NPC_AHEAD;
+      const y = this.ground?.support(x, z, p.y + 2) ?? p.y;
+      const R = NPC_LOOP, duty: Duty = patrol ? { kind: 'patrol', loop: [[R, R], [R, -R], [-R, -R], [-R, R]].map(([u, v]) => ({ x: x + u, z: z + v })) }
+        : { kind: 'guard', x, z, h: p.h + Math.PI };
+      this.addNpc({ x, y, z }, undefined, duty);
+      return true;
+    },
     resetDriver: (player) => {
       if (this.seat(player)?.role !== 'driver' || !this.phys) return false;
       this.phys.resetDriver(player);
@@ -190,6 +202,7 @@ export class WorldSim {
     seed?: number; tuning?: Tuning; loadPhysics?: (tuning: Tuning) => Promise<LifePhysics>; crafts?: CraftWorld; activeR?: number; stands?: boolean;
   } = {}) {
     this.traffic = new Traffic(data, opts.seed ?? DEFAULT_SEED, opts.activeR);
+    this.seed = (opts.seed ?? DEFAULT_SEED) >>> 0;
     this.tuning = opts.tuning ?? DEFAULT_TUNING;
     this.keeper = new EditKeeper(this.tuning.presence);
     this.left = new Presence(this.tuning.presence);
@@ -270,10 +283,11 @@ export class WorldSim {
   /** box (map metres [x0, z0, x1, z1)) was edited, or, cleared, is its files' again */
   edited(box: [number, number, number, number], cleared = false) { this.traffic.edited(box, cleared); this.npcs.edited(box); }
 
-  /** an NPC on foot put down standing at (x, y, z) (y: its soles), walking at speed m/s; its avatar's id */
-  addNpc(at: { x: number; y: number; z: number }, speed?: number) {
+  /** an NPC on foot put down standing at (x, y, z) (y: its soles), walking at speed m/s; with a duty, an enemy that
+   * keeps it (sim/npc-mind.ts), else one that only walks where it is sent; its avatar's id */
+  addNpc(at: { x: number; y: number; z: number }, speed?: number, duty?: Duty) {
     const id = this.nextAvatar++;
-    this.npcs.add(id, at, speed);
+    this.npcs.add(id, at, speed, duty ? newMind(duty, this.clock) : null);
     return id;
   }
 
@@ -373,7 +387,7 @@ export class WorldSim {
     T.crafts = crafts;
     traffic();
     for (const P of this.players.values()) if (P.walk?.on) this.carryOn(P.walk);
-    if (this.npcs.all.size) this.npcs.tick(STEP, (x, z) => this.walkSolids(x, z));
+    if (this.npcs.all.size) { this.minds(); this.npcs.tick(STEP, (x, z) => this.walkSolids(x, z)); }
     this.harm();
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
@@ -544,16 +558,22 @@ export class WorldSim {
     const P = this.players.get(player) as PlayerState | undefined, s = P && this.seat(player), w = weaponIn(slot);
     if (!P?.walk || s?.role !== 'walker' || !w || !Number.isFinite(h) || !Number.isFinite(pitch) || this.lives.down.has(player)) return;
     if (!(P.trigger ??= new Trigger()).pull(w, this.clock)) return;
-    const f = P.walk.pose, from = { x: f.x, y: f.y + EYE, z: f.z };
-    const shot = w.fire(this.shotWorld(s.entity), from, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
+    const f = P.walk.pose;
+    this.shoot(player, s.entity, w, { x: f.x, y: f.y + EYE, z: f.z }, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
+  }
+
+  // w fired by `by` (a player, or an NPC: the same shot), from its body own's eyes along unit dir; what it hits harmed.
+  // (a shot's points to the cm: their digits were most of its bytes, ten a second a gun)
+  private shoot(by: PlayerId, own: EntityRef, w: Weapon, from: Vec3, dir: Vec3) {
+    const shot = w.fire(this.shotWorld(own), from, dir);
     if (!('fly' in shot)) {
-      this.due.push({ kind: 'shot', weapon: w.id, player, ...shot });
+      this.due.push({ kind: 'shot', weapon: w.id, player: by, at: to(shot.at, 100), to: to(shot.to, 100), hit: shot.hit });
       const life = shot.hit && shot.hit !== 'world' ? this.lifeOf(shot.hit) : null;
       if (life) this.hurt(life, w.damage.kind, w.damage.points);
       return;
     }
-    this.flying.push({ player, weapon: w.id, damage: w.damage, own: s.entity, p: shot, t: 0 });
-    this.due.push({ kind: 'launch', weapon: w.id, player, at: { ...shot.at }, v: { ...shot.v } });
+    this.flying.push({ player: by, weapon: w.id, damage: w.damage, own, p: shot, t: 0 });
+    this.due.push({ kind: 'launch', weapon: w.id, player: by, at: { ...shot.at }, v: { ...shot.v } });
   }
 
   // the projectiles' flight through this tick; one that bursts: its blast, and its crater for the host to apply
@@ -638,6 +658,11 @@ export class WorldSim {
         for (const [id, by] of sim.avatars) {
           const w = sim.players.get(by)?.walk?.pose;
           if (w && !mine('avatar', id)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: 0.3, l: 0.3, ht: 1.8 };
+        }
+        // (a dead NPC is no body: shots and blasts pass over it)
+        for (const [id, n] of sim.npcs.all) {
+          const w = n.pose;
+          if (n.dead === null && !mine('avatar', id) && !out(w.x, w.z)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: 0.3, l: 0.3, ht: 1.8 };
         }
         for (const c of sim.crafts.values()) {
           const p = c.core.pose;
@@ -914,7 +939,10 @@ export class WorldSim {
 
   // the life an entity is (an avatar: its walker), or null: none (a person of the crowd)
   private lifeOf(e: EntityRef): Life | null {
-    if (e.kind === 'avatar') { const p = this.avatars.get(e.id); return p === undefined ? null : { kind: 'player', id: p }; }
+    if (e.kind === 'avatar') {
+      const p = this.avatars.get(e.id);
+      return p !== undefined ? { kind: 'player', id: p } : this.npcs.all.has(e.id) ? { kind: 'npc', id: e.id } : null;
+    }
     return e.kind === 'person' ? null : { kind: e.kind, id: e.id };
   }
 
@@ -922,6 +950,7 @@ export class WorldSim {
   private toughness(life: Life): Toughness | null {
     const H = this.tuning.health;
     if (life.kind === 'player') return this.players.has(life.id) ? H.player : null;
+    if (life.kind === 'npc') return this.npcs.all.get(life.id)?.dead === null ? H.npc : null;
     if (life.kind === 'car') { const c = this.carById(life.id); return c ? H.car[vehicleOf(c).id] : null; }
     const c = this.crafts.get(life.id);
     return c ? H.craft[c.type] : null;
@@ -941,6 +970,7 @@ export class WorldSim {
     }
     if (was > 0 && hp === 0) {
       if (life.kind === 'player') this.goDown(life.id);
+      else if (life.kind === 'npc') this.npcs.kill(life.id);
       else this.wreck(life);
     }
   }
@@ -1011,7 +1041,7 @@ export class WorldSim {
     for (const [p, at] of this.lives.down) if (at <= this.clock + 1e-9) this.comeBack(p);
     if (this.tick % FORGET_TICKS) return;
     for (const { life } of [...this.lives.values()]) {
-      const gone = life.kind === 'player' ? !this.players.has(life.id) : !this.entities.exists(life);
+      const gone = life.kind === 'player' ? !this.players.has(life.id) : life.kind === 'npc' ? !this.npcs.all.has(life.id) : !this.entities.exists(life);
       if (gone) { this.lives.heal(lifeKey(life)); this.wrecks.delete(lifeKey(life)); }
     }
     for (const k of this.wrecks) if (this.lives.hp(k) === undefined) this.wrecks.delete(k);
@@ -1034,6 +1064,59 @@ export class WorldSim {
     const p = W.pose, under = this.ground?.support(p.x, p.z, p.y + 0.5);
     if (!W.fall && !p.swim && !W.on && !this.lives.down.has(player) && (under === undefined || Math.abs(p.y - under) < 0.5)) this.safe.set(player, p);
   }
+
+  // ------------------------------------------------------------------ the NPCs' minds (sim/npc-mind.ts)
+  // Each NPC with a duty thinks once a tick, before the walk steps it: what it sees is the host's (the players on foot
+  // as this sim has them, the voxels between), what it fires is a player's MG fired as theirs is.
+
+  private minds() {
+    const MG = weaponById('mg'), N = this.npcs, V = this.voxels;
+    // (the players it may attack: on foot, not down)
+    const prey: { player: PlayerId; at: WalkPose }[] = [];
+    for (const [p, P] of this.players) if (P.walk && P.seat?.role === 'walker' && !this.lives.down.has(p)) prey.push({ player: p, at: P.walk.pose });
+    for (const n of N.all.values()) {
+      const m = n.mind;
+      if (!m || n.dead !== null) continue;
+      const me = n.pose, eyes = { x: me.x, y: me.y + EYE, z: me.z };
+      // (a clear line from its eyes to their chest within RANGE: the weapons' voxel ray)
+      const clear = (at: WalkPose) => {
+        const d = { x: at.x - eyes.x, y: at.y + CHEST - eyes.y, z: at.z - eyes.z }, L = Math.hypot(d.x, d.y, d.z);
+        if (L > RANGE) return false;
+        if (!V || L < 1e-6) return true;
+        d.x /= L; d.y /= L; d.z /= L;
+        // (voxels not yet loaded are no clear line: a ray through them meets nothing)
+        return (!V.ready || V.ready(eyes, d, L)) && V.raycast(eyes, d, L) >= L - 0.3;
+      };
+      const where = (at: WalkPose) => ({ x: at.x, y: at.y, z: at.z });
+      const senses: Senses = {
+        nearest: () => {
+          let best: { player: PlayerId; at: Vec3 } | null = null, bd = Infinity;
+          for (const q of prey) {
+            const d = Math.hypot(q.at.x - me.x, q.at.z - me.z);
+            if (d < bd && clear(q.at)) { bd = d; best = { player: q.player, at: where(q.at) }; }
+          }
+          return best;
+        },
+        sees: (player) => { const q = prey.find((r) => r.player === player); return q && clear(q.at) ? where(q.at) : null; },
+      };
+      const act = think(m, { x: me.x, y: me.y, z: me.z, walking: n.goal !== null }, senses, this.clock, MG?.rate ?? 10);
+      n.speed = act.speed;
+      n.face = act.face ?? null;
+      const g = act.goal;
+      if (g === null && n.goal) N.goTo(n.id, null);
+      else if (g && (!n.goal || Math.hypot(g.x - n.goal.x, g.z - n.goal.z) > REGOAL)) N.goTo(n.id, g);
+      if (act.fire && MG && n.trigger.pull(MG, this.clock)) this.shoot(`npc${n.id}`, { kind: 'avatar', id: n.id }, MG, eyes, aimFrom(eyes, act.fire, this.rnd));
+    }
+  }
+
+  // the NPCs' aim's stray: seeded, so a run repeats (mulberry32)
+  private seed = 0;
+  private readonly rnd = () => {
+    let t = (this.seed = (this.seed + 0x6d2b79f5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 
   // The driver's car: the road physics' (loadPhysics)
   /** the player's car now, or null while they drive none (what its driver is to be told: the car's drive events) */
@@ -1231,5 +1314,10 @@ const WRECK_COL = '#1d1a18';
 const FALL_QUIET = 6, FALL_PACE = 3, GRAVITY = 9.81;
 // the ticks between forgetting the lives of what left the world
 const FORGET_TICKS = 30;
+// m ahead of the player an NPC asked for is put down; the half side of its patrol's square
+const NPC_AHEAD = 4, NPC_LOOP = 8;
+// m a goal may move before an NPC walking to it finds its way again (a search each time)
+const REGOAL = 2;
+const to = (v: Vec3, k: number) => ({ x: Math.round(v.x * k) / k, y: Math.round(v.y * k) / k, z: Math.round(v.z * k) / k });
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
 

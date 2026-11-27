@@ -35,6 +35,9 @@ export interface ModeWorld {
   setTime(hour: number, day?: number): void;
   /** the player's car back on the road; false: they drive none */
   resetDriver(player: PlayerId): boolean;
+  /** an NPC enemy put down a few metres ahead of the player on foot, a guard or on a patrol round there; false: the
+   * player is not on foot */
+  addNpc(player: PlayerId, patrol: boolean): boolean;
 }
 
 export interface GameMode {

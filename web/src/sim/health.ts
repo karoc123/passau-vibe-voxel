@@ -1,12 +1,13 @@
-// Health and damage: one model for players, every vehicle kind and (later) NPCs. The host's alone: a page is told the
+// Health and damage: one model for players, every vehicle kind and NPCs. The host's alone: a page is told the
 // health its player sees (sim/server/snapshot.ts), never asked. No three.js, no DOM (tools/core-deps.mjs).
 import { frozen } from '../core/frozen';
 import type { CraftType, PlayerId, VehicleId } from './contract/ids';
 
 export type DamageKind = 'bullet' | 'blast' | 'crash' | 'fall';
 
-/** what has health: a player wherever they are (on foot, at a wheel, along for the ride), a car, a craft */
-export type Life = { kind: 'player'; id: PlayerId } | { kind: 'car' | 'craft'; id: number };
+/** what has health: a player wherever they are (on foot, at a wheel, along for the ride), a car, a craft, an NPC (by
+ * its avatar's id) */
+export type Life = { kind: 'player'; id: PlayerId } | { kind: 'car' | 'craft'; id: number } | { kind: 'npc'; id: number };
 export const lifeKey = (l: Life) => `${l.kind}:${l.id}`;
 
 /** a type's health as data: max, a factor per damage kind, the share of a vehicle's damage that reaches each of those
@@ -22,6 +23,7 @@ export interface Toughness {
  * are back (a game mode may say otherwise) */
 export interface HealthTuning {
   readonly player: Toughness;
+  readonly npc: Toughness;
   readonly car: Readonly<Record<VehicleId, Toughness>>;
   readonly craft: Readonly<Record<CraftType, Toughness>>;
   readonly perMs: number;
@@ -38,6 +40,8 @@ const tough = (max: number, bullet: number, blast: number, crash: number, throug
 // jet's hardest turn: ~3 m/s), so only a hit counts.
 export const HEALTH: HealthTuning = frozen({
   player: tough(100, 1, 1, 1, 0, 9),
+  // (as tough as a player: ten MG hits, a grenade at its feet)
+  npc: tough(100, 1, 1, 1, 0, 9),
   car: frozen({
     car: tough(150, 0.4, 1, 1, 0.25, 8), coupe: tough(130, 0.4, 1, 1, 0.25, 8), van: tough(180, 0.4, 1, 1, 0.25, 8),
     pickup: tough(180, 0.4, 1, 1, 0.25, 8), bus: tough(300, 0.3, 0.8, 0.8, 0.15, 8), moto: tough(60, 0.8, 1, 1, 0.8, 7),
