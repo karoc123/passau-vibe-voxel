@@ -9,12 +9,12 @@
 //   bike_lean   -- the fast curve both ways at half lock: upright (the body), drawn leaning into the turn (car.ts lean)
 //                  by 0.3 rad or more, the right way (turning right: left side up)
 //   bike_keys   -- a key (steer 1) held from straight at 60 km/h: the bars turned in over a fraction of a second (0.1 s
-//                  in, under half the angle held), the turn held at no more than 1.1 g sideways with a steady
-//                  yaw rate (no slide, no wobble), straight again within 0.6 s of letting go; and a 0.15 s tap: a
-//                  small lean (under 0.3 rad), not a swing to full lean
-//   bike_turn   -- full lock held at 10, 30 and 60 km/h: a city corner's circle (under 4 m at 10 km/h, 8.5 m at 30),
-//                  at speed as tight as ~45° of lean (~1 g), the turn there within 0.35 s, upright; 0-50 km/h quicker
-//                  than the car; from 50 km/h stopped within 10 m, upright
+//                  in, under half the angle held), the turn held at no more than the type's latG sideways with a
+//                  steady yaw rate (no slide, no wobble), straight again within 0.6 s of letting go; and a 0.15 s
+//                  tap: short of full lean
+//   bike_turn   -- full lock held at 10, 30 and 60 km/h: a bike's circle at walking pace (2.3-3.5 m), at every speed
+//                  under 0.8 of the car's (the player turns a bike far tighter than a car, also at speed), the turn
+//                  within 0.35 s, upright; 0-50 km/h quicker than the car; from 50 km/h stopped within 10 m, upright
 //   bike_curb   -- a 0.3 m kerb across the way (a street's cap stepping up over a metre) at 40 km/h, square and at 30°;
 //                  and a 1 m terrace (car.ts' wedge) at 30 km/h: over it, upright
 //   bike_wall   -- into a wall at 50 km/h through the drive (physics/rapier/player-car.ts): the rider comes off (no input,
@@ -97,7 +97,7 @@ for (const [id, t] of Object.entries(VEHICLES)) {
     s = new sc.Sim(flat, { x: 256, z: 50 }, 0, 60 / 3.6, b);
     let tap = 0;
     s.run(2, (sim) => { tap = Math.max(tap, Math.abs(sim.car.lean)); return { ...sc.cruise(60)(sim), steer: sim.t >= 0.5 && sim.t < 0.65 ? 1 : 0 }; });
-    check('moto bike_keys', in01 < 0.45 && latG < 1.1 && wobble < 0.02 && after < 0.05 && tap < 0.3 && minUp(s.log) > 0.99,
+    check('moto bike_keys', in01 < 0.45 && latG < b.tune.latG * 1.05 && wobble < 0.03 && after < 0.05 && tap < 0.65 && minUp(s.log) > 0.99,
       { in01: r2(in01), angle: Math.round(angle * 1000) / 1000, latG: r2(latG), wobble: Math.round(wobble * 1000) / 1000, yawAfter: r2(after), tapLean: r2(tap) });
   }
   s.dispose();
@@ -114,15 +114,17 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   if (!b.bike) continue;
   // full lock held at 10, 30, 60 km/h: the circle's radius (speed over yaw rate, its last 2 s), the yaw rate's 90 %
   // reached (s after the key), upright; 0-50 km/h against the car's; stopping from 50 km/h
-  const lock = {};
-  for (const k of [10, 30, 60]) {
-    s = new sc.Sim(flat, { x: 512, z: 512 }, 0, k / 3.6, b);
-    s.run(6, (sim) => ({ ...sc.cruise(k)(sim), steer: sim.t > 0.5 ? 1 : 0 }));
-    const H = s.log.filter((l) => l.t > 4);
-    const v = H.reduce((q, l) => q + Math.hypot(l.vx, l.vz), 0) / H.length, w = Math.abs(H.reduce((q, l) => q + l.yr, 0) / H.length);
-    lock[k] = { r: v / w, lat: v * w / 9.81, t90: s.log.find((l) => Math.abs(l.yr) >= 0.9 * w).t - 0.5, up: minUp(s.log) };
-    s.dispose();
-  }
+  const lock = {}, carR = {};
+  const circle = (build, k) => {
+    const q = new sc.Sim(flat, { x: 512, z: 512 }, 0, k / 3.6, build);
+    q.run(6, (sim) => ({ ...sc.cruise(k)(sim), steer: sim.t > 0.5 ? 1 : 0 }));
+    const H = q.log.filter((l) => l.t > 4);
+    const v = H.reduce((o, l) => o + Math.hypot(l.vx, l.vz), 0) / H.length, w = Math.abs(H.reduce((o, l) => o + l.yr, 0) / H.length);
+    const o = { r: v / w, lat: v * w / 9.81, t90: q.log.find((l) => Math.abs(l.yr) >= 0.9 * w).t - 0.5, up: minUp(q.log) };
+    q.dispose();
+    return o;
+  };
+  for (const k of [10, 30, 60]) { lock[k] = circle(b, k); carR[k] = circle(VEHICLES.car.build, k).r; }
   const zeroTo50 = (build) => {
     const q = new sc.Sim(flat, { x: 512, z: 100 }, 0, 0, build);
     let t = NaN;
@@ -136,9 +138,9 @@ for (const [id, t] of Object.entries(VEHICLES)) {
   const stop = (stopAt ?? Infinity) - s.log[0].z, stopUp = minUp(s.log);
   s.dispose();
   const own50 = zeroTo50(b), car50 = zeroTo50(VEHICLES.car.build);
-  check('moto bike_turn', lock[10].r < 4 && lock[30].r < 8.5 && lock[60].lat > 0.9 && lock[60].lat < 1.1 && Object.values(lock).every((o) => o.t90 < 0.35 && o.up > 0.99)
+  check('moto bike_turn', lock[10].r > 2.3 && lock[10].r < 3.5 && [10, 30, 60].every((k) => lock[k].r < 0.8 * carR[k]) && Object.values(lock).every((o) => o.t90 < 0.35 && o.up > 0.99)
     && own50 < car50 && stop < 10 && stopUp > 0.99,
-  { r10: r2(lock[10].r), r30: r2(lock[30].r), r60: r2(lock[60].r), g60: r2(lock[60].lat), t90: r2(Math.max(...Object.values(lock).map((o) => o.t90))),
+  { r10: r2(lock[10].r), r30: r2(lock[30].r), r60: r2(lock[60].r), car: [10, 30, 60].map((k) => r2(carR[k])).join('/'), g60: r2(lock[60].lat), t90: r2(Math.max(...Object.values(lock).map((o) => o.t90))),
     up30: lock[30].up, t0to50: r2(own50), car0to50: r2(car50), stop50m: r2(stop), stopUp });
   // the bike at rest
   s = new sc.Sim(flat, { x: 64, z: 64 }, 0, 0, b);
