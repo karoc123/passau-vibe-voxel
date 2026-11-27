@@ -7,6 +7,7 @@ import type { BoatPose } from './contract/agents';
 import type { CraftType, VehicleId } from './contract/ids';
 import type { Pose, RoofSpot } from './contract/pose';
 import { COACH_LENGTH, COACH_WIDTH } from './coaches';
+import { BODY_HEAD, BODY_R } from './figure';
 import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
 import { FIGHTER, JET, PLANE } from './craft/plane-flight';
@@ -22,8 +23,9 @@ export interface Shape { hx: number; hz: number; fwd?: number; y0?: number; top:
 export interface Solid { x: number; y: number; z: number; h: number; hx: number; hz: number; top: number; id?: string; roof?: false }
 
 /** the walker: a circle of WALKER_R from the soles to WALKER_HEAD over them, climbing WALKER_STEP in a stride (a kerb,
- * a stair; a car's roof with a jump) */
-export const WALKER_R = 0.3, WALKER_HEAD = 1.9, WALKER_STEP = 1.05;
+ * a stair; a car's roof with a jump). The step is the city's, not the figure's: a block, or the city's stairs and
+ * terraces would wall a smaller figure in */
+export const WALKER_R = BODY_R, WALKER_HEAD = BODY_HEAD, WALKER_STEP = 1.05;
 
 /** the world's voxels as the walker meets them: whether a span of heights of the column at x, z is solid */
 export interface Walls { blocked(x: number, z: number, y0: number, y1: number): boolean }

@@ -38,8 +38,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   roads (`roads.md`, "How the main roads drive").
 - Roofs: rule buildings (`scripts/roofs.py`), the owner picked the look `slopes` (2026-11-27), on in the map config
   and in the committed map (rebuilt 2026-11-27); for the owner to look at in the viewer. Not smoothed.
-- 0.5 m blocks: not pursued (owner 2026-11-27: little gain for 3x the cost). But the walker in the half-size world
-  felt better proportioned: the figure's size against the city is open.
+- 0.5 m blocks: not pursued (owner 2026-11-27: little gain for 3x the cost).
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes
 only); meadows and roofs are never smoothed; the world ticks at 30 Hz.

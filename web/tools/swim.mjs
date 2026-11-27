@@ -21,7 +21,7 @@ const { hello } = await imp('src/sim/hello.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { Foot } = await imp('src/nav/foot.ts');
 const { FLOAT, CLIMB_OUT } = await imp('src/sim/swim.ts');
-const { EYE } = await imp('src/nav/spots.ts');
+const { EYE } = await imp('src/sim/figure.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
 

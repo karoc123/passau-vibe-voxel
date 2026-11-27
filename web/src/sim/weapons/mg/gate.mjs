@@ -15,7 +15,7 @@ const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { hello } = await imp('src/sim/hello.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { weaponIn } = await imp('src/sim/weapons/index.ts');
-const { EYE } = await imp('src/sim/weapons/weapon.ts');
+const { EYE } = await imp('src/sim/figure.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 

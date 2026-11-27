@@ -1,5 +1,6 @@
 import type { CraftType, VehicleId } from '../sim/contract/ids';
 import { CRAFT_SCALE, GLIDER_HEIGHT } from '../sim/craft/craft-motion';
+import { FIGURE_SCALE } from '../sim/figure';
 import { mountOf, SEATS, type Mount } from '../sim/seats';
 
 // Where a passenger sits in each vehicle's look: the hips' point in its frame (x to its left, y up from its origin, z
@@ -7,16 +8,22 @@ import { mountOf, SEATS, type Mount } from '../sim/seats';
 // (rad). Read off the looks (sim/vehicles.ts models, view/crafts/): rows across the cabin from the front, the
 // driver's place left free. A seat index past a table's end sits on its last row's place. A car's seats are under
 // its side windows (view/meshes.ts opens the cabin of a car someone sits in), so the heads show in them.
+// The places were read for a grown-up; the figure is smaller (sim/figure.ts) and sits LIFT higher, its eyes and head
+// where a grown-up's were: still in the windows, under the roofs and in the canopies the places were read for, the
+// seat views and a gunner's eyes at the mount unchanged; its shorter legs hang in the footwell.
 
 /** a passenger's seat in a vehicle's frame */
 export interface SeatPlace { x: number; y: number; z: number; legs: number }
 
 const SIT = 1.35;
-// rows of seats at heights y, across at xs, from z0 back by dz
+// the seat view's eyes over the hips (seatEye): a grown-up's, the figure's
+const GROWN_EYE_UP = 0.75, EYE_UP = GROWN_EYE_UP * FIGURE_SCALE, LIFT = GROWN_EYE_UP - EYE_UP;
+// rows of seats with a grown-up's hips at heights y, across at xs, from z0 back by dz
 const rows = (n: number, xs: readonly number[], y: number, z0: number, dz: number, legs = SIT): SeatPlace[] =>
-  Array.from({ length: n }, (_, i) => ({ x: xs[i % xs.length], y, z: z0 - Math.floor(i / xs.length) * dz, legs }));
-const at = (x: number, y: number, z: number, legs = SIT): SeatPlace => ({ x, y, z, legs });
-const scaled = (s: number, p: SeatPlace[]) => p.map((q) => ({ ...q, x: q.x * s, y: q.y * s, z: q.z * s }));
+  Array.from({ length: n }, (_, i) => ({ x: xs[i % xs.length], y: y + LIFT, z: z0 - Math.floor(i / xs.length) * dz, legs }));
+const at = (x: number, y: number, z: number, legs = SIT): SeatPlace => ({ x, y: y + LIFT, z, legs });
+// (the figure is not scaled with the look: its lift is not)
+const scaled = (s: number, p: SeatPlace[]) => p.map((q) => ({ ...q, x: q.x * s, y: (q.y - LIFT) * s + LIFT, z: q.z * s }));
 
 const CARS: Record<VehicleId, SeatPlace[]> = {
   car: [at(-0.4, 0.55, 0.15), at(0.4, 0.55, -0.85), at(-0.4, 0.55, -0.85)],
@@ -26,8 +33,8 @@ const CARS: Record<VehicleId, SeatPlace[]> = {
   // (four across behind the driver, the rows over a 12 m bus: one of another length stretches them with it)
   bus: rows(SEATS.car.bus.length - 1, [0.85, 0.4, -0.4, -0.85], 1.0, 3.6, 1.15),
   camper: [at(-0.45, 1.05, 2.35), at(0.45, 1.2, -1.4), at(-0.45, 1.2, -1.4)],
-  // (the pillion behind the bike's own rider, the legs down its sides)
-  moto: [at(0, 0.88, -0.6, 0.45)],
+  // (the pillion behind the bike's own rider, the legs down its sides: the hips on its saddle, not lifted)
+  moto: [{ x: 0, y: 0.88, z: -0.6, legs: 0.45 }],
 };
 
 // the hovercraft's cabin: five rows of four between its window pillars, the hips under the window band so that the
@@ -70,9 +77,9 @@ export function pilotPlace(type: CraftType): SeatPlace | null { return PILOTS[ty
 // The seat view's eyes: a little over the middle of the head and ahead of its face, so that the own head (not drawn
 // then) would not be in the way; the near plane there short enough that a neighbour's shoulder (~0.4 m off) is not cut
 /** where a player sitting at p looks from (the same frame as p) */
-export const seatEye = (p: SeatPlace) => ({ x: p.x, y: p.y + 0.75, z: p.z + 0.16 });
+export const seatEye = (p: SeatPlace) => ({ x: p.x, y: p.y + EYE_UP, z: p.z + 0.16 });
 // a gunner's seat: seatEye's inverse of the mount, so figure, camera and the host's shot share one point
-function gunner(m: Mount, legs: number): SeatPlace { return { x: m.at.x, y: m.at.y - 0.75, z: m.at.z - 0.16, legs }; }
+function gunner(m: Mount, legs: number): SeatPlace { return { x: m.at.x, y: m.at.y - EYE_UP, z: m.at.z - 0.16, legs }; }
 /** the camera's near plane (m) at the seat view's eyes */
 export const SEAT_NEAR = 0.15;
 

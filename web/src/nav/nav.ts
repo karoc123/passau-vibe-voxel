@@ -15,7 +15,8 @@ import { gameKey, onFocusLoss } from './input';
 import { MoveKeys } from './move-keys';
 import { OrbitInput } from './orbit';
 import { Rider } from './ride';
-import { EYE, findStreet, openSpot, walkNet } from './spots';
+import { EYE } from '../sim/figure';
+import { findStreet, openSpot, walkNet } from './spots';
 import { HEAD } from '../sim/walk';
 import { FootTouch } from '../touch/foot';
 

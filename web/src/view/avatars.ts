@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { AvatarState } from '../sim/contract/snapshot';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { STEP } from '../sim/road-net';
+import { FIGURE_SCALE as S, FIGURE_TOP } from '../sim/figure';
 import { FLOAT } from '../sim/swim';
 import { weaponIn } from '../sim/weapons';
 
@@ -46,11 +47,13 @@ function lookOf(player: string): Look {
 
 // the gait: a stride (both legs, one cycle) of 2 (STEP_M + STEP_V * v) m, the legs swinging up to WALK_SWING rad at a
 // walk (WALK m/s) and RUN_SWING at a run (RUN m/s and on), leaning LEAN rad forward at a run; the speed eased over V_S s
-const STEP_M = 0.55, STEP_V = 0.12, WALK = 2.2, RUN = 6.5, WALK_SWING = 0.5, RUN_SWING = 0.9, LEAN = 0.15, V_S = 0.2;
+// (the stride as long as the figure's legs: at the walk's speed shorter legs step faster, the feet not sliding)
+const STEP_M = 0.55 * S, STEP_V = 0.12 * S, WALK = 2.2, RUN = 6.5, WALK_SWING = 0.5, RUN_SWING = 0.9, LEAN = 0.15, V_S = 0.2;
 // a speed past this (m/s) between two ticks is a jump of the walk (put down elsewhere), not a gait
 const V_MAX = 12;
-// the figure's frame: its feet at 0, +z ahead; the hips, shoulders, the top of the head (where a name hangs over it)
-const HIP = 0.85, SHOULDER = 1.42, TOP = 1.85, LABEL_UP = 0.35, ARM = 0.6;
+// the figure's frame as a grown-up's, drawn at S of it (sim/figure.ts): its feet at 0, +z ahead; the hips, shoulders,
+// the arm's length; a name hangs LABEL_UP over the top of its head
+const HIP = 0.85, SHOULDER = 1.42, LABEL_UP = 0.35, ARM = 0.6;
 // a gun held: the right arm reaching ahead and down to its grip (AIM rad up from hanging), the left under its fore-end
 const AIM = 1.2, AIM_LEFT = 1.0;
 
@@ -86,10 +89,13 @@ class Figure {
     this.legs = [limb(0.1, HIP, [mesh(GEO.leg, trousers), mesh(GEO.shoe, SHOES)]), limb(-0.1, HIP, [mesh(GEO.leg, trousers), mesh(GEO.shoe, SHOES)])];
     this.arms = [limb(0.29, SHOULDER, [mesh(GEO.arm, shirt)]), limb(-0.29, SHOULDER, [mesh(GEO.arm, shirt)])];
     this.hand.position.y = -ARM;
+    // (a gun is the world's size, not the figure's)
+    this.hand.scale.setScalar(1 / S);
     this.arms[1].add(this.hand);
     this.body.add(mesh(GEO.torso, shirt), mesh(GEO.head, skin), cap ? mesh(GEO.cap, cap) : mesh(GEO.hair, hair));
     if (cap) this.body.add(mesh(GEO.peak, cap));
-    this.label.position.y = TOP + LABEL_UP;
+    this.body.scale.setScalar(S);
+    this.label.position.y = FIGURE_TOP + LABEL_UP;
     this.group.add(this.body, this.label);
   }
 
@@ -97,7 +103,7 @@ class Figure {
   pose(d: Drawn, swim: boolean, armed: boolean, down = false) {
     const G = this.group, B = this.body, [l, r] = this.legs, [al, ar] = this.arms;
     if (down) { // on its back along its heading, the limbs splayed
-      G.position.set(d.x, d.y + 0.15, d.z);
+      G.position.set(d.x, d.y + 0.15 * S, d.z);
       G.quaternion.setFromEuler(SW.e.set(-Math.PI / 2, d.h, 0, 'YXZ'));
       B.rotation.set(0, 0, 0);
       l.rotation.x = r.rotation.x = 0; l.rotation.z = 0.2; r.rotation.z = -0.2;
@@ -108,7 +114,7 @@ class Figure {
     l.rotation.z = r.rotation.z = 0;
     if (swim) { // lying forward along its heading, the chest at the water's top, the arms in turn over the head, the legs kicking
       const q = G.quaternion.setFromEuler(SW.e.set(SWIM_TILT, d.h, 0, 'YXZ')), up = SW.v.set(0, 1, 0).applyQuaternion(q);
-      G.position.set(d.x, d.y + FLOAT - 0.2, d.z).addScaledVector(up, -HIP);
+      G.position.set(d.x, d.y + FLOAT - 0.2 * S, d.z).addScaledVector(up, -HIP * S);
       B.rotation.set(0, 0, 0);
       al.rotation.x = -Math.PI + Math.sin(d.ph) * 1.2; ar.rotation.x = -Math.PI - Math.sin(d.ph) * 1.2;
       l.rotation.x = 0.25 * Math.sin(d.ph * 3); r.rotation.x = -l.rotation.x;
@@ -116,7 +122,7 @@ class Figure {
       return;
     }
     const run = Math.min(1, Math.max(0, (d.v - WALK) / (RUN - WALK))), swing = swingAt(d.v), s = Math.sin(d.ph);
-    G.position.set(d.x, d.y + 0.04 * swing * Math.abs(s), d.z);
+    G.position.set(d.x, d.y + 0.04 * S * swing * Math.abs(s), d.z);
     G.rotation.set(0, d.h, 0);
     B.rotation.set(LEAN * run, 0, 0);
     l.rotation.x = swing * s; r.rotation.x = -swing * s;
@@ -145,7 +151,7 @@ class Figure {
  * vehicle's turn, the legs' reach forward (rad) */
 export interface Seated { player: string; at: THREE.Vector3; q: THREE.Quaternion; legs: number }
 /** the hips' height over a figure's feet */
-export const HIPS = HIP;
+export const HIPS = HIP * S;
 const SWIM_TILT = 1.3, SW = { e: new THREE.Euler(), v: new THREE.Vector3() };
 
 /** how far (rad) the legs swing either way at v m/s: none standing, WALK_SWING at a walk, RUN_SWING at a run */

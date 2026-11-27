@@ -34,6 +34,9 @@ const { craftBox } = await imp('src/sim/solids.ts');
 const { SPAWN_HEIGHT } = await imp('src/sim/craft/craft-collision.ts');
 const { StreetLife } = await imp('src/view/life.ts');
 const { HIPS } = await imp('src/view/avatars.ts');
+const { FIGURE_SCALE: FS } = await imp('src/sim/figure.ts');
+// (the middle of a seated figure's head and its top over its hips)
+const HEAD = 0.75 * FS, TOP = 0.97 * FS;
 const { CraftsView } = await imp('src/view/crafts/crafts-view.ts');
 const { Boarding } = await imp('src/nav/board.ts');
 const { seatPlace, seatEye, pilotPlace, SEAT_NEAR } = await imp('src/view/seats.ts');
@@ -99,8 +102,8 @@ const seesHead = (W, name, dir, m = 5) => {
   const f = shownFigure(W, name);
   if (!f) return 'not drawn';
   W.scene.updateMatrixWorld(true);
-  const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0));
-  const from = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0).addScaledVector(new THREE.Vector3(...dir).normalize(), m));
+  const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + HEAD, 0));
+  const from = f.group.localToWorld(new THREE.Vector3(0, HIPS + HEAD, 0).addScaledVector(new THREE.Vector3(...dir).normalize(), m));
   const hit = firstSeen(W, from, head);
   return of(f, hit) ? null : `${hit?.name || hit?.type || 'nothing'} met first`;
 };
@@ -113,13 +116,13 @@ const sitting = (W, p, name, id, s = 1) => {
   const d = c.core.drawn(p.c.time.alpha), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-d.pitch, d.h, d.bank, 'YXZ')).invert();
   const local = (v) => v.sub(new THREE.Vector3(d.x, d.y, d.z)).applyQuaternion(q).divideScalar(s);
   const hips = f.group.localToWorld(new THREE.Vector3(0, HIPS, 0)), label = f.label.getWorldPosition(new THREE.Vector3());
-  return { hips: local(hips.clone()), top: local(f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.97, 0))), legs: f.legs[0].rotation.x,
+  return { hips: local(hips.clone()), top: local(f.group.localToWorld(new THREE.Vector3(0, HIPS + TOP, 0))), legs: f.legs[0].rotation.x,
     label: label.y - hips.y, onFoot: W.life.avatarsDrawn().some((a) => a.player === name) };
 };
 // in the hovercraft's cabin (its look: 4.2 m across, from 2.6 m aft to 4 m forward of the origin, the roof at 2.6 m),
 // the head in its window band (1.3 to 2.05 m up), the legs forward, a name's place over the head
 const inCabin = (t) => !!t && Math.abs(t.hips.x) < 2 && t.hips.z > -2.6 && t.hips.z < 4 && t.hips.y > 0.5 && t.top.y < 2.6
-  && t.top.y - 0.4 > 1.3 && t.top.y - 0.15 < 2.05 && t.legs < -1 && t.label > 1.1 && !t.onFoot;
+  && t.top.y - 0.4 > 1.3 && t.top.y - 0.15 < 2.05 && t.legs < -1 && t.label > TOP && !t.onFoot;
 // what a page on foot at pose is offered to get into (nav/board.ts), as its button says
 const offer = (p, pose) => {
   const b = new Boarding({ sim: p.c, life: null, onFoot: true, mapPose: () => pose }, () => [], () => {}, () => ({}));
@@ -398,7 +401,7 @@ const spawn = async (p, type, x, z, h) => {
   const looks = [['E', -1, 'the passenger'], ['D', 1, 'the driver']].map(([name, s, who]) => {
     const f = W.life.avatars.figure(name);
     if (!f || !d) return `${who}: not drawn`;
-    const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + 0.75, 0)), hit = firstSeen(W, head.clone().addScaledVector(side, 4 * s), head);
+    const head = f.group.localToWorld(new THREE.Vector3(0, HIPS + HEAD, 0)), hit = firstSeen(W, head.clone().addScaledVector(side, 4 * s), head);
     return of(f, hit) ? null : `${who}: ${hit?.type ?? 'nothing'} met first`;
   });
   check(looks.every((l) => l === null), `a page beside the car sees the passenger and the driver through its side windows (${looks.filter(Boolean).join('; ') || 'both'})`);

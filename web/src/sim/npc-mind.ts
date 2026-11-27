@@ -2,6 +2,7 @@
 // flanking come later. No three.js, no DOM (tools/core-deps.mjs).
 import type { Vec3 } from '../core/vec';
 import type { PlayerId } from './contract/ids';
+import { CHEST } from './figure';
 import type { NpcTuning } from './tuning';
 
 /** what an NPC does at its post: a guard stands at (x, z) facing h; a patrol walks its loop's points in turn */
@@ -55,8 +56,6 @@ export interface Act { goal?: { x: number; z: number } | null; speed: number; fa
 const LOOK = 0.1, LOST = 1, SEARCH = 4, ENGAGE = 20;
 // m/s: a patrol's stroll, the pace of an attack or a search
 const STROLL = 1.6, RUN = 4;
-// a chest's height over the feet: what it looks and aims at
-export const CHEST = 1.2;
 
 export function newMind(duty: Duty, now: number, k: NpcTuning, squad: number | null = null): Mind {
   return { duty, k, squad, cue: null, state: 'post', target: null, seen: null, seenAt: -Infinity, since: now, leg: 0, ready: Infinity, burst: k.burst,

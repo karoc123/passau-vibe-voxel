@@ -1,7 +1,7 @@
 import { MAX_LEG } from '../chamfer';
 import type { World } from '../core/world';
 import { bodyClear, carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from './solids';
-import { EYE } from './weapons/weapon';
+import { EYE } from './figure';
 
 /** what the walk asks of the voxels: what to stand on under a height, whether a span of a column is solid */
 export type Ground = Pick<World, 'support' | 'blocked'>;
@@ -28,8 +28,11 @@ export function walkStep(w: Ground, P: { x: number; z: number }, feet: number, m
     const nx = P.x + sx, nz = P.z + sz, ax = nx + Math.sign(sx) * 0.3, az = nz + Math.sign(sz) * 0.3;
     const sup = w.support(ax, az, feet + step);
     if (sup <= top && !w.blocked(ax, az, Math.max(sup, feet + step), sup + HEAD) && bodyClear(w, nx, nz, feet, step) && !deeper(solids, P.x, P.z, nx, nz, Math.max(feet, sup))) {
-      // (eyes already nearer a wall than EYE_R: put there, or shoved by a car; they may go along it or away)
-      const room = eyeRoom(w, nx, nz, feet + EYE);
+      // (eyes already nearer a wall than EYE_R: put there, or shoved by a car; they may go along it or away. The eyes
+      // as they will be over what is stepped onto within EYE_R ahead: a step up a kerb or out of the water may reach
+      // over the soles' eye height, its riser no wall to them)
+      const up = w.support(nx + Math.sign(sx) * EYE_R, nz + Math.sign(sz) * EYE_R, feet + step);
+      const room = eyeRoom(w, nx, nz, Math.max(feet, sup, up <= top ? up : feet) + EYE);
       if (room < EYE_R && room < (here ??= eyeRoom(w, P.x, P.z, feet + EYE)) - 1e-6) continue;
       P.x = nx; P.z = nz;
       return true;

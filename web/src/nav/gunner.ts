@@ -1,6 +1,7 @@
 import type { SimClient } from '../client/sim-client';
 import type { Vec3 } from '../core/vec';
 import type { Pose } from '../sim/contract/pose';
+import { BODY_HEAD, BODY_R } from '../sim/figure';
 import { inArc, type Mount } from '../sim/seats';
 import { REACH, trace, type Body, type VoxelRay } from '../sim/weapons/weapon';
 
@@ -18,7 +19,7 @@ export function aimPoint(sim: SimClient, voxels: VoxelRay | null, from: Vec3, di
       for (const a of T.avatars) {
         if (a.pose.down) continue;
         T.avatarPose(a, alpha, p);
-        yield { entity: { kind: 'avatar', id: a.id }, x: p.x, y: p.y, z: p.z, h: p.h, r: 0.3, l: 0.3, ht: 1.8 };
+        yield { entity: { kind: 'avatar', id: a.id }, x: p.x, y: p.y, z: p.z, h: p.h, r: BODY_R, l: BODY_R, ht: BODY_HEAD };
       }
     },
   }, from, dir, REACH).to;

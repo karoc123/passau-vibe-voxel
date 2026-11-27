@@ -3,7 +3,7 @@ import type { RoofSpot } from './contract/pose';
 import { roofSpot, roofUnder, type Solid } from './solids';
 import { CLIMB_OUT, FLOAT, SWIM_DEPTH, Wet } from './swim';
 import { ride, STEP, walkFrame, withRoofs, type Ground } from './walk';
-import { EYE } from './weapons/weapon';
+import { EYE } from './figure';
 
 const GRAV = 16;
 // A body's free fall (off the paraglider): a skydiver's belly-down terminal speed, under the host's walk bound (80 m/s,
