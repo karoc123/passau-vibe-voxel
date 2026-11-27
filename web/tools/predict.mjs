@@ -268,12 +268,15 @@ for (const K of MEETS) {
 // player sees (MOVED m) and the craft drawn keeps near the host's path (OFF m: small corrections, each eased over, add
 // up while a thing reckoned on brakes or turns otherwise than the snapshot showed)
 const MOVED = 0.3, OFF = 0.8, V = 12, DRIVE = { turn: 0, drive: 1, lift: 0, side: 0 };
+// a car braking for the craft in its way is driven on the page as the host drives it: reckoned on at its speed, the
+// craft drawn was corrected by ~0.2 m each snapshot for ~0.6 s
+const BRAKES = 0.05;
 const ROAD = 128, CROSS = { x: 100, y: G + 1, z: 95, h: Math.PI / 2, speed: V };
 const MOVING = [
   { what: 'another player\'s hovercraft coming head-on', at: { x: 0, z: 70, h: Math.PI }, stick: () => DRIVE },
   { what: 'another player\'s hovercraft crossing its way', at: { x: -30, z: 40, h: Math.PI / 2 }, stick: () => DRIVE },
   { what: 'another player\'s hovercraft turning in front of it', at: { x: -6, z: 55, h: Math.PI }, stick: (i) => ({ ...DRIVE, turn: i > 40 ? -1 : 0 }) },
-  { what: 'a car of the traffic driving across its way', spot: CROSS, roads: [{ p: [[ROAD, 250, G], [ROAD, 6, G]], a: 0, b: 1, w: 1, lanes: 1, v: V, c: 1, o0: 0 }] },
+  { what: 'a car of the traffic driving across its way', brakes: BRAKES, spot: CROSS, roads: [{ p: [[ROAD, 250, G], [ROAD, 6, G]], a: 0, b: 1, w: 1, lanes: 1, v: V, c: 1, o0: 0 }] },
 ];
 for (const K of MOVING) {
   let b = null;
@@ -295,6 +298,7 @@ for (const K of MOVING) {
   let off = 0;
   for (let i = 10; i < drawn.length; i++) off = Math.max(off, offPath(pos(drawn[i]), host));
   if (log) console.log(K.what, 'near', near.toFixed(2), 'went', went.toFixed(1), 'fix', fix.toFixed(3), 'off', off.toFixed(3), JSON.stringify(fixes.filter(([f, e]) => f > 10 && e > 0.01).map(([f, e]) => [f, +e.toFixed(2)])));
+  if (K.brakes) check(fix < K.brakes, `driven at ${K.what}, the car braking for the craft as the host has it: the page's largest correction ${fix.toFixed(3)} m (under ${K.brakes})`);
   check(fix < MOVED && off < OFF, `driven at ${K.what} (${went.toFixed(0)} m driven, ${near.toFixed(1)} m between them at the nearest): the page's largest correction ${fix.toFixed(2)} m (under ${MOVED}), the drawn craft ${off.toFixed(2)} m off the host's path (under ${OFF})`);
 }
 

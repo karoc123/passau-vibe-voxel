@@ -4,17 +4,18 @@
 // inputs they had (rewind and replay). What then differs from what was drawn a moment before is blended out; a
 // difference too big to blend (a reset, a crash, a craft met) is shown at once.
 // The craft run ahead meets the solid things the newest snapshot has round it as the host's meets them (the same code,
-// sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars reckoned on along their ways,
+// sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars driven on along their ways,
 // the crafts at their speed (a parked one stays put) and the coaches by the timetable at the host's clock then (the
 // snapshot's world clock gone on by the ticks since), so running into one is not undone a round trip later. A craft met
 // coming at it loses its speed into it from then on, as the host's does: reckoned on through it, it pushed the craft
 // back by its speed in each tick run ahead (2 m in a round trip, head-on at 12 m/s), all taken back when the host's
 // word came. A craft is reckoned on along the arc its turn bends its way to (read off two snapshots): reckoned on
-// straight, one turning in front of it was met where it was not (corrections of 0.6-0.9 m against under 0.2). A car met
-// is reckoned on at its speed still: it brakes for a craft in its way rather than stop, and held where it was met it
-// was further off (1.2 m against 0.45 m, the craft crossing in front of one). Its events are told when it first runs a
-// tick (not when stepped again); the host's word on each comes a round trip later and is then not told again (heard):
-// one of the same kind due within HEAR ticks of the host's.
+// straight, one turning in front of it was met where it was not (corrections of 0.6-0.9 m against under 0.2). A car
+// brakes for the craft run ahead in its way with the host's sums (sim/solids.ts craftAhead, road-net.ts carAcc):
+// reckoned on at its speed, the craft crossing in front of one was corrected by 0.2 m each snapshot for 0.6 s (now
+// under 0.01 m).
+// Its events are told when it first runs a tick (not when stepped again); the host's word on each comes a round trip
+// later and is then not told again (heard): one of the same kind due within HEAR ticks of the host's.
 // Which tick of the page's a snapshot's tick is: an input's seq was sent in the page's tick p and first applied in the
 // host's tick ta (the ack), so the host runs ta - p ticks behind. The host holds each input for its tick (sim-server.ts
 // Session), so that number changes only when the host moves its timeline (a packet later than any before it): the
@@ -29,12 +30,12 @@ import type { BoatView, CarState } from '../sim/contract/agents';
 import type { Car } from '../sim/types';
 import type { CoachPose } from '../sim/coaches';
 import type { CarPose } from '../sim/road-net';
-import { reckon, type Sampled } from '../sim/agent-wire';
-import { carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type CraftPose, type Solid } from '../sim/solids';
+import { AGENT_TICKS, reckon, type Sampled } from '../sim/agent-wire';
+import { carShape, COACH_SHAPE, craftAhead, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type CraftPose, type Solid } from '../sim/solids';
 import { CORES } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
-import { STEP } from '../sim/road-net';
+import { carAcc, STEP, stopShort } from '../sim/road-net';
 
 // a correction is blended out over BLEND_S s; beyond SNAP m (or TURN rad) it is shown at once
 const BLEND_S = 0.25, SNAP = 4, TURN = 0.6;
@@ -55,10 +56,13 @@ export type CarAt = (c: Car, s: number, off: number, out: CarPose) => CarPose;
 type CoachesAt = (t: number, hour: number) => Iterable<CoachPose>;
 // a craft's pose as at the start of the host's tick from, and its speed (vx, vz m/s)
 type Going = CraftPose & { from: number; vx: number; vz: number };
-// a thing of the snapshot round the craft: a car of the traffic (where it is reckoned to be in a tick), boxes standing
-// still, or a craft going on from the snapshot's tick turning at w (rad/s), and from the tick the craft run ahead met
-// it in without its speed into it (met)
-type Seen = { car: Sampled<CarState> } | { boxes: Solid[] } | { craft: CraftType; go: Going; w: number; met?: Going };
+// a thing of the snapshot round the craft: a car of the traffic (where it is after each host's tick from the
+// snapshot's: way[k] after its k-th tick on, braking for the craft run ahead as the host's brakes for the host's),
+// boxes standing still, or a craft going on from the snapshot's tick turning at w (rad/s), and from the tick the craft
+// run ahead met it in without its speed into it (met)
+type Seen = { car: Sampled<CarState>; way: Way[] } | { boxes: Solid[] } | { craft: CraftType; go: Going; w: number; met?: Going };
+// where a car of the traffic is on its way after a host's tick (s m, going v m/s)
+type Way = { s: number; v: number };
 // what of a snapshot as held the craft may meet (the client's held snapshot is one)
 type Taken = { tick: number; t: number; hour: number; cars: readonly Sampled<CarState>[]; detached: readonly CarState[]; crafts: readonly CraftState[]; boats: BoatView | null };
 
@@ -92,6 +96,8 @@ export class Prediction {
   private hour = 12;
   private readonly cores = new Map<CraftType, CraftCore>();
   private readonly carAt: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+  private readonly mine: Solid[] = [];
+  private readonly room = { ext: 0, need: 0 };
   // each craft's heading in the snapshot before (its tick, the heading): how fast it turns
   private headings = new Map<CraftId, [number, number]>();
   // the events told ahead, each by the host's tick it is due in, not yet heard from the host; the page's tick told up
@@ -168,6 +174,9 @@ export class Prediction {
     const at = this.lag === null ? this.thingsAt : t.p + this.lag;
     // (met in this tick or after by a run now stepped again)
     for (const o of this.things) if ('met' in o && o.met && o.met.from >= at) o.met = undefined;
+    // (driven in this tick or after by a run now stepped again)
+    const k = at - this.thingsAt;
+    for (const o of this.things) if ('car' in o && o.way.length > k) o.way.length = Math.max(k, 1);
     const near = core.meet && this.clockAt !== null ? this.near(at) : null;
     const met = (i: number, n: { x: number; z: number }) => this.met(this.whose[i], at, n);
     core.clock.run(STEP, (s) => {
@@ -175,6 +184,7 @@ export class Prediction {
       if (near?.length) meetSolids(type, core, near, col, met);
       return true;
     });
+    if (near && k > 0) this.drive(k);
     if (core.events.length) {
       if (t.p > this.toldTo && this.lag !== null) for (const e of core.events) { this.fresh.push(e); this.told.push({ tick: at, key: keyOf(e) }); }
       core.events.length = 0;
@@ -194,8 +204,8 @@ export class Prediction {
     const keep = (s: Solid, o: Seen | null) => { const b = r + s.hx + s.hz; if (Math.abs(s.x - p.x) < b && Math.abs(s.z - p.z) < b) { out.push(s); W.push(o); } };
     for (const o of this.things) {
       if ('car' in o) {
-        const c = o.car;
-        keep(solidAt(carShape(c), this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, at - 1), c.off, this.carAt)), null);
+        const c = o.car, s = k >= 0 ? wayAt(o.way, k).s : reckon(c.s, c.v, c.at, at - 1);
+        keep(solidAt(carShape(c), this.carPose(c as unknown as Car, s, c.off, this.carAt)), null);
       } else if ('boxes' in o) for (const b of o.boxes) keep(b, null);
       else {
         const q = going(o.met && o.met.from < at ? o.met : o.go, o.w, at);
@@ -204,6 +214,28 @@ export class Prediction {
     }
     for (const c of this.coaches(this.clockAt! + dt, this.hour)) keep(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }), null);
     return out;
+  }
+
+  // the cars after the host's k-th tick from the snapshot's, the craft run ahead stepped in it: one that has the craft
+  // in its way brakes for it (with the host's sums; wanting the speed the snapshot showed, the rest of its road unknown
+  // here), the others go on at their speed
+  private drive(k: number) {
+    const own = this.mine;
+    own.length = 0;
+    craftSolids(this.type!, this.core!.pose, own);
+    for (const o of this.things) if ('car' in o) o.way[k] = this.driven(o.car, wayAt(o.way, k - 1), own);
+  }
+
+  // car c a host's tick on from w, the craft's boxes own
+  private driven(c: CarState, w: Way, own: readonly Solid[]): Way {
+    let gap = Infinity;
+    if (own.length) {
+      const q = this.carPose(c as unknown as Car, w.s, c.off, this.carAt), fx = Math.sin(q.h), fy = Math.cos(q.h), f = (c.len - 1.2) / 2;
+      const g = { px: q.x + fx * f, py: q.z + fy * f, z: q.y, fx, fy };
+      for (const s of own) { const d = craftAhead(g, s, this.room); if (!Number.isNaN(d)) gap = Math.min(gap, Math.max(stopShort(d, this.room.need), 0.01)); }
+    }
+    const v = gap === Infinity ? w.v : Math.max(0, w.v + carAcc(w.v, c.v, gap, 0) * STEP);
+    return { s: w.s + v * STEP, v };
   }
 
   // craft o met in the host's tick at, n the craft's way out of it
@@ -222,12 +254,21 @@ export class Prediction {
     this.clockAt = s.t;
     this.hour = s.hour;
     // (a car the session took out of the traffic is a detached one from that tick)
-    const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
+    const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null, mine = this.mine;
+    // (the craft's boxes at the snapshot's tick stand for those of the ticks before it)
+    mine.length = 0;
+    craftSolids(own, core.pose, mine);
     for (const c of s.detached) if (c.detachedPose && by(c.detachedPose.x, c.detachedPose.z)) T.push({ boxes: [solidAt(carShape(c), c.detachedPose)] });
     for (const c of s.cars) {
       if (out?.has(c.id)) continue;
       const q = this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, tick), c.off, this.carAt);
-      if (by(q.x, q.z)) T.push({ car: c });
+      if (!by(q.x, q.z)) continue;
+      // (from its sample on, up to AGENT_TICKS old while its speed changes: reckoned on at the sample's speed it kept
+      // no braking for the craft, a correction each sample)
+      const from = Math.max(c.at, tick - AGENT_TICKS);
+      let w: Way = { s: reckon(c.s, c.v, c.at, from), v: c.v };
+      for (let n = from; n < tick; n++) w = this.driven(c, w, mine);
+      T.push({ car: c, way: [w] });
     }
     const H = new Map<CraftId, [number, number]>();
     for (const c of s.crafts) {
@@ -311,6 +352,12 @@ function going(g: Going, w: number, at: number): Going {
   // (the speed turned by a, and the way gone: its integral; straight for a turn too small to divide by)
   const [u, r] = Math.abs(a) < 1e-6 ? [t, 0] : [s / w, (1 - c) / w];
   return { ...g, x: g.x + g.vx * u + g.vz * r, z: g.z + g.vz * u - g.vx * r, h: g.h + a, from: at, vx: g.vx * c + g.vz * s, vz: g.vz * c - g.vx * s };
+}
+
+// where a car is after the host's k-th tick from the snapshot's: those not driven yet at its speed
+function wayAt(way: Way[], k: number): Way {
+  while (way.length <= k) { const w = way[way.length - 1]; way.push({ s: w.s + w.v * STEP, v: w.v }); }
+  return way[k];
 }
 
 // an event's kind: its type or kind, or itself (a word)

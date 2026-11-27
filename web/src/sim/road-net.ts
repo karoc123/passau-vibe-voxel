@@ -9,6 +9,23 @@ import type { Person, Shift } from './contract/agents';
 
 // the tick (s): the traffic's, and the bodies' (two physics steps of it); what the drawn agents interpolate over
 export const STEP = 1 / 30;
+/** the cars' driving (the intelligent driver model): their acceleration, comfortable braking (m/s²), least gap (m)
+ * and time gap (s) */
+export const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
+/** a car's acceleration (m/s²) at speed v wanting v0, gap m behind what it follows (Infinity: none) going lv */
+export function carAcc(v: number, v0: number, gap: number, lv: number) {
+  const ss = IDM.s0 + Math.max(0, v * IDM.T + (v * (v - lv)) / (2 * Math.sqrt(IDM.a * IDM.b)));
+  return Math.max(-9, IDM.a * (1 - (v / Math.max(v0, 0.1)) ** 4 - (gap === Infinity ? 0 : (ss / Math.max(gap, 0.1)) ** 2)));
+}
+// A car moves across (out beside something, back into its lane) as it rolls on, over SHIFT_K m of road a metre
+// across (about 30 degrees at the steepest), at least SHIFT_MIN m: a driver's lane change, never a slide while
+// standing. So it stops that much further short of something standing, with room to pull out.
+const SHIFT_K = 1.9;
+export const SHIFT_MIN = 3;
+export const shiftLen = (d: number) => Math.max(SHIFT_MIN, SHIFT_K * Math.abs(d));
+/** where a car stops for something standing d0 m ahead of its front that needs need m across to get past: short of it
+ * by the road it takes to pull out beside it */
+export const stopShort = (d0: number, need: number) => d0 - shiftLen(need) - 0.5;
 // the signals' fixed-time cycle (s): green, amber, the walkers' green, from each controller's offset
 export const CYCLE = 64, GREEN = 26, AMBER = 3, PED_GREEN = 18;
 const LANE_W = 3.0; // m between lane centres: scripts/traffic.py LANE, the lanes it checks and places (scripts/check.sh lanes)
