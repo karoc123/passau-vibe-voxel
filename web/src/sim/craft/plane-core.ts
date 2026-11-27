@@ -90,6 +90,8 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
     f.heading = o.heading; f.gamma = o.gamma; f.bank = o.bank; f.jumps = o.jumps;
   }
 
+  get ahead() { return this.flight.ahead; }
+  set ahead(v: boolean) { this.flight.ahead = v; }
   get pose() { const { p, heading, bank } = this.flight; return { x: p.x, y: p.y, z: p.z, h: heading, bank }; }
   get velocity() { return this.flight.velocity(this.v); }
   // (between the tick's start and now; put somewhere at once since: now)

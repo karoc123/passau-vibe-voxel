@@ -23,7 +23,8 @@ export const NOT_ON_THE_WIRE: Record<CraftType, readonly string[]> = (() => {
     'motion.delta', 'motion.raised']; // the steps' scratch
   const plane = [...COMMON, 'v', 'now', 'out', 'qa', 'qb', // drawn(), velocity's scratch
     'flight.crashLeft', 'flight.crashAt', 'flight.safe', 'flight.start', 'flight.clock', // the respawn's (the server's)
-    'flight.d', 'flight.q']; // the steps' scratch
+    'flight.d', 'flight.q', // the steps' scratch
+    'flight.ahead']; // whether this copy runs ahead on a page (the copy's own, not the craft's)
   return {
     boat, hovercraft: special, helicopter: special, paraglider: special, floatplane: plane, jet: plane,
     drone: [...COMMON, 'next', 'glide', 'out', // the steps', drawn()'s scratch

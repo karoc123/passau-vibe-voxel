@@ -3,6 +3,11 @@
 // state of it is taken as the truth for its tick, and the page's ticks since then stepped again from it with the
 // inputs they had (rewind and replay). What then differs from what was drawn a moment before is blended out; a
 // difference too big to blend (a reset, a crash, a craft met) is shown at once.
+// The craft run ahead meets the solid things the newest snapshot has round it as the host's meets them (the same code,
+// sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars reckoned on along their ways and
+// the crafts at their speed (a parked one stays put), so running into one is not undone a round trip later. Its events
+// are told when it first runs a tick (not when stepped again); the host's word on each comes a round trip later and is
+// then not told again (heard): one of the same kind due within HEAR ticks of the host's.
 // Which tick of the page's a snapshot's tick is: an input's seq was sent in the page's tick p and first applied in the
 // host's tick ta (the ack), so the host runs ta - p ticks behind. The host holds each input for its tick (sim-server.ts
 // Session), so that number changes only when the host moves its timeline (a packet later than any before it): the
@@ -12,6 +17,12 @@ import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
 import type { CraftId, CraftType } from '../sim/contract/ids';
 import type { PilotInput } from '../sim/contract/inputs';
 import type { Ack, CraftState } from '../sim/contract/snapshot';
+import type { CraftEventOf } from '../sim/contract/crafts';
+import type { BoatView, CarState } from '../sim/contract/agents';
+import type { Car } from '../sim/types';
+import type { CarPose } from '../sim/road-net';
+import { reckon, type Sampled } from '../sim/agent-wire';
+import { carShape, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
 import { CORES } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
@@ -21,6 +32,20 @@ import { STEP } from '../sim/road-net';
 const BLEND_S = 0.25, SNAP = 4, TURN = 0.6;
 // the most ticks run ahead of the newest snapshot (a ping of 2 s)
 const AHEAD = 60;
+// a host's event and one told ahead of the same kind due this many ticks apart are one (the ticks a crash may move by
+// when the host's things are not where they were reckoned to be)
+const HEAR = 15;
+// how far beyond the craft (m) the snapshot's things are looked at, besides what it and a car (at CAR_V m/s) cover in
+// the ticks run ahead
+const SEE = 20, CAR_V = 25;
+
+/** where a car of the traffic is at arc length s, lane offset off (the page's road maths, the host's own) */
+export type CarAt = (c: Car, s: number, off: number, out: CarPose) => CarPose;
+// a thing of the snapshot round the craft: a car of the traffic (where it is reckoned to be in a tick), or boxes as at
+// the snapshot's tick going on at a speed (vx, vz m/s)
+type Seen = { car: Sampled<CarState> } | { boxes: Solid[]; vx: number; vz: number };
+// what of a snapshot as held the craft may meet (the client's held snapshot is one)
+type Taken = { tick: number; cars: readonly Sampled<CarState>[]; detached: readonly CarState[]; crafts: readonly CraftState[]; boats: BoatView | null };
 
 interface Tick { p: number; seq: number; input: PilotInput; key: string; before: unknown }
 
@@ -41,8 +66,19 @@ export class Prediction {
   private acked = -1;
   // the corrections being blended out: each what differed, and since when (s)
   private errs: { e: Leaf; since: number }[] = [];
+  private type: CraftType | null = null;
+  // the newest snapshot's things round the craft, and its tick
+  private things: Seen[] = [];
+  private thingsAt = 0;
+  private readonly cores = new Map<CraftType, CraftCore>();
+  private readonly carAt: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+  // the events told ahead, each by the host's tick it is due in, not yet heard from the host; the page's tick told up
+  // to; those told not yet read
+  private told: { tick: number; key: string }[] = [];
+  private toldTo = 0;
+  private fresh: unknown[] = [];
 
-  constructor(private readonly world: CraftWorld) {}
+  constructor(private readonly world: CraftWorld, private readonly carPose: CarAt) {}
 
   /** the core run ahead of craft id (null: not that one's) */
   coreOf(id: CraftId) { return id === this.id ? this.core : null; }
@@ -57,9 +93,22 @@ export class Prediction {
     if (this.sent.length > 4 * AHEAD) this.sent.splice(0, this.sent.length - 4 * AHEAD);
   }
 
+  /** the events told ahead since the last call */
+  tell(): CraftEventOf[] {
+    const t = this.type;
+    return t ? this.fresh.splice(0).map((e) => ({ craft: t, e }) as CraftEventOf) : [];
+  }
+
+  /** whether the host's event e, of its tick, was told ahead already (then it is not told again) */
+  heard(e: unknown, tick: number) {
+    const k = keyOf(e), i = this.told.findIndex((x) => x.key === k && Math.abs(x.tick - tick) <= HEAR);
+    if (i >= 0) this.told.splice(i, 1);
+    return i >= 0;
+  }
+
   /** a frame: the page's clock (its tick in progress, the time into it), the craft piloted (none: let go) and the
-   * newest snapshot's word on it (its tick, its state, the ack) */
-  update(dt: number, page: number, acc: number, craft: { id: CraftId; type: CraftType; placed: boolean } | null, tick: number, state: CraftState | null, ack: Ack | null) {
+   * newest snapshot's word on it (its tick, its state, the ack), and that snapshot as held (taken: the things round it) */
+  update(dt: number, page: number, acc: number, craft: { id: CraftId; type: CraftType; placed: boolean } | null, tick: number, state: CraftState | null, ack: Ack | null, taken: Taken | null = null) {
     // (one not put down is not stepped by the host either)
     if (!craft?.placed || !state || state.id !== craft.id) { this.drop(); return; }
     for (const e of this.errs) e.since += dt;
@@ -82,25 +131,81 @@ export class Prediction {
       this.ticks.push(t);
     }
     if (this.ticks.length > AHEAD) this.ticks.splice(0, this.ticks.length - AHEAD);
-    if (tick > this.seen) this.take(tick, state, ack);
+    if (tick > this.seen) this.take(tick, state, ack, taken);
   }
 
   // a tick stepped with input from the state before it
   private run(t: Tick, input: PilotInput, key: string) {
-    const core = this.core!;
+    const core = this.core!, col = this.col!, type = this.type!;
     t.before = core.save();
     t.input = input;
     t.key = key;
     core.keep();
-    this.col!.prefetch(core.pose, core.velocity);
-    core.clock.run(STEP, (s) => core.step(input, s, this.col!));
-    // (what happens to the craft is the host's to say)
-    core.events.length = 0;
+    col.prefetch(core.pose, core.velocity);
+    // (the host's tick this one is; not known yet: the snapshot's)
+    const at = this.lag === null ? this.thingsAt : t.p + this.lag;
+    const near = core.meet && this.things.length ? this.near(at) : null;
+    core.clock.run(STEP, (s) => {
+      if (!core.step(input, s, col)) return false;
+      if (near?.length) meetSolids(type, core, near, col);
+      return true;
+    });
+    if (core.events.length) {
+      if (t.p > this.toldTo && this.lag !== null) for (const e of core.events) { this.fresh.push(e); this.told.push({ tick: at, key: keyOf(e) }); }
+      core.events.length = 0;
+      if (this.fresh.length > 32) this.fresh.splice(0, this.fresh.length - 32);
+    }
+    this.toldTo = Math.max(this.toldTo, t.p);
+  }
+
+  // the snapshot's things the craft may meet in the host's tick at, where the host has them then (as at the tick's
+  // start: after the one before), those within the craft's reach of where it is now
+  private near(at: number): Solid[] {
+    const core = this.core!, p = core.pose, v = core.velocity, dt = (at - 1 - this.thingsAt) * STEP, out: Solid[] = [];
+    let r = 0;
+    for (const s of meetShapes(this.type!)) r = Math.max(r, Math.hypot(s.hx, s.hz) + Math.abs(s.fwd ?? 0));
+    r += Math.hypot(v.x, v.z) * STEP + 1;
+    const keep = (s: Solid) => { const b = r + s.hx + s.hz; if (Math.abs(s.x - p.x) < b && Math.abs(s.z - p.z) < b) out.push(s); };
+    for (const o of this.things) {
+      if ('car' in o) {
+        const c = o.car;
+        keep(solidAt(carShape(c), this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, at - 1), c.off, this.carAt)));
+      } else for (const b of o.boxes) keep(dt ? { ...b, x: b.x + o.vx * dt, z: b.z + o.vz * dt } : b);
+    }
+    return out;
+  }
+
+  // the newest snapshot's things round the craft (within what it and a car cover in the ticks run ahead)
+  private see(tick: number, s: Taken) {
+    const core = this.core!, p = core.pose, v = core.velocity, own = this.type!, T = this.things, ahead = (this.ticks.length + 5) * STEP;
+    const R = SEE + (Math.hypot(v.x, v.z) + CAR_V) * ahead, by = (x: number, z: number, b = 0) => Math.abs(x - p.x) < R + b && Math.abs(z - p.z) < R + b;
+    T.length = 0;
+    this.thingsAt = tick;
+    // (a car the session took out of the traffic is a detached one from that tick)
+    const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
+    for (const c of s.detached) if (c.detachedPose && by(c.detachedPose.x, c.detachedPose.z)) T.push({ boxes: [solidAt(carShape(c), c.detachedPose)], vx: 0, vz: 0 });
+    for (const c of s.cars) {
+      if (out?.has(c.id)) continue;
+      const q = this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, tick), c.off, this.carAt);
+      if (by(q.x, q.z)) T.push({ car: c });
+    }
+    for (const c of s.crafts) {
+      if (c.id === this.id || !c.placed) continue;
+      let k = this.cores.get(c.type);
+      if (!k) this.cores.set(c.type, k = CORES[c.type](DEFAULT_TUNING) as CraftCore);
+      k.load(c.core as never);
+      const q = k.pose, w = k.velocity;
+      if (!by(q.x, q.z)) continue;
+      const boxes = lightSolids(own, c.type, q, craftSolids(c.type, q));
+      if (boxes.length) T.push({ boxes, vx: w.x, vz: w.z });
+    }
+    for (const b of s.boats?.poses ?? []) if (by(b.x, b.z, b.len / 2)) T.push({ boxes: [solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading })], vx: 0, vz: 0 });
   }
 
   // the newest snapshot's state taken for its tick and the page's ticks after it stepped again
-  private take(tick: number, state: CraftState, ack: Ack | null) {
+  private take(tick: number, state: CraftState, ack: Ack | null, taken: Taken | null) {
     this.seen = tick;
+    if (this.told.length) this.told = this.told.filter((x) => x.tick >= tick - HEAR);
     const core = this.core!;
     const sent = ack && ack.seq !== this.acked ? this.sent.find(([seq]) => seq === ack.seq) : undefined;
     if (sent) { this.acked = ack!.seq; this.lag = ack!.tick - sent[1]; }
@@ -111,6 +216,7 @@ export class Prediction {
     let i = 0;
     while (i < T.length && T[i].p <= at) i++;
     T.splice(0, i);
+    if (taken?.tick === tick) this.see(tick, taken);
     for (const t of T) this.run(t, t.input, t.key);
     // (each correction blended on its own curve: one coming each snapshot does not hold the last ones back)
     const e = diff(shown, core.drawn(this.alpha) as Leaf);
@@ -123,7 +229,9 @@ export class Prediction {
     this.p = page;
     this.acc = acc;
     const core = this.core = CORES[type](DEFAULT_TUNING) as CraftCore;
+    core.ahead = true;
     this.id = id;
+    this.type = type;
     this.col = new VoxelCollision(this.world.meta, this.world.cache, this.world.now, core.reach);
     core.load(state.core as never);
     this.seen = tick;
@@ -144,8 +252,15 @@ export class Prediction {
     this.col = null;
     this.ticks.length = 0;
     this.errs = [];
+    this.type = null;
+    this.things = [];
+    this.told = [];
+    this.fresh = [];
   }
 }
+
+// an event's kind: its type or kind, or itself (a word)
+const keyOf = (e: unknown) => typeof e === 'object' && e ? String((e as { type?: string }).type ?? (e as { kind?: string }).kind) : String(e);
 
 const left = (t: number) => { const u = Math.min(1, t / BLEND_S); return 1 - u * u * (3 - 2 * u); };
 
