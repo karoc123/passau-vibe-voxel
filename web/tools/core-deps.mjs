@@ -171,6 +171,7 @@ const LAYERS = [
   ['sim/solids.ts', 'shared'], // (the shapes the page's walk meets)
   ['sim/seats.ts', 'shared'], // (a model's seats: the host holds them, the page offers and draws them)
   ['sim/player-name.ts', 'shared'], // (a chosen name cleaned: by the page and by the host)
+  ['sim/health.ts', 'shared'], // (each type's health as data, in the tuning; what a weapon does is its package's)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
   ['client/', 'client'], // (SimClient, MirrorSimClient, TrafficMirror, the links)

@@ -11,6 +11,7 @@
 // - presence: how long the world keeps an edit, or a vehicle a player left, that no player is near (PRESENCE below,
 //   the one default kept here: its code, sim/edit-keeper.ts, is the domain's): WorldSim, EditKeeper, Presence
 // - walk: how far a client's walk may move the person it walks as (sim/walk-bounds.ts WALK_BOUNDS): WorldSim
+// - health: each type's health and what harms it (sim/health.ts HEALTH): WorldSim
 // A tool that varies tuning builds a copy ({ ...RIDE, stiffness: 40 }) and passes it, as tools/rapier-car.mjs --set
 // and tools/plane.mjs --set do.
 import { frozen } from '../core/frozen';
@@ -20,6 +21,7 @@ import { JET, PLANE, type PlaneConfig } from './craft/plane-flight';
 import { CRAFT, type CraftTuning } from './craft/craft-motion';
 import { DRONE, type DroneTuning } from './craft/fpv-flight';
 import { WALK_BOUNDS, type WalkBounds } from './walk-bounds';
+import { HEALTH, type HealthTuning } from './health';
 
 // radius: m from a focus to the node's square (map metres; a vehicle's place) within which an edit is kept; after: s of
 // world time with no focus that near before it is dropped
@@ -35,8 +37,9 @@ export interface Tuning {
   readonly drone: DroneTuning;
   readonly presence: PresenceTuning;
   readonly walk: WalkBounds;
+  readonly health: HealthTuning;
 }
 
 export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, drone: DRONE,
-  presence: PRESENCE, walk: WALK_BOUNDS });
+  presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH });
 

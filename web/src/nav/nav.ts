@@ -51,6 +51,8 @@ const WALK_NEAR = 0.2;
 
 export class Nav {
   mode: Mode = 'orbit';
+  /** the player is down (their health at 0): the walk and the arms held still till the host has them back */
+  held = false;
   /** the craft the player is in (craft.ts): in mode craft, or the car driven in mode ride */
   craft: PlayerCraft | null = null;
   readonly actors = new THREE.Group();
@@ -631,12 +633,12 @@ export class Nav {
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
-    if (this.onFoot) this.foot.updateWalk(dt, this.footTouch.move);
+    if (this.onFoot && !this.held) this.foot.updateWalk(dt, this.footTouch.move);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
     this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);
     // (after the walk's pose: the host fires from where it has just put the body)
-    if (this.onFoot) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
+    if (this.onFoot && !this.held) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
     else { this.arms.trigger = false; this.foot.aim = false; }
   }
 

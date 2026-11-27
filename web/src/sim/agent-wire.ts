@@ -9,7 +9,7 @@
 import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { AvatarState, AvatarWire, CarBody, PlayerReads, Snapshot } from './contract/snapshot';
+import type { AvatarState, AvatarWire, CarBody, HealthWire, PlayerReads, Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
@@ -71,6 +71,8 @@ export class AgentWire {
   private readonly avatars = new Map<number, { gen: number; player: string; pose: WalkPose; prev: WalkPose }>();
   private gen = 0;
   private playerKey = '';
+  // the health sent of each life the client holds below its max, by key
+  private readonly lives = new Map<string, number>();
 
   /** a car out of the traffic (as sent: sim/server/snapshot.ts carState), or null when unchanged */
   detachedCar(c: CarState): CarState | null {
@@ -102,6 +104,23 @@ export class AgentWire {
     if (!p.results.length && key === this.playerKey) return undefined;
     this.playerKey = key;
     return p;
+  }
+
+  /** the lives whose health the client holds otherwise than hurt has it (hurt: those below their max, by key, with it;
+   * sees: whether the session is sent one now): a life healed or gone is sent at its max once, whether seen or not, so
+   * the client forgets it */
+  health(hurt: Iterable<{ key: string; hp: number; max: number }>, sees: (key: string) => boolean): HealthWire[] {
+    const out: HealthWire[] = [], L = this.lives, now = new Set<string>();
+    for (const { key, hp, max } of hurt) {
+      now.add(key);
+      // (rounded up: one hurt at all is never shown at 0)
+      const n = Math.ceil(hp);
+      if (L.get(key) === n || !sees(key)) continue;
+      L.set(key, n);
+      out.push([key, n, max]);
+    }
+    for (const key of L.keys()) if (!now.has(key)) { L.delete(key); out.push([key, -1, -1]); }
+    return out;
   }
 
   /** an avatar (its poses rounded), or null when it stands where it was sent standing; prev left out when it is the

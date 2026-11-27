@@ -272,3 +272,16 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
 @media (pointer: coarse) and (orientation: landscape) {
   #handbrake-button, #boat-drift-button { width: 68px; height: 68px; right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); }
 }
+/* own health and the vehicle's (ui/health.ts): small, over the weapon slots, off on the map */
+#health { position: fixed; left: 50%; bottom: calc(44px + var(--sb)); transform: translateX(-50%); z-index: 3; pointer-events: none;
+  display: grid; gap: 3px; font: 600 11px Inter, system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+body[data-nav=orbit] #health, body.noui #health { display: none; }
+#health .row { display: grid; grid-template-columns: 84px 90px 24px; align-items: center; gap: 6px; }
+#health .row[hidden] { display: none; }
+#health .name { text-align: right; opacity: .8; }
+#health .bar { height: 5px; border-radius: 3px; background: rgba(16,17,20,.5); overflow: hidden; }
+#health .bar i { display: block; height: 100%; width: 100%; background: #e8ece9; }
+#health .row.low .bar i { background: #e0533f; }
+#health.down .row:first-child .name::after { content: ' · down'; color: #e0533f; }
+#health-tint { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%); }

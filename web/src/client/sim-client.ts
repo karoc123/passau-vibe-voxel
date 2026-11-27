@@ -114,6 +114,9 @@ export interface SimClient {
   readonly edits: LiveEdits;
   /** the name player chose, as the host passed it on ('' none) */
   nameOf(player: PlayerId): string;
+  /** a life's health as last told (sim/health.ts lifeKey: "player:p1", "car:12", "craft:3"), or null: full (or never
+   * seen hurt) */
+  health(life: string): { hp: number; max: number } | null;
   /** the name this client's player goes by for the others ('' none), sent again to each new session */
   setName(name: string): void;
 }
@@ -243,6 +246,7 @@ export class MirrorSimClient implements SimClient {
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private names = new Map<PlayerId, string>();
+  private readonly lives = new Map<string, { hp: number; max: number }>();
   private myName = '';
   private readonly pending = new Map<number, { done: (n: [number, number][]) => void; fail: (e: unknown) => void }>();
   // the nodes whose edits wait for their files, by "tx_ty": each note after the one before
@@ -294,6 +298,8 @@ export class MirrorSimClient implements SimClient {
       this.craftList.clear();
       this.names.clear();
     }
+    // (a new session's wire sends the lives hurt afresh: one healed meanwhile would be held hurt)
+    this.lives.clear();
     this.drawn = null;
     this.buffer.length = 0;
     this.at = null;
@@ -328,6 +334,8 @@ export class MirrorSimClient implements SimClient {
   }
 
   nameOf(player: PlayerId) { return this.names.get(player) ?? ''; }
+
+  health(life: string) { return this.lives.get(life) ?? null; }
 
   setName(name: string) {
     if (name === this.myName) return;
@@ -417,6 +425,7 @@ export class MirrorSimClient implements SimClient {
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.takeEdit(e);
     if (w.names) this.names = new Map(w.names);
+    for (const [k, hp, max] of w.health ?? []) { if (hp < 0) this.lives.delete(k); else this.lives.set(k, { hp, max }); }
     // (a session taken up again sends the log's events from its start: those held already left out)
     for (const e of s.events) if (e.tick > after) this.events.push(e);
     const old = s.tick - EVENT_TICKS;

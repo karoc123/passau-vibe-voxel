@@ -48,6 +48,8 @@ import { NameTags } from './ui/name-tags';
 import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
+import { makeHealthHud } from './ui/health';
+import { shake } from './nav/chase-rig';
 import { WeaponsView } from './view/weapons/weapons-view';
 import { makeDayWeather } from './ui/day-weather';
 import { Graphics } from './ui/graphics';
@@ -197,7 +199,7 @@ nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
-const armsHud = makeArmsHud();
+const armsHud = makeArmsHud(), healthHud = makeHealthHud();
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
@@ -455,6 +457,34 @@ async function boot() {
   craftsView = new CraftsView(nav.actors);
 }
 
+// The player's health and the vehicle's they are in, a hit felt (the crash tint, a short shake of the camera: taken
+// off again at the next frame's start, as the walk's camera is not set anew while the player is down); down, the walk
+// is held; back, the walk is put where the host has them
+const shaken = new THREE.Vector3();
+let backSeen = 0;
+function feelHealth(now: number) {
+  const S = sim, me = S?.player;
+  if (!S || !me) return;
+  const s = S.seat(), e = s && s.role !== 'walker' ? s.entity : null, key = e ? `${e.kind}:${e.id}` : '';
+  const type = e?.kind === 'craft' ? S.crafts().find((c) => c.id === e.id)?.type ?? 'craft' : 'car';
+  const own = S.health(`player:${me}`);
+  const k = healthHud.set(own, e ? { key, name: type[0].toUpperCase() + type.slice(1), h: S.health(key) } : null, now);
+  if (k > 0 && !nav.onMap) {
+    shaken.copy(camera.position);
+    shake(camera.position, 0.12 * k, now);
+    shaken.subVectors(camera.position, shaken);
+  }
+  nav.held = own?.hp === 0;
+  // (a page's first look: the events held from before it came are not its)
+  if (!backSeen) { backSeen = S.tick; return; }
+  for (const ev of S.eventsSince(backSeen)) {
+    if (ev.kind !== 'back' || ev.player !== me) continue;
+    const t = ev.to;
+    void nav.setWalk({ at: new THREE.Vector3(t.x, t.y, t.z), exact: true, facing: new THREE.Vector3(Math.sin(t.h), 0, Math.cos(t.h)) });
+  }
+  backSeen = S.tick;
+}
+
 // the other players near this one as the maps mark them: on foot, at the wheel, flying (the array reused)
 const others: MapMark[] = [];
 function otherPlayers(): readonly MapMark[] {
@@ -514,6 +544,8 @@ let viewDist = 0, redraws = 0; // (this frame's: the camera's distance to the ta
 renderer.setAnimationLoop(frameLoop({
   // the players' input (the car's, Nav's, the crafts that own the camera); first the map's fly-to and the weather's fade
   input: (now, dt) => {
+    camera.position.sub(shaken);
+    shaken.set(0, 0, 0);
     goTo.step(now);
     dayWeather.step(now);
     boarding.update();
@@ -542,7 +574,7 @@ renderer.setAnimationLoop(frameLoop({
     weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
-  cameras: (_now, dt) => {
+  cameras: (now, dt) => {
     nav.place(dt);
     for (const c of crafts) c.place?.(dt);
     const bodyMode = nav.craft?.id ?? nav.mode;
@@ -554,6 +586,7 @@ renderer.setAnimationLoop(frameLoop({
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    feelHealth(now);
     boardButton.set((key) => boarding.label(key));
     touchArms.set(nav.aiming);
     canopyButton.show(glider?.canopyAction ?? null);

@@ -2,6 +2,7 @@
 // so the weapons stand on the world's voxels and bodies here, not on a page's.
 import type { Vec3 } from '../../core/vec';
 import type { EntityRef, WeaponId } from '../contract/ids';
+import type { DamageKind } from '../health';
 
 /** the slots a player holds weapons in, numbered from 1 (keys 1, 2) */
 export const SLOTS = 2;
@@ -58,6 +59,8 @@ export interface Weapon {
   name: string;
   /** shots a second at most: the host's limit and a held trigger's pace */
   rate: number;
+  /** what it does to what it hits: points of a kind (a blast's at its middle, none at reach m from it) */
+  damage: { kind: DamageKind; points: number; reach?: number };
   /** fired from `from` along unit `dir`: a shot at once, or a projectile let go */
   fire(world: ShotWorld, from: Vec3, dir: Vec3): Shot | Projectile;
 }
