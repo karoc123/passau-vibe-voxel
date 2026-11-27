@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carried, carShape, COACH_SHAPE, craftSolids, meetShapes, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
+import { carried, carShape, COACH_SHAPE, craftMeets, craftSolids, lightSolids, meetShapes, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
@@ -879,8 +879,8 @@ export class WorldSim {
 
   // The solid things (sim/solids.ts, ADR 0010) a craft meets in this tick: those whose boxes may come within its own
   // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
-  // crafts with a shape (not the light ones), the river's vessels, the train coaches. Not the walkers: their walk is
-  // their page's, and a craft shoves them as a car does.
+  // crafts with a shape (the light ones only to a light one: sim/solids.ts lightSolids), the river's vessels, the train
+  // coaches. Not the walkers: their walk is their page's, and a craft shoves them as a car does.
   private solidsNear(own: Craft, shapes: readonly Shape[], coaches: () => readonly CoachPose[]): Solid[] {
     const T = this.traffic, p = own.core.pose, v = own.core.velocity, out: Solid[] = [];
     let r = 0;
@@ -893,7 +893,7 @@ export class WorldSim {
     }
     for (const c of this.crafts.values()) {
       const q = c.core.pose;
-      if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) craftSolids(c.type, q, out);
+      if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) lightSolids(own.type, c.type, q, craftSolids(c.type, q, out));
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
     for (const k of coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
@@ -937,7 +937,7 @@ export class WorldSim {
       const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes, trains) : null;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
-        if (near?.length) meetSolids(core, shapes, near, c.collision);
+        if (near?.length) meetSolids(c.type, core, near, c.collision);
         return true;
       });
       // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores'; only its pilot reads
@@ -966,10 +966,11 @@ const BESIDE = 2;
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
 
 // after each of a craft's steps: pushed out of each solid thing near it that one of its boxes reaches into
-const out = { x: 0, z: 0 };
-function meetSolids(core: CraftCore, shapes: readonly Shape[], near: readonly Solid[], col: VoxelCollision) {
-  for (const shape of shapes) for (const s of near) {
-    const d = overlap(solidAt(shape, core.pose), s, out);
+const out = { x: 0, z: 0 }, own: Solid[] = [];
+function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision) {
+  own.length = 0;
+  for (const a of craftMeets(type, core.pose, own)) for (const s of near) {
+    const d = overlap(a, s, out);
     if (d > 0) core.meet!(out, d, col);
   }
 }

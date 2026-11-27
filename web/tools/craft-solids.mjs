@@ -6,14 +6,15 @@
 // car stops at it. A car a player drives (the road physics) at a hovering hovercraft bumps off it, never through it
 // nor shoving it away (the crafts are walls to the road physics); a car of the traffic on a road stops for a player on
 // foot in its lane, and for a hovercraft let down in it. A floatplane and a jet flown at a parked car crash on it, one
-// passing it close crashes on it with a wing, a wing tip clipping a pillar crashes it; a drone bounces off a parked
-// car and a paraglider stops at one, none passes through.
+// passing it close crashes on it with a wing, a wing tip clipping a pillar crashes it; a banked floatplane crashes on a
+// car under its lowered wing tip and passes a bus under its raised wing; a drone bounces off a parked car and a
+// paraglider stops at one, none passes through; a paraglider gliding at a drone shoves it along and glides on.
 // usage (in web/): node tools/craft-solids.mjs; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 
 const { nodeHost } = await imp('src/host/node.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { carShape, CRAFT_SHAPES, meetShapes, overlap, solidAt, vesselShape, WALKER_R } = await imp('src/sim/solids.ts');
+const { carShape, craftMeets, CRAFT_SHAPES, lightSolids, meetShapes, overlap, solidAt, vesselShape, WALKER_R } = await imp('src/sim/solids.ts');
 const { HOVER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts');
 const { DRONE } = await imp('src/sim/craft/fpv-flight.ts');
 
@@ -153,12 +154,14 @@ check(T.cars.includes(tc) && past < -WALKER_R && tc.v < 0.1 && tc.why === 'walke
 
 // the light crafts and the planes, each flown along +x at a car parked across its way (or a pillar) on the land: met by
 // all its boxes (the planes' wings too), never reached into further than a hair
-const parked = (id, x, z) => {
-  const c = { ...structuredClone(car), id, geo: { ...car.geo, cx: x, cy: z }, detachedPose: { x, y: LAND, z, h: 0, pitch: 0, roll: 0 } };
+const parked = (id, x, z, h = 0, more = {}) => {
+  const c = { ...structuredClone(car), id, ...more, geo: { ...car.geo, cx: x, cy: z }, detachedPose: { x, y: LAND, z, h, pitch: 0, roll: 0 } };
   T.detachedCars.push(c);
   return solidAt(carShape(c), c.detachedPose);
 };
-const deepest = (P, solid) => Math.max(...meetShapes(P.type).map((sh) => overlap(solidAt(sh, P.craft().core.pose), solid)));
+const deepest = (P, solid) => Math.max(...craftMeets(P.type, P.craft().core.pose).map((s) => overlap(s, solid)));
+// (as an upright plane's would: its boxes level whatever its bank)
+const deepestLevel = (P, solid) => Math.max(...meetShapes(P.type).map((sh) => overlap(solidAt(sh, P.craft().core.pose), solid)));
 const fly = async (P, solid, s, input, each = () => {}) => {
   let d = 0, x = -Infinity;
   if (input) P.input(input);
@@ -206,6 +209,51 @@ const I = player('i', 'paraglider', 48, 175, Math.PI / 2, LAND + 1.4, 9);
 r = await fly(I, car4, 3, { turn: 0, drive: 0, lift: 0, side: 0 });
 check(r.d <= 0.05 && r.x < car4.x - car4.hx,
   `a paraglider gliding at a parked car stops at it, never through (its furthest x ${r.x.toFixed(2)}, the car's side at ${(car4.x - car4.hx).toFixed(2)}; deepest ${r.d.toFixed(3)} m)`);
+
+// a floatplane banked 50 deg flown low past a parked car on its right, its fuselage over and beside the car and clear
+// of it, its lowered wing tip through the car (level, the wing would be 3 m over it)
+const D50 = 50 * Math.PI / 180, cs = carShape(car);
+const car5 = parked(9105, 165, 178, Math.PI / 2);
+const J = player('j', 'floatplane', 140, 178 - cs.hx - 2.65, Math.PI / 2, LAND + 3.5, 45);
+await tick();
+J.craft().core.flight.bank = D50;
+let level = 0;
+r = await fly(J, car5, 1.5, { ...LEVEL, turn: D50 / (65 * Math.PI / 180) }, () => { crashed(J)(); level = Math.max(level, deepestLevel(J, car5)); });
+check(J.crashed && r.d <= 0.05 && r.x < car5.x + car5.hz && level <= 0,
+  `a floatplane banked 50 deg flown low past a parked car (its fuselage clear) crashes on it with its lowered wing tip (furthest x ${r.x.toFixed(1)}; deepest ${r.d.toFixed(3)} m)`);
+
+// a floatplane banked 25 deg flown low past a parked bus on its left, under its raised wing: clear of it (level, the
+// wing would clip the bus's roof)
+const D25 = 25 * Math.PI / 180, busSolid = parked(9106, 165, 195, Math.PI / 2, { bus: true, len: 12 });
+const K = player('k', 'floatplane', 135, 195 + busSolid.hx + 2, Math.PI / 2, LAND + 1.7, 45);
+await tick();
+K.craft().core.flight.bank = D25;
+level = 0;
+r = await fly(K, busSolid, 0.9, { ...LEVEL, turn: D25 / (65 * Math.PI / 180) }, () => { crashed(K)(); level = Math.max(level, deepestLevel(K, busSolid)); });
+check(!K.crashed && r.x > busSolid.x + busSolid.hz && r.d <= 0 && level > 0,
+  `a floatplane banked 25 deg flown low past a parked bus passes it under its raised wing (furthest x ${r.x.toFixed(1)}, the bus to ${(busSolid.x + busSolid.hz).toFixed(1)}; a level wing would reach ${level.toFixed(2)} m into it)`);
+
+// a paraglider gliding at a drone hovering in its canopy's way: the drone is shoved along, never through the canopy;
+// the paraglider glides on (a drone does not stop it)
+const L = player('l', 'paraglider', 20, 232, Math.PI / 2, LAND + 20, 9);
+const M = player('m', 'drone', 30, 232, Math.PI / 2, LAND + 25);
+M.input({ roll: 0, pitch: 0, yaw: 0, throttle: DRONE.hover });
+await tick();
+L.input({ turn: 0, drive: 0, lift: 0, side: 0 });
+let dd = 0, g0 = 0, through = false;
+await run(2.5, () => {
+  const g = L.craft(), d = M.craft();
+  if (!g?.placed || !d?.placed) return;
+  g0 ||= Math.hypot(g.core.velocity.x, g.core.velocity.z);
+  const canopy = lightSolids('drone', 'paraglider', g.core.pose, [])[1], drone = craftMeets('drone', d.core.pose)[0];
+  dd = Math.max(dd, overlap(drone, canopy));
+  if (d.core.pose.x < canopy.x - canopy.hz && Math.abs(d.core.pose.z - canopy.z) < canopy.hx && drone.y < canopy.y + canopy.top && drone.y + drone.top > canopy.y) through = true;
+});
+const v1 = Math.hypot(L.craft().core.velocity.x, L.craft().core.velocity.z), shoved = M.craft().core.pose.x - 30;
+check(!through && dd <= 9 * STEP + 0.05 && shoved > 3 && v1 > 0.8 * g0,
+  `a paraglider gliding at a hovering drone shoves it along (${shoved.toFixed(1)} m), never through its canopy (deepest ${dd.toFixed(3)} m), and glides on (${g0.toFixed(1)} then ${v1.toFixed(1)} m/s)`);
+for (const P of [L, M]) P.s.send({ kind: 'request', request: { kind: 'dropCraft' } });
+await run(0.2);
 
 // the car of the traffic that stopped for D goes on once D has left its lane, at C's hovercraft let down in it
 C.put(200, ROAD_Z, Math.PI / 2);

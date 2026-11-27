@@ -19,8 +19,8 @@ The crafts move on the host, each at its own fixed step; cars are road physics b
 - The river's vessels give way: one under way slows to a stop when a craft is ahead of its bow or close beside it,
   and goes on once the way is clear, later by what it lost. Its route and timetable stay as they are.
 - The vessels are solid to the walker too, where the page draws them. The planes meet solid things as a wall: in
-  the air they crash, afloat they bump. Their wings are a second box, and a few small cubes along each wing against
-  the voxels. The drone and the paraglider are light: they meet solid things but stop nothing.
+  the air they crash, afloat they bump. Their wings are boxes (banked, a stair of them along the span) and small
+  cubes against the voxels. The light drone and paraglider stop nothing but each other; a drone stops no paraglider.
 - The traffic's cars without a body stop for a craft in their lane, as for a walker, and never push it. After a
   short wait they pass anything standing where the road has room and nothing comes (the oncoming lane too, its cars
   waiting); with no room they turn round, and that road is left out of routes for a while.
