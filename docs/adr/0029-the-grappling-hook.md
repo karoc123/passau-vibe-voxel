@@ -1,4 +1,4 @@
-# 0028 The grappling hook
+# 0029 The grappling hook
 
 Status: accepted (2026-11-27, the owner's; the numbers and the button are expected to change in play).
 
