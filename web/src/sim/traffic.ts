@@ -13,8 +13,8 @@ import { TrainTraffic } from './train-traffic';
 import { trafficType, VEHICLES } from './vehicles';
 import { BUS_COLOUR, CAR_COLOURS, carsAt, Flow, PACE, type FlowCar } from './flow';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
-import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, shiftOff, signalAt, STEP, turnRear, turnTime, type CarPose, type Ground } from './road-net';
-import { WALKER_R, type Solid } from './solids';
+import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, carAcc, IDM, SHIFT_MIN, shiftLen, stopShort, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, shiftOff, signalAt, STEP, turnRear, turnTime, type CarPose, type Ground } from './road-net';
+import { craftAhead, WALKER_R, type Solid } from './solids';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
 export { STEP, type CarPose, type Ground } from './road-net';
@@ -23,7 +23,6 @@ import type { Fallen } from './contract/events';
 import type { RoadPose } from './contract/pose';
 import { EditBoxes } from './edit-boxes';
 
-const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
 const BOX_IN = 7, BOX_OUT = 9;
 // a focus moved more than its circle's radius over this at once (or is new): its circle is filled anew at once, near
 // it too (not in sight of the other players)
@@ -46,8 +45,6 @@ const PARKED = 8, PARKED_MAX = 24;
 const HOLE = 1;
 // a walker this far (m) across a car's line (its half width, the walker's, a little room) is in its way
 const WALKER_LAT = 0.9 + WALKER_R + 0.3;
-// a craft's box this far across a car's line past its own half width, and up to this high over the road, is in its way
-const CRAFT_LAT = 0.9 + 0.3, CRAFT_UNDER = 3;
 // Something standing in a car's way (a craft, a player on foot, a car out of the traffic) is got past: after PASS_WAIT s
 // still behind it the car drives beside it where the road has room (up to PASS_EDGE m beyond its outer lanes' middles,
 // the oncoming lanes too) and nothing comes; with no room it turns round after TURN_WAIT s, with room but never clear
@@ -56,11 +53,8 @@ const CRAFT_LAT = 0.9 + 0.3, CRAFT_UNDER = 3;
 const PASS_WAIT = 1.5, PASS_EDGE = 1.2, TURN_WAIT = 4, GIVE_UP = 15, BLOCKED = 30;
 // how far on a car that got past needs, at speed, to be back in its lane (kept free by those coming the other way)
 const PASS_BACK = 8;
-// A car moves across (out beside something, back into its lane) as it rolls on, over SHIFT_K m of road a metre
-// across (about 30 degrees at the steepest), at least SHIFT_MIN m: a driver's lane change, never a slide while
-// standing. So it stops that much further short of something standing, with room to pull out.
-const SHIFT_K = 1.9, SHIFT_MIN = 3;
-const shiftLen = (d: number) => Math.max(SHIFT_MIN, SHIFT_K * Math.abs(d));
+// what of a craft in a car's way craftAhead tells besides how far
+const AHEAD = { ext: 0, need: 0 };
 // a lane change at speed takes about as long as a driver's (a few seconds of road), not the steepest shift
 const LC_S = 1.5;
 // A car turns round within the road: its body at most TURN_EDGE m beyond the outer lanes' middles (half a lane and a
@@ -490,7 +484,7 @@ export class Traffic {
     // (not the one it is out beside, clear of it across the road: on a bend its line ahead would cut it)
     const standStop = (d0: number, reason: string, x: number, z: number, ext: number, need: number, who: Agent | null = null) => {
       if (car.pass && this.besideClear(car, e, car.s + d0 + ext, x, z)) return;
-      const d = d0 - shiftLen(need) - 0.5;
+      const d = stopShort(d0, need);
       if (d >= gap) return;
       stop(d, reason, who);
       standGap = gap; sx = x; sz = z; sExt = ext; sNeed = need;
@@ -539,11 +533,8 @@ export class Traffic {
     }
     // a craft in the way (its box's reach along the car's line and across it): stopped for alike
     for (const s of this.crafts) {
-      if (s.y > g.z + CRAFT_UNDER || s.y + s.top < g.z) continue;
-      const rx = s.x - g.px, ry = s.z - g.py, along = rx * g.fx + ry * g.fy;
-      const c = Math.cos(s.h), n = Math.sin(s.h), ca = c * g.fx - n * g.fy, na = n * g.fx + c * g.fy;
-      const ea = s.hx * Math.abs(ca) + s.hz * Math.abs(na), el = s.hx * Math.abs(na) + s.hz * Math.abs(ca);
-      if (along + ea > -1 && along - ea < 40 && Math.abs(rx * g.fy - ry * g.fx) < el + CRAFT_LAT) standStop(along - ea, 'craft', s.x, s.z, ea, el + CRAFT_LAT);
+      const d0 = craftAhead(g, s, AHEAD);
+      if (!Number.isNaN(d0)) standStop(d0, 'craft', s.x, s.z, AHEAD.ext, AHEAD.need);
     }
     // one coming the other way, out beside something on its way back across this car's line: waited for short of
     // where it will be past; so is one that stopped for something standing first and has waited to get past (the
@@ -759,8 +750,7 @@ export class Traffic {
       let v0 = e.v * car.v0f;
       if (car.next >= 0 && e.L - car.s < 30 && this.nextTurn(car, e) !== Turn.Straight) v0 = Math.min(v0, this.nextTurn(car, e) === Turn.Right ? 4.5 : 6);
       const [gap, lv] = this.carObstacle(car, e);
-      const ss = IDM.s0 + Math.max(0, car.v * IDM.T + (car.v * (car.v - lv)) / (2 * Math.sqrt(IDM.a * IDM.b)));
-      const acc = Math.max(-9, IDM.a * (1 - (car.v / Math.max(v0, 0.1)) ** 4 - (gap === Infinity ? 0 : (ss / Math.max(gap, 0.1)) ** 2)));
+      const acc = carAcc(car.v, v0, gap, lv);
       car.brake = acc < -0.8 || car.v < 0.3 ? 1 : 0;
       car.v = Math.max(0, car.v + acc * dt);
       // (creeping up to something standing is still waiting for it: one let go after giving way gets past it at once)

@@ -86,6 +86,21 @@ export function lightSolids(own: CraftType, type: CraftType, p: Pose, out: Solid
   return out;
 }
 
+// a craft's box this far across a car's line past its own half width, and up to this high over the road, is in its way
+const CRAFT_LAT = 0.9 + 0.3, CRAFT_UNDER = 3;
+/** how far ahead of a car's front g (on the map: px, py, its height z, its heading fx, fy) craft box s stands in its
+ * way (m, to the box's near side), its reach along the car's line (out.ext) and the room it needs across (out.need);
+ * NaN: not in its way. The host's traffic and the page's prediction stop for a craft alike */
+export function craftAhead(g: { px: number; py: number; z: number; fx: number; fy: number }, s: Solid, out: { ext: number; need: number }) {
+  if (s.y > g.z + CRAFT_UNDER || s.y + s.top < g.z) return NaN;
+  const rx = s.x - g.px, ry = s.z - g.py, along = rx * g.fx + ry * g.fy;
+  const c = Math.cos(s.h), n = Math.sin(s.h), ca = c * g.fx - n * g.fy, na = n * g.fx + c * g.fy;
+  const ea = s.hx * Math.abs(ca) + s.hz * Math.abs(na), el = s.hx * Math.abs(na) + s.hz * Math.abs(ca);
+  if (!(along + ea > -1 && along - ea < 40 && Math.abs(rx * g.fy - ry * g.fx) < el + CRAFT_LAT)) return NaN;
+  out.ext = ea; out.need = el + CRAFT_LAT;
+  return along - ea;
+}
+
 /** after each of a craft's steps (the host's and the page's run ahead alike, so both meet the same): pushed out of
  * each of near that one of its boxes reaches into; met: told each such one (its index in near) and the way out of it */
 export function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision, met?: (i: number, n: { x: number; z: number }) => void) {
