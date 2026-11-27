@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { MAX_BIKES, MAX_CARS, MAX_PEOPLE } from '../sim/contract/agents';
-import { PALETTE, VEHICLE_IDS, VEHICLES, type VehicleType } from '../sim/vehicles';
+import { PALETTE, VEHICLE_IDS, VEHICLES, type Part } from '../sim/vehicles';
 import type { VehicleId } from '../sim/contract/ids';
 export { MAX_BIKES, MAX_PEOPLE };
 
@@ -30,10 +30,14 @@ function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, n: number, { 
 // its fixed colours (glass, tyres, trim: vertex colours), its head lamps (headMat: brighter at night) and tail lamps
 // (coloured per instance: brighter when braking)
 export interface VehicleMeshes { body: THREE.InstancedMesh; dark: THREE.InstancedMesh; head: THREE.InstancedMesh; tail: THREE.InstancedMesh }
+/** a vehicle type's meshes with its cabin seen into: its side windows a pane of their own */
+export interface OpenMeshes extends VehicleMeshes { pane: THREE.InstancedMesh }
 
-function vehicleMeshes(t: VehicleType, n: number, mats: { body: THREE.Material; dark: THREE.Material; head: THREE.Material; tail: THREE.Material }): VehicleMeshes {
+const partBox = ([w, h, l, x, y, z, c]: Part, colour: boolean) => box(w, h, l, x, y, z, colour ? new THREE.Color(PALETTE[c as keyof typeof PALETTE]).getHex() : undefined);
+
+function vehicleMeshes(model: readonly Part[], n: number, mats: { body: THREE.Material; dark: THREE.Material; head: THREE.Material; tail: THREE.Material }): VehicleMeshes {
   const parts = (want: (c: string) => boolean, colour: boolean) => {
-    const gs = t.model.filter((p) => want(p[6])).map(([w, h, l, x, y, z, c]) => box(w, h, l, x, y, z, colour ? new THREE.Color(PALETTE[c as keyof typeof PALETTE]).getHex() : undefined));
+    const gs = model.filter((p) => want(p[6])).map((p) => partBox(p, colour));
     return gs.length ? merge(...gs) : new THREE.BufferGeometry();
   };
   const fixed = (c: string) => c !== 'paint' && c !== 'head' && c !== 'tail';
@@ -45,11 +49,38 @@ function vehicleMeshes(t: VehicleType, n: number, mats: { body: THREE.Material; 
   };
 }
 
+// A car a seated player is drawn in (view/seats.ts) has its cabin opened, so that who sits in it shows; few are near
+// at once. All the others keep the solid cabin: an empty one seen into would change the look of every car of the
+// traffic.
+export const OPEN_CARS = 16;
+const spans = (a: Part, b: Part) => a[4] < b[4] + b[1] && b[4] < a[4] + a[1] && Math.abs(a[5] - b[5]) < (a[2] + b[2]) / 2;
+// a side window: glass at least as wide as a part of the body it wraps (a windscreen or a visor is narrower and stays)
+const wraps = (g: Part, q: Part) => g[6] === 'glass' && q[6] !== 'glass' && q[0] <= g[0] && spans(q, g);
+// q without the slab across it at g's height and length: what is below and above it, and before and after it
+function carve(q: Part, g: Part): Part[] {
+  const [w, h, l, x, y, z, c] = q, top = y + h, g0 = g[5] - g[2] / 2, g1 = g[5] + g[2] / 2, q0 = z - l / 2, q1 = z + l / 2;
+  const lo = Math.max(y, g[4]), hi = Math.min(top, g[4] + g[1]), out: Part[] = [];
+  if (lo > y) out.push([w, lo - y, l, x, y, z, c]);
+  if (top > hi) out.push([w, top - hi, l, x, hi, z, c]);
+  if (g0 > q0) out.push([w, hi - lo, g0 - q0, x, lo, (q0 + g0) / 2, c]);
+  if (q1 > g1) out.push([w, hi - lo, q1 - g1, x, lo, (g1 + q1) / 2, c]);
+  return out;
+}
+/** a model's parts with its side windows cut out of the body behind them, and those windows */
+function opened(model: readonly Part[]): { parts: Part[]; panes: Part[] } {
+  const panes = model.filter((g) => model.some((q) => wraps(g, q)));
+  let parts = model.filter((p) => !panes.includes(p));
+  for (const g of panes) parts = parts.flatMap((q) => (wraps(g, q) ? carve(q, g) : [q]));
+  return { parts, panes };
+}
+
 // instanced meshes for every car (of each type), person, bike and signal head; the simulation writes their matrices
 export class LifeMeshes {
   readonly group = new THREE.Group();
   // the vehicles' meshes by type; the car's also as body, dark, head and tail
   readonly vehicles = {} as Record<VehicleId, VehicleMeshes>;
+  // the same with the cabin seen into (OPEN_CARS each)
+  readonly open = {} as Record<VehicleId, OpenMeshes>;
   readonly body: THREE.InstancedMesh;
   readonly dark: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
@@ -63,7 +94,13 @@ export class LifeMeshes {
 
   constructor(scene: THREE.Scene, heads: [number, number, number, number, ...number[]][]) {
     const mats = { body: std({ color: 0xffffff }), dark: std({ vertexColors: true, roughness: 0.15, metalness: 0.5 }), head: this.headMat, tail: new THREE.MeshBasicMaterial({ color: 0xffffff }) };
-    for (const id of VEHICLE_IDS) this.vehicles[id] = vehicleMeshes(VEHICLES[id], MAX_CARS, mats);
+    for (const id of VEHICLE_IDS) this.vehicles[id] = vehicleMeshes(VEHICLES[id].model, MAX_CARS, mats);
+    const pane = std({ color: PALETTE.glass, roughness: 0.15, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide });
+    for (const id of VEHICLE_IDS) {
+      const { parts, panes } = opened(VEHICLES[id].model);
+      const glass = panes.length ? merge(...panes.map((p) => partBox(p, false))) : new THREE.BufferGeometry();
+      this.open[id] = { ...vehicleMeshes(parts, OPEN_CARS, mats), pane: instanced(glass, pane, OPEN_CARS) };
+    }
     ({ body: this.body, dark: this.dark, head: this.head, tail: this.tail } = this.vehicles.car);
     const P = MAX_PEOPLE + MAX_BIKES;
     this.legs = instanced(merge(box(0.18, 0.85, 0.22, -0.1, 0, 0, 0x2b3240), box(0.18, 0.85, 0.22, 0.1, 0, 0, 0x2b3240),
@@ -78,7 +115,10 @@ export class LifeMeshes {
     this.pole.castShadow = true;
     this.lamp = instanced(new THREE.BoxGeometry(0.3, 0.3, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }), H, { color: true });
     this.pole.count = 0; // (the signals near the focus: poles())
-    for (const id of VEHICLE_IDS) { const V = this.vehicles[id]; this.group.add(V.body, V.dark, V.head, V.tail); }
+    for (const id of VEHICLE_IDS) {
+      const V = this.vehicles[id], O = this.open[id];
+      this.group.add(V.body, V.dark, V.head, V.tail, O.body, O.dark, O.head, O.tail, O.pane);
+    }
     this.group.add(this.legs, this.torso, this.bike, this.pole, this.lamp);
     scene.add(this.group);
   }

@@ -71,6 +71,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
   a car is got into at any speed (no stopping it first); the host's reach uses a rough box for a car (2.2 m half-length).
-- Seated players: a car's windows are opaque, so its passengers are seen only on a motorbike's pillion (the name tag
-  hangs over the seat); drivers and pilots are not drawn; passengers of the player's own craft sit at the snapshot's
-  pose, not the shell's (apart once step 7 predicts it).
+- Seated players: crafts' pilots are not drawn (the helicopter's front glass and the hovercraft's wheelhouse are
+  closed); a car is opened only for another player's driver or passenger (16 per type), seen through the side
+  windows (its end walls stay); the own page draws no one in its own car.
