@@ -56,12 +56,17 @@ const dom = meta.labels.find((l) => l.kind === 'cathedral') ?? { x: 8085, y: 277
 const cam = `${dom.x - 40 + ox},70,${dom.y - 10 + oz + 60},${dom.x - 40 + ox},14,${dom.y - 10 + oz}`;
 const Q = `cam=${cam}&crop=256&res=0.5&shadow=0&ao=0&bloom=0&taa=0&refl=0&weather=clear&hour=13`;
 const server = `ws://127.0.0.1:${hostPort}`;
-// B's link: each message held LAG ms, in order, both ways
+// B's link: each message held LAG ms, in order, both ways; how long the pings and pongs really were (a timer fires
+// late on a busy machine: B's ping 167 ms once over a link of 120)
 const { WebSocketServer, WebSocket } = createRequire(path.join(web, 'package.json'))('ws');
 lagged = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+const held = { ping: [], pong: [] };
 lagged.on('connection', (down) => {
   const up = new WebSocket(server), early = [];
-  const later = (to, d) => setTimeout(() => { if (to.readyState === WebSocket.OPEN) to.send(d.toString()); else if (to === up) early.push(d); }, LAG);
+  const later = (to, d) => {
+    const t = performance.now(), k = /"kind":"(ping|pong)"/.exec(d.toString())?.[1];
+    setTimeout(() => { if (k) held[k].push(performance.now() - t); if (to.readyState === WebSocket.OPEN) to.send(d.toString()); else if (to === up) early.push(d); }, LAG);
+  };
   up.on('open', () => { for (const d of early.splice(0)) up.send(d.toString()); });
   up.on('message', (d) => later(down, d));
   down.on('message', (d) => later(up, d));
@@ -188,10 +193,11 @@ const shown = (p) => p.waitForFunction(() => /^\d+ ms ping$/.test(document.query
   .then((h) => h.jsonValue()).then((t) => +t.split(' ')[0]).catch(() => null);
 await B.waitForTimeout(10000);
 const [pingA, pingB] = await Promise.all([shown(A), shown(B)]);
+const mid = (a) => a.toSorted((x, y) => x - y)[a.length >> 1] ?? LAG, link = mid(held.ping.slice(-5)) + mid(held.pong.slice(-5));
 // (B's lower bound its own link's, not A's plus it: each page's ping carries its own busy frames, A's under load ~30 ms
 // one run and B's ~10, and a difference of the two failed a ping that held the whole link)
-check(pingA !== null && pingB !== null && pingA < 40 && pingB >= 2 * LAG - 5 && pingB - pingA <= 2 * LAG + 30,
-  `the ping shown is the socket's round trip: B over a link of ${2 * LAG} ms more shows ${pingB} ms, A ${pingA} ms`);
+check(pingA !== null && pingB !== null && pingA < 40 && pingB >= 2 * LAG - 5 && pingB - pingA <= link + 30,
+  `the ping shown is the socket's round trip: B over a link of ${2 * LAG} ms more (held ${link.toFixed(0)}) shows ${pingB} ms, A ${pingA} ms`);
 const C = await page('C', `play&${Q}`, true);
 const alone = await C.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 60000 }).then((h) => h.jsonValue()).catch(() => null);
 check(alone === 'alone, no ping', `a page alone shows no number: ${alone}`);

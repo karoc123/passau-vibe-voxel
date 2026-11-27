@@ -70,13 +70,19 @@ await until(() => {
 }, 60000);
 const ref = car && { kind: 'car', id: car.id }, pose = () => sim.entities.pose(ref);
 const side = (d) => { const p = pose(); return { x: p.x + Math.cos(p.h) * (0.9 + d), y: p.y, z: p.z - Math.sin(p.h) * (0.9 + d), h: p.h }; };
-if (car) {
-  const s = side(1);
+// (beside it and asked again until in: on a busy machine the seat was asked for before the host had D beside it, or
+// the car had moved on meanwhile, and the one refusal was the end of it)
+const refused = [];
+for (const t0 = Date.now(); car && D.seat()?.role !== 'driver' && Date.now() - t0 < 60000; ) {
+  const s = side(1), beside = () => { const e = D.seat()?.entity, p = e && sim.entities.pose(e); return p && Math.hypot(p.x - s.x, p.z - s.z) < 1; };
   D.send({ kind: 'request', request: { kind: 'walk', pose: { x: s.x, y: s.y, z: s.z, h: 0, moving: false } } });
-  await until(() => D.seat()?.role === 'walker', 5000);
+  await until(() => D.seat()?.role === 'walker' && beside(), 10000);
+  D.results('enterSeat');
   D.send({ kind: 'enterSeat', entity: ref, role: 'driver' });
-  await until(() => D.seat()?.role === 'driver', 10000);
+  const n = refused.length;
+  await until(() => D.seat()?.role === 'driver' || (refused.push(...D.results('enterSeat').filter((r) => !r.ok)), refused.length > n), 10000);
 }
+if (refused.length) log(`D refused first: ${JSON.stringify(refused)}`);
 check(D.seat()?.role === 'driver', `D at the wheel of a car standing by the cathedral (${car && `${vehicleOf(car).id} ${car.id}`}, ${JSON.stringify(D.seat())})`);
 
 // P: a page on a touch screen near it, on foot 1.5 m off its far side
@@ -117,7 +123,11 @@ const BOAT = { x: 8160.5, z: 2880.5, h: 1.8 };
 await P.tap('#board-button').catch(() => {});
 await P.waitForFunction(() => window.__three.nav.onFoot, null, { timeout: 30000 }).catch(() => {});
 await P.evaluate((at) => window.__crafts.find((c) => c.id === 'boat').enter(at), BOAT);
-const piloting = () => P.waitForFunction(() => window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'boat' && window.__sim.craftOf().placed, null, { timeout: 60000 }).then(() => true, () => false);
+// (the page's boat shell on too, not the host's seat alone: under load the page was once left out of it, C and W doing
+// nothing)
+const piloting = () => P.waitForFunction(() => window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'boat' && window.__sim.craftOf().placed
+  && window.__three.nav.craft?.id === 'boat', null, { timeout: 60000 }).then(() => true, () => false);
+const seatNow = () => P.evaluate(() => `${JSON.stringify(window.__sim.seat())}, the page's shell ${window.__three.nav.craft?.id ?? 'none'}`);
 const atWheel = await piloting();
 const toGun = atWheel && await P.waitForFunction(() => { const b = document.querySelector('#seat-button'); return b && getComputedStyle(b).display !== 'none' && b.textContent; }, null, { timeout: 10000 })
   .then((h) => h.jsonValue(), () => null);
@@ -127,7 +137,7 @@ const gunner = await P.waitForFunction(() => window.__sim.seat()?.role === 'pass
 const toWheel = gunner && await until(async () => (await seatButton()) === 'To the wheel', 10000);
 check(gunner && toWheel, `a tap on it: P at the gun, the button saying To the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))}, ${JSON.stringify(await seatButton())})`);
 await P.tap('#seat-button').catch(() => {});
-check(await piloting(), `another tap: P back at the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))})`);
+check(await piloting(), `another tap: P back at the wheel (${await seatNow()})`);
 
 // with mouse and keyboard: C to the gun shows the crosshair and takes the mouse (a key press is the gesture Chrome
 // wants), a click fires (the host's shot), C back steers; the lock refused (a browser wanting a click), the crosshair
@@ -135,11 +145,14 @@ check(await piloting(), `another tap: P back at the wheel (${JSON.stringify(awai
 // the mouse taken and a click fires
 const crosshair = () => P.evaluate(() => !!document.querySelector('#arms .crosshair')?.checkVisibility());
 const locked = () => P.evaluate(() => document.pointerLockElement === document.querySelector('canvas'));
+// (the button held over two of the page's frames at least: the trigger is read once a frame, and with the machine busy
+// a frame took longer than the 120 ms click, which then fired nothing)
+const frames2 = () => P.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const firesOnClick = async () => {
   const me = await P.evaluate(() => window.__sim.player), t0 = sim.tick;
   await P.mouse.move(480, 320);
-  await P.mouse.down(); await wait(120); await P.mouse.up();
-  const ok = await until(() => sim.eventsSince(t0).some((e) => e.kind === 'shot' && e.player === me), 3000);
+  await P.mouse.down(); await Promise.all([wait(120), frames2()]); await P.mouse.up();
+  const ok = await until(() => sim.eventsSince(t0).some((e) => e.kind === 'shot' && e.player === me), 10000);
   if (!ok) log('no shot', JSON.stringify(await P.evaluate(() => { const n = window.__three.nav; return { held: n.held, mode: n.mode, slot: n.arms.slot, lock: !!document.pointerLockElement, seat: window.__sim.seat() }; })), JSON.stringify(sim.eventsSince(t0).map((e) => e.kind)));
   return ok;
 };
@@ -154,23 +167,25 @@ const gunCycle = async (refuse) => {
   }
   await P.keyboard.press('KeyC');
   const atGun = await P.waitForFunction(() => window.__sim.seat()?.role === 'passenger' && window.__three.nav.craft?.id === 'passenger', null, { timeout: 15000 }).then(() => true, () => false);
-  await wait(400);
+  await until(async () => atGun && await crosshair() && await locked() === !refuse, 10000);
   const seen = atGun && await crosshair(), mouse = await locked();
   check(seen && mouse === !refuse, `C at the wheel${refuse ? ', the lock refused' : ''}: P at the gun, the crosshair shown, the mouse ${mouse ? 'taken' : 'not taken'}`);
   const fired = atGun && await firesOnClick(), after = await locked();
   check(fired && after, `${refuse ? 'the first' : 'a'} click at the gun fires a shot the host records (the mouse taken: ${after})`);
   await P.keyboard.press('KeyC');
   const back = await piloting(), boatId = await P.evaluate(() => window.__sim.craftOf()?.id);
-  const v0 = sim.crafts.get(boatId)?.core.motion.speed ?? 0;
-  await P.keyboard.down('KeyW'); await wait(1500); await P.keyboard.up('KeyW');
+  const v0 = sim.crafts.get(boatId)?.core.motion.speed ?? 0, w0 = sim.tick;
+  // (held until the boat is 1 m/s faster, ~10 host ticks alone, not for a fixed 1.5 s: the keys go with the page's
+  // frames, fewer on a busy machine)
+  await P.keyboard.down('KeyW'); await until(() => (sim.crafts.get(boatId)?.core.motion.speed ?? 0) > v0 + 1, 15000); await P.keyboard.up('KeyW');
   const v1 = sim.crafts.get(boatId)?.core.motion.speed ?? 0, kept = await locked();
-  check(back && kept && v1 > v0 + 1, `C again: P back at the wheel, the mouse kept (${kept}: the boat's view turns with it), W drives the boat (${v0.toFixed(1)} -> ${v1.toFixed(1)} m/s)`);
+  check(back && kept && v1 > v0 + 1, `C again: P back at the wheel, the mouse kept (${kept}: the boat's view turns with it), W drives the boat (${v0.toFixed(1)} -> ${v1.toFixed(1)} m/s in ${sim.tick - w0} host ticks)`);
 };
 await gunCycle(false);
 await gunCycle(true);
 await P.keyboard.press('KeyX');
 const onFoot = await P.waitForFunction(() => window.__three.nav.onFoot && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
-await wait(400);
+await until(async () => onFoot && await crosshair() && await locked(), 10000);
 const footMouse = await locked();
 check(onFoot && await crosshair() && footMouse, `X: P out of the boat on foot, the crosshair shown, the mouse taken (${footMouse})`);
 check(onFoot && await firesOnClick(), 'a click on foot fires a shot the host records');
@@ -182,9 +197,8 @@ await wait(800);
 await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
 await P.locator('button', { hasText: /^Combat plane$/ }).click({ timeout: 10000 }).catch((e) => log(`combat plane button: ${e.message}`));
 const flying = await P.waitForFunction(() => window.__three.nav.craft?.mouse === true, null, { timeout: 30000 }).then(() => true, () => false);
-await wait(400);
-let planeMouse = await locked();
-if (flying && !planeMouse) { await P.mouse.click(480, 320); await wait(300); planeMouse = await locked(); }
+let planeMouse = flying && await until(locked, 5000);
+if (flying && !planeMouse) { await P.mouse.click(480, 320); planeMouse = await until(locked, 5000); }
 check(flying && planeMouse, `the combat plane flying: the mouse taken (${planeMouse})`);
 check(flying && await firesOnClick(), 'a click in the combat plane fires a shot the host records');
 

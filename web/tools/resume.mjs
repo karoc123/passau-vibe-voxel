@@ -134,11 +134,19 @@ fly(A, 1);
 await step();
 A.link.away(true);
 await step(3);
-const got = A.link.times.length, t0 = A.c.tick, h = craft();
-check(h?.pilot === a0 && JSON.stringify(h.input) === JSON.stringify(h.core.neutral), `A's page hidden: the craft hands off at once (input ${JSON.stringify(h?.input)})`);
+const h = craft(), neutral = (x) => JSON.stringify(x?.input) === JSON.stringify(x?.core.neutral);
+check(h?.pilot === a0 && neutral(h), `A's page hidden: the craft hands off at once (input ${JSON.stringify(h?.input)})`);
+// the snapshots counted by the host tick they were made in, not by when they came: the host hands off in the first
+// tick after it took the away, and sends A none from that tick on, but those made before it may still be on their
+// way (with the machine busy the page reads its socket ticks behind the host: up to 19 such seen)
+await until(() => neutral(craft()));
+const hid = sim.tick, onSnap = A.link.onSnapshot;
+let after = 0;
+A.link.onSnapshot = (sn) => { if (sn.tick >= hid) after++; onSnap(sn); };
 await step(60);
-check(A.link.times.length - got <= 1 && A.c.tick - t0 <= 2 && A.link.ws.readyState === 1 && !host.server.isAway?.(a0) && craft().pilot === a0,
-  `and A is sent no snapshots for 2 s (${A.link.times.length - got}), still connected, still the pilot`);
+A.link.onSnapshot = onSnap;
+check(after === 0 && A.c.tick < hid && A.link.ws.readyState === 1 && !host.server.isAway?.(a0) && craft().pilot === a0,
+  `and A is sent no snapshots for 2 s (${after} made after the hand-off at tick ${hid}), still connected, still the pilot`);
 A.link.away(false);
 await until(() => sim.tick - A.c.tick <= 2, 10);
 check(sim.tick - A.c.tick <= 2, `shown again, A's next snapshot is the present's (A at ${A.c.tick}, the host at ${sim.tick})`);
