@@ -22,6 +22,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Host tick under sustained fire (16 launchers by the cathedral, 150 s): p50 ~6, p95 ~13, p99 ~16 ms. What is left
   of it is the shots' flight and traces (~2 ms a tick) and deflating the snapshots (~6 s of the 150); measured on a
   shared machine, p99 10–35 between runs.
+- The page under a volley (`volley`, phone 4x CPU): a node's crater ~4 ms on its main thread (its columns made again
+  ~1.5, sent to the mesher ~1), 16 shooters ~30 ms/s and no frame held up by them, 32 ~60 ms/s with the worst frame's
+  edits 26–50 ms. Next if it shows: the columns made in the mesher worker instead of on the page (they are copied
+  there anyway), not before a real phone shows hitches.
 - E18: the car's prediction (one-body world), if the owner says so (FRAGEN 17).
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M7–M10: wire compaction, lag compensation for hits (with the first weapon).

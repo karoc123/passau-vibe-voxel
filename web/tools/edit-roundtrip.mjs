@@ -4,7 +4,7 @@
 // node's window as the reference: get() agrees along the way, encode() equals the dense array's canonical runs (a port
 // of scripts/tiles.py column_runs) and ground (min of the base's and the stack from z = 0), re-encoding the encoded node
 // changes nothing, and the two nodes' shared margin columns agree; blocks placed in its trees take their foliage. The
-// edits are synthetic; nothing is written.
+// edits are synthetic; nothing is written. A bunch of a node's ops in one pass (editNodeOps) ends as each in turn.
 // usage: node tools/edit-roundtrip.mjs [SEED] [OPS]; exit code 1 on a mismatch
 import { imp } from './lib.mjs';
 import { fileURLToPath } from 'node:url';
@@ -158,6 +158,28 @@ for (const [x, y, g] of trees) {
       else if (was) kept++;
     }
   }
+}
+
+// 5. a bunch of a node's ops in one pass (editNodeOps, a page's notes) ends as each op in turn (editNode, the host's):
+// craters (spheres and boxes of air) crossing each other and the trees, then craters with a block among them
+const sameNode = (name, got, want) => {
+  for (const k of ['counts', 'runs', 'ground']) eqArr(`${name} base ${k}`, got.base[k], want.base[k]);
+  for (const k of ['counts', 'runs']) eqArr(`${name} foliage ${k}`, got.foliage[k], want.foliage[k]);
+  eqArr(`${name} foliage ground`, got.foliage.ground, want.foliage.ground);
+  if (got.ops.length !== want.ops.length) fail(`${name}: ${got.ops.length} ops, not ${want.ops.length}`);
+};
+const crater = () => {
+  const [x, y] = trees[ri(0, trees.length - 1)], [col, row] = LA.mapToGrid(frame, TX * N + x + ri(-4, 4), TY * N + y + ri(-4, 4));
+  const z = LA.cellToAbsZ(frame, A.ground[(y + 1) * S + x + 1] + ri(-2, 3));
+  return rnd() < 0.8 ? { kind: 'sphere', col, row, z, r: 1.5 + rnd() * 3, colour: 0 } : { kind: 'box', col, row, z, w: ri(1, 4), d: ri(1, 4), h: ri(1, 5), colour: 0, replace: CO.REPLACE_SOLID };
+};
+for (let round = 0; round < 6; round++) {
+  const ops = Array.from({ length: ri(2, 12) }, crater);
+  if (round >= 4) ops.splice(ri(0, ops.length), 0, { ...crater(), kind: 'box', w: 2, d: 2, h: 3, colour: ids[1], replace: CO.REPLACE_ALL });
+  const before = [crater()], v0 = WE.editNode(frame, TX, TY, { base: A, foliage: F, edited: false }, before[0], []);
+  let want = v0;
+  for (const op of ops) want = WE.editNode(frame, TX, TY, { base: want.base, foliage: want.foliage, edited: true }, op, want.ops);
+  sameNode(`${ops.length} ops in one pass (round ${round})`, WE.editNodeOps(frame, TX, TY, { base: v0.base, foliage: v0.foliage, edited: true }, ops, v0.ops), want);
 }
 
 let changed = 0;

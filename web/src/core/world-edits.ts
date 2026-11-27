@@ -102,6 +102,23 @@ export function editNode(frame: Frame, tx: number, ty: number, v: NodeView, op: 
   return { base, foliage, ops: [...ops, op] };
 }
 
+/** editNode for several ops in order, to the same columns: in one pass when every op carves (under heavy fire a
+ * page is handed a node's craters in bunches of up to a dozen: ten took ~2 ms op by op, ~0.5 in one pass, 4x that on a
+ * phone). Air only lowers a column's ground, so the ground one pass gives is the least of what the passes would give */
+export function editNodeOps(frame: Frame, tx: number, ty: number, v: NodeView, ops: readonly WorldOp[], before: readonly WorldOp[]): LiveNode {
+  if (ops.length < 2 || ops.some((op) => op.colour !== 0)) {
+    let node: LiveNode = { base: v.base, foliage: v.foliage, ops: before };
+    for (const op of ops) node = editNode(frame, tx, ty, { base: node.base, foliage: node.foliage as NodeView['foliage'], edited: true }, op, node.ops ?? []);
+    return node;
+  }
+  const N = frame.N, e = new EditableNode(N, v.base as NodeColumns, tx, ty);
+  // (the foliage's own ground is never read: it takes the base's)
+  const f = new EditableNode(N, { ...v.foliage, ground: v.base.ground } as NodeColumns, tx, ty);
+  for (const op of ops) { const cell = toCellOp(frame, op); e.apply(cell); f.apply(cell); }
+  const enc = e.encode();
+  return { base: { ...v.base, ...enc }, foliage: { ...f.encode(), ground: enc.ground }, ops: [...before, ...ops] };
+}
+
 /** node (tx, ty) made again from its files and ops in order (a host's kept edits read back), the node held in the
  * TileCache (ready); each op applied to this node alone, so a node whose files changed under its ops is left out by
  * the caller without touching its neighbours. false: the node is not in */
