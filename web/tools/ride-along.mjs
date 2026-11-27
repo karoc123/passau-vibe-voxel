@@ -190,7 +190,12 @@ check(flying && await firesOnClick(), 'a click in the combat plane fires a shot 
 
 // Every aircraft (nav/craft.ts AIRCRAFT: each type a player sits in in the air) from the map: X high up puts P under
 // an open paraglider. The helicopter (climbed first) takes the mouse, and the mouse moved swings its chase view.
-const ENTER = { helicopter: /^Helicopter$/, floatplane: /^Plane$/, jet: /^Jet$/, fighter: /^Combat plane$/ };
+const ENTER = { helicopter: /^Helicopter$/, gunship: /^Military helicopter$/, floatplane: /^Plane$/, jet: /^Jet$/, fighter: /^Combat plane$/ };
+// (the helicopters start on the ground and climb first)
+const CLIMB = new Set(['helicopter', 'gunship']);
+// (a new aircraft without a button here would only show as 'not in it': named instead)
+const unknown = AIRCRAFT.filter((t) => !ENTER[t]);
+if (unknown.length) check(false, `every aircraft has its button in this gate (missing: ${unknown.join(', ')})`);
 const yaw = () => P.evaluate(() => { const d = window.__three.camera.getWorldDirection(window.__three.camera.position.clone()); return Math.atan2(d.x, d.z); });
 const underCanopy = () => P.waitForFunction(() => window.__three.nav.craft?.id === 'paraglider' && window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'paraglider',
   null, { timeout: 10000 }).then(() => true, () => false);
@@ -212,8 +217,8 @@ for (const type of AIRCRAFT) {
     await wait(200);
     const y1 = await yaw(), turned = Math.abs(Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0)));
     check(inIt && m && turned > 0.3, `the helicopter takes the mouse (${m}), the mouse moved swings its chase view (${turned.toFixed(2)} rad)`);
-    await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space');
   }
+  if (CLIMB.has(type)) { await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space'); }
   const id = await P.evaluate(() => window.__sim.craftOf()?.id), p = id != null && sim.crafts.get(id)?.core.pose;
   await P.keyboard.press('KeyX');
   const glides = inIt && await underCanopy(), left = id != null && sim.crafts.get(id);
