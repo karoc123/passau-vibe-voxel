@@ -71,9 +71,10 @@ def decode(buf):
 # at the column's ground with air above, the cell's ground paved or a bare deck (data/ground.npz cls: CLS_PAVED,
 # CLS_DECK, a bridge's way drawn on the ground at its end) -- or on a carriageway (data/qa_roadmask.bin.gz 1) any
 # ground but grass and water (a strip of earth the data paints where a bridge's way meets the road: a 15 cm dip at
-# 50 km/h) --, and the column's last run above the ground, its top a deck's surface (deck_ids: paving, concrete, a
-# rail deck's ballast or track bed), within DECK_TOL of the deck's profile. Lawns, fields, steps, water and anything
-# standing on the ground stay voxels.
+# 50 km/h), and any ground but water and steps that is a hole in the paving or the carriageway's verge (region_fields)
+# --, and the column's last run above the ground, its top a deck's surface (deck_ids: paving, concrete, a rail deck's
+# ballast or track bed), within DECK_TOL of the deck's profile (a slab over a passage under the carriageway counts as a
+# deck: SLAB). Lawns, fields, steps, water and anything standing on the ground stay voxels.
 SRC_TOL, WALL_TOL, DECK_TOL = 0.75, 0.6, 0.75  # m
 N_SMOOTH, N_RELAX = 16, 48
 # a deck's nodes alone, more rounds after those (with the fallback nodes'): a deck is smooth in truth, and its profile
@@ -90,6 +91,9 @@ BLEND = 6
 # the model on a steep street): the riser the cap kept there was a step a car's wheel hit or dropped off (steps of
 # 0.6 m or more under a car's footprint on 0.94 % of the lanes' length, 0.05 % with this and traffic.place_lanes)
 ROAD_WALLS = True
+# m: ground this far under the terrain model with no deck over it lies under a slab the pipeline carved a passage under
+# (region_fields: its top is capped as a deck)
+SLAB = 2.5
 # 1/64 m: the cap stays above the voxel under its run's top voxel (physics keeps that one as a floor), 1/16 m over it.
 # (56 until the carriageways were linked over the terrain model's walls, ROAD_WALLS: on the steep streets of the Hals
 # fixture the corners clamped apart rose to 1.1 % of the linked edges; at 60: 0.75 %, the roughness p99 20.6 -> 14.5 cm)
@@ -390,9 +394,24 @@ def region_fields(region, D, W, base, tmp="data"):
     D_, W_ = gt.shape
     qa = tmp / "qa_roadmask.bin.gz"
     road = (wmod.gz_region(qa, (D, W), np.uint8, region) == 1) if qa.exists() else np.zeros((D_, W_), bool)
+    dirs = ((0, 1), (0, -1), (1, 0), (-1, 0))
+    verge = road.copy()
+    for dy, dx in dirs:
+        verge |= _shift(road, dy, dx, False)
+    # a slab over a passage carved under the carriageway (an underpass's corridor, a culvert): the street on it is where
+    # the terrain model is, the ground far under it. Its top is taken as a deck whose profile is the terrain model's, so
+    # the street runs on over it: as plain voxels it was a step of up to half a metre at either side (B 85 fixture:
+    # 0.35 m at 58 km/h). Only on and beside the carriageway: a hill over a tunnel stays as it is
+    deck = np.where(~np.isfinite(deck) & np.isfinite(dtm) & (dtm - gt > SLAB) & verge & ~water & ~bld, dtm, deck)
     F = fields(gt, water, bld, steps, dtm, deck, road)
     F["road"] = road
-    F["paved"] = np.isin(cls, CLS_PAVED + (CLS_DECK,))  # (the ground's run may get a cap: paved, or a bare deck)
+    paved = np.isin(cls, CLS_PAVED + (CLS_DECK,))  # (the ground's run may get a cap: paved, or a bare deck)
+    # a cell of something else (a tree pit, a drain, a strip of earth) with paving or carriageway on three sides or four
+    # is a hole in the surface, and a verge beside the carriageway the edge its outer wheels drop off (the lanes are
+    # drawn narrower than the traffic drives them in places: B 85 fixture, 0.3 m at 58 km/h): capped with them
+    ok = paved | road
+    near = sum(_shift(ok, dy, dx, False).astype(np.int8) for dy, dx in dirs)
+    F["paved"] = paved | (~ok & ~water & ~bld & ~steps & ((near >= 3) | verge))
     F["deck"], F["bld"] = deck, bld
     F["at"] = (region[0], region[2])
     return F

@@ -33,6 +33,24 @@ cells. The larger ones: service 28093589 (1416, 929; 39 cells, 4 m), service 296
 Industriestraße 125812800 (-4775, -1267; 20 cells), Innstraße 98905800 (1266, 1300; 14 cells), Hennebergerstraße
 73317824 (-3257, -27; 13 cells).
 
+## How the main roads drive
+
+`web/tools/road-drive.mjs` (gate `road-drive`, budgets in the tool) drives the main roads at their speed and lists
+bumps, edges under a wheel, grades over 12 % and curves over 0.5 g, worst first; `--near X,Z,R` for a cut-out,
+`--trace X,Z` for the wheels at a spot. On the committed map (2026-11-27): bumps 93 spots, edges 113, steep 100,
+tight 296. What the caps cannot take (a cap stays within 60/64 m of its voxel), by cause, the voxels' to fix in
+`voxelize.py`:
+
+- A deck's end metres off the road: 6368, 4945 (way 96354683, 4 m up onto the deck in 5 m); 3515, 4012 (way
+  1110709995, a 9 m hump over 15 m: the column solid up to a deck over the road).
+- Pits: single carriageway cells a metre or more under the terrain model (6016, 2786, way 1498612191: 0.4 m at
+  58 km/h), and the carriageway's edge at a drop where its last cells were lowered (6080, 2805).
+- An asphalt voxel standing on the ground (grnd a metre under the drawn top, so no cap): under the B 85 bridge at
+  5146, 2488 (way 96131678, 0.5 m), 111 such columns in the B 85 fixture.
+- Tight: kinked polylines on fast roads (the A 3, way 8017122 at 86 km/h: 15-20 degree kinks every 10 m round
+  874, 1117); smoothing the ways' lines before they are drawn, or the speeds there, is the fix. Steep: real grades
+  (way 136322280 at 7368, 2258, 24 %).
+
 ## The lane scan
 
 `web/tools/life-phys-scan.mjs --lanes --dump FILE` samples every metre of every lane's path as the traffic drives it,

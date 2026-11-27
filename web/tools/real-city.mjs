@@ -8,7 +8,9 @@ import { dataDir } from './data-dir.mjs';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const DATA = `${dataDir}/`; // (VOXEL_DATA: a fixture's build, tools/data-dir.mjs)
-export const load = (p) => imp(`src/${p}`);
+// (each module once: vite's runner bundles it again on every call, a few hundred ms)
+const mods = new Map();
+export const load = (p) => { if (!mods.has(p)) mods.set(p, imp(`src/${p}`)); return mods.get(p); };
 export const hasData = () => fs.existsSync(`${DATA}meta.json`) && fs.existsSync(`${DATA}traffic.json`);
 
 let meta = null;

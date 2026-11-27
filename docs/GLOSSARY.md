@@ -36,3 +36,5 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Region**: a block of the map the pipeline builds at once.
 - **Stretch**: a piece of river with one water level, between weirs (map config).
 - **Gate**: an automated check guarding what a player would notice (`web/tools/gates.mjs`).
+- **Cap**: a 1 m column's top drawn as a sloped quad (four corner heights) instead of its voxel's flat top: what
+  wheels and feet stand on.
