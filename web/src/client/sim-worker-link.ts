@@ -55,8 +55,10 @@ export type LinkStatus = { up: true } | { up: false; lost: boolean };
 
 /** how often a SocketLink tries again to reach its host, ms */
 export const RETRY_MS = 3000;
-// how often it measures the round trip, ms
+// how often it measures the round trip, ms (a ping and its pong: some 60 bytes every PING_MS)
 const PING_MS = 2000;
+// the round trips the one shown is the median of: one late pong (a long frame, a collection) does not move it
+const PINGS = 5;
 
 // where a page keeps its host's token over a reload (a phone's browser reloads a tab it put away): the tab's own store,
 // so two tabs are two players
@@ -78,8 +80,9 @@ export class SocketLink implements SimLink {
   // that fails drops them, they were the old session's)
   private early: SimCommand[] = [];
   readonly times: number[] = [];
-  /** the last round trip to the host, ms (null: none measured on this connection yet) */
+  /** the round trip to the host, ms: the median of the last PINGS (null: none measured on this connection yet) */
   rtt: number | null = null;
+  private rtts: number[] = [];
   private pinger: ReturnType<typeof setInterval> | null = null;
 
   // the token of the host's last hello (never logged: it is the player's seat)
@@ -101,7 +104,13 @@ export class SocketLink implements SimLink {
   }
 
   /** (receive) a host's answer to a ping */
-  pong(t: number) { if (Number.isFinite(t)) this.rtt = Math.max(0, performance.now() - t); }
+  pong(t: number) {
+    if (!Number.isFinite(t)) return;
+    this.rtts.push(Math.max(0, performance.now() - t));
+    if (this.rtts.length > PINGS) this.rtts.shift();
+    const s = [...this.rtts].sort((a, b) => a - b), h = s.length >> 1;
+    this.rtt = s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
+  }
 
   private open() {
     const ws = this.ws = new WebSocket(this.url);
@@ -121,6 +130,7 @@ export class SocketLink implements SimLink {
       if (this.closed || ws !== this.ws) return;
       this.early = [];
       this.rtt = null;
+      this.rtts = [];
       this.onStatus({ up: false, lost: this.ever });
       this.timer = setTimeout(() => { this.timer = null; if (!this.closed) this.open(); }, RETRY_MS);
     };
