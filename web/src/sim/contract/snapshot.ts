@@ -88,6 +88,8 @@ export interface Snapshot {
   avatars: AvatarWire[];
   /** the cars driven by players, by car id with its driver (for a map's markers) */
   drivers: [car: number, player: PlayerId][];
+  /** the players riding along in a car or a craft sent (its free seats, its riders not drawn on foot, map markers) */
+  passengers: [kind: 'car' | 'craft', id: number, player: PlayerId][];
   /** the crafts put down, piloted or left */
   crafts: CraftState[];
   /** the events of the ticks after the last snapshot's */

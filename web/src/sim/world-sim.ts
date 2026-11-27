@@ -508,9 +508,10 @@ export class WorldSim {
 
   // whether player may ask for a seat of entity with role from where they are: on foot (their avatar), a vehicle only
   // within Tuning.walk.board of where the host has the walker, not where the page says (a seat the mode gives, a
-  // craft made, is the mode's to place)
+  // craft made, is the mode's to place); a passenger's only from foot (not from the map, nor from another seat)
   private reaches(player: PlayerId, entity: EntityRef, role?: Role) {
     const held = this.seat(player), W = this.players.get(player)?.walk;
+    if (role === 'passenger' && (held?.entity.kind !== 'avatar' || !W)) return false;
     if (held?.entity.kind !== 'avatar' || !W || (role ?? this.entities.seat(entity)?.role) === 'walker' || !this.entities.exists(entity)) return true;
     const box = this.boxOf(entity);
     return !!box && reaches(W.pose, box, this.tuning.walk.board);
@@ -582,11 +583,13 @@ export class WorldSim {
     this.player(player).seat = seat;
     this.occupants.set(seatKey(seat), player);
     if (seat.role === 'pilot') this.craft(seat.entity.id)!.pilot = player;
+    if (seat.role === 'passenger') this.held();
     this.due.push({ kind: 'seated', player, seat });
   }
 
-  // out of the seat held: the avatar gone (orbit mode has no body); the car parked
-  // where it is (the road physics); the craft goes on with hands off (its core's neutral input)
+  // out of the seat held: the avatar gone (orbit mode has no body); the car parked where it is (the road physics); the
+  // craft goes on with hands off (its core's neutral input); a passenger's leaves the vehicle as it was (its
+  // passengers stay when its driver or pilot gets out: it comes to rest under them)
   private leaveSeat(player: PlayerId) {
     const P = this.players.get(player) as PlayerState | undefined, s = P?.seat;
     if (!P || !s) return;
@@ -598,7 +601,8 @@ export class WorldSim {
       if (s.entity.kind === 'avatar') (this.avatars as Map<number, PlayerId>).delete(s.entity.id);
       this.held();
     } else if (s.role === 'driver') this.phys?.releaseWheel(player);
-    else {
+    else if (s.role === 'passenger') this.held();
+    else if (s.role === 'pilot') {
       const c = this.craft(s.entity.id);
       if (!c) return;
       c.pilot = null;
@@ -613,7 +617,7 @@ export class WorldSim {
   // The walker's from pose (an avatar's: where the mode's walk puts it down), the
   // driver's as type choice (the car taken shows in driverSnapshot; the terrain round it warmed)
   private enterSeat(player: PlayerId, cmd: { entity: EntityRef; role?: Role; index?: number; choice?: VehicleId; pose?: WalkPose }): boolean | Refusal {
-    const seat = this.entities.seat(cmd.entity, cmd.role, cmd.index);
+    const seat = cmd.role === 'passenger' && cmd.index === undefined ? this.freePassengerSeat(player, cmd.entity) : this.entities.seat(cmd.entity, cmd.role, cmd.index);
     if (!seat) return false;
     const by = this.occupants.get(seatKey(seat));
     if (by === player) return true;
@@ -644,6 +648,19 @@ export class WorldSim {
       this.sit(player, seat);
     }
     return true;
+  }
+
+  // a passenger's seat of entity: the one player holds, else the first free (all taken: the last, so 'taken'), or null:
+  // it has none
+  private freePassengerSeat(player: PlayerId, entity: EntityRef): Seat | null {
+    let last: Seat | null = null;
+    for (const q of this.entities.seats(entity)) {
+      if (q.role !== 'passenger') continue;
+      last = { entity: { kind: entity.kind, id: entity.id }, role: q.role, index: q.index };
+      const by = this.occupants.get(seatKey(last));
+      if (by === undefined || by === player) return last;
+    }
+    return last;
   }
 
   // where the walk puts the avatar, bounded (Tuning.walk) against the last pose taken in an earlier tick;
@@ -716,11 +733,14 @@ export class WorldSim {
     L.retain(live);
   }
 
-  // the traffic's held ids, from the players
+  // the traffic's held ids, from the players (a car ridden along in is held as one followed)
   private held() {
     const { held } = this.traffic;
     held.car.clear(); held.person.clear();
-    for (const P of this.players.values()) if (P.follow?.kind === 'car' || P.follow?.kind === 'person') held[P.follow.kind].add(P.follow.id);
+    for (const P of this.players.values()) {
+      if (P.follow?.kind === 'car' || P.follow?.kind === 'person') held[P.follow.kind].add(P.follow.id);
+      if (P.seat?.role === 'passenger' && P.seat.entity.kind === 'car') held.car.add(P.seat.entity.id);
+    }
   }
 
   // The driver's car: the road physics' (loadPhysics)
@@ -728,9 +748,9 @@ export class WorldSim {
   driverSnapshot(player: PlayerId): DriverSnapshot | null { return this.phys?.driverSnapshot(player) ?? null; }
 
   // ------------------------------------------------------------------ the player crafts (sim/craft/craft-core.ts)
-  // A craft is an entity with one seat, its pilot's (ADR 0008: per seat; a gunner's would be another). It is made
-  // (addCraft), put down (placeCraft: stepped from then on, whether or not anyone pilots it: an empty seat is its core's
-  // neutral input) and taken away (removeCraft; or, left empty, by the presence rule: dropLeft). Left, it stays where
+  // A craft is an entity with its pilot's seat and, the hovercraft and the helicopter, passengers' (ADR 0008: per
+  // seat; a gunner's would be another). It is made (addCraft), put down (placeCraft: stepped from then on, whether or
+  // not anyone pilots it: an empty seat is its core's neutral input) and taken away (removeCraft; or, left empty, by the presence rule: dropLeft). Left, it stays where
   // it is for any player to enter. Its pilot's seat is the seat table's (enterSeat, leaveSeat); a tick's steps read
   // the pilot's input as the tick's commands left it.
 
@@ -755,11 +775,24 @@ export class WorldSim {
     c.placed = true;
   }
 
-  /** craft id taken out of the world (its pilot leaves it first) */
+  /** craft id taken out of the world (its pilot leaves it first; its passengers are put on foot beside where it was,
+   * on the ground under it) */
   removeCraft(id: CraftId) {
     const c = this.craft(id);
     if (!c) return;
     if (c.pilot !== null) this.leaveSeat(c.pilot);
+    const box = c.placed ? craftBox(c.type, c.core.pose) : null;
+    let n = 0;
+    for (const [p, P] of this.players) {
+      if (P.seat?.role !== 'passenger' || P.seat.entity.kind !== 'craft' || P.seat.entity.id !== id) continue;
+      this.leaveSeat(p);
+      // (to either side in turn, a step apart along it)
+      const side = n % 2 ? -1 : 1, along = (Math.floor(n++ / 2) % 4) - 1.5;
+      if (!box) continue;
+      // (a craft in the air: down on what is under it, where its tiles are in)
+      const out = outBeside(box, side, along, this.tuning.walk.board / 2), under = c.collision.surface(out.x, out.z);
+      this.walk(p, under ? { ...out, y: under.top } : out);
+    }
     c.collision.release();
     (this.crafts as Map<CraftId, CraftState>).delete(id);
   }
@@ -840,6 +873,13 @@ export class WorldSim {
 }
 
 const finitePose = (p: WalkPose) => [p.x, p.y, p.z, p.h].every(Number.isFinite);
+
+// a spot on foot out from box's side (+1 its right, -1 its left) by out m, along it by along m from its middle,
+// facing as it did
+function outBeside(b: Box, side: number, along: number, out: number): WalkPose {
+  const c = Math.cos(b.h), s = Math.sin(b.h), a = side * (b.r + out);
+  return { x: b.x + a * c + along * s, y: b.y, z: b.z - a * s + along * c, h: b.h, moving: false };
+}
 
 // how far a solid thing may be from a craft and still be met in a tick (m, from its pose, past the craft's reach): a
 // car's (a bus's half length, the tick its gathered place lags), a craft's (the helicopter's tail and rotor), a coach's

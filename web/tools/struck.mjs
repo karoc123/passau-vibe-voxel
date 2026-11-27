@@ -38,7 +38,7 @@ function draw(d, e) {
   // (the sim has no other players; the mirror lists them)
   traffic.avatars ??= [];
   let tick = 0;
-  const client = { get tick() { return tick; }, traffic, eventsSince: (t) => (t < e.tick && tick >= e.tick ? [e] : []), avatars: () => [], drivers: () => [], crafts: () => [], player: null };
+  const client = { get tick() { return tick; }, traffic, eventsSince: (t) => (t < e.tick && tick >= e.tick ? [e] : []), avatars: () => [], drivers: () => [], passengers: () => [], crafts: () => [], player: null };
   // (the torso's instances: the people walking first, none here, so the person knocked down is the first)
   const life = new StreetLife(new THREE.Scene(), client), T = life.M.torso, m = new THREE.Matrix4(), v = new THREE.Vector3(), out = [];
   for (let i = 0; i < SECONDS * FPS; i++) {

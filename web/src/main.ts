@@ -22,6 +22,7 @@ import { StreetLife } from './view/life';
 import type { CraftView, SimClient } from './client/sim-client';
 import type { CraftsView } from './view/crafts/crafts-view';
 import type { ParagliderMode } from './nav/special-craft';
+import type { PassengerMode } from './nav/passenger';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
 import { unpackTraffic } from './sim/traffic-pack';
@@ -103,6 +104,7 @@ const CRAFTS = () => [
   import('./nav/plane').then((m) => m.PlaneMode),
   import('./nav/special-craft').then((m) => m.HovercraftMode),
   import('./nav/special-craft').then((m) => m.HelicopterMode),
+  import('./nav/passenger').then((m) => m.PassengerMode),
 ];
 let crafts: PlayerCraft[] = [];
 // the world's crafts the local player does not fly (left by their pilots, or other players')
@@ -194,7 +196,7 @@ const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
 const armsHud = makeArmsHud();
-const boarding = new Boarding(nav, () => crafts, (s) => toast(s));
+const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
 if (qs.get('ui') === '0') document.body.classList.add('noui');
@@ -462,6 +464,10 @@ function otherPlayers(): readonly MapMark[] {
   for (const c of sim.crafts()) if (c.pilot && c.pilot !== me) others.push({ player: c.pilot, label: label(c.pilot), ...xyz(c.core.pose) });
   for (const [car, player] of sim.drivers()) {
     const d = player !== me && life.drawn('car', car);
+    if (d) others.push({ player, label: label(player), ...xyz(d) });
+  }
+  for (const [kind, id, player] of sim.passengers()) {
+    const d = player === me ? null : kind === 'car' ? life.drawn('car', id) : sim.crafts().find((c) => c.id === id)?.core.pose;
     if (d) others.push({ player, label: label(player), ...xyz(d) });
   }
   return others;
