@@ -1,65 +1,72 @@
-# Building looks: windows that break, houses that differ
+# Enterable houses: a hollow ground floor (hall) in every building
 
-A concept to decide before landmark work. Numbers are measured on the committed data unless marked "est.".
+Owner's decision (2026-11-27), replacing the earlier windows-first concept: houses become enterable, gameplay first,
+not realism. Step 1: every building gets a hollow ground floor (a hall), the house above stays solid. Later the halls
+hold loot. Cost decides: if it measurably costs performance, no halls or only chosen ones. Threshold: seen from outside
+at most +5 % triangles, no measurably longer frames on the phone profile.
 
-## Today, and why broken blocks get windows
+## Layout by size (as probed)
 
-A house is a solid block of one palette id from base to roof (21.7 M voxels of the two house materials, wall and
-tenement). A voxel carries nothing but its palette id (a run is z0, length, id); a column adds ground, roof plane
-and building id. Windows are not data: the fragment shader paints them on every vertical face of those two
-materials, from the face's place along the wall, its height over the street and a hash of the building id. A crater
-exposes the fill, the fill is the same material, its new faces are vertical, so they get windows, sills and night
-light. The cathedral shows the other way already: its windows are voxels of a window material, and a uniform tells
-the shader to paint none there.
+- A 2 m shell round the hall: the outer metre keeps the facade and its painted windows, the inner metre and floor,
+  ceiling, pillars get interior colours (three appended palette entries of the interior material: no windows, no
+  night light, no weather inside).
+- Hall 4 m high, 5 m from 120 m² (3 m under a low roof); floor at the median street level round the house; at
+  least 2 m of house over it.
+- Doors 2 m wide (3 m from 120 m²), 4 m high (3 m in a 3 m hall), only through walls facing a street at floor
+  level or a metre above it, two free cells deep: 1 door under 60 m², 2 under 120, 3 under 400, else 4, spread apart.
+- Cover: 2 x 2 m pillars every 7 m in halls 9 m or more across; from 300 m² a partition with a 3 m gap across.
+- Left solid: too low (under 5 m over the floor), no wall facing a street, hall under 9 m². No stairs, corridors or furniture.
 
-What a building can differ by today: wall colour, roof colour, three materials, and two hashed numbers (axis 3 or
-4 m, storey 3.3-3.7 m). 14 370 buildings; the palette uses 1 026 of 65 535 ids. Open data per building: LoD2 roof
-type and heights for all; OSM (12 847 buildings) has a type for 32 %, levels 27 %, wall colour 16 %, roof colour
-16 %, material 40, year 6. No year of construction in open data; ALKIS/LoD2 function is not read yet.
+## Measured: old town, 3 x 3 nodes round 59_21, 243 buildings, 196 get a hall
 
-Level 1 now: 2 571 nodes, 44.9 MB (runs 10.1 MB of it), 56 M triangles; 5.0 M facade faces. Densest node (59_21, old
-town): 22.7 k facade faces, 54 kB; no node has more than 83 k triangles.
+Variants: all halls; chosen = only halls of 150 m² or more (57); "doors only" = the doors carved but the hall's faces
+absent, standing in for a hall whose inside is drawn only while the camera is in it or at its door.
 
-## Options
+| | all | chosen | all, doors only | chosen, doors only |
+|---|---|---|---|---|
+| level-1 bytes (388 kB) | +27.5 % (runs +23 kB, room record +62 kB) | +16.2 % | +3.2 % | +1.7 % |
+| triangles of the 9 nodes (325 k) | +47 % | +24 % | +7.7 % | +3.8 % |
+| in view from the street, phone, today's occlusion | +117 to +283 % | | | |
+| same, occlusion opening rooms only from inside | +15 to +23 % | +8 % | +2.4 to +4.0 % | +1.2 to +1.6 % |
+| mesh time per node (mean / max, base 15.6 / 20.8 ms) | 22.4 / 33.8 ms | 19.2 / 27.1 ms | as base | as base |
 
-| | A. Paint stays, breaks hidden | B. Painted style per building | C. Windows and doors as voxels |
-|---|---|---|---|
-| Idea | a crater repaints its rim as masonry; nothing else changes | A, plus a style record per building the shader reads by building id | the pipeline stamps window and door voxels into the shell from the style record; the shader details a pane only inside its own voxel |
-| Breaks properly | broken faces yes; a pane is still paint, cut in half at a hole | as A | yes: a pane is a voxel, can be shot out alone |
-| Houses differ | no | yes: axes, storeys, ground floor (shop, door, plain), window shape, surround | yes, same record, and visible in the geometry |
-| Interiors later | a carved room has painted windows on a wall nobody sees through | as A | fits: rooms (already in the format) get their daylight through the same voxels |
-| Pipeline | none | the windows sidecar grows to ~8 B per building (~115 kB raw, loaded once) | B, plus stamping; coarser levels built with windows filled (as rooms are) and painted from the record; full rebuild |
-| Tile format | none | none | none (window material exists; 20-30 appended palette ids) |
-| Page | crater op, 4 appended masonry ids | A, plus shader reads the record (the fetch exists for night light) | B, plus pane detail per voxel; the cathedral's exception goes |
-| Bytes | 0 | +115 kB once | level 1 est. +1.1 M runs, +1-2 MB (2-5 %) |
-| Frame time | 0 | ~0 (est.) | est. +7 % triangles on the map, up to +30 % in the densest old-town nodes; the triangle budget holds the frame, fewer fine nodes fit it |
-| Landmarks | hand-built voxel windows plus a "paint none here" exception each | style "none" per landmark, voxel windows by parts | ordinary buildings with hand-placed parts; no exception |
+- In view: the tiles' own triangles from the street 6 m before a door, two spots stable over three runs (110 k and
+  305 k triangles at base); a third spot varied ±50 % from run to run and is left out.
+- The rise under today's occlusion comes from the culling, not the faces: it treats a room as solid except within a
+  tile of the camera, and with every ground floor hollow nothing near the street hides anything. The probe's change
+  (rooms open only while the eye is in one) is behind `?halls=1`, default off.
+- Frame time (phone profile: 4x CPU throttle, drawing left out as in the fly-stream gate): 16.6-17.4 ms mean,
+  p95 21-27 ms, standing and walking, outside and inside, in every variant: no measurable difference. The GPU's share
+  cannot be measured here (software GL); the triangles in view stand in for it. Inside a hall the view holds
+  370-560 k tile triangles (it sees out through the doors).
+- Walking in: 197 of 204 doors of 80 halls (walker 1.9 m, steps up 1.05 m; same voxels as the host's collision);
+  the 7 failures start stuck at a spot 1.5 m before the door. Traffic follows the road net and the road cells are
+  unchanged; a player's car fits through a 3 m door (not tested).
 
-Not offered: sub-metre bricks (reserved in the format): finest look, but a new section, mesher and edit path.
+## Recommendation
 
-Known trap for C: the old town once had 1 m voxel windows and lost them, because they stepped along diagonal walls.
-C keeps the shader's filtering and its wall-plane coordinate; only where a window is comes from the voxels.
+All buildings, but only with two page changes; without them no hall should ship, because "all" costs +15-23 % in
+view even with the occlusion fixed, and chosen ones still +8 %.
 
-## Recommendation: B now, C for the houses near the street, in three steps
+1. Occlusion: rooms count as solid unless the eye is in one (probed, behind `?halls=1`; becomes the default).
+2. Hall faces drawn only near: the mesher puts the faces of interior-material voxels in their own index range per
+   node, ordered by building; the page draws the range of the hall the camera is in or within ~10 m of a door
+   (+1 draw call). Then the outside cost is the "doors only" column: +2.4-4.0 % in view, under the threshold.
+3. A smaller room record (a box and height per hall instead of spans per column): the record is 60 % of the bytes.
 
-1. **Week 1, playable, no rebuild (A + the start of B).** A crater paints the wall voxels of its rim with one of four
-   masonry ids before carving (derived where the op is applied, so nothing new on the wire). The sidecar gets the
-   style record from OSM type, levels, LoD2 height and roof type; the shader takes axis, storey height and ground
-   floor from it. Result: a shot house shows brick, and a villa, a block of flats and an old-town house look
-   different.
-2. **Voxel windows in one region** (old town), built as a region, not the map: measure real bytes, triangles and
-   frame time on a phone against the estimates above, and look at diagonal walls. Then the owner decides the rebuild.
-3. **Rooms** behind chosen ground floors and in landmarks, with the rooms the pipeline already knows. Landmarks
-   start after step 2.
+If 2 turns out dearer than it looks, fall back to chosen halls (≥150 m²) with 1 and 2: +1.2-1.6 %.
 
-Gates: (1) crater a facade in a fixture, mesh the node: no face within the rim carries a house material, and none
-has night light. (2) From step 2: level-1 bytes and triangles of the region within 5 % and 30 % of today's, and the
-coarser levels byte-identical to a build without windows.
+Full rebuild with halls in the pipeline (rooms through interiors.py, the coarser levels unchanged): est. +1 min on
+the ~5½ min build. Map, extrapolated from 196 halls (est. ~11 k halls): level 1 +6 MB (44.9 → ~51 MB) with
+today's record, ~+2.5 MB with a box record; level-1 triangles +9 M (+16 %) as probed, +1.5 M (+2.6 %) with 2.
+
+## How to repeat
+
+`uv run python scripts/halls.py --out DIR [--min-area 150] [--doors-only]` (old town, into DIR/data: links to the
+committed data but the 9 rewritten nodes and meta.json), `node tools/tris.mjs DIR/data`, then
+`node tools/halls-probe.mjs --public DIR --halls DIR/halls.json --phone [--occ]`.
 
 ## Owner's questions
 
-1. Windows snapped to the metre grid (1 x 2 m openings, frames drawn finer inside): good enough, or do you want
-   finer than a metre? (Finer means bricks: months, not weeks.)
-2. Walkable: every house, or chosen ones (landmarks, shops, a few per street)? Recommend chosen; every house is
-   hollowing 21.7 M voxels and is not costed here.
-3. Step 2 needs a full data rebuild once it has passed: may that be planned?
+1. All buildings with steps 1-3 first, or chosen ones (≥150 m², a quarter of the houses) sooner?
+2. May the rebuild be planned once 1-3 pass the threshold on the probe region?

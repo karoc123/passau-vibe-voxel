@@ -625,7 +625,8 @@ export async function installCity({ streamer: S, uniforms: U, meta, scene, focus
 
   // Occlusion culling (occlusion.ts): a tile's columns block the view once it is in and all its buildings show --
   // drawn by whichever level (the least of the levels' heights where two are in)
-  const occ = new Occlusion(d.nx, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3);
+  const occ = new Occlusion(d.nx, Uint8Array.from(meta.palette, (p) => (p[3] === MAT.LEAF || p[3] === MAT.WATER || p[3] === MAT.JET ? 0 : 1)), meta.H + 3,
+    undefined, typeof location !== 'undefined' && new URLSearchParams(location.search).get('halls') === '1');
   let occOn = occlusion, occAt = 0, occN = -1;
   const occSrc = new Map<number, ColumnData[]>(), occStats = { ms: 0, meshes: 0, hidden: 0 };
   // A hidden mesh moves to layer HIDDEN alone: the camera (layer 0) passes it over before anything else; the
