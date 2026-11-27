@@ -5,9 +5,9 @@
 //     matched), which skipped. tsc always runs; nothing matched: tsc alone. With --full, the full set's gates too.
 //   fast set (default, about a minute and a half on 20 cores: the load gate runs alone at the end): tsc and every check
 //   that runs in seconds; after a series of merges;
-//   full set (--full): also section-check, popin-check, caps-check --all, surface-gap --check against
-//     tools/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE, recorded
-//     before the change with `node tools/mesh-golden.mjs write FILE`).
+//   full set (--full): also section-check, popin-check, caps-check --all, see-through --all --max 0, surface-gap
+//     --check against tools/surface-gap-baseline.json, and mesh-golden check if a golden file is given (--golden FILE,
+//     recorded before the change with `node tools/mesh-golden.mjs write FILE`).
 // A gate passes when its command exits 0 and, where `expect` is set, it printed at least that many PASS lines and no
 // FAIL line (a scenario dropped from a check would otherwise go unnoticed; the counts include the real-data checks
 // those tools run when the data is there, so they apply only then). Gates on the real data (`data`) are
@@ -84,6 +84,7 @@ const GATES = [
   { name: 'menu', cmd: ['tools/menu.mjs'], set: 'fast', data: true, expect: 14, secs: 40, guards: 'the start menu (the server preselected as ./voxel builds it, skipped with ?server=), the Esc menu (on foot it opens and does not fly up, Back to orbit mode; Esc closes the full map first), a name set by one player cleaned and shown to another on the maps and over them (not through a building), the ping on a host, the frame cap at 30, in headless Chrome with two players on a host of its own', paths: ['src/ui/menu.ts', 'src/ui/name-tags.ts', 'src/sim/player-name.ts', 'src/app/frame.ts', 'src/app/session.ts', 'src/nav/nav.ts', 'src/nav/input.ts', 'src/perf.ts', 'src/main.ts', 'src/sim/server/sim-server.ts', 'src/host/ws.ts', 'src/client/sim-client.ts', 'src/client/sim-worker-link.ts', 'tools/menu.mjs'] },
   { name: 'section-check', cmd: ['tools/section-check.mjs'], set: 'full', data: true, secs: 56, guards: 'sections.ts, mesher.worker.ts meshSections', paths: [...DATA, ...MESH, 'tools/section-check.mjs'] },
   { name: 'popin-check', cmd: ['tools/popin-check.mjs'], set: 'full', data: true, secs: 59, guards: 'view/life.ts, sim/world-sim.ts, sim/traffic.ts (one run with a second player far off), sim/train-traffic.ts, sim/boat-traffic.ts', paths: [...DATA, ...SIM, 'src/view/**', 'tools/popin-check.mjs'] },
+  { name: 'see-through-all', cmd: ['tools/see-through.mjs', '--all', '--max', '0'], set: 'full', data: true, expect: 1, secs: 55, guards: 'as see-through, every node: no building of the map seen through (a data rebuild can open one)', paths: [...DATA, ...MESH, 'tools/see-through.mjs'] },
   { name: 'caps-check-all', cmd: ['tools/caps-check.mjs', '--all'], set: 'full', data: true, secs: 85, guards: 'as caps-check, every node with caps', paths: [...DATA, ...MESH, 'tools/caps-check.mjs'] },
   { name: 'surface-gap', cmd: ['tools/surface-gap.mjs', '--check', 'tools/surface-gap-baseline.json'], set: 'full', data: true, secs: 12, guards: 'physics/rapier/terrain.ts and car.ts against core/surface.ts (the baseline)', paths: [...DATA, 'src/physics/rapier/terrain.ts', 'src/physics/rapier/car.ts', 'src/physics/rapier/vehicle.ts', 'tools/surface-gap.mjs', 'tools/surface-gap-baseline.json'] },
   { name: 'mesh-golden', cmd: golden ? ['tools/mesh-golden.mjs', 'check', path.resolve(golden)] : null, set: 'full', data: true, secs: 11, guards: 'mesher.worker.ts byte for byte (only with --golden FILE)', paths: [...DATA, ...MESH, 'tools/mesh-golden.mjs'] },
