@@ -7,7 +7,7 @@ import type { Quat, Vec3 } from '../../core/vec';
 import type { CraftType } from './ids';
 
 /** what a craft's cube swept through the voxels meets (sim/craft/sweep.ts, VoxelCollision.sweep) */
-export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling';
+export type ImpactKind = 'terrain' | 'structure' | 'foliage' | 'city edge' | 'ceiling' | 'vehicle';
 
 // ---------------------------------------------------------------- events
 

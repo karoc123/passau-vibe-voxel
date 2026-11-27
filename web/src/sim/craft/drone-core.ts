@@ -5,7 +5,7 @@
 // no DOM (tools/core-deps.mjs). Drawn between the world's last two ticks: the position on the line, the attitude by
 // quaternion (nlerp).
 import { FixedStep } from '../../core/fixed-step';
-import { add, addScaled, component, copy, copyQuat, length, lengthSq, lerp, nlerpQuat, quat, scale, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
+import { add, addScaled, component, copy, copyQuat, length, lengthSq, lerp, nlerpQuat, quat, scale, set, setComponent, vec3, type Quat, type Vec3 } from '../../core/vec';
 import type { CraftSpot } from '../contract/commands';
 import type { DroneCoreState, DroneEvent, ImpactKind } from '../contract/crafts';
 import type { DroneInput } from '../contract/inputs';
@@ -78,6 +78,15 @@ export class DroneCore implements CraftCore<DroneInput, DroneEvent, DroneDrawn, 
     lerp(o.position, a.position, this.flight.position, t);
     nlerpQuat(o.attitude, a.attitude, this.flight.attitude, t);
     return o;
+  }
+
+  // pushed out of a solid thing (sim/solids.ts) as far as its cube gets, and bounced off it as off a wall
+  meet(n: { x: number; z: number }, depth: number, col: VoxelCollision) {
+    const f = this.flight, d = set(this.next, n.x * (depth + 1e-3), 0, n.z * (depth + 1e-3)), hit = col.sweep(f.position, d);
+    if (hit === 'loading') return;
+    addScaled(f.position, d, hit.hit ? clearance(hit.fraction, d, this.cfg.clearance) : 1);
+    const speed = f.bounceOff(set(this.glide, n.x, 0, n.z));
+    if (speed >= this.cfg.rebound) this.events.push({ kind: 'impact', hit: 'vehicle', speed });
   }
 
   private readonly move = (position: Vec3, displacement: Vec3, velocity: Vec3) => {

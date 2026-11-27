@@ -107,12 +107,16 @@ export class FpvFlight {
 
   // Resolve the normal impulse while the motors and pilot remain active.
   bounce(axis: number) {
+    return this.bounceOff(setComponent(set(this.impactNormal, 0, 0, 0), Math.abs(axis) - 1, Math.sign(axis)), axis === 2);
+  }
+
+  /** off a face whose normal (a unit vector) is normal; floor: a floor's (slid along, it brakes) */
+  bounceOff(normal: Vec3, floor = false) {
     const c = this.cfg;
-    const normal = setComponent(set(this.impactNormal, 0, 0, 0), Math.abs(axis) - 1, Math.sign(axis));
     const approach = Math.max(0, -dot(this.velocity, normal));
     if (approach < c.rebound) {
       addScaled(this.velocity, normal, approach);
-      if (axis === 2) scale(this.velocity, c.floorKeep);
+      if (floor) scale(this.velocity, c.floorKeep);
       return approach;
     }
 

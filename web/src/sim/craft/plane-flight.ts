@@ -64,9 +64,15 @@ export const PLANE = frozen({
   CEILING: 450,
   CEILING_FADE: 150,
   EDGE: 20, // m: the map's edge wall stands this far inside
-  // the collision: the fuselage's cube (half side; the wings do not collide), tiles fetched this far ahead (s)
+  // the collision: the fuselage's cube (half side), tiles fetched this far ahead (s)
   RADIUS: 1.5,
   HORIZON: 3.5,
+  // the wings: cubes of WING_R at WING_AT of the way out to each tip, the tip WING_X across, WING_Y up and WING_Z along
+  // from the fuselage's cube's centre; swept with it, so a tip met is met as the fuselage would be (a crash, a skim)
+  WING_X: 4.45,
+  WING_Y: 1.35,
+  WING_Z: 0.9,
+  WING_R: 0.3,
   // a top face met sinking slower than SKIM_SINK: a bounce (path at least SKIM_PITCH up, speed x SKIM_KEEP), else a crash
   SKIM_SINK: 4,
   SKIM_PITCH: 6 * D,
@@ -127,6 +133,10 @@ export const JET: PlaneConfig = frozen({
   CEILING: 560, // (VoxelCollision's ceiling is meta.H + 600): room for a loop over the city
   CEILING_FADE: 200,
   RADIUS: 1.2,
+  WING_X: 3.4, // (the tip tanks)
+  WING_Y: -0.25,
+  WING_Z: -0.9, // (swept back)
+  WING_R: 0.35,
   HORIZON: 3, // s; VoxelCollision fetches along the path, so ~375 m ahead at the top speed leaves no gap
   SKIM_SINK: 3,
   FLOAT_H: 1.3, // (no floats: the belly; over RADIUS, so that water is met before the ground under it)
@@ -143,7 +153,8 @@ export interface PlaneWorld {
   W: number;
   D: number;
   H: number; // the map's top (meta.H)
-  sweep(p: Vec3, d: Vec3): Sweep;
+  // a cube of half side r (absent: the fuselage's) from p moved by d
+  sweep(p: Vec3, d: Vec3, r?: number): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
   // the water's surface at (x, z); -1: no water; null: not known yet (its tile not in)
   water(x: number, z: number): number | null;
@@ -156,6 +167,11 @@ export interface PlaneWorld {
 export interface PlanePose { x: number; y: number; z: number; heading: number; speed?: number; water?: boolean }
 type Safe = Required<PlanePose>;
 
+// the wings' cubes, as shares of the way out to the tip (no voxel's room between them and the fuselage's)
+const WING_AT = [0.4, 0.7, 1];
+// the wings' sweeps' scratch (not the plane's state: nothing of it outlives a sweep): the nose, the cockpit's up, the
+// left wing (+x as drawn), a cube's place
+const WF = vec3(), WU = vec3(), WL = vec3(), WQ = vec3();
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 // the level speed at full throttle (thrust = parasitic drag, roughly)
 const levelTop = (c: PlaneConfig) => Math.sqrt(c.THRUST / c.CD0);
@@ -325,7 +341,7 @@ export class PlaneFlight {
       if (wl === null) return false;
       if (wl >= 0 && ny - c.FLOAT_H <= wl) { d.y = wl + c.FLOAT_H - p.y; touch = true; }
     }
-    const s = w.sweep(p, d);
+    const s = this.sweepWings(w.sweep(p, d), d, w);
     if (s === 'loading') return false;
     if (!s.hit) {
       add(p, d);
@@ -346,6 +362,31 @@ export class PlaneFlight {
     }
     this.crash(s.hit);
     return true;
+  }
+
+  // the fuselage's sweep s, or the first of the wings' cubes' along d that meets something sooner (the map's edge and
+  // the ceiling are the fuselage's: the wings stay well inside them)
+  private sweepWings(s: Sweep, d: Vec3, w: PlaneWorld): Sweep {
+    if (s === 'loading') return s;
+    const c = this.cfg, p = this.p, f = this.attitude(WF, WU), l = cross(WL, WU, f);
+    for (const side of [-1, 1]) for (const k of WING_AT) {
+      const q = addScaled(addScaled(addScaled(copy(WQ, p), l, side * k * c.WING_X), WU, c.WING_Y), f, c.WING_Z);
+      const t = w.sweep(q, d, c.WING_R);
+      if (t === 'loading') return t;
+      if (t.hit && t.hit !== 'city edge' && t.hit !== 'ceiling' && (!s.hit || t.fraction < s.fraction)) s = t;
+    }
+    return s;
+  }
+
+  /** met a solid thing (sim/solids.ts: a car, a craft, a vessel, a coach) depth m deep, n (a unit x, z) the way out:
+   * pushed out as far as its sweep lets it, and met as a wall: in the air a crash, afloat a bump */
+  meet(n: { x: number; z: number }, depth: number, w: PlaneWorld) {
+    if (this.state === 'crashed') return;
+    const p = this.p, d = set(this.d, n.x * (depth + 1e-3), 0, n.z * (depth + 1e-3));
+    const s = w.sweep(p, d);
+    if (s === 'loading') return;
+    addScaled(p, d, s.hit ? Math.max(0, s.fraction - 0.002 / length(d)) : 1);
+    if (this.state === 'air') this.crash('vehicle'); else this.bump('vehicle');
   }
 
   // the stick asks a bank and the path's climb or dive (the load factor holding it in a turn); returns the load factor
@@ -516,13 +557,13 @@ export interface CollisionLike extends WaterColumns {
   width: number;
   depth: number;
   built?: { all(x0: number, z0: number, x1: number, z1: number): boolean };
-  sweep(p: Vec3, d: Vec3): Sweep;
+  sweep(p: Vec3, d: Vec3, r?: number): Sweep;
   surface(x: number, z: number): { ground: number; top: number } | null;
 }
 export function collisionWorld(c: CollisionLike, H: number): PlaneWorld {
   return {
     W: c.width, D: c.depth, H,
-    sweep: (p, d) => c.sweep(p, d),
+    sweep: (p, d, r) => c.sweep(p, d, r),
     surface: (x, z) => c.surface(x, z),
     water: (x, z) => waterTop(c, x, z),
     ...(c.built ? { built: (x0: number, z0: number, x1: number, z1: number) => c.built!.all(x0, z0, x1, z1) } : {}),

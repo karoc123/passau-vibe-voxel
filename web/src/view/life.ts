@@ -14,7 +14,7 @@ import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
 import { MAX_CARS } from '../sim/contract/agents';
-import { AVATAR_SHAPE, carShape, COACH_SHAPE, CRAFT_SHAPES, solidAt, vesselShape, type Solid } from '../sim/solids';
+import { AVATAR_SHAPE, carShape, COACH_SHAPE, craftSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
 // its client, client/sim-client.ts TrafficMirror, ticked by main.ts) drawn between its last two ticks with instanced
@@ -537,8 +537,8 @@ export class StreetLife {
     }
     const me = this.client.player;
     for (const c of this.client.crafts()) {
-      const shape = CRAFT_SHAPES[c.type], p = c.core.pose;
-      if (shape && c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) out.push(solidAt(shape, p));
+      const p = c.core.pose;
+      if (c.placed && (c.pilot === null || c.pilot !== me) && by(p.x, p.z)) craftSolids(c.type, p, out);
     }
     return out;
   }

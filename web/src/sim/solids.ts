@@ -7,7 +7,7 @@ import type { BoatPose } from './contract/agents';
 import type { CraftType, VehicleId } from './contract/ids';
 import type { Pose } from './contract/pose';
 import { COACH_LENGTH, COACH_WIDTH } from './coaches';
-import { CRAFT_SCALE, HOVER_HEIGHT } from './craft/craft-motion';
+import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
 import { JET, PLANE } from './craft/plane-flight';
 import { VEHICLE_IDS, VEHICLES, vehicleOf } from './vehicles';
@@ -37,10 +37,10 @@ export function carShape(c: { vt?: VehicleId; bus: boolean; len: number }): Shap
   return { ...s, hz: s.hz * c.len / t.len };
 }
 
-// The crafts standing in the world: the hovercraft's skirt and the helicopter's cabin and tail (their collision's
-// probes and cube, sim/craft/craft-collision.ts), the boat's hull, the planes' fuselages from the floats' or the
-// belly's bottom (the wings do not collide, as in their flight's own collision; view/crafts/*/ draws them so). Not solid:
-// the paraglider and the drone (light: what meets a shape takes it for a wall)
+// The crafts standing in the world, as others meet them: the hovercraft's skirt and the helicopter's cabin and tail
+// (their collision's probes and cube, sim/craft/craft-collision.ts), the boat's hull, the planes' fuselages from the
+// floats' or the belly's bottom (the box a walker boards and a shot hits) and their wings, a flat box at their tips'
+// height (their flight's own wing cubes, plane-flight.ts WING_*; view/crafts/*/ draws them so)
 const CS = CRAFT_SCALE.helicopter;
 export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
   hovercraft: { hx: 2.9, hz: 6.4, y0: -HOVER_HEIGHT, top: 3.1 },
@@ -49,6 +49,30 @@ export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
   floatplane: { hx: 1.4, hz: 3.6, y0: -PLANE.FLOAT_H, top: 1.3 },
   jet: { hx: 0.8, hz: 4.5, fwd: 0.1, y0: -JET.FLOAT_H, top: 0.9 },
 };
+const WINGS: Partial<Record<CraftType, Shape>> = {
+  floatplane: { hx: PLANE.WING_X + 0.25, hz: 0.75, fwd: PLANE.WING_Z, y0: PLANE.WING_Y - 0.25, top: PLANE.WING_Y + 0.25 },
+  jet: { hx: JET.WING_X + 0.2, hz: 1.35, fwd: -0.9, y0: JET.WING_Y - 0.25, top: JET.WING_Y + 0.25 },
+};
+// The light crafts: they meet the solid things as the others do, but are none themselves (a car, the walker, another
+// craft, a vessel would take a drone for a wall): what meets them pushes them aside. The drone's frame and props; the
+// paraglider's pilot in the harness and its canopy (an arc boxed whole, as its probes reach it)
+const LIGHT: Partial<Record<CraftType, readonly Shape[]>> = {
+  drone: [{ hx: 0.18, hz: 0.18, y0: -0.06, top: 0.06 }],
+  paraglider: [{ hx: 0.45, hz: 0.6, y0: -GLIDER_HEIGHT, top: 0.9 }, { hx: 5, hz: 1.3, fwd: 0.15, y0: 4.2, top: 7.5 }],
+};
+const MEETS: Partial<Record<CraftType, readonly Shape[]>> = {};
+/** the boxes a craft of type meets the solid things with (none: it meets none) */
+export function meetShapes(type: CraftType): readonly Shape[] {
+  return MEETS[type] ??= LIGHT[type] ?? [CRAFT_SHAPES[type], WINGS[type]].filter((s): s is Shape => !!s);
+}
+
+/** the solid things a craft of type is to others at pose p, pushed onto out (none for a light craft) */
+export function craftSolids(type: CraftType, p: Pose, out: Solid[] = []) {
+  const s = CRAFT_SHAPES[type], w = WINGS[type];
+  if (s) out.push(solidAt(s, p));
+  if (w) out.push(solidAt(w, p));
+  return out;
+}
 
 /** the river's vessels' measures (m): a cruise ship's longest length and its beam, an excursion boat's */
 export const CRUISE_L = 135, CRUISE_B = 11.4, TOUR_L = 38, TOUR_B = 8;

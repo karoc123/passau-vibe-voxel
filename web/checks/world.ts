@@ -205,8 +205,7 @@ export class BoxWorld implements PlaneWorld {
     return this.at(x, z).water;
   }
 
-  sweep(p: Vec3, d: Vec3): Sweep {
-    const R = this.R;
+  sweep(p: Vec3, d: Vec3, R = this.R): Sweep {
     let fraction = 1, hit: ImpactKind | null = null, axis = 0;
     const all: Block[] = [{ x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9, top: this.ground, kind: 'terrain' }, ...this.blocks];
     for (const b of all) {

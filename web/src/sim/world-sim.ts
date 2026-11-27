@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carShape, COACH_SHAPE, CRAFT_SHAPES, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
+import { carShape, COACH_SHAPE, craftSolids, meetShapes, overlap, solidAt, vesselShape, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import type { CoachPose } from './coaches';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
@@ -330,6 +330,9 @@ export class WorldSim {
     this.dropLeft(now, foci);
     this.stepCrafts();
     T.walkers = [...this.players.values()].flatMap((P) => (P.walk ? [P.walk.pose] : []));
+    const crafts: Solid[] = [];
+    for (const c of this.crafts.values()) if (c.placed) craftSolids(c.type, c.core.pose, crafts);
+    T.crafts = crafts;
     traffic();
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
@@ -846,19 +849,21 @@ export class WorldSim {
 
   // The solid things (sim/solids.ts, ADR 0010) a craft meets in this tick: those whose boxes may come within its own
   // as they stand at the tick's start: the cars (out of the traffic where they are, else on their paths), the other
-  // crafts with a shape, the river's vessels, the train coaches. Not the walkers: their walk is their page's, and a
-  // craft shoves them as a car does.
-  private solidsNear(own: Craft, shape: Shape, coaches: () => readonly CoachPose[]): Solid[] {
+  // crafts with a shape (not the light ones), the river's vessels, the train coaches. Not the walkers: their walk is
+  // their page's, and a craft shoves them as a car does.
+  private solidsNear(own: Craft, shapes: readonly Shape[], coaches: () => readonly CoachPose[]): Solid[] {
     const T = this.traffic, p = own.core.pose, v = own.core.velocity, out: Solid[] = [];
-    const r = Math.hypot(shape.hx, shape.hz) + Math.abs(shape.fwd ?? 0) + Math.hypot(v.x, v.z) * STEP + 1;
+    let r = 0;
+    for (const s of shapes) r = Math.max(r, Math.hypot(s.hx, s.hz) + Math.abs(s.fwd ?? 0));
+    r += Math.hypot(v.x, v.z) * STEP + 1;
     const near = (x: number, z: number, R: number) => Math.abs(x - p.x) < r + R && Math.abs(z - p.z) < r + R;
     for (const list of [T.cars, T.detachedCars]) for (const c of list) {
       const d = c.detachedPose;
       if (near(d?.x ?? c.geo.cx, d?.z ?? c.geo.cy, CAR_REACH)) out.push(solidAt(carShape(c), d ?? T.carPose(c, c.s, c.off, this.carAt)));
     }
     for (const c of this.crafts.values()) {
-      const s = CRAFT_SHAPES[c.type], q = c.core.pose;
-      if (c !== own && c.placed && s && near(q.x, q.z, CRAFT_REACH)) out.push(solidAt(s, q));
+      const q = c.core.pose;
+      if (c !== own && c.placed && near(q.x, q.z, CRAFT_REACH)) craftSolids(c.type, q, out);
     }
     for (const b of T.boats?.poses ?? []) if (near(b.x, b.z, b.len / 2 + 6)) out.push(vesselAt(b));
     for (const k of coaches()) if (near(k.x, k.z, COACH_REACH)) out.push(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
@@ -869,10 +874,11 @@ export class WorldSim {
   // parked hovercraft as at a train's coach; the craft does not feel it (its own step pushes it out of the cars)
   private *craftWalls(): Generator<WallBox> {
     for (const c of this.crafts.values()) {
-      const shape = CRAFT_SHAPES[c.type];
-      if (!c.placed || !shape) continue;
-      const s = solidAt(shape, c.core.pose);
-      yield { id: `craft:${c.id}`, x: s.x, y: s.y, z: s.z, heading: s.h, size: { x: 2 * s.hx, y: s.top, z: 2 * s.hz } };
+      if (!c.placed) continue;
+      let k = 0;
+      for (const s of craftSolids(c.type, c.core.pose)) {
+        yield { id: `craft:${c.id}${k++ ? `:${k}` : ''}`, x: s.x, y: s.y, z: s.z, heading: s.h, size: { x: 2 * s.hx, y: s.top, z: 2 * s.hz } };
+      }
     }
   }
 
@@ -881,8 +887,7 @@ export class WorldSim {
   private inTheWay(p: BoatPose, before: number) {
     const s = vesselShape(p), zone = solidAt({ ...s, hx: s.hx + BESIDE, hz: s.hz + before / 2, fwd: before / 2 }, { x: p.x, y: p.y, z: p.z, h: p.heading });
     for (const c of this.crafts.values()) {
-      const shape = CRAFT_SHAPES[c.type];
-      if (c.placed && shape && overlap(zone, solidAt(shape, c.core.pose)) > 0) return true;
+      if (c.placed && craftSolids(c.type, c.core.pose).some((s) => overlap(zone, s) > 0)) return true;
     }
     return false;
   }
@@ -899,10 +904,10 @@ export class WorldSim {
       const core = c.core;
       core.keep();
       c.collision.prefetch(core.pose, core.velocity);
-      const shape = CRAFT_SHAPES[c.type], near = shape && core.meet ? this.solidsNear(c, shape, trains) : null;
+      const shapes = meetShapes(c.type), near = shapes.length && core.meet ? this.solidsNear(c, shapes, trains) : null;
       core.clock.run(STEP, (step) => {
         if (!core.step(c.input, step, c.collision)) return false;
-        if (near?.length) meetSolids(core, shape!, near, c.collision);
+        if (near?.length) meetSolids(core, shapes, near, c.collision);
         return true;
       });
       // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores'; only its pilot reads
@@ -930,10 +935,10 @@ const FIRE_WAIT = 15;
 const BESIDE = 2;
 const vesselAt = (b: BoatPose) => solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading });
 
-// after each of a craft's steps: pushed out of each solid thing near it that its box reaches into
+// after each of a craft's steps: pushed out of each solid thing near it that one of its boxes reaches into
 const out = { x: 0, z: 0 };
-function meetSolids(core: CraftCore, shape: Shape, near: readonly Solid[], col: VoxelCollision) {
-  for (const s of near) {
+function meetSolids(core: CraftCore, shapes: readonly Shape[], near: readonly Solid[], col: VoxelCollision) {
+  for (const shape of shapes) for (const s of near) {
     const d = overlap(solidAt(shape, core.pose), s, out);
     if (d > 0) core.meet!(out, d, col);
   }

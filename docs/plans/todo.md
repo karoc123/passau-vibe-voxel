@@ -56,8 +56,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Temporary damage needs the tile cache to expose a node's raw files.
 - Walkers and solid things (ADR 0010): a driven car does not feel a walker (it shoves it); the host does not check
   them; the walker cannot stand on a car's roof.
-- Crafts and solid things (ADR 0012): the traffic's cars without a body do not feel crafts; a plane does not meet
-  what it runs into (it has no meet); drone and paraglider have no shape.
+- Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a traffic car waits
+  behind a craft left in its lane until it goes; a drone and a paraglider pass through each other.
 - The parked-car cap (8/24) sits beside presence, not per cell.
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
   not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
@@ -66,7 +66,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
 - The own craft run ahead (prediction) does not feel solid things (cars, other crafts) nor tell its own events: the
   host's correction and its events come a round trip later.
-- Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
+- Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Seated players: crafts' pilots are not drawn (the helicopter's front glass and the hovercraft's wheelhouse are
   closed); a car is opened only for another player's driver or passenger (16 per type), seen through the side
   windows (its end walls stay); the own page draws no one in its own car.

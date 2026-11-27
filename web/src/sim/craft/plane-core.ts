@@ -1,5 +1,6 @@
 // The floatplane and the jet as WorldSim steps them (craft-core.ts): their flight (plane-flight.ts PlaneFlight) at its
-// own STEP (two a world tick), through their collision (the fuselage's cube, RADIUS; fetched HORIZON s ahead).
+// own STEP (two a world tick), through their collision (the fuselage's cube, RADIUS, and the wings'; fetched HORIZON s
+// ahead). A solid thing met (sim/solids.ts) is met as a wall: in the air a crash.
 // Put down in the air (at spot.speed, else RESPAWN_SPEED; the engine at RESPAWN_THROTTLE) or afloat (spot.water: still,
 // the engine idle). Its pilot hears what happened (PlaneEvent: crash, respawn, ...). An empty seat: the stick let go,
 // the lever back (it glides down, or floats), and crashed it stays down (no one flies it back to a safe point). No
@@ -104,6 +105,8 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
     o.bank = lerpAngle(a.bank, b.bank, t);
     return o;
   }
+
+  meet(n: { x: number; z: number }, depth: number, col: VoxelCollision) { this.flight.meet(n, depth, this.world(col)); }
 
   /** back to the last safe pose (T) */
   unstick(col: VoxelCollision) {

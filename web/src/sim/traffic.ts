@@ -14,7 +14,7 @@ import { trafficType, VEHICLES } from './vehicles';
 import { BUS_COLOUR, CAR_COLOURS, carsAt, Flow, PACE, type FlowCar } from './flow';
 import { at, cellKey, farFrom, landingLane, pt, Turn, turnOf, type Pt, type Viewer } from './path';
 import { ACTIVE_CELL, ACTIVE_R, activeKey, BLEND, CAR_POP_R, laneOffset, PED_POP_R, PH_RIDE, PH_WALK, pedGreen, RoadNet, signalAt, STEP, type CarPose, type Ground } from './road-net';
-import { WALKER_R } from './solids';
+import { WALKER_R, type Solid } from './solids';
 import type { Agent, Car, Controller, PedEdge, Road, TrafficData } from './types';
 
 export { STEP, type CarPose, type Ground } from './road-net';
@@ -45,6 +45,8 @@ const PARKED = 8, PARKED_MAX = 24;
 const HOLE = 1;
 // a walker this far (m) across a car's line (its half width, the walker's, a little room) is in its way
 const WALKER_LAT = 0.9 + WALKER_R + 0.3;
+// a craft's box this far across a car's line past its own half width, and up to this high over the road, is in its way
+const CRAFT_LAT = 0.9 + 0.3, CRAFT_UNDER = 3;
 
 export const DEFAULT_SEED = 1;
 
@@ -116,6 +118,8 @@ export class Traffic {
   inTheWay: InTheWay = () => false;
   /** the players on foot, where their walks are this tick (WorldSim's): a car stops for one in its way as for a car */
   walkers: readonly { x: number; y: number; z: number }[] = [];
+  /** the crafts' boxes this tick (WorldSim's, sim/solids.ts craftSolids): a car stops for one in its way as for a car */
+  crafts: readonly Solid[] = [];
   /** the things the road physics' cars meet as walls it does not move (WorldSim's: the crafts with a shape), upright
    * boxes on their foot */
   walls: () => Iterable<WallBox> = () => [];
@@ -476,6 +480,14 @@ export class Traffic {
       if (Math.abs(w.y - g.z) > 2) continue;
       const rx = w.x - g.px, ry = w.z - g.py, along = rx * g.fx + ry * g.fy;
       if (along > -1 && along < 40 && Math.abs(rx * g.fy - ry * g.fx) < WALKER_LAT) stop(along - WALKER_R, 'walker', null);
+    }
+    // a craft in the way (its box's reach along the car's line and across it): stopped for alike
+    for (const s of this.crafts) {
+      if (s.y > g.z + CRAFT_UNDER || s.y + s.top < g.z) continue;
+      const rx = s.x - g.px, ry = s.z - g.py, along = rx * g.fx + ry * g.fy;
+      const c = Math.cos(s.h), n = Math.sin(s.h), ca = c * g.fx - n * g.fy, na = n * g.fx + c * g.fy;
+      const ea = s.hx * Math.abs(ca) + s.hz * Math.abs(na), el = s.hx * Math.abs(na) + s.hz * Math.abs(ca);
+      if (along + ea > -1 && along - ea < 40 && Math.abs(rx * g.fy - ry * g.fx) < el + CRAFT_LAT) stop(along - ea, 'craft', null);
     }
     const b = car.block;
     if (b && b.o !== ig) { // physical blocker; circular waits are broken after 6 s when the blocker is stuck too
