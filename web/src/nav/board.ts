@@ -5,11 +5,13 @@ import { craftBox } from '../sim/solids';
 import { fromBox, type Box } from '../sim/walk-bounds';
 import type { Picked } from '../view/life';
 import type { PlayerCraft } from './craft';
+import type { PassengerMode } from './passenger';
 import { gameKey } from './input';
 import type { Nav } from './nav';
 
 // On foot, getting into what is within reach: a car of the street (moving or not: the host goes by its reach, a step
-// more than offered here), a craft left in the world. The seat is asked of the host from foot first (it checks the reach from where it has the
+// more than offered here), a craft left in the world, or a free seat beside another player at the wheel or the
+// controls (riding along: passenger.ts). The seat is asked of the host from foot first (it checks the reach from where it has the
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
 // keys leave E free.
@@ -19,6 +21,8 @@ const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
 const E_TAKEN = new Set(['fpv', 'helicopter', 'hovercraft', 'paraglider']);
 const NOT_BOARDED = 'paraglider';
+// the crafts with passengers' seats (the host's SEATS)
+const ALONG = new Set(['hovercraft', 'helicopter']);
 
 /** what is within reach: its entity, the seat's role, what to call it, and what its shell takes over from */
 export interface Target { ref: EntityRef; role: Role; label: string; picked?: Picked; craft?: CraftView }
@@ -29,7 +33,8 @@ export class Boarding {
   // the seat asked for and when (performance.now): its answer awaited
   private pending: { t: Target; at: number } | null = null;
 
-  constructor(private readonly nav: Nav, private readonly shells: () => readonly PlayerCraft[], private readonly say: (s: string) => void) {
+  constructor(private readonly nav: Nav, private readonly shells: () => readonly PlayerCraft[], private readonly say: (s: string) => void,
+    private readonly passenger: () => PassengerMode | null) {
     // (before Nav's own: on foot E is also a look key, and a craft's keys must not see the E that left it)
     addEventListener('keydown', (e) => {
       if (e.code !== 'KeyE' || !gameKey(e) || e.repeat || !this.press(true)) return;
@@ -40,7 +45,8 @@ export class Boarding {
 
   /** what the button says, or null: hidden. key: on a keyboard */
   label(key: boolean) {
-    if (this.nav.onFoot) return this.target ? `${key ? 'E: get' : 'Get'} in ${this.target.label}` : this.pending ? 'Getting in…' : null;
+    const t = this.target, along = t?.role === 'passenger';
+    if (this.nav.onFoot) return t ? `${key ? 'E: ' : ''}${along ? (key ? 'ride' : 'Ride') + ' along in' : (key ? 'get' : 'Get') + ' in'} ${t.label}` : this.pending ? 'Getting in…' : null;
     return !this.canGetOut(false) ? null : key && this.canGetOut(true) ? 'E: get out' : 'Get out';
   }
 
@@ -78,13 +84,16 @@ export class Boarding {
   private answered(t: Target, r: CommandResult[]) {
     const nav = this.nav, no = r.find((x) => !x.ok);
     if (!r.some((x) => x.ok)) {
-      this.say(no?.reason === 'taken' ? `Someone is in that ${t.label}` : no?.reason === 'far' ? `Too far from the ${t.label}`
+      this.say(no?.reason === 'taken' ? (t.role === 'passenger' ? `No free seat in that ${t.label}` : `Someone is in that ${t.label}`) : no?.reason === 'far' ? `Too far from the ${t.label}`
         : no?.reason === 'loading' ? 'Road physics still loading' : `Cannot get into that ${t.label}`);
       return;
     }
     if (!nav.onFoot) return;
     nav.tookSeat();
-    if (t.picked) {
+    if (t.role === 'passenger') {
+      if (t.picked) nav.startRide(t.picked);
+      if (!this.passenger()?.ride(t.ref as Target['ref'] & { kind: 'car' | 'craft' }, t.craft?.type ?? 'car', t.label)) nav.flyUp();
+    } else if (t.picked) {
       nav.startRide(t.picked);
       this.shells().find((s) => s.id === 'drive')?.enter();
     } else if (t.craft) {
@@ -105,14 +114,20 @@ export class Boarding {
       const look = Math.atan2(box.x - me.x, box.z - me.z) - me.h, s = d + 2 * (1 - Math.cos(look));
       if (s < bs) { bs = s; best = t; }
     };
+    const driven = new Map(sim.drivers());
     for (const { picked, pose, agent } of life?.near('car', me, 20) ?? []) {
       if (agent.kind !== 'car') continue;
-      consider({ ...pose, r: 0.9, l: agent.len / 2 }, { ref: { kind: 'car', id: picked.ref.id }, role: 'driver', label: picked.label, picked });
+      const id = picked.ref.id, by = driven.get(id);
+      // (a car another player drives: beside them; the host says whether a seat is free)
+      if (by === sim.player) continue;
+      consider({ ...pose, r: 0.9, l: agent.len / 2 }, { ref: { kind: 'car', id }, role: by ? 'passenger' : 'driver', label: picked.label, picked });
     }
     for (const c of sim.crafts()) {
-      const p = c.core.pose;
-      if (c.pilot !== null || c.type === NOT_BOARDED || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
-      consider(craftBox(c.type, p), { ref: { kind: 'craft', id: c.id }, role: 'pilot', label: c.type, craft: c });
+      const p = c.core.pose, flown = c.pilot !== null && c.pilot !== sim.player;
+      if (c.type === NOT_BOARDED) continue;
+      // (one another flies: beside them, where the host says whether a seat is free)
+      if (flown ? !this.passenger() || !ALONG.has(c.type) : c.pilot !== null || !this.shells().some((s) => s.boards?.includes(c.type))) continue;
+      consider(craftBox(c.type, p), { ref: { kind: 'craft', id: c.id }, role: flown ? 'passenger' : 'pilot', label: c.type, craft: c });
     }
     return best;
   }

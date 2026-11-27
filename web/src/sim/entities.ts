@@ -14,16 +14,21 @@ export interface SeatSpec { readonly role: Role; readonly index: number }
 
 const one = (role: Role): readonly SeatSpec[] => Object.freeze([Object.freeze({ role, index: 0 })]);
 const DRIVER = one('driver'), PILOT = one('pilot'), WALKER = one('walker'), NONE: readonly SeatSpec[] = Object.freeze([]);
-/** the seats of each kind's model, by type: one a vehicle for now (the driver's, the pilot's; passengers and gunners
- * would be listed here), a walker's on a person on foot (none on a bike) */
+// the driver's or pilot's seat and n passengers' after it
+const withPassengers = (first: readonly SeatSpec[], n: number): readonly SeatSpec[] =>
+  Object.freeze([...first, ...Array.from({ length: n }, (_, index) => Object.freeze({ role: 'passenger' as const, index }))]);
+/** the seats of each kind's model, by type: a vehicle's driver's or pilot's and its passengers' (the hovercraft's
+ * cabin, the helicopter's bench, a car's front and back seats; a craft flown alone has none), a walker's on a person
+ * on foot (none on a bike) */
 export const SEATS: {
   readonly car: Readonly<Record<VehicleId, readonly SeatSpec[]>>;
   readonly craft: Readonly<Record<CraftType, readonly SeatSpec[]>>;
   readonly person: { readonly foot: readonly SeatSpec[]; readonly bike: readonly SeatSpec[] };
   readonly avatar: readonly SeatSpec[];
 } = {
-  car: { car: DRIVER, coupe: DRIVER, van: DRIVER, pickup: DRIVER, bus: DRIVER, moto: DRIVER, camper: DRIVER },
-  craft: { boat: PILOT, hovercraft: PILOT, helicopter: PILOT, paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
+  car: { car: withPassengers(DRIVER, 3), coupe: withPassengers(DRIVER, 1), van: withPassengers(DRIVER, 2), pickup: withPassengers(DRIVER, 1),
+    bus: withPassengers(DRIVER, 30), moto: withPassengers(DRIVER, 1), camper: withPassengers(DRIVER, 3) },
+  craft: { boat: PILOT, hovercraft: withPassengers(PILOT, 20), helicopter: withPassengers(PILOT, 3), paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
   person: { foot: WALKER, bike: NONE },
   avatar: WALKER,
 };

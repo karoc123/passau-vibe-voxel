@@ -73,6 +73,11 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     if (c.placed && (!S || S.sees('craft', c.id, c.core.pose.x, c.core.pose.z)))
       crafts.push({ id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: c.core.save() } as CraftState);
   }
+  const passengers: [kind: 'car' | 'craft', id: number, player: PlayerId][] = [];
+  for (const [id, P] of sim.players) {
+    const e = P.seat?.role === 'passenger' ? P.seat.entity : null;
+    if ((e?.kind === 'car' || e?.kind === 'craft') && sim.entities.exists(e) && (!S || S.has(e.kind, e.id))) passengers.push([e.kind, e.id, id]);
+  }
   let events = sim.eventsSince(since);
   if (S) { events = events.filter((e) => S.event(e)); S.done(); }
   return {
@@ -80,7 +85,7 @@ export function takeSnapshot(sim: WorldSim, player: PlayerId, since: number, res
     cars, detached, people, riders, gone,
     bodies, trains,
     boats,
-    walked, avatars, drivers, crafts, events,
+    walked, avatars, drivers, passengers, crafts, events,
     player: wire.player({ id: player, seat: sim.seat(player), driver: sim.driverSnapshot(player), results, ack: ack && { ...ack } }),
     edits,
   };

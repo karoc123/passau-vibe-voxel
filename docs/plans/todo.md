@@ -78,6 +78,5 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
   a car is got into at any speed (no stopping it first); the host's reach uses a rough box for a car (2.2 m half-length).
-- Passengers (the hovercraft has a cabin for ~20): the seat table takes more seats per craft, but a passenger needs a
-  shell of its own (camera, getting out, the craft taken away under it), a free seat offered by the boarding, and the
-  craft's passengers sent and drawn; together not cheap, and it touches the seats, boarding and snapshot.
+- Passengers are not drawn sitting in the craft or car (only their body on foot hidden); a car passenger on a touch
+  screen cannot look round (Nav leaves touch to the drive's sticks); a full craft or car is still offered (the host says it is full).

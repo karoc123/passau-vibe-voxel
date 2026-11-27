@@ -10,6 +10,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
   paraglider.
+- **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
 - **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.

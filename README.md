@@ -549,6 +549,14 @@ thumb looks and a pinch zooms. **Esc** releases the mouse and opens the menu; it
 on foot and the crafts standing about (hovercraft, helicopter, boat) are solid: you walk round them, and a car driven
 into you shoves you along. The crowd is not: you pass through people.
 
+Walk up to a car or a craft standing about and press **E** (or the button) to get in; E or the button gets out
+again onto foot beside it (in the helicopter, hovercraft and drone, whose own keys use E, only the button). Beside a
+car or craft another player drives or flies the prompt is **ride along**: a free seat (a hovercraft has 20, a
+helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around, the wheel
+zooms, **V** swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
+craft comes to rest; anyone may take the controls); if the craft is taken away you are put on foot where it was.
+Players in orbit mode cannot board.
+
 On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch
 (Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
 the right button aims (a narrower view). On a touch screen the right thumb fires: a tap is one shot, held still it fires on

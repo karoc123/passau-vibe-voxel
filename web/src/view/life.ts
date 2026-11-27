@@ -157,6 +157,7 @@ export class StreetLife {
     const n = this.drawPeople(dt) + this.drawRiders(dt, this.people.length);
     const C = this.client, seated = new Set<string>(C.drivers().map(([, p]) => p));
     for (const c of C.crafts()) if (c.pilot !== null) seated.add(c.pilot);
+    for (const [, , p] of C.passengers()) seated.add(p);
     this.avatars.update(this.traffic.avatars, C.player, seated, lead / STEP, dt, (av, a, out) => this.traffic.avatarPose(av, a, out));
     setCount(n + this.drawFallen(dt, n), this.M.legs, this.M.torso);
     this.drawSignals();
