@@ -8,8 +8,10 @@ import type { GameMode, ModeWorld } from '../mode';
 import type { CampPlace } from '../camps';
 
 // The owner chose the places (one for now, not spread over the map). Veste Oberhaus: its inner courtyard, ~30 x 40 m
-// open and level at 94 m, walled round; the guard watches the old town.
-const CAMPS: readonly CampPlace[] = [{ name: 'Veste Oberhaus', x: 8474.5, z: 2385.5, h: -0.76 }];
+// open and level at 94 m, walled round; the guard watches the old town. Its lookout: the edge of a level top at 109 m
+// at the west end, ~115 m off, chosen from the voxels: of rays to a helicopter 60 m over the ground 150 and 250 m off
+// all round, ~80 % clear, and all over the old town and the rivers (from the courtyard: 4 %).
+const CAMPS: readonly CampPlace[] = [{ name: 'Veste Oberhaus', x: 8474.5, z: 2385.5, h: -0.76, lookout: { x: 8358.5, z: 2380.5, h: -0.76 } }];
 
 /** edits: the world's voxels may be edited (?dig=1); camps: the enemy camps (without: the sandbox's own; none: []) */
 export function sandbox(opts: { edits?: boolean; camps?: readonly CampPlace[] } = {}): GameMode {
@@ -39,7 +41,7 @@ export function sandbox(opts: { edits?: boolean; camps?: readonly CampPlace[] } 
         case 'dropCraft': { const c = w.craftOf(player); if (c) w.removeCraft(c.id); return !!c; }
         case 'walk': return w.walk(player, r.pose);
         case 'setTime': w.setTime(r.hour, r.day); return true;
-        case 'npc': return w.addNpc(player, !!r.patrol);
+        case 'npc': return w.addNpc(player, r.duty);
       }
     },
   };

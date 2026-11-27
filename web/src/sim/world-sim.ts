@@ -181,13 +181,13 @@ export class WorldSim {
     walk: (player, pose) => this.walk(player, pose),
     sit: (player, seat) => this.enterSeat(player, seat) === true,
     setTime: (hour, day) => this.setTime(hour, day),
-    addNpc: (player, patrol) => {
+    addNpc: (player, kind) => {
       const W = this.players.get(player)?.walk;
       if (this.seat(player)?.role !== 'walker' || !W) return false;
       const p = W.pose, x = p.x + Math.sin(p.h) * NPC_AHEAD, z = p.z + Math.cos(p.h) * NPC_AHEAD;
       const y = this.ground?.support(x, z, p.y + 2) ?? p.y;
-      const R = NPC_LOOP, duty: Duty = patrol ? { kind: 'patrol', loop: [[R, R], [R, -R], [-R, -R], [-R, R]].map(([u, v]) => ({ x: x + u, z: z + v })) }
-        : { kind: 'guard', x, z, h: p.h + Math.PI };
+      const R = NPC_LOOP, duty: Duty = kind === 'patrol' ? { kind, loop: [[R, R], [R, -R], [-R, -R], [-R, R]].map(([u, v]) => ({ x: x + u, z: z + v })) }
+        : { kind, x, z, h: p.h + Math.PI };
       this.addNpc({ x, y, z }, undefined, duty);
       return true;
     },
@@ -293,7 +293,7 @@ export class WorldSim {
    * keeps it (sim/npc-mind.ts), else one that only walks where it is sent; its avatar's id */
   addNpc(at: { x: number; y: number; z: number }, speed?: number, duty?: Duty, squad: number | null = null) {
     const id = this.nextAvatar++;
-    this.npcs.add(id, at, speed, duty ? newMind(duty, this.clock, this.tuning.npc, squad) : null);
+    this.npcs.add(id, at, speed, duty ? newMind(duty, this.clock, duty.kind === 'lookout' ? this.tuning.lookout : this.tuning.npc, squad) : null);
     return id;
   }
 
@@ -690,7 +690,7 @@ export class WorldSim {
   private carById(id: number) { return this.traffic.cars.find((c) => c.id === id) ?? this.traffic.detachedCars.find((c) => c.id === id); }
 
   // entity's footprint as a shot meets it, or null: not in the world
-  private boxOf(entity: EntityRef): Box | null {
+  private boxOf(entity: EntityRef): Body | null {
     const none: EntityRef = { kind: entity.kind === 'avatar' ? 'car' : 'avatar', id: -1 };
     for (const b of this.shotWorld(none).bodies()) if (b.entity.kind === entity.kind && b.entity.id === entity.id) return { ...b };
     return null;
@@ -1137,38 +1137,44 @@ export class WorldSim {
   }
 
   // ------------------------------------------------------------------ the NPCs' minds (sim/npc-mind.ts)
-  // Each NPC with a duty thinks once a tick, before the walk steps it: what it sees is the host's (the players on foot
-  // as this sim has them, the voxels between), what it fires is a player's MG fired as theirs is.
+  // Each NPC with a duty thinks once a tick, before the walk steps it: what it sees is the host's (the players, on foot
+  // or in a vehicle, as this sim has them, the voxels between), what it fires is a player's MG fired as theirs is.
 
   private minds() {
     const MG = weaponById('mg'), N = this.npcs, V = this.voxels;
-    // (the players it may attack: on foot, not down)
-    const prey: { player: PlayerId; at: WalkPose }[] = [];
-    for (const [p, P] of this.players) if (P.walk && P.seat?.role === 'walker' && !this.lives.down.has(p)) prey.push({ player: p, at: P.walk.pose });
+    // (the players it may attack, not down, where it aims at them: a chest on foot, else the middle of the vehicle's
+    // body, which a hit harms and whose share reaches those in it)
+    const prey: { player: PlayerId; at: Vec3 }[] = [];
+    for (const [p, P] of this.players) {
+      if (this.lives.down.has(p) || !P.seat) continue;
+      if (P.seat.role === 'walker') { if (P.walk) prey.push({ player: p, at: { x: P.walk.pose.x, y: P.walk.pose.y + CHEST, z: P.walk.pose.z } }); continue; }
+      const e = P.seat.entity, c = e.kind === 'craft' ? this.crafts.get(e.id) : null;
+      const b = c ? (c.placed ? craftBox(c.type, c.core.pose) : null) : this.boxOf(e);
+      if (b) prey.push({ player: p, at: { x: b.x, y: b.y + b.ht / 2, z: b.z } });
+    }
     for (const n of N.all.values()) {
       const m = n.mind;
       if (!m || n.dead !== null) continue;
       const me = n.pose, eyes = { x: me.x, y: me.y + EYE, z: me.z };
-      // (a clear line from its eyes to their chest within its sight: the weapons' voxel ray)
-      const clear = (at: WalkPose) => {
-        const d = { x: at.x - eyes.x, y: at.y + CHEST - eyes.y, z: at.z - eyes.z }, L = Math.hypot(d.x, d.y, d.z);
+      // (a clear line from its eyes to where it aims within its sight: the weapons' voxel ray)
+      const clear = (at: Vec3) => {
+        const d = { x: at.x - eyes.x, y: at.y - eyes.y, z: at.z - eyes.z }, L = Math.hypot(d.x, d.y, d.z);
         if (L > m.k.sight) return false;
         if (!V || L < 1e-6) return true;
         d.x /= L; d.y /= L; d.z /= L;
         // (voxels not yet loaded are no clear line: a ray through them meets nothing)
         return (!V.ready || V.ready(eyes, d, L)) && V.raycast(eyes, d, L) >= L - 0.3;
       };
-      const where = (at: WalkPose) => ({ x: at.x, y: at.y, z: at.z });
       const senses: Senses = {
         nearest: () => {
           let best: { player: PlayerId; at: Vec3 } | null = null, bd = Infinity;
           for (const q of prey) {
             const d = Math.hypot(q.at.x - me.x, q.at.z - me.z);
-            if (d < bd && clear(q.at)) { bd = d; best = { player: q.player, at: where(q.at) }; }
+            if (d < bd && clear(q.at)) { bd = d; best = { player: q.player, at: { ...q.at } }; }
           }
           return best;
         },
-        sees: (player) => { const q = prey.find((r) => r.player === player); return q && clear(q.at) ? where(q.at) : null; },
+        sees: (player) => { const q = prey.find((r) => r.player === player); return q && clear(q.at) ? { ...q.at } : null; },
       };
       const was = m.state, act = think(m, { x: me.x, y: me.y, z: me.z, walking: n.goal !== null }, senses, this.clock, MG?.rate ?? 10);
       // (one that notices a player alarms its squad: the fight comes from several sides)

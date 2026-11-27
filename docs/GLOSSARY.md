@@ -71,7 +71,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Asleep**: a placed craft not yet touched: not stepped, sent once.
 - **NPC**: a body on foot the host runs (no player behind it), by the players' walk; drawn as an avatar. Not "bot".
   An enemy NPC keeps a **duty**: a **guard** stands at its **post** facing one way, a **patrol** walks its **loop**.
-- **Mind**: an enemy NPC's state machine: **post**, **attack** (a player noticed by a clear sight line: fires, follows
+- **Mind**: an enemy NPC's state machine: **post**, **attack** (a player, on foot or in a vehicle, noticed by a clear
+  sight line: fires, follows
   a little), **search** (walks to where it last saw them, looks round), **back** (to its post). Not "AI".
 - **Mount**: a weapon fixed to a seat of a vehicle's type, in its data: the point a shot leaves from, its **swing**
   (how far either side of its middle off the bow it turns) and its pitch's limits; at a **stop** the crosshair greys.
@@ -84,6 +85,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Enemy camp** (code: camp): a chosen place where a **squad** of enemy NPCs keeps watch; **manned** when a player
   comes near (never in front of one), **stood down** once all are far, **cleared** when its squad is dead, **refilled** a
   while after its first loss. Not "outpost", "base" or "spawner".
+- **Lookout**: an enemy NPC that guards a high place of a camp with numbers of its own (a long sight, a tight
+  spread, no leash) and fires at players in vehicles as on foot; air defence's first step. Not "flak" or "sniper".
 - **Leash**: how far an NPC follows or searches from its post. **Alarm**: an NPC that notices a player telling its
   squad.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.
