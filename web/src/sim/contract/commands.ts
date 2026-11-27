@@ -21,18 +21,16 @@ export type SimCommand = PlayerCommand;
  *                 before its ticks (it decides what they simulate), not in tick order with the other commands
  *   follow        follow an entity (a car, a person, a craft; no rights over it), or none
  *   enterSeat     a seat of an entity (sim/entities.ts SEATS: role, index; without, its first): the driver's of a car (as
- *                 type choice), the walker's of a person on foot (from pose: where they are drawn, kept within
- *                 Tuning.walk.take of where the sim has them), the pilot's of a craft; refused: gone, no such seat, held
- *                 by another ('taken'), from foot (the player's avatar) a vehicle beyond Tuning.walk.board of where the
+ *                 type choice), the pilot's of a craft (an avatar's walker seat is the mode's walk's); refused: gone,
+ *                 no such seat, held by another ('taken'), from foot (the player's avatar) a vehicle beyond Tuning.walk.board of where the
  *                 sim has the walker ('far'), not allowed (the game mode's mayEnter: sim/mode.ts), or (a car) no road
  *                 physics. The one held is left first
  *   seatInput     the controls of the seat held, until the next: a driver's CarInput, a pilot's their craft's type's
  *                 input, a walker's pose (the walk is the client's), bounded against the last one taken (Tuning.walk:
- *                 clamped, refused, walkedPose has the pose taken); ignored for a role not held. seq: the client's
- *                 number for it (increasing per client; its session's ack: the last taken), tick: the world tick it was
+ *                 clamped, refused); ignored for a role not held. seq: the client's number for it (increasing per client; its session's ack: the last taken), tick: the world tick it was
  *                 sent for (the client's tick + 1; it is applied at the next tick run)
- *   leaveSeat     out of the seat held: the person walked back to the crowd's walk, the car parked where it is, the
- *                 craft left where it is, hands off (its core's neutral); with pose (a vehicle's
+ *   leaveSeat     out of the seat held: the avatar gone, the car parked where it is, the craft left where it is,
+ *                 hands off (its core's neutral); with pose (a vehicle's
  *                 seat left), out on foot there in the same tick: the player's avatar put down at pose, kept within
  *                 Tuning.walk.board of the vehicle (as the mode's walk; the mode's mayEnter asked)
  *   request       what the player asks of the game mode (ModeRequest: a craft made, put down again, reset or

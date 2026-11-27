@@ -1,5 +1,5 @@
 // The world's entities, one index over the kinds' own stores: a car
-// (Traffic, the road physics), a person (Traffic's crowd and riders, a walked one where its walker puts it), a craft
+// (Traffic, the road physics), a person (Traffic's crowd and riders), a craft
 // (WorldSim.crafts), an avatar (a player's own body: WorldSim, where its walker puts it). Each kind keeps its storage and its numbering (Car.id picks the traffic vehicle's type); this
 // reads them through one adapter per kind. Read only. No three.js, no DOM (tools/core-deps.mjs).
 //   exists(ref)   the entity is in the world
@@ -15,7 +15,8 @@ export interface SeatSpec { readonly role: Role; readonly index: number }
 const one = (role: Role): readonly SeatSpec[] => Object.freeze([Object.freeze({ role, index: 0 })]);
 const DRIVER = one('driver'), PILOT = one('pilot'), WALKER = one('walker'), NONE: readonly SeatSpec[] = Object.freeze([]);
 /** the seats of each kind's model, by type: one a vehicle for now (the driver's, the pilot's; passengers and gunners
- * would be listed here), a walker's on a person on foot (none on a bike) */
+ * would be listed here), a walker's on a player's avatar (none on a person of the crowd: a player on foot is a body of
+ * their own) */
 export const SEATS: {
   readonly car: Readonly<Record<VehicleId, readonly SeatSpec[]>>;
   readonly craft: Readonly<Record<CraftType, readonly SeatSpec[]>>;
@@ -24,7 +25,7 @@ export const SEATS: {
 } = {
   car: { car: DRIVER, coupe: DRIVER, van: DRIVER, pickup: DRIVER, bus: DRIVER, moto: DRIVER, camper: DRIVER },
   craft: { boat: PILOT, hovercraft: PILOT, helicopter: PILOT, paraglider: PILOT, drone: PILOT, floatplane: PILOT, jet: PILOT },
-  person: { foot: WALKER, bike: NONE },
+  person: { foot: NONE, bike: NONE },
   avatar: WALKER,
 };
 

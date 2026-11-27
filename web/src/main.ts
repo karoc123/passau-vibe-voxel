@@ -585,7 +585,7 @@ renderer.setAnimationLoop(frameLoop({
     minimap?.update(now, barRect.bottom);
     fullmap?.update(now);
     labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
-    nameTags.update(camera, life?.group.visible ? otherPlayers() : []);
+    nameTags.update(camera, life?.group.visible ? otherPlayers() : [], world);
   },
 }, t0, () => prefs.fps));
 hook('__menu', { menu, prefs, fps: () => perf.fps, tags: nameTags });

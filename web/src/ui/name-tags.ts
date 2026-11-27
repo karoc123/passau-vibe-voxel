@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { MapMark } from '../minimap';
+import type { World } from '../core/world';
 import { el } from '../util';
 
 // The other players' names over them (an avatar, the car driven, the craft flown), as the maps mark them. Only a name
@@ -9,21 +10,29 @@ import { el } from '../util';
 const NAME_FAR = 150;
 // (over the feet or the craft's middle: above a walker's head, a car's roof)
 const ABOVE = 2.4;
+// A name behind a building is left out: a ray through the voxels from the camera to the tag, every tag every frame
+// (at most NAME_FAR m of voxel steps each, far less than a frame's draw even with dozens near). Kept in the DOM rather
+// than drawn in the scene: crisp at any distance, and out of the fog, the bloom and the TAA's blur. A tag past
+// something nearer than HIDE_SLACK m before it still shows (the tag's own cell, a branch over a car's roof)
+const HIDE_SLACK = 1;
 
 export class NameTags {
   private readonly box = el('div', '');
   private readonly tags = new Map<string, HTMLDivElement>();
   private readonly v = new THREE.Vector3();
+  private readonly dir = new THREE.Vector3();
 
   constructor() { this.box.id = 'name-tags'; }
 
-  /** each frame after the draw: the names of others within NAME_FAR m in front of the camera */
-  update(camera: THREE.Camera, others: readonly MapMark[]) {
+  /** each frame after the draw: the names of others within NAME_FAR m in front of the camera, not behind the world's
+   * voxels (world null: not yet streamed, none hidden) */
+  update(camera: THREE.Camera, others: readonly MapMark[], world: World | null) {
     const seen = new Set<string>(), w = innerWidth, h = innerHeight, cp = camera.position;
     for (const o of others) {
       if (o.label === o.player || seen.has(o.player)) continue;
-      const v = this.v.set(o.x, o.y + ABOVE, o.z);
-      if (v.distanceTo(cp) > NAME_FAR) continue;
+      const v = this.v.set(o.x, o.y + ABOVE, o.z), d = v.distanceTo(cp);
+      if (d > NAME_FAR) continue;
+      if (world && d > HIDE_SLACK && world.raycast(cp, this.dir.subVectors(v, cp).divideScalar(d), d) < d - HIDE_SLACK) continue;
       v.project(camera);
       if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) continue;
       seen.add(o.player);

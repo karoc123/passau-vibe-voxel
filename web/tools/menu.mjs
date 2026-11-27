@@ -2,7 +2,7 @@
 // page from a vite dev server of its own, built as `./voxel start` builds it: VITE_HOST_PORT, the host's port; the
 // host, src/host/ws.ts, in this process). A opens the page bare: the start menu shows, the server preselected; A gives
 // a name there and plays on the server. B comes with ?server= (no start menu). A walks by the cathedral: Esc opens the
-// menu and A stays on foot; B sees A's name on both maps and over A; B's ping is shown; B's frame cap at 30 holds the
+// menu and A stays on foot; B sees A's name on both maps and over A, not through a building; B's ping is shown; B's frame cap at 30 holds the
 // frames near 30; A's menu's Back to orbit mode takes A up to orbit mode.
 // usage (in web/): node tools/menu.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
@@ -95,6 +95,42 @@ check(full === NAME, `and by A's dot on the full map: ${full}`);
 await B.keyboard.press('Escape');
 await B.waitForTimeout(400);
 check(!(await B.evaluate(() => window.__map.full.isOpen || window.__menu.menu.isOpen())), 'Esc closes the full map, the menu stays shut');
+
+// A's name behind a building: B's camera put 70 m from A, once where the voxels stand between it and A's tag (the
+// first more than 5 m before it), once where nothing does; the name shown only in the open
+const spots = await B.evaluate((who) => {
+  const w = window.__three.nav.world, a = window.__life.avatarsDrawn().find((o) => o.player === who)?.pose;
+  if (!w || !a) return null;
+  const out = { hidden: null, open: null };
+  for (let k = 0; k < 64 && !(out.hidden && out.open); k++) {
+    const t = (k / 64) * 2 * Math.PI, x = a.x + 70 * Math.sin(t), z = a.z + 70 * Math.cos(t), c = { x, y: w.groundAt(x, z) + 12, z };
+    const d = { x: a.x - c.x, y: a.y + 2.4 - c.y, z: a.z - c.z }, L = Math.hypot(d.x, d.y, d.z);
+    const hit = w.raycast(c, { x: d.x / L, y: d.y / L, z: d.z / L }, L);
+    if (w.solid(Math.floor(c.x), Math.floor(c.z), Math.floor(c.y))) continue;
+    if (!out.hidden && hit < L - 20 && hit > 10) out.hidden = c;
+    if (!out.open && hit >= L) out.open = c;
+  }
+  return { ...out, a: { x: a.x, y: a.y, z: a.z } };
+}, pa);
+const lookFrom = async (c) => {
+  await B.evaluate(({ c, a }) => {
+    const T = window.__three;
+    T.camera.position.set(c.x, c.y, c.z);
+    T.controls.target.set(a.x, a.y + 1.5, a.z);
+    T.controls.update();
+  }, { c, a: spots.a });
+  await B.waitForTimeout(1500);
+  // (where the camera is after the map's own clamps, and what lies between it and the tag from there)
+  return B.evaluate(({ who, a }) => {
+    const T = window.__three, w = T.nav.world, c = T.camera.position;
+    const d = { x: a.x - c.x, y: a.y + 2.4 - c.y, z: a.z - c.z }, L = Math.hypot(d.x, d.y, d.z);
+    return { shown: !!window.__menu.tags.shown()[who], hit: w.raycast(c, { x: d.x / L, y: d.y / L, z: d.z / L }, L), L, at: [c.x, c.y, c.z].map(Math.round) };
+  }, { who: pa, a: spots.a });
+};
+const behind = spots?.hidden && await lookFrom(spots.hidden), open = spots?.open && await lookFrom(spots.open);
+log(`tag behind ${JSON.stringify(behind)}, in the open ${JSON.stringify(open)}`);
+check(behind && open && behind.hit < behind.L - 5 && !behind.shown && open.hit >= open.L - 1 && open.shown,
+  `A's name hidden behind a building (${behind && `a voxel ${(behind.L - behind.hit).toFixed(0)} m before the tag, shown ${behind.shown}`}), shown in the open (${open?.shown})`);
 
 // B's ping
 const ping = await B.waitForFunction(() => document.querySelector('#perf .ping')?.textContent, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);

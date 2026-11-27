@@ -194,7 +194,9 @@ let burst = 0;
 for (let i = 0; i < 60; i++) { await tick(); v.update(1 / 30); burst = Math.max(burst, shown()); }
 for (let i = 0; i < 60; i++) v.update(1 / 30);
 check(flying > idle && burst > idle && shown() === idle, `the view draws the grenade in flight and its blast (${flying - idle}, ${burst - idle} things shown) and lets them go`);
-const guns = (arm) => { const before = shown(); v.update(0, arm === null ? [] : [{ player: 'x', pose: { x: 0, y: G, z: 0, h: 0 }, arm }]); return shown() - before; };
+// (a figure's hand: a gun is drawn only in one)
+const hand = new THREE.Group(); scene.add(hand);
+const guns = (arm) => { const before = shown(); v.update(0, arm === null ? [] : [{ player: 'x', pose: { x: 0, y: G, z: 0, h: 0 }, arm, hand }]); return shown() - before; };
 const held = () => v.carried.get('x')?.weapon ?? null;
 const g2 = guns(2), w2 = held(), g1 = guns(1), w1 = held(), g0 = guns(null);
 check(g2 > 0 && w2 === 'launcher' && w1 === 'mg' && g0 === -g2 - g1 && held() === null,
