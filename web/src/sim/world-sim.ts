@@ -45,7 +45,7 @@ import { VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId, WeaponId } from './contract/ids';
-import { MAX_DT, type FrameTime } from './contract/inputs';
+import { MAX_DT, PARK, type FrameTime } from './contract/inputs';
 import { EVENT_TICKS, type SimEvent } from './contract/events';
 import type { DriverSnapshot, TimeOfDay } from './contract/snapshot';
 import type { WalkPose } from './contract/pose';
@@ -87,8 +87,8 @@ type Untimed = SimEvent extends infer E ? (E extends SimEvent ? Omit<E, 'tick'> 
 // a command queued: for whom (the host's stamp), and what its sender is told when a seat input of it is taken (the
 // tick it is applied in: a session's ack) or an edit of it applied (the tick, its outcome: the sender's own)
 type Taken = (tick: number, r?: CommandResult) => void;
-// (leave, damage: the host's, not a client's: leave, damage)
-interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'damage'; op: WorldOp }; taken?: Taken; waited?: number }
+// (leave, handsOff, damage: the host's, not a client's: leave, handsOff, damage)
+interface Queued { player: PlayerId; cmd: PlayerCommand | { kind: 'leave' } | { kind: 'handsOff' } | { kind: 'damage'; op: WorldOp }; taken?: Taken; waited?: number }
 // a projectile in flight: whose, of which weapon, the body it left (it flies through that one), its time aloft (s)
 interface Flying { player: PlayerId; weapon: WeaponId; own: EntityRef; p: Projectile; t: number }
 
@@ -396,6 +396,11 @@ export class WorldSim {
    * and their entry in players goes (their view: send a null one) */
   leave(player: PlayerId) { this.queue.push({ player, cmd: { kind: 'leave' } }); }
 
+  /** the player's connection lost for now (SimServer.disconnect, held): in the next tick their seat is kept but let go
+   * of, as a driver who stepped away briefly would (the car parked, the craft's controls neutral, the body standing),
+   * so a vehicle does not go on with the last input sent */
+  handsOff(player: PlayerId) { this.queue.push({ player, cmd: { kind: 'handsOff' } }); }
+
   /** whether the game mode lets player make an edit with op (its mayEdit; none: no), asked when the edit is applied
    * and by the host before it holds the edit's nodes (sim/server/sim-server.ts holdEdit) */
   mayEdit(player: PlayerId, op: WorldOp) { return !!this.mode?.mayEdit?.(this.face, player, op); }
@@ -434,6 +439,13 @@ export class WorldSim {
         break;
       }
       case 'leave': this.leaveSeat(p); (this.players as Map<PlayerId, PlayerState>).delete(p); this.held(); break;
+      case 'handsOff': {
+        const role = this.seat(p)?.role, W = this.players.get(p)?.walk;
+        if (role === 'driver') this.phys?.input(p, PARK);
+        else if (role === 'pilot') { const c = this.craftOf(p) as CraftState | null; if (c) c.input = c.core.neutral; }
+        else if (role === 'walker' && W) { W.pose = { ...W.pose, moving: false }; W.vx = W.vz = 0; }
+        break;
+      }
       case 'edit': {
         const r: CommandResult = { tick: this.tick, kind: 'edit', ok: false, ref: cmd.ref ?? 0 };
         if (this.mayEdit(p, cmd.op)) {

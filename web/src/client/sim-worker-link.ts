@@ -40,7 +40,7 @@ export class WorkerLink implements SimLink {
 }
 
 function receive(link: WorkerLink | SocketLink, m: FromWorker) {
-  if (m.kind === 'hello') link.onHello(m.hello);
+  if (m.kind === 'hello') { if (link instanceof SocketLink) link.keep(m.hello.resume?.token ?? null); link.onHello(m.hello); }
   else if (m.kind === 'pong') { if (link instanceof SocketLink) link.pong(m.t); }
   else if (m.kind === 'snapshot') {
     link.times.push(m.ms);
@@ -58,8 +58,13 @@ export const RETRY_MS = 3000;
 // how often it measures the round trip, ms
 const PING_MS = 2000;
 
+// where a page keeps its host's token over a reload (a phone's browser reloads a tab it put away): the tab's own store,
+// so two tabs are two players
+const STORE = 'voxel-resume:';
+
 /** a SimLink to a host over a WebSocket (host/ws.ts): the worker's messages, several to a frame. A host not reached,
- * or lost, is tried again every RETRY_MS: the host's hello then starts a new session (MirrorSimClient) */
+ * or lost, is tried again every RETRY_MS: the host's hello then starts a new session (MirrorSimClient), as the same
+ * player if the host still holds them (the token of its last hello sent first: ToWorker join) */
 export class SocketLink implements SimLink {
   onHello: (h: Hello) => void = () => {};
   onSnapshot: (s: Snapshot) => void = () => {};
@@ -77,7 +82,19 @@ export class SocketLink implements SimLink {
   rtt: number | null = null;
   private pinger: ReturnType<typeof setInterval> | null = null;
 
-  constructor(readonly url: string) { this.open(); }
+  // the token of the host's last hello (never logged: it is the player's seat)
+  private token: string | null = null;
+
+  constructor(readonly url: string) {
+    try { this.token = sessionStorage.getItem(STORE + url); } catch { /* (no storage: a tool, a private window) */ }
+    this.open();
+  }
+
+  /** (receive) the token the host's hello gave: the one to come back with */
+  keep(token: string | null) {
+    this.token = token;
+    try { if (token) sessionStorage.setItem(STORE + this.url, token); else sessionStorage.removeItem(STORE + this.url); } catch { /* (memory only) */ }
+  }
 
   private ping() {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ kind: 'ping', t: performance.now() } satisfies ToWorker));
@@ -89,6 +106,7 @@ export class SocketLink implements SimLink {
   private open() {
     const ws = this.ws = new WebSocket(this.url);
     ws.onopen = () => {
+      ws.send(JSON.stringify({ kind: 'join', token: this.token } satisfies ToWorker));
       this.ever = true;
       this.onStatus({ up: true });
       this.ping();

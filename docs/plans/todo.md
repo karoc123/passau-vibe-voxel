@@ -5,7 +5,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- A player's seat on a ride or in a vehicle is lost when the page reconnects to its host.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (orbit mode is a presence, unseen: GLOSSARY.md).
 

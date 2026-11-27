@@ -12,7 +12,9 @@
 // The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
 // differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
 // A later hello (the link connected again: a new session, perhaps a new host) starts the client's session reads afresh;
-// what the player held is gone with the old session.
+// what the player held is gone with the old session, unless the host says the session came back as its player
+// (Hello resume): then the player's reads (id, seat, car, crafts) are kept until the new session's first snapshot, so
+// the page's vehicle never sees its seat gone in between.
 // No three.js, no DOM. The client never imports the server.
 import { editNode, opRegion, type WorldOp } from '../core/world-edits';
 import { LiveEdits, type LiveNode, type Region } from '../core/live-edits';
@@ -247,25 +249,31 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     const e = checkHello(h, this.mine);
     if (e) { this.refuse(e); return; }
-    if (this.greeted) { this.restart(); return; }
+    if (this.greeted) { this.restart(!!h.resume?.resumed); return; }
     this.greeted = h;
     // (one sent before a first try that failed was dropped with it)
     if (this.myName) this.send({ kind: 'name', name: this.myName });
+    // (a page loaded again comes back as its player but starts on the map: the seat it holds nothing of let go)
+    if (h.resume?.resumed) this.send({ kind: 'leaveSeat' });
     this.settle.ok(h);
   }
 
   // a new session (its tick may start anew): nothing of the old one's snapshots, events, outcomes or crafts kept; its
-  // edits not yet answered failed
-  private restart() {
-    this.last = this.drawn = null;
+  // edits not yet answered failed. resumed: the same player on the same host, so its reads, the events and the crafts
+  // held stay until the new session's snapshots replace them (its events already held skipped: take)
+  private restart(resumed: boolean) {
+    if (!resumed) {
+      this.last = null;
+      this.events = [];
+      this.outcomes = [];
+      this.reads = new SeatReads();
+      this.craftList.clear();
+      this.names.clear();
+    }
+    this.drawn = null;
     this.buffer.length = 0;
     this.at = null;
     this.leads.length = 0;
-    this.events = [];
-    this.outcomes = [];
-    this.reads = new SeatReads();
-    this.craftList.clear();
-    this.names.clear();
     this.traffic.forget();
     if (this.myName) this.send({ kind: 'name', name: this.myName });
     for (const p of this.pending.values()) p.fail(new Error('edit lost: the host connection was lost'));
@@ -355,7 +363,7 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     if (!this.greeted) { this.refuse(new Error('sim: host refused: a snapshot came before its hello')); return; }
     // (the player's reads left out: those before, without their results)
-    const held = this.last?.player;
+    const held = this.last?.player, after = this.last?.tick ?? -Infinity;
     if (!w.player && !held) { this.refuse(new Error('sim: host sent no player reads')); return; }
     const s = this.last = { ...w, player: w.player ?? { ...held!, results: [] } };
     const B = this.buffer;
@@ -365,7 +373,8 @@ export class MirrorSimClient implements SimClient {
     if (B.length > KEEP) B.splice(0, B.length - KEEP);
     for (const e of s.edits) this.takeEdit(e);
     if (w.names) this.names = new Map(w.names);
-    this.events.push(...s.events);
+    // (a session taken up again sends the log's events from its start: those held already left out)
+    for (const e of s.events) if (e.tick > after) this.events.push(e);
     const old = s.tick - EVENT_TICKS;
     if (this.events.length && this.events[0].tick <= old) this.events = this.events.filter((e) => e.tick > old);
     const P = s.player;

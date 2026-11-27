@@ -14,7 +14,8 @@
 //              driverNotes), its last seat input taken (ack), the world's edits' ops it was sent (EditFeed), what it was sent
 //              (its sight: what is near its player). Two sessions of one
 //              player each get everything; leaving the last one of a player frees the player's seat
-//              and drops the player from the world sim
+//              and drops the player from the world sim, unless the host holds the player for their coming back
+//              (leave(true): seat, name and view kept, hands off; connect(player) takes them up again, free lets go)
 import { liveEdits } from '../../core/live-edits';
 import { nodeMetres, ready, touched, type WorldOp } from '../../core/world-edits';
 import type { DataBuild } from '../../core/data-contract';
@@ -58,6 +59,8 @@ export class SimServer {
   // the names the players chose; changed counts their changes (a session sends them all again when it differs)
   private readonly names = new Map<PlayerId, string>();
   private changed = 0;
+  // the players whose last session dropped while the host holds them for their coming back (Session.leave(true))
+  private readonly away = new Set<PlayerId>();
 
   /** the radii (m) round its player a session is sent the world's things in, by kind (sim/server/interest.ts Sight;
    * one number: that for all; null: all of them), for the sessions connected after it is set */
@@ -78,6 +81,7 @@ export class SimServer {
   /** a connection for player (the host names it: a client never does; without, a new id no session holds: p1, p2,
    * ...); its commands are the player's, its client learns it from its snapshots (Snapshot player) */
   connect(player: PlayerId = this.newPlayer()): Session {
+    this.away.delete(player);
     const s = new Session(this, player);
     // (one joining late is sent the ops of the edited nodes near it: the craters made before it came)
     if (this.tracking) s.edits = new EditFeed();
@@ -86,20 +90,34 @@ export class SimServer {
   }
 
   private newPlayer(): PlayerId {
-    const held = new Set([...this.sessions].map((s) => s.player));
+    const held = new Set([...this.sessions].map((s) => s.player).concat([...this.away]));
     let id: PlayerId;
     do id = `p${++this.players}`; while (held.has(id));
     return id;
   }
 
   /** the session gone (Session.leave); the last of its player: the player looks nowhere and is gone from the world
-   * sim (WorldSim.leave: their seat left, their entry dropped) */
-  disconnect(session: Session) {
+   * sim (WorldSim.leave: their seat left, their entry dropped); hold: kept instead, hands off (WorldSim.handsOff),
+   * until connect takes them up again or free lets them go. Their view stays a presence, so the street round the seat
+   * they come back to is the one they left */
+  disconnect(session: Session, hold = false) {
     if (!this.sessions.delete(session)) return;
-    for (const s of this.sessions) if (s.player === session.player) return;
-    this.sim.send(session.player, { kind: 'view', view: null });
-    this.sim.leave(session.player);
-    if (this.names.delete(session.player)) this.changed++;
+    const p = session.player;
+    for (const s of this.sessions) if (s.player === p) return;
+    if (hold) { this.away.add(p); this.sim.handsOff(p); return; }
+    this.drop(p);
+  }
+
+  /** whether player is held for their coming back (disconnect with hold), no session of theirs connected */
+  isAway(player: PlayerId) { return this.away.has(player); }
+
+  /** a player held for their coming back let go: their seat freed, gone from the world sim (nothing if not held) */
+  free(player: PlayerId) { if (this.away.delete(player)) this.drop(player); }
+
+  private drop(player: PlayerId) {
+    this.sim.send(player, { kind: 'view', view: null });
+    this.sim.leave(player);
+    if (this.names.delete(player)) this.changed++;
   }
 
   /** (Session.send) player's name, cleaned here: a page of other code sends anything */
@@ -197,8 +215,8 @@ export class Session {
     this.sim.send(this.player, cmd, seq === undefined ? undefined : (tick) => { this.acked = { seq, tick }; });
   }
 
-  /** out: no more commands or reads (SimServer.disconnect) */
-  leave() { this.server.disconnect(this); }
+  /** out: no more commands or reads (SimServer.disconnect; hold: the player kept for their coming back) */
+  leave(hold = false) { this.server.disconnect(this, hold); }
 
   /** the player's command outcomes since this session last took them (of kind, and of a seat's role; all without),
    * oldest first: the sim's, then the session's edits'. Kept EVENT_TICKS ticks, as the events */

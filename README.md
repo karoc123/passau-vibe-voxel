@@ -339,7 +339,7 @@ node tools/where.mjs 25,1713                  # what lies at a ?cam=/HUD point (
 ### Two or more players
 
 One machine hosts the world; every page that names it joins as a player of its own and sees the others on foot, their
-cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed). Alone (the start menu's **Play alone**, or `?play`) the world runs in a Web Worker.
+cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed); back within 30 s it is the same player, in the same seat, with the same name (meanwhile the vehicle stands, hands off, and no one else gets the seat). Alone (the start menu's **Play alone**, or `?play`) the world runs in a Web Worker.
 
 To host a game on a box of its own (a Pi, a server in the LAN), from the repository's root: `./voxel start` runs the
 built page (port 8080) and the host (5300) in the background and prints the link to open (its start menu offers that
