@@ -17,13 +17,14 @@ import type { Nav } from './nav';
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
 // keys leave E free; X gets out of any (the one key no vehicle's own keys have, so a craft flying on E is left too).
-// C switches seats in a craft with a gun (from the controls to the gun and back), so one player alone can man both;
-// on a touch screen a button does (touch/buttons.ts), shown only while there is a seat to switch to.
+// C switches seats in a craft with a gun, to the next free one in its seats' order (the controls, then each gun, then
+// the plain seats, round again), so one player alone can man the controls and a gun; on a touch screen a button does
+// (touch/buttons.ts), shown only while there is a seat to switch to.
 
 // m from its sides: a step inside the host's Tuning.walk.board, so a walk the host has not yet taken is no refusal
 const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
-const E_TAKEN = new Set(['fpv', 'helicopter', 'hovercraft', 'paraglider']);
+const E_TAKEN = new Set(['fpv', 'helicopter', 'gunship', 'hovercraft', 'paraglider']);
 // (no getting out of a wing in the air; one is got into only where the host placed it, before its flight)
 const NOT_BOARDED = 'paraglider';
 /** the keys that get in (E) and out (E where free, X anywhere) */
@@ -36,7 +37,7 @@ export class Boarding {
   /** what E gets into now (on foot), or null */
   target: Target | null = null;
   // the seat asked for and when (performance.now): its answer awaited
-  private pending: { t: Target; at: number; swap?: boolean } | null = null;
+  private pending: { t: Target; at: number; swap?: boolean; from?: Role } | null = null;
 
   constructor(private readonly nav: Nav, private readonly shells: () => readonly PlayerCraft[], private readonly say: (s: string) => void,
     private readonly passenger: () => PassengerMode | null) {
@@ -74,39 +75,44 @@ export class Boarding {
     const nav = this.nav, sim = nav.sim, P = this.pending;
     if (P && sim) {
       const r = sim.results('enterSeat', P.t.role);
-      if (r.length) { this.pending = null; if (P.swap) this.swapped(P.t, r); else this.answered(P.t, r); }
+      if (r.length) { this.pending = null; if (P.swap) this.swapped(P.t, r, P.from); else this.answered(P.t, r); }
       else if (performance.now() - P.at > 3000) this.pending = null;
     }
     this.target = nav.onFoot && !this.pending ? this.find() : null;
   }
 
-  /** what the seat switch's button says, or null: hidden (not in a craft with a gun, or its other seat taken) */
+  /** what the seat switch's button says, or null: hidden (not in a craft with a gun, or no other seat free) */
   swapLabel() {
-    const to = this.swapTo();
-    return to && (to.role === 'passenger' ? 'To the gun' : 'To the wheel');
+    const to = this.swapTo(), m = to?.seat.mount;
+    return to && (m ? (m.yaw > 0 ? 'To the left gun' : m.yaw < 0 ? 'To the right gun' : 'To the gun') : to.seat.role === 'pilot' ? 'To the wheel' : 'To a seat');
   }
 
-  /** from the controls of the craft the player is in to its gun, or from the gun back to its free controls (C, the
-   * seat switch's button); false: not in such a craft. The host decides; the shell of the seat taken takes over
-   * (answered) */
+  /** to the next free seat of the craft the player is in (C, the seat switch's button); false: not in a craft with a
+   * gun, or none free. The host decides; the shell of the seat taken takes over (swapped) */
   swap() {
     const to = this.swapTo();
     if (!to) return false;
-    const { sim, c, role } = to;
+    const { sim, c, seat: { role, index }, from } = to;
     sim.results('enterSeat', role);
-    sim.send({ kind: 'enterSeat', entity: { kind: 'craft', id: c.id }, role });
-    this.pending = { t: { ref: { kind: 'craft', id: c.id }, role, label: c.type, craft: c }, at: performance.now(), swap: true };
+    sim.send({ kind: 'enterSeat', entity: { kind: 'craft', id: c.id }, role, index });
+    this.pending = { t: { ref: { kind: 'craft', id: c.id }, role, label: c.type, craft: c }, at: performance.now(), swap: true, from };
     return true;
   }
 
-  // the seat a switch would take in the craft the player is in, or null: none
+  // the seat a switch would take in the craft the player is in: the next in its seats' order after the one held that
+  // the snapshot shows free, or null: none
   private swapTo() {
     const nav = this.nav, sim = nav.sim, s = sim?.seat();
     if (!sim || !s || s.entity.kind !== 'craft' || this.pending || !nav.craft) return null;
     const c = sim.crafts().find((q) => q.id === s.entity.id), seats = c && SEATS.craft[c.type];
     if (!c || !seats?.some((q) => q.role === 'passenger' && q.mount)) return null;
-    const role = s.role === 'pilot' ? 'passenger' : s.role === 'passenger' && c.pilot === null ? 'pilot' : null;
-    return role && { sim, c, role } as const;
+    const taken = new Set(sim.passengers().filter(([kind, id]) => kind === 'craft' && id === c.id).map(([, , , i]) => i));
+    const at = seats.findIndex((q) => q.role === s.role && q.index === s.index);
+    for (let k = 1; k < seats.length; k++) {
+      const q = seats[(at + k) % seats.length];
+      if (q.role === 'pilot' ? c.pilot === null : q.role === 'passenger' && !taken.has(q.index)) return { sim, c, seat: q, from: s.role } as const;
+    }
+    return null;
   }
 
   private canGetOut(key?: BoardKey) {
@@ -139,10 +145,11 @@ export class Boarding {
   }
 
   // the seat switched to (swap): its shell takes over from the one now on, which leaves no seat (the host moved the
-  // player already)
-  private swapped(t: Target, r: CommandResult[]) {
+  // player already); from one passenger's seat to another the rider's shell stays on and finds the new seat's gun
+  private swapped(t: Target, r: CommandResult[], was?: Role) {
     const nav = this.nav, from = nav.craft, c = t.craft;
-    if (!r.some((x) => x.ok) || !from || !c) { this.say(t.role === 'passenger' ? 'The gun is taken' : 'Someone is at the controls'); return; }
+    if (!r.some((x) => x.ok) || !from || !c) { this.say(t.role === 'passenger' ? 'That seat is taken' : 'Someone is at the controls'); return; }
+    if (t.role === 'passenger' && was === 'passenger') return;
     if (t.role === 'passenger') this.passenger()?.ride({ kind: 'craft', id: c.id }, c.type, t.label, from);
     else this.shells().find((s) => s.boards?.includes(c.type))?.board?.(c, from);
   }

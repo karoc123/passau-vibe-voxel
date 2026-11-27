@@ -10,8 +10,12 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Figure**: the body on foot as drawn and as it meets the world (a player's avatar, an NPC): three quarters of a
   grown-up, about 1.4 m, the eyes at about 1.28 m (owner 2026-11-27); it climbs a block's step all the same.
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
-- **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
-  combat plane, paraglider.
+- **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, military helicopter,
+  floatplane, jet, combat plane, paraglider.
+- **Helicopter**: the light, unarmed one, a two-seater (pilot and one passenger).
+- **Military helicopter**: a bigger helicopter with its own numbers and four seats: the pilot, a **door gun** each
+  side (a gunner's seat), a bench without a gun. Its pilot flies for the gunners. `gunship` in code. Not "attack helicopter"
+  or "armed helicopter".
 - **Combat plane**: the craft on the floatplane's flight with its own numbers and an MG fixed in its nose; its pilot
   aims by flying. `fighter` in code. Not "warplane" or "armed floatplane".
 - **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
@@ -80,7 +84,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Aim point**: the world point under a gunner's crosshair (a pilot's: along the nose) as their page sees it, sent
   with each shot; the host aims at it from the mount where it has the vehicle.
 - **Gunsight**: the combat plane's dot, where its nose points at the MG's range.
-- **Seat switch**: one key (or, on a touch screen, one button) from the wheel of the own vehicle to its gun, or back.
+- **Seat switch**: one key (or, on a touch screen, one button) to the next free seat of the own vehicle with a gun:
+  the controls, each gun, the plain seats, round again.
 - **Enemy camp** (code: camp): a chosen place where a **squad** of enemy NPCs keeps watch; **manned** when a player
   comes near (never in front of one), **stood down** once all are far, **cleared** when its squad is dead, **refilled** a
   while after its first loss. Not "outpost", "base" or "spawner".

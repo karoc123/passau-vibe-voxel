@@ -60,19 +60,22 @@ export function carShape(c: { vt?: VehicleId; bus: boolean; len: number }): Shap
   return { ...s, hz: s.hz * c.len / t.len };
 }
 
-// The crafts standing in the world, as others meet them: the hovercraft's skirt and the helicopter's cabin and tail
+// The crafts standing in the world, as others meet them: the hovercraft's skirt and the helicopters' cabins and tails
 // (their collision's probes and cube, sim/craft/craft-collision.ts), the boat's hull, the planes' fuselages from the
 // floats' or the belly's bottom (the box a walker boards and a shot hits) and their wings, a flat box at their tips'
 // height (their flight's own wing cubes, plane-flight.ts WING_*; view/crafts/*/ draws them so)
 const CS = CRAFT_SCALE.helicopter;
-export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
+// (every craft type but the light ones, LIGHT below: one forgotten would be boarded and hit as a small craft's box)
+const HEAVY = {
   hovercraft: { hx: 2.9, hz: 6.4, y0: -HOVER_HEIGHT, top: 3.1 },
   helicopter: { hx: 1.09 * CS, hz: 4.22 * CS, fwd: -2.12 * CS, y0: -1.09 * CS, top: 1.6 * CS },
+  gunship: { hx: 1.3, hz: 6.1, fwd: -2.6, y0: -1.3, top: 1.8 },
   boat: { hx: BOAT.beam / 2, hz: BOAT.length / 2, y0: -0.5, top: 1.5 },
   floatplane: { hx: 1.4, hz: 3.6, y0: -PLANE.FLOAT_H, top: 1.3 },
   jet: { hx: 0.8, hz: 4.5, fwd: 0.1, y0: -JET.FLOAT_H, top: 0.9 },
   fighter: { hx: 0.55, hz: 3.9, y0: -FIGHTER.FLOAT_H, top: 1.5 },
-};
+} satisfies Record<Exclude<CraftType, 'drone' | 'paraglider'>, Shape>;
+export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = HEAVY;
 const WINGS: Partial<Record<CraftType, Shape>> = {
   floatplane: { hx: PLANE.WING_X + 0.25, hz: 0.75, fwd: PLANE.WING_Z, y0: PLANE.WING_Y - 0.25, top: PLANE.WING_Y + 0.25 },
   jet: { hx: JET.WING_X + 0.2, hz: 1.35, fwd: -0.9, y0: JET.WING_Y - 0.25, top: JET.WING_Y + 0.25 },

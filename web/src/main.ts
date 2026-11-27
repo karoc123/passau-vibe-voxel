@@ -109,6 +109,7 @@ const CRAFTS = () => [
   import('./nav/plane').then((m) => m.PlaneMode),
   import('./nav/special-craft').then((m) => m.HovercraftMode),
   import('./nav/special-craft').then((m) => m.HelicopterMode),
+  import('./nav/special-craft').then((m) => m.GunshipMode),
   import('./nav/passenger').then((m) => m.PassengerMode),
 ];
 let crafts: PlayerCraft[] = [];

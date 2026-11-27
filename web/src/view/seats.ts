@@ -38,27 +38,31 @@ const CARS: Record<VehicleId, SeatPlace[]> = {
 };
 
 // the hovercraft's cabin: five rows of four between its window pillars, the hips under the window band so that the
-// chest and head are in it and under its roof; the helicopter's three behind its door windows, low enough for the head
-// to stay under the cabin's roof, the middle one a little back so that the shoulders do not meet; the speedboat's
-// beside its pilot
+// chest and head are in it and under its roof; the helicopter's behind its door window, low enough for the head to
+// stay under the cabin's roof; the speedboat's beside its pilot; the military helicopter's gunners in its doors, its
+// passenger on the bench at the back
 const CRAFTS: Partial<Record<CraftType, SeatPlace[]>> = {
   boat: [gunner(mountOf(SEATS.craft.boat, { role: 'passenger', index: 0 })!, 1.1)],
   hovercraft: rows(20, [1.55, 0.85, -0.85, -1.55], 1.0, 3.55, 0.82),
-  helicopter: scaled(CRAFT_SCALE.helicopter, [at(0.45, 0.05, 0.3), at(-0.45, 0.05, 0.3), at(0, 0.05, -0.1)]),
+  helicopter: scaled(CRAFT_SCALE.helicopter, [at(0.45, 0.05, 0.3)]),
+  gunship: [gunner(mountOf(SEATS.craft.gunship, { role: 'passenger', index: 0 })!, 1.1), gunner(mountOf(SEATS.craft.gunship, { role: 'passenger', index: 1 })!, 1.1),
+    at(0, -0.15, -1.35)],
 };
 
 // The pilots: the helicopter's front right under its front glass; the hovercraft's in the wheelhouse on the cabin's
 // roof, starboard of its middle mullion, the legs bent level so that the shoes stay over the cabin's ceiling; the
 // speedboat's at its wheel; the floatplane's in the left seat, the shoulders inside the cabin's sides; the jet's in
-// the front seat, low enough for the head alone to be in the canopy and the shoes over the belly; the combat plane's under its bubble canopy; the paraglider's in
+// the front seat, low enough for the head alone to be in the canopy and the shoes over the belly; the combat plane's under its bubble canopy; the military helicopter's front right behind its glass; the paraglider's in
 // its harness (the motion's point is the pilot's middle, GLIDER_HEIGHT over the feet). A drone is flown from afar.
-const PILOTS: Partial<Record<CraftType, SeatPlace>> = {
+// (every type flown from inside it: one forgotten would fly with its pilot not drawn)
+const PILOTS: Record<Exclude<CraftType, 'drone'>, SeatPlace> = {
   helicopter: scaled(CRAFT_SCALE.helicopter, [at(-0.4, 0.03, 1.4)])[0],
   hovercraft: at(-0.5, 2.3, 3.0, 1.45),
   boat: at(-0.45, 1.05, -0.2, 1.1),
   floatplane: at(0.2, 0.2, 1.2),
   jet: at(0, -0.3, 1.9, 1.5),
   fighter: at(0, 0.3, 0.2, 1.5),
+  gunship: at(-0.5, -0.15, 2.3),
   paraglider: at(0, 0.87 - GLIDER_HEIGHT, -0.05),
 };
 
@@ -72,7 +76,7 @@ const DRIVERS: Partial<Record<VehicleId, SeatPlace>> = {
 export function driverPlace(id: VehicleId): SeatPlace | null { return DRIVERS[id] ?? null; }
 
 /** the pilot's seat in a craft of type, or null: none sits in it */
-export function pilotPlace(type: CraftType): SeatPlace | null { return PILOTS[type] ?? null; }
+export function pilotPlace(type: CraftType): SeatPlace | null { return type === 'drone' ? null : PILOTS[type]; }
 
 // The seat view's eyes: a little over the middle of the head and ahead of its face, so that the own head (not drawn
 // then) would not be in the way; the near plane there short enough that a neighbour's shoulder (~0.4 m off) is not cut
