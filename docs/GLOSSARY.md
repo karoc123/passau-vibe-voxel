@@ -34,5 +34,6 @@ The words the owner and the code use for the same thing. One name per thing; use
 
 - **Node**: one file of tiles (an octree node) the page and the host stream in.
 - **Region**: a block of the map the pipeline builds at once.
+- **Hall**: a building's hollow ground floor, entered through doors from the street (a room of the pipeline's).
 - **Stretch**: a piece of river with one water level, between weirs (map config).
 - **Gate**: an automated check guarding what a player would notice (`web/tools/gates.mjs`).

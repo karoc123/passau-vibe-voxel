@@ -114,7 +114,7 @@ const CORE = ['src/core/**', 'src/sim/contract/**', 'src/fetch.ts', 'checks/chec
 // run by hand
 const UNGATED = ['src/*.ts', 'src/*.css', 'src/app/**', 'src/ui/**', 'src/nav/**', 'src/touch/**', 'tools/wt.sh', 'tools/judder.mjs', 'tools/shoot.mjs', 'tools/where.mjs',
   'tools/lamps.mjs', 'tools/life-phys.mjs', 'tools/life-phys-scan.mjs', 'tools/mesh-profile.mjs', 'tools/remesh-bench.mjs',
-  'tools/rapier-car-bench.mjs', 'tools/serve.mjs', 'tools/tris.mjs'];
+  'tools/rapier-car-bench.mjs', 'tools/serve.mjs', 'tools/tris.mjs', 'tools/halls-probe.mjs'];
 
 const glob = (g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*/g, (m) => (m === '*' ? '[^/]*' : '.*'))}$`);
 const matcher = (globs) => { const res = globs.map(glob); return (f) => res.some((r) => r.test(f)); };
