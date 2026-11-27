@@ -6,7 +6,8 @@ Status: accepted (2026-11-27). The second game building block; builds on [ADR 00
 
 - Vehicles stand in the world for anyone to take: helicopters on landing room, speedboats off a bank (a landing stage
   first), hovercraft on a bank facing the water, floatplanes on long open water, paragliders on high ground over a
-  clear drop, cars beside the slower roads. The jet and the drone are not placed. Debug spawning stays as a tool.
+  clear drop, cars beside the slower roads; none on a carriageway, so the traffic never stops for one. The jet and
+  the drone are not placed. Debug spawning stays as a tool.
 - The host finds the stands itself from the voxels and the roads, a block of the map at a time, when a player first
   comes near it. No hand-placed list and no pipeline step: any map gets them, and a map's edits need no rebuild.
 - A stand is stocked only near players and emptied again when they leave, while its vehicle is untouched. A stocked

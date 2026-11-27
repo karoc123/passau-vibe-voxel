@@ -5,8 +5,8 @@
 // helicopter is boarded, flown off and left: it stays, and its stand refills out of the player's sight; a second
 // player rides along in the speedboat beside its pilot, a third finds its seat taken; the paraglider's pilot is
 // launched off its cliff. With every player gone far, the untouched vehicles go at once and the used ones once the
-// keeping has run out. On the real data (when there): cars and crafts stocked round the cathedral, a car taken from
-// its stand, nothing sent again of what stands.
+// keeping has run out. On the real data (when there): cars and crafts stocked round the cathedral, off the roads (no
+// car of the traffic stops for one), a car taken from its stand, nothing sent again of what stands.
 // usage (in web/): node tools/stands.mjs [-v]; prints PASS lines, or FAIL and exit 1
 import { imp, sessionLink, synthData } from './lib.mjs';
 import { DATA, hasData } from './real-city.mjs';
@@ -142,8 +142,14 @@ else {
   const cars = near.filter((s) => s.kind === 'car'), crafts = near.filter((s) => s.kind === 'craft');
   if (verbose) for (const s of near) console.log(s.type, s.spot.x.toFixed(0), s.spot.z.toFixed(0), s.spot.y.toFixed(1));
   check(cars.length > 0 && crafts.length > 0, `round the cathedral: ${cars.length} cars by the road and ${crafts.length} crafts (${[...new Set(crafts.map((s) => s.type))].join(', ')})`);
+  // (the traffic's cars stopped for something standing in their way: none for a stand's vehicle)
+  let blocked = 0;
   A.sent.length = 0;
-  await P.tick(30);
+  for (let i = 0; i < 30; i++) {
+    await P.tick(1);
+    blocked += sim.traffic.cars.filter((c) => c.stand && near.some((s) => Math.hypot(c.stand.x - s.spot.x, c.stand.z - s.spot.z) < 3)).length;
+  }
+  check(blocked === 0, `no car of the traffic stops for a stand's vehicle (${blocked} car-ticks)`);
   check(sum(A.sent) === 0, `nothing standing is sent again (${sum(A.sent)} craft states in a second)`);
   // (the nearest car stand)
   const cs = cars.sort((a, b) => Math.hypot(a.spot.x - spot.x, a.spot.z - spot.y) - Math.hypot(b.spot.x - spot.x, b.spot.z - spot.y))[0];

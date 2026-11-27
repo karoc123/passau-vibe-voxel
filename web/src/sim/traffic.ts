@@ -1190,12 +1190,13 @@ export class Traffic {
     return true;
   }
 
-  /** a car put out of the traffic (parked) at pose, on no road, as a tool sets up a world. null: PARKED_MAX already
-   * out of the traffic */
-  parkAgain(k: Pick<Car, 'len' | 'bus' | 'vt' | 'col'>, pose: RoadPose): Car | null {
+  /** a car put out of the traffic (parked) at pose, on no road, as a tool or the stands set up a world (id: one of
+   * the caller's, else the traffic's next: the stands keep out of the traffic's ids, which pick its cars' types). null:
+   * PARKED_MAX already out of the traffic */
+  parkAgain(k: Pick<Car, 'len' | 'bus' | 'vt' | 'col'>, pose: RoadPose, id?: number): Car | null {
     if (this.detachedCars.length >= PARKED_MAX) return null;
     const car: Car = {
-      kind: 'car', id: this.idSeq++, e: 0, lane: 0, s: 0, v: 0, len: k.len, bus: k.bus, prev: -1, prevOff: 0, next: -1, v0f: 1, col: k.col,
+      kind: 'car', id: id ?? this.idSeq++, e: 0, lane: 0, s: 0, v: 0, len: k.len, bus: k.bus, prev: -1, prevOff: 0, next: -1, v0f: 1, col: k.col,
       off: 0, brake: 0, wait: 0, ghost: 0, ds: 0, dOff: 0, why: 'free', by: null, boxNode: -1, boxFrom: -1, boxTo: -1, boxLane: 0, boxT: 0,
       boxTurn: 0, block: null, geo: { px: 0, py: 0, cx: pose.x, cy: pose.z, z: pose.y, fx: 0, fy: 1 }, detachedPose: { ...pose },
     };

@@ -1,8 +1,8 @@
 // Stands: where the host puts vehicles for anyone to take, found from the map's own voxels and roads, so any map gets
-// them without a list. A block of the map (3 x 3 nodes) is looked at once, when a player first comes near it, read
-// through a craft's collision (VoxelCollision), whose nodes are let go again after. A stand is stocked while a player
-// is within the wake radius and emptied again past it while its vehicle is untouched, so the map's far parts cost
-// nothing. Once a vehicle is taken, moved, harmed or wrecked it is an ordinary left one (WorldSim keeps it while
+// them without a list; never on a carriageway (the traffic would stop for it). A block of the map (3 x 3 nodes) is
+// looked at once, when a player first comes near it, read through a craft's collision (VoxelCollision), whose nodes
+// are let go again after. A stand is stocked while a player is within the wake radius and emptied again past it while
+// its vehicle is untouched, so the map's far parts cost nothing. Once a vehicle is taken, moved, harmed or wrecked it is an ordinary left one (WorldSim keeps it while
 // players are near) and the stand refills after a while, out of sight. No three.js, no DOM (tools/core-deps.mjs).
 import { hash } from '../core/num';
 import type { Meta } from '../core/meta';
@@ -86,7 +86,7 @@ const ROOM: Record<string, number> = { boat: 6, floatplane: 16, hovercraft: 8, h
 // DROP_RUN m from BACK m short of an edge found within EDGE m, at least DROP m down at its end; a car's verge off the
 // outer lane's middle (m), on roads no faster than CAR_ROAD m/s (not the fast roads' shoulders), every CAR_EVERY m.
 const HELI_ROOM = 8, HELI_BIG = 14, HOVER_ROOM = 7, SHORE = 30, BANK = 20, RUN = 220, RUN_MAX = 300, SIDE = 24, SIDE_MAX = 60;
-const DROP_RUN = 120, DROP = 30, GLIDE = 0.25, EDGE = 24, BACK = 4, CAR_VERGE = 1.5 + 1.8, CAR_ROAD = 14, CAR_EVERY = 25;
+const DROP_RUN = 120, DROP = 30, GLIDE = 0.25, EDGE = 24, BACK = 4, CAR_VERGE = 1.5 + 2.4, CAR_ROAD = 14, CAR_EVERY = 25;
 // a paraglider is launched from this high over its spot at this speed (m, m/s): clear of the edge at once
 const LAUNCH_UP = 2.5, LAUNCH_SPEED = 14;
 
@@ -123,6 +123,8 @@ export class Stands {
   private readonly side: number;
   private readonly nbx: number;
   private readonly byVehicle = new Map<string, Stand>();
+  // the roads' boxes (x0, z0, x1, z1 each), made when a block first asks
+  private roadBoxes: Float64Array | null = null;
   private nextId = 1;
   /** the river boats' landing stages (boats.json): a speedboat beside one first */
   berths: readonly Berth[] = [];
@@ -237,6 +239,39 @@ export class Stands {
     return true;
   }
 
+  // whether a disc of r m round (x, z) keeps off every carriageway near box: what stands on a road stops the traffic
+  private roadsIn(box: readonly [number, number, number, number]) {
+    const M = ROAD_REACH, cells = new Map<number, number[]>(), pt = { x: 0, y: 0, z: 0 };
+    const key = (x: number, z: number) => Math.floor(x / ROAD_CELL) * 65536 + Math.floor(z / ROAD_CELL);
+    // (each road's box, once: a block samples only the roads that reach it)
+    const B = this.roadBoxes ??= Float64Array.from(this.w.roads.flatMap((e) => {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of e.p) { x0 = Math.min(x0, q[0]); z0 = Math.min(z0, q[1]); x1 = Math.max(x1, q[0]); z1 = Math.max(z1, q[1]); }
+      return [x0, z0, x1, z1];
+    }));
+    for (let i = 0; i < this.w.roads.length; i++) {
+      const e = this.w.roads[i], R = M + 20;
+      if (B[4 * i] > box[2] + R || B[4 * i + 1] > box[3] + R || B[4 * i + 2] < box[0] - R || B[4 * i + 3] < box[1] - R) continue;
+      // (the middle of its lanes, and half their width with the kerb)
+      const lo = e.o0 - LANE / 2, hi = laneOffset(e, e.lanes - 1) + LANE / 2, mid = (lo + hi) / 2, half = (hi - lo) / 2;
+      for (let s = 0; s <= e.L; s += ROAD_STEP) {
+        at(e, s, mid, pt);
+        if (pt.x < box[0] - M || pt.y < box[1] - M || pt.x >= box[2] + M || pt.y >= box[3] + M) continue;
+        const k = key(pt.x, pt.y);
+        let c = cells.get(k);
+        if (!c) cells.set(k, c = []);
+        c.push(pt.x, pt.y, half);
+      }
+    }
+    return (x: number, z: number, r: number) => {
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+        const c = cells.get(key(x + i * ROAD_CELL, z + j * ROAD_CELL));
+        if (c) for (let k = 0; k < c.length; k += 3) if ((c[k] - x) ** 2 + (c[k + 1] - z) ** 2 < (r + c[k + 2]) ** 2) return false;
+      }
+      return true;
+    };
+  }
+
   // the block's stands, the best spot of each class first, kept apart
   private *find(col: VoxelCollision, box: readonly [number, number, number, number]): Generator<void, Stand[]> {
     const C = collisionColumns(col, box), out: Stand[] = [], [x0, z0, x1, z1] = box;
@@ -258,6 +293,8 @@ export class Stands {
       for (let z = z0 + step / 2; z < z1; z += step) for (let x = x0 + step / 2; x < x1; x += step) yield [x, z] as const;
     };
     const dirs = Array.from({ length: 8 }, (_, k) => k * Math.PI / 4);
+    let near: ReturnType<Stands['roadsIn']> | null = null;
+    const offRoad = (x: number, z: number, r: number) => (near ??= this.roadsIn(box))(x, z, r);
     const wet = (x: number, z: number) => { const q = C.at(x, z); return !!q && q.water >= 0; };
     const dry = (x: number, z: number) => { const q = C.at(x, z); return !!q && q.water < 0; };
 
@@ -309,7 +346,7 @@ export class Stands {
       let water = Infinity, to = 0;
       for (const h of dirs) for (let d = HOVER_ROOM + 2; d <= SHORE && d < water; d += 3) if (wet(x + Math.sin(h) * d, z + Math.cos(h) * d)) { water = d; to = h; }
       if (water > SHORE) continue;
-      const y = landingRoom(C, x, z, HOVER_ROOM);
+      const y = offRoad(x, z, HOVER_ROOM) ? landingRoom(C, x, z, HOVER_ROOM) : null;
       if (y !== null) hovers.push({ spot: { x, y: y + SPAWN_HEIGHT.hovercraft, z, h: to }, score: water });
     }
     pick('craft', 'hovercraft', hovers);
@@ -318,7 +355,7 @@ export class Stands {
     // the helicopter: landing room, the more the better
     const helis: Cand[] = [];
     for (const [x, z] of grid(12)) {
-      const y = landingRoom(C, x, z, HELI_ROOM);
+      const y = offRoad(x, z, HELI_ROOM) ? landingRoom(C, x, z, HELI_ROOM) : null;
       if (y === null) continue;
       const big = landingRoom(C, x, z, HELI_BIG) !== null;
       helis.push({ spot: { x, y: y + SPAWN_HEIGHT.helicopter, z, h: 2 * Math.PI * hash(x * 7 + z) }, score: big ? 0 : 1 });
@@ -336,7 +373,7 @@ export class Stands {
         let edge = 0;
         for (let d = 2; d <= EDGE && !edge; d += 2) { const q = C.at(x0g + sx * d, z0g + sz * d); if (!q) break; if (q.top < top - 2) edge = d; }
         if (!edge) continue;
-        const x = x0g + sx * (edge - BACK), z = z0g + sz * (edge - BACK), y = landingRoom(C, x, z, 2);
+        const x = x0g + sx * (edge - BACK), z = z0g + sz * (edge - BACK), y = offRoad(x, z, 2) ? landingRoom(C, x, z, 2) : null;
         if (y === null) continue;
         let ok = true, end = 0;
         for (let d = BACK + 2; d <= DROP_RUN && ok; d += 6) {
@@ -359,7 +396,7 @@ export class Stands {
         at(e, s, off, pt);
         if (pt.x < x0 || pt.y < z0 || pt.x >= x1 || pt.y >= z1) continue;
         at(e, s + 1, off, ahead);
-        const y = landingRoom(C, pt.x, pt.y, ROOM.car - 1.5);
+        const y = offRoad(pt.x, pt.y, CAR_HALF) ? landingRoom(C, pt.x, pt.y, ROOM.car - 1.5) : null;
         if (y === null || Math.abs(y - pt.z) > LEVEL * 2) continue;
         cars.push({ spot: { x: pt.x, y, z: pt.y, h: Math.atan2(ahead.x - pt.x, ahead.y - pt.y) }, score: hash(e.i * 131 + s) });
       }
@@ -374,3 +411,6 @@ export class Stands {
 
 // a stand's vehicle this far (m) from its spot has been moved: used
 const MOVED = 2;
+// the roads sampled every ROAD_STEP m into cells of ROAD_CELL m, out to ROAD_REACH m past a block (a stand's room
+// and a road's half width fit in a cell and its neighbours); a lane's width (sim/road-net.ts); a car's half width
+const ROAD_STEP = 3, ROAD_CELL = 32, ROAD_REACH = 32, LANE = 3, CAR_HALF = 0.9 + 1;

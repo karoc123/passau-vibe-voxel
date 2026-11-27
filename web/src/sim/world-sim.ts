@@ -152,6 +152,8 @@ export class WorldSim {
   // the vehicles at 0 the mode let be wrecks ("car:12", "craft:3"); the last place each player stood on the ground
   private readonly wrecks = new Set<string>();
   private readonly safe = new Map<PlayerId, WalkPose>();
+  // the stands' cars' ids: far past any the traffic reaches, so stocking a car never shifts the traffic's own
+  private nextStandCar = STAND_CARS;
   /** the stands of placed vehicles (sim/stands.ts), when the host asked for them */
   readonly stands: Stands | null = null;
 
@@ -1092,7 +1094,7 @@ export class WorldSim {
         c.collision.release();
         return c.id;
       },
-      stockCar: (type, col, spot) => T.parkAgain({ len: VEHICLES[type].len, bus: false, vt: type, col }, { ...spot, pitch: 0, roll: 0 })?.id ?? null,
+      stockCar: (type, col, spot) => T.parkAgain({ len: VEHICLES[type].len, bus: false, vt: type, col }, { ...spot, pitch: 0, roll: 0 }, this.nextStandCar++)?.id ?? null,
       pose: (v) => this.entities.pose(v),
       harmed: (v) => this.lives.hp(key(v)) !== undefined || this.wrecks.has(key(v)),
       remove: (v) => {
@@ -1206,6 +1208,8 @@ const FIRE_WAIT = 15;
 const BESIDE = 2;
 // how far (m) past a blast's reach a body's foot may be and its box still be in reach (a bus's half length)
 const BODY_FAR = 7;
+// the first id of the stands' cars (the traffic numbers its cars from 0, a few thousand an hour)
+const STAND_CARS = 1 << 28;
 // a wreck's paint
 const WRECK_COL = '#1d1a18';
 // a fall: the ticks without going lower that end it, the pace (m/s) a walk down steps never makes; m/s²
