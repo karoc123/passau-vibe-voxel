@@ -18,6 +18,7 @@ export const CORES = {
   drone: (t: ClientTuning) => new DroneCore(t.drone),
   floatplane: (t: ClientTuning) => new PlaneCore(t.plane, t.fuel.floatplane),
   jet: (t: ClientTuning) => new PlaneCore(t.jet, t.fuel.jet),
+  fighter: (t: ClientTuning) => new PlaneCore(t.fighter, t.fuel.fighter),
 } satisfies Record<CraftType, (t: ClientTuning) => CraftCore>;
 
 /** the core of a craft of type K */

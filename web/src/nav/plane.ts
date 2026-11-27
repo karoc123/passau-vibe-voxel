@@ -5,7 +5,11 @@ import type { Nav } from './nav';
 import { CraftLink, type CraftContext, type CraftEnv, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
 import type { PlaneCore, PlaneDrawn } from '../sim/craft/plane-core';
-import { JET, PLANE, type PlaneConfig } from '../sim/craft/plane-flight';
+import { FIGHTER, JET, PLANE, type PlaneConfig } from '../sim/craft/plane-flight';
+import { mountOf, mountPoint, SEATS, type Mount } from '../sim/seats';
+import { weaponById } from '../sim/weapons';
+import { REACH } from '../sim/weapons/weapon';
+import { aimPoint } from './gunner';
 import type { PlaneInput } from '../sim/contract/inputs';
 import { craftLook } from '../view/crafts';
 import type { CraftLook } from '../view/crafts/craft-look';
@@ -16,11 +20,13 @@ import { ModePanel } from './mode-panel';
 import { nearestRiver, waterTop } from '../sim/river';
 import './plane.css';
 
-// The plane mode: the glue round the world sim's plane (CraftLink 'floatplane' | 'jet': its core,
+// The plane mode: the glue round the world sim's plane (CraftLink 'floatplane' | 'jet' | 'fighter': its core,
 // sim/craft/plane-core.ts round plane-flight.ts, stepped on the world's clock with its collision; the local player its
-// pilot): the panel, the input (keyboard, touch, gamepad), the chase camera, the model, the crash's tint and shake. Two aircraft, picked by the panel's buttons: the floatplane
-// (PLANE: in the air where the camera is, or afloat on the river nearest the view) and the aerobatic jet (JET: in the
-// air only; the stick rolls and pitches it, the chase camera rolls with it through loops). Entered from orbit only.
+// pilot): the panel, the input (keyboard, touch, gamepad), the chase camera, the model, the crash's tint and shake. Three aircraft, picked by the panel's buttons: the floatplane
+// (PLANE: in the air where the camera is, or afloat on the river nearest the view), the aerobatic jet (JET: in the
+// air only; the stick rolls and pitches it, the chase camera rolls with it through loops) and the combat plane
+// (FIGHTER: as the floatplane, with the MG fixed in its nose: the gunsight's dot where the nose points at the MG's
+// range, the left mouse button, the gamepad's A or the touch button fires). Entered from orbit only.
 //
 // Keys: A/D turn, W/S nose down/up (flight convention; "Invert pitch" swaps), Shift or R throttle up, Space or F down
 // (held, gradual; not Ctrl: Ctrl+W would close the tab), T back to the last safe point, Esc exit (nav.ts). Touch: the
@@ -38,17 +44,22 @@ const Z = new THREE.Vector3(0, 0, 1);
 
 // the aircraft: the flight's numbers (plane-flight.ts, the same on a server) and what only the viewer needs
 type Chase = { back: number; up: number; look: number; lag: number; rollLag: number; fov: (v: number) => number };
-interface Aircraft { cfg: PlaneConfig; label: string; model: () => CraftLook<'floatplane'> | CraftLook<'jet'>; chase: Chase; help: [keys: string, touch: string] }
-type AircraftId = 'floatplane' | 'jet';
+type Look = CraftLook<'floatplane'> | CraftLook<'jet'> | CraftLook<'fighter'>;
+interface Aircraft { id: AircraftId; cfg: PlaneConfig; label: string; model: () => Look; chase: Chase; help: [keys: string, touch: string] }
+type AircraftId = 'floatplane' | 'jet' | 'fighter';
 const AIRCRAFT: Record<AircraftId, Aircraft> = {
-  floatplane: { cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
+  floatplane: { id: 'floatplane', cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
     help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle. Pinch on the right to zoom.'] },
-  jet: { cfg: JET, label: 'jet', model: () => craftLook('jet'),
+  jet: { id: 'jet', cfg: JET, label: 'jet', model: () => craftLook('jet'),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
     help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · G deploy paraglider · T last safe point · Esc exit',
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
+  fighter: { id: 'fighter', cfg: FIGHTER, label: 'combat plane', model: () => craftLook('fighter'),
+    chase: { back: 14, up: 3.5, look: 40, lag: 5, rollLag: 3.5, fov: (v) => clamp(56 + (v - 25) * 0.3, 56, 74) },
+    help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · Shift/R throttle up · Space/F down · G deploy paraglider · T last safe point · Esc exit',
+      'Left thumb: sideways to turn, up/down for the nose. Fire button: the gun, aimed with the nose (the dot). Right slider: throttle. Pinch on the right to zoom.'] },
 };
 
 const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'; } catch { return false; } };
@@ -56,7 +67,7 @@ const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'
 export class PlaneMode implements PlayerCraft {
   readonly id = 'plane';
   readonly view = 'own';
-  readonly boards = ['floatplane', 'jet'] as const;
+  readonly boards = ['floatplane', 'jet', 'fighter'] as const;
   private readonly nav: Nav;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly target: THREE.Vector3;
@@ -64,10 +75,10 @@ export class PlaneMode implements PlayerCraft {
   private readonly env: CraftEnv;
   private type: Aircraft = AIRCRAFT.floatplane;
   // per aircraft (made when first flown): its model
-  private readonly made = new Map<Aircraft, CraftLook<'floatplane'> | CraftLook<'jet'>>();
-  private model!: CraftLook<'floatplane'> | CraftLook<'jet'>;
+  private readonly made = new Map<Aircraft, Look>();
+  private model!: Look;
   // the plane in the world sim while the player flies it (its client, its own collision)
-  private readonly link: CraftLink<'floatplane' | 'jet'>;
+  private readonly link: CraftLink<AircraftId>;
   // the chase camera to be set from the plane once the sim has put it down
   private aim = false;
   private readonly touch: TouchSticks;
@@ -76,6 +87,13 @@ export class PlaneMode implements PlayerCraft {
   private readonly enterButton: HTMLButtonElement;
   private readonly enterWater: HTMLButtonElement;
   private readonly enterJet: HTMLButtonElement;
+  private readonly enterFighter: HTMLButtonElement;
+  // the combat plane's gun: its mount, the trigger held (the mouse's, the touch button's), the gunsight's dot and the
+  // touch button
+  private gun: Mount | null = null;
+  private trigger = false;
+  private readonly sight = el('div', 'plane-sight');
+  private readonly fireButton = el('button', 'plane-fire', 'Fire');
   private readonly deployButton: HTMLButtonElement;
   private readonly deployGlider: CraftContext['deployGlider'];
   private readonly telemetry: HTMLDivElement;
@@ -101,12 +119,13 @@ export class PlaneMode implements PlayerCraft {
   constructor(ctx: CraftContext) {
     const { nav, camera, target, meta, host, canvas, env, deployGlider } = ctx;
     this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
-    this.link = new CraftLink<'floatplane' | 'jet'>(ctx, 'floatplane');
+    this.link = new CraftLink<AircraftId>(ctx, 'floatplane');
     this.deployGlider = deployGlider;
     const P = this.panel = new ModePanel(host, 'plane', 'Plane');
     this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
     this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
     this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));
+    this.enterFighter = P.button('Combat plane', () => this.toggle(false, AIRCRAFT.fighter));
     this.deployButton = P.button('Deploy paraglider', () => this.jump());
     this.telemetry = P.line('telemetry');
     this.help = P.help('', '');
@@ -121,6 +140,13 @@ export class PlaneMode implements PlayerCraft {
       this.invertBox.blur();
     });
     this.tint.setAttribute('aria-hidden', 'true');
+    this.sight.setAttribute('aria-hidden', 'true');
+    canvas.addEventListener('mousedown', (e) => { if (this.gun && this.phase === 'flying' && e.button === 0) this.trigger = true; });
+    addEventListener('mouseup', (e) => { if (e.button === 0) this.trigger = false; });
+    const fb = this.fireButton;
+    fb.addEventListener('pointerdown', (e) => { e.preventDefault(); fb.setPointerCapture(e.pointerId); this.trigger = true; });
+    for (const end of ['pointerup', 'pointercancel'] as const) fb.addEventListener(end, () => { this.trigger = false; });
+    fb.addEventListener('contextmenu', (e) => e.preventDefault());
     // the throttle slider (touch): where the finger is on it, the lever is; it stays when let go
     const sl = this.slider;
     sl.id = 'plane-throttle';
@@ -146,7 +172,7 @@ export class PlaneMode implements PlayerCraft {
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
-    onFocusLoss(() => this.touch.clear());
+    onFocusLoss(() => { this.touch.clear(); this.trigger = false; });
     this.draw();
   }
 
@@ -161,6 +187,8 @@ export class PlaneMode implements PlayerCraft {
     this.type = type;
     this.panel.setHelp(this.help, ...type.help);
     this.model = m;
+    this.gun = mountOf(SEATS.craft[type.id], { role: 'pilot', index: 0 });
+    this.trigger = false;
   }
 
   // ------------------------------------------------------------------ entering and leaving
@@ -182,7 +210,7 @@ export class PlaneMode implements PlayerCraft {
       if (!r) { this.panel.say('No river near the view', 2500); return; }
       ({ x, z } = r);
     }
-    this.startAt({ x, z, y: pos.y, h: heading, water, type: type === AIRCRAFT.jet ? 'jet' : 'floatplane' });
+    this.startAt({ x, z, y: pos.y, h: heading, water, type: type.id });
   }
 
   private startAt(s: { x: number; y?: number; z: number; h?: number; water?: boolean; type?: AircraftId }) {
@@ -243,7 +271,7 @@ export class PlaneMode implements PlayerCraft {
   // into a plane left in the world (afloat, landed, or gliding down with its lever back)
   board(craft: CraftView) {
     const type = craft.type;
-    if (this.phase !== 'off' || (type !== 'floatplane' && type !== 'jet') || !this.link.sim || !this.nav.enterCraft(this)) return false;
+    if (this.phase !== 'off' || (type !== 'floatplane' && type !== 'jet' && type !== 'fighter') || !this.link.sim || !this.nav.enterCraft(this)) return false;
     this.use(AIRCRAFT[type]);
     this.link.open(type);
     this.link.board(craft.id);
@@ -313,6 +341,7 @@ export class PlaneMode implements PlayerCraft {
     this.touch.setActive(false);
     this.model.hide();
     this.rig.end();
+    this.trigger = false;
   }
 
   // ------------------------------------------------------------------ every frame
@@ -326,6 +355,8 @@ export class PlaneMode implements PlayerCraft {
     if (now >= this.nextPanel) { this.nextPanel = now + 100; this.draw(); }
     const k = (now - this.crashAt) / CRASH_TINT_MS;
     this.tint.style.opacity = active && k < 1 ? String(0.7 * (1 - k)) : '0';
+    document.body.classList.toggle('plane-gun', active && !!this.gun);
+    if (!active || !this.gun) this.sight.style.visibility = 'hidden';
   }
 
   // (before the sim's update, main.ts: the input sent, what happened to it)
@@ -364,6 +395,24 @@ export class PlaneMode implements PlayerCraft {
     this.fwd.copy(d.fwd);
     this.up.copy(d.up);
     this.chase(d, dt, now);
+    this.shoot(d, dt);
+  }
+
+  // the combat plane's gun: aimed where the nose points as drawn, the point the page sees there sent with each shot
+  // (the host aims at it from the mount where it has the plane); the gunsight's dot on that line at the MG's range
+  private shoot(d: PlaneDrawn, dt: number) {
+    const m = this.gun, w = m && weaponById(m.weapon), sim = this.link.sim, nav = this.nav;
+    if (!m || !w || !sim) return;
+    const f = d.fwd, h = Math.atan2(f.x, f.z), pitch = Math.asin(clamp(f.y, -1, 1));
+    const from = mountPoint(m, { x: d.p.x, y: d.p.y, z: d.p.z, h, pitch }), dir = { x: f.x, y: f.y, z: f.z };
+    const air = this.craft?.core.flight.state === 'air';
+    nav.arms.update(dt, sim, h, pitch, this.camera, air && inFocus() && (this.trigger || !!gamepad()?.buttons[0]?.pressed), { slot: w.slot, to: () => aimPoint(sim, nav.world, from, dir) });
+    const s = this.v4.set(from.x, from.y, from.z).addScaledVector(this.v3.set(f.x, f.y, f.z), REACH);
+    this.camera.updateMatrixWorld();
+    s.project(this.camera);
+    const on = air && s.z < 1;
+    this.sight.style.visibility = on ? 'visible' : 'hidden';
+    if (on) this.sight.style.transform = `translate(${((s.x + 1) / 2 * innerWidth).toFixed(1)}px, ${((1 - s.y) / 2 * innerHeight).toFixed(1)}px)`;
   }
 
   private input(dt: number): PlaneInput {
@@ -430,8 +479,8 @@ export class PlaneMode implements PlayerCraft {
     this.enterButton.textContent = active ? `Exit ${this.type.label}` : 'Plane';
     const canStart = this.nav.canStartCraft && !!this.link.sim;
     this.enterButton.disabled = !active && !canStart;
-    this.enterWater.hidden = this.enterJet.hidden = active;
-    this.enterJet.disabled = !canStart;
+    this.enterWater.hidden = this.enterJet.hidden = this.enterFighter.hidden = active;
+    this.enterJet.disabled = this.enterFighter.disabled = !canStart;
     this.deployButton.hidden = !on || f!.state !== 'air';
     this.enterWater.disabled = !canStart || !this.env.river()?.length;
     const pct = Math.round(this.throttle * 100);

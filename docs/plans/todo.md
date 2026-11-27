@@ -26,8 +26,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   konzept-geschuetze-flugabwehr.md; first step: an NPC post that fires at vehicles, then the gun; owner: at a chosen place such as the Feste
   Oberhaus, not spread over the map). An enemy camp (owner 2026-11-27: one, at the Oberhaus,
   a guard and a patrol, refilled out of sight; its numbers and the NPCs' in the tuning, not hard-coded; NPCs react to
-  hits and shots and alert the squad) and a combat plane (on the floatplane's core, a fixed MG; the player's first,
-  NPC pilots after, attack runs first, dogfights not ruled out, bombs later): being built. Health and
+  hits and shots and alert the squad): being built. The combat plane built for a player (ADR 0021; left: its numbers
+  and the swing tried in play; next its NPC pilot, after the air defence's first step: players in vehicles as targets,
+  an NPC on a seat; dogfights later, not ruled out; bombs and rockets not yet). Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);

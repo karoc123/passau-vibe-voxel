@@ -147,6 +147,34 @@ export const JET: PlaneConfig = frozen({
   AEROBATIC: true,
 });
 
+// The combat plane (a single-seat fighter on floats, ~10 m): the floatplane's core and flight law with its own
+// numbers. Faster and stiffer than the floatplane (level top ~270 km/h, 4.5 g, rolls at 110 deg/s, banks to 75 deg), so
+// it turns inside the Danube's and the Inn's valleys (~90 m at 55 m/s, full bank); it still takes off from water. Its
+// gun is aimed by flying it: the pilot's seat's mount (sim/seats.ts) follows the nose.
+export const FIGHTER: PlaneConfig = frozen({
+  ...PLANE,
+  THRUST: 6.2, // level top at full throttle sqrt(THRUST / CD0) = 75 m/s (270 km/h)
+  SPOOL: 3,
+  KI: 5.5,
+  V_STALL: 26, // m/s (94 km/h)
+  N_MAX: 4.5,
+  V_MAX: 115,
+  BANK_MAX: 75 * D,
+  BANK_FOLLOW: 4,
+  ROLL_RATE: 110 * D,
+  ROLL_ACCEL: 420 * D,
+  PITCH_RATE: 32 * D,
+  PITCH_FOLLOW: 6,
+  PITCH_ACCEL: 80 * D,
+  ALPHA_STALL: 13 * D,
+  WING_X: 4.6,
+  WING_Y: 0.1, // (a low wing)
+  WING_Z: 0.4,
+  WATER_SPEED: 38,
+  V_TAKEOFF: 29,
+  RESPAWN_SPEED: 50,
+});
+
 // (its input, PlaneInput: contract/inputs.ts)
 
 export interface PlaneWorld {

@@ -50,7 +50,7 @@ export const HEALTH: HealthTuning = frozen({
   craft: frozen({
     boat: tough(120, 0.5, 1, 1, 0.4, 6), hovercraft: tough(150, 0.5, 1, 1, 0.3, 8), helicopter: tough(150, 0.5, 1, 1, 0.3, 7),
     paraglider: tough(40, 1, 1, 1, 1, 6), drone: tough(30, 1, 1, 0, 0, 8), floatplane: tough(100, 0.6, 1, 1, 0.3, 10),
-    jet: tough(120, 0.5, 1, 1, 0.25, 10),
+    jet: tough(120, 0.5, 1, 1, 0.25, 10), fighter: tough(130, 0.5, 1, 1, 0.3, 10),
   }),
   perMs: 5,
   downMs: 5000,

@@ -443,7 +443,7 @@ for (const [vt, len, X] of [['van', 5.4, 340], ['camper', 6.6, 380]]) {
 }
 
 // the crafts' pilots seen by another page through the glass round them: the helicopter's front glass, the hovercraft's
-// wheelhouse, the boat's, the floatplane's and the jet's cockpits, the paraglider's harness; none in a drone
+// wheelhouse, the boat's, the floatplane's, the jet's and the combat plane's cockpits, the paraglider's harness; none in a drone
 {
   const V = add('PV'), W = watch(V), seen = [];
   const flights = [
@@ -452,6 +452,7 @@ for (const [vt, len, X] of [['van', 5.4, 340], ['camper', 6.6, 380]]) {
     ['boat', 470, 30, G - 1, 0, [[1, 0.3, 0]]],
     ['floatplane', 200, 230, G + 20, 0, [[1, 0, 0]]],
     ['jet', 260, 230, G + 20, 0, [[1, 0.3, 0]]],
+    ['fighter', 380, 230, G + 20, 0, [[1, 0.3, 0], [0, 1, 0]]],
     ['paraglider', 320, 230, G + 60, 0, [[0, 0, 1]]],
   ];
   for (const [type, x, z, y, h, dirs] of flights) {

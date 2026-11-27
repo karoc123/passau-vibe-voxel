@@ -30,4 +30,4 @@ export interface Seat { entity: EntityRef; role: Role; index: number }
 export type VehicleId = 'car' | 'coupe' | 'van' | 'pickup' | 'bus' | 'moto' | 'camper';
 
 /** a player craft's type (sim/craft/cores.ts CORES: the core WorldSim makes for it) */
-export type CraftType = 'boat' | 'hovercraft' | 'helicopter' | 'paraglider' | 'drone' | 'floatplane' | 'jet';
+export type CraftType = 'boat' | 'hovercraft' | 'helicopter' | 'paraglider' | 'drone' | 'floatplane' | 'jet' | 'fighter';

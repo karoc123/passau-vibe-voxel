@@ -28,6 +28,7 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
   readonly tank: Tank;
   private worlds = new WeakMap<VoxelCollision, PlaneWorld>();
   private readonly v = vec3();
+  private readonly up = vec3();
   // drawn: where it was at the world tick's start (and how often it had jumped then), now, and between
   private readonly from = { ...drawnState(), jumps: 0 };
   private readonly now = drawnState();
@@ -102,6 +103,11 @@ export class PlaneCore implements CraftCore<PlaneInput, PlaneEvent, PlaneDrawn, 
   set ahead(v: boolean) { this.flight.ahead = v; }
   get pose() { const { p, heading, bank } = this.flight; return { x: p.x, y: p.y, z: p.z, h: heading, bank }; }
   get velocity() { return this.flight.velocity(this.v); }
+  /** where its nose points now: a pose with the nose's heading and pitch (a gun fixed in it aims there) */
+  get nose() {
+    const { p } = this.flight, f = this.flight.attitude(this.v, this.up);
+    return { x: p.x, y: p.y, z: p.z, h: Math.atan2(f.x, f.z), pitch: Math.asin(Math.max(-1, Math.min(1, f.y))) };
+  }
   // (between the tick's start and now; put somewhere at once since: now)
   drawn(alpha: number): PlaneDrawn {
     const a = this.from, b = this.state(this.now), o = this.out;

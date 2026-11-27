@@ -104,7 +104,7 @@ export class Boarding {
     const nav = this.nav, sim = nav.sim, s = sim?.seat();
     if (!sim || !s || s.entity.kind !== 'craft' || this.pending || !nav.craft) return null;
     const c = sim.crafts().find((q) => q.id === s.entity.id), seats = c && SEATS.craft[c.type];
-    if (!c || !seats?.some((q) => q.mount)) return null;
+    if (!c || !seats?.some((q) => q.role === 'passenger' && q.mount)) return null;
     const role = s.role === 'pilot' ? 'passenger' : s.role === 'passenger' && c.pilot === null ? 'pilot' : null;
     return role && { sim, c, role } as const;
   }
