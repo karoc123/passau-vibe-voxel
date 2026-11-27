@@ -22,9 +22,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
   budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
   roads (`roads.md`, "How the main roads drive").
-- Roofs probe (after the roads: both change the pipeline): small, simple houses a rule-based roof (gable, hip, flat
-  along the long side, even steps), large and special ones their surveyed roof tidied; landmarks untouched. Not
-  smoothed.
+- Roofs probe: built behind `roofs.rules` in the map config (`scripts/roofs.py`, off), waiting for the owner's walk
+  of the Altstadt and Haidenhof cut-outs with and without it. On: a full rebuild. Not smoothed.
 - 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes

@@ -135,7 +135,7 @@ across a rapid of our choosing, never a box's edge across open water (the Ilz fr
 voxelize.py cuts a water body where their water meets (a box edge along a bank cuts nothing), so no level is a median
 across a weir; the pools split the sorted levels at gaps of 2 m or more, so a falling river's stretches must leave
 such a gap somewhere: the Ilz's loop at 297.7 m stays 2.05 m under the Danube's 299.75 m above the Kachlet, else every
-level is one pool and the Kachlet's weir stands in a block at a median), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan). `MAP_CONFIG=path` picks another file. The project grid
+level is one pool and the Kachlet's weir stands in a block at a median), the anchor, and the default cover of regions (`size`; `jobs`: how many at once, `auto` the cores less 4, within `mem_gb` or `REGION_MEM_GB`, else 75 % of the memory available: `scripts/regions.py` plan), and `roofs`: `{"rules": true}` builds roofs by rule (`scripts/roofs.py`: small simple houses a gable, hip or flat roof in even steps, other buildings their surveyed roof tidied, landmarks untouched; off when absent). `MAP_CONFIG=path` picks another file. The project grid
 (column = easting − 827371, row = 5390500 − northing) never moves: hashes, noise and curated places key on it, so a
 larger map keeps today's cells as they are; the outputs (tiles, the viewer's coordinates, `data/*.npz`) are in map
 cells, the project grid's less the map's corner (`meta.json` `origin`). The viewer's shaders hash and pattern by the

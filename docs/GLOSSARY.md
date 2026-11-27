@@ -38,3 +38,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Gate**: an automated check guarding what a player would notice (`web/tools/gates.mjs`).
 - **Cap**: a 1 m column's top drawn as a sloped quad (four corner heights) instead of its voxel's flat top: what
   wheels and feet stand on.
+- **Rule roof**: a small simple house's roof made by rule (gable, hip or flat, even steps) instead of the survey's.
+  Its counterpart, a **tidied roof**: the survey's (LoD2's) roof with dormers, spikes and near levels taken out.
+  A **landmark** keeps its roof as surveyed: churches, castles and their grounds, towers, buildings with OSM parts
+  or a curated override.

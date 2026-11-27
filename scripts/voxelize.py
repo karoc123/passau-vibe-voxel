@@ -50,6 +50,7 @@ import overrides
 import region
 from region import boxmean, in_core
 import region_inputs
+import roofs
 import species_map
 import tiles
 import trees as treedb
@@ -1694,11 +1695,17 @@ def buildings(ctx):
     pitched_m = lod2_roofs(top)
     pitched_m |= dsm_pitched_roofs(top)
     overrides.roof_shapes(feats, top, dtm, ROOF_GX, ROOF_GY, pitched_m, R0, C0, note)  # (scripts/overrides/building)
+    RULE_PLANE = None
+    if roofs.enabled():  # (a probe: off unless the map config turns it on)
+        RULE_PLANE = roofs.apply(render, osm.areas, top, dtm, bmask, LOD2, LOD2_USE, cell_maxh, ROOF_GX, ROOF_GY,
+                                 pitched_m, R0, C0, overrides._own, set(landmarks.LABELS), core_slice, note, report)
     # the roof's voxel is its height above sea level rounded once: the ground under it (g) is rounded and smoothed on its own,
     # and g + round(height over the ground) put a quarter of all roof cells a metre off their neighbours -- speckle and
     # contour lines of the street below across every flat roof and plane of LoD2
     topi = np.where(bmask, np.round(top + dtm - BASE) - g, 0).astype(np.int32)
     roof_exact = np.where(bmask, top + dtm - BASE, np.nan).astype(np.float32)  # (the roof's height before rounding: caps.py)
+    if RULE_PLANE is not None:  # (a rule roof's voxels step along its plane: the caps draw the plane)
+        roof_exact = np.where(bmask & np.isfinite(RULE_PLANE), RULE_PLANE - BASE, roof_exact).astype(np.float32)
     # single LiDAR pits in a flat roof (1-3 m deep, up to 3 cells, building all round): each read as a black speck under
     # the ambient occlusion (hotels' and banks' roofs); outside the old town's fitted pitched roofs
     _cl = ndimage.grey_closing(topi, size=(3, 3))
