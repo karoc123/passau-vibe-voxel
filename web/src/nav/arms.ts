@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
 import type { SimClient } from '../client/sim-client';
+import type { Vec3 } from '../core/vec';
 import { weaponIn } from '../sim/weapons';
 import { SLOTS } from '../sim/weapons/weapon';
 import type { WeaponsView } from '../view/weapons/weapons-view';
@@ -27,16 +28,17 @@ export class Arms {
   /** one shot, as soon as the weapon may fire */
   pull() { this.once = true; }
 
-  /** on foot, each frame: a held trigger (the mouse's, or held: the touch's) fires along h and pitch (the host's ray:
-   * from the player's eyes as it has them), its flash drawn from camera */
-  update(dt: number, sim: SimClient | null, h: number, pitch: number, camera: THREE.Camera, held = false) {
+  /** each frame on foot or at a mount: a held trigger (the mouse's, or held: the touch's) fires along h and pitch (the
+   * host's ray: from the player's eyes as it has them), its flash drawn from camera. At a mount (gun): its weapon's
+   * slot, and the world point under the crosshair, asked for only when a shot goes */
+  update(dt: number, sim: SimClient | null, h: number, pitch: number, camera: THREE.Camera, held = false, gun?: { slot: number; to: () => Vec3 }) {
     this.wait = Math.max(0, this.wait - dt);
-    const w = weaponIn(this.slot);
+    const slot = gun?.slot ?? this.slot, w = weaponIn(slot);
     if (!w || !sim) { this.once = false; return; }
     if (!(this.trigger || held || this.once) || this.wait > 0) return;
     this.once = false;
     this.wait += 1 / w.rate;
-    sim.send({ kind: 'fire', slot: this.slot, h, pitch });
+    sim.send(gun ? { kind: 'fire', slot, h, pitch, to: gun.to() } : { kind: 'fire', slot, h, pitch });
     this.view?.fired(w.id, camera);
   }
 }

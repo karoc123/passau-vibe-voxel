@@ -1,6 +1,6 @@
 import type { CraftType, VehicleId } from '../sim/contract/ids';
 import { CRAFT_SCALE, GLIDER_HEIGHT } from '../sim/craft/craft-motion';
-import { SEATS } from '../sim/seats';
+import { mountOf, SEATS, type Mount } from '../sim/seats';
 
 // Where a passenger sits in each vehicle's look: the hips' point in its frame (x to its left, y up from its origin, z
 // ahead, metres as drawn: a scaled look's numbers times its scale) and how far forward the legs reach from hanging
@@ -35,7 +35,7 @@ const CARS: Record<VehicleId, SeatPlace[]> = {
 // to stay under the cabin's roof, the middle one a little back so that the shoulders do not meet; the speedboat's
 // beside its pilot
 const CRAFTS: Partial<Record<CraftType, SeatPlace[]>> = {
-  boat: [at(0.45, 1.05, -0.2, 1.1)],
+  boat: [gunner(mountOf(SEATS.craft.boat, { role: 'passenger', index: 0 })!, 1.1)],
   hovercraft: rows(20, [1.55, 0.85, -0.85, -1.55], 1.0, 3.55, 0.82),
   helicopter: scaled(CRAFT_SCALE.helicopter, [at(0.45, 0.05, 0.3), at(-0.45, 0.05, 0.3), at(0, 0.05, -0.1)]),
 };
@@ -70,6 +70,8 @@ export function pilotPlace(type: CraftType): SeatPlace | null { return PILOTS[ty
 // then) would not be in the way; the near plane there short enough that a neighbour's shoulder (~0.4 m off) is not cut
 /** where a player sitting at p looks from (the same frame as p) */
 export const seatEye = (p: SeatPlace) => ({ x: p.x, y: p.y + 0.75, z: p.z + 0.16 });
+// a gunner's seat: seatEye's inverse of the mount, so figure, camera and the host's shot share one point
+function gunner(m: Mount, legs: number): SeatPlace { return { x: m.at.x, y: m.at.y - 0.75, z: m.at.z - 0.16, legs }; }
 /** the camera's near plane (m) at the seat view's eyes */
 export const SEAT_NEAR = 0.15;
 

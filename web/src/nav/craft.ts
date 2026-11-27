@@ -40,8 +40,9 @@ export interface PlayerCraft {
   enter(at?: CraftSpot): boolean;
   /** the types of the world's crafts it flies (board) */
   readonly boards?: readonly CraftType[];
-  /** into the pilot's seat of a craft in the world no one pilots (one of `boards`; SimClient.crafts()). false: not now */
-  board?(craft: CraftView): boolean;
+  /** into the pilot's seat of a craft in the world no one pilots (one of `boards`; SimClient.crafts()); from: the shell
+   * of the seat held before in the same craft (a seat switch). false: not now */
+  board?(craft: CraftView, from?: PlayerCraft): boolean;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */
   leave(): void;
   /** every frame, on or not, before the sim's update (main.ts): its input sent, its panel, what happened to it */
@@ -162,7 +163,8 @@ export class CraftLink<K extends CraftType> {
   /** out: the craft left where it is (for anyone to enter; the sim drops it once no player is near), or, drop, taken
    * out of the world; the shell's collision let go */
   close(drop = false) {
-    if (this.held) this.sim?.send(drop ? { kind: 'request', request: { kind: 'dropCraft' } } : { kind: 'leaveSeat', pose: this.ctx.nav.stepOut ?? undefined });
+    // (moved to a passenger's seat of it already: the seat switch, which a leaveSeat would undo)
+    if (this.held && this.sim?.seat()?.role !== 'passenger') this.sim?.send(drop ? { kind: 'request', request: { kind: 'dropCraft' } } : { kind: 'leaveSeat', pose: this.ctx.nav.stepOut ?? undefined });
     this.held = false;
     this.col?.release();
     this.col = null;

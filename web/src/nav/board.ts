@@ -17,6 +17,7 @@ import type { Nav } from './nav';
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
 // keys leave E free; X gets out of any (the one key no vehicle's own keys have, so a craft flying on E is left too).
+// C switches seats in a craft with a gun (from the controls to the gun and back), so one player alone can man both.
 
 // m from its sides: a step inside the host's Tuning.walk.board, so a walk the host has not yet taken is no refusal
 const REACH = 3;
@@ -34,12 +35,13 @@ export class Boarding {
   /** what E gets into now (on foot), or null */
   target: Target | null = null;
   // the seat asked for and when (performance.now): its answer awaited
-  private pending: { t: Target; at: number } | null = null;
+  private pending: { t: Target; at: number; swap?: boolean } | null = null;
 
   constructor(private readonly nav: Nav, private readonly shells: () => readonly PlayerCraft[], private readonly say: (s: string) => void,
     private readonly passenger: () => PassengerMode | null) {
     // (before Nav's own: on foot E is also a look key, and a craft's keys must not see the E that left it)
     addEventListener('keydown', (e) => {
+      if (e.code === 'KeyC' && gameKey(e) && !e.repeat && this.swap()) { e.preventDefault(); return; }
       if ((e.code !== 'KeyE' && e.code !== 'KeyX') || !gameKey(e) || e.repeat || !this.press(e.code)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -71,10 +73,25 @@ export class Boarding {
     const nav = this.nav, sim = nav.sim, P = this.pending;
     if (P && sim) {
       const r = sim.results('enterSeat', P.t.role);
-      if (r.length) { this.pending = null; this.answered(P.t, r); }
+      if (r.length) { this.pending = null; if (P.swap) this.swapped(P.t, r); else this.answered(P.t, r); }
       else if (performance.now() - P.at > 3000) this.pending = null;
     }
     this.target = nav.onFoot && !this.pending ? this.find() : null;
+  }
+
+  /** from the controls of the craft the player is in to its gun, or from the gun back to its free controls (C);
+   * false: not in such a craft. The host decides; the shell of the seat taken takes over (answered) */
+  swap() {
+    const nav = this.nav, sim = nav.sim, s = sim?.seat();
+    if (!sim || !s || s.entity.kind !== 'craft' || this.pending || !nav.craft) return false;
+    const c = sim.crafts().find((q) => q.id === s.entity.id), seats = c && SEATS.craft[c.type];
+    if (!c || !seats?.some((q) => q.mount)) return false;
+    const role = s.role === 'pilot' ? 'passenger' : s.role === 'passenger' && c.pilot === null ? 'pilot' : null;
+    if (!role) return false;
+    sim.results('enterSeat', role);
+    sim.send({ kind: 'enterSeat', entity: { kind: 'craft', id: c.id }, role });
+    this.pending = { t: { ref: { kind: 'craft', id: c.id }, role, label: c.type, craft: c }, at: performance.now(), swap: true };
+    return true;
   }
 
   private canGetOut(key?: BoardKey) {
@@ -104,6 +121,15 @@ export class Boarding {
       const shell = c && this.shells().find((s) => s.boards?.includes(c.type));
       if (c && shell) shell.board?.(c);
     }
+  }
+
+  // the seat switched to (swap): its shell takes over from the one now on, which leaves no seat (the host moved the
+  // player already)
+  private swapped(t: Target, r: CommandResult[]) {
+    const nav = this.nav, from = nav.craft, c = t.craft;
+    if (!r.some((x) => x.ok) || !from || !c) { this.say(t.role === 'passenger' ? 'The gun is taken' : 'Someone is at the controls'); return; }
+    if (t.role === 'passenger') this.passenger()?.ride({ kind: 'craft', id: c.id }, c.type, t.label, from);
+    else this.shells().find((s) => s.boards?.includes(c.type))?.board?.(c, from);
   }
 
   // the nearest within reach, the one looked at first
