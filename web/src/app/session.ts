@@ -52,7 +52,7 @@ export function openSession(o: SessionOptions, { meta, edits, traffic, world }: 
   const link = o.server ? new SocketLink(o.server) : new WorkerLink(o.query);
   // (the edits are sent as ops, applied over the page's own node files)
   const tiles = { cache: viewerTileCache(meta.tiles.N, edits), frame: frameOf(meta) };
-  return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles), link };
+  return { client: new MirrorSimClient(link, traffic, world, mine, edits, tiles, { meta, cache: tiles.cache, now: () => performance.now() }), link };
 }
 
 /** the page's view command for this frame: where it looks (focus: the orbit's target or the camera) and sees from (the

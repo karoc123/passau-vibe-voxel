@@ -1,7 +1,7 @@
 # Target architecture: cost follows players, not the city
 
-Status: accepted by the owner (2026-11-26, section 6); steps 1 to 4 landed. Facts are marked by their source
-(code path or URL); everything under "Judgement" is mine.
+Status: accepted by the owner (2026-11-26, section 6); steps 1 to 7 landed (7 without the car). Facts are marked by
+their source (code path or URL); everything under "Judgement" is mine.
 
 Goal (owner, revised 2026-11-26 after concepts-and-scale.md): 3–8 players at once is normal, 16 in a round, 50 is
 a stress test, on a map of several km² that keeps growing. The owner provides the hosts; a Raspberry Pi 5 is a wish,
@@ -176,7 +176,8 @@ in the tick.
    page out to 1.5 km; the agent ring 350 m, cars sent to 400 m; agents spawned on the flow's cars).
 6. **Kept things on disk.** Landed 2026-11-27 (the network host's craters, edits, parked cars and crafts left, a file
    per cell under `web/.run/world/`, written every 5 s and on SIGTERM; kept by presence as before).
-7. **Prediction** of the player's own craft, then the decision on cars.
+7. **Prediction** of the player's own craft. Landed 2026-11-27 for the crafts (rewound to each snapshot and stepped
+   again with the inputs since, corrections blended out); the car waits for the owner (FRAGEN 17).
 8. **Measure on a Pi.** Only then compact the wire (typed arrays, deltas) or move a hot part to Rust.
 
 Steps 1 and 2 come first on purpose: they end the preparation and give every later step a user.

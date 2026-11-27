@@ -109,8 +109,8 @@ export class CraftLink<K extends CraftType> {
     return c && c.type === this.type ? c as CraftView<CoreOf<K>> : null;
   }
 
-  /** how far between the world's last two ticks this frame is drawn (the craft's drawn(alpha)) */
-  get alpha() { return this.sim?.time.alpha ?? 1; }
+  /** how far into its tick the craft is drawn this frame (its drawn(alpha)) */
+  get alpha() { return this.sim?.ownAlpha ?? 1; }
 
   /** the craft this frame (null: not made yet), the shell's collision fetched round it */
   frame() {

@@ -4,7 +4,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
-- **Steps 7–8** in the order of target-architecture.md.
+- **Step 8** of target-architecture.md; the car's prediction waits for the owner (FRAGEN 17).
 - With steps 1–2: input commands by tick with ack and buffer (M5).
 
 - Overload (target-architecture.md): all three steps built (host/overload.ts), but the third cuts a whole session's
@@ -19,9 +19,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   traffic within 60 m of a crater) and crafts (~4, a helicopter's core whole, a parked one too). Not measured: a busy
   square, a late joiner after many craters (a node's whole op list), a phone on 4G. Binary only after a Pi
   measurement. A driver's peak is higher since step 5 (a cell coming into the circle is filled and sent at once).
-- E17–E18: prediction of the player's craft, then the car (one-body world). Belongs to step 7.
+- E18: the car's prediction (one-body world), if the owner says so (FRAGEN 17).
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
-- M6–M10: prediction, wire compaction, lag compensation for hits (with the first weapon).
+- M7–M10: wire compaction, lag compensation for hits (with the first weapon).
 
 ## On hold until the game is decided (owner 2026-11-24)
 
@@ -64,8 +64,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Kept things: crafts and cars left still go 120 s after the last player leaves (only craters last), restart or
   not; the world is serialised on the tick every 5 s (a hitch with many edits, unmeasured); wrecks are kept as cars.
 - The worker decodes nodes the page also decodes.
-- The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
-  removes it. The world keeps ticking while the tab is hidden.
+- The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
+  network (no prediction for it yet). The world keeps ticking while the tab is hidden.
+- The own craft run ahead (prediction) does not feel solid things (cars, other crafts) nor tell its own events: the
+  host's correction and its events come a round trip later.
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
 - Getting in from foot: E is the helicopter's, hovercraft's and drone's own key, so out of those only by the button;
   a car is got into at any speed (no stopping it first); the host's reach uses a rough box for a car (2.2 m half-length).

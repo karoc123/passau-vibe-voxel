@@ -7,7 +7,8 @@
 // render clock that runs with the page's frames a little behind the newest snapshot, so snapshots arriving unevenly
 // never show as a stop and a jump. What the player must learn at once (seat, results, events, edits, the time of day)
 // is read from the newest snapshot as it arrives; what is drawn (agents, bodies, the crafts' poses) from the one the
-// render clock is in. A seat input gets its seq and the tick it is meant for (the tick seen + 1); the session answers
+// render clock is in, but the player's own craft where the client predicts it (run ahead from the player's input,
+// predict.ts). A seat input gets its seq and the tick it is meant for (the tick seen + 1); the session answers
 // with ack (the last one taken).
 // The client first takes its host's hello (the protocol, the data build, the tuning's hash) and refuses a host that
 // differs: client.hello rejects with what differs, the link is closed and the client sends and takes nothing more.
@@ -21,7 +22,8 @@ import { LiveEdits, type LiveNode, type Region } from '../core/live-edits';
 import type { Frame } from '../core/layers';
 import type { NodeView, TileCache } from '../core/tile-cache';
 import type { Car, TrafficData } from '../sim/types';
-import type { CraftCore } from '../sim/craft/craft-core';
+import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
+import { Prediction } from './predict';
 import { CORES } from '../sim/craft/cores';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
@@ -88,8 +90,12 @@ export interface SimClient {
   driver(): DriverSnapshot | null;
   /** what the driver is to be told since the last call (the drive events of their car) */
   driverNotes(): DriveNote[];
-  /** the craft the player pilots, or null */
+  /** the craft the player pilots, or null: run ahead on the page from the player's input (prediction), where the
+   * client predicts */
   craftOf(): CraftView | null;
+  /** how far into its tick the craft the player pilots is drawn (craftOf's drawn(alpha)): the frame's, or its
+   * prediction's */
+  readonly ownAlpha: number;
   /** the cars driven by players near this one (its own among them), by car id with its driver */
   drivers(): readonly [number, PlayerId][];
   /** the players riding along in a car or a craft near the player (theirs too) */
@@ -225,6 +231,7 @@ export class MirrorSimClient implements SimClient {
   private reads = new SeatReads();
   private outcomes: CommandResult[] = [];
   // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
+  private readonly prediction: Prediction | null;
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private names = new Map<PlayerId, string>();
@@ -236,9 +243,12 @@ export class MirrorSimClient implements SimClient {
   /** data: a TrafficData of the client's own (never the sim's: paths are prepared in place); ground: the page's world;
    * mine: the client's own hello (this code, the build the app loaded); edits: the client's live edits, the snapshots'
    * edits applied into them over the node files of tiles (its TileCache over these edits, the world's frame; none:
-   * the edits are not applied) */
+   * the edits are not applied); predict: the world the craft the player pilots is run ahead in (none: drawn as the
+   * snapshots have it) */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
-    readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null) {
+    readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null,
+    predict?: CraftWorld) {
+    this.prediction = predict ? new Prediction(predict) : null;
     if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
@@ -297,7 +307,12 @@ export class MirrorSimClient implements SimClient {
   get lead() { return this.last && this.at !== null ? this.last.tick - this.at : 0; }
   get timeOfDay(): TimeOfDay | null { return this.last && { hour: this.last.hour, day: this.last.day }; }
 
-  send(cmd: SimCommand) { if (!this.refused) this.queue.push(this.seqs.stamp(cmd, this.tick)); }
+  send(cmd: SimCommand) {
+    if (this.refused) return;
+    const c = this.seqs.stamp(cmd, this.tick);
+    if (c.kind === 'seatInput' && c.role === 'pilot') this.prediction?.sentInput(c.seq!, c.input);
+    this.queue.push(c);
+  }
 
   nameOf(player: PlayerId) { return this.names.get(player) ?? ''; }
 
@@ -323,7 +338,14 @@ export class MirrorSimClient implements SimClient {
     if (q.length) this.link.send(q);
     this.dt = Math.min(dt, 0.1);
     this.advance(this.dt);
+    const P = this.prediction, s = this.last;
+    if (P) {
+      const c = this.craftOf(true);
+      P.update(this.dt, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack());
+    }
   }
+
+  get ownAlpha() { const c = this.craftOf(true); return c && this.prediction?.coreOf(c.id) ? this.prediction.alpha : this.alpha; }
 
   // the render clock moved on by the frame's dt, and the snapshot it is in drawn
   private advance(dt: number) {
@@ -462,9 +484,11 @@ export class MirrorSimClient implements SimClient {
   ack() { return this.last?.player.ack ?? null; }
   driver() { return this.last?.player.driver ?? null; }
   driverNotes() { return this.last ? this.reads.take(this.events, this.last.player.id, this.seat(), 'drive', this.tick).map((e) => e.note) : []; }
-  craftOf(): CraftView | null {
-    const seat = this.seat();
-    return seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
+  // (sent: the snapshots' copy, not the one run ahead)
+  craftOf(sent = false): CraftView | null {
+    const seat = this.seat(), c = seat?.role === 'pilot' ? this.craftList.get(seat.entity.id) ?? null : null;
+    const p = c && !sent ? this.prediction?.coreOf(c.id) : null;
+    return p ? { ...c!, core: p } : c;
   }
   crafts(): readonly CraftView[] { return [...this.craftList.values()]; }
   drivers(): readonly [number, PlayerId][] { return this.last?.drivers ?? []; }
