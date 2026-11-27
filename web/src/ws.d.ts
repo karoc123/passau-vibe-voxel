@@ -6,6 +6,7 @@ declare module 'ws' {
     readonly bufferedAmount: number;
     send(data: string): void;
     close(): void;
+    terminate(): void;
     on(event: 'message', f: (data: { toString(): string }) => void): this;
     on(event: 'close', f: () => void): this;
     on(event: 'error', f: (e: Error) => void): this;

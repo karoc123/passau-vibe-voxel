@@ -15,6 +15,9 @@ export type ToWorker =
   // host/start.ts hostStart)
   | { kind: 'init'; base: string; query: string }
   | { kind: 'commands'; commands: SimCommand[] }
+  // (a network host's first message from a page: the token of the last hello it had from that host, to come back as
+  // its player; null: a new player. A first message of another kind is a new player too)
+  | { kind: 'join'; token: string | null }
   // (a network host answers at once with a pong of the same t: the page's round trip; the page's own worker gets none)
   | { kind: 'ping'; t: number };
 export type FromWorker =
