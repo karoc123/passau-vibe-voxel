@@ -56,6 +56,9 @@ export interface CraftView<C extends CraftCore = CraftCore> {
   readonly type: CraftType;
   readonly pilot: PlayerId | null;
   readonly placed: boolean;
+  /** a wreck: its health told at 0 (the host sends a vehicle's 0 when it wrecks it; a game mode that keeps
+   * one going at 0 would be drawn a wreck) */
+  readonly wreck: boolean;
   readonly core: C;
 }
 
@@ -449,9 +452,10 @@ export class MirrorSimClient implements SimClient {
     const L = this.craftList, seen = new Set<CraftId>();
     for (const c of s.crafts) {
       let m = L.get(c.id);
-      if (!m) { L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, core: CORES[c.type](DEFAULT_TUNING) }); m.core.load(c.core); }
+      if (!m) { L.set(c.id, m = { id: c.id, type: c.type, pilot: c.pilot, placed: c.placed, wreck: false, core: CORES[c.type](DEFAULT_TUNING) }); m.core.load(c.core); }
       m.pilot = c.pilot;
       m.placed = c.placed;
+      m.wreck = this.lives.get(`craft:${c.id}`)?.hp === 0;
       seen.add(c.id);
     }
     for (const id of L.keys()) if (!seen.has(id)) L.delete(id);

@@ -13,7 +13,8 @@ import type { Pose, RoadPose } from '../sim/contract/pose';
 import { VEHICLE_IDS, vehicleOf } from '../sim/vehicles';
 import type { CraftType, EntityRef, VehicleId } from '../sim/contract/ids';
 import type { CoachPose } from '../sim/coaches';
-import { MAX_CARS } from '../sim/contract/agents';
+import { MAX_CARS, WRECK_COL } from '../sim/contract/agents';
+import { wreckSmoke } from './wreck-smoke';
 import { AVATAR_SHAPE, carShape, COACH_SHAPE, craftSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
 
 // The street life's presentation: the world sim's traffic (sim/world-sim.ts, headless, on its fixed tick; read through
@@ -253,9 +254,11 @@ export class StreetLife {
     }
     // (out of the traffic: from where it was drawn last; never drawn, from where it was parked, heading 0 until its
     // bodies' pose says otherwise)
+    // (a wreck, charred by the host, smokes)
     for (const c of T.detachedCars) {
-      const at = c.detachedPose ?? { x: 0, y: 0, z: 0 };
-      draw(c, this.entry(this.drawnCars, c.id, at.x, at.y, at.z));
+      const at = c.detachedPose ?? { x: 0, y: 0, z: 0 }, d = this.entry(this.drawnCars, c.id, at.x, at.y, at.z);
+      draw(c, d);
+      if (c.col === WRECK_COL) wreckSmoke.at(`car:${c.id}`, d.x, d.y + 1, d.z, 0.8);
     }
     T.farCars(this.viewer.x, this.viewer.z, FAR_R, (p, f, len) => {
       const t = vehicleOf(f), V = M.vehicles[t.id];

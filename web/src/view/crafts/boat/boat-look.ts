@@ -89,6 +89,8 @@ class BoatLook implements CraftLook<'boat'> {
     this.foam.count = 0;
   }
 
+  get anchor() { return this.hull; }
+
   draw(c: CraftView<CoreOf<'boat'>>, { alpha, night }: CraftFrame) {
     const m = c.core.motion, d = c.core.drawn(alpha), speed = m.speed, t = m.t;
     this.group.visible = true;

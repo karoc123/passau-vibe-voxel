@@ -39,6 +39,9 @@ export type Shift = [s0: number, s1: number, o0: number, o1: number];
 type CarTurn = [t0: number, r: number, d: number, x: number, u0: number, v0: number, ax: number, ay: number, bx: number, by: number];
 
 /** what a client's path maths and drawing read of a car (sim/types.ts Car extends it; sim/server/snapshot.ts carState) */
+/** a wrecked car's paint (the host's): what the page reads a car wreck by; a craft wreck is drawn in it too */
+export const WRECK_COL = '#1d1a18';
+
 export interface CarState {
   id: number;
   e: number;

@@ -18,7 +18,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   Order (the owner leaves it to us): NPCs on foot (patrol, attack, sight; hearing after; the walk on the host and
   way finding built, ADR 0017: left a way to place one in play, NPCs as lives, their bytes, ~4.5 kB/s raw each
   walking); NPCs in vehicles; zones (landing room, air defence); fuel; seat tools. Health and
-  damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
+  damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
   left of it: cars at the mapped car parks too, a crater under an asleep craft, the draw cost of a dozen standing
