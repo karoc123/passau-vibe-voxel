@@ -42,7 +42,7 @@ import { SEATS } from './seats';
 import { vehicleOf } from './vehicles';
 import type { Craft, CraftCore, CraftWorld } from './craft/craft-core';
 import { CORES, type CoreOf } from './craft/cores';
-import { VoxelCollision } from './craft/voxel-collision';
+import { CEILING, VoxelCollision } from './craft/voxel-collision';
 import type { CommandResult, CraftSpot, PlayerCommand, Refusal, View } from './contract/commands';
 import type { CraftEventOf } from './contract/crafts';
 import type { CraftId, CraftType, EntityRef, PlayerId, Role, Seat, VehicleId, WeaponId } from './contract/ids';
@@ -423,7 +423,7 @@ export class WorldSim {
       case 'view': break; // (taken at the update's start: send)
       case 'follow': this.follow(p, cmd.entity); break;
       case 'enterSeat': {
-        const r = this.reaches(p, cmd.entity, cmd.role) ? this.enterSeat(p, cmd) : 'far';
+        const why = this.mayBoard(p, cmd.entity, cmd.role), r = why === true ? this.enterSeat(p, cmd) : why;
         this.result(p, cmd.kind, r === true, cmd.role ?? this.entities.seat(cmd.entity)?.role, typeof r === 'string' ? r : undefined);
         break;
       }
@@ -529,16 +529,21 @@ export class WorldSim {
     V.hold(at, REACH);
   }
 
-  // whether player may ask for a seat of entity with role from where they are: on foot (their avatar), a vehicle only
-  // within Tuning.walk.board of where the host has the walker, not where the page says (a seat the mode gives, a
-  // craft made, is the mode's to place); a passenger's only from foot (not from the map, nor from another seat)
-  private reaches(player: PlayerId, entity: EntityRef, role?: Role) {
+  // whether player may ask for a seat of entity with role from where they are (true), else why not: on foot (their
+  // avatar), a vehicle only within Tuning.walk.board of where the host has the walker, not where the page says (a seat
+  // the mode gives, a craft made, is the mode's to place), and a car only while it goes no faster than
+  // Tuning.walk.boardSpeed; a passenger's only from foot (not from the map, nor from another seat)
+  private mayBoard(player: PlayerId, entity: EntityRef, role?: Role): boolean | Refusal {
     const held = this.seat(player), W = this.players.get(player)?.walk;
     if (role === 'passenger' && (held?.entity.kind !== 'avatar' || !W)) return false;
     if (held?.entity.kind !== 'avatar' || !W || (role ?? this.entities.seat(entity)?.role) === 'walker' || !this.entities.exists(entity)) return true;
     const box = this.boxOf(entity);
-    return !!box && reaches(W.pose, box, this.tuning.walk.board);
+    if (!box || !reaches(W.pose, box, this.tuning.walk.board)) return 'far';
+    const car = entity.kind === 'car' ? this.carById(entity.id) : null;
+    return car && Math.abs(car.v) > this.tuning.walk.boardSpeed ? 'moving' : true;
   }
+
+  private carById(id: number) { return this.traffic.cars.find((c) => c.id === id) ?? this.traffic.detachedCars.find((c) => c.id === id); }
 
   // entity's footprint as a shot meets it, or null: not in the world
   private boxOf(entity: EntityRef): Box | null {
@@ -563,7 +568,8 @@ export class WorldSim {
           if (d) Object.assign(at, d); else T.carPose(c, c.s, c.off, at, true);
           if (out(at.x, at.z)) continue;
           if (!d) T.carPose(c, c.s, c.off, at);
-          yield { entity: { kind: 'car', id: c.id }, x: at.x, y: at.y, z: at.z, h: at.h, r: 0.9, l: c.bus ? 6 : 2.2, ht: c.bus ? 3 : 1.5 };
+          const s = carShape(c);
+          yield { entity: { kind: 'car', id: c.id }, x: at.x, y: at.y, z: at.z, h: at.h, r: s.hx, l: s.hz, ht: s.top };
         }
         for (const list of [T.people, T.riders]) for (const p of list) {
           if (mine('person', p.id)) continue;
@@ -702,8 +708,10 @@ export class WorldSim {
 
   // the player on foot (a mode's walk): their avatar put down at pose (one held: there again, nothing drawn between);
   // else a new one, the player its walker (the seat held left first); false: not seated (the mode's mayEnter)
-  private walk(player: PlayerId, pose: WalkPose) {
+  private walk(player: PlayerId, asked: WalkPose) {
     const s = this.seat(player), W = this.players.get(player)?.walk;
+    if (!finitePose(asked)) return false;
+    const pose = this.inHeight(asked);
     if (s?.entity.kind === 'avatar' && W) {
       const at = { ...pose }, t = this.clock - STEP;
       Object.assign(W, { pose: at, at: t, from: at, fromAt: t, prev: at, vx: 0, vz: 0, sent: { x: at.x, z: at.z, at: t } });
@@ -714,6 +722,14 @@ export class WorldSim {
     if (this.enterSeat(player, { entity: { kind: 'avatar', id }, role: 'walker', pose }) === true) return true;
     avatars.delete(id);
     return false;
+  }
+
+  // pose's height kept within the world's: not under the ground of its column (a walk's start is the page's word, and
+  // the walk's bound goes on from it), nor over the crafts' ceiling (getting out of one anywhere it flies)
+  private inHeight(pose: WalkPose): WalkPose {
+    const meta = this.opts.crafts?.meta, under = this.ground?.support(pose.x, pose.z, pose.y);
+    const y = Math.min(meta ? meta.H + CEILING : Infinity, Math.max(under ?? -Infinity, pose.y));
+    return y === pose.y ? pose : { ...pose, y };
   }
 
   private player(id: PlayerId) {
@@ -889,8 +905,9 @@ export class WorldSim {
         if (near?.length) meetSolids(core, shape!, near, c.collision);
         return true;
       });
-      // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores')
-      if (core.events.length) for (const e of core.events.splice(0)) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
+      // (a core of its type's events: sim/craft/cores.ts asserts the contract's are the cores'; only its pilot reads
+      // them, so an empty craft's are not sent)
+      if (core.events.length) for (const e of core.events.splice(0)) if (c.pilot !== null) this.due.push({ kind: 'craft', entity: { kind: 'craft', id: c.id }, ...{ craft: c.type, e } as CraftEventOf });
     }
   }
 }

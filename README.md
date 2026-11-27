@@ -564,8 +564,9 @@ thumb looks and a pinch zooms. **Esc** releases the mouse and opens the menu; it
 on foot and the crafts standing about (hovercraft, helicopter, boat) are solid: you walk round them, and a car driven
 into you shoves you along. The crowd is not: you pass through people.
 
-Walk up to a car or a craft standing about and press **E** (or the button) to get in; E or the button gets out
-again onto foot beside it (in the helicopter, hovercraft and drone, whose own keys use E, only the button). Beside a
+Walk up to a car or a craft standing about and press **E** (or the button) to get in; a car must be stopped or
+creeping (no faster than a walk). E or the button gets out again onto foot beside it; **X** does too, in anything
+(in the helicopter, hovercraft and drone, whose own keys use E, X is the key). Beside a
 car or craft another player drives or flies the prompt is **ride along**: a free seat (a hovercraft has 20, a
 helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around, the wheel
 zooms, **V** swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the

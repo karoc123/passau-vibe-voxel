@@ -13,6 +13,7 @@
 // holds each message 70 ms, the pilot's page (prediction on) keeps the passenger within 3 cm of their seat on the craft
 // as it draws it, every frame of a flight, while the snapshot's craft lies metres off. A page beside a parked car sees
 // its passenger and its driver through the side windows (a ray meets their figure first), an empty car stays closed.
+// Out by key: X out of any vehicle (the helicopter, hovercraft and drone keep E for themselves), E where it is free.
 // usage (in web/): node tools/passengers.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink, synthData } from './lib.mjs';
@@ -353,6 +354,18 @@ const spawn = async (p, type, x, z, h) => {
   check(looks.every((l) => l === null), `a page beside the car sees the passenger and the driver through its side windows (${looks.filter(Boolean).join('; ') || 'both'})`);
   const at = new THREE.Vector3(X + 12, G + 1.3, Z), hit = firstSeen(at.clone().addScaledVector(side, -4), at);
   check(hit?.isInstancedMesh && !hit.material.transparent, `a car nobody sits in keeps its solid cabin (a ray at its windows meets ${hit?.type ?? 'nothing'})`);
+}
+
+// getting out by key (nav/board.ts): X out of any vehicle, E only out of one whose own keys leave it free
+{
+  const keys = (id) => {
+    let outs = 0;
+    const b = new Boarding({ sim: null, onFoot: false, craft: { id }, craftView: true, mode: 'craft', getOut: () => ++outs > 0 }, () => [], () => {}, () => null);
+    return { label: b.label(true), e: b.press('KeyE'), eOuts: outs, x: b.press('KeyX'), outs };
+  };
+  const shown = ['helicopter', 'hovercraft', 'fpv', 'drive'].map((id) => ({ id, ...keys(id) }));
+  check(shown.every((k) => k.x && k.outs === k.eOuts + 1 && k.label === (k.id === 'drive' ? 'E: get out' : 'X: get out') && k.e === (k.id === 'drive') && k.eOuts === (k.id === 'drive' ? 1 : 0)),
+    `X gets out of the helicopter, the hovercraft, the drone and a car, E only out of the car, the button saying which (${JSON.stringify(shown)})`);
 }
 
 host.dispose();
