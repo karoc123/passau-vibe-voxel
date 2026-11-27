@@ -110,7 +110,11 @@ BASE = CONFIG["base"]
 # model there): the median of the terrain model under OSM's water on this map, pinned like BASE; per stretch where the
 # config gives stretches (river_level)
 RIVER_LEVEL = CONFIG["rivers"]["level"]
-RIVER_STRETCHES = [(tuple(s["box"]), s["level"]) for s in CONFIG["rivers"].get("stretches", [])]
+# a stretch is a box (x0, y0, x1, y1) or a polygon (`poly`: a ring of x, y): a polygon lets the edge between two
+# stretches of a falling river lie under a bridge's deck or along a weir, whichever way they cross the river (a box's
+# edge across open water is a step in the water's top)
+RIVER_STRETCHES = [(tuple(s["box"]) if "box" in s else [tuple(p) for p in s["poly"]], s["level"])
+                   for s in CONFIG["rivers"].get("stretches", [])]
 # the region being built (voxelize.py builds the volume region by region, scripts/region.py): R0, C0 its first row
 # and column in the project grid, D x W its size; without VOXEL_REGION the region is the map
 R0, C0 = MAP_R0, MAP_C0
@@ -126,19 +130,31 @@ MR0, MC0 = R0 - MAP_R0, C0 - MAP_C0  # the region's first row and column in map 
 OSM_PATH = os.environ.get("VOXEL_OSM", f"{RAW}/osm.json")  # (a region's own cut of it: regions.py)
 
 
-def river_level(rows, cols):
-    """the rivers' level (m a.s.l.) at the region's cells (rows, cols: broadcastable integer arrays): the first config
-    stretch whose box holds the cell's centre, else RIVER_LEVEL. A function of the project grid's coordinates alone,
-    so the same in every region. float64 array, or a float where there are no stretches"""
-    if not RIVER_STRETCHES:
-        return RIVER_LEVEL
+def river_stretch(rows, cols):
+    """the index in RIVER_STRETCHES of the first stretch whose box or polygon holds the region's cells' centres (rows,
+    cols: broadcastable integer arrays), -1 where none does. A function of the project grid's coordinates alone, so
+    the same in every region"""
     r, c = np.broadcast_arrays(np.asarray(rows) + R0, np.asarray(cols) + C0)
     x, y = GRID_X0 + c + 0.5, GRID_Y0 - r - 0.5
-    out = np.full(r.shape, np.nan)
-    for (x0, y0, x1, y1), lv in RIVER_STRETCHES:
-        m = np.isnan(out) & (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
-        out[m] = lv
-    return np.where(np.isnan(out), RIVER_LEVEL, out)
+    out = np.full(r.shape, -1, np.int16)
+    for k, (shape, _) in enumerate(RIVER_STRETCHES):
+        if isinstance(shape, tuple):
+            x0, y0, x1, y1 = shape
+            m = (out < 0) & (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
+        else:
+            import shapely
+            m = out < 0
+            m[m] = shapely.contains_xy(shapely.Polygon(shape), x[m], y[m])
+        out[m] = k
+    return out
+
+
+def river_level(rows, cols):
+    """the rivers' level (m a.s.l.) at the region's cells (rows, cols: broadcastable integer arrays): the first config
+    stretch's (river_stretch), else RIVER_LEVEL. float64 array, or a float where there are no stretches"""
+    if not RIVER_STRETCHES:
+        return RIVER_LEVEL
+    return np.array([lv for _, lv in RIVER_STRETCHES] + [RIVER_LEVEL])[river_stretch(rows, cols)]
 
 
 EU = np.array([math.cos(THETA), math.sin(THETA)])   # grid +i in world
