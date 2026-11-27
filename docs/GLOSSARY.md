@@ -66,6 +66,13 @@ The words the owner and the code use for the same thing. One name per thing; use
   An enemy NPC keeps a **duty**: a **guard** stands at its **post** facing one way, a **patrol** walks its **loop**.
 - **Mind**: an enemy NPC's state machine: **post**, **attack** (a player noticed by a clear sight line: fires, follows
   a little), **search** (walks to where it last saw them, looks round), **back** (to its post). Not "AI".
+- **Mount**: a weapon fixed to a seat of a vehicle's type, in its data: the point a shot leaves from, its **swing**
+  (how far either side of its middle off the bow it turns) and its pitch's limits; at a **stop** the crosshair greys.
+  Not "turret".
+- **Gunner**: a passenger at a mount; no role of its own. Not "co-pilot".
+- **Aim point**: the world point under a gunner's crosshair as their page sees it, sent with each shot; the host aims
+  at it from the mount where it has the vehicle.
+- **Seat switch**: one key from the wheel of the own vehicle to its gun, or back.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.
 - **Dead**: an NPC at 0: lies where it fell, no target and no body to shots, taken away after a while. A player is
   down, never dead.

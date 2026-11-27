@@ -42,8 +42,11 @@ export type SimCommand = PlayerCommand;
  *                 tick or more after the commands sent with it. Its outcome (ref: the client's number for it; nodes:
  *                 the level-1 nodes it changed) goes to the session it came through
  *   fire          the weapon in slot fired once along h (heading) and pitch (up), from the player's eyes as the host has
- *                 them; only on foot, at most at the weapon's rate (sim/weapons/weapon.ts Trigger): else ignored, with
- *                 no outcome (a held trigger sends one ~10 times a second). What it hit is a shot event
+ *                 them; on foot, or from a seat with a mount (its weapon, whatever the slot: from the mount on the
+ *                 vehicle as the host has it, towards `to`, the world point under the crosshair, else along h and
+ *                 pitch; kept within the mount's swing). At most at the weapon's rate (sim/weapons/weapon.ts Trigger):
+ *                 else ignored, with no outcome (a held trigger sends one ~10 times a second). What it hit is a shot
+ *                 event. (`to`, not a direction: the gunner sees the vehicle a ping late, metres behind the host's)
  *   name          the name the player goes by for the others ('' none: their id), cleaned by the host
  *                 (sim/player-name.ts); taken by the session, never reaching the world sim; the snapshots' names */
 export type PlayerCommand =
@@ -54,7 +57,7 @@ export type PlayerCommand =
   | { kind: 'leaveSeat'; pose?: WalkPose }
   | { kind: 'request'; request: ModeRequest }
   | { kind: 'edit'; op: WorldOp; ref?: number }
-  | { kind: 'fire'; slot: number; h: number; pitch: number }
+  | { kind: 'fire'; slot: number; h: number; pitch: number; to?: { x: number; y: number; z: number } }
   | { kind: 'name'; name: string };
 
 /** where a player looks (map metres): focus, the middle of what is simulated round them (the active circle, the

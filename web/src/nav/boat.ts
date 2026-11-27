@@ -17,7 +17,7 @@ import { downstream, nearestRiver } from '../sim/river';
 import './boat.css';
 
 // The boat mode: a speedboat of the player's own on the rivers, driven like the car (W/S throttle and reverse, A/D
-// steer, Space drift, T unstick, Esc exit; the same touch stick and handbrake button; the gamepad as the car's). Put
+// steer, Space drift, C to its gun, T unstick, Esc exit; the same touch stick and handbrake button; the gamepad as the car's). Put
 // down on the water nearest the map's focus, facing downstream. The boat is a craft of the world sim's (CraftLink: its
 // core, sim/craft/boat-motion.ts BoatCore, stepped on the world's clock with its collision), the local player in its
 // pilot's seat; Here: the panel, the input, the chase camera. Out of
@@ -72,7 +72,7 @@ export class BoatMode implements PlayerCraft {
     const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat');
     this.action = P.button('Boat', () => this.toggle());
     this.speed = P.line('speed');
-    this.help = P.help('W/S throttle and reverse · A/D steer · Space drift · T unstick · Esc exit',
+    this.help = P.help('W/S throttle and reverse · A/D steer · Space drift · C: to the gun · T unstick · Esc exit',
       'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift. Pinch on the right to zoom.');
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
@@ -110,9 +110,9 @@ export class BoatMode implements PlayerCraft {
     return true;
   }
 
-  // into a boat left in the world
-  board(craft: CraftView) {
-    if (this.phase !== 'off' || !this.link.sim || !this.nav.enterCraft(this)) return false;
+  // into a boat left in the world, or from its gun (from: the gunner's shell)
+  board(craft: CraftView, from?: PlayerCraft) {
+    if (this.phase !== 'off' || !this.link.sim || !this.nav.enterCraft(this, from)) return false;
     this.link.open();
     this.link.board(craft.id);
     this.panel.silence();

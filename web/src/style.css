@@ -255,6 +255,10 @@ body[data-mode=walk]:not(.noui) #arms { display: block; }
 #arms .crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 3; pointer-events: none;
   background: linear-gradient(#fff, #fff) center / 2px 14px no-repeat, linear-gradient(#fff, #fff) center / 14px 2px no-repeat;
   opacity: .8; mix-blend-mode: difference; }
+/* at a gun (nav/passenger.ts): the crosshair alone, grey at the mount's stops */
+body.gunner:not(.noui) #arms { display: block; }
+body.gunner #arms .slots { display: none; }
+body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: grayscale(1) brightness(.6); }
 #arms .slots { position: fixed; left: 50%; bottom: calc(14px + var(--sb)); transform: translateX(-50%); z-index: 3; display: flex; gap: 6px;
   pointer-events: none; font: 600 12px Inter, system-ui, sans-serif; color: #fff; }
 #arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }

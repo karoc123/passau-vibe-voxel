@@ -38,7 +38,7 @@ import { DEFAULT_SEED, STEP, Traffic, type Focus, type Ground, type WallBox } fr
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 import type { TrafficData } from './types';
 import { Entities } from './entities';
-import { SEATS } from './seats';
+import { inArc, mountOf, mountPoint, SEATS } from './seats';
 import { vehicleOf, VEHICLES } from './vehicles';
 import { Stands } from './stands';
 import type { Craft, CraftWorld } from './craft/craft-core';
@@ -530,11 +530,14 @@ export class WorldSim {
         if (taken) taken(this.tick + 1, r); else this.outcomes.push({ at: this.tick + 1, player: p, r });
         break;
       }
-      case 'fire':
+      case 'fire': {
         // (a ray into a node not loaded meets nothing: the shot waits for its nodes, a few ticks at most)
-        if ((q.waited ?? 0) >= FIRE_WAIT || this.aimLoaded(p, cmd.h, cmd.pitch)) this.fire(p, cmd.slot, cmd.h, cmd.pitch);
+        const a = this.aim(p, cmd), V = this.voxels;
+        if (!a) break;
+        if ((q.waited ?? 0) >= FIRE_WAIT || !V?.ready || V.ready(a.from, a.dir, REACH)) this.fire(p, a);
         else this.queue.push({ ...q, waited: (q.waited ?? 0) + 1 });
         break;
+      }
       case 'damage': {
         // (no mode asked: the blast was the weapon's, fired as the rules allowed)
         try { applyEdit(cmd.op); this.keeper.last(cmd.op); } catch { /* (no world to edit) */ }
@@ -544,22 +547,34 @@ export class WorldSim {
     }
   }
 
-  // whether the voxels along the aim of the player on foot are loaded (not on foot: nothing to wait for)
-  private aimLoaded(player: PlayerId, h: number, pitch: number) {
-    const W = this.players.get(player)?.walk, V = this.voxels;
-    if (!W || !V?.ready || !Number.isFinite(h) || !Number.isFinite(pitch)) return true;
-    const f = W.pose;
-    return V.ready({ x: f.x, y: f.y + EYE, z: f.z }, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))), REACH);
+  // a shot of the player's as this sim has them (never the page's word for where they are), or null: none. On foot:
+  // the weapon in slot, from the eyes along h and pitch. In a seat with a mount: its weapon, from the mount on the
+  // vehicle towards the page's aim point (the page saw the vehicle a ping back: a direction alone would be off by that
+  // much), kept within the mount's swing
+  private aim(player: PlayerId, cmd: { slot: number; h: number; pitch: number; to?: Vec3 }) {
+    const P = this.players.get(player), s = this.seat(player);
+    if (!P || !s || !Number.isFinite(cmd.h) || !Number.isFinite(cmd.pitch) || this.lives.down.has(player)) return null;
+    if (s.role === 'walker') {
+      const w = weaponIn(cmd.slot), f = P.walk?.pose;
+      return w && f ? { w, own: s.entity, from: { x: f.x, y: f.y + EYE, z: f.z }, dir: aimDir(cmd.h, Math.max(-1.5, Math.min(1.5, cmd.pitch))) } : null;
+    }
+    const c = s.entity.kind === 'craft' ? this.crafts.get(s.entity.id) : undefined, m = c && mountOf(SEATS.craft[c.type], s);
+    const w = m && weaponById(m.weapon);
+    if (!c || !m || !w) return null;
+    const from = mountPoint(m, c.core.pose), t = cmd.to;
+    let { h, pitch } = cmd;
+    if (t && Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z) && Math.hypot(t.x - from.x, t.z - from.z) > 1) {
+      h = Math.atan2(t.x - from.x, t.z - from.z);
+      pitch = Math.atan2(t.y - from.y, Math.hypot(t.x - from.x, t.z - from.z));
+    }
+    const k = inArc(m, c.core.pose.h, h, pitch);
+    return { w, own: s.entity, from, dir: aimDir(k.h, k.pitch) };
   }
 
-  // a shot from the eyes of the player on foot, where this sim has them (never the page's word for them), if their
-  // weapon in slot is ready
-  private fire(player: PlayerId, slot: number, h: number, pitch: number) {
-    const P = this.players.get(player) as PlayerState | undefined, s = P && this.seat(player), w = weaponIn(slot);
-    if (!P?.walk || s?.role !== 'walker' || !w || !Number.isFinite(h) || !Number.isFinite(pitch) || this.lives.down.has(player)) return;
-    if (!(P.trigger ??= new Trigger()).pull(w, this.clock)) return;
-    const f = P.walk.pose;
-    this.shoot(player, s.entity, w, { x: f.x, y: f.y + EYE, z: f.z }, aimDir(h, Math.max(-1.5, Math.min(1.5, pitch))));
+  // a shot aimed (aim), if its weapon is ready
+  private fire(player: PlayerId, a: { w: Weapon; own: EntityRef; from: Vec3; dir: Vec3 }) {
+    const P = this.players.get(player) as PlayerState;
+    if ((P.trigger ??= new Trigger()).pull(a.w, this.clock)) this.shoot(player, a.own, a.w, a.from, a.dir);
   }
 
   // w fired by `by` (a player, or an NPC: the same shot), from its body own's eyes along unit dir; what it hits harmed.
@@ -609,9 +624,11 @@ export class WorldSim {
   // whether player may ask for a seat of entity with role from where they are (true), else why not: on foot (their
   // avatar), a vehicle only within Tuning.walk.board of where the host has the walker, not where the page says (a seat
   // the mode gives, a craft made, is the mode's to place), and a car only while it goes no faster than
-  // Tuning.walk.boardSpeed; a passenger's only from foot (not from the map, nor from another seat)
+  // Tuning.walk.boardSpeed; a passenger's only from foot or from another seat of the same vehicle (a player alone
+  // goes from the wheel to its gun), not from the map
   private mayBoard(player: PlayerId, entity: EntityRef, role?: Role): boolean | Refusal {
     const held = this.seat(player), W = this.players.get(player)?.walk;
+    if (role === 'passenger' && held && held.entity.kind === entity.kind && held.entity.id === entity.id) return true;
     if (role === 'passenger' && (held?.entity.kind !== 'avatar' || !W)) return false;
     if (held?.entity.kind !== 'avatar' || !W || (role ?? this.entities.seat(entity)?.role) === 'walker' || !this.entities.exists(entity)) return true;
     const box = this.boxOf(entity);
