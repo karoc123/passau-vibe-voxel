@@ -18,10 +18,10 @@
 // (Hello resume): then the player's reads (id, seat, car, crafts) are kept until the new session's first snapshot, so
 // the page's vehicle never sees its seat gone in between.
 // No three.js, no DOM. The client never imports the server.
-import { editNode, opRegion, type WorldOp } from '../core/world-edits';
-import { LiveEdits, type LiveNode, type Region } from '../core/live-edits';
+import { editNodeOps, opRegion, type WorldOp } from '../core/world-edits';
+import { LiveEdits, type Region } from '../core/live-edits';
 import type { Frame } from '../core/layers';
-import type { NodeView, TileCache } from '../core/tile-cache';
+import type { TileCache } from '../core/tile-cache';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
 import { Prediction } from './predict';
@@ -463,9 +463,9 @@ export class MirrorSimClient implements SimClient {
     if (!ops.length) return true;
     const v = cache.view(n.tx, n.ty);
     if (!v) return false;
-    let node: LiveNode = { base: v.base, foliage: v.foliage, ops: E.get(n.tx, n.ty)?.ops ?? [] }, region: Region = null;
+    const node = editNodeOps(frame, n.tx, n.ty, v, ops, E.get(n.tx, n.ty)?.ops ?? []);
+    let region: Region = null;
     for (const op of ops) {
-      node = editNode(frame, n.tx, n.ty, { base: node.base, foliage: node.foliage as NodeView['foliage'], edited: true }, op, node.ops ?? []);
       const r = opRegion(frame, op);
       region = region ? [Math.min(region[0], r[0]), Math.min(region[1], r[1]), Math.max(region[2], r[2]), Math.max(region[3], r[3])] : r;
     }
