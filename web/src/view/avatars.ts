@@ -36,7 +36,7 @@ function lookOf(player: string): Look {
   const m = /^p(\d+)$/.exec(player), n = m ? +m[1] : hashOf(player);
   return {
     shirt: SHIRTS[n % SHIRTS.length], trousers: TROUSERS[(n * 3) % TROUSERS.length], hair: HAIR[(n * 7 + 1) % HAIR.length],
-    skin: SKIN[(n >> 1) % SKIN.length], cap: n % 2 ? SHIRTS[(n + 3) % SHIRTS.length] : null,
+    skin: SKIN[(n >>> 1) % SKIN.length], cap: n % 2 ? SHIRTS[(n + 3) % SHIRTS.length] : null,
   };
 }
 
