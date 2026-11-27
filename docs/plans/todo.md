@@ -51,8 +51,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 ## Small defects
 
-
-- A placed block leaves trees poking through; the edit keep radius (600 m) and delay (120 s) are guesses.
+- The edit keep radius (600 m) and delay (120 s) are guesses.
 - Temporary damage needs the tile cache to expose a node's raw files.
 - Crafts and solid things (ADR 0012): a banked plane's wings are still upright boxes to cars; a drone and a paraglider
   pass through each other.

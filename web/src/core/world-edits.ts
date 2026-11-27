@@ -2,8 +2,9 @@
 // An op touches level-1 nodes (touched: core/columns.ts touchedNodes, the margins too); a host holds them in the
 // world's TileCache (ready) until the world sim's tick that applies the edit (applyNow, synchronous: each node as it
 // is now, its files or its live edit; the op applied to its base columns and, where the op carves (air), to its
-// foliage's, EditableNode; the result put into the live edits, core/live-edits.ts, with the op appended to the node's
-// ops). apply(op) does both for a tool without a world sim. Whatever draws or collides with the world listens there:
+// foliage's, where it places a block, its foliage cleared there, EditableNode; the result put into the live edits,
+// core/live-edits.ts, with the op appended to the node's ops). apply(op) does both for a tool without a world sim.
+// Whatever draws or collides with the world listens there:
 // the viewer's streamer meshes the node again (stream.ts), the physics drop what they built of it
 // (physics/rapier/terrain.ts), the world sim hears of the box (host/sim-host.ts). drop(tx, ty) gives a node its files
 // again. Who keeps an edit and for how long is not decided here (sim/edit-keeper.ts).
@@ -14,7 +15,7 @@
 // apart from the others; a node is then made again from its files and the ops left (core/layers.ts effectiveColumns,
 // over the TileCache's files), instead of op upon op as here.
 // Pure data: no three.js, no DOM.
-import { EditableNode, opBounds, touchedNodes, type NodeColumns } from './columns';
+import { EditableNode, opBounds, touchedNodes, Z_MAX, type CellOp, type NodeColumns } from './columns';
 import { cellToAbsZ, mapToGrid, toCellOp, type Frame, type WorldOp } from './layers';
 import { liveEdits, type LiveNode, type Region } from './live-edits';
 import type { NodeView, TileCache } from './tile-cache';
@@ -91,14 +92,13 @@ export function editNode(frame: Frame, tx: number, ty: number, v: NodeView, op: 
   const e = new EditableNode(N, v.base as NodeColumns, tx, ty);
   e.apply(cell);
   const enc = e.encode(), base = { ...v.base, ...enc };
-  // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs; only what carves takes trees
-  // and grass with it)
+  // (a foliage tile's ground is its base's, in the files too: tools/remesh-bench.mjs)
   let foliage: LiveNode['foliage'] = { ...v.foliage, ground: enc.ground };
-  if (cell.id === 0) {
-    const f = new EditableNode(N, foliage as NodeColumns, tx, ty);
-    f.apply(cell);
-    foliage = { ...f.encode(), ground: enc.ground };
-  }
+  const f = new EditableNode(N, foliage as NodeColumns, tx, ty);
+  // (a block placed takes the trees and grass in its cells with it, or they draw through it; only where the base
+  // changed: painting what is solid leaves the leaves round it, and grass stays on ground the block did not touch)
+  const changed = cell.id === 0 ? (f.apply(cell), true) : clearUnderBlock(f, new EditableNode(N, v.base as NodeColumns, tx, ty), e, cell);
+  if (changed) foliage = { ...f.encode(), ground: enc.ground };
   return { base, foliage, ops: [...ops, op] };
 }
 
@@ -114,6 +114,21 @@ export function restoreNow(tx: number, ty: number, ops: readonly WorldOp[]): boo
     liveEdits.set(tx, ty, editNode(frame, tx, ty, v, op, liveEdits.get(tx, ty)?.ops ?? []), opRegion(frame, op));
   }
   return true;
+}
+
+// foliage f cleared in op's cells where the base went from before to a new solid id in after; whether any was
+function clearUnderBlock(f: EditableNode, before: EditableNode, after: EditableNode, op: CellOp) {
+  const b = opBounds(op), ox = f.tx * f.N, oy = f.ty * f.N, z0 = Math.max(0, b.z0), z1 = Math.min(Z_MAX, b.z1);
+  let hit = false;
+  for (let y = Math.max(-1, b.y0 - oy); y < Math.min(f.N + 1, b.y1 - oy); y++) {
+    for (let x = Math.max(-1, b.x0 - ox); x < Math.min(f.N + 1, b.x1 - ox); x++) {
+      for (let z = z0; z < z1; z++) {
+        const now = after.get(x, y, z);
+        if (now && now !== before.get(x, y, z) && f.get(x, y, z)) { f.set(x, y, z, 0); hit = true; }
+      }
+    }
+  }
+  return hit;
 }
 
 // Applies op to the world (after the edits before it), its nodes read first (ready, then applyNow): a tool's edit
