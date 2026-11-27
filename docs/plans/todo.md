@@ -41,7 +41,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Names over the others are not hidden behind walls (a DOM tag within 150 m); the ping is the socket's round trip,
   not the snapshot's age.
-- A car hitting a pedestrian: they topple over instead of being thrown ahead.
 - A concept for the buildings' looks before landmark work: the window shader also lands on broken blocks and may not
   carry walkable, differing houses.
 
