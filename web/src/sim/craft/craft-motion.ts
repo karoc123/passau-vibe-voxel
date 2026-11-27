@@ -45,7 +45,9 @@ export const CRAFT = frozen({
   paraglider: frozen({
     yaw: 0.7, yawResponse: 2, // rad/s
     trim: 11, bar: 4.5, brake: 4, // m/s: hands up, on the speed bar (W) adds, braked (S) takes off
-    sink: 1.4, barSink: 1.3, brakeSink: -0.3, turnSink: 1.0, // m/s: trim glide about 8:1
+    // m/s: trim glide about 8:1; W dives steeply (owner 2026-11-27: down fast to a spot, as in a battle royale's drop),
+    // ~2.5:1 at ~6.5 m/s down
+    sink: 1.4, barSink: 5.1, brakeSink: -0.3, turnSink: 1.0,
     response: 1.5, // /s: the speed follows
   }),
 });
@@ -231,7 +233,7 @@ export class CraftMotion {
     }
     // drawn: the pilot swings into a turn, forward on the bar and back on the brakes
     this.bank = follow(this.bank, 0.4 * input.turn, 3, dt);
-    this.pitch = follow(this.pitch, -0.13 * bar + 0.13 * brake, 3, dt);
+    this.pitch = follow(this.pitch, -0.35 * bar + 0.13 * brake, 3, dt);
     return met.some((a) => Math.abs(a) !== 2) ? 'blocked' : 'moving';
   }
 }
