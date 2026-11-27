@@ -49,34 +49,54 @@ function vehicleMeshes(model: readonly Part[], n: number, mats: { body: THREE.Ma
   };
 }
 
-// A car a seated player is drawn in (view/seats.ts) has its cabin opened, so that who sits in it shows; few are near
-// at once. All the others keep the solid cabin: an empty one seen into would change the look of every car of the
-// traffic.
-export const OPEN_CARS = 16;
+// A car a seated player is drawn in (view/seats.ts) has its cabin opened, so that who sits in it shows. All the others
+// keep the solid cabin: an empty one seen into would change the look of every car of the traffic. As many of a type
+// as the server is meant to have players (up to 50), so that a whole round driving cars of one type still shows them all; only
+// those drawn are uploaded.
+export const OPEN_CARS = 50;
 const spans = (a: Part, b: Part) => a[4] < b[4] + b[1] && b[4] < a[4] + a[1] && Math.abs(a[5] - b[5]) < (a[2] + b[2]) / 2;
 // a side window: glass at least as wide as a part of the body it wraps (a windscreen or a visor is narrower and stays)
 const wraps = (g: Part, q: Part) => g[6] === 'glass' && q[6] !== 'glass' && q[0] <= g[0] && spans(q, g);
 // an end wall this thin beside a side window is the windscreen or the rear window: glass too, so who sits in the car
 // shows from ahead and from behind
 const END = 0.3;
-// q without the slab across it at g's height and length: what is below and above it, and before and after it (an
-// end wall thinner than END goes to the glass)
-function carve(q: Part, g: Part, panes: Part[]): Part[] {
+// A thicker end (a van's load space, a camper's living box) is hollowed at the windows' height instead: its sides
+// stay as walls this thick, so that it looks the same from the side, and its end is the window there (in the place of
+// the model's own glass, which would sit in the body below it), open where another part of the body goes on, and
+// closed where neither is.
+const WALL = 0.06;
+const holds = (p: Part, x: number, y: number, z: number) =>
+  Math.abs(x - p[3]) < p[0] / 2 && y > p[4] && y < p[4] + p[1] && Math.abs(z - p[5]) < p[2] / 2;
+// q without the slab across it at g's height and length: what is below and above it, and before and after it
+function carve(q: Part, g: Part, model: readonly Part[], panes: Part[], used: Set<Part>): Part[] {
   const [w, h, l, x, y, z, c] = q, top = y + h, g0 = g[5] - g[2] / 2, g1 = g[5] + g[2] / 2, q0 = z - l / 2, q1 = z + l / 2;
   const lo = Math.max(y, g[4]), hi = Math.min(top, g[4] + g[1]), out: Part[] = [];
   if (lo > y) out.push([w, lo - y, l, x, y, z, c]);
   if (top > hi) out.push([w, top - hi, l, x, hi, z, c]);
-  if (g0 > q0) (g0 - q0 < END ? panes : out).push([w, hi - lo, g0 - q0, x, lo, (q0 + g0) / 2, c]);
-  if (q1 > g1) (q1 - g1 < END ? panes : out).push([w, hi - lo, q1 - g1, x, lo, (g1 + q1) / 2, c]);
+  // the end from a to b, its outer face at face, outwards s
+  const end = (a: number, b: number, face: number, s: number) => {
+    const piece: Part = [w, hi - lo, b - a, x, lo, (a + b) / 2, c];
+    if (b - a < END) return void panes.push(piece);
+    const glass = model.find((e) => e[6] === 'glass' && e[2] < END && Math.abs(e[5] - face) < e[2] && e[4] < hi && lo < e[4] + e[1]
+      && Math.abs(e[3] - x) < (e[0] + w) / 2);
+    const goesOn = model.some((p) => p[6] !== 'glass' && !holds(p, x, y + h / 2, z) && holds(p, x, (lo + hi) / 2, face + s * 0.05));
+    if (!glass && !goesOn) return void out.push(piece);
+    for (const side of [-1, 1]) out.push([WALL, hi - lo, b - a, x + side * (w - WALL) / 2, lo, (a + b) / 2, c]);
+    if (glass) { panes.push([w, hi - lo, glass[2], x, lo, glass[5], 'glass']); used.add(glass); }
+  };
+  if (g0 > q0) end(q0, g0, q0, -1);
+  if (q1 > g1) end(g1, q1, q1, 1);
   return out;
 }
 const inside = (a: Part, b: Part) => Math.abs(a[3] - b[3]) < (a[0] + b[0]) / 2 && spans(a, b);
 /** a model's parts with its side windows cut out of the body behind them, and the glass: those windows, the end
- * walls beside them, and any glass with no body behind it any more (a windscreen before an opened end, a bus's band) */
+ * walls or end windows beside them, and any glass with no body behind it any more (a windscreen before an opened end,
+ * a bus's band) */
 function opened(model: readonly Part[]): { parts: Part[]; panes: Part[] } {
-  const sides = model.filter((g) => model.some((q) => wraps(g, q))), panes = [...sides];
+  const sides = model.filter((g) => model.some((q) => wraps(g, q))), panes = [...sides], used = new Set<Part>();
   let parts = model.filter((p) => !sides.includes(p));
-  for (const g of sides) parts = parts.flatMap((q) => (wraps(g, q) ? carve(q, g, panes) : [q]));
+  for (const g of sides) parts = parts.flatMap((q) => (wraps(g, q) ? carve(q, g, model, panes, used) : [q]));
+  parts = parts.filter((p) => !used.has(p));
   const free = parts.filter((g) => g[6] === 'glass' && !parts.some((q) => q[6] !== 'glass' && inside(g, q)));
   return { parts: parts.filter((p) => !free.includes(p)), panes: [...panes, ...free] };
 }

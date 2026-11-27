@@ -67,5 +67,3 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - The own craft run ahead (prediction) does not feel solid things (cars, other crafts) nor tell its own events: the
   host's correction and its events come a round trip later.
 - Not measured: does tile streaming keep up with the floatplane at ~245 km/h.
-- Seated players: a car is opened only while a player sits in it (16 per type); the van's ends and the camper's
-  back stay solid (thick walls, not glass).
