@@ -43,9 +43,9 @@ export interface Ride extends Picked {
 }
 export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean }
 
-// On foot the camera stands a step from walls: the walk's side probes keep 0.4 m, less in a doorway or a narrow
-// aisle. The map camera's near plane (0.5 m, main.ts) cut into them there; on foot it comes in to WALK_NEAR -- its
-// frustum's corners ~0.33 m out at the walk's field of view -- and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
+// On foot the camera stands a step from walls: the eyes keep 0.4 m from what is drawn of them (walk.ts eyeRoom). The
+// map camera's near plane (0.5 m, main.ts) cut into them there; on foot it comes in to WALK_NEAR -- its frustum's
+// corners ~0.33 m out at the walk's field of view, inside the 0.4 m -- and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
 // (near x 2^24), is then 2.5 x coarser than the map camera's, as the drone's has always been.)
 const WALK_NEAR = 0.2;
 

@@ -189,5 +189,11 @@ function clearOf(world: World, base: THREE.Vector3, pos: THREE.Vector3, up: numb
     if (clear(p)) return p;
   }
   const d = pos.clone().sub(eye), L = d.length(), t = world.raycast(eye, d.divideScalar(L), L);
-  return eye.addScaledVector(d, Math.min(L, Math.max(minDist, t - 0.8)));
+  if (t - 0.8 >= minDist) return eye.addScaledVector(d, Math.min(L, t - 0.8));
+  // backed up to a wall: kept minDist out the camera stood in it or behind it, and the view went on through the wall;
+  // so in front of it (0.8 m: the near plane's corners ~0.7 m out), raised over the car as far as is clear
+  const p = eye.addScaledVector(d, Math.max(0, t - 0.8));
+  p.y += Math.max(0, Math.min(base.y + up - p.y, world.raycast(p, UP, up + 1) - 0.8));
+  return p;
 }
+const UP = new THREE.Vector3(0, 1, 0);
