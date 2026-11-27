@@ -58,8 +58,9 @@ export class WeaponsView {
     this.kick = 1;
   }
 
-  /** the frame's events and effects; avatars: the others on foot as drawn, each given the gun in their hand */
-  update(dt: number, avatars: readonly ArmedAvatar[] = []) {
+  /** the frame's events and effects; avatars: the others on foot as drawn, each given the gun in their hand; eye:
+   * where the frame is seen from */
+  update(dt: number, avatars: readonly ArmedAvatar[], eye: THREE.Vector3) {
     const C = this.client;
     for (const e of C.eventsSince(this.seen)) {
       if (!('weapon' in e)) continue;
@@ -69,7 +70,7 @@ export class WeaponsView {
       this.views.get(e.weapon)?.event(fromMuzzle ? { ...e, at: this.muzzle!.clone() } as WeaponEvent : e, own);
     }
     this.seen = C.tick;
-    for (const v of this.views.values()) v.update(dt);
+    for (const v of this.views.values()) v.update(dt, eye);
     this.kick *= Math.exp(-RECOIL_BACK * dt);
     this.carry(avatars);
   }

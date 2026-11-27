@@ -13,7 +13,8 @@ export interface WeaponView {
   event(e: WeaponEvent, own: boolean): void;
   /** the page's player pulled the trigger and the host will be asked: drawn at once, from the muzzle along dir */
   fired(muzzle: THREE.Vector3, dir: THREE.Vector3): void;
-  update(dt: number): void;
+  /** eye: where the frame is seen from */
+  update(dt: number, eye: THREE.Vector3): void;
   /** a new model of the gun in the hand (m): the hand at its origin, the barrel along +z, up +y */
   model(): THREE.Object3D;
 }

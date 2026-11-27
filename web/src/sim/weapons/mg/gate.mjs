@@ -109,17 +109,18 @@ check(edits === 0, 'no node of the world edited');
 const THREE = await imp('node_modules/three/build/three.module.js');
 const { WeaponsView } = await imp('src/view/weapons/weapons-view.ts');
 const scene = new THREE.Scene(), v = new WeaponsView(scene, B.c);
+const VIEW_EYE = new THREE.Vector3();
 const shown = () => { let k = 0; scene.traverse((o) => { if (o.visible && (o.isMesh || o.isPoints) && (o.isPoints ? o.geometry.drawRange.count > 0 : true)) k++; }); return k; };
 const before = shown();
 B.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: 5, y: 0, z: 6, h: 0, moving: false } } });
-tick(); v.update(1 / 60);
+tick(); v.update(1 / 60, [], VIEW_EYE);
 A.c.send({ kind: 'request', request: { kind: 'walk', pose: { x: 0, y: 0, z: 0, h: 0, moving: false } } });
-tick(); tick(); v.update(1 / 60);
+tick(); tick(); v.update(1 / 60, [], VIEW_EYE);
 A.c.send({ kind: 'fire', slot: 1, h: Math.PI / 2, pitch: 0 });
 tick();
-v.update(1 / 60);
+v.update(1 / 60, [], VIEW_EYE);
 const during = shown();
-for (let i = 0; i < 60; i++) v.update(1 / 60);
+for (let i = 0; i < 60; i++) v.update(1 / 60, [], VIEW_EYE);
 check(during > before && shown() === before, `the view draws a shot of another player (${during - before} things shown) and lets it go`);
 
 // a fresh part of the world: a wall 2 m thick at x 200..202, ground up to y 5; the player put down 30 m before it,

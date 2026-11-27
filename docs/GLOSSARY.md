@@ -106,6 +106,9 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Leash**: how far an NPC follows or searches from its post. **Alarm**: an NPC that notices a player telling its
   squad.
 - **Spread**: how far an NPC's aim strays from where it aims, more the further off.
+- **Incoming fire**: a shot or blast that met the page's player (a **hit**: their body or the vehicle they sit in) or
+  passed close (a **near miss**), read by their page from the host's events. **Arc**: its mark on a ring round the
+  screen's middle, towards where it came from as the view looks. Not "damage indicator".
 - **Dead**: an NPC at 0: lies where it fell, no target and no body to shots, taken away after a while. A player is
   down, never dead.
 - **Walkable grid**: the host's cells, a metre each, round an NPC, each with the floor a walker stands on there (or

@@ -4,13 +4,16 @@ import { boxModel, type WeaponEvent, type WeaponView } from '../weapon-view';
 // A tracer is drawn slower than a bullet flies: at 900 m/s it would cross a street in a frame and never be seen.
 const TRACER_V = 350, TRACER_L = 3, TRACER_W = 0.05, TRACERS = 48;
 const FLASH_S = 0.05, FLASHES = 16;
+// Fire from afar must be traced back to its gun: a tracer and a flash are never thinner than FAR_W of their distance
+// from the eye (a few pixels), and another's tracer is a long streak, its flash held longer, where the own would blind.
+const FAR_W = 0.0025, THEIR_L = 14, THEIR_FLASH_S = 0.12;
 const SPARKS = 512, SPARKS_PER_HIT = 10, SPARK_S = 0.35, SPARK_V = 5, GRAVITY = 12;
 
 const glow = (color: number) => new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
 
 // (hit: sparks where it ends, once its head is there)
-interface Tracer { mesh: THREE.Mesh; from: THREE.Vector3; dir: THREE.Vector3; len: number; s: number; hit: boolean }
-interface Flash { mesh: THREE.Mesh; t: number }
+interface Tracer { mesh: THREE.Mesh; from: THREE.Vector3; dir: THREE.Vector3; len: number; s: number; hit: boolean; tail: number }
+interface Flash { mesh: THREE.Mesh; t: number; r: number }
 
 /** the machine gun's look: a flash at the muzzle, a tracer down the shot, sparks where it stopped */
 export function mgView(): WeaponView {
@@ -22,13 +25,13 @@ export function mgView(): WeaponView {
     mesh.visible = false;
     mesh.frustumCulled = false;
     group.add(mesh);
-    tracers.push({ mesh, from: new THREE.Vector3(), dir: new THREE.Vector3(), len: 0, s: Infinity, hit: false });
+    tracers.push({ mesh, from: new THREE.Vector3(), dir: new THREE.Vector3(), len: 0, s: Infinity, hit: false, tail: TRACER_L });
   }
   for (let i = 0; i < FLASHES; i++) {
     const mesh = new THREE.Mesh(ball, flashMat);
     mesh.visible = false;
     group.add(mesh);
-    flashes.push({ mesh, t: 0 });
+    flashes.push({ mesh, t: 0, r: 0 });
   }
   // the sparks: position, velocity and age per spark, drawn as points
   const pos = new Float32Array(SPARKS * 3), vel = new Float32Array(SPARKS * 3), age = new Float32Array(SPARKS).fill(Infinity);
@@ -41,15 +44,17 @@ export function mgView(): WeaponView {
   group.add(sparks);
   let nextSpark = 0, nextTracer = 0, nextFlash = 0;
 
-  const flash = (at: THREE.Vector3) => {
+  const flash = (at: THREE.Vector3, secs: number) => {
     const f = flashes[nextFlash++ % FLASHES];
-    f.t = FLASH_S;
+    f.t = secs;
     f.mesh.position.copy(at);
-    f.mesh.scale.setScalar(0.12 + Math.random() * 0.08);
+    f.r = 0.12 + Math.random() * 0.08;
+    f.mesh.scale.setScalar(f.r);
     f.mesh.visible = true;
   };
-  const tracer = (from: THREE.Vector3, to: THREE.Vector3, hit: boolean) => {
+  const tracer = (from: THREE.Vector3, to: THREE.Vector3, hit: boolean, tail: number) => {
     const T = tracers[nextTracer++ % TRACERS];
+    T.tail = tail;
     if (T.hit && T.s < T.len) spark(T.from.clone().addScaledVector(T.dir, T.len), T.dir.clone().negate());
     T.from.copy(from);
     T.len = T.dir.subVectors(to, from).length();
@@ -75,21 +80,26 @@ export function mgView(): WeaponView {
       if (e.kind !== 'shot') return;
       const from = new THREE.Vector3(e.at.x, e.at.y, e.at.z), to = new THREE.Vector3(e.to.x, e.to.y, e.to.z);
       const dir = to.clone().sub(from).normalize();
-      if (!own) flash(from.clone().addScaledVector(dir, 0.6));
-      tracer(from, to, !!e.hit);
+      if (!own) flash(from.clone().addScaledVector(dir, 0.6), THEIR_FLASH_S);
+      tracer(from, to, !!e.hit, own ? TRACER_L : THEIR_L);
     },
-    fired(muzzle, dir) { flash(muzzle.clone().addScaledVector(dir, 0.1)); },
-    update(dt) {
-      for (const f of flashes) if (f.mesh.visible && (f.t -= dt) <= 0) f.mesh.visible = false;
+    fired(muzzle, dir) { flash(muzzle.clone().addScaledVector(dir, 0.1), FLASH_S); },
+    update(dt, eye) {
+      for (const f of flashes) {
+        if (!f.mesh.visible) continue;
+        if ((f.t -= dt) <= 0) f.mesh.visible = false;
+        else f.mesh.scale.setScalar(Math.max(f.r, FAR_W * f.mesh.position.distanceTo(eye)));
+      }
       for (const T of tracers) {
         if (T.s >= T.len) { T.mesh.visible = false; continue; }
         T.s += TRACER_V * dt;
         if (T.s >= T.len && T.hit) spark(T.from.clone().addScaledVector(T.dir, T.len), T.dir.clone().negate());
-        // (the tracer's head along the shot, its tail TRACER_L behind, both kept within the shot)
-        const head = Math.min(T.s, T.len), tail = Math.max(0, head - TRACER_L), L = head - tail;
+        // (the tracer's head along the shot, its tail behind, both kept within the shot)
+        const head = Math.min(T.s, T.len), tail = Math.max(0, head - T.tail), L = head - tail;
         T.mesh.visible = L > 1e-3;
         T.mesh.position.copy(T.from).addScaledVector(T.dir, (head + tail) / 2);
-        T.mesh.scale.set(TRACER_W, TRACER_W, Math.max(L, 1e-3));
+        const w = Math.max(TRACER_W, FAR_W * T.mesh.position.distanceTo(eye));
+        T.mesh.scale.set(w, w, Math.max(L, 1e-3));
         if (T.s >= T.len) T.mesh.visible = false;
       }
       let n = 0;

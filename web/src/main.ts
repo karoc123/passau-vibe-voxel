@@ -49,6 +49,8 @@ import { makeBoardButton, makeCanopyButton, makeJumpButton, makeSeatButton, make
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
+import { makeIncomingHud } from './ui/incoming';
+import { incoming } from './client/incoming';
 import { LEVELS } from './sim/tank';
 import { shake } from './nav/chase-rig';
 import { WeaponsView } from './view/weapons/weapons-view';
@@ -228,7 +230,7 @@ nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
-const armsHud = makeArmsHud(), healthHud = makeHealthHud();
+const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
@@ -519,6 +521,22 @@ function feelHealth(now: number) {
   backSeen = S.tick;
 }
 
+// Fire at the player shown by where it comes from, against the view's heading (the camera's, not the body's: a chase
+// view and a gunner look elsewhere than the vehicle points)
+const lookDir = new THREE.Vector3();
+let fireSeen = 0;
+function showIncoming(now: number) {
+  const S = sim, me = S?.player;
+  if (!S || !me) return;
+  if (fireSeen) {
+    const body = S.seat()?.entity ?? null, at = nav.mapPose();
+    for (const ev of S.eventsSince(fireSeen)) { const i = incoming(ev, { player: me, body, at }); if (i) incomingHud.add(i, now); }
+  }
+  fireSeen = S.tick;
+  camera.getWorldDirection(lookDir);
+  incomingHud.show(camera.position, Math.atan2(lookDir.x, lookDir.z), now);
+}
+
 // the other players near this one as the maps mark them: on foot, at the wheel, flying (the array reused)
 const others: MapMark[] = [];
 function otherPlayers(): readonly MapMark[] {
@@ -605,7 +623,7 @@ renderer.setAnimationLoop(frameLoop({
       life.update(dt, daylight.night, camera.position, camera); // (the viewer: last frame's camera)
     }
     craftsView?.update(sim, dt, daylight.night, nav.craftView);
-    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : []);
+    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : [], camera.position);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
   cameras: (now, dt) => {
@@ -621,6 +639,7 @@ renderer.setAnimationLoop(frameLoop({
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
     feelHealth(now);
+    showIncoming(now);
     boardButton.set((key) => boarding.label(key));
     seatButton.show(boarding.swapLabel());
     touchArms.set(nav.aiming);
