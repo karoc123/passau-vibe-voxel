@@ -69,7 +69,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Crafts and solid things (ADR 0012): cars do not feel crafts (a driven car passes through a parked hovercraft:
   crafts as kinematic bodies in the road physics would fix it); planes, drone and paraglider have no shape.
 - The parked-car cap (8/24) sits beside presence; it goes with presence per cell (target step 6).
-- The worker decodes nodes the page also decodes.
+- Solo, the worker and the page each fetch and decode the nodes round the player (on foot ~60 of the worker's ~80
+  files; 4x CPU throttle): the worker's decoding ~30 ms and its gunzip off the page's thread, its first snapshot 6-8 s
+  before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
 - The own car and boat answer ~15–30 ms later since step 1 (render clock ~0.5 tick behind): prediction (step 7)
   removes it. The world keeps ticking while the tab is hidden.
 - Aircraft wings do not collide. Not measured: does tile streaming keep up with the floatplane at ~245 km/h.

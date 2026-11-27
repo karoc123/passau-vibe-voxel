@@ -23,6 +23,11 @@ export interface TileCacheOptions {
   keep?: number;
 }
 
+// The columns alone, counts and ground copied out of the file: their views would keep the whole file, and the shader's
+// fields with it, which no reader here takes (the mesher reads its own); a node held costs about half
+const columnsOf = ({ counts, ground, runs, planes, bld, rooms, caps, roofCaps }: ReturnType<typeof decodeTile>): Columns =>
+  ({ counts: counts.slice(), ground: ground.slice(), runs, planes, bld, rooms, caps, roofCaps });
+
 interface Entry { refs: number; files: NodeColumns | null; ready: Promise<NodeColumns> }
 
 export class TileCache {
@@ -54,7 +59,7 @@ export class TileCache {
     } else {
       const ready = Promise.all(['1', '1f'].map((s) => this.load(`${s}/${k}.bin`))).then(([b, f]) => {
         this.loads++;
-        const files = { base: decodeTile(b, this.N), foliage: decodeTile(f, this.N) };
+        const files = { base: columnsOf(decodeTile(b, this.N)), foliage: columnsOf(decodeTile(f, this.N)) };
         if (this.entries.get(k) === entry) entry.files = files;
         return files;
       });
