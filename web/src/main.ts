@@ -129,13 +129,13 @@ const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box,
 void serverChoice.then((s) => { dayWeather.online = s !== null; });
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
 const debugBox = menu.section('Debug').box;
-for (const [label, patrol] of [['NPC here: guard', false], ['NPC here: patrol', true]] as const) {
+for (const duty of ['guard', 'patrol', 'lookout'] as const) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'menu-entry';
-  b.textContent = label;
+  b.textContent = `NPC here: ${duty}`;
   b.addEventListener('click', () => {
-    if (sim?.seat()?.role === 'walker') { sim.send({ kind: 'request', request: { kind: 'npc', patrol } }); toast(`NPC put down (${patrol ? 'patrol' : 'guard'})`); }
+    if (sim?.seat()?.role === 'walker') { sim.send({ kind: 'request', request: { kind: 'npc', duty } }); toast(`NPC put down (${duty})`); }
     else toast('NPCs are put down on foot only');
   });
   debugBox.append(b);

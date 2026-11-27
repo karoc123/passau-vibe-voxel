@@ -7,6 +7,8 @@
 - No abstractions "for later": a new abstraction needs a real user now.
 - A review ends in at most five findings, not in packages.
 - A gate guards something a player would notice, or the data format.
+- A bug fixed gets a guard over its whole class (every type, model or case like it), so it cannot come back
+  unnoticed: a gate, an assertion, or a type the compiler checks. One place decides a thing, not each user of it.
 
 ## Docs
 
