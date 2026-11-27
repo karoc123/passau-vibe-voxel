@@ -14,7 +14,7 @@ and [ADR 0013](0013-swimming.md).
   headroom over the floor. A* on it, then the walk follows the way's turning points.
 - An edit that touches a grid makes it stale: the NPC finds its way again at its next tick. So does an NPC that
   makes no headway. A few searches a tick at most; the others wait a tick.
-- An NPC is seen as an avatar, as another player on foot is: nothing new on the wire or on the page.
+- An NPC is drawn as an avatar, as another player on foot is (on the wire a sample of its own: ADR 0018).
 
 ## Why
 
@@ -29,4 +29,4 @@ and [ADR 0013](0013-swimming.md).
 - A cell takes the level the search comes to it on: under a bridge, a way finds the street or the deck, not both.
 - The grid's step rule is the walk's on land; out of water it is stricter than the walk (a bank a swimmer could
   climb may be missed).
-- NPCs are not yet lives (no health), have no behaviour and are made only by the host's own calls.
+- An NPC's behaviour, health and placing: ADR 0018.

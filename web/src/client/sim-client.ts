@@ -537,8 +537,8 @@ export class MirrorSimClient implements SimClient {
 
 /** a snapshot as the client holds it: all its cars and people, each as last sampled, and all the cars out of the
  * traffic, bodies and avatars it holds (TrafficMirror read) */
-export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'boats' | 'avatars' | 'bodies'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
-  riders: Sampled<PersonState>[]; boats: BoatView | null; avatars: AvatarState[]; bodies: [number, BodyDraw][] };
+export type Taken = Omit<Snapshot, 'cars' | 'people' | 'riders' | 'boats' | 'avatars' | 'bodies' | 'detached'> & { cars: Sampled<CarState>[]; people: Sampled<PersonState>[];
+  riders: Sampled<PersonState>[]; boats: BoatView | null; avatars: AvatarState[]; bodies: [number, BodyDraw][]; detached: CarState[] };
 
 // A correction (a new sample of a car where the one before was reckoned elsewhere) is blended out over BLEND_S s, eased
 // in and out (an exponential's first frame would be a kick); one over SNAP m (a car put elsewhere) is not

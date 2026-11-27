@@ -15,11 +15,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   boards with a player's commands and fires a player's weapons; once aboard, a vehicle's own AI may steer instead.
   Perception (sight lines, noise) built in small steps. A helicopter lands only where there is room (from the data).
   Wind and weather noted for later. "Only on foot" needs no block: it follows from landing room and vehicles' size.
-  Order (the owner leaves it to us): NPCs on foot (patrol, attack, sight; hearing after; the walk on the host and
-  way finding built, ADR 0017: left a way to place one in play, NPCs as lives, their bytes, ~4.5 kB/s raw each
-  walking); then (owner 2026-11-27) a fuel tank (no refuelling yet); seat tools: a gunner, its concept first (no
-  scout: anyone can mark already); NPCs in vehicles only once enemies on foot have been seen and played; zones: the
-  concept to be talked through first (a helicopter lands anywhere today). Health and
+  Order (the owner leaves it to us): NPCs on foot (built, ADR 0017, 0018: guard or patrol, sight, MG, search, lives,
+  their samples; left: hearing, cover, a field of view, players in vehicles as targets, where a mode puts them, the
+  numbers tried in play); then (owner 2026-11-27) a fuel tank (no refuelling yet); seat tools: a gunner, its concept
+  first (no scout: anyone can mark already); NPCs in vehicles only once enemies on foot have been seen and played;
+  zones: the concept to be talked through first (a helicopter lands anywhere today). Health and
   damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
@@ -47,10 +47,10 @@ only); meadows and roofs are never smoothed; the world ticks at 30 Hz.
   needs AgentWire to keep what a snapshot leaves out. Cars given back refill slowly (from sources).
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
   player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
-  16 at the cathedral 13–16 (`load` holds 20). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
+  16 at the cathedral 13–15 after the 1500 craters of its sustained run (`load` holds 20; it had crept to 18–19.5). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
   the city 5–6 with a worst second of 8–11 (`drive-bytes` holds 20 / 50); a cell coming into the circle shows no peak.
-  What is left is every tick's moving bodies (~5 kB/s raw each: the traffic within 60 m of a crater) and a driven or
-  hit car's whole state beside its body every tick (~1). Not measured: a busy square, a late joiner after many
+  What is left is every tick's moving bodies (the most of a round's bytes: the traffic within 60 m of a crater and
+  the driven cars). Not measured: a busy square, a late joiner after many
   craters (a node's whole op list), a phone on 4G. Binary only after a Pi measurement.
 - Host tick under sustained fire (16 launchers by the cathedral, 150 s): p50 ~6, p95 ~13, p99 ~16 ms. What is left
   of it is the shots' flight and traces (~2 ms a tick) and deflating the snapshots (~6 s of the 150); measured on a

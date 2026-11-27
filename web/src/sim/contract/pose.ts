@@ -6,7 +6,9 @@ export interface Pose { x: number; y: number; z: number; h: number }
  * input (contract/commands.ts SeatInput); arm: the weapon slot in their hand, the page's word (only drawn: the others
  * see that gun on the avatar); swim: afloat in deep water, the page's word too (drawn swimming, the soles FLOAT under
  * the water's top: nav/foot.ts) */
-export interface WalkPose extends Pose { moving: boolean; arm?: number; swim?: boolean; roof?: RoofSpot }
+export interface WalkPose extends Pose { moving: boolean; arm?: number; swim?: boolean; roof?: RoofSpot;
+  /** lying where it fell (a dead NPC) */
+  down?: boolean }
 /** where on a solid thing's roof the walker stands, as its page saw the thing: the thing's id (sim/solids.ts Solid),
  * v across and u along it from its middle, y over its roof. The page sees a moving car or train a round trip late; the
  * host puts the walker there on the thing as it has it (only in a walker's input: the host keeps its own pose) */

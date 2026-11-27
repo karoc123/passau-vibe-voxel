@@ -32,6 +32,7 @@ export function sandbox(opts: { edits?: boolean } = {}): GameMode {
         case 'dropCraft': { const c = w.craftOf(player); if (c) w.removeCraft(c.id); return !!c; }
         case 'walk': return w.walk(player, r.pose);
         case 'setTime': w.setTime(r.hour, r.day); return true;
+        case 'npc': return w.addNpc(player, !!r.patrol);
       }
     },
   };

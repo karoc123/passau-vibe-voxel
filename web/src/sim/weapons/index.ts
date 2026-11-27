@@ -8,3 +8,6 @@ const WEAPONS: readonly Weapon[] = [mg, launcher];
 
 /** the weapon in slot (1..SLOTS), or null: an empty slot */
 export const weaponIn = (slot: number): Weapon | null => WEAPONS.find((w) => w.slot === slot) ?? null;
+
+/** the weapon of id, or null */
+export const weaponById = (id: string): Weapon | null => WEAPONS.find((w) => w.id === id) ?? null;

@@ -125,6 +125,19 @@ const gfxSection = menu.section('Graphics');
 // the menu's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
 const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
 void serverChoice.then((s) => { dayWeather.online = s !== null; });
+// the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
+const debugBox = menu.section('Debug').box;
+for (const [label, patrol] of [['NPC here: guard', false], ['NPC here: patrol', true]] as const) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'menu-entry';
+  b.textContent = label;
+  b.addEventListener('click', () => {
+    if (sim?.seat()?.role === 'walker') { sim.send({ kind: 'request', request: { kind: 'npc', patrol } }); toast(`NPC put down (${patrol ? 'patrol' : 'guard'})`); }
+    else toast('NPCs are put down on foot only');
+  });
+  debugBox.append(b);
+}
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;

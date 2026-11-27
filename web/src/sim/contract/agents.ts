@@ -106,8 +106,11 @@ export interface BodyDraw {
   fade: { dx: number; dy: number; dz: number; dh: number; t: number; dur: number } | null;
 }
 /** a body's draw as a snapshot carries it (sim/agent-wire.ts): p0 left out when it is the p1 sent before (a moving
- * body's last pose); a fade's t is that at the snapshot's tick, sent again only when it does not run on with the ticks */
-export type BodyWire = Omit<BodyDraw, 'p0'> & { p0?: BodyPose | null };
+ * body's last pose); a fade's t is that at the snapshot's tick, sent again only when it does not run on with the ticks;
+ * a pose's largest quaternion part left out, the others signed so it is positive (the page works it out) */
+export type BodyWire = Omit<BodyDraw, 'p0' | 'p1'> & { p0?: SlimPose | null; p1: SlimPose | null };
+type Quat = 'qx' | 'qy' | 'qz' | 'qw';
+export type SlimPose = Omit<BodyPose, Quat> & Partial<Pick<BodyPose, Quat>>;
 
 /** a ship or a boat on the river (sim/boat-traffic.ts) */
 export interface BoatPose {

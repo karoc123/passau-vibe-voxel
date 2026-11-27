@@ -7,17 +7,23 @@
 // and the avatars are sent when they change, a body come to rest once (else every shot's bodies and wrecks were sent
 // whole every tick for as long as they lay near: 7 bodies were 57 kB/s). A craft likewise: one standing where the host
 // placed it would otherwise cost its whole state every tick to everyone near. No three.js, no DOM.
-import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire } from './contract/agents';
+import type { BoatPose, BoatsWire, BoatView, BodyDraw, BodyPose, BodyWire, CarState, CarWire, PersonState, PersonWire, SlimPose } from './contract/agents';
 import type { VehicleId } from './contract/ids';
 import type { RoadPose, WalkPose } from './contract/pose';
-import type { AvatarState, AvatarWire, CarBody, CraftState, HealthWire, PlayerReads, Snapshot } from './contract/snapshot';
+import { NPC_ARM, NPC_ARMED, NPC_DOWN, NPC_MOVING, NPC_SWIM, type AvatarState, type AvatarWire, type CarBody, type CraftState, type DetachedWire, type HealthWire,
+  type NpcWire, type PlayerReads, type Snapshot } from './contract/snapshot';
 import { PH_RIDE, PH_WALK, STEP } from './road-net';
+
+// an NPC's heading may turn by TURN rad before it is sent again; far, it is sent every FAR_TICKS-th tick at most, when
+// it drifted past FAR_DRIFT m or turned FAR_TURN rad (a figure a few pixels tall)
+const TURN = 0.1, FAR_TICKS = 15, FAR_DRIFT = 0.5, FAR_TURN = 0.3;
 
 /** v rounded to 1/k (k a power of ten): cm for lengths, cm/s for speeds; -0 as 0 so JSON writes no sign */
 export const round = (v: number, k: number) => Math.round(v * k) / k + 0;
 const CM = 100, MM = 1000;
-// a quaternion's parts and an angle in rad: 1e-5 turns a body 5 m long by under 0.1 mm
-const Q = 1e5, RAD = 1e4;
+// a quaternion's parts and an angle in rad: 1e-4 turns a body 5 m long by under a mm, as its place is rounded (the
+// fifth digit of every moving body's four parts every tick was ~1 kB/s a player under fire)
+const Q = 1e4, RAD = 1e4;
 
 /** the ticks between the drifts sent (a way changed, one new or gone: at once) */
 export const AGENT_TICKS = 3;
@@ -67,21 +73,34 @@ export class AgentWire {
   private readonly cars = new Map<number, CarSent>();
   private readonly people = new Map<number, PersonSent>();
   private readonly boats = new Map<number, { gen: number; pose: BoatPose }>();
-  private readonly detached = new Map<number, { gen: number; key: string }>();
+  private readonly detached = new Map<number, { gen: number; sent: Record<string, unknown> }>();
   private readonly bodies = new Map<number, BodySent>();
   private readonly avatars = new Map<number, { gen: number; player: string; pose: WalkPose; prev: WalkPose }>();
   private readonly crafts = new Map<number, { gen: number; key: string }>();
+  private readonly npcs = new Map<number, { gen: number; w: NpcWire; tick: number }>();
   private gen = 0;
   private playerKey = '';
   // the health sent of each life the client holds below its max, by key
   private readonly lives = new Map<string, number>();
 
-  /** a car out of the traffic (as sent: sim/server/snapshot.ts carState), or null when unchanged */
-  detachedCar(c: CarState): CarState | null {
-    const key = JSON.stringify(c), h = this.detached.get(c.id);
-    if (h?.key === key) { h.gen = this.gen; return null; }
-    this.detached.set(c.id, { gen: this.gen, key });
-    return c;
+  /** a car out of the traffic (as sent: sim/server/snapshot.ts carState) at tick: whole when new to the client, then
+   * only what changed (a driven car's whole state every tick was ~1 kB/s more a player), or null. One drawn from its
+   * moving body (moving) has its pose and speed sent only every AGENT_TICKS-th tick, as a car of the traffic's sample
+   * is: what reads them then is a page's prediction meeting it, and its pose beside its body's was ~1.5 kB/s more */
+  detachedCar(c: CarState, tick: number, moving = false): DetachedWire | null {
+    const h = this.detached.get(c.id), now = c as unknown as Record<string, unknown>;
+    if (!h) { this.detached.set(c.id, { gen: this.gen, sent: { ...now } }); return c; }
+    h.gen = this.gen;
+    const out: Record<string, unknown> = { id: c.id }, was = h.sent, later = moving && tick % AGENT_TICKS !== 0;
+    let n = 0;
+    for (const k in now) {
+      const v = now[k], w = was[k];
+      if (v === w || (later && UNDER_WAY.has(k)) || (typeof v === 'object' && v && w && JSON.stringify(v) === JSON.stringify(w))) continue;
+      out[k] = v ?? null;
+      was[k] = v;
+      n++;
+    }
+    return n ? out as DetachedWire : null;
   }
 
   /** a craft as sent (key: its state's string), or null when unchanged */
@@ -99,13 +118,13 @@ export class AgentWire {
   body(id: number, d: BodyDraw, tick: number): BodyWire | null {
     const h = this.bodies.get(id), p = d.p1, f = d.fade;
     const rest = p && d.p0 && !f && !d.drive?.fall && still(d.p0, p) ? p : null;
-    const w: BodyWire = rest ? { ...d, p0: rest } : { ...d };
+    const w: Omit<BodyDraw, 'p0'> & { p0?: BodyPose | null } = rest ? { ...d, p0: rest } : { ...d };
     // (at rest: what it is besides its pose; else the whole draw, a fade by the tick it began)
     const key = rest ? `${d.owns} ${d.body} ${d.drive?.wheelZ}` : JSON.stringify({ ...w, fade: f && { ...f, t: Math.round(tick - f.t / STEP) } });
     if (h && h.key === key && (!rest || (h.rest && still(h.rest, rest)))) { h.gen = this.gen; return null; }
     this.bodies.set(id, { gen: this.gen, key, rest, p1: w.p1 });
     if (h?.p1 && w.p0 && samePose(h.p1, w.p0)) delete w.p0;
-    return w;
+    return { ...w, ...(w.p0 !== undefined ? { p0: w.p0 && slim(w.p0) } : {}), p1: w.p1 && slim(w.p1) };
   }
 
   /** the session's player's reads, or undefined when they are those sent before and it has no results */
@@ -147,6 +166,25 @@ export class AgentWire {
     }
     this.avatars.set(a.id, { gen: this.gen, player: a.player, pose, prev });
     return { id: a.id, player: a.player, pose, prev };
+  }
+
+  /** an NPC at tick (pose, and prev the tick before: its velocity), or null while the client's reckoning of the
+   * sample sent before holds: within DRIFT, turned less than TURN rad, doing the same. Far (past the page's close
+   * look), only every FAR_TICKS-th tick, by FAR_DRIFT. One standing is not sent at all */
+  npc(id: number, pose: WalkPose, prev: WalkPose, tick: number, far: boolean): NpcWire | null {
+    const flags = (pose.moving ? NPC_MOVING : 0) | (pose.swim ? NPC_SWIM : 0) | (pose.down ? NPC_DOWN : 0) | (pose.arm === NPC_ARM ? NPC_ARMED : 0);
+    const w: NpcWire = [id, Math.round(pose.x * CM), Math.round(pose.y * CM), Math.round(pose.z * CM), Math.round(pose.h * 1000),
+      Math.round((pose.x - prev.x) / STEP * CM), Math.round((pose.z - prev.z) / STEP * CM), flags];
+    const h = this.npcs.get(id);
+    if (h && h.w[7] === flags) {
+      h.gen = this.gen;
+      const o = h.w, dt = (tick - h.tick) * STEP, err = (Math.hypot(o[1] + o[5] * dt - w[1], o[3] + o[6] * dt - w[3]) + Math.abs(o[2] - w[2])) / CM;
+      const dh = Math.abs(Math.atan2(Math.sin((w[4] - o[4]) / 1000), Math.cos((w[4] - o[4]) / 1000))), dv = Math.hypot(w[5] - o[5], w[6] - o[6]) / CM;
+      if (far ? tick % FAR_TICKS !== 0 || (err <= FAR_DRIFT && dh <= FAR_TURN)
+        : err + dv * STEP <= URGENT && (tick % AGENT_TICKS !== 0 || (err + dv * AHEAD <= DRIFT && dh <= TURN))) return null;
+    }
+    this.npcs.set(id, { gen: this.gen, w, tick });
+    return w;
   }
 
   car(c: CarState, tick: number): CarWire | null {
@@ -199,8 +237,8 @@ export class AgentWire {
   /** the snapshot's end: the ids of the cars, people, boats, cars out of the traffic, bodies, avatars and crafts it no
    * longer holds */
   done(): Snapshot['gone'] {
-    const gone: Snapshot['gone'] = [[], [], [], [], [], [], []];
-    [this.cars, this.people, this.boats, this.detached, this.bodies, this.avatars, this.crafts].forEach((M: Map<number, { gen: number }>, i) => {
+    const gone: Snapshot['gone'] = [[], [], [], [], [], [], [], []];
+    [this.cars, this.people, this.boats, this.detached, this.bodies, this.avatars, this.crafts, this.npcs].forEach((M: Map<number, { gen: number }>, i) => {
       for (const [id, h] of M) if (h.gen !== this.gen) { M.delete(id); gone[i].push(id); }
     });
     this.gen++;
@@ -233,6 +271,8 @@ export class AgentRead {
   constructor(private readonly L: (road: number) => number) {}
 
   private readonly held = { detached: new Held<CarState>(), avatars: new Held<AvatarState>(), crafts: new Held<CraftState>() };
+  // the NPCs' last samples, by id, with the tick of the snapshot that sent each
+  private readonly npcs = new Map<number, { w: NpcWire; at: number }>();
   // the bodies as sent, by car id, with the tick of the snapshot that sent each (a fade's t runs on from it)
   private readonly bodies = new Map<number, { d: BodyDraw; at: number }>();
   private bodyList: [number, BodyDraw][] = [];
@@ -243,18 +283,26 @@ export class AgentRead {
     this.cars.clear(); this.people.clear(); this.boats.clear();
     this.carList = []; this.lists = [[], []]; this.boatList = [];
     for (const h of Object.values(this.held)) h.clear();
+    this.npcs.clear();
     this.bodies.clear(); this.bodyList = []; this.fades = 0;
   }
 
   /** the cars out of the traffic, the bodies, the avatars and the crafts after a snapshot (s: its changed ones and gone) */
-  readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'crafts' | 'gone'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[];
+  readHeld(s: Pick<Snapshot, 'tick' | 'detached' | 'bodies' | 'avatars' | 'crafts' | 'gone' | 'npcs'>): { detached: CarState[]; bodies: [number, BodyDraw][]; avatars: AvatarState[];
     crafts: CraftState[] } {
-    const H = this.held, A = H.avatars;
+    const H = this.held, A = H.avatars, N = this.npcs;
+    for (const id of s.gone[7] ?? []) N.delete(id);
+    for (const w of s.npcs ?? []) N.set(w[0], { w, at: s.tick });
+    const npcs: AvatarState[] = [];
+    // (an NPC is drawn as an avatar between where its sample reckons it a tick before and now)
+    for (const { w, at } of N.values()) npcs.push({ id: w[0], player: `npc${w[0]}`, pose: npcPose(w, s.tick - at), prev: npcPose(w, s.tick - 1 - at) });
+    const avatars = A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[5]);
     return {
-      detached: H.detached.read(s.detached.map((c) => [c.id, c]), s.gone[3]),
+      // (keys left out: as before; null: none now)
+      detached: H.detached.read(s.detached.map((c) => [c.id, merged(H.detached.get(c.id), c)]), s.gone[3]),
       bodies: this.readBodies(s.bodies, s.gone[4], s.tick),
       // (prev left out: the pose sent before)
-      avatars: A.read(s.avatars.map((a) => [a.id, { ...a, prev: a.prev ?? A.get(a.id)?.pose ?? a.pose }]), s.gone[5]),
+      avatars: npcs.length ? [...avatars, ...npcs] : avatars,
       crafts: H.crafts.read(s.crafts.map((c) => [c.id, c]), s.gone[6]),
     };
   }
@@ -263,7 +311,10 @@ export class AgentRead {
   private readBodies(changed: [number, BodyWire][], gone: readonly number[], tick: number): [number, BodyDraw][] {
     const M = this.bodies;
     for (const id of gone) M.delete(id);
-    for (const [id, w] of changed) M.set(id, { d: { ...w, p0: w.p0 === undefined ? M.get(id)?.d.p1 ?? w.p1 : w.p0 }, at: tick });
+    for (const [id, w] of changed) {
+      const p1 = w.p1 && full(w.p1), p0 = w.p0 === undefined ? M.get(id)?.d.p1 ?? p1 : w.p0 && full(w.p0);
+      M.set(id, { d: { ...w, p0, p1 }, at: tick });
+    }
     if (!gone.length && !changed.length && !this.fades) return this.bodyList;
     this.fades = 0;
     this.bodyList = [];
@@ -347,6 +398,39 @@ export class AgentRead {
   }
 }
 
+// A body's rotation as sent: its largest part (never under 1/2) left out, the others turned so it is positive (the same
+// rotation): a quarter of a moving body's digits every tick
+const QUAT = ['qx', 'qy', 'qz', 'qw'] as const;
+function slim(p: BodyPose): SlimPose {
+  let big: (typeof QUAT)[number] = 'qw';
+  for (const k of QUAT) if (Math.abs(p[k]) > Math.abs(p[big])) big = k;
+  const o: SlimPose = { ...p }, s = p[big] < 0 ? -1 : 1;
+  for (const k of QUAT) o[k] = s < 0 ? round(-p[k], Q) : p[k];
+  delete o[big];
+  return o;
+}
+function full(p: SlimPose): BodyPose {
+  let sum = 0, gone: (typeof QUAT)[number] = 'qw';
+  for (const k of QUAT) { const v = p[k]; if (v === undefined) gone = k; else sum += v * v; }
+  return p[gone] === undefined ? { ...p, [gone]: Math.sqrt(Math.max(0, 1 - sum)) } as BodyPose : p as BodyPose;
+}
+
+// an NPC's sample reckoned on by ticks (the tick it was sent at: 0; a dead one lies still)
+const npcPose = (w: NpcWire, ticks: number): WalkPose => {
+  const f = w[7], t = f & NPC_DOWN ? 0 : Math.max(-1, ticks) * STEP;
+  return { x: (w[1] + w[5] * t) / CM, y: w[2] / CM, z: (w[3] + w[6] * t) / CM, h: w[4] / 1000, moving: !!(f & NPC_MOVING),
+    ...(f & NPC_SWIM ? { swim: true } : {}), ...(f & NPC_DOWN ? { down: true } : {}), ...(f & NPC_ARMED ? { arm: NPC_ARM } : {}) };
+};
+
+// what of a car out of the traffic changes as it goes (sent less often while its body is drawn)
+const UNDER_WAY = new Set(['detachedPose', 'v', 'brake', 's', 'ds', 'off', 'dOff', 'wait']);
+
+const merged = (was: CarState | undefined, d: DetachedWire): CarState => {
+  const c = { ...was, ...d } as Record<string, unknown>;
+  for (const k in d) if (c[k] === null) delete c[k];
+  return c as unknown as CarState;
+};
+
 // what a client holds of a kind sent when it changes: by id, and as a list (the one before when nothing changed)
 class Held<T> {
   private readonly M = new Map<number, T>();
@@ -365,7 +449,7 @@ const roundPose = (p: BodyPose): BodyPose => ({ x: round(p.x, MM), y: round(p.y,
   qy: round(p.qy, Q), qz: round(p.qz, Q), qw: round(p.qw, Q), ride: round(p.ride, MM),
   ...(p.lean !== undefined && { lean: round(p.lean, RAD) }), ...(p.wheelie !== undefined && { wheelie: round(p.wheelie, RAD) }) });
 
-/** a body's draw state as sent: positions to mm, its rotation to 1e-5 of a quaternion's parts, angles to 1e-4 rad
+/** a body's draw state as sent: positions to mm, its rotation to 1e-4 of a quaternion's parts, angles to 1e-4 rad
  * (a client draws it within a mm or so of where the sim does); a fade's t whole (a ms off is a mm and 1e-3 rad off at
  * the start of a fast fade) */
 export function wireBody(d: BodyDraw): BodyDraw {

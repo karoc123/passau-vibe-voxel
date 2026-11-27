@@ -565,7 +565,8 @@ export class StreetLife {
       const d = this.drawnCars.get(c.id);
       if (d && d.frame === this.frame && by(d.x, d.z)) out.push(solidAt(carShape(c), d, `car${c.id}`));
     }
-    for (const { pose: d } of this.avatars.drawn()) if (by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
+    // (one lying dead is stepped over)
+    for (const { pose: d } of this.avatars.drawn()) if (!d.down && by(d.x, d.z)) out.push(solidAt(AVATAR_SHAPE, d));
     for (const c of this.coaches) if (by(c.x, c.z)) out.push(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }, `coach${c.id}`));
     // (the river's vessels where view/boats.ts draws them: a walker on a jetty meets the boat alongside)
     const B = this.traffic.boats, back = this.back;

@@ -4,6 +4,9 @@ import { Wet } from './swim';
 import { stride } from './walk';
 import { Walker, type WalkWorld } from './walker';
 import { WalkGrid, type WayWorld } from './way';
+import type { Mind } from './npc-mind';
+import { Trigger } from './weapons/weapon';
+import { NPC_ARM } from './contract/snapshot';
 
 // An NPC gives up on a way when it got no nearer the point it walks to by NEAR m in STUCK s, and finds it again; after
 // TRIES such searches in a row it gives up the goal. A search with columns not yet loaded is made again after RETRY s.
@@ -12,6 +15,9 @@ const STUCK = 1.5, NEAR = 0.2, TRIES = 3, RETRY = 1;
 const SEARCHES = 2;
 // m from a point of the way at which the next is walked to; from the goal at which it is reached
 const PASS = 0.5, ARRIVE = 0.35;
+// s a dead NPC lies before it is taken away
+const LIE = 20;
+
 
 /** an NPC on foot: its body (the walk the players' pages run), the goal it walks to and the way found there */
 export interface Npc {
@@ -32,6 +38,12 @@ export interface Npc {
   best: number;
   since: number;
   searched: number;
+  /** its behaviour (none: it only walks where it is sent); the heading it turns to while it stands (null: as it
+   * stopped); its triggers; when it died (s; null: alive) */
+  mind: Mind | null;
+  face: number | null;
+  readonly trigger: Trigger;
+  dead: number | null;
 }
 
 /** the world an NPC walks in: the walk's (its water read from it) */
@@ -49,11 +61,12 @@ export class Npcs {
   private clock = 0;
 
   /** an NPC put down standing at (x, y, z) (y: its soles) */
-  add(id: number, at: { x: number; y: number; z: number }, speed = 4) {
+  add(id: number, at: { x: number; y: number; z: number }, speed = 4, mind: Mind | null = null) {
     const body = new Walker({ x: 0, y: 0, z: 0 }, () => this.world);
     body.fallAt(at, { x: 0, y: 0, z: 0 }, 0);
     const pose: WalkPose = { x: at.x, y: at.y, z: at.z, h: 0, moving: false };
-    this.all.set(id, { id, body, speed, goal: null, way: [], next: 0, grid: null, pose, prev: pose, searches: 0, tries: 0, best: Infinity, since: 0, searched: -Infinity });
+    this.all.set(id, { id, body, speed, goal: null, way: [], next: 0, grid: null, pose, prev: pose, searches: 0, tries: 0, best: Infinity, since: 0, searched: -Infinity,
+      mind, face: null, trigger: new Trigger(), dead: null });
   }
 
   /** npc to walk to goal (null: stand); false: no such NPC */
@@ -62,6 +75,13 @@ export class Npcs {
     if (!n) return false;
     Object.assign(n, { goal, way: [], next: 0, grid: null, searches: 0, tries: 0 });
     return true;
+  }
+
+  /** NPC id dead: it drops where it stands, lies LIE s, then is gone */
+  kill(id: number) {
+    const n = this.all.get(id);
+    if (!n || n.dead !== null) return;
+    Object.assign(n, { dead: this.clock, goal: null, way: [], grid: null, mind: null });
   }
 
   /** box [x0, z0, x1, z1) of the voxels was edited: the grids over it are stale */
@@ -75,7 +95,8 @@ export class Npcs {
     const w = this.world;
     let budget = SEARCHES;
     const search = (n: Npc) => { if (budget > 0) { budget--; this.search(n); } };
-    for (const n of this.all.values()) {
+    for (const n of [...this.all.values()]) {
+      if (n.dead !== null && this.clock - n.dead > LIE) { this.all.delete(n.id); continue; }
       n.prev = n.pose;
       const B = n.body, P = B.pos;
       // (on voxels not yet loaded it would fall through the map)
@@ -96,8 +117,10 @@ export class Npcs {
           if (this.clock - n.since > STUCK && budget > 0) { n.tries++; search(n); }
         }
       }
+      if (!want && n.face !== null) B.yaw = n.face;
       B.move(dt, solids(P.x, P.z), n.speed, (yaw, d) => (want ? stride(yaw, 1, 0, Math.min(d, want)) : null));
-      n.pose = { x: P.x, y: B.feet, z: P.z, h: B.yaw, moving: want > 0, ...(B.swimming ? { swim: true } : {}) };
+      n.pose = { x: P.x, y: B.feet, z: P.z, h: B.yaw, moving: want > 0, ...(B.swimming ? { swim: true } : {}),
+        ...(n.dead !== null ? { down: true } : n.mind ? { arm: NPC_ARM } : {}) };
     }
   }
 
