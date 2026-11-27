@@ -782,6 +782,9 @@ def ground_classes(ctx):
              if (t.get("amenity") == "fountain" or t.get("natural") == "water" or t.get("water")) and not underground(t)]
     _gcol_dry = gcol.copy()  # (the ways' colours under the water: culvert.carry gives them back)
     burn(gcol, water)
+    _wriv = np.zeros((D, W), np.uint8)  # (what OSM maps as the river itself, not a pond beside it)
+    burn(_wriv, [(geom, 1) for oid, typ, t, geom in osm.areas if (t.get("water") in ("river", "canal")
+                 or t.get("waterway") in ("riverbank", "canal")) and not underground(t)])
     # Passau: the Danube's and the Ilz's OSM multipolygons are cut by the map edge and do not close. The rivers from the
     # terrain model instead: flat cells (under 0.3 m of relief in 5 m) within 0.8 m of the rivers' level (aoi.RIVER_LEVEL,
     # the median of the terrain under the water OSM does give, the Inn's), in bodies of 2000 cells or more.
@@ -814,7 +817,10 @@ def ground_classes(ctx):
     # own stretch's -- the DGM over the water is the surface on either side and ramps across the weir, so the cut runs
     # along the weir's middle, not the boxes' staircase. Only the pool's water counts, not its box: a box's edge along a
     # bank (no water of that pool beyond it) cuts nothing, and the bank's cells, nearer the upper level by their DGM,
-    # stay their river's (the loop below the Hals weir: terraces at 298-301 m up the bank over the 296 m river)
+    # stay their river's (the loop below the Hals weir: terraces at 298-301 m up the bank over the 296 m river). The
+    # pools split the sorted levels where they lie WEIR_STEP or more apart: a falling river's stretches (the Ilz's
+    # below the Hals weir) must leave that gap below the pool over its weir, or the Danube's pools above and below
+    # the Kachlet merge into one, a 64 m block of the weir standing at a median between them
     WEIR_STEP, POOL_EDGE = 2.0, 32  # m
     _lvs = sorted({lv_ for _, lv_ in RIVER_STRETCHES} | {RIVER_LEVEL})
     _pool0 = _pool = np.cumsum([0] + [b_ - a_ >= WEIR_STEP for a_, b_ in zip(_lvs, _lvs[1:])])[np.searchsorted(_lvs, _lv64)]
@@ -865,21 +871,42 @@ def ground_classes(ctx):
         _wat[_b[0]:_b[1], _b[2]:_b[3]] = _ww[_bs]
         _bl, _bn = _bodies(_ww, _pool[_ws], _pool0[_ws])
         _ids = np.unique(_bl[_bs][_bl[_bs] > 0])
-        _ids = _ids[np.bincount(_bl.ravel())[_ids] >= 400]
+        # a body under 400 cells is flattened only where it is still water: a pond, a fountain's basin (its ground
+        # within 2 m: a stream's strip falls further and keeps its terrain), or a strip along a water override's outline
+        # (the cells its polygon leaves on the bank, at the override's level: else a rim a voxel over the Inn's pool
+        # above the Ingling dam)
+        _gw, _glw = g[_ws], _gatelv[_ws]
+        _sz = np.bincount(_bl.ravel())[_ids]
+        _lkl = ndimage.grey_dilation(np.where(_lockm[_ws], _locklev[_ws], -1), size=3) if water_overrides else None
+        _small = {}
+        for i_ in _ids[_sz < 400]:
+            _m = _bl == i_
+            _ov = _lkl[_m] if _lkl is not None else ()
+            if len(_ov) and (_ov >= 0).any():
+                _small[i_] = int(np.median(_ov[_ov >= 0]))
+            elif int(_gw[_m].max()) - int(_gw[_m].min()) <= 2:
+                _small[i_] = int(np.median(_gw[_m]))
+        _ids = _ids[(_sz >= 400) | np.isin(_ids, list(_small))]
         if len(_ids):
             _lut = np.full(_bn + 1, -1, np.int32)
-            _gw, _glw = g[_ws], _gatelv[_ws]
             _rl = np.broadcast_to(RIVER_LV, (D, W))[_ws]
+            _wr_ws = _wriv[_ws]
             _river = np.zeros(_bn + 1, bool)
             for i_ in _ids:
+                if i_ in _small:
+                    _lut[i_] = _small[i_]
+                    continue
                 _m = _bl == i_
                 _gt = _glw[_m & (_glw >= 0)]
                 _lut[i_] = int(np.median(_gt)) if len(_gt) else int(np.median(_gw[_m]))
-                # a river's body (its terrain within 1.5 m of its stretch's level) stands at the stretch's level, cell
-                # by cell: the median of the terrain model rounded per 64 m block, over water near x.5 m, put 1 m
-                # cliffs across open water on the blocks' lines (the Danube below the Kachlet, -1664, 763; the
-                # Racklau harbour, its terrain model 1.4 m over the Danube's level, -4000, -1020)
-                _river[i_] = not len(_gt) and abs(float(np.median(dtm[_ws][_m])) - float(np.median(_rl[_m]))) <= 1.5
+                # a river's body (its terrain within 1.5 m of its stretch's level, or within 3 m where OSM maps most
+                # of it as the river) stands at the stretch's level, cell by cell: the median of the terrain model
+                # rounded per 64 m block, over water near x.5 m, put 1 m cliffs across open water on the blocks' lines
+                # (the Danube below the Kachlet, -1664, 763; the Racklau harbour, its terrain model 1.4 m over the
+                # Danube's level, -4000, -1020, and 1.5-2 m along the bank, where in a block's window it outweighed
+                # the open river). A pond beside the river keeps its own level
+                _off = abs(float(np.median(dtm[_ws][_m])) - float(np.median(_rl[_m])))
+                _river[i_] = not len(_gt) and (_off <= 1.5 or (_off <= 3.0 and _wr_ws[_m].mean() >= 0.5))
             _lv = _lut[_bl[_bs]]
             _rv = _river[_bl[_bs]]
             _lv[_rv] = np.floor(_rl[_bs][_rv] - BASE + 0.5).astype(np.int32)

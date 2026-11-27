@@ -5,6 +5,8 @@
 #               printed, not failed)
 #   interiors   scripts/interiors.py --test: the synthetic checks of carving rooms
 #   lanes       scripts/traffic.py --lane-check: the lane spacing the same in traffic.py and web/src/sim/road-net.ts
+#   water       scripts/water_steps.py: no step in the water's top across open water, over the whole map (needs the
+#               map's build, data/ground.npz; steps at weirs and the river stretches' cuts are listed, not failed)
 # --fixture adds scripts/check.py verify: the hard checks on the fixture map's build (builds its workspace
 # data/check/<fixture>/base first where code or inputs changed: ~5 min from nothing, seconds when it is up to date).
 # usage: scripts/check.sh [--fixture]; a PASS / FAIL table with times, exit code 1 if a gate fails
@@ -15,7 +17,7 @@ fixture=0
 for a in "$@"; do
   case "$a" in
     --fixture) fixture=1 ;;
-    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
@@ -35,6 +37,7 @@ gate palette uv run python scripts/palette_check.py
 gate overrides uv run python scripts/overrides.py check
 gate interiors uv run python scripts/interiors.py --test
 gate lanes uv run python scripts/traffic.py --lane-check
+gate water uv run python scripts/water_steps.py --max 0
 if [ $fixture -eq 1 ]; then
   gate fixture-verify uv run python scripts/check.py verify
 fi
