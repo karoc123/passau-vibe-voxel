@@ -6,7 +6,8 @@
 // message LAG ms each way, shows a ping of that round trip, A one near none, a page alone none at all; B's frame cap at
 // 30 holds the frames near 30; A's menu's Back to orbit mode takes A up to orbit mode. A page alone, hidden (its tab
 // in the background, emulated: headless Chrome keeps every page shown), holds its world still and goes on from there
-// when shown again.
+// when shown again; its menu's Graphics set a lower detail (a lower budget, kept over a fresh load) and its Time &
+// weather 22:00 (night).
 // usage (in web/): node tools/menu.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -209,6 +210,29 @@ const h2 = await ticks();
 log(`C hidden: ${JSON.stringify([h0, h1, h2])}`);
 check(h1.tick - h0.tick <= 1 && h2.tick - h1.tick >= 15 && h2.tick - h1.tick <= 45,
   `a page alone, hidden 2 s, holds its world (${h1.tick - h0.tick} ticks) and goes on when shown (${h2.tick - h1.tick} ticks in 1 s)`);
+
+// C's menu: its Graphics and Time & weather; the detail set there takes effect (the triangles' budget) and is kept
+// over a fresh load of the same link (the browser's storage, not the URL); the hour set there moves the sun
+await C.keyboard.press('Escape');
+await C.waitForSelector('#menu:not([hidden])');
+const heads = await C.evaluate(() => [...document.querySelectorAll('#menu details > summary')].map((s) => s.textContent.trim()));
+check(heads.some((t) => t.startsWith('Graphics')) && heads.some((t) => t.startsWith('Time & weather')), `the menu shows Graphics and Time & weather: ${JSON.stringify(heads)}`);
+await C.click('#menu summary:has-text("Graphics")');
+await C.click('#menu .adv summary');
+const g0 = await C.evaluate(() => ({ detail: window.__three.gfx.now.detail, budget: window.__three.budget() }));
+await C.fill('#menu input[name=detail]', '0.3');
+const g1 = await C.evaluate(() => ({ detail: window.__three.gfx.now.detail, budget: window.__three.budget() }));
+await C.click('#menu summary:has-text("Time & weather")');
+const sun0 = await C.evaluate(() => ({ hour: window.__three.daylight.hour, night: window.__three.daylight.night }));
+await C.fill('#menu input[name=hour]', '22');
+await C.waitForTimeout(1500);
+const sun1 = await C.evaluate(() => ({ hour: window.__three.daylight.hour, night: window.__three.daylight.night }));
+log(`C: graphics ${JSON.stringify([g0, g1])}, sun ${JSON.stringify([sun0, sun1])}`);
+check(sun0.night < 0.5 && Math.abs(sun1.hour - 22) < 0.01 && sun1.night > 0.9, `the menu's hour 22:00 (alone) makes it night and holds: ${JSON.stringify([sun0, sun1])}`);
+await C.goto(`http://127.0.0.1:${vitePort}/?play&${Q}`, { timeout: 180000 });
+const g2 = await C.waitForFunction(() => window.__three?.gfx && window.__three.gfx.now.detail, null, { timeout: 60000 }).then((h) => h.jsonValue()).catch(() => null);
+check(g0.detail !== 0.3 && g1.detail === 0.3 && g1.budget < g0.budget && g2 === 0.3,
+  `the menu's detail set to 30 % lowers the budget (${(g0.budget / 1e6).toFixed(1)} M to ${(g1.budget / 1e6).toFixed(1)} M) and is kept over a fresh load (${g2})`);
 await C.context().close();
 
 // the frame cap in the loop itself (app/frame.ts), with a display's frames made up: a headless GPU draws too few

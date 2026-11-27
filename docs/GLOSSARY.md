@@ -11,7 +11,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
   paraglider.
 - **Passenger**: riding along in a car or craft another player drives or flies; steers nothing.
-- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Back to orbit mode, Full screen, Start menu.
+- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 

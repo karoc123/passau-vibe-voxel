@@ -8,7 +8,7 @@ and the Ilz valley up to Hals and its loops; south up the Inn to the Ingling dam
 Austrian bank too; south-west over Auerbach and the Messe to Kohlbruck, the Passauer Erlebnisbad and the Tierheim.
 The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the extent is set in `scripts/map.json`).
 
-The date, the hour and the weather are sliders; cars, trains, pedestrians and bikes move on the
+The date, the hour and the weather are set in the menu (**Esc**); cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
 (`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
@@ -21,7 +21,9 @@ they drive or fly; the name is shown over them too.
 
 **Esc** (or the ☰ button at the bottom right, on a phone) opens the menu in every mode and lets go of the mouse:
 **Resume**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
-default, 30 on a phone; both kept in the browser), **Back to orbit mode** (on foot, riding, in a craft), **Full
+default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
+the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
+are the world's, changed for everyone where its game mode allows it), **Back to orbit mode** (on foot, riding, in a craft), **Full
 screen** (not on an iPhone: its Safari has none for a page) and **Start menu**. An open map or panel closes first.
 The page opens on a start menu: play alone or on a server, the server preselected when `./voxel start` serves the
 page (else the last one chosen). `?server=` or `?play` skips it. With a host the round trip (ping) shows top right.
@@ -394,7 +396,7 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch) |
 | `lifephys=0` | no Rapier bodies for traffic cars near edits (they drive on over a hole; see Driving) |
 | `lpnear=`, `lpmax=` | debug knobs of those bodies: the reach round an edit in m (default 60), the most bodies (default 60) |
-| `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the ⚙ panel), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
+| `res=`, `detail=`, `shadow=`, `ao=`, `bloom=`, `tilt=`, `refl=`, `grade=`, `lod=0\|1\|2\|4\|8`, `lodpx=`, `prepass=`, `occl=`, `dist=`, `taa=` | the graphics settings (the menu's Graphics), each described in `web/src/settings.ts`; the URL wins over what the visitor stored |
 
 Page globals for the console and agent tools (none needed by the viewer): `window.__ready` (first frame drawn),
 `__three` (camera, scene, renderer, daylight, `city()`, `setGfx` …: `main.ts`), `__streamer`, `__sim` (the world sim,

@@ -27,7 +27,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .search li.none { color: var(--t2); cursor: default; white-space: normal; }
 #bar .row { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
 #bar .val { flex: 0 0 140px; color: #fff; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#bar .track, #bar .choices { position: relative; flex: 1; display: flex; align-items: center; height: 16px; }
+#bar .track { position: relative; flex: 1; display: flex; align-items: center; height: 16px; }
 #bar .val .mark { color: var(--t2); margin-left: 4px; }
 #bar input[type=range] { position: absolute; inset: 0; width: 100%; margin: 0; background: none; -webkit-appearance: none; appearance: none; cursor: pointer; }
 #bar input[type=range]::-webkit-slider-runnable-track { height: 2px; background: rgba(255,255,255,.55); border-radius: 1px; box-shadow: 0 0 2px rgba(0,0,0,.6); }
@@ -35,10 +35,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 14px; margin-top: -6px; border-radius: 1px; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.8); position: relative; z-index: 2; }
 #bar input[type=range]::-moz-range-thumb { width: 3px; height: 14px; border: 0; border-radius: 1px; background: #fff; }
 #bar input[type=range]:disabled { opacity: .35; cursor: default; }
-#bar .choices { column-gap: 9px; }
-#bar .choices button { white-space: nowrap; padding: 0; border: 0; background: none; color: var(--t2); font: inherit; cursor: pointer; }
-#bar .choices button:hover, #bar .choices button.on { color: #fff; }
-#bar .sky button:disabled { display: none; }
 /* Driving and flight sit alongside the existing map controls. */
 #bar .mode-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; padding-top: 5px; }
 #bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
@@ -80,26 +76,9 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 #bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
 @media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px - var(--st) - var(--sb))); } }
 @media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
-/* the graphics panel (bar.ts Graphics): folded under a ⚙ row; inside, the presets and an "Advanced" fold */
-#bar .gear { padding-top: 6px; }
-#bar .gear .fold, #bar .adv summary { padding: 0; border: 0; background: none; color: var(--t2); font: inherit; text-shadow: inherit; cursor: pointer; }
-#bar .gear .fold:hover, #bar .gear .fold[aria-expanded=true], #bar .adv summary:hover, #bar .adv[open] summary { color: #fff; }
-#bar .gear .icon { display: inline-block; width: 1em; font-size: 12px; transition: transform .2s; }
-#bar .gear .fold[aria-expanded=true] .icon { transform: rotate(60deg); }
-#bar .gear .mark { color: var(--t2); margin-left: 4px; }
-#bar .gfx { display: none; margin-top: 4px; padding: 2px 8px 6px; border-radius: 6px; background: rgba(16,17,20,.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-#bar .gfx.open { display: block; }
-#bar .adv summary { padding-top: 6px; list-style: none; }
-#bar .adv summary::-webkit-details-marker { display: none; }
-#bar .adv summary::before { content: '▸'; display: inline-block; width: 1em; }
-#bar .adv[open] summary::before { content: '▾'; }
-#bar .dev .val { color: var(--t2); }
-#bar .gfx .note { padding-top: 6px; color: var(--t2); line-height: 1.35; }
 @media (max-width: 600px) { #bar { left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
-@media (max-width: 600px), (max-height: 500px) { #bar .gfx.open { max-height: 55vh; overflow-y: auto; } }
 @media (max-width: 600px), (max-height: 500px) {
   #bar .val { flex-basis: 40%; }
-  #bar .choices { column-gap: 7px; }
   #bar:has(.search li) .row { display: none; }
 }
 @media (max-height: 500px) { #bar { left: calc(8px + var(--sl)); top: calc(8px + var(--st)); width: min(330px, calc(100vw - 16px - var(--sl) - var(--sr))); } }
@@ -127,7 +106,7 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   background: rgba(10,11,13,.45); font: 13px/1.4 Inter, system-ui, sans-serif; color: #eee; }
 .menu[hidden] { display: none; }
 .start-menu { z-index: 30; background: rgba(10,11,13,.25); }
-.menu-card { display: flex; flex-direction: column; gap: 8px; width: min(320px, 100%); max-height: 100%; overflow: auto; padding: 16px;
+.menu-card { display: flex; flex-direction: column; gap: 8px; width: min(360px, 100%); max-height: 100%; overflow: auto; padding: 16px;
   border: 1px solid rgba(255,255,255,.22); border-radius: 8px; background: #202226; }
 .menu-card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .menu-entry { min-height: 40px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; background: #2d3036;
@@ -141,6 +120,25 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .menu input, .menu select { min-width: 0; flex: 1 1 auto; max-width: 190px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.22);
   border-radius: 4px; background: #15171a; color: #fff; font: inherit; }
 .menu .menu-addr { max-width: none; }
+/* the menu's sections (Graphics, Time & weather): each value over its slider or its buttons, big enough for a thumb */
+.menu-more summary .mark { color: rgba(255,255,255,.62); margin-left: 4px; }
+.menu-section { display: flex; flex-direction: column; gap: 6px; padding: 8px 2px 0; font-variant-numeric: tabular-nums; }
+.menu-section .row { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.menu-section .val { color: #fff; font-weight: 500; }
+.menu-section .val .mark { color: rgba(255,255,255,.62); margin-left: 4px; font-weight: 400; }
+.menu-section .track { position: relative; display: flex; align-items: center; height: 32px; }
+.menu .menu-section input[type=range] { width: 100%; max-width: none; margin: 0; padding: 0; border: 0; background: none; accent-color: #6d9bd1; height: 32px; cursor: pointer; }
+.menu .menu-section input[type=range]:disabled { opacity: .35; cursor: default; }
+.menu-section .choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.menu-section .choices button { min-height: 32px; padding: 4px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; background: #2d3036; color: rgba(255,255,255,.8); font: inherit; cursor: pointer; }
+.menu-section .choices button:hover { background: #3a3d44; }
+.menu-section .choices button.on { background: #3b5f8a; border-color: #6d9bd1; color: #fff; }
+.menu-section .sky button:disabled { display: none; }
+.menu-section .dev .val { color: rgba(255,255,255,.62); }
+.menu-section .adv summary { padding: 6px 0; cursor: pointer; color: rgba(255,255,255,.8); }
+.menu-section .adv { display: flex; flex-direction: column; gap: 6px; }
+.menu-section .adv[open] > :not(summary) { margin-bottom: 6px; }
+@media (pointer: coarse) { .menu-section .choices button { min-height: 40px; padding: 6px 12px; } .menu-section .track, .menu .menu-section input[type=range] { height: 40px; } }
 
 /* the other players' names over them */
 #name-tags { position: fixed; inset: 0; pointer-events: none; z-index: 2; }

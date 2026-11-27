@@ -1,7 +1,8 @@
 import { cleanName, NAME_MAX } from '../sim/player-name';
 import { el } from '../util';
 
-// The player's own settings (not the graphics: settings.ts), the Esc menu that holds them, and the start menu.
+// The player's own settings (not the graphics: settings.ts), the Esc menu that holds them and the graphics, the day and
+// the weather (sections of their own), and the start menu.
 
 /** the frame-rate caps offered (0: none, the display's own rate) */
 const FPS_CAPS = [30, 60, 0] as const;
@@ -71,8 +72,8 @@ export interface MenuActions {
   changed(p: Prefs): void;
 }
 
-/** the menu Esc opens (and the ☰ button, for touch): Resume, the settings, back to orbit mode, full screen, the start
- * menu (the page loaded again without its server) */
+/** the menu Esc opens (and the ☰ button, for touch): Resume, the settings and the sections given (section), back to
+ * orbit mode, full screen, the start menu (the page loaded again without its server) */
 export function makeMenu(prefs: Prefs, a: MenuActions) {
   const box = el('div', 'menu', '');
   box.id = 'menu';
@@ -89,6 +90,14 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
   const resume = entry('Resume', (e) => { close(); a.resumed(e.detail > 0 && !(e instanceof PointerEvent && e.pointerType !== 'mouse')); });
   const settings = el('details', 'menu-more', '<summary>Settings</summary>', card);
   const showSettings = settingsFields(prefs, settings, a.changed);
+  let last: HTMLElement = settings;
+  /** a folded section after the others: its body, and a mark beside its title */
+  const section = (title: string) => {
+    const d = el('details', 'menu-more', `<summary>${title} <span class="mark"></span></summary>`, card);
+    last.after(d);
+    last = d;
+    return { box: el('div', 'menu-section', '', d), mark: d.querySelector<HTMLElement>('.mark')! };
+  };
   const orbit = entry('Back to orbit mode', () => { close(); a.toOrbit(); });
   const fs = entry('', () => { toggleFullscreen(); });
   const fsNote = el('div', 'menu-note', 'Full screen: not offered by this browser (on an iPhone, Safari has none for a page).', card);
@@ -134,7 +143,7 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
     if (!isOpen()) open(); else if (performance.now() - openedAt > 300) close();
   });
   box.addEventListener('click', (e) => { if (e.target === box) close(); });
-  return { open, close, isOpen, el: box };
+  return { open, close, isOpen, section, el: box };
 }
 
 // ------------------------------------------------------------------ the start menu
