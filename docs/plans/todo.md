@@ -18,7 +18,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   Order (the owner leaves it to us): the walk on the host with way finding; NPCs on foot (patrol,
   attack, sight; hearing after); NPCs in vehicles; zones (landing room, air defence); fuel; seat tools. Health and
   damage built (ADR 0015); left of it: a wrecked craft's look (a car's is charred), the crowd not harmed, the
-  numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built (ADR 0016);
+  numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
+  the owner, expect changes);
   left of it: cars at the mapped car parks too, a crater under an asleep craft, the draw cost of a dozen standing
   crafts on the phone, the numbers (wake 400 m, refill 300 s) tried in play.
 - Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
@@ -28,8 +29,6 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 - Roofs probe, round 2 (owner 2026-11-27: round 1 barely differed; roofs too complex): every building but landmarks
   simplified: straight walls (rectangles), roofs from a few types chosen from the data (flat with a parapet for halls
   and supermarkets, gable, hip, ...), no chimneys, dormers or spikes. Two looks compared: clean planes or voxel steps.
-- Placed vehicles: built as a first draft (how and where they are placed was not refined with the owner; expect
-  changes).
 - 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes
