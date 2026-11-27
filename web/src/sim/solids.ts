@@ -5,7 +5,7 @@
 // solidsNear), never by collision code of its own. No three.js, no DOM.
 import type { BoatPose } from './contract/agents';
 import type { CraftType, VehicleId } from './contract/ids';
-import type { Pose } from './contract/pose';
+import type { Pose, RoofSpot } from './contract/pose';
 import { COACH_LENGTH, COACH_WIDTH } from './coaches';
 import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
@@ -168,9 +168,27 @@ export function roofUnder(solids: readonly Solid[], x: number, z: number, below:
 /** where P, on the roof of a as it was, is on b (the same thing moved and turned since): x, z, and the rise dy and the
  * turn dh to add */
 export function carried(a: Solid, b: Solid, P: { x: number; z: number }) {
-  const ca = Math.cos(a.h), na = Math.sin(a.h), dx = P.x - a.x, dz = P.z - a.z;
-  const v = dx * ca - dz * na, u = dx * na + dz * ca, cb = Math.cos(b.h), nb = Math.sin(b.h);
+  const { v, u } = across(a, P), cb = Math.cos(b.h), nb = Math.sin(b.h);
   return { x: b.x + v * cb + u * nb, z: b.z - v * nb + u * cb, dy: b.y + b.top - a.y - a.top, dh: Math.atan2(Math.sin(b.h - a.h), Math.cos(b.h - a.h)) };
+}
+
+// P from s's middle: v across it, u along it
+function across(s: Solid, P: { x: number; z: number }) {
+  const c = Math.cos(s.h), n = Math.sin(s.h), dx = P.x - s.x, dz = P.z - s.z;
+  return { v: dx * c - dz * n, u: dx * n + dz * c };
+}
+
+/** the walker at P (its soles at feet) as a spot on the roof of s (which has an id) */
+export function roofSpot(s: Solid & { id: string }, P: { x: number; z: number }, feet: number): RoofSpot {
+  return { id: s.id, ...across(s, P), y: feet - s.y - s.top };
+}
+
+/** spot put on s (the thing it names, as it is now): x, z and the soles' y; null: the spot is off its roof by more
+ * than the walker's reach (a page's word is not taken for a place beside the thing) */
+export function onRoof(s: Solid, spot: RoofSpot) {
+  if (!(Math.abs(spot.v) <= s.hx + WALKER_R && Math.abs(spot.u) <= s.hz + WALKER_R && Number.isFinite(spot.y))) return null;
+  const c = Math.cos(s.h), n = Math.sin(s.h);
+  return { x: s.x + spot.v * c + spot.u * n, z: s.z - spot.v * n + spot.u * c, y: s.y + s.top + spot.y };
 }
 
 /** how far the walker at x, z (its soles at feet) reaches into s (m; 0 or less: clear of it), and which way out (a

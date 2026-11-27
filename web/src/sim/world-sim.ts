@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carried, carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, overlap, pushOut, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
+import { carried, carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
 import type { BoatPose } from './contract/agents';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
@@ -322,7 +322,8 @@ export class WorldSim {
     this.fly();
     for (const P of this.players.values()) {
       const W = P.walk;
-      if (W && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9)
+      // (one on a roof is carried with it after the step instead)
+      if (W && !W.on && W.at !== this.clock && W.pose.moving && this.clock - W.at <= GUESS_S + 1e-9)
         W.pose = { ...W.pose, x: W.pose.x + W.vx * STEP, z: W.pose.z + W.vz * STEP };
     }
     const now = t0 * STEP, foci = this.foci();
@@ -335,6 +336,7 @@ export class WorldSim {
     for (const c of this.crafts.values()) if (c.placed) craftSolids(c.type, c.core.pose, crafts);
     T.crafts = crafts;
     traffic();
+    for (const P of this.players.values()) if (P.walk?.on) this.carryOn(P.walk);
     const fresh: SimEvent[] = [];
     if (this.due.length) { for (const e of this.due) fresh.push({ tick: t0 + 1, ...e }); this.due = []; }
     if (T.dropped.length || T.struck.length) {
@@ -698,12 +700,17 @@ export class WorldSim {
 
   // where the walk puts the avatar, bounded (Tuning.walk) against the last pose taken in an earlier tick;
   // false: it was out of reach, and was taken clamped (ignored while walking as none)
-  private walkPose(player: PlayerId, pose: WalkPose) {
+  private walkPose(player: PlayerId, asked: WalkPose) {
     const W = this.players.get(player)?.walk;
     if (!W) return true;
     if (W.at !== this.clock) { W.from = W.pose; W.fromAt = W.at; W.fromOn = W.on; }
+    const near = this.walkSolids(asked.x, asked.z), { roof: spot, ...pose } = asked;
+    // (on a roof: its page saw the thing a round trip late; the spot put on it as it is now, so others see the walker
+    // where its page has it on the roof, not that far back along it)
+    const r = spot && typeof spot.id === 'string' ? near.find((q) => q.id === spot.id) : undefined, at = r && onRoof(r, spot!);
+    if (at) Object.assign(pose, at);
     // (on a car's roof: bounded from where the car has carried the last pose since, so a ride is not taken for a run)
-    const near = this.walkSolids(pose.x, pose.z), a = W.fromOn, b = a && near.find((q) => q.id === a.id);
+    const a = W.fromOn, b = a && near.find((q) => q.id === a.id);
     const to = a && b ? carried(a, b, W.from) : null;
     const from = to ? { ...W.from, x: to.x, z: to.z, y: W.from.y + to.dy } : W.from;
     const bound = boundWalk(from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
@@ -720,6 +727,16 @@ export class WorldSim {
     if (dt > 0) { W.vx = (taken.x - S.x) / dt; W.vz = (taken.z - S.z) / dt; W.sent = { x: taken.x, z: taken.z, at: this.clock }; }
     else { S.x = taken.x; S.z = taken.z; }
     return bound === pose;
+  }
+
+  // a walker on a roof taken along by the thing's step this tick (its pose was put on the thing as it was before it):
+  // else the snapshot, which has the thing after its step, shows it a tick back along the roof
+  private carryOn(W: Walk) {
+    const a = W.on!, b = a.id === undefined ? undefined : this.walkSolids(W.pose.x, W.pose.z).find((q) => q.id === a.id);
+    const at = b && onRoof(b, roofSpot(a as Solid & { id: string }, W.pose, W.pose.y));
+    if (!at) return;
+    W.pose = { ...W.pose, ...at, h: W.pose.h + Math.atan2(Math.sin(b.h - a.h), Math.cos(b.h - a.h)) };
+    W.on = b;
   }
 
   // the solid things a walker at x, z may be in or on, as the host has them now: the cars, the crafts with a shape, the
