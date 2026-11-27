@@ -19,6 +19,9 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   What is left is every tick's moving bodies (~5 kB/s raw each: the traffic within 60 m of a crater) and a driven or
   hit car's whole state beside its body every tick (~1). Not measured: a busy square, a late joiner after many
   craters (a node's whole op list), a phone on 4G. Binary only after a Pi measurement.
+- Host tick under sustained fire (16 launchers by the cathedral, 150 s): p50 ~6, p95 ~13, p99 ~16 ms. What is left
+  of it is the shots' flight and traces (~2 ms a tick) and deflating the snapshots (~6 s of the 150); measured on a
+  shared machine, p99 10–35 between runs.
 - E18: the car's prediction (one-body world), if the owner says so (FRAGEN 17).
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M7–M10: wire compaction, lag compensation for hits (with the first weapon).

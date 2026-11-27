@@ -166,6 +166,68 @@ if (!isMainThread) {
     const mean = (a) => a.slice(-LAST).reduce((u, v) => u + v, 0) / LAST, m = mean(kb), n = mean(moving);
     return { kb: m, moving: n, budget: BASE + PER_MOVING * n, first: kb.slice(0, 3).map((v) => v.toFixed(1)).join(' '), shots: t };
   }
+  // Sustained fire: every player by the cathedral firing the launcher (a crater each 1.5 s), the tick's time with the
+  // craters of a long round about them. Two and a half minutes of it are too long for a gate, so the round's craters
+  // (CRATERS within 70 m) are handed to the host as its own blasts' are, a volley of every launcher's grenade landing
+  // in the same tick (VOLLEY) each tick. What a player notices: a tick over its budget (p95, p99 of the WINDOW s after),
+  // the world slower than before the craters (p50 over GROW times the WINDOW s before: whatever every agent asks of the
+  // edits each tick must not grow with them; with a list of the edited boxes the tick's p50 went ~6 -> 10 ms), and the
+  // volley's ticks (p99 under two ticks: a crater's nodes edited and their colliders made again, each crater; 3.6 ms
+  // a crater once, a volley's tick ~200 ms). Measured 2026-11-27 with 16 players: p50 ~5 before and after, p95 ~8,
+  // p99 ~10, volley p99 ~25.
+  const CRATERS = 1500, VOLLEY = 16, WINDOW = 8, FIRE_P95 = 33, FIRE_P99 = 50, GROW = 1.3, VOLLEY_P99 = 66;
+  async function sustained() {
+    const { frameOf, mapToGrid, cellToAbsZ } = await load('core/layers.ts'), frame = frameOf(meta);
+    let ticks = [];
+    const host = serve({ dir: DATA, host: '127.0.0.1', port: 0, query: 'seed=3', log: () => {},
+      clock: (tick) => clock(() => { const t0 = performance.now(); tick(); ticks.push(performance.now() - t0); }) });
+    const port = await host.port, sim = host.server.sim, T = sim.traffic;
+    const ground = (x, z) => T.ground?.support(x, z, 1000) ?? 0;
+    for (const t0 = performance.now(); !(ground(spot.x, spot.y) > 0 && sim.physics); await new Promise((r) => setTimeout(r, 50)))
+      if (performance.now() - t0 > 30000) throw new Error('no ground or road physics by the cathedral within 30 s');
+    const plans = [];
+    for (let i = 0; i < players; i++) {
+      const a = (i / players) * 2 * Math.PI, x = spot.x + Math.cos(a) * 25, z = spot.y + Math.sin(a) * 25;
+      plans.push({ role: 'fire', x, y: ground(x, z), z, h: a + Math.PI, path: [], slot: 2 });
+    }
+    const w = new Worker(new URL(import.meta.url), { workerData: { port, plans, seconds: 120 } });
+    const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
+    const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
+    await wait(warm);
+    ticks = [];
+    await wait(WINDOW);
+    const before = q(ticks, 0.5);
+    // (the round's craters where its grenades would have burst: on the ground or a roof round the square)
+    let seed = 1;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, player = [...sim.players.keys()][0], left = [];
+    for (let i = 0; i < CRATERS; i++) {
+      const a = rnd() * 2 * Math.PI, d = 10 + 60 * Math.sqrt(rnd()), x = spot.x + Math.cos(a) * d, z = spot.y + Math.sin(a) * d;
+      const [col, row] = mapToGrid(frame, Math.floor(x), Math.floor(z));
+      left.push({ player, op: { kind: 'sphere', col, row, z: cellToAbsZ(frame, Math.floor(ground(x, z))), r: 3, colour: 0 } });
+    }
+    const take = sim.takeDamage.bind(sim), boxes0 = T.edits.length;
+    sim.takeDamage = () => [...take(), ...left.splice(0, VOLLEY)];
+    ticks = [];
+    for (const t0 = performance.now(); left.length || T.edits.length < boxes0 + CRATERS; await wait(0.1))
+      if (performance.now() - t0 > 60000) throw new Error(`the craters not applied within 60 s (${T.edits.length - boxes0} edited boxes)`);
+    const volley = q(ticks, 0.99), volleyMax = Math.max(...ticks);
+    await wait(1);
+    ticks = [];
+    await wait(WINDOW);
+    const after = ticks;
+    await w.terminate();
+    host.close();
+    return { before, p50: q(after, 0.5), p95: q(after, 0.95), p99: q(after, 0.99), max: Math.max(...after), volley, volleyMax, boxes: T.edits.length };
+  }
+  const fire = [];
+  for (let i = 0; i < runs; i++) {
+    const r = await sustained();
+    fire.push(r);
+    console.log(`sustained fire run ${i + 1}: ${players} players firing the launcher, ${CRATERS} craters (${r.boxes} edited boxes): ticks p50 ${r.before.toFixed(1)} ms before them, then p50 ${r.p50.toFixed(1)} p95 ${r.p95.toFixed(1)} p99 ${r.p99.toFixed(1)} max ${r.max.toFixed(1)}; ` +
+      `a volley of ${VOLLEY} a tick: p99 ${r.volley.toFixed(1)} max ${r.volleyMax.toFixed(1)}`);
+    if (r.p95 < FIRE_P95 && r.p99 < FIRE_P99 && r.p50 <= GROW * r.before + 1 && r.volley < VOLLEY_P99) break;
+  }
+
   const fired = await firing();
   console.log(`firing: one player ${fired.shots} ticks firing by the cathedral, ${fired.kb.toFixed(1)} kB/s (before deflate) over the last ${LAST} s with ${fired.moving.toFixed(1)} bodies moving (budget ${fired.budget.toFixed(1)}; the first seconds ${fired.first})`);
 
@@ -188,7 +250,13 @@ if (!isMainThread) {
   if (kbMean > MEAN_KB) fail.push(`${kbMean.toFixed(1)} kB/s mean per player, budget ${MEAN_KB}`);
   if (kbPeak > PEAK_KB) fail.push(`${kbPeak.toFixed(1)} kB/s peak per player in a second, budget ${PEAK_KB}`);
   if (fired.kb > fired.budget) fail.push(`one player firing: ${fired.kb.toFixed(1)} kB/s over the last ${LAST} s, budget ${fired.budget.toFixed(1)} (${BASE} and ${PER_MOVING} a body moving): what the client holds is sent again`);
-  const sum = `${players} players by the cathedral: tick p95 ${best.p95.toFixed(1)} ms (budget ${P95}), p99 ${best.p99.toFixed(1)} (${P99}); ${kbMean.toFixed(1)} kB/s mean (${MEAN_KB}), ${kbPeak.toFixed(1)} peak (${PEAK_KB}) per player`;
+  const sf = fire.reduce((a, b) => (b.p99 < a.p99 ? b : a));
+  if (sf.p95 >= FIRE_P95) fail.push(`sustained fire: tick p95 ${sf.p95.toFixed(1)} ms in the best of ${fire.length} run(s), budget ${FIRE_P95}: the world stutters for every player`);
+  if (sf.p99 >= FIRE_P99) fail.push(`sustained fire: tick p99 ${sf.p99.toFixed(1)} ms in the best of ${fire.length} run(s), budget ${FIRE_P99}`);
+  if (Math.min(...fire.map((r) => r.p50 - GROW * r.before)) > 1) fail.push(`sustained fire: tick p50 ${sf.p50.toFixed(1)} ms with ${CRATERS} craters, ${sf.before.toFixed(1)} before them (budget ${GROW} times and 1 ms): the tick grows with the edits`);
+  if (Math.min(...fire.map((r) => r.volley)) >= VOLLEY_P99) fail.push(`sustained fire: a volley of ${VOLLEY} craters a tick, tick p99 ${Math.min(...fire.map((r) => r.volley)).toFixed(1)} ms, budget ${VOLLEY_P99}`);
+  const sum = `${players} players by the cathedral: tick p95 ${best.p95.toFixed(1)} ms (budget ${P95}), p99 ${best.p99.toFixed(1)} (${P99}); ${kbMean.toFixed(1)} kB/s mean (${MEAN_KB}), ${kbPeak.toFixed(1)} peak (${PEAK_KB}) per player; ` +
+    `all firing with ${CRATERS} craters: p95 ${sf.p95.toFixed(1)} (${FIRE_P95}), p99 ${sf.p99.toFixed(1)} (${FIRE_P99}), p50 ${sf.p50.toFixed(1)} (${sf.before.toFixed(1)} before)`;
   if (fail.length) { console.log(fail.map((f) => `  ${f}`).join('\n')); console.log(`FAIL load: ${sum}`); process.exit(1); }
   console.log(`PASS load: ${sum}`);
   process.exit(0);

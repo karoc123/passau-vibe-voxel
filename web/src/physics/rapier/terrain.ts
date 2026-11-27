@@ -174,7 +174,7 @@ export class RapierTerrain {
   private readonly nz: number;
   private readonly pal: TerrainPalette;
   private readonly built: Built;
-  private readonly tiles = new Map<number, TerrainTile | 'loading' | 'failed'>();
+  private readonly tiles = new Map<number, TerrainTile | 'loading' | 'failed' | 'stale'>();
   private readonly chunks = new Map<number, Chunk>();
   private readonly cache: TileCache;
   budgetMs: number;
@@ -203,15 +203,16 @@ export class RapierTerrain {
     this.unlisten = liveEdits.listen((tx, tz, _n, region) => this.invalidate(tx, tz, region));
   }
 
-  // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): the tile is decoded again from them (now
-  // where the cache has the node: its files in, or both its base and foliage given; else loaded again), and the chunks
+  // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): the tile is decoded again from them when
+  // next read (where the cache has the node: its files in, or both its base and foliage given; else loaded again: a
+  // tick's craters on one node decoded once, not once each), and the chunks
   // over region (map metres; null: the whole tile) and a column round it (a column's shell reads its neighbours; a cap
   // only its own column) are removed to be built again by the next update.
   invalidate(tx: number, tz: number, region: Region = null) {
     if (tx < 0 || tz < 0 || tx >= this.nx || tz >= this.nz) return;
     const key = tx + tz * this.nx, t = this.tiles.get(key), v = this.cache.view(tx, tz);
     if (t !== 'loading') {
-      if (v) this.tiles.set(key, terrainTile(this.N, v.base, v.foliage, this.pal));
+      if (v) this.tiles.set(key, 'stale');
       else this.tiles.delete(key);
     } // (a load under way takes the live columns when it ends)
     const [x0, z0, x1, z1] = region ?? [tx * this.N, tz * this.N, (tx + 1) * this.N, (tz + 1) * this.N], m = 1;
@@ -349,7 +350,8 @@ export class RapierTerrain {
   private column(x: number, z: number) {
     const ix = Math.floor(x), iz = Math.floor(z);
     if (ix < 0 || iz < 0 || ix >= this.nx * this.N || iz >= this.nz * this.N) return null;
-    const tile = this.tiles.get(Math.floor(ix / this.N) + this.nx * Math.floor(iz / this.N));
+    const tx = Math.floor(ix / this.N), tz = Math.floor(iz / this.N), t = this.tiles.get(tx + this.nx * tz);
+    const tile = t === 'stale' ? this.tile(tx, tz) : t;
     if (!tile || tile === 'loading' || tile === 'failed') return null;
     return { tile, c: (ix % this.N) + 1 + tile.S * ((iz % this.N) + 1) };
   }
@@ -376,7 +378,7 @@ export class RapierTerrain {
   private tile(tx: number, tz: number): TerrainTile | null {
     const key = tx + tz * this.nx, t = this.tiles.get(key);
     if (t === 'loading' || t === 'failed') return null;
-    if (t) return t;
+    if (t && t !== 'stale') return t;
     const now = this.cache.view(tx, tz);
     if (now) { const lt = terrainTile(this.N, now.base, now.foliage, this.pal); this.tiles.set(key, lt); return lt; }
     this.tiles.set(key, 'loading');

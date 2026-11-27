@@ -21,6 +21,7 @@ export { STEP, type CarPose, type Ground } from './road-net';
 import { MAX_BIKES, MAX_CARS, MAX_PEOPLE, type BodyDraw, type Person } from './contract/agents';
 import type { Fallen } from './contract/events';
 import type { RoadPose } from './contract/pose';
+import { EditBoxes } from './edit-boxes';
 
 const IDM = { a: 1.4, b: 2.2, s0: 2.2, T: 1.2 };
 const BOX_IN = 7, BOX_OUT = 9;
@@ -154,7 +155,7 @@ export class Traffic {
   struck: ({ tick: number; pose: RoadPose; vx: number; vz: number; by: number } & Fallen)[] = [];
   tickNumber = 0;
   // the boxes edited (map metres [x0, z0, x1, z1), a metre round): only an agent in one has its ground looked at
-  edits: [number, number, number, number][] = [];
+  readonly editBoxes = new EditBoxes();
   day = 180;
   /** the share of the hour's people and riders wanted (1: all): a host over its tick thins its crowd first */
   crowd = 1;
@@ -609,7 +610,7 @@ export class Traffic {
     if (this.half) this.breakDeadlocks();
     this.populate(density);
     this.snapshot();
-    if (this.edits.length) this.dropOverHoles();
+    if (this.editBoxes.length) this.dropOverHoles();
     this.stepCars(dt);
     this.stepPeople(dt);
     this.stepRiders(dt);
@@ -622,12 +623,15 @@ export class Traffic {
   // Box (map metres [x0, z0, x1, z1)) was edited (core/world-edits.ts, through core/live-edits.ts), or, cleared,
   // is its files' again (the edit dropped): the edits meeting it are forgotten.
   edited(box: [number, number, number, number], cleared = false) {
-    if (cleared) this.edits = this.edits.filter((b) => !(b[0] < box[2] && box[0] < b[2] && b[1] < box[3] && box[1] < b[3]));
-    else this.edits.push([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
+    if (cleared) this.editBoxes.clear(box);
+    else this.editBoxes.add([box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1]);
   }
 
+  /** the boxes edited, as edited() was told of them */
+  get edits() { return this.editBoxes.all; }
+
   // is (x, z) in an edited box?
-  private inEdit(x: number, z: number) { return this.edits.some((b) => x >= b[0] && z >= b[1] && x < b[2] && z < b[3]); }
+  private inEdit(x: number, z: number) { return this.editBoxes.has(x, z); }
 
   // is the ground at (x, z) more than HOLE m under height y, in an edited box?
   private hole(x: number, z: number, y: number) {
@@ -638,7 +642,7 @@ export class Traffic {
 
   // the people and riders over a hole fall (out of the crowd: dropped, drawn falling)
   private dropOverHoles() {
-    const P = this.pA, all = this.edits.reduce((u, b) => [Math.min(u[0], b[0]), Math.min(u[1], b[1]), Math.max(u[2], b[2]), Math.max(u[3], b[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+    const P = this.pA, all = this.editBoxes.bounds;
     const drop = (list: Person[]) => list.filter((p) => {
       if (this.held.person.has(p.id)) return true;
       // (where they are on the map first: their height reads the ground's voxels, every person every tick while an
