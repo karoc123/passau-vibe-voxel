@@ -12,26 +12,31 @@ export function makeHealthHud() {
     const r = el('div', 'row', '<span class="name"></span><span class="bar"><i></i></span><span class="n"></span>', box);
     return { r, name: r.querySelector('.name') as HTMLElement, fill: r.querySelector('i') as HTMLElement, n: r.querySelector('.n') as HTMLElement, f: -1 };
   };
-  const me = row(), it = row();
+  const me = row(), it = row(), fuel = row();
   me.name.textContent = 'You';
+  fuel.name.textContent = 'Fuel';
+  fuel.r.classList.add('fuel');
   const tint = el('div', '');
   tint.id = 'health-tint';
   let last: [number, number] = [1, 1], lastKey = '', hitAt = -1e9, hard = 0;
-  const show = (R: ReturnType<typeof row>, h: Shown) => {
+  const show = (R: ReturnType<typeof row>, h: Shown, warn = true) => {
     const f = h ? h.hp / h.max : 1;
     // (written only when it changes: the HUD is set every frame)
     if (f === R.f) return f;
     R.f = f;
     R.fill.style.width = `${Math.round(100 * f)}%`;
-    R.r.classList.toggle('low', f < 0.3);
+    if (warn) R.r.classList.toggle('low', f < 0.3);
     R.n.textContent = String(Math.round(100 * f));
     return f;
   };
   return {
     /** own: the player's health; vehicle: the one of what they are in (key: which, name: its kind; null: on foot);
-     * now: ms */
-    set(own: Shown, vehicle: { key: string; name: string; h: Shown } | null, now: number) {
+     * tank: its fuel left (0..1; null: it has no tank, or they do not drive it); now: ms */
+    set(own: Shown, vehicle: { key: string; name: string; h: Shown } | null, tank: number | null, now: number) {
       const a = show(me, own), b = vehicle ? show(it, vehicle.h) : 1;
+      fuel.r.hidden = tank === null;
+      // (no warning when low: the owner's call)
+      if (tank !== null) show(fuel, { hp: tank, max: 1 }, false);
       if ((vehicle?.key ?? '') !== lastKey) { lastKey = vehicle?.key ?? ''; last[1] = b; }
       it.r.hidden = !vehicle;
       if (vehicle) it.name.textContent = vehicle.name;

@@ -39,6 +39,10 @@ export type CraftEventOf<K extends CraftType = CraftType> = { [T in K]: { craft:
 
 // ---------------------------------------------------------------- state
 
+/** a vehicle's power as it crosses (sim/tank.ts Tank): its fuel level in steps of a full tank (only with a tank: whole
+ * steps, so it changes seldom) and dead once a wreck cut it (absent otherwise) */
+export interface PowerState { fuel?: number; dead?: true }
+
 /** what the motion's last step did (sim/craft/craft-motion.ts) */
 export type CraftStep = 'moving' | 'blocked' | 'loading' | 'landed' | 'splash';
 /** where the plane is (sim/craft/plane-flight.ts) */
@@ -53,7 +57,7 @@ export interface BoatMotionState {
   waiting: boolean;
 }
 /** the boat's core: its motion and the hull as drawn at the world tick's start */
-export interface BoatCoreState {
+export interface BoatCoreState extends PowerState {
   motion: BoatMotionState;
   from: { x: number; y: number; z: number; h: number; pitch: number; roll: number };
 }
@@ -66,7 +70,7 @@ export interface CraftMotionState {
   throttle: number;
 }
 /** their core (sim/craft/special-core.ts): the motion, what its last step did, as drawn at the world tick's start */
-export interface SpecialCoreState {
+export interface SpecialCoreState extends PowerState {
   motion: CraftMotionState;
   result: CraftStep;
   from: { x: number; y: number; z: number; h: number; pitch: number; bank: number };
@@ -75,7 +79,7 @@ export interface SpecialCoreState {
 /** the drone's flight (sim/craft/fpv-flight.ts FpvFlight) */
 export interface FpvFlightState { position: Vec3; attitude: Quat; velocity: Vec3 }
 /** the drone's core (sim/craft/drone-core.ts): its flight, the last step waited for a tile, as drawn at the tick's start */
-export interface DroneCoreState {
+export interface DroneCoreState extends PowerState {
   flight: FpvFlightState;
   waiting: boolean;
   from: { position: Vec3; attitude: Quat };
@@ -96,7 +100,7 @@ export interface PlaneFlightState {
   crashLeft: number; crashAt: number;
 }
 /** the floatplane's and the jet's core (sim/craft/plane-core.ts): the flight, as drawn at the world tick's start */
-export interface PlaneCoreState {
+export interface PlaneCoreState extends PowerState {
   flight: PlaneFlightState;
   from: { p: Vec3; fwd: Vec3; up: Vec3; heading: number; gamma: number; bank: number; jumps: number };
 }

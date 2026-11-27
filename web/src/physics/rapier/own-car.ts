@@ -13,6 +13,7 @@ import { STEP as TICK } from '../../sim/road-net';
 import { buildOf } from '../../sim/vehicles';
 import { DEFAULT_TUNING } from '../../sim/tuning';
 import { RapierCar } from './car';
+import { Tank } from '../../sim/tank';
 import { mapOrigin, SUB } from './life-phys';
 import { RapierTerrain, type TerrainOptions } from './terrain';
 import { createVehicle, warmUp } from './vehicle';
@@ -53,6 +54,7 @@ export class OwnCar {
       const build = buildOf(c as Parameters<typeof buildOf>[0]), ride = DEFAULT_TUNING.ride;
       const v = createVehicle(RAPIER, this.world, { x: b.p[0] - this.origin.x, y: b.p[1], z: b.p[2] - this.origin.z }, { x: b.q[0], y: b.q[1], z: b.q[2], w: b.q[3] }, build, true, ride);
       this.car = new RapierCar(RAPIER, this.world, v.body.translation(), v.body.rotation(), this.terrain, undefined, build, v, ride);
+      this.car.tank = new Tank(DEFAULT_TUNING.fuel.car);
       this.kind = kind;
     }
     this.load(b);

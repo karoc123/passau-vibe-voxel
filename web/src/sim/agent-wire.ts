@@ -476,6 +476,8 @@ export const wireCarBody = (b: CarBody): CarBody => {
   if (b.lean) o.lean = round(b.lean, RAD);
   if (b.wheelie) o.wheelie = round(b.wheelie, RAD);
   if (b.water) o.water = true;
+  if (b.fuel !== undefined) o.fuel = b.fuel;
+  if (b.dead) o.dead = true;
   return o;
 };
 

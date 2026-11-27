@@ -14,6 +14,7 @@
 // - health: each type's health and what harms it (sim/health.ts HEALTH): WorldSim
 // - stands: where placed vehicles are stocked and when they refill (STANDS below, kept here as presence: its code,
 //   sim/stands.ts, is the domain's): Stands
+// - fuel: how long each vehicle's tank lasts (sim/tank.ts FUEL): the cores, WorldSim (a car's)
 // A tool that varies tuning builds a copy ({ ...RIDE, stiffness: 40 }) and passes it, as tools/rapier-car.mjs --set
 // and tools/plane.mjs --set do.
 import { frozen } from '../core/frozen';
@@ -24,6 +25,7 @@ import { CRAFT, type CraftTuning } from './craft/craft-motion';
 import { DRONE, type DroneTuning } from './craft/fpv-flight';
 import { WALK_BOUNDS, type WalkBounds } from './walk-bounds';
 import { HEALTH, type HealthTuning } from './health';
+import { FUEL, type FuelTuning } from './tank';
 
 // radius: m from a focus to the node's square (map metres; a vehicle's place) within which an edit is kept; after: s of
 // world time with no focus that near before it is dropped
@@ -48,8 +50,9 @@ export interface Tuning {
   readonly walk: WalkBounds;
   readonly health: HealthTuning;
   readonly stands: StandTuning;
+  readonly fuel: FuelTuning;
 }
 
 export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, drone: DRONE,
-  presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS });
+  presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS, fuel: FUEL });
 

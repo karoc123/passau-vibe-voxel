@@ -24,6 +24,7 @@ import type { Vec3 } from '../../core/vec';
 import type { CraftSpot } from '../contract/commands';
 import type { CraftId, CraftType, PlayerId } from '../contract/ids';
 import type { Pose } from '../contract/pose';
+import type { Tank } from '../tank';
 import type { CollisionOptions, VoxelCollision } from './voxel-collision';
 
 /** a player craft (a CraftCore; WorldSim's crafts): an entity with one seat, its pilot's; stepped once put down */
@@ -51,6 +52,8 @@ export interface CraftCore<I = unknown, E = unknown, D = unknown, S = unknown> {
   /** the input of an empty seat (WorldSim: a craft left, or not yet given its pilot's): hands off, and what would keep
    * it going let go (a plane's lever back, a drone's throttle cut, a helicopter let down onto its skids) */
   readonly neutral: I;
+  /** its power: without it a step takes the neutral input, whatever its pilot sends (a wreck, an empty tank) */
+  readonly tank: Tank;
   /** what happened since they were last read (WorldSim: the world's craft events, read by its pilot's session: Session.craftEvents) */
   readonly events: E[];
   reset(spot: CraftSpot): void;

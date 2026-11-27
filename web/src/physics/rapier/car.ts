@@ -18,7 +18,8 @@
 // The shared world publishes its pose. StreetLife draws the vehicle model.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { axisAngle, cross, dot, quat, rotate, vec3 } from '../../core/vec';
-import type { CarInput } from '../../sim/contract/inputs';
+import { PARK, type CarInput } from '../../sim/contract/inputs';
+import { Tank } from '../../sim/tank';
 import type { CarBody } from '../../sim/contract/snapshot';
 import { CAR_GROUPS, CAR_ONLY_GROUPS, WHEEL_GROUPS, type RapierTerrain } from './terrain';
 import { CAR, createVehicle, MAX_SUSPENSION_FORCE, REST, RIDE, rideOf, WHEEL_R, type CarBuild, type RideTuning } from './vehicle';
@@ -61,6 +62,8 @@ export class RapierCar {
   readonly chassis: RAPIER.Collider;
   readonly controller: RAPIER.DynamicRayCastVehicleController;
   status: CarStatus = 'ok';
+  /** its power (the driven car's own, LifePhysics; none: it never runs dry) */
+  tank = new Tank();
   airTime = 0;
   private steer = 0;
   private bars = 0; // the steering input as the bars follow it (CarBuild tune steerRamp)
@@ -98,6 +101,8 @@ export class RapierCar {
   // Before the world's step: the wheels' forces, the assists.
   step(input: CarInput, dt: number) {
     this.event = null;
+    // (no power: the gas pedal does nothing, so it rolls out as with the foot off)
+    if (!this.tank.power && input.gas) input = { ...input, gas: 0 };
     const c = this.controller, v = c.currentVehicleSpeed();
     // steering eased, less of it at speed
     const T = this.build.tune;
@@ -123,6 +128,9 @@ export class RapierCar {
     }
     if (input.gas > 0 && v < -0.5) brake = input.gas * BRAKE;
     if (!input.gas && !input.brake) brake = BRAKE * 0.027; // rolling resistance
+    if (!this.tank.power) engine = 0;
+    // (parked is the engine off)
+    else if (input !== PARK) this.tank.burn(Math.abs(engine) / B.engine, dt);
     for (let i = 0, n = c.numWheels(); i < n; i++) {
       const front = B.wheels[i].front;
       c.setWheelSteering(i, front ? this.steer : 0);
@@ -479,7 +487,7 @@ export class RapierCar {
   save(o: { x: number; z: number }): CarBody {
     const b = this.body, p = b.translation(), q = b.rotation(), v = b.linvel(), w = b.angvel();
     return { p: [p.x + o.x, p.y, p.z + o.z], q: [q.x, q.y, q.z, q.w], v: [v.x, v.y, v.z], w: [w.x, w.y, w.z],
-      steer: this.steer, bars: this.bars, air: this.airTime, ride: this.ride, lean: this.lean, wheelie: this.wheelie, water: this.status === 'water' };
+      steer: this.steer, bars: this.bars, air: this.airTime, ride: this.ride, lean: this.lean, wheelie: this.wheelie, water: this.status === 'water', ...this.tank.save() };
   }
 
   /** put back as s had it (save) */
@@ -491,6 +499,7 @@ export class RapierCar {
     b.setAngvel({ x: s.w[0], y: s.w[1], z: s.w[2] }, true);
     this.steer = s.steer; this.bars = s.bars; this.airTime = s.air; this.ride = s.ride; this.lean = s.lean ?? 0; this.wheelie = s.wheelie ?? 0;
     this.status = s.water ? 'water' : 'ok';
+    this.tank.load(s);
   }
 
   clearWedges() {

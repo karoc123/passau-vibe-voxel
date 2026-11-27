@@ -17,6 +17,7 @@ import type { BoatInput } from '../contract/inputs';
 import type { CraftSpot } from '../contract/commands';
 import type { BoatCoreState, BoatEvent, BoatMotionState } from '../contract/crafts';
 import type { CraftCore } from './craft-core';
+import { Tank, type TankTuning } from '../tank';
 
 // (its input, BoatInput: contract/inputs.ts)
 export const NO_BOAT_INPUT: BoatInput = { throttle: 0, steer: 0, drift: false };
@@ -296,11 +297,12 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn, Boat
   readonly reach = {};
   readonly neutral = NO_BOAT_INPUT;
   readonly events: BoatEvent[] = [];
+  readonly tank: Tank;
 
   // drawn: the hull as drawn at the world tick's start
   private from: BoatDrawn = { x: 0, y: 0, z: 0, h: 0, pitch: 0, roll: 0 };
 
-  constructor(cfg: BoatTuning = BOAT) { this.motion = new BoatMotion(cfg); }
+  constructor(cfg: BoatTuning = BOAT, fuel: TankTuning | null = null) { this.motion = new BoatMotion(cfg); this.tank = new Tank(fuel); }
 
   reset(spot: CraftSpot) {
     this.motion.reset({ x: spot.x, y: spot.y ?? 0, z: spot.z, h: spot.h });
@@ -310,16 +312,20 @@ export class BoatCore implements CraftCore<BoatInput, BoatEvent, BoatDrawn, Boat
   keep() { this.from = this.motion.drawn(); }
 
   step(input: BoatInput, dt: number, world: BoatWorld) {
+    if (!this.tank.power) input = this.neutral;
+    // (an empty seat is the engine off)
+    else if (input !== this.neutral) this.tank.burn(Math.abs(input.throttle), dt);
     const ev = this.motion.step(input, dt, world);
     if (ev === 'loading') return false;
     this.events.push(...ev);
     return true;
   }
 
-  save(): BoatCoreState { return { motion: this.motion.save(), from: { ...this.from } }; }
+  save(): BoatCoreState { return { motion: this.motion.save(), from: { ...this.from }, ...this.tank.save() }; }
   load(s: BoatCoreState) {
     this.motion.restore(s.motion);
     this.from = { ...s.from };
+    this.tank.load(s);
   }
 
   get pose() { return this.motion.pose; }

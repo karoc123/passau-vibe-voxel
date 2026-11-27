@@ -6,7 +6,7 @@
 import type { WorldOp } from '../../core/layers';
 import type { BodyWire, BoatsWire, CarState, CarWire, PersonWire } from './agents';
 import type { CommandResult } from './commands';
-import type { CraftStates } from './crafts';
+import type { CraftStates, PowerState } from './crafts';
 import type { SimEvent } from './events';
 import type { CraftId, CraftType, PlayerId, Seat } from './ids';
 import type { RoadPose, WalkPose } from './pose';
@@ -66,7 +66,7 @@ export interface DriverSnapshot {
  * x, y, z, w), velocity (v, m/s) and spin (w, rad/s); the front wheels' angle (steer, rad) and the steering input as
  * the bars follow it (bars), its time in the air (air, s), the ground under its origin along its up (ride, m), a
  * bike's lean and wheelie (rad), whether it is in the water */
-export interface CarBody {
+export interface CarBody extends PowerState {
   p: [number, number, number]; q: [number, number, number, number]; v: [number, number, number]; w: [number, number, number];
   steer: number; bars: number; air: number; ride: number; lean?: number; wheelie?: number; water?: boolean;
 }

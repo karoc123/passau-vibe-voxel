@@ -59,6 +59,7 @@ import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
 import { aimFrom, CHEST, newMind, RANGE, think, type Duty, type Senses } from './npc-mind';
 import type { Vec3 } from '../core/vec';
+import { Tank } from './tank';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import { WRECK_COL, type BoatPose } from './contract/agents';
@@ -755,6 +756,9 @@ export class WorldSim {
       }
       if (warm) phys.warmTerrain(warm).catch(() => {});
       this.leaveSeat(player);
+      // (the tank goes with the car, not the drive: a car parked and taken again is not refilled)
+      const car = this.carById(id);
+      if (car) car.tank ??= new Tank(this.tuning.fuel.car);
       if (!phys.takeWheel(this.traffic, player, id, cmd.choice)) return false;
       this.sit(player, seat);
     } else {
@@ -1000,9 +1004,10 @@ export class WorldSim {
   private wreck(v: Life & { kind: 'car' | 'craft' }) {
     if (this.mode?.wrecks && !this.mode.wrecks(this.face, v)) return;
     this.wrecks.add(lifeKey(v));
-    if (v.kind === 'craft') { const c = this.craft(v.id); if (c) c.input = c.core.neutral; return; }
+    if (v.kind === 'craft') { const c = this.craft(v.id); if (c) c.core.tank.wrecked = true; return; }
     const c = this.carById(v.id), T = this.traffic;
     if (!c) return;
+    if (c.tank) c.tank.wrecked = true;
     c.col = WRECK_COL;
     for (const [p, P] of this.players) if (P.seat?.role === 'driver' && P.seat.entity.id === v.id) this.phys?.input(p, PARK);
     if (c.detachedPose || this.phys?.wreckCar(c, T)) return;

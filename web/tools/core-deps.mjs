@@ -172,6 +172,7 @@ const LAYERS = [
   ['sim/walk.ts', 'shared'], ['sim/swim.ts', 'shared'], ['sim/walker.ts', 'shared'], // (the walk: the page's player's and the host's NPCs')
   ['sim/seats.ts', 'shared'], // (a model's seats: the host holds them, the page offers and draws them)
   ['sim/player-name.ts', 'shared'], // (a chosen name cleaned: by the page and by the host)
+  ['sim/tank.ts', 'shared'], // (a vehicle's power: the host's and the copy a page runs ahead)
   ['sim/health.ts', 'shared'], // (each type's health as data, in the tuning; what a weapon does is its package's)
   ['sim/server/', 'server'], // (sim-server.ts: SimServer, Session; snapshot.ts: takeSnapshot)
   ['sim/', 'domain'], ['physics/', 'domain'],
