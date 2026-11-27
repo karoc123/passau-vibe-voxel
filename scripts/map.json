@@ -39,5 +39,6 @@
   {"row": 3, "cols": [-3, -1], "rows": 640},
   {"row": 3, "cols": [0, 0], "rows": 384}
  ],
- "regions": {"size": 1024, "jobs": "auto"}
+ "regions": {"size": 1024, "jobs": "auto"},
+ "roofs": {"rules": true, "look": "slopes"}
 }
