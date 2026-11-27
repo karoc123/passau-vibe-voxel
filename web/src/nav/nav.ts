@@ -26,12 +26,12 @@ import { FootTouch } from '../touch/foot';
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right aims (arms.ts)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
 //          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
-//   ride:  following a pedestrian or a car; move keys walk as that person, or get out of a vehicle
+//   ride:  following a pedestrian or a car; move keys step off onto foot (off a person: where they stood)
 //   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
 //          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
 //
 // Nav is the mode machine and routes the input to the mode on: the map's own input is orbit.ts, on foot foot.ts, the
-// ride and its camera ride.ts (following, walking as the person followed); the crafts are their own (craft.ts).
+// ride and its camera ride.ts (following); the crafts are their own (craft.ts).
 export type Mode = 'orbit' | 'walk' | 'ride' | 'craft';
 export interface Ride extends Picked {
   view: 'eyes' | 'behind';
@@ -97,8 +97,7 @@ export class Nav {
     dom.style.cursor = 'grab';
     this.foot = new Foot(camera, controls, this.keys, this.glide, () => this.world, (near) => this.life?.solids(near) ?? []);
     this.rider = new Rider({
-      camera, controls, foot: this.foot, glide: this.glide, keys: this.keys, life: () => this.life, sim: () => this.sim, world: () => this.world,
-      changed: (R) => this.onMode(this.mode, R),
+      camera, controls, glide: this.glide, life: () => this.life, sim: () => this.sim, world: () => this.world,
     });
     this.bindKeys();
     this.bindPointer();
@@ -178,15 +177,11 @@ export class Nav {
       }
       if (this.craftView || this.driving) return;
       if (this.onFoot && /^Digit\d$/.test(e.code)) { this.arms.select(+e.code.slice(5)); e.preventDefault(); return; }
-      if (e.code === 'Space' && (this.onFoot || this.ride?.ref.kind === 'person')) { // following someone: become them, then jump
-        if (this.onFoot) this.foot.jump();
-        else this.rider.jumpAsked = true;
-        e.preventDefault(); return;
-      }
+      if (e.code === 'Space' && this.onFoot) { this.foot.jump(); e.preventDefault(); return; }
       const k = MoveKeys.of(e.code);
       if (!k) return;
       K.add(k);
-      if (this.ride && this.ride.ref.kind !== 'person') this.hopOff();
+      if (this.ride) this.hopOff();
       this.cancelFly();
       e.preventDefault();
     });
@@ -633,7 +628,6 @@ export class Nav {
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
     if (this.onFoot) this.foot.updateWalk(dt, this.footTouch.move);
-    else if (this.riding) this.rider.control(dt);
     else if (this.onMap) this.orbit.update(dt);
     if (this.onFoot) this.walkBody();
     this.dom.classList.toggle('underwater', this.onFoot && this.foot.under);

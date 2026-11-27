@@ -6,67 +6,45 @@ import type { SimClient } from '../client/sim-client';
 import type { Rideable } from '../sim/types';
 import type { Picked, StreetLife } from '../view/life';
 import type { World } from '../core/world';
-import type { Foot } from './foot';
 import type { Glide } from './glide';
-import type { MoveKeys } from './move-keys';
 import type { Ride, WalkOpts } from './nav';
 
-// The ride (nav.ts mode ride): following a pedestrian or a vehicle, and walking as the person followed. The local
-// player's commands go to the world sim through its client (client/sim-client.ts): follow (the sim keeps what is followed
-// wherever it goes), enterSeat (the person's walker's seat; refused, the ride goes on following), seatInput (where the
-// walk, which is the client's, puts them; the sim bounds it, and a pose it clamped puts the walk back where the sim has
-// them), leaveSeat. Nav switches the modes; the car driven is drive.ts's (the driver's
-// seat), on this ride's camera.
+// The ride (nav.ts mode ride): following a pedestrian or a vehicle. The local player's command goes to the world sim
+// through its client (client/sim-client.ts): follow (the sim keeps what is followed wherever it goes). Walking off a
+// person followed is the player's own avatar where they stood (Nav), never the person: on foot a player is never one
+// of the crowd (owner). Nav switches the modes; the car driven is drive.ts's (the driver's seat), on this ride's camera.
 
 /** what the ride needs of Nav */
 export interface RideHost {
   readonly camera: THREE.PerspectiveCamera;
   readonly controls: OrbitControls;
-  readonly foot: Foot;
   readonly glide: Glide;
-  readonly keys: MoveKeys;
   life(): StreetLife | null;
   /** the world sim's client (the local player's commands, reads) */
   sim(): SimClient | null;
   world(): World | null;
-  /** the ride changed (walking as the person began): Nav tells its listener */
-  changed(R: Ride): void;
 }
 
 export class Rider {
   ride: Ride | null = null;
   /** the ride's camera; its shake is the driven car's (drive.ts) */
   readonly camera = new RideCamera();
-  /** Space while following a person: become them, then jump */
-  jumpAsked = false;
-  // the person walked as (their id: the local player's seat on them), while the ride lasts
-  private walking: number | null = null;
 
   constructor(private readonly host: RideHost) {}
 
   private get sim() { return this.host.sim(); }
 
-  /** follow ag (what was walked let go) */
+  /** follow ag */
   start(ag: Picked) {
-    this.release();
     this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
     this.sim?.send({ kind: 'follow', entity: { kind: ag.ref.kind, id: ag.ref.id } });
   }
 
-  /** the ride is over: nothing followed, nothing walked */
+  /** the ride is over: nothing followed */
   leave() {
     this.ride = null;
     this.camera.reset();
-    this.jumpAsked = false;
-    this.release();
     this.sim?.send({ kind: 'follow', entity: null });
-  }
-
-  // off the person walked: back to the crowd's own walk (the sim no longer keeps them where put), and following them
-  // again starts afresh from where they are (walkAs' start) instead of moving them to the foot's position
-  release() {
-    if (this.walking) this.sim?.send({ kind: 'leaveSeat' });
-    this.walking = null;
   }
 
   /** out of the vehicle (a step to its side) or off the person, onto the street: where Nav walks to */
@@ -76,19 +54,6 @@ export class Rider {
     const p = pose ? new THREE.Vector3(pose.x, pose.y, pose.z) : H.camera.position.clone();
     if (R && pose && R.ref.kind !== 'person') p.addScaledVector(new THREE.Vector3(Math.cos(pose.h), 0, -Math.sin(pose.h)), 2.0);
     return { at: p, facing: f, pitch: 0.05, ms: 500, exact: R?.ref.kind === 'person' };
-  }
-
-  /** a frame of the ride before the sim's update: the walk's commands sent (walking as the person followed) */
-  control(dt: number) {
-    const R = this.ride!, H = this.host, sim = this.sim;
-    // (the seat refused: walked by another, or gone from the crowd; a pose out of reach: the walk back where the sim
-    // took it)
-    if (sim?.results('enterSeat', 'walker').some((r) => !r.ok)) this.walking = null;
-    if (sim?.results('seatInput', 'walker').some((r) => !r.ok) && this.walking !== null) {
-      const w = sim.walkedPose(this.walking);
-      if (w) H.foot.correct(w);
-    }
-    if (R.ref.kind === 'person' && (H.keys.size || this.jumpAsked || this.walking === R.ref.id)) this.walkAs(dt);
   }
 
   /** a frame of the ride after the sim's update and the street's drawing (driving: the car driven): the camera placed
@@ -103,26 +68,6 @@ export class Rider {
     H.glide.place(pos, q, fov, true, dt);
     H.controls.target.copy(H.camera.position).addScaledVector(look, 10);
     return null;
-  }
-
-  // walking as the person followed (foot.ts walkAs), through their eyes; they stay where left while the ride lasts
-  // (release(): back to their own walk after)
-  private walkAs(dt: number) {
-    const R = this.ride!, o = R.ref, H = this.host, sim = this.sim;
-    if (o.kind !== 'person' || !sim) return;
-    if (this.walking !== o.id) {
-      const p: Pose | null = H.life()!.pose(o);
-      if (!p) return;
-      this.release();
-      sim.send({ kind: 'enterSeat', entity: { kind: 'person', id: o.id }, role: 'walker', pose: { ...p, moving: false } });
-      this.walking = o.id;
-      Object.assign(R, { label: 'you', view: 'eyes', dyaw: 0, dpitch: 0, zoom: 1 });
-      H.glide.start(1100);
-      H.changed(R);
-      H.foot.startAs(p);
-    }
-    if (this.jumpAsked) { H.foot.jump(); this.jumpAsked = false; }
-    sim.send({ kind: 'seatInput', role: 'walker', input: H.foot.walkAs(R, dt) });
   }
 }
 

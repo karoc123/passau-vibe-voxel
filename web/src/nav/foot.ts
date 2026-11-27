@@ -1,11 +1,9 @@
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { WalkPose } from '../sim/contract/pose';
 import { clamp } from '../util';
 import type { World } from '../core/world';
 import type { Glide } from './glide';
 import type { MoveKeys } from './move-keys';
-import type { Ride } from './nav';
 import { backOff, EYE } from './spots';
 import type { Solid } from '../sim/solids';
 import { CLIMB_OUT, FLOAT, SWIM_DEPTH, Wet } from './swim';
@@ -28,7 +26,7 @@ const SWIM = 1.8, WADE = 0.45;
 /** the left touch stick on foot: [forward, right] in -1..1 */
 export type Stick = [number, number] | null;
 
-// On foot (nav.ts mode walk, and walking as the person followed): where the feet are, the steps (walk.ts, up kerbs
+// On foot (nav.ts mode walk): where the feet are, the steps (walk.ts, up kerbs
 // and stairs, sliding along walls and round the solid things near: solids), gravity and jumps, and the camera at the
 // eyes. Nav feeds the input.
 export class Foot {
@@ -181,32 +179,5 @@ export class Foot {
     this.glide.place(this.pos, q, fov, settle, dt);
     const look = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
-  }
-
-  /** walking as the person followed starts where they stand */
-  startAs(p: { x: number; y: number; z: number; h: number }) {
-    this.pos.set(p.x, p.y + EYE, p.z);
-    this.feet = p.y; this.vy = 0; this.yaw = p.h;
-    this.carry.x = this.carry.z = 0;
-  }
-
-  /** the walk put back where the sim took it (a pose it clamped: sim/walk-bounds.ts) */
-  correct(p: { x: number; y: number; z: number }) {
-    this.pos.set(p.x, p.y + EYE, p.z);
-    this.feet = p.y;
-  }
-
-  // walking as the person followed (the walk is the client's; where it puts them goes to the sim: ride.ts): W/S walk,
-  // A/D step sideways, the arrows turn them, Q/E look; the ride camera at their eyes turns with them
-  walkAs(R: Ride, dt: number): WalkPose {
-    const P = this.pos, K = this.keys, tp = K.axis('tu', 'td'), { go, side, turn } = footKeys(K);
-    this.yaw -= turn * (K.shift ? 2.6 : 1.8) * dt;
-    if (tp) R.dpitch = clamp(R.dpitch + tp * dt, -1.2, 1.2);
-    this.yaw += R.dyaw;
-    R.dyaw = 0;
-    const pace = this.wade(K.shift ? 7 : 2.2) * dt;
-    const moving = this.stepBy(go || side ? stride(this.yaw, go, side, pace) : null);
-    this.stand(dt);
-    return { x: P.x, y: this.feet, z: P.z, h: this.yaw, moving, ...(this.swimming ? { swim: true } : {}) };
   }
 }

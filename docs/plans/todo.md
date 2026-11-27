@@ -5,8 +5,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 ## Now: the server (target-architecture.md, owner 2026-11-26)
 
 - **Steps 5–8** in the order of target-architecture.md.
-- A player on foot is drawn to the others as one of the crowd in a bright shirt (view/life.ts), not as their own
-  walker figure; their seat on a ride or in a vehicle is lost when the page reconnects to its host.
+- A player's seat on a ride or in a vehicle is lost when the page reconnects to its host.
 - With steps 1–2: input commands by tick with ack and buffer (M5); drop bit-exact determinism checks; remove the
   observer-view switch (orbit mode is a presence, unseen: GLOSSARY.md).
 
@@ -32,8 +31,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   flood rescue. Open: genre, round length, PvP. Decided: a lobby later.
 - Creative mode (the map maintained by hand, kept apart from a round's damage): who may write (the team only, never
   in a deployed build), where the edits live, how they survive a pipeline rebuild. A concept first.
-- E15 health and items, E16 spawn/despawn/keep, E21 the player's avatar (owner: on foot always an avatar of its own,
-  never one of the crowd).
+- E15 health and items, E16 spawn/despawn/keep. E21 (the avatar, view/avatars.ts) left: the host still offers a
+  person's walker seat no page asks for (gone: the wire's walked, PROTOCOL); a gun not in the figure's hand.
 - M2 `?pace=1`: real frame times and judder on the owner's machine.
 - Debug spawning of crafts and car type stays client-trusted until placed vehicles replace it.
 
