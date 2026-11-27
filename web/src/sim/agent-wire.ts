@@ -346,6 +346,11 @@ export function wireBody(d: BodyDraw): BodyDraw {
   };
 }
 
+/** a craft's core state (save()'s) as sent: every number to 1e-4 (0.1 mm, 1e-4 rad). The client's prediction blends
+ * the difference out (under its 1e-4 it is none), and the digits past it cannot deflate: a helicopter's whole core
+ * every tick was ~5 kB/s */
+export const wireCore = <T>(s: T): T => JSON.parse(JSON.stringify(s), (_, v) => typeof v === 'number' ? round(v, 1e4) : v) as T;
+
 /** a pose out of the traffic as sent (a left car's): to the mm, its angles to 1e-4 rad */
 export const wirePose = (p: RoadPose): RoadPose => ({ x: round(p.x, MM), y: round(p.y, MM), z: round(p.z, MM),
   h: round(p.h, RAD), pitch: round(p.pitch, RAD), roll: round(p.roll, RAD) });

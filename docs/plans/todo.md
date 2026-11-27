@@ -15,10 +15,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Bandwidth (owner 2026-11-26: <= 20 kB/s mean, 50 peak, phones over the internet): at the cathedral, deflated per
   player, ~10 kB/s on foot, ~13 driving, ~15 in the helicopter, ~1 far off; ws-smoke holds it under 25; a round of
-  16 at the cathedral 13–16 (`load` holds 20). What is left is every tick's moving bodies (~5 kB/s raw each: the
-  traffic within 60 m of a crater) and crafts (~4, a helicopter's core whole, a parked one too). Not measured: a busy
-  square, a late joiner after many craters (a node's whole op list), a phone on 4G. Binary only after a Pi
-  measurement. A driver's peak is higher since step 5 (a cell coming into the circle is filled and sent at once).
+  16 at the cathedral 13–16 (`load` holds 20). One player alone: on foot ~2, flying ~3.5, driving 90 km/h through
+  the city 5–6 with a worst second of 8–11 (`drive-bytes` holds 20 / 50); a cell coming into the circle shows no peak.
+  What is left is every tick's moving bodies (~5 kB/s raw each: the traffic within 60 m of a crater) and a driven or
+  hit car's whole state beside its body every tick (~1). Not measured: a busy square, a late joiner after many
+  craters (a node's whole op list), a phone on 4G. Binary only after a Pi measurement.
 - E18: the car's prediction (one-body world), if the owner says so (FRAGEN 17).
 - E20: a headless probe mode (no city, players placed, an item, a round end), once E15/E16 exist.
 - M7–M10: wire compaction, lag compensation for hits (with the first weapon).
