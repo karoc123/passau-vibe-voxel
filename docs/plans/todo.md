@@ -63,8 +63,10 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   before the city's first frame. Left as is; a channel page to worker only when a measurement shows the start waits.
 - The own car answers ~15–30 ms later since step 1 (render clock ~0.5 tick behind), and a round trip later over the
   network (no prediction for it yet). The world keeps ticking while the tab is hidden.
-- Prediction: a moving craft is reckoned on at its speed, unmeasured; an event it tells the host then never has (a
-  crash a car moved out of) stays told.
+- Prediction: a car braking for the own craft is reckoned on at its speed (corrections ~0.2 m each snapshot for ~0.6
+  s, eased). An event told ahead that the host then never has (a plane's crash on a craft or car that turned or braked
+  away within a round trip) stays told: tint, shake, message, the plane snapped back. Left: rare, a crafts' meet tells
+  none, and taking it back runs through the client, the craft link and the plane's nav.
 - Floatplane at 240 km/h low over the city (tools/fly-stream.mjs): no ground missing, queue empty, the host's collision
   tiles in time. Left on a phone (4x CPU, 2 M budget): 1 m reaches only ~224 m ahead (2 m beyond), and ~1 frame/s over
   50 ms, up to ~70 ms, half of them the stream's taking in meshes (pages.show). Not measured: the GPU's uploads, the

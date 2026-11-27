@@ -87,12 +87,12 @@ export function lightSolids(own: CraftType, type: CraftType, p: Pose, out: Solid
 }
 
 /** after each of a craft's steps (the host's and the page's run ahead alike, so both meet the same): pushed out of
- * each of near that one of its boxes reaches into */
-export function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision) {
+ * each of near that one of its boxes reaches into; met: told each such one (its index in near) and the way out of it */
+export function meetSolids(type: CraftType, core: CraftCore, near: readonly Solid[], col: VoxelCollision, met?: (i: number, n: { x: number; z: number }) => void) {
   MINE.length = 0;
-  for (const a of craftMeets(type, core.pose, MINE)) for (const s of near) {
-    const d = overlap(a, s, OUT);
-    if (d > 0) core.meet!(OUT, d, col);
+  for (const a of craftMeets(type, core.pose, MINE)) for (let i = 0; i < near.length; i++) {
+    const d = overlap(a, near[i], OUT);
+    if (d > 0) { met?.(i, OUT); core.meet!(OUT, d, col); }
   }
 }
 const OUT = { x: 0, z: 0 }, MINE: Solid[] = [];
