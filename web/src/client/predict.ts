@@ -6,9 +6,15 @@
 // The craft run ahead meets the solid things the newest snapshot has round it as the host's meets them (the same code,
 // sim/solids.ts meetSolids): each tick where the host will have them, the traffic's cars reckoned on along their ways,
 // the crafts at their speed (a parked one stays put) and the coaches by the timetable at the host's clock then (the
-// snapshot's world clock gone on by the ticks since), so running into one is not undone a round trip later. Its events
-// are told when it first runs a tick (not when stepped again); the host's word on each comes a round trip later and is
-// then not told again (heard): one of the same kind due within HEAR ticks of the host's.
+// snapshot's world clock gone on by the ticks since), so running into one is not undone a round trip later. A craft met
+// coming at it loses its speed into it from then on, as the host's does: reckoned on through it, it pushed the craft
+// back by its speed in each tick run ahead (2 m in a round trip, head-on at 12 m/s), all taken back when the host's
+// word came. A craft is reckoned on along the arc its turn bends its way to (read off two snapshots): reckoned on
+// straight, one turning in front of it was met where it was not (corrections of 0.6-0.9 m against under 0.2). A car met
+// is reckoned on at its speed still: it brakes for a craft in its way rather than stop, and held where it was met it
+// was further off (1.2 m against 0.45 m, the craft crossing in front of one). Its events are told when it first runs a
+// tick (not when stepped again); the host's word on each comes a round trip later and is then not told again (heard):
+// one of the same kind due within HEAR ticks of the host's.
 // Which tick of the page's a snapshot's tick is: an input's seq was sent in the page's tick p and first applied in the
 // host's tick ta (the ack), so the host runs ta - p ticks behind. The host holds each input for its tick (sim-server.ts
 // Session), so that number changes only when the host moves its timeline (a packet later than any before it): the
@@ -24,7 +30,7 @@ import type { Car } from '../sim/types';
 import type { CoachPose } from '../sim/coaches';
 import type { CarPose } from '../sim/road-net';
 import { reckon, type Sampled } from '../sim/agent-wire';
-import { carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type Solid } from '../sim/solids';
+import { carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, solidAt, vesselShape, type CraftPose, type Solid } from '../sim/solids';
 import { CORES } from '../sim/craft/cores';
 import { VoxelCollision } from '../sim/craft/voxel-collision';
 import { DEFAULT_TUNING } from '../sim/tuning';
@@ -40,14 +46,19 @@ const HEAR = 15;
 // how far beyond the craft (m) the snapshot's things are looked at, besides what it and a car (at CAR_V m/s) cover in
 // the ticks run ahead
 const SEE = 20, CAR_V = 25;
+// the most ticks between two snapshots a craft's turn is read from
+const TURNED = 6;
 
 /** where a car of the traffic is at arc length s, lane offset off (the page's road maths, the host's own) */
 export type CarAt = (c: Car, s: number, off: number, out: CarPose) => CarPose;
 /** the coaches at world time t (s) when the hour is hour (the page's timetable, the host's own) */
 type CoachesAt = (t: number, hour: number) => Iterable<CoachPose>;
-// a thing of the snapshot round the craft: a car of the traffic (where it is reckoned to be in a tick), or boxes as at
-// the snapshot's tick going on at a speed (vx, vz m/s)
-type Seen = { car: Sampled<CarState> } | { boxes: Solid[]; vx: number; vz: number };
+// a craft's pose as at the start of the host's tick from, and its speed (vx, vz m/s)
+type Going = CraftPose & { from: number; vx: number; vz: number };
+// a thing of the snapshot round the craft: a car of the traffic (where it is reckoned to be in a tick), boxes standing
+// still, or a craft going on from the snapshot's tick turning at w (rad/s), and from the tick the craft run ahead met
+// it in without its speed into it (met)
+type Seen = { car: Sampled<CarState> } | { boxes: Solid[] } | { craft: CraftType; go: Going; w: number; met?: Going };
 // what of a snapshot as held the craft may meet (the client's held snapshot is one)
 type Taken = { tick: number; t: number; hour: number; cars: readonly Sampled<CarState>[]; detached: readonly CarState[]; crafts: readonly CraftState[]; boats: BoatView | null };
 
@@ -73,12 +84,16 @@ export class Prediction {
   private type: CraftType | null = null;
   // the newest snapshot's things round the craft, and its tick
   private things: Seen[] = [];
+  // which of things each of the solids near() gave is
+  private readonly whose: (Seen | null)[] = [];
   private thingsAt = 0;
   // the newest snapshot's world clock (s) and hour: where the coaches are reckoned from (null: none seen yet)
   private clockAt: number | null = null;
   private hour = 12;
   private readonly cores = new Map<CraftType, CraftCore>();
   private readonly carAt: CarPose = { x: 0, y: 0, z: 0, h: 0, pitch: 0 };
+  // each craft's heading in the snapshot before (its tick, the heading): how fast it turns
+  private headings = new Map<CraftId, [number, number]>();
   // the events told ahead, each by the host's tick it is due in, not yet heard from the host; the page's tick told up
   // to; those told not yet read
   private told: { tick: number; key: string }[] = [];
@@ -151,10 +166,13 @@ export class Prediction {
     col.prefetch(core.pose, core.velocity);
     // (the host's tick this one is; not known yet: the snapshot's)
     const at = this.lag === null ? this.thingsAt : t.p + this.lag;
+    // (met in this tick or after by a run now stepped again)
+    for (const o of this.things) if ('met' in o && o.met && o.met.from >= at) o.met = undefined;
     const near = core.meet && this.clockAt !== null ? this.near(at) : null;
+    const met = (i: number, n: { x: number; z: number }) => this.met(this.whose[i], at, n);
     core.clock.run(STEP, (s) => {
       if (!core.step(input, s, col)) return false;
-      if (near?.length) meetSolids(type, core, near, col);
+      if (near?.length) meetSolids(type, core, near, col, met);
       return true;
     });
     if (core.events.length) {
@@ -168,19 +186,31 @@ export class Prediction {
   // the snapshot's things the craft may meet in the host's tick at, where the host has them then (as at the tick's
   // start: after the one before), those within the craft's reach of where it is now
   private near(at: number): Solid[] {
-    const core = this.core!, p = core.pose, v = core.velocity, dt = (at - 1 - this.thingsAt) * STEP, out: Solid[] = [];
+    const core = this.core!, p = core.pose, v = core.velocity, k = at - 1 - this.thingsAt, dt = k * STEP, out: Solid[] = [], W = this.whose;
+    W.length = 0;
     let r = 0;
     for (const s of meetShapes(this.type!)) r = Math.max(r, Math.hypot(s.hx, s.hz) + Math.abs(s.fwd ?? 0));
     r += Math.hypot(v.x, v.z) * STEP + 1;
-    const keep = (s: Solid) => { const b = r + s.hx + s.hz; if (Math.abs(s.x - p.x) < b && Math.abs(s.z - p.z) < b) out.push(s); };
+    const keep = (s: Solid, o: Seen | null) => { const b = r + s.hx + s.hz; if (Math.abs(s.x - p.x) < b && Math.abs(s.z - p.z) < b) { out.push(s); W.push(o); } };
     for (const o of this.things) {
       if ('car' in o) {
         const c = o.car;
-        keep(solidAt(carShape(c), this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, at - 1), c.off, this.carAt)));
-      } else for (const b of o.boxes) keep(dt ? { ...b, x: b.x + o.vx * dt, z: b.z + o.vz * dt } : b);
+        keep(solidAt(carShape(c), this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, at - 1), c.off, this.carAt)), null);
+      } else if ('boxes' in o) for (const b of o.boxes) keep(b, null);
+      else {
+        const q = going(o.met && o.met.from < at ? o.met : o.go, o.w, at);
+        for (const b of lightSolids(this.type!, o.craft, q, craftSolids(o.craft, q))) keep(b, o);
+      }
     }
-    for (const k of this.coaches(this.clockAt! + dt, this.hour)) keep(solidAt(COACH_SHAPE, { x: k.x, y: k.y, z: k.z, h: k.heading }));
+    for (const c of this.coaches(this.clockAt! + dt, this.hour)) keep(solidAt(COACH_SHAPE, { x: c.x, y: c.y, z: c.z, h: c.heading }), null);
     return out;
+  }
+
+  // craft o met in the host's tick at, n the craft's way out of it
+  private met(o: Seen | null, at: number, n: { x: number; z: number }) {
+    if (!o || !('craft' in o) || o.met) return;
+    const q = going(o.go, o.w, at), into = q.vx * n.x + q.vz * n.z;
+    if (into > 0) o.met = { ...q, vx: q.vx - into * n.x, vz: q.vz - into * n.z };
   }
 
   // the newest snapshot's things round the craft (within what it and a car cover in the ticks run ahead)
@@ -193,23 +223,27 @@ export class Prediction {
     this.hour = s.hour;
     // (a car the session took out of the traffic is a detached one from that tick)
     const out = s.detached.length ? new Set(s.detached.map((c) => c.id)) : null;
-    for (const c of s.detached) if (c.detachedPose && by(c.detachedPose.x, c.detachedPose.z)) T.push({ boxes: [solidAt(carShape(c), c.detachedPose)], vx: 0, vz: 0 });
+    for (const c of s.detached) if (c.detachedPose && by(c.detachedPose.x, c.detachedPose.z)) T.push({ boxes: [solidAt(carShape(c), c.detachedPose)] });
     for (const c of s.cars) {
       if (out?.has(c.id)) continue;
       const q = this.carPose(c as unknown as Car, reckon(c.s, c.v, c.at, tick), c.off, this.carAt);
       if (by(q.x, q.z)) T.push({ car: c });
     }
+    const H = new Map<CraftId, [number, number]>();
     for (const c of s.crafts) {
       if (c.id === this.id || !c.placed) continue;
       let k = this.cores.get(c.type);
       if (!k) this.cores.set(c.type, k = CORES[c.type](DEFAULT_TUNING) as CraftCore);
       k.load(c.core as never);
-      const q = k.pose, w = k.velocity;
-      if (!by(q.x, q.z)) continue;
-      const boxes = lightSolids(own, c.type, q, craftSolids(c.type, q));
-      if (boxes.length) T.push({ boxes, vx: w.x, vz: w.z });
+      const q = k.pose as CraftPose, v = k.velocity, was = this.headings.get(c.id);
+      H.set(c.id, [tick, q.h]);
+      if (!by(q.x, q.z) || !lightSolids(own, c.type, q, craftSolids(c.type, q)).length) continue;
+      // (its turn as the snapshots show it: the cores keep their yaw rates each its own way, or none)
+      const w = was && tick - was[0] <= TURNED ? wrap(q.h - was[1]) / ((tick - was[0]) * STEP) : 0;
+      T.push({ craft: c.type, go: { ...q, from: tick + 1, vx: v.x, vz: v.z }, w });
     }
-    for (const b of s.boats?.poses ?? []) if (by(b.x, b.z, b.len / 2)) T.push({ boxes: [solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading })], vx: 0, vz: 0 });
+    this.headings = H;
+    for (const b of s.boats?.poses ?? []) if (by(b.x, b.z, b.len / 2)) T.push({ boxes: [solidAt(vesselShape(b), { x: b.x, y: b.y, z: b.z, h: b.heading })] });
   }
 
   // the newest snapshot's state taken for its tick and the page's ticks after it stepped again
@@ -264,10 +298,19 @@ export class Prediction {
     this.errs = [];
     this.type = null;
     this.things = [];
+    this.headings.clear();
     this.clockAt = null;
     this.told = [];
     this.fresh = [];
   }
+}
+
+// where g is (as at the start of) the host's tick at, and how fast it goes: on along the arc its turn w bends its way to
+function going(g: Going, w: number, at: number): Going {
+  const t = (at - g.from) * STEP, a = w * t, c = Math.cos(a), s = Math.sin(a);
+  // (the speed turned by a, and the way gone: its integral; straight for a turn too small to divide by)
+  const [u, r] = Math.abs(a) < 1e-6 ? [t, 0] : [s / w, (1 - c) / w];
+  return { ...g, x: g.x + g.vx * u + g.vz * r, z: g.z + g.vz * u - g.vx * r, h: g.h + a, from: at, vx: g.vx * c + g.vz * s, vz: g.vz * c - g.vx * s };
 }
 
 // an event's kind: its type or kind, or itself (a word)
