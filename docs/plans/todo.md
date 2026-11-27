@@ -24,7 +24,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   air defence (owner 2026-11-27): no zones, a gun with a sight line, manned by an NPC, a player may take a gun won,
   it fires at whatever its mount can aim at, a reaction time and tracers warn (concept in the scratchpad's
   konzept-geschuetze-flugabwehr.md; first step: an NPC post that fires at vehicles, then the gun; owner: at a chosen place such as the Feste
-  Oberhaus, not spread over the map). An armed aircraft whose NPCs attack from the air: a concept being written. Health and
+  Oberhaus, not spread over the map). An enemy camp (owner 2026-11-27: one, at the Oberhaus,
+  a guard and a patrol, refilled out of sight; its numbers and the NPCs' in the tuning, not hard-coded; NPCs react to
+  hits and shots and alert the squad): being built. The combat plane built for a player (ADR 0021; left: its numbers
+  and the swing tried in play; next its NPC pilot, after the air defence's first step: players in vehicles as targets,
+  an NPC on a seat; dogfights later, not ruled out; bombs and rockets not yet). Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);

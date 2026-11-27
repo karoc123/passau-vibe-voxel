@@ -5,7 +5,7 @@
 // - ride: the cars' ride (sim/vehicles.ts RIDE): createVehicle/createWheels (physics/rapier/vehicle.ts), RapierCar,
 //   LifePhysics. A vehicle type's own differences (CarBuild tune) stay in the catalog, resolved at creation (rideOf).
 // - boat: the speedboat (sim/craft/boat-motion.ts BOAT): BoatMotion, findSpawn
-// - plane, jet: the floatplane and the jet (sim/craft/plane-flight.ts PLANE, JET): PlaneFlight
+// - plane, jet, fighter: the floatplane, the jet and the combat plane (sim/craft/plane-flight.ts PLANE, JET, FIGHTER): PlaneFlight
 // - craft: the helicopter, hovercraft and paraglider (sim/craft/craft-motion.ts CRAFT): CraftMotion
 // - drone: the FPV drone (sim/craft/fpv-flight.ts DRONE): FpvFlight, DroneCore
 // - presence: how long the world keeps an edit, or a vehicle a player left, that no player is near (PRESENCE below,
@@ -20,7 +20,7 @@
 import { frozen } from '../core/frozen';
 import { RIDE, type RideTuning } from './vehicles';
 import { BOAT, type BoatTuning } from './craft/boat-motion';
-import { JET, PLANE, type PlaneConfig } from './craft/plane-flight';
+import { FIGHTER, JET, PLANE, type PlaneConfig } from './craft/plane-flight';
 import { CRAFT, type CraftTuning } from './craft/craft-motion';
 import { DRONE, type DroneTuning } from './craft/fpv-flight';
 import { WALK_BOUNDS, type WalkBounds } from './walk-bounds';
@@ -44,6 +44,7 @@ export interface Tuning {
   readonly boat: BoatTuning;
   readonly plane: PlaneConfig;
   readonly jet: PlaneConfig;
+  readonly fighter: PlaneConfig;
   readonly craft: CraftTuning;
   readonly drone: DroneTuning;
   readonly presence: PresenceTuning;
@@ -56,8 +57,8 @@ export interface Tuning {
 /** the parts the page runs as the host does, so the host sends them in its hello: the crafts' motion laws and tanks
  * (a mirror's and a prediction's cores are made with them) and the cars' ride and tank (the driver's own car run
  * ahead). Not the host's own (presence, walk, health, stands): they would only lengthen every hello */
-export type ClientTuning = Pick<Tuning, 'ride' | 'boat' | 'plane' | 'jet' | 'craft' | 'drone' | 'fuel'>;
+export type ClientTuning = Pick<Tuning, 'ride' | 'boat' | 'plane' | 'jet' | 'fighter' | 'craft' | 'drone' | 'fuel'>;
 
-export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, craft: CRAFT, drone: DRONE,
+export const DEFAULT_TUNING: Tuning = frozen({ ride: RIDE, boat: BOAT, plane: PLANE, jet: JET, fighter: FIGHTER, craft: CRAFT, drone: DRONE,
   presence: PRESENCE, walk: WALK_BOUNDS, health: HEALTH, stands: STANDS, fuel: FUEL });
 

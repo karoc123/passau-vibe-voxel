@@ -50,7 +50,7 @@ const CRAFTS: Partial<Record<CraftType, SeatPlace[]>> = {
 // The pilots: the helicopter's front right under its front glass; the hovercraft's in the wheelhouse on the cabin's
 // roof, starboard of its middle mullion, the legs bent level so that the shoes stay over the cabin's ceiling; the
 // speedboat's at its wheel; the floatplane's in the left seat, the shoulders inside the cabin's sides; the jet's in
-// the front seat, low enough for the head alone to be in the canopy and the shoes over the belly; the paraglider's in
+// the front seat, low enough for the head alone to be in the canopy and the shoes over the belly; the combat plane's under its bubble canopy; the paraglider's in
 // its harness (the motion's point is the pilot's middle, GLIDER_HEIGHT over the feet). A drone is flown from afar.
 const PILOTS: Partial<Record<CraftType, SeatPlace>> = {
   helicopter: scaled(CRAFT_SCALE.helicopter, [at(-0.4, 0.03, 1.4)])[0],
@@ -58,6 +58,7 @@ const PILOTS: Partial<Record<CraftType, SeatPlace>> = {
   boat: at(-0.45, 1.05, -0.2, 1.1),
   floatplane: at(0.2, 0.2, 1.2),
   jet: at(0, -0.3, 1.9, 1.5),
+  fighter: at(0, 0.3, 0.2, 1.5),
   paraglider: at(0, 0.87 - GLIDER_HEIGHT, -0.05),
 };
 

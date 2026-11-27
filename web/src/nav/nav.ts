@@ -65,7 +65,13 @@ export class Nav {
   /** the mouse's lock taken by the browser (Esc while walking): the page opens its menu */
   onLockLost: () => void = () => {};
   /** the mouse taken again for the walk (the menu's Resume: a click on the button is the gesture it needs) */
-  resumeMouse() { if (this.onFoot) this.requestMouse(); }
+  resumeMouse() { if (this.wantsMouse) this.requestMouse(); }
+  /** the mouse taken for aiming (a craft's view that aims with it: PlayerCraft.mouse), unless the last input was a
+   * finger or pen. The browser grants it only within a key press or click (a few seconds after one in Chrome);
+   * refused, the next click on the view takes it */
+  takeMouse() { if (this.mouseLast) this.requestMouse(); }
+  // on foot or at a gun: the mouse aims
+  private get wantsMouse() { return this.onFoot || !!this.craft?.mouse; }
   private lifeRef: StreetLife | null = null;
   private simRef: SimClient | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
@@ -92,6 +98,8 @@ export class Nav {
   private wheelT = 0;
   private walkStart: object | null = null;
   private mouseLook: { locked: boolean } | null = null;
+  // the last input a key or the mouse (not a finger or pen: no mouse to take, the view is dragged)
+  private mouseLast = true;
   private mapNear: number | null = null; // the camera's near plane before it went on foot (fitNear)
   private readonly footTouch: FootTouch;
 
@@ -211,7 +219,8 @@ export class Nav {
     } catch { reject(); }
   }
 
-  private releaseMouse() {
+  /** the mouse given back (out of a view that aims with it) */
+  releaseMouse() {
     this.walkStart = null;
     this.mouseLook = null;
     if (document.pointerLockElement === this.dom) document.exitPointerLock();
@@ -229,6 +238,8 @@ export class Nav {
     let press: { x: number; y: number; t: number; button: number; moved: boolean } | null = null;
     let pinch0: { d: number; fov: number } | null = null, twist: number | null = null;
     const two = () => [...ptrs.values()];
+    addEventListener('pointerdown', (e) => { this.mouseLast = e.pointerType === 'mouse'; }, { capture: true });
+    addEventListener('keydown', () => { this.mouseLast = true; }, { capture: true });
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement === dom) {
         if (this.mouseLook) this.mouseLook.locked = true;
@@ -259,9 +270,14 @@ export class Nav {
     });
     dom.addEventListener('pointerdown', (e) => {
       if (this.craftView || (this.onFoot && document.pointerLockElement === dom)) return;
-      // on foot (back from another tab, or landed from the map): a click takes the mouse; its press still picks who
-      // to follow (tap)
-      if (this.onFoot && e.pointerType === 'mouse') this.requestMouse();
+      // on foot (back from another tab, or the lock refused): a click takes the mouse and is not lost: its button
+      // fires or aims at once
+      if (this.onFoot && e.pointerType === 'mouse') {
+        this.requestMouse();
+        if (e.button === 0) this.arms.trigger = true;
+        else if (e.button === 2) this.foot.aim = true;
+        return;
+      }
       if ((this.onSticks || this.onFoot) && e.pointerType === 'touch') return;
       (document.activeElement as HTMLElement | null)?.blur?.();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -434,6 +450,8 @@ export class Nav {
     if (from) {
       if (!this.craftView || this.craft !== from || c.view !== 'own' || from === c) return false;
       this.dropCraft();
+      // (from a gun to the wheel; to a gun, its shell takes the mouse again)
+      this.releaseMouse();
       this.craft = c;
       this.keys.clear();
       this.onMode(this.mode, null);
@@ -596,9 +614,16 @@ export class Nav {
     if (!w || !c || !pose || this.walkPending) return false;
     const opts = exitFrom(w, pose, ride ? 2 : 3), at = opts.at!;
     this.stepOut = { x: at.x, y: at.y, z: at.z, h: Math.atan2(opts.facing!.x, opts.facing!.z), moving: false };
+    // (the mouse taken within the key press or click that got out, as before boarding; kept from a gun)
+    const entry = {};
+    this.walkStart = entry;
+    this.takeMouse();
     this.dropCraft();
     this.stepOut = null;
-    void this.setWalk(opts);
+    void this.setWalk(opts).finally(() => {
+      if (this.walkStart === entry) this.walkStart = null;
+      if (!this.onFoot) this.releaseMouse();
+    });
     return true;
   }
 

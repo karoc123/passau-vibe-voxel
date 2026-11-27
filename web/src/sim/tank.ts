@@ -20,6 +20,7 @@ export const FUEL: FuelTuning = frozen({
   helicopter: frozen({ full: 120, idle: 0.1 }),
   floatplane: frozen({ full: 240, idle: 0.1 }),
   jet: frozen({ full: 150, idle: 0.1 }),
+  fighter: frozen({ full: 240, idle: 0.1 }),
 });
 
 /** the tank's steps from empty to full: only a whole step crosses the wire (fuel goes down slowly; 0.5 % is finer than

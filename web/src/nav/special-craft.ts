@@ -31,8 +31,8 @@ const CONFIG = {
     help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
-    help: ['A/D steer · W speed bar · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
-      'Left stick: turn, speed bar and brake. Release: let go of the wing; falling, Open canopy.'] },
+    help: ['A/D steer · W dive · S brake (flare to land) · G release (falling: G opens a canopy again) · Esc exit',
+      'Left stick: turn, dive and brake. Release: let go of the wing; falling, Open canopy.'] },
 } as const;
 
 class SpecialCraft implements PlayerCraft {

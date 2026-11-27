@@ -4,7 +4,8 @@
 // (nav/board.ts) and taps the button to ride along; a finger dragged across the screen turns P's view round the car
 // (nav/nav.ts: a passenger has no drive sticks), as dragging does in a craft. The seat switch's button (nav/board.ts
 // swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
-// tap on it moves P to the gun, another back to the wheel.
+// tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
+// at the gun and on foot (out with X) firing shots the host records.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -125,6 +126,49 @@ const toWheel = gunner && await until(async () => (await seatButton()) === 'To t
 check(gunner && toWheel, `a tap on it: P at the gun, the button saying To the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))}, ${JSON.stringify(await seatButton())})`);
 await P.tap('#seat-button').catch(() => {});
 check(await piloting(), `another tap: P back at the wheel (${JSON.stringify(await P.evaluate(() => window.__sim.seat()))})`);
+
+// with mouse and keyboard: C to the gun shows the crosshair and takes the mouse (a key press is the gesture Chrome
+// wants), a click fires (the host's shot), C back steers; the lock refused (a browser wanting a click), the crosshair
+// still shown and the first click both takes the mouse and fires; out of the boat with X, on foot the crosshair again,
+// the mouse taken and a click fires
+const crosshair = () => P.evaluate(() => !!document.querySelector('#arms .crosshair')?.checkVisibility());
+const locked = () => P.evaluate(() => document.pointerLockElement === document.querySelector('canvas'));
+const firesOnClick = async () => {
+  const me = await P.evaluate(() => window.__sim.player), t0 = sim.tick;
+  await P.mouse.move(480, 320);
+  await P.mouse.down(); await wait(120); await P.mouse.up();
+  return until(() => sim.eventsSince(t0).some((e) => e.kind === 'shot' && e.player === me), 3000);
+};
+const gunCycle = async (refuse) => {
+  // (the next lock asked for refused once, as by a browser without a click)
+  if (refuse) {
+    await P.evaluate(() => {
+      const c = document.querySelector('canvas'), own = c.requestPointerLock;
+      c.requestPointerLock = () => { c.requestPointerLock = own; document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); };
+    });
+  }
+  await P.keyboard.press('KeyC');
+  const atGun = await P.waitForFunction(() => window.__sim.seat()?.role === 'passenger' && window.__three.nav.craft?.id === 'passenger', null, { timeout: 15000 }).then(() => true, () => false);
+  await wait(400);
+  const seen = atGun && await crosshair(), mouse = await locked();
+  check(seen && mouse === !refuse, `C at the wheel${refuse ? ', the lock refused' : ''}: P at the gun, the crosshair shown, the mouse ${mouse ? 'taken' : 'not taken'}`);
+  const fired = atGun && await firesOnClick(), after = await locked();
+  check(fired && after, `${refuse ? 'the first' : 'a'} click at the gun fires a shot the host records (the mouse taken: ${after})`);
+  await P.keyboard.press('KeyC');
+  const back = await piloting(), boatId = await P.evaluate(() => window.__sim.craftOf()?.id);
+  const v0 = sim.crafts.get(boatId)?.core.motion.speed ?? 0;
+  await P.keyboard.down('KeyW'); await wait(1500); await P.keyboard.up('KeyW');
+  const v1 = sim.crafts.get(boatId)?.core.motion.speed ?? 0, free = !(await locked());
+  check(back && free && v1 > v0 + 1, `C again: P back at the wheel, the mouse given back (${free}), W drives the boat (${v0.toFixed(1)} -> ${v1.toFixed(1)} m/s)`);
+};
+await gunCycle(false);
+await gunCycle(true);
+await P.keyboard.press('KeyX');
+const onFoot = await P.waitForFunction(() => window.__three.nav.onFoot && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
+await wait(400);
+const footMouse = await locked();
+check(onFoot && await crosshair() && footMouse, `X: P out of the boat on foot, the crosshair shown, the mouse taken (${footMouse})`);
+check(onFoot && await firesOnClick(), 'a click on foot fires a shot the host records');
 
 await browser.close();
 link.close?.();

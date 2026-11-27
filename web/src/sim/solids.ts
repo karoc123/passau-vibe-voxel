@@ -10,7 +10,7 @@ import { COACH_LENGTH, COACH_WIDTH } from './coaches';
 import { BODY_HEAD, BODY_R } from './figure';
 import { CRAFT_SCALE, GLIDER_HEIGHT, HOVER_HEIGHT } from './craft/craft-motion';
 import { BOAT } from './craft/boat-motion';
-import { JET, PLANE } from './craft/plane-flight';
+import { FIGHTER, JET, PLANE } from './craft/plane-flight';
 import { VEHICLE_IDS, VEHICLES, vehicleOf } from './vehicles';
 import type { CraftCore } from './craft/craft-core';
 import type { VoxelCollision } from './craft/voxel-collision';
@@ -71,10 +71,12 @@ export const CRAFT_SHAPES: Partial<Record<CraftType, Shape>> = {
   boat: { hx: BOAT.beam / 2, hz: BOAT.length / 2, y0: -0.5, top: 1.5 },
   floatplane: { hx: 1.4, hz: 3.6, y0: -PLANE.FLOAT_H, top: 1.3 },
   jet: { hx: 0.8, hz: 4.5, fwd: 0.1, y0: -JET.FLOAT_H, top: 0.9 },
+  fighter: { hx: 0.55, hz: 3.9, y0: -FIGHTER.FLOAT_H, top: 1.5 },
 };
 const WINGS: Partial<Record<CraftType, Shape>> = {
   floatplane: { hx: PLANE.WING_X + 0.25, hz: 0.75, fwd: PLANE.WING_Z, y0: PLANE.WING_Y - 0.25, top: PLANE.WING_Y + 0.25 },
   jet: { hx: JET.WING_X + 0.2, hz: 1.35, fwd: -0.9, y0: JET.WING_Y - 0.25, top: JET.WING_Y + 0.25 },
+  fighter: { hx: FIGHTER.WING_X + 0.1, hz: 0.85, fwd: FIGHTER.WING_Z, y0: FIGHTER.WING_Y - 0.25, top: FIGHTER.WING_Y + 0.25 },
 };
 // The light crafts: they meet the solid things as the others do, but are none themselves (a car, the walker, another
 // craft, a vessel would take a drone for a wall): what meets them pushes them aside. The drone's frame and props; the
