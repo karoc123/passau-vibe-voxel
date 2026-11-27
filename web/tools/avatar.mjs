@@ -16,6 +16,7 @@ const { StreetLife } = await imp('src/view/life.ts');
 const { WeaponsView } = await imp('src/view/weapons/weapons-view.ts');
 const { HIPS } = await imp('src/view/avatars.ts');
 const { pilotPlace } = await imp('src/view/seats.ts');
+const { EYE, FIGURE_TOP } = await imp('src/sim/figure.ts');
 
 const fail = [], pass = (s) => console.log(`PASS ${s}`), check = (ok, s) => (ok ? pass(s) : fail.push(s));
 const G = 5;
@@ -64,7 +65,17 @@ check(B.c.traffic.avatars.some((a) => a.player === A.c.player) && fA && dA && Ma
   `B sees A on foot as a figure of its own at A's pose (drawn at ${dA?.pose.x.toFixed(2)}, ${dA?.pose.z.toFixed(2)}; A at ${ax}, ${az})`);
 check(after.people === before.people && after.legs === before.legs && after.torso === before.torso && after.legs === after.people,
   `A is not one of the crowd: the crowd ${before.people} -> ${after.people}, its meshes' people ${before.legs} -> ${after.legs}`);
-check(!!fA?.label && fA.label.parent === fA.group && fA.label.position.y > 1.8, `a place over A's head for a name (${fA?.label?.position.y.toFixed(2)} m up)`);
+check(!!fA?.label && fA.label.parent === fA.group && fA.label.position.y > FIGURE_TOP, `a place over A's head for a name (${fA?.label?.position.y.toFixed(2)} m up)`);
+
+// the figure's size (sim/figure.ts): its head's top as drawn standing where the shared constants put it, the eyes (the
+// camera on foot, a shot's start, an NPC's look) in its head's upper half
+{
+  fA.group.updateMatrixWorld(true);
+  const all = new THREE.Box3().setFromObject(fA.body), head = new THREE.Box3().setFromObject(fA.body.children.filter((o) => o.isMesh)[1]);
+  const feet = fA.group.position.y, top = all.max.y - feet, h0 = head.min.y - feet, h1 = head.max.y - feet;
+  check(Math.abs(top - FIGURE_TOP) < 0.03 && EYE > (h0 + h1) / 2 && EYE < h1,
+    `A's figure drawn ${top.toFixed(3)} m tall (the shared top ${FIGURE_TOP.toFixed(3)}), its head from ${h0.toFixed(3)} to ${h1.toFixed(3)} m round the eyes at ${EYE.toFixed(3)}`);
+}
 
 // the gait: the legs' swing (rad, most either way) and its cycles a second over s, at v m/s
 const gait = (v, s) => {

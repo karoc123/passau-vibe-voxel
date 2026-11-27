@@ -1,11 +1,11 @@
 import type { World } from '../core/world';
-import { EYE } from './weapons/weapon';
+import { EYE, FIGURE_SCALE } from './figure';
 import type { Ground } from './walk';
 
-/** water deeper than this (m) is swum, shallower waded */
-export const SWIM_DEPTH = 1.2;
-/** m the soles hang under the water's top afloat: the eyes 0.3 m over it */
-export const FLOAT = EYE - 0.3;
+/** water deeper than this (m) is swum, shallower waded: about the figure's chest */
+export const SWIM_DEPTH = 1.2 * FIGURE_SCALE;
+/** m the soles hang under the water's top afloat: the eyes a little over it */
+export const FLOAT = EYE - 0.3 * FIGURE_SCALE;
 /** how far up a bank or a step (m over the water) a swimmer climbs out: a low quay's edge, not a high one */
 export const CLIMB_OUT = 1.05;
 // The data's water is one voxel over the soil everywhere (scripts/voxelize.py lays each body flat at its level and

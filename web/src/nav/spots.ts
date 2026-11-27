@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import type { PedEdge } from '../sim/types';
 import { clamp, pushTo } from '../util';
 import type { World } from '../core/world';
-
-export const EYE = 1.7;
+import { EYE } from '../sim/figure';
 
 type Net = (x: number, r: number, R: number) => [number, number][];
 

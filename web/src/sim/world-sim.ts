@@ -57,13 +57,14 @@ import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponById, weaponIn } from './weapons';
 import { Npcs } from './npcs';
-import { aimFrom, CHEST, newMind, RANGE, think, type Duty, type Senses } from './npc-mind';
+import { BODY_HEAD, BODY_R, CHEST, EYE } from './figure';
+import { aimFrom, newMind, RANGE, think, type Duty, type Senses } from './npc-mind';
 import type { Vec3 } from '../core/vec';
 import { Tank } from './tank';
 import { lifeKey, Lives, type DamageKind, type Life, type Toughness } from './health';
 import { bodyClear, carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import { WRECK_COL, type BoatPose } from './contract/agents';
-import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay, type Weapon } from './weapons/weapon';
+import { aimDir, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay, type Weapon } from './weapons/weapon';
 
 /** what the sim keeps of a player: where they look (view: the focus simulated round them, the viewer), the entity
  * followed (kept in the sim wherever it goes, no rights over it), the seat held, and, walking as a person, the walk's
@@ -675,12 +676,12 @@ export class WorldSim {
         }
         for (const [id, by] of sim.avatars) {
           const w = sim.players.get(by)?.walk?.pose;
-          if (w && !mine('avatar', id)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: 0.3, l: 0.3, ht: 1.8 };
+          if (w && !mine('avatar', id)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: BODY_R, l: BODY_R, ht: BODY_HEAD };
         }
         // (a dead NPC is no body: shots and blasts pass over it)
         for (const [id, n] of sim.npcs.all) {
           const w = n.pose;
-          if (n.dead === null && !mine('avatar', id) && !out(w.x, w.z)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: 0.3, l: 0.3, ht: 1.8 };
+          if (n.dead === null && !mine('avatar', id) && !out(w.x, w.z)) yield { entity: { kind: 'avatar', id }, x: w.x, y: w.y, z: w.z, h: w.h, r: BODY_R, l: BODY_R, ht: BODY_HEAD };
         }
         for (const c of sim.crafts.values()) {
           const p = c.core.pose;

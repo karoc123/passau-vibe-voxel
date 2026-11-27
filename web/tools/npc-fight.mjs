@@ -12,7 +12,7 @@ import { imp, sessionLink, synthData } from './lib.mjs';
 const { nodeHost } = await imp('src/host/node.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { EYE } = await imp('src/sim/weapons/weapon.ts');
+const { EYE } = await imp('src/sim/figure.ts');
 
 const fail = [], check = (ok, s) => (ok ? console.log(`PASS ${s}`) : (console.log(`FAIL ${s}`), fail.push(s)));
 const settle = () => new Promise((r) => setImmediate(r));
@@ -146,7 +146,12 @@ for (let k = 0; k < 2; k++) ten.push(sim.addNpc({ x: 190 + k * 20, y: G, z: 200 
 await tick(30);
 C.keep = true;
 const SECS = 10;
-await tick(SECS / STEP);
+// (fighting: in an attack at some time of the window; D, killed, lies a while and comes back)
+const fought = new Set();
+for (let i = 0; i < SECS / STEP; i++) {
+  await tick();
+  for (const id of ten) if (N.all.get(id)?.mind.state === 'attack') fought.add(id);
+}
 C.keep = false;
 const z = zlib.createDeflateRaw();
 let deflated = 0, raw = 0;
@@ -159,7 +164,7 @@ for (const s of C.snaps) {
   z.write(t);
   await new Promise((r) => z.flush(zlib.constants.Z_SYNC_FLUSH, r));
 }
-const fighting = ten.filter((id) => N.all.get(id)?.mind.state === 'attack').length;
+const fighting = fought.size;
 const kbs = deflated / SECS / 1024, rawKbs = raw / SECS / 1024;
 console.log(`bytes: 10 NPCs in sight (${fighting} fighting) ${kbs.toFixed(2)} kB/s deflated, ${rawKbs.toFixed(1)} raw, a player`);
 check(fighting >= 1 && kbs < 3, `10 NPCs in sight, ${fighting} fighting, cost a player ${kbs.toFixed(2)} kB/s (budget 3)`);

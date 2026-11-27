@@ -7,6 +7,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Orbit mode**: the map view the page starts in; the city dragged, turned and zoomed from above, a double-click
   flies there. The player has no body in it and is seen by nobody (owner 2026-11-27). Not "free camera".
 - **Walk**: on foot, first person (walker, avatar). Swims in deep water.
+- **Figure**: the body on foot as drawn and as it meets the world (a player's avatar, an NPC): three quarters of a
+  grown-up, about 1.4 m, the eyes at about 1.28 m (owner 2026-11-27); it climbs a block's step all the same.
 - **Ride**: following a person or a car, or driving a car (the car driven is a craft on the ride's camera).
 - **Craft**: a vehicle that owns the camera and the input: drone, boat, hovercraft, helicopter, floatplane, jet,
   paraglider.

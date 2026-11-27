@@ -7,8 +7,6 @@ import type { DamageKind } from '../health';
 /** the slots a player holds weapons in, numbered from 1 (keys 1, 2) */
 export const SLOTS = 2;
 
-/** the eyes over the feet (m): the first-person camera's, so a shot leaves where the player looks from */
-export const EYE = 1.7;
 
 /** how far (m) round a player on foot the host keeps the voxels loaded: a ray into a node not loaded meets nothing,
  * so this is at least the longest ray a weapon casts */
