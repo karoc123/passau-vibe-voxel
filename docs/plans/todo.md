@@ -27,9 +27,8 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
   budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
   roads (`roads.md`, "How the main roads drive").
-- Roofs probe, round 2 (owner 2026-11-27: round 1 barely differed; roofs too complex): every building but landmarks
-  simplified: straight walls (rectangles), roofs from a few types chosen from the data (flat with a parapet for halls
-  and supermarkets, gable, hip, ...), no chimneys, dormers or spikes. Two looks compared: clean planes or voxel steps.
+- Roofs: rule buildings (`scripts/roofs.py`), the owner picked the look `slopes` (2026-11-27), on in the map config;
+  seen once the map is rebuilt in full (with the roads' caps). Not smoothed.
 - 0.5 m blocks probe (after the roofs): what it costs (bytes, triangles, mesh time, phone frames), then walked.
 
 Decided: desktop first, the phone must keep running well (the owner tests on it); the traffic sim is frozen (fixes

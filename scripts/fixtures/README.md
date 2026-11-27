@@ -25,6 +25,7 @@ apply across the whole fixture, including areas outside the local defects.
 | `hals` | Footpaths hovering 3.22% (maximum 1.50%), cap roughness p99 14.45 cm (maximum 12 cm) |
 | `inn` | Bridge deck 8092867 sags 2.1 m (as in `holes`) |
 | `kachlet` | 445 of 1419 LoD2-matched outlines moved (31.4%, minimum 40%) |
+| `haidenhof` | 519 of 1553 LoD2-matched outlines moved (33.4%, minimum 40%; fixture added for the roofs probe, with and without `roofs.rules`); `covers` 2x2: the ground of node 0_0 (the map's corner: `ground.npz` cls, rgb, terrain, tiles 1/2/4 0_0) differs from the whole fixture's |
 
 The LoD2 ratio measures how many outlines were shifted among those already
 matched to LoD2. The lower ratios in Gaißa and Kachlet describe fewer shifts,
