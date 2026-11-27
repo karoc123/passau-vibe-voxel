@@ -72,3 +72,32 @@ export class ChaseRig {
     return cam;
   }
 }
+
+const UP = new THREE.Vector3(0, 1, 0);
+// rad per px of the mouse (a passenger's drag's); ms let be before the boom swings back, at /s
+const PER_PX = 0.005, HOLD_MS = 1500, BACK_RATE = 1.5;
+
+/** The chase boom swung by the mouse taken, as a passenger's drag swings theirs: round the craft and over it. Let be
+ *  a moment, it swings back behind (the pilot steers by the view behind). */
+export class MouseLook {
+  private yaw = 0;
+  private pitch = 0;
+  private at = 0;
+
+  /** the mouse moved by dx, dy px (right, down +) */
+  move(dx: number, dy: number) {
+    this.yaw -= dx * PER_PX;
+    this.pitch = Math.max(-1.2, Math.min(1.2, this.pitch - dy * PER_PX * 0.8));
+    this.at = performance.now();
+  }
+
+  reset() { this.yaw = this.pitch = 0; }
+
+  /** off (the boom, from the craft to the camera) swung for this frame of dt s */
+  swing(off: THREE.Vector3, dt: number) {
+    if (performance.now() - this.at > HOLD_MS) { const k = follow(BACK_RATE, dt); this.yaw -= this.yaw * k; this.pitch -= this.pitch * k; }
+    if (Math.abs(this.yaw) < 1e-4 && Math.abs(this.pitch) < 1e-4) return off;
+    const L = off.length();
+    return off.applyAxisAngle(UP, this.yaw).setY(off.y - Math.sin(this.pitch) * L);
+  }
+}

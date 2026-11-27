@@ -92,7 +92,7 @@ export class PassengerMode implements PlayerCraft {
       this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
     });
     addEventListener('pointermove', (e) => {
-      if (this.gun && document.pointerLockElement === canvas) { this.turnGun(-e.movementX * 0.0025, -e.movementY * 0.0025); return; }
+      if (document.pointerLockElement === canvas) return;
       const d = this.drag;
       if (!d || d.id !== e.pointerId) return;
       if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) d.moved = true;
@@ -127,7 +127,15 @@ export class PassengerMode implements PlayerCraft {
     return !!R && !this.out && (R.ref.kind === 'craft' ? this.seatView || !!this.gun : this.ctx.nav.ride?.view === 'eyes');
   }
 
-  get mouse() { return !!this.gun; }
+  get mouse() { return !!this.riding && !this.out; }
+
+  turnView(dx: number, dy: number) {
+    if (this.gun) this.turnGun(-dx * 0.0025, -dy * 0.0025);
+    else {
+      this.dyaw -= dx * 0.005;
+      this.dpitch = clamp(this.dpitch - dy * 0.004, -1.2, 1.2);
+    }
+  }
 
   private get ownsCamera() { return !!this.riding && this.riding.ref.kind === 'craft' && !this.out; }
 

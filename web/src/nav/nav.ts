@@ -7,7 +7,7 @@ import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
 import type { World } from '../core/world';
-import type { PlayerCraft } from './craft';
+import { aloft, type CraftSpot, type PlayerCraft } from './craft';
 import { Arms } from './arms';
 import { Foot } from './foot';
 import { Glide } from './glide';
@@ -18,6 +18,9 @@ import { Rider } from './ride';
 import { EYE } from '../sim/figure';
 import { findStreet, openSpot, walkNet } from './spots';
 import { HEAD } from '../sim/walk';
+import { canopyOpens } from '../sim/walker';
+import { craftSolids, meetShapes } from '../sim/solids';
+import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { FootTouch } from '../touch/foot';
 
 // Orbit, walk and ride share one set of keys (W/S forward and back, A/D turn or on foot step sideways, Q/E nose up and
@@ -49,6 +52,8 @@ export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.
 // corners ~0.33 m out at the walk's field of view, inside the 0.4 m -- and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
 // (near x 2^24), is then 2.5 x coarser than the map camera's, as the drone's has always been.)
 const WALK_NEAR = 0.2;
+// m between a craft left in the air and the top of the paraglider opened under it
+const CANOPY_CLEAR = 0.5;
 
 export class Nav {
   mode: Mode = 'orbit';
@@ -66,15 +71,15 @@ export class Nav {
   onLockLost: () => void = () => {};
   /** the mouse taken again for the walk (the menu's Resume: a click on the button is the gesture it needs) */
   resumeMouse() { if (this.wantsMouse) this.requestMouse(); }
-  /** the mouse taken for aiming (a craft's view that aims with it: PlayerCraft.mouse), unless the last input was a
+  /** the mouse taken (on foot, in a vehicle that takes it: PlayerCraft.mouse), unless the last input was a
    * finger or pen. The browser grants it only within a key press or click (a few seconds after one in Chrome);
    * refused, the next click on the view takes it */
   takeMouse() { if (this.mouseLast) this.requestMouse(); }
-  // on foot or at a gun: the mouse aims
+  // on foot or in a vehicle: the mouse aims or turns the view
   private get wantsMouse() { return this.onFoot || !!this.craft?.mouse; }
-  // a craft's view that aims with the mouse, as last seen: here alone the lock follows it, so a craft only says
-  // whether it aims (PlayerCraft.mouse) and none takes or gives back the mouse itself
-  private craftMouse = false;
+  // the vehicle that takes the mouse, as last seen (null: none): here alone the lock follows it, so a craft only says
+  // whether it takes it (PlayerCraft.mouse) and none takes or gives back the mouse itself
+  private craftMouse: PlayerCraft | null = null;
   private lifeRef: StreetLife | null = null;
   private simRef: SimClient | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
@@ -95,6 +100,8 @@ export class Nav {
   stepOut: WalkPose | null = null;
   /** the weapons on foot */
   readonly arms = new Arms();
+  /** a paraglider opened at `at` for the player out of the craft source (main.ts: the wing's); false: not now */
+  bailOut: (source: PlayerCraft, at: CraftSpot) => boolean = () => false;
   private hoverT = 0;
   private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
   private quietT = 0;
@@ -181,6 +188,8 @@ export class Nav {
   toggleAim() { return this.foot.aim = this.onFoot && !this.foot.aim; }
   private get driving() { return this.craft !== null && this.riding; }
   // a touch on the screen is the drive's sticks' (drive.ts), but a passenger's: their seat has none, so it looks round
+  // in a craft or at a car's wheel or seat: what takes the mouse (PlayerCraft.mouse)
+  private get inVehicle() { return this.craftView || this.driving; }
   private get onSticks() { return this.driving && this.craft?.id !== 'passenger'; }
   /** a craft owns the camera and the input */
   get craftView() { return this.mode === 'craft'; }
@@ -269,12 +278,19 @@ export class Nav {
       else if (e.button === 2) this.foot.aim = false;
     });
     dom.addEventListener('mousemove', e => {
-      if (this.onFoot && document.pointerLockElement === dom) this.lookWithMouse(e);
+      if (document.pointerLockElement !== dom) return;
+      if (this.onFoot) this.lookWithMouse(e);
+      else if (this.craft && this.inVehicle) {
+        // (a car's view is the ride's: turned as on foot, the mouse right to the right)
+        if (this.craft.view === 'ride') this.lookWithMouse(e);
+        else this.craft.turnView?.(e.movementX, e.movementY);
+      }
     });
     dom.addEventListener('pointerdown', (e) => {
-      // (in a craft that aims with the mouse: a click not yet locked takes it, the craft's own handler still fires)
-      if (this.craftView && this.craft?.mouse && e.pointerType === 'mouse' && document.pointerLockElement !== dom) this.requestMouse();
-      if (this.craftView || (this.onFoot && document.pointerLockElement === dom)) return;
+      // (in a vehicle that takes the mouse: a click not yet locked takes it, the craft's own handler still fires)
+      const locked = document.pointerLockElement === dom;
+      if (this.inVehicle && this.craft?.mouse && e.pointerType === 'mouse' && !locked) this.requestMouse();
+      if (this.craftView || ((this.onFoot || this.driving) && locked)) return;
       // on foot (back from another tab, or the lock refused): a click takes the mouse and is not lost: its button
       // fires or aims at once
       if (this.onFoot && e.pointerType === 'mouse') {
@@ -455,8 +471,7 @@ export class Nav {
     if (from) {
       if (!this.craftView || this.craft !== from || c.view !== 'own' || from === c) return false;
       this.dropCraft();
-      // (from a gun to the wheel; to a gun, its shell takes the mouse again)
-      this.releaseMouse();
+      // (the mouse kept: the craft taken over says whether it takes it, followCraftMouse)
       this.craft = c;
       this.keys.clear();
       this.onMode(this.mode, null);
@@ -470,7 +485,6 @@ export class Nav {
     }
     // (from foot: got in walking up to it, the seat already the host's: board.ts)
     if (!this.canStartCraft && !this.onFoot) return false;
-    if (this.onFoot) this.releaseMouse();
     this.rememberSky();
     if (this.riding) {
       this.leaveRide(); // (the car driven parked: dropCraft)
@@ -488,7 +502,6 @@ export class Nav {
   openCanopy(c: PlayerCraft) {
     if (!this.canOpen || c.view !== 'own') return false;
     this.body = null;
-    this.releaseMouse();
     this.glide.stop();
     this.toCraft(c);
     return true;
@@ -617,6 +630,7 @@ export class Nav {
     const w = this.world, c = this.craft, ride = this.driving ? this.ride : null;
     const pose = c && (ride ? this.life?.pose(ride.ref) : c.mapPose);
     if (!w || !c || !pose || this.walkPending) return false;
+    if (this.underCanopy(w, c)) return true;
     const opts = exitFrom(w, pose, ride ? 2 : 3), at = opts.at!;
     this.stepOut = { x: at.x, y: at.y, z: at.z, h: Math.atan2(opts.facing!.x, opts.facing!.z), moving: false };
     // (the mouse taken within the key press or click that got out, as before boarding; kept from a gun)
@@ -632,6 +646,17 @@ export class Nav {
     return true;
   }
 
+  // Out of an aircraft in the air (any seat in it: ALOFT) where a canopy would open on a fall: under a paraglider
+  // opened just under it (its canopy clear of the craft's lowest box), as it flies on (owner 2026-11-27). Lower,
+  // out onto foot as from any vehicle
+  private underCanopy(w: World, c: PlayerCraft) {
+    const sim = this.sim, s = sim?.seat(), v = s?.entity.kind === 'craft' ? sim!.crafts().find((q) => q.id === s.entity.id) : null;
+    if (!v || !aloft(v)) return false;
+    const p = v.core.pose, under = Math.min(...craftSolids(v.type, p).map((b) => b.y)), top = Math.max(...meetShapes('paraglider').map((b) => b.top));
+    const y = under - CANOPY_CLEAR - top;
+    return canopyOpens(w, p.x, p.z, y - GLIDER_HEIGHT) && this.bailOut(c, { x: p.x, y, z: p.z, h: p.h });
+  }
+
   /** the host has moved the player from their body on foot into a seat (board.ts): the body is not to be left again */
   tookSeat() { this.body = null; }
 
@@ -639,7 +664,6 @@ export class Nav {
     // (the body on foot left before the ride's own seat is asked for: a seat taken from foot is the host's to reach)
     if (this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
     this.rememberSky();
-    this.releaseMouse();
     this.dropCraft();
     this.rider.start(ag);
     this.glide.start(1100);
@@ -674,14 +698,14 @@ export class Nav {
     else { this.arms.trigger = false; this.foot.aim = false; }
   }
 
-  // (taken on the frame a craft starts aiming, still within the key press or click that brought it there; given
-  // back when it stops, but not on the way out onto foot, which aims with it too: getOut)
+  // (taken on the frame a vehicle takes it, still within the key press or click that brought it there, kept from
+  // foot into a vehicle; given back off foot where nothing takes it, but not on the way out onto foot, which aims
+  // with it too: getOut)
   private followCraftMouse() {
-    const m = this.craftView && !!this.craft?.mouse;
-    if (m === this.craftMouse) return;
-    this.craftMouse = m;
-    if (m) this.takeMouse();
-    else if (!this.onFoot && !this.walkStart) this.releaseMouse();
+    // (each vehicle taken over asks again: a seat switched to by a key is the gesture a lock refused before needs)
+    const m = this.inVehicle && this.craft?.mouse ? this.craft : null;
+    if (m !== this.craftMouse) { this.craftMouse = m; if (m) this.takeMouse(); }
+    if (!m && !this.onFoot && !this.walkStart && document.pointerLockElement === this.dom) this.releaseMouse();
   }
 
   // On foot the player is a body the world knows (an avatar: the others see it walk), moved by this walk: put down
