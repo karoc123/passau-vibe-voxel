@@ -26,7 +26,12 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   konzept-geschuetze-flugabwehr.md; first step: an NPC post that fires at vehicles, then the gun; owner: at a chosen place such as the Feste
   Oberhaus, not spread over the map). The combat plane built for a player (ADR 0021; left: its numbers
   and the swing tried in play; next its NPC pilot, after the air defence's first step: players in vehicles as targets,
-  an NPC on a seat; dogfights later, not ruled out; bombs and rockets not yet). Health and
+  an NPC on a seat; dogfights later, not ruled out; bombs and rockets not yet; the NPC pilot decided (owner
+  2026-11-27, kept small, it will change): comes on the camp's alarm, appears flying out of sight (boarding at the
+  shore later), dies with the plane (later: the plane crashes and the pilot bails out on a paraglider), attacks every
+  player, the paraglider too, one at the Oberhaus even for four). A military helicopter (owner: bigger than today's,
+  four seats, two door guns, no pilot's gun, no hover hold: a co-op craft; debug menu only at first): being built;
+  today's helicopter becomes a two-seater. Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the
   numbers tried in play (a hard landing or a drone's bump may wreck too readily). Placed vehicles built as a first draft (ADR 0016; how and where not yet refined with
   the owner, expect changes);
