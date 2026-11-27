@@ -69,7 +69,7 @@ const SETS = {
   west: ['kachlet', 'schalding', 'hacklberg', 'ilztal', 'north'],
   all: Object.keys(SHOTS),
 };
-const BASE = { ui: '0', autores: '0', weather: 'clear', date: '7-15', hour: '13' };
+const BASE = { play: '', ui: '0', autores: '0', weather: 'clear', date: '7-15', hour: '13' };
 // --focus: name -> the view's query (az: compass bearing the camera stands at, el: degrees over the horizon)
 export const FOCUS_SHOTS = {
   'f-sw': 'az=225', 'f-se': 'az=135', 'f-ne': 'az=45', 'f-nw': 'az=315', 'f-top': 'az=190&el=70',

@@ -8,6 +8,8 @@ import type { StreetLife } from '../view/life';
 import type { FullMap } from '../fullmap';
 import type { Minimap } from '../minimap';
 import type { Waypoint } from '../waypoint';
+import type { Prefs } from '../ui/menu';
+import type { NameTags } from '../ui/name-tags';
 
 export interface DebugHooks {
   // the city is shown (shoot.mjs waits for it)
@@ -25,6 +27,8 @@ export interface DebugHooks {
   __crafts: PlayerCraft[];
   // the maps and the waypoint (tools/maps.mjs)
   __map: { minimap: Minimap; full: FullMap; waypoint: Waypoint };
+  // the Esc menu, the player's settings, the frames shown, the names over the others (tools/menu.mjs)
+  __menu: { menu: { open(): void; close(): void; isOpen(): boolean }; prefs: Prefs; fps: () => number; tags: NameTags };
 }
 
 declare global {

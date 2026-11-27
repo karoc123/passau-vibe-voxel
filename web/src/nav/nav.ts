@@ -59,6 +59,10 @@ export class Nav {
   // the map's corner in the project grid (meta.origin): ?cam= links are in the project grid's coordinates
   origin: [number, number] = [0, 0];
   cancelFly: () => void = () => {};
+  /** the mouse's lock taken by the browser (Esc while walking): the page opens its menu */
+  onLockLost: () => void = () => {};
+  /** the mouse taken again for the walk (the menu's Resume: a click on the button is the gesture it needs) */
+  resumeMouse() { if (this.onFoot) this.requestMouse(); }
   private lifeRef: StreetLife | null = null;
   private simRef: SimClient | null = null;
   private net: ReturnType<typeof walkNet> | null = null;
@@ -171,11 +175,8 @@ export class Nav {
     addEventListener('keydown', (e) => {
       if (!gameKey(e)) return;
       K.shift = e.shiftKey;
-      if (e.code === 'Escape') {
-        if (this.walkStart) this.releaseMouse();
-        if (!this.onMap) this.flyUp();
-        return;
-      }
+      // (Esc opens the menu, main.ts; a walk still coming is given up)
+      if (e.code === 'Escape') { if (this.walkStart) this.releaseMouse(); return; }
       if (this.craftView || this.driving) return;
       if (this.onFoot && /^Digit\d$/.test(e.code)) { this.arms.select(+e.code.slice(5)); e.preventDefault(); return; }
       if (e.code === 'Space' && (this.onFoot || this.ride?.ref.kind === 'person')) { // following someone: become them, then jump
@@ -234,9 +235,10 @@ export class Nav {
         else document.exitPointerLock();
       } else if (this.mouseLook?.locked) {
         this.releaseMouse();
-        // Esc ends the walk; a tab switch or alt-tab also takes the lock, and must not. Focus and visibility settle a
-        // moment after the lock goes, hence the wait.
-        setTimeout(() => { if (this.onFoot && document.hasFocus() && !document.hidden) this.flyUp(); }, 150);
+        // the browser takes Esc to end the lock (the page may never see the key): the menu opens instead; a tab switch
+        // or alt-tab also takes the lock, and must not. Focus and visibility settle a moment after the lock goes,
+        // hence the wait.
+        setTimeout(() => { if (document.hasFocus() && !document.hidden) this.onLockLost(); }, 150);
       }
     });
     document.addEventListener('pointerlockerror', () => {

@@ -15,7 +15,7 @@ import { FullMap } from './fullmap';
 import { Waypoint } from './waypoint';
 import type { CraftContext, PlayerCraft } from './nav/craft';
 import { Nav, type Mode, type Ride } from './nav/nav';
-import { gameKey, typing } from './nav/input';
+import { gameKey, pause, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
 import { StreetLife } from './view/life';
@@ -42,6 +42,8 @@ import { focusView } from './focus';
 import { ViewDistance } from './view-distance';
 import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
+import { loadPrefs, makeMenu, preselect, skipStart, startMenu } from './ui/menu';
+import { NameTags } from './ui/name-tags';
 import { makeBoardButton, makeCanopyButton, makeJumpButton, makeTouchArms } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
@@ -50,7 +52,7 @@ import { makeDayWeather, WEATHER_NAMES } from './ui/day-weather';
 import { makeGoTo } from './ui/go-to';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
-import { openSession, pageView, PageTime, sessionOptions } from './app/session';
+import { HOST_PORT, openSession, pageView, PageTime, sessionOptions } from './app/session';
 import { RETRY_MS, SocketLink } from './client/sim-worker-link';
 import { LiveEdits } from './core/live-edits';
 import './style.css';
@@ -64,6 +66,13 @@ const qs = new URLSearchParams(location.search);
 const phone = Math.min(screen.width, screen.height) < 600;
 const gpu = gpuName();
 const gfx = new Settings(phone, innerWidth >= 600, prepassPays(gpu), gpu);
+// the player's own settings (ui/menu.ts: the name, the frame cap)
+const prefs = loadPrefs(phone);
+// the host chosen in the start menu (null: alone), the city loading behind it; a URL that names one skips it
+const serverChoice: Promise<string | null> = skipStart(qs) ? Promise.resolve(sessionOptions(qs).server) : (() => {
+  pause(true);
+  return startMenu(prefs, preselect(HOST_PORT), () => {}).finally(() => pause(false));
+})();
 // The detail, 0 to 1: the triangles the city's tiles may draw (city.ts picks their levels by it, the nearest finest),
 // evenly on a log scale from twice the whole map at 8 m (0: 3.4 M on today's map, the whole map at 8 m and the nearest
 // finer) to all of it at 1 m with its foliage (132 M; at 1 no limit at all): 0.45 ~18 M, 0.75 ~53 M. Phones draw 2 M at
@@ -173,6 +182,15 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
 }
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 makeCredits();
+const menu = makeMenu(prefs, {
+  paused: pause,
+  resumed: (mouse) => { if (mouse) nav.resumeMouse(); },
+  canOrbit: () => !nav.onMap,
+  toOrbit: () => nav.flyUp(),
+  changed: (p) => sim?.setName(p.name),
+});
+nav.onLockLost = () => menu.open();
+const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
 const armsHud = makeArmsHud();
@@ -385,11 +403,13 @@ async function boot() {
     mapView.setRiver(riverPoints);
   })
     .catch((e) => { riverPoints = []; console.warn('river points', e); });
-  fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic)).then(unpackTraffic).then((td) => {
+  fetchJson<TrafficData>(dataUrl(HOST_FILES.traffic)).then(unpackTraffic).then(async (td) => {
     mapView.setRoads(td.roads);
     streetLamps.then((placed) => { lamps.addStreets(placed); lampHeads = new LampHeads(scene, placed, meta.origin); });
     // the world sim's client, the sim in a Web Worker on its own clock
-    const { client, link } = openSession(session, { meta, edits, traffic: td, world });
+    const { client, link } = openSession({ ...session, server: await serverChoice }, { meta, edits, traffic: td, world });
+    client.setName(prefs.name);
+    if (link instanceof SocketLink) perf.ping = () => link.rtt;
     // a host of other code, data or tuning is refused (sim/hello.ts): said on the page, the city stays without life
     client.hello.catch((e: Error) => {
       console.error(e.message);
@@ -437,14 +457,17 @@ function otherPlayers(): readonly MapMark[] {
   others.length = 0;
   const me = sim?.player;
   if (!sim || !life) return others;
-  for (const a of life.avatarsDrawn()) if (a.player !== me) others.push({ player: a.player, x: a.pose.x, z: a.pose.z });
-  for (const c of sim.crafts()) if (c.pilot && c.pilot !== me) others.push({ player: c.pilot, x: c.core.pose.x, z: c.core.pose.z });
+  const S = sim, label = (p: string) => S.nameOf(p) || p;
+  for (const a of life.avatarsDrawn()) if (a.player !== me) others.push({ player: a.player, label: label(a.player), ...xyz(a.pose) });
+  for (const c of sim.crafts()) if (c.pilot && c.pilot !== me) others.push({ player: c.pilot, label: label(c.pilot), ...xyz(c.core.pose) });
   for (const [car, player] of sim.drivers()) {
     const d = player !== me && life.drawn('car', car);
-    if (d) others.push({ player, x: d.x, z: d.z });
+    if (d) others.push({ player, label: label(player), ...xyz(d) });
   }
   return others;
 }
+
+const xyz = (p: { x: number; y: number; z: number }) => ({ x: p.x, y: p.y, z: p.z });
 
 // the shell that flies the nearest craft no one pilots within BOARD_R m of the map's focus, put in it; false: none
 const BOARD_R = 150;
@@ -562,8 +585,10 @@ renderer.setAnimationLoop(frameLoop({
     minimap?.update(now, barRect.bottom);
     fullmap?.update(now);
     labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
+    nameTags.update(camera, life?.group.visible ? otherPlayers() : []);
   },
-}, t0));
+}, t0, () => prefs.fps));
+hook('__menu', { menu, prefs, fps: () => perf.fps, tags: nameTags });
 
 hook('__three', { camera, controls, nav, bar, scene, renderer, flyTo: goTo.flyTo, setHour: dayWeather.setHour, setDay: dayWeather.setDay, setWeather: dayWeather.setWeather, map, daylight, post, budget,
   // the detail, as the visitor would set it (tools)

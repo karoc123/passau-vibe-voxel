@@ -9,11 +9,11 @@
 // Focus: when the window loses the focus (another window, a tab switch) the held keys, touches and hold buttons are
 // let go (onFocusLoss) and a craft's input is hands off (inFocus false: its neutral input, the car's PARK; the world
 // sim goes on, ADR 0008) until it is back; the panel says PAUSED. The drone is disarmed and wants arming again
-// (fpv.ts: a radio's throttle may have moved meanwhile).
+// (fpv.ts: a radio's throttle may have moved meanwhile). The Esc menu open is the same as the focus lost (paused).
 
 /** a gamepad's stick inside this is at rest */
 const DEADZONE = 0.12;
-export const PAUSED = 'Hands off (window not in focus)';
+export const PAUSED = 'Hands off (menu open or window not in focus)';
 
 /** the key is meant for a page control: typed into a text field or a list, or Space and Enter on a focused button,
  *  checkbox or summary (they press it). A range slider is no text field: the walk keys walk after one was dragged. */
@@ -25,7 +25,7 @@ export function typing(e: KeyboardEvent): boolean {
 }
 
 /** a key for the modes: no browser shortcut (Ctrl, Cmd, Alt) and not typing */
-export const gameKey = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e);
+export const gameKey = (e: KeyboardEvent) => !paused && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e);
 
 /** the gamepads connected ([] when the Gamepad API is missing or blocked: the keyboard still works) */
 export function gamepads(): Gamepad[] {
@@ -42,15 +42,23 @@ export function padAxis(v: number | undefined, dead = DEADZONE) {
   return Math.sign(a) * Math.min(1, Math.max(0, (Math.abs(a) - dead) / (1 - dead)));
 }
 
-let blurred = false;
+let blurred = false, paused = false;
+const letGo: (() => void)[] = [];
 addEventListener('blur', () => { blurred = true; });
 addEventListener('focus', () => { blurred = false; });
 
 /** the window has the focus and is shown: a craft takes the player's input only then */
-export const inFocus = () => !blurred && !document.hidden;
+export const inFocus = () => !blurred && !paused && !document.hidden;
 
-/** run when the window loses the focus or is hidden: let go of what is held */
+/** the Esc menu opened (on: the modes' keys and a craft's input off, what is held let go) or closed */
+export function pause(on: boolean) {
+  paused = on;
+  if (on) for (const run of letGo) run();
+}
+
+/** run when the window loses the focus or is hidden, or the Esc menu opens: let go of what is held */
 export function onFocusLoss(run: () => void) {
+  letGo.push(run);
   addEventListener('blur', run);
   document.addEventListener('visibilitychange', () => { if (document.hidden) run(); });
 }

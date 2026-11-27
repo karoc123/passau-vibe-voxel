@@ -53,7 +53,7 @@ page.on('worker', (w) => w.evaluate(() => {
   const timeout = setTimeout.bind(self);
   self.setTimeout = (f, d) => timeout(f, Math.min(d ?? 0, 2));
 }).catch(() => {}));
-await page.goto(`http://127.0.0.1:${PORT}/?cam=${craft?.cam ?? '1400,60,350,1460,10,420'}&crop=600&seed=7&res=0.5&shadow=0&ao=0&bloom=0&taa=0&refl=0${extra ? '&' + extra : ''}`);
+await page.goto(`http://127.0.0.1:${PORT}/?play&cam=${craft?.cam ?? '1400,60,350,1460,10,420'}&crop=600&seed=7&res=0.5&shadow=0&ao=0&bloom=0&taa=0&refl=0${extra ? '&' + extra : ''}`);
 await page.waitForFunction(() => window.__life?.group.visible, null, { timeout: 240000 });
 await page.waitForTimeout(3000);
 const key = (type, code) => page.evaluate(([t, c]) => window.dispatchEvent(new KeyboardEvent(t, { code: c, key: c, bubbles: true })), [type, code]);

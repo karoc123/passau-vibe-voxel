@@ -16,7 +16,15 @@ and heading, rivers, roads and nearby landmarks. **,** (comma), the corner butto
 of **Map** (also on a phone) opens the whole city full screen with street names: drag to move, wheel or pinch to zoom,
 **,** or **Esc** closes it. A click or tap on either map sets a waypoint (a beam over the spot in the city, its
 distance and direction at the top of the screen); clicking it again, its distance or **Backspace** clears it. With a
-host (`?server=`) both maps show the other players near you, labelled, on foot or in what they drive or fly.
+host both maps show the other players near you, labelled with the name they chose (else their id), on foot or in what
+they drive or fly; the name is shown over them too.
+
+**Esc** (or the ☰ button at the bottom right, on a phone) opens the menu in every mode and lets go of the mouse:
+**Resume**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
+default, 30 on a phone; both kept in the browser), **Back to orbit mode** (on foot, riding, in a craft), **Full
+screen** (not on an iPhone: its Safari has none for a page) and **Start menu**. An open map or panel closes first.
+The page opens on a start menu: play alone or on a server, the server preselected when `./voxel start` serves the
+page (else the last one chosen). `?server=` or `?play` skips it. With a host the round trip (ping) shows top right.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).
@@ -322,10 +330,11 @@ node tools/where.mjs 25,1713                  # what lies at a ?cam=/HUD point (
 ### Two or more players
 
 One machine hosts the world; every page that names it joins as a player of its own and sees the others on foot, their
-cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed). Without `?server=` the page plays alone with the world in a Web Worker, as before.
+cars and crafts. A page that cannot reach its host says so at the top and tries again every 3 s (no reload needed). Alone (the start menu's **Play alone**, or `?play`) the world runs in a Web Worker.
 
 To host a game on a box of its own (a Pi, a server in the LAN), from the repository's root: `./voxel start` runs the
-built page (port 8080) and the host (5300) in the background and prints the link to open; `./voxel stop`, `status`,
+built page (port 8080) and the host (5300) in the background and prints the link to open (its start menu offers that
+host first: the page is built for its port); `./voxel stop`, `status`,
 `logs`, `restart` (after a pull), `run` (in the foreground). It needs node 22 and pnpm (or corepack); it installs the
 packages and builds the page itself when the commit changed. By hand, for development:
 
@@ -341,7 +350,7 @@ tools/wt.sh vite 5231 lan                    # the page, reachable from the LAN 
 ```
 
 Open `http://<machine>:5231/?server=ws://<machine>:5300` in each browser (a bare `?server` means this page's machine,
-port 5300). Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
+port 5300), or the page bare and the server's address in its start menu. Every player has living streets round them, however far apart. Each player gets every tick's snapshot of
 what lies near them, two to a message: the crafts whole, the bodies, avatars and cars let go when they change (one at
 rest once), the cars, people and trains only when the page's reckoning of them drifts, edits as their ops; ~10-15 kB/s per player on the wire by the cathedral (deflated). Under WSL2 the LAN reaches the host only with mirrored networking
 or a port forward.
@@ -366,7 +375,8 @@ Every query parameter the viewer reads (`web/src/main.ts`, `focus.ts`, `settings
 | `crop=R`, `crop=x0,z0,x1,z1`, `crop=fit` | a tiny scene: only the tiles within R m / that box / round the `focus=` object ("Agent tools") |
 | `date=M-D`, `hour=`, `weather=clear\|cloudy\|rain\|snow` | the day, the hour (decimal) and the weather; the viewer writes them back as they change |
 | `ui=0` | no panels (for screenshots) |
-| `server=ws://host:port` | join the world of a network host (`tools/wt.sh serve`) instead of playing alone; bare `server`: this page's machine, port 5300. The world's start (`seed`, `dig`, `mode`, `date`, `hour`, `lifephys`) is then the host's |
+| `server=ws://host:port` | join the world of a network host (`tools/wt.sh serve`) instead of playing alone; bare `server`: this page's machine, port 5300. The world's start (`seed`, `dig`, `mode`, `date`, `hour`, `lifephys`) is then the host's; no start menu |
+| `play` | alone, without the start menu (the tools, a shared link) |
 | `seed=` | the street life's random seed (default: a new one each load) |
 | `autores=1\|0` | measure resolution and detail once even under automation (`1`) or never (`0`; `autores.ts`) |
 | `dig=1` | a click carves a hole in the city until the page is reloaded (`dig.ts`, a developer's switch) |
@@ -439,7 +449,7 @@ or press a controller button so its axes appear under **Controller setup**.
 3. Lower throttle fully and click **Arm controller**. The drone starts in the air. Around 39% throttle holds altitude
    when level. Centred attitude sticks hold the current orientation. Set camera tilt before arming.
 
-**T** resets to the launch point, **Enter** arms the last input source again and **Esc** returns to the map. The keyboard
+**T** resets to the launch point, **Enter** arms the last input source again and **Esc** opens the menu (its **Back to orbit mode** returns to the map). The keyboard
 option uses W/S for pitch, Q/E for roll, A/D for yaw and R/F to raise or cut throttle. It starts at hover throttle.
 
 The flight uses independent 1 m collision data for terrain, structures and trees across the whole 9,344 × 3,456 m model.
@@ -453,7 +463,7 @@ Roof and wall collisions follow the source voxels, including where a rendered ro
 Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
-the same car where you stop, T puts it back on the road, and **Esc** takes you back to the map. **Vehicle: …** beside
+the same car where you stop, T puts it back on the road, and the menu's **Back to orbit mode** (**Esc**) takes you back to the map. **Vehicle: …** beside
 **Take the wheel** (or V) picks what the car taken becomes: as it is (any), car, coupé, van, pickup, bus, motorbike or camper van
 (`web/src/sim/vehicles.ts`).
 
@@ -490,7 +500,7 @@ no bodies and no Rapier step.
 
 Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
 downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
-exits; touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
+opens the menu (Back to orbit mode exits); touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
 the bridges. The motion is `web/src/sim/craft/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
 the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide with nor avoid it.
 
@@ -499,7 +509,7 @@ the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide wit
 Click **Plane** in the toolbar (from the map view) to fly a small floatplane from where the camera is, or **Plane on
 the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
 nose down/up (flight convention; "Invert pitch" in the panel swaps), Shift or R throttle up, Space or F down (held,
-stepless 0–100 %), T back to the last safe point, Esc exits; the wheel moves the camera. Touch: the left thumb is the
+stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits); the wheel moves the camera. Touch: the left thumb is the
 stick, the throttle a slider on the right, pinch zooms. Gamepad (standard): left stick, RT/LT or the right stick's Y
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
 stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings near level) to float and taxi; past
@@ -528,14 +538,14 @@ core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/craft
 The left touch or gamepad stick steers and controls forward/back motion. On the helicopter, the right touch or
 gamepad stick climbs and descends (up/down) and slides sideways; the gamepad triggers climb and descend too.
 Their motion laws and numbers are `CRAFT` in `web/src/sim/craft/craft-motion.ts`, the models (at the walker's and the
-cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc** returns to the map.
+cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc**, then **Back to orbit mode**, returns to the map.
 
 ## Walking
 
 Click **Walk** in the toolbar to start on foot, in first person, at the current view or beside the vehicle you're
 following. W/S walk, A/D step sideways, the left/right arrows turn, Q/E look up and down, Shift runs and Space jumps;
 the mouse looks around (a click takes it back after a tab switch). On touch screens the left thumb walks, the right
-thumb looks and a pinch zooms. **Esc** releases the mouse and returns to the map. Cars, train coaches, other players
+thumb looks and a pinch zooms. **Esc** releases the mouse and opens the menu; its **Back to orbit mode** returns to the map. Cars, train coaches, other players
 on foot and the crafts standing about (hovercraft, helicopter, boat) are solid: you walk round them, and a car driven
 into you shoves you along. The crowd is not: you pass through people.
 

@@ -205,8 +205,8 @@ export class FullMap {
     for (const o of this.at.others()) {
       const { sx, sy } = this.toScreen(o.x, o.z);
       if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
-      drawOther(ctx, sx, sy, o.player);
-      this.drawnOthers.push({ player: o.player, sx, sy });
+      drawOther(ctx, sx, sy, o.label);
+      this.drawnOthers.push({ player: o.player, label: o.label, sx, sy });
     }
     const wp = this.at.waypoint.at;
     if (wp) { const { sx, sy } = this.toScreen(wp.x, wp.z); drawPin(ctx, sx, sy); }

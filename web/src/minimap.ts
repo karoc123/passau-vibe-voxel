@@ -31,12 +31,13 @@ const LANDMARKS: Record<string, string> = {
 const EXPAND = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
 
 export type MapPose = Pick<Pose, 'x' | 'z' | 'h'>;
-/** another player on a map: their label and where they are (on foot or in what they drive or fly) */
-export interface MapMark { player: string; x: number; z: number }
+/** another player on a map: who, their label (the name they chose, else their id) and where they are (on foot or in
+ * what they drive or fly; y: the height, for the name over them) */
+export interface MapMark { player: string; label: string; x: number; y: number; z: number }
 /** what both maps mark: the player, the waypoint, the others */
 export interface MapMarks { pose: () => MapPose; waypoint: Waypoint; others: () => readonly MapMark[] }
 /** a marker as last drawn on a map, in its CSS pixels (the tools) */
-export interface DrawnMark { player: string; sx: number; sy: number }
+export interface DrawnMark { player: string; label: string; sx: number; sy: number }
 
 /** the city's ground as the maps draw it (the built blocks, the rivers, the roads) and its names (the landmarks, the
  * streets); version: bumped when what is drawn changes */
@@ -294,8 +295,8 @@ export class Minimap {
     for (const o of others) {
       const x = mid + (o.x - pose.x) * zoom, y = mid + (o.z - pose.z) * zoom;
       if (x < 4 || y < 4 || x > size - 4 || y > size - 4) continue;
-      drawOther(ctx, x, y, o.player);
-      this.drawnOthers.push({ player: o.player, sx: x, sy: y });
+      drawOther(ctx, x, y, o.label);
+      this.drawnOthers.push({ player: o.player, label: o.label, sx: x, sy: y });
     }
     // the waypoint, held at the edge when it is off the map (its direction)
     const wp = this.marks.waypoint.at;
