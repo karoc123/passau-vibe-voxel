@@ -25,6 +25,14 @@ export interface Solid { x: number; y: number; z: number; h: number; hx: number;
  * a stair; a car's roof with a jump) */
 export const WALKER_R = 0.3, WALKER_HEAD = 1.9, WALKER_STEP = 1.05;
 
+/** the world's voxels as the walker meets them: whether a span of heights of the column at x, z is solid */
+export interface Walls { blocked(x: number, z: number, y0: number, y1: number): boolean }
+
+/** whether the walker's middle at x, z, its soles at feet, is clear of the voxels up to its head: what a walker
+ * carried on a roof is carried to (a bridge's deck it does not fit under sweeps it off, on the page and the host
+ * alike) */
+export const headroom = (w: Walls, x: number, z: number, feet: number) => !w.blocked(x, z, feet + 0.05, feet + WALKER_HEAD);
+
 /** another player on foot: as solid as the walker, so two walkers push each other apart; a head is not stood on (a
  * jump from a car's roof would reach it) */
 export const AVATAR_SHAPE: Shape = { hx: WALKER_R, hz: WALKER_R, top: WALKER_HEAD, roof: false };

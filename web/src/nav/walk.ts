@@ -1,6 +1,6 @@
 import { MAX_LEG } from '../chamfer';
 import type { World } from '../core/world';
-import { carried, deeper, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
+import { carried, deeper, headroom, pushOut, roofUnder, WALKER_HEAD, WALKER_STEP, type Solid } from '../sim/solids';
 import type { MoveKeys } from './move-keys';
 import { EYE } from './spots';
 
@@ -153,5 +153,5 @@ export function ride(w: Ground, P: { x: number; z: number }, feet: number, a: So
   const b = a.id === undefined ? undefined : solids.find((s) => s.id === a.id);
   if (!b) return null;
   const to = carried(a, b, P);
-  return w.blocked(to.x, to.z, feet + to.dy + 0.05, feet + to.dy + HEAD) ? null : to;
+  return headroom(w, to.x, to.z, feet + to.dy) ? to : null;
 }

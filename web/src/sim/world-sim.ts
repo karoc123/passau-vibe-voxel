@@ -55,7 +55,7 @@ import { craftBox } from './solids';
 import { seatKey } from './seat-reads';
 import type { GameMode, ModeWorld } from './mode';
 import { weaponIn } from './weapons';
-import { carried, carShape, COACH_SHAPE, craftSolids, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid } from './solids';
+import { carried, carShape, COACH_SHAPE, craftSolids, headroom, lightSolids, meetShapes, meetSolids, onRoof, overlap, pushOut, roofSpot, roofUnder, solidAt, vesselShape, WALKER_STEP, type Shape, type Solid, type Walls } from './solids';
 import type { BoatPose } from './contract/agents';
 import { aimDir, EYE, REACH, Trigger, type Body, type MapBox, type Projectile, type ShotWorld, type VoxelRay } from './weapons/weapon';
 
@@ -120,6 +120,8 @@ export class WorldSim {
   private phys: LifePhysics | null = null;
   // what a shot flies through (setWorld)
   private voxels: VoxelRay | null = null;
+  // what a walker carried on a roof is kept out of (setWorld; none: carried anywhere)
+  private walls: Walls | null = null;
   private loading: Promise<LifePhysics> | null = null;
   // the last load of the road physics failed (a car's seat refused as 'failed' until one is in)
   private physFailed = false;
@@ -232,8 +234,9 @@ export class WorldSim {
   get ground() { return this.traffic.ground; }
 
   /** the world the agents stand on and the boats float on (world.ts World) */
-  setWorld(ground: Ground | null, water: WaterColumns | null = null, voxels: VoxelRay | null = null) {
+  setWorld(ground: (Ground & Partial<Walls>) | null, water: WaterColumns | null = null, voxels: VoxelRay | null = null) {
     this.voxels = voxels;
+    this.walls = ground?.blocked ? ground as Walls : null;
     this.traffic.ground = ground;
     this.traffic.water = water;
   }
@@ -708,11 +711,11 @@ export class WorldSim {
     // (on a roof: its page saw the thing a round trip late; the spot put on it as it is now, so others see the walker
     // where its page has it on the roof, not that far back along it)
     const r = spot && typeof spot.id === 'string' ? near.find((q) => q.id === spot.id) : undefined, at = r && onRoof(r, spot!);
-    if (at) Object.assign(pose, at);
+    if (at && this.clear(at.x, at.z, at.y)) Object.assign(pose, at);
     // (on a car's roof: bounded from where the car has carried the last pose since, so a ride is not taken for a run)
     const a = W.fromOn, b = a && near.find((q) => q.id === a.id);
-    const to = a && b ? carried(a, b, W.from) : null;
-    const from = to ? { ...W.from, x: to.x, z: to.z, y: W.from.y + to.dy } : W.from;
+    const to = a && b ? carried(a, b, W.from) : null, gone = to && this.clear(to.x, to.z, W.from.y + to.dy) ? to : null;
+    const from = gone ? { ...W.from, x: gone.x, z: gone.z, y: W.from.y + gone.dy } : W.from;
     const bound = boundWalk(from, pose, this.clock - W.fromAt, this.tuning.walk), S = W.sent, dt = this.clock - S.at;
     // Kept out of the solid things as the host has them (a page walking through a parked car is seen beside it, shoots
     // and boards from there); not told: a fair page is only ever in one by the tick or two it sees a moving car late,
@@ -735,9 +738,13 @@ export class WorldSim {
     const a = W.on!, b = a.id === undefined ? undefined : this.walkSolids(W.pose.x, W.pose.z).find((q) => q.id === a.id);
     const at = b && onRoof(b, roofSpot(a as Solid & { id: string }, W.pose, W.pose.y));
     if (!at) return;
+    // (a wall where the roof takes it: left standing there, as its page is, till its next pose)
+    if (!this.clear(at.x, at.z, at.y)) { W.on = null; return; }
     W.pose = { ...W.pose, ...at, h: W.pose.h + Math.atan2(Math.sin(b.h - a.h), Math.cos(b.h - a.h)) };
     W.on = b;
   }
+
+  private clear(x: number, z: number, feet: number) { return !this.walls || headroom(this.walls, x, z, feet); }
 
   // the solid things a walker at x, z may be in or on, as the host has them now: the cars, the crafts with a shape, the
   // river's vessels, the coaches (not the other walkers)
