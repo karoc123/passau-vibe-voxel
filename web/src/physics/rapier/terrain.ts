@@ -14,7 +14,7 @@
 // are removed. Physics coordinates are the world's minus `origin` (f32 precision near the action).
 import RAPIER from '@dimforge/rapier3d-compat';
 import { capField, capSlot, cornerQ, diagonal02, surfaceAt, type CapField } from '../../core/surface';
-import { liveEdits, type Region } from '../../core/live-edits';
+import { liveEdits, type LiveEdits, type Region } from '../../core/live-edits';
 import { TileCache } from '../../core/tile-cache';
 import type { Meta } from '../../core/meta';
 import { paletteMask, RULES, semanticTable } from '../../core/semantics';
@@ -166,6 +166,7 @@ export interface TerrainOptions {
   couple?: boolean; // couple neighbouring chunks' voxels (default true)
   reach?: number; // m: chunks within this of a body are built (default REACH)
   needNow?: number; // m: a body with an unbuilt chunk within this is not ready (default NEED_NOW)
+  edits?: LiveEdits; // whose edits rebuild the chunks (default the world's, liveEdits; a page's: its client's)
 }
 
 export class RapierTerrain {
@@ -193,14 +194,14 @@ export class RapierTerrain {
     this.pal = terrainPalette(meta.palette);
     this.built = new Built(meta);
     if (!opts.cache && !opts.load) throw new Error('RapierTerrain: a cache or a load is needed');
-    this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load!, edits: liveEdits });
+    this.cache = opts.cache ?? new TileCache({ N: this.N, load: opts.load!, edits: opts.edits ?? liveEdits });
     this.budgetMs = opts.budgetMs ?? BUILD_BUDGET_MS;
     this.budgetChunks = opts.budgetChunks ?? Infinity;
     this.couple = opts.couple ?? true;
     this.reach = opts.reach ?? REACH;
     this.needNow = opts.needNow ?? NEED_NOW;
     // (an edited node, core/live-edits.ts: its tile and the chunks it changed built again)
-    this.unlisten = liveEdits.listen((tx, tz, _n, region) => this.invalidate(tx, tz, region));
+    this.unlisten = (opts.edits ?? liveEdits).listen((tx, tz, _n, region) => this.invalidate(tx, tz, region));
   }
 
   // Node (tx, tz)'s columns changed (core/live-edits.ts, or its file again): the tile is decoded again from them when

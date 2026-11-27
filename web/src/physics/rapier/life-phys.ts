@@ -231,6 +231,7 @@ export class LifePhysics implements TrafficBodies {
       sinkMs: Math.max(0, driver.sinkUntil - now),
       crashMs: Math.max(0, driver.crashUntil - now),
       fallMs: Math.max(0, driver.fallUntil - now),
+      ...(car && !driver.waiting ? { body: car.save(this.origin) } : {}),
     };
   }
 

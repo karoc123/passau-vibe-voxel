@@ -47,6 +47,18 @@ export interface DriverSnapshot {
   sinkMs: number;
   crashMs: number;
   fallMs: number;
+  /** its body (none while it waits for its ground) */
+  body?: CarBody;
+}
+
+/** a driven car's body after a tick as the host's road physics has it (physics/rapier/car.ts RapierCar save): what
+ * its driver's page runs its own copy on from (client/predict-car.ts). Its origin in map metres (p), its rotation (q:
+ * x, y, z, w), velocity (v, m/s) and spin (w, rad/s); the front wheels' angle (steer, rad) and the steering input as
+ * the bars follow it (bars), its time in the air (air, s), the ground under its origin along its up (ride, m), a
+ * bike's lean and wheelie (rad), whether it is in the water */
+export interface CarBody {
+  p: [number, number, number]; q: [number, number, number, number]; v: [number, number, number]; w: [number, number, number];
+  steer: number; bars: number; air: number; ride: number; lean?: number; wheelie?: number; water?: boolean;
 }
 
 /** the world's time of day (hour 0..24) and day of the year (1..365): world state the host sets, the same for every

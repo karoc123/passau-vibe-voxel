@@ -23,7 +23,3 @@ Erledigte Fragen werden gestrichen bzw. entfernt.
 
 7. **Spielerbauten:** Darf ein Spieler überall bauen, oder nur auf eigenen Grundstücken? Dürfen Spieler bestehende (importierte) Gebäude umbauen oder abreißen, dauerhaft?
 8. **Zerstörung:** Wann setzt sich Zerstörung zurück: erst beim Neuladen des Chunks, nach einer festen Zeit oder wenn kein Spieler in der Nähe ist? Sehen alle Spieler dieselben Trümmer?
-
-## Server und Bewegung
-
-17. **Auto über das Netz:** Soll das eigene Auto beim Client vorhergesagt werden (eine eigene kleine Physikwelt mit nur diesem Auto; Zusammenstöße zwischen Spielern entscheidet der Server und zeigt sie als geglättete Korrektur)? Ohne Vorhersage antwortet das Lenkrad eine Netz-Rundreise plus Puffer später (über das Internet 150 ms und mehr). *Empfehlung: ja, wie geplant.* Stand 2026-11-27: die Fluggeräte und Boote werden jetzt vorhergesagt (sie antworten im selben Bild); das Auto nicht, denn es braucht dafür Rapier und die Geländekollision auf der Seite, und das ist eine Entscheidung, keine Ableitung aus dem Code.

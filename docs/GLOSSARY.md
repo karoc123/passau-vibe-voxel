@@ -22,7 +22,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Session**: one player's connection to a host.
 - **Player name**: the name a player chose for the others (optional; else their id, p1, p2, ...); the host cleans it.
 - **Ping**: the page's round trip to a host on the network, ms.
-- **Prediction**: the page running its player's own craft ahead from its input, corrected to each snapshot (the
+- **Prediction**: the page running its player's own craft or car ahead from its input, corrected to each snapshot (the
   correction blended out, a big one shown at once). Not "client-side physics".
 - **Tick**: one step of the host's simulation (30 a second); the budget is its 33 ms.
 - **Snapshot**: what a host sends a session each tick about what lies near that player.

@@ -25,6 +25,7 @@ import type { TileCache } from '../core/tile-cache';
 import type { Car, TrafficData } from '../sim/types';
 import type { CraftCore, CraftWorld } from '../sim/craft/craft-core';
 import { Prediction } from './predict';
+import { CarPrediction, type OwnCar } from './predict-car';
 import { CORES } from '../sim/craft/cores';
 import { DEFAULT_TUNING } from '../sim/tuning';
 import type { CommandResult, SimCommand } from '../sim/contract/commands';
@@ -237,6 +238,8 @@ export class MirrorSimClient implements SimClient {
   private outcomes: CommandResult[] = [];
   // the crafts by id: a core of each one's class, loaded from the snapshots (never stepped)
   private readonly prediction: Prediction | null;
+  // the driver's own car run ahead (none: drawn as the snapshots have it)
+  readonly carPrediction: CarPrediction | null;
   private readonly craftList = new Map<CraftId, { -readonly [K in keyof CraftView]: CraftView[K] }>();
   private nextRef = 1;
   private names = new Map<PlayerId, string>();
@@ -249,13 +252,17 @@ export class MirrorSimClient implements SimClient {
    * mine: the client's own hello (this code, the build the app loaded); edits: the client's live edits, the snapshots'
    * edits applied into them over the node files of tiles (its TileCache over these edits, the world's frame; none:
    * the edits are not applied); predict: the world the craft the player pilots is run ahead in (none: drawn as the
-   * snapshots have it) */
+   * snapshots have it); car: the world the car the player drives is run ahead in, loaded when first driven (none:
+   * drawn as the snapshots have it) */
   constructor(private readonly link: SimLink, data: TrafficData, ground: Ground | null, private readonly mine: Hello,
     readonly edits: LiveEdits = new LiveEdits(), private readonly tiles: { cache: TileCache; frame: Frame } | null = null,
-    predict?: CraftWorld) {
+    predict?: CraftWorld, car?: () => Promise<OwnCar>) {
     this.prediction = predict ? new Prediction(predict, (c, s, off, out) => this.traffic.carPose(c, s, off, out), (t, hour) => this.traffic.trains.at(t, hour)) : null;
+    this.carPrediction = car ? new CarPrediction(car) : null;
     if (tiles && tiles.cache.edits !== edits) throw new Error('sim-client: the TileCache must see the client\'s edits');
     this.traffic = new TrafficMirror(data, ground);
+    const C = this.carPrediction;
+    if (C) this.traffic.own = (c, draw) => C.pose(c.id, draw);
     this.hello = new Promise((ok, fail) => { this.settle = { ok, fail }; });
     link.onHello = (h) => this.greet(h);
     link.onSnapshot = (s) => this.take(s);
@@ -316,6 +323,7 @@ export class MirrorSimClient implements SimClient {
     if (this.refused) return;
     const c = this.seqs.stamp(cmd, this.page);
     if (c.kind === 'seatInput' && c.role === 'pilot') this.prediction?.sentInput(c.seq!, c.input, this.page);
+    if (c.kind === 'seatInput' && c.role === 'driver') this.carPrediction?.sentInput(c.seq!, c.input, this.page);
     this.queue.push(c);
   }
 
@@ -349,6 +357,11 @@ export class MirrorSimClient implements SimClient {
     if (P) {
       const c = this.craftOf(true);
       P.update(this.dt, this.page, this.pageAcc, c, s?.tick ?? 0, c && s ? s.crafts.find((x) => x.id === c.id) ?? null : null, this.ack(), this.buffer[this.buffer.length - 1] ?? null);
+    }
+    const C = this.carPrediction;
+    if (C) {
+      const d = this.driver(), kind = d && this.traffic.detachedCars.find((c) => c.id === d.entityId);
+      C.update(this.dt, this.page, this.pageAcc, d, kind ?? null, this.ack());
     }
   }
 
@@ -563,6 +576,8 @@ export class TrafficMirror {
   private clock = 0;
   /** the players' own bodies on foot (avatarPose: where one is drawn) */
   avatars: AvatarState[] = [];
+  /** where the driver's own car is drawn when its client runs it ahead (null: as the snapshots have it) */
+  own: ((c: Car, draw: BodyDraw | undefined) => RoadPose | null) | null = null;
   readonly bodies = {
     owns: (c: Car) => !!this.draws.get(c.id)?.owns,
     pose: (c: Car, a: number, under: RoadPose) => this.bodyPose(c, a, under),
@@ -724,6 +739,7 @@ export class TrafficMirror {
   // as LifePhysics.pose (sim/body-pose.ts drawnBodyPose, the same code): a parked car or a wreck where it is, a body
   // between its last two poses, the fade back onto its path blended out
   private bodyPose(c: Car, a: number, under: RoadPose): RoadPose {
-    return drawnBodyPose(this.draws.get(c.id), a, c.detachedPose ?? under, STEP);
+    const d = this.draws.get(c.id);
+    return this.own?.(c, d) ?? drawnBodyPose(d, a, c.detachedPose ?? under, STEP);
   }
 }
