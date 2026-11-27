@@ -1,5 +1,5 @@
 import type { World } from '../core/world';
-import { EYE } from './spots';
+import { EYE } from './weapons/weapon';
 import type { Ground } from './walk';
 
 /** water deeper than this (m) is swum, shallower waded */

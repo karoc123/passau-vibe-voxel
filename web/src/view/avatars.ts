@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { AvatarState } from '../sim/contract/snapshot';
 import type { Pose, RoadPose } from '../sim/contract/pose';
 import { STEP } from '../sim/road-net';
-import { FLOAT } from '../nav/swim';
+import { FLOAT } from '../sim/swim';
 import { weaponIn } from '../sim/weapons';
 
 // The other players on foot, each a figure of its own (owner: on foot always an avatar of its own, never one of the

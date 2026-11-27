@@ -780,7 +780,7 @@ export class WorldSim {
     W.on = b;
   }
 
-  // a tick of the walk's velocity, stopped at a wall or slid along it as its page's walk is (nav/walk.ts walkStep):
+  // a tick of the walk's velocity, stopped at a wall or slid along it as its page's walk is (sim/walk.ts walkStep):
   // else the others see a walker running at one inside or beyond it, shoot it and board from there, till its next pose
   private guess(W: Walk) {
     const p = W.pose, dx = W.vx * STEP, dz = W.vz * STEP;
