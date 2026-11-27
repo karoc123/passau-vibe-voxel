@@ -6,8 +6,11 @@ Open work only. When something lands, delete its line. Owner questions are in `F
 
 - Game building blocks (owner 2026-11-27): a stable framework first, the game later; blocks that combine so concepts
   are tried fast. Direction: the whole map, moving by air, water and land (a squad's chain: helicopter, paraglider, on
-  foot, speedboat), no house or alley fights. Open: why one leaves a vehicle (fuel, air defence?), how enemies fit in,
-  a co-pilot's jobs (not only firing). The speedboat gets two seats. Loot and routes: not yet.
+  foot, speedboat), no house or alley fights. Decided: leaving a vehicle has several causes, each its own block (fuel,
+  vehicle damage, zones such as air defence; maybe more); one damage model for players, vehicles and enemies; enemies
+  are NPCs on foot that also use vehicles (stationary guns besides); a seat may carry a tool (a co-pilot's job, not
+  only firing), modular, not every seat; the speedboat gets two seats. No mode-as-data layer: a concept that carries
+  comes later and turns the framework into a game. Loot and routes: not yet.
 - Roads by algorithm, for any map: measured (`road-drive`); the caps now take holes and verges of the carriageway and
   slabs over passages under it, the committed map not yet rebuilt with them (a full rebuild, then lower the gate's
   budgets). Left, in `voxelize.py`: deck ends metres off the road, pits, asphalt voxels on the ground, kinked fast
