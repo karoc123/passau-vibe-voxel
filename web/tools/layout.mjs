@@ -7,7 +7,8 @@
 //   - the hovercraft and the military helicopter are got into as a player does, by ☰ and the menu's entry;
 //   - a real tap (a click with the mouse) on ☰ opens the menu, whose own controls are checked the same way, and one
 //     on Resume closes it;
-//   - on the touch page a tap on the minimap and the menu's Map open the full map, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
+//   - on the touch page every control of play is at least 44 px either way; a tap on the weapon's name takes the
+//     next weapon, a tap on the minimap and the menu's Map open the full map, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
 //     view button swaps a passenger's view;
 //   - the touch buttons shown are the situation's, none on the desktop but Get in/out; the help is the situation's:
 //     the strip's keys on the desktop and the menu's Help, the keys or what the thumbs do; Esc is
@@ -36,10 +37,10 @@ const SIZES = {
   desktop: [['desktop', 1280, 720], ['small desktop', 1024, 600]],
 };
 // what a player can press, and what they read: none may lie over another
-const CONTROLS = 'button, input, select, summary, a[href], [role=slider], #minimap';
-const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #status, #perf, #waypoint-chip';
+const CONTROLS = 'button, input, select, summary, a[href], [role=slider], #minimap, #waypoint-chip';
+const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #bar .mode-active .mode-detail, #perf';
 // the touch buttons there are (a new one is named here, and in the situations it belongs to)
-const TOUCH_BUTTONS = ['#jump-button', '#slot-button', '#hook-button', '#canopy-button', '#board-button', '#seat-button', '#handbrake-button',
+const TOUCH_BUTTONS = ['#jump-button', '#hook-button', '#canopy-button', '#board-button', '#seat-button', '#handbrake-button',
   '#boat-drift-button', '#plane-throttle', '.plane-fire', '#reset-button', '#view-button'];
 
 const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
@@ -67,7 +68,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: !headed, ar
 
 // ------------------------------------------------------------------ in the page
 // every control and read-out shown (within `scope` if given), where it lies and what a tap at its middle meets
-const MEASURE = ({ CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope }) => {
+const MEASURE = ({ CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope, thumb }) => {
   const W = innerWidth, H = innerHeight, issues = [];
   const name = (e) => (e.id ? `#${e.id}` : `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).join('.') : ''}`)
     + (e.textContent?.trim() ? ` "${e.textContent.trim().replace(/\s+/g, ' ').slice(0, 24)}"` : e.getAttribute('aria-label') ? ` "${e.getAttribute('aria-label')}"` : '');
@@ -101,6 +102,8 @@ const MEASURE = ({ CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope }) => {
     const { e, r, x, y } = it;
     if (r.left < -0.5 || r.top < -0.5 || r.right > W + 0.5 || r.bottom > H + 0.5) issues.push(`${it.name} off the screen (${Math.round(r.left)},${Math.round(r.top)} .. ${Math.round(r.right)},${Math.round(r.bottom)} of ${W}x${H})`);
     else if (it.control) {
+      // (what a thumb presses in play is as big as a thumb needs; the menu's fields have their own sizes)
+      if (thumb && !e.closest('#menu, #fullmap') && Math.min(r.right - r.left, r.bottom - r.top) < 43.5) issues.push(`${it.name} is ${Math.round(r.right - r.left)}x${Math.round(r.bottom - r.top)} px, under a thumb's 44`);
       const hit = document.elementFromPoint(x, y);
       if (hit !== e && !e.contains(hit)) issues.push(`${it.name} covered at its middle by ${hit ? name(hit) : 'nothing'}`);
     }
@@ -185,6 +188,13 @@ const mapsOpen = async (P) => {
   await shut();
   return null;
 };
+const weaponSwaps = async (P) => {
+  const slot = () => P.evaluate(() => window.__three.nav.arms.slot), was = await slot(), p = await centre(P, '#arms .slots');
+  await P.touchscreen.tap(p.x, p.y);
+  await frames(P, 3);
+  const now = await slot(), name = await P.evaluate(() => document.querySelector('#arms .slots .on')?.textContent);
+  return now !== was && new RegExp(`^${now} `).test(name ?? '') ? null : `a tap on the weapon's name does not take the next one (slot ${was} to ${now}, shown ${JSON.stringify(name)})`;
+};
 const viewSwaps = async (P) => {
   const seat = () => P.evaluate(() => window.__crafts.find((c) => c.id === 'passenger').seatView), was = await seat(), p = await centre(P, '#view-button');
   await P.touchscreen.tap(p.x, p.y);
@@ -199,7 +209,7 @@ const SITUATIONS = [
   { name: 'the full map', scope: '#fullmap, #waypoint-chip', into: async (P) => { await toMap(P); await P.evaluate(() => window.__map.full.open()); return T(P, () => window.__map.full.isOpen); },
     touch: null, out: (P) => P.evaluate(() => window.__map.full.toggle()) },
   { name: 'on foot', into: async (P) => { await toMap(P); await P.evaluate(() => void window.__three.nav.toggleWalk(false)); return afoot(P); }, thumb: mapsOpen,
-    touch: ['#jump-button', '#slot-button', '#hook-button'], menu: true, help: ['walk', ...FOOT_HELP] },
+    touch: ['#jump-button', '#hook-button'], menu: true, help: ['walk', ...FOOT_HELP] },
   { name: 'following a car', into: async (P) => {
     await toMap(P);
     await P.evaluate(() => { const T = window.__three, c = window.__life.nearest('car', T.controls.target, null); if (c) T.nav.startRide(c); });
@@ -212,8 +222,8 @@ const SITUATIONS = [
   }, touch: ['#handbrake-button', '#board-button', '#reset-button'], help: ['drive', /steer.*handbrake/i, /stick|thumb/i] },
   { name: 'the hovercraft', into: fromMenu('Hovercraft', 'hovercraft'), touch: ['#board-button'], help: ['hovercraft', /thrust/i, /stick/i] },
   { name: 'the helicopter', into: enter('helicopter'), touch: ['#board-button'], help: ['helicopter', /climb/i, /stick/i] },
-  { name: 'on foot beside the helicopter', into: async (P) => { await P.keyboard.press('KeyX'); return (await afoot(P)) && T(P, () => document.querySelector('#board-button:not([hidden])'), null, 20000); },
-    touch: ['#jump-button', '#slot-button', '#hook-button', '#board-button'], help: ['walk', ...FOOT_HELP] },
+  { name: 'on foot beside the helicopter', into: async (P) => { await P.keyboard.press('KeyX'); return (await afoot(P)) && T(P, () => document.querySelector('#board-button:not([hidden])'), null, 20000); }, thumb: weaponSwaps,
+    touch: ['#jump-button', '#hook-button', '#board-button'], help: ['walk', ...FOOT_HELP] },
   { name: 'the military helicopter', into: fromMenu('Military helicopter', 'gunship'), touch: ['#board-button', '#seat-button'], help: ['gunship', /climb/i, /stick/i] },
   { name: 'at the military helicopter\'s gun', into: nextSeat, touch: ['#board-button', '#seat-button'], help: ['gunner', /aim.*fire/i, /aim.*fire/i] },
   { name: 'on the military helicopter\'s bench', into: async (P) => (await nextSeat(P)) && nextSeat(P), thumb: viewSwaps, touch: ['#board-button', '#seat-button', '#view-button'], help: ['passenger', /look/i, /look/i] },
@@ -246,7 +256,7 @@ async function run(kind) {
   // (a waypoint set: its chip is one more thing on the screen)
   await P.evaluate((s) => window.__map.waypoint.toggleAt(s.x + 300, s.z, 1), SQUARE);
   const press = (p) => (touch ? P.touchscreen.tap(p.x, p.y) : P.mouse.click(p.x, p.y));
-  const measure = (scope) => P.evaluate(MEASURE, { CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope: scope ?? null });
+  const measure = (scope) => P.evaluate(MEASURE, { CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope: scope ?? null, thumb: touch });
   for (const S of SITUATIONS) {
     if (only && !only.split(',').includes(S.name)) continue;
     const reached = await S.into(P, touch).catch((e) => { log(`${S.name}: ${e.message}`); return false; });

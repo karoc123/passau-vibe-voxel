@@ -44,7 +44,7 @@ import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { loadPrefs, makeMenu, preselect, skipStart, startMenu } from './ui/menu';
 import { NameTags } from './ui/name-tags';
-import { makeBoardButton, makeCanopyButton, makeJumpButton, makeResetButton, makeSeatButton, makeTouchArms, makeViewButton } from './touch/buttons';
+import { makeBoardButton, makeCanopyButton, makeHookButton, makeJumpButton, makeResetButton, makeSeatButton, makeViewButton } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
@@ -235,13 +235,13 @@ nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
 const canopyButton = makeCanopyButton(() => glider?.press());
-const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
+const armsHud = makeArmsHud(() => nav.arms.cycle(1)), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
 const resetButton = makeResetButton(() => nav.craft?.reset?.());
 const viewButton = makeViewButton(() => crafts.find((c): c is PassengerMode => c.id === 'passenger')?.swapView());
-makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else glider?.hookShot(); });
+makeHookButton(() => { if (nav.onFoot) nav.hookShot(); else glider?.hookShot(); });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -359,6 +359,18 @@ function applyGfx(c: Partial<Gfx>) {
 
 function onMode() {
   post.taa.restart(); // (the camera jumps)
+}
+
+// a phone held upright runs, but the thumbs' layout is made for it held across: said once, the first time play starts
+// that way (kept: HINT_KEY)
+const HINT_KEY = 'passau.uprightHint';
+function uprightHint() {
+  if (!coarsePointer() || !matchMedia('(orientation: portrait)').matches) return;
+  try {
+    if (localStorage.getItem(HINT_KEY)) return;
+    localStorage.setItem(HINT_KEY, '1');
+  } catch { return; /* storage blocked: not said every time */ }
+  toast('Turn the phone sideways: it plays better');
 }
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
@@ -636,7 +648,10 @@ renderer.setAnimationLoop(frameLoop({
     for (const c of crafts) c.place?.(dt);
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
-    if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
+    if (document.body.dataset.nav !== nav.mode) {
+      if (document.body.dataset.nav === 'orbit') uprightHint();
+      document.body.dataset.nav = nav.mode;
+    }
     armsHud.set(nav.arms.slot);
     help.update(now);
     feelHealth(now);

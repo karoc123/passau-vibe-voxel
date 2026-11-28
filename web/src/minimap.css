@@ -97,8 +97,9 @@
 #waypoint-chip[hidden] { display: none; }
 /* a phone held upright: the bar spans its top, so over the thumbs' buttons; held across: beside the minimap's corner,
    right of the bar */
-@media (max-width: 600px) and (orientation: portrait) { #waypoint-chip { top: auto; bottom: calc(262px + var(--sb)); } }
+@media (max-width: 600px) and (orientation: portrait) { #waypoint-chip { top: auto; bottom: calc(240px + var(--sb)); } }
 @media (pointer: coarse) and (orientation: landscape) { #waypoint-chip { left: auto; right: calc(152px + var(--sr)); transform: none; } }
+@media (pointer: coarse) { #waypoint-chip { min-height: 44px; } }
 #waypoint-chip .arrow { display: inline-block; color: #ff4fd8; }
 #waypoint-chip .x { color: rgba(255,255,255,.6); font-weight: 400; }
 @media (max-width: 600px) {

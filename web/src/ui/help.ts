@@ -13,7 +13,7 @@ export const MAP_HELP: Help = { id: 'map',
   touch: 'One finger drags the map, two turn and zoom it. Tap a person or a car to follow it.' };
 export const WALK_HELP: Help = { id: 'walk',
   keys: 'W/S walk · A/D step sideways · Mouse: look · Shift run · Space jump · Left button: fire · Right button: grappling hook · 1/2 weapon · E get in · Q/E look up and down',
-  touch: 'Left thumb: drag to walk, far to run. Right thumb: drag to look, tap to fire, hold to keep firing. The hook button: grappling hook. Pinch to zoom.' };
+  touch: 'Left thumb: drag to walk, far to run. Right thumb: drag to look, tap to fire, hold to keep firing. Tap the weapon\'s name for the next one. The hook button: grappling hook. Pinch to zoom.' };
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', moto: 'Following a motorbike' };
 /** following what: the ride's label (person, car, bus, moto) */
 export const rideHelp = (what: string): Help => ({ id: 'ride', title: WHO[what] ?? '',

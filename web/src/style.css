@@ -13,10 +13,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar { --t2: rgba(255,255,255,.62); position: fixed; left: var(--bar-left); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
 #bar .search { position: relative; margin: 0 0 4px; }
-@media (pointer: coarse) { #bar .search input { height: 36px; } }
 #bar .search input { width: 100%; height: 24px; border: 0; border-bottom: 1px solid rgba(255,255,255,.55); outline: 0; padding: 0 30px 0 20px; background: transparent; color: #fff; font: inherit; font-size: 11.5px; text-shadow: inherit;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='white' stroke-opacity='.8' stroke-width='1.6'%3E%3Ccircle cx='6' cy='6' r='4.5'/%3E%3Cpath d='M9.5 9.5L13 13'/%3E%3C/svg%3E") 0 50% no-repeat; }
 #bar .search input:focus { border-bottom-color: #fff; }
+@media (pointer: coarse) { #bar .search input { height: 44px; } }
 #bar .search input::placeholder { color: var(--t2); }
 #bar .search .x { position: absolute; right: 2px; top: 4px; width: 24px; height: 24px; border: 0; background: none; color: var(--t2); cursor: pointer; font-size: 11px; }
 #bar .search input:placeholder-shown + .x { display: none; }
@@ -128,6 +128,17 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .menu-section .adv[open] > :not(summary) { margin-bottom: 6px; }
 @media (pointer: coarse) { .menu-section .choices button { min-height: 40px; padding: 6px 12px; } .menu-section .track, .menu .menu-section input[type=range] { height: 40px; } }
 
+/* on a touch screen the menu is a sheet over the whole screen, each entry tall enough for a thumb */
+@media (pointer: coarse) {
+  .menu { padding: 0; }
+  .menu-card { width: 100%; height: 100%; border: 0; border-radius: 0; padding: calc(12px + var(--st)) calc(16px + var(--sr)) calc(16px + var(--sb)) calc(16px + var(--sl)); }
+  .menu-entry, .menu-more summary { min-height: 48px; display: flex; align-items: center; }
+  .menu-check { min-height: 44px; }
+  .menu input:not([type=range], [type=checkbox]), .menu select { min-height: 44px; }
+}
+/* a low screen held across: the status one line */
+@media (pointer: coarse) and (max-height: 359px) { #bar .mode-detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 3px 8px; } #bar .mode-detail > div { display: inline; margin-right: 8px; } }
+
 /* the other players' names over them */
 #name-tags { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
 .name-tag { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 4px; background: rgba(16,17,20,.6); color: #fff;
@@ -225,23 +236,30 @@ body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: gr
   pointer-events: none; font: 600 12px Inter, system-ui, sans-serif; color: #fff; }
 #arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }
 #arms .slots span.on { opacity: 1; background: rgba(16,17,20,.7); outline: 1px solid rgba(255,255,255,.7); }
+/* on a touch screen the weapon in hand alone, a tap on it for the next (no button of its own by the thumb) */
+@media (pointer: coarse) {
+  #arms .slots { bottom: var(--sb); min-width: 88px; min-height: 44px; align-items: center; justify-content: center; pointer-events: auto; touch-action: manipulation; }
+  #arms .slots span:not(.on) { display: none; }
+}
 /* driving on a touch screen: the handbrake (nav/drive.ts, held) where the right thumb rests, the left thumb on the one
-   stick; in the Jump button's place (on foot only), clear of the bar, inside the safe area */
-#handbrake-button, #boat-drift-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(110px + var(--sb)); z-index: 4; width: 72px; height: 72px;
+   stick; in the Jump button's place (touch/touch.css) */
+#handbrake-button, #boat-drift-button { display: none; position: fixed; z-index: 4;
   padding: 0; border: 1.5px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff;
-  font: 600 12px/1.15 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em;
+  font: 600 11px/1.15 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .02em;
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #handbrake-button.held, #boat-drift-button.held { background: rgba(220,60,50,.55); border-color: #fff; }
 @media (pointer: coarse) { body[data-mode=drive]:not(.noui) #handbrake-button, body[data-mode=boat]:not(.noui) #boat-drift-button { display: grid; place-items: center; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #handbrake-button, #boat-drift-button { width: 68px; height: 68px; right: calc(16px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 16px); }
-}
 /* own health and the vehicle's (ui/health.ts): small, over the weapon slots, off on the map */
 #health { position: fixed; left: 50%; bottom: calc(44px + var(--sb)); transform: translateX(-50%); z-index: 3; pointer-events: none;
   display: grid; gap: 3px; font: 600 11px Inter, system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
 body[data-nav=orbit] #health, body.noui #health { display: none; }
-/* (a phone held upright: clear of the map's buttons in the corner) */
-@media (max-width: 600px) { #health { bottom: calc(58px + var(--sb)); } }
+/* on a touch screen three short bars side by side, told apart by colour, no names or numbers: over the weapon's name */
+@media (pointer: coarse) {
+  #health { display: flex; gap: 6px; bottom: calc(48px + var(--sb)); }
+  #health .row { display: block; width: 46px; }
+  #health :is(.name, .n) { display: none; }
+  #health .row:nth-child(2) .bar i { background: #8fc1e8; }
+}
 #health .row { display: grid; grid-template-columns: 84px 90px 24px; align-items: center; gap: 6px; }
 #health .row[hidden] { display: none; }
 #health .name { text-align: right; opacity: .8; }

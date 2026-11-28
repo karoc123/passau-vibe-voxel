@@ -29,6 +29,12 @@ screen** (not on an iPhone: its Safari has none for a page), **Start menu**, **C
 (every vehicle there is, put down near the view with you in it: the sandbox). Top left beside ☰ are the search and,
 in a vehicle, its status (speed, height, what it has to say); on a phone the search is the map's alone. Under **Debug**:
 the frame rate, the triangles drawn and the ping, on a desktop also at the top right if switched on there. An open map or panel closes first.
+On a phone every corner has one job in every situation: ☰ and the status top left, the minimap top right, Get in/out
+and the seat switch on the left edge, at most two buttons by the right thumb (the bigger on the edge: Jump, handbrake,
+drift, Fire in the combat plane, the passenger's view; the other the grappling hook or ↺), the health as three short
+bars at the bottom. Their sizes come from the screen's shorter side, none under 44 px. Held across is how it is meant
+to be played; upright runs too (the two buttons one over the other) and says so once.
+
 At the bottom left of a desktop a strip names the keys of what you are doing now (on foot, each vehicle, at a gun,
 riding along, the map) for the first three minutes; **H** lists them all and brings the strip back; the menu's
 **Help** has the same, on a phone what the thumbs do, and can turn the strip off.
@@ -584,7 +590,7 @@ On foot you carry two weapon slots: **1** the machine gun, **2** the grenade lau
 (Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
 the right button fires the grappling hook at what you look at (up to 80 m: you
 are reeled there; again at the sky or jump to let go; under the paraglider the same). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
-(and may then drag to sweep), a drag only looks, at a mounted gun as on foot; the button up and left of Jump takes the next slot and the one left of
+(and may then drag to sweep), a drag only looks, at a mounted gun as on foot; a tap on the weapon name at the bottom takes the next slot and the button beside
 Jump fires the grappling hook (under the paraglider too). At a wheel or in a plane the ↺ button is **T** (back to a safe spot). In an aircraft the pilot's view stays behind it: the mouse
 does not turn it. A tap on the left half picks whom to follow. The host decides each shot and each
 grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and

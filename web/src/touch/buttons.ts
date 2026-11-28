@@ -23,11 +23,9 @@ export function makeJumpButton(jump: () => void) {
   return b;
 }
 
-/** beside Jump: the next slot, and the grappling hook (the right mouse button's; under the paraglider too) */
-export function makeTouchArms(next: () => void, hook: () => void) {
-  const slot = roundButton('slot-button', 'arms-touch', '⇄', 'Next weapon');
+/** beside Jump: the grappling hook (the right mouse button's; under the paraglider too) */
+export function makeHookButton(hook: () => void) {
   const line = roundButton('hook-button', 'arms-touch', '⚓', 'Grappling hook');
-  slot.addEventListener('click', next);
   // (pointerdown, not click: the hook goes where the view points now, not where it has turned to by the release)
   line.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); hook(); });
   line.addEventListener('click', (e) => { if (e.detail === 0) hook(); }); // (the keyboard)

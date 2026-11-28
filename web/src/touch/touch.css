@@ -1,36 +1,30 @@
-/* on foot on a touch screen: Jump; fire is the right thumb on the view (foot.ts) */
-#jump-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(120px + var(--sb)); z-index: 4; width: 60px; height: 60px; padding: 0;
+/* The thumbs' buttons on a touch screen. One size decides them all: --u, a tenth of the screen's shorter side within
+   what a thumb needs. By the right thumb a situation has at most two: the first (--c1, a third bigger) on the edge, the
+   second (--c2, never under 44 px) left of it when the phone is held across, over it when upright; the plane's
+   throttle is on the edge and the two left of it (--tx). No Fire button on foot or at a gun: the right thumb's taps
+   and holds on the view fire (foot.ts) */
+:root { --u: clamp(40px, 11vmin, 56px); --c1: calc(var(--u) * 1.3); --c2: max(44px, var(--u)); --tg: 12px;
+  --tx: calc(10px + var(--sr)); --ty: calc(16px + var(--sb)); }
+@media (orientation: portrait) { :root { --ty: calc(96px + var(--sb)); } }
+body[data-mode=plane] { --tx: calc(10px + var(--sr) + 56px + 12px); }
+/* the first: Jump on foot, the handbrake and the drift, Fire in the combat plane, the view riding along */
+:is(#jump-button, #view-button, #handbrake-button, #boat-drift-button, .plane-fire) { right: var(--tx); bottom: var(--ty); width: var(--c1); height: var(--c1); }
+/* the second: the grappling hook on foot and under the paraglider, back to a safe spot at a wheel or a stick */
+:is(#hook-button, #reset-button) { right: calc(var(--tx) + var(--c1) + var(--tg)); bottom: var(--ty); width: var(--c2); height: var(--c2); }
+@media (orientation: portrait) {
+  :is(#hook-button, #reset-button) { right: calc(var(--tx) + (var(--c1) - var(--c2)) / 2); bottom: calc(var(--ty) + var(--c1) + var(--tg)); }
+}
+#jump-button { display: none; position: fixed; z-index: 4; padding: 0;
   border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff; font: 600 22px Inter, system-ui, sans-serif;
   touch-action: none; -webkit-user-select: none; user-select: none; }
 #jump-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
 @media (pointer: coarse) { body[data-mode=walk]:not(.noui) #jump-button { display: grid; place-items: center; } }
-/* landscape: the right thumb rests ~100-150 px in from the bottom right corner, so the button sits on the edge beside
-   it, out of the stick's ring (radius <= 72 px around the thumb)
-   and far from the bar (top left); the safe area keeps it off a notch or the home indicator */
-@media (pointer: coarse) and (orientation: landscape) {
-  #jump-button { width: 56px; height: 56px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
-}
-/* the next slot up and left of Jump, the grappling hook left of it (under the paraglider too: its line is fired there) */
-.arms-touch, .thumb-touch { display: none; position: fixed; z-index: 4; width: 48px; height: 48px; padding: 0; border: 1px solid rgba(255,255,255,.55);
+.arms-touch, .thumb-touch { display: none; position: fixed; z-index: 4; padding: 0; border: 1px solid rgba(255,255,255,.55);
   border-radius: 50%; background: rgba(16,17,20,.4); color: #fff; font: 600 20px Inter, system-ui, sans-serif; touch-action: manipulation;
   -webkit-user-select: none; user-select: none; }
 .arms-touch:active, .arms-touch.on, .thumb-touch:active { background: rgba(255,255,255,.28); border-color: #fff; }
-#slot-button { right: calc(98px + var(--sr)); bottom: calc(206px + var(--sb)); }
-#hook-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
 @media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch, body[data-mode=paraglider]:not(.noui) #hook-button { display: grid; place-items: center; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
-  #hook-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
-}
-/* in what can get stuck (T) and riding along (V): where the hook's and Jump's buttons are on foot; the plane's
-   throttle and Fire are between the reset and the edge when the phone is held across, the health's rows over it */
-#reset-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
-#view-button { right: calc(18px + var(--sr)); bottom: calc(120px + var(--sb)); width: 56px; height: 56px; }
 @media (pointer: coarse) { body:not(.noui) :is(#reset-button, #view-button).on { display: grid; place-items: center; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #reset-button { right: calc(16px + var(--sr) + 56px + 16px + 64px + 12px); bottom: calc(8px + var(--sb)); }
-  #view-button { right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
-}
 /* the paraglider's release and, falling, its canopy again: by the right thumb, where nothing else is shown on the wing */
 #canopy-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; min-width: 68px; height: 44px;
   padding: 0 12px; border: 1px solid rgba(255,255,255,.6); border-radius: 22px; background: rgba(16,17,20,.5); color: #fff;
@@ -60,3 +54,6 @@
   border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
 .stick-ring.knob { width: 46px; height: 46px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); }
 .noui .stick-ring { display: none; }
+/* (the way off the wing over the first button's place, wider than it; upright, over the hook) */
+#canopy-button { right: var(--tx); bottom: calc(var(--ty) + var(--c1) + var(--tg)); }
+@media (orientation: portrait) { #canopy-button { bottom: calc(var(--ty) + var(--c1) + var(--c2) + 2 * var(--tg)); } }
