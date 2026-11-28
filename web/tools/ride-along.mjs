@@ -6,8 +6,9 @@
 // swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
 // tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
 // at the gun and on foot (out with X) firing shots the host records; the combat plane from the map, the mouse taken;
-// every aircraft from the map, X high up putting P under a paraglider that flies, the helicopter's view turned by the
-// mouse; last X under the paraglider folding it away and X in the fall opening one again.
+// the boat's chase view swung by the mouse; every aircraft from the map, its pilot's view not turned by the mouse, X
+// high up putting P under a paraglider that flies; the grappling hook's touch button shown there; X under the
+// paraglider folding it away and X in the fall opening one again; last, on foot, a tap on the hook button firing a hook.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -183,7 +184,20 @@ const gunCycle = async (refuse) => {
   const v1 = sim.crafts.get(boatId)?.core.motion.speed ?? 0, kept = await locked();
   check(back && kept && v1 > v0 + 1, `C again: P back at the wheel, the mouse kept (${kept}: the boat's view turns with it), W drives the boat (${v0.toFixed(1)} -> ${v1.toFixed(1)} m/s in ${sim.tick - w0} host ticks)`);
 };
+// how far a mouse move of 250 px turns the chase view round the craft piloted (the view's bearing against the craft's
+// heading, so its own turning does not count), rad
+const yaw = () => P.evaluate(() => { const d = window.__three.camera.getWorldDirection(window.__three.camera.position.clone()); return Math.atan2(d.x, d.z) - (window.__sim.craftOf()?.core.pose.h ?? 0); });
+const swung = async () => {
+  const y0 = await yaw();
+  for (let i = 1; i <= 10; i++) { await P.mouse.move(480 + i * 25, 320); await wait(20); }
+  await wait(200);
+  const y1 = await yaw();
+  await P.mouse.move(480, 320);
+  return Math.abs(Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0)));
+};
 await gunCycle(false);
+const boatTurn = await locked() ? await swung() : -1;
+check(boatTurn > 0.3, `at the speedboat's wheel the mouse moved swings the chase view (${boatTurn.toFixed(2)} rad)`);
 await gunCycle(true);
 await P.keyboard.press('KeyX');
 const onFoot = await P.waitForFunction(() => window.__three.nav.onFoot && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
@@ -205,14 +219,14 @@ check(flying && planeMouse, `the combat plane flying: the mouse taken (${planeMo
 check(flying && await firesOnClick(), 'a click in the combat plane fires a shot the host records');
 
 // Every aircraft (nav/craft.ts AIRCRAFT: each type a player sits in in the air) from the map: X high up puts P under
-// an open paraglider. The helicopter (climbed first) takes the mouse, and the mouse moved swings its chase view.
+// an open paraglider. Each takes the mouse (the combat plane fires with it), and the mouse moved leaves its pilot's
+// chase view behind it (nav/craft.ts mouseTurns).
 const ENTER = { helicopter: /^Helicopter$/, gunship: /^Military helicopter$/, floatplane: /^Plane$/, jet: /^Jet$/, fighter: /^Combat plane$/ };
 // (the helicopters start on the ground and climb first)
 const CLIMB = new Set(['helicopter', 'gunship']);
 // (a new aircraft without a button here would only show as 'not in it': named instead)
 const unknown = AIRCRAFT.filter((t) => !ENTER[t]);
 if (unknown.length) check(false, `every aircraft has its button in this gate (missing: ${unknown.join(', ')})`);
-const yaw = () => P.evaluate(() => { const d = window.__three.camera.getWorldDirection(window.__three.camera.position.clone()); return Math.atan2(d.x, d.z); });
 const underCanopy = () => P.waitForFunction(() => window.__three.nav.craft?.id === 'paraglider' && window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'paraglider',
   null, { timeout: 10000 }).then(() => true, () => false);
 // The paraglider P hangs under flies: on the host over a second and a half it goes forward at about its trim speed and
@@ -221,7 +235,15 @@ const underCanopy = () => P.waitForFunction(() => window.__three.nav.craft?.id =
 const pid = await P.evaluate(() => window.__sim.player);
 const wing = () => { const me = [...sim.crafts.values()].find((c) => c.type === 'paraglider' && c.pilot === pid); return me ? { ...me.core.pose, tick: sim.tick } : null; };
 const flies = async () => {
-  const a = wing(), at = (p) => p ? `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)}` : 'none';
+  const from = wing(), at = (p) => p ? `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)}` : 'none';
+  // (measured once it has flown 10 m: opening, it waits for its tiles and takes up its sink from none, more of the
+  // window on a busy machine; one that hangs never gets there)
+  const away = from && await until(() => { const w = wing(); return w && Math.hypot(w.x - from.x, w.z - from.z) > 10; }, 15000);
+  if (from && !away) {
+    const me = [...sim.crafts.values()].find((c) => c.type === 'paraglider' && c.pilot === pid);
+    return { ok: false, why: `it hangs where it opened (host ${at(from)} -> ${at(wing())}; ${me ? `${me.core.result}, velocity ${JSON.stringify(me.core.velocity)}, input ${JSON.stringify(me.input)}` : 'gone'})` };
+  }
+  const a = wing();
   await until(() => a && sim.tick - a.tick >= 1.5 / STEP, 20000);
   const b = wing(), seen = await P.evaluate(() => window.__sim.craftOf()?.core.pose ?? null), c = wing();
   if (!a || !b || !c || !seen) return { ok: false, why: `no paraglider (host ${at(b)}, page ${at(seen)})` };
@@ -230,7 +252,9 @@ const flies = async () => {
   await P.keyboard.down('KeyD'); await until(() => { const w = wing(); return !w || Math.abs(w.h - b.h) > 0.3; }, 15000); await P.keyboard.up('KeyD');
   const d = wing(), turned = d ? Math.abs(d.h - b.h) : 0;
   const T = GLIDE.trim, S = GLIDE.sink;
-  return { ok: fwd > T * 0.7 && fwd < T * 1.6 && sink > S * 0.4 && sink < S * 2 && off < 12 && turned > 0.3,
+  // (the page's within 20 m: it runs ahead of the host, and on a busy machine the two are read a second apart; left
+  // where it opened it would be 27 m behind by now)
+  return { ok: fwd > T * 0.7 && fwd < T * 1.6 && sink > S * 0.4 && sink < S * 2 && off < 20 && turned > 0.3,
     why: `${fwd.toFixed(1)} m/s forward, sinking ${sink.toFixed(2)} m/s, the page's ${off.toFixed(1)} m off the host's, D turns it ${turned.toFixed(2)} rad` };
 };
 for (const type of AIRCRAFT) {
@@ -242,17 +266,20 @@ for (const type of AIRCRAFT) {
   await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
   if (ENTER[type]) await P.locator('button', { hasText: ENTER[type] }).click({ timeout: 10000 }).catch((e) => log(`${type} button: ${e.message}`));
   const inIt = await P.waitForFunction((t) => window.__sim.craftOf()?.type === t && window.__sim.craftOf().placed && window.__three.nav.craft?.mouse === true, type, { timeout: 30000 }).then(() => true, () => false);
-  if (type === 'helicopter') {
-    await wait(400);
-    let m = await locked();
-    if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
-    const y0 = await yaw();
-    for (let i = 1; i <= 10; i++) { await P.mouse.move(480 + i * 25, 320); await wait(20); }
-    await wait(200);
-    const y1 = await yaw(), turned = Math.abs(Math.atan2(Math.sin(y1 - y0), Math.cos(y1 - y0)));
-    check(inIt && m && turned > 0.3, `the helicopter takes the mouse (${m}), the mouse moved swings its chase view (${turned.toFixed(2)} rad)`);
+  // (the glide in from the map's view over)
+  await wait(1200);
+  let m = await locked();
+  if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
+  const turned = await swung();
+  check(inIt && m && turned < 0.1, `the ${type}'s pilot: the mouse taken (${m}), the mouse moved leaves the chase view behind it (${turned.toFixed(2)} rad)`);
+  // (off its skids, then put by the host 150 m up, where the planes fly: beside the cathedral the military helicopter
+  // climbs no higher than its towers' ledges, ~50 m, and a paraglider opened under it there scraped the roofs or, on
+  // a busy machine, found no room to open)
+  if (CLIMB.has(type)) {
+    await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space');
+    const c = sim.crafts.get(sim.seat(pid)?.entity.id), q = c?.core.pose;
+    if (q) { sim.placeCraft(c.id, { ...q, y: 150 }); await P.waitForFunction(() => window.__sim.craftOf()?.core.pose.y > 120, null, { timeout: 10000 }).catch(() => {}); }
   }
-  if (CLIMB.has(type)) { await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space'); }
   const id = await P.evaluate(() => window.__sim.craftOf()?.id), p = id != null && sim.crafts.get(id)?.core.pose;
   await P.keyboard.press('KeyX');
   const glides = inIt && await underCanopy(), left = id != null && sim.crafts.get(id);
@@ -261,6 +288,10 @@ for (const type of AIRCRAFT) {
   check(glides && !!left && left.pilot === null, `X high in the ${type} (${p ? `${p.y.toFixed(0)} m` : 'not in it'}): P under an open paraglider, the ${type} flying on empty (${JSON.stringify(await P.evaluate(() => [window.__three.nav.craft?.id, window.__sim.seat()?.role]))})`);
 }
 
+// the grappling hook's touch button: shown under the paraglider (P is under one now); on foot a tap on it fires a
+// hook at what the view's middle meets (here the ground a few metres ahead)
+const hookButton = () => P.evaluate(() => { const b = document.querySelector('#hook-button'); return !!b && getComputedStyle(b).display !== 'none'; });
+check(await hookButton(), 'under the paraglider the grappling hook\'s touch button is shown');
 // X is the paraglider's one key: under it (out of the last aircraft) X folds it away into a fall on foot, the button
 // saying so; falling, X opens one again, and that one flies as well.
 const button = () => P.evaluate(() => { const b = document.querySelector('#board-button'); return b && !b.hidden ? b.textContent : null; });
@@ -275,6 +306,18 @@ check(falling && gone && /fold paraglider/i.test(fold ?? '') && /open paraglider
   `X under the paraglider folds it away: P falls on foot, no paraglider left (the button: ${JSON.stringify(fold)}, then ${JSON.stringify(open)})`);
 const reopened = falling && await underCanopy(), second = reopened ? await flies() : { ok: false, why: 'not under one' };
 check(second.ok, `X falling on foot opens a paraglider that flies: ${second.why}`);
+
+await P.evaluate((s) => { const T = window.__three; void T.nav.setWalk({ at: T.camera.position.clone().set(s.x, s.y, s.z), exact: true }); }, s);
+const afoot = await P.waitForFunction(() => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
+await wait(800);
+// (as on a phone: the bar folded, where the aircraft's buttons unfolded it over the thumbs' corner, and no mouse
+// taken, which would get the tap in the button's place)
+await P.evaluate(() => { const f = window.__three.nav.foot; f.pitch = -0.5; f.anchor = null; document.querySelector('#bar')?.classList.add('folded'); window.__three.nav.releaseMouse(); });
+await frames2();
+const shownAfoot = await hookButton();
+await P.tap('#hook-button').catch((e) => log(`hook button: ${e.message}`));
+const anchor = await P.waitForFunction(() => window.__three.nav.foot.anchor, null, { timeout: 5000 }).then((h) => h.jsonValue(), () => null);
+check(afoot && shownAfoot && !!anchor, `on foot the button is shown (${shownAfoot}), a tap on it fires a hook that holds (${anchor ? `at ${anchor.x.toFixed(1)}, ${anchor.y.toFixed(1)}, ${anchor.z.toFixed(1)}` : 'none'})`);
 
 await browser.close();
 link.close?.();

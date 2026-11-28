@@ -1,6 +1,6 @@
 # 0025 Bail out with the get-out key, and the mouse in every vehicle
 
-Status: accepted (2026-11-27, the owner's).
+Status: accepted (2026-11-27, the owner's; the pilot's fixed view 2026-11-28, the owner's).
 
 ## Decision
 
@@ -11,7 +11,10 @@ Status: accepted (2026-11-27, the owner's).
   it opens one, under one it folds it away into a fall. The paraglider's own key and touch button are gone; the
   get-out button says what it does. A paraglider opens one way, whatever it opens out of.
 - Every vehicle a player sits in takes the mouse, as walking does. Where it aims nothing, it swings the chase or seat
-  view as a drag does; a pilot's view swings back behind after a moment. Touch and gamepad stay as they were.
+  view as a drag does; a driver's view swings back behind after a moment. Touch and gamepad stay as they were.
+- The pilot of an aircraft is the exception: the mouse is taken (a gun fires by its button) but does not turn the
+  view, which stays behind the aircraft. Passengers and gunners in it look and aim as anywhere. One rule says which
+  seats the mouse turns the view from, and a gate takes every aircraft type.
 - Each aircraft type states whether it is in the air, and each vehicle whether it takes the mouse: a new type is
   refused by the compiler until it says.
 - A helicopter set down on a vessel's deck stands on it and is carried along, as a walker on a roof; the vessel goes
@@ -24,6 +27,7 @@ Status: accepted (2026-11-27, the owner's).
 - The controls a pilot sent last are for the seat they sat in: taken by the next craft, a plane's left the paraglider
   out of it hanging still in the air.
 - A vehicle that leaves the mouse free read as broken, and a turned view is the use a mouse has where there is no gun.
+- A view swung round an aircraft that banks and pitches read as strange, and the pilot steers by the view behind.
 
 ## Consequences
 

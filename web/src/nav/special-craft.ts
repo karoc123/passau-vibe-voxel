@@ -29,7 +29,7 @@ const CONFIG = {
   hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
     help: ['W/S thrust and reverse · A/D steer (it drifts) · X get out · Esc exit', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
-    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · mouse: look round · X get out (high up: under a paraglider) · Esc exit',
+    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out (high up: under a paraglider) · Esc exit',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   // (no hover hold: its pilot flies for its door gunners, who ride along; C goes round its seats)
   gunship: { name: 'Military helicopter', back: 22, up: 7.5, look: 1.5, drop: 0,
@@ -37,7 +37,7 @@ const CONFIG = {
       'Left stick: forward, back and turn. Right stick: climb, descend, slide. The seat button goes round the seats.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
     help: ['A/D steer · W dive · S brake (flare to land) · right mouse button: grappling hook at the middle of the view (again: let go) · X fold it away (falling: X opens it again) · Esc exit',
-      'Left stick: turn, dive and brake. Fold paraglider: a free fall; falling, Open paraglider.'] },
+      'Left stick: turn, dive and brake. The hook button: grappling hook at the middle of the view (again: let go). Fold paraglider: a free fall; falling, Open paraglider.'] },
 } as const;
 
 class SpecialCraft implements PlayerCraft {
@@ -60,6 +60,7 @@ class SpecialCraft implements PlayerCraft {
   private phase: 'off' | 'finding' | 'on' | 'landing' = 'off';
   private start: (CraftSpot & { deadline: number }) | null = null;
   private camYaw = 0;
+  // (never moved by an aircraft's pilot: craft.ts mouseTurns)
   private readonly mouseLook = new MouseLook();
   private zoom = 1;
   /** the point the grappling hook holds (the paraglider's), sent with the input while the wing is reeled there */
@@ -113,8 +114,11 @@ class SpecialCraft implements PlayerCraft {
   // the craft `from` (left flying on) or, without one, out of a fall on foot. false: not now
   protected openAt(at: Required<CraftSpot> & { speed: number }, from?: PlayerCraft) {
     const nav = this.ctx.nav;
-    if (this.phase !== 'off' || !this.link.sim || !(from ? nav.enterCraft(this, from) : nav.openCanopy(this))) return false;
-    this.link.open();
+    if (this.phase !== 'off' || !this.link.sim) return false;
+    // (not where the canopy would be in a wall or a roof: opened there it hung, held on every side. Falling, X opens
+    // it once clear; out of an aircraft the player gets out onto foot as from low down)
+    const clear = craftWorld(this.id, this.link.open()).sweep(at, { x: 0, y: 1, z: 0 }, at.h, at.h);
+    if ((clear !== 'loading' && clear.hit) || !(from ? nav.enterCraft(this, from) : nav.openCanopy(this))) { this.link.close(); return false; }
     this.link.spawn(at);
     this.activate(at.h);
     return true;
@@ -308,13 +312,14 @@ export class GunshipMode extends SpecialCraft {
 export class ParagliderMode extends SpecialCraft {
   constructor(ctx: CraftContext) {
     super(ctx, 'paraglider');
-    ctx.canvas.addEventListener('mousedown', (e) => { if (e.button === 2 && this.on) this.hookShot(); });
+    ctx.canvas.addEventListener('mousedown', (e) => { if (e.button === 2) this.hookShot(); });
   }
 
-  // The right button: the hook fired along the middle of the view from beside the pilot (the camera is behind them:
+  // The right button, the touch button: the hook fired along the middle of the view from beside the pilot (the camera is behind them:
   // what stands between the two is not aimed at) at a voxel within the line's range of the pilot; with the line out,
   // or at nothing, it lets go
-  private hookShot() {
+  hookShot() {
+    if (!this.on) return;
     const c = this.link.craft, w = this.ctx.nav.world;
     if (this.hook || !c || !w) { this.hook = null; return; }
     const cam = this.ctx.camera, d = cam.getWorldDirection(new THREE.Vector3()), p = c.core.motion.p;

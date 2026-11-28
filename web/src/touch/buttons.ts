@@ -23,13 +23,14 @@ export function makeJumpButton(jump: () => void) {
   return b;
 }
 
-/** beside Jump: the next slot, and aim (a tap narrows the view, another widens it) */
-export function makeTouchArms(next: () => void, aim: () => boolean) {
+/** beside Jump: the next slot, and the grappling hook (the right mouse button's; under the paraglider too) */
+export function makeTouchArms(next: () => void, hook: () => void) {
   const slot = roundButton('slot-button', 'arms-touch', '⇄', 'Next weapon');
-  const sight = roundButton('aim-button', 'arms-touch', '◎', 'Aim');
+  const line = roundButton('hook-button', 'arms-touch', '⚓', 'Grappling hook');
   slot.addEventListener('click', next);
-  sight.addEventListener('click', () => sight.classList.toggle('on', aim()));
-  return { set(aiming: boolean) { if (sight.classList.contains('on') !== aiming) sight.classList.toggle('on', aiming); } };
+  // (pointerdown, not click: the hook goes where the view points now, not where it has turned to by the release)
+  line.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); hook(); });
+  line.addEventListener('click', (e) => { if (e.detail === 0) hook(); }); // (the keyboard)
 }
 
 /** in a craft with a gun: from the controls to the gun or back (the C key's, nav/board.ts swap); shown on a touch
