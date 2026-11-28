@@ -1,7 +1,9 @@
 import type { Rect } from './ui/help';
 import { $, el } from './util';
 
-// top right: frames per second, triangles drawn, and the round trip to a host on the network (the resolution and the detail are in the ⚙ panel, settings.ts)
+// frames per second, triangles drawn, and the round trip to a host on the network: a line in the menu's Debug (line),
+// and on a desktop at the top right if switched on there (kept: SHOWN_KEY; a touch screen's corners are taken)
+const SHOWN_KEY = 'passau.perf';
 export class Perf {
   rects: Rect[] = [];
   private readonly box = el('div', '', '<div class="fps"></div>');
@@ -14,8 +16,17 @@ export class Perf {
    * undefined: not known yet (the start menu) */
   ping: (() => number | null) | null | undefined;
 
-  constructor() {
+  constructor(private readonly line: HTMLElement, toggle: HTMLInputElement) {
     this.box.id = 'perf';
+    let on = false;
+    try { on = localStorage.getItem(SHOWN_KEY) === '1'; } catch { /* storage blocked: not shown */ }
+    const show = () => { toggle.checked = on; this.box.hidden = !on; };
+    show();
+    toggle.addEventListener('change', () => {
+      on = toggle.checked;
+      show();
+      try { localStorage.setItem(SHOWN_KEY, on ? '1' : '0'); } catch { /* not remembered */ }
+    });
     const measure = () => { const r = this.box.getBoundingClientRect(); this.rects = [{ x0: r.left - 6, x1: r.right + 6, y0: r.top - 6, y1: r.bottom + 6 }]; };
     new ResizeObserver(measure).observe(this.box);
     addEventListener('resize', measure);
@@ -31,6 +42,7 @@ export class Perf {
       const ping = this.ping?.();
       this.fpsBox.innerHTML = `${this.fps} fps<span class="mark">${(triangles / 1e6).toFixed(1)} M triangles</span>`
         + (this.ping === undefined ? '' : `<span class="mark ping">${this.ping === null ? 'alone, no ping' : ping == null ? '– ms ping' : `${Math.round(ping)} ms ping`}</span>`);
+      this.line.innerHTML = this.fpsBox.innerHTML;
     }
     this.n = 0;
     this.t0 = now;

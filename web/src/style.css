@@ -75,20 +75,8 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   #bar .val { flex-basis: 40%; }
   #bar:has(.search li) .row { display: none; }
 }
-@media (max-height: 500px) { #bar { left: var(--bar-left); top: calc(8px + var(--st)); width: min(330px, calc(100vw - 64px - var(--sl) - var(--sr))); } }
-#credits-button { position: fixed; right: calc(8px + var(--sr)); bottom: calc(8px + var(--sb)); z-index: 4; width: 44px; height: 44px;
-  display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer;
-  font: 600 14px Inter, system-ui, sans-serif; }
-#credits-button span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(16,17,20,.75); }
-#credits-button:is(:hover, :focus-visible) span, body:has(#credits:popover-open) #credits-button span { background: #2d3036; }
-#credits-button:focus-visible { outline: 1px solid #fff; border-radius: 6px; }
-#credits { position: fixed; inset: auto calc(12px + var(--sr)) calc(56px + var(--sb)) auto; margin: 0; width: min(352px, calc(100vw - 24px - var(--sl) - var(--sr)));
-  max-height: calc(100dvh - 96px - var(--st) - var(--sb)); overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
-  padding: 12px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; background: #202226; color: #eee;
-  font: 12px/1.5 Inter, system-ui, sans-serif; }
-#credits > div + div { margin-top: 8px; }
-#credits a { color: #fff; text-underline-offset: 2px; }
-.noui :is(#bar, #credits-button, #credits, #menu-button, #name-tags), .loading :is(#credits-button, #menu-button) { display: none; }
+@media (max-height: 500px) { #bar { left: var(--bar-left); top: calc(8px + var(--st)); width: min(280px, calc(100vw - 64px - var(--sl) - var(--sr))); } }
+.noui :is(#bar, #menu-button, #name-tags), .loading #menu-button { display: none; }
 
 /* the Esc menu, its ☰ button and the start menu over the loading city. The button has the top left corner to itself
    on every screen (the bottom right is the right thumb's): the bar starts beside it (--bar-left) */
@@ -192,8 +180,15 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
 #perf .fps { color: #fff; font-weight: 500; min-height: 13px; }
 #perf .fps .mark { color: rgba(255,255,255,.62); margin-left: 4px; }
-/* (not on a touch screen: its corners are the thumbs' and the minimap's) */
-@media (pointer: coarse) { #perf { display: none; } }
+/* (on the screen only if switched on in the menu's Debug, and not on a touch screen: its corners are the thumbs' and
+   the minimap's; the menu's line says the same) */
+#perf[hidden] { display: none; }
+@media (pointer: coarse) { #perf, .perf-check { display: none; } }
+.menu-perf { color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; }
+.menu-perf .mark { color: rgba(255,255,255,.62); margin-left: 6px; }
+.menu-part { display: contents; }
+.menu .credits { display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.5; }
+.menu .credits a { color: #fff; text-underline-offset: 2px; }
 .noui #perf { display: none; }
 .caption { position: fixed; left: var(--bar-left); top: calc(14px + var(--st)); z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
   width: 340px; max-width: calc(100vw - 16px - var(--sl) - var(--sr)); color: #fff; font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); transition: opacity .8s; }
@@ -251,7 +246,7 @@ body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: gr
 #arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }
 #arms .slots span.on { opacity: 1; background: rgba(16,17,20,.7); outline: 1px solid rgba(255,255,255,.7); }
 /* driving on a touch screen: the handbrake (nav/drive.ts, held) where the right thumb rests, the left thumb on the one
-   stick; in the Jump button's place (on foot only), so above the "?" and clear of the bar, inside the safe area */
+   stick; in the Jump button's place (on foot only), clear of the bar, inside the safe area */
 #handbrake-button, #boat-drift-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(110px + var(--sb)); z-index: 4; width: 72px; height: 72px;
   padding: 0; border: 1.5px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(16,17,20,.45); color: #fff;
   font: 600 12px/1.15 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em;
@@ -283,3 +278,5 @@ body[data-nav=orbit] #incoming, body.noui #incoming { display: none; }
 #incoming i.hit { border-width: 12px; border-top-color: #e8402a; }
 #health-tint { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
   background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%); }
+/* (a phone held across: the waypoint and the minimap are right of the bar) */
+@media (pointer: coarse) and (orientation: landscape) { #bar.folded { max-width: calc(100vw - 320px - var(--sl) - var(--sr)); } }

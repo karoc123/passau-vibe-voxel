@@ -137,8 +137,13 @@ const help = makeHelp(menu.section('Help').box, () => {
   const ride = nav.ride, agent = ride && life?.agent(ride.ref);
   return rideHelp(agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label ?? '');
 });
+// the maps from the menu (a phone has no M and no comma)
+menu.entry('Map', () => fullmap?.open());
+menu.entry(() => (minimap?.shown ? 'Hide the minimap' : 'Show the minimap'), () => minimap?.toggle());
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
 const debugBox = menu.section('Debug').box;
+const perf = new Perf(el('div', 'menu-perf', '', debugBox),
+  el('label', 'menu-check perf-check', '<input type="checkbox"> Frame rate and ping on the screen', debugBox).querySelector('input')!);
 for (const duty of ['guard', 'patrol', 'lookout'] as const) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -184,7 +189,6 @@ let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStrea
 let prepass: DepthPrepass | null = null;
 let barRect: DOMRect | null = null;
 const caption = new Caption();
-const perf = new Perf();
 let setWindows: ((hour: number, day: number) => void) | null = null;
 let lampHeads: LampHeads | null = null;
 
@@ -232,7 +236,7 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
   gfxPanel.show();
 }
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
-makeCredits();
+makeCredits(menu.section('Credits &amp; licences', 'last').box);
 nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());

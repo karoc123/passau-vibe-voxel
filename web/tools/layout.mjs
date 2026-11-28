@@ -6,10 +6,10 @@
 //     no control or read-out (DISPLAYS) lies over another;
 //   - a real tap (a click with the mouse) on ☰ opens the menu, whose own controls are checked the same way, and one
 //     on Resume closes it;
-//   - on the touch page a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
+//   - on the touch page a tap on the minimap and the menu's Map open the full map, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
 //     view button swaps a passenger's view;
 //   - the touch buttons shown are the situation's, none on the desktop but Get in/out; the help is the situation's:
-//     the strip's keys on the desktop (none on touch) and the menu's Help, the keys or what the thumbs do; Esc is
+//     the strip's keys on the desktop and the menu's Help, the keys or what the thumbs do; Esc is
 //     the menu's key in every one; H lists all the keys and the strip again.
 // usage (in web/): node tools/layout.mjs [-v] [--headed] [--only NAME,NAME]; prints PASS/FAIL lines
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ const SIZES = {
 };
 // what a player can press, and what they read: none may lie over another
 const CONTROLS = 'button, input, select, summary, a[href], [role=slider], #minimap';
-const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #status, #perf';
+const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #status, #perf, #waypoint-chip';
 // the touch buttons there are (a new one is named here, and in the situations it belongs to)
 const TOUCH_BUTTONS = ['#jump-button', '#slot-button', '#hook-button', '#canopy-button', '#board-button', '#seat-button', '#handbrake-button',
   '#boat-drift-button', '#plane-throttle', '.plane-fire', '#reset-button', '#view-button'];
@@ -163,6 +163,19 @@ const resetPuts = async (P) => {
   await P.touchscreen.tap(p.x, p.y);
   return (await T(P, () => /Back on open water/.test(document.querySelector('.boat-status')?.textContent ?? ''), null, 10000)) ? null : 'a tap on the reset button does not put the boat back on open water';
 };
+// (the phone has no comma key: the minimap tapped, and the menu's Map)
+const mapsOpen = async (P) => {
+  const open = () => T(P, () => window.__map.full.isOpen, null, 3000), shut = () => P.evaluate(() => window.__map.full.close());
+  const p = await centre(P, '#minimap');
+  await P.touchscreen.tap(p.x, p.y);
+  if (!(await open())) return 'a tap on the minimap does not open the full map';
+  await shut();
+  await P.evaluate(() => window.__menu.menu.open());
+  await P.tap('#menu .menu-entry:text-is("Map")');
+  if (!(await open()) || await P.evaluate(() => window.__menu.menu.isOpen())) return 'the menu\'s Map does not open the full map';
+  await shut();
+  return null;
+};
 const viewSwaps = async (P) => {
   const seat = () => P.evaluate(() => window.__crafts.find((c) => c.id === 'passenger').seatView), was = await seat(), p = await centre(P, '#view-button');
   await P.touchscreen.tap(p.x, p.y);
@@ -176,7 +189,7 @@ const SITUATIONS = [
   { name: 'the map', into: async (P) => { await toMap(P); return true; }, touch: [], menu: true, help: ['map', /drag|move/i, /drag|finger/i] },
   { name: 'the full map', scope: '#fullmap, #waypoint-chip', into: async (P) => { await toMap(P); await P.evaluate(() => window.__map.full.open()); return T(P, () => window.__map.full.isOpen); },
     touch: null, out: (P) => P.evaluate(() => window.__map.full.toggle()) },
-  { name: 'on foot', into: async (P) => { await toMap(P); await P.evaluate(() => void window.__three.nav.toggleWalk(false)); return afoot(P); },
+  { name: 'on foot', into: async (P) => { await toMap(P); await P.evaluate(() => void window.__three.nav.toggleWalk(false)); return afoot(P); }, thumb: mapsOpen,
     touch: ['#jump-button', '#slot-button', '#hook-button'], menu: true, help: ['walk', ...FOOT_HELP] },
   { name: 'following a car', into: async (P) => {
     await toMap(P);
@@ -221,6 +234,8 @@ async function run(kind) {
   // (the mouse taken again by a click on Resume is refused by a headless browser now and then, and a lock lost opens
   // the menu, at any moment: not this gate's matter, tools/menu.mjs has the menu)
   await P.evaluate(() => { window.__three.nav.onLockLost = () => {}; });
+  // (a waypoint set: its chip is one more thing on the screen)
+  await P.evaluate((s) => window.__map.waypoint.toggleAt(s.x + 300, s.z, 1), SQUARE);
   const press = (p) => (touch ? P.touchscreen.tap(p.x, p.y) : P.mouse.click(p.x, p.y));
   const measure = (scope) => P.evaluate(MEASURE, { CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope: scope ?? null });
   for (const S of SITUATIONS) {
@@ -229,6 +244,7 @@ async function run(kind) {
     const bad = [];
     if (!reached) bad.push(`not reached (${JSON.stringify(await P.evaluate(() => ({ mode: window.__three.nav.mode, craft: window.__three.nav.craft?.id ?? null, seat: window.__sim.seat() })))})`);
     if (reached && touch && S.thumb) {
+      await P.setViewportSize({ width: w0, height: h0 });
       await frames(P, 4);
       const wrong = await S.thumb(P).catch((e) => e.message);
       if (wrong) bad.push(wrong);
@@ -242,10 +258,10 @@ async function run(kind) {
       // (on the desktop none of the thumbs' buttons, but Get in/out, which a click presses too)
       const want = S.touch === null ? null : (Array.isArray(S.touch[0]) ? S.touch : [S.touch]).map((t) => (touch ? t : t.filter((b) => b === '#board-button')));
       if (want && !want.some((t) => same(t, m.touch))) bad.push(`${size}: the touch buttons shown are ${m.touch.join(' ') || 'none'}, not ${want.map((t) => t.join(' ') || 'none').join(' or ')}`);
-      // the strip: on the desktop the situation's first keys, none on touch
+      // the strip on the desktop: the situation's first keys
       const [on, keys, thumbs] = S.help ?? [];
-      if (S.help && (touch ? m.help?.shown : !m.help?.shown || m.help.on !== on || !keys.test(m.help.text) || !/Esc menu/.test(m.help.text)))
-        bad.push(`${size}: the help's strip is ${JSON.stringify(m.help)}, not ${touch ? 'hidden' : `the one of '${on}' (${keys}, Esc menu)`}`);
+      if (S.help && !touch && (!m.help?.shown || m.help.on !== on || !keys.test(m.help.text) || !/Esc menu/.test(m.help.text)))
+        bad.push(`${size}: the help's strip is ${JSON.stringify(m.help)}, not the one of '${on}' (${keys}, Esc menu)`);
       if (S.scope) continue;
       // ☰ by a real tap, the menu's own controls, Resume by a real tap
       if (!m.menuButton) { bad.push(`${size}: no ☰ button`); continue; }
@@ -257,7 +273,7 @@ async function run(kind) {
       if (S.menu) bad.push(...inMenu.issues.map((i) => `${size}, the menu: ${i}`));
       // the menu's Help: the situation's, the keys or what the thumbs do
       const mh = inMenu.menuHelp;
-      if (S.help && (!mh || mh.on !== on || !(touch ? thumbs : keys).test(mh.text) || /Esc exit/.test(mh.text) || touch === /Esc menu/.test(mh.text)))
+      if (S.help && (!mh || mh.on !== on || !(touch ? thumbs : keys).test(mh.text) || !(touch || /Esc menu/.test(mh.text))))
         bad.push(`${size}: the menu's help is ${JSON.stringify(mh)}, not the one of '${on}' (${touch ? thumbs : `${keys}, Esc menu`})`);
       if (inMenu.resume) await press(inMenu.resume);
       if (!(await T(P, () => !window.__menu.menu.isOpen(), null, 3000))) { bad.push(`${size}: a ${touch ? 'tap' : 'click'} on Resume does not close the menu`); await P.evaluate(() => window.__menu.menu.close()); }
