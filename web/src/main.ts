@@ -8,13 +8,12 @@ import { loadFoliage } from './foliage';
 import { loadWindows } from './windows';
 import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
-import { Hud } from './hud';
 import { Labels } from './labels';
 import { MapData, type MapMark, Minimap } from './minimap';
 import { FullMap } from './fullmap';
 import { Waypoint } from './waypoint';
 import type { CraftContext, PlayerCraft } from './nav/craft';
-import { Nav, type Mode, type Ride } from './nav/nav';
+import { Nav } from './nav/nav';
 import { gameKey, pause, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -58,6 +57,7 @@ import { wreckSmoke } from './view/wreck-smoke';
 import { makeDayWeather } from './ui/day-weather';
 import { Graphics } from './ui/graphics';
 import { makeGoTo } from './ui/go-to';
+import { makeHelp, MAP_HELP, rideHelp, WALK_HELP } from './ui/help';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
 import { HOST_PORT, openSession, pageView, PageTime, sessionOptions } from './app/session';
@@ -130,6 +130,13 @@ const gfxSection = menu.section('Graphics');
 // the menu's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
 const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
 void serverChoice.then((s) => { dayWeather.online = s !== null; });
+// the one help (ui/help.ts): the craft's the player is in, else the mode's
+const help = makeHelp(menu.section('Help').box, () => {
+  if (nav.craft) return nav.craft.help;
+  if (nav.mode !== 'ride') return nav.mode === 'walk' ? WALK_HELP : MAP_HELP;
+  const ride = nav.ride, agent = ride && life?.agent(ride.ref);
+  return rideHelp(agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label ?? '');
+});
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
 const debugBox = menu.section('Debug').box;
 for (const duty of ['guard', 'patrol', 'lookout'] as const) {
@@ -158,7 +165,7 @@ for (const duty of ['guard', 'patrol', 'lookout'] as const) {
 }
 const precip = new Precip(scene);
 const map = new THREE.Box3();
-let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
+let world: World | null = null, labels: Labels | null = null;
 let minimap: Minimap | null = null, fullmap: FullMap | null = null;
 // the page's own waypoint (waypoint.ts), set from the maps
 const waypoint = new Waypoint(scene);
@@ -352,9 +359,8 @@ function applyGfx(c: Partial<Gfx>) {
   busy = true;
 }
 
-function onMode(m: Mode, ride: Ride | null) {
+function onMode() {
   post.taa.restart(); // (the camera jumps)
-  hud?.set(m, ride, ride ? life?.agent(ride.ref) ?? null : null);
 }
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
@@ -431,7 +437,6 @@ async function boot() {
   const full = fullmap = new FullMap(mapView, marks);
   minimap = new Minimap(mapView, marks, () => full.open());
   hook('__map', { minimap, full, waypoint });
-  hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(goTo.searchItems(meta));
   fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => {
     bar.search.setItems(goTo.searchItems(meta, places));
@@ -640,6 +645,7 @@ renderer.setAnimationLoop(frameLoop({
     const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
     if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    help.update(now);
     feelHealth(now);
     showIncoming(now);
     boardButton.set((key) => boarding.label(key));
@@ -693,7 +699,7 @@ renderer.setAnimationLoop(frameLoop({
     barRect ??= bar.rect;
     minimap?.update(now, barRect.bottom);
     fullmap?.update(now);
-    labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
+    labels?.update(camera, world, barRect, [...help.rects, ...perf.rects, ...(minimap?.rects ?? [])]);
     nameTags.update(camera, life?.group.visible ? otherPlayers() : [], world);
   },
 }, t0, () => prefs.fps));

@@ -23,8 +23,11 @@ they drive or fly; the name is shown over them too.
 **Resume**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
 default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
 the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
-are the world's, changed for everyone where its game mode allows it), **Back to orbit mode** (on foot, riding, in a craft), **Full
+are the world's, changed for everyone where its game mode allows it), **Help**, **Back to orbit mode** (on foot, riding, in a craft), **Full
 screen** (not on an iPhone: its Safari has none for a page) and **Start menu**. An open map or panel closes first.
+At the bottom left of a desktop a strip names the keys of what you are doing now (on foot, each vehicle, at a gun,
+riding along, the map) for the first three minutes; **H** lists them all and brings the strip back; the menu's
+**Help** has the same, on a phone what the thumbs do, and can turn the strip off.
 The page opens on a start menu: play alone or on a server, the server preselected when `./voxel start` serves the
 page (else the last one chosen). `?server=` or `?play` skips it. With a host the round trip (ping) shows top right.
 

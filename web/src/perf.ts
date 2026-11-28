@@ -1,4 +1,4 @@
-import type { Rect } from './hud';
+import type { Rect } from './ui/help';
 import { $, el } from './util';
 
 // top right: frames per second, triangles drawn, and the round trip to a host on the network (the resolution and the detail are in the ⚙ panel, settings.ts)

@@ -10,6 +10,7 @@ import { VoxelCollision } from '../sim/craft/voxel-collision';
 import type { Meta } from '../core/meta';
 import type { Pose } from '../sim/contract/pose';
 import type { Nav } from './nav';
+import type { Help } from '../ui/help';
 import type { RiverPoints } from '../sim/river';
 
 // A craft the player gets into: the drone (fpv.ts), the car (drive.ts), the boat
@@ -48,6 +49,8 @@ export interface PlayerCraft {
   /** into the pilot's seat of a craft in the world no one pilots (one of `boards`; SimClient.crafts()); from: the shell
    * of the seat held before in the same craft (a seat switch). false: not now */
   board?(craft: CraftView, from?: PlayerCraft): boolean;
+  /** its help now (ui/help.ts): every craft says, so none is flown without */
+  readonly help: Help;
   /** back to a safe spot nearby (T, the touch button); only what can get stuck or lost has it */
   reset?(): void;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */

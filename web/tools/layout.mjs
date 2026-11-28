@@ -8,8 +8,9 @@
 //     on Resume closes it;
 //   - on the touch page a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
 //     view button swaps a passenger's view;
-//   - the touch buttons shown are the situation's (TOUCH below), none on the desktop but Get in/out; the help is the
-//     situation's (HELP below: the keys on the desktop, what the thumbs do on touch).
+//   - the touch buttons shown are the situation's, none on the desktop but Get in/out; the help is the situation's:
+//     the strip's keys on the desktop (none on touch) and the menu's Help, the keys or what the thumbs do; Esc is
+//     the menu's key in every one; H lists all the keys and the strip again.
 // usage (in web/): node tools/layout.mjs [-v] [--headed] [--only NAME,NAME]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -111,9 +112,9 @@ const MEASURE = ({ CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope }) => {
   }
   const touch = TOUCH_BUTTONS.filter((s) => { const e = document.querySelector(s); return e && shown(e); });
   const at = (sel) => { const e = document.querySelector(sel); if (!e || !shown(e)) return null; const r = e.getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; };
-  const help = document.querySelector('#help');
+  const help = (sel) => { const e = document.querySelector(sel); return e ? { on: e.dataset.situation ?? '', text: e.textContent ?? '', shown: shown(e) } : null; };
   return { issues, touch, n: items.filter((i) => i.control).length, menuButton: at('#menu-button'), resume: at('#menu .menu-entry'),
-    help: help ? { on: help.dataset.situation ?? '', text: help.textContent ?? '' } : null };
+    help: help('#help'), menuHelp: help('#menu .menu-help') };
 };
 const frames = (P, n = 3) => P.evaluate((n) => new Promise((done) => { const f = () => (--n > 0 ? requestAnimationFrame(f) : done()); requestAnimationFrame(f); }), n);
 
@@ -170,7 +171,7 @@ const viewSwaps = async (P) => {
 
 // name; into it (false: not reached); thumb: a check of what a thumb does there (above); touch: the touch buttons it shows; help: what its help says (on the desktop,
 // on touch); menu: its menu checked too
-const FOOT_HELP = [/WASD.*walk.*Space.*jump/i, /thumb/i];
+const FOOT_HELP = [/walk.*jump/i, /thumb/i];
 const SITUATIONS = [
   { name: 'the map', into: async (P) => { await toMap(P); return true; }, touch: [], menu: true, help: ['map', /drag|move/i, /drag|finger/i] },
   { name: 'the full map', scope: '#fullmap, #waypoint-chip', into: async (P) => { await toMap(P); await P.evaluate(() => window.__map.full.open()); return T(P, () => window.__map.full.isOpen); },
@@ -207,7 +208,6 @@ const SITUATIONS = [
     touch: ['#board-button'], help: ['fpv', /throttle/i, /throttle/i] },
 ];
 
-const HELP = false;
 const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
 async function run(kind) {
   const touch = kind === 'touch', sizes = SIZES[kind], [, w0, h0] = sizes[0];
@@ -242,10 +242,10 @@ async function run(kind) {
       // (on the desktop none of the thumbs' buttons, but Get in/out, which a click presses too)
       const want = S.touch === null ? null : (Array.isArray(S.touch[0]) ? S.touch : [S.touch]).map((t) => (touch ? t : t.filter((b) => b === '#board-button')));
       if (want && !want.some((t) => same(t, m.touch))) bad.push(`${size}: the touch buttons shown are ${m.touch.join(' ') || 'none'}, not ${want.map((t) => t.join(' ') || 'none').join(' or ')}`);
-      if (HELP && S.help) {
-        const [on, keys, thumbs] = S.help;
-        if (!m.help || m.help.on !== on || !(touch ? thumbs : keys).test(m.help.text)) bad.push(`${size}: the help is ${JSON.stringify(m.help)}, not the one of '${on}' (${touch ? thumbs : keys})`);
-      }
+      // the strip: on the desktop the situation's first keys, none on touch
+      const [on, keys, thumbs] = S.help ?? [];
+      if (S.help && (touch ? m.help?.shown : !m.help?.shown || m.help.on !== on || !keys.test(m.help.text) || !/Esc menu/.test(m.help.text)))
+        bad.push(`${size}: the help's strip is ${JSON.stringify(m.help)}, not ${touch ? 'hidden' : `the one of '${on}' (${keys}, Esc menu)`}`);
       if (S.scope) continue;
       // ☰ by a real tap, the menu's own controls, Resume by a real tap
       if (!m.menuButton) { bad.push(`${size}: no ☰ button`); continue; }
@@ -255,11 +255,25 @@ async function run(kind) {
       if (!open) { bad.push(`${size}: ☰ (a ${touch ? 'tap' : 'click, or Esc with the mouse taken'}) does not open the menu`); continue; }
       const inMenu = await measure('#menu');
       if (S.menu) bad.push(...inMenu.issues.map((i) => `${size}, the menu: ${i}`));
+      // the menu's Help: the situation's, the keys or what the thumbs do
+      const mh = inMenu.menuHelp;
+      if (S.help && (!mh || mh.on !== on || !(touch ? thumbs : keys).test(mh.text) || /Esc exit/.test(mh.text) || touch === /Esc menu/.test(mh.text)))
+        bad.push(`${size}: the menu's help is ${JSON.stringify(mh)}, not the one of '${on}' (${touch ? thumbs : `${keys}, Esc menu`})`);
       if (inMenu.resume) await press(inMenu.resume);
       if (!(await T(P, () => !window.__menu.menu.isOpen(), null, 3000))) { bad.push(`${size}: a ${touch ? 'tap' : 'click'} on Resume does not close the menu`); await P.evaluate(() => window.__menu.menu.close()); }
     }
     await S.out?.(P);
     check(!bad.length, `${kind}, ${S.name}: every control on the screen and free at ${sizes.map((s) => s[0]).join(', ')}, ☰ opens the menu, the buttons and the help are the situation's${bad.length ? `\n    ${[...new Set(bad)].join('\n    ')}` : ''}`);
+  }
+  if (!touch && !only) {
+    await toMap(P);
+    const strip = () => P.evaluate(() => { const h = document.querySelector('#help'); return { all: h.classList.contains('all'), n: h.querySelectorAll('span').length }; });
+    const a = await strip();
+    await P.keyboard.press('KeyH'); await frames(P, 3);
+    const b = await strip();
+    await P.keyboard.press('KeyH'); await frames(P, 3);
+    const c = await strip();
+    check(!a.all && b.all && b.n > a.n && !c.all && c.n === a.n, `desktop: H lists all the keys (${a.n} to ${b.n}), H again the strip (${c.n})`);
   }
   await ctx.close();
 }

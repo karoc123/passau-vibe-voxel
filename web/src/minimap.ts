@@ -1,4 +1,4 @@
-import type { Rect } from './hud';
+import type { Rect } from './ui/help';
 import type { RoadData } from './sim/types';
 import type { Pose } from './sim/contract/pose';
 import type { Label, Meta } from './core/meta';

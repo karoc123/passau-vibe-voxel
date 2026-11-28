@@ -2,9 +2,9 @@ import { el } from '../util';
 import { onFocusLoss } from './input';
 
 // A mode's panel in the bar's mode tools (drive, boat, plane, drone): its buttons, then a detail box with a status line
-// first (role=status), the mode's own lines, and a help line (keys, or touch on a touch screen). The panel is
+// first (role=status) and the mode's own lines. The panel is
 // `.mode-active` while its mode is on (style.css: then it takes the row, and in a craft the other panels hide; which
-// mode is on is body[data-mode], main.ts). Classes: generic (mode-status, mode-help) and the mode's own
+// mode is on is body[data-mode], main.ts). Classes: generic (mode-status) and the mode's own
 // (`<name>-status`, ...) for what differs.
 export class ModePanel {
   readonly el = document.createElement('aside');
@@ -31,17 +31,6 @@ export class ModePanel {
 
   /** a line in the detail box */
   line(cls: string, html = '') { return el('div', `${this.name}-${cls}`, html, this.details); }
-
-  /** the help line: the keys, or on a touch screen what the thumbs do (style.css shows one) */
-  help(keys: string, touch: string) {
-    const h = el('div', `mode-help ${this.name}-help`, '', this.details);
-    this.setHelp(h, keys, touch);
-    return h;
-  }
-
-  setHelp(h: HTMLElement, keys: string, touch: string) {
-    h.innerHTML = `<span class="mode-help-keys ${this.name}-help-keys">${keys}</span><span class="mode-help-touch ${this.name}-help-touch">${touch}</span>`;
-  }
 
   set active(on: boolean) { this.el.classList.toggle('mode-active', on); }
 

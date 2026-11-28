@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import { length } from '../core/vec';
 import { DRONE } from '../sim/craft/fpv-flight';
@@ -105,6 +106,9 @@ export class FpvMode implements PlayerCraft {
     onFocusLoss(() => this.pause('Window lost focus. Arm again to resume.'));
     this.renderPanel();
   }
+
+  readonly help: Help = { id: 'fpv', keys: 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Enter: arm again · X get out',
+    touch: 'Left thumb: throttle and yaw. Right thumb: pitch and roll. Pinch to zoom.' };
 
   private get craft() { return this.on ? this.link.craft : null; }
 
@@ -308,12 +312,10 @@ export class FpvMode implements PlayerCraft {
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
-    const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll, pinch to zoom.' :
-      'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · X get out · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       flying && this.craft?.core.waiting ? 'Waiting for the next collision tile…' :
       flying ? (this.impact?.message ?? '') :
-      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : controls);
+      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : '');
     ModePanel.text(P.status, content);
 
     const core = this.craft?.core, p = core?.flight.position;

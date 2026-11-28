@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import type { Meta } from '../core/meta';
 import { clamp } from '../util';
@@ -48,7 +49,6 @@ export class BoatMode implements PlayerCraft {
   private readonly panel: ModePanel;
   private readonly action: HTMLButtonElement;
   private readonly speed: HTMLDivElement;
-  private readonly help: HTMLDivElement;
   private readonly rig: ChaseRig;
   private phase: Phase = 'off';
   private start: { x: number; z: number; h: number; t0: number } | null = null;
@@ -72,8 +72,6 @@ export class BoatMode implements PlayerCraft {
     const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat');
     this.action = P.button('Boat', () => this.toggle());
     this.speed = P.line('speed');
-    this.help = P.help('W/S throttle and reverse · A/D steer · Space drift · C: to the gun · T unstick · Esc exit',
-      'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift. Pinch on the right to zoom.');
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.reset(); }
@@ -199,6 +197,9 @@ export class BoatMode implements PlayerCraft {
     this.rig.end();
   }
 
+  readonly help: Help = { id: 'boat', keys: 'W/S throttle and reverse · A/D steer · Space drift · C: to the gun · T unstick · E get out',
+    touch: 'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift, ↺ puts the boat back on open water. Pinch on the right to zoom.' };
+
   reset() {
     if (this.phase === 'on') this.link.reset();
   }
@@ -241,7 +242,7 @@ export class BoatMode implements PlayerCraft {
     ModePanel.text(this.action, active ? 'Exit boat' : 'Boat');
     this.action.disabled = !active && (!this.nav.canStartCraft || !this.link.sim);
     P.details.hidden = !active && !note;
-    this.speed.hidden = this.help.hidden = !on;
+    this.speed.hidden = !on;
     ModePanel.text(P.status, this.phase === 'finding' ? 'Looking for water…' : on && !inFocus() ? PAUSED :
       on && this.craft?.core.motion.waiting ? 'Loading collision tiles…' : note);
     if (on && this.craft) ModePanel.text(this.speed, Math.round(Math.abs(this.craft.core.motion.kmh)) + ' km/h');

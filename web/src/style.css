@@ -41,13 +41,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
 #bar .mode-tools [hidden] { display: none; }
 /* the mode on (main.ts): body[data-mode], nav.ts's Mode or the craft's id while in one (nav/craft.ts: fpv, boat, plane,
-   drive); body[data-nav=craft] while a craft owns the camera. Then and while driving the key legend is hidden; in a
-   craft that owns the camera the other modes' panels too (the active one is .mode-active, nav/mode-panel.ts) */
-body:is([data-nav=craft], [data-mode=drive]) #hud { display: none; }
+   drive); body[data-nav=craft] while a craft owns the camera. In a
+   craft that owns the camera the other modes' panels are hidden (the active one is .mode-active, nav/mode-panel.ts) */
 body[data-nav=craft] #bar .mode-tools > :not(.mode-active) { display: none; }
 body[data-mode=fpv] #labels { display: none; }
 /* the plane, and the drone while it flies: a compact strip of its panel alone (nav/plane.css, nav/fpv.css: their own) */
-body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) :is(#hud, .caption),
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) .caption,
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools, .bar-fold) { display: none; }
 @media (min-width: 601px) and (min-height: 501px) { body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > .bar-fold { display: none; } }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100vw - var(--bar-left) - 8px - var(--sr)); }
@@ -56,12 +55,6 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active .mode-detail { display: contents; }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active .mode-status:not(:empty) { order: 1; flex-basis: 100%; padding-bottom: 6px; }
-/* a mode's help line: the keys, or on a touch screen what the thumbs do */
-#bar .mode-help-touch { display: none; }
-@media (pointer: coarse) {
-  #bar .mode-help-keys { display: none; }
-  #bar .mode-help-touch { display: inline; }
-}
 #bar .mode-button {
   padding: 0; min-height: 24px; border: 0; background: none; color: #fff;
   font: inherit; font-weight: 500; text-shadow: inherit; cursor: pointer;
@@ -74,7 +67,7 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); max-height: max(95px, calc(100dvh - 155px - var(--st) - var(--sb)));
   overflow: auto; overscroll-behavior: contain; touch-action: pan-y; line-height: 1.4;
 }
-#bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
+#bar .mode-detail .fpv-status { color: rgba(255,255,255,.82); }
 @media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px - var(--st) - var(--sb))); } }
 @media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
 @media (max-width: 600px) { #bar { left: var(--bar-left); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
@@ -118,6 +111,12 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .menu-note { color: rgba(255,255,255,.62); font-size: 12px; }
 .menu-more summary { padding: 8px 12px; cursor: pointer; border-radius: 6px; background: #2d3036; }
 .menu-settings { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 0; }
+/* the menu's Help: the situation's keys one under the other, or what the thumbs do */
+.menu-help { display: flex; flex-direction: column; gap: 3px; line-height: 1.45; }
+.menu-help b { font-weight: 600; }
+.menu-check { display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,.8); cursor: pointer; }
+.menu-check[hidden] { display: none; }
+.menu .menu-check input { flex: none; width: 16px; height: 16px; padding: 0; accent-color: #6d9bd1; }
 .menu-settings label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .menu input, .menu select { min-width: 0; flex: 1 1 auto; max-width: 190px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.22);
   border-radius: 4px; background: #15171a; color: #fff; font: inherit; }
@@ -179,28 +178,16 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .noui #labels { display: none !important; }
 
 
-/* HUD: a legend, not a control panel -- outlines only, semi-transparent, never in the way of the pointer */
-#hud { --o: rgba(255,255,255,.55); position: fixed; left: calc(14px + var(--sl)); bottom: calc(14px + var(--sb)); z-index: 4; pointer-events: none;
-  font: 11px Inter, system-ui, sans-serif; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
-#hud .who { font-weight: 600; color: #fff; margin-bottom: 6px; }
-#hud .who:empty { display: none; }
-#hud .row { display: flex; align-items: flex-end; gap: 16px; }
-#hud .keys { display: grid; grid-template-columns: repeat(3, 30px); gap: 4px; }
-#hud .cap { position: relative; display: block; height: 30px; min-width: 30px; border: 1px solid var(--o); border-radius: 5px; box-sizing: border-box;
-  box-shadow: 0 0 2px rgba(0,0,0,.45), inset 0 0 2px rgba(0,0,0,.3); font: 600 12px ui-monospace, Menlo, monospace; padding: 3px 0 0 5px; transition: background .08s, border-color .08s; }
-#hud .cap i { position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; opacity: .75; }
-#hud .cap i svg { display: block; width: 8px; height: 8px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-#hud .on.cap, #hud .on .cap { background: rgba(255,255,255,.28); border-color: #fff; }
-#hud .mouse { display: flex; gap: 10px; }
-#hud figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-#hud figure .cap { padding: 7px 5px 0; font-size: 11px; }
-#hud svg { height: 30px; width: 26px; fill: none; stroke: var(--o); stroke-width: 1.3; stroke-linecap: round; filter: drop-shadow(0 0 1px rgba(0,0,0,.6)); overflow: visible; }
-#hud svg .btn { fill: var(--o); stroke: none; }
-#hud .on svg { stroke: #fff; } #hud .on svg .btn { fill: #fff; }
-#hud figcaption { font-size: 10.5px; }
-@media (max-width: 600px) { #hud { left: calc(8px + var(--sl)); bottom: calc(8px + var(--sb)); } }
-.noui #hud { display: none; }
-/* top right, in the legend's style: frames per second, and the one knob, how much of the city is drawn in detail */
+/* the help's strip (ui/help.ts): the situation's first keys at the bottom left, never in the way of the pointer; with
+   H all of them, one under the other */
+#help { position: fixed; left: calc(14px + var(--sl)); bottom: calc(14px + var(--sb)); z-index: 4; pointer-events: none; display: flex; flex-wrap: wrap;
+  gap: 3px 6px; max-width: min(520px, calc(50vw - 130px)); font: 11px Inter, system-ui, sans-serif; color: rgba(255,255,255,.9); }
+#help[hidden], .noui #help { display: none; }
+#help span { padding: 2px 6px; border-radius: 4px; background: rgba(16,17,20,.5); white-space: nowrap; }
+#help b { flex-basis: 100%; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+#help.all { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; max-height: calc(100dvh - 120px - var(--st) - var(--sb)); overflow: hidden; }
+#help.all span { white-space: normal; }
+/* top right: frames per second, the triangles drawn, the ping */
 #perf { position: fixed; right: calc(14px + var(--sr)); top: calc(14px + var(--st)); z-index: 4; pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
 #perf .fps { color: #fff; font-weight: 500; min-height: 13px; }
@@ -215,8 +202,9 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .caption .bar { position: relative; height: 2px; border-radius: 1px; background: rgba(255,255,255,.3); box-shadow: 0 0 2px rgba(0,0,0,.6); }
 .caption .bar i { display: block; height: 100%; width: 0; border-radius: 1px; background: #fff; transition: width .3s; }
 @media (max-width: 600px) { .caption { left: var(--bar-left); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; max-width: none; } }
-#bar, #labels, #hud { transition: opacity .6s; }
-.loading #bar, .loading #labels, .loading #hud { opacity: 0; pointer-events: none; }
+#bar, #labels { transition: opacity .6s; }
+.loading #bar, .loading #labels { opacity: 0; pointer-events: none; }
+.loading #help { display: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 
 /* the bar's fold (bar.ts): a round button as the "?" one; folded, only it and the mode buttons (walk, drive, fly) */
@@ -231,7 +219,6 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 #bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
 #bar.folded .bar-fold { position: static; flex: none; }
 #bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
-#bar.folded .mode-tools .drive-help { display: none; }
 #bar.folded .mode-tools .mode-active { flex: 0 1 auto; }
 @media (pointer: coarse) {
   #bar .bar-fold { width: 36px; height: 36px; }
@@ -245,7 +232,7 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 @media (max-width: 600px), (max-height: 500px) {
   body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar:not(.folded) > .mode-tools { margin-left: 44px; }
   body:not([data-nav=orbit]) #bar.folded .mode-tools > :not(.mode-active, .walk-button),
-  body:not([data-nav=orbit]) #bar.folded .mode-active :is(.mode-help, .plane-invert) { display: none; }
+  body:not([data-nav=orbit]) #bar.folded .mode-active .plane-invert { display: none; }
   body:not([data-nav=orbit]) #bar.folded .mode-active .mode-status:not(:empty) { padding-bottom: 4px; }
 }
 
@@ -263,8 +250,6 @@ body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: gr
   pointer-events: none; font: 600 12px Inter, system-ui, sans-serif; color: #fff; }
 #arms .slots span { padding: 3px 8px; border-radius: 4px; background: rgba(16,17,20,.45); opacity: .6; }
 #arms .slots span.on { opacity: 1; background: rgba(16,17,20,.7); outline: 1px solid rgba(255,255,255,.7); }
-#hud .hint { max-width: min(300px, calc(100vw - 100px - var(--sl) - var(--sr))); line-height: 1.4; }
-#hud .hint:empty { display: none; }
 /* driving on a touch screen: the handbrake (nav/drive.ts, held) where the right thumb rests, the left thumb on the one
    stick; in the Jump button's place (on foot only), so above the "?" and clear of the bar, inside the safe area */
 #handbrake-button, #boat-drift-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(110px + var(--sb)); z-index: 4; width: 72px; height: 72px;

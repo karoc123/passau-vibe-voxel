@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import { clamp } from '../core/num';
 import type { SimClient } from '../client/sim-client';
@@ -40,8 +41,6 @@ type Riding = { ref: EntityRef & { kind: 'car' | 'craft' }; type: string; label:
 export class PassengerMode implements PlayerCraft {
   readonly id = 'passenger';
   private readonly panel: ModePanel;
-  private readonly help: HTMLDivElement;
-  private readonly gunHelp: HTMLDivElement;
   private readonly rig: ChaseRig;
   private sim: SimClient | null = null;
   private riding: Riding | null = null;
@@ -72,10 +71,6 @@ export class PassengerMode implements PlayerCraft {
     this.rig = new ChaseRig(camera);
     this.panel = new ModePanel(host, 'passenger', 'Riding along');
     this.panel.el.classList.add('special-craft');
-    this.help = this.panel.help('Drag: look around · Wheel: zoom · V: seat or chase view · E: get out · Esc: menu',
-      'Drag to look around, pinch to zoom; the View button swaps the seat\'s view and the chase view, the Get out button leaves.');
-    this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E: get out',
-      'Drag to aim, tap to fire, hold to keep firing; the Get out button leaves.');
     addEventListener('keydown', (e) => {
       if (!this.riding || e.code !== 'KeyV' || e.repeat || !gameKey(e)) return;
       this.swapView();
@@ -116,6 +111,13 @@ export class PassengerMode implements PlayerCraft {
       e.preventDefault();
     }, { passive: false });
     this.draw();
+  }
+
+  get help(): Help {
+    return this.gun ? { id: 'gunner', keys: 'Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E get out',
+      touch: 'Drag to aim, tap to fire, hold to keep firing. The seat button goes to the next seat, Get out leaves.' }
+      : { id: 'passenger', keys: 'Drag: look around · Wheel: zoom · V: seat or chase view · C: next seat · E get out',
+        touch: 'Drag to look around, pinch to zoom. The eye button swaps the seat\'s view and the chase view, Get out leaves.' };
   }
 
   /** the seat's view for the chase view or back (V, the touch button) */
@@ -305,8 +307,6 @@ export class PassengerMode implements PlayerCraft {
     const R = this.riding;
     this.panel.active = !!R;
     this.panel.el.hidden = !R && !this.panel.saying;
-    this.help.hidden = !R || !!this.gun;
-    this.gunHelp.hidden = !R || !this.gun;
     ModePanel.text(this.panel.status, this.panel.saying || (R ? this.gun ? `At the gun of the ${R.label}` : `Riding along in the ${R.label}` : ''));
   }
 }
