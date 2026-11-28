@@ -29,7 +29,7 @@ The words the owner and the code use for the same thing. One name per thing; use
   **reel**: the pull; **hang**: held on the line high on a wall. Not "grapple" or "rope".
 - **Mouse look**: in every vehicle the player sits in, the mouse is taken and swings the chase or seat view as a
   drag does (a pilot's swings back behind after a moment); at a gun it aims.
-- **Menu**: what Esc (or ☰) opens in every mode: Resume, Settings, Graphics, Time & weather, Debug, Back to orbit mode, Full screen, Start menu.
+- **Menu**: what Esc (or ☰, top left) opens in every mode: Resume, Settings, Graphics, Time & weather, Debug, Back to orbit mode, Full screen, Start menu.
   Not "pause menu": the world goes on.
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 

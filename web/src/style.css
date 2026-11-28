@@ -2,14 +2,15 @@
   /* the safe area (index.html viewport-fit=cover): a notch, rounded corners, the home indicator; 0 on a desktop, so
      every fixed control's edge offset below adds its side's inset and the desktop layout stays as it was */
   --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px);
-  --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
+  --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+  --bar-left: calc(56px + var(--sl)); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* pinches zoom the map, never the page */ background: #1b1d22; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
 #app canvas { display: block; }
 /* on foot with the eyes under the water's top (a fall into it): murky green-blue */
 #app canvas.underwater { filter: sepia(.4) hue-rotate(140deg) saturate(1.8) brightness(.55) blur(1.5px); }
 
-#bar { --t2: rgba(255,255,255,.62); position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
+#bar { --t2: rgba(255,255,255,.62); position: fixed; left: var(--bar-left); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
 #bar .search { position: relative; margin: 0 0 4px; }
 #bar .search input { width: 100%; height: 24px; border: 0; border-bottom: 1px solid rgba(255,255,255,.55); outline: 0; padding: 0 30px 0 20px; background: transparent; color: #fff; font: inherit; font-size: 11.5px; text-shadow: inherit;
@@ -49,7 +50,7 @@ body[data-mode=fpv] #labels { display: none; }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) :is(#hud, .caption),
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools, .bar-fold) { display: none; }
 @media (min-width: 601px) and (min-height: 501px) { body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > .bar-fold { display: none; } }
-body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100% - 28px - var(--sl) - var(--sr)); }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100vw - var(--bar-left) - 8px - var(--sr)); }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active {
   display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 0 8px; border-radius: 6px; background: rgba(16,17,20,.62);
 }
@@ -76,12 +77,12 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 #bar .mode-detail :is(.fpv-status, .drive-help) { color: rgba(255,255,255,.82); }
 @media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px - var(--st) - var(--sb))); } }
 @media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
-@media (max-width: 600px) { #bar { left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
+@media (max-width: 600px) { #bar { left: var(--bar-left); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
 @media (max-width: 600px), (max-height: 500px) {
   #bar .val { flex-basis: 40%; }
   #bar:has(.search li) .row { display: none; }
 }
-@media (max-height: 500px) { #bar { left: calc(8px + var(--sl)); top: calc(8px + var(--st)); width: min(330px, calc(100vw - 16px - var(--sl) - var(--sr))); } }
+@media (max-height: 500px) { #bar { left: var(--bar-left); top: calc(8px + var(--st)); width: min(330px, calc(100vw - 64px - var(--sl) - var(--sr))); } }
 #credits-button { position: fixed; right: calc(8px + var(--sr)); bottom: calc(8px + var(--sb)); z-index: 4; width: 44px; height: 44px;
   display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer;
   font: 600 14px Inter, system-ui, sans-serif; }
@@ -96,11 +97,12 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 #credits a { color: #fff; text-underline-offset: 2px; }
 .noui :is(#bar, #credits-button, #credits, #menu-button, #name-tags), .loading :is(#credits-button, #menu-button) { display: none; }
 
-/* the Esc menu (and its ☰ button beside the credits', for touch) and the start menu over the loading city */
-#menu-button { position: fixed; right: calc(52px + var(--sr)); bottom: calc(8px + var(--sb)); z-index: 4; width: 44px; height: 44px;
+/* the Esc menu, its ☰ button and the start menu over the loading city. The button has the top left corner to itself
+   on every screen (the bottom right is the right thumb's): the bar starts beside it (--bar-left) */
+#menu-button { position: fixed; left: calc(6px + var(--sl)); top: calc(4px + var(--st)); z-index: 6; width: 44px; height: 44px;
   display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer;
-  font: 600 14px Inter, system-ui, sans-serif; }
-#menu-button span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(16,17,20,.75); }
+  font: 600 16px Inter, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+#menu-button span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(16,17,20,.75); }
 #menu-button:is(:hover, :focus-visible) span { background: #2d3036; }
 .menu { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: calc(16px + var(--st)) calc(16px + var(--sr)) calc(16px + var(--sb)) calc(16px + var(--sl));
   background: rgba(10,11,13,.45); font: 13px/1.4 Inter, system-ui, sans-serif; color: #eee; }
@@ -203,18 +205,16 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.85); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
 #perf .fps { color: #fff; font-weight: 500; min-height: 13px; }
 #perf .fps .mark { color: rgba(255,255,255,.62); margin-left: 4px; }
-@media (max-width: 600px) {
-  #perf { top: auto; right: calc(8px + var(--sr)); bottom: calc(58px + var(--sb)); }
-  #credits { bottom: calc(80px + var(--sb)); }
-}
+/* (not on a touch screen: its corners are the thumbs' and the minimap's) */
+@media (pointer: coarse) { #perf { display: none; } }
 .noui #perf { display: none; }
-.caption { position: fixed; left: calc(14px + var(--sl)); top: calc(14px + var(--st)); z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
+.caption { position: fixed; left: var(--bar-left); top: calc(14px + var(--st)); z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
   width: 340px; max-width: calc(100vw - 16px - var(--sl) - var(--sr)); color: #fff; font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); transition: opacity .8s; }
 .caption.off { opacity: 0; }
 .caption .txt { display: flex; justify-content: space-between; white-space: nowrap; }
 .caption .bar { position: relative; height: 2px; border-radius: 1px; background: rgba(255,255,255,.3); box-shadow: 0 0 2px rgba(0,0,0,.6); }
 .caption .bar i { display: block; height: 100%; width: 0; border-radius: 1px; background: #fff; transition: width .3s; }
-@media (max-width: 600px) { .caption { left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; max-width: none; } }
+@media (max-width: 600px) { .caption { left: var(--bar-left); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; max-width: none; } }
 #bar, #labels, #hud { transition: opacity .6s; }
 .loading #bar, .loading #labels, .loading #hud { opacity: 0; pointer-events: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
@@ -227,12 +227,12 @@ body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 #bar .bar-fold:is(:hover, :focus-visible) { background: #2d3036; }
 #bar .bar-fold:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
 #bar .search { margin-left: 34px; }
-#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 16px - var(--sl) - var(--sr)); }
+#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 64px - var(--sl) - var(--sr)); }
 #bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
 #bar.folded .bar-fold { position: static; flex: none; }
 #bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
 #bar.folded .mode-tools .drive-help { display: none; }
-#bar.folded .mode-tools .mode-active { flex-basis: auto; }
+#bar.folded .mode-tools .mode-active { flex: 0 1 auto; }
 @media (pointer: coarse) {
   #bar .bar-fold { width: 36px; height: 36px; }
   #bar .search { margin-left: 44px; }
@@ -280,6 +280,8 @@ body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: gr
 #health { position: fixed; left: 50%; bottom: calc(44px + var(--sb)); transform: translateX(-50%); z-index: 3; pointer-events: none;
   display: grid; gap: 3px; font: 600 11px Inter, system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
 body[data-nav=orbit] #health, body.noui #health { display: none; }
+/* (a phone held upright: clear of the map's buttons in the corner) */
+@media (max-width: 600px) { #health { bottom: calc(58px + var(--sb)); } }
 #health .row { display: grid; grid-template-columns: 84px 90px 24px; align-items: center; gap: 6px; }
 #health .row[hidden] { display: none; }
 #health .name { text-align: right; opacity: .8; }

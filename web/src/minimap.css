@@ -79,6 +79,8 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+/* (a phone held upright: the weapon slots reach that far; the minimap's own corner button opens the full map) */
+@media (max-width: 600px) { #fullmap-button { display: none; } }
 #fullmap-button .map-expand { position: static; width: 30px; height: 26px; border-radius: 13px; background: rgba(16,17,20,.85); }
 
 #fullmap {

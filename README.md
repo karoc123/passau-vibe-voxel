@@ -19,7 +19,7 @@ distance and direction at the top of the screen); clicking it again, its distanc
 host both maps show the other players near you, labelled with the name they chose (else their id), on foot or in what
 they drive or fly; the name is shown over them too.
 
-**Esc** (or the ☰ button at the bottom right, on a phone) opens the menu in every mode and lets go of the mouse:
+**Esc** or the ☰ button at the top left opens the menu in every mode and lets go of the mouse:
 **Resume**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
 default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
 the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
