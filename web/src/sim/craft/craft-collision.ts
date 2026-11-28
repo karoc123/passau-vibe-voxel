@@ -31,6 +31,13 @@ const PROBES: Record<CraftKind, readonly [number, number, number][]> = {
   paraglider: [[0, 0, 0], [0, 0.95, 0], [0, 7.1, 0.15], [-2.7, 6.4, 0.15], [2.7, 6.4, 0.15], [-4.6, 4.6, 0.15], [4.6, 4.6, 0.15]],
 };
 
+/** whether a paraglider opened at `at` (its pilot's middle, heading h) has its canopy clear of the voxels: opened in
+ * a wall or under a roof it hung there, held on every side. 'loading': its tiles are not in */
+export function canopyFits(col: VoxelCollision, at: { x: number; y: number; z: number; h: number }) {
+  const hit = craftWorld('paraglider', col).sweep(at, { x: 0, y: 1, z: 0 }, at.h, at.h);
+  return hit === 'loading' ? hit : !hit.hit;
+}
+
 // (the probes' size given, not the collision's: a stand's finder reads through one collision for every kind)
 export function craftWorld(kind: CraftKind, col: VoxelCollision): CraftMotionWorld {
   const R = CRAFT_RADIUS[kind];

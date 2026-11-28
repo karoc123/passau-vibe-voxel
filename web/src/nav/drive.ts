@@ -61,16 +61,15 @@ export class DriveMode implements PlayerCraft {
   constructor({ nav, target, sim, host, canvas }: CraftContext) {
     this.nav = nav; this.focus = target;
     sim.then((world) => { this.world = world; }, () => {});
-    // two fingers close together pinch the chase camera in and out (at the eyes, the field of view; nav.ts zoomRide)
-    // (the right side is the camera's: no stick, only the pinch, so a drive never steers from the right thumb)
-    this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio), camera: 'right' });
+    // (the right side is the camera's: no stick, so a drive never steers from the right thumb)
+    this.touch = new TouchSticks(canvas, { camera: 'right' });
     const P = this.panel = new ModePanel(host, 'drive', 'Drive a car');
     this.action = P.button('', () => this.toggle());
     this.typeButton = P.button('', () => this.cycleType(), 'drive-type');
     this.typeButton.title = 'What to drive (V)';
     this.speed = P.line('speed');
     this.help = P.help('W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · Esc exit',
-      'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake. Pinch on the right to zoom.');
+      'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake.');
     addEventListener('keydown', e => {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }

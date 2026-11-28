@@ -19,20 +19,9 @@ interface StickEvents {
   onMove?: (side: Side, stick: Readonly<Stick>) => void;
   onEnd?: (side: Side, stick: Readonly<Stick>) => void;
   onInterrupted?: () => void;
-  /** with it, two fingers close together pinch (see PINCH_NEAR): d0 / d of the fingers' distance since the last call */
-  onPinch?: (ratio: number) => void;
-  /** a side whose finger is no stick but the camera's: drawn without rings, and a second finger landing near it pinches
-   *  with it even while the other side's stick is held and moving (the drive mode: steer left, zoom right) */
+  /** a side whose finger is no stick but the camera's: drawn without rings */
   camera?: Side;
 }
-
-// a second finger landing this close to a first that has hardly moved (a fraction of the screen's shorter side) makes
-// a pinch with it, not a second stick: the two thumbs of the sticks are far apart (on a phone, portrait ~200 px,
-// landscape ~600 px), a pinch's fingers close; and a stick in use has moved
-const PINCH_NEAR = 0.35, PINCH_STILL = 20;
-// the first finger of a pinch is a stick until the second lands: for its first moments (still, the only one) it is
-// not read yet (the getters, onMove), so a pinch never steers, walks or turns on the way in
-const PINCH_WINDOW = 120; // ms
 
 export function stickAxis(offset: number, radius: number) {
   return Math.sign(offset) * Math.max(0, Math.abs(offset) - DEAD_ZONE) / (radius - DEAD_ZONE);
@@ -60,29 +49,12 @@ export class TouchSticks {
   private active = false;
   private readonly sticks: Record<Side, Stick | null> = { left: null, right: null };
   private readonly rings: Record<Side, Rings> = { left: new Rings(), right: new Rings() };
-  private pinch: { pts: Map<number, { x: number; y: number }>; d: number } | null = null;
 
   constructor(private readonly canvas: HTMLElement, private readonly events: StickEvents = {}) {
     canvas.addEventListener('pointerdown', e => {
       if (!this.active || e.pointerType !== 'touch') return;
       const bounds = canvas.getBoundingClientRect();
       const side = e.clientX < bounds.left + bounds.width / 2 ? 'left' : 'right';
-      if (this.pinch) return;
-      const held = [this.sticks.left, this.sticks.right].filter((s) => s !== null);
-      const cam = events.camera ? this.sticks[events.camera] : null;
-      const s = held.length === 1 ? held[0] : cam;
-      if (events.onPinch && s) {
-        const x = s.startX + s.dx, y = s.startY - s.dy;
-        const d = Math.hypot(e.clientX - x, e.clientY - y);
-        if ((s === cam || Math.hypot(s.dx, s.dy) < PINCH_STILL) && d < PINCH_NEAR * Math.min(bounds.width, bounds.height)) {
-          canvas.setPointerCapture(e.pointerId);
-          const sd = this.sideOf(s.id)!;
-          this.sticks[sd] = null; // (no onEnd: not a tap)
-          this.rings[sd].hide();
-          this.pinch = { pts: new Map([[s.id, { x, y }], [e.pointerId, { x: e.clientX, y: e.clientY }]]), d: Math.max(20, d) };
-          return;
-        }
-      }
       if (this.sticks[side]) return;
       canvas.setPointerCapture(e.pointerId);
       this.sticks[side] = {
@@ -94,24 +66,15 @@ export class TouchSticks {
       events.onStart?.(side);
     });
     canvas.addEventListener('pointermove', e => {
-      const p = this.pinch?.pts.get(e.pointerId);
-      if (p && this.pinch) {
-        p.x = e.clientX; p.y = e.clientY;
-        const [a, b] = [...this.pinch.pts.values()], d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
-        events.onPinch?.(this.pinch.d / d);
-        this.pinch.d = d;
-        return;
-      }
       const side = this.sideOf(e.pointerId);
       if (!side) return;
       const stick = this.sticks[side]!;
       stick.dx = e.clientX - stick.startX;
       stick.dy = stick.startY - e.clientY;
       if (side !== this.events.camera) this.rings[side].show(stick);
-      if (!this.undecided(stick)) events.onMove?.(side, stick);
+      events.onMove?.(side, stick);
     });
     canvas.addEventListener('pointerup', e => {
-      if (this.pinch?.pts.has(e.pointerId)) { this.endPinch(); return; } // (the other finger then does nothing until lifted)
       const side = this.sideOf(e.pointerId);
       if (!side) return;
       const stick = this.sticks[side]!;
@@ -120,21 +83,18 @@ export class TouchSticks {
       events.onEnd?.(side, stick);
     });
     const interrupt = () => {
-      if (!this.sticks.left && !this.sticks.right) { this.endPinch(); return; }
+      if (!this.sticks.left && !this.sticks.right) return;
       this.clear();
       events.onInterrupted?.();
     };
-    const cancel = (e: PointerEvent) => {
-      if (this.pinch?.pts.has(e.pointerId)) this.endPinch();
-      else if (this.sideOf(e.pointerId)) interrupt();
-    };
+    const cancel = (e: PointerEvent) => { if (this.sideOf(e.pointerId)) interrupt(); };
     canvas.addEventListener('pointercancel', cancel);
     canvas.addEventListener('lostpointercapture', cancel);
     addEventListener('resize', interrupt);
   }
 
-  get left(): Readonly<Stick> | null { return this.decided(this.sticks.left); }
-  get right(): Readonly<Stick> | null { return this.decided(this.sticks.right); }
+  get left(): Readonly<Stick> | null { return this.sticks.left; }
+  get right(): Readonly<Stick> | null { return this.sticks.right; }
 
   /** a stick's deflection for a mode to map: x right, y up, 0 inside the dead zone, 1 at the ring (more beyond it) */
   axes(side: Side): { x: number; y: number } | null {
@@ -142,26 +102,12 @@ export class TouchSticks {
     return s && { x: stickAxis(s.dx, s.radius), y: stickAxis(s.dy, s.radius) };
   }
 
-  private decided(s: Stick | null) { return s && !this.undecided(s) ? s : null; }
-
-  // a lone stick just put down that has hardly moved: maybe the first finger of a pinch (see PINCH_WINDOW)
-  private undecided(s: Readonly<Stick>) {
-    return !!this.events.onPinch && !(this.sticks.left && this.sticks.right) &&
-      performance.now() - s.t < PINCH_WINDOW && Math.hypot(s.dx, s.dy) < PINCH_STILL;
-  }
-
   setActive(active: boolean) {
     this.active = active;
     if (!active) this.clear();
   }
 
-  private endPinch() {
-    for (const id of this.pinch?.pts.keys() ?? []) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
-    this.pinch = null;
-  }
-
   clear() {
-    this.endPinch();
     const { left, right } = this.sticks;
     this.sticks.left = this.sticks.right = null;
     this.rings.left.hide();

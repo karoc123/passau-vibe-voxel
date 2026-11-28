@@ -52,7 +52,6 @@ export class BoatMode implements PlayerCraft {
   private readonly rig: ChaseRig;
   private phase: Phase = 'off';
   private start: { x: number; z: number; h: number; t0: number } | null = null;
-  private zoom = 1;
   private camYaw = 0;
   private readonly mouseLook = new MouseLook();
   private camY = 0;
@@ -68,23 +67,18 @@ export class BoatMode implements PlayerCraft {
     this.model = craftLook('boat');
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
-    this.touch = new TouchSticks(canvas, { onPinch: (r) => { this.zoom = clamp(this.zoom * r, 0.5, 2.2); }, camera: 'right' });
+    this.touch = new TouchSticks(canvas, { camera: 'right' });
     const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat');
     this.action = P.button('Boat', () => this.toggle());
     this.speed = P.line('speed');
     this.help = P.help('W/S throttle and reverse · A/D steer · Space drift · C: to the gun · T unstick · Esc exit',
-      'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift. Pinch on the right to zoom.');
+      'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift.');
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.unstick(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
-    canvas.addEventListener('wheel', (e) => {
-      if (this.phase === 'off') return;
-      e.preventDefault();
-      this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.5, 2.2);
-    }, { passive: false });
     onFocusLoss(() => this.touch.clear());
     this.draw();
   }
@@ -180,7 +174,6 @@ export class BoatMode implements PlayerCraft {
 
   // on board, heading h, the water at y
   private go(h: number, y: number) {
-    this.zoom = 1;
     this.camYaw = h;
     this.camY = y;
     this.phase = 'on';
@@ -226,7 +219,7 @@ export class BoatMode implements PlayerCraft {
     this.camY += (m.y - this.camY) * follow(3, dt);
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw), base = this.camY;
     const eye = new THREE.Vector3(d.x, base + 1.6, d.z);
-    const off = this.mouseLook.swing(new THREE.Vector3(-fx * BACK * this.zoom, UP * this.zoom - 1.6, -fz * BACK * this.zoom), dt);
+    const off = this.mouseLook.swing(new THREE.Vector3(-fx * BACK, UP - 1.6, -fz * BACK), dt);
     const pos = this.pos.copy(eye).addScaledVector(off, clearShare(this.link.col!.sweep(eye, off), off, 0.25, 0.4));
     if (now < this.shakeUntil) shake(pos, this.shakeA * (this.shakeUntil - now) / 450, now);
     const at = new THREE.Vector3(d.x + Math.sin(d.h) * AHEAD, base + 1.2, d.z + Math.cos(d.h) * AHEAD);

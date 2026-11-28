@@ -7,7 +7,8 @@
 // tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
 // at the gun and on foot (out with X) firing shots the host records; the combat plane from the map, the mouse taken;
 // the boat's chase view swung by the mouse; every aircraft from the map, its pilot's view not turned by the mouse, X
-// high up putting P under a paraglider that flies; the grappling hook's touch button shown there; X under the
+// low in the air (no canopy fits) leaving P beside it at its height, falling; X high up putting P under a paraglider
+// that flies; first of all, on the map, the wheel zooms (orbit mode's alone); the grappling hook's touch button shown there; X under the
 // paraglider folding it away and X in the fall opening one again; last, on foot, a tap on the hook button firing a hook.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
@@ -36,6 +37,7 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { readHostData } = await imp('src/host/node.ts');
 const { vehicleOf } = await imp('src/sim/vehicles.ts');
 const { AIRCRAFT } = await imp('src/nav/craft.ts');
+const { craftMeets, reach } = await imp('src/sim/solids.ts');
 const GLIDE = (await imp('src/sim/craft/craft-motion.ts')).CRAFT.paraglider;
 const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => log(`host: ${l}`) });
 const hostPort = await host.port, sim = host.server.sim;
@@ -98,6 +100,14 @@ const P = await ctx.newPage();
 P.on('pageerror', (e) => console.log(`  P page error: ${e.message}`));
 await P.goto(`http://127.0.0.1:${vitePort}/?${Q}`);
 await P.waitForFunction(() => window.__sim?.player && window.__crafts && window.__life?.group.visible, null, { timeout: 300000 });
+// in orbit mode the wheel zooms: turned back, the camera is further from what it looks at
+const far = () => P.evaluate(() => { const T = window.__three; return T.camera.position.distanceTo(T.controls.target); });
+const far0 = await far();
+await P.mouse.move(480, 320);
+await P.mouse.wheel(0, 300);
+await until(async () => await far() > far0 * 1.05, 5000);
+const far1 = await far();
+check(far1 > far0 * 1.05, `in orbit mode the wheel zooms out (${far0.toFixed(0)} -> ${far1.toFixed(0)} m from the view's target)`);
 const s = side(-2 * 0.9 - 1.5);
 await P.evaluate((s) => { const T = window.__three; void T.nav.setWalk({ at: T.camera.position.clone().set(s.x, s.y, s.z), exact: true }); }, s);
 const offered = await P.waitForFunction(() => window.__three.nav.onFoot && document.querySelector('#board-button:not([hidden])')?.textContent, null, { timeout: 60000 })
@@ -257,7 +267,7 @@ const flies = async () => {
   return { ok: fwd > T * 0.7 && fwd < T * 1.6 && sink > S * 0.4 && sink < S * 2 && off < 20 && turned > 0.3,
     why: `${fwd.toFixed(1)} m/s forward, sinking ${sink.toFixed(2)} m/s, the page's ${off.toFixed(1)} m off the host's, D turns it ${turned.toFixed(2)} rad` };
 };
-for (const type of AIRCRAFT) {
+const enter = async (type) => {
   await P.evaluate(() => window.__three.nav.setOrbit());
   await wait(800);
   // (the map's view back over the cathedral's square, where a helicopter finds land to start on, wherever the last
@@ -268,6 +278,27 @@ for (const type of AIRCRAFT) {
   const inIt = await P.waitForFunction((t) => window.__sim.craftOf()?.type === t && window.__sim.craftOf().placed && window.__three.nav.craft?.mouse === true, type, { timeout: 30000 }).then(() => true, () => false);
   // (the glide in from the map's view over)
   await wait(1200);
+  return inIt;
+};
+// m over the street the aircraft is put for the low way out: under it no canopy has its 4 m to open in
+const LOW = 7;
+for (const type of AIRCRAFT) {
+  // X low in the air, where no canopy fits: P is beside the aircraft's boxes at its height in that frame (read in the
+  // frame X is taken, against the aircraft as the page has it), not on the street under it, and falls onto it
+  const lowIn = await enter(type), lc = lowIn && sim.crafts.get(sim.seat(pid)?.entity.id);
+  if (lc) sim.placeCraft(lc.id, { ...lc.core.pose, x: s.x, z: s.z, y: s.y + LOW });
+  // (X in the frame the page first has it there: a plane is 40 m on within half a second, over other ground)
+  const out = !!lc && await P.waitForFunction(([x, y, z]) => {
+    const n = window.__three.nav, c = window.__sim.craftOf(), p = c?.core.pose;
+    if (!p || Math.hypot(p.x - x, p.z - z) > 15 || Math.abs(p.y - y) > 3) return false;
+    const pose = { ...p }, ok = n.getOut(), f = n.foot;
+    return { ok, pose, onFoot: n.onFoot, shell: n.craft?.id ?? null, x: f.pos.x, z: f.pos.z, feet: f.feet, ground: n.world.support(f.pos.x, f.pos.z, f.feet) };
+  }, [s.x, s.y + LOW, s.z], { timeout: 10000, polling: 'raf' }).then((h) => h.jsonValue(), () => null);
+  const boxes = out ? craftMeets(type, out.pose) : [], clearOf = !!out && boxes.every((b) => reach(b, out.x, out.z, out.feet) <= 0);
+  const landed = !!out && out.onFoot && await P.waitForFunction(() => { const n = window.__three.nav, f = n.foot; return n.onFoot && window.__sim.seat()?.role === 'walker' && f.feet - n.world.support(f.pos.x, f.pos.z, f.feet + 0.5) < 0.1; }, null, { timeout: 20000 }).then(() => true, () => false);
+  check(!!out && out.ok && out.onFoot && clearOf && Math.abs(out.feet - boxes[0].y) < 1.1 && out.feet - out.ground > 2 && landed,
+    `X ${LOW} m up in the ${type}: P beside it at its height, outside its boxes (${clearOf}), falling, then landed (${landed}): ${out ? `feet ${out.feet.toFixed(1)}, the ${type}'s foot ${boxes[0]?.y.toFixed(1)}, the ground ${out.ground.toFixed(1)}, on foot ${out.onFoot}, shell ${out.shell}` : `not in it low (in ${lowIn})`}`);
+  const inIt = await enter(type);
   let m = await locked();
   if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
   const turned = await swung();

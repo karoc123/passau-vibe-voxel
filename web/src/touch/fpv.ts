@@ -10,15 +10,13 @@ export class FpvTouch {
   private throttle = DRONE.hover;
   private startThrottle = DRONE.hover;
 
-  // onPinch: two fingers close together (touch-sticks.ts), d0 / d of their distance since the last call
-  constructor(canvas: HTMLCanvasElement, onInterrupted: () => void, onPinch: (ratio: number) => void) {
+  constructor(canvas: HTMLCanvasElement, onInterrupted: () => void) {
     this.sticks = new TouchSticks(canvas, {
       onStart: side => { if (side === 'left') this.startThrottle = this.throttle; },
       onMove: (side, { dy, radius }) => {
         if (side === 'left') this.throttle = clamp(this.startThrottle + 0.65 * stickAxis(dy, radius), 0, 1);
       },
       onInterrupted,
-      onPinch,
     });
   }
 

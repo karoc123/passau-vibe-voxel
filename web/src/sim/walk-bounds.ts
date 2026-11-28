@@ -26,6 +26,13 @@ export function boundWalk(from: WalkPose, pose: WalkPose, t: number, B: WalkBoun
   return { ...pose, x: from.x + dx * k, z: from.z + dz * k, y: from.y + Math.max(-down, Math.min(up, dy)) };
 }
 
+/** the velocity a body let go in the air starts its fall with, of the v of what it left: across and upwards no more
+ * than the walk's bound takes with room to spare (a jet's speed kept, every pose of the fall would be clamped) */
+export function letGo(v: { x: number; y: number; z: number }, B: WalkBounds = WALK_BOUNDS) {
+  const k = Math.min(1, 0.8 * B.speed / Math.max(1e-9, Math.hypot(v.x, v.z)));
+  return { x: v.x * k, y: Math.min(v.y, 0.8 * B.climb), z: v.z * k };
+}
+
 /** a vehicle's footprint: its middle (y: where it stands), heading h (0: +z), half its width (r) and length (l) */
 export interface Box { x: number; y: number; z: number; h: number; r: number; l: number }
 

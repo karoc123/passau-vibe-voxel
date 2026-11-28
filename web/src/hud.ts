@@ -59,7 +59,7 @@ export class Hud {
     $('.who', this.box).textContent = mode === 'ride' && ride && label ? WHO[label] ?? WHO[ride.ref.kind] : '';
     if (this.touch) {
       $('.hint', this.box).textContent = mode === 'walk'
-        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look, tap to fire, hold to keep firing · Hook button: grappling hook · Pinch: zoom' : '';
+        ? 'Left thumb: drag to walk, far to run · Right thumb: drag to look, tap to fire, hold to keep firing · Hook button: grappling hook' : '';
       return;
     }
     const items = [...MOUSE[mode], LABELS];
