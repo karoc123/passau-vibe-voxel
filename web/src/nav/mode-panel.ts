@@ -1,11 +1,14 @@
 import { el } from '../util';
 import { onFocusLoss } from './input';
 
-// A mode's panel in the bar's mode tools (drive, boat, plane, drone): its buttons, then a detail box with a status line
+// A mode's panel in the bar's mode tools (drive, boat, plane, drone): a detail box with a status line
 // first (role=status) and the mode's own lines. The panel is
 // `.mode-active` while its mode is on (style.css: then it takes the row, and in a craft the other panels hide; which
 // mode is on is body[data-mode], main.ts). Classes: generic (mode-status) and the mode's own
 // (`<name>-status`, ...) for what differs.
+/** a button that gets into a vehicle or out of it, put where the page offers them (main.ts: the menu) */
+export type Offer = (label: string, run: () => void, cls?: string) => HTMLButtonElement;
+
 export class ModePanel {
   readonly el = document.createElement('aside');
   readonly details: HTMLDivElement;
@@ -13,7 +16,7 @@ export class ModePanel {
   private note = '';
   private noteUntil = 0;
 
-  constructor(host: HTMLElement, readonly name: string, label: string) {
+  constructor(host: HTMLElement, readonly name: string, label: string, private readonly offer: Offer) {
     this.el.className = `${name}-mode`;
     this.el.setAttribute('aria-label', label);
     this.details = el('div', 'mode-detail', '', this.el);
@@ -22,12 +25,8 @@ export class ModePanel {
     host.append(this.el);
   }
 
-  /** a button before the detail box: run on click, then the focus given back (the keys go to the mode again) */
-  button(label: string, run: () => void, cls = '') {
-    const b = modeButton(label, run, this.el, cls);
-    this.el.insertBefore(b, this.details);
-    return b;
-  }
+  /** the mode's button, where the page offers the vehicles (the menu): run on click */
+  button(label: string, run: () => void, cls = '') { return this.offer(label, run, cls); }
 
   /** a line in the detail box */
   line(cls: string, html = '') { return el('div', `${this.name}-${cls}`, html, this.details); }

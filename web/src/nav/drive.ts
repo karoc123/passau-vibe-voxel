@@ -58,13 +58,13 @@ export class DriveMode implements PlayerCraft {
   // the world sim's client, once it is there
   private world: SimClient | null = null;
 
-  constructor({ nav, target, sim, host, canvas }: CraftContext) {
+  constructor({ nav, target, sim, host, canvas, offer }: CraftContext) {
     this.nav = nav; this.focus = target;
     sim.then((world) => { this.world = world; }, () => {});
     // two fingers close together pinch the chase camera in and out (at the eyes, the field of view; nav.ts zoomRide)
     // (the right side is the camera's: no stick, only the pinch, so a drive never steers from the right thumb)
     this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio), camera: 'right' });
-    const P = this.panel = new ModePanel(host, 'drive', 'Drive a car');
+    const P = this.panel = new ModePanel(host, 'drive', 'Drive a car', offer);
     this.action = P.button('', () => this.toggle());
     this.typeButton = P.button('', () => this.cycleType(), 'drive-type');
     this.typeButton.title = 'What to drive (V)';

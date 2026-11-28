@@ -2,7 +2,6 @@
 #bar .plane-telemetry { font-variant-numeric: tabular-nums; font-weight: 600; }
 #bar .plane-status:empty { display: none; }
 #bar .plane-invert { display: flex; align-items: center; gap: 6px; color: var(--t2); cursor: pointer; }
-@media (pointer: coarse) { #bar .plane-mode > button { min-height: 44px; } }
 body[data-mode=plane] #bar .plane-mode { max-width: 100%; box-sizing: border-box; }
 body[data-mode=plane] #bar .plane-invert { order: 3; padding-bottom: 6px; }
 

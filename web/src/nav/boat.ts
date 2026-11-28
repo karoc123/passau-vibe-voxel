@@ -69,7 +69,7 @@ export class BoatMode implements PlayerCraft {
     nav.actors.add(this.model.group);
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, { onPinch: (r) => { this.zoom = clamp(this.zoom * r, 0.5, 2.2); }, camera: 'right' });
-    const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat');
+    const P = this.panel = new ModePanel(host, 'boat', 'Drive a boat', ctx.offer);
     this.action = P.button('Boat', () => this.toggle());
     this.speed = P.line('speed');
     addEventListener('keydown', (e) => {

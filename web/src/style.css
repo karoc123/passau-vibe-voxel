@@ -13,6 +13,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar { --t2: rgba(255,255,255,.62); position: fixed; left: var(--bar-left); top: calc(14px + var(--st)); z-index: 5; width: 340px; color: #fff;
   font: 11px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
 #bar .search { position: relative; margin: 0 0 4px; }
+@media (pointer: coarse) { #bar .search input { height: 36px; } }
 #bar .search input { width: 100%; height: 24px; border: 0; border-bottom: 1px solid rgba(255,255,255,.55); outline: 0; padding: 0 30px 0 20px; background: transparent; color: #fff; font: inherit; font-size: 11.5px; text-shadow: inherit;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='white' stroke-opacity='.8' stroke-width='1.6'%3E%3Ccircle cx='6' cy='6' r='4.5'/%3E%3Cpath d='M9.5 9.5L13 13'/%3E%3C/svg%3E") 0 50% no-repeat; }
 #bar .search input:focus { border-bottom-color: #fff; }
@@ -36,9 +37,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; /* p
 #bar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 14px; margin-top: -6px; border-radius: 1px; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.8); position: relative; z-index: 2; }
 #bar input[type=range]::-moz-range-thumb { width: 3px; height: 14px; border: 0; border-radius: 1px; background: #fff; }
 #bar input[type=range]:disabled { opacity: .35; cursor: default; }
-/* Driving and flight sit alongside the existing map controls. */
-#bar .mode-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; padding-top: 5px; }
-#bar .mode-tools .mode-active { flex: 1 0 100%; min-width: 0; }
+/* the mode tools: the panel of the vehicle the player is in (nav/mode-panel.ts), or what one has to say */
+#bar .mode-tools { padding-top: 5px; }
 #bar .mode-tools [hidden] { display: none; }
 /* the mode on (main.ts): body[data-mode], nav.ts's Mode or the craft's id while in one (nav/craft.ts: fpv, boat, plane,
    drive); body[data-nav=craft] while a craft owns the camera. In a
@@ -47,9 +47,8 @@ body[data-nav=craft] #bar .mode-tools > :not(.mode-active) { display: none; }
 body[data-mode=fpv] #labels { display: none; }
 /* the plane, and the drone while it flies: a compact strip of its panel alone (nav/plane.css, nav/fpv.css: their own) */
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) .caption,
-body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools, .bar-fold) { display: none; }
-@media (min-width: 601px) and (min-height: 501px) { body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > .bar-fold { display: none; } }
-body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100vw - var(--bar-left) - 8px - var(--sr)); }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar > :not(.mode-tools) { display: none; }
+body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar { right: auto; width: max-content; max-width: calc(100vw - var(--bar-left) - var(--bar-room) - var(--sr)); }
 body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-active {
   display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 0 8px; border-radius: 6px; background: rgba(16,17,20,.62);
 }
@@ -69,7 +68,7 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 }
 #bar .mode-detail .fpv-status { color: rgba(255,255,255,.82); }
 @media (max-width: 600px), (max-height: 500px) { #bar .mode-detail { max-height: max(72px, calc(100dvh - 285px - var(--st) - var(--sb))); } }
-@media (pointer: coarse) { #bar .mode-button { min-height: 36px; } #bar .mode-tools > .mode-button, #bar .mode-tools > * > .mode-button { min-height: 44px; } } /* the modes on one line (drive.css) */
+@media (pointer: coarse) { #bar .mode-button { min-height: 44px; } }
 @media (max-width: 600px) { #bar { left: var(--bar-left); right: calc(8px + var(--sr)); top: calc(8px + var(--st)); width: auto; } }
 @media (max-width: 600px), (max-height: 500px) {
   #bar .val { flex-basis: 40%; }
@@ -202,34 +201,15 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .loading #help { display: none; }
 body:not(.loading) #bar { transition: opacity .12s 1.2s; }
 
-/* the bar's fold (bar.ts): a round button as the "?" one; folded, only it and the mode buttons (walk, drive, fly) */
-#bar .bar-fold { position: absolute; left: 0; top: 0; z-index: 1; width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
-  border: 0; border-radius: 50%; background: rgba(16,17,20,.75); color: #fff; cursor: pointer; }
-#bar .bar-fold span { display: block; width: 12px; height: 2px; background: currentColor; box-shadow: 0 -4px currentColor, 0 4px currentColor; transition: transform .2s; }
-#bar:not(.folded) .bar-fold span { width: 10px; height: 10px; background: none; box-shadow: none; border: solid currentColor; border-width: 0 0 2px 2px; transform: translateY(2px) rotate(135deg); }
-#bar .bar-fold:is(:hover, :focus-visible) { background: #2d3036; }
-#bar .bar-fold:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
-#bar .search { margin-left: 34px; }
-#bar.folded { display: flex; align-items: flex-start; gap: 0 12px; width: auto; right: auto; max-width: calc(100vw - 64px - var(--sl) - var(--sr)); }
-#bar.folded > :not(.bar-fold, .mode-tools) { display: none; }
-#bar.folded .bar-fold { position: static; flex: none; }
-#bar.folded .mode-tools { flex: 0 1 auto; min-width: 0; padding-top: 0; }
-#bar.folded .mode-tools .mode-active { flex: 0 1 auto; }
-@media (pointer: coarse) {
-  #bar .bar-fold { width: 36px; height: 36px; }
-  #bar .search { margin-left: 44px; }
-  #bar .search input { height: 36px; }
-  #bar.folded .bar-fold { margin-top: 4px; } /* centred on the mode buttons' line (44 px) */
+/* the bar never takes a touch meant for the view: only its fields and buttons do */
+#bar { pointer-events: none; --bar-room: 8px; }
+#bar :is(.search, button, input, select, summary, label, .fpv-options) { pointer-events: auto; }
+/* in play on a touch screen or a small one the bar is the vehicle's status alone (the search is the map's, the drone's
+   controller setup a desktop's); held across, the waypoint's distance and the minimap are right of it */
+@media (pointer: coarse), (max-width: 600px), (max-height: 500px) {
+  body:not([data-nav=orbit]) #bar :is(.search, .plane-invert, .fpv-options) { display: none; }
 }
-/* play (on foot, riding, in a craft) on a small screen: folded, the bar is one strip, the fold button and the mode's
-   own buttons and status, so the view stays free; the other modes, the help and the options open with the button,
-   which stays even where a craft's strip hides the rest of the bar (beside it when open) */
-@media (max-width: 600px), (max-height: 500px) {
-  body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar:not(.folded) > .mode-tools { margin-left: 44px; }
-  body:not([data-nav=orbit]) #bar.folded .mode-tools > :not(.mode-active, .walk-button),
-  body:not([data-nav=orbit]) #bar.folded .mode-active .plane-invert { display: none; }
-  body:not([data-nav=orbit]) #bar.folded .mode-active .mode-status:not(:empty) { padding-bottom: 4px; }
-}
+@media (pointer: coarse) and (orientation: landscape) { #bar { --bar-room: 250px; max-width: calc(100vw - var(--bar-left) - var(--bar-room) - var(--sr)); } }
 
 /* on foot: the crosshair at the middle, the weapon slots at the bottom */
 #arms { display: none; }
@@ -278,5 +258,3 @@ body[data-nav=orbit] #incoming, body.noui #incoming { display: none; }
 #incoming i.hit { border-width: 12px; border-top-color: #e8402a; }
 #health-tint { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
   background: radial-gradient(ellipse at center, transparent 35%, #a82d18 100%); }
-/* (a phone held across: the waypoint and the minimap are right of the bar) */
-@media (pointer: coarse) and (orientation: landscape) { #bar.folded { max-width: calc(100vw - 320px - var(--sl) - var(--sr)); } }

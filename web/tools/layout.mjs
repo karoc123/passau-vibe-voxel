@@ -4,6 +4,7 @@
 // touch page at each of SIZES.touch, a mouse page at each of SIZES.desktop. In each situation at each size:
 //   - every control shown (CONTROLS) lies on the screen and is what a tap at its middle meets (elementFromPoint), and
 //     no control or read-out (DISPLAYS) lies over another;
+//   - the hovercraft and the military helicopter are got into as a player does, by ☰ and the menu's entry;
 //   - a real tap (a click with the mouse) on ☰ opens the menu, whose own controls are checked the same way, and one
 //     on Resume closes it;
 //   - on the touch page a tap on the minimap and the menu's Map open the full map, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
@@ -119,6 +120,7 @@ const MEASURE = ({ CONTROLS, DISPLAYS, TOUCH_BUTTONS, scope }) => {
 const frames = (P, n = 3) => P.evaluate((n) => new Promise((done) => { const f = () => (--n > 0 ? requestAnimationFrame(f) : done()); requestAnimationFrame(f); }), n);
 
 // ------------------------------------------------------------------ the situations
+const centre = (P, sel) => P.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; }, sel);
 const T = (P, f, arg, ms = 60000) => P.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);
 const toMap = async (P) => {
   await P.evaluate(() => { window.__map.full.isOpen && window.__map.full.close?.(); window.__three.nav.setOrbit(); });
@@ -131,6 +133,14 @@ const enter = (shell, type, at) => async (P) => {
   await toMap(P);
   await P.evaluate(([shell, at]) => window.__crafts.find((c) => c.id === shell).enter(at ?? undefined), [shell, at ?? null]);
   return inCraft(P, shell, type ?? shell);
+};
+// (as a player gets one: ☰, then its entry among the menu's vehicles, by a real tap or click)
+const fromMenu = (label, shell, type) => async (P, touch) => {
+  await toMap(P);
+  const b = await centre(P, '#menu-button'), entry = P.locator('#menu button.menu-entry', { hasText: new RegExp(`^${label}$`) });
+  await (touch ? P.touchscreen.tap(b.x, b.y) : P.mouse.click(b.x, b.y));
+  await (touch ? entry.tap({ timeout: 10000 }) : entry.click({ timeout: 10000 }));
+  return (await inCraft(P, shell, type ?? shell)) && !(await P.evaluate(() => window.__menu.menu.isOpen()));
 };
 // (C: the next seat of the craft the player is in)
 const nextSeat = async (P) => {
@@ -148,7 +158,6 @@ const plane = (type, track) => enter('plane', type, { x: SQUARE.x, y: 200 + 40 *
 const afoot = (P) => T(P, () => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker');
 
 // on the touch page: what a thumb does there (null: as it should; else what went wrong)
-const centre = (P, sel) => P.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; }, sel);
 const shots = (P, since) => P.evaluate((since) => window.__sim.eventsSince(since).filter((e) => e.kind === 'shot' && e.player === window.__sim.player).length, since);
 const holdFires = async (P) => {
   const cdp = await P.context().newCDPSession(P), t0 = await P.evaluate(() => window.__sim.tick), at = { x: 300, y: 200 };
@@ -201,11 +210,11 @@ const SITUATIONS = [
     await P.evaluate(() => window.__crafts.find((c) => c.id === 'drive').enter());
     return T(P, () => window.__sim.seat()?.role === 'driver' && window.__sim.driver() && !window.__sim.driver().waiting && window.__three.nav.craft?.id === 'drive', null, 120000);
   }, touch: ['#handbrake-button', '#board-button', '#reset-button'], help: ['drive', /steer.*handbrake/i, /stick|thumb/i] },
-  { name: 'the hovercraft', into: enter('hovercraft'), touch: ['#board-button'], help: ['hovercraft', /thrust/i, /stick/i] },
+  { name: 'the hovercraft', into: fromMenu('Hovercraft', 'hovercraft'), touch: ['#board-button'], help: ['hovercraft', /thrust/i, /stick/i] },
   { name: 'the helicopter', into: enter('helicopter'), touch: ['#board-button'], help: ['helicopter', /climb/i, /stick/i] },
   { name: 'on foot beside the helicopter', into: async (P) => { await P.keyboard.press('KeyX'); return (await afoot(P)) && T(P, () => document.querySelector('#board-button:not([hidden])'), null, 20000); },
     touch: ['#jump-button', '#slot-button', '#hook-button', '#board-button'], help: ['walk', ...FOOT_HELP] },
-  { name: 'the military helicopter', into: enter('gunship'), touch: ['#board-button', '#seat-button'], help: ['gunship', /climb/i, /stick/i] },
+  { name: 'the military helicopter', into: fromMenu('Military helicopter', 'gunship'), touch: ['#board-button', '#seat-button'], help: ['gunship', /climb/i, /stick/i] },
   { name: 'at the military helicopter\'s gun', into: nextSeat, touch: ['#board-button', '#seat-button'], help: ['gunner', /aim.*fire/i, /aim.*fire/i] },
   { name: 'on the military helicopter\'s bench', into: async (P) => (await nextSeat(P)) && nextSeat(P), thumb: viewSwaps, touch: ['#board-button', '#seat-button', '#view-button'], help: ['passenger', /look/i, /look/i] },
   { name: 'at the boat\'s wheel', into: enter('boat', 'boat', BOAT), thumb: resetPuts, touch: ['#boat-drift-button', '#board-button', '#seat-button', '#reset-button'], help: ['boat', /steer.*drift/i, /stick|thumb/i] },

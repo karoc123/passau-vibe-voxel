@@ -116,10 +116,10 @@ export class PlaneMode implements PlayerCraft {
   private nextPanel = 0;
 
   constructor(ctx: CraftContext) {
-    const { nav, camera, target, meta, host, canvas, env } = ctx;
+    const { nav, camera, target, meta, host, canvas, env, offer } = ctx;
     this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
     this.link = new CraftLink<AircraftId>(ctx, 'floatplane');
-    const P = this.panel = new ModePanel(host, 'plane', 'Plane');
+    const P = this.panel = new ModePanel(host, 'plane', 'Plane', offer);
     this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
     this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
     this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));

@@ -102,9 +102,10 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
   const settings = el('details', 'menu-more', '<summary>Settings</summary>', card);
   const showSettings = settingsFields(prefs, settings, a.changed);
   part('game');
-  /** a folded section: its body, and a mark beside its title */
-  const section = (title: string, where: Part = 'game') => {
+  /** a section that folds (open: unfolded at first): its body, and a mark beside its title */
+  const section = (title: string, where: Part = 'game', open = false) => {
     const d = el('details', 'menu-more', `<summary>${title} <span class="mark"></span></summary>`, parts[where]);
+    d.open = open;
     return { box: el('div', 'menu-section', '', d), mark: d.querySelector<HTMLElement>('.mark')! };
   };
   /** an entry that closes the menu and runs; label: fixed, or what it says when the menu opens; shown: offered or not */
@@ -137,6 +138,8 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
     showFs();
     showSettings();
     box.hidden = false;
+    // (from its top, wherever it was scrolled to when it closed)
+    card.scrollTop = 0;
     if (document.pointerLockElement) document.exitPointerLock();
     a.paused(true);
     resume.focus({ preventScroll: true });

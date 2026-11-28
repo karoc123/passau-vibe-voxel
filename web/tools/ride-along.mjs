@@ -208,7 +208,7 @@ check(onFoot && await firesOnClick(), 'a click on foot fires a shot the host rec
 // that aims with the mouse; the plane was missed once), else the first click takes it; a click fires its MG
 await P.evaluate(() => window.__three.nav.setOrbit());
 await wait(800);
-await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
+await P.evaluate(() => window.__menu.menu.open());
 await P.locator('button', { hasText: /^Combat plane$/ }).click({ timeout: 10000 }).catch((e) => log(`combat plane button: ${e.message}`));
 const flying = await P.waitForFunction(() => window.__three.nav.craft?.mouse === true, null, { timeout: 30000 }).then(() => true, () => false);
 let planeMouse = flying && await until(locked, 5000);
@@ -233,7 +233,7 @@ for (const type of AIRCRAFT) {
   // (the map's view back over the cathedral's square, where a helicopter finds land to start on, wherever the last
   // aircraft flew)
   await P.evaluate((d) => { const T = window.__three; T.controls.target.set(d.x, d.y, d.z); T.camera.position.set(d.x, d.y + 60, d.z + 60); T.camera.lookAt(T.controls.target); }, { x: dom.x, y: dom.z ?? 20, z: dom.y });
-  await P.evaluate(() => document.querySelector('#bar')?.classList.remove('folded'));
+  await P.evaluate(() => window.__menu.menu.open());
   if (ENTER[type]) await P.locator('button', { hasText: ENTER[type] }).click({ timeout: 10000 }).catch((e) => log(`${type} button: ${e.message}`));
   const inIt = await P.waitForFunction((t) => window.__sim.craftOf()?.type === t && window.__sim.craftOf().placed && window.__three.nav.craft?.mouse === true, type, { timeout: 30000 }).then(() => true, () => false);
   // (the glide in from the map's view over)
@@ -256,9 +256,8 @@ check(await hookButton(), 'under the paraglider the grappling hook\'s touch butt
 await P.evaluate((s) => { const T = window.__three; void T.nav.setWalk({ at: T.camera.position.clone().set(s.x, s.y, s.z), exact: true }); }, s);
 const afoot = await P.waitForFunction(() => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
 await wait(800);
-// (as on a phone: the bar folded, where the aircraft's buttons unfolded it over the thumbs' corner, and no mouse
-// taken, which would get the tap in the button's place)
-await P.evaluate(() => { const f = window.__three.nav.foot; f.pitch = -0.5; f.anchor = null; document.querySelector('#bar')?.classList.add('folded'); window.__three.nav.releaseMouse(); });
+// (as on a phone: no mouse taken, which would get the tap in the button's place)
+await P.evaluate(() => { const f = window.__three.nav.foot; f.pitch = -0.5; f.anchor = null; window.__three.nav.releaseMouse(); });
 await frames2();
 const shownAfoot = await hookButton();
 await P.tap('#hook-button').catch((e) => log(`hook button: ${e.message}`));

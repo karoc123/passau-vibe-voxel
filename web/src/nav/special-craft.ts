@@ -77,7 +77,7 @@ class SpecialCraft implements PlayerCraft {
       camera: rotorcraft(id) ? undefined : 'right',
       onPinch: (ratio) => { this.zoom = clamp(this.zoom * ratio, 0.65, 2); },
     });
-    this.panel = new ModePanel(host, id, cfg.name);
+    this.panel = new ModePanel(host, id, cfg.name, ctx.offer);
     this.panel.el.classList.add('special-craft');
     this.action = this.panel.button(cfg.name, () => {
       if (this.phase === 'off') this.enter();

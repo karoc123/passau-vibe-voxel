@@ -67,7 +67,7 @@ export class FpvMode implements PlayerCraft {
   private notice = '';
 
   constructor(ctx: CraftContext) {
-    const { nav, camera, target, host, canvas } = ctx;
+    const { nav, camera, target, host, canvas, offer } = ctx;
     this.nav = nav; this.camera = camera; this.target = target;
     this.link = new CraftLink(ctx, 'drone');
     // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
@@ -76,7 +76,7 @@ export class FpvMode implements PlayerCraft {
       this.camera.updateProjectionMatrix();
     });
     this.impactTint.setAttribute('aria-hidden', 'true');
-    const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro');
+    const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro', offer);
     this.enterExit = P.button('FPV Acro', () => this.toggle());
     this.telemetry = P.line('telemetry');
     const actions = P.line('actions');

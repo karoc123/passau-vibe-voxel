@@ -197,25 +197,19 @@ const goTo = makeGoTo({ camera, target: controls.target, nav, world: () => world
   follow: followNearest });
 nav.cancelFly = goTo.cancel;
 const modeTools = el('div', 'mode-tools', '', bar.el);
-const walkButton = el('button', 'mode-button walk-button', 'Walk', modeTools);
-walkButton.type = 'button';
-walkButton.disabled = true;
-walkButton.addEventListener('click', e => {
-  walkButton.blur();
+// on foot from the menu, at the view or beside the vehicle followed
+menu.entry(() => (nav.enteringWalk ? 'Entering walk…' : 'Walk here'), () => {
   nav.leaveCraft(); // (the car driven parks; you step out beside it)
-  const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
-  void nav.toggleWalk(!touch && !coarsePointer());
-});
-// on a phone the bar open over play hides half the view: leaving the map folds it (style.css: then only the mode's
-// own buttons and status beside the fold button), back on the map it opens again if it was open
-const smallScreen = matchMedia('(max-width: 600px), (max-height: 500px)');
-let openOnMap = false;
-function foldForPlay(fromMap: boolean, toMap: boolean) {
-  if (fromMap && !toMap) {
-    openOnMap = !bar.folded;
-    if (smallScreen.matches) bar.fold(true);
-  } else if (toMap && openOnMap) bar.fold(false);
-}
+  void nav.toggleWalk(!coarsePointer());
+}, 'quick', () => !!world && !nav.onFoot && !nav.craftView);
+// the vehicles of the sandbox: each craft's buttons (nav/mode-panel.ts), in the menu
+const vehicles = menu.section('Vehicles', 'sandbox', true).box;
+const offer = (label: string, run: () => void, cls = '') => {
+  const b = el('button', `menu-entry ${cls}`, label, vehicles);
+  b.type = 'button';
+  b.addEventListener('click', () => { menu.close(); run(); });
+  return b;
+};
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = new Graphics(gfxSection.box, gfxSection.mark, gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -258,7 +252,7 @@ const LABELS_KEY = 'labels';
 let labelsOn = true;
 try { labelsOn = localStorage.getItem(LABELS_KEY) !== '0'; } catch { /* storage blocked: shown */ }
 addEventListener('keydown', (e) => {
-  if (e.key === '/' && gameKey(e)) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
+  if (e.key === '/' && gameKey(e)) { bar.search.input.focus(); e.preventDefault(); }
   if (e.code === 'KeyN' && gameKey(e) && !e.repeat) {
     labelsOn = !labelsOn;
     if (labels) labels.visible = labelsOn;
@@ -489,7 +483,7 @@ async function boot() {
   hook('__ready', true);
   const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
     import('./view/crafts/crafts-view')]);
-  const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
+  const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, offer, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
     sim: simReady,
     tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
@@ -642,12 +636,7 @@ renderer.setAnimationLoop(frameLoop({
     for (const c of crafts) c.place?.(dt);
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
-    if (document.body.dataset.nav !== nav.mode) {
-      foldForPlay(document.body.dataset.nav === 'orbit', nav.mode === 'orbit');
-      document.body.dataset.nav = nav.mode;
-    }
-    const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
-    if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
+    if (document.body.dataset.nav !== nav.mode) document.body.dataset.nav = nav.mode;
     armsHud.set(nav.arms.slot);
     help.update(now);
     feelHealth(now);
@@ -658,7 +647,6 @@ renderer.setAnimationLoop(frameLoop({
     resetButton.show(!!nav.craft?.reset);
     // (at a gun the seat's view is the only one)
     viewButton.show(nav.craft?.id === 'passenger' && !document.body.classList.contains('gunner'));
-    walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },
   // what reads the camera: the view distance, the fog, the far plane, the animated uniforms, the tiles streamed, the

@@ -33,6 +33,9 @@ The words the owner and the code use for the same thing. One name per thing; use
   Not "pause menu": the world goes on.
 - **Help**: the keys of the situation the player is in (the map, on foot, each vehicle, at a gun, riding along), or on
   a touch screen what the thumbs do. **Key strip**: its first keys at the bottom left of a desktop. Not "legend".
+- **Sandbox**: the menu's part that grants things for trying out: the vehicles (each put down near the view with the
+  player in it), NPCs, the enemy plane. Not "debug menu".
+- **Status**: top left beside ☰, what the vehicle the player is in has to say (speed, height, a message).
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 
 ## World and multiplayer
@@ -79,7 +82,7 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Tank**: a vehicle's fuel, full at the start, burnt by load; **empty**: no power (not a wreck: not charred,
   its seat free). The paraglider and the drone have none. **Power**: what drives a vehicle; a wreck or an empty tank
   cuts it. **Gauge**: the HUD's fuel bar.
-- **Placed vehicle**: a vehicle the host put in the world for anyone to take (not spawned from the debug menu).
+- **Placed vehicle**: a vehicle the host put in the world for anyone to take (not spawned from the sandbox).
 - **Stand**: where a placed vehicle of one class stands, found by the host from the map's voxels and roads; **stocked**
   while a player is near, empty past that; **used** once its vehicle is taken, moved, harmed or wrecked (the vehicle
   then a left one like any other), **refilled** a while later out of sight.

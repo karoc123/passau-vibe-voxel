@@ -21,11 +21,13 @@ host both maps show the other players near you, labelled with the name they chos
 they drive or fly; the name is shown over them too.
 
 **Esc** or the ☰ button at the top left opens the menu in every mode and lets go of the mouse:
-**Resume**, **Map** and the minimap's switch, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
+**Resume**, **Map** and the minimap's switch, **Walk here**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
 default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
 the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
 are the world's, changed for everyone where its game mode allows it), **Help**, **Back to orbit mode** (on foot, riding, in a craft), **Full
-screen** (not on an iPhone: its Safari has none for a page), **Start menu** and **Credits & licences**. Under **Debug**:
+screen** (not on an iPhone: its Safari has none for a page), **Start menu**, **Credits & licences** and **Vehicles**
+(every vehicle there is, put down near the view with you in it: the sandbox). Top left beside ☰ are the search and,
+in a vehicle, its status (speed, height, what it has to say); on a phone the search is the map's alone. Under **Debug**:
 the frame rate, the triangles drawn and the ping, on a desktop also at the top right if switched on there. An open map or panel closes first.
 At the bottom left of a desktop a strip names the keys of what you are doing now (on foot, each vehicle, at a gun,
 riding along, the map) for the first three minutes; **H** lists them all and brings the strip back; the menu's
@@ -458,7 +460,7 @@ first). A whole-city shot takes 33-77 s, a `crop=192` shot ~15 s.
 ## FPV Acro prototype
 
 Start the viewer with `cd web && pnpm dev`. Choose an orbit view near where you want to start, then click
-**FPV Acro** in the top-left toolbar. On Windows with a controller connected, use the Windows browser and move a stick
+**FPV Acro** among the menu's **Vehicles**. On Windows with a controller connected, use the Windows browser and move a stick
 or press a controller button so its axes appear under **Controller setup**.
 
 1. Use **Learn axes** and follow the four stick prompts, or select and invert each axis by hand. Standard gamepads start
@@ -479,7 +481,7 @@ Roof and wall collisions follow the source voxels, including where a rendered ro
 
 ## Driving
 
-Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
+Choose **Take the wheel** among the menu's **Vehicles** to drive the car you're following or pick a nearby car.
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, T puts it back on the road, and the menu's **Back to orbit mode** (**Esc**) takes you back to the map. **Vehicle: …** beside
@@ -517,7 +519,7 @@ no bodies and no Rapier step.
 
 ## Boat
 
-Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
+Choose **Boat** among the menu's **Vehicles** (from the map view) to put a speedboat in on the river nearest the view, facing
 downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
 opens the menu (Back to orbit mode exits); touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
 the bridges. The motion is `web/src/sim/craft/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
@@ -525,9 +527,9 @@ the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide wit
 
 ## Plane
 
-Click **Plane** in the toolbar (from the map view) to fly a small floatplane from where the camera is, or **Plane on
+Choose **Plane** among the menu's **Vehicles** (from the map view) to fly a small floatplane from where the camera is, or **Plane on
 the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
-nose down/up (flight convention; "Invert pitch" in the panel swaps), Shift or R throttle up, Space or F down (held,
+nose down/up (flight convention; "Invert pitch" under the status at the top left swaps, on a desktop), Shift or R throttle up, Space or F down (held,
 stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits); the wheel moves the camera. Touch: the left thumb is the
 stick, the throttle a slider on the right, pinch zooms. Gamepad (standard): left stick, RT/LT or the right stick's Y
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
@@ -549,9 +551,9 @@ core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/craft
   paraglider; the empty aircraft flies on unpiloted.
   Steer with A/D, W is the speed bar, S brakes (flare before touching down). Hands up it glides about 8:1 at 40 km/h.
   Land on dry ground to continue on foot.
-- Click **Hovercraft** in the map toolbar to start near the view on land or water. W thrust, S brakes then backs,
+- Choose **Hovercraft** among the menu's **Vehicles** to start near the view on land or water. W thrust, S brakes then backs,
   A/D steer. It keeps its momentum and drifts through turns; approach low banks and ramps to cross between land and water.
-- Click **Helicopter** in the map toolbar to start on clear land near the view. Space climbs, Shift descends,
+- Choose **Helicopter** among the menu's **Vehicles** to start on clear land near the view. Space climbs, Shift descends,
   W/S tilt the nose to fly forward and back, A/D turn and Q/E slide sideways. It gathers speed over a few seconds
   (up to 160 km/h) and settles into a hover when the stick is let go; on its skids it stays put until Space lifts it.
 
@@ -562,7 +564,7 @@ cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc**, th
 
 ## Walking
 
-Click **Walk** in the toolbar to start on foot, in first person, at the current view or beside the vehicle you're
+Choose **Walk here** in the menu to start on foot, in first person, at the current view or beside the vehicle you're
 following. W/S walk, A/D step sideways, the left/right arrows turn, Q/E look up and down, Shift runs and Space jumps;
 the mouse looks around (a click takes it back after a tab switch). On touch screens the left thumb walks, the right
 thumb looks and a pinch zooms. **Esc** releases the mouse and opens the menu; its **Back to orbit mode** returns to the map. Cars, train coaches, other players

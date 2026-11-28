@@ -69,7 +69,7 @@ export class PassengerMode implements PlayerCraft {
     const { canvas, host, camera, sim } = ctx;
     void sim.then((s) => { this.sim = s; }, () => {});
     this.rig = new ChaseRig(camera);
-    this.panel = new ModePanel(host, 'passenger', 'Riding along');
+    this.panel = new ModePanel(host, 'passenger', 'Riding along', ctx.offer);
     this.panel.el.classList.add('special-craft');
     addEventListener('keydown', (e) => {
       if (!this.riding || e.code !== 'KeyV' || e.repeat || !gameKey(e)) return;

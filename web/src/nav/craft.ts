@@ -11,6 +11,7 @@ import type { Meta } from '../core/meta';
 import type { Pose } from '../sim/contract/pose';
 import type { Nav } from './nav';
 import type { Help } from '../ui/help';
+import type { Offer } from './mode-panel';
 import type { RiverPoints } from '../sim/river';
 
 // A craft the player gets into: the drone (fpv.ts), the car (drive.ts), the boat
@@ -79,6 +80,8 @@ export interface CraftContext {
   meta: Meta;
   /** the bar's mode tools, where its panel goes */
   host: HTMLElement;
+  /** its buttons (in, out), where the page offers the vehicles */
+  offer: Offer;
   canvas: HTMLCanvasElement;
   env: CraftEnv;
   /** the world sim's client, once the traffic is loaded: the crafts' commands go to it (its session's player's: the
