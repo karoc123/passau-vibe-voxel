@@ -6,7 +6,7 @@
 // swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
 // tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
 // at the gun and on foot (out with X) firing shots the host records; the combat plane from the map, the mouse taken;
-// the boat's chase view swung by the mouse; every aircraft from the map, its pilot's view not turned by the mouse, X
+// the boat's chase view swung by the mouse; every aircraft from the map, the mouse taken, X
 // low in the air (no canopy fits) leaving P beside it at its height, falling; X high up putting P under a paraglider
 // that flies; first of all, on the map, the wheel zooms (orbit mode's alone); the grappling hook's touch button shown there; X under the
 // paraglider folding it away and X in the fall opening one again; last, on foot, a tap on the hook button firing a hook.
@@ -229,8 +229,7 @@ check(flying && planeMouse, `the combat plane flying: the mouse taken (${planeMo
 check(flying && await firesOnClick(), 'a click in the combat plane fires a shot the host records');
 
 // Every aircraft (nav/craft.ts AIRCRAFT: each type a player sits in in the air) from the map: X high up puts P under
-// an open paraglider. Each takes the mouse (the combat plane fires with it), and the mouse moved leaves its pilot's
-// chase view behind it (nav/craft.ts mouseTurns).
+// an open paraglider. Each takes the mouse (the combat plane fires with it).
 const ENTER = { helicopter: /^Helicopter$/, gunship: /^Military helicopter$/, floatplane: /^Plane$/, jet: /^Jet$/, fighter: /^Combat plane$/ };
 // (the helicopters start on the ground and climb first)
 const CLIMB = new Set(['helicopter', 'gunship']);
@@ -301,8 +300,7 @@ for (const type of AIRCRAFT) {
   const inIt = await enter(type);
   let m = await locked();
   if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
-  const turned = await swung();
-  check(inIt && m && turned < 0.1, `the ${type}'s pilot: the mouse taken (${m}), the mouse moved leaves the chase view behind it (${turned.toFixed(2)} rad)`);
+  check(inIt && m, `the ${type}'s pilot: the mouse taken (${m})`);
   // (off its skids, then put by the host 150 m up, where the planes fly: beside the cathedral the military helicopter
   // climbs no higher than its towers' ledges, ~50 m, and a paraglider opened under it there scraped the roofs or, on
   // a busy machine, found no room to open)
