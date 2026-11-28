@@ -9,6 +9,7 @@
 - A gate guards something a player would notice, or the data format.
 - A bug fixed gets a guard over its whole class (every type, model or case like it), so it cannot come back
   unnoticed: a gate, an assertion, or a type the compiler checks. One place decides a thing, not each user of it.
+- A check asserts what happens. No check that something removed stays gone: it stays green whatever the code does.
 
 ## Docs
 
