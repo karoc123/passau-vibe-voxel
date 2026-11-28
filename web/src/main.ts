@@ -126,9 +126,17 @@ const menu = makeMenu(prefs, {
   toOrbit: () => nav.flyUp(),
   changed: (p) => sim?.setName(p.name),
 });
+// the vehicles of the sandbox: each craft's buttons (nav/mode-panel.ts), in the menu
+const vehicles = menu.section('Vehicles', 'sandbox', true).box;
+const offer = (label: string, run: () => void, cls = '') => {
+  const b = el('button', `menu-entry ${cls}`, label, vehicles);
+  b.type = 'button';
+  b.addEventListener('click', () => { menu.close(); run(); });
+  return b;
+};
 const gfxSection = menu.section('Graphics');
 // the menu's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
-const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
+const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather', 'sandbox').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
 void serverChoice.then((s) => { dayWeather.online = s !== null; });
 // the one help (ui/help.ts): the craft's the player is in, else the mode's
 const help = makeHelp(menu.section('Help').box, () => {
@@ -141,7 +149,7 @@ const help = makeHelp(menu.section('Help').box, () => {
 menu.entry('Map', () => fullmap?.open());
 menu.entry(() => (minimap?.shown ? 'Hide the minimap' : 'Show the minimap'), () => minimap?.toggle());
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
-const debugBox = menu.section('Debug').box;
+const debugBox = menu.section('Debug', 'sandbox').box;
 const perf = new Perf(el('div', 'menu-perf', '', debugBox),
   el('label', 'menu-check perf-check', '<input type="checkbox"> Frame rate and ping on the screen', debugBox).querySelector('input')!);
 for (const duty of ['guard', 'patrol', 'lookout'] as const) {
@@ -202,14 +210,6 @@ menu.entry(() => (nav.enteringWalk ? 'Entering walk…' : 'Walk here'), () => {
   nav.leaveCraft(); // (the car driven parks; you step out beside it)
   void nav.toggleWalk(!coarsePointer());
 }, 'quick', () => !!world && !nav.onFoot && !nav.craftView);
-// the vehicles of the sandbox: each craft's buttons (nav/mode-panel.ts), in the menu
-const vehicles = menu.section('Vehicles', 'sandbox', true).box;
-const offer = (label: string, run: () => void, cls = '') => {
-  const b = el('button', `menu-entry ${cls}`, label, vehicles);
-  b.type = 'button';
-  b.addEventListener('click', () => { menu.close(); run(); });
-  return b;
-};
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = new Graphics(gfxSection.box, gfxSection.mark, gfx, applyGfx, maxShadow);
 gfx.writeUrl();

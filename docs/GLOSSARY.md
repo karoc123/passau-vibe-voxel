@@ -29,12 +29,13 @@ The words the owner and the code use for the same thing. One name per thing; use
   **reel**: the pull; **hang**: held on the line high on a wall. Not "grapple" or "rope".
 - **Mouse look**: in every vehicle the player sits in, the mouse is taken and swings the chase or seat view as a
   drag does (a pilot's swings back behind after a moment); at a gun it aims.
-- **Menu**: what Esc (or ☰, top left) opens in every mode: Resume, Map, Settings, Graphics, Time & weather, Help, Debug, Back to orbit mode, Full screen, Start menu, Credits.
+- **Menu**: what Esc (or ☰, top left) opens in every mode: the game's part (Resume, Map, Walk here, Settings, Graphics, Help, Back to orbit mode, Full screen, Start menu,
+  Credits), then the sandbox's (Vehicles, Time & weather, Debug).
   Not "pause menu": the world goes on.
 - **Help**: the keys of the situation the player is in (the map, on foot, each vehicle, at a gun, riding along), or on
   a touch screen what the thumbs do. **Key strip**: its first keys at the bottom left of a desktop. Not "legend".
 - **Sandbox**: the menu's part that grants things for trying out: the vehicles (each put down near the view with the
-  player in it), NPCs, the enemy plane. Not "debug menu".
+  player in it), the time and the weather, NPCs, the enemy plane. Not "debug menu".
 - **Status**: top left beside ☰, what the vehicle the player is in has to say (speed, height, a message).
 - **Start menu**: where a page begins: alone (the host in its worker) or on a server.
 

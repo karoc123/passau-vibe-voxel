@@ -34,10 +34,10 @@ body[data-mode=plane] { --tx: calc(10px + var(--sr) + 56px + 12px); }
 @media (pointer: coarse) and (orientation: landscape) {
   #canopy-button { right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
 }
-/* get in or out (nav/board.ts; a click on the desktop too): over the health's rows, under the crosshair; on touch on
+/* get in or out (nav/board.ts; a click on the desktop too): over the weapon slots, under the crosshair; on touch on
    the left edge half way up, off the thumbs' rest at the bottom (where a stick starts), the right's buttons, the
    plane's throttle and the bar */
-#board-button { position: fixed; left: 50%; bottom: calc(104px + var(--sb)); transform: translateX(-50%); z-index: 4; padding: 8px 16px;
+#board-button { position: fixed; left: 50%; bottom: calc(56px + var(--sb)); transform: translateX(-50%); z-index: 4; padding: 8px 16px;
   border: 1px solid rgba(255,255,255,.55); border-radius: 18px; background: rgba(16,17,20,.55); color: #fff;
   font: 600 14px Inter, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
 #board-button[hidden], body.noui #board-button { display: none; }

@@ -76,8 +76,9 @@ export interface MenuActions {
  * Start menu), sandbox (what is granted for trying things out) */
 type Part = 'quick' | 'game' | 'last' | 'sandbox';
 
-/** the menu Esc and the ☰ button open: Resume, the entries given (entry), the settings and the sections given
- * (section), back to orbit mode, full screen, the start menu (the page loaded again without its server) */
+/** the menu Esc and the ☰ button open. The game's part: Resume, the entries given (entry), the settings and the sections
+ * given (section), back to orbit mode, full screen, the start menu (the page loaded again without its server). Then,
+ * under its own heading, the sandbox's: what is granted for trying things out */
 export function makeMenu(prefs: Prefs, a: MenuActions) {
   const box = el('div', 'menu', '');
   box.id = 'menu';
@@ -116,6 +117,7 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
   const fsNote = el('div', 'menu-note', 'Full screen: not offered by this browser (on an iPhone, Safari has none for a page).', card);
   button('Start menu', () => { location.assign(startUrl()); }, card);
   part('last');
+  el('h3', 'menu-head', 'Sandbox', card);
   part('sandbox');
 
   const burger = el('button', '', '<span aria-hidden="true">☰</span>');

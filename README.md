@@ -21,14 +21,15 @@ host both maps show the other players near you, labelled with the name they chos
 they drive or fly; the name is shown over them too.
 
 **Esc** or the ☰ button at the top left opens the menu in every mode and lets go of the mouse:
-**Resume**, **Map** and the minimap's switch, **Walk here**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
+the game's part, **Resume**, **Map** and the minimap's switch, **Walk here**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
 default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
-the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
-are the world's, changed for everyone where its game mode allows it), **Help**, **Back to orbit mode** (on foot, riding, in a craft), **Full
-screen** (not on an iPhone: its Safari has none for a page), **Start menu**, **Credits & licences** and **Vehicles**
-(every vehicle there is, put down near the view with you in it: the sandbox). Top left beside ☰ are the search and,
-in a vehicle, its status (speed, height, what it has to say); on a phone the search is the map's alone. Under **Debug**:
-the frame rate, the triangles drawn and the ping, on a desktop also at the top right if switched on there. An open map or panel closes first.
+the browser), **Help**, **Back to orbit mode** (on foot, riding, in a craft), **Full
+screen** (not on an iPhone: its Safari has none for a page), **Start menu** and **Credits & licences**; then under **Sandbox** what is granted for trying things out: **Vehicles**
+(every vehicle there is, put down near the view with you in it), **Time & weather** (the day, the hour, the weather;
+kept in the URL only: on a server the day and hour are the world's, changed for everyone where its game mode allows
+it) and **Debug** (NPCs, the enemy plane, the frame rate). Top left beside ☰ are the search and,
+in a vehicle, its status (speed, height, what it has to say); on a phone the search is the map's alone. The frame rate, the triangles drawn
+and the ping are a line under Debug, on a desktop also at the top right if switched on there. An open map or panel closes first.
 On a phone every corner has one job in every situation: ☰ and the status top left, the minimap top right, Get in/out
 and the seat switch on the left edge, at most two buttons by the right thumb (the bigger on the edge: Jump, handbrake,
 drift, Fire in the combat plane, the passenger's view; the other the grappling hook or ↺), the health as three short

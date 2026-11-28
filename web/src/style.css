@@ -197,6 +197,8 @@ body:is([data-mode=plane], [data-mode=fpv]:has(.fpv-mode.flying)) #bar .mode-act
 .menu-perf { color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; }
 .menu-perf .mark { color: rgba(255,255,255,.62); margin-left: 6px; }
 .menu-part { display: contents; }
+/* over what the sandbox grants, apart from the game's own entries */
+.menu-head { margin: 10px 0 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.62); }
 .menu .credits { display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.5; }
 .menu .credits a { color: #fff; text-underline-offset: 2px; }
 .noui #perf { display: none; }
@@ -249,17 +251,10 @@ body.gun-stop #arms .crosshair { mix-blend-mode: normal; opacity: .5; filter: gr
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #handbrake-button.held, #boat-drift-button.held { background: rgba(220,60,50,.55); border-color: #fff; }
 @media (pointer: coarse) { body[data-mode=drive]:not(.noui) #handbrake-button, body[data-mode=boat]:not(.noui) #boat-drift-button { display: grid; place-items: center; } }
-/* own health and the vehicle's (ui/health.ts): small, over the weapon slots, off on the map */
+/* own health and the vehicle's (ui/health.ts): small, off on the map */
 #health { position: fixed; left: 50%; bottom: calc(44px + var(--sb)); transform: translateX(-50%); z-index: 3; pointer-events: none;
   display: grid; gap: 3px; font: 600 11px Inter, system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
 body[data-nav=orbit] #health, body.noui #health { display: none; }
-/* on a touch screen three short bars side by side, told apart by colour, no names or numbers: over the weapon's name */
-@media (pointer: coarse) {
-  #health { display: flex; gap: 6px; bottom: calc(48px + var(--sb)); }
-  #health .row { display: block; width: 46px; }
-  #health :is(.name, .n) { display: none; }
-  #health .row:nth-child(2) .bar i { background: #8fc1e8; }
-}
 #health .row { display: grid; grid-template-columns: 84px 90px 24px; align-items: center; gap: 6px; }
 #health .row[hidden] { display: none; }
 #health .name { text-align: right; opacity: .8; }
@@ -268,6 +263,20 @@ body[data-nav=orbit] #health, body.noui #health { display: none; }
 #health .row.low .bar i { background: #e0533f; }
 #health .row.fuel .bar i { background: #d9b45a; }
 #health.down .row:first-child .name::after { content: ' · down'; color: #e0533f; }
+/* on a touch screen three short bars side by side, told apart by colour, no names or numbers: over the weapon's name */
+@media (pointer: coarse) {
+  #health { display: flex; gap: 6px; bottom: calc(48px + var(--sb)); }
+  #health .row { display: block; width: 46px; }
+  #health :is(.name, .n) { display: none; }
+  #health .row:nth-child(2) .bar i { background: #8fc1e8; }
+}
+/* with a mouse: at the bottom left, the key strip over it; the bottom's middle is the weapon's and Get in/out's */
+@media not (pointer: coarse) {
+  #health { left: calc(14px + var(--sl)); bottom: calc(14px + var(--sb)); transform: none; }
+  #health .row { grid-template-columns: 62px 90px 24px; }
+  #health .name { text-align: left; }
+  body:not([data-nav=orbit]) #help { bottom: calc(76px + var(--sb)); }
+}
 /* where fire comes from (ui/incoming.ts): arcs of a ring round the middle, each turned towards its shooter */
 #incoming { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
 body[data-nav=orbit] #incoming, body.noui #incoming { display: none; }
