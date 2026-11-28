@@ -1,12 +1,15 @@
 # 0025 Bail out with the get-out key, and the mouse in every vehicle
 
-Status: accepted (2026-11-27, the owner's; the pilot's fixed view 2026-11-28, the owner's).
+Status: accepted (2026-11-27, the owner's; the pilot's fixed view and the fall beside 2026-11-28, the owner's).
 
 ## Decision
 
 - Getting out of an aircraft high in the air (the same height a falling body may open a canopy at) puts the player
-  under an open paraglider, from every seat of every aircraft a player sits in. Lower, they get out onto foot as from
-  any vehicle. The empty aircraft flies on without a pilot. The plane's own key and button for a paraglider are gone.
+  under an open paraglider, from every seat of every aircraft a player sits in. The empty aircraft flies on without
+  a pilot. The plane's own key and button for a paraglider are gone.
+- Where no paraglider opens (too low, a wall or roof in its way, a vehicle that is no aircraft) the player leaves a
+  vehicle in the air just outside it, at its height, and falls from there with its speed (amended 2026-11-28, the
+  owner's). Only a vehicle standing on the ground or the water is stepped out of onto the ground beside it.
 - The get-out key is the paraglider's only key (amended 2026-11-28, the owner's): in the air on foot at that height
   it opens one, under one it folds it away into a fall. The paraglider's own key and touch button are gone; the
   get-out button says what it does. A paraglider opens one way, whatever it opens out of.
@@ -23,7 +26,8 @@ Status: accepted (2026-11-27, the owner's; the pilot's fixed view 2026-11-28, th
 ## Why
 
 - One key that always gets out is easier than a second key that only works in some aircraft; the height rule is
-  the one already known from falling. Two keys for one paraglider were mixed up, and a long jump could not open one.
+  the one already known from falling. Set down on the ground under the aircraft, the player was moved somewhere they
+  had not been: leaving a vehicle means being outside it, nothing more. Two keys for one paraglider were mixed up, and a long jump could not open one.
 - The controls a pilot sent last are for the seat they sat in: taken by the next craft, a plane's left the paraglider
   out of it hanging still in the air.
 - A vehicle that leaves the mouse free read as broken, and a turned view is the use a mouse has where there is no gun.

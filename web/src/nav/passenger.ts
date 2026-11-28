@@ -54,7 +54,6 @@ export class PassengerMode implements PlayerCraft {
   private yaw = 0;
   private dyaw = 0;
   private dpitch = 0;
-  private zoom = 1;
   private drag: { id: number; x: number; y: number; moved: boolean } | null = null;
   private readonly pos = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
@@ -70,8 +69,8 @@ export class PassengerMode implements PlayerCraft {
     this.rig = new ChaseRig(camera);
     this.panel = new ModePanel(host, 'passenger', 'Riding along');
     this.panel.el.classList.add('special-craft');
-    this.help = this.panel.help('Drag: look around · Wheel: zoom · V: seat or chase view · E: get out · Esc: menu',
-      'Drag to look around, pinch to zoom; the Get out button leaves.');
+    this.help = this.panel.help('Drag: look around · V: seat or chase view · E: get out · Esc: menu',
+      'Drag to look around; the Get out button leaves.');
     this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E: get out',
       'Drag to aim, tap to fire; the Get out button leaves.');
     addEventListener('keydown', (e) => {
@@ -111,11 +110,6 @@ export class PassengerMode implements PlayerCraft {
     };
     addEventListener('pointerup', up);
     addEventListener('pointercancel', up);
-    canvas.addEventListener('wheel', (e) => {
-      if (!this.ownsCamera) return;
-      this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.5, 2.5);
-      e.preventDefault();
-    }, { passive: false });
     this.draw();
   }
 
@@ -154,7 +148,6 @@ export class PassengerMode implements PlayerCraft {
     if (!this.ctx.nav.enterCraft(this, from)) { this.riding = null; return false; }
     this.seatView = false;
     this.dyaw = this.dpitch = 0;
-    this.zoom = 1;
     this.yaw = this.last?.h ?? 0;
     this.gun = null;
     if (ref.kind === 'craft') {
@@ -233,18 +226,18 @@ export class PassengerMode implements PlayerCraft {
       const e = mountPoint(gun, p), a = aimDir(this.aim.h, this.aim.pitch);
       this.pos.set(e.x, e.y, e.z);
       this.at.copy(this.pos).add(this.off.set(a.x, a.y, a.z));
-      fov = clamp(70 * this.zoom, 40, 90);
+      fov = 70;
       document.body.classList.toggle('gun-stop', this.aim.stop);
     } else if (this.seatView) {
       // (at the own seat's eyes, turned with the craft's heading)
       const e = place ? seatEye(place) : { x: 0, y: v.look, z: 0 };
       this.pos.set(e.x, e.y, e.z).applyAxisAngle(UP, p.h).add(this.at.set(p.x, p.y, p.z));
       this.at.copy(this.pos).add(dir);
-      fov = clamp(70 * this.zoom, 40, 90);
+      fov = 70;
     } else {
       this.at.set(p.x, p.y + v.look, p.z);
       // (behind and over it, swung round by the drag)
-      const back = this.off.set(-Math.sin(yaw) * v.back, v.up - Math.sin(this.dpitch) * v.back, -Math.cos(yaw) * v.back).multiplyScalar(this.zoom);
+      const back = this.off.set(-Math.sin(yaw) * v.back, v.up - Math.sin(this.dpitch) * v.back, -Math.cos(yaw) * v.back);
       this.pos.copy(this.at);
       this.pos.addScaledVector(back, this.col ? clearShare(this.col.sweep(this.pos, back), back, 0.12, 0.25) : 1);
     }

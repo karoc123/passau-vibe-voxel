@@ -3,7 +3,9 @@
 // go of it into a free fall on foot (nav/foot.ts fallAt, its poses sent as the page's walk sends them), opens a canopy
 // again while falling, and does so many times; B, near, sees the wing vanish and the body fall, then the wing again.
 // The fall keeps the wing's velocity, stays within the host's walk bound (no pose clamped), and lands; on the ground (or
-// a jump high) no canopy opens.
+// a jump high) no canopy opens. Out of every aircraft and the drone low in the air, where none opens, the body starts
+// beside the craft's boxes at its height and falls from there, the host taking that start as it is. Beside a wall a
+// canopy is refused, in the open it fits.
 // usage (in web/): node tools/canopy.mjs; prints PASS lines, or FAIL and exit 1
 import * as THREE from 'three';
 import { imp, sessionLink } from './lib.mjs';
@@ -19,17 +21,20 @@ const { hello } = await imp('src/sim/hello.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
 const { GLIDER_HEIGHT, CRAFT } = await imp('src/sim/craft/craft-motion.ts');
 const { CORES } = await imp('src/sim/craft/cores.ts');
-const { WALK_BOUNDS, boundWalk } = await imp('src/sim/walk-bounds.ts');
-const { CraftLink } = await imp('src/nav/craft.ts');
+const { WALK_BOUNDS, boundWalk, letGo } = await imp('src/sim/walk-bounds.ts');
+const { CraftLink, AIRCRAFT } = await imp('src/nav/craft.ts');
+const { canopyFits } = await imp('src/sim/craft/craft-collision.ts');
+const { besideSolids, craftMeets, reach, meetShapes } = await imp('src/sim/solids.ts');
 const { Foot } = await imp('src/nav/foot.ts');
-const { CANOPY_DROP } = await imp('src/sim/walker.ts');
+const { CANOPY_DROP, canopyOpens } = await imp('src/sim/walker.ts');
 const { Glide } = await imp('src/nav/glide.ts');
 const { MoveKeys } = await imp('src/nav/move-keys.ts');
 
 const fail = [], check = (ok, s) => (ok ? console.log(`PASS ${s}`) : (console.log(`FAIL ${s}`), fail.push(s)));
 
-// flat ground, its top at y 10
-const G = 10, { meta } = await makeWorld({ size: [256, 256], ground: () => G });
+// flat ground, its top at y 10; a wall 80 m high off to one side (x 200..204), where nothing else here flies
+const G = 10, WALL = { x0: 200, x1: 204, z0: 150, z1: 250, y0: G, y1: G + 80, mat: 'wall' };
+const { meta } = await makeWorld({ size: [256, 256], ground: () => G, boxes: [WALL] });
 const cache = new TileCache({ N: meta.tiles.N, load: (p) => fetchGzip(`data/tiles/${p}`) });
 const traffic = () => ({ roads: [], peds: [], ctrls: [] });
 const sim = new WorldSim(traffic(), { crafts: { meta, cache, now: () => performance.now() } });
@@ -175,6 +180,52 @@ for (const type of others.filter((t) => t in HELD)) {
   if (id !== undefined) sim.removeCraft(id);
 }
 check(!flown.some((f) => f.startsWith('NOT')), `out of every craft with its controls held, the paraglider flies and answers its own (${flown.join('; ')})`);
+
+// Out of every aircraft, and the drone, low in the air (too low for a canopy under it): as X does there (nav.ts
+// fallBeside), the body starts beside the craft's boxes at its height and falls with its velocity; the host puts it
+// down there in the tick the seat is left and clamps no pose of the fall.
+const LOW = 8, lows = [];
+for (const type of [...AIRCRAFT, 'drone']) {
+  const from = new CraftLink(ctx, type);
+  await null;
+  from.open();
+  from.spawn({ x: 60, y: G + LOW, z: 60, h: Math.PI / 2, speed: 20 });
+  for (let i = 0; i < 400 && !(from.craft && sim.crafts.get(from.craft.id).core.result !== 'loading'); i++) { from.input(HELD[type]); tick(); await new Promise((r) => setTimeout(r, 2)); }
+  const c = from.craft;
+  if (!c) { lows.push(`NOT ${type}: no craft`); continue; }
+  const pose = { ...c.core.pose }, boxes = craftMeets(type, pose), at = besideSolids(world, boxes);
+  const under = Math.min(...boxes.map((b) => b.y)), top = Math.max(...meetShapes('paraglider').map((b) => b.top));
+  const noCanopy = !canopyOpens(world, pose.x, pose.z, under - 0.5 - top);
+  const outside = !!at && boxes.every((b) => reach(b, at.x, at.z, at.y) <= 0), level = !!at && Math.abs(at.y - boxes[0].y) < 0.01 && at.y > G + 3;
+  if (!at) { lows.push(`NOT ${type}: no room beside it`); from.close(true); tick(); continue; }
+  ctx.nav.stepOut = { ...at, h: pose.h, moving: false };
+  from.close();
+  ctx.nav.stepOut = null;
+  foot.fallAt(at, letGo(c.core.velocity), pose.h);
+  body = false; last = null;
+  const clamped0 = clamped;
+  walkFrame();
+  const first = foot.feet, seat = sim.seat('a'), seen = seat && sim.entities.pose(seat.entity), walker = A.c.seat()?.role === 'walker';
+  for (let i = 0; i < 60 * 10 && foot.feet > G; i++) walkFrame();
+  const ok = noCanopy && outside && level && walker && Math.abs(first - at.y) < 0.5 && !!seen && Math.abs(seen.y - first) < 1.5 && Math.hypot(seen.x - foot.pos.x, seen.z - foot.pos.z) < 30
+    && foot.feet === G && clamped === clamped0;
+  lows.push(`${ok ? '' : 'NOT '}${type} beside it at ${at.y.toFixed(1)} (its foot ${boxes[0].y.toFixed(1)}, outside ${outside}, no canopy ${noCanopy}), first frame ${first.toFixed(1)}, the host's ${seen?.y.toFixed(1)}, landed ${foot.feet.toFixed(1)}, clamped ${clamped - clamped0}`);
+  sim.removeCraft(c.id);
+  tick();
+}
+check(!lows.some((f) => f.startsWith('NOT')), `out of every aircraft and the drone ${LOW} m up, too low for a canopy: the body starts beside its boxes at its height, not on the ground, and falls there (${lows.join('; ')})`);
+
+// A canopy opens only clear of the voxels (special-craft.ts openAt): in the open and 12 m from the wall it fits, 4 m
+// from the wall (its span reaches in) it is refused.
+const col = new CraftLink(ctx, 'paraglider');
+await null;
+const fits = async (at) => {
+  const w = col.open();
+  for (let i = 0; i < 400; i++) { w.prefetch(at, { x: 0, y: 0, z: 0 }); const r = canopyFits(w, at); if (r !== 'loading') return r; await new Promise((r) => setTimeout(r, 5)); }
+  return 'loading';
+};
+const mid = (WALL.z0 + WALL.z1) / 2, wall = [await fits({ x: 120, y: G + 40, z: mid, h: 0 }), await fits({ x: WALL.x0 - 12, y: G + 40, z: mid, h: 0 }), await fits({ x: WALL.x0 - 4, y: G + 40, z: mid, h: 0 })];
+check(wall[0] === true && wall[1] === true && wall[2] === false, `a canopy fits in the open and 12 m from a wall, and is refused 4 m from it (${wall.join(', ')})`);
 
 glider.open();
 glider.spawn({ x: 60, y: G + 300, z: 128, h: Math.PI / 2, speed: 16 });

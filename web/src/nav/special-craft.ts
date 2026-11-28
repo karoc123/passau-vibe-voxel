@@ -3,7 +3,7 @@ import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle, MouseLook } from './chase-rig';
 import { CraftLink, type CraftContext, type CraftSpot, type PlayerCraft } from './craft';
 import type { CraftView } from '../client/sim-client';
-import { craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
+import { canopyFits, craftWorld, SPAWN_HEIGHT } from '../sim/craft/craft-collision';
 import { CRAFT_SCALE, GLIDER_HEIGHT, rotorcraft, type CraftKind } from '../sim/craft/craft-motion';
 import { craftLook } from '../view/crafts';
 import type { CraftInput } from '../sim/contract/inputs';
@@ -62,7 +62,6 @@ class SpecialCraft implements PlayerCraft {
   private camYaw = 0;
   // (never moved by an aircraft's pilot: craft.ts mouseTurns)
   private readonly mouseLook = new MouseLook();
-  private zoom = 1;
   /** the point the grappling hook holds (the paraglider's), sent with the input while the wing is reeled there */
   protected hook: { x: number; y: number; z: number } | null = null;
 
@@ -75,7 +74,6 @@ class SpecialCraft implements PlayerCraft {
     this.rig = new ChaseRig(camera);
     this.touch = new TouchSticks(canvas, {
       camera: rotorcraft(id) ? undefined : 'right',
-      onPinch: (ratio) => { this.zoom = clamp(this.zoom * ratio, 0.65, 2); },
     });
     this.panel = new ModePanel(host, id, cfg.name);
     this.panel.el.classList.add('special-craft');
@@ -89,11 +87,6 @@ class SpecialCraft implements PlayerCraft {
     addEventListener('keydown', (e) => {
       if (this.phase === 'on' && gameKey(e) && this.keys.press(e)) e.preventDefault();
     });
-    canvas.addEventListener('wheel', (e) => {
-      if (this.phase !== 'on') return;
-      this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.65, 2);
-      e.preventDefault();
-    }, { passive: false });
     onFocusLoss(() => this.touch.clear());
     this.draw();
   }
@@ -116,9 +109,8 @@ class SpecialCraft implements PlayerCraft {
     const nav = this.ctx.nav;
     if (this.phase !== 'off' || !this.link.sim) return false;
     // (not where the canopy would be in a wall or a roof: opened there it hung, held on every side. Falling, X opens
-    // it once clear; out of an aircraft the player gets out onto foot as from low down)
-    const clear = craftWorld(this.id, this.link.open()).sweep(at, { x: 0, y: 1, z: 0 }, at.h, at.h);
-    if ((clear !== 'loading' && clear.hit) || !(from ? nav.enterCraft(this, from) : nav.openCanopy(this))) { this.link.close(); return false; }
+    // it once clear; out of an aircraft the player falls from beside it)
+    if (!canopyFits(this.link.open(), at) || !(from ? nav.enterCraft(this, from) : nav.openCanopy(this))) { this.link.close(); return false; }
     this.link.spawn(at);
     this.activate(at.h);
     return true;
@@ -224,7 +216,6 @@ class SpecialCraft implements PlayerCraft {
     this.phase = 'on';
     this.hook = null;
     this.camYaw = heading;
-    this.zoom = 1;
     this.panel.silence();
     this.rig.begin(450);
     this.keys.clear();
@@ -263,7 +254,7 @@ class SpecialCraft implements PlayerCraft {
     const c = this.craft!, collision = this.link.col!, m = c.core.drawn(this.link.alpha), cfg = CONFIG[this.id], group = this.model.group;
     this.model.draw(c, { dt, alpha: this.link.alpha, night: this.ctx.env.night(), now: performance.now() });
     this.camYaw = followAngle(this.camYaw, m.h, 4, dt);
-    this.mouseLook.swing(this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back).multiplyScalar(this.zoom), dt);
+    this.mouseLook.swing(this.offset.set(-Math.sin(this.camYaw) * cfg.back, cfg.up, -Math.cos(this.camYaw) * cfg.back), dt);
     const eye = this.pos.copy(group.position);
     eye.y += cfg.look;
     eye.addScaledVector(this.offset, clearShare(collision.sweep(eye, this.offset), this.offset, 0.12, 0.25));

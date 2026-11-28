@@ -69,11 +69,7 @@ export class FpvMode implements PlayerCraft {
     const { nav, camera, target, host, canvas } = ctx;
     this.nav = nav; this.camera = camera; this.target = target;
     this.link = new CraftLink(ctx, 'drone');
-    // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
-    this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
-      this.camera.fov = clamp(this.camera.fov * ratio, 45, 100);
-      this.camera.updateProjectionMatrix();
-    });
+    this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
     const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro');
     this.enterExit = P.button('FPV Acro', () => this.toggle());
@@ -308,7 +304,7 @@ export class FpvMode implements PlayerCraft {
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
-    const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll, pinch to zoom.' :
+    const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll.' :
       'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · X get out · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       flying && this.craft?.core.waiting ? 'Waiting for the next collision tile…' :

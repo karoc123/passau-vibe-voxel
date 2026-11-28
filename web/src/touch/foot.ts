@@ -18,8 +18,6 @@ export interface FootIntents {
   tap(x: number, y: number): void;
   /** the right thumb tapped: one shot */
   fire(): void;
-  /** two fingers close together: d0 / d of their distance since the last call */
-  pinch(ratio: number): void;
 }
 
 /** on foot on a touch screen: the left thumb a stick that walks, the right thumb looks and fires */
@@ -48,7 +46,6 @@ export class FootTouch {
         else if (!this.dragged && !this.holding && d < SLOP && ms < HOLD) on.fire();
         if (side === 'right') this.holding = false;
       },
-      onPinch: on.pinch,
     });
   }
 

@@ -19,7 +19,8 @@ import { EYE } from '../sim/figure';
 import { findStreet, openSpot, walkNet } from './spots';
 import { HEAD } from '../sim/walk';
 import { canopyOpens } from '../sim/walker';
-import { craftSolids, meetShapes } from '../sim/solids';
+import { besideSolids, craftMeets, craftSolids, meetShapes, type Solid } from '../sim/solids';
+import { letGo } from '../sim/walk-bounds';
 import { FootTouch } from '../touch/foot';
 import { HookLine } from './hook-line';
 
@@ -30,10 +31,10 @@ import { HookLine } from './hook-line';
 //          wheel choose a weapon, the left button fires (held: again at its rate), the right fires the
 //          grappling hook (foot.ts hookShot)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
-//          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
+//          drags to look, taps to fire once, held still fires on (touch/foot.ts)
 //   ride:  following a pedestrian or a car; move keys step off onto foot (off a person: where they stood)
 //   craft: a craft (craft.ts: the drone, the boat, the plane) owns the camera and the input; Nav leaves the keys, the
-//          pointer and the wheel to it. The car driven is a craft too, but on the ride's camera (mode ride)
+//          pointer to it. The car driven is a craft too, but on the ride's camera (mode ride)
 //
 // Nav is the mode machine and routes the input to the mode on: the map's own input is orbit.ts, on foot foot.ts, the
 // ride and its camera ride.ts (following); the crafts are their own (craft.ts).
@@ -43,8 +44,6 @@ export interface Ride extends Picked {
   dyaw: number;
   dpitch: number;
   idle: number;
-  /** how far out the camera is (wheel, pinch): behind, a factor on the chase distance; at the eyes, on the field of view */
-  zoom: number;
 }
 export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.Vector3; pitch?: number; ms?: number; deckOK?: boolean }
 
@@ -56,6 +55,8 @@ const WALK_NEAR = 0.2;
 // m between a craft left in the air and the top of the paraglider opened under it; m/s the paraglider flies at as
 // it opens there (not the aircraft's: a jet's would be no glide)
 const CANOPY_CLEAR = 0.5, BAIL_SPEED = 16;
+// m a vehicle may stand over the ground beside it and still be stepped out of onto it; higher, it is in the air
+const STEP_DOWN = 1.7;
 
 export class Nav {
   mode: Mode = 'orbit';
@@ -141,8 +142,6 @@ export class Nav {
       },
       tap: (x, y) => this.tap(x, y),
       fire: () => this.arms.pull(),
-      // two fingers close together: the field of view
-      pinch: (ratio) => this.setFov(this.camera.fov * ratio),
     });
   }
 
@@ -256,7 +255,7 @@ export class Nav {
   private bindPointer() {
     const dom = this.dom, ptrs = new Map<number, { x: number; y: number }>();
     let press: { x: number; y: number; t: number; button: number; moved: boolean } | null = null;
-    let pinch0: { d: number; fov: number } | null = null, twist: number | null = null;
+    let twist: number | null = null;
     const two = () => [...ptrs.values()];
     addEventListener('pointerdown', (e) => { this.mouseLast = e.pointerType === 'mouse'; }, { capture: true });
     addEventListener('keydown', () => { this.mouseLast = true; }, { capture: true });
@@ -310,7 +309,6 @@ export class Nav {
       if (this.onMap && (e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) || ptrs.size === 2)) this.orbit.pivotAt(e.clientX, e.clientY);
       if (ptrs.size === 2) { const [a, b] = two(); twist = Math.atan2(b.y - a.y, b.x - a.x); }
       press = ptrs.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now(), button: e.button, moved: false } : null;
-      if (ptrs.size === 2 && !this.onMap) { const [a, b] = two(); pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y), fov: this.camera.fov }; }
       if (!this.onMap) dom.setPointerCapture(e.pointerId);
       else dom.style.cursor = 'grabbing';
       this.cancelFly();
@@ -332,21 +330,13 @@ export class Nav {
         }
         return;
       }
-      if (ptrs.size === 2 && pinch0) {
-        const [a, b] = two(), d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
-        if (this.riding) {
-          this.zoomRide(pinch0.d / d);
-          pinch0.d = d;
-        } else this.setFov(pinch0.fov * pinch0.d / d);
-        return;
-      }
       if (press && !press.moved) return;
       const k = (e.pointerType === 'touch' ? 2.4 : 1.2) * (this.camera.fov * Math.PI / 180) / innerHeight;
       this.look(dx * k, dy * k * 0.7);
     });
     const up = (e: PointerEvent) => {
       if (!ptrs.delete(e.pointerId)) return;
-      if (ptrs.size < 2) { pinch0 = null; twist = null; }
+      if (ptrs.size < 2) twist = null;
       this.quietT = performance.now();
       if (this.onMap) dom.style.cursor = 'grab';
       if (press && !press.moved && e.type === 'pointerup' && performance.now() - press.t < 600 && press.button === 0) this.tap(e.clientX, e.clientY);
@@ -364,8 +354,6 @@ export class Nav {
     if (this.craftView) return;
     if (this.onMap) { this.orbit.zoomT = performance.now(); return; }
     e.preventDefault();
-    if (this.riding) { this.zoomRide(Math.exp(e.deltaY * 0.004)); return; }
-    if (e.ctrlKey) { this.setFov(this.camera.fov * Math.exp(e.deltaY * 0.004)); return; }
     // (a trackpad sends a burst of small wheel events for one swipe: one slot each 200 ms)
     const now = performance.now();
     if (this.onFoot && e.deltaY && now - this.wheelT > 200) { this.wheelT = now; this.arms.cycle(Math.sign(e.deltaY)); }
@@ -420,13 +408,6 @@ export class Nav {
   }
 
   // ------------------------------------------------------------------ the view
-  private setFov(f: number) { this.camera.fov = clamp(f, 20, 80); this.camera.updateProjectionMatrix(); }
-
-  /** riding or driving: the camera out (ratio > 1) or in, as the wheel and a pinch (drive.ts) do (ride.ts) */
-  zoomRide(ratio: number) {
-    if (this.ride) this.ride.zoom = clamp(this.ride.zoom * ratio, 0.5, 2.2);
-  }
-
   private look(dyaw: number, dpitch: number) {
     if (this.onFoot) this.foot.look(dyaw, dpitch);
     else if (this.ride) { const R = this.ride; R.dyaw += dyaw; R.dpitch = clamp(R.dpitch + dpitch, -1.2, 1.2); R.idle = performance.now(); }
@@ -458,7 +439,7 @@ export class Nav {
     this.mode = 'orbit';
     this.leaveRide();
     this.controls.enabled = true;
-    if (this.orbitFov) this.setFov(this.orbitFov);
+    if (this.orbitFov) { this.camera.fov = this.orbitFov; this.camera.updateProjectionMatrix(); }
     this.controls.target.copy(this.camera.position).add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(30));
     this.orbit.retarget();
     this.dom.style.cursor = 'grab';
@@ -520,10 +501,10 @@ export class Nav {
     return !!this.wing?.open({ x: f.pos.x, y: f.feet, z: f.pos.z, h: speed > 1 ? Math.atan2(f.carry.x, f.carry.z) : f.yaw, speed });
   }
 
-  // Out of the craft piloted (the paraglider let go) into a free fall on foot from feet at `at` with velocity v,
+  // Out of the vehicle sat in (the paraglider let go, an aircraft left) into a free fall on foot from feet at `at` with velocity v,
   // facing yaw: at once, as the craft is gone this frame; the tiles where it lands asked for meanwhile
-  fall(at: THREE.Vector3, v: THREE.Vector3, yaw: number) {
-    if (!this.craftView || !this.world) return false;
+  fall(at: THREE.Vector3, v: { x: number; y: number; z: number }, yaw: number) {
+    if (!this.inVehicle || !this.world) return false;
     this.foot.fallAt(at, v, yaw);
     this.streamer?.ensure(at.x, at.z, 200).catch(() => {});
     this.glide.start(250);
@@ -632,8 +613,8 @@ export class Nav {
   }
 
   /** out of the vehicle driven or the craft piloted onto foot beside it, the host putting the body down there as the
-   * seat is left (stepOut), so the others see the player step out; out of the paraglider by folding it away (a fall
-   * on foot); false: in none */
+   * seat is left (stepOut), so the others see the player step out; in the air under a paraglider where one opens,
+   * else falling from beside it; out of the paraglider by folding it away (a fall on foot); false: in none */
   getOut() {
     const w = this.world, c = this.craft, ride = this.driving ? this.ride : null;
     if (c && c === this.wing) return this.wing.fold();
@@ -641,6 +622,7 @@ export class Nav {
     if (!w || !c || !pose || this.walkPending) return false;
     if (this.underCanopy(w, c)) return true;
     const opts = exitFrom(w, pose, ride ? 2 : 3), at = opts.at!;
+    if (!opts.exact && this.fallBeside(w, pose)) return true;
     this.stepOut = { x: at.x, y: at.y, z: at.z, h: Math.atan2(opts.facing!.x, opts.facing!.z), moving: false };
     // (the mouse taken within the key press or click that got out, as before boarding; kept from a gun)
     const entry = {};
@@ -657,13 +639,29 @@ export class Nav {
 
   // Out of an aircraft in the air (any seat in it: ALOFT) where a canopy would open on a fall: under a paraglider
   // opened just under it (its canopy clear of the craft's lowest box), as it flies on (owner 2026-11-27). Lower,
-  // out onto foot as from any vehicle
+  // or with a wall in the canopy's way, a fall from beside it (fallBeside)
   private underCanopy(w: World, c: PlayerCraft) {
     const sim = this.sim, s = sim?.seat(), v = s?.entity.kind === 'craft' ? sim!.crafts().find((q) => q.id === s.entity.id) : null;
     if (!v || !aloft(v)) return false;
     const p = v.core.pose, under = Math.min(...craftSolids(v.type, p).map((b) => b.y)), top = Math.max(...meetShapes('paraglider').map((b) => b.top));
     const feet = under - CANOPY_CLEAR - top;
     return canopyOpens(w, p.x, p.z, feet) && !!this.wing?.open({ x: p.x, y: feet, z: p.z, h: p.h, speed: BAIL_SPEED }, c);
+  }
+
+  // Out of a vehicle in the air where no canopy opens (too low, a wall, no aircraft): beside it at its height and
+  // falling from there with its velocity, never set down on the ground under it (owner 2026-11-28: "putting you
+  // somewhere is wrong"). false: beside it the ground or the water is a step down, or there is no room round it
+  private fallBeside(w: World, pose: Pose) {
+    const sim = this.sim, e = sim?.seat()?.entity, v = e?.kind === 'craft' ? sim!.crafts().find((q) => q.id === e.id) : null;
+    const boxes: Solid[] = v ? craftMeets(v.type, v.core.pose) : e?.kind === 'car' ? (this.life?.solids(pose) ?? []).filter((q) => q.id === `car${e.id}`) : [];
+    const at = besideSolids(w, boxes, (x, z) => w.inside(x, z));
+    if (!at || at.y - Math.max(w.support(at.x, at.z, at.y + 0.01), w.waterColumn(at.x, at.z)?.water ?? -Infinity) < STEP_DOWN) return false;
+    this.stepOut = { ...at, h: pose.h, moving: false };
+    // (the mouse taken within the key press or click that got out, as onto the ground)
+    this.takeMouse();
+    const out = this.fall(new THREE.Vector3(at.x, at.y, at.z), letGo(v?.core.velocity ?? { x: 0, y: 0, z: 0 }), pose.h);
+    this.stepOut = null;
+    return out;
   }
 
   /** the host has moved the player from their body on foot into a seat (board.ts): the body is not to be left again */
@@ -763,7 +761,7 @@ export class Nav {
   private updateRide(dt: number) {
     const next = this.rider.place(dt, this.driving);
     if (next === 'off') this.hopOff();
-    else if (next) { const { view, zoom } = this.ride!; this.startRide(next); Object.assign(this.ride!, { view, zoom }); }
+    else if (next) { const { view } = this.ride!; this.startRide(next); this.ride!.view = view; }
   }
 }
 
@@ -777,7 +775,7 @@ function exitFrom(world: World, pose: Pose, side: number): WalkOpts {
   const clear = exits.find(p => {
     const y = world.support(p.x, p.z, p.y + 1.02);
     // (from the voxel over the one stood on: a road's cap stands within its voxel, which is solid)
-    return world.inside(p.x, p.z) && p.y - y < 1.7 && !world.blocked(p.x, p.z, Math.ceil(y - 0.01), y + HEAD);
+    return world.inside(p.x, p.z) && p.y - y < STEP_DOWN && !world.blocked(p.x, p.z, Math.ceil(y - 0.01), y + HEAD);
   });
   return clear ? { at: clear, exact: true, facing, ms: 540 } : { at, facing, ms: 650 };
 }

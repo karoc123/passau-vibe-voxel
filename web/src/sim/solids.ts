@@ -43,6 +43,25 @@ export function bodyClear(w: Walls & { support(x: number, z: number, top: number
   return clear(x, z) && clear(x + 0.4, z) && clear(x - 0.4, z) && clear(x, z + 0.4) && clear(x, z - 0.4);
 }
 
+// m between the walker and the box it gets out beside
+const BESIDE = 0.2;
+/** where a walker gets out of a thing in the air: beside its body (boxes[0]), the feet at the body's foot (or on what
+ * stands within a step of it there), clear of every one of its boxes (a wing over the door) and of the voxels; along
+ * a side first, then behind and ahead. null: no room round it. ok: where the world is at all */
+export function besideSolids(w: Walls & { support(x: number, z: number, top: number): number }, boxes: readonly Solid[], ok: (x: number, z: number) => boolean = () => true) {
+  const b = boxes[0];
+  if (!b) return null;
+  const s = Math.sin(b.h), c = Math.cos(b.h), side = b.hx + WALKER_R + BESIDE, end = b.hz + WALKER_R + BESIDE;
+  const tries: [number, number][] = [];
+  for (const u of [0, -b.hz / 2, b.hz / 2, -b.hz, b.hz]) tries.push([side, u], [-side, u]);
+  tries.push([0, -end], [0, end]);
+  for (const [v, u] of tries) {
+    const x = b.x + v * c + u * s, z = b.z - v * s + u * c, feet = Math.max(b.y, w.support(x, z, b.y + WALKER_STEP));
+    if (ok(x, z) && headroom(w, x, z, feet) && boxes.every((q) => reach(q, x, z, feet) <= 0)) return { x, y: feet, z };
+  }
+  return null;
+}
+
 /** another player on foot: as solid as the walker, so two walkers push each other apart; a head is not stood on (a
  * jump from a car's roof would reach it) */
 export const AVATAR_SHAPE: Shape = { hx: WALKER_R, hz: WALKER_R, top: WALKER_HEAD, roof: false };
