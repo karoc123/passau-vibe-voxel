@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import type { Vector3 } from 'three';
 import { clamp } from '../util';
 import { type CarInput, PARK } from '../sim/contract/inputs';
@@ -46,7 +47,6 @@ export class DriveMode implements PlayerCraft {
   private readonly typeButton: HTMLButtonElement;
   private choice = readChoice();
   private readonly speed: HTMLDivElement;
-  private readonly help: HTMLDivElement;
   private pending: Ride | null = null;
   private driving: Ride | null = null;
   // the wheel taken (its answer came back): from then on, no car of the player's means the car was lost. Not the tick
@@ -58,23 +58,21 @@ export class DriveMode implements PlayerCraft {
   // the world sim's client, once it is there
   private world: SimClient | null = null;
 
-  constructor({ nav, target, sim, host, canvas }: CraftContext) {
+  constructor({ nav, target, sim, host, canvas, offer }: CraftContext) {
     this.nav = nav; this.focus = target;
     sim.then((world) => { this.world = world; }, () => {});
     // (the right side is the camera's: no stick, so a drive never steers from the right thumb)
     this.touch = new TouchSticks(canvas, { camera: 'right' });
-    const P = this.panel = new ModePanel(host, 'drive', 'Drive a car');
+    const P = this.panel = new ModePanel(host, 'drive', 'Drive a car', offer);
     this.action = P.button('', () => this.toggle());
     this.typeButton = P.button('', () => this.cycleType(), 'drive-type');
     this.typeButton.title = 'What to drive (V)';
     this.speed = P.line('speed');
-    this.help = P.help('W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · Esc exit',
-      'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake.');
     addEventListener('keydown', e => {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.reset(); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
@@ -116,6 +114,11 @@ export class DriveMode implements PlayerCraft {
     const sink = snapshot.sinkMs / SINK_MS;
     if (sink > 0) offset.y -= 1.6 * Math.sin(Math.min(1, (1 - sink) * 4) * Math.PI / 2);
   }
+
+  readonly help: Help = { id: 'drive', keys: 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · X get out',
+    touch: 'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake, ↺ puts the car back on the road.' };
+
+  reset() { if (this.driving) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); }
 
   // the panel's button: take the wheel, or park
   private toggle() {
@@ -210,7 +213,7 @@ export class DriveMode implements PlayerCraft {
     this.action.disabled = !!this.pending || (!active && (!life?.group.visible ||
       (!following && !life.first('car'))));
     P.details.hidden = !active && !this.pending;
-    this.speed.hidden = this.help.hidden = !active;
+    this.speed.hidden = !active;
     P.status.hidden = !this.pending && !active;
     ModePanel.text(P.status, this.pending ? 'Loading…' : active && this.retryAt !== null ? 'Loading road physics…' :
       active && (!this.snapshot || this.snapshot.waiting) ? 'Loading road collision tiles…' :

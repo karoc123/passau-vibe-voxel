@@ -72,8 +72,13 @@ export interface MenuActions {
   changed(p: Prefs): void;
 }
 
-/** the menu Esc opens (and the ☰ button, for touch): Resume, the settings and the sections given (section), back to
- * orbit mode, full screen, the start menu (the page loaded again without its server) */
+/** where in the menu a thing goes: quick (entries under Resume), game (the sections after Settings), last (after the
+ * Start menu), sandbox (what is granted for trying things out) */
+type Part = 'quick' | 'game' | 'last' | 'sandbox';
+
+/** the menu Esc and the ☰ button open. The game's part: Resume, the entries given (entry), the settings and the sections
+ * given (section), back to orbit mode, full screen, the start menu (the page loaded again without its server). Then,
+ * under its own heading, the sandbox's: what is granted for trying things out */
 export function makeMenu(prefs: Prefs, a: MenuActions) {
   const box = el('div', 'menu', '');
   box.id = 'menu';
@@ -81,33 +86,45 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', 'Menu');
   const card = el('div', 'menu-card', '<h2>Menu</h2>', box);
-  const entry = (label: string, run: (e: MouseEvent) => void) => {
-    const b = el('button', 'menu-entry', label, card);
+  // what an open menu shows anew: the entries' labels, which of them are offered
+  const fresh: (() => void)[] = [];
+  const button = (label: string | (() => string), run: (e: MouseEvent) => void, into: HTMLElement, shown?: () => boolean) => {
+    const b = el('button', 'menu-entry', typeof label === 'string' ? label : '', into);
     b.type = 'button';
     b.addEventListener('click', run);
+    if (typeof label !== 'string') fresh.push(() => { b.textContent = label(); });
+    if (shown) fresh.push(() => { b.hidden = !shown(); });
     return b;
   };
-  const resume = entry('Resume', (e) => { close(); a.resumed(e.detail > 0 && !(e instanceof PointerEvent && e.pointerType !== 'mouse')); });
+  const resume = button('Resume', (e) => { close(); a.resumed(e.detail > 0 && !(e instanceof PointerEvent && e.pointerType !== 'mouse')); }, card);
+  const parts = {} as Record<Part, HTMLElement>;
+  const part = (p: Part) => { parts[p] = el('div', `menu-part ${p}`, '', card); };
+  part('quick');
   const settings = el('details', 'menu-more', '<summary>Settings</summary>', card);
   const showSettings = settingsFields(prefs, settings, a.changed);
-  let last: HTMLElement = settings;
-  /** a folded section after the others: its body, and a mark beside its title */
-  const section = (title: string) => {
-    const d = el('details', 'menu-more', `<summary>${title} <span class="mark"></span></summary>`, card);
-    last.after(d);
-    last = d;
+  part('game');
+  /** a section that folds (open: unfolded at first): its body, and a mark beside its title */
+  const section = (title: string, where: Part = 'game', open = false) => {
+    const d = el('details', 'menu-more', `<summary>${title} <span class="mark"></span></summary>`, parts[where]);
+    d.open = open;
     return { box: el('div', 'menu-section', '', d), mark: d.querySelector<HTMLElement>('.mark')! };
   };
-  const orbit = entry('Back to orbit mode', () => { close(); a.toOrbit(); });
-  const fs = entry('', () => { toggleFullscreen(); });
+  /** an entry that closes the menu and runs; label: fixed, or what it says when the menu opens; shown: offered or not */
+  const entry = (label: string | (() => string), run: () => void, where: Part = 'quick', shown?: () => boolean) =>
+    button(label, () => { close(); run(); }, parts[where], shown);
+  button('Back to orbit mode', () => { close(); a.toOrbit(); }, card, a.canOrbit);
+  const fs = button('', () => { toggleFullscreen(); }, card);
   const fsNote = el('div', 'menu-note', 'Full screen: not offered by this browser (on an iPhone, Safari has none for a page).', card);
-  entry('Start menu', () => { location.assign(startUrl()); });
+  button('Start menu', () => { location.assign(startUrl()); }, card);
+  part('last');
+  el('h3', 'menu-head', 'Sandbox', card);
+  part('sandbox');
 
-  const button = el('button', '', '<span aria-hidden="true">☰</span>');
-  button.id = 'menu-button';
-  button.type = 'button';
-  button.setAttribute('aria-label', 'Menu');
-  button.addEventListener('click', () => (isOpen() ? close() : open()));
+  const burger = el('button', '', '<span aria-hidden="true">☰</span>');
+  burger.id = 'menu-button';
+  burger.type = 'button';
+  burger.setAttribute('aria-label', 'Menu');
+  burger.addEventListener('click', () => (isOpen() ? close() : open()));
 
   const showFs = () => { fs.textContent = fullscreen() ? 'Leave full screen' : 'Full screen'; };
   document.addEventListener('fullscreenchange', showFs);
@@ -117,12 +134,14 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
   function open() {
     if (isOpen()) return;
     openedAt = performance.now();
-    orbit.hidden = !a.canOrbit();
+    for (const f of fresh) f();
     fs.hidden = !fsAble();
     fsNote.hidden = !fs.hidden;
     showFs();
     showSettings();
     box.hidden = false;
+    // (from its top, wherever it was scrolled to when it closed)
+    card.scrollTop = 0;
     if (document.pointerLockElement) document.exitPointerLock();
     a.paused(true);
     resume.focus({ preventScroll: true });
@@ -133,7 +152,7 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
     (document.activeElement as HTMLElement | null)?.blur?.();
     a.paused(false);
   }
-  // (bubbling: an open overlay closes first and stops the key, fullmap.ts, credits.ts; a field's Esc is the field's)
+  // (bubbling: an open overlay closes first and stops the key, fullmap.ts; a field's Esc is the field's)
   addEventListener('keydown', (e) => {
     if (e.code !== 'Escape' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || document.getElementById('start-menu')) return;
     const t = e.target as Element | null;
@@ -143,7 +162,7 @@ export function makeMenu(prefs: Prefs, a: MenuActions) {
     if (!isOpen()) open(); else if (performance.now() - openedAt > 300) close();
   });
   box.addEventListener('click', (e) => { if (e.target === box) close(); });
-  return { open, close, isOpen, section, el: box };
+  return { open, close, isOpen, section, entry, el: box };
 }
 
 // ------------------------------------------------------------------ the start menu

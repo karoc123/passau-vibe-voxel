@@ -1,8 +1,9 @@
-// a short message at the bottom of the screen, gone after 1.6 s
+// a short message at the top of the screen, under the banner's place (the bottom is the thumbs', the weapon's and the
+// health's), gone after 1.6 s
 export function toast(msg: string) {
   const t = document.createElement('div');
   t.textContent = msg;
-  t.style.cssText = 'position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);padding:6px 12px;border-radius:6px;'
+  t.style.cssText = 'position:fixed;left:50%;top:calc(64px + env(safe-area-inset-top, 0px));transform:translateX(-50%);max-width:calc(100% - 32px);padding:6px 12px;border-radius:6px;'
     + 'background:rgba(20,24,30,.85);color:#fff;font:13px system-ui,sans-serif;z-index:1000;pointer-events:none';
   document.body.append(t);
   setTimeout(() => t.remove(), 1600);

@@ -8,13 +8,12 @@ import { loadFoliage } from './foliage';
 import { loadWindows } from './windows';
 import { LampHeads } from './lamps';
 import { Fountains } from './fountains';
-import { Hud } from './hud';
 import { Labels } from './labels';
 import { MapData, type MapMark, Minimap } from './minimap';
 import { FullMap } from './fullmap';
 import { Waypoint } from './waypoint';
 import type { CraftContext, PlayerCraft } from './nav/craft';
-import { Nav, type Mode, type Ride } from './nav/nav';
+import { Nav } from './nav/nav';
 import { gameKey, pause, typing } from './nav/input';
 import { Perf } from './perf';
 import { makePost } from './post';
@@ -44,7 +43,7 @@ import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { loadPrefs, makeMenu, preselect, skipStart, startMenu } from './ui/menu';
 import { NameTags } from './ui/name-tags';
-import { makeBoardButton, makeJumpButton, makeSeatButton, makeTouchArms } from './touch/buttons';
+import { makeBoardButton, makeHookButton, makeJumpButton, makeResetButton, makeSeatButton, makeViewButton } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
@@ -57,6 +56,7 @@ import { wreckSmoke } from './view/wreck-smoke';
 import { makeDayWeather } from './ui/day-weather';
 import { Graphics } from './ui/graphics';
 import { makeGoTo } from './ui/go-to';
+import { makeHelp, MAP_HELP, rideHelp, WALK_HELP } from './ui/help';
 import { hook } from './app/debug-hooks';
 import { frameLoop } from './app/frame';
 import { HOST_PORT, openSession, pageView, PageTime, sessionOptions } from './app/session';
@@ -124,12 +124,32 @@ const menu = makeMenu(prefs, {
   toOrbit: () => nav.flyUp(),
   changed: (p) => sim?.setName(p.name),
 });
+// the vehicles of the sandbox: each craft's buttons (nav/mode-panel.ts), in the menu
+const vehicles = menu.section('Vehicles', 'sandbox', true).box;
+const offer = (label: string, run: () => void, cls = '') => {
+  const b = el('button', `menu-entry ${cls}`, label, vehicles);
+  b.type = 'button';
+  b.addEventListener('click', () => { menu.close(); run(); });
+  return b;
+};
 const gfxSection = menu.section('Graphics');
 // the menu's day, hour and weather (ui/day-weather.ts); the day and hour asked of the world through the client (PageTime)
-const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
+const dayWeather = makeDayWeather({ box: menu.section('Time &amp; weather', 'sandbox').box, days: DAYS, daylight, ask: (h, d) => pageTime?.ask(h, d) });
 void serverChoice.then((s) => { dayWeather.online = s !== null; });
+// the one help (ui/help.ts): the craft's the player is in, else the mode's
+const help = makeHelp(menu.section('Help').box, () => {
+  if (nav.craft) return nav.craft.help;
+  if (nav.mode !== 'ride') return nav.mode === 'walk' ? WALK_HELP : MAP_HELP;
+  const ride = nav.ride, agent = ride && life?.agent(ride.ref);
+  return rideHelp(agent?.kind === 'car' && agent.vt === 'moto' ? 'moto' : ride?.label ?? '');
+});
+// the maps from the menu (a phone has no M and no comma)
+menu.entry('Map', () => fullmap?.open());
+menu.entry(() => (minimap?.shown ? 'Hide the minimap' : 'Show the minimap'), () => minimap?.toggle());
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
-const debugBox = menu.section('Debug').box;
+const debugBox = menu.section('Debug', 'sandbox').box;
+const perf = new Perf(el('div', 'menu-perf', '', debugBox),
+  el('label', 'menu-check perf-check', '<input type="checkbox"> Frame rate and ping on the screen', debugBox).querySelector('input')!);
 for (const duty of ['guard', 'patrol', 'lookout'] as const) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -156,7 +176,7 @@ for (const duty of ['guard', 'patrol', 'lookout'] as const) {
 }
 const precip = new Precip(scene);
 const map = new THREE.Box3();
-let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
+let world: World | null = null, labels: Labels | null = null;
 let minimap: Minimap | null = null, fullmap: FullMap | null = null;
 // the page's own waypoint (waypoint.ts), set from the maps
 const waypoint = new Waypoint(scene);
@@ -175,7 +195,6 @@ let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStrea
 let prepass: DepthPrepass | null = null;
 let barRect: DOMRect | null = null;
 const caption = new Caption();
-const perf = new Perf();
 let setWindows: ((hour: number, day: number) => void) | null = null;
 let lampHeads: LampHeads | null = null;
 
@@ -184,25 +203,11 @@ const goTo = makeGoTo({ camera, target: controls.target, nav, world: () => world
   follow: followNearest });
 nav.cancelFly = goTo.cancel;
 const modeTools = el('div', 'mode-tools', '', bar.el);
-const walkButton = el('button', 'mode-button walk-button', 'Walk', modeTools);
-walkButton.type = 'button';
-walkButton.disabled = true;
-walkButton.addEventListener('click', e => {
-  walkButton.blur();
+// on foot from the menu, at the view or beside the vehicle followed
+menu.entry(() => (nav.enteringWalk ? 'Entering walk…' : 'Walk here'), () => {
   nav.leaveCraft(); // (the car driven parks; you step out beside it)
-  const touch = e instanceof PointerEvent && (e.pointerType === 'touch' || e.pointerType === 'pen');
-  void nav.toggleWalk(!touch && !coarsePointer());
-});
-// on a phone the bar open over play hides half the view: leaving the map folds it (style.css: then only the mode's
-// own buttons and status beside the fold button), back on the map it opens again if it was open
-const smallScreen = matchMedia('(max-width: 600px), (max-height: 500px)');
-let openOnMap = false;
-function foldForPlay(fromMap: boolean, toMap: boolean) {
-  if (fromMap && !toMap) {
-    openOnMap = !bar.folded;
-    if (smallScreen.matches) bar.fold(true);
-  } else if (toMap && openOnMap) bar.fold(false);
-}
+  void nav.toggleWalk(!coarsePointer());
+}, 'quick', () => !!world && !nav.onFoot && !nav.craftView);
 const maxShadow = renderer.capabilities.maxTextureSize;
 const gfxPanel = new Graphics(gfxSection.box, gfxSection.mark, gfx, applyGfx, maxShadow);
 gfx.writeUrl();
@@ -223,15 +228,17 @@ if (gfx.toMeasure && !gfx.now.taa && (autoQ === '1' || (autoQ !== '0' && !naviga
   gfxPanel.show();
 }
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
-makeCredits();
+makeCredits(menu.section('Credits &amp; licences', 'last').box);
 nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
-const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
+const armsHud = makeArmsHud(() => nav.arms.cycle(1)), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
-makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else nav.wing?.hookShot(); });
+const resetButton = makeResetButton(() => nav.craft?.reset?.());
+const viewButton = makeViewButton(() => crafts.find((c): c is PassengerMode => c.id === 'passenger')?.swapView());
+makeHookButton(() => { if (nav.onFoot) nav.hookShot(); else nav.wing?.hookShot(); });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -242,7 +249,7 @@ const LABELS_KEY = 'labels';
 let labelsOn = true;
 try { labelsOn = localStorage.getItem(LABELS_KEY) !== '0'; } catch { /* storage blocked: shown */ }
 addEventListener('keydown', (e) => {
-  if (e.key === '/' && gameKey(e)) { bar.fold(false); bar.search.input.focus(); e.preventDefault(); }
+  if (e.key === '/' && gameKey(e)) { bar.search.input.focus(); e.preventDefault(); }
   if (e.code === 'KeyN' && gameKey(e) && !e.repeat) {
     labelsOn = !labelsOn;
     if (labels) labels.visible = labelsOn;
@@ -347,9 +354,20 @@ function applyGfx(c: Partial<Gfx>) {
   busy = true;
 }
 
-function onMode(m: Mode, ride: Ride | null) {
+function onMode() {
   post.taa.restart(); // (the camera jumps)
-  hud?.set(m, ride, ride ? life?.agent(ride.ref) ?? null : null);
+}
+
+// a phone held upright runs, but the thumbs' layout is made for it held across: said once, the first time play starts
+// that way (kept: HINT_KEY)
+const HINT_KEY = 'passau.uprightHint';
+function uprightHint() {
+  if (!coarsePointer() || !matchMedia('(orientation: portrait)').matches) return;
+  try {
+    if (localStorage.getItem(HINT_KEY)) return;
+    localStorage.setItem(HINT_KEY, '1');
+  } catch { return; /* storage blocked: not said every time */ }
+  toast('Turn the phone sideways: it plays better');
 }
 
 const focus = () => (nav.onMap ? controls.target : camera.position);
@@ -426,7 +444,6 @@ async function boot() {
   const full = fullmap = new FullMap(mapView, marks);
   minimap = new Minimap(mapView, marks, () => full.open());
   hook('__map', { minimap, full, waypoint });
-  hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(goTo.searchItems(meta));
   fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => {
     bar.search.setItems(goTo.searchItems(meta, places));
@@ -475,7 +492,7 @@ async function boot() {
   hook('__ready', true);
   const [{ ParagliderMode }, modes, { CraftsView }] = await Promise.all([import('./nav/special-craft'), Promise.all(CRAFTS()),
     import('./view/crafts/crafts-view')]);
-  const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, canvas: renderer.domElement,
+  const ctx: CraftContext = { nav, camera, target: controls.target, meta, host: modeTools, offer, canvas: renderer.domElement,
     env: { night: () => daylight.night, river: () => riverPoints },
     sim: simReady,
     tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
@@ -629,17 +646,18 @@ renderer.setAnimationLoop(frameLoop({
     const bodyMode = nav.craft?.id ?? nav.mode;
     if (document.body.dataset.mode !== bodyMode) document.body.dataset.mode = bodyMode;
     if (document.body.dataset.nav !== nav.mode) {
-      foldForPlay(document.body.dataset.nav === 'orbit', nav.mode === 'orbit');
+      if (document.body.dataset.nav === 'orbit') uprightHint();
       document.body.dataset.nav = nav.mode;
     }
-    const walkLabel = nav.enteringWalk ? 'Entering walk…' : nav.onFoot ? 'Exit walk' : 'Walk';
-    if (walkButton.textContent !== walkLabel) walkButton.textContent = walkLabel;
     armsHud.set(nav.arms.slot);
+    help.update(now);
     feelHealth(now);
     showIncoming(now);
     boardButton.set((key) => boarding.label(key));
     seatButton.show(boarding.swapLabel());
-    walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
+    resetButton.show(!!nav.craft?.reset);
+    // (at a gun the seat's view is the only one)
+    viewButton.show(nav.craft?.id === 'passenger' && !document.body.classList.contains('gunner'));
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },
   // what reads the camera: the view distance, the fog, the far plane, the animated uniforms, the tiles streamed, the
@@ -684,7 +702,7 @@ renderer.setAnimationLoop(frameLoop({
     barRect ??= bar.rect;
     minimap?.update(now, barRect.bottom);
     fullmap?.update(now);
-    labels?.update(camera, world, barRect, [...(hud?.rects ?? []), ...perf.rects, ...(minimap?.rects ?? [])]);
+    labels?.update(camera, world, barRect, [...help.rects, ...perf.rects, ...(minimap?.rects ?? [])]);
     nameTags.update(camera, life?.group.visible ? otherPlayers() : [], world);
   },
 }, t0, () => prefs.fps));

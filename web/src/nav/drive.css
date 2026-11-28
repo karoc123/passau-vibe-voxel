@@ -1,4 +1,2 @@
 #bar .drive-speed { font-variant-numeric: tabular-nums; font-weight: 600; }
 #bar .drive-status:empty { display: none; }
-@media (pointer: coarse) { #bar .drive-mode > button { min-height: 44px; } }
-#bar .drive-type { margin-left: 10px; font-weight: 400; color: rgba(255,255,255,.75); }

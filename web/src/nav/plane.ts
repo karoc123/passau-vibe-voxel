@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import type { Meta } from '../core/meta';
 import { clamp, el } from '../util';
@@ -49,15 +50,15 @@ type AircraftId = 'floatplane' | 'jet' | 'fighter';
 const AIRCRAFT: Record<AircraftId, Aircraft> = {
   floatplane: { id: 'floatplane', cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
-    help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D turn · W/S nose down/up · R/F throttle up and down · X out (high up: under a paraglider) · T last safe point',
       'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle.'] },
   jet: { id: 'jet', cfg: JET, label: 'jet', model: () => craftLook('jet'),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
-    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · R/F throttle up and down (top 15 %: afterburner) · X out (high up: under a paraglider) · T last safe point',
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle.'] },
   fighter: { id: 'fighter', cfg: FIGHTER, label: 'combat plane', model: () => craftLook('fighter'),
     chase: { back: 14, up: 3.5, look: 40, lag: 5, rollLag: 3.5, fov: (v) => clamp(56 + (v - 25) * 0.3, 56, 74) },
-    help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · Shift/R throttle up · Space/F down · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · R/F throttle up and down · X out (high up: under a paraglider) · T last safe point',
       'Left thumb: sideways to turn, up/down for the nose. Fire button: the gun, aimed with the nose (the dot). Right slider: throttle.'] },
 };
 
@@ -96,7 +97,6 @@ export class PlaneMode implements PlayerCraft {
   private readonly sight = el('div', 'plane-sight');
   private readonly fireButton = el('button', 'plane-fire', 'Fire');
   private readonly telemetry: HTMLDivElement;
-  private readonly help: HTMLDivElement;
   private readonly invertBox: HTMLInputElement;
   private readonly rig: ChaseRig;
   private readonly tint = el('div', 'fpv-impact-tint plane-tint');
@@ -115,16 +115,15 @@ export class PlaneMode implements PlayerCraft {
   private nextPanel = 0;
 
   constructor(ctx: CraftContext) {
-    const { nav, camera, target, meta, host, canvas, env } = ctx;
+    const { nav, camera, target, meta, host, canvas, env, offer } = ctx;
     this.nav = nav; this.camera = camera; this.target = target; this.meta = meta; this.env = env;
     this.link = new CraftLink<AircraftId>(ctx, 'floatplane');
-    const P = this.panel = new ModePanel(host, 'plane', 'Plane');
+    const P = this.panel = new ModePanel(host, 'plane', 'Plane', offer);
     this.enterButton = P.button('Plane', () => this.toggle(false, AIRCRAFT.floatplane));
     this.enterWater = P.button('Plane on the river', () => this.toggle(true, AIRCRAFT.floatplane));
     this.enterJet = P.button('Jet', () => this.toggle(false, AIRCRAFT.jet));
     this.enterFighter = P.button('Combat plane', () => this.toggle(false, AIRCRAFT.fighter));
     this.telemetry = P.line('telemetry');
-    this.help = P.help('', '');
     this.rig = new ChaseRig(camera);
     this.use(AIRCRAFT.floatplane);
     const label = el('label', 'plane-invert', '<input type="checkbox"> Invert pitch', P.details);
@@ -158,7 +157,7 @@ export class PlaneMode implements PlayerCraft {
     this.touch = new TouchSticks(canvas, { camera: 'right' });
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.backToSafe(); }
+      if (e.code === 'KeyT') { if (!e.repeat) this.reset(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
@@ -175,11 +174,12 @@ export class PlaneMode implements PlayerCraft {
       this.made.set(type, m);
     }
     this.type = type;
-    this.panel.setHelp(this.help, ...type.help);
     this.model = m;
     this.gun = mountOf(SEATS.craft[type.id], { role: 'pilot', index: 0 });
     this.trigger = false;
   }
+
+  get help(): Help { const [keys, touch] = this.type.help; return { id: this.type.id, keys, touch }; }
 
   // ------------------------------------------------------------------ entering and leaving
   // into the floatplane at a spot (tools), else in the air where the camera is
@@ -301,7 +301,7 @@ export class PlaneMode implements PlayerCraft {
     return best;
   }
 
-  private backToSafe() {
+  reset() {
     if (this.phase !== 'flying') return;
     this.link.reset();
   }
@@ -448,7 +448,6 @@ export class PlaneMode implements PlayerCraft {
     const c = this.craft, f = c?.core.flight, active = this.phase !== 'off', on = active && this.phase === 'flying' && !!f, P = this.panel;
     P.active = active;
     P.details.hidden = !active;
-    this.help.hidden = this.phase !== 'flying';
     this.enterButton.textContent = active ? `Exit ${this.type.label}` : 'Plane';
     const canStart = this.nav.canStartCraft && !!this.link.sim;
     this.enterButton.disabled = !active && !canStart;

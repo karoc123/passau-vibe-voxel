@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import { clamp } from '../core/num';
 import { ChaseRig, clearShare, followAngle, MouseLook } from './chase-rig';
@@ -27,16 +28,16 @@ const KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'A
 const CS = CRAFT_SCALE.helicopter;
 const CONFIG = {
   hovercraft: { name: 'Hovercraft', back: 22, up: 7.5, look: 1.8, drop: 0,
-    help: ['W/S thrust and reverse · A/D steer (it drifts) · X get out · Esc exit', 'Left stick: thrust, reverse and steer.'] },
+    help: ['W/S thrust and reverse · A/D steer (it drifts) · X get out', 'Left stick: thrust, reverse and steer.'] },
   helicopter: { name: 'Helicopter', back: 17 * CS, up: 6 * CS, look: 1.2 * CS, drop: 0,
-    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out (high up: under a paraglider) · Esc exit',
+    help: ['W/S nose down and up (forward, back) · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · X get out (high up: under a paraglider)',
       'Left stick: forward, back and turn. Right stick: up/down to climb and descend, sideways to slide.'] },
   // (no hover hold: its pilot flies for its door gunners, who ride along; C goes round its seats)
   gunship: { name: 'Military helicopter', back: 22, up: 7.5, look: 1.5, drop: 0,
-    help: ['W/S nose down and up · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · C: next seat (left gun, right gun, bench, controls) · X get out · Esc exit',
+    help: ['W/S nose down and up · A/D turn · Q/E sideways · Space climb · Shift descend · let go: it hovers · C: next seat (left gun, right gun, bench, controls) · X get out',
       'Left stick: forward, back and turn. Right stick: climb, descend, slide. The seat button goes round the seats.'] },
   paraglider: { name: 'Paraglider', back: 13, up: 3.5, look: 3, drop: GLIDER_HEIGHT,
-    help: ['A/D steer · W dive · S brake (flare to land) · right mouse button: grappling hook at the middle of the view (again: let go) · X fold it away (falling: X opens it again) · Esc exit',
+    help: ['A/D steer · W dive · S brake (flare to land) · right mouse button: grappling hook at the middle of the view (again: let go) · X fold it away (falling: X opens it again)',
       'Left stick: turn, dive and brake. The hook button: grappling hook at the middle of the view (again: let go). Fold paraglider: a free fall; falling, Open paraglider.'] },
 } as const;
 
@@ -46,7 +47,6 @@ class SpecialCraft implements PlayerCraft {
   private readonly panel: ModePanel;
   private readonly action: HTMLButtonElement;
   private readonly telemetry: HTMLDivElement;
-  private readonly help: HTMLDivElement;
   private readonly model;
   private readonly rig: ChaseRig;
   private readonly touch: TouchSticks;
@@ -75,7 +75,7 @@ class SpecialCraft implements PlayerCraft {
     this.touch = new TouchSticks(canvas, {
       camera: rotorcraft(id) ? undefined : 'right',
     });
-    this.panel = new ModePanel(host, id, cfg.name);
+    this.panel = new ModePanel(host, id, cfg.name, ctx.offer);
     this.panel.el.classList.add('special-craft');
     this.action = this.panel.button(cfg.name, () => {
       if (this.phase === 'off') this.enter();
@@ -83,13 +83,14 @@ class SpecialCraft implements PlayerCraft {
     });
     this.telemetry = this.panel.line('telemetry');
     this.telemetry.classList.add('craft-telemetry');
-    this.help = this.panel.help(cfg.help[0], cfg.help[1]);
     addEventListener('keydown', (e) => {
       if (this.phase === 'on' && gameKey(e) && this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
     this.draw();
   }
+
+  get help(): Help { const [keys, touch] = CONFIG[this.id].help; return { id: this.id, keys, touch }; }
 
   enter(at?: CraftSpot) {
     if (this.id === 'paraglider' || this.phase !== 'off' || !this.link.sim || !this.ctx.nav.enterCraft(this)) return false;
@@ -273,7 +274,7 @@ class SpecialCraft implements PlayerCraft {
     this.action.disabled = !active && (!this.ctx.nav.canStartCraft || !this.link.sim);
     ModePanel.text(this.action, active ? `Exit ${CONFIG[this.id].name.toLowerCase()}` : CONFIG[this.id].name);
     this.panel.details.hidden = !active && !this.panel.saying;
-    this.help.hidden = this.telemetry.hidden = !on;
+    this.telemetry.hidden = !on;
     const core = this.craft?.core, result = core?.result;
     ModePanel.text(this.panel.status, this.phase === 'finding' ? 'Looking for a clear starting spot…' :
       this.phase === 'landing' ? 'Landing…' : on && !inFocus() ? PAUSED :

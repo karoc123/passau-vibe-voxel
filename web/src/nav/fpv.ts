@@ -1,3 +1,4 @@
+import type { Help } from '../ui/help';
 import * as THREE from 'three';
 import { length } from '../core/vec';
 import { DRONE } from '../sim/craft/fpv-flight';
@@ -52,7 +53,7 @@ export class FpvMode implements PlayerCraft {
   private readonly armRadio: HTMLButtonElement;
   private readonly armKeys: HTMLButtonElement;
   private readonly armTouch: HTMLButtonElement;
-  private readonly reset: HTMLButtonElement;
+  private readonly resetFlight: HTMLButtonElement;
   private readonly options: HTMLDivElement;
 
   private phase: Phase = 'loading';
@@ -66,19 +67,19 @@ export class FpvMode implements PlayerCraft {
   private notice = '';
 
   constructor(ctx: CraftContext) {
-    const { nav, camera, target, host, canvas } = ctx;
+    const { nav, camera, target, host, canvas, offer } = ctx;
     this.nav = nav; this.camera = camera; this.target = target;
     this.link = new CraftLink(ctx, 'drone');
     this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
-    const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro');
+    const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro', offer);
     this.enterExit = P.button('FPV Acro', () => this.toggle());
     this.telemetry = P.line('telemetry');
     const actions = P.line('actions');
     this.armTouch = modeButton('Fly with touch', () => this.arm('touch'), actions);
     this.armRadio = modeButton('Arm controller', () => this.arm('controller'), actions);
     this.armKeys = modeButton('Fly with keyboard', () => this.arm('keyboard'), actions);
-    this.reset = modeButton('Reset flight', () => this.restart(), actions);
+    this.resetFlight = modeButton('Reset flight', () => this.restart(), actions);
     this.options = P.line('options');
     this.options.append(this.radio.element);
     const angle = el('label', 'row fpv-camera-angle', '', this.options);
@@ -101,6 +102,9 @@ export class FpvMode implements PlayerCraft {
     onFocusLoss(() => this.pause('Window lost focus. Arm again to resume.'));
     this.renderPanel();
   }
+
+  readonly help: Help = { id: 'fpv', keys: 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Enter: arm again · X get out',
+    touch: 'Left thumb: throttle and yaw. Right thumb: pitch and roll.' };
 
   private get craft() { return this.on ? this.link.craft : null; }
 
@@ -298,18 +302,16 @@ export class FpvMode implements PlayerCraft {
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
     this.armTouch.hidden = !canArm || !this.hasTouch;
-    this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
+    this.resetFlight.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
     this.options.hidden = !active || flying;
     P.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';
     if (!active) return;
 
-    const controls = this.hasTouch ? 'Touch: left for throttle and yaw, right for pitch and roll.' :
-      'Keyboard: W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · X get out · Esc exit';
     const content = this.notice || (this.phase === 'loading' ? 'Loading collision tiles near the start…' :
       flying && this.craft?.core.waiting ? 'Waiting for the next collision tile…' :
       flying ? (this.impact?.message ?? '') :
-      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : controls);
+      this.controller && this.controller.throttle > ARM_THROTTLE ? 'Lower throttle to arm the controller.' : '');
     ModePanel.text(P.status, content);
 
     const core = this.craft?.core, p = core?.flight.position;

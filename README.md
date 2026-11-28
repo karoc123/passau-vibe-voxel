@@ -11,22 +11,36 @@ The grid is north-up and anchored on the cathedral (`scripts/aoi.py`; the extent
 The date, the hour and the weather are set in the menu (**Esc**); cars, trains, pedestrians and bikes move on the
 real OSM network; river-cruise ships moor at the Danube quay by season and the Dreiflüsse excursion boats run their
 loop; at night street lights, lit windows and floodlit landmarks come on. Landmarks carry labels, and a search box
-(`/`) finds streets, squares, buildings and stops. **M** or **Map** toggles a north-up minimap showing your position
-and heading, rivers, roads and nearby landmarks. **,** (comma), the corner button on the minimap or the button left
-of **Map** (also on a phone) opens the whole city full screen with street names: drag to move, wheel or pinch to zoom,
-**,** or **Esc** closes it. A click or tap on either map sets a waypoint (a beam over the spot in the city, its
+(`/`) finds streets, squares, buildings and stops. **M** (or the menu) toggles a north-up minimap showing your position
+and heading, rivers, roads and nearby landmarks; on a phone it is on at first, off over the map and on a very low
+screen. **,** (comma), the corner button on the minimap, a tap on it on a phone or the menu's **Map** opens the whole
+city full screen with street names: drag to move, wheel or pinch to zoom,
+**,** or **Esc** closes it. A click on either map, or a tap on the full one, sets a waypoint (a beam over the spot in the city, its
 distance and direction at the top of the screen); clicking it again, its distance or **Backspace** clears it. With a
 host both maps show the other players near you, labelled with the name they chose (else their id), on foot or in what
 they drive or fly; the name is shown over them too.
 
-**Esc** (or the ☰ button at the bottom right, on a phone) opens the menu in every mode and lets go of the mouse:
-**Resume**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
+**Esc** or the ☰ button at the top left opens the menu in every mode and lets go of the mouse:
+the game's part, **Resume**, **Map** and the minimap's switch, **Walk here**, **Settings** (a name for the others to see, optional, and a frame-rate cap: 30, 60 or unlimited; 60 by
 default, 30 on a phone; both kept in the browser), **Graphics** (a quality preset, under Advanced each setting; kept in
-the browser), **Time & weather** (the day, the hour, the weather; kept in the URL only: on a server the day and hour
-are the world's, changed for everyone where its game mode allows it), **Back to orbit mode** (on foot, riding, in a craft), **Full
-screen** (not on an iPhone: its Safari has none for a page) and **Start menu**. An open map or panel closes first.
+the browser), **Help**, **Back to orbit mode** (on foot, riding, in a craft), **Full
+screen** (not on an iPhone: its Safari has none for a page), **Start menu** and **Credits & licences**; then under **Sandbox** what is granted for trying things out: **Vehicles**
+(every vehicle there is, put down near the view with you in it), **Time & weather** (the day, the hour, the weather;
+kept in the URL only: on a server the day and hour are the world's, changed for everyone where its game mode allows
+it) and **Debug** (NPCs, the enemy plane, the frame rate). Top left beside ☰ are the search and,
+in a vehicle, its status (speed, height, what it has to say); on a phone the search is the map's alone. The frame rate, the triangles drawn
+and the ping are a line under Debug, on a desktop also at the top right if switched on there. An open map or panel closes first.
+On a phone every corner has one job in every situation: ☰ and the status top left, the minimap top right, Get in/out
+and the seat switch on the left edge, at most two buttons by the right thumb (the bigger on the edge: Jump, handbrake,
+drift, Fire in the combat plane, the passenger's view; the other the grappling hook or ↺), the health as three short
+bars at the bottom. Their sizes come from the screen's shorter side, none under 44 px. Held across is how it is meant
+to be played; upright runs too (the two buttons one over the other) and says so once.
+
+At the bottom left of a desktop a strip names the keys of what you are doing now (on foot, each vehicle, at a gun,
+riding along, the map) for the first three minutes; **H** lists them all and brings the strip back; the menu's
+**Help** has the same, on a phone what the thumbs do, and can turn the strip off.
 The page opens on a start menu: play alone or on a server, the server preselected when `./voxel start` serves the
-page (else the last one chosen). `?server=` or `?play` skips it. With a host the round trip (ping) shows top right.
+page (else the last one chosen). `?server=` or `?play` skips it.
 
 Live: <https://karoc123.github.io/passau-vibe-voxel/> (GitHub Pages, deployed on every push to `main` by
 `.github/workflows/pages.yml`).
@@ -453,7 +467,7 @@ first). A whole-city shot takes 33-77 s, a `crop=192` shot ~15 s.
 ## FPV Acro prototype
 
 Start the viewer with `cd web && pnpm dev`. Choose an orbit view near where you want to start, then click
-**FPV Acro** in the top-left toolbar. On Windows with a controller connected, use the Windows browser and move a stick
+**FPV Acro** among the menu's **Vehicles**. On Windows with a controller connected, use the Windows browser and move a stick
 or press a controller button so its axes appear under **Controller setup**.
 
 1. Use **Learn axes** and follow the four stick prompts, or select and invert each axis by hand. Standard gamepads start
@@ -474,7 +488,7 @@ Roof and wall collisions follow the source voxels, including where a rendered ro
 
 ## Driving
 
-Click **Take the wheel** in the top-left toolbar to drive the car you're following or pick a nearby car.
+Choose **Take the wheel** among the menu's **Vehicles** to drive the car you're following or pick a nearby car.
 W/S (or the up/down arrows) accelerate, brake and reverse. A/D or the left/right arrows steer. Space applies the handbrake and
 loosens lateral grip. A standard gamepad uses the left stick, RT/LT, and the bottom face button. **Park car** leaves
 the same car where you stop, T puts it back on the road, and the menu's **Back to orbit mode** (**Esc**) takes you back to the map. **Vehicle: …** beside
@@ -512,7 +526,7 @@ no bodies and no Rapier step.
 
 ## Boat
 
-Click **Boat** in the toolbar (from the map view) to put a speedboat in on the river nearest the view, facing
+Choose **Boat** among the menu's **Vehicles** (from the map view) to put a speedboat in on the river nearest the view, facing
 downstream. W/S (or the arrows) throttle and reverse, A/D steer, Space drifts, T puts it back on open water, Esc
 opens the menu (Back to orbit mode exits); touch and gamepad as the car. Up to ~67 km/h; shores, quay walls and bridge piers stop it, it passes under
 the bridges. The motion is `web/src/sim/craft/boat-motion.ts` (no DOM, fixed step), checked headless by `tools/boat.mjs`;
@@ -520,9 +534,9 @@ the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide wit
 
 ## Plane
 
-Click **Plane** in the toolbar (from the map view) to fly a small floatplane from where the camera is, or **Plane on
+Choose **Plane** among the menu's **Vehicles** (from the map view) to fly a small floatplane from where the camera is, or **Plane on
 the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
-nose down/up (flight convention; "Invert pitch" in the panel swaps), Shift or R throttle up, Space or F down (held,
+nose down/up (flight convention; "Invert pitch" under the status at the top left swaps, on a desktop), Shift or R throttle up, Space or F down (held,
 stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits). Touch: the left thumb is the
 stick, the throttle a slider on the right. Gamepad (standard): left stick, RT/LT or the right stick's Y
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
@@ -547,9 +561,9 @@ core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/craft
   there. Under it X folds it away: you fall, and X opens it again.
   Steer with A/D, W is the speed bar, S brakes (flare before touching down). Hands up it glides about 8:1 at 40 km/h.
   Land on dry ground to continue on foot.
-- Click **Hovercraft** in the map toolbar to start near the view on land or water. W thrust, S brakes then backs,
+- Choose **Hovercraft** among the menu's **Vehicles** to start near the view on land or water. W thrust, S brakes then backs,
   A/D steer. It keeps its momentum and drifts through turns; approach low banks and ramps to cross between land and water.
-- Click **Helicopter** in the map toolbar to start on clear land near the view. Space climbs, Shift descends,
+- Choose **Helicopter** among the menu's **Vehicles** to start on clear land near the view. Space climbs, Shift descends,
   W/S tilt the nose to fly forward and back, A/D turn and Q/E slide sideways. It gathers speed over a few seconds
   (up to 160 km/h) and settles into a hover when the stick is let go; on its skids it stays put until Space lifts it.
 
@@ -560,7 +574,7 @@ cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc**, th
 
 ## Walking
 
-Click **Walk** in the toolbar to start on foot, in first person, at the current view or beside the vehicle you're
+Choose **Walk here** in the menu to start on foot, in first person, at the current view or beside the vehicle you're
 following. W/S walk, A/D step sideways, the left/right arrows turn, Q/E look up and down, Shift runs and Space jumps;
 the mouse looks around (a click takes it back after a tab switch). On touch screens the left thumb walks, the right
 thumb looks. Wheel and pinch zoom in orbit mode only. **Esc** releases the mouse and opens the menu; its **Back to orbit mode** returns to the map. Cars, train coaches, other players
@@ -572,7 +586,7 @@ creeping (no faster than a walk). E or the button gets out again onto foot besid
 (in the helicopter, hovercraft and drone, whose own keys use E, X is the key). Beside a
 car or craft another player drives or flies the prompt is **ride along**: a free seat (a hovercraft has 20, a
 helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around,
-**V** swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
+**V** (on a touch screen the eye button) swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
 craft comes to rest; anyone may take the controls); if the craft is taken away you are put on foot where it was.
 Players in orbit mode cannot board.
 
@@ -580,8 +594,8 @@ On foot you carry two weapon slots: **1** the machine gun, **2** the grenade lau
 The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
 the right button fires the grappling hook at what you look at (up to 80 m: you
 are reeled there; again at the sky or jump to let go; under the paraglider the same). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
-(and may then drag to sweep), a drag only looks; the button up and left of Jump takes the next slot and the one left of
-Jump fires the grappling hook (under the paraglider too). In an aircraft the pilot's view stays behind it: the mouse
+(and may then drag to sweep), a drag only looks, at a mounted gun as on foot; a tap on the weapon name at the bottom takes the next slot and the button beside
+Jump fires the grappling hook (under the paraglider too). At a wheel or in a plane the ↺ button is **T** (back to a safe spot). In an aircraft the pilot's view stays behind it: the mouse
 does not turn it. A tap on the left half picks whom to follow. The host decides each shot and each
 grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and
 sparks, the grenade's arc and its blast. A grenade blows a crater of about 3 m into whatever it hits, the same for
