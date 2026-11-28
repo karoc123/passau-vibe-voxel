@@ -10,17 +10,17 @@
 @media (pointer: coarse) and (orientation: landscape) {
   #jump-button { width: 56px; height: 56px; right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px); }
 }
-/* the next slot up and left of Jump, aim left of it */
+/* the next slot up and left of Jump, the grappling hook left of it (under the paraglider too: its line is fired there) */
 .arms-touch { display: none; position: fixed; z-index: 4; width: 48px; height: 48px; padding: 0; border: 1px solid rgba(255,255,255,.55);
   border-radius: 50%; background: rgba(16,17,20,.4); color: #fff; font: 600 20px Inter, system-ui, sans-serif; touch-action: manipulation;
   -webkit-user-select: none; user-select: none; }
 .arms-touch:active, .arms-touch.on { background: rgba(255,255,255,.28); border-color: #fff; }
 #slot-button { right: calc(98px + var(--sr)); bottom: calc(206px + var(--sb)); }
-#aim-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
-@media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch { display: grid; place-items: center; } }
+#hook-button { right: calc(90px + var(--sr)); bottom: calc(126px + var(--sb)); }
+@media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch, body[data-mode=paraglider]:not(.noui) #hook-button { display: grid; place-items: center; } }
 @media (pointer: coarse) and (orientation: landscape) {
   #slot-button { right: calc(80px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px + 6px); }
-  #aim-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
+  #hook-button { right: calc(76px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 4px); }
 }
 /* the paraglider's release and, falling, its canopy again: by the right thumb, where nothing else is shown on the wing */
 #canopy-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; min-width: 68px; height: 44px;

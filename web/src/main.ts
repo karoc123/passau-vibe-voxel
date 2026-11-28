@@ -234,7 +234,7 @@ const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIn
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
-const touchArms = makeTouchArms(() => nav.arms.cycle(1), () => nav.toggleAim());
+makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else glider?.hookShot(); });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -642,7 +642,6 @@ renderer.setAnimationLoop(frameLoop({
     showIncoming(now);
     boardButton.set((key) => boarding.label(key));
     seatButton.show(boarding.swapLabel());
-    touchArms.set(nav.aiming);
     canopyButton.show(glider?.canopyAction ?? null);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
