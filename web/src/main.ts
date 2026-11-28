@@ -642,7 +642,7 @@ renderer.setAnimationLoop(frameLoop({
       life.update(dt, daylight.night, camera.position, camera); // (the viewer: last frame's camera)
     }
     craftsView?.update(sim, dt, daylight.night, nav.craftView);
-    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : [], camera.position);
+    weapons?.update(dt, life?.group.visible ? life.avatarsDrawn() : [], camera.position, nav.swimming);
   },
   // the cameras on them (the ride's, a craft's own; the map's controls), and the mode shown
   cameras: (now, dt) => {

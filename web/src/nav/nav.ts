@@ -482,6 +482,8 @@ export class Nav {
 
   /** falling on foot high enough to open a canopy (Foot.canOpen) */
   get canOpen() { return this.onFoot && this.foot.canOpen; }
+  /** on foot afloat in deep water */
+  get swimming() { return this.onFoot && this.foot.swimming; }
 
   // Out of the fall into a craft that opens over it (the paraglider). The craft's own request moves the player's seat
   // from the body to it in one command, so the body is not left (no leaveSeat). false: not falling high enough

@@ -12,6 +12,9 @@ const RIGHT = 0.22, DOWN = 0.2, AHEAD = 0.6;
 const HELD_SCALE = 0.55, HAND_AHEAD = 0.25;
 // the kick of a shot (m back, rad up), gone at RECOIL_BACK per s
 const KICK_BACK = 0.05, KICK_UP = 0.12, RECOIL_BACK = 14;
+// swimming on (m/s across, faster than the float's drift): the gun dips and sways with the strokes (STROKE per s),
+// eased in and out at STROKE_EASE per s
+const SWIM_MOVING = 0.5, STROKE = 0.9, STROKE_EASE = 4;
 // the gun in a figure's hand (view/avatars.ts Figure hand), set back so its pistol grip, not its middle, is in the fist
 const GRIP = new THREE.Vector3(0, 0.1, -0.1);
 
@@ -34,6 +37,10 @@ export class WeaponsView {
   private readonly sun = new THREE.DirectionalLight(0xffffff, 1.6);
   private readonly sky = new THREE.HemisphereLight(0xdde8ff, 0x605848, 1.2);
   private kick = 0;
+  // how far into the swimming strokes (0 none, 1 full), where in a stroke (rad); the eye's last place (its speed)
+  private stroke = 0;
+  private strokeAt = 0;
+  private readonly lastEye = new THREE.Vector3(NaN, 0, 0);
   // the others' guns, by player, each in its figure's hand
   private readonly carried = new Map<string, { weapon: WeaponId; obj: THREE.Object3D }>();
 
@@ -60,7 +67,7 @@ export class WeaponsView {
 
   /** the frame's events and effects; avatars: the others on foot as drawn, each given the gun in their hand; eye:
    * where the frame is seen from */
-  update(dt: number, avatars: readonly ArmedAvatar[], eye: THREE.Vector3) {
+  update(dt: number, avatars: readonly ArmedAvatar[], eye: THREE.Vector3, swimming: boolean) {
     const C = this.client;
     for (const e of C.eventsSince(this.seen)) {
       if (!('weapon' in e)) continue;
@@ -72,6 +79,10 @@ export class WeaponsView {
     this.seen = C.tick;
     for (const v of this.views.values()) v.update(dt, eye);
     this.kick *= Math.exp(-RECOIL_BACK * dt);
+    const across = dt > 0 ? Math.hypot(eye.x - this.lastEye.x, eye.z - this.lastEye.z) / dt : 0;
+    this.lastEye.copy(eye);
+    this.stroke += ((swimming && across > SWIM_MOVING ? 1 : 0) - this.stroke) * (1 - Math.exp(-STROKE_EASE * dt));
+    this.strokeAt = (this.strokeAt + 2 * Math.PI * STROKE * dt) % (2 * Math.PI);
     this.carry(avatars);
   }
 
@@ -101,8 +112,9 @@ export class WeaponsView {
     if (!m) this.held.set(v.id, m = v.model());
     for (const o of this.hand.children) if (o !== m) this.hand.remove(o);
     if (m.parent !== this.hand) this.hand.add(m);
-    m.position.set(0, 0, -KICK_BACK * this.kick);
-    m.rotation.x = -KICK_UP * this.kick;
+    const st = this.stroke, w = Math.sin(this.strokeAt);
+    m.position.set(0.06 * st * w, -st * (0.1 + 0.04 * Math.cos(2 * this.strokeAt)), -KICK_BACK * this.kick);
+    m.rotation.set(0.3 * st - KICK_UP * this.kick, 0, 0.3 * st * w);
     const light = 1 - 0.75 * night;
     this.sun.intensity = 1.6 * light; this.sky.intensity = 1.2 * light;
     const H = this.heldCamera;

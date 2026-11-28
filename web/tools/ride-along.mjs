@@ -218,6 +218,12 @@ const swimming = await P.waitForFunction(() => window.__three.nav.foot.swimming,
 const out = await P.evaluate(() => { const f = window.__three.nav.foot; return { x: f.pos.x, z: f.pos.z }; });
 const off = Math.hypot(out.x - hull.x, out.z - hull.z);
 check(onFoot && off < 6 && swimming, `X on the river: P beside the boat (${off.toFixed(1)} m from its middle), swimming (${swimming})`);
+// swimming on with W, the gun in hand dips with the strokes (drawn low, swaying), and comes back up still
+const gunY = () => P.evaluate(() => window.__three.nav.arms.view.hand.children[0]?.position.y ?? null);
+await P.keyboard.down('KeyW'); await wait(1500);
+const dipped = await gunY();
+await P.keyboard.up('KeyW');
+check(swimming && dipped !== null && dipped < -0.04, `swimming on, the gun in hand dips with the strokes (${dipped?.toFixed(3)} m)`);
 await until(async () => onFoot && await crosshair() && await locked(), 10000);
 const footMouse = await locked();
 check(onFoot && await crosshair() && footMouse, `X: P out of the boat on foot, the crosshair shown, the mouse taken (${footMouse})`);
