@@ -209,8 +209,15 @@ await gunCycle(false);
 const boatTurn = await locked() ? await swung() : -1;
 check(boatTurn > 0.3, `at the speedboat's wheel the mouse moved swings the chase view (${boatTurn.toFixed(2)} rad)`);
 await gunCycle(true);
+const hull = await P.evaluate(() => { const p = window.__sim.craftOf().core.pose; return { x: p.x, z: p.z }; });
 await P.keyboard.press('KeyX');
 const onFoot = await P.waitForFunction(() => window.__three.nav.onFoot && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
+// out of the boat on the river beside it, swimming once the step out has sunk into the water: not set down on a bank
+// somewhere (owner 2026-11-28)
+const swimming = await P.waitForFunction(() => window.__three.nav.foot.swimming, null, { timeout: 5000 }).then(() => true, () => false);
+const out = await P.evaluate(() => { const f = window.__three.nav.foot; return { x: f.pos.x, z: f.pos.z }; });
+const off = Math.hypot(out.x - hull.x, out.z - hull.z);
+check(onFoot && off < 6 && swimming, `X on the river: P beside the boat (${off.toFixed(1)} m from its middle), swimming (${swimming})`);
 await until(async () => onFoot && await crosshair() && await locked(), 10000);
 const footMouse = await locked();
 check(onFoot && await crosshair() && footMouse, `X: P out of the boat on foot, the crosshair shown, the mouse taken (${footMouse})`);

@@ -6,6 +6,7 @@ import type { PlayerCraft } from '../nav/craft';
 import type { TileStreamer } from '../stream';
 import type { StreetLife } from '../view/life';
 import type { FullMap } from '../fullmap';
+import type { Labels } from '../labels';
 import type { Minimap } from '../minimap';
 import type { Waypoint } from '../waypoint';
 import type { Prefs } from '../ui/menu';
@@ -26,7 +27,7 @@ export interface DebugHooks {
   // the player's craft shells (judder.mjs enters one at a spot)
   __crafts: PlayerCraft[];
   // the maps and the waypoint (tools/maps.mjs)
-  __map: { minimap: Minimap; full: FullMap; waypoint: Waypoint };
+  __map: { minimap: Minimap; full: FullMap; waypoint: Waypoint; labels: Labels | null };
   // the Esc menu, the player's settings, the frames shown, the names over the others (tools/menu.mjs)
   __menu: { menu: { open(): void; close(): void; isOpen(): boolean }; prefs: Prefs; fps: () => number; tags: NameTags };
 }

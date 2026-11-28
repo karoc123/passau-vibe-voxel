@@ -8,7 +8,7 @@
 //   - a real tap (a click with the mouse) on ☰ opens the menu, whose own controls are checked the same way, and one
 //     on Resume closes it;
 //   - on the touch page every control of play is at least 44 px either way; a tap on the weapon's name takes the
-//     next weapon, a tap on the minimap and the menu's Map open the full map, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
+//     next weapon, a tap on the minimap and the menu's Map open the full map, the menu's entry hides the labels and shows them, a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
 //     view button swaps a passenger's view;
 //   - the touch buttons shown are the situation's, none on the desktop but Get in/out; the help is the situation's:
 //     the strip's keys on the desktop and the menu's Help, the keys or what the thumbs do; Esc is
@@ -188,6 +188,17 @@ const mapsOpen = async (P) => {
   await shut();
   return null;
 };
+// (the phone has no N key: the menu's entry hides the map's labels and shows them again; the map is cropped here, so
+// the labels' own switch is looked at, not their pins)
+const labelsToggle = async (P) => {
+  const shown = (n) => T(P, (n) => window.__map.labels.visible === n, n, 5000);
+  const tap = async (label) => { await P.evaluate(() => window.__menu.menu.open()); await P.tap(`#menu .menu-entry:text-is("${label}")`); };
+  if (!(await shown(true))) return 'the labels are off to begin with';
+  await tap('Hide the labels');
+  if (!(await shown(false))) return 'the menu\'s Hide the labels leaves the labels on';
+  await tap('Show the labels');
+  return (await shown(true)) ? null : 'the menu\'s Show the labels does not turn them on again';
+};
 const weaponSwaps = async (P) => {
   const slot = () => P.evaluate(() => window.__three.nav.arms.slot), was = await slot(), p = await centre(P, '#arms .slots');
   await P.touchscreen.tap(p.x, p.y);
@@ -205,7 +216,7 @@ const viewSwaps = async (P) => {
 // on touch); menu: its menu checked too
 const FOOT_HELP = [/walk.*jump/i, /thumb/i];
 const SITUATIONS = [
-  { name: 'the map', into: async (P) => { await toMap(P); return true; }, touch: [], menu: true, help: ['map', /drag|move/i, /drag|finger/i] },
+  { name: 'the map', into: async (P) => { await toMap(P); return true; }, thumb: labelsToggle, touch: [], menu: true, help: ['map', /drag|move/i, /drag|finger/i] },
   { name: 'the full map', scope: '#fullmap, #waypoint-chip', into: async (P) => { await toMap(P); await P.evaluate(() => window.__map.full.open()); return T(P, () => window.__map.full.isOpen); },
     touch: null, out: (P) => P.evaluate(() => window.__map.full.toggle()) },
   { name: 'on foot', into: async (P) => { await toMap(P); await P.evaluate(() => void window.__three.nav.toggleWalk(false)); return afoot(P); }, thumb: mapsOpen,

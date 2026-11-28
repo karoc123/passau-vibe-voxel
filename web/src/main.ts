@@ -146,6 +146,17 @@ const help = makeHelp(menu.section('Help').box, () => {
 // the maps from the menu (a phone has no M and no comma)
 menu.entry('Map', () => fullmap?.open());
 menu.entry(() => (minimap?.shown ? 'Hide the minimap' : 'Show the minimap'), () => minimap?.toggle());
+// N or the menu (a phone has no key for it) shows and hides the map's labels (a searched place's stays), in every
+// mode; remembered (localStorage LABELS_KEY)
+const LABELS_KEY = 'labels';
+let labelsOn = true;
+try { labelsOn = localStorage.getItem(LABELS_KEY) !== '0'; } catch { /* storage blocked: shown */ }
+function toggleLabels() {
+  labelsOn = !labelsOn;
+  if (labels) labels.visible = labelsOn;
+  try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
+}
+menu.entry(() => (labelsOn ? 'Hide the labels' : 'Show the labels'), toggleLabels);
 // the menu's Debug: what the sandbox grants for trying things out; an NPC enemy goes a few metres ahead of the walker
 const debugBox = menu.section('Debug', 'sandbox').box;
 const perf = new Perf(el('div', 'menu-perf', '', debugBox),
@@ -244,16 +255,10 @@ if (qs.get('ui') === '0') document.body.classList.add('noui');
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
 document.body.dataset.mode = document.body.dataset.nav = nav.mode;
 addEventListener('resize', onResize);
-// N shows and hides the map's labels (a searched place's stays), in every mode; remembered (localStorage LABELS_KEY)
-const LABELS_KEY = 'labels';
-let labelsOn = true;
-try { labelsOn = localStorage.getItem(LABELS_KEY) !== '0'; } catch { /* storage blocked: shown */ }
 addEventListener('keydown', (e) => {
   if (e.key === '/' && gameKey(e)) { bar.search.input.focus(); e.preventDefault(); }
   if (e.code === 'KeyN' && gameKey(e) && !e.repeat) {
-    labelsOn = !labelsOn;
-    if (labels) labels.visible = labelsOn;
-    try { localStorage.setItem(LABELS_KEY, labelsOn ? '1' : '0'); } catch { /* not remembered */ }
+    toggleLabels();
     toast(labelsOn ? 'Labels on' : 'Labels off (N shows them)');
     e.preventDefault();
   }
@@ -443,7 +448,7 @@ async function boot() {
   const mapView = new MapData(meta), marks = { pose: nav.mapPose, waypoint, others: otherPlayers };
   const full = fullmap = new FullMap(mapView, marks);
   minimap = new Minimap(mapView, marks, () => full.open());
-  hook('__map', { minimap, full, waypoint });
+  hook('__map', { minimap, full, waypoint, labels });
   bar.search.setItems(goTo.searchItems(meta));
   fetchJson<{ places: Place[] }>(dataUrl(CLIENT_FILES.places)).then(({ places }) => {
     bar.search.setItems(goTo.searchItems(meta, places));
