@@ -6,8 +6,9 @@
 // swap) is not shown in the car; P gets out and takes the speedboat's wheel on the Danube below, where it is shown, and a
 // tap on it moves P to the gun, another back to the wheel. Then with mouse and keyboard: C to the gun and back, a click
 // at the gun and on foot (out with X) firing shots the host records; the combat plane from the map, the mouse taken;
-// the boat's chase view swung by the mouse; last every aircraft from the map, its pilot's view not turned by the mouse, X
-// high up putting P under a paraglider; the grappling hook's touch button shown there and, on foot, a tap firing a hook.
+// the boat's chase view swung by the mouse; every aircraft from the map, its pilot's view not turned by the mouse, X
+// high up putting P under a paraglider that flies; the grappling hook's touch button shown there; X under the
+// paraglider folding it away and X in the fall opening one again; last, on foot, a tap on the hook button firing a hook.
 // usage (in web/): node tools/ride-along.mjs [-v] [--headed]; prints PASS/FAIL lines
 import fs from 'node:fs';
 import net from 'node:net';
@@ -35,6 +36,7 @@ const { STEP } = await imp('src/sim/road-net.ts');
 const { readHostData } = await imp('src/host/node.ts');
 const { vehicleOf } = await imp('src/sim/vehicles.ts');
 const { AIRCRAFT } = await imp('src/nav/craft.ts');
+const GLIDE = (await imp('src/sim/craft/craft-motion.ts')).CRAFT.paraglider;
 const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => log(`host: ${l}`) });
 const hostPort = await host.port, sim = host.server.sim;
 const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'ride-along-gate-'));
@@ -227,6 +229,34 @@ const unknown = AIRCRAFT.filter((t) => !ENTER[t]);
 if (unknown.length) check(false, `every aircraft has its button in this gate (missing: ${unknown.join(', ')})`);
 const underCanopy = () => P.waitForFunction(() => window.__three.nav.craft?.id === 'paraglider' && window.__sim.seat()?.role === 'pilot' && window.__sim.craftOf()?.type === 'paraglider',
   null, { timeout: 10000 }).then(() => true, () => false);
+// The paraglider P hangs under flies: on the host over a second and a half it goes forward at about its trim speed and
+// sinks at about its glide's rate, the page draws it where the host has it (not left hanging where it opened), and D
+// held turns it.
+const pid = await P.evaluate(() => window.__sim.player);
+const wing = () => { const me = [...sim.crafts.values()].find((c) => c.type === 'paraglider' && c.pilot === pid); return me ? { ...me.core.pose, tick: sim.tick } : null; };
+const flies = async () => {
+  const from = wing(), at = (p) => p ? `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)}` : 'none';
+  // (measured once it has flown 10 m: opening, it waits for its tiles and takes up its sink from none, more of the
+  // window on a busy machine; one that hangs never gets there)
+  const away = from && await until(() => { const w = wing(); return w && Math.hypot(w.x - from.x, w.z - from.z) > 10; }, 15000);
+  if (from && !away) {
+    const me = [...sim.crafts.values()].find((c) => c.type === 'paraglider' && c.pilot === pid);
+    return { ok: false, why: `it hangs where it opened (host ${at(from)} -> ${at(wing())}; ${me ? `${me.core.result}, velocity ${JSON.stringify(me.core.velocity)}, input ${JSON.stringify(me.input)}` : 'gone'})` };
+  }
+  const a = wing();
+  await until(() => a && sim.tick - a.tick >= 1.5 / STEP, 20000);
+  const b = wing(), seen = await P.evaluate(() => window.__sim.craftOf()?.core.pose ?? null), c = wing();
+  if (!a || !b || !c || !seen) return { ok: false, why: `no paraglider (host ${at(b)}, page ${at(seen)})` };
+  const s = (b.tick - a.tick) * STEP, fwd = ((b.x - a.x) * Math.sin(a.h) + (b.z - a.z) * Math.cos(a.h)) / s, sink = (a.y - b.y) / s;
+  const off = Math.hypot(seen.x - c.x, seen.y - c.y, seen.z - c.z);
+  await P.keyboard.down('KeyD'); await until(() => { const w = wing(); return !w || Math.abs(w.h - b.h) > 0.3; }, 15000); await P.keyboard.up('KeyD');
+  const d = wing(), turned = d ? Math.abs(d.h - b.h) : 0;
+  const T = GLIDE.trim, S = GLIDE.sink;
+  // (the page's within 20 m: it runs ahead of the host, and on a busy machine the two are read a second apart; left
+  // where it opened it would be 27 m behind by now)
+  return { ok: fwd > T * 0.7 && fwd < T * 1.6 && sink > S * 0.4 && sink < S * 2 && off < 20 && turned > 0.3,
+    why: `${fwd.toFixed(1)} m/s forward, sinking ${sink.toFixed(2)} m/s, the page's ${off.toFixed(1)} m off the host's, D turns it ${turned.toFixed(2)} rad` };
+};
 for (const type of AIRCRAFT) {
   await P.evaluate(() => window.__three.nav.setOrbit());
   await wait(800);
@@ -242,10 +272,19 @@ for (const type of AIRCRAFT) {
   if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
   const turned = await swung();
   check(inIt && m && turned < 0.1, `the ${type}'s pilot: the mouse taken (${m}), the mouse moved leaves the chase view behind it (${turned.toFixed(2)} rad)`);
-  if (CLIMB.has(type)) { await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space'); }
+  // (off its skids, then put by the host 150 m up, where the planes fly: beside the cathedral the military helicopter
+  // climbs no higher than its towers' ledges, ~50 m, and a paraglider opened under it there scraped the roofs or, on
+  // a busy machine, found no room to open)
+  if (CLIMB.has(type)) {
+    await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space');
+    const c = sim.crafts.get(sim.seat(pid)?.entity.id), q = c?.core.pose;
+    if (q) { sim.placeCraft(c.id, { ...q, y: 150 }); await P.waitForFunction(() => window.__sim.craftOf()?.core.pose.y > 120, null, { timeout: 10000 }).catch(() => {}); }
+  }
   const id = await P.evaluate(() => window.__sim.craftOf()?.id), p = id != null && sim.crafts.get(id)?.core.pose;
   await P.keyboard.press('KeyX');
   const glides = inIt && await underCanopy(), left = id != null && sim.crafts.get(id);
+  const flight = glides ? await flies() : { ok: false, why: 'not under one' };
+  check(flight.ok, `the paraglider out of the ${type} flies: ${flight.why}`);
   check(glides && !!left && left.pilot === null, `X high in the ${type} (${p ? `${p.y.toFixed(0)} m` : 'not in it'}): P under an open paraglider, the ${type} flying on empty (${JSON.stringify(await P.evaluate(() => [window.__three.nav.craft?.id, window.__sim.seat()?.role]))})`);
 }
 
@@ -253,6 +292,21 @@ for (const type of AIRCRAFT) {
 // hook at what the view's middle meets (here the ground a few metres ahead)
 const hookButton = () => P.evaluate(() => { const b = document.querySelector('#hook-button'); return !!b && getComputedStyle(b).display !== 'none'; });
 check(await hookButton(), 'under the paraglider the grappling hook\'s touch button is shown');
+// X is the paraglider's one key: under it (out of the last aircraft) X folds it away into a fall on foot, the button
+// saying so; falling, X opens one again, and that one flies as well.
+const button = () => P.evaluate(() => { const b = document.querySelector('#board-button'); return b && !b.hidden ? b.textContent : null; });
+const fold = await button();
+await P.keyboard.press('KeyX');
+const falling = await P.waitForFunction(() => window.__three.nav.onFoot && window.__three.nav.canOpen && window.__sim.seat()?.role === 'walker', null, { timeout: 10000 }).then(() => true, () => false);
+// (the page's seat is the host's word: the paraglider is gone there by now; X again at once, as the fall from here
+// lasts a few seconds only)
+const gone = falling && !wing(), open = await button();
+await P.keyboard.press('KeyX');
+check(falling && gone && /fold paraglider/i.test(fold ?? '') && /open paraglider/i.test(open ?? ''),
+  `X under the paraglider folds it away: P falls on foot, no paraglider left (the button: ${JSON.stringify(fold)}, then ${JSON.stringify(open)})`);
+const reopened = falling && await underCanopy(), second = reopened ? await flies() : { ok: false, why: 'not under one' };
+check(second.ok, `X falling on foot opens a paraglider that flies: ${second.why}`);
+
 await P.evaluate((s) => { const T = window.__three; void T.nav.setWalk({ at: T.camera.position.clone().set(s.x, s.y, s.z), exact: true }); }, s);
 const afoot = await P.waitForFunction(() => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);
 await wait(800);

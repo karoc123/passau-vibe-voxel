@@ -21,7 +21,6 @@ import { makePost } from './post';
 import { StreetLife } from './view/life';
 import type { CraftView, SimClient } from './client/sim-client';
 import type { CraftsView } from './view/crafts/crafts-view';
-import type { ParagliderMode } from './nav/special-craft';
 import type { PassengerMode } from './nav/passenger';
 import { viewerTileCache } from './viewer-tiles';
 import type { Kind, TrafficData } from './sim/types';
@@ -45,7 +44,7 @@ import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { loadPrefs, makeMenu, preselect, skipStart, startMenu } from './ui/menu';
 import { NameTags } from './ui/name-tags';
-import { makeBoardButton, makeCanopyButton, makeJumpButton, makeSeatButton, makeTouchArms } from './touch/buttons';
+import { makeBoardButton, makeJumpButton, makeSeatButton, makeTouchArms } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
@@ -117,7 +116,6 @@ const CRAFTS = () => [
 let crafts: PlayerCraft[] = [];
 // the world's crafts the local player does not fly (left by their pilots, or other players')
 let craftsView: CraftsView | null = null;
-let glider: ParagliderMode | null = null;
 const bar = new Bar();
 const menu = makeMenu(prefs, {
   paused: pause,
@@ -229,12 +227,11 @@ makeCredits();
 nav.onLockLost = () => menu.open();
 const nameTags = new NameTags();
 makeJumpButton(() => nav.jump());
-const canopyButton = makeCanopyButton(() => glider?.press());
 const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIncomingHud();
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
-makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else glider?.hookShot(); });
+makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else nav.wing?.hookShot(); });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
 // (craft.ts); data-nav, nav.ts Mode (craft: a craft owns the camera and the input)
@@ -483,8 +480,8 @@ async function boot() {
     sim: simReady,
     tiles: { meta, cache: viewerTileCache(meta.tiles.N, edits), now: () => performance.now() },
   };
-  const wing = glider = new ParagliderMode(ctx);
-  nav.bailOut = (source, at) => wing.deploy(source, at);
+  const wing = new ParagliderMode(ctx);
+  nav.wing = wing;
   crafts = [...modes.map((C) => new C(ctx)), wing];
   hook('__crafts', crafts); // (the shells, for the tools: judder.mjs enters one at a spot)
   craftsView = new CraftsView(nav.actors);
@@ -642,7 +639,6 @@ renderer.setAnimationLoop(frameLoop({
     showIncoming(now);
     boardButton.set((key) => boarding.label(key));
     seatButton.show(boarding.swapLabel());
-    canopyButton.show(glider?.canopyAction ?? null);
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },

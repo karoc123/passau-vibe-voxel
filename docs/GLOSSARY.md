@@ -25,6 +25,8 @@ The words the owner and the code use for the same thing. One name per thing; use
 - **Boarding**: getting into a vehicle from foot beside it; a car may be rolling, up to running speed.
 - **Bail out**: getting out (X) of an aircraft high in the air, pilot or passenger: the player hangs under an open
   paraglider, the aircraft flies on empty. Low over the ground X gets out onto foot. Not "eject" or "deploy".
+- **Open**, **fold away**: what X does with the paraglider: opened over a player in the air on foot (a fall, a jump
+  from high up), folded away from under it into a fall on foot. Not "release", "canopy button" or "let go".
 - **Grappling hook**: a line fired at a voxel in range that reels the player there, on foot or under the paraglider;
   **reel**: the pull; **hang**: held on the line high on a wall. Not "grapple" or "rope".
 - **Mouse look**: in every vehicle the player sits in, the mouse is taken and swings the chase or seat view as a

@@ -17,7 +17,8 @@ const { sandbox } = await imp('src/sim/modes/sandbox.ts');
 const { MirrorSimClient, CloneLink } = await imp('src/client/sim-client.ts');
 const { hello } = await imp('src/sim/hello.ts');
 const { STEP } = await imp('src/sim/road-net.ts');
-const { GLIDER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts');
+const { GLIDER_HEIGHT, CRAFT } = await imp('src/sim/craft/craft-motion.ts');
+const { CORES } = await imp('src/sim/craft/cores.ts');
 const { WALK_BOUNDS, boundWalk } = await imp('src/sim/walk-bounds.ts');
 const { CraftLink } = await imp('src/nav/craft.ts');
 const { Foot } = await imp('src/nav/foot.ts');
@@ -45,7 +46,7 @@ const tick = () => { for (const p of all) p.c.update(STEP); server.update(STEP);
 tick();
 
 // A's shell: its CraftLink, and its walk (the page's Foot over the same ground)
-const ctx = { sim: Promise.resolve(A.c), tiles: { meta, cache, now: () => performance.now() } };
+const ctx = { nav: { stepOut: null }, sim: Promise.resolve(A.c), tiles: { meta, cache, now: () => performance.now() } };
 const glider = new CraftLink(ctx, 'paraglider');
 await null;
 const world = { support: () => G, blocked: () => false };
@@ -64,7 +65,8 @@ const walkFrame = () => {
   body = true;
   tick();
 };
-const flyFrame = () => { glider.input({ drive: 0, turn: 0, lift: 0, side: 0 }); tick(); };
+const HANDS_OFF = { drive: 0, turn: 0, lift: 0, side: 0 };
+const flyFrame = () => { glider.input(HANDS_OFF); tick(); };
 const release = () => {
   const { p, velocity: v, heading } = glider.craft.core.motion, vel = { ...v };
   glider.close(true);
@@ -72,7 +74,7 @@ const release = () => {
   body = false; last = null;
   return vel;
 };
-// as the shell opens one (special-craft.ts canopy): refused unless falling high enough
+// as X on foot opens one (nav.ts openWing): refused unless falling high enough
 const reopen = () => {
   if (!foot.canOpen) return false;
   const speed = Math.hypot(foot.carry.x, foot.carry.z), h = speed > 1 ? Math.atan2(foot.carry.x, foot.carry.z) : foot.yaw;
@@ -120,6 +122,63 @@ for (let k = 0; k < 40; k++) {
 }
 check(seatsOk && sim.crafts.size === 1 && sim.avatars.size === 0 && bCrafts().length === 1 && bAvatars().length === 0,
   `40 times let go and opened again: A seated each time, one wing in the world, no body left (${sim.crafts.size} crafts, ${sim.avatars.size} bodies)`);
+
+// Out of every craft into a paraglider within one frame, as X high up does (nav.ts getOut): the craft's controls
+// sent that frame are still held by the host for their tick when the seat changes, and are not the wing's (a plane's
+// lever taken for a paraglider's input left it hanging in the air). The wing flies: forward at about its trim speed,
+// sinking at about its glide's rate, turned by its own input.
+const HANDS = { turn: 1, drive: 1, lift: 1, side: 1 }, LEVER = { turn: 1, pitch: 1, throttle: 1 };
+const HELD = { boat: { throttle: 1, steer: 1, drift: true }, hovercraft: HANDS, helicopter: HANDS, gunship: HANDS, drone: null, floatplane: LEVER, jet: LEVER, fighter: LEVER };
+const others = Object.keys(CORES).filter((t) => t !== 'paraglider'), P = CRAFT.paraglider;
+check(others.every((t) => t in HELD), `every craft type has its controls in this gate (${others.filter((t) => !(t in HELD)).join(', ') || 'all'})`);
+const flown = [];
+glider.close(true);
+tick();
+for (const type of others.filter((t) => t in HELD)) {
+  const from = new CraftLink(ctx, type);
+  await null;
+  from.open();
+  from.spawn({ x: 60, y: G + 300, z: 60, h: Math.PI / 2, speed: 20 });
+  for (let i = 0; i < 6; i++) { from.input(HELD[type]); tick(); }
+  // (till it flies: the tiles round it are in then, and the wing opened under it steps from its first tick)
+  for (let i = 0; i < 400 && !(from.craft && sim.crafts.get(from.craft.id).core.result !== 'loading'); i++) { from.input(HELD[type]); tick(); await new Promise((r) => setTimeout(r, 2)); }
+  const id = from.craft?.id, at = from.craft?.core.pose ?? { x: 60, y: G + 300, z: 60 };
+  // (its last controls stamped for page ticks to come, as a page that runs ahead of its host's ticks sends them, and
+  // the wing's own a few ticks late, as a network bunches them)
+  for (let k = 1; k <= 4; k++) A.link.send([{ kind: 'seatInput', role: 'pilot', input: HELD[type], seq: 1e9 + k, tick: A.c.page + k }]);
+  from.close();
+  glider.open();
+  glider.spawn({ x: at.x, y: at.y - 40, z: at.z, h: Math.PI / 2, speed: 16 });
+  for (let i = 0; i < 6; i++) { tick(); await new Promise((r) => setTimeout(r, 2)); }
+  // (a step waiting for a tile of its collision's is not taken: the tiles given time to come, and only the ticks
+  // stepped counted)
+  const wing = () => [...sim.crafts.values()].find((c) => c.pilot === 'a' && c.type === 'paraglider');
+  const fly = async (n, input) => {
+    let stepped = 0;
+    for (let i = 0; i < 2000 && stepped < n; i++) {
+      glider.input(input); tick();
+      if (wing() && wing().core.result !== 'loading') stepped++;
+      else await new Promise((r) => setTimeout(r, 2));
+    }
+    return stepped === n;
+  };
+  if (!await fly(5, HANDS_OFF)) { flown.push(`NOT ${type}: no paraglider`); continue; }
+  const a = { ...wing().core.motion.p };
+  await fly(45, HANDS_OFF);
+  const b = { ...wing().core.motion.p }, h0 = wing().core.motion.heading, fwd = (b.x - a.x) / (45 * STEP), sink = (a.y - b.y) / (45 * STEP);
+  await fly(30, { ...HANDS_OFF, turn: 1 });
+  const turned = Math.abs(wing().core.motion.heading - h0);
+  const ok = id !== undefined && A.c.seat()?.role === 'pilot' && fwd > 0.7 * P.trim && fwd < 1.6 * P.trim && sink > 0.4 * P.sink && sink < 2 * P.sink && turned > 0.3;
+  flown.push(`${ok ? '' : 'NOT '}${type} ${fwd.toFixed(1)} m/s, sinking ${sink.toFixed(2)}, turned ${turned.toFixed(2)} rad`);
+  glider.close(true);
+  tick();
+  if (id !== undefined) sim.removeCraft(id);
+}
+check(!flown.some((f) => f.startsWith('NOT')), `out of every craft with its controls held, the paraglider flies and answers its own (${flown.join('; ')})`);
+
+glider.open();
+glider.spawn({ x: 60, y: G + 300, z: 128, h: Math.PI / 2, speed: 16 });
+for (let i = 0; i < 10; i++) flyFrame();
 
 // let go and fall to the ground: within the host's walk bound all the way (no pose clamped), landed, no canopy there
 release();
