@@ -294,9 +294,19 @@ for (const type of AIRCRAFT) {
     return { ok, pose, onFoot: n.onFoot, shell: n.craft?.id ?? null, x: f.pos.x, z: f.pos.z, feet: f.feet, ground: n.world.support(f.pos.x, f.pos.z, f.feet) };
   }, [s.x, s.y + LOW, s.z], { timeout: 10000, polling: 'raf' }).then((h) => h.jsonValue(), () => null);
   const boxes = out ? craftMeets(type, out.pose) : [], clearOf = !!out && boxes.every((b) => reach(b, out.x, out.z, out.feet) <= 0);
-  const landed = !!out && out.onFoot && await P.waitForFunction(() => { const n = window.__three.nav, f = n.foot; return n.onFoot && window.__sim.seat()?.role === 'walker' && f.feet - n.world.support(f.pos.x, f.pos.z, f.feet + 0.5) < 0.1; }, null, { timeout: 20000 }).then(() => true, () => false);
+  // (down: standing on the street, or on a thing in the way down -- the plane left comes down ahead and the fall, at
+  // its speed, ends on its wing as often as beside it)
+  const down = !!out && out.onFoot && await P.waitForFunction(() => {
+    const n = window.__three.nav, f = n.foot, street = f.feet - n.world.support(f.pos.x, f.pos.z, f.feet + 0.5) < 0.1;
+    return n.onFoot && window.__sim.seat()?.role === 'walker' && f.vy === 0 && (street || f.on) ? (street ? 'on the street' : `on ${f.on.id}`) : false;
+  }, null, { timeout: 20000 }).then((h) => h.jsonValue(), () => null);
+  const landed = !!down;
+  if (out && out.onFoot && !down) log(`not down: ${JSON.stringify(await P.evaluate(() => { const n = window.__three.nav, f = n.foot; return { mode: n.mode, seat: window.__sim.seat(), feet: f.feet, vy: f.vy, on: f.on?.id ?? null, sup: n.world.support(f.pos.x, f.pos.z, f.feet + 0.5), swim: f.swimming, x: f.pos.x, z: f.pos.z }; }))}, host seat ${JSON.stringify(sim.seat(pid))}`);
   check(!!out && out.ok && out.onFoot && clearOf && Math.abs(out.feet - boxes[0].y) < 1.1 && out.feet - out.ground > 2 && landed,
-    `X ${LOW} m up in the ${type}: P beside it at its height, outside its boxes (${clearOf}), falling, then landed (${landed}): ${out ? `feet ${out.feet.toFixed(1)}, the ${type}'s foot ${boxes[0]?.y.toFixed(1)}, the ground ${out.ground.toFixed(1)}, on foot ${out.onFoot}, shell ${out.shell}` : `not in it low (in ${lowIn})`}`);
+    `X ${LOW} m up in the ${type}: P beside it at its height, outside its boxes (${clearOf}), falling, then down (${down}): ${out ? `feet ${out.feet.toFixed(1)}, the ${type}'s foot ${boxes[0]?.y.toFixed(1)}, the ground ${out.ground.toFixed(1)}, on foot ${out.onFoot}, shell ${out.shell}` : `not in it low (in ${lowIn})`}`);
+  // (the aircraft left taken away once P is down: a helicopter let down there stood under the next one's way out, and
+  // its roof was landed on, 4 m over the street)
+  if (lc) sim.removeCraft(lc.id);
   const inIt = await enter(type);
   let m = await locked();
   if (inIt && !m) { await P.mouse.click(480, 320); await wait(300); m = await locked(); }
@@ -307,7 +317,7 @@ for (const type of AIRCRAFT) {
   if (CLIMB.has(type)) {
     await P.keyboard.down('Space'); await wait(4000); await P.keyboard.up('Space');
     const c = sim.crafts.get(sim.seat(pid)?.entity.id), q = c?.core.pose;
-    if (q) { sim.placeCraft(c.id, { ...q, y: 150 }); await P.waitForFunction(() => window.__sim.craftOf()?.core.pose.y > 120, null, { timeout: 10000 }).catch(() => {}); }
+    if (q) { sim.placeCraft(c.id, { ...q, y: 150 }); await P.waitForFunction(() => window.__sim.craftOf()?.core.pose.y > 120, null, { timeout: 30000 }).catch(() => {}); }
   }
   const id = await P.evaluate(() => window.__sim.craftOf()?.id), p = id != null && sim.crafts.get(id)?.core.pose;
   await P.keyboard.press('KeyX');

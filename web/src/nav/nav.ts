@@ -637,11 +637,20 @@ export class Nav {
     return true;
   }
 
+  // The craft the player sits in, where this page has it now: its pilot's is run ahead of the snapshots, and the
+  // snapshot's copy a round trip behind (a jet's 12 m back, where the canopy then opened and the ground was judged)
+  private seatCraft() {
+    const sim = this.sim, e = sim?.seat()?.entity;
+    if (!sim || e?.kind !== 'craft') return null;
+    const own = sim.craftOf();
+    return own?.id === e.id ? own : sim.crafts().find((q) => q.id === e.id) ?? null;
+  }
+
   // Out of an aircraft in the air (any seat in it: ALOFT) where a canopy would open on a fall: under a paraglider
   // opened just under it (its canopy clear of the craft's lowest box), as it flies on (owner 2026-11-27). Lower,
   // or with a wall in the canopy's way, a fall from beside it (fallBeside)
   private underCanopy(w: World, c: PlayerCraft) {
-    const sim = this.sim, s = sim?.seat(), v = s?.entity.kind === 'craft' ? sim!.crafts().find((q) => q.id === s.entity.id) : null;
+    const v = this.seatCraft();
     if (!v || !aloft(v)) return false;
     const p = v.core.pose, under = Math.min(...craftSolids(v.type, p).map((b) => b.y)), top = Math.max(...meetShapes('paraglider').map((b) => b.top));
     const feet = under - CANOPY_CLEAR - top;
@@ -652,7 +661,7 @@ export class Nav {
   // falling from there with its velocity, never set down on the ground under it (owner 2026-11-28: "putting you
   // somewhere is wrong"). false: beside it the ground or the water is a step down, or there is no room round it
   private fallBeside(w: World, pose: Pose) {
-    const sim = this.sim, e = sim?.seat()?.entity, v = e?.kind === 'craft' ? sim!.crafts().find((q) => q.id === e.id) : null;
+    const e = this.sim?.seat()?.entity, v = this.seatCraft();
     const boxes: Solid[] = v ? craftMeets(v.type, v.core.pose) : e?.kind === 'car' ? (this.life?.solids(pose) ?? []).filter((q) => q.id === `car${e.id}`) : [];
     const at = besideSolids(w, boxes, (x, z) => w.inside(x, z));
     if (!at || at.y - Math.max(w.support(at.x, at.z, at.y + 0.01), w.waterColumn(at.x, at.z)?.water ?? -Infinity) < STEP_DOWN) return false;
