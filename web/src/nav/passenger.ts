@@ -83,7 +83,7 @@ export class PassengerMode implements PlayerCraft {
         if (e.button === 0) this.trigger = true;
         return;
       }
-      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now(), touch: e.pointerType === 'touch', moved: false, held: false };
+      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now(), touch: e.pointerType !== 'mouse', moved: false, held: false };
     });
     addEventListener('pointermove', (e) => {
       if (document.pointerLockElement === canvas) return;

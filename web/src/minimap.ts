@@ -214,7 +214,7 @@ export class Minimap {
     b.title = 'Full map (,)';
     b.setAttribute('aria-keyshortcuts', ',');
     b.addEventListener('click', () => { b.blur(); openFull(); });
-    this.canvas.addEventListener('click', (e) => { if (e instanceof PointerEvent && e.pointerType === 'touch') openFull(); else this.click(e); });
+    this.canvas.addEventListener('click', (e) => { if (coarsePointer()) openFull(); else this.click(e); });
     const resize = new ResizeObserver(() => { this.stale = true; this.measure(); });
     resize.observe(this.box);
     addEventListener('resize', () => this.measure());
