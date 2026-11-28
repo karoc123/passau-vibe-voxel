@@ -38,7 +38,7 @@ const { readHostData } = await imp('src/host/node.ts');
 const { vehicleOf } = await imp('src/sim/vehicles.ts');
 const { AIRCRAFT } = await imp('src/nav/craft.ts');
 const { craftMeets, reach } = await imp('src/sim/solids.ts');
-const GLIDE = (await imp('src/sim/craft/craft-motion.ts')).CRAFT.paraglider;
+const { CRAFT, GLIDER_HEIGHT } = await imp('src/sim/craft/craft-motion.ts'), GLIDE = CRAFT.paraglider;
 const host = serve({ dir: dataDir, host: '127.0.0.1', port: 0, query: 'seed=3', log: (l) => log(`host: ${l}`) });
 const hostPort = await host.port, sim = host.server.sim;
 const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'ride-along-gate-'));
@@ -352,6 +352,13 @@ check(falling && gone && /fold paraglider/i.test(fold ?? '') && /open paraglider
   `X under the paraglider folds it away: P falls on foot, no paraglider left (the button: ${JSON.stringify(fold)}, then ${JSON.stringify(open)})`);
 const reopened = falling && await underCanopy(), second = reopened ? await flies() : { ok: false, why: 'not under one' };
 check(second.ok, `X falling on foot opens a paraglider that flies: ${second.why}`);
+// down on the river under it: P on foot in the water, swimming (owner 2026-11-28: no "choose a dry spot" back to the map);
+// put by the host a metre over the water where the speedboat was
+const top = await P.evaluate((b) => window.__three.nav.world.waterColumn(b.x, b.z)?.water ?? null, BOAT), mine = wing();
+const me = [...sim.crafts.values()].find((c) => c.type === 'paraglider' && c.pilot === pid);
+if (me && top !== null) sim.placeCraft(me.id, { ...me.core.pose, x: BOAT.x, y: top + GLIDER_HEIGHT + 1, z: BOAT.z, h: BOAT.h });
+const swam = !!mine && await P.waitForFunction(() => window.__three.nav.onFoot && window.__three.nav.foot.swimming && window.__sim.seat()?.role === 'walker', null, { timeout: 20000 }).then(() => true, () => false);
+check(swam, `the paraglider down on the river: P on foot in it, swimming (${JSON.stringify(await P.evaluate(() => [window.__three.nav.mode, window.__three.nav.foot.swimming, window.__sim.seat()?.role]))})`);
 
 await P.evaluate((s) => { const T = window.__three; void T.nav.setWalk({ at: T.camera.position.clone().set(s.x, s.y, s.z), exact: true }); }, s);
 const afoot = await P.waitForFunction(() => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker', null, { timeout: 30000 }).then(() => true, () => false);

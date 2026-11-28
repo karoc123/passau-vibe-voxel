@@ -166,14 +166,8 @@ class SpecialCraft implements PlayerCraft {
       if (to && (Math.hypot(this.hook!.x - to.x, this.hook!.y - to.y, this.hook!.z - to.z) < HOOK.near || m!.result === 'blocked')) this.hook = null;
       this.link.input(inFocus() ? this.input() : NO_CRAFT_INPUT);
       this.link.frame();
-      for (const e of this.link.events()) {
-        if (e === 'landed') this.landOnFoot();
-        else {
-          this.panel.say('Water landing. Choose a dry landing spot next time.', 3500);
-          this.ctx.nav.flyUp();
-        }
-        break;
-      }
+      // landed on the ground or on the water: on foot there, in the water swimming (owner 2026-11-28)
+      for (const _ of this.link.events()) { this.landOnFoot(); break; }
     }
     this.draw();
   }

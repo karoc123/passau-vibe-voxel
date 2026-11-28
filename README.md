@@ -536,7 +536,7 @@ the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide wit
 
 Choose **Plane** among the menu's **Vehicles** (from the map view) to fly a small floatplane from where the camera is, or **Plane on
 the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
-nose down/up (flight convention; "Invert pitch" under the status at the top left swaps, on a desktop), Shift or R throttle up, Space or F down (held,
+nose down/up (flight convention; "Invert pitch" under the status at the top left swaps, on a desktop), Space or R throttle up, Shift or F down (held,
 stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits). Touch: the left thumb is the
 stick, the throttle a slider on the right. Gamepad (standard): left stick, RT/LT or the right stick's Y
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it

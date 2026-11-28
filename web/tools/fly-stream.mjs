@@ -60,7 +60,7 @@ try {
     pm.link.put({ x: f.p.x, y: f.p.y, z: f.p.z, h: Math.PI / 2, speed: v });
     pm.throttle = 1;
   }, SPEED);
-  await page.keyboard.down('ShiftLeft');
+  await page.keyboard.down('Space');
   // the samples, every frame
   await page.evaluate(() => {
     const S = window.__streamer, city = window.__three.city(), T = 128, out = window.__fly = [];
