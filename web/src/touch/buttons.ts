@@ -23,15 +23,27 @@ export function makeJumpButton(jump: () => void) {
   return b;
 }
 
-/** beside Jump: the next slot, and the grappling hook (the right mouse button's; under the paraglider too) */
-export function makeTouchArms(next: () => void, hook: () => void) {
-  const slot = roundButton('slot-button', 'arms-touch', '⇄', 'Next weapon');
+/** beside Jump: the grappling hook (the right mouse button's; under the paraglider too) */
+export function makeHookButton(hook: () => void) {
   const line = roundButton('hook-button', 'arms-touch', '⚓', 'Grappling hook');
-  slot.addEventListener('click', next);
   // (pointerdown, not click: the hook goes where the view points now, not where it has turned to by the release)
   line.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); hook(); });
   line.addEventListener('click', (e) => { if (e.detail === 0) hook(); }); // (the keyboard)
 }
+
+/** a button by the right thumb shown only while there is something for it to do (on a touch screen: touch.css) */
+function situational(id: string, glyph: string, label: string, press: () => void) {
+  const b = roundButton(id, 'thumb-touch', glyph, label);
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); press(); });
+  b.addEventListener('click', (e) => { if (e.detail === 0) press(); }); // (the keyboard)
+  return { show(on: boolean) { if (b.classList.contains('on') !== on) b.classList.toggle('on', on); } };
+}
+
+/** at a wheel or a stick: back to a safe spot nearby (T) */
+export const makeResetButton = (press: () => void) => situational('reset-button', '↺', 'Back to a safe spot', press);
+
+/** riding along: the seat's view or the chase view (V) */
+export const makeViewButton = (press: () => void) => situational('view-button', '👁', 'Seat or chase view', press);
 
 /** in a craft with a gun: from the controls to the gun or back (the C key's, nav/board.ts swap); shown on a touch
  *  screen only while there is a seat to switch to */

@@ -1,10 +1,10 @@
-import type { Rect } from './hud';
+import type { Rect } from './ui/help';
 import type { RoadData } from './sim/types';
 import type { Pose } from './sim/contract/pose';
 import type { Label, Meta } from './core/meta';
 import type { Place } from './types';
 import type { Waypoint } from './waypoint';
-import { el } from './util';
+import { coarsePointer, el } from './util';
 import './minimap.css';
 
 const CELL = 8; // metres per pixel of the atlas
@@ -28,6 +28,7 @@ const LANDMARKS: Record<string, string> = {
   sight: 'M-5 0q5-7 10 0-5 7-10 0ZM0-1a1 1 0 1 0 0 2 1 1 0 0 0 0-2',
 };
 
+const SHOWN_KEY = 'passau.minimap';
 const EXPAND = '<svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>';
 
 export type MapPose = Pick<Pose, 'x' | 'z' | 'h'>;
@@ -181,13 +182,13 @@ export function drawScale(ctx: CanvasRenderingContext2D, height: number, m: numb
 }
 
 /** A north-up map round the player. Positions are world metres (x east, z south, h: 0 towards +z, π/2 towards +x).
- * A click sets the waypoint there (on the waypoint: clears it); its corner button opens the full map. */
+ * A click sets the waypoint there (on the waypoint: clears it), its corner button opens the full map; a tap on a
+ * touch screen opens the full map (a waypoint is set there: a thumb is too broad for this one). Shown or not as last
+ * left (M, the menu), at first on a touch screen only. */
 export class Minimap {
   rects: Rect[] = [];
   /** the others as last drawn (the tools) */
   drawnOthers: DrawnMark[] = [];
-  private readonly button = el('button', '', '<span>Map</span>');
-  private readonly fullButton = el('button', '', `<span class="map-expand">${EXPAND}</span>`);
   private readonly box = el('div', '');
   private readonly canvas = el('canvas', '', '', this.box);
   private readonly expand = el('button', 'map-expand', EXPAND, this.box);
@@ -203,34 +204,28 @@ export class Minimap {
 
   constructor(private readonly data: MapData, private readonly marks: MapMarks, openFull: () => void) {
     this.box.id = 'minimap';
-    this.box.hidden = true;
+    let kept: string | null = null;
+    try { kept = localStorage.getItem(SHOWN_KEY); } catch { /* storage blocked */ }
+    this.box.hidden = kept === null ? !coarsePointer() : kept !== '1';
     this.canvas.setAttribute('role', 'img');
     this.canvas.setAttribute('aria-label', 'North-up minimap with your position and heading, rivers, roads and landmarks; click for a waypoint');
-    this.button.id = 'minimap-button';
-    this.button.type = 'button';
-    this.button.title = 'Minimap (M)';
-    this.button.setAttribute('aria-controls', this.box.id);
-    this.button.setAttribute('aria-pressed', 'false');
-    this.button.setAttribute('aria-keyshortcuts', 'M');
-    this.button.addEventListener('click', () => this.toggle());
-    for (const b of [this.expand, this.fullButton]) {
-      b.type = 'button';
-      b.title = 'Full map (,)';
-      b.setAttribute('aria-keyshortcuts', ',');
-      b.addEventListener('click', () => { b.blur(); openFull(); });
-    }
-    this.fullButton.id = 'fullmap-button';
-    this.canvas.addEventListener('click', (e) => this.click(e));
+    const b = this.expand;
+    b.type = 'button';
+    b.title = 'Full map (,)';
+    b.setAttribute('aria-keyshortcuts', ',');
+    b.addEventListener('click', () => { b.blur(); openFull(); });
+    this.canvas.addEventListener('click', (e) => { if (coarsePointer()) openFull(); else this.click(e); });
     const resize = new ResizeObserver(() => { this.stale = true; this.measure(); });
-    resize.observe(this.button);
     resize.observe(this.box);
     addEventListener('resize', () => this.measure());
   }
 
+  get shown() { return !this.box.hidden; }
+
   toggle() {
     if (document.body.classList.contains('noui')) return;
     this.box.hidden = !this.box.hidden;
-    this.button.setAttribute('aria-pressed', String(!this.box.hidden));
+    try { localStorage.setItem(SHOWN_KEY, this.box.hidden ? '0' : '1'); } catch { /* not remembered */ }
     this.stale = true;
     this.lastT = -Infinity;
     this.measure();
@@ -258,10 +253,8 @@ export class Minimap {
   }
 
   private measure() {
-    this.rects = [this.button, this.box].flatMap((node) => {
-      const r = node.getBoundingClientRect();
-      return r.width ? [{ x0: r.left, x1: r.right, y0: r.top, y1: r.bottom }] : [];
-    });
+    const r = this.box.getBoundingClientRect();
+    this.rects = r.width ? [{ x0: r.left, x1: r.right, y0: r.top, y1: r.bottom }] : [];
   }
 
   private click(e: MouseEvent) {

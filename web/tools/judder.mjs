@@ -61,8 +61,9 @@ if (!craft) {
 await page.keyboard.press('/'); await page.keyboard.type('Follow a car'); await page.waitForTimeout(300); await page.keyboard.press('Enter');
 await page.evaluate(() => document.activeElement?.blur?.());
 await page.waitForTimeout(2000);
-await page.waitForFunction(() => !document.querySelector('.drive-mode button')?.disabled, null, { timeout: 60000 }).catch(() => {});
-await page.locator('.drive-mode button').first().click();
+await page.waitForFunction(() => window.__menu && [...document.querySelectorAll('#menu button')].some((b) => b.textContent === 'Take the wheel' && !b.disabled), null, { timeout: 60000 }).catch(() => {});
+await page.evaluate(() => window.__menu.menu.open());
+await page.locator('#menu button', { hasText: 'Take the wheel' }).click();
 await page.waitForFunction(() => window.__sim.seat()?.role === 'driver' && window.__sim.driver() && !window.__sim.driver().waiting, null, { timeout: 90000 }).catch(() => {});
 await page.evaluate(() => document.activeElement?.blur?.());
 

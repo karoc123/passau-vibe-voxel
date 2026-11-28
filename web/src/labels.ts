@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Rect } from './hud';
+import type { Rect } from './ui/help';
 import type { Facts, Label } from './core/meta';
 import { $, el } from './util';
 import type { World } from './core/world';

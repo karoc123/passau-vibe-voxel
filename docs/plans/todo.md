@@ -29,7 +29,7 @@ Open work only. When something lands, delete its line. Owner questions are in `F
   alarm calls one, it passes at every player; left: its numbers and its feel tried in play at the Oberhaus, boarding
   a moored plane at the shore, the pilot bailing out on a paraglider, a lead on moving targets, an NPC on a seat as a
   body of its own). The military helicopter built (ADR 0024: bigger, four seats, two
-  door guns, no pilot's gun, no hover hold, a co-op craft, debug menu only; today's helicopter a two-seater; left: its
+  door guns, no pilot's gun, no hover hold, a co-op craft, sandbox only; today's helicopter a two-seater; left: its
   numbers, the swing and the drawn tilt against the level mount tried in play, firing from a pass at speed, a place on
   the map such as the Oberhaus once the camp is cleared, NPC door gunners later). Health and
   damage built (ADR 0015); left of it: the crowd not harmed, the

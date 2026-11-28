@@ -18,7 +18,7 @@ Status: accepted (2026-11-27). Builds on [ADR 0015](0015-health-and-damage.md), 
 - The mount stays level: it turns with the heading only, on the host and on the page alike. The drawn tilt of the
   hull moves the drawn gun by a few decimetres at full tilt; shot and camera agree with each other.
 - The light helicopter becomes a two-seater: the pilot and one passenger.
-- For now only from the debug menu; no stands.
+- For now only from the menu's sandbox, where every vehicle is spawned; no stands.
 
 ## Why
 
@@ -28,7 +28,7 @@ Status: accepted (2026-11-27). Builds on [ADR 0015](0015-health-and-damage.md), 
   combat plane remains the craft for one.
 - One switch key cycling the seats serves any number of guns without new keys.
 - A level mount needs nothing new on the wire and keeps the shot and the gunner's view in one point.
-- Debug menu only: standing everywhere, nobody would take the unarmed one.
+- Sandbox only: standing everywhere, nobody would take the unarmed one.
 
 ## Consequences
 

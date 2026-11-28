@@ -230,8 +230,6 @@ function codeOf(bare) {
 const BASELINE = [
   "R1 view/boats.ts (presentation) -> sim/boat-traffic.ts (domain)",
   "R2 type cycle: nav/craft.ts, nav/nav.ts, nav/orbit.ts, nav/ride.ts",
-  "R6 main.ts: pointerType==='pen'",
-  "R6 main.ts: pointerType==='touch'",
   "R6 nav/nav.ts: pointerType==='touch'",
   "R6 nav/nav.ts: pointerType==='touch'",
   "R6 nav/nav.ts: pointerType==='touch'",
