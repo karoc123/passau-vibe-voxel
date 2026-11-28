@@ -20,7 +20,6 @@ import { findStreet, openSpot, walkNet } from './spots';
 import { HEAD } from '../sim/walk';
 import { canopyOpens } from '../sim/walker';
 import { craftSolids, meetShapes } from '../sim/solids';
-import { GLIDER_HEIGHT } from '../sim/craft/craft-motion';
 import { FootTouch } from '../touch/foot';
 import { HookLine } from './hook-line';
 
@@ -54,8 +53,9 @@ export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.
 // corners ~0.33 m out at the walk's field of view, inside the 0.4 m -- and goes back on leaving. (The FPV drone takes 0.15 m alike, fpv.ts: the depth buffer's precision far off, ~d^2 /
 // (near x 2^24), is then 2.5 x coarser than the map camera's, as the drone's has always been.)
 const WALK_NEAR = 0.2;
-// m between a craft left in the air and the top of the paraglider opened under it
-const CANOPY_CLEAR = 0.5;
+// m between a craft left in the air and the top of the paraglider opened under it; m/s the paraglider flies at as
+// it opens there (not the aircraft's: a jet's would be no glide)
+const CANOPY_CLEAR = 0.5, BAIL_SPEED = 16;
 // ms the right button is down before it aims: let go sooner, it was a tap, the grappling hook's (both on one button,
 // as the owner asked for the hook there and the aim was there first; a tap is over in ~100 ms)
 const TAP_MS = 180;
@@ -105,8 +105,9 @@ export class Nav {
   stepOut: WalkPose | null = null;
   /** the weapons on foot */
   readonly arms = new Arms();
-  /** a paraglider opened at `at` for the player out of the craft source (main.ts: the wing's); false: not now */
-  bailOut: (source: PlayerCraft, at: CraftSpot) => boolean = () => false;
+  /** the paraglider's shell (main.ts): opened over the player's feet out of an aircraft (from) or a fall on foot,
+   * folded away in the air; each false: not now */
+  wing: (PlayerCraft & { open(at: Required<CraftSpot> & { speed: number }, from?: PlayerCraft): boolean; fold(): boolean }) | null = null;
   private hoverT = 0;
   private cursor: { x: number; y: number } | null = null; // the mouse over the map, for Ctrl+C (copySpot)
   private quietT = 0;
@@ -526,10 +527,12 @@ export class Nav {
     return true;
   }
 
-  /** the feet and velocity of the fall, while on foot (the canopy's spot) */
-  get fallPose() {
-    const f = this.foot;
-    return { x: f.pos.x, y: f.feet, z: f.pos.z, vx: f.carry.x, vy: f.vy, vz: f.carry.z, yaw: f.yaw };
+  /** in the air on foot high enough (canOpen: a fall, a long jump off something high): the paraglider opened over
+   * the body, flying the way the body went across (the opening takes the fall's speed down); false: not now */
+  openWing() {
+    if (!this.canOpen) return false;
+    const f = this.foot, speed = Math.hypot(f.carry.x, f.carry.z);
+    return !!this.wing?.open({ x: f.pos.x, y: f.feet, z: f.pos.z, h: speed > 1 ? Math.atan2(f.carry.x, f.carry.z) : f.yaw, speed });
   }
 
   // Out of the craft piloted (the paraglider let go) into a free fall on foot from feet at `at` with velocity v,
@@ -644,9 +647,11 @@ export class Nav {
   }
 
   /** out of the vehicle driven or the craft piloted onto foot beside it, the host putting the body down there as the
-   * seat is left (stepOut), so the others see the player step out; false: in none */
+   * seat is left (stepOut), so the others see the player step out; out of the paraglider by folding it away (a fall
+   * on foot); false: in none */
   getOut() {
     const w = this.world, c = this.craft, ride = this.driving ? this.ride : null;
+    if (c && c === this.wing) return this.wing.fold();
     const pose = c && (ride ? this.life?.pose(ride.ref) : c.mapPose);
     if (!w || !c || !pose || this.walkPending) return false;
     if (this.underCanopy(w, c)) return true;
@@ -672,8 +677,8 @@ export class Nav {
     const sim = this.sim, s = sim?.seat(), v = s?.entity.kind === 'craft' ? sim!.crafts().find((q) => q.id === s.entity.id) : null;
     if (!v || !aloft(v)) return false;
     const p = v.core.pose, under = Math.min(...craftSolids(v.type, p).map((b) => b.y)), top = Math.max(...meetShapes('paraglider').map((b) => b.top));
-    const y = under - CANOPY_CLEAR - top;
-    return canopyOpens(w, p.x, p.z, y - GLIDER_HEIGHT) && this.bailOut(c, { x: p.x, y, z: p.z, h: p.h });
+    const feet = under - CANOPY_CLEAR - top;
+    return canopyOpens(w, p.x, p.z, feet) && !!this.wing?.open({ x: p.x, y: feet, z: p.z, h: p.h, speed: BAIL_SPEED }, c);
   }
 
   /** the host has moved the player from their body on foot into a seat (board.ts): the body is not to be left again */
