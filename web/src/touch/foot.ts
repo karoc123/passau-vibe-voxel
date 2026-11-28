@@ -5,7 +5,8 @@ import { TouchSticks } from './sticks';
 // finger that moves past SLOP looks, one that lifts still within HOLD is a tap (one shot, as a mouse click is), one held
 // still past HOLD holds the trigger (the MG at its rate) until it lifts, and may then drag to sweep. HOLD is past a tap's
 // usual ~100-150 ms and short enough that holding to fire does not feel late; SLOP is above a resting thumb's jitter.
-const SLOP = 10, HOLD = 250; // CSS px, ms
+// (a mounted gun's thumb goes by the same two: nav/passenger.ts)
+export const SLOP = 10, HOLD = 250; // CSS px, ms
 // the left thumb's tap (a short touch that hardly moved: follow who is there, as with one finger elsewhere)
 const TAP_SLOP = 8, TAP_MS = 600;
 

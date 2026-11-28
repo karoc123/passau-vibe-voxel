@@ -15,6 +15,7 @@ import { mountOf, mountPoint, SEATS, type Mount } from '../sim/seats';
 import { weaponById } from '../sim/weapons';
 import { aimDir } from '../sim/weapons/weapon';
 import { aimPoint, GunAim } from './gunner';
+import { HOLD, SLOP } from '../touch/foot';
 import './special-craft.css';
 
 // Riding along in another player's car or craft (a passenger's seat, taken from foot: board.ts). The input steers
@@ -55,7 +56,8 @@ export class PassengerMode implements PlayerCraft {
   private dyaw = 0;
   private dpitch = 0;
   private zoom = 1;
-  private drag: { id: number; x: number; y: number; moved: boolean } | null = null;
+  // (x0, y0, t: where and when it went down; held: a thumb on the gun's trigger)
+  private drag: { id: number; x: number; y: number; x0: number; y0: number; t: number; touch: boolean; moved: boolean; held: boolean } | null = null;
   private readonly pos = new THREE.Vector3();
   private readonly at = new THREE.Vector3();
   private readonly off = new THREE.Vector3();
@@ -71,15 +73,12 @@ export class PassengerMode implements PlayerCraft {
     this.panel = new ModePanel(host, 'passenger', 'Riding along');
     this.panel.el.classList.add('special-craft');
     this.help = this.panel.help('Drag: look around · Wheel: zoom · V: seat or chase view · E: get out · Esc: menu',
-      'Drag to look around, pinch to zoom; the Get out button leaves.');
+      'Drag to look around, pinch to zoom; the View button swaps the seat\'s view and the chase view, the Get out button leaves.');
     this.gunHelp = this.panel.help('Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E: get out',
-      'Drag to aim, tap to fire; the Get out button leaves.');
+      'Drag to aim, tap to fire, hold to keep firing; the Get out button leaves.');
     addEventListener('keydown', (e) => {
       if (!this.riding || e.code !== 'KeyV' || e.repeat || !gameKey(e)) return;
-      const R = this.riding.ref.kind === 'car' ? this.ctx.nav.ride : null;
-      if (R) R.view = R.view === 'eyes' ? 'behind' : 'eyes';
-      else this.seatView = !this.seatView;
-      this.dyaw = this.dpitch = 0;
+      this.swapView();
       e.preventDefault();
     });
     canvas.addEventListener('pointerdown', (e) => {
@@ -89,13 +88,13 @@ export class PassengerMode implements PlayerCraft {
         if (e.button === 0) this.trigger = true;
         return;
       }
-      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now(), touch: e.pointerType === 'touch', moved: false, held: false };
     });
     addEventListener('pointermove', (e) => {
       if (document.pointerLockElement === canvas) return;
       const d = this.drag;
       if (!d || d.id !== e.pointerId) return;
-      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) d.moved = true;
+      if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > SLOP) d.moved = true;
       if (this.gun) this.turnGun(-(e.clientX - d.x) * 0.005, -(e.clientY - d.y) * 0.004);
       else {
         this.dyaw -= (e.clientX - d.x) * 0.005;
@@ -106,7 +105,7 @@ export class PassengerMode implements PlayerCraft {
     addEventListener('pointerup', (e) => { if (e.button === 0) this.trigger = false; });
     const up = (e: PointerEvent) => {
       // (a tap at a gun: one shot)
-      if (this.drag?.id === e.pointerId && this.gun && !this.drag.moved && e.type === 'pointerup') this.ctx.nav.arms.pull();
+      if (this.drag?.id === e.pointerId && this.gun && !this.drag.moved && !this.drag.held && e.type === 'pointerup') this.ctx.nav.arms.pull();
       if (this.drag?.id === e.pointerId) this.drag = null;
     };
     addEventListener('pointerup', up);
@@ -117,6 +116,15 @@ export class PassengerMode implements PlayerCraft {
       e.preventDefault();
     }, { passive: false });
     this.draw();
+  }
+
+  /** the seat's view for the chase view or back (V, the touch button) */
+  swapView() {
+    if (!this.riding) return;
+    const R = this.riding.ref.kind === 'car' ? this.ctx.nav.ride : null;
+    if (R) R.view = R.view === 'eyes' ? 'behind' : 'eyes';
+    else this.seatView = !this.seatView;
+    this.dyaw = this.dpitch = 0;
   }
 
   /** in a car Nav's ride camera follows it; in a craft this shell's own */
@@ -196,9 +204,12 @@ export class PassengerMode implements PlayerCraft {
     this.armGun(s ? mountOf(SEATS.craft[R!.type as CraftKind], s) : null);
     const m = this.gun, p = this.last, w = m && weaponById(m.weapon);
     if (m && p && w && sim) {
+      // a thumb held still past HOLD is on the trigger until it lifts, and may then drag to sweep: the gesture on foot
+      const d = this.drag;
+      if (d?.touch && !d.moved && performance.now() - d.t >= HOLD) d.held = true;
       this.aim.turn(m, p.h);
       const from = mountPoint(m, p), dir = aimDir(this.aim.h, this.aim.pitch), nav = this.ctx.nav;
-      nav.arms.update(dt, sim, this.aim.h, this.aim.pitch, this.ctx.camera, this.trigger, { slot: w.slot, to: () => aimPoint(sim, nav.world, from, dir) });
+      nav.arms.update(dt, sim, this.aim.h, this.aim.pitch, this.ctx.camera, this.trigger || !!d?.held, { slot: w.slot, to: () => aimPoint(sim, nav.world, from, dir) });
     }
     this.draw();
   }

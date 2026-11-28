@@ -45,7 +45,7 @@ import { banner, toast } from './ui/toast';
 import { makeCredits } from './ui/credits';
 import { loadPrefs, makeMenu, preselect, skipStart, startMenu } from './ui/menu';
 import { NameTags } from './ui/name-tags';
-import { makeBoardButton, makeCanopyButton, makeJumpButton, makeSeatButton, makeTouchArms } from './touch/buttons';
+import { makeBoardButton, makeCanopyButton, makeJumpButton, makeResetButton, makeSeatButton, makeTouchArms, makeViewButton } from './touch/buttons';
 import { Boarding } from './nav/board';
 import { makeArmsHud } from './ui/arms';
 import { makeHealthHud } from './ui/health';
@@ -234,6 +234,8 @@ const armsHud = makeArmsHud(), healthHud = makeHealthHud(), incomingHud = makeIn
 const boarding = new Boarding(nav, () => crafts, (s) => toast(s), () => crafts.find((c): c is PassengerMode => c.id === 'passenger') ?? null);
 const boardButton = makeBoardButton(() => boarding.press());
 const seatButton = makeSeatButton(() => boarding.swap());
+const resetButton = makeResetButton(() => nav.craft?.reset?.());
+const viewButton = makeViewButton(() => crafts.find((c): c is PassengerMode => c.id === 'passenger')?.swapView());
 makeTouchArms(() => nav.arms.cycle(1), () => { if (nav.onFoot) nav.hookShot(); else glider?.hookShot(); });
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 // which mode is on, for style.css (set each frame below): data-mode, nav.ts Mode or the craft's id while in one
@@ -643,6 +645,9 @@ renderer.setAnimationLoop(frameLoop({
     boardButton.set((key) => boarding.label(key));
     seatButton.show(boarding.swapLabel());
     canopyButton.show(glider?.canopyAction ?? null);
+    resetButton.show(!!nav.craft?.reset);
+    // (at a gun the seat's view is the only one)
+    viewButton.show(nav.craft?.id === 'passenger' && !document.body.classList.contains('gunner'));
     walkButton.disabled = !world || nav.enteringWalk || nav.craftView;
     if (nav.onMap) { controls.update(); nav.clamp(); keepInside(); }
   },

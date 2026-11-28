@@ -48,6 +48,8 @@ export interface PlayerCraft {
   /** into the pilot's seat of a craft in the world no one pilots (one of `boards`; SimClient.crafts()); from: the shell
    * of the seat held before in the same craft (a seat switch). false: not now */
   board?(craft: CraftView, from?: PlayerCraft): boolean;
+  /** back to a safe spot nearby (T, the touch button); only what can get stuck or lost has it */
+  reset?(): void;
   /** it has been left (Nav calls this once, from whatever left it): let go of everything, hide what it showed */
   leave(): void;
   /** every frame, on or not, before the sim's update (main.ts): its input sent, its panel, what happened to it */

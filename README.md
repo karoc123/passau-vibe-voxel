@@ -569,7 +569,7 @@ creeping (no faster than a walk). E or the button gets out again onto foot besid
 (in the helicopter, hovercraft and drone, whose own keys use E, X is the key). Beside a
 car or craft another player drives or flies the prompt is **ride along**: a free seat (a hovercraft has 20, a
 helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around, the wheel
-zooms, **V** swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
+zooms, **V** (on a touch screen the eye button) swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
 craft comes to rest; anyone may take the controls); if the craft is taken away you are put on foot where it was.
 Players in orbit mode cannot board.
 
@@ -577,8 +577,8 @@ On foot you carry two weapon slots: **1** the machine gun, **2** the grenade lau
 (Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
 the right button fires the grappling hook at what you look at (up to 80 m: you
 are reeled there; again at the sky or jump to let go; under the paraglider the same). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
-(and may then drag to sweep), a drag only looks; the button up and left of Jump takes the next slot and the one left of
-Jump fires the grappling hook (under the paraglider too). In an aircraft the pilot's view stays behind it: the mouse
+(and may then drag to sweep), a drag only looks, at a mounted gun as on foot; the button up and left of Jump takes the next slot and the one left of
+Jump fires the grappling hook (under the paraglider too). At a wheel or in a plane the ↺ button is **T** (back to a safe spot). In an aircraft the pilot's view stays behind it: the mouse
 does not turn it. A tap on the left half picks whom to follow. The host decides each shot and each
 grenade's flight from your eyes as it has them; the others nearby see the gun in your hand, the flash, tracer and
 sparks, the grenade's arc and its blast. A grenade blows a crater of about 3 m into whatever it hits, the same for

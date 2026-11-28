@@ -164,7 +164,7 @@ export class PlaneMode implements PlayerCraft {
     }, { passive: false });
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.backToSafe(); }
+      if (e.code === 'KeyT') { if (!e.repeat) this.reset(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
@@ -307,7 +307,7 @@ export class PlaneMode implements PlayerCraft {
     return best;
   }
 
-  private backToSafe() {
+  reset() {
     if (this.phase !== 'flying') return;
     this.link.reset();
   }

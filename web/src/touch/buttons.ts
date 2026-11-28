@@ -52,6 +52,20 @@ export function makeCanopyButton(press: () => void) {
   };
 }
 
+/** a button by the right thumb shown only while there is something for it to do (on a touch screen: touch.css) */
+function situational(id: string, glyph: string, label: string, press: () => void) {
+  const b = roundButton(id, 'thumb-touch', glyph, label);
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); press(); });
+  b.addEventListener('click', (e) => { if (e.detail === 0) press(); }); // (the keyboard)
+  return { show(on: boolean) { if (b.classList.contains('on') !== on) b.classList.toggle('on', on); } };
+}
+
+/** at a wheel or a stick: back to a safe spot nearby (T) */
+export const makeResetButton = (press: () => void) => situational('reset-button', '↺', 'Back to a safe spot', press);
+
+/** riding along: the seat's view or the chase view (V) */
+export const makeViewButton = (press: () => void) => situational('view-button', '👁', 'Seat or chase view', press);
+
 /** in a craft with a gun: from the controls to the gun or back (the C key's, nav/board.ts swap); shown on a touch
  *  screen only while there is a seat to switch to */
 export function makeSeatButton(press: () => void) {

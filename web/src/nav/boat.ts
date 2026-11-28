@@ -76,7 +76,7 @@ export class BoatMode implements PlayerCraft {
       'Left thumb: drag up for throttle, down to reverse, sideways to steer. Hold the right button to drift. Pinch on the right to zoom.');
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.unstick(); }
+      if (e.code === 'KeyT') { if (!e.repeat) this.reset(); }
       else if (!this.keys.press(e)) return;
       e.preventDefault();
     });
@@ -199,7 +199,7 @@ export class BoatMode implements PlayerCraft {
     this.rig.end();
   }
 
-  private unstick() {
+  reset() {
     if (this.phase === 'on') this.link.reset();
   }
 

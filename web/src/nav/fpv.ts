@@ -52,7 +52,7 @@ export class FpvMode implements PlayerCraft {
   private readonly armRadio: HTMLButtonElement;
   private readonly armKeys: HTMLButtonElement;
   private readonly armTouch: HTMLButtonElement;
-  private readonly reset: HTMLButtonElement;
+  private readonly resetFlight: HTMLButtonElement;
   private readonly options: HTMLDivElement;
 
   private phase: Phase = 'loading';
@@ -82,7 +82,7 @@ export class FpvMode implements PlayerCraft {
     this.armTouch = modeButton('Fly with touch', () => this.arm('touch'), actions);
     this.armRadio = modeButton('Arm controller', () => this.arm('controller'), actions);
     this.armKeys = modeButton('Fly with keyboard', () => this.arm('keyboard'), actions);
-    this.reset = modeButton('Reset flight', () => this.restart(), actions);
+    this.resetFlight = modeButton('Reset flight', () => this.restart(), actions);
     this.options = P.line('options');
     this.options.append(this.radio.element);
     const angle = el('label', 'row fpv-camera-angle', '', this.options);
@@ -302,7 +302,7 @@ export class FpvMode implements PlayerCraft {
     this.armRadio.disabled = !this.controller || this.controller.throttle > ARM_THROTTLE;
     this.armKeys.hidden = !canArm;
     this.armTouch.hidden = !canArm || !this.hasTouch;
-    this.reset.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
+    this.resetFlight.hidden = !active || this.phase === 'ready' || this.phase === 'loading';
     this.options.hidden = !active || flying;
     P.status.hidden = !active;
     this.telemetry.hidden = !active || this.phase === 'loading';

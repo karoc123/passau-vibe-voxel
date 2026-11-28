@@ -6,6 +6,8 @@
 //     no control or read-out (DISPLAYS) lies over another;
 //   - a real tap (a click with the mouse) on ☰ opens the menu, whose own controls are checked the same way, and one
 //     on Resume closes it;
+//   - on the touch page a thumb held still at a gun fires on (as on foot), the reset button puts the boat back, the
+//     view button swaps a passenger's view;
 //   - the touch buttons shown are the situation's (TOUCH below), none on the desktop but Get in/out; the help is the
 //     situation's (HELP below: the keys on the desktop, what the thumbs do on touch).
 // usage (in web/): node tools/layout.mjs [-v] [--headed] [--only NAME,NAME]; prints PASS/FAIL lines
@@ -36,7 +38,7 @@ const CONTROLS = 'button, input, select, summary, a[href], [role=slider], #minim
 const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #status, #perf';
 // the touch buttons there are (a new one is named here, and in the situations it belongs to)
 const TOUCH_BUTTONS = ['#jump-button', '#slot-button', '#hook-button', '#canopy-button', '#board-button', '#seat-button', '#handbrake-button',
-  '#boat-drift-button', '#plane-throttle', '.plane-fire', '#reset-button'];
+  '#boat-drift-button', '#plane-throttle', '.plane-fire', '#reset-button', '#view-button'];
 
 const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'layout-gate-'));
@@ -144,7 +146,29 @@ const nextSeat = async (P) => {
 const plane = (type, track) => enter('plane', type, { x: SQUARE.x, y: 200 + 40 * track, z: SQUARE.z + 150 * track, h: -Math.PI / 2, type });
 const afoot = (P) => T(P, () => window.__three.nav.onFoot && !window.__three.nav.enteringWalk && window.__sim.seat()?.role === 'walker');
 
-// name; into it (false: not reached); touch: the touch buttons it shows; help: what its help says (on the desktop,
+// on the touch page: what a thumb does there (null: as it should; else what went wrong)
+const centre = (P, sel) => P.evaluate((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; }, sel);
+const shots = (P, since) => P.evaluate((since) => window.__sim.eventsSince(since).filter((e) => e.kind === 'shot' && e.player === window.__sim.player).length, since);
+const holdFires = async (P) => {
+  const cdp = await P.context().newCDPSession(P), t0 = await P.evaluate(() => window.__sim.tick), at = { x: 300, y: 200 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+  const on = await T(P, (t0) => window.__sim.eventsSince(t0).filter((e) => e.kind === 'shot' && e.player === window.__sim.player).length >= 3, t0, 15000);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+  return on ? null : `a thumb held still at the gun fired ${await shots(P, t0)} shots, not on and on`;
+};
+const resetPuts = async (P) => {
+  const p = await centre(P, '#reset-button');
+  await P.touchscreen.tap(p.x, p.y);
+  return (await T(P, () => /Back on open water/.test(document.querySelector('.boat-status')?.textContent ?? ''), null, 10000)) ? null : 'a tap on the reset button does not put the boat back on open water';
+};
+const viewSwaps = async (P) => {
+  const seat = () => P.evaluate(() => window.__crafts.find((c) => c.id === 'passenger').seatView), was = await seat(), p = await centre(P, '#view-button');
+  await P.touchscreen.tap(p.x, p.y);
+  return (await seat()) !== was ? null : 'a tap on the view button does not swap the passenger\'s view';
+};
+
+// name; into it (false: not reached); thumb: a check of what a thumb does there (above); touch: the touch buttons it shows; help: what its help says (on the desktop,
 // on touch); menu: its menu checked too
 const FOOT_HELP = [/WASD.*walk.*Space.*jump/i, /thumb/i];
 const SITUATIONS = [
@@ -162,19 +186,19 @@ const SITUATIONS = [
     await toMap(P);
     await P.evaluate(() => window.__crafts.find((c) => c.id === 'drive').enter());
     return T(P, () => window.__sim.seat()?.role === 'driver' && window.__sim.driver() && !window.__sim.driver().waiting && window.__three.nav.craft?.id === 'drive', null, 120000);
-  }, touch: ['#handbrake-button', '#board-button'], help: ['drive', /steer.*handbrake/i, /stick|thumb/i] },
+  }, touch: ['#handbrake-button', '#board-button', '#reset-button'], help: ['drive', /steer.*handbrake/i, /stick|thumb/i] },
   { name: 'the hovercraft', into: enter('hovercraft'), touch: ['#board-button'], help: ['hovercraft', /thrust/i, /stick/i] },
   { name: 'the helicopter', into: enter('helicopter'), touch: ['#board-button'], help: ['helicopter', /climb/i, /stick/i] },
   { name: 'on foot beside the helicopter', into: async (P) => { await P.keyboard.press('KeyX'); return (await afoot(P)) && T(P, () => document.querySelector('#board-button:not([hidden])'), null, 20000); },
     touch: ['#jump-button', '#slot-button', '#hook-button', '#board-button'], help: ['walk', ...FOOT_HELP] },
   { name: 'the military helicopter', into: enter('gunship'), touch: ['#board-button', '#seat-button'], help: ['gunship', /climb/i, /stick/i] },
   { name: 'at the military helicopter\'s gun', into: nextSeat, touch: ['#board-button', '#seat-button'], help: ['gunner', /aim.*fire/i, /aim.*fire/i] },
-  { name: 'on the military helicopter\'s bench', into: async (P) => (await nextSeat(P)) && nextSeat(P), touch: ['#board-button', '#seat-button'], help: ['passenger', /look/i, /look/i] },
-  { name: 'at the boat\'s wheel', into: enter('boat', 'boat', BOAT), touch: ['#boat-drift-button', '#board-button', '#seat-button'], help: ['boat', /steer.*drift/i, /stick|thumb/i] },
-  { name: 'at the boat\'s gun', into: nextSeat, touch: ['#board-button', '#seat-button'], help: ['gunner', /aim.*fire/i, /aim.*fire/i] },
-  { name: 'the floatplane', into: plane('floatplane', 0), touch: ['#plane-throttle', '#board-button'], help: ['floatplane', /throttle/i, /throttle/i] },
-  { name: 'the jet', into: plane('jet', 1), touch: ['#plane-throttle', '#board-button'], help: ['jet', /throttle/i, /throttle/i] },
-  { name: 'the combat plane', into: plane('fighter', 2), touch: ['#plane-throttle', '.plane-fire', '#board-button'], help: ['fighter', /fire/i, /fire/i] },
+  { name: 'on the military helicopter\'s bench', into: async (P) => (await nextSeat(P)) && nextSeat(P), thumb: viewSwaps, touch: ['#board-button', '#seat-button', '#view-button'], help: ['passenger', /look/i, /look/i] },
+  { name: 'at the boat\'s wheel', into: enter('boat', 'boat', BOAT), thumb: resetPuts, touch: ['#boat-drift-button', '#board-button', '#seat-button', '#reset-button'], help: ['boat', /steer.*drift/i, /stick|thumb/i] },
+  { name: 'at the boat\'s gun', into: nextSeat, thumb: holdFires, touch: ['#board-button', '#seat-button'], help: ['gunner', /aim.*fire/i, /aim.*fire/i] },
+  { name: 'the floatplane', into: plane('floatplane', 0), touch: ['#plane-throttle', '#board-button', '#reset-button'], help: ['floatplane', /throttle/i, /throttle/i] },
+  { name: 'the jet', into: plane('jet', 1), touch: ['#plane-throttle', '#board-button', '#reset-button'], help: ['jet', /throttle/i, /throttle/i] },
+  { name: 'the combat plane', into: plane('fighter', 2), touch: ['#plane-throttle', '.plane-fire', '#board-button', '#reset-button'], help: ['fighter', /fire/i, /fire/i] },
   // (the way off the wing: a button of its own, or Get out's)
   { name: 'under the paraglider', into: async (P) => { await P.keyboard.press('KeyX'); return inCraft(P, 'paraglider', 'paraglider'); },
     touch: [['#hook-button', '#canopy-button'], ['#hook-button', '#board-button']], help: ['paraglider', /steer.*hook/i, /hook/i] },
@@ -204,6 +228,11 @@ async function run(kind) {
     const reached = await S.into(P, touch).catch((e) => { log(`${S.name}: ${e.message}`); return false; });
     const bad = [];
     if (!reached) bad.push(`not reached (${JSON.stringify(await P.evaluate(() => ({ mode: window.__three.nav.mode, craft: window.__three.nav.craft?.id ?? null, seat: window.__sim.seat() })))})`);
+    if (reached && touch && S.thumb) {
+      await frames(P, 4);
+      const wrong = await S.thumb(P).catch((e) => e.message);
+      if (wrong) bad.push(wrong);
+    }
     for (const [size, w, h] of reached ? sizes : []) {
       await P.setViewportSize({ width: w, height: h });
       await frames(P, 4);

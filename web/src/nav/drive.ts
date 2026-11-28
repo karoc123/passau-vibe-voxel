@@ -75,7 +75,7 @@ export class DriveMode implements PlayerCraft {
       if (!gameKey(e)) return;
       if (e.code === 'KeyV' && !this.driving && !this.nav.craftView && !e.repeat) { this.cycleType(); e.preventDefault(); return; }
       if (!this.driving) return;
-      if (e.code === 'KeyT') { if (!e.repeat) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); e.preventDefault(); return; }
+      if (e.code === 'KeyT') { if (!e.repeat) this.reset(); e.preventDefault(); return; }
       if (this.keys.press(e)) e.preventDefault();
     });
     onFocusLoss(() => this.touch.clear());
@@ -117,6 +117,8 @@ export class DriveMode implements PlayerCraft {
     const sink = snapshot.sinkMs / SINK_MS;
     if (sink > 0) offset.y -= 1.6 * Math.sin(Math.min(1, (1 - sink) * 4) * Math.PI / 2);
   }
+
+  reset() { if (this.driving) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); }
 
   // the panel's button: take the wheel, or park
   private toggle() {
