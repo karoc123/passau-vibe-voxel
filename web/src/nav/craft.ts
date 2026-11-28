@@ -36,7 +36,7 @@ export interface PlayerCraft {
   /** its camera at the player's eyes in their seat (their own figure not drawn: StreetLife ownEyes) */
   readonly inSeat?: boolean;
   /** it takes the mouse now (Nav takes it, and again after the menu): its moves turn the view (turnView; a 'ride'
-   * craft's are Nav's ride look) or aim a gun. Every craft a player sits in says so (owner 2026-11-27: a vehicle that
+   * craft's are Nav's ride look; not an aircraft's pilot's: mouseTurns) or aim a gun. Every craft a player sits in says so (owner 2026-11-27: a vehicle that
    * leaves the mouse free felt broken); not one a player flies from afar */
   readonly mouse: boolean;
   /** the mouse taken moved by dx, dy px (right, down +): the chase or seat view turned, or the gun aimed */
@@ -96,6 +96,10 @@ const ALOFT: { [K in CraftType]: ((core: CoreOf<K>) => boolean) | null } = {
 };
 /** the types a player sits in in the air (a gate takes each) */
 export const AIRCRAFT = (Object.keys(ALOFT) as CraftType[]).filter((t) => ALOFT[t] !== null);
+/** the mouse taken turns this shell's view (Nav alone asks). Not a pilot's of an aircraft: the view stays behind
+ * what they steer by (owner 2026-11-28: a chase view swung round a banking aircraft read as broken); the mouse is
+ * still taken there, for the trigger */
+export const mouseTurns = (shell: PlayerCraft) => !shell.boards?.some((t) => AIRCRAFT.includes(t));
 /** craft c in the air (ALOFT) */
 export const aloft = (c: CraftView) => (ALOFT[c.type] as ((core: CraftView['core']) => boolean) | null)?.(c.core) ?? false;
 

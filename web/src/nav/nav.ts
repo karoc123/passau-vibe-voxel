@@ -7,7 +7,7 @@ import type { TileStreamer } from '../stream';
 import type { View } from '../core/meta';
 import { clamp, coarsePointer } from '../util';
 import type { World } from '../core/world';
-import { aloft, type CraftSpot, type PlayerCraft } from './craft';
+import { aloft, mouseTurns, type CraftSpot, type PlayerCraft } from './craft';
 import { Arms } from './arms';
 import { Foot } from './foot';
 import { Glide } from './glide';
@@ -28,8 +28,8 @@ import { HookLine } from './hook-line';
 // down, Shift faster; arrows forward, back, turn: move-keys.ts) and one gesture language for mouse, trackpad and touch:
 //   orbit: drag moves the map, right-drag turns and tilts, wheel zooms at the cursor, double-click flies there
 //   walk:  first person; a click takes the mouse (pointer lock) and it looks, Space jumps, Esc flies up; 1, 2 and the
-//          wheel choose a weapon, the left button fires (held: again at its rate), the right held aims (arms.ts),
-//          tapped fires the grappling hook (foot.ts hookShot)
+//          wheel choose a weapon, the left button fires (held: again at its rate), the right fires the
+//          grappling hook (foot.ts hookShot)
 //   walk on touch: the left thumb is a stick that walks (up ahead, sideways steps; pushed far, runs), the right thumb
 //          drags to look, taps to fire once, held still fires on (touch/foot.ts); two fingers close together pinch to zoom
 //   ride:  following a pedestrian or a car; move keys step off onto foot (off a person: where they stood)
@@ -56,9 +56,6 @@ export interface WalkOpts { at?: THREE.Vector3; exact?: boolean; facing?: THREE.
 const WALK_NEAR = 0.2;
 // m between a craft left in the air and the top of the paraglider opened under it
 const CANOPY_CLEAR = 0.5;
-// ms the right button is down before it aims: let go sooner, it was a tap, the grappling hook's (both on one button,
-// as the owner asked for the hook there and the aim was there first; a tap is over in ~100 ms)
-const TAP_MS = 180;
 
 export class Nav {
   mode: Mode = 'orbit';
@@ -119,8 +116,6 @@ export class Nav {
   private readonly footTouch: FootTouch;
   /** the grappling hook's line, drawn for the walk here and for the paraglider by its shell */
   readonly hookLine = new HookLine();
-  // when the right button went down on foot (null: up)
-  private rightAt: number | null = null;
 
   constructor(private readonly camera: THREE.PerspectiveCamera, private readonly controls: OrbitControls, private readonly dom: HTMLElement,
     private readonly flyTo: (v: Pick<View, 'pos' | 'target'>) => void, private readonly onMode: (m: Mode, r: Ride | null) => void) {
@@ -155,7 +150,7 @@ export class Nav {
     if (this.onFoot) this.foot.jump();
   }
 
-  /** the grappling hook fired on foot (the right button's tap) */
+  /** the grappling hook fired on foot (the right button, the touch button) */
   hookShot() {
     if (this.onFoot && !this.held && this.world) this.foot.hookShot(this.world);
   }
@@ -198,9 +193,6 @@ export class Nav {
   /** following a person or a vehicle (or driving one) */
   private get riding() { return this.mode === 'ride'; }
   get onFoot() { return this.mode === 'walk'; }
-  /** aiming on foot (the right mouse button; on touch the aim button: toggleAim) */
-  get aiming() { return this.foot.aim; }
-  toggleAim() { return this.foot.aim = this.onFoot && !this.foot.aim; }
   private get driving() { return this.craft !== null && this.riding; }
   // a touch on the screen is the drive's sticks' (drive.ts), but a passenger's: their seat has none, so it looks round
   // in a craft or at a car's wheel or seat: what takes the mouse (PlayerCraft.mouse)
@@ -232,7 +224,7 @@ export class Nav {
       if (k) K.delete(k);
       if (this.orbit.turned && !K.turning) { this.orbit.turned = false; if (this.onMap) this.orbit.retarget(); }
     });
-    onFocusLoss(() => { K.clear(); this.arms.trigger = false; this.foot.aim = false; this.rightAt = null; });
+    onFocusLoss(() => { K.clear(); this.arms.trigger = false; });
   }
 
   private requestMouse() {
@@ -254,7 +246,7 @@ export class Nav {
   }
 
   private lookWithMouse(e: MouseEvent) {
-    // (aiming narrows the view: the mouse turns it as much on the screen)
+    // (a narrower view: the mouse turns it as much on the screen)
     const scale = 0.0027 * this.camera.fov / 65;
     // (yaw grows to the left: the mouse right turns right, up looks up)
     this.look(-e.movementX * scale, -e.movementY * scale * 0.8);
@@ -286,23 +278,16 @@ export class Nav {
     dom.addEventListener('mousedown', (e) => {
       if (!this.onFoot || document.pointerLockElement !== dom) return;
       if (e.button === 0) this.arms.trigger = true;
-      else if (e.button === 2) this.rightAt = performance.now();
+      else if (e.button === 2) this.hookShot();
     });
-    addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.arms.trigger = false;
-      else if (e.button === 2) {
-        if (this.rightAt !== null && performance.now() - this.rightAt <= TAP_MS) this.hookShot();
-        this.rightAt = null;
-        this.foot.aim = false;
-      }
-    });
+    addEventListener('mouseup', (e) => { if (e.button === 0) this.arms.trigger = false; });
     dom.addEventListener('mousemove', e => {
       if (document.pointerLockElement !== dom) return;
       if (this.onFoot) this.lookWithMouse(e);
       else if (this.craft && this.inVehicle) {
         // (a car's view is the ride's: turned as on foot, the mouse right to the right)
         if (this.craft.view === 'ride') this.lookWithMouse(e);
-        else this.craft.turnView?.(e.movementX, e.movementY);
+        else if (mouseTurns(this.craft)) this.craft.turnView?.(e.movementX, e.movementY);
       }
     });
     dom.addEventListener('pointerdown', (e) => {
@@ -311,11 +296,11 @@ export class Nav {
       if (this.inVehicle && this.craft?.mouse && e.pointerType === 'mouse' && !locked) this.requestMouse();
       if (this.craftView || ((this.onFoot || this.driving) && locked)) return;
       // on foot (back from another tab, or the lock refused): a click takes the mouse and is not lost: its button
-      // fires or aims at once
+      // fires at once
       if (this.onFoot && e.pointerType === 'mouse') {
         this.requestMouse();
         if (e.button === 0) this.arms.trigger = true;
-        else if (e.button === 2) this.rightAt = performance.now();
+        else if (e.button === 2) this.hookShot();
         return;
       }
       if ((this.onSticks || this.onFoot) && e.pointerType === 'touch') return;
@@ -707,7 +692,6 @@ export class Nav {
     this.fitNear();
     // (off foot: the body gone before a ride's own seat is asked for)
     if (!this.onFoot && this.body) { this.body = null; this.sim?.send({ kind: 'leaveSeat' }); }
-    if (this.rightAt !== null && this.onFoot && performance.now() - this.rightAt > TAP_MS) this.foot.aim = true;
     // (down: the line lets go)
     if (this.held) this.foot.unhook();
     if (this.onFoot && !this.held) this.foot.updateWalk(dt, this.footTouch.move);
@@ -718,7 +702,7 @@ export class Nav {
     this.followCraftMouse();
     // (after the walk's pose: the host fires from where it has just put the body)
     if (this.onFoot && !this.held) this.arms.update(dt, this.sim, this.foot.yaw, this.foot.pitch, this.camera, this.footTouch.trigger());
-    else { this.arms.trigger = false; this.foot.aim = false; this.rightAt = null; }
+    else this.arms.trigger = false;
   }
 
   // where the line leaves the player on foot: low and right of the eyes, out of the crosshair's way

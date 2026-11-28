@@ -11,8 +11,7 @@ import { HEAD, stride } from '../sim/walk';
 import { HOOK, hookFeet, hookPoint } from '../sim/hook';
 import { Walker } from '../sim/walker';
 
-// aiming (the right mouse button) narrows the view to AIM_FOV; let go, it widens back to the field of view before
-const WALK_FOV = 65, AIM_FOV = 32;
+const WALK_FOV = 65;
 
 /** the keys on foot: W/S forward and back, A/D a step sideways (right +1), the arrows left and right turn (the mouse
  * turns too, but a keyboard alone still can) */
@@ -22,12 +21,9 @@ export const footKeys = (K: MoveKeys) => ({ go: K.axis('f', 'b'), side: K.axis('
 export type Stick = [number, number] | null;
 
 // On foot (nav.ts mode walk): the player's walker (its body the host's NPCs have too) with the camera at the eyes,
-// the keys and the stick turned into its stride, aiming. Nav feeds the input.
+// the keys and the stick turned into its stride. Nav feeds the input.
 export class Foot extends Walker<THREE.Vector3> {
   pitch = 0;
-  /** the right mouse button held: the view narrowed */
-  aim = false;
-  private fovBack: number | null = null;
   /** where the hook holds while its line is out (Walker.hook is where the feet are reeled to) */
   anchor: { x: number; y: number; z: number } | null = null;
 
@@ -60,8 +56,6 @@ export class Foot extends Walker<THREE.Vector3> {
     this.on = null;
     this.carry.x = this.carry.z = 0;
     this.hook = null;
-    this.aim = false;
-    this.fovBack = null;
     if (exact) {
       this.pos.set(t.x, 0, t.z);
       this.feet = w.support(t.x, t.z, t.y + 1.5);
@@ -78,8 +72,6 @@ export class Foot extends Walker<THREE.Vector3> {
   override fallAt(at: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }, yaw: number) {
     super.fallAt(at, v, yaw);
     this.pitch = -0.3;
-    this.aim = false;
-    this.fovBack = null;
   }
 
   // the arrows turn, Q/E look, W/S walk, A/D step sideways (Shift runs), else the stick
@@ -93,13 +85,7 @@ export class Foot extends Walker<THREE.Vector3> {
       return { x: (Math.sin(yaw) * f - Math.cos(yaw) * r) * pace, z: (Math.cos(yaw) * f + Math.sin(yaw) * r) * pace };
     });
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw + Math.PI, 0, 'YXZ'));
-    let fov = WALK_FOV, settle = false;
-    if (this.aim) { this.fovBack ??= this.camera.fov; fov = AIM_FOV; settle = true; }
-    else if (this.fovBack !== null) {
-      fov = this.fovBack; settle = true;
-      if (Math.abs(this.camera.fov - fov) < 0.05) this.fovBack = null;
-    }
-    this.glide.place(this.pos, q, fov, settle, dt);
+    this.glide.place(this.pos, q, WALK_FOV, false, dt);
     const look = new THREE.Vector3(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
     this.controls.target.copy(this.camera.position).addScaledVector(look, 10);
   }

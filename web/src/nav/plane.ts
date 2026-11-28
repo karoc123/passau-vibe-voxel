@@ -15,7 +15,7 @@ import { craftLook } from '../view/crafts';
 import type { CraftLook } from '../view/crafts/craft-look';
 import { TouchSticks } from '../touch/sticks';
 import { gameKey, gamepad, HeldKeys, inFocus, onFocusLoss, padAxis, PAUSED } from './input';
-import { ChaseRig, clearShare, follow, followAngle, MouseLook, shake } from './chase-rig';
+import { ChaseRig, clearShare, follow, followAngle, shake } from './chase-rig';
 import { ModePanel } from './mode-panel';
 import { nearestRiver, waterTop } from '../sim/river';
 import './plane.css';
@@ -49,15 +49,15 @@ type AircraftId = 'floatplane' | 'jet' | 'fighter';
 const AIRCRAFT: Record<AircraftId, Aircraft> = {
   floatplane: { id: 'floatplane', cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
-    help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · mouse: look round · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D turn · W/S nose down/up · Shift/R throttle up · Space/F down · X out (high up: under a paraglider) · T last safe point · Esc exit',
       'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle. Pinch on the right to zoom.'] },
   jet: { id: 'jet', cfg: JET, label: 'jet', model: () => craftLook('jet'),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
-    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · mouse: look round · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · Shift/R throttle (top 15 %: afterburner) · Space/F less · X out (high up: under a paraglider) · T last safe point · Esc exit',
       'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
   fighter: { id: 'fighter', cfg: FIGHTER, label: 'combat plane', model: () => craftLook('fighter'),
     chase: { back: 14, up: 3.5, look: 40, lag: 5, rollLag: 3.5, fov: (v) => clamp(56 + (v - 25) * 0.3, 56, 74) },
-    help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · Shift/R throttle up · Space/F down · mouse: look round · X out (high up: under a paraglider) · T last safe point · Esc exit',
+    help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · Shift/R throttle up · Space/F down · X out (high up: under a paraglider) · T last safe point · Esc exit',
       'Left thumb: sideways to turn, up/down for the nose. Fire button: the gun, aimed with the nose (the dot). Right slider: throttle. Pinch on the right to zoom.'] },
 };
 
@@ -90,10 +90,8 @@ export class PlaneMode implements PlayerCraft {
   // the combat plane's gun: its mount, the trigger held (the mouse's, the touch button's), the gunsight's dot and the
   // touch button
   private gun: Mount | null = null;
-  /** flying: the mouse taken (Nav), turning the chase view; with a gun its left button fires */
+  /** flying: the mouse taken (Nav); with a gun its left button fires */
   get mouse() { return this.phase === 'flying'; }
-  turnView(dx: number, dy: number) { this.mouseLook.move(dx, dy); }
-  private readonly mouseLook = new MouseLook();
   private trigger = false;
   private readonly sight = el('div', 'plane-sight');
   private readonly fireButton = el('button', 'plane-fire', 'Fire');
@@ -437,7 +435,6 @@ export class PlaneMode implements PlayerCraft {
       off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom);
       off.y += ch.up * this.zoom;
     }
-    this.mouseLook.swing(off, dt);
     const hit = f.state !== 'crashed' ? collision.sweep(d.p, off) : 'loading';
     const want = off.multiplyScalar(clearShare(hit, off, 0.15, 0.5)).add(d.p);
     const look = fwd.multiplyScalar(ch.look).add(d.p);
