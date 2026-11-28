@@ -109,7 +109,7 @@ arm = 1;
 let gripOff = 0, aimed = Infinity, ahead = Infinity, held = 0;
 const hand = new THREE.Vector3(), shoulder = new THREE.Vector3(), barrel = new THREE.Vector3();
 const holding = () => {
-  weapons.update(STEP, life.avatarsDrawn());
+  weapons.update(STEP, life.avatarsDrawn(), { x: 0, y: 0, z: 0 }, false);
   scene.updateMatrixWorld(true);
   const f = figureOf(A), gun = weapons.carried?.get(A.c.player)?.obj;
   if (!f || !gun) { gripOff = Infinity; return; }
