@@ -537,8 +537,8 @@ the mode is `nav/boat.ts`. The river boats (`view/boats.ts`) neither collide wit
 Choose **Plane** among the menu's **Vehicles** (from the map view) to fly a small floatplane from where the camera is, or **Plane on
 the river** to start afloat on the river nearest the view. A/D turn (it banks by itself and levels when let go), W/S
 nose down/up (flight convention; "Invert pitch" under the status at the top left swaps, on a desktop), Shift or R throttle up, Space or F down (held,
-stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits); the wheel moves the camera. Touch: the left thumb is the
-stick, the throttle a slider on the right, pinch zooms. Gamepad (standard): left stick, RT/LT or the right stick's Y
+stepless 0–100 %), T back to the last safe point, Esc opens the menu (Back to orbit mode exits). Touch: the left thumb is the
+stick, the throttle a slider on the right. Gamepad (standard): left stick, RT/LT or the right stick's Y
 for the throttle. Speed is energy: up to ~245 km/h level at full throttle, climbing costs speed, below ~86 km/h it
 stalls and sinks. Touch the water slowly (≤ 130 km/h, sinking ≤ 3 m/s, wings near level) to float and taxi; past
 ~97 km/h with the stick pulled it takes off. Land, roofs and fast or steep water are a crash: back at a safe pose ~3 s
@@ -554,8 +554,11 @@ core as the floatplane's, `AEROBATIC` flight law), the model `web/src/view/craft
 
 ## Paraglider, hovercraft and helicopter
 
-- Get out (**X**) of a helicopter, plane or jet high in the air, as pilot or passenger: you hang under an open
-  paraglider; the empty aircraft flies on unpiloted.
+- **X** is the paraglider's one key (or the button that says so). In the air on foot, more than 4 m over what is
+  under you (a fall, a jump off a roof or a cliff), X opens a paraglider over you. Out of a helicopter, plane or jet
+  high in the air, as pilot or passenger, X leaves you under one; the empty aircraft flies on unpiloted. Where none
+  opens (too low, a wall or roof in its way, the drone) X leaves you beside the vehicle at its height, falling from
+  there. Under it X folds it away: you fall, and X opens it again.
   Steer with A/D, W is the speed bar, S brakes (flare before touching down). Hands up it glides about 8:1 at 40 km/h.
   Land on dry ground to continue on foot.
 - Choose **Hovercraft** among the menu's **Vehicles** to start near the view on land or water. W thrust, S brakes then backs,
@@ -574,7 +577,7 @@ cars' scale) one package per craft in `web/src/view/crafts/<type>/`. **Esc**, th
 Choose **Walk here** in the menu to start on foot, in first person, at the current view or beside the vehicle you're
 following. W/S walk, A/D step sideways, the left/right arrows turn, Q/E look up and down, Shift runs and Space jumps;
 the mouse looks around (a click takes it back after a tab switch). On touch screens the left thumb walks, the right
-thumb looks and a pinch zooms. **Esc** releases the mouse and opens the menu; its **Back to orbit mode** returns to the map. Cars, train coaches, other players
+thumb looks. Wheel and pinch zoom in orbit mode only. **Esc** releases the mouse and opens the menu; its **Back to orbit mode** returns to the map. Cars, train coaches, other players
 on foot and the crafts standing about (hovercraft, helicopter, boat) are solid: you walk round them, and a car driven
 into you shoves you along. The crowd is not: you pass through people.
 
@@ -582,13 +585,13 @@ Walk up to a car or a craft standing about and press **E** (or the button) to ge
 creeping (no faster than a walk). E or the button gets out again onto foot beside it; **X** does too, in anything
 (in the helicopter, hovercraft and drone, whose own keys use E, X is the key). Beside a
 car or craft another player drives or flies the prompt is **ride along**: a free seat (a hovercraft has 20, a
-helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around, the wheel
-zooms, **V** (on a touch screen the eye button) swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
+helicopter 3, a car up to 3, a bus 30) where the driver's or pilot's steering carries you. Drag looks around,
+**V** (on a touch screen the eye button) swaps the chase view and the seat's, **E** gets out beside it. If the pilot gets out you stay aboard (the
 craft comes to rest; anyone may take the controls); if the craft is taken away you are put on foot where it was.
 Players in orbit mode cannot board.
 
-On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch
-(Ctrl+wheel zooms). The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
+On foot you carry two weapon slots: **1** the machine gun, **2** the grenade launcher; 1/2 or the wheel switch.
+The left button fires (held: the MG about 10 shots a second, the launcher one grenade each 1.5 s),
 the right button fires the grappling hook at what you look at (up to 80 m: you
 are reeled there; again at the sky or jump to let go; under the paraglider the same). On a touch screen the right thumb fires: a tap is one shot, held still it fires on
 (and may then drag to sweep), a drag only looks, at a mounted gun as on foot; a tap on the weapon name at the bottom takes the next slot and the button beside

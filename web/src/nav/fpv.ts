@@ -70,11 +70,7 @@ export class FpvMode implements PlayerCraft {
     const { nav, camera, target, host, canvas, offer } = ctx;
     this.nav = nav; this.camera = camera; this.target = target;
     this.link = new CraftLink(ctx, 'drone');
-    // a pinch while flying with touch: the camera's field of view (spread to zoom in), as on foot in first person
-    this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'), ratio => {
-      this.camera.fov = clamp(this.camera.fov * ratio, 45, 100);
-      this.camera.updateProjectionMatrix();
-    });
+    this.touch = new FpvTouch(canvas, () => this.pause('Touch interrupted. Choose Fly with touch to resume.'));
     this.impactTint.setAttribute('aria-hidden', 'true');
     const P = this.panel = new ModePanel(host, 'fpv', 'FPV Acro', offer);
     this.enterExit = P.button('FPV Acro', () => this.toggle());
@@ -108,7 +104,7 @@ export class FpvMode implements PlayerCraft {
   }
 
   readonly help: Help = { id: 'fpv', keys: 'W/S pitch · Q/E roll · A/D yaw · R/F throttle · T reset · Enter: arm again · X get out',
-    touch: 'Left thumb: throttle and yaw. Right thumb: pitch and roll. Pinch to zoom.' };
+    touch: 'Left thumb: throttle and yaw. Right thumb: pitch and roll.' };
 
   private get craft() { return this.on ? this.link.craft : null; }
 

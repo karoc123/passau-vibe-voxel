@@ -21,7 +21,7 @@ Layers, innermost first. A module imports its own layer and the layers above it 
 | domain | the rest of `sim/`, `physics/` | the world and its rules |
 | server | `sim/server/`, `host/` | sessions, snapshots per session, the one host `hostSim` and its platform entries; `host/` is the only place that reads a clock, a file or a URL |
 | client | `client/` | `SimClient`, the mirror, the links; never imports domain or server |
-| touch | `touch/` | the fingers as sticks, taps, holds and pinches, handed to a mode as axes and intents; knows no mode; imported by presentation |
+| touch | `touch/` | the fingers as sticks, taps and holds, handed to a mode as axes and intents; knows no mode; imported by presentation |
 | presentation | `view/`, `nav/`, `ui/`, the root's render modules | three.js, DOM, input; never imports domain or server |
 | app | `main.ts`, `app/` | composition, frame order, debug hooks; the only place that builds server and client together |
 

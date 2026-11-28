@@ -32,7 +32,7 @@ import './plane.css';
 // Keys: A/D turn, W/S nose down/up (flight convention; "Invert pitch" swaps), Shift or R throttle up, Space or F down
 // (held, gradual; not Ctrl: Ctrl+W would close the tab), T back to the last safe point, Esc exit (nav.ts). Touch: the
 // left thumb is a stick (sideways turn, up nose down), the throttle a slider on the right that stays where it is left,
-// a pinch on the right zooms. Gamepad (standard mapping): left stick turn and pitch, RT/LT (or the right stick up/down)
+// Gamepad (standard mapping): left stick turn and pitch, RT/LT (or the right stick up/down)
 // move the throttle. Out of focus its input is hands off: the stick let go, the lever where it is (input.ts).
 
 const KEYS: ReadonlySet<string> = new Set(['KeyA', 'KeyD', 'KeyW', 'KeyS', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyF', 'Space']);
@@ -51,15 +51,15 @@ const AIRCRAFT: Record<AircraftId, Aircraft> = {
   floatplane: { id: 'floatplane', cfg: PLANE, label: 'plane', model: () => craftLook('floatplane'),
     chase: { back: 14, up: 4, look: 30, lag: 4, rollLag: 3, fov: (v) => clamp(56 + (v - 25) * 0.33, 56, 74) },
     help: ['A/D turn · W/S nose down/up · R/F throttle up and down · X out (high up: under a paraglider) · T last safe point',
-      'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle. Pinch on the right to zoom.'] },
+      'Left thumb: sideways to turn, up/down for the nose. Right slider: throttle.'] },
   jet: { id: 'jet', cfg: JET, label: 'jet', model: () => craftLook('jet'),
     chase: { back: 17, up: 3.5, look: 40, lag: 5, rollLag: 4, fov: (v) => clamp(60 + (v - 50) * 0.2, 60, 78) },
     help: ['A/D roll · W/S nose down/up (hold S for a loop) · let go: it holds its path · R/F throttle up and down (top 15 %: afterburner) · X out (high up: under a paraglider) · T last safe point',
-      'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle. Pinch on the right to zoom.'] },
+      'Left thumb: sideways to roll, up/down for the nose; let go and it holds its path. Right slider: throttle.'] },
   fighter: { id: 'fighter', cfg: FIGHTER, label: 'combat plane', model: () => craftLook('fighter'),
     chase: { back: 14, up: 3.5, look: 40, lag: 5, rollLag: 3.5, fov: (v) => clamp(56 + (v - 25) * 0.3, 56, 74) },
     help: ['A/D turn · W/S nose down/up · left mouse button: fire (aim with the nose: the dot) · R/F throttle up and down · X out (high up: under a paraglider) · T last safe point',
-      'Left thumb: sideways to turn, up/down for the nose. Fire button: the gun, aimed with the nose (the dot). Right slider: throttle. Pinch on the right to zoom.'] },
+      'Left thumb: sideways to turn, up/down for the nose. Fire button: the gun, aimed with the nose (the dot). Right slider: throttle.'] },
 };
 
 const readInvert = () => { try { return localStorage.getItem(INVERT_KEY) === '1'; } catch { return false; } };
@@ -106,7 +106,6 @@ export class PlaneMode implements PlayerCraft {
   private phase: 'off' | 'loading' | 'flying' = 'off';
   private start: { x: number; z: number; y: number; heading: number; water: boolean } | null = null;
   private crashAt = -1e9;
-  private zoom = 1;
   private readonly cam = { yaw: 0, pitch: 0, fwd: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
   private readonly fwd = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
@@ -155,12 +154,7 @@ export class PlaneMode implements PlayerCraft {
     sl.addEventListener('pointerdown', (e) => { e.preventDefault(); sl.setPointerCapture(e.pointerId); setFrom(e); });
     sl.addEventListener('pointermove', (e) => { if (sl.hasPointerCapture(e.pointerId)) setFrom(e); });
     sl.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.touch = new TouchSticks(canvas, { onPinch: (ratio) => { this.zoom = clamp(this.zoom * ratio, 0.6, 2.2); }, camera: 'right' });
-    canvas.addEventListener('wheel', (e) => {
-      if (this.phase === 'off') return;
-      e.preventDefault();
-      this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.6, 2.2);
-    }, { passive: false });
+    this.touch = new TouchSticks(canvas, { camera: 'right' });
     addEventListener('keydown', (e) => {
       if (this.phase === 'off' || !gameKey(e)) return;
       if (e.code === 'KeyT') { if (!e.repeat) this.reset(); }
@@ -427,13 +421,13 @@ export class PlaneMode implements PlayerCraft {
       c.up.addScaledVector(c.fwd, -c.up.dot(c.fwd)).normalize();
       c.yaw = Math.atan2(c.fwd.x, c.fwd.z);
       fwd = this.v3.copy(c.fwd);
-      off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom).addScaledVector(c.up, ch.up * this.zoom);
+      off = this.v4.copy(fwd).multiplyScalar(-ch.back).addScaledVector(c.up, ch.up);
     } else {
       c.yaw = followAngle(c.yaw, d.heading, ch.lag, dt);
       c.pitch += (d.gamma * 0.7 - c.pitch) * follow(ch.rollLag, dt);
       fwd = this.v3.set(Math.sin(c.yaw) * Math.cos(c.pitch), Math.sin(c.pitch), Math.cos(c.yaw) * Math.cos(c.pitch));
-      off = this.v4.copy(fwd).multiplyScalar(-ch.back * this.zoom);
-      off.y += ch.up * this.zoom;
+      off = this.v4.copy(fwd).multiplyScalar(-ch.back);
+      off.y += ch.up;
     }
     const hit = f.state !== 'crashed' ? collision.sweep(d.p, off) : 'loading';
     const want = off.multiplyScalar(clearShare(hit, off, 0.15, 0.5)).add(d.p);

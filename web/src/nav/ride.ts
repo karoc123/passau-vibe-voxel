@@ -37,7 +37,7 @@ export class Rider {
 
   /** follow ag */
   start(ag: Picked) {
-    this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0, zoom: 1 };
+    this.ride = { ...ag, view: 'behind', dyaw: 0, dpitch: 0, idle: 0 };
     this.sim?.send({ kind: 'follow', entity: { kind: ag.ref.kind, id: ag.ref.id } });
   }
 
@@ -115,11 +115,11 @@ function rideCamera(R: Ride, agent: Readonly<Rideable>, pose: Pose, world: World
   if (R.view === 'eyes') {
     const bus = agent.kind === 'car' && agent.bus ? agent : null;
     const ahead = bus ? bus.len / 2 + 0.25 : rig.eye[1], up = bus ? 2.3 : rig.eye[0];
-    return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: THREE.MathUtils.clamp(rig.fov * R.zoom, 25, 80) };
+    return { pos: base.clone().addScaledVector(fw, ahead).setY(base.y + up), look, fov: rig.fov };
   }
   // (zoomed: further back and higher up alike, the same angle down)
   const chase = agent.kind === 'car' ? vehicleOf(agent).chase : RIG.person;
-  const back = chase.back * R.zoom, high = chase.up * R.zoom;
+  const back = chase.back, high = chase.up;
   const pos = base.clone().addScaledVector(new THREE.Vector3(look.x, 0, look.z).normalize(), -back);
   pos.y = base.y + high;
   return { pos: world ? clearOf(world, base, pos, high, R.ref.kind === 'person' ? 1.5 : 4.5) : pos, look, fov: 55 };

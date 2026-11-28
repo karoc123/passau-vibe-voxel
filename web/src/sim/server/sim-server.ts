@@ -222,6 +222,9 @@ export class Session {
       this.inputs.add(cmd, this.sim.tick + 1);
       return;
     }
+    // (an input held is for the seat it was sent in: one still held when the player changes seats would steer the
+    // next craft with the last one's controls, a plane's lever to a paraglider's motion: it never flew)
+    if (cmd.kind === 'enterSeat' || cmd.kind === 'leaveSeat' || cmd.kind === 'request') this.inputs.clear();
     this.take(cmd);
   }
 

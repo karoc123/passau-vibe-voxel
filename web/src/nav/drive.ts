@@ -61,9 +61,8 @@ export class DriveMode implements PlayerCraft {
   constructor({ nav, target, sim, host, canvas, offer }: CraftContext) {
     this.nav = nav; this.focus = target;
     sim.then((world) => { this.world = world; }, () => {});
-    // two fingers close together pinch the chase camera in and out (at the eyes, the field of view; nav.ts zoomRide)
-    // (the right side is the camera's: no stick, only the pinch, so a drive never steers from the right thumb)
-    this.touch = new TouchSticks(canvas, { onPinch: ratio => this.nav.zoomRide(ratio), camera: 'right' });
+    // (the right side is the camera's: no stick, so a drive never steers from the right thumb)
+    this.touch = new TouchSticks(canvas, { camera: 'right' });
     const P = this.panel = new ModePanel(host, 'drive', 'Drive a car', offer);
     this.action = P.button('', () => this.toggle());
     this.typeButton = P.button('', () => this.cycleType(), 'drive-type');
@@ -116,8 +115,8 @@ export class DriveMode implements PlayerCraft {
     if (sink > 0) offset.y -= 1.6 * Math.sin(Math.min(1, (1 - sink) * 4) * Math.PI / 2);
   }
 
-  readonly help: Help = { id: 'drive', keys: 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · E get out',
-    touch: 'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake, ↺ puts the car back on the road. Pinch on the right to zoom.' };
+  readonly help: Help = { id: 'drive', keys: 'W/S accelerate and brake/reverse · A/D steer · Space handbrake · T back on the road · X get out',
+    touch: 'Left thumb: drag up for gas, down to brake/reverse, sideways to steer. Hold the right button for the handbrake, ↺ puts the car back on the road.' };
 
   reset() { if (this.driving) this.world?.send({ kind: 'request', request: { kind: 'resetDriver' } }); }
 

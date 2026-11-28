@@ -31,25 +31,6 @@ export function makeHookButton(hook: () => void) {
   line.addEventListener('click', (e) => { if (e.detail === 0) hook(); }); // (the keyboard)
 }
 
-/** the paraglider's G: let go of the wing (a free fall), and while falling open one again; shown only when it can do
- *  one or the other */
-export function makeCanopyButton(press: () => void) {
-  const b = button('canopy-button');
-  b.textContent = 'Release';
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); press(); });
-  b.addEventListener('click', (e) => { if (e.detail === 0) press(); }); // (the keyboard)
-  let shown: string | null = null;
-  return {
-    /** 'release' on the wing, 'open' falling, null neither */
-    show(what: 'release' | 'open' | null) {
-      if (what === shown) return;
-      shown = what;
-      b.classList.toggle('on', !!what);
-      if (what) b.textContent = what === 'release' ? 'Release' : 'Open canopy';
-    },
-  };
-}
-
 /** a button by the right thumb shown only while there is something for it to do (on a touch screen: touch.css) */
 function situational(id: string, glyph: string, label: string, press: () => void) {
   const b = roundButton(id, 'thumb-touch', glyph, label);
@@ -81,7 +62,8 @@ export function makeSeatButton(press: () => void) {
   };
 }
 
-/** near a vehicle on foot, or in one: get in or out (the E key's, as a button to tap or click; nav/board.ts) */
+/** near a vehicle on foot, or in one: get in or out; in the air on foot or under the paraglider: open it, fold it
+ *  away (the E and X keys', as a button to tap or click; nav/board.ts) */
 export function makeBoardButton(press: () => void) {
   const b = button('board-button');
   b.hidden = true;

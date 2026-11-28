@@ -54,7 +54,6 @@ export class PassengerMode implements PlayerCraft {
   private yaw = 0;
   private dyaw = 0;
   private dpitch = 0;
-  private zoom = 1;
   // (x0, y0, t: where and when it went down; held: a thumb on the gun's trigger)
   private drag: { id: number; x: number; y: number; x0: number; y0: number; t: number; touch: boolean; moved: boolean; held: boolean } | null = null;
   private readonly pos = new THREE.Vector3();
@@ -105,19 +104,14 @@ export class PassengerMode implements PlayerCraft {
     };
     addEventListener('pointerup', up);
     addEventListener('pointercancel', up);
-    canvas.addEventListener('wheel', (e) => {
-      if (!this.ownsCamera) return;
-      this.zoom = clamp(this.zoom * Math.exp(e.deltaY * 0.004), 0.5, 2.5);
-      e.preventDefault();
-    }, { passive: false });
     this.draw();
   }
 
   get help(): Help {
-    return this.gun ? { id: 'gunner', keys: 'Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · E get out',
+    return this.gun ? { id: 'gunner', keys: 'Mouse: aim · Left button: fire (a click takes the mouse) · C: next seat · X get out',
       touch: 'Drag to aim, tap to fire, hold to keep firing. The seat button goes to the next seat, Get out leaves.' }
-      : { id: 'passenger', keys: 'Drag: look around · Wheel: zoom · V: seat or chase view · C: next seat · E get out',
-        touch: 'Drag to look around, pinch to zoom. The eye button swaps the seat\'s view and the chase view, Get out leaves.' };
+      : { id: 'passenger', keys: 'Drag: look around · V: seat or chase view · C: next seat · X get out',
+        touch: 'Drag to look around. The eye button swaps the seat\'s view and the chase view, Get out leaves.' };
   }
 
   /** the seat's view for the chase view or back (V, the touch button) */
@@ -164,7 +158,6 @@ export class PassengerMode implements PlayerCraft {
     if (!this.ctx.nav.enterCraft(this, from)) { this.riding = null; return false; }
     this.seatView = false;
     this.dyaw = this.dpitch = 0;
-    this.zoom = 1;
     this.yaw = this.last?.h ?? 0;
     this.gun = null;
     if (ref.kind === 'craft') {
@@ -246,18 +239,18 @@ export class PassengerMode implements PlayerCraft {
       const e = mountPoint(gun, p), a = aimDir(this.aim.h, this.aim.pitch);
       this.pos.set(e.x, e.y, e.z);
       this.at.copy(this.pos).add(this.off.set(a.x, a.y, a.z));
-      fov = clamp(70 * this.zoom, 40, 90);
+      fov = 70;
       document.body.classList.toggle('gun-stop', this.aim.stop);
     } else if (this.seatView) {
       // (at the own seat's eyes, turned with the craft's heading)
       const e = place ? seatEye(place) : { x: 0, y: v.look, z: 0 };
       this.pos.set(e.x, e.y, e.z).applyAxisAngle(UP, p.h).add(this.at.set(p.x, p.y, p.z));
       this.at.copy(this.pos).add(dir);
-      fov = clamp(70 * this.zoom, 40, 90);
+      fov = 70;
     } else {
       this.at.set(p.x, p.y + v.look, p.z);
       // (behind and over it, swung round by the drag)
-      const back = this.off.set(-Math.sin(yaw) * v.back, v.up - Math.sin(this.dpitch) * v.back, -Math.cos(yaw) * v.back).multiplyScalar(this.zoom);
+      const back = this.off.set(-Math.sin(yaw) * v.back, v.up - Math.sin(this.dpitch) * v.back, -Math.cos(yaw) * v.back);
       this.pos.copy(this.at);
       this.pos.addScaledVector(back, this.col ? clearShare(this.col.sweep(this.pos, back), back, 0.12, 0.25) : 1);
     }

@@ -40,7 +40,7 @@ const SIZES = {
 const CONTROLS = 'button, input, select, summary, a[href], [role=slider], #minimap, #waypoint-chip';
 const DISPLAYS = '#health, #arms .slots, #arms .crosshair, #help, #bar .mode-active .mode-detail, #perf';
 // the touch buttons there are (a new one is named here, and in the situations it belongs to)
-const TOUCH_BUTTONS = ['#jump-button', '#hook-button', '#canopy-button', '#board-button', '#seat-button', '#handbrake-button',
+const TOUCH_BUTTONS = ['#jump-button', '#hook-button', '#board-button', '#seat-button', '#handbrake-button',
   '#boat-drift-button', '#plane-throttle', '.plane-fire', '#reset-button', '#view-button'];
 
 const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
@@ -232,9 +232,12 @@ const SITUATIONS = [
   { name: 'the floatplane', into: plane('floatplane', 0), touch: ['#plane-throttle', '#board-button', '#reset-button'], help: ['floatplane', /throttle/i, /throttle/i] },
   { name: 'the jet', into: plane('jet', 1), touch: ['#plane-throttle', '#board-button', '#reset-button'], help: ['jet', /throttle/i, /throttle/i] },
   { name: 'the combat plane', into: plane('fighter', 2), touch: ['#plane-throttle', '.plane-fire', '#board-button', '#reset-button'], help: ['fighter', /fire/i, /fire/i] },
-  // (the way off the wing: a button of its own, or Get out's)
-  { name: 'under the paraglider', into: async (P) => { await P.keyboard.press('KeyX'); return inCraft(P, 'paraglider', 'paraglider'); },
-    touch: [['#hook-button', '#canopy-button'], ['#hook-button', '#board-button']], help: ['paraglider', /steer.*hook/i, /hook/i] },
+  // (X high up: beside the plane falling, then the paraglider open over the player)
+  { name: 'under the paraglider', into: async (P) => {
+    await P.keyboard.press('KeyX');
+    for (let i = 0; i < 8 && !(await T(P, () => window.__three.nav.craft?.id === 'paraglider', null, 2500)); i++) await P.keyboard.press('KeyX');
+    return inCraft(P, 'paraglider', 'paraglider');
+  }, touch: ['#hook-button', '#board-button'], help: ['paraglider', /steer.*hook/i, /hook/i] },
   { name: 'the drone before it flies', into: enter('fpv', 'drone', { x: SQUARE.x, y: 40, z: SQUARE.z, h: 0 }), touch: ['#board-button'], help: ['fpv', /throttle/i, /throttle/i] },
   { name: 'the drone flying', into: async (P, touch) => { await P.evaluate((how) => window.__crafts.find((c) => c.id === 'fpv').arm(how), touch ? 'touch' : 'keyboard'); return T(P, () => document.querySelector('.fpv-mode.flying'), null, 20000); },
     touch: ['#board-button'], help: ['fpv', /throttle/i, /throttle/i] },
@@ -275,8 +278,8 @@ async function run(kind) {
       log(`${kind} ${S.name} at ${size}: ${m.n} controls, touch buttons ${m.touch.join(' ') || 'none'}, help ${JSON.stringify(m.help)}`);
       bad.push(...m.issues.map((i) => `${size}: ${i}`));
       // (on the desktop none of the thumbs' buttons, but Get in/out, which a click presses too)
-      const want = S.touch === null ? null : (Array.isArray(S.touch[0]) ? S.touch : [S.touch]).map((t) => (touch ? t : t.filter((b) => b === '#board-button')));
-      if (want && !want.some((t) => same(t, m.touch))) bad.push(`${size}: the touch buttons shown are ${m.touch.join(' ') || 'none'}, not ${want.map((t) => t.join(' ') || 'none').join(' or ')}`);
+      const want = S.touch && (touch ? S.touch : S.touch.filter((b) => b === '#board-button'));
+      if (want && !same(want, m.touch)) bad.push(`${size}: the touch buttons shown are ${m.touch.join(' ') || 'none'}, not ${want.join(' ') || 'none'}`);
       // the strip on the desktop: the situation's first keys
       const [on, keys, thumbs] = S.help ?? [];
       if (S.help && !touch && (!m.help?.shown || m.help.on !== on || !keys.test(m.help.text) || !/Esc menu/.test(m.help.text)))

@@ -12,12 +12,12 @@ export const MAP_HELP: Help = { id: 'map',
   keys: 'Drag: move · Right button drag: turn and tilt · Wheel: zoom · W/A/S/D move · Q/E tilt · Click a person or a car: follow it · / search · F: into the nearest empty craft',
   touch: 'One finger drags the map, two turn and zoom it. Tap a person or a car to follow it.' };
 export const WALK_HELP: Help = { id: 'walk',
-  keys: 'W/S walk · A/D step sideways · Mouse: look · Shift run · Space jump · Left button: fire · Right button: grappling hook · 1/2 weapon · E get in · Q/E look up and down',
-  touch: 'Left thumb: drag to walk, far to run. Right thumb: drag to look, tap to fire, hold to keep firing. Tap the weapon\'s name for the next one. The hook button: grappling hook. Pinch to zoom.' };
+  keys: 'W/S walk · A/D step sideways · Mouse: look · Shift run · Space jump · Left button: fire · Right button: grappling hook · 1/2 weapon · E get in · X in the air: open the paraglider · Q/E look up and down',
+  touch: 'Left thumb: drag to walk, far to run. Right thumb: drag to look, tap to fire, hold to keep firing. Tap the weapon\'s name for the next one. The hook button: grappling hook. In the air, Open paraglider.' };
 const WHO: Record<string, string> = { person: 'Following a pedestrian', car: 'Following a car', bus: 'Following a bus', moto: 'Following a motorbike' };
 /** following what: the ride's label (person, car, bus, moto) */
 export const rideHelp = (what: string): Help => ({ id: 'ride', title: WHO[what] ?? '',
-  keys: 'Drag: look around · Wheel: zoom · W/A/S/D: off again, over the map', touch: 'Drag to look around, pinch to zoom.' });
+  keys: 'Drag: look around · W/A/S/D: off again, over the map', touch: 'Drag to look around.' });
 
 // the keys every situation has, after its own
 const EVERYWHERE = 'M minimap · , full map · N labels · Esc menu';

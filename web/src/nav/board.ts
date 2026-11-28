@@ -17,6 +17,8 @@ import type { Nav } from './nav';
 // walker, and that the seat is free); only once it is taken does the vehicle's shell take over, asking again for the
 // seat it now holds (a no-op). E gets in, and gets out of a vehicle onto foot beside it (Nav.getOut) where its own
 // keys leave E free; X gets out of any (the one key no vehicle's own keys have, so a craft flying on E is left too).
+// X is the paraglider's one key as well (owner 2026-11-28: no second key to mix up): in the air on foot it opens one,
+// under it folds it away, and out of an aircraft high up is under one (Nav.getOut).
 // C switches seats in a craft with a gun, to the next free one in its seats' order (the controls, then each gun, then
 // the plain seats, round again), so one player alone can man the controls and a gun; on a touch screen a button does
 // (touch/buttons.ts), shown only while there is a seat to switch to.
@@ -25,9 +27,9 @@ import type { Nav } from './nav';
 const REACH = 3;
 // the shells whose own keys have E (fpv.ts, special-craft.ts)
 const E_TAKEN = new Set(['fpv', 'helicopter', 'gunship', 'hovercraft', 'paraglider']);
-// (no getting out of a wing in the air; one is got into only where the host placed it, before its flight)
+// (one is got into only where the host placed it, before its flight)
 const NOT_BOARDED = 'paraglider';
-/** the keys that get in (E) and out (E where free, X anywhere) */
+/** the keys that get in (E) and out (E where free, X anywhere; X: the paraglider opened and folded away) */
 export type BoardKey = 'KeyE' | 'KeyX';
 
 /** what is within reach: its entity, the seat's role, what to call it, and what its shell takes over from */
@@ -53,7 +55,12 @@ export class Boarding {
   /** what the button says, or null: hidden. key: on a keyboard */
   label(key: boolean) {
     const t = this.target, along = t?.role === 'passenger';
-    if (this.nav.onFoot) return t ? `${key ? 'E: ' : ''}${along ? (key ? 'ride' : 'Ride') + ' along in' : (key ? 'get' : 'Get') + ' in'} ${t.label}` : this.pending ? 'Getting in…' : null;
+    const nav = this.nav;
+    if (nav.onFoot) {
+      return t ? `${key ? 'E: ' : ''}${along ? (key ? 'ride' : 'Ride') + ' along in' : (key ? 'get' : 'Get') + ' in'} ${t.label}` : this.pending ? 'Getting in…'
+        : nav.canOpen ? (key ? 'X: open paraglider' : 'Open paraglider') : null;
+    }
+    if (nav.craft && nav.craft === nav.wing) return key ? 'X: fold paraglider' : 'Fold paraglider';
     return !this.canGetOut() ? null : !key ? 'Get out' : this.canGetOut('KeyE') ? 'E: get out' : 'X: get out';
   }
 
@@ -62,7 +69,9 @@ export class Boarding {
     const nav = this.nav, sim = nav.sim;
     if (!nav.onFoot) return this.canGetOut(key) && nav.getOut();
     const t = this.target;
-    if (key === 'KeyX' || !t || !sim || this.pending) return false;
+    // (the button gets in where there is something to get into, as E)
+    if (key === 'KeyX' || (!key && !t)) return nav.openWing();
+    if (!t || !sim || this.pending) return false;
     sim.results('enterSeat', t.role);
     sim.send({ kind: 'enterSeat', entity: t.ref, role: t.role });
     this.pending = { t, at: performance.now() };
@@ -117,7 +126,7 @@ export class Boarding {
 
   private canGetOut(key?: BoardKey) {
     const c = this.nav.craft;
-    return !!c && (this.nav.craftView || this.nav.mode === 'ride') && c.id !== NOT_BOARDED && !(key === 'KeyE' && E_TAKEN.has(c.id));
+    return !!c && (this.nav.craftView || this.nav.mode === 'ride') && !(key === 'KeyE' && E_TAKEN.has(c.id));
   }
 
   // the seat taken: the vehicle's shell takes over (Nav off foot without leaving the body: the host moved the player

@@ -25,16 +25,7 @@ body[data-mode=plane] { --tx: calc(10px + var(--sr) + 56px + 12px); }
 .arms-touch:active, .arms-touch.on, .thumb-touch:active { background: rgba(255,255,255,.28); border-color: #fff; }
 @media (pointer: coarse) { body[data-mode=walk]:not(.noui) .arms-touch, body[data-mode=paraglider]:not(.noui) #hook-button { display: grid; place-items: center; } }
 @media (pointer: coarse) { body:not(.noui) :is(#reset-button, #view-button).on { display: grid; place-items: center; } }
-/* the paraglider's release and, falling, its canopy again: by the right thumb, where nothing else is shown on the wing */
-#canopy-button { display: none; position: fixed; right: calc(18px + var(--sr)); bottom: calc(196px + var(--sb)); z-index: 4; min-width: 68px; height: 44px;
-  padding: 0 12px; border: 1px solid rgba(255,255,255,.6); border-radius: 22px; background: rgba(16,17,20,.5); color: #fff;
-  font: 600 14px Inter, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
-#canopy-button:active { background: rgba(255,255,255,.28); border-color: #fff; }
-@media (pointer: coarse) { body:not(.noui) #canopy-button.on { display: block; } }
-@media (pointer: coarse) and (orientation: landscape) {
-  #canopy-button { right: calc(10px + var(--sr)); bottom: calc(8px + var(--sb) + 44px + 12px + 56px + 12px); }
-}
-/* get in or out (nav/board.ts; a click on the desktop too): over the weapon slots, under the crosshair; on touch on
+/* get in or out, the paraglider opened or folded away (nav/board.ts; a click on the desktop too): over the weapon slots, under the crosshair; on touch on
    the left edge half way up, off the thumbs' rest at the bottom (where a stick starts), the right's buttons, the
    plane's throttle and the bar */
 #board-button { position: fixed; left: 50%; bottom: calc(56px + var(--sb)); transform: translateX(-50%); z-index: 4; padding: 8px 16px;
@@ -54,6 +45,3 @@ body[data-mode=plane] { --tx: calc(10px + var(--sr) + 56px + 12px); }
   border: 1.5px solid rgba(255,255,255,.4); box-shadow: 0 0 3px rgba(0,0,0,.35), inset 0 0 3px rgba(0,0,0,.25); }
 .stick-ring.knob { width: 46px; height: 46px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); }
 .noui .stick-ring { display: none; }
-/* (the way off the wing over the first button's place, wider than it; upright, over the hook) */
-#canopy-button { right: var(--tx); bottom: calc(var(--ty) + var(--c1) + var(--tg)); }
-@media (orientation: portrait) { #canopy-button { bottom: calc(var(--ty) + var(--c1) + var(--c2) + 2 * var(--tg)); } }
